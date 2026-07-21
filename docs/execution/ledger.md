@@ -14,7 +14,7 @@ before any become `admitted`.
 | G0-P1a | Fresh pnpm/TypeScript workspace and clean-install scaffold | G0 | Mechanical | accepted | `856f90ca4a1bd1d4d099760dd2da6dc8ad51e4ae` | [packet](packets/G0-P1a.md) |
 | G0-P1b | CI jobs and repository hygiene gates for the scaffold | G0 | Mechanical | planned | - | - |
 | G0-P2a | Foundational constitution ADRs + authority map + framework decision | G0 | Critical | accepted | `5a3f96c80ea931cfc39aa4af2648f45282bf279f` | [packet](packets/G0-P2a.md) |
-| G0-P2b | Operational and trust constitution ADRs | G0 | Critical | planned | - | - |
+| G0-P2b | Operational and trust constitution ADRs | G0 | Critical | active | - | [packet](packets/G0-P2b.md) |
 | G0-P3 | Dependency-boundary checker + architecture tests | G0 | Behavioral | planned | - | - |
 | G0-P4 | Ephemeral PostgreSQL test harness + two-tenant smoke fixture | G0 | Behavioral | planned | - | - |
 | G0-P5 | Observability baseline + evidence/ledger wiring in CI | G0 | Mechanical | planned | - | - |
