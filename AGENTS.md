@@ -59,6 +59,13 @@ Classify every packet by its final diff:
 - **Critical** — release kernel, compiler, semantic gateways, inventory
   ledger/posting, tenant isolation and policy, trust substrate, migrations.
 
+The tier sets review INTENSITY only (how strong a reviewer, how many). Review
+SCOPE is bounded by a mandatory charter, review is proportionate to what the
+deterministic gates already prove, findings are triaged (in-scope + material
+only), and rounds converge (max two REVISE rounds, then surface). A high tier
+never means infinite scrutiny. The `review-tiers` skill is binding on all of
+this; read it before launching any review.
+
 | Tier | Writer | Review chain |
 |---|---|---|
 | Mechanical | codex `gpt-5.6-sol` high, or the orchestrator directly for trivial diffs | one fresh reviewer, or orchestrator verification with evidence |
@@ -68,8 +75,16 @@ Classify every packet by its final diff:
 Rules:
 
 - Reviewers are always fresh, naive spawns: no planning context, only the
-  frozen diff, owned paths, and the decisive questions. Never resume a
-  prior reviewer (anchoring).
+  frozen diff, owned paths, and the charter (gates-green, in-scope,
+  out-of-scope, threat model, bounded decisive questions). A review prompt
+  with no explicit charter is invalid. Never resume a prior reviewer.
+- Never frame a review as "find any way this could fail/be evaded" — that is
+  the unbounded hunt that caused the P3 spiral. Ask specific, bounded
+  questions and stop.
+- A finding is actionable only if in-scope, material, and proportionate;
+  valid-but-out-of-scope findings are recorded as future work, not chased. A
+  fix that would balloon the packet is a stop-and-surface, never a silent
+  scope expansion.
 - Any code change after a review invalidates it: new SHA, fresh review.
 - Fable runs via the WSL claude binary: `claude -p --model fable --effort
   max` (use `high` for lower-risk confirms).
