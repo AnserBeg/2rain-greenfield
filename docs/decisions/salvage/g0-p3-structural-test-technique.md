@@ -52,7 +52,7 @@ the prior repository.
 | Live imports of old schema/module metadata | Temporary synthetic workspace fixtures with no database/runtime imports |
 | Old module/action/permission registries | Accepted ADR-0001 through ADR-0010 authority signatures and package graph |
 | Generated action-registry comparison | Fixed five-tool protocol and private-registry rejection |
-| Old app/server/actions/shared directory walk | Greenfield `apps/` and `packages/` production roots |
+| Old app/server/actions/shared directory walk | Greenfield `apps/`, `packages/`, and `db/` production roots plus emitted model-facing catalogs |
 | Ad hoc assertion messages | Stable rule IDs plus normalized file and line evidence |
 
 ## REJECT
