@@ -17,4 +17,4 @@ before any become `admitted`.
 | G0-P4 | Ephemeral PostgreSQL test harness + two-tenant smoke fixture | G0 | Behavioral | planned | - | - |
 | G0-P5 | Observability baseline + evidence/ledger wiring in CI | G0 | Mechanical | planned | - | - |
 | G0-P6a | X-01 baseline input freeze in an isolated quarry worktree | G0 | Mechanical | accepted | `68f748cde06ecc795b159be5ae507a9d973106ac` | [packet](packets/G0-P6a.md); [baseline](baselines/x01-v1.md) |
-| G0-P6b | X-01 baseline replay in a disposable checkout | G0 | Mechanical | planned | - | - |
+| G0-P6b | X-01 baseline replay in a disposable checkout | G0 | Mechanical | evidence_ready | - | [packet](packets/G0-P6b.md); [replay](baselines/x01-v1-replay.md) — red replay gates recorded |
