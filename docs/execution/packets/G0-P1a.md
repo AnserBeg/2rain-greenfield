@@ -1,6 +1,6 @@
 # G0-P1a — Fresh toolchain and clean-install scaffold
 
-Status: evidence ready
+Status: accepted
 Tier: Mechanical
 Frozen candidate: `856f90ca4a1bd1d4d099760dd2da6dc8ad51e4ae`
 
@@ -51,4 +51,5 @@ Mechanical configuration diff directly.
 
 Review: orchestrator self-verification, permitted for Mechanical work. The
 clean-install gate, full command suite, final owned-path check, and whitespace
-check all ran against `856f90c`.
+check all ran against `856f90c`. The user accepted the final green evidence on
+2026-07-21.
