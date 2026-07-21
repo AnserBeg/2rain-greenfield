@@ -1,6 +1,6 @@
 # Runtime authority map
 
-Status: G0-P2a accepted; G0-P2b extension proposed
+Status: G0-P2a and G0-P2b accepted
 Date: 2026-07-21
 
 This map assigns every concern in the two constitutional ADR tranches to one
@@ -63,11 +63,8 @@ make the consumer a second source of truth.
 
 ## Constitutional coverage
 
-ADR-0001 through ADR-0005 are accepted. G0-P2b proposes ADR-0006 through
-ADR-0010 for the five previously reserved concerns: human release approval,
-inventory posting truth, semantic gateways, the in-app agent tool boundary,
-and lifecycle/audit/correction/recovery. Until G0-P2b is accepted, the
-north-star plan remains supreme and the new rows are proposed refinements only.
+ADR-0001 through ADR-0010 are accepted and cover both constitutional tranches.
+The north-star plan remains supreme over every refinement in this map.
 
 ## Review checklist
 

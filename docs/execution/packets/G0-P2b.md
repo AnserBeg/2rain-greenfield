@@ -1,6 +1,6 @@
 # G0-P2b — Operational and trust constitutional ADR tranche
 
-Status: evidence ready
+Status: accepted
 Tier: Critical
 Frozen candidate: `34f439c88f26d8efb98224d6b8ad9481250234f2`
 
@@ -30,7 +30,7 @@ bounded autonomy, recovery infrastructure, and any G0 stage-gate claim.
 
 ## Outcome
 
-Five proposed ADRs now cover every concern reserved by P2a. The extended map
+Five accepted ADRs now cover every concern reserved by P2a. The extended map
 assigns human release approval, inventory quantities, semantic gateway ingress,
 the in-app agent tool surface, and shared trust/recovery contracts without
 creating peers to the accepted P2a authorities.
@@ -76,3 +76,5 @@ Writer: Codex orchestrator, Critical-tier reasoning.
 - The orchestrator verified the cited prior reference directly at
   `/home/rvham/2rain_erp`, branch `chess`, SHA `668a60b`; no prior-repository
   file was modified or admitted.
+- The user reviewed ADR-0006 through ADR-0010, the extended authority map, and
+  all three corrected bypasses, then accepted the packet on 2026-07-21.
