@@ -33,11 +33,9 @@ As of 2026-07-21, the binding rules not yet backed by a tracked enforcement
 packet:
 
 1. **UI/UX surface grammar** (archetypes, one-authority-per-surface,
-   status-color grammar, weight-matches-consequence) — binding in plan §8.5-8.6
-   and the `ux-grammar` skill, with enforcement *described* for G1 (skill-pin
-   test) and G2 (surface-grammar conformance suite), but those enforcement
-   packets are not yet broken out in the ledger. Create them when G1/G2 are
-   sequenced.
+   status-color grammar, weight-matches-consequence) — G1 skill-pin and the
+   compiled SurfaceRuntime seam are now tracked by G1-P7/G1-P8. The full G2
+   five-archetype conformance packet remains to be created at the G2 cut.
 2. **Mobile/responsive contract** — same instruments; the G2 compact-projection
    conformance is described but not yet a tracked packet.
 3. **Accessibility (WCAG 2.2 AA)** — plan §8.4/§8.5; G2 conformance + G7 audit
@@ -53,20 +51,20 @@ scheduled as concrete packets. Cutting G1 and G2 must create those packets.
 
 | Concern | Instrument | Enforced today by | Executable at | Status |
 |---|---|---|---|---|
-| One application/release authority | ADR-0001 | G0-P3 alternate-authority scan + authority-map review | G1 activation tests | partially enforced |
+| One application/release authority | ADR-0001 | G0-P3 alternate-authority scan + authority-map review | G1-P3 persistence; G1-P4 activation; G1-P5 pinning | partially enforced |
 | Modular monolith + dependency direction | ADR-0002 | G0-P3 boundary checker | G0-P3 boundary checker | enforced |
 | PostgreSQL sole launch provider | ADR-0003 | G0-P3 protected-import scan | G0-P4a provider/migration tests | partially enforced |
-| Trusted tenant/request context | ADR-0004 | G0-P4b authenticated-entry, two-tenant RLS, and pool-reuse tests | G0-P4b trusted context; G1 request-view pinning tests | partially enforced |
+| Trusted tenant/request context | ADR-0004 | G0-P4b authenticated-entry, two-tenant RLS, and pool-reuse tests | G0-P4b trusted context; G1-P5 request-view pinning tests | partially enforced |
 | Drop `@agent-native/core` | ADR-0005 | G0-P3 manifest, lockfile, import, and compatibility-authority scan | G0-P3 boundary checker | enforced |
-| Compiler determinism (round-trip/hash) | ADR-0001 (partial) + plan §5.3 | — | G1 golden/hash tests | scheduled |
+| Compiler determinism (round-trip/hash) | ADR-0001 (partial) + plan §5.3 | — | G1-P2 golden/hash tests | scheduled |
 
 ## Runtime, gateways, agent
 
 | Concern | Instrument | Enforced today by | Executable at | Status |
 |---|---|---|---|---|
-| Human-controlled release activation | ADR-0006; plan §5.4 | authority-map review | G1 activation; G6 approval flow | scheduled |
-| Semantic Query/Operation gateway ownership | ADR-0008; plan §5.9, §9.2 | G0-P3 direct-access/private-registry scan | G1 gateway skeleton and gateway tests | partially enforced |
-| Agent tool prohibitions (no raw DB/source; five fixed tools) | ADR-0009; plan §9.2, §9.2.5 | G0-P3 source/model-facing scan | G2 agent contracts and evals; benchmark G1/G7 | partially enforced |
+| Human-controlled release activation | ADR-0006; plan §5.4 | authority-map review | G1-P4 activation; G6 approval flow | scheduled |
+| Semantic Query/Operation gateway ownership | ADR-0008; plan §5.9, §9.2 | G0-P3 direct-access/private-registry scan | G1-P6 gateway skeleton and tests | partially enforced |
+| Agent tool prohibitions (no raw DB/source; five fixed tools) | ADR-0009; plan §9.2, §9.2.5 | G0-P3 source/model-facing scan | G1-P2 projection + G1-P6 seam; G2 agent contracts/evals; benchmark G7 | partially enforced |
 | LLM-only intent classification | salvaged user policy; plan §9 | — | agent packets (A-01+) | prose-only |
 | Append-only inventory posting truth | ADR-0007; plan §6.3-6.4 | G0-P3 direct-write/writable-balance scan | G3 inventory property suite | partially enforced |
 
@@ -74,7 +72,7 @@ scheduled as concrete packets. Cutting G1 and G2 must create those packets.
 
 | Concern | Instrument | Enforced today by | Executable at | Status |
 |---|---|---|---|---|
-| Surface grammar (5 archetypes, one authority per surface, status colors, weight-matches-consequence) | plan §8.5-8.6; `ux-grammar` skill | skill (advisory) | G1 skill-pin test; G2 surface-grammar conformance | prose-only (packets untracked) |
+| Surface grammar (5 archetypes, one authority per surface, status colors, weight-matches-consequence) | plan §8.5-8.6; `ux-grammar` skill | skill (advisory) | G1-P7 compiled shell + G1-P8 skill-pin/seam; G2 full conformance | scheduled |
 | Responsive/mobile contract | plan §8.5; `ux-grammar` skill | skill (advisory) | G2 compact-projection conformance | prose-only (packets untracked) |
 | Accessibility (WCAG 2.2 AA) | plan §8.4-8.5 | — | G2 conformance; G7 audit | prose-only (packets untracked) |
 | Customize content, never grammar | plan §8.6, §10 | `ux-grammar` skill | G6 customization gates | scheduled |
