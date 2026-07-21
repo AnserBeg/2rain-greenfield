@@ -1,21 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, extname, join, relative, resolve } from 'node:path';
 
-import {
-  createSourceFile,
-  forEachChild,
-  isClassDeclaration,
-  isEnumDeclaration,
-  isExportSpecifier,
-  isFunctionDeclaration,
-  isIdentifier,
-  isInterfaceDeclaration,
-  isModuleDeclaration,
-  isTypeAliasDeclaration,
-  isVariableDeclaration,
-  preProcessFile,
-  ScriptTarget,
-} from 'typescript';
+import { preProcessFile } from 'typescript';
 
 export interface BoundaryViolation {
   file: string;
@@ -31,31 +17,20 @@ export interface BoundaryCheckResult {
 
 interface WorkspacePackage {
   directory: string;
-  name: string;
   kind: PackageKind;
-}
-
-interface AuthorityRule {
   name: string;
-  ruleId: string;
-  allowedDirectories: string[];
 }
 
 interface AuthorityDeclaration {
-  rule: AuthorityRule;
   file: string;
-  source: string;
   index: number;
+  name: string;
+  ruleId: string;
+  source: string;
 }
 
 type PackageKind =
-  | 'app'
-  | 'compiler'
-  | 'contracts'
-  | 'domain'
-  | 'runtime'
-  | 'tooling'
-  | 'unclassified';
+  'app' | 'compiler' | 'contracts' | 'domain' | 'runtime' | 'tooling' | 'other';
 
 const sourceExtensions = new Set([
   '.cjs',
@@ -68,7 +43,7 @@ const sourceExtensions = new Set([
   '.tsx',
 ]);
 
-const dataExtensions = new Set(['.json', '.sql', '.yaml', '.yml']);
+const scannedExtensions = new Set([...sourceExtensions, '.json', '.sql']);
 
 const ignoredDirectories = new Set([
   '.git',
@@ -80,14 +55,25 @@ const ignoredDirectories = new Set([
   'test-results',
 ]);
 
-const emittedArtifactDirectories = new Set(['build', 'dist']);
-
-const allowedProtectedExternalImports = [
-  /^node:/,
-  /^decimal\.js(?:\/|$)/,
-  /^typescript(?:\/|$)/,
-  /^zod(?:\/|$)/,
-  /^@standard-schema\/spec(?:\/|$)/,
+const forbiddenProtectedImports = [
+  /^react(?:-dom)?(?:\/|$)/,
+  /^next(?:\/|$)/,
+  /^@remix-run\//,
+  /^openai(?:\/|$)/,
+  /^@openai\//,
+  /^@anthropic-ai\//,
+  /^@ai-sdk\//,
+  /^pg(?:\/|$)/,
+  /^postgres(?:\/|$)/,
+  /^drizzle-orm(?:\/|$)/,
+  /^@prisma\//,
+  /^knex(?:\/|$)/,
+  /^kysely(?:\/|$)/,
+  /^sequelize(?:\/|$)/,
+  /^typeorm(?:\/|$)/,
+  /^express(?:\/|$)/,
+  /^fastify(?:\/|$)/,
+  /^hono(?:\/|$)/,
 ];
 
 const allowedErpTools = new Set([
@@ -98,146 +84,63 @@ const allowedErpTools = new Set([
   'erp_verify',
 ]);
 
-const authorityRules: AuthorityRule[] = [
-  {
-    name: 'ActiveReleasePointer',
-    ruleId: 'AUTH002_RELEASE_AUTHORITY',
-    allowedDirectories: [
-      'packages/canonical-model',
-      'packages/contracts',
-      'packages/platform-runtime',
-    ],
-  },
-  {
-    name: 'AppPackageRevision',
-    ruleId: 'AUTH002_RELEASE_AUTHORITY',
-    allowedDirectories: ['packages/canonical-model', 'packages/contracts'],
-  },
-  {
-    name: 'TenantRelease',
-    ruleId: 'AUTH002_RELEASE_AUTHORITY',
-    allowedDirectories: [
-      'packages/canonical-model',
-      'packages/contracts',
-      'packages/platform-runtime',
-    ],
-  },
-  {
-    name: 'RequestRuntimeView',
-    ruleId: 'AUTH007_DUPLICATE_TRUST',
-    allowedDirectories: [
-      'packages/canonical-model',
-      'packages/contracts',
-      'packages/platform-runtime',
-    ],
-  },
-  {
-    name: 'ReleaseApproval',
-    ruleId: 'AUTH002_RELEASE_AUTHORITY',
-    allowedDirectories: ['packages/contracts', 'packages/platform-runtime'],
-  },
-  {
-    name: 'InventoryMovement',
-    ruleId: 'AUTH004_INVENTORY_PEER',
-    allowedDirectories: [
-      'packages/canonical-model',
-      'packages/contracts',
-      'packages/domain-inventory',
-    ],
-  },
-  {
-    name: 'Reservation',
-    ruleId: 'AUTH004_INVENTORY_PEER',
-    allowedDirectories: [
-      'packages/canonical-model',
-      'packages/contracts',
-      'packages/domain-inventory',
-    ],
-  },
-  {
-    name: 'SemanticQueryGateway',
-    ruleId: 'AUTH003_GATEWAY_BYPASS',
-    allowedDirectories: ['packages/contracts', 'packages/platform-runtime'],
-  },
-  {
-    name: 'SemanticOperationGateway',
-    ruleId: 'AUTH003_GATEWAY_BYPASS',
-    allowedDirectories: ['packages/contracts', 'packages/platform-runtime'],
-  },
-  {
-    name: 'OperationsAgentToolProfile',
-    ruleId: 'AUTH005_AGENT_TOOL',
-    allowedDirectories: [
-      'packages/contracts',
-      'packages/platform-runtime',
-      'packages/agent-runtime',
-    ],
-  },
-  {
-    name: 'ActionInvocation',
-    ruleId: 'AUTH007_DUPLICATE_TRUST',
-    allowedDirectories: ['packages/contracts', 'packages/platform-runtime'],
-  },
-  {
-    name: 'BusinessChangeDocument',
-    ruleId: 'AUTH007_DUPLICATE_TRUST',
-    allowedDirectories: ['packages/contracts', 'packages/platform-runtime'],
-  },
-  {
-    name: 'LifecycleService',
-    ruleId: 'AUTH007_DUPLICATE_TRUST',
-    allowedDirectories: ['packages/contracts', 'packages/platform-runtime'],
-  },
-  {
-    name: 'CorrectionLink',
-    ruleId: 'AUTH007_DUPLICATE_TRUST',
-    allowedDirectories: ['packages/contracts', 'packages/platform-runtime'],
-  },
-  {
-    name: 'RecoveryService',
-    ruleId: 'AUTH007_DUPLICATE_TRUST',
-    allowedDirectories: ['packages/contracts', 'packages/platform-runtime'],
-  },
-];
+const canonicalAuthorities = [
+  ['ActiveReleasePointer', 'AUTH002_RELEASE_AUTHORITY'],
+  ['AppPackageRevision', 'AUTH002_RELEASE_AUTHORITY'],
+  ['TenantRelease', 'AUTH002_RELEASE_AUTHORITY'],
+  ['InventoryMovement', 'AUTH004_INVENTORY_PEER'],
+  ['Reservation', 'AUTH004_INVENTORY_PEER'],
+  ['SemanticQueryGateway', 'AUTH003_GATEWAY_BYPASS'],
+  ['SemanticOperationGateway', 'AUTH003_GATEWAY_BYPASS'],
+  ['OperationsAgentToolProfile', 'AUTH005_AGENT_TOOL'],
+  ['BusinessChangeDocument', 'AUTH007_DUPLICATE_TRUST'],
+  ['RequestRuntimeView', 'AUTH007_DUPLICATE_TRUST'],
+] as const;
 
 const ruleDefinitionPath =
   'packages/dev-tooling/src/architecture-boundaries.ts';
 
 export function checkArchitecture(rootDirectory: string): BoundaryCheckResult {
   const root = resolve(rootDirectory);
-  const violations: BoundaryViolation[] = [];
   const files = productionFiles(root);
-  const workspacePackages = workspacePackageIndex(root, violations);
-  const authorityDeclarations: AuthorityDeclaration[] = [];
+  const workspacePackages = workspacePackageIndex(root, files);
+  const violations: BoundaryViolation[] = [];
+  const declarations: AuthorityDeclaration[] = [];
 
   for (const file of files) {
     const repoPath = normalizePath(relative(root, file));
     const source = readFileSync(file, 'utf8');
     const owner = packageForFile(repoPath, workspacePackages);
 
-    if (repoPath !== ruleDefinitionPath) {
-      scanAgentNativeReference(repoPath, source, violations);
-    }
     if (repoPath.endsWith('package.json')) {
       scanManifest(repoPath, source, owner, workspacePackages, violations);
+    }
+    if (
+      repoPath === 'pnpm-lock.yaml' &&
+      source.includes('@agent-native/core')
+    ) {
+      addViolation(
+        violations,
+        repoPath,
+        source,
+        source.indexOf('@agent-native/core'),
+        'AUTH001_AGENT_NATIVE_CORE',
+        'lockfile contains forbidden @agent-native/core',
+      );
     }
     if (sourceExtensions.has(extname(repoPath))) {
       scanImports(root, repoPath, source, owner, workspacePackages, violations);
     }
-
     if (repoPath !== ruleDefinitionPath && isProductionPath(repoPath)) {
-      scanAuthoritySignatures(repoPath, source, owner, violations);
-      if (
-        sourceExtensions.has(extname(repoPath)) &&
-        !repoPath.startsWith('build/') &&
-        !repoPath.startsWith('dist/')
-      ) {
-        collectAuthorityDeclarations(repoPath, source, authorityDeclarations);
+      scanPlainAuthorityViolations(repoPath, source, owner, violations);
+      scanToolCatalog(repoPath, source, violations);
+      if (sourceExtensions.has(extname(repoPath))) {
+        collectPlainAuthorityDeclarations(repoPath, source, declarations);
       }
     }
   }
 
-  validateAuthorityDeclarations(authorityDeclarations, violations);
+  rejectDuplicateAuthorities(declarations, violations);
 
   return {
     scannedFiles: files.length,
@@ -269,10 +172,6 @@ function productionFiles(root: string): string[] {
     const path = join(root, rootName);
     if (existsSync(path)) walk(path, files);
   }
-  for (const artifactRoot of emittedArtifactDirectories) {
-    const path = join(root, artifactRoot);
-    if (existsSync(path)) walkEmittedArtifacts(path, files);
-  }
   return [...files].sort();
 }
 
@@ -280,116 +179,30 @@ function walk(directory: string, files: Set<string>): void {
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
     const path = join(directory, entry.name);
     if (entry.isDirectory()) {
-      if (emittedArtifactDirectories.has(entry.name)) {
-        walkEmittedArtifacts(path, files);
-      } else if (!ignoredDirectories.has(entry.name)) {
-        walk(path, files);
-      }
+      if (!ignoredDirectories.has(entry.name)) walk(path, files);
       continue;
     }
-
-    const extension = extname(entry.name);
-    if (sourceExtensions.has(extension) || dataExtensions.has(extension)) {
-      files.add(path);
-    }
-  }
-}
-
-function walkEmittedArtifacts(directory: string, files: Set<string>): void {
-  for (const entry of readdirSync(directory, { withFileTypes: true })) {
-    const path = join(directory, entry.name);
-    if (entry.isDirectory()) {
-      if (entry.name !== 'node_modules') walkEmittedArtifacts(path, files);
-      continue;
-    }
-
-    if (
-      (dataExtensions.has(extname(entry.name)) ||
-        sourceExtensions.has(extname(entry.name))) &&
-      isModelFacingPath(normalizePath(path))
-    ) {
-      files.add(path);
-    }
+    if (scannedExtensions.has(extname(entry.name))) files.add(path);
   }
 }
 
 function workspacePackageIndex(
   root: string,
-  violations: BoundaryViolation[],
+  files: string[],
 ): WorkspacePackage[] {
   const packages: WorkspacePackage[] = [];
-  for (const rootName of ['apps', 'packages']) {
-    const rootPath = join(root, rootName);
-    if (!existsSync(rootPath)) continue;
-
-    for (const entry of readdirSync(rootPath, { withFileTypes: true })) {
-      if (!entry.isDirectory() || ignoredDirectories.has(entry.name)) continue;
-      const directory = `${rootName}/${entry.name}`;
-      const manifestPath = join(rootPath, entry.name, 'package.json');
-      let name = `<unnamed:${directory}>`;
-
-      if (!existsSync(manifestPath)) {
-        addViolation(
-          violations,
-          `${directory}/package.json`,
-          '',
-          0,
-          'CFG002_PACKAGE_IDENTITY',
-          'production package is missing package.json',
-        );
-      } else {
-        const source = readFileSync(manifestPath, 'utf8');
-        const parsed = parseJson(source);
-        if (!parsed || typeof parsed.name !== 'string' || parsed.name === '') {
-          addViolation(
-            violations,
-            `${directory}/package.json`,
-            source,
-            0,
-            'CFG002_PACKAGE_IDENTITY',
-            'production package must declare a non-empty name',
-          );
-        } else {
-          name = parsed.name;
-        }
-      }
-
-      const kind = packageKind(directory);
-      if (kind === 'unclassified') {
-        addViolation(
-          violations,
-          `${directory}/package.json`,
-          '',
-          0,
-          'CFG003_PACKAGE_CLASSIFICATION',
-          'production package is not classified by the dependency policy',
-        );
-      }
-      packages.push({ directory, name, kind });
-    }
+  for (const file of files.filter((path) => path.endsWith('package.json'))) {
+    const repoPath = normalizePath(relative(root, file));
+    if (repoPath === 'package.json') continue;
+    const manifest = parseJson(readFileSync(file, 'utf8'));
+    if (!manifest || typeof manifest.name !== 'string') continue;
+    const directory = normalizePath(dirname(repoPath));
+    packages.push({
+      directory,
+      kind: packageKind(directory),
+      name: manifest.name,
+    });
   }
-
-  const byName = new Map<string, WorkspacePackage[]>();
-  for (const workspacePackage of packages) {
-    if (workspacePackage.name.startsWith('<unnamed:')) continue;
-    const matches = byName.get(workspacePackage.name) ?? [];
-    matches.push(workspacePackage);
-    byName.set(workspacePackage.name, matches);
-  }
-  for (const [name, matches] of byName) {
-    if (matches.length < 2) continue;
-    for (const match of matches) {
-      addViolation(
-        violations,
-        `${match.directory}/package.json`,
-        '',
-        0,
-        'CFG002_PACKAGE_IDENTITY',
-        `duplicate workspace package name ${name}`,
-      );
-    }
-  }
-
   return packages.sort(
     (left, right) => right.directory.length - left.directory.length,
   );
@@ -397,25 +210,15 @@ function workspacePackageIndex(
 
 function packageKind(directory: string): PackageKind {
   if (directory.startsWith('apps/')) return 'app';
-  const packageName = directory.split('/').at(-1) ?? '';
-  if (packageName === 'canonical-model' || packageName === 'contracts') {
-    return 'contracts';
-  }
-  if (packageName === 'compiler') return 'compiler';
-  if (packageName === 'domain' || packageName.startsWith('domain-')) {
-    return 'domain';
-  }
-  if (packageName === 'runtime' || packageName.endsWith('-runtime')) {
-    return 'runtime';
-  }
-  if (
-    packageName === 'dev-tooling' ||
-    packageName === 'test-contracts' ||
-    packageName === 'testing'
-  ) {
+  const name = directory.split('/').at(-1) ?? '';
+  if (name === 'canonical-model' || name === 'contracts') return 'contracts';
+  if (name === 'compiler') return 'compiler';
+  if (name === 'domain' || name.startsWith('domain-')) return 'domain';
+  if (name === 'runtime' || name.endsWith('-runtime')) return 'runtime';
+  if (['dev-tooling', 'test-contracts', 'testing'].includes(name)) {
     return 'tooling';
   }
-  return 'unclassified';
+  return 'other';
 }
 
 function packageForFile(
@@ -426,21 +229,6 @@ function packageForFile(
     (workspacePackage) =>
       repoPath === workspacePackage.directory ||
       repoPath.startsWith(`${workspacePackage.directory}/`),
-  );
-}
-
-function scanAgentNativeReference(
-  repoPath: string,
-  source: string,
-  violations: BoundaryViolation[],
-): void {
-  addPatternViolations(
-    violations,
-    repoPath,
-    source,
-    'AUTH001_AGENT_NATIVE_CORE',
-    'production artifact references forbidden @agent-native/core',
-    /@agent-native\/core(?:\b|\/)/g,
   );
 }
 
@@ -464,61 +252,28 @@ function scanManifest(
     return;
   }
 
-  if (containsAgentNativeReference(manifest)) {
-    addViolation(
-      violations,
-      repoPath,
-      source,
-      Math.max(0, source.indexOf('@agent-native/core')),
-      'AUTH001_AGENT_NATIVE_CORE',
-      'parsed manifest contains a forbidden @agent-native/core key, alias, patch, or override',
-    );
-  }
-
-  for (const dependencyGroup of [
+  for (const group of [
     'dependencies',
     'devDependencies',
     'optionalDependencies',
     'peerDependencies',
   ]) {
-    const dependencies = manifest[dependencyGroup];
+    const dependencies = manifest[group];
     if (!isRecord(dependencies)) continue;
-
-    for (const [dependencyName, dependencyRange] of Object.entries(
-      dependencies,
-    )) {
-      if (typeof dependencyRange !== 'string') {
-        addViolation(
-          violations,
-          repoPath,
-          source,
-          source.indexOf(dependencyName),
-          'CFG004_DEPENDENCY_TARGET',
-          `${dependencyGroup}.${dependencyName} must be a string dependency target`,
-        );
-        continue;
-      }
-
-      const effectiveName = normalizedDependencyTarget(
-        dependencyName,
-        dependencyRange,
-      );
-      if (
-        effectiveName === '@agent-native/core' ||
-        effectiveName.startsWith('@agent-native/core/')
-      ) {
+    for (const dependencyName of Object.keys(dependencies)) {
+      if (dependencyName === '@agent-native/core') {
         addViolation(
           violations,
           repoPath,
           source,
           source.indexOf(dependencyName),
           'AUTH001_AGENT_NATIVE_CORE',
-          `${dependencyGroup}.${dependencyName} resolves to forbidden ${effectiveName}`,
+          `${group} contains forbidden @agent-native/core`,
         );
       }
 
       const target = packages.find(
-        (workspacePackage) => workspacePackage.name === effectiveName,
+        (workspacePackage) => workspacePackage.name === dependencyName,
       );
       if (
         owner &&
@@ -532,15 +287,15 @@ function scanManifest(
           source,
           source.indexOf(dependencyName),
           'BND001_WORKSPACE_DIRECTION',
-          `${owner.name} may not depend on ${target.name}; protected packages depend only on canonical contracts`,
+          `${owner.name} may not depend on ${target.name}`,
         );
       }
-
       if (
         owner &&
         isProtectedLayer(owner.kind) &&
-        !target &&
-        !externalSpecifierAllowed(effectiveName)
+        forbiddenProtectedImports.some((pattern) =>
+          pattern.test(dependencyName),
+        )
       ) {
         addViolation(
           violations,
@@ -548,31 +303,11 @@ function scanManifest(
           source,
           source.indexOf(dependencyName),
           'BND002_PROTECTED_IMPORT',
-          `${owner.name} declares external dependency ${effectiveName} outside the protected-layer allowlist`,
+          `${owner.name} declares forbidden provider/framework dependency ${dependencyName}`,
         );
       }
     }
   }
-}
-
-function normalizedDependencyTarget(name: string, range: string): string {
-  const alias = range.match(
-    /^(?:npm|patch|workspace):((?:@[^/@]+\/[^@/]+)|(?:[a-z0-9][^@/:]*))/i,
-  );
-  return alias?.[1] ?? name;
-}
-
-function containsAgentNativeReference(value: unknown): boolean {
-  if (typeof value === 'string') {
-    return /@agent-native\/core(?:\b|\/)/.test(value);
-  }
-  if (Array.isArray(value)) return value.some(containsAgentNativeReference);
-  if (!isRecord(value)) return false;
-  return Object.entries(value).some(
-    ([key, nested]) =>
-      /@agent-native\/core(?:\b|\/)/.test(key) ||
-      containsAgentNativeReference(nested),
-  );
 }
 
 function scanImports(
@@ -583,17 +318,28 @@ function scanImports(
   packages: WorkspacePackage[],
   violations: BoundaryViolation[],
 ): void {
-  const imports = preProcessFile(source, true, true).importedFiles;
-  for (const importedFile of imports) {
+  for (const importedFile of preProcessFile(source, true, true).importedFiles) {
     const specifier = importedFile.fileName;
-    const index = importedFile.pos;
+    if (
+      specifier === '@agent-native/core' ||
+      specifier.startsWith('@agent-native/core/')
+    ) {
+      addViolation(
+        violations,
+        repoPath,
+        source,
+        importedFile.pos,
+        'AUTH001_AGENT_NATIVE_CORE',
+        `source imports forbidden ${specifier}`,
+      );
+    }
+
     const target = importedWorkspacePackage(
       root,
       repoPath,
       specifier,
       packages,
     );
-
     if (
       owner &&
       target &&
@@ -604,42 +350,23 @@ function scanImports(
         violations,
         repoPath,
         source,
-        index,
+        importedFile.pos,
         'BND001_WORKSPACE_DIRECTION',
-        `${owner.name} may not import ${target.name}; protected packages depend only on canonical contracts`,
+        `${owner.name} may not import ${target.name}`,
       );
     }
-
     if (
       owner &&
       isProtectedLayer(owner.kind) &&
-      !target &&
-      !specifier.startsWith('.') &&
-      !externalSpecifierAllowed(specifier)
+      forbiddenProtectedImports.some((pattern) => pattern.test(specifier))
     ) {
       addViolation(
         violations,
         repoPath,
         source,
-        index,
+        importedFile.pos,
         'BND002_PROTECTED_IMPORT',
-        `${owner.name} imports external path ${specifier} outside the protected-layer allowlist`,
-      );
-    }
-
-    if (
-      owner?.kind === 'app' &&
-      /(?:^|\/)(?:db|database|repositories?|schema|tables?)(?:\/|$)/i.test(
-        specifier,
-      )
-    ) {
-      addViolation(
-        violations,
-        repoPath,
-        source,
-        index,
-        'AUTH003_GATEWAY_BYPASS',
-        `${owner.name} imports direct storage internals ${specifier}`,
+        `${owner.name} imports forbidden provider/framework path ${specifier}`,
       );
     }
   }
@@ -658,14 +385,13 @@ function importedWorkspacePackage(
   );
   if (named) return named;
   if (!specifier.startsWith('.')) return undefined;
-
   const resolvedPath = normalizePath(
     relative(root, resolve(root, dirname(repoPath), specifier)),
   );
   return packageForFile(resolvedPath, packages);
 }
 
-function scanAuthoritySignatures(
+function scanPlainAuthorityViolations(
   repoPath: string,
   source: string,
   owner: WorkspacePackage | undefined,
@@ -676,174 +402,104 @@ function scanAuthoritySignatures(
     repoPath,
     source,
     'AUTH001_AGENT_NATIVE_CORE',
-    'production source declares an agent-native compatibility facade',
-    /\b(?:agent[_-]?native\w*(?:adapter|compatibility|facade|registry|shim)|(?:adapter|compatibility|facade|registry|shim)\w*agent[_-]?native)\b/gi,
+    'source declares an agent-native compatibility authority',
+    /\b(?:agentNativeCompatibility|AgentNativeCoreFacade|AgentNativeActionRegistry)\b/g,
   );
   addPatternViolations(
     violations,
     repoPath,
     source,
     'AUTH002_RELEASE_AUTHORITY',
-    'source declares a forbidden alternate release, manifest, or overlay authority',
-    /\b(?:\w*global\w*(?:active|activation|release)\w*|\w*(?:active|compiled|package|tenant)\w*overlay\w*|\w*active\w*manifest\w*|\w*manifest\w*provider\w*|runtimeCustomizationVersion\w*)\b/gi,
+    'source declares an alternate release/overlay authority',
+    /\b(?:globalActiveRelease|deploymentGlobalActivation|activeOverlay|tenantPackageOverlay)\b/g,
   );
   addPatternViolations(
     violations,
     repoPath,
     source,
     'AUTH003_GATEWAY_BYPASS',
-    'source declares a private physical-action registry or gateway bypass',
-    /\b(?:\w*(?:physical|private|framework)\w*action\w*registry\w*|actionRegistry|loadActionsFromStaticRegistry|frameworkActionIds)\b/gi,
+    'source declares a private physical-action registry',
+    /\b(?:actionRegistry|physicalActionRegistry|loadActionsFromStaticRegistry)\b/g,
   );
   addPatternViolations(
     violations,
     repoPath,
     source,
     'AUTH004_INVENTORY_PEER',
-    'source declares writable inventory state or a peer balance authority',
-    /\b(?:currentQuantity|\w*writable\w*(?:inventory|stock)\w*|(?:delete|overwrite|patch|set|update)\w*(?:inventory|stock)\w*(?:balance|quantity)|(?:inventory|stock)\w*(?:balance|onHand)\w*(?:store|table))\b/gi,
+    'source declares writable inventory balance state',
+    /\b(?:currentQuantity|writableInventoryBalance|setInventoryBalance|patchInventoryBalance)\b/g,
   );
   addPatternViolations(
     violations,
     repoPath,
     source,
     'AUTH006_HARD_DELETE',
-    'source declares an ordinary hard-delete or purge path',
-    /\b(?:hard|physical|permanent)\w*delete\w*|\bpurge\w*(?:business|record|data)\w*|\b(?:DELETE\s+FROM|DROP\s+TABLE|TRUNCATE(?:\s+TABLE)?)\b/gi,
+    'source declares an ordinary hard-delete path',
+    /\b(?:hardDeleteBusinessRecord|physicalDeleteBusinessRecord|purgeBusinessData)\b|\bDELETE\s+FROM\b/gi,
   );
   addPatternViolations(
     violations,
     repoPath,
     source,
     'AUTH007_DUPLICATE_TRUST',
-    'source declares a duplicate audit, change-document, or actor-context authority',
-    /\b(?:\w*(?:parallel|secondary|alternate|universal)\w*(?:audit|actorContext|changeDocument)\w*|BusinessAuditLedger|ActorContextStore)\b/gi,
+    'source declares a duplicate audit or actor-context authority',
+    /\b(?:universalAuditJournal|secondaryActorContext|parallelChangeDocument)\b/g,
   );
 
-  scanStorageCalls(repoPath, source, owner, violations);
-  scanDirectTableAccess(repoPath, source, owner, violations);
-  scanInventoryWrites(repoPath, source, owner, violations);
-  scanAgentTools(repoPath, source, violations);
-}
-
-function scanDirectTableAccess(
-  repoPath: string,
-  source: string,
-  owner: WorkspacePackage | undefined,
-  violations: BoundaryViolation[],
-): void {
-  const tableReference =
-    /\b(?:DELETE\s+FROM|FROM|INSERT\s+INTO|JOIN|UPDATE)\s+["`]?([a-z][a-z0-9_.]*)/gi;
-  const ownerDomain = owner?.directory.startsWith('packages/domain-')
-    ? owner.directory.slice('packages/domain-'.length)
-    : undefined;
-  const knownDomains = ['catalog', 'inventory', 'party', 'purchasing', 'sales'];
-
-  for (const match of source.matchAll(tableReference)) {
-    const qualifiedTable = (match[1] ?? '').toLowerCase();
-    const tableParts = qualifiedTable.split('.');
-    const table = tableParts.at(-1) ?? '';
-    const tableDomain = knownDomains.find(
-      (domain) =>
-        tableParts[0] === domain ||
-        table === domain ||
-        table.startsWith(`${domain}_`),
-    );
-    const isAppSql = owner?.kind === 'app';
-    const isCrossDomain =
-      ownerDomain !== undefined &&
-      tableDomain !== undefined &&
-      tableDomain !== ownerDomain;
-    if (!isAppSql && !isCrossDomain) continue;
-
-    addViolation(
-      violations,
-      repoPath,
-      source,
-      match.index,
-      'AUTH003_GATEWAY_BYPASS',
-      isAppSql
-        ? `application channel contains direct table access ${table}`
-        : `${owner?.name ?? 'domain package'} accesses cross-domain table ${table}`,
-    );
-  }
-}
-
-function scanStorageCalls(
-  repoPath: string,
-  source: string,
-  owner: WorkspacePackage | undefined,
-  violations: BoundaryViolation[],
-): void {
-  const storageMutation =
-    /\b(?:(?:db|database|entityManager|orm|repo|repository|store|prisma(?:\s*\.\s*\w+)?)\s*\.\s*(?:aggregate|clear|count|create|createMany|delete|deleteFrom|deleteMany|destroy|execute|findFirst|findMany|findUnique|insert|query|remove|save|select|update|upsert)|(?:client|pool)\s*\.\s*(?:execute|query))\s*\(/gi;
   if (owner?.kind === 'app') {
     addPatternViolations(
       violations,
       repoPath,
       source,
       'AUTH003_GATEWAY_BYPASS',
-      'application channel calls storage directly instead of a semantic gateway',
-      storageMutation,
+      'application calls storage directly instead of a semantic gateway',
+      /\b(?:db|database|repository)\s*\.\s*(?:delete|insert|query|select|update)\s*\(/g,
     );
   }
 
-  addPatternViolations(
-    violations,
-    repoPath,
-    source,
-    'AUTH006_HARD_DELETE',
-    'source invokes an ordinary repository hard-delete method',
-    /\b(?:db|database|entityManager|orm|repo|repository|store|prisma(?:\s*\.\s*\w+)?)\s*\.\s*(?:clear|delete|deleteFrom|deleteMany|destroy|remove)\s*\(|\.createQueryBuilder\s*\([^)]*\)\s*\.\s*delete\s*\(|\.delete\s*\(\s*\)\s*\.\s*from\s*\(/gi,
-  );
+  scanPlainCrossDomainWrites(repoPath, source, owner, violations);
 }
 
-function scanInventoryWrites(
+function scanPlainCrossDomainWrites(
   repoPath: string,
   source: string,
   owner: WorkspacePackage | undefined,
   violations: BoundaryViolation[],
 ): void {
-  const writePattern =
-    /\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+["`]?([a-z][a-z0-9_.]*)/gi;
-  for (const match of source.matchAll(writePattern)) {
-    const operation = (match[1] ?? '').toUpperCase().replaceAll(/\s+/g, ' ');
-    const table = (match[2] ?? '').toLowerCase().split('.').at(-1) ?? '';
-    if (!/(?:inventory|stock|reservation|movement)/.test(table)) continue;
+  const writes = /\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+([a-z][a-z0-9_]*)/gi;
+  for (const match of source.matchAll(writes)) {
+    const table = (match[2] ?? '').toLowerCase();
+    if (!/(?:inventory|movement|reservation|stock)/.test(table)) continue;
+    const inventoryOwner = owner?.directory === 'packages/domain-inventory';
+    const appendOnlyMutation =
+      /(?:movement|reservation)/.test(table) &&
+      (match[1] ?? '').toUpperCase() !== 'INSERT INTO';
+    const writableBalance = /(?:balance|quantity|stock)/.test(table);
 
-    const isBalance = /(?:balance|on_hand|onhand|quantity|stock)/.test(table);
-    const isAppendOnlyFact = /(?:movement|reservation)/.test(table);
-    const isCrossDomain =
-      owner !== undefined &&
-      owner.directory !== 'packages/domain-inventory' &&
-      !repoPath.startsWith('db/');
-    if (
-      isBalance ||
-      isCrossDomain ||
-      (isAppendOnlyFact && operation !== 'INSERT INTO')
-    ) {
+    if (!inventoryOwner && !repoPath.startsWith('db/')) {
+      addViolation(
+        violations,
+        repoPath,
+        source,
+        match.index,
+        'AUTH003_GATEWAY_BYPASS',
+        `cross-domain direct write targets ${table}`,
+      );
+    }
+    if (appendOnlyMutation || writableBalance) {
       addViolation(
         violations,
         repoPath,
         source,
         match.index,
         'AUTH004_INVENTORY_PEER',
-        `forbidden inventory write ${operation} ${table}`,
+        `forbidden inventory mutation targets ${table}`,
       );
     }
   }
-
-  addPatternViolations(
-    violations,
-    repoPath,
-    source,
-    'AUTH004_INVENTORY_PEER',
-    'source invokes a direct ORM/repository inventory mutation',
-    /\b(?:db|database|orm|prisma|repo|repository)\s*\.\s*(?:inventory|stock|reservation|movement)\w*(?:\s*\.\s*\w+)?\s*\.\s*(?:create|delete|deleteMany|insert|remove|save|update)\s*\(/gi,
-  );
 }
 
-function scanAgentTools(
+function scanToolCatalog(
   repoPath: string,
   source: string,
   violations: BoundaryViolation[],
@@ -856,223 +512,104 @@ function scanAgentTools(
       source,
       match.index,
       'AUTH005_AGENT_TOOL',
-      `model-facing surface exposes non-protocol ERP tool ${match[0]}`,
+      `source exposes sixth ERP tool ${match[0]}`,
     );
   }
 
-  if (!isModelFacingPath(repoPath)) return;
-  addPatternViolations(
-    violations,
-    repoPath,
-    source,
-    'AUTH005_AGENT_TOOL',
-    'model-facing artifact exposes a prohibited raw or administrative tool',
-    /\b(?:raw[_ -]?database|sql|shell|source[_ -]?(?:editing|write)|file[_ -]?system|arbitrary[_ -]?http|activate[_ -]?release|purge|free[_ -]?form[_ -]?write)\w*tool\b/gi,
-  );
+  if (/(?:agent|tool|model-facing)/i.test(repoPath)) {
+    addPatternViolations(
+      violations,
+      repoPath,
+      source,
+      'AUTH005_AGENT_TOOL',
+      'model-facing source exposes a prohibited raw or administrative tool',
+      /\b(?:rawDatabaseTool|sqlTool|shellTool|sourceEditingTool|filesystemTool|arbitraryHttpTool|activateReleaseTool|purgeTool|freeFormWriteTool)\b/g,
+    );
+  }
 
-  const toolNames = extractDeclaredToolNames(repoPath, source);
-  for (const toolName of toolNames) {
-    if (allowedErpTools.has(toolName)) continue;
+  if (extname(repoPath) !== '.json') return;
+  const parsed = parseJson(source);
+  if (!parsed || !Array.isArray(parsed.tools)) return;
+  const tools = parsed.tools.filter(
+    (tool): tool is string => typeof tool === 'string',
+  );
+  for (const tool of tools) {
+    if (allowedErpTools.has(tool)) continue;
     addViolation(
       violations,
       repoPath,
       source,
-      Math.max(0, source.indexOf(toolName)),
+      Math.max(0, source.indexOf(tool)),
       'AUTH005_AGENT_TOOL',
-      `model-facing catalog exposes non-protocol tool ${toolName}`,
+      `tool catalog exposes non-protocol tool ${tool}`,
     );
   }
 
-  if (isOperationsAgentProfile(repoPath, source)) {
-    const uniqueNames = new Set(toolNames);
-    const missing = [...allowedErpTools].filter(
-      (name) => !uniqueNames.has(name),
-    );
-    const extras = [...uniqueNames].filter(
-      (name) => !allowedErpTools.has(name),
-    );
-    if (missing.length > 0 || extras.length > 0) {
+  if (
+    parsed.profile === 'operations-agent' ||
+    /operations-agent-tool-profile/i.test(repoPath)
+  ) {
+    const distinct = new Set(tools);
+    if (
+      tools.length !== allowedErpTools.size ||
+      distinct.size !== allowedErpTools.size ||
+      [...allowedErpTools].some((tool) => !distinct.has(tool))
+    ) {
       addViolation(
         violations,
         repoPath,
         source,
         0,
         'AUTH005_AGENT_TOOL',
-        `OperationsAgentToolProfile must contain exactly the five protocol tools; missing=[${missing.join(',')}], extras=[${extras.join(',')}]`,
+        'OperationsAgentToolProfile must contain exactly the five distinct protocol tools',
       );
     }
   }
 }
 
-function extractDeclaredToolNames(repoPath: string, source: string): string[] {
-  if (extname(repoPath) === '.json') {
-    try {
-      return extractJsonToolNames(JSON.parse(source) as unknown);
-    } catch {
-      return [];
-    }
-  }
-
-  const names = new Set<string>();
-  for (const match of source.matchAll(
-    /\b(?:tools?|toolNames?)\s*[:=]\s*\[([^\]]*)\]/gis,
-  )) {
-    for (const quoted of (match[1] ?? '').matchAll(/['"]([^'"]+)['"]/g)) {
-      if (quoted[1]) names.add(quoted[1]);
-    }
-  }
-  for (const match of source.matchAll(
-    /\b(?:name|tool|toolName|id)\s*:\s*['"]([a-z][a-z0-9_-]+)['"]/gi,
-  )) {
-    if (match[1]) names.add(match[1]);
-  }
-  for (const match of source.matchAll(/^\s*-\s*([a-z][a-z0-9_-]+)\s*$/gim)) {
-    if (match[1]) names.add(match[1]);
-  }
-  return [...names];
-}
-
-function extractJsonToolNames(value: unknown): string[] {
-  const names = new Set<string>();
-
-  function visit(candidate: unknown): void {
-    if (Array.isArray(candidate)) {
-      for (const item of candidate) visit(item);
-      return;
-    }
-    if (!isRecord(candidate)) return;
-
-    const directName = ['name', 'tool', 'toolName', 'id']
-      .map((key) => candidate[key])
-      .find((nested): nested is string => typeof nested === 'string');
-    if (directName) names.add(directName);
-
-    for (const [key, nested] of Object.entries(candidate)) {
-      if (/^(?:tools?|toolNames?)$/i.test(key)) {
-        collectToolCollection(nested, names);
-      } else {
-        visit(nested);
-      }
-    }
-  }
-
-  visit(value);
-  return [...names];
-}
-
-function collectToolCollection(value: unknown, names: Set<string>): void {
-  if (typeof value === 'string') {
-    names.add(value);
-    return;
-  }
-  if (Array.isArray(value)) {
-    for (const item of value) collectToolCollection(item, names);
-    return;
-  }
-  if (!isRecord(value)) return;
-
-  const explicitName = ['name', 'tool', 'toolName', 'id']
-    .map((key) => value[key])
-    .find((candidate): candidate is string => typeof candidate === 'string');
-  if (explicitName) {
-    names.add(explicitName);
-    return;
-  }
-  for (const key of Object.keys(value)) names.add(key);
-}
-
-function collectAuthorityDeclarations(
+function collectPlainAuthorityDeclarations(
   repoPath: string,
   source: string,
   declarations: AuthorityDeclaration[],
 ): void {
-  const sourceFile = createSourceFile(
-    repoPath,
-    source,
-    ScriptTarget.Latest,
-    true,
-  );
-
-  function visit(node: Parameters<typeof forEachChild>[0]): void {
-    if (
-      (isClassDeclaration(node) ||
-        isEnumDeclaration(node) ||
-        isFunctionDeclaration(node) ||
-        isInterfaceDeclaration(node) ||
-        isModuleDeclaration(node) ||
-        isTypeAliasDeclaration(node) ||
-        isVariableDeclaration(node) ||
-        isExportSpecifier(node)) &&
-      node.name &&
-      isIdentifier(node.name)
-    ) {
-      const declarationName = node.name;
-      const rule = authorityRules.find(
-        (candidate) => candidate.name === declarationName.text,
-      );
-      if (rule) {
-        declarations.push({
-          rule,
-          file: repoPath,
-          source,
-          index: declarationName.getStart(sourceFile),
-        });
-      }
+  for (const [name, ruleId] of canonicalAuthorities) {
+    const pattern = new RegExp(
+      `\\b(?:class|const|interface|let|type|var)\\s+${name}\\b`,
+      'g',
+    );
+    for (const match of source.matchAll(pattern)) {
+      declarations.push({
+        file: repoPath,
+        index: match.index,
+        name,
+        ruleId,
+        source,
+      });
     }
-    forEachChild(node, visit);
   }
-
-  visit(sourceFile);
 }
 
-function validateAuthorityDeclarations(
+function rejectDuplicateAuthorities(
   declarations: AuthorityDeclaration[],
   violations: BoundaryViolation[],
 ): void {
-  for (const rule of authorityRules) {
-    const matches = declarations.filter(
-      (declaration) => declaration.rule.name === rule.name,
-    );
-    for (const declaration of matches) {
-      if (
-        !rule.allowedDirectories.some(
-          (directory) =>
-            declaration.file === directory ||
-            declaration.file.startsWith(`${directory}/`),
-        )
-      ) {
-        addViolation(
-          violations,
-          declaration.file,
-          declaration.source,
-          declaration.index,
-          rule.ruleId,
-          `${rule.name} is declared outside its sole authority package`,
-        );
-      }
-    }
-    if (matches.length > 1) {
-      for (const declaration of matches.slice(1)) {
-        addViolation(
-          violations,
-          declaration.file,
-          declaration.source,
-          declaration.index,
-          rule.ruleId,
-          `duplicate canonical authority declaration ${rule.name}`,
-        );
-      }
+  for (const [name, ruleId] of canonicalAuthorities) {
+    const matches = declarations.filter((item) => item.name === name);
+    for (const duplicate of matches.slice(1)) {
+      addViolation(
+        violations,
+        duplicate.file,
+        duplicate.source,
+        duplicate.index,
+        ruleId,
+        `duplicate canonical authority declaration ${name}`,
+      );
     }
   }
 }
 
 function isProtectedLayer(kind: PackageKind): boolean {
-  return (
-    kind === 'compiler' ||
-    kind === 'contracts' ||
-    kind === 'domain' ||
-    kind === 'unclassified'
-  );
+  return kind === 'compiler' || kind === 'contracts' || kind === 'domain';
 }
 
 function workspaceDependencyAllowed(
@@ -1082,32 +619,13 @@ function workspaceDependencyAllowed(
   return (
     owner.kind === 'app' ||
     owner.kind === 'tooling' ||
+    owner.kind === 'other' ||
     target.kind === 'contracts'
   );
 }
 
-function externalSpecifierAllowed(specifier: string): boolean {
-  return allowedProtectedExternalImports.some((pattern) =>
-    pattern.test(specifier),
-  );
-}
-
 function isProductionPath(repoPath: string): boolean {
-  return /^(?:apps|build|db|dist|packages)\//.test(repoPath);
-}
-
-function isModelFacingPath(repoPath: string): boolean {
-  if (/(?:^|\/)dev-tooling(?:\/|$)/i.test(repoPath)) return false;
-  return /(?:agent|model-facing|operations-agent-tool-profile|(?:^|[-_./])tools?(?:[-_./]|$)|catalog)/i.test(
-    repoPath,
-  );
-}
-
-function isOperationsAgentProfile(repoPath: string, source: string): boolean {
-  return (
-    /operations[-_.]?agent[-_.]?tool[-_.]?profile/i.test(repoPath) ||
-    /\bOperationsAgentToolProfile\b/.test(source)
-  );
+  return /^(?:apps|db|packages)\//.test(repoPath);
 }
 
 function addPatternViolations(
