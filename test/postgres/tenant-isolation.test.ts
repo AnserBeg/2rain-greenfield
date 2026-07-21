@@ -147,6 +147,20 @@ test('two tenants and environments remain isolated across one reused pooled conn
           UnsafeDatabaseRoleError,
         );
 
+        await pool.query('ALTER ROLE north_star_runtime BYPASSRLS');
+        try {
+          await assert.rejects(
+            withTrustedRequestTransaction(
+              singleConnectionPool,
+              contextA,
+              async () => undefined,
+            ),
+            UnsafeDatabaseRoleError,
+          );
+        } finally {
+          await pool.query('ALTER ROLE north_star_runtime NOBYPASSRLS');
+        }
+
         const first = await readVisibleFixture(singleConnectionPool, contextA);
         assert.deepEqual(first.labels, ['tenant-a']);
         assert.equal(first.tenantId, tenantA);

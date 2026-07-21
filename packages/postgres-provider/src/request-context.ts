@@ -22,15 +22,43 @@ export async function withTrustedRequestTransaction<T>(
   try {
     await client.query('BEGIN');
     transactionOpen = true;
-    const role = await client.query<{ role: string; session_role: string }>(
-      'SELECT current_user AS role, session_user AS session_role',
-    );
+    const role = await client.query<{
+      bypass_rls: boolean;
+      can_login: boolean;
+      create_database: boolean;
+      create_role: boolean;
+      inherits_privileges: boolean;
+      replication: boolean;
+      role: string;
+      session_role: string;
+      superuser: boolean;
+    }>(`
+      SELECT current_user AS role,
+             session_user AS session_role,
+             r.rolbypassrls AS bypass_rls,
+             r.rolcanlogin AS can_login,
+             r.rolcreatedb AS create_database,
+             r.rolcreaterole AS create_role,
+             r.rolinherit AS inherits_privileges,
+             r.rolreplication AS replication,
+             r.rolsuper AS superuser
+      FROM pg_catalog.pg_roles r
+      WHERE r.rolname = current_user
+    `);
+    const runtimeRole = role.rows[0];
     if (
-      role.rows[0]?.role !== 'north_star_runtime' ||
-      role.rows[0]?.session_role !== 'north_star_runtime'
+      runtimeRole?.role !== 'north_star_runtime' ||
+      runtimeRole.session_role !== 'north_star_runtime' ||
+      runtimeRole.bypass_rls ||
+      !runtimeRole.can_login ||
+      runtimeRole.create_database ||
+      runtimeRole.create_role ||
+      runtimeRole.inherits_privileges ||
+      runtimeRole.replication ||
+      runtimeRole.superuser
     ) {
       throw new UnsafeDatabaseRoleError(
-        'trusted request transactions require a north_star_runtime login session',
+        'trusted request transactions require the unprivileged north_star_runtime login role',
       );
     }
     await client.query(
