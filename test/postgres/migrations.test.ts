@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
 import { mkdtemp, rm, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import test from 'node:test';
+import { promisify } from 'node:util';
 
 import {
   assertSchemaMatchesSnapshot,
@@ -15,42 +17,60 @@ import { withEphemeralPostgres } from '../helpers/postgres.js';
 
 const checkedInMigrations = resolve('db/migrations');
 const checkedInSnapshot = resolve('db/schema.snapshot.json');
+const execFileAsync = promisify(execFile);
 
 test('empty, concurrent, and previously migrated databases converge', async () => {
-  await withEphemeralPostgres('migration-convergence', async ({ pool }) => {
-    const migrations = await loadMigrations(checkedInMigrations);
-    const left = await pool.connect();
-    const right = await pool.connect();
-    try {
-      const results = await Promise.all([
-        runMigrations(left, migrations),
-        runMigrations(right, migrations),
-      ]);
-      assert.equal(
-        results.reduce((count, result) => count + result.applied.length, 0),
-        migrations.length,
-      );
-      assert.deepEqual(
-        results.map((result) => result.verified),
-        [
-          migrations.map(({ name }) => name),
-          migrations.map(({ name }) => name),
-        ],
-      );
+  await withEphemeralPostgres(
+    'migration-convergence',
+    async ({ connection, pool }) => {
+      const migrations = await loadMigrations(checkedInMigrations);
+      const left = await pool.connect();
+      const right = await pool.connect();
+      try {
+        const results = await Promise.all([
+          runMigrations(left, migrations),
+          runMigrations(right, migrations),
+        ]);
+        assert.equal(
+          results.reduce((count, result) => count + result.applied.length, 0),
+          migrations.length,
+        );
+        assert.deepEqual(
+          results.map((result) => result.verified),
+          [
+            migrations.map(({ name }) => name),
+            migrations.map(({ name }) => name),
+          ],
+        );
 
-      const repeated = await runMigrations(left, migrations);
-      assert.deepEqual(repeated.applied, []);
-      await assertSchemaMatchesSnapshot(left, checkedInSnapshot);
+        const repeated = await runMigrations(left, migrations);
+        assert.deepEqual(repeated.applied, []);
+        await assertSchemaMatchesSnapshot(left, checkedInSnapshot);
 
-      const history = await left.query<{ count: string }>(
-        'SELECT count(*) FROM north_star_internal.schema_migrations',
-      );
-      assert.equal(history.rows[0]?.count, String(migrations.length));
-    } finally {
-      left.release();
-      right.release();
-    }
-  });
+        const history = await left.query<{ count: string }>(
+          'SELECT count(*) FROM north_star_internal.schema_migrations',
+        );
+        assert.equal(history.rows[0]?.count, String(migrations.length));
+
+        const cli = await execFileAsync(
+          'node',
+          ['--import', 'tsx', 'packages/postgres-provider/src/migrate.ts'],
+          {
+            cwd: process.cwd(),
+            encoding: 'utf8',
+            env: {
+              ...process.env,
+              DATABASE_URL: `postgresql://postgres@127.0.0.1:${String(connection.port)}/postgres`,
+            },
+          },
+        );
+        assert.match(cli.stdout, /migrations: PASS \(0 applied, 1 verified\)/);
+      } finally {
+        left.release();
+        right.release();
+      }
+    },
+  );
 });
 
 test('edited and missing applied migrations fail deterministically', async () => {
@@ -162,6 +182,19 @@ test('plain physical schema drift fails the checked-in snapshot', async () => {
       client.release();
     }
   });
+});
+
+test('a failing callback still removes its ephemeral container', async () => {
+  let containerName = '';
+  await assert.rejects(
+    withEphemeralPostgres('failure-cleanup', async (database) => {
+      containerName = database.containerName;
+      throw new Error('intentional fixture failure');
+    }),
+    /intentional fixture failure/,
+  );
+  assert.notEqual(containerName, '');
+  await assert.rejects(execFileAsync('docker', ['inspect', containerName]));
 });
 
 async function withMigrationDirectory(
