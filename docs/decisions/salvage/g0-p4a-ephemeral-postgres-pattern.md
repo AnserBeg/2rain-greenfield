@@ -16,8 +16,8 @@ which contains unrelated user changes. No prior-repository file was modified.
 
 ## Verified evidence
 
-The source demonstrates one helper owning database creation, initialization,
-callback execution, and cleanup in a `try/finally`; unique test identity; and
+The source demonstrates one helper owning database creation and initialization
+before a `try/finally` that owns callback execution and cleanup; unique test identity; and
 test state kept outside watched repository paths. It targets SQLite, mutates
 global `DATABASE_URL`, imports the old persistence implementation, and deletes
 database files directly. It was inspected but not executed because the
