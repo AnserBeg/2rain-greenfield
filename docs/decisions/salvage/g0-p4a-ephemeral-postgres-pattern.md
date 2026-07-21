@@ -75,7 +75,8 @@ tests, concurrent runner calls, negative drift fixtures, and cleanup.
 - mutation of process-global database configuration;
 - application imports that hide migration ownership;
 - test databases under repository-watched paths;
-- cleanup that runs only after a successful callback;
+- initialization outside the source helper's `try/finally`, which can leak a
+  database file when initialization itself fails;
 - tenant identity helpers treated as authenticated request context.
 
 ## Admission gates

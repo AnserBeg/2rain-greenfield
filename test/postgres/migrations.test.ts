@@ -139,6 +139,32 @@ test('gapped and self-transactional migration streams are rejected', async () =>
         /runner owns the transaction/.test(error.message),
     );
   });
+
+  await withMigrationDirectory(async (directory) => {
+    await writeFile(
+      join(directory, '0001_abort_alias.sql'),
+      'SELECT 1;\nABORT;\n',
+    );
+    await assert.rejects(
+      loadMigrations(directory),
+      (error: unknown) =>
+        error instanceof MigrationDriftError &&
+        /runner owns the transaction/.test(error.message),
+    );
+  });
+
+  await withMigrationDirectory(async (directory) => {
+    await writeFile(
+      join(directory, '0001_start_alias.sql'),
+      'START TRANSACTION;\nSELECT 1;\n',
+    );
+    await assert.rejects(
+      loadMigrations(directory),
+      (error: unknown) =>
+        error instanceof MigrationDriftError &&
+        /runner owns the transaction/.test(error.message),
+    );
+  });
 });
 
 test('a failed stream rolls back schema and migration history together', async () => {

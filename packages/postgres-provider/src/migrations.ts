@@ -33,7 +33,8 @@ export class SchemaDriftError extends Error {
 }
 
 const migrationFilePattern = /^(\d{4})_[a-z0-9_]+\.sql$/;
-const transactionControlPattern = /^\s*(?:BEGIN|COMMIT|END|ROLLBACK)\b/im;
+const transactionControlPattern =
+  /^\s*(?:ABORT|BEGIN|COMMIT|END|ROLLBACK|START\s+TRANSACTION)\b/im;
 const migrationLockKey = 'north-star:platform-migrations:v1';
 
 export async function loadMigrations(directory: string): Promise<Migration[]> {
