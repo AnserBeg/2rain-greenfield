@@ -45,7 +45,8 @@ packet:
    confirmed as tracked packets when those stages are cut.
 None of these are *missing from the product* — they are designed and binding.
 The risk is only that their promotion from prose to executable gate is not yet
-scheduled as concrete packets. Cutting G1 and G2 must create those packets.
+scheduled as concrete packets. G1-P0 has created the G1 entries; the G2 and
+later stage cuts must create their remaining enforcement packets.
 
 ## Authority and structure
 
