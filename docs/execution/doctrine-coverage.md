@@ -38,9 +38,6 @@ packet:
 4. **Customization boundaries** and **capability support cells** — plan §10,
    §5.5; enforcement lands at G6/per-capability, correctly later, but should be
    confirmed as tracked packets when those stages are cut.
-5. **No hard delete for business data** — AGENTS.md + plan doctrine; becomes
-   executable at the G2 operation gateway. Confirm a gateway test asserts it.
-
 None of these are *missing from the product* — they are designed and binding.
 The risk is only that their promotion from prose to executable gate is not yet
 scheduled as concrete packets. Cutting G1 and G2 must create those packets.
@@ -60,11 +57,11 @@ scheduled as concrete packets. Cutting G1 and G2 must create those packets.
 
 | Concern | Instrument | Enforced today by | Executable at | Status |
 |---|---|---|---|---|
-| Human-controlled release activation | plan §5.4; P2b ADR (planned) | — | G1 activation; G6 approval flow | scheduled |
-| Semantic Query/Operation gateway ownership | plan §5.9, §9.2; P2b ADR (planned) | — | G1 gateway skeleton; gateway tests | scheduled |
-| Agent tool prohibitions (no raw DB/source; five fixed tools) | plan §9.2, §9.2.5; P2b ADR (planned) | — | G2 `model-facing-scan`; agent evals; benchmark G1/G7 | scheduled |
+| Human-controlled release activation | ADR-0006; plan §5.4 | authority-map review | G1 activation; G6 approval flow | scheduled |
+| Semantic Query/Operation gateway ownership | ADR-0008; plan §5.9, §9.2 | authority-map review | G0-P3 direct-access scan; G1 gateway skeleton and gateway tests | scheduled |
+| Agent tool prohibitions (no raw DB/source; five fixed tools) | ADR-0009; plan §9.2, §9.2.5 | authority-map review | G0-P3 source/model-facing scan; G2 agent contracts and evals; benchmark G1/G7 | scheduled |
 | LLM-only intent classification | salvaged user policy; plan §9 | — | agent packets (A-01+) | prose-only |
-| Append-only inventory posting truth | plan §6.3-6.4; P2b ADR (planned) | — | G3 inventory property suite | scheduled |
+| Append-only inventory posting truth | ADR-0007; plan §6.3-6.4 | authority-map review | G0-P3 direct-write/writable-balance scan; G3 inventory property suite | scheduled |
 
 ## UI/UX and customization
 
@@ -81,9 +78,9 @@ scheduled as concrete packets. Cutting G1 and G2 must create those packets.
 
 | Concern | Instrument | Enforced today by | Executable at | Status |
 |---|---|---|---|---|
-| Lifecycle / audit / correction / recovery doctrine | plan §7.3-7.4; P2b ADR (planned) | — | T-01 trust substrate (G2); drills G7 | scheduled |
-| No hard delete for business data | AGENTS.md; plan §7.4 | review | G2 operation gateway test | prose-only |
-| Backup / restore / RPO / RTO | plan §7.5 | — | G7 recovery drill | scheduled |
+| Lifecycle / audit / correction / recovery doctrine | ADR-0010; plan §7.3-7.4 | authority-map review | G0-P3 duplicate-authority and hard-delete scan; T-01 trust substrate (G2); drills G7 | scheduled |
+| No hard delete for business data | ADR-0010; AGENTS.md; plan §7.4 | authority-map review | G0-P3 hard-delete scan; G2 operation gateway test | scheduled |
+| Backup / restore / RPO / RTO | ADR-0010; plan §7.5 | authority-map review | G7 recovery drill | scheduled |
 | Secrets never in source/fixtures/prompts | AGENTS.md | review | G0-P5 secret scan in CI | scheduled |
 
 ## Process and evidence (already enforced by skills)
