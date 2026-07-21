@@ -16,6 +16,8 @@ ADR, skill, or plan section adds or promotes a binding rule.
   skill governs it now.
 - `scheduled` — binding, not yet executable, but a named packet/stage will make
   it so and that packet is tracked (or seeded) in the ledger.
+- `partially enforced` — an executable gate covers the structural/static
+  boundary now, while a named later packet owns runtime or provider proof.
 - `prose-only` — binding, but no enforcement instrument yet and no tracked
   packet. These are the real risk rows: they depend on someone remembering to
   promote them. Drive this column to empty.
@@ -46,11 +48,11 @@ scheduled as concrete packets. Cutting G1 and G2 must create those packets.
 
 | Concern | Instrument | Enforced today by | Executable at | Status |
 |---|---|---|---|---|
-| One application/release authority | ADR-0001 | authority-map review + governance test | G1 activation tests; G0-P3 dependency scan | scheduled |
-| Modular monolith + dependency direction | ADR-0002 | authority-map review | G0-P3 boundary checker | scheduled |
-| PostgreSQL sole launch provider | ADR-0003 | review | G0-P4 provider/migration tests; G0-P3 import scan | scheduled |
+| One application/release authority | ADR-0001 | G0-P3 alternate-authority scan + authority-map review | G1 activation tests | partially enforced |
+| Modular monolith + dependency direction | ADR-0002 | G0-P3 boundary checker | G0-P3 boundary checker | enforced |
+| PostgreSQL sole launch provider | ADR-0003 | G0-P3 protected-import scan | G0-P4 provider/migration tests | partially enforced |
 | Trusted tenant/request context | ADR-0004 | review | G0-P4 two-tenant fixture; G1 pinning tests | scheduled |
-| Drop `@agent-native/core` | ADR-0005 | lockfile/manifest state | G0-P3 dependency + model-facing scan | scheduled |
+| Drop `@agent-native/core` | ADR-0005 | G0-P3 manifest, lockfile, import, and compatibility-authority scan | G0-P3 boundary checker | enforced |
 | Compiler determinism (round-trip/hash) | ADR-0001 (partial) + plan §5.3 | — | G1 golden/hash tests | scheduled |
 
 ## Runtime, gateways, agent
@@ -58,10 +60,10 @@ scheduled as concrete packets. Cutting G1 and G2 must create those packets.
 | Concern | Instrument | Enforced today by | Executable at | Status |
 |---|---|---|---|---|
 | Human-controlled release activation | ADR-0006; plan §5.4 | authority-map review | G1 activation; G6 approval flow | scheduled |
-| Semantic Query/Operation gateway ownership | ADR-0008; plan §5.9, §9.2 | authority-map review | G0-P3 direct-access scan; G1 gateway skeleton and gateway tests | scheduled |
-| Agent tool prohibitions (no raw DB/source; five fixed tools) | ADR-0009; plan §9.2, §9.2.5 | authority-map review | G0-P3 source/model-facing scan; G2 agent contracts and evals; benchmark G1/G7 | scheduled |
+| Semantic Query/Operation gateway ownership | ADR-0008; plan §5.9, §9.2 | G0-P3 direct-access/private-registry scan | G1 gateway skeleton and gateway tests | partially enforced |
+| Agent tool prohibitions (no raw DB/source; five fixed tools) | ADR-0009; plan §9.2, §9.2.5 | G0-P3 source/model-facing scan | G2 agent contracts and evals; benchmark G1/G7 | partially enforced |
 | LLM-only intent classification | salvaged user policy; plan §9 | — | agent packets (A-01+) | prose-only |
-| Append-only inventory posting truth | ADR-0007; plan §6.3-6.4 | authority-map review | G0-P3 direct-write/writable-balance scan; G3 inventory property suite | scheduled |
+| Append-only inventory posting truth | ADR-0007; plan §6.3-6.4 | G0-P3 direct-write/writable-balance scan | G3 inventory property suite | partially enforced |
 
 ## UI/UX and customization
 
@@ -78,8 +80,8 @@ scheduled as concrete packets. Cutting G1 and G2 must create those packets.
 
 | Concern | Instrument | Enforced today by | Executable at | Status |
 |---|---|---|---|---|
-| Lifecycle / audit / correction / recovery doctrine | ADR-0010; plan §7.3-7.4 | authority-map review | G0-P3 duplicate-authority and hard-delete scan; T-01 trust substrate (G2); drills G7 | scheduled |
-| No hard delete for business data | ADR-0010; AGENTS.md; plan §7.4 | authority-map review | G0-P3 hard-delete scan; G2 operation gateway test | scheduled |
+| Lifecycle / audit / correction / recovery doctrine | ADR-0010; plan §7.3-7.4 | G0-P3 duplicate-authority and hard-delete scan | T-01 trust substrate (G2); drills G7 | partially enforced |
+| No hard delete for business data | ADR-0010; AGENTS.md; plan §7.4 | G0-P3 hard-delete scan | G2 operation gateway test | partially enforced |
 | Backup / restore / RPO / RTO | ADR-0010; plan §7.5 | authority-map review | G7 recovery drill | scheduled |
 | Secrets never in source/fixtures/prompts | AGENTS.md | review | G0-P5 secret scan in CI | scheduled |
 
