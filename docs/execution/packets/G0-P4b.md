@@ -21,6 +21,7 @@ Owned paths:
 - `pnpm-lock.yaml`
 - `db/migrations/0002_trusted_request_context.sql`
 - `db/schema.snapshot.json`
+- `test/postgres/migrations.test.ts`
 - `test/postgres/tenant-isolation.test.ts`
 - `docs/execution/doctrine-coverage.md`
 - `docs/execution/packets/G0-P4b.md`

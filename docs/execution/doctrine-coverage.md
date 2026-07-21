@@ -56,7 +56,7 @@ scheduled as concrete packets. Cutting G1 and G2 must create those packets.
 | One application/release authority | ADR-0001 | G0-P3 alternate-authority scan + authority-map review | G1 activation tests | partially enforced |
 | Modular monolith + dependency direction | ADR-0002 | G0-P3 boundary checker | G0-P3 boundary checker | enforced |
 | PostgreSQL sole launch provider | ADR-0003 | G0-P3 protected-import scan | G0-P4a provider/migration tests | partially enforced |
-| Trusted tenant/request context | ADR-0004 | review | G0-P4b two-tenant fixture; G1 pinning tests | scheduled |
+| Trusted tenant/request context | ADR-0004 | G0-P4b authenticated-entry, two-tenant RLS, and pool-reuse tests | G0-P4b trusted context; G1 request-view pinning tests | partially enforced |
 | Drop `@agent-native/core` | ADR-0005 | G0-P3 manifest, lockfile, import, and compatibility-authority scan | G0-P3 boundary checker | enforced |
 | Compiler determinism (round-trip/hash) | ADR-0001 (partial) + plan §5.3 | — | G1 golden/hash tests | scheduled |
 
@@ -106,7 +106,7 @@ scheduled as concrete packets. Cutting G1 and G2 must create those packets.
 |---|---|---|---|---|
 | Baseline observability (logs, correlation IDs, health/metrics) | plan §15.2; AGENTS.md | — | G0-P5 observability packet | scheduled |
 | SLOs / error budgets | plan §15.1 | — | G7 | prose-only |
-| Tenant isolation (defense in depth) | ADR-0004; plan §7.2 | review | G0-P4b pool-reuse tests; G7 pentest | scheduled |
+| Tenant isolation (defense in depth) | ADR-0004; plan §7.2 | G0-P4b tenant/environment RLS and pool-reuse tests | G0-P4b smoke fixture; G7 pentest | partially enforced |
 | Dependency / secret scanning | AGENTS.md | — | G0-P5c CI scans | scheduled |
 
 ## Maintenance rule
