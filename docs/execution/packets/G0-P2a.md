@@ -1,6 +1,6 @@
 # G0-P2a — Foundational constitutional ADR tranche
 
-Status: evidence ready
+Status: accepted
 Tier: Critical
 Frozen candidate: `5a3f96c80ea931cfc39aa4af2648f45282bf279f`
 
@@ -29,7 +29,7 @@ agent tool, and lifecycle/trust ADRs reserved for G0-P2b.
 
 ## Outcome
 
-Five proposed ADRs now assign the foundational application, release,
+Five accepted ADRs now assign the foundational application, release,
 deployment, storage-provider, trusted-context, and authorization authorities.
 The authority map makes their ownership boundaries inspectable and records
 `@agent-native/core` as DROP with no replacement framework authority.
@@ -69,3 +69,5 @@ Writer: Codex orchestrator, Critical-tier reasoning.
   `5a3f96c`, confirming plan supremacy, disjoint authorities, request-context
   separation, the PostgreSQL boundary, the framework DROP, enforceability, and
   the G0-P2b scope reservation.
+- The user reviewed all five ADRs and the authority map and accepted the packet
+  on 2026-07-21.

@@ -1,7 +1,7 @@
 # ADR-0004: Trusted tenant and request context
 
 Date: 2026-07-21
-Status: proposed
+Status: accepted
 Tier: Critical (review per `review-tiers`)
 
 ## Context

@@ -1,7 +1,7 @@
 # ADR-0002: Modular monolith and dependency direction
 
 Date: 2026-07-21
-Status: proposed
+Status: accepted
 Tier: Critical (review per `review-tiers`)
 
 ## Context
