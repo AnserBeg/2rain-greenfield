@@ -90,7 +90,7 @@ scheduled as concrete packets. Cutting G1 and G2 must create those packets.
 | Concern | Instrument | Enforced today by | Status |
 |---|---|---|---|
 | Step-packet cadence (one packet, user checkpoint, no autonomous continuation) | `mission-cadence` skill | orchestrator follows skill | enforced |
-| Seat/model + review tiers | `review-tiers` skill | orchestrator follows skill | enforced |
+| Seat/model + threat-bounded review tiers | `review-tiers` skill | packet records and fresh review prompts state in-scope and deferred threat cases | enforced |
 | Salvage admission (PORT/RE-EXPRESS/REFERENCE) | `salvage-admission` skill | per-port admission record | enforced |
 | Branching / commit / push discipline | `git-workflow` skill | orchestrator follows skill | enforced |
 | Evidence packet per stage gate | AGENTS.md + template | per-gate record | enforced |

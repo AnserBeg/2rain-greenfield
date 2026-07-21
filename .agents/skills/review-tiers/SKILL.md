@@ -36,7 +36,16 @@ the diff actually touched, not what the packet intended.
 
 - Every review and every re-review is a NEW spawn with zero planning
   context. The review prompt contains only: the frozen diff or SHA, the
-  owned paths, the invariants at stake, and the decisive questions.
+  owned paths, the invariants at stake, the packet's threat-model/scope
+  boundary, and the decisive questions.
+- Every packet record and review prompt must state what failures are in scope
+  and what adversarial or future-hardening cases are explicitly out of scope.
+  Reviewers test correctness inside that boundary; they do not turn a
+  foundation packet into an unbounded evasion exercise. An out-of-scope
+  observation may be recorded for later hardening, but is not a blocking
+  finding unless it disproves an in-scope claim.
+- If the packet has no explicit threat-model/scope boundary, the orchestrator
+  adds one before freezing the SHA or launching review.
 - Never resume, extend, or SendMessage a prior reviewer — anchoring bias.
 - Verdicts: PASS / REVISE (findings, fixable in loop) / BLOCK (design-level
   problem; back to the user).
