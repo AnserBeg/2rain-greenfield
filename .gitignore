@@ -2,6 +2,8 @@ node_modules/
 dist/
 build/
 coverage/
+playwright-report/
+test-results/
 tmp/
 .env
 .env.*
@@ -10,4 +12,5 @@ tmp/
 *.db
 *.db-shm
 *.db-wal
+.tsbuildinfo
 .DS_Store

@@ -1,0 +1,12 @@
+.agents/
+docs/
+AGENTS.md
+CLAUDE.md
+KICKOFF-PROMPT.md
+learnings.md
+node_modules/
+dist/
+coverage/
+playwright-report/
+test-results/
+pnpm-lock.yaml
