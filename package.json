@@ -9,12 +9,14 @@
   },
   "scripts": {
     "build": "tsc --project tsconfig.build.json",
+    "check:boundaries": "node --import tsx packages/dev-tooling/src/check-boundaries.ts",
     "clean": "node scripts/clean.mjs",
     "format": "prettier --check .",
     "format:write": "prettier --write .",
     "lint": "eslint .",
     "typecheck": "tsc --project tsconfig.json --noEmit",
-    "test": "corepack pnpm test:unit && corepack pnpm test:integration && corepack pnpm test:browser",
+    "test": "corepack pnpm test:unit && corepack pnpm test:integration && corepack pnpm test:architecture && corepack pnpm test:browser",
+    "test:architecture": "node --import tsx --test test/architecture/**/*.test.ts",
     "test:unit": "node --import tsx --test test/unit/**/*.test.ts",
     "test:integration": "node --import tsx --test test/integration/**/*.test.ts",
     "test:browser": "playwright test"
