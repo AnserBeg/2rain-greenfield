@@ -11,7 +11,8 @@ before any become `admitted`.
 
 | ID | Packet | Stage | Tier | Status | SHA | Evidence |
 |---|---|---|---|---|---|---|
-| G0-P1 | Repo scaffold: toolchain, monorepo layout, CI, test runners | G0 | Mechanical | planned | - | - |
+| G0-P1a | Fresh pnpm/TypeScript workspace and clean-install scaffold | G0 | Mechanical | evidence_ready | - | [packet](packets/G0-P1a.md) |
+| G0-P1b | CI jobs and repository hygiene gates for the scaffold | G0 | Mechanical | planned | - | - |
 | G0-P2 | Constitution ADRs (the nine from plan 11.3) | G0 | Critical | planned | - | - |
 | G0-P3 | Dependency-boundary checker + architecture tests | G0 | Behavioral | planned | - | - |
 | G0-P4 | Ephemeral PostgreSQL test harness + two-tenant smoke fixture | G0 | Behavioral | planned | - | - |
