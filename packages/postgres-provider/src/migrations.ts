@@ -19,9 +19,10 @@ export interface SchemaSnapshot {
   columns: readonly QueryResultRow[];
   constraints: readonly QueryResultRow[];
   indexes: readonly QueryResultRow[];
+  policies: readonly QueryResultRow[];
   relations: readonly QueryResultRow[];
   schemas: readonly string[];
-  version: 1;
+  version: 2;
 }
 
 export class MigrationDriftError extends Error {
@@ -196,14 +197,24 @@ export async function captureSchemaSnapshot(
       ORDER BY schemaname, tablename, indexname`,
     [sortedSchemas],
   );
+  const policies = await client.query(
+    `SELECT schemaname AS schema, tablename AS relation,
+            policyname AS name, permissive, roles, cmd,
+            qual, with_check
+       FROM pg_catalog.pg_policies
+      WHERE schemaname = ANY($1::text[])
+      ORDER BY schemaname, tablename, policyname`,
+    [sortedSchemas],
+  );
 
   return {
     columns: columns.rows,
     constraints: constraints.rows,
     indexes: indexes.rows,
+    policies: policies.rows,
     relations: relations.rows,
     schemas: sortedSchemas,
-    version: 1,
+    version: 2,
   };
 }
 

@@ -3,8 +3,12 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "exports": "./src/migrations.ts",
+  "exports": {
+    ".": "./src/migrations.ts",
+    "./request-context": "./src/request-context.ts"
+  },
   "dependencies": {
+    "@north-star/runtime": "workspace:*",
     "pg": "^8.22.0"
   },
   "devDependencies": {

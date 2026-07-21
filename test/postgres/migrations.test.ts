@@ -64,7 +64,12 @@ test('empty, concurrent, and previously migrated databases converge', async () =
             },
           },
         );
-        assert.match(cli.stdout, /migrations: PASS \(0 applied, 1 verified\)/);
+        assert.match(
+          cli.stdout,
+          new RegExp(
+            `migrations: PASS \\(0 applied, ${String(migrations.length)} verified\\)`,
+          ),
+        );
       } finally {
         left.release();
         right.release();

@@ -1,5 +1,7 @@
 {
   "name": "@north-star/runtime",
   "private": true,
-  "version": "0.0.0"
+  "version": "0.0.0",
+  "type": "module",
+  "exports": "./src/request-context.ts"
 }
