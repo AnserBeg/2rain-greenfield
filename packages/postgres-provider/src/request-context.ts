@@ -22,12 +22,15 @@ export async function withTrustedRequestTransaction<T>(
   try {
     await client.query('BEGIN');
     transactionOpen = true;
-    const role = await client.query<{ role: string }>(
-      'SELECT current_user AS role',
+    const role = await client.query<{ role: string; session_role: string }>(
+      'SELECT current_user AS role, session_user AS session_role',
     );
-    if (role.rows[0]?.role !== 'north_star_runtime') {
+    if (
+      role.rows[0]?.role !== 'north_star_runtime' ||
+      role.rows[0]?.session_role !== 'north_star_runtime'
+    ) {
       throw new UnsafeDatabaseRoleError(
-        'trusted request transactions require the north_star_runtime database role',
+        'trusted request transactions require a north_star_runtime login session',
       );
     }
     await client.query(

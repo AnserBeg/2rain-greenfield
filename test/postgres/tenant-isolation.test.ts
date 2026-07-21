@@ -153,6 +153,7 @@ test('two tenants and environments remain isolated across one reused pooled conn
         assert.equal(first.environmentId, environmentA);
         assert.equal(first.principalId, principalA);
         assert.equal(first.role, 'north_star_runtime');
+        assert.equal(first.sessionRole, 'north_star_runtime');
         await assertConnectionCleared(singleConnectionPool, first.backendPid);
 
         await assert.rejects(
@@ -177,6 +178,7 @@ test('two tenants and environments remain isolated across one reused pooled conn
         assert.equal(second.tenantId, tenantB);
         assert.equal(second.environmentId, environmentB);
         assert.equal(second.principalId, principalB);
+        assert.equal(second.sessionRole, 'north_star_runtime');
         assert.equal(second.backendPid, first.backendPid);
         await assertConnectionCleared(singleConnectionPool, first.backendPid);
 
@@ -217,6 +219,7 @@ interface VisibleFixture {
   labels: string[];
   principalId: string;
   role: string;
+  sessionRole: string;
   tenantId: string;
 }
 
@@ -233,10 +236,12 @@ async function readVisibleFixture(
       environment_id: string;
       principal_id: string;
       role: string;
+      session_role: string;
       tenant_id: string;
     }>(`
       SELECT pg_backend_pid() AS backend_pid,
              current_user AS role,
+             session_user AS session_role,
              current_setting('north_star.tenant_id') AS tenant_id,
              current_setting('north_star.environment_id') AS environment_id,
              current_setting('north_star.principal_id') AS principal_id
@@ -249,6 +254,7 @@ async function readVisibleFixture(
       labels: rows.rows.map(({ label }) => label),
       principalId: current.principal_id,
       role: current.role,
+      sessionRole: current.session_role,
       tenantId: current.tenant_id,
     };
   });
@@ -266,10 +272,12 @@ async function assertConnectionCleared(
       principal_id: string | null;
       request_id: string | null;
       role: string;
+      session_role: string;
       tenant_id: string | null;
     }>(`
       SELECT pg_backend_pid() AS backend_pid,
              current_user AS role,
+             session_user AS session_role,
              nullif(current_setting('north_star.tenant_id', true), '') AS tenant_id,
              nullif(current_setting('north_star.environment_id', true), '') AS environment_id,
              nullif(current_setting('north_star.principal_id', true), '') AS principal_id,
@@ -281,6 +289,7 @@ async function assertConnectionCleared(
       principal_id: null,
       request_id: null,
       role: 'north_star_runtime',
+      session_role: 'north_star_runtime',
       tenant_id: null,
     });
   } finally {
