@@ -36,6 +36,12 @@ The shared trust substrate has these exclusive contracts:
   reconciliation, and release-pointer restoration. It follows an approved
   runbook and emits immutable `RecoveryAttempt` evidence and discrepancies.
 
+An approved recovery runbook authorizes recovery mechanics, not release
+selection. Any active-pointer restoration is a release activation transition
+governed by ADR-0006: it requires an exact `ReleaseApproval`, a current-policy
+recheck, an atomic single-attempt claim, pointer compare-and-swap, and read-back.
+`RecoveryService` cannot infer or bypass that approval.
+
 Trusted actor identity comes from ADR-0004 and is never accepted from operation
 input. Evidence distinguishes execution principal, subject human, approving
 human, initiating human, and AI/automation/service/system actor kinds where
@@ -64,8 +70,9 @@ preview, approval, idempotency, verification, and a non-sensitive tombstone.
 Recovery never silently edits canonical facts to make projections agree.
 Backups, isolated restore, read-model/index rebuild, outbox reconciliation,
 immutable revision restoration, and active-pointer restoration require
-measured evidence. Same-database audit records and hashes are not described as
-tamper-proof.
+measured evidence. Pointer restoration additionally retains its ADR-0006
+approval and activation-attempt evidence. Same-database audit records and
+hashes are not described as tamper-proof.
 
 ## Consequences
 

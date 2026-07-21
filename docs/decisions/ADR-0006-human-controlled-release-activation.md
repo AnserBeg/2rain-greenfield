@@ -17,6 +17,7 @@ An immutable `ReleaseApproval` issued by an authorized human is the sole
 authority that permits an activation attempt. It binds:
 
 - one tenant, environment, `TenantRelease`, and release content hash;
+- one unique approval identity and one allowed activation-attempt identity;
 - the expected current `ActiveReleasePointer` identity and fencing/version
   token;
 - the human-readable semantic, policy, effect, and migration diff;
@@ -37,11 +38,15 @@ authorities.
 
 Immediately before execution, the release service rechecks the approval,
 current policy, candidate identity/hash, compatibility and migration state,
-and expected pointer. It then uses compare-and-swap, records an immutable
-activation attempt, reads back the pointer, invalidates affected caches, and
-runs active verification. The `ActiveReleasePointer` remains the sole record
-of which release is active; approval is permission to attempt the transition,
-not a competing active-version authority.
+and expected pointer. It atomically claims the approval by inserting exactly
+one immutable `ReleaseActivationAttempt` under a uniqueness constraint on the
+approval identity. Retries resume that same attempt idempotently; a second
+attempt requires a new human approval even when the first failed before pointer
+compare-and-swap. The service then uses compare-and-swap, reads back the
+pointer, invalidates affected caches, and runs active verification. The
+`ActiveReleasePointer` remains the sole record of which release is active;
+approval is permission for one attempt, not a competing active-version
+authority.
 
 AI agents, visual builders, compilers, verification workers, and application
 authors may prepare candidates and evidence but cannot approve or activate.
@@ -73,7 +78,8 @@ equally explicit authorized decision and never reverses business transactions.
 ## Enforcement
 
 G1 must test exact approval binding, current-policy recheck, stale-pointer CAS,
-read-back, activation history, compatible rollback, and absence of ambient
-activation. G6 must prove that authoring and customization agents cannot
-self-approve or self-activate. Protected-candidate tests must refuse
+atomic single-attempt claim, idempotent attempt resumption, refusal of approval
+replay, read-back, activation history, compatible rollback, and absence of
+ambient activation. G6 must prove that authoring and customization agents
+cannot self-approve or self-activate. Protected-candidate tests must refuse
 self-approval.

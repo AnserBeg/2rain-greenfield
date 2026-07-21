@@ -82,8 +82,9 @@ Then verify that the framework-disposition row creates no new authority.
 
 For the G0-P2b extension, also verify that:
 
-1. `ReleaseApproval` permits one exact attempt but never competes with
-   `ActiveReleasePointer` for active-version truth;
+1. `ReleaseApproval` is atomically claimed for one exact, idempotently resumable
+   attempt and never competes with `ActiveReleasePointer` for active-version
+   truth;
 2. movement/reservation facts own quantities while availability and all other
    balances remain registered, rebuildable projections;
 3. semantic gateways own ingress and mediation but not business facts,
@@ -95,4 +96,6 @@ For the G0-P2b extension, also verify that:
    for inventory movements, domain events, release history, or agent evidence;
 6. generic lifecycle, domain correction, and recovery remain distinct;
 7. correction preserves the original fact and an immutable lineage link; and
-8. no ordinary hard-delete or silent recovery path exists.
+8. no ordinary hard-delete or silent recovery path exists, and recovery cannot
+   restore an active pointer without ADR-0006 approval, current-policy recheck,
+   compare-and-swap, and read-back.

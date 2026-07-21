@@ -19,13 +19,17 @@ from the request-pinned `TenantRelease`, validates typed arguments and limits,
 applies current tenant/policy/field/classification rules, dispatches only to the
 registered read model or protocol, and returns the common result envelope with
 provenance, freshness, paging, truncation, and unsupported diagnostics.
+Current authorization comes from the Identity and Policy gateways; the query
+gateway enforces their decision but does not own policy.
 
 The `SemanticOperationGateway` is the sole ingress and mediation authority for
 business writes and effects. It resolves a canonical `OperationDefinition`
-from the pinned release and owns the plan/execute boundary: target resolution,
-preconditions, predicted effects, risk, confirmation/approval requirements,
-current authorization, idempotency, concurrency, transaction selection,
-dispatch, audit/outbox coupling, declared result, and read-back contract.
+from the pinned release and mediates the plan/execute boundary: target
+resolution, preconditions, predicted effects, risk, confirmation/approval
+requirements, idempotency, concurrency, transaction selection, dispatch,
+audit/outbox coupling, declared result, and read-back contract. It invokes the
+Identity and Policy gateways for current authorization and validates exact
+confirmation/approval grants; it never owns, mints, or broadens either.
 
 The gateways mediate; they do not replace underlying authorities. Registered
 read models own their derived semantics, and registered domain handlers own
