@@ -1,7 +1,8 @@
 # G0-P2b — Operational and trust constitutional ADR tranche
 
-Status: active
+Status: evidence ready
 Tier: Critical
+Frozen candidate: `34f439c88f26d8efb98224d6b8ad9481250234f2`
 
 ## Goal and scope
 
@@ -27,15 +28,23 @@ Out of scope: runtime code, dependencies, executable boundary tests,
 PostgreSQL/provider work, physical-purge implementation, workflow approvals,
 bounded autonomy, recovery infrastructure, and any G0 stage-gate claim.
 
-## Required gates
+## Outcome
 
-- `corepack pnpm typecheck`
-- `corepack pnpm format`
-- `git diff --check main...HEAD`
-- owned-path and authority-map review against the accepted P2a ADRs and plan
-  sections 0-7, 9-10, 11.3, 14.1, and 15.3
-- salvage-reference review confirming that prior trust/lifecycle material is
-  REFERENCE only
+Five proposed ADRs now cover every concern reserved by P2a. The extended map
+assigns human release approval, inventory quantities, semantic gateway ingress,
+the in-app agent tool surface, and shared trust/recovery contracts without
+creating peers to the accepted P2a authorities.
+
+## Gates
+
+| Gate | Command | Result |
+|---|---|---|
+| Typecheck | `corepack pnpm typecheck` | PASS |
+| Format | `corepack pnpm format` | PASS; all matched files use Prettier style |
+| Whitespace | `git diff --check main...34f439c` | PASS; no output |
+| Owned paths | `git diff --name-only main...34f439c` | PASS; exactly the eight declared paths |
+| Salvage reference | inspect ADR-0006, ADR-0007, and ADR-0010 against `salvage-admission` | PASS; prior trust material is cited as REFERENCE only and no prior artifact lands |
+| Authority review | ADRs and map against accepted ADR-0001 through ADR-0005 and the plan | PASS; all five reserved concerns have disjoint named authorities |
 
 ## Test it yourself
 
@@ -48,3 +57,22 @@ mediation versus domain truth, and shared audit evidence versus specialist
 ledgers.
 
 No command execution is required for this documentation checkpoint.
+
+## Review evidence
+
+Writer: Codex orchestrator, Critical-tier reasoning.
+
+- Candidate `046aa10` received REVISE from a fresh-naive Codex Critical
+  reviewer: the operation gateway wording claimed current authorization,
+  recovery could restore the active pointer without re-entering ADR-0006, and
+  release approval lacked an atomic single-attempt claim. All findings were
+  accepted; four owned documents changed, invalidating that review.
+- Final candidate `34f439c` received PASS with no findings from a new
+  fresh-naive Codex Critical reviewer.
+- Fable max independently returned PASS on the identical unchanged
+  `34f439c`, confirming complete coverage, disjoint authorities, approval and
+  recovery closure, gateway and agent boundaries, inventory truth, trust
+  separation, salvage compliance, and the document-only checkpoint.
+- The orchestrator verified the cited prior reference directly at
+  `/home/rvham/2rain_erp`, branch `chess`, SHA `668a60b`; no prior-repository
+  file was modified or admitted.
