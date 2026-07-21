@@ -108,5 +108,6 @@ Rules:
 - `mission-cadence` — the packet contract; read before orchestrating.
 - `review-tiers` — seat matrix mechanics and review prompts.
 - `salvage-admission` — reuse from the prior repository.
+- `git-workflow` — branching, commit, push, and tag discipline.
 - `ux-grammar` — binding UI/UX grammar (its CI pinning test lands at G1).
 - `capture-learnings` — how lessons are recorded.
