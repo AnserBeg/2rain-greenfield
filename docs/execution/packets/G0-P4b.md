@@ -1,6 +1,6 @@
 # G0-P4b — Trusted request context and tenant isolation
 
-Status: evidence_ready
+Status: accepted
 Tier: Critical
 Frozen candidate: `64458dc55199bc3c5277b62dd22d7cc666823c6a`
 
@@ -148,3 +148,6 @@ Writer: Codex orchestrator, Critical tier.
   cross-tenant path in this packet.
 - No code, configuration, migration, schema, or test changed after the passing
   Codex and Fable reviews.
+- The user reran `check:schema` and `test:postgres`, confirmed 2 migrations and
+  all 8 PostgreSQL tests, adjudicated the `BYPASSRLS` finding as the intended
+  isolation-review class, and directed acceptance on 2026-07-21.
