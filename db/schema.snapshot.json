@@ -1,0 +1,169 @@
+{
+  "columns": [
+    {
+      "schema": "platform",
+      "relation": "environments",
+      "ordinal_position": 1,
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "environments",
+      "ordinal_position": 2,
+      "column_name": "id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "environments",
+      "ordinal_position": 3,
+      "column_name": "slug",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "environments",
+      "ordinal_position": 4,
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "transaction_timestamp()"
+    },
+    {
+      "schema": "platform",
+      "relation": "tenants",
+      "ordinal_position": 1,
+      "column_name": "id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "tenants",
+      "ordinal_position": 2,
+      "column_name": "slug",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "tenants",
+      "ordinal_position": 3,
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "transaction_timestamp()"
+    }
+  ],
+  "constraints": [
+    {
+      "schema": "platform",
+      "relation": "environments",
+      "name": "environments_pkey",
+      "type": "p",
+      "definition": "PRIMARY KEY (tenant_id, id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "environments",
+      "name": "environments_slug_not_blank",
+      "type": "c",
+      "definition": "CHECK (btrim(slug) <> ''::text)"
+    },
+    {
+      "schema": "platform",
+      "relation": "environments",
+      "name": "environments_tenant_id_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id) REFERENCES platform.tenants(id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "environments",
+      "name": "environments_tenant_slug_unique",
+      "type": "u",
+      "definition": "UNIQUE (tenant_id, slug)"
+    },
+    {
+      "schema": "platform",
+      "relation": "tenants",
+      "name": "tenants_pkey",
+      "type": "p",
+      "definition": "PRIMARY KEY (id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "tenants",
+      "name": "tenants_slug_not_blank",
+      "type": "c",
+      "definition": "CHECK (btrim(slug) <> ''::text)"
+    },
+    {
+      "schema": "platform",
+      "relation": "tenants",
+      "name": "tenants_slug_unique",
+      "type": "u",
+      "definition": "UNIQUE (slug)"
+    }
+  ],
+  "indexes": [
+    {
+      "schema": "platform",
+      "relation": "environments",
+      "name": "environments_pkey",
+      "definition": "CREATE UNIQUE INDEX environments_pkey ON platform.environments USING btree (tenant_id, id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "environments",
+      "name": "environments_tenant_slug_unique",
+      "definition": "CREATE UNIQUE INDEX environments_tenant_slug_unique ON platform.environments USING btree (tenant_id, slug)"
+    },
+    {
+      "schema": "platform",
+      "relation": "tenants",
+      "name": "tenants_pkey",
+      "definition": "CREATE UNIQUE INDEX tenants_pkey ON platform.tenants USING btree (id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "tenants",
+      "name": "tenants_slug_unique",
+      "definition": "CREATE UNIQUE INDEX tenants_slug_unique ON platform.tenants USING btree (slug)"
+    }
+  ],
+  "relations": [
+    {
+      "schema": "platform",
+      "relation": "environments",
+      "kind": "r",
+      "row_level_security": false,
+      "force_row_level_security": false
+    },
+    {
+      "schema": "platform",
+      "relation": "tenants",
+      "kind": "r",
+      "row_level_security": false,
+      "force_row_level_security": false
+    }
+  ],
+  "schemas": ["platform"],
+  "version": 1
+}

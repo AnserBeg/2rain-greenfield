@@ -1,0 +1,13 @@
+{
+  "name": "@north-star/postgres-provider",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": "./src/migrations.ts",
+  "dependencies": {
+    "pg": "^8.22.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.20.0"
+  }
+}
