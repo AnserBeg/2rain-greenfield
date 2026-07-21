@@ -1,7 +1,8 @@
 # G0-P6b — X-01 baseline replay in a disposable checkout
 
-Status: evidence ready
+Status: accepted
 Tier: Mechanical
+Frozen candidate: `2bd1d232426a2b50afd7ea350ad29e2a08c1e11b`
 
 ## Goal and scope
 
@@ -60,6 +61,7 @@ the frozen source checkout.
 
 Writer: orchestrator (trivial Mechanical evidence record).
 
-Review: orchestrator self-verification, permitted for Mechanical work. The
-final candidate will be checked for owned-path scope and Markdown whitespace;
-the replay commands above were run against the frozen X-01 tag.
+Review: orchestrator self-verification, permitted for Mechanical work. Owned
+paths and Markdown whitespace passed on the frozen candidate; the replay
+commands above were run against the frozen X-01 tag. The user accepted the
+documented red gates as reproducibility findings on 2026-07-21.

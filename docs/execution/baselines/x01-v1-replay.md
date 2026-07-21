@@ -1,8 +1,8 @@
 # X-01 v1 replay characterization
 
 Date: 2026-07-21
-Status: evidence ready — the frozen artifact is locally resurrectable, but not
-a faithful clean replay.
+Status: accepted characterization — the frozen artifact is locally
+resurrectable, but not a faithful clean replay.
 
 ## Reconstruction result
 
