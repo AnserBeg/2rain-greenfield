@@ -1,7 +1,21 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, extname, join, relative, resolve } from 'node:path';
 
-import { preProcessFile } from 'typescript';
+import {
+  createSourceFile,
+  forEachChild,
+  isClassDeclaration,
+  isEnumDeclaration,
+  isExportSpecifier,
+  isFunctionDeclaration,
+  isIdentifier,
+  isInterfaceDeclaration,
+  isModuleDeclaration,
+  isTypeAliasDeclaration,
+  isVariableDeclaration,
+  preProcessFile,
+  ScriptTarget,
+} from 'typescript';
 
 export interface BoundaryViolation {
   file: string;
@@ -213,7 +227,11 @@ export function checkArchitecture(rootDirectory: string): BoundaryCheckResult {
 
     if (repoPath !== ruleDefinitionPath && isProductionPath(repoPath)) {
       scanAuthoritySignatures(repoPath, source, owner, violations);
-      if (sourceExtensions.has(extname(repoPath))) {
+      if (
+        sourceExtensions.has(extname(repoPath)) &&
+        !repoPath.startsWith('build/') &&
+        !repoPath.startsWith('dist/')
+      ) {
         collectAuthorityDeclarations(repoPath, source, authorityDeclarations);
       }
     }
@@ -286,7 +304,8 @@ function walkEmittedArtifacts(directory: string, files: Set<string>): void {
     }
 
     if (
-      dataExtensions.has(extname(entry.name)) &&
+      (dataExtensions.has(extname(entry.name)) ||
+        sourceExtensions.has(extname(entry.name))) &&
       isModelFacingPath(normalizePath(path))
     ) {
       files.add(path);
@@ -445,6 +464,17 @@ function scanManifest(
     return;
   }
 
+  if (containsAgentNativeReference(manifest)) {
+    addViolation(
+      violations,
+      repoPath,
+      source,
+      Math.max(0, source.indexOf('@agent-native/core')),
+      'AUTH001_AGENT_NATIVE_CORE',
+      'parsed manifest contains a forbidden @agent-native/core key, alias, patch, or override',
+    );
+  }
+
   for (const dependencyGroup of [
     'dependencies',
     'devDependencies',
@@ -457,8 +487,38 @@ function scanManifest(
     for (const [dependencyName, dependencyRange] of Object.entries(
       dependencies,
     )) {
+      if (typeof dependencyRange !== 'string') {
+        addViolation(
+          violations,
+          repoPath,
+          source,
+          source.indexOf(dependencyName),
+          'CFG004_DEPENDENCY_TARGET',
+          `${dependencyGroup}.${dependencyName} must be a string dependency target`,
+        );
+        continue;
+      }
+
+      const effectiveName = normalizedDependencyTarget(
+        dependencyName,
+        dependencyRange,
+      );
+      if (
+        effectiveName === '@agent-native/core' ||
+        effectiveName.startsWith('@agent-native/core/')
+      ) {
+        addViolation(
+          violations,
+          repoPath,
+          source,
+          source.indexOf(dependencyName),
+          'AUTH001_AGENT_NATIVE_CORE',
+          `${dependencyGroup}.${dependencyName} resolves to forbidden ${effectiveName}`,
+        );
+      }
+
       const target = packages.find(
-        (workspacePackage) => workspacePackage.name === dependencyName,
+        (workspacePackage) => workspacePackage.name === effectiveName,
       );
       if (
         owner &&
@@ -480,9 +540,7 @@ function scanManifest(
         owner &&
         isProtectedLayer(owner.kind) &&
         !target &&
-        dependencyGroup !== 'devDependencies' &&
-        !externalSpecifierAllowed(dependencyName) &&
-        typeof dependencyRange === 'string'
+        !externalSpecifierAllowed(effectiveName)
       ) {
         addViolation(
           violations,
@@ -490,11 +548,31 @@ function scanManifest(
           source,
           source.indexOf(dependencyName),
           'BND002_PROTECTED_IMPORT',
-          `${owner.name} declares external dependency ${dependencyName} outside the protected-layer allowlist`,
+          `${owner.name} declares external dependency ${effectiveName} outside the protected-layer allowlist`,
         );
       }
     }
   }
+}
+
+function normalizedDependencyTarget(name: string, range: string): string {
+  const alias = range.match(
+    /^(?:npm|patch|workspace):((?:@[^/@]+\/[^@/]+)|(?:[a-z0-9][^@/:]*))/i,
+  );
+  return alias?.[1] ?? name;
+}
+
+function containsAgentNativeReference(value: unknown): boolean {
+  if (typeof value === 'string') {
+    return /@agent-native\/core(?:\b|\/)/.test(value);
+  }
+  if (Array.isArray(value)) return value.some(containsAgentNativeReference);
+  if (!isRecord(value)) return false;
+  return Object.entries(value).some(
+    ([key, nested]) =>
+      /@agent-native\/core(?:\b|\/)/.test(key) ||
+      containsAgentNativeReference(nested),
+  );
 }
 
 function scanImports(
@@ -631,7 +709,7 @@ function scanAuthoritySignatures(
     source,
     'AUTH006_HARD_DELETE',
     'source declares an ordinary hard-delete or purge path',
-    /\b(?:hard|physical|permanent)\w*delete\w*|\bpurge\w*(?:business|record|data)\w*|\bDELETE\s+FROM\b/gi,
+    /\b(?:hard|physical|permanent)\w*delete\w*|\bpurge\w*(?:business|record|data)\w*|\b(?:DELETE\s+FROM|DROP\s+TABLE|TRUNCATE(?:\s+TABLE)?)\b/gi,
   );
   addPatternViolations(
     violations,
@@ -662,9 +740,14 @@ function scanDirectTableAccess(
   const knownDomains = ['catalog', 'inventory', 'party', 'purchasing', 'sales'];
 
   for (const match of source.matchAll(tableReference)) {
-    const table = (match[1] ?? '').toLowerCase().split('.').at(-1) ?? '';
+    const qualifiedTable = (match[1] ?? '').toLowerCase();
+    const tableParts = qualifiedTable.split('.');
+    const table = tableParts.at(-1) ?? '';
     const tableDomain = knownDomains.find(
-      (domain) => table === domain || table.startsWith(`${domain}_`),
+      (domain) =>
+        tableParts[0] === domain ||
+        table === domain ||
+        table.startsWith(`${domain}_`),
     );
     const isAppSql = owner?.kind === 'app';
     const isCrossDomain =
@@ -693,7 +776,7 @@ function scanStorageCalls(
   violations: BoundaryViolation[],
 ): void {
   const storageMutation =
-    /\b(?:(?:db|database|entityManager|orm|repo|repository|store|prisma(?:\s*\.\s*\w+)?)\s*\.\s*(?:delete|deleteMany|destroy|execute|insert|query|remove|save|select|update)|(?:client|pool)\s*\.\s*(?:execute|query))\s*\(/gi;
+    /\b(?:(?:db|database|entityManager|orm|repo|repository|store|prisma(?:\s*\.\s*\w+)?)\s*\.\s*(?:aggregate|clear|count|create|createMany|delete|deleteFrom|deleteMany|destroy|execute|findFirst|findMany|findUnique|insert|query|remove|save|select|update|upsert)|(?:client|pool)\s*\.\s*(?:execute|query))\s*\(/gi;
   if (owner?.kind === 'app') {
     addPatternViolations(
       violations,
@@ -711,7 +794,7 @@ function scanStorageCalls(
     source,
     'AUTH006_HARD_DELETE',
     'source invokes an ordinary repository hard-delete method',
-    /\b(?:db|database|entityManager|orm|repo|repository|store|prisma(?:\s*\.\s*\w+)?)\s*\.\s*(?:delete|deleteMany|destroy|remove)\s*\(/gi,
+    /\b(?:db|database|entityManager|orm|repo|repository|store|prisma(?:\s*\.\s*\w+)?)\s*\.\s*(?:clear|delete|deleteFrom|deleteMany|destroy|remove)\s*\(|\.createQueryBuilder\s*\([^)]*\)\s*\.\s*delete\s*\(|\.delete\s*\(\s*\)\s*\.\s*from\s*\(/gi,
   );
 }
 
@@ -839,8 +922,11 @@ function extractDeclaredToolNames(repoPath: string, source: string): string[] {
     }
   }
   for (const match of source.matchAll(
-    /^\s*(?:-\s*)?(?:name|tool|toolName|id)\s*:\s*['"]?([a-z][a-z0-9_-]+)['"]?\s*$/gim,
+    /\b(?:name|tool|toolName|id)\s*:\s*['"]([a-z][a-z0-9_-]+)['"]/gi,
   )) {
+    if (match[1]) names.add(match[1]);
+  }
+  for (const match of source.matchAll(/^\s*-\s*([a-z][a-z0-9_-]+)\s*$/gim)) {
     if (match[1]) names.add(match[1]);
   }
   return [...names];
@@ -855,6 +941,11 @@ function extractJsonToolNames(value: unknown): string[] {
       return;
     }
     if (!isRecord(candidate)) return;
+
+    const directName = ['name', 'tool', 'toolName', 'id']
+      .map((key) => candidate[key])
+      .find((nested): nested is string => typeof nested === 'string');
+    if (directName) names.add(directName);
 
     for (const [key, nested] of Object.entries(candidate)) {
       if (/^(?:tools?|toolNames?)$/i.test(key)) {
@@ -895,15 +986,43 @@ function collectAuthorityDeclarations(
   source: string,
   declarations: AuthorityDeclaration[],
 ): void {
-  for (const rule of authorityRules) {
-    const pattern = new RegExp(
-      `\\b(?:export\\s+)?(?:abstract\\s+)?(?:class|const|enum|function|interface|type)\\s+${rule.name}\\b`,
-      'g',
-    );
-    for (const match of source.matchAll(pattern)) {
-      declarations.push({ rule, file: repoPath, source, index: match.index });
+  const sourceFile = createSourceFile(
+    repoPath,
+    source,
+    ScriptTarget.Latest,
+    true,
+  );
+
+  function visit(node: Parameters<typeof forEachChild>[0]): void {
+    if (
+      (isClassDeclaration(node) ||
+        isEnumDeclaration(node) ||
+        isFunctionDeclaration(node) ||
+        isInterfaceDeclaration(node) ||
+        isModuleDeclaration(node) ||
+        isTypeAliasDeclaration(node) ||
+        isVariableDeclaration(node) ||
+        isExportSpecifier(node)) &&
+      node.name &&
+      isIdentifier(node.name)
+    ) {
+      const declarationName = node.name;
+      const rule = authorityRules.find(
+        (candidate) => candidate.name === declarationName.text,
+      );
+      if (rule) {
+        declarations.push({
+          rule,
+          file: repoPath,
+          source,
+          index: declarationName.getStart(sourceFile),
+        });
+      }
     }
+    forEachChild(node, visit);
   }
+
+  visit(sourceFile);
 }
 
 function validateAuthorityDeclarations(
@@ -978,7 +1097,8 @@ function isProductionPath(repoPath: string): boolean {
 }
 
 function isModelFacingPath(repoPath: string): boolean {
-  return /(?:agent|model-facing|operations-agent-tool-profile|tool(?:s|ing)?(?:[-_./]|$)|catalog)/i.test(
+  if (/(?:^|\/)dev-tooling(?:\/|$)/i.test(repoPath)) return false;
+  return /(?:agent|model-facing|operations-agent-tool-profile|(?:^|[-_./])tools?(?:[-_./]|$)|catalog)/i.test(
     repoPath,
   );
 }
