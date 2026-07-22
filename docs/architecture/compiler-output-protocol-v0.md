@@ -54,7 +54,8 @@ type checking, and invalid types stop lowering, so cascades are suppressed.
 Diagnostics deduplicate and sort by `(subjectId, path, phase, code,
 occurrenceIndex)` using code-unit order. `rule` and `acceptedAlternative` are
 hand-written explanatory copy outside identity and ordering. A versioned limit
-adds one stable truncation diagnostic. Engine, Zod, stack, timeout, and OOM text
+adds one stable truncation diagnostic, then the complete truncated set is
+sorted by the same structural tuple. Engine, Zod, stack, timeout, and OOM text
 never enters frozen fields.
 
 Any error returns `releaseRoot:null`, `bundle:null`, and `attestation:null`.
@@ -119,11 +120,21 @@ release-to-projection-to-chunk link is verified before lowering a transition,
 including duplicated version, compatibility, scope, capability, semantic, and
 artifact facts.
 
+The provisional storage-target payload resolves each entity's selected storage
+mapping by its canonical mapping ID, never by an overwritable entity index. It
+also carries every compiler-derived state field with its owning machine. Those
+derived fields participate in storage completeness and entity-skeleton
+transition checks; Freeze B does not silently drop or invent a transition for
+them.
+
 ## Completeness, capability, and policy facts
 
-Every admitted supported capability names its declared effects and required
-projection families. Compilation fails closed when any required family is not
-implemented or emitted. Post-lowering checks verify storage-field coverage,
+Every active admitted supported capability names its declared effects and
+required projection families. Compilation fails closed when any required
+family is not implemented or emitted. Retired or unsupported capability
+records are retained as semantic history but neither advertise support nor
+impose runtime-projection completeness. Post-lowering checks verify ordinary
+and derived storage-field coverage, the selected storage-mapping descriptor,
 surface/query field agreement, required base instances, and absence of tenant
 or coordinator identity. The vertical fixture exercises one entity, optional
 field, form, query, operation, policy reference, discovery view, and storage

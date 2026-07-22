@@ -238,26 +238,49 @@ function storageTargetPayload(
     fields.push(field);
     fieldsByEntity.set(field.entity.targetId, fields);
   }
-  const storageByEntity = new Map(
+  const stateFieldsByEntity = new Map<
+    string,
+    Array<{
+      fieldId: string;
+      lifecycle: string;
+      stateMachineId: string;
+      valueKind: 'stateId';
+    }>
+  >();
+  for (const machine of packageRevision.stateMachines) {
+    const stateFields = stateFieldsByEntity.get(machine.entity.targetId) ?? [];
+    stateFields.push({
+      fieldId: machine.stateField.fieldId,
+      lifecycle: machine.lifecycle,
+      stateMachineId: machine.machineId,
+      valueKind: machine.stateField.valueKind,
+    });
+    stateFieldsByEntity.set(machine.entity.targetId, stateFields);
+  }
+  const storageById = new Map(
     packageRevision.storageMappings.map((mapping) => [
-      mapping.entity.targetId,
+      mapping.storageMappingId,
       mapping,
     ]),
   );
   return {
-    entities: packageRevision.entities.map((entity) => ({
-      entityId: entity.entityId,
-      fields: (fieldsByEntity.get(entity.entityId) ?? []).map((field) => ({
-        classification: field.classification,
-        fieldId: field.fieldId,
-        fieldType: field.fieldType,
-        lifecycle: field.lifecycle,
-        presence: field.presence,
-      })),
-      lifecycle: entity.lifecycle,
-      storageClass: storageByEntity.get(entity.entityId)?.storageClass ?? null,
-      storageMappingId: entity.storage.targetId,
-    })),
+    entities: packageRevision.entities.map((entity) => {
+      const selectedStorage = storageById.get(entity.storage.targetId);
+      return {
+        derivedStateFields: stateFieldsByEntity.get(entity.entityId) ?? [],
+        entityId: entity.entityId,
+        fields: (fieldsByEntity.get(entity.entityId) ?? []).map((field) => ({
+          classification: field.classification,
+          fieldId: field.fieldId,
+          fieldType: field.fieldType,
+          lifecycle: field.lifecycle,
+          presence: field.presence,
+        })),
+        lifecycle: entity.lifecycle,
+        storageClass: selectedStorage?.storageClass ?? null,
+        storageMappingId: entity.storage.targetId,
+      };
+    }),
     kind: 'storageTargetPayload',
     schemaVersion: payloadSchemaVersions[PROJECTION_FAMILY_IDS.storageTarget],
   };

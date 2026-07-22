@@ -1052,7 +1052,10 @@ function verifyCompleteness(
       );
     }
   }
-  for (const requirement of packageRevision.capabilityRequirements) {
+  for (const requirement of packageRevision.capabilityRequirements.filter(
+    (entry) =>
+      entry.lifecycle === 'active' && entry.supportStatus === 'supported',
+  )) {
     for (const required of requirement.requiredProjections) {
       const familyId = requiredProjectionFamily(required);
       if (!familyId || !families.has(familyId)) {
@@ -1086,6 +1089,56 @@ function verifyCompleteness(
         packageRevision.package.packageId,
       ),
     );
+  }
+  const expectedStateFields = new Set(
+    packageRevision.stateMachines.map((machine) => machine.stateField.fieldId),
+  );
+  const emittedStateFields = new Set(
+    (
+      byFamily.get(PROJECTION_FAMILY_IDS.storageTarget) as StorageTargetPayload
+    ).entities.flatMap((entity) =>
+      entity.derivedStateFields.map((field) => field.fieldId),
+    ),
+  );
+  if (!setsEqual(emittedStateFields, expectedStateFields)) {
+    diagnostics.push(
+      compilerDiagnostic(
+        'COMPILER_PROJECTION_INVARIANT_FAILED',
+        'verifyCompleteness',
+        '$.projections.storageTarget.derivedStateFields',
+        packageRevision.package.packageId,
+      ),
+    );
+  }
+  const storageById = new Map(
+    packageRevision.storageMappings.map((mapping) => [
+      mapping.storageMappingId,
+      mapping,
+    ]),
+  );
+  const emittedStorage = byFamily.get(
+    PROJECTION_FAMILY_IDS.storageTarget,
+  ) as StorageTargetPayload;
+  for (const entity of emittedStorage.entities) {
+    const source = packageRevision.entities.find(
+      (candidate) => candidate.entityId === entity.entityId,
+    );
+    const selected = source ? storageById.get(source.storage.targetId) : null;
+    if (
+      !source ||
+      !selected ||
+      entity.storageMappingId !== selected.storageMappingId ||
+      entity.storageClass !== selected.storageClass
+    ) {
+      diagnostics.push(
+        compilerDiagnostic(
+          'COMPILER_PROJECTION_INVARIANT_FAILED',
+          'verifyCompleteness',
+          '$.projections.storageTarget.storageMapping',
+          entity.entityId,
+        ),
+      );
+    }
   }
   const surface = byFamily.get(PROJECTION_FAMILY_IDS.surfaceManifest) as {
     surfaces: Array<{ fieldIds: string[]; surfaceId: string }>;
@@ -1239,6 +1292,12 @@ function projectionManifestDomain(familyId: string): string {
 
 interface StorageTargetPayload {
   entities: Array<{
+    derivedStateFields: Array<{
+      fieldId: string;
+      lifecycle: string;
+      stateMachineId: string;
+      valueKind: 'stateId';
+    }>;
     entityId: string;
     fields: Array<{
       classification: string;
@@ -1284,6 +1343,7 @@ function collectStorageFields(
 function storageEntitySkeletons(payload: StorageTargetPayload): unknown {
   return {
     entities: payload.entities.map((entity) => ({
+      derivedStateFields: entity.derivedStateFields,
       entityId: entity.entityId,
       lifecycle: entity.lifecycle,
       storageClass: entity.storageClass,

@@ -55,3 +55,18 @@ How to apply: before hashing or presenting a diff, verify its transition payload
 Date: 2026-07-21
 Why: G1-P2 computed and returned a staged release-manifest artifact when the final output-size check failed even though the result-level root was null.
 How to apply: allow collectable unreferenced leaves on failure, but perform final limits and completeness checks before hashing or returning any registerable root manifest.
+
+## Lower selected and compiler-derived storage authority explicitly
+Date: 2026-07-21
+Why: G1-P2 could pair a selected mapping ID with another mapping's class and omitted compiler-derived state fields from a supposedly complete storage target.
+How to apply: resolve selected definitions by canonical ID, carry compiler-derived storage constructs explicitly, and compare both against the normalized source in completeness checks.
+
+## Apply lifecycle admission consistently
+Date: 2026-07-21
+Why: G1-P2 filtered retired unsupported capabilities from manifest facts but still required their runtime projections.
+How to apply: define the admitted active/supported set once conceptually and use it for facts, completeness, and support gates; historical definitions must not create live obligations.
+
+## Sort synthetic diagnostics with source diagnostics
+Date: 2026-07-21
+Why: G1-P2 appended its truncation marker after sorting, violating the frozen structural order even though the output stayed deterministic.
+How to apply: after adding limit, summary, or cascade markers, sort the final emitted diagnostic set by the same versioned structural comparator.

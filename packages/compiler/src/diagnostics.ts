@@ -128,7 +128,8 @@ export function finalizeDiagnostics(
   const ordered = [...byIdentity.values()].sort(compareDiagnostics);
   if (ordered.length <= maximumDiagnostics) return ordered;
   const kept = ordered.slice(0, Math.max(0, maximumDiagnostics - 1));
-  kept.push(
+  return [
+    ...kept,
     compilerDiagnostic(
       'COMPILER_DIAGNOSTIC_LIMIT_REACHED',
       'wholeModelValidation',
@@ -136,8 +137,7 @@ export function finalizeDiagnostics(
       null,
       maximumDiagnostics - 1,
     ),
-  );
-  return kept;
+  ].sort(compareDiagnostics);
 }
 
 function compareDiagnostics(

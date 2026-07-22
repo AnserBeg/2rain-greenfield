@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { canonicalize } from '../../packages/canonical-model/src/index.js';
+import {
+  CanonicalIdSchema,
+  canonicalize,
+} from '../../packages/canonical-model/src/index.js';
 import {
   PROJECTION_FAMILY_IDS,
   REQUIRED_BASE_PROJECTION_FAMILIES,
@@ -263,8 +266,159 @@ test('retired unsupported capabilities are never advertised as supported facts',
   const capability = authored.capabilityRequirements[0]!;
   capability.lifecycle = 'retired';
   capability.supportStatus = 'unsupported';
+  capability.requiredProjections = ['reporting'];
   const result = mustCompile(compilerInput(normalizedBytes(authored)));
   assert.deepEqual(result.bundle.releaseManifest.capabilityFacts, []);
+});
+
+test('derived state fields are present in the complete storage target', () => {
+  const authored = authoredFixture('vertical-v1');
+  authored.stateMachines.push({
+    entity: {
+      kind: 'entityReference',
+      schemaVersion: 'v0-experimental',
+      targetId: CanonicalIdSchema.parse('northstar.bootstrap:entity.item'),
+    },
+    initialState: {
+      kind: 'stateReference',
+      schemaVersion: 'v0-experimental',
+      targetId: CanonicalIdSchema.parse(
+        'northstar.bootstrap:state.item_active',
+      ),
+    },
+    kind: 'stateMachineDefinition',
+    machineId: CanonicalIdSchema.parse(
+      'northstar.bootstrap:machine.item_lifecycle',
+    ),
+    schemaVersion: 'v0-experimental',
+    states: [
+      {
+        kind: 'stateDefinition',
+        label: 'Active',
+        orderKey: 10,
+        schemaVersion: 'v0-experimental',
+        stateId: CanonicalIdSchema.parse(
+          'northstar.bootstrap:state.item_active',
+        ),
+      },
+    ],
+    transitions: [],
+  });
+  const result = mustCompile(compilerInput(normalizedBytes(authored)));
+  const storage = projectionPayload<{
+    entities: Array<{
+      derivedStateFields: Array<{
+        fieldId: string;
+        lifecycle: string;
+        stateMachineId: string;
+        valueKind: string;
+      }>;
+      entityId: string;
+    }>;
+  }>(result, PROJECTION_FAMILY_IDS.storageTarget);
+  assert.deepEqual(storage.entities[0]?.derivedStateFields, [
+    {
+      fieldId: 'northstar.bootstrap:derived_state_field.machine.item_lifecycle',
+      lifecycle: 'active',
+      stateMachineId: 'northstar.bootstrap:machine.item_lifecycle',
+      valueKind: 'stateId',
+    },
+  ]);
+});
+
+test('storage targets use the mapping selected by canonical entity identity', () => {
+  const authored = authoredFixture('vertical-v1');
+  authored.storageMappings.push({
+    entity: {
+      kind: 'entityReference',
+      schemaVersion: 'v0-experimental',
+      targetId: CanonicalIdSchema.parse('northstar.bootstrap:entity.item'),
+    },
+    kind: 'storageMappingDefinition',
+    schemaVersion: 'v0-experimental',
+    storageClass: 'dedicatedTable',
+    storageMappingId: CanonicalIdSchema.parse(
+      'northstar.bootstrap:storage.item_alternative',
+    ),
+  });
+  const result = mustCompile(compilerInput(normalizedBytes(authored)));
+  const storage = projectionPayload<{
+    entities: Array<{
+      storageClass: string;
+      storageMappingId: string;
+    }>;
+  }>(result, PROJECTION_FAMILY_IDS.storageTarget);
+  assert.deepEqual(storage.entities[0], {
+    derivedStateFields: [],
+    entityId: 'northstar.bootstrap:entity.item',
+    fields: [
+      {
+        classification: 'internal',
+        fieldId: 'northstar.bootstrap:field.item_name',
+        fieldType: {
+          kind: 'textFieldType',
+          maximumLength: 240,
+          schemaVersion: 'v0-experimental',
+        },
+        lifecycle: 'active',
+        presence: 'optional',
+      },
+    ],
+    lifecycle: 'active',
+    storageClass: 'generatedTyped',
+    storageMappingId: 'northstar.bootstrap:storage.item',
+  });
+});
+
+test('diagnostic truncation preserves the frozen structural order', () => {
+  const authored = authoredFixture('vertical-v1');
+  const capability = authored.capabilityRequirements[0]!;
+  capability.supportStatus = 'unsupported';
+  authored.capabilityRequirements.push(
+    {
+      ...structuredClone(capability),
+      capabilityId: CanonicalIdSchema.parse(
+        'northstar.bootstrap:capability.unsupported_b',
+      ),
+    },
+    {
+      ...structuredClone(capability),
+      capabilityId: CanonicalIdSchema.parse(
+        'northstar.bootstrap:capability.unsupported_c',
+      ),
+    },
+  );
+  const input = compilerInput(normalizedBytes(authored));
+  input.limits.maximumDiagnostics = 2;
+  const result = compileApplication(input);
+  assert.equal(result.status, 'failed');
+  assert.deepEqual(
+    result.diagnostics.map(
+      ({ code, occurrenceIndex, path, phase, subjectId }) => ({
+        code,
+        occurrenceIndex,
+        path,
+        phase,
+        subjectId,
+      }),
+    ),
+    [
+      {
+        code: 'COMPILER_DIAGNOSTIC_LIMIT_REACHED',
+        occurrenceIndex: 1,
+        path: '$',
+        phase: 'wholeModelValidation',
+        subjectId: null,
+      },
+      {
+        code: 'COMPILER_CAPABILITY_NOT_SUPPORTED',
+        occurrenceIndex: 0,
+        path: '$.capabilityRequirements.supportStatus',
+        phase: 'wholeModelValidation',
+        subjectId: 'northstar.bootstrap:capability.auto_form',
+      },
+    ],
+  );
 });
 
 test('partial lowering fails atomically after staging with no release root', () => {

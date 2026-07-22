@@ -38,8 +38,9 @@ fixtures, output protocol, hashing, diff, and tests are new.
 
 ## Invariants retained
 
-1. A supported construct is represented in every required projection or the
-   compile fails with no publishable root.
+1. An active supported construct is represented in every required projection
+   or the compile fails with no publishable root; retired/unsupported history
+   does not claim or require runtime support.
 2. Stable semantic identity is distinct from physical or chunk layout.
 3. Canonical ordering, hashes, and diagnostics cannot depend on environment,
    prose, timing, path, locale, or task completion order.
@@ -47,6 +48,9 @@ fixtures, output protocol, hashing, diff, and tests are new.
 5. Timings are accepted only after correctness and completeness oracles pass.
 6. Preview and production compilation cannot become separate semantic
    evaluators.
+7. Storage targets bind the mapping selected by canonical identity and retain
+   compiler-derived state fields; entity-index overwrites and omitted derived
+   storage semantics are not admitted.
 
 ## Known defects not carried
 
