@@ -57,7 +57,8 @@ later stage cuts must create their remaining enforcement packets.
 | PostgreSQL sole launch provider | ADR-0003 | G0-P3 protected-import scan | G0-P4a provider/migration tests | partially enforced |
 | Trusted tenant/request context | ADR-0004 | G0-P4b authenticated-entry, two-tenant RLS, and pool-reuse tests | G0-P4b trusted context; G1-P5 request-view pinning tests | partially enforced |
 | Drop `@agent-native/core` | ADR-0005 | G0-P3 manifest, lockfile, import, and compatibility-authority scan | G0-P3 boundary checker | enforced |
-| Compiler determinism (round-trip/hash) | ADR-0001 (partial) + plan §5.3 | — | G1-P2 golden/hash tests | scheduled |
+| Compiler determinism (round-trip/hash) | ADR-0001 (partial) + plan §5.3 | G1-P2 permutation, schedule, fresh-process, twice-compile, golden leaf/manifest/root/diff, and hermeticity gates | G1-P2 compiler tests | enforced |
+| Complete fail-closed Merkle release output | Freeze B; plan §5.3-5.5 | G1-P2 required-family, cross-projection, exact transition, verified-Merkle-base, output-limit, and partial-lowering/no-root tests | G1-P2 compiler tests; G1-P3 verified `bytea` registration | partially enforced |
 
 ## Canonical-language evolution and compatibility
 
@@ -68,13 +69,21 @@ later stage cuts must create their remaining enforcement packets.
 | Full package composition/merge and tenant three-way rebase | plan §5.6, §10; canonical language T9 | G1-P1 foreign-reference unsupported fixture | G6 customization stage cut must create the merge/rebase packet | scheduled |
 | Historical compiler/runtime compatibility and retirement | plan §5.4, §7.5; canonical language v0 deferral | version/profile identity from G1-P1 | G7 compatibility/recovery packet | scheduled |
 | Storage backfill and data-validity semantics are part of compiler completeness | plan §5.3, §5.8-5.9 | G1-P1 storage schema carries no false backfill claim | G2 stage cut must create compiler/storage validity enforcement | scheduled |
-| Per-subgraph incremental compilation and memoization | plan §5.3, §10; salvaged SLO budget reference | — | G6 builder/compiler stage cut must create bounded performance packet | scheduled |
+| Per-subgraph incremental compilation and memoization | plan §5.3, §10; Freeze B; salvaged SLO budget reference | G1-P2 cache-input/node contracts, cold equivalence invariant, and 4,096-field numeric budget | G6 builder/compiler stage cut must create the measurement-triggered cached-equivalence packet | partially enforced |
+| Compiler execution off the serving event loop and verified canonical `bytea` root registration | Freeze B; plan §5.3-5.4 | G1-P2 process-serializable/hermetic boundary only | G1-P3 first coordinator worker/child-process and persistence tests | scheduled |
+| Untrusted-definition compiler sandbox release gate | Freeze B; plan §7.2 | G1-P2 rejects non-first-party provenance until the gate exists | G6 builder/compiler stage cut must create process-isolation/resource-limit release gate before tenant/AI authoring | partially enforced |
+| Draft preview uses the production hermetic compiler core | Freeze B; plan §5.3, §10 | no second compiler API exists | G6 preview packet must test draft bytes through the same compiler core | scheduled |
+| Release-plane definitions versus data-plane preferences | Freeze B; plan §5.4, §8.6, §10 | G1-P2 compiler protocol binds definition projections only | G6 customization stage cut must test saved views/column order as release-pinned data parameters | scheduled |
+| Online-compatible optional-field storage path before seconds-fast claims | Freeze B; plan §5.3, §15.1 | G1-P2 emits only a factual exact-pair transition and makes no latency claim | G2 stage cut must create a storage strategy/bounded-transition packet | scheduled |
 
 ## Runtime, gateways, agent
 
 | Concern | Instrument | Enforced today by | Executable at | Status |
 |---|---|---|---|---|
 | Human-controlled release activation | ADR-0006; plan §5.4 | authority-map review | G1-P4 activation; G6 approval flow | scheduled |
+| Prepare → verify → activate transition protocol and rollback/forward-recovery rule | ADR-0006/ADR-0010; Freeze B | G1-P2 exact-pair transition digest and verified base only | G1-P4 must enforce preparation verification before CAS and forbid irreversible work without a recovery doctrine | scheduled |
+| Approval binds exact diff/transition/compiler evidence and rejects unknown impact codes | ADR-0006; Freeze B | G1-P2 emits versioned factual diff/impact/transition and compiler-attestation digests | G1-P4 approval-policy, renderer-evidence, stale-base, and unknown-code tests | scheduled |
+| Approval fan-out for one decision to many tenant-qualified approvals | Freeze B; ADR-0006 | — | G7 multi-tenant production stage cut must create the fan-out packet before rollout | scheduled |
 | Semantic Query/Operation gateway ownership | ADR-0008; plan §5.9, §9.2 | G0-P3 direct-access/private-registry scan | G1-P6 gateway skeleton and tests | partially enforced |
 | Agent tool prohibitions (no raw DB/source; five fixed tools) | ADR-0009; plan §9.2, §9.2.5 | G0-P3 source/model-facing scan | G1-P2 projection + G1-P6 seam; G2 agent contracts/evals; benchmark G7 | partially enforced |
 | LLM-only intent classification | salvaged user policy; plan §9 | — | agent packets (A-01+) | prose-only |
@@ -96,6 +105,7 @@ later stage cuts must create their remaining enforcement packets.
 | Concern | Instrument | Enforced today by | Executable at | Status |
 |---|---|---|---|---|
 | Lifecycle / audit / correction / recovery doctrine | ADR-0010; plan §7.3-7.4 | G0-P3 duplicate-authority and hard-delete scan | T-01 trust substrate (G2); drills G7 | partially enforced |
+| Authorization audit captures policy/evaluator version, relevant inputs, and decision | ADR-0008/ADR-0010; Freeze B | G1-P2 pins policy references/model version and declares live deny-capable decisions | T-01 trust substrate in G2 must make audit evidence executable | scheduled |
 | No hard delete for business data | ADR-0010; AGENTS.md; plan §7.4 | G0-P3 hard-delete scan | G2 operation gateway test | partially enforced |
 | Backup / restore / RPO / RTO | ADR-0010; plan §7.5 | authority-map review | G7 recovery drill | scheduled |
 | Secrets never in source/fixtures/prompts | AGENTS.md | G0-P5c clean-history scan plus committed synthetic-secret negative gate | G0-P5c secret scan in CI | enforced |
@@ -115,9 +125,10 @@ later stage cuts must create their remaining enforcement packets.
 | Concern | Instrument | Enforced today by | Executable at | Status |
 |---|---|---|---|---|
 | Baseline observability (structured logs, correlation/trace IDs, health/readiness, metrics/error evidence) | plan §15.2; AGENTS.md | G0-P5 propagation, PostgreSQL-loss readiness, redaction, metrics, and CI-evidence tests | G0-P5 observability packet | enforced |
-| SLOs / error budgets | plan §15.1 | — | G7 | prose-only |
+| SLOs / error budgets | plan §15.1; Freeze B SLO families | G1-P2 monotonic numeric 4,096-field full-compile budget; other release-path families are explicitly separate | G1-P4 activation/approval telemetry; G2 transition preparation; G6 preview/incremental; G7 platform budgets | partially enforced |
 | Tenant isolation (defense in depth) | ADR-0004; plan §7.2 | G0-P4b tenant/environment RLS and pool-reuse tests | G0-P4b smoke fixture; G7 pentest | partially enforced |
 | Dependency / secret scanning | AGENTS.md | G0-P5c high/critical dependency audit, clean-history scan, negative secret fixture, and retained CI reports | G0-P5c CI scans | enforced |
+| Cross-tenant CAS deduplication domains prevent hash-oracle/existence leaks | Freeze B; plan §7.2 | G1-P2 keeps tenant identity out of shareable content but does not enable global reuse | G7 security stage cut must define authorization/encryption/dedup domains before global artifact reuse | scheduled |
 
 ## Maintenance rule
 
