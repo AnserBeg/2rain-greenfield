@@ -1,11 +1,10 @@
 # G1-P4b — human-approved activation kernel and crash reconciler
 
-Status: active
+Status: evidence_ready
 Tier: Critical
 Base: `dbf871dd68bbb5b4ec2abb9e2b2b7a4d407eda87`
-Frozen candidate: `c95302d340d31697384f0c27f1beaaed99c0f113`
-(`REVISE` after the user-authorized observability verification; not
-evidence-ready)
+Frozen candidate: `1bb946f9a5668512a6d4cab6876dd66ec0d3753d`
+(fresh scoped Codex xhigh **PASS**; Fable max **PASS** on the identical SHA)
 
 ## Goal and scope
 
@@ -348,10 +347,73 @@ The authorization was exactly one fix round followed by one scoped Codex
 verification, so no second fix/review cycle was started. Fable was not launched
 because Critical-tier sequencing requires a Codex PASS on the identical SHA.
 
-G1-P4b remains `active`, not `evidence_ready`. The transaction-crossing-deadline
-finding requires user direction before any further fix. The ledger therefore
-remains `active`, doctrine coverage is not advanced, and G1-P5 has not been
-started.
+At that checkpoint G1-P4b remained `active`, not `evidence_ready`; the
+transaction-crossing-deadline finding required user direction before any
+further fix. The ledger and doctrine coverage were not advanced, and G1-P5 was
+not started.
+
+### Final statement-time adjudication and evidence-ready checkpoint
+
+The user adjudicated the transaction-crossing-deadline finding valid and
+authorized one final narrow fix round. Critical-tier writer `gpt-5.6-sol`
+xhigh audited every time fact consumed by P4b overdue and expiry decisions.
+Candidate `1bb946f9a5668512a6d4cab6876dd66ec0d3753d` explicitly records the
+reconciliation start, terminal and swapped outcomes, and verification receipt
+with PostgreSQL `clock_timestamp()` at their P4b insert statements. The
+overdue observation, approval-expiry precheck, CAS predicate, and fallback
+expiry classification already used `clock_timestamp()`. No accepted migration
+or schema snapshot changed.
+
+The focused PostgreSQL regression proves the recovery transaction's
+`pg_stat_activity.xact_start` and pointer lock wait both precede the durable
+deadline, keeps the pointer lock held until PostgreSQL's clock crosses that
+deadline, then verifies the committed `LOST_RACE` outcome timestamp is after
+the deadline and a fresh observer derives `OVERDUE_COMPLETED`.
+
+The orchestrator independently reran the complete declared gate set at the
+exact candidate:
+
+| Gate | Result |
+|---|---|
+| Frozen install | PASS — all 13 workspace projects already up to date |
+| Typecheck | PASS |
+| Lint | PASS |
+| Format | PASS |
+| Build | PASS |
+| Dependency boundaries | PASS — 53 files scanned |
+| Migration/schema drift | PASS — 5 applied, 5 verified; drift clean |
+| Unit | PASS — 18/18 |
+| Compiler | PASS — 21/21 |
+| Integration | PASS — 4/4 |
+| Architecture | PASS — 23/23 |
+| PostgreSQL | PASS — 40/40, including focused P4b 14/14 scenarios and 15/15 TAP tests |
+| Browser | PASS — one intentional scaffold skip |
+| Diff/lease/worktree | PASS — `git diff --check`; three authorized fix files only; clean tree |
+
+Review evidence on unchanged candidate
+`1bb946f9a5668512a6d4cab6876dd66ec0d3753d`:
+
+- Fresh naive Codex `gpt-5.6-sol` xhigh, scoped charter "does the timestamp
+  fix close the transaction-crossing-deadline case without touching anything
+  else?": **PASS**. It confirmed all consumed timestamp/comparison sites use
+  statement time, the blocking test is non-vacuous, the original
+  post-commit/no-alarm derivation remains intact, and nothing unrelated
+  changed. No future-work finding.
+- Fable max with repository verification and the identical scoped charter:
+  **PASS**. It independently confirmed the production write sites, comparison
+  audit, lock-crossing proof, and unchanged alarm/read semantics.
+
+Fable reported two valid but unrelated future-hardening notes; per charter
+they were recorded and not chased:
+
+| Future work | Evidence / disposition |
+|---|---|
+| Audit event-time semantics before future consumers use phase, history, swap-receipt, or outbox `recorded_at` values. | Those timestamps still default to transaction-start time but are not consumed by P4b overdue/expiry logic. Record for the packet that first treats them as event time. |
+| Make statement-time defaults structural if another writer is introduced for outcome or verification rows. | Current correctness is explicit at the sole P4b insert sites; a future migration may change the table defaults, but migrations were out of scope here. |
+
+G1-P4b is `evidence_ready`. The ledger and doctrine coverage identify the
+reviewed SHA and executable activation/reconciliation evidence. It is not
+integrated; G1-P5 has not been started.
 
 ## Test it yourself
 
@@ -359,12 +421,12 @@ No UI exists in this packet. These commands complete in under ten minutes:
 
 ```bash
 cd /home/rvham/2rain-greenfield-wt/g1-p4b
-git merge-base --is-ancestor c95302d340d31697384f0c27f1beaaed99c0f113 HEAD
+git merge-base --is-ancestor 1bb946f9a5668512a6d4cab6876dd66ec0d3753d HEAD
 corepack pnpm check:schema
 node --import tsx --test test/postgres/release-activation.test.ts
 ```
 
 Expected: 5 migrations apply and verify with clean drift; the focused P4b
-suite reports 13/13 scenarios and 14/14 TAP tests, including the durable-age
-fresh-coordinator, no-receipt/advanced-fence, and post-commit/no-alarm cases.
-Passing tests do not override the scoped verification finding above.
+suite reports 14/14 scenarios and 15/15 TAP tests, including durable-age
+handoff, post-commit/no-alarm derivation, and a recovery transaction proven to
+block across its deadline before being classified `OVERDUE_COMPLETED`.
