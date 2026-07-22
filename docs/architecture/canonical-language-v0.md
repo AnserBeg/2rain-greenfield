@@ -87,6 +87,11 @@ place; a new immutable revision is produced.
   `northstar.canonical-json/v0-experimental`.
 - Input JSON is strict UTF-8, no BOM, no duplicate object keys, no lone
   surrogates, and no unknown schema keys.
+- Absence is admitted only for the authored properties named by
+  `IMMUTABLE_DEFAULTS_V0`; normalization materializes them. Semantic null is
+  admitted only where the normalized schema explicitly requires a nullable
+  value (for example a successful assertion's `expectedDiagnosticCode:null`).
+  Null never means “use a default.”
 - Stored Unicode scalar sequences are byte-preserved. NFC/NFD, case, and
   whitespace are not normalized.
 - Object keys sort by ascending UTF-16 code units. Output has no insignificant

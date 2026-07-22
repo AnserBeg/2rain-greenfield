@@ -69,6 +69,7 @@ export function normalizeApplicationPackage(
   const normalizedCandidate = {
     assertions: authored.assertions.map((entry) => ({
       ...entry,
+      evidenceKinds: sortedStrings(entry.evidenceKinds),
       lifecycle: entry.lifecycle ?? IMMUTABLE_DEFAULTS_V0.lifecycle,
     })),
     canonicalizationProfileVersion: CANONICALIZATION_PROFILE_VERSION,
@@ -856,6 +857,14 @@ function validateSetCollections(
       capability.requiredProjections,
       '$.capabilityRequirements.requiredProjections',
       capability.capabilityId,
+      diagnostics,
+    );
+  }
+  for (const assertion of packageRevision.assertions) {
+    rejectDuplicateStrings(
+      assertion.evidenceKinds,
+      '$.assertions.evidenceKinds',
+      assertion.assertionId,
       diagnostics,
     );
   }

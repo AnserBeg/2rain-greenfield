@@ -208,6 +208,15 @@ test('parent scope, assertion diagnostics, and reference locality are closed', (
     { objectId: 'northstar.inventory:assertion.item_archive_readback' },
   );
 
+  const absentNullable = structuredClone(fixture()) as unknown as {
+    assertions: Array<Record<string, unknown>>;
+  };
+  delete absentNullable.assertions[0]!.expectedDiagnosticCode;
+  expectDiagnostic(
+    () => normalizeApplicationPackage(absentNullable),
+    'CANON_SCHEMA_INVALID',
+  );
+
   const selection = structuredClone(fixture());
   selection.queries[0]!.selections[0]!.field.targetId =
     'northstar.inventory:field.item_alias_value' as never;
