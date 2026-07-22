@@ -26,6 +26,8 @@ import {
   type DecisiveActivationOutcomeCode,
   type MintedUuid,
   type ReleaseActivationInvalidationEvent,
+  type ReleaseActivationReconciliationInspection,
+  type ReleaseActivationReconciliationState,
 } from '@north-star/platform-runtime';
 import {
   assertTrustedRequestContext,
@@ -134,6 +136,21 @@ interface SwapTransactionResult {
 interface DurableReconciliationAge {
   alarmDue: boolean;
   started: boolean;
+}
+
+interface ReconciliationInspectionRow {
+  alarm_recorded: boolean;
+  completion_at: Date | null;
+  deadline_at: Date | null;
+  environment_id: string;
+  execution_principal_id: string;
+  execution_principal_kind: 'SYSTEM';
+  max_age_milliseconds: string | null;
+  observed_at: Date;
+  overdue: boolean;
+  reconciliation_state: ReleaseActivationReconciliationState;
+  started_at: Date | null;
+  tenant_id: string;
 }
 
 /**
@@ -388,6 +405,21 @@ export class PostgresReleaseActivationService {
         command.activationAttemptId,
       );
     }
+  }
+
+  async inspectReconciliationState(
+    context: TrustedRequestContext,
+    command: ActivateReleaseCommand,
+  ): Promise<ReleaseActivationReconciliationInspection> {
+    assertTrustedRequestContext(context);
+    assertAttemptIdentity(command.activationAttemptId);
+    return withTrustedRequestTransaction(this.pool, context, async (client) =>
+      loadReconciliationInspection(
+        client,
+        context,
+        command.activationAttemptId,
+      ),
+    );
   }
 
   async readInvalidationEvent(
@@ -849,21 +881,14 @@ export class PostgresReleaseActivationService {
         );
       }
 
-      const age = await client.query<{
-        max_age_milliseconds: string;
-        overdue: boolean;
-      }>(
-        `SELECT start.max_age_milliseconds,
-                  clock_timestamp() >=
-                    start.started_at +
-                    (start.max_age_milliseconds::text || ' milliseconds')::interval
-                    AS overdue
-             FROM platform.release_activation_reconciliation_starts AS start
-            WHERE start.activation_attempt_id = $1`,
-        [command.activationAttemptId],
+      const durable = await loadReconciliationInspection(
+        client,
+        context,
+        command.activationAttemptId,
       );
-      const durable = age.rows[0];
-      if (!durable) return { alarmDue: false, started: false };
+      if (durable.state === 'NOT_STARTED') {
+        return { alarmDue: false, started: false };
+      }
 
       if (durable.overdue) {
         await client.query(
@@ -885,9 +910,6 @@ export class PostgresReleaseActivationService {
                     start.max_age_milliseconds
                FROM platform.release_activation_reconciliation_starts AS start
               WHERE start.activation_attempt_id = $1
-                AND clock_timestamp() >=
-                      start.started_at +
-                      (start.max_age_milliseconds::text || ' milliseconds')::interval
                 AND NOT EXISTS (
                   SELECT 1
                     FROM platform.release_activation_reconciliation_alarms AS alarm
@@ -900,16 +922,8 @@ export class PostgresReleaseActivationService {
           ],
         );
       }
-      const alarm = await client.query<{ alarm_due: boolean }>(
-        `SELECT EXISTS (
-             SELECT 1
-               FROM platform.release_activation_reconciliation_alarms
-              WHERE activation_attempt_id = $1
-           ) AS alarm_due`,
-        [command.activationAttemptId],
-      );
       return {
-        alarmDue: alarm.rows[0]?.alarm_due === true,
+        alarmDue: durable.alarmRecorded || durable.overdue,
         started: true,
       };
     });
@@ -949,6 +963,103 @@ export class PostgresReleaseActivationService {
       terminal: false,
     });
   }
+}
+
+async function loadReconciliationInspection(
+  client: PoolClient,
+  context: TrustedRequestContext,
+  activationAttemptId: MintedUuid,
+): Promise<ReleaseActivationReconciliationInspection> {
+  const result = await client.query<ReconciliationInspectionRow>(
+    `WITH observed AS (
+       SELECT clock_timestamp() AS observed_at
+     ), durable AS (
+       SELECT attempt.tenant_id,
+              attempt.environment_id,
+              attempt.execution_principal_kind,
+              attempt.execution_principal_id,
+              start.started_at,
+              start.max_age_milliseconds,
+              CASE
+                WHEN start.started_at IS NULL THEN NULL
+                ELSE start.started_at +
+                     (start.max_age_milliseconds::text || ' milliseconds')::interval
+              END AS deadline_at,
+              COALESCE(
+                verification.recorded_at,
+                CASE WHEN outcome.terminal THEN outcome.recorded_at END
+              ) AS completion_at,
+              alarm.activation_attempt_id IS NOT NULL AS alarm_recorded,
+              observed.observed_at
+         FROM platform.release_activation_attempts AS attempt
+         CROSS JOIN observed
+         LEFT JOIN platform.release_activation_reconciliation_starts AS start
+           ON start.tenant_id = attempt.tenant_id
+          AND start.environment_id = attempt.environment_id
+          AND start.activation_attempt_id = attempt.activation_attempt_id
+         LEFT JOIN platform.release_activation_attempt_outcomes AS outcome
+           ON outcome.tenant_id = attempt.tenant_id
+          AND outcome.environment_id = attempt.environment_id
+          AND outcome.activation_attempt_id = attempt.activation_attempt_id
+         LEFT JOIN platform.release_activation_verification_receipts AS verification
+           ON verification.tenant_id = attempt.tenant_id
+          AND verification.environment_id = attempt.environment_id
+          AND verification.activation_attempt_id = attempt.activation_attempt_id
+         LEFT JOIN platform.release_activation_reconciliation_alarms AS alarm
+           ON alarm.tenant_id = attempt.tenant_id
+          AND alarm.environment_id = attempt.environment_id
+          AND alarm.activation_attempt_id = attempt.activation_attempt_id
+        WHERE attempt.tenant_id = $1
+          AND attempt.environment_id = $2
+          AND attempt.activation_attempt_id = $3
+     )
+     SELECT tenant_id,
+            environment_id,
+            execution_principal_kind,
+            execution_principal_id,
+            started_at,
+            max_age_milliseconds,
+            deadline_at,
+            completion_at,
+            alarm_recorded,
+            observed_at,
+            CASE
+              WHEN started_at IS NULL THEN 'NOT_STARTED'
+              WHEN completion_at IS NULL AND observed_at >= deadline_at
+                THEN 'OVERDUE_UNRESOLVED'
+              WHEN completion_at IS NULL THEN 'PENDING'
+              WHEN completion_at >= deadline_at THEN 'OVERDUE_COMPLETED'
+              ELSE 'COMPLETED_WITHIN_MAX_AGE'
+            END AS reconciliation_state,
+            CASE
+              WHEN started_at IS NULL THEN false
+              WHEN completion_at IS NULL THEN observed_at >= deadline_at
+              ELSE completion_at >= deadline_at
+            END AS overdue
+       FROM durable`,
+    [context.tenantId, context.environmentId, activationAttemptId],
+  );
+  const row = requiredRow(
+    result.rows[0],
+    'activation attempt is not visible to the trusted request context',
+  );
+  assertExecutionPrincipal(context, row);
+  return Object.freeze({
+    activationAttemptId,
+    alarmRecorded: row.alarm_recorded,
+    completionAt: row.completion_at?.toISOString() ?? null,
+    deadlineAt: row.deadline_at?.toISOString() ?? null,
+    environmentId: row.environment_id,
+    maxAgeMilliseconds:
+      row.max_age_milliseconds === null
+        ? null
+        : safeFence(row.max_age_milliseconds),
+    observedAt: row.observed_at.toISOString(),
+    overdue: row.overdue,
+    startedAt: row.started_at?.toISOString() ?? null,
+    state: row.reconciliation_state,
+    tenantId: row.tenant_id,
+  });
 }
 
 async function loadAttemptRecord(

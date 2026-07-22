@@ -99,4 +99,4 @@ How to apply: record retryable/paused/reconciling states as append-only phases o
 ## Persist reconciliation age across worker lifetimes
 Date: 2026-07-22
 Why: Process-local timers cannot prove a crash-safe overdue alarm after worker failure or handoff.
-How to apply: derive deadlines from durable database facts and test outage recovery with a fresh worker; see `docs/execution/packets/G1-P4b.md`.
+How to apply: derive deadlines and completion from durable database facts; an alarm row is an idempotent projection, never detection authority. Test recovery with a fresh worker; see `docs/execution/packets/G1-P4b.md`.

@@ -358,6 +358,174 @@ test('G1-P4b atomic activation, reconciliation, rollback, and invalidation', asy
         );
 
         await t.test(
+          'overdue recovery completion is derivable without its alarm projection',
+          async () => {
+            const before = await pointer(pool, tenantA, environmentA);
+            const attemptA = await prepareApproval(
+              webPool,
+              approverContextA,
+              makerContextA,
+              releaseOtherThan(releasesA, before.releaseId, 5),
+            );
+            const attemptB = await prepareApproval(
+              webPool,
+              approverContextA,
+              makerContextA,
+              releaseOtherThan(releasesA, before.releaseId, 6),
+            );
+            const maxAgeMilliseconds = 2_000;
+            const boundedService = new PostgresReleaseActivationService(
+              webPool,
+              { reconciliationMaxAgeMilliseconds: maxAgeMilliseconds },
+            );
+            assert.equal(
+              (
+                await boundedService.reconcileActivation(
+                  systemContextA,
+                  attemptA,
+                )
+              ).status,
+              'RECONCILING',
+            );
+            const pending = await boundedService.inspectReconciliationState(
+              systemContextA,
+              attemptA,
+            );
+            assert.equal(
+              pending.activationAttemptId,
+              attemptA.activationAttemptId,
+            );
+            assert.equal(pending.tenantId, tenantA);
+            assert.equal(pending.environmentId, environmentA);
+            assert.equal(pending.state, 'PENDING');
+            assert.equal(pending.overdue, false);
+            assert.equal(pending.alarmRecorded, false);
+            assert.equal(pending.completionAt, null);
+            assert.equal(pending.maxAgeMilliseconds, maxAgeMilliseconds);
+            assert.ok(pending.startedAt);
+            assert.ok(pending.deadlineAt);
+            assert.ok(pending.observedAt);
+
+            assert.equal(
+              (await boundedService.activate(systemContextA, attemptB)).status,
+              'SWAPPED_VERIFIED',
+            );
+            const generationB = await pointer(pool, tenantA, environmentA);
+
+            await withCommitDroppingProxy(
+              connection,
+              async (proxyPort) => {
+                const faultPool = runtimePool(
+                  { ...connection, host: '127.0.0.1', port: proxyPort },
+                  1,
+                );
+                faultPool.on('error', () => undefined);
+                faultPool.on('connect', (client) => {
+                  client.on('error', () => undefined);
+                });
+                try {
+                  const faultingWorker = new PostgresReleaseActivationService(
+                    faultPool,
+                  );
+                  const ambiguous = await faultingWorker.reconcileActivation(
+                    systemContextA,
+                    attemptA,
+                  );
+                  assert.equal(ambiguous.status, 'RECONCILING');
+                  assert.equal(ambiguous.alarmDue, false);
+                } finally {
+                  await faultPool.end();
+                }
+              },
+              {
+                delayCommitResponse: {
+                  commitNumber: 1,
+                  milliseconds: maxAgeMilliseconds + 200,
+                },
+                dropCommitResponseNumber: 2,
+              },
+            );
+
+            const alarm = await pool.query<{ count: string }>(
+              `SELECT count(*)
+                 FROM platform.release_activation_reconciliation_alarms
+                WHERE activation_attempt_id = $1`,
+              [attemptA.activationAttemptId],
+            );
+            assert.equal(alarm.rows[0]?.count, '0');
+            const completion = await pool.query<{
+              outcome_code: string;
+              recorded_at: Date;
+            }>(
+              `SELECT outcome_code, recorded_at
+                 FROM platform.release_activation_attempt_outcomes
+                WHERE activation_attempt_id = $1`,
+              [attemptA.activationAttemptId],
+            );
+            assert.equal(completion.rows.length, 1);
+            assert.equal(completion.rows[0]?.outcome_code, 'LOST_RACE');
+            assert.deepEqual(
+              await attemptFactCounts(pool, [attemptA.activationAttemptId]),
+              {
+                histories: 0,
+                outboxRows: 0,
+                outcomes: 1,
+                receipts: 0,
+                swappedOutcomes: 0,
+              },
+            );
+            assert.deepEqual(
+              await pointer(pool, tenantA, environmentA),
+              generationB,
+            );
+
+            const observerPool = runtimePool(connection, 1);
+            try {
+              const freshObserver = new PostgresReleaseActivationService(
+                observerPool,
+              );
+              const overdue = await freshObserver.inspectReconciliationState(
+                systemContextA,
+                attemptA,
+              );
+              assert.equal(overdue.state, 'OVERDUE_COMPLETED');
+              assert.equal(overdue.overdue, true);
+              assert.equal(overdue.alarmRecorded, false);
+              assert.ok(overdue.completionAt);
+              assert.ok(overdue.deadlineAt);
+              assert.ok(overdue.completionAt >= overdue.deadlineAt);
+              assert.equal(
+                overdue.completionAt,
+                completion.rows[0]?.recorded_at.toISOString(),
+              );
+
+              const prompt = await freshObserver.inspectReconciliationState(
+                systemContextA,
+                attemptB,
+              );
+              assert.equal(prompt.state, 'COMPLETED_WITHIN_MAX_AGE');
+              assert.equal(prompt.overdue, false);
+              assert.equal(prompt.alarmRecorded, false);
+              assert.ok(prompt.deadlineAt);
+              assert.ok(prompt.observedAt >= prompt.deadlineAt);
+            } finally {
+              await observerPool.end();
+            }
+            assert.equal(
+              (
+                await pool.query<{ count: string }>(
+                  `SELECT count(*)
+                     FROM platform.release_activation_reconciliation_alarms
+                    WHERE activation_attempt_id = $1`,
+                  [attemptA.activationAttemptId],
+                )
+              ).rows[0]?.count,
+              '0',
+            );
+          },
+        );
+
+        await t.test(
           'same tenant/different environments and two tenants activate independently',
           async () => {
             const beforeA2 = await pointer(pool, tenantA, environmentA2);
@@ -1539,6 +1707,13 @@ async function waitForReceipt(
 async function withCommitDroppingProxy<T>(
   connection: pg.PoolConfig,
   run: (port: number) => Promise<T>,
+  options: Readonly<{
+    delayCommitResponse?: Readonly<{
+      commitNumber: number;
+      milliseconds: number;
+    }>;
+    dropCommitResponseNumber?: number;
+  }> = {},
 ): Promise<T> {
   const targetHost = String(connection.host ?? '127.0.0.1');
   const targetPort = Number(connection.port);
@@ -1546,11 +1721,24 @@ async function withCommitDroppingProxy<T>(
   let commitCount = 0;
   const server = createServer((downstream) => {
     const upstream = connect(targetPort, targetHost);
+    const delayedChunks: Buffer[] = [];
+    let delayCommitResponse = false;
+    let delayTimer: ReturnType<typeof setTimeout> | undefined;
     let dropCommitResponse = false;
     downstream.on('data', (chunk: Buffer) => {
       const hasCommit = chunk.includes(Buffer.from('COMMIT'));
       if (armed && hasCommit) commitCount += 1;
-      const isCommitToDrop = armed && hasCommit && commitCount === 2;
+      if (
+        armed &&
+        hasCommit &&
+        commitCount === options.delayCommitResponse?.commitNumber
+      ) {
+        delayCommitResponse = true;
+      }
+      const isCommitToDrop =
+        armed &&
+        hasCommit &&
+        commitCount === (options.dropCommitResponseNumber ?? 2);
       if (isCommitToDrop) {
         armed = false;
         dropCommitResponse = true;
@@ -1561,11 +1749,21 @@ async function withCommitDroppingProxy<T>(
       if (dropCommitResponse) {
         downstream.end();
         upstream.end();
+      } else if (delayCommitResponse) {
+        delayedChunks.push(chunk);
+        delayTimer ??= setTimeout(() => {
+          delayCommitResponse = false;
+          if (!downstream.destroyed) {
+            for (const delayed of delayedChunks) downstream.write(delayed);
+          }
+          delayedChunks.length = 0;
+        }, options.delayCommitResponse?.milliseconds ?? 0);
       } else if (!downstream.destroyed) {
         downstream.write(chunk);
       }
     });
     downstream.on('close', () => {
+      if (delayTimer !== undefined) clearTimeout(delayTimer);
       if (!dropCommitResponse) upstream.destroy();
     });
     downstream.on('error', () => undefined);

@@ -599,6 +599,30 @@ export interface ReleaseActivationReconciliationStart extends TenantEnvironmentI
   readonly startedAt: string;
 }
 
+export type ReleaseActivationReconciliationState =
+  | 'COMPLETED_WITHIN_MAX_AGE'
+  | 'NOT_STARTED'
+  | 'OVERDUE_COMPLETED'
+  | 'OVERDUE_UNRESOLVED'
+  | 'PENDING';
+
+/**
+ * A read-only projection derived from the durable start, threshold, and
+ * completion facts. Alarm presence is observability metadata, not authority
+ * for whether the attempt is overdue.
+ */
+export interface ReleaseActivationReconciliationInspection extends TenantEnvironmentIdentity {
+  readonly activationAttemptId: MintedUuid;
+  readonly alarmRecorded: boolean;
+  readonly completionAt: string | null;
+  readonly deadlineAt: string | null;
+  readonly maxAgeMilliseconds: number | null;
+  readonly observedAt: string;
+  readonly overdue: boolean;
+  readonly startedAt: string | null;
+  readonly state: ReleaseActivationReconciliationState;
+}
+
 /**
  * Frozen producer envelope for the G1-P5 activation-invalidation dispatcher.
  * PostgreSQL commits one row; the dispatcher delivers it at least once and
