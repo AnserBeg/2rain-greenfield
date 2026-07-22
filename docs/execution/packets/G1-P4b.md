@@ -3,7 +3,8 @@
 Status: active
 Tier: Critical
 Base: `dbf871dd68bbb5b4ec2abb9e2b2b7a4d407eda87`
-Frozen candidate: pending
+Frozen candidate: `94fa8a4e96d78d20d6eeeb0ca540cdef57032ef2`
+(`REVISE` convergence stop; not evidence-ready)
 
 ## Goal and scope
 
@@ -244,5 +245,73 @@ surfacing the result.
   integration (4/4), and unit (18/18) tests. The browser scaffold has one
   intentional skip because product browser journeys are out of scope at G1.
 
-Implementation candidate commit, Critical reviews, and user checkpoint remain
-pending. Packet status and candidate metadata remain orchestrator-owned.
+### Candidate gates
+
+The orchestrator independently reran the complete declared gate set at
+`94fa8a4e96d78d20d6eeeb0ca540cdef57032ef2` with a clean worktree:
+
+| Gate | Result |
+|---|---|
+| Frozen install | PASS — all 13 workspace projects already up to date |
+| Typecheck | PASS |
+| Lint | PASS |
+| Format | PASS |
+| Build | PASS |
+| Dependency boundaries | PASS — 53 files scanned |
+| Migration/schema drift | PASS — 5 applied, 5 verified; drift clean |
+| Unit | PASS — 18/18 |
+| Compiler | PASS — 21/21 |
+| Integration | PASS — 4/4 |
+| Architecture | PASS — 23/23 |
+| PostgreSQL | PASS — 38/38, including focused P4b 12/12 scenarios and 13/13 TAP tests |
+| Browser | PASS — one intentional scaffold skip |
+| Diff/lease/worktree | PASS — `git diff --check`; authorized paths only; clean tree |
+
+The pre-candidate writer sandbox could not access Docker or child processes;
+the orchestrator's first real focused run then exposed masked PostgreSQL errors
+and was red 0/11. The writer corrected the trusted attempt lock, PostgreSQL
+append-only insert mechanics, fixture isolation, and commit-disconnect timing
+before freezing `830763d`. No red gate was hidden as candidate evidence.
+
+### Review evidence and convergence stop
+
+- Initial candidate `830763d00e32c3c4bd78d2b9f79fd9aef253537e`
+  passed the complete gate set.
+- Fresh naive Codex `gpt-5.6-sol` xhigh round 1: **REVISE**. It found two
+  in-scope material issues: reconciliation age was process-local rather than
+  durable across worker crashes/handoffs, and the no-receipt/advanced-fence
+  `LOST_RACE` branch lacked a material PostgreSQL test. It reported no future
+  work.
+- The writer fixed exactly those findings in candidate
+  `94fa8a4e96d78d20d6eeeb0ca540cdef57032ef2`, added the adjudicated durable-age
+  learning, and the orchestrator reran every gate above.
+- Fresh naive Codex `gpt-5.6-sol` xhigh round 2: **REVISE**. Finding 2 is
+  closed, with non-vacuous no-receipt/no-outcome/advanced-fence evidence and
+  correct attempt/pointer serialization. Finding 1 remains open at one crash
+  boundary: successful swap, verification, or terminal recovery can commit,
+  then the worker can crash before the separate overdue-alarm transaction.
+  The current outage test inserts the alarm before enabling successful
+  recovery, so it does not exercise that commit/crash interval. No direct fix
+  regressions or future-work findings were reported.
+- The user-authorized cap of two `REVISE` rounds is reached. Per
+  `review-tiers`, no third review/fix hunt is started. Fable was not launched
+  because the required Codex PASS was not reached on the identical SHA.
+
+G1-P4b remains `active`, not `evidence_ready`. The remaining finding requires
+user adjudication before any further fix. G1-P5 has not been started.
+
+## Test it yourself
+
+No UI exists in this packet. These commands complete in under ten minutes:
+
+```bash
+cd /home/rvham/2rain-greenfield-wt/g1-p4b
+git merge-base --is-ancestor 94fa8a4e96d78d20d6eeeb0ca540cdef57032ef2 HEAD
+corepack pnpm check:schema
+node --import tsx --test test/postgres/release-activation.test.ts
+```
+
+Expected: 5 migrations apply and verify with clean drift; the focused P4b
+suite reports 12/12 scenarios and 13/13 TAP tests, including the durable-age
+fresh-coordinator and no-receipt/advanced-fence cases. Passing tests do not
+override the unresolved round-2 crash-boundary finding above.
