@@ -462,6 +462,146 @@
     },
     {
       "schema": "platform",
+      "relation": "release_activation_authority_epochs",
+      "ordinal_position": 1,
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_authority_epochs",
+      "ordinal_position": 2,
+      "column_name": "approver_policy_version",
+      "data_type": "bigint",
+      "udt_name": "int8",
+      "is_nullable": "NO",
+      "column_default": "0"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_authority_epochs",
+      "ordinal_position": 3,
+      "column_name": "executor_policy_version",
+      "data_type": "bigint",
+      "udt_name": "int8",
+      "is_nullable": "NO",
+      "column_default": "0"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_authority_epochs",
+      "ordinal_position": 4,
+      "column_name": "control_policy_version",
+      "data_type": "bigint",
+      "udt_name": "int8",
+      "is_nullable": "NO",
+      "column_default": "0"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_control_events",
+      "ordinal_position": 1,
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_control_events",
+      "ordinal_position": 2,
+      "column_name": "environment_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_control_events",
+      "ordinal_position": 3,
+      "column_name": "policy_version",
+      "data_type": "bigint",
+      "udt_name": "int8",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_control_events",
+      "ordinal_position": 4,
+      "column_name": "control_event_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_control_events",
+      "ordinal_position": 5,
+      "column_name": "rollout_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_control_events",
+      "ordinal_position": 6,
+      "column_name": "live_policy_denied",
+      "data_type": "boolean",
+      "udt_name": "bool",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_control_events",
+      "ordinal_position": 7,
+      "column_name": "rollout_paused",
+      "data_type": "boolean",
+      "udt_name": "bool",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_control_events",
+      "ordinal_position": 8,
+      "column_name": "changed_by",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_control_events",
+      "ordinal_position": 9,
+      "column_name": "control_policy_contract_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": "'northstar.release-activation-control/v1'::text"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_control_events",
+      "ordinal_position": 10,
+      "column_name": "changed_at",
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "transaction_timestamp()"
+    },
+    {
+      "schema": "platform",
       "relation": "release_activation_history",
       "ordinal_position": 1,
       "column_name": "tenant_id",
@@ -662,6 +802,46 @@
     },
     {
       "schema": "platform",
+      "relation": "release_activation_history",
+      "ordinal_position": 21,
+      "column_name": "approval_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_history",
+      "ordinal_position": 22,
+      "column_name": "transition_preparation_receipt_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_history",
+      "ordinal_position": 23,
+      "column_name": "transition_plan_digest",
+      "data_type": "bytea",
+      "udt_name": "bytea",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_history",
+      "ordinal_position": 24,
+      "column_name": "compatibility_policy_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
       "relation": "release_activation_outbox",
       "ordinal_position": 1,
       "column_name": "tenant_id",
@@ -739,6 +919,76 @@
       "udt_name": "timestamptz",
       "is_nullable": "NO",
       "column_default": "transaction_timestamp()"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_outbox",
+      "ordinal_position": 9,
+      "column_name": "pointer_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_outbox",
+      "ordinal_position": 10,
+      "column_name": "old_release_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_outbox",
+      "ordinal_position": 11,
+      "column_name": "new_release_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_outbox",
+      "ordinal_position": 12,
+      "column_name": "fence",
+      "data_type": "bigint",
+      "udt_name": "int8",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_outbox",
+      "ordinal_position": 13,
+      "column_name": "history_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_outbox",
+      "ordinal_position": 14,
+      "column_name": "event_schema_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_outbox",
+      "ordinal_position": 15,
+      "column_name": "deduplication_key",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "YES",
+      "column_default": null
     },
     {
       "schema": "platform",
@@ -1125,6 +1375,356 @@
       "relation": "release_activation_preparations",
       "ordinal_position": 31,
       "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "transaction_timestamp()"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_reconciliation_alarms",
+      "ordinal_position": 1,
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_reconciliation_alarms",
+      "ordinal_position": 2,
+      "column_name": "environment_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_reconciliation_alarms",
+      "ordinal_position": 3,
+      "column_name": "activation_attempt_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_reconciliation_alarms",
+      "ordinal_position": 4,
+      "column_name": "alarm_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_reconciliation_alarms",
+      "ordinal_position": 5,
+      "column_name": "alarm_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_reconciliation_alarms",
+      "ordinal_position": 6,
+      "column_name": "reason_code",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_reconciliation_alarms",
+      "ordinal_position": 7,
+      "column_name": "max_age_milliseconds",
+      "data_type": "bigint",
+      "udt_name": "int8",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_reconciliation_alarms",
+      "ordinal_position": 8,
+      "column_name": "observed_at",
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "clock_timestamp()"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_swap_receipts",
+      "ordinal_position": 1,
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_swap_receipts",
+      "ordinal_position": 2,
+      "column_name": "environment_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_swap_receipts",
+      "ordinal_position": 3,
+      "column_name": "activation_attempt_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_swap_receipts",
+      "ordinal_position": 4,
+      "column_name": "swap_receipt_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_swap_receipts",
+      "ordinal_position": 5,
+      "column_name": "swap_receipt_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_swap_receipts",
+      "ordinal_position": 6,
+      "column_name": "approval_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_swap_receipts",
+      "ordinal_position": 7,
+      "column_name": "pointer_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_swap_receipts",
+      "ordinal_position": 8,
+      "column_name": "previous_release_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_swap_receipts",
+      "ordinal_position": 9,
+      "column_name": "activated_release_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_swap_receipts",
+      "ordinal_position": 10,
+      "column_name": "fence",
+      "data_type": "bigint",
+      "udt_name": "int8",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_swap_receipts",
+      "ordinal_position": 11,
+      "column_name": "history_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_swap_receipts",
+      "ordinal_position": 12,
+      "column_name": "outbox_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_swap_receipts",
+      "ordinal_position": 13,
+      "column_name": "recorded_at",
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "transaction_timestamp()"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_verification_receipts",
+      "ordinal_position": 1,
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_verification_receipts",
+      "ordinal_position": 2,
+      "column_name": "environment_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_verification_receipts",
+      "ordinal_position": 3,
+      "column_name": "activation_attempt_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_verification_receipts",
+      "ordinal_position": 4,
+      "column_name": "verification_receipt_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_verification_receipts",
+      "ordinal_position": 5,
+      "column_name": "verification_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_verification_receipts",
+      "ordinal_position": 6,
+      "column_name": "pointer_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_verification_receipts",
+      "ordinal_position": 7,
+      "column_name": "activated_release_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_verification_receipts",
+      "ordinal_position": 8,
+      "column_name": "fence",
+      "data_type": "bigint",
+      "udt_name": "int8",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_verification_receipts",
+      "ordinal_position": 9,
+      "column_name": "pointer_read_back_passed",
+      "data_type": "boolean",
+      "udt_name": "bool",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_verification_receipts",
+      "ordinal_position": 10,
+      "column_name": "artifact_availability_passed",
+      "data_type": "boolean",
+      "udt_name": "bool",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_verification_receipts",
+      "ordinal_position": 11,
+      "column_name": "release_kernel_invariants_passed",
+      "data_type": "boolean",
+      "udt_name": "bool",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_verification_receipts",
+      "ordinal_position": 12,
+      "column_name": "warning_count",
+      "data_type": "integer",
+      "udt_name": "int4",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_verification_receipts",
+      "ordinal_position": 13,
+      "column_name": "status",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_verification_receipts",
+      "ordinal_position": 14,
+      "column_name": "recorded_at",
       "data_type": "timestamp with time zone",
       "udt_name": "timestamptz",
       "is_nullable": "NO",
@@ -1699,6 +2299,86 @@
       "udt_name": "int4",
       "is_nullable": "NO",
       "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_executor_authority_events",
+      "ordinal_position": 1,
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_executor_authority_events",
+      "ordinal_position": 2,
+      "column_name": "policy_version",
+      "data_type": "bigint",
+      "udt_name": "int8",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_executor_authority_events",
+      "ordinal_position": 3,
+      "column_name": "authority_event_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_executor_authority_events",
+      "ordinal_position": 4,
+      "column_name": "principal_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_executor_authority_events",
+      "ordinal_position": 5,
+      "column_name": "authorized",
+      "data_type": "boolean",
+      "udt_name": "bool",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_executor_authority_events",
+      "ordinal_position": 6,
+      "column_name": "changed_by",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_executor_authority_events",
+      "ordinal_position": 7,
+      "column_name": "authority_policy_contract_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": "'northstar.release-executor-authority/v1'::text"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_executor_authority_events",
+      "ordinal_position": 8,
+      "column_name": "changed_at",
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "transaction_timestamp()"
     },
     {
       "schema": "platform",
@@ -2477,7 +3157,7 @@
       "relation": "release_activation_attempt_outcomes",
       "name": "release_activation_attempt_outcomes_codes",
       "type": "c",
-      "definition": "CHECK (outcome_version = 'northstar.release-activation-outcome/v1'::text AND (outcome_code = ANY (ARRAY['SWAPPED'::text, 'STALE_POINTER'::text, 'EXPIRED_APPROVAL'::text, 'INVALID_BINDING'::text, 'OBSOLETE_POLICY'::text, 'DEFINITIVE_BLOCKING_FAILURE'::text, 'CANCELLATION'::text, 'APPROVER_REVOCATION'::text, 'PRE_CAS_POLICY_DENY'::text])) AND (pointer_outcome = ANY (ARRAY['NOT_ATTEMPTED'::text, 'NOT_SWAPPED'::text, 'SWAPPED'::text, 'SWAPPED_THEN_SUPERSEDED'::text, 'AMBIGUOUS'::text])) AND (verification_outcome = ANY (ARRAY['NOT_RUN'::text, 'PASSED'::text, 'FAILED'::text, 'UNKNOWN'::text])) AND (workflow_disposition = ANY (ARRAY['RETAINED'::text, 'CONSUMED'::text])) AND (workflow_status = ANY (ARRAY['RUNNING'::text, 'PAUSED'::text, 'RECONCILING'::text, 'SUCCEEDED'::text, 'FAILED'::text, 'CANCELLED'::text])) AND terminal = (workflow_status = ANY (ARRAY['SUCCEEDED'::text, 'FAILED'::text, 'CANCELLED'::text])) AND (outcome_code = 'SWAPPED'::text AND pointer_outcome = 'SWAPPED'::text AND verification_outcome = 'NOT_RUN'::text AND workflow_disposition = 'CONSUMED'::text AND workflow_status = 'RUNNING'::text AND NOT terminal OR outcome_code = 'CANCELLATION'::text AND pointer_outcome = 'NOT_SWAPPED'::text AND verification_outcome = 'NOT_RUN'::text AND workflow_disposition = 'CONSUMED'::text AND workflow_status = 'CANCELLED'::text AND terminal OR (outcome_code = ANY (ARRAY['STALE_POINTER'::text, 'EXPIRED_APPROVAL'::text, 'INVALID_BINDING'::text, 'OBSOLETE_POLICY'::text, 'DEFINITIVE_BLOCKING_FAILURE'::text, 'APPROVER_REVOCATION'::text, 'PRE_CAS_POLICY_DENY'::text])) AND pointer_outcome = 'NOT_SWAPPED'::text AND verification_outcome = 'NOT_RUN'::text AND workflow_disposition = 'CONSUMED'::text AND workflow_status = 'FAILED'::text AND terminal) AND octet_length(outcome_digest) = 32)"
+      "definition": "CHECK (outcome_version = 'northstar.release-activation-outcome/v1'::text AND (outcome_code = ANY (ARRAY['SWAPPED'::text, 'STALE_POINTER'::text, 'EXPIRED_APPROVAL'::text, 'INVALID_BINDING'::text, 'LOST_RACE'::text, 'OBSOLETE_POLICY'::text, 'DEFINITIVE_BLOCKING_FAILURE'::text, 'CANCELLATION'::text, 'APPROVER_REVOCATION'::text, 'PRE_CAS_POLICY_DENY'::text])) AND (pointer_outcome = ANY (ARRAY['NOT_ATTEMPTED'::text, 'NOT_SWAPPED'::text, 'SWAPPED'::text, 'SWAPPED_THEN_SUPERSEDED'::text, 'AMBIGUOUS'::text])) AND (verification_outcome = ANY (ARRAY['NOT_RUN'::text, 'PASSED'::text, 'FAILED'::text, 'UNKNOWN'::text])) AND (workflow_disposition = ANY (ARRAY['RETAINED'::text, 'CONSUMED'::text])) AND (workflow_status = ANY (ARRAY['RUNNING'::text, 'PAUSED'::text, 'RECONCILING'::text, 'SUCCEEDED'::text, 'FAILED'::text, 'CANCELLED'::text])) AND terminal = (workflow_status = ANY (ARRAY['SUCCEEDED'::text, 'FAILED'::text, 'CANCELLED'::text])) AND (outcome_code = 'SWAPPED'::text AND pointer_outcome = 'SWAPPED'::text AND verification_outcome = 'NOT_RUN'::text AND workflow_disposition = 'CONSUMED'::text AND workflow_status = 'RUNNING'::text AND NOT terminal OR outcome_code = 'CANCELLATION'::text AND pointer_outcome = 'NOT_SWAPPED'::text AND verification_outcome = 'NOT_RUN'::text AND workflow_disposition = 'CONSUMED'::text AND workflow_status = 'CANCELLED'::text AND terminal OR (outcome_code = ANY (ARRAY['STALE_POINTER'::text, 'EXPIRED_APPROVAL'::text, 'INVALID_BINDING'::text, 'LOST_RACE'::text, 'OBSOLETE_POLICY'::text, 'DEFINITIVE_BLOCKING_FAILURE'::text, 'APPROVER_REVOCATION'::text, 'PRE_CAS_POLICY_DENY'::text])) AND pointer_outcome = 'NOT_SWAPPED'::text AND verification_outcome = 'NOT_RUN'::text AND workflow_disposition = 'CONSUMED'::text AND workflow_status = 'FAILED'::text AND terminal) AND octet_length(outcome_digest) = 32)"
     },
     {
       "schema": "platform",
@@ -2492,6 +3172,13 @@
       "name": "release_activation_attempt_outcomes_pkey",
       "type": "p",
       "definition": "PRIMARY KEY (tenant_id, environment_id, activation_attempt_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempt_outcomes",
+      "name": "release_activation_outcome_swap_fact_set",
+      "type": "t",
+      "definition": "TRIGGER DEFERRABLE INITIALLY DEFERRED"
     },
     {
       "schema": "platform",
@@ -2527,6 +3214,69 @@
       "name": "release_activation_attempts_prebound_contract",
       "type": "c",
       "definition": "CHECK (attempt_contract_version = 'northstar.release-activation-attempt/v1'::text AND execution_principal_kind = 'SYSTEM'::text AND execution_principal_id = '00000000-0000-4000-8000-000000000001'::uuid AND attempt_state = 'PREBOUND'::text)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_authority_epochs",
+      "name": "release_activation_authority_epochs_nonnegative",
+      "type": "c",
+      "definition": "CHECK (approver_policy_version >= 0 AND executor_policy_version >= 0 AND control_policy_version >= 0)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_authority_epochs",
+      "name": "release_activation_authority_epochs_pkey",
+      "type": "p",
+      "definition": "PRIMARY KEY (tenant_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_authority_epochs",
+      "name": "release_activation_authority_epochs_tenant_id_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id) REFERENCES platform.tenants(id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_control_events",
+      "name": "release_activation_control_events_contract_version",
+      "type": "c",
+      "definition": "CHECK (control_policy_contract_version = 'northstar.release-activation-control/v1'::text)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_control_events",
+      "name": "release_activation_control_events_environment_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id) REFERENCES platform.environments(tenant_id, id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_control_events",
+      "name": "release_activation_control_events_event_id_unique",
+      "type": "u",
+      "definition": "UNIQUE (control_event_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_control_events",
+      "name": "release_activation_control_events_pkey",
+      "type": "p",
+      "definition": "PRIMARY KEY (tenant_id, policy_version)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_control_events",
+      "name": "release_activation_control_events_version_positive",
+      "type": "c",
+      "definition": "CHECK (policy_version > 0)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_history",
+      "name": "release_activation_history_approval_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, approval_id) REFERENCES platform.release_approvals(tenant_id, environment_id, approval_id)"
     },
     {
       "schema": "platform",
@@ -2580,9 +3330,30 @@
     {
       "schema": "platform",
       "relation": "release_activation_history",
+      "name": "release_activation_history_swap_fact_set",
+      "type": "t",
+      "definition": "TRIGGER DEFERRABLE INITIALLY DEFERRED"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_history",
       "name": "release_activation_history_to_release_fkey",
       "type": "f",
       "definition": "FOREIGN KEY (tenant_id, environment_id, to_release_id) REFERENCES platform.tenant_releases(tenant_id, environment_id, release_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_history",
+      "name": "release_activation_history_transition_digest",
+      "type": "c",
+      "definition": "CHECK (transition_plan_digest IS NULL OR octet_length(transition_plan_digest) = 32)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_history",
+      "name": "release_activation_history_transition_receipt_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, transition_preparation_receipt_id) REFERENCES platform.transition_preparation_receipts(tenant_id, environment_id, receipt_id)"
     },
     {
       "schema": "platform",
@@ -2601,9 +3372,30 @@
     {
       "schema": "platform",
       "relation": "release_activation_outbox",
+      "name": "release_activation_outbox_deduplication_key_unique",
+      "type": "u",
+      "definition": "UNIQUE (deduplication_key)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_outbox",
       "name": "release_activation_outbox_envelope",
       "type": "c",
       "definition": "CHECK (envelope_version = 'northstar.release-activation-outbox/v1'::text AND btrim(event_code) <> ''::text AND octet_length(payload_digest) = 32)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_outbox",
+      "name": "release_activation_outbox_generation_shape",
+      "type": "c",
+      "definition": "CHECK (pointer_id IS NULL AND new_release_id IS NULL AND fence IS NULL AND history_id IS NULL AND event_schema_version IS NULL AND deduplication_key IS NULL OR pointer_id IS NOT NULL AND new_release_id IS NOT NULL AND fence > 0 AND history_id IS NOT NULL AND event_schema_version = 'northstar.release-activation-invalidation/v1'::text AND btrim(deduplication_key) <> ''::text AND event_code = 'ACTIVE_RELEASE_POINTER_CHANGED'::text)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_outbox",
+      "name": "release_activation_outbox_history_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, history_id) REFERENCES platform.release_activation_history(tenant_id, environment_id, history_id)"
     },
     {
       "schema": "platform",
@@ -2615,9 +3407,37 @@
     {
       "schema": "platform",
       "relation": "release_activation_outbox",
+      "name": "release_activation_outbox_new_release_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, new_release_id) REFERENCES platform.tenant_releases(tenant_id, environment_id, release_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_outbox",
+      "name": "release_activation_outbox_old_release_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, old_release_id) REFERENCES platform.tenant_releases(tenant_id, environment_id, release_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_outbox",
       "name": "release_activation_outbox_pkey",
       "type": "p",
       "definition": "PRIMARY KEY (tenant_id, environment_id, outbox_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_outbox",
+      "name": "release_activation_outbox_pointer_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, pointer_id) REFERENCES platform.active_release_pointers(tenant_id, environment_id, pointer_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_outbox",
+      "name": "release_activation_outbox_swap_fact_set",
+      "type": "t",
+      "definition": "TRIGGER DEFERRABLE INITIALLY DEFERRED"
     },
     {
       "schema": "platform",
@@ -2744,6 +3564,153 @@
       "name": "release_activation_preparations_versions_not_blank",
       "type": "c",
       "definition": "CHECK (btrim(preparation_version) <> ''::text AND btrim(compiler_version) <> ''::text AND btrim(compiler_semantic_profile_version) <> ''::text AND btrim(compiler_output_protocol_version) <> ''::text AND btrim(verification_evidence_version) <> ''::text AND btrim(capability_support_version) <> ''::text AND btrim(renderer_version) <> ''::text AND btrim(view_schema_version) <> ''::text)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_reconciliation_alarms",
+      "name": "release_activation_reconciliation_alarms_attempt_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, activation_attempt_id) REFERENCES platform.release_activation_attempts(tenant_id, environment_id, activation_attempt_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_reconciliation_alarms",
+      "name": "release_activation_reconciliation_alarms_id_unique",
+      "type": "u",
+      "definition": "UNIQUE (alarm_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_reconciliation_alarms",
+      "name": "release_activation_reconciliation_alarms_pkey",
+      "type": "p",
+      "definition": "PRIMARY KEY (tenant_id, environment_id, activation_attempt_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_reconciliation_alarms",
+      "name": "release_activation_reconciliation_alarms_shape",
+      "type": "c",
+      "definition": "CHECK (alarm_version = 'northstar.release-activation-reconciliation-alarm/v1'::text AND reason_code = 'RECONCILIATION_OVERDUE'::text AND max_age_milliseconds > 0)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_swap_receipts",
+      "name": "release_activation_receipt_swap_fact_set",
+      "type": "t",
+      "definition": "TRIGGER DEFERRABLE INITIALLY DEFERRED"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_swap_receipts",
+      "name": "release_activation_swap_receipts_activated_release_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, activated_release_id) REFERENCES platform.tenant_releases(tenant_id, environment_id, release_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_swap_receipts",
+      "name": "release_activation_swap_receipts_approval_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, approval_id) REFERENCES platform.release_approvals(tenant_id, environment_id, approval_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_swap_receipts",
+      "name": "release_activation_swap_receipts_attempt_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, activation_attempt_id) REFERENCES platform.release_activation_attempts(tenant_id, environment_id, activation_attempt_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_swap_receipts",
+      "name": "release_activation_swap_receipts_history_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, history_id) REFERENCES platform.release_activation_history(tenant_id, environment_id, history_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_swap_receipts",
+      "name": "release_activation_swap_receipts_id_unique",
+      "type": "u",
+      "definition": "UNIQUE (swap_receipt_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_swap_receipts",
+      "name": "release_activation_swap_receipts_outbox_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, outbox_id) REFERENCES platform.release_activation_outbox(tenant_id, environment_id, outbox_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_swap_receipts",
+      "name": "release_activation_swap_receipts_pkey",
+      "type": "p",
+      "definition": "PRIMARY KEY (tenant_id, environment_id, activation_attempt_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_swap_receipts",
+      "name": "release_activation_swap_receipts_pointer_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, pointer_id) REFERENCES platform.active_release_pointers(tenant_id, environment_id, pointer_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_swap_receipts",
+      "name": "release_activation_swap_receipts_previous_release_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, previous_release_id) REFERENCES platform.tenant_releases(tenant_id, environment_id, release_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_swap_receipts",
+      "name": "release_activation_swap_receipts_shape",
+      "type": "c",
+      "definition": "CHECK (swap_receipt_version = 'northstar.release-activation-swap-receipt/v1'::text AND fence > 0)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_verification_receipts",
+      "name": "release_activation_verification_receipts_attempt_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, activation_attempt_id) REFERENCES platform.release_activation_swap_receipts(tenant_id, environment_id, activation_attempt_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_verification_receipts",
+      "name": "release_activation_verification_receipts_id_unique",
+      "type": "u",
+      "definition": "UNIQUE (verification_receipt_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_verification_receipts",
+      "name": "release_activation_verification_receipts_pkey",
+      "type": "p",
+      "definition": "PRIMARY KEY (tenant_id, environment_id, activation_attempt_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_verification_receipts",
+      "name": "release_activation_verification_receipts_pointer_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, pointer_id) REFERENCES platform.active_release_pointers(tenant_id, environment_id, pointer_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_verification_receipts",
+      "name": "release_activation_verification_receipts_release_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, activated_release_id) REFERENCES platform.tenant_releases(tenant_id, environment_id, release_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_verification_receipts",
+      "name": "release_activation_verification_receipts_shape",
+      "type": "c",
+      "definition": "CHECK (verification_version = 'northstar.release-activation-verification/v1'::text AND fence > 0 AND warning_count >= 0 AND (status = ANY (ARRAY['SWAPPED_VERIFIED'::text, 'SWAPPED_VERIFICATION_FAILED'::text, 'SUPERSEDED'::text])) AND (status = 'SWAPPED_VERIFIED'::text AND pointer_read_back_passed AND artifact_availability_passed AND release_kernel_invariants_passed AND warning_count = 0 OR status = 'SWAPPED_VERIFICATION_FAILED'::text AND (NOT pointer_read_back_passed OR NOT artifact_availability_passed OR NOT release_kernel_invariants_passed) OR status = 'SUPERSEDED'::text))"
     },
     {
       "schema": "platform",
@@ -2947,6 +3914,41 @@
       "name": "release_artifact_blobs_sha256",
       "type": "c",
       "definition": "CHECK (content_hash ~ '^[0-9a-f]{64}$'::text)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_executor_authority_events",
+      "name": "release_executor_authority_events_contract_version",
+      "type": "c",
+      "definition": "CHECK (authority_policy_contract_version = 'northstar.release-executor-authority/v1'::text)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_executor_authority_events",
+      "name": "release_executor_authority_events_event_id_unique",
+      "type": "u",
+      "definition": "UNIQUE (authority_event_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_executor_authority_events",
+      "name": "release_executor_authority_events_pkey",
+      "type": "p",
+      "definition": "PRIMARY KEY (tenant_id, policy_version)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_executor_authority_events",
+      "name": "release_executor_authority_events_tenant_id_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id) REFERENCES platform.tenants(id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_executor_authority_events",
+      "name": "release_executor_authority_events_version_positive",
+      "type": "c",
+      "definition": "CHECK (policy_version > 0)"
     },
     {
       "schema": "platform",
@@ -3318,6 +4320,30 @@
     },
     {
       "schema": "platform",
+      "relation": "release_activation_authority_epochs",
+      "name": "release_activation_authority_epochs_pkey",
+      "definition": "CREATE UNIQUE INDEX release_activation_authority_epochs_pkey ON platform.release_activation_authority_epochs USING btree (tenant_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_control_events",
+      "name": "release_activation_control_events_current_scope_idx",
+      "definition": "CREATE INDEX release_activation_control_events_current_scope_idx ON platform.release_activation_control_events USING btree (tenant_id, environment_id, rollout_id, policy_version DESC)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_control_events",
+      "name": "release_activation_control_events_event_id_unique",
+      "definition": "CREATE UNIQUE INDEX release_activation_control_events_event_id_unique ON platform.release_activation_control_events USING btree (control_event_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_control_events",
+      "name": "release_activation_control_events_pkey",
+      "definition": "CREATE UNIQUE INDEX release_activation_control_events_pkey ON platform.release_activation_control_events USING btree (tenant_id, policy_version)"
+    },
+    {
+      "schema": "platform",
       "relation": "release_activation_history",
       "name": "release_activation_history_id_unique",
       "definition": "CREATE UNIQUE INDEX release_activation_history_id_unique ON platform.release_activation_history USING btree (history_id)"
@@ -3333,6 +4359,12 @@
       "relation": "release_activation_outbox",
       "name": "release_activation_outbox_attempt_event_unique",
       "definition": "CREATE UNIQUE INDEX release_activation_outbox_attempt_event_unique ON platform.release_activation_outbox USING btree (activation_attempt_id, event_code)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_outbox",
+      "name": "release_activation_outbox_deduplication_key_unique",
+      "definition": "CREATE UNIQUE INDEX release_activation_outbox_deduplication_key_unique ON platform.release_activation_outbox USING btree (deduplication_key)"
     },
     {
       "schema": "platform",
@@ -3375,6 +4407,42 @@
       "relation": "release_activation_preparations",
       "name": "release_activation_preparations_preparation_id_unique",
       "definition": "CREATE UNIQUE INDEX release_activation_preparations_preparation_id_unique ON platform.release_activation_preparations USING btree (preparation_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_reconciliation_alarms",
+      "name": "release_activation_reconciliation_alarms_id_unique",
+      "definition": "CREATE UNIQUE INDEX release_activation_reconciliation_alarms_id_unique ON platform.release_activation_reconciliation_alarms USING btree (alarm_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_reconciliation_alarms",
+      "name": "release_activation_reconciliation_alarms_pkey",
+      "definition": "CREATE UNIQUE INDEX release_activation_reconciliation_alarms_pkey ON platform.release_activation_reconciliation_alarms USING btree (tenant_id, environment_id, activation_attempt_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_swap_receipts",
+      "name": "release_activation_swap_receipts_id_unique",
+      "definition": "CREATE UNIQUE INDEX release_activation_swap_receipts_id_unique ON platform.release_activation_swap_receipts USING btree (swap_receipt_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_swap_receipts",
+      "name": "release_activation_swap_receipts_pkey",
+      "definition": "CREATE UNIQUE INDEX release_activation_swap_receipts_pkey ON platform.release_activation_swap_receipts USING btree (tenant_id, environment_id, activation_attempt_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_verification_receipts",
+      "name": "release_activation_verification_receipts_id_unique",
+      "definition": "CREATE UNIQUE INDEX release_activation_verification_receipts_id_unique ON platform.release_activation_verification_receipts USING btree (verification_receipt_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_verification_receipts",
+      "name": "release_activation_verification_receipts_pkey",
+      "definition": "CREATE UNIQUE INDEX release_activation_verification_receipts_pkey ON platform.release_activation_verification_receipts USING btree (tenant_id, environment_id, activation_attempt_id)"
     },
     {
       "schema": "platform",
@@ -3423,6 +4491,24 @@
       "relation": "release_artifact_blobs",
       "name": "release_artifact_blobs_pkey",
       "definition": "CREATE UNIQUE INDEX release_artifact_blobs_pkey ON platform.release_artifact_blobs USING btree (content_hash)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_executor_authority_events",
+      "name": "release_executor_authority_events_current_principal_idx",
+      "definition": "CREATE INDEX release_executor_authority_events_current_principal_idx ON platform.release_executor_authority_events USING btree (tenant_id, principal_id, policy_version DESC)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_executor_authority_events",
+      "name": "release_executor_authority_events_event_id_unique",
+      "definition": "CREATE UNIQUE INDEX release_executor_authority_events_event_id_unique ON platform.release_executor_authority_events USING btree (authority_event_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_executor_authority_events",
+      "name": "release_executor_authority_events_pkey",
+      "definition": "CREATE UNIQUE INDEX release_executor_authority_events_pkey ON platform.release_executor_authority_events USING btree (tenant_id, policy_version)"
     },
     {
       "schema": "platform",
@@ -3547,6 +4633,16 @@
     {
       "schema": "platform",
       "relation": "release_activation_attempt_outcomes",
+      "name": "release_activation_attempt_outcomes_insert_trusted_context",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_runtime}",
+      "cmd": "INSERT",
+      "qual": null,
+      "with_check": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempt_outcomes",
       "name": "release_activation_attempt_outcomes_select_trusted_context",
       "permissive": "PERMISSIVE",
       "roles": "{north_star_runtime}",
@@ -3576,6 +4672,26 @@
     },
     {
       "schema": "platform",
+      "relation": "release_activation_authority_epochs",
+      "name": "release_activation_authority_epochs_select_trusted_context",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_runtime}",
+      "cmd": "SELECT",
+      "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid IS NOT NULL) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))",
+      "with_check": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_control_events",
+      "name": "release_activation_control_events_select_trusted_context",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_runtime}",
+      "cmd": "SELECT",
+      "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))",
+      "with_check": null
+    },
+    {
+      "schema": "platform",
       "relation": "release_activation_history",
       "name": "release_activation_history_insert_trusted_context",
       "permissive": "PERMISSIVE",
@@ -3593,6 +4709,16 @@
       "cmd": "SELECT",
       "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))",
       "with_check": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_outbox",
+      "name": "release_activation_outbox_insert_trusted_context",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_runtime}",
+      "cmd": "INSERT",
+      "qual": null,
+      "with_check": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))"
     },
     {
       "schema": "platform",
@@ -3646,6 +4772,66 @@
     },
     {
       "schema": "platform",
+      "relation": "release_activation_reconciliation_alarms",
+      "name": "release_activation_reconciliation_alarms_insert_trusted_context",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_runtime}",
+      "cmd": "INSERT",
+      "qual": null,
+      "with_check": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_reconciliation_alarms",
+      "name": "release_activation_reconciliation_alarms_select_trusted_context",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_runtime}",
+      "cmd": "SELECT",
+      "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))",
+      "with_check": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_swap_receipts",
+      "name": "release_activation_swap_receipts_insert_trusted_context",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_runtime}",
+      "cmd": "INSERT",
+      "qual": null,
+      "with_check": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_swap_receipts",
+      "name": "release_activation_swap_receipts_select_trusted_context",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_runtime}",
+      "cmd": "SELECT",
+      "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))",
+      "with_check": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_verification_receipts",
+      "name": "release_activation_verification_receipts_insert_trusted_context",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_runtime}",
+      "cmd": "INSERT",
+      "qual": null,
+      "with_check": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_verification_receipts",
+      "name": "release_activation_verification_receipts_select_trusted_context",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_runtime}",
+      "cmd": "SELECT",
+      "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))",
+      "with_check": null
+    },
+    {
+      "schema": "platform",
       "relation": "release_approvals",
       "name": "release_approvals_insert_trusted_context",
       "permissive": "PERMISSIVE",
@@ -3668,6 +4854,16 @@
       "schema": "platform",
       "relation": "release_approver_eligibility_events",
       "name": "release_approver_events_select_trusted_context",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_runtime}",
+      "cmd": "SELECT",
+      "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid IS NOT NULL) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))",
+      "with_check": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_executor_authority_events",
+      "name": "release_executor_authority_events_select_trusted_context",
       "permissive": "PERMISSIVE",
       "roles": "{north_star_runtime}",
       "cmd": "SELECT",
@@ -3830,6 +5026,20 @@
     },
     {
       "schema": "platform",
+      "relation": "release_activation_authority_epochs",
+      "kind": "r",
+      "row_level_security": true,
+      "force_row_level_security": true
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_control_events",
+      "kind": "r",
+      "row_level_security": true,
+      "force_row_level_security": true
+    },
+    {
+      "schema": "platform",
       "relation": "release_activation_history",
       "kind": "r",
       "row_level_security": true,
@@ -3852,6 +5062,27 @@
     {
       "schema": "platform",
       "relation": "release_activation_preparations",
+      "kind": "r",
+      "row_level_security": true,
+      "force_row_level_security": true
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_reconciliation_alarms",
+      "kind": "r",
+      "row_level_security": true,
+      "force_row_level_security": true
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_swap_receipts",
+      "kind": "r",
+      "row_level_security": true,
+      "force_row_level_security": true
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_verification_receipts",
       "kind": "r",
       "row_level_security": true,
       "force_row_level_security": true
@@ -3883,6 +5114,13 @@
       "kind": "r",
       "row_level_security": false,
       "force_row_level_security": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_executor_authority_events",
+      "kind": "r",
+      "row_level_security": true,
+      "force_row_level_security": true
     },
     {
       "schema": "platform",

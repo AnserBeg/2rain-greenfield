@@ -191,4 +191,53 @@ surfacing the result.
 
 ## Evidence
 
-Pending implementation, frozen candidate, gates, reviews, and user checkpoint.
+### Preliminary implementation notes
+
+- Migration 0005 adds the per-tenant approver/executor/control authority epoch,
+  real append-only executor and deny-only control event streams, swap receipts,
+  generation-bound verification receipts, and durable reconciliation alarms.
+  Its deferred fact-set constraints reject any committed P4b `SWAPPED` outcome
+  that lacks exactly one matching receipt, history record, and invalidation
+  outbox row.
+- The trusted PostgreSQL service accepts only a prebound activation-attempt ID.
+  It locks that attempt and the governing authority epoch, rebuilds the approval
+  and transition binding from canonical rows, checks expiry with
+  `clock_timestamp()` and a 3-second skew margin, and performs the pointer CAS
+  plus all swap facts in one transaction. Cancellation uses the same attempt
+  serialization. Rollback is the same call path with a fresh approval for the
+  earlier immutable release. The runtime acquires the immutable attempt row
+  through a trusted-context security-definer lock function, without granting
+  raw attempt mutation authority.
+- Reconciliation is receipt-driven and pointer-read-only: a receipt resumes
+  verification, an unchanged original generation remains retryable through the
+  activation call, and a missing receipt plus an advanced fence records
+  `LOST_RACE` while holding the attempt and pointer locks. Database uncertainty
+  remains `RECONCILING`; monotonic elapsed time drives an idempotent durable
+  overdue alarm. Only connection loss, explicit database retry/timeout
+  conditions, and ambiguous database failures enter reconciliation; SQL,
+  constraint, binding, and programming defects remain visible.
+- Post-swap verification records only pointer read-back, artifact availability,
+  and release-kernel invariants. It locks and compares the exact generation
+  before committing a verdict, so supersession records `SUPERSEDED`. G1 has no
+  nonblocking verification class and therefore no warning verdict.
+- The P5 seam exports the versioned generation event, names the future
+  at-least-once dispatcher owner, and supplies a maximum-fence consumer helper.
+  The helper rejects duplicate/reordered fences, requests authoritative reread
+  on a gap or doubt, and defines fence-tagged derived-cache discard behavior;
+  it is explicitly not request-pinning authority.
+
+### Preliminary focused evidence
+
+- PASS: canonical schema check (`5 applied, 5 verified`, drift clean), frozen
+  install, formatting, typecheck, lint, build, and dependency-boundary scan (53
+  files).
+- PASS: the focused activation matrix executes all 11 real-PostgreSQL scenarios
+  (12/12 TAP tests including the parent), including complete-fact cardinality
+  assertions for each same-pointer race, a real commit-response TCP disconnect,
+  and separate child/parent processes and pools.
+- PASS: full PostgreSQL (37/37), architecture (23/23), compiler (21/21),
+  integration (4/4), and unit (18/18) tests. The browser scaffold has one
+  intentional skip because product browser journeys are out of scope at G1.
+
+Implementation candidate commit, Critical reviews, and user checkpoint remain
+pending. Packet status and candidate metadata remain orchestrator-owned.
