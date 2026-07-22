@@ -41,7 +41,14 @@ importers:
 
   apps/api: {}
 
-  apps/web: {}
+  apps/web:
+    dependencies:
+      '@north-star/observability':
+        specifier: workspace:*
+        version: link:../../packages/observability
+      '@north-star/postgres-provider':
+        specifier: workspace:*
+        version: link:../../packages/postgres-provider
 
   apps/worker: {}
 
@@ -52,6 +59,8 @@ importers:
   packages/dev-tooling: {}
 
   packages/domain: {}
+
+  packages/observability: {}
 
   packages/postgres-provider:
     dependencies:

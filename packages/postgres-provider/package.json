@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     ".": "./src/migrations.ts",
+    "./readiness": "./src/readiness.ts",
     "./request-context": "./src/request-context.ts"
   },
   "dependencies": {

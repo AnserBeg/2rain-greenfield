@@ -1,0 +1,7 @@
+{
+  "name": "@north-star/observability",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": "./src/index.ts"
+}
