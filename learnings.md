@@ -85,3 +85,13 @@ How to apply: compare every discriminant, version, and invariant to supported ru
 Date: 2026-07-22
 Why: G1-P3 review found that hash-consistent bytes could still omit required envelope fields or carry mutually consistent semantic-digest claims unrelated to their payload.
 How to apply: validate required runtime shape and recompute semantic digests from canonical payload bytes; use correlated rehashing negatives that leave no registered root. See `docs/execution/packets/G1-P3.md`.
+
+## Ship callable effects with their reconciler
+Date: 2026-07-22
+Why: G1-P4 debate showed that enabling pointer mutation before receipt-based crash reconciliation would expose ambiguous commits and zombie coordinators.
+How to apply: schemas and policies may land noncallable, but withhold runtime mutation grants and APIs until CAS, decisive receipts, reconciliation, and race/fault proofs land together. See `docs/execution/packets/G1-P4a.md`.
+
+## Keep resumable observations out of decisive slots
+Date: 2026-07-22
+Why: A unique immutable outcome row cannot hold a timeout or infrastructure error without preventing the same attempt from later recording its actual swap or terminal no-swap result.
+How to apply: record retryable/paused/reconciling states as append-only phases or history; reserve the one decisive slot for committed effect or proven terminal no-effect. See `docs/execution/packets/G1-P4a.md`.
