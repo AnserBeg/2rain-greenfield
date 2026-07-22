@@ -19,6 +19,8 @@ import {
   compileApplication,
   type CompileSuccess,
   type ContentAddressedArtifact,
+  type ProjectionManifestEnvelope,
+  type ProjectionReference,
 } from '../../packages/compiler/src/index.js';
 import type {
   MintedUuid,
@@ -344,7 +346,7 @@ test('immutable release persistence verifies bytes, identities, links, RLS, and 
         );
 
         await t.test(
-          'corrupt, missing, mislinked, wrong-domain, closure, attestation, and scope inputs register no root',
+          'corrupt, missing, mislinked, unsupported frozen, attestation, and scope inputs register no root',
           async () => {
             const initialRoots = await releaseCount(pool);
             const cases: Array<{ code: string; compiled: CompileSuccess }> = [
@@ -371,6 +373,65 @@ test('immutable release persistence verifies bytes, identities, links, RLS, and 
               {
                 code: 'COMPILER_ATTESTATION_MISMATCH',
                 compiled: wrongAttestation(bootstrap),
+              },
+              {
+                code: 'RELEASE_MANIFEST_ENVELOPE_MISMATCH',
+                compiled: wrongReleaseManifestIdentity(
+                  bootstrap,
+                  'manifestVersion',
+                ),
+              },
+              {
+                code: 'RELEASE_MANIFEST_ENVELOPE_MISMATCH',
+                compiled: wrongReleaseManifestIdentity(
+                  bootstrap,
+                  'policyModelVersion',
+                ),
+              },
+              {
+                code: 'PROJECTION_MANIFEST_LINK_MISMATCH',
+                compiled: wrongProjectionVersion(
+                  bootstrap,
+                  'chunkingSchemeVersion',
+                ),
+              },
+              {
+                code: 'PROJECTION_MANIFEST_LINK_MISMATCH',
+                compiled: wrongProjectionVersion(bootstrap, 'manifestVersion'),
+              },
+              {
+                code: 'PROJECTION_MANIFEST_LINK_MISMATCH',
+                compiled: wrongProjectionVersion(
+                  bootstrap,
+                  'outputProtocolVersion',
+                ),
+              },
+              {
+                code: 'PROJECTION_MANIFEST_LINK_MISMATCH',
+                compiled: wrongProjectionReaderProtocolVersion(bootstrap),
+              },
+              {
+                code: 'PROJECTION_CHUNK_LINK_MISMATCH',
+                compiled: wrongChunkDescriptorVersion(bootstrap),
+              },
+              {
+                code: 'COMPILER_ATTESTATION_MISMATCH',
+                compiled: wrongAttestationIdentity(bootstrap, 'compileMode'),
+              },
+              {
+                code: 'COMPILER_ATTESTATION_MISMATCH',
+                compiled: wrongAttestationIdentity(
+                  bootstrap,
+                  'incrementalEquivalenceInvariant',
+                ),
+              },
+              {
+                code: 'COMPILE_RESULT_NOT_SUCCESSFUL',
+                compiled: wrongCompiledBundleKind(bootstrap),
+              },
+              {
+                code: 'COMPILE_RESULT_NOT_SUCCESSFUL',
+                compiled: wrongSuccessfulDiagnostics(bootstrap),
               },
             ];
 
@@ -752,6 +813,130 @@ function wrongAttestation(compiled: CompileSuccess): CompileSuccess {
   return clone;
 }
 
+function wrongReleaseManifestIdentity(
+  compiled: CompileSuccess,
+  field: 'manifestVersion' | 'policyModelVersion',
+): CompileSuccess {
+  const clone = structuredClone(compiled);
+  const manifest = clone.bundle.releaseManifest as unknown as Record<
+    string,
+    unknown
+  >;
+  manifest[field] = `northstar.unsupported/${field}`;
+  return rebuildReleaseRoot(clone);
+}
+
+function wrongProjectionVersion(
+  compiled: CompileSuccess,
+  field: 'chunkingSchemeVersion' | 'manifestVersion' | 'outputProtocolVersion',
+): CompileSuccess {
+  return rebuildProjectionManifest(compiled, (reference, manifest) => {
+    const mutableReference = reference as unknown as Record<string, unknown>;
+    const mutableManifest = manifest as unknown as Record<string, unknown>;
+    const unsupported = `northstar.unsupported/${field}`;
+    mutableReference[field] = unsupported;
+    mutableManifest[field] = unsupported;
+  });
+}
+
+function wrongProjectionReaderProtocolVersion(
+  compiled: CompileSuccess,
+): CompileSuccess {
+  return rebuildProjectionManifest(compiled, (reference, manifest) => {
+    const referenceCompatibility = reference.compatibility as unknown as Record<
+      string,
+      unknown
+    >;
+    const manifestCompatibility = manifest.compatibility as unknown as Record<
+      string,
+      unknown
+    >;
+    const unsupported = 'northstar.unsupported/minimumReaderProtocolVersion';
+    referenceCompatibility.minimumReaderProtocolVersion = unsupported;
+    manifestCompatibility.minimumReaderProtocolVersion = unsupported;
+  });
+}
+
+function wrongChunkDescriptorVersion(compiled: CompileSuccess): CompileSuccess {
+  return rebuildProjectionManifest(compiled, (_reference, manifest) => {
+    const descriptor = manifest.chunks[0];
+    assert.ok(descriptor);
+    const mutableDescriptor = descriptor as unknown as Record<string, unknown>;
+    mutableDescriptor.chunkDescriptorVersion =
+      'northstar.unsupported/chunkDescriptorVersion';
+  });
+}
+
+function rebuildProjectionManifest(
+  compiled: CompileSuccess,
+  mutate: (
+    reference: ProjectionReference,
+    manifest: ProjectionManifestEnvelope,
+  ) => void,
+): CompileSuccess {
+  const clone = structuredClone(compiled);
+  const reference = clone.bundle.releaseManifest.projections[0];
+  assert.ok(reference);
+  const priorRoot = reference.artifactRoot;
+  const artifact = clone.bundle.artifacts.find(
+    (candidate) => candidate.contentHash === priorRoot,
+  );
+  assert.ok(artifact);
+  assert.equal(artifact.artifactKind, 'projectionManifest');
+  const manifest = JSON.parse(
+    new TextDecoder().decode(artifact.canonicalBytes),
+  ) as ProjectionManifestEnvelope;
+  mutate(reference, manifest);
+  const bytes = new TextEncoder().encode(canonicalize(manifest));
+  const replacement: ContentAddressedArtifact = {
+    ...artifact,
+    canonicalBytes: bytes,
+    contentHash: hashBytes(artifact.domainTag, bytes),
+  };
+  reference.artifactRoot = replacement.contentHash;
+  clone.bundle.releaseManifest.artifactClosure =
+    clone.bundle.releaseManifest.artifactClosure
+      .map((contentHash) =>
+        contentHash === priorRoot ? replacement.contentHash : contentHash,
+      )
+      .toSorted();
+  clone.bundle.artifacts = replaceArtifact(
+    clone.bundle.artifacts,
+    priorRoot,
+    replacement,
+  );
+  clone.stagedArtifacts = replaceArtifact(
+    clone.stagedArtifacts,
+    priorRoot,
+    replacement,
+  );
+  return rebuildReleaseRoot(clone);
+}
+
+function wrongAttestationIdentity(
+  compiled: CompileSuccess,
+  field: 'compileMode' | 'incrementalEquivalenceInvariant',
+): CompileSuccess {
+  const clone = structuredClone(compiled);
+  const attestation = clone.attestation as unknown as Record<string, unknown>;
+  attestation[field] = `northstar.unsupported/${field}`;
+  return rehashAttestation(clone);
+}
+
+function wrongCompiledBundleKind(compiled: CompileSuccess): CompileSuccess {
+  const clone = structuredClone(compiled);
+  const bundle = clone.bundle as unknown as Record<string, unknown>;
+  bundle.kind = 'unsupportedCompiledReleaseBundle';
+  return clone;
+}
+
+function wrongSuccessfulDiagnostics(compiled: CompileSuccess): CompileSuccess {
+  const clone = structuredClone(compiled);
+  const success = clone as unknown as { diagnostics: unknown[] };
+  success.diagnostics = [{ code: 'unexpected-success-diagnostic' }];
+  return clone;
+}
+
 function rebuildReleaseRoot(compiled: CompileSuccess): CompileSuccess {
   const bytes = new TextEncoder().encode(
     canonicalize(compiled.bundle.releaseManifest),
@@ -776,6 +961,10 @@ function rebuildReleaseRoot(compiled: CompileSuccess): CompileSuccess {
     replacement,
   );
   compiled.attestation.releaseRoot = root;
+  return rehashAttestation(compiled);
+}
+
+function rehashAttestation(compiled: CompileSuccess): CompileSuccess {
   const attestationBody: Record<string, unknown> = {
     ...compiled.attestation,
   };
@@ -785,6 +974,16 @@ function rebuildReleaseRoot(compiled: CompileSuccess): CompileSuccess {
     new TextEncoder().encode(canonicalize(attestationBody)),
   );
   return compiled;
+}
+
+function replaceArtifact(
+  artifacts: ContentAddressedArtifact[],
+  priorHash: string,
+  replacement: ContentAddressedArtifact,
+): ContentAddressedArtifact[] {
+  return artifacts.map((artifact) =>
+    artifact.contentHash === priorHash ? replacement : artifact,
+  );
 }
 
 function replaceRootArtifact(

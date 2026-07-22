@@ -75,3 +75,8 @@ How to apply: after adding limit, summary, or cascade markers, sort the final em
 Date: 2026-07-21
 Why: G1-P3's first PL/pgSQL guard used `BEGIN`, and the accepted G0-P4a loader correctly rejected the migration because the runner exclusively owns transactions.
 How to apply: express migration-time guards without transaction-control tokens, and run `loadMigrations` as a focused check before any database suite.
+
+## Validate frozen serialized contracts at runtime
+Date: 2026-07-21
+Why: TypeScript types do not validate serialized frozen contracts crossing a process or persistence boundary.
+How to apply: compare every discriminant, version, and invariant to supported runtime constants, and keep a correlated-mutation negative test.

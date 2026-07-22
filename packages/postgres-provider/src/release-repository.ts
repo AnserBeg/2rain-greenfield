@@ -12,12 +12,18 @@ import {
   parseAuthoredApplicationPackageJson,
 } from '@north-star/canonical-model';
 import {
+  CHUNK_DESCRIPTOR_VERSION,
+  CHUNKING_SCHEME_VERSION,
   COMPILER_ATTESTATION_VERSION,
   COMPILER_SEMANTIC_PROFILE_VERSION,
   COMPILER_VERSION,
   HASH_ALGORITHM,
   HASH_DOMAINS,
+  INCREMENTAL_EQUIVALENCE_INVARIANT,
   OUTPUT_PROTOCOL_VERSION,
+  POLICY_MODEL_VERSION,
+  PROJECTION_MANIFEST_VERSION,
+  RELEASE_MANIFEST_VERSION,
   type CompileSuccess,
   type ContentAddressedArtifact,
   type ProjectionManifestEnvelope,
@@ -373,8 +379,11 @@ function verifyCompiledRelease(
 ): VerifiedRelease {
   if (
     compiled.status !== 'compiled' ||
+    !Array.isArray(compiled.diagnostics) ||
+    compiled.diagnostics.length !== 0 ||
     compiled.releaseRoot.length === 0 ||
     !compiled.bundle ||
+    compiled.bundle.kind !== 'compiledReleaseBundle' ||
     !compiled.attestation
   ) {
     throw integrity(
@@ -504,6 +513,7 @@ function verifyCompiledRelease(
         chunkArtifact.artifactKind !== 'projectionChunk' ||
         chunkArtifact.domainTag !==
           `${HASH_DOMAINS.projectionChunk}/${reference.familyId}` ||
+        descriptor.chunkDescriptorVersion !== CHUNK_DESCRIPTOR_VERSION ||
         chunkArtifact.canonicalBytes.byteLength !== descriptor.byteLength ||
         descriptor.mediaType !== artifactMediaType ||
         canonicalize(descriptor.logicalScope) !==
@@ -565,6 +575,8 @@ function verifyReleaseManifestEnvelope(
     manifest.completeSnapshot !== true ||
     manifest.runtimeOverlayEvaluation !== 'forbidden' ||
     manifest.policyDecisionDependency !== 'liveCurrentDenyCapable' ||
+    manifest.manifestVersion !== RELEASE_MANIFEST_VERSION ||
+    manifest.policyModelVersion !== POLICY_MODEL_VERSION ||
     manifest.compilerVersion !== COMPILER_VERSION ||
     manifest.compilerSemanticProfileVersion !==
       COMPILER_SEMANTIC_PROFILE_VERSION ||
@@ -594,7 +606,13 @@ function verifyAttestation(
   if (
     compiled.attestation.kind !== 'compilerAttestation' ||
     compiled.attestation.attestationVersion !== COMPILER_ATTESTATION_VERSION ||
+    compiled.attestation.compileMode !== 'coldFull' ||
+    compiled.attestation.incrementalEquivalenceInvariant !==
+      INCREMENTAL_EQUIVALENCE_INVARIANT ||
+    compiled.attestation.compilerVersion !== COMPILER_VERSION ||
     compiled.attestation.compilerVersion !== manifest.compilerVersion ||
+    compiled.attestation.compilerSemanticProfileVersion !==
+      COMPILER_SEMANTIC_PROFILE_VERSION ||
     compiled.attestation.compilerSemanticProfileVersion !==
       manifest.compilerSemanticProfileVersion ||
     compiled.attestation.inputDefinitionDigest !==
@@ -634,6 +652,14 @@ function verifyProjectionReference(
   ] as const;
   if (
     manifest.kind !== 'projectionManifest' ||
+    reference.chunkingSchemeVersion !== CHUNKING_SCHEME_VERSION ||
+    manifest.chunkingSchemeVersion !== CHUNKING_SCHEME_VERSION ||
+    reference.manifestVersion !== PROJECTION_MANIFEST_VERSION ||
+    manifest.manifestVersion !== PROJECTION_MANIFEST_VERSION ||
+    reference.outputProtocolVersion !== OUTPUT_PROTOCOL_VERSION ||
+    manifest.outputProtocolVersion !== OUTPUT_PROTOCOL_VERSION ||
+    !hasSupportedProjectionCompatibility(reference.compatibility) ||
+    !hasSupportedProjectionCompatibility(manifest.compatibility) ||
     !Array.isArray(manifest.chunks) ||
     manifest.chunks.length === 0 ||
     sharedKeys.some(
@@ -645,6 +671,18 @@ function verifyProjectionReference(
       'projection reference metadata differs from its manifest',
     );
   }
+}
+
+function hasSupportedProjectionCompatibility(
+  compatibility: ProjectionReference['compatibility'],
+): boolean {
+  return (
+    compatibility.additiveInstances === 'allowed' &&
+    compatibility.minimumReaderProtocolVersion === OUTPUT_PROTOCOL_VERSION &&
+    compatibility.retirement === 'requiresNewProtocolOrExplicitOptionality' &&
+    compatibility.unknownRequiredFamily === 'reject' &&
+    compatibility.versionChange === 'newFamilyOrPayloadVersion'
+  );
 }
 
 function uniqueArtifacts(
