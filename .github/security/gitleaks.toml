@@ -1,0 +1,13 @@
+title = "North Star ERP secret scanning policy"
+
+[extend]
+useDefault = true
+
+# This rule exists only to prove the real scanner failure path. The matching
+# value is assembled and committed in a disposable repository at test time;
+# no complete test secret is stored in this repository.
+[[rules]]
+id = "north-star-synthetic-test-secret"
+description = "North Star synthetic secret used by the negative scan fixture"
+regex = '''NORTH_STAR_TEST_SECRET_[A-Z0-9]{32}'''
+keywords = ["NORTH_STAR_TEST_SECRET_"]
