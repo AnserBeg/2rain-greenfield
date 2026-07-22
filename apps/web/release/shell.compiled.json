@@ -1,0 +1,261 @@
+{
+  "compilerVersion": "northstar.compiler/0.1.0",
+  "normalizedDefinitionDigest": "9af21aeaffd2caec89606c89e6b74f295d031323a2aabbda408d4d87811aaac3",
+  "outputProtocolVersion": "northstar.compiler-output/v0-experimental",
+  "projections": {
+    "agent": {
+      "artifactRoot": "ae5014b09302e6d9eeb512d9e370b094780ee0a02bcfb97ea986b9230fd1280c",
+      "familyId": "northstar.compiler:projection-family.agent-discovery",
+      "instanceId": "northstar.shell:projection.agent-discovery",
+      "payload": {
+        "kind": "agentDiscoveryPayload",
+        "operations": [],
+        "queries": [
+          {
+            "fieldIds": ["northstar.shell:field.workspace_name"],
+            "queryId": "northstar.shell:query.workspace_get"
+          }
+        ],
+        "schemaVersion": "northstar.agent-discovery-payload/v0-provisional",
+        "surfaces": [
+          "northstar.shell:surface.a_home",
+          "northstar.shell:surface.b_setup",
+          "northstar.shell:surface.c_unsupported",
+          "northstar.shell:surface.d_error"
+        ],
+        "toolIds": [
+          "erp_discover",
+          "erp_query",
+          "erp_plan",
+          "erp_execute",
+          "erp_verify"
+        ]
+      },
+      "payloadSchemaVersion": "northstar.agent-discovery-payload/v0-provisional",
+      "semanticDigest": "f0936a0793569d902eaec01de845b3c0036f3b42a5f30afc9528f1770779a1c7"
+    },
+    "catalog": {
+      "artifactRoot": "84d4c261708f77723c6053a10c984bec31567f9c9978d915a3f97762cdd8d846",
+      "familyId": "northstar.compiler:projection-family.semantic-model",
+      "instanceId": "northstar.shell:projection.semantic-model",
+      "payload": {
+        "constructs": [
+          {
+            "constructKind": "capabilityRequirement",
+            "semanticFingerprint": "9e64753e7823e8350c24c21bccd646c0ec9f852b2abf0ba0314f89597867c1e0",
+            "subjectId": "northstar.shell:component.error_probe"
+          },
+          {
+            "constructKind": "capabilityRequirement",
+            "semanticFingerprint": "275f5f473616d4e7278fe4a6f804ad77be8e5c9a520c4291fbaed4942686ca75",
+            "subjectId": "northstar.shell:component.future_insights"
+          },
+          {
+            "constructKind": "capabilityRequirement",
+            "semanticFingerprint": "8176c32c3cb5138147ca9e5e581ba7933d365cfb26311808c13a20452b9db530",
+            "subjectId": "northstar.shell:component.release_summary"
+          },
+          {
+            "constructKind": "capabilityRequirement",
+            "semanticFingerprint": "b6e282e5bb829b2d0962b17062c216d55409970dbe53cd33573d6407c3e57a9a",
+            "subjectId": "northstar.shell:component.setup_checklist"
+          },
+          {
+            "constructKind": "entityDefinition",
+            "semanticFingerprint": "63c4ac7448ba200cb43822829b3c7d3c061b8419f8d748593d60d395a4f8bb70",
+            "subjectId": "northstar.shell:entity.workspace"
+          },
+          {
+            "constructKind": "fieldDefinition",
+            "semanticFingerprint": "022710b1b2d8efc06e02bf797f69a72c7f27cbff434bf1eea8c76284e8c1a71f",
+            "subjectId": "northstar.shell:field.workspace_name"
+          },
+          {
+            "constructKind": "moduleDefinition",
+            "semanticFingerprint": "2e71458a349f9588fc9f225f4395a92485e355d05606262866c7c7aba1556172",
+            "subjectId": "northstar.shell:module.workspace"
+          },
+          {
+            "constructKind": "packageDefinition",
+            "semanticFingerprint": "46d3414cc5743d2f1318853d9123af3e944a6aa661fbdba7f2bd7307bd169300",
+            "subjectId": "northstar.shell:package.demo"
+          },
+          {
+            "constructKind": "permissionDefinition",
+            "semanticFingerprint": "2bc4c1dfe6aded60916ff88643d700e965ebbec353ffc04d7a8439e56f3e3cec",
+            "subjectId": "northstar.shell:permission.workspace_read"
+          },
+          {
+            "constructKind": "queryDefinition",
+            "semanticFingerprint": "b5795e43be2a479f2000f17b7c7ce8370bcf6ca42e6bd36db9a466e455b753ee",
+            "subjectId": "northstar.shell:query.workspace_get"
+          },
+          {
+            "constructKind": "storageMappingDefinition",
+            "semanticFingerprint": "8383409e707f53c7449ec3868c2cadd82fab1de144faf576358c61a0ddee5d04",
+            "subjectId": "northstar.shell:storage.workspace"
+          },
+          {
+            "constructKind": "surfaceDefinition",
+            "semanticFingerprint": "e03d88d143c3c57daf54951b3736afada157c4b392924389a1dde3258b4414ec",
+            "subjectId": "northstar.shell:surface.a_home"
+          },
+          {
+            "constructKind": "surfaceDefinition",
+            "semanticFingerprint": "cfca1e04afc86a2ab10cffa431376fb2febc977553b0ac7a31f7aaa8336484f3",
+            "subjectId": "northstar.shell:surface.b_setup"
+          },
+          {
+            "constructKind": "surfaceDefinition",
+            "semanticFingerprint": "35cbf0ec6305dbe0be4d61e65c7df97fef7c2a23c11f937f4b065049ff4f4663",
+            "subjectId": "northstar.shell:surface.c_unsupported"
+          },
+          {
+            "constructKind": "surfaceDefinition",
+            "semanticFingerprint": "791bb4c18dda36aee88d60db24cb04f7ed6353486c32af14bdf0b3588abc92d8",
+            "subjectId": "northstar.shell:surface.d_error"
+          }
+        ],
+        "kind": "semanticModelPayload",
+        "schemaVersion": "northstar.semantic-model-payload/v0-provisional"
+      },
+      "payloadSchemaVersion": "northstar.semantic-model-payload/v0-provisional",
+      "semanticDigest": "1b7a0e07151cb95c0a16985ac38c778537c48eaad8f633dbe18b9ed05c010f99"
+    },
+    "operation": {
+      "artifactRoot": "ec4746aea9140b099528d4061fb7ba53b197f0bf4c1e201552e7ebc1ec120313",
+      "familyId": "northstar.compiler:projection-family.operation-catalog",
+      "instanceId": "northstar.shell:projection.operation-catalog",
+      "payload": {
+        "kind": "operationCatalogPayload",
+        "operations": [],
+        "schemaVersion": "northstar.operation-catalog-payload/v0-provisional"
+      },
+      "payloadSchemaVersion": "northstar.operation-catalog-payload/v0-provisional",
+      "semanticDigest": "7691751f6ed2d873ebb2d22275cf215ac76e279d9ed6f7a22bddfd0d4c77ca7c"
+    },
+    "query": {
+      "artifactRoot": "320196c7e529f411a136ac982b9b0c27a98fc1b7a657fa5e23ee00bc889e3c63",
+      "familyId": "northstar.compiler:projection-family.query-catalog",
+      "instanceId": "northstar.shell:projection.query-catalog",
+      "payload": {
+        "kind": "queryCatalogPayload",
+        "queries": [
+          {
+            "filter": {
+              "kind": "booleanPredicate",
+              "schemaVersion": "v0-experimental",
+              "value": true
+            },
+            "lifecycle": "active",
+            "maximumResultCount": 1,
+            "permissionId": "northstar.shell:permission.workspace_read",
+            "queryId": "northstar.shell:query.workspace_get",
+            "queryType": "get",
+            "selections": [
+              {
+                "fieldId": "northstar.shell:field.workspace_name",
+                "orderKey": 10,
+                "selectionId": "northstar.shell:selection.workspace_name"
+              }
+            ],
+            "sourceEntityId": "northstar.shell:entity.workspace",
+            "tier": "q0"
+          }
+        ],
+        "schemaVersion": "northstar.query-catalog-payload/v0-provisional"
+      },
+      "payloadSchemaVersion": "northstar.query-catalog-payload/v0-provisional",
+      "semanticDigest": "2e617336d2c715c98dafae27b8b0c5f3fe8e810fb86be335ea0bf48d3dae7e94"
+    },
+    "surface": {
+      "artifactRoot": "dc629fb7108dd7627e1fe11b70f0c283164d4976a11a2e08a442ff86d9f5f460",
+      "familyId": "northstar.compiler:projection-family.surface-manifest",
+      "instanceId": "northstar.shell:projection.surface-manifest",
+      "payload": {
+        "kind": "surfaceManifestPayload",
+        "schemaVersion": "northstar.surface-manifest-payload/v0-provisional",
+        "surfaces": [
+          {
+            "archetype": "home",
+            "dataSourceQueryId": "northstar.shell:query.workspace_get",
+            "fieldIds": ["northstar.shell:field.workspace_name"],
+            "label": "Home",
+            "lifecycle": "active",
+            "slots": [
+              {
+                "contentReferenceId": "northstar.shell:component.release_summary",
+                "orderKey": 10,
+                "slot": "exceptions",
+                "slotId": "northstar.shell:slot.home_exceptions"
+              },
+              {
+                "contentReferenceId": "northstar.shell:component.setup_checklist",
+                "orderKey": 20,
+                "slot": "setupChecklist",
+                "slotId": "northstar.shell:slot.home_setup"
+              }
+            ],
+            "statusRoles": ["inProgress", "success"],
+            "surfaceId": "northstar.shell:surface.a_home"
+          },
+          {
+            "archetype": "home",
+            "dataSourceQueryId": "northstar.shell:query.workspace_get",
+            "fieldIds": ["northstar.shell:field.workspace_name"],
+            "label": "Setup",
+            "lifecycle": "active",
+            "slots": [
+              {
+                "contentReferenceId": "northstar.shell:component.setup_checklist",
+                "orderKey": 10,
+                "slot": "setupChecklist",
+                "slotId": "northstar.shell:slot.setup_checklist"
+              }
+            ],
+            "statusRoles": ["attention"],
+            "surfaceId": "northstar.shell:surface.b_setup"
+          },
+          {
+            "archetype": "home",
+            "dataSourceQueryId": "northstar.shell:query.workspace_get",
+            "fieldIds": ["northstar.shell:field.workspace_name"],
+            "label": "Unsupported component",
+            "lifecycle": "active",
+            "slots": [
+              {
+                "contentReferenceId": "northstar.shell:component.future_insights",
+                "orderKey": 10,
+                "slot": "exceptions",
+                "slotId": "northstar.shell:slot.unsupported_component"
+              }
+            ],
+            "statusRoles": ["blocked"],
+            "surfaceId": "northstar.shell:surface.c_unsupported"
+          },
+          {
+            "archetype": "home",
+            "dataSourceQueryId": "northstar.shell:query.workspace_get",
+            "fieldIds": ["northstar.shell:field.workspace_name"],
+            "label": "Renderer error",
+            "lifecycle": "active",
+            "slots": [
+              {
+                "contentReferenceId": "northstar.shell:component.error_probe",
+                "orderKey": 10,
+                "slot": "exceptions",
+                "slotId": "northstar.shell:slot.error_probe"
+              }
+            ],
+            "statusRoles": ["blocked"],
+            "surfaceId": "northstar.shell:surface.d_error"
+          }
+        ]
+      },
+      "payloadSchemaVersion": "northstar.surface-manifest-payload/v0-provisional",
+      "semanticDigest": "3883e8cac981c8de95b1aad28b52ce410a0ba122b8bf1603049d11b16dcb34b6"
+    }
+  },
+  "releaseRoot": "728bc0ae2306ab0c5cc188f0675043247628629eab8825ff0cb94e286bf2c12b",
+  "schemaVersion": "northstar.web:compiled-shell-fixture/v1"
+}

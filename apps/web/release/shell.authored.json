@@ -1,0 +1,316 @@
+{
+  "kind": "applicationPackageRevision",
+  "schemaVersion": "v0-experimental",
+  "languageVersion": "v0-experimental",
+  "package": {
+    "kind": "packageDefinition",
+    "schemaVersion": "v0-experimental",
+    "packageId": "northstar.shell:package.demo",
+    "namespace": "northstar.shell",
+    "version": "0.1.0",
+    "provenance": "firstParty"
+  },
+  "modules": [
+    {
+      "kind": "moduleDefinition",
+      "schemaVersion": "v0-experimental",
+      "moduleId": "northstar.shell:module.workspace",
+      "ownerPackageId": "northstar.shell:package.demo",
+      "label": "Workspace",
+      "orderKey": 10,
+      "composition": {
+        "kind": "compositionSeam",
+        "schemaVersion": "v0-experimental",
+        "status": "unsupported"
+      }
+    }
+  ],
+  "entities": [
+    {
+      "kind": "entityDefinition",
+      "schemaVersion": "v0-experimental",
+      "entityId": "northstar.shell:entity.workspace",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v0-experimental",
+        "targetId": "northstar.shell:module.workspace"
+      },
+      "label": "Workspace",
+      "orderKey": 10,
+      "storage": {
+        "kind": "storageMappingReference",
+        "schemaVersion": "v0-experimental",
+        "targetId": "northstar.shell:storage.workspace"
+      }
+    }
+  ],
+  "fields": [
+    {
+      "kind": "fieldDefinition",
+      "schemaVersion": "v0-experimental",
+      "fieldId": "northstar.shell:field.workspace_name",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v0-experimental",
+        "targetId": "northstar.shell:entity.workspace"
+      },
+      "label": "Name",
+      "orderKey": 10,
+      "classification": "internal",
+      "fieldType": {
+        "kind": "textFieldType",
+        "schemaVersion": "v0-experimental",
+        "maximumLength": 240
+      }
+    }
+  ],
+  "relations": [],
+  "stateMachines": [],
+  "surfaces": [
+    {
+      "kind": "surfaceDefinition",
+      "schemaVersion": "v0-experimental",
+      "surfaceId": "northstar.shell:surface.a_home",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v0-experimental",
+        "targetId": "northstar.shell:module.workspace"
+      },
+      "label": "Home",
+      "archetype": "home",
+      "dataSource": {
+        "kind": "queryReference",
+        "schemaVersion": "v0-experimental",
+        "targetId": "northstar.shell:query.workspace_get"
+      },
+      "slots": [
+        {
+          "kind": "surfaceSlot",
+          "schemaVersion": "v0-experimental",
+          "slotId": "northstar.shell:slot.home_exceptions",
+          "slot": "exceptions",
+          "orderKey": 10,
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v0-experimental",
+            "targetId": "northstar.shell:component.release_summary"
+          }
+        },
+        {
+          "kind": "surfaceSlot",
+          "schemaVersion": "v0-experimental",
+          "slotId": "northstar.shell:slot.home_setup",
+          "slot": "setupChecklist",
+          "orderKey": 20,
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v0-experimental",
+            "targetId": "northstar.shell:component.setup_checklist"
+          }
+        }
+      ],
+      "statusRoles": ["success", "inProgress"]
+    },
+    {
+      "kind": "surfaceDefinition",
+      "schemaVersion": "v0-experimental",
+      "surfaceId": "northstar.shell:surface.b_setup",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v0-experimental",
+        "targetId": "northstar.shell:module.workspace"
+      },
+      "label": "Setup",
+      "archetype": "home",
+      "dataSource": {
+        "kind": "queryReference",
+        "schemaVersion": "v0-experimental",
+        "targetId": "northstar.shell:query.workspace_get"
+      },
+      "slots": [
+        {
+          "kind": "surfaceSlot",
+          "schemaVersion": "v0-experimental",
+          "slotId": "northstar.shell:slot.setup_checklist",
+          "slot": "setupChecklist",
+          "orderKey": 10,
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v0-experimental",
+            "targetId": "northstar.shell:component.setup_checklist"
+          }
+        }
+      ],
+      "statusRoles": ["attention"]
+    },
+    {
+      "kind": "surfaceDefinition",
+      "schemaVersion": "v0-experimental",
+      "surfaceId": "northstar.shell:surface.c_unsupported",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v0-experimental",
+        "targetId": "northstar.shell:module.workspace"
+      },
+      "label": "Unsupported component",
+      "archetype": "home",
+      "dataSource": {
+        "kind": "queryReference",
+        "schemaVersion": "v0-experimental",
+        "targetId": "northstar.shell:query.workspace_get"
+      },
+      "slots": [
+        {
+          "kind": "surfaceSlot",
+          "schemaVersion": "v0-experimental",
+          "slotId": "northstar.shell:slot.unsupported_component",
+          "slot": "exceptions",
+          "orderKey": 10,
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v0-experimental",
+            "targetId": "northstar.shell:component.future_insights"
+          }
+        }
+      ],
+      "statusRoles": ["blocked"]
+    },
+    {
+      "kind": "surfaceDefinition",
+      "schemaVersion": "v0-experimental",
+      "surfaceId": "northstar.shell:surface.d_error",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v0-experimental",
+        "targetId": "northstar.shell:module.workspace"
+      },
+      "label": "Renderer error",
+      "archetype": "home",
+      "dataSource": {
+        "kind": "queryReference",
+        "schemaVersion": "v0-experimental",
+        "targetId": "northstar.shell:query.workspace_get"
+      },
+      "slots": [
+        {
+          "kind": "surfaceSlot",
+          "schemaVersion": "v0-experimental",
+          "slotId": "northstar.shell:slot.error_probe",
+          "slot": "exceptions",
+          "orderKey": 10,
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v0-experimental",
+            "targetId": "northstar.shell:component.error_probe"
+          }
+        }
+      ],
+      "statusRoles": ["blocked"]
+    }
+  ],
+  "queries": [
+    {
+      "kind": "queryDefinition",
+      "schemaVersion": "v0-experimental",
+      "queryId": "northstar.shell:query.workspace_get",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v0-experimental",
+        "targetId": "northstar.shell:module.workspace"
+      },
+      "sourceEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v0-experimental",
+        "targetId": "northstar.shell:entity.workspace"
+      },
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v0-experimental",
+        "targetId": "northstar.shell:permission.workspace_read"
+      },
+      "queryType": "get",
+      "tier": "q0",
+      "maximumResultCount": 1,
+      "selections": [
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v0-experimental",
+          "selectionId": "northstar.shell:selection.workspace_name",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v0-experimental",
+            "targetId": "northstar.shell:field.workspace_name"
+          },
+          "orderKey": 10
+        }
+      ]
+    }
+  ],
+  "operations": [],
+  "permissions": [
+    {
+      "kind": "permissionDefinition",
+      "schemaVersion": "v0-experimental",
+      "permissionId": "northstar.shell:permission.workspace_read",
+      "label": "Read workspace",
+      "action": "read",
+      "resource": {
+        "kind": "entityReference",
+        "schemaVersion": "v0-experimental",
+        "targetId": "northstar.shell:entity.workspace"
+      }
+    }
+  ],
+  "assertions": [],
+  "storageMappings": [
+    {
+      "kind": "storageMappingDefinition",
+      "schemaVersion": "v0-experimental",
+      "storageMappingId": "northstar.shell:storage.workspace",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v0-experimental",
+        "targetId": "northstar.shell:entity.workspace"
+      },
+      "storageClass": "generatedTyped"
+    }
+  ],
+  "capabilityRequirements": [
+    {
+      "kind": "capabilityRequirement",
+      "schemaVersion": "v0-experimental",
+      "capabilityId": "northstar.shell:component.error_probe",
+      "capabilityVersion": 1,
+      "supportStatus": "supported",
+      "declaredEffects": ["read"],
+      "requiredProjections": ["surface"]
+    },
+    {
+      "kind": "capabilityRequirement",
+      "schemaVersion": "v0-experimental",
+      "capabilityId": "northstar.shell:component.future_insights",
+      "capabilityVersion": 1,
+      "supportStatus": "supported",
+      "declaredEffects": ["read"],
+      "requiredProjections": ["surface"]
+    },
+    {
+      "kind": "capabilityRequirement",
+      "schemaVersion": "v0-experimental",
+      "capabilityId": "northstar.shell:component.release_summary",
+      "capabilityVersion": 1,
+      "supportStatus": "supported",
+      "declaredEffects": ["read"],
+      "requiredProjections": ["surface"]
+    },
+    {
+      "kind": "capabilityRequirement",
+      "schemaVersion": "v0-experimental",
+      "capabilityId": "northstar.shell:component.setup_checklist",
+      "capabilityVersion": 1,
+      "supportStatus": "supported",
+      "declaredEffects": ["read"],
+      "requiredProjections": ["surface"]
+    }
+  ]
+}

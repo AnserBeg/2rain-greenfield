@@ -33,9 +33,10 @@ As of 2026-07-21, the binding rules not yet backed by a tracked enforcement
 packet:
 
 1. **UI/UX surface grammar** (archetypes, one-authority-per-surface,
-   status-color grammar, weight-matches-consequence) — G1 skill-pin and the
-   compiled SurfaceRuntime seam are now tracked by G1-P7/G1-P8. The full G2
-   five-archetype conformance packet remains to be created at the G2 cut.
+   status-color grammar, weight-matches-consequence) — G1-P7 now renders the
+   first compiled-release-only shell with a closed registry; G1-P8 still owns
+   the skill pin and executable seam. The full G2 five-archetype conformance
+   packet remains to be created at the G2 cut.
 2. **Mobile/responsive contract** — same instruments; the G2 compact-projection
    conformance is described but not yet a tracked packet.
 3. **Accessibility (WCAG 2.2 AA)** — plan §8.4/§8.5; G2 conformance + G7 audit
@@ -95,7 +96,7 @@ later stage cuts must create their remaining enforcement packets.
 
 | Concern | Instrument | Enforced today by | Executable at | Status |
 |---|---|---|---|---|
-| Surface grammar (5 archetypes, one authority per surface, status colors, weight-matches-consequence) | plan §8.5-8.6; `ux-grammar` skill | skill (advisory) | G1-P7 compiled shell + G1-P8 skill-pin/seam; G2 full conformance | scheduled |
+| Surface grammar (5 archetypes, one authority per surface, status colors, weight-matches-consequence) | plan §8.5-8.6; `ux-grammar` skill | G1-P7 issued-view-only SurfaceRuntime, deterministic compiled-navigation assertion, closed component registry, rendered unsupported/error diagnostics, status-role styling, and browser accessibility smoke; `ux-grammar` skill remains advisory until G1-P8 | G1-P7 compiled shell + G1-P8 skill-pin/seam; G2 full conformance | partially enforced |
 | Responsive/mobile contract | plan §8.5; `ux-grammar` skill | skill (advisory) | G2 compact-projection conformance | prose-only (packets untracked) |
 | Accessibility (WCAG 2.2 AA) | plan §8.4-8.5 | — | G2 conformance; G7 audit | prose-only (packets untracked) |
 | Customize content, never grammar | plan §8.6, §10 | `ux-grammar` skill | G6 customization gates | scheduled |

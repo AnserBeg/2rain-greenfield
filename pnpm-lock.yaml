@@ -52,6 +52,16 @@ importers:
       '@north-star/postgres-provider':
         specifier: workspace:*
         version: link:../../packages/postgres-provider
+      '@north-star/runtime':
+        specifier: workspace:*
+        version: link:../../packages/runtime
+    devDependencies:
+      '@north-star/canonical-model':
+        specifier: workspace:*
+        version: link:../../packages/canonical-model
+      '@north-star/compiler':
+        specifier: workspace:*
+        version: link:../../packages/compiler
 
   apps/worker: {}
 

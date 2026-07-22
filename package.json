@@ -23,7 +23,7 @@
     "test:unit": "node --import tsx --test test/unit/**/*.test.ts",
     "test:integration": "node --import tsx --test test/integration/**/*.test.ts",
     "test:postgres": "node --import tsx --test test/postgres/**/*.test.ts",
-    "test:browser": "playwright test"
+    "test:browser": "playwright test --config apps/web/playwright.config.ts"
   },
   "devDependencies": {
     "@eslint/js": "^9.34.0",
