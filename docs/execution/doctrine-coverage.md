@@ -58,7 +58,7 @@ later stage cuts must create their remaining enforcement packets.
 | Trusted tenant/request context | ADR-0004 | G0-P4b authenticated-entry, two-tenant RLS, and pool-reuse tests | G0-P4b trusted context; G1-P5 request-view pinning tests | partially enforced |
 | Drop `@agent-native/core` | ADR-0005 | G0-P3 manifest, lockfile, import, and compatibility-authority scan | G0-P3 boundary checker | enforced |
 | Compiler determinism (round-trip/hash) | ADR-0001 (partial) + plan §5.3 | G1-P2 permutation, schedule, fresh-process, twice-compile, golden leaf/manifest/root/diff, and hermeticity gates | G1-P2 compiler tests | enforced |
-| Complete fail-closed Merkle release output | Freeze B; plan §5.3-5.5 | G1-P2 required-family/cross-projection/no-root tests + G1-P3 domain-hash, manifest/projection/chunk link, exact-closure, attestation, and no-root-on-registration-failure tests | G1-P2 compiler tests; G1-P3 verified `bytea` registration | enforced |
+| Complete fail-closed Merkle release output | Freeze B; plan §5.3-5.5 | G1-P2 required-family/cross-projection/no-root tests + G1-P3 required release-envelope shape, domain-hash, manifest/projection/chunk links, payload-derived projection semantic digests, exact closure, attestation, and no-root-on-registration-failure tests | G1-P2 compiler tests; G1-P3 verified `bytea` registration | enforced |
 
 ## Canonical-language evolution and compatibility
 

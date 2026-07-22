@@ -80,3 +80,8 @@ How to apply: express migration-time guards without transaction-control tokens, 
 Date: 2026-07-21
 Why: TypeScript types do not validate serialized frozen contracts crossing a process or persistence boundary.
 How to apply: compare every discriminant, version, and invariant to supported runtime constants, and keep a correlated-mutation negative test.
+
+## Validate structure and derive digests independently
+Date: 2026-07-22
+Why: G1-P3 review found that hash-consistent bytes could still omit required envelope fields or carry mutually consistent semantic-digest claims unrelated to their payload.
+How to apply: validate required runtime shape and recompute semantic digests from canonical payload bytes; use correlated rehashing negatives that leave no registered root. See `docs/execution/packets/G1-P3.md`.
