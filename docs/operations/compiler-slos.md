@@ -35,4 +35,3 @@ bit-identical to a cold compile.
 The inherited quarry's compiled-manifest ≤4 MiB and module-context ≤18K
 character values remain planning references, not adopted greenfield gates;
 their physical model and global-manifest assumptions do not match Freeze B.
-

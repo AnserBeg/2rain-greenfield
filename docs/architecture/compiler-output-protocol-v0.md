@@ -206,4 +206,3 @@ The doctrine map tracks these required later owners:
 - draft preview using this same hermetic compiler core, never a second
   evaluator; and
 - measurement-triggered per-subgraph incremental implementation.
-

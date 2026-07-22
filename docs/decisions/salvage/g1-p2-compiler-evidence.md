@@ -68,4 +68,3 @@ boundary checker, and the packet's two-review Critical chain. Before
 integration, rollback is deletion of the G1-P2-owned compiler, fixture, test,
 protocol, SLO, and salvage files plus restoration of its manifest/lock,
 doctrine, packet, ledger, and language-note changes.
-
