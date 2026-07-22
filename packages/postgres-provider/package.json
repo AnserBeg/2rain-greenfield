@@ -9,6 +9,7 @@
     "./release-activation-service": "./src/release-activation-service.ts",
     "./release-approval-service": "./src/release-approval-service.ts",
     "./release-repository": "./src/release-repository.ts",
+    "./request-runtime-view-service": "./src/request-runtime-view-service.ts",
     "./request-context": "./src/request-context.ts"
   },
   "dependencies": {
