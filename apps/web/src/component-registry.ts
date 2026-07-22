@@ -37,7 +37,12 @@ export const REGISTERED_SURFACE_COMPONENT_IDS = Object.freeze(
 export function renderRegisteredSurfaceComponent(
   context: SurfaceComponentContext,
 ): SurfaceComponentRenderResult {
-  const renderer = componentRegistry[context.slot.contentReferenceId];
+  const renderer = Object.hasOwn(
+    componentRegistry,
+    context.slot.contentReferenceId,
+  )
+    ? componentRegistry[context.slot.contentReferenceId]
+    : undefined;
   if (!renderer) {
     return Object.freeze({
       code: 'UNSUPPORTED_COMPONENT' as const,

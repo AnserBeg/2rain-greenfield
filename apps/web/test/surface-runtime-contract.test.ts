@@ -123,6 +123,33 @@ test('closed registry returns diagnostics for unknown and failing components', a
   });
 });
 
+test('inherited object names cannot execute as unregistered components', async () => {
+  const temporaryDirectory = mkdtempSync(join(tmpdir(), 'g1-p7-registry-'));
+  try {
+    const fixture = JSON.parse(
+      readFileSync(compiledFixturePath, 'utf8'),
+    ) as Record<string, unknown>;
+    const surface = projectionRecord(fixture, 'surface');
+    const payload = record(surface.payload);
+    const firstSurface = arrayOfRecords(payload.surfaces)[0];
+    assert.ok(firstSurface);
+    const firstSlot = arrayOfRecords(firstSurface.slots)[0];
+    assert.ok(firstSlot);
+    firstSlot.contentReferenceId = 'constructor';
+    const inheritedNamePath = join(temporaryDirectory, 'inherited-name.json');
+    writeFileSync(inheritedNamePath, JSON.stringify(fixture));
+
+    await demoEntry(inheritedNamePath).run({}, (view) => {
+      const result = renderSurfaceRuntime(view, '/');
+      assert.equal(result.statusCode, 200);
+      assert.match(result.html, /UNSUPPORTED_COMPONENT/);
+      assert.doesNotMatch(result.html, /\[object Object\]/);
+    });
+  } finally {
+    rmSync(temporaryDirectory, { force: true, recursive: true });
+  }
+});
+
 test('unknown surface and malformed projection fail as rendered diagnostics', async () => {
   await demoEntry().run({}, (view) => {
     const unknown = renderSurfaceRuntime(view, '/?surface=not-in-release');
