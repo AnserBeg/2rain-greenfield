@@ -2,6 +2,66 @@
   "columns": [
     {
       "schema": "platform",
+      "relation": "active_release_pointers",
+      "ordinal_position": 1,
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "active_release_pointers",
+      "ordinal_position": 2,
+      "column_name": "environment_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "active_release_pointers",
+      "ordinal_position": 3,
+      "column_name": "pointer_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "active_release_pointers",
+      "ordinal_position": 4,
+      "column_name": "release_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "active_release_pointers",
+      "ordinal_position": 5,
+      "column_name": "fence",
+      "data_type": "bigint",
+      "udt_name": "int8",
+      "is_nullable": "NO",
+      "column_default": "0"
+    },
+    {
+      "schema": "platform",
+      "relation": "active_release_pointers",
+      "ordinal_position": 6,
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "transaction_timestamp()"
+    },
+    {
+      "schema": "platform",
       "relation": "app_package_revisions",
       "ordinal_position": 1,
       "column_name": "tenant_id",
@@ -179,6 +239,1406 @@
       "udt_name": "text",
       "is_nullable": "NO",
       "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempt_outcomes",
+      "ordinal_position": 1,
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempt_outcomes",
+      "ordinal_position": 2,
+      "column_name": "environment_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempt_outcomes",
+      "ordinal_position": 3,
+      "column_name": "activation_attempt_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempt_outcomes",
+      "ordinal_position": 4,
+      "column_name": "outcome_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempt_outcomes",
+      "ordinal_position": 5,
+      "column_name": "outcome_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempt_outcomes",
+      "ordinal_position": 6,
+      "column_name": "condition_code",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempt_outcomes",
+      "ordinal_position": 7,
+      "column_name": "pointer_outcome",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempt_outcomes",
+      "ordinal_position": 8,
+      "column_name": "verification_outcome",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempt_outcomes",
+      "ordinal_position": 9,
+      "column_name": "workflow_disposition",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempt_outcomes",
+      "ordinal_position": 10,
+      "column_name": "workflow_status",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempt_outcomes",
+      "ordinal_position": 11,
+      "column_name": "terminal",
+      "data_type": "boolean",
+      "udt_name": "bool",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempt_outcomes",
+      "ordinal_position": 12,
+      "column_name": "outcome_digest",
+      "data_type": "bytea",
+      "udt_name": "bytea",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempt_outcomes",
+      "ordinal_position": 13,
+      "column_name": "recorded_at",
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "transaction_timestamp()"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempts",
+      "ordinal_position": 1,
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempts",
+      "ordinal_position": 2,
+      "column_name": "environment_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempts",
+      "ordinal_position": 3,
+      "column_name": "activation_attempt_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempts",
+      "ordinal_position": 4,
+      "column_name": "approval_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempts",
+      "ordinal_position": 5,
+      "column_name": "attempt_contract_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempts",
+      "ordinal_position": 6,
+      "column_name": "execution_principal_kind",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempts",
+      "ordinal_position": 7,
+      "column_name": "execution_principal_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempts",
+      "ordinal_position": 8,
+      "column_name": "attempt_state",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempts",
+      "ordinal_position": 9,
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "transaction_timestamp()"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_history",
+      "ordinal_position": 1,
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_history",
+      "ordinal_position": 2,
+      "column_name": "environment_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_history",
+      "ordinal_position": 3,
+      "column_name": "history_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_history",
+      "ordinal_position": 4,
+      "column_name": "activation_attempt_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_history",
+      "ordinal_position": 5,
+      "column_name": "history_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_history",
+      "ordinal_position": 6,
+      "column_name": "pointer_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_history",
+      "ordinal_position": 7,
+      "column_name": "approving_human_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_history",
+      "ordinal_position": 8,
+      "column_name": "issuing_actor_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_history",
+      "ordinal_position": 9,
+      "column_name": "initiating_human_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_history",
+      "ordinal_position": 10,
+      "column_name": "execution_principal_kind",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_history",
+      "ordinal_position": 11,
+      "column_name": "execution_principal_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_history",
+      "ordinal_position": 12,
+      "column_name": "from_release_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_history",
+      "ordinal_position": 13,
+      "column_name": "to_release_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_history",
+      "ordinal_position": 14,
+      "column_name": "observed_fence",
+      "data_type": "bigint",
+      "udt_name": "int8",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_history",
+      "ordinal_position": 15,
+      "column_name": "pointer_outcome",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_history",
+      "ordinal_position": 16,
+      "column_name": "verification_outcome",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_history",
+      "ordinal_position": 17,
+      "column_name": "workflow_disposition",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_history",
+      "ordinal_position": 18,
+      "column_name": "workflow_status",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_history",
+      "ordinal_position": 19,
+      "column_name": "terminal",
+      "data_type": "boolean",
+      "udt_name": "bool",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_history",
+      "ordinal_position": 20,
+      "column_name": "recorded_at",
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "transaction_timestamp()"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_outbox",
+      "ordinal_position": 1,
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_outbox",
+      "ordinal_position": 2,
+      "column_name": "environment_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_outbox",
+      "ordinal_position": 3,
+      "column_name": "outbox_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_outbox",
+      "ordinal_position": 4,
+      "column_name": "activation_attempt_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_outbox",
+      "ordinal_position": 5,
+      "column_name": "envelope_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_outbox",
+      "ordinal_position": 6,
+      "column_name": "event_code",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_outbox",
+      "ordinal_position": 7,
+      "column_name": "payload_digest",
+      "data_type": "bytea",
+      "udt_name": "bytea",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_outbox",
+      "ordinal_position": 8,
+      "column_name": "recorded_at",
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "transaction_timestamp()"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_phase_receipts",
+      "ordinal_position": 1,
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_phase_receipts",
+      "ordinal_position": 2,
+      "column_name": "environment_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_phase_receipts",
+      "ordinal_position": 3,
+      "column_name": "phase_receipt_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_phase_receipts",
+      "ordinal_position": 4,
+      "column_name": "activation_attempt_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_phase_receipts",
+      "ordinal_position": 5,
+      "column_name": "receipt_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_phase_receipts",
+      "ordinal_position": 6,
+      "column_name": "phase_code",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_phase_receipts",
+      "ordinal_position": 7,
+      "column_name": "receipt_digest",
+      "data_type": "bytea",
+      "udt_name": "bytea",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_phase_receipts",
+      "ordinal_position": 8,
+      "column_name": "recorded_at",
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "transaction_timestamp()"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "ordinal_position": 1,
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "ordinal_position": 2,
+      "column_name": "environment_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "ordinal_position": 3,
+      "column_name": "preparation_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "ordinal_position": 4,
+      "column_name": "preparation_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "ordinal_position": 5,
+      "column_name": "expected_pointer_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "ordinal_position": 6,
+      "column_name": "expected_release_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "ordinal_position": 7,
+      "column_name": "expected_fence",
+      "data_type": "bigint",
+      "udt_name": "int8",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "ordinal_position": 8,
+      "column_name": "source_manifest_root",
+      "data_type": "bytea",
+      "udt_name": "bytea",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "ordinal_position": 9,
+      "column_name": "target_release_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "ordinal_position": 10,
+      "column_name": "target_manifest_root",
+      "data_type": "bytea",
+      "udt_name": "bytea",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "ordinal_position": 11,
+      "column_name": "diff_binding_kind",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "ordinal_position": 12,
+      "column_name": "diff_binding_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "ordinal_position": 13,
+      "column_name": "release_diff_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "ordinal_position": 14,
+      "column_name": "release_diff_algorithm_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "ordinal_position": 15,
+      "column_name": "canonical_diff_digest",
+      "data_type": "bytea",
+      "udt_name": "bytea",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "ordinal_position": 16,
+      "column_name": "transition_plan_digest",
+      "data_type": "bytea",
+      "udt_name": "bytea",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "ordinal_position": 17,
+      "column_name": "compiler_attestation_digest",
+      "data_type": "bytea",
+      "udt_name": "bytea",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "ordinal_position": 18,
+      "column_name": "compiler_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "ordinal_position": 19,
+      "column_name": "compiler_semantic_profile_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "ordinal_position": 20,
+      "column_name": "compiler_output_protocol_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "ordinal_position": 21,
+      "column_name": "verification_evidence_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "ordinal_position": 22,
+      "column_name": "verification_evidence_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "ordinal_position": 23,
+      "column_name": "verification_evidence_digest",
+      "data_type": "bytea",
+      "udt_name": "bytea",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "ordinal_position": 24,
+      "column_name": "capability_support_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "ordinal_position": 25,
+      "column_name": "capability_support_digest",
+      "data_type": "bytea",
+      "udt_name": "bytea",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "ordinal_position": 26,
+      "column_name": "capability_support_result",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "ordinal_position": 27,
+      "column_name": "renderer_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "ordinal_position": 28,
+      "column_name": "view_schema_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "ordinal_position": 29,
+      "column_name": "rendered_diff_evidence_digest",
+      "data_type": "bytea",
+      "udt_name": "bytea",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "ordinal_position": 30,
+      "column_name": "transition_preparation_receipt_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "ordinal_position": 31,
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "transaction_timestamp()"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_write_guard",
+      "ordinal_position": 1,
+      "column_name": "attempted_relation",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "ordinal_position": 1,
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "ordinal_position": 2,
+      "column_name": "environment_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "ordinal_position": 3,
+      "column_name": "approval_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "ordinal_position": 4,
+      "column_name": "approval_contract_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "ordinal_position": 5,
+      "column_name": "activation_attempt_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "ordinal_position": 6,
+      "column_name": "preparation_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "ordinal_position": 7,
+      "column_name": "target_release_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "ordinal_position": 8,
+      "column_name": "target_manifest_root",
+      "data_type": "bytea",
+      "udt_name": "bytea",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "ordinal_position": 9,
+      "column_name": "expected_pointer_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "ordinal_position": 10,
+      "column_name": "expected_release_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "ordinal_position": 11,
+      "column_name": "expected_fence",
+      "data_type": "bigint",
+      "udt_name": "int8",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "ordinal_position": 12,
+      "column_name": "source_manifest_root",
+      "data_type": "bytea",
+      "udt_name": "bytea",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "ordinal_position": 13,
+      "column_name": "diff_binding_kind",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "ordinal_position": 14,
+      "column_name": "diff_binding_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "ordinal_position": 15,
+      "column_name": "release_diff_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "ordinal_position": 16,
+      "column_name": "release_diff_algorithm_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "ordinal_position": 17,
+      "column_name": "canonical_diff_digest",
+      "data_type": "bytea",
+      "udt_name": "bytea",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "ordinal_position": 18,
+      "column_name": "transition_plan_digest",
+      "data_type": "bytea",
+      "udt_name": "bytea",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "ordinal_position": 19,
+      "column_name": "compiler_attestation_digest",
+      "data_type": "bytea",
+      "udt_name": "bytea",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "ordinal_position": 20,
+      "column_name": "compiler_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "ordinal_position": 21,
+      "column_name": "compiler_semantic_profile_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "ordinal_position": 22,
+      "column_name": "compiler_output_protocol_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "ordinal_position": 23,
+      "column_name": "verification_evidence_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "ordinal_position": 24,
+      "column_name": "verification_evidence_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "ordinal_position": 25,
+      "column_name": "verification_evidence_digest",
+      "data_type": "bytea",
+      "udt_name": "bytea",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "ordinal_position": 26,
+      "column_name": "capability_support_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "ordinal_position": 27,
+      "column_name": "capability_support_digest",
+      "data_type": "bytea",
+      "udt_name": "bytea",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "ordinal_position": 28,
+      "column_name": "renderer_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "ordinal_position": 29,
+      "column_name": "view_schema_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "ordinal_position": 30,
+      "column_name": "rendered_diff_evidence_digest",
+      "data_type": "bytea",
+      "udt_name": "bytea",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "ordinal_position": 31,
+      "column_name": "transition_preparation_receipt_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "ordinal_position": 32,
+      "column_name": "compatibility_policy_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "ordinal_position": 33,
+      "column_name": "authority_policy_version",
+      "data_type": "bigint",
+      "udt_name": "int8",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "ordinal_position": 34,
+      "column_name": "authority_policy_contract_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "ordinal_position": 35,
+      "column_name": "approving_human_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "ordinal_position": 36,
+      "column_name": "issuing_actor_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "ordinal_position": 37,
+      "column_name": "initiating_human_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "ordinal_position": 38,
+      "column_name": "source_decision_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "ordinal_position": 39,
+      "column_name": "rollout_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "ordinal_position": 40,
+      "column_name": "decided_at",
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "ordinal_position": 41,
+      "column_name": "expires_at",
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "ordinal_position": 42,
+      "column_name": "expiry_policy_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approver_eligibility_events",
+      "ordinal_position": 1,
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approver_eligibility_events",
+      "ordinal_position": 2,
+      "column_name": "policy_version",
+      "data_type": "bigint",
+      "udt_name": "int8",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approver_eligibility_events",
+      "ordinal_position": 3,
+      "column_name": "authority_event_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approver_eligibility_events",
+      "ordinal_position": 4,
+      "column_name": "principal_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approver_eligibility_events",
+      "ordinal_position": 5,
+      "column_name": "eligible",
+      "data_type": "boolean",
+      "udt_name": "bool",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approver_eligibility_events",
+      "ordinal_position": 6,
+      "column_name": "changed_by",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approver_eligibility_events",
+      "ordinal_position": 7,
+      "column_name": "authority_policy_contract_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": "'northstar.release-approver-authority/v1'::text"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approver_eligibility_events",
+      "ordinal_position": 8,
+      "column_name": "changed_at",
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "transaction_timestamp()"
     },
     {
       "schema": "platform",
@@ -629,9 +2089,291 @@
       "udt_name": "timestamptz",
       "is_nullable": "NO",
       "column_default": "transaction_timestamp()"
+    },
+    {
+      "schema": "platform",
+      "relation": "transition_preparation_receipts",
+      "ordinal_position": 1,
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "transition_preparation_receipts",
+      "ordinal_position": 2,
+      "column_name": "environment_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "transition_preparation_receipts",
+      "ordinal_position": 3,
+      "column_name": "receipt_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "transition_preparation_receipts",
+      "ordinal_position": 4,
+      "column_name": "receipt_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "transition_preparation_receipts",
+      "ordinal_position": 5,
+      "column_name": "source_release_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "transition_preparation_receipts",
+      "ordinal_position": 6,
+      "column_name": "source_manifest_root",
+      "data_type": "bytea",
+      "udt_name": "bytea",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "transition_preparation_receipts",
+      "ordinal_position": 7,
+      "column_name": "target_release_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "transition_preparation_receipts",
+      "ordinal_position": 8,
+      "column_name": "target_manifest_root",
+      "data_type": "bytea",
+      "udt_name": "bytea",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "transition_preparation_receipts",
+      "ordinal_position": 9,
+      "column_name": "transition_scope",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "transition_preparation_receipts",
+      "ordinal_position": 10,
+      "column_name": "storage_domain_id",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "transition_preparation_receipts",
+      "ordinal_position": 11,
+      "column_name": "schema_generation",
+      "data_type": "bigint",
+      "udt_name": "int8",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "transition_preparation_receipts",
+      "ordinal_position": 12,
+      "column_name": "compiler_facts_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "transition_preparation_receipts",
+      "ordinal_position": 13,
+      "column_name": "compiler_facts_digest",
+      "data_type": "bytea",
+      "udt_name": "bytea",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "transition_preparation_receipts",
+      "ordinal_position": 14,
+      "column_name": "compiler_transition_class",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "transition_preparation_receipts",
+      "ordinal_position": 15,
+      "column_name": "compiler_static_compatibility",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "transition_preparation_receipts",
+      "ordinal_position": 16,
+      "column_name": "compiler_exact_pair",
+      "data_type": "boolean",
+      "udt_name": "bool",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "transition_preparation_receipts",
+      "ordinal_position": 17,
+      "column_name": "executor_evidence_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "transition_preparation_receipts",
+      "ordinal_position": 18,
+      "column_name": "executor_evidence_digest",
+      "data_type": "bytea",
+      "udt_name": "bytea",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "transition_preparation_receipts",
+      "ordinal_position": 19,
+      "column_name": "executor_applied_state",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "transition_preparation_receipts",
+      "ordinal_position": 20,
+      "column_name": "executor_exact_pair",
+      "data_type": "boolean",
+      "udt_name": "bool",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "transition_preparation_receipts",
+      "ordinal_position": 21,
+      "column_name": "compatibility_policy_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "transition_preparation_receipts",
+      "ordinal_position": 22,
+      "column_name": "compatibility_policy_verdict",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "transition_preparation_receipts",
+      "ordinal_position": 23,
+      "column_name": "recovery_mode",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "transition_preparation_receipts",
+      "ordinal_position": 24,
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "transaction_timestamp()"
     }
   ],
   "constraints": [
+    {
+      "schema": "platform",
+      "relation": "active_release_pointers",
+      "name": "active_release_pointers_environment_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id) REFERENCES platform.environments(tenant_id, id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "active_release_pointers",
+      "name": "active_release_pointers_fence_nonnegative",
+      "type": "c",
+      "definition": "CHECK (fence >= 0)"
+    },
+    {
+      "schema": "platform",
+      "relation": "active_release_pointers",
+      "name": "active_release_pointers_pkey",
+      "type": "p",
+      "definition": "PRIMARY KEY (tenant_id, environment_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "active_release_pointers",
+      "name": "active_release_pointers_pointer_id_unique",
+      "type": "u",
+      "definition": "UNIQUE (pointer_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "active_release_pointers",
+      "name": "active_release_pointers_release_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, release_id) REFERENCES platform.tenant_releases(tenant_id, environment_id, release_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "active_release_pointers",
+      "name": "active_release_pointers_scoped_identity_unique",
+      "type": "u",
+      "definition": "UNIQUE (tenant_id, environment_id, pointer_id)"
+    },
     {
       "schema": "platform",
       "relation": "app_package_revisions",
@@ -722,6 +2464,440 @@
       "name": "immutable_release_write_guard_reject",
       "type": "c",
       "definition": "CHECK (false)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempt_outcomes",
+      "name": "release_activation_attempt_outcomes_attempt_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, activation_attempt_id) REFERENCES platform.release_activation_attempts(tenant_id, environment_id, activation_attempt_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempt_outcomes",
+      "name": "release_activation_attempt_outcomes_codes",
+      "type": "c",
+      "definition": "CHECK (outcome_version = 'northstar.release-activation-outcome/v1'::text AND (condition_code = ANY (ARRAY['STALE_POINTER'::text, 'EXPIRED_APPROVAL'::text, 'INVALID_BINDING'::text, 'OBSOLETE_POLICY'::text, 'DEFINITIVE_BLOCKING_FAILURE'::text, 'CANCELLATION'::text, 'APPROVER_REVOCATION'::text, 'PRE_CAS_POLICY_DENY'::text, 'INFRASTRUCTURE_ERROR'::text, 'TIMEOUT'::text, 'AMBIGUOUS_COMMIT'::text, 'EXECUTOR_UNAVAILABLE'::text, 'ROLLOUT_PAUSE'::text])) AND (pointer_outcome = ANY (ARRAY['NOT_ATTEMPTED'::text, 'NOT_SWAPPED'::text, 'SWAPPED'::text, 'SWAPPED_THEN_SUPERSEDED'::text, 'AMBIGUOUS'::text])) AND (verification_outcome = ANY (ARRAY['NOT_RUN'::text, 'PASSED'::text, 'FAILED'::text, 'UNKNOWN'::text])) AND (workflow_disposition = ANY (ARRAY['RETAINED'::text, 'CONSUMED'::text])) AND (workflow_status = ANY (ARRAY['RUNNING'::text, 'PAUSED'::text, 'RECONCILING'::text, 'SUCCEEDED'::text, 'FAILED'::text, 'CANCELLED'::text])) AND terminal = (workflow_status = ANY (ARRAY['SUCCEEDED'::text, 'FAILED'::text, 'CANCELLED'::text])) AND octet_length(outcome_digest) = 32)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempt_outcomes",
+      "name": "release_activation_attempt_outcomes_id_unique",
+      "type": "u",
+      "definition": "UNIQUE (outcome_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempt_outcomes",
+      "name": "release_activation_attempt_outcomes_pkey",
+      "type": "p",
+      "definition": "PRIMARY KEY (tenant_id, environment_id, activation_attempt_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempts",
+      "name": "release_activation_attempts_approval_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, approval_id, activation_attempt_id) REFERENCES platform.release_approvals(tenant_id, environment_id, approval_id, activation_attempt_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempts",
+      "name": "release_activation_attempts_approval_unique",
+      "type": "u",
+      "definition": "UNIQUE (approval_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempts",
+      "name": "release_activation_attempts_attempt_id_unique",
+      "type": "u",
+      "definition": "UNIQUE (activation_attempt_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempts",
+      "name": "release_activation_attempts_pkey",
+      "type": "p",
+      "definition": "PRIMARY KEY (tenant_id, environment_id, activation_attempt_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempts",
+      "name": "release_activation_attempts_prebound_contract",
+      "type": "c",
+      "definition": "CHECK (attempt_contract_version = 'northstar.release-activation-attempt/v1'::text AND execution_principal_kind = 'SYSTEM'::text AND execution_principal_id = '00000000-0000-4000-8000-000000000001'::uuid AND attempt_state = 'PREBOUND'::text)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_history",
+      "name": "release_activation_history_attempt_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, activation_attempt_id) REFERENCES platform.release_activation_attempts(tenant_id, environment_id, activation_attempt_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_history",
+      "name": "release_activation_history_dimensions",
+      "type": "c",
+      "definition": "CHECK (history_version = 'northstar.release-activation-history/v1'::text AND execution_principal_kind = 'SYSTEM'::text AND execution_principal_id = '00000000-0000-4000-8000-000000000001'::uuid AND (pointer_outcome = ANY (ARRAY['NOT_ATTEMPTED'::text, 'NOT_SWAPPED'::text, 'SWAPPED'::text, 'SWAPPED_THEN_SUPERSEDED'::text, 'AMBIGUOUS'::text])) AND (verification_outcome = ANY (ARRAY['NOT_RUN'::text, 'PASSED'::text, 'FAILED'::text, 'UNKNOWN'::text])) AND (workflow_disposition = ANY (ARRAY['RETAINED'::text, 'CONSUMED'::text])) AND (workflow_status = ANY (ARRAY['RUNNING'::text, 'PAUSED'::text, 'RECONCILING'::text, 'SUCCEEDED'::text, 'FAILED'::text, 'CANCELLED'::text])) AND terminal = (workflow_status = ANY (ARRAY['SUCCEEDED'::text, 'FAILED'::text, 'CANCELLED'::text])) AND (workflow_status <> 'PAUSED'::text OR workflow_disposition = 'RETAINED'::text) AND (workflow_status <> 'CANCELLED'::text OR workflow_disposition = 'CONSUMED'::text))"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_history",
+      "name": "release_activation_history_fence_nonnegative",
+      "type": "c",
+      "definition": "CHECK (observed_fence >= 0)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_history",
+      "name": "release_activation_history_from_release_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, from_release_id) REFERENCES platform.tenant_releases(tenant_id, environment_id, release_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_history",
+      "name": "release_activation_history_id_unique",
+      "type": "u",
+      "definition": "UNIQUE (history_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_history",
+      "name": "release_activation_history_pkey",
+      "type": "p",
+      "definition": "PRIMARY KEY (tenant_id, environment_id, history_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_history",
+      "name": "release_activation_history_pointer_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, pointer_id) REFERENCES platform.active_release_pointers(tenant_id, environment_id, pointer_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_history",
+      "name": "release_activation_history_to_release_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, to_release_id) REFERENCES platform.tenant_releases(tenant_id, environment_id, release_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_outbox",
+      "name": "release_activation_outbox_attempt_event_unique",
+      "type": "u",
+      "definition": "UNIQUE (activation_attempt_id, event_code)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_outbox",
+      "name": "release_activation_outbox_attempt_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, activation_attempt_id) REFERENCES platform.release_activation_attempts(tenant_id, environment_id, activation_attempt_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_outbox",
+      "name": "release_activation_outbox_envelope",
+      "type": "c",
+      "definition": "CHECK (envelope_version = 'northstar.release-activation-outbox/v1'::text AND btrim(event_code) <> ''::text AND octet_length(payload_digest) = 32)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_outbox",
+      "name": "release_activation_outbox_id_unique",
+      "type": "u",
+      "definition": "UNIQUE (outbox_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_outbox",
+      "name": "release_activation_outbox_pkey",
+      "type": "p",
+      "definition": "PRIMARY KEY (tenant_id, environment_id, outbox_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_phase_receipts",
+      "name": "release_activation_phase_receipts_attempt_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, activation_attempt_id) REFERENCES platform.release_activation_attempts(tenant_id, environment_id, activation_attempt_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_phase_receipts",
+      "name": "release_activation_phase_receipts_id_unique",
+      "type": "u",
+      "definition": "UNIQUE (phase_receipt_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_phase_receipts",
+      "name": "release_activation_phase_receipts_phase_unique",
+      "type": "u",
+      "definition": "UNIQUE (activation_attempt_id, phase_code)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_phase_receipts",
+      "name": "release_activation_phase_receipts_pkey",
+      "type": "p",
+      "definition": "PRIMARY KEY (tenant_id, environment_id, phase_receipt_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_phase_receipts",
+      "name": "release_activation_phase_receipts_shape",
+      "type": "c",
+      "definition": "CHECK (receipt_version = 'northstar.release-activation-phase-receipt/v1'::text AND btrim(phase_code) <> ''::text AND octet_length(receipt_digest) = 32)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "name": "release_activation_preparations_capability_result",
+      "type": "c",
+      "definition": "CHECK (capability_support_result = ANY (ARRAY['SUPPORTED'::text, 'UNSUPPORTED'::text]))"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "name": "release_activation_preparations_diff_binding",
+      "type": "c",
+      "definition": "CHECK (diff_binding_kind = 'INITIAL_ACTIVATION'::text AND diff_binding_version = 'northstar.initial-activation-binding/v1'::text AND expected_release_id IS NULL AND source_manifest_root IS NULL AND release_diff_version IS NULL AND release_diff_algorithm_version IS NULL AND transition_plan_digest IS NULL OR diff_binding_kind = 'RELEASE_DIFF'::text AND diff_binding_version = 'northstar.release-diff-binding/v1'::text AND expected_release_id IS NOT NULL AND octet_length(source_manifest_root) = 32 AND btrim(release_diff_version) <> ''::text AND btrim(release_diff_algorithm_version) <> ''::text)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "name": "release_activation_preparations_environment_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id) REFERENCES platform.environments(tenant_id, id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "name": "release_activation_preparations_fence_nonnegative",
+      "type": "c",
+      "definition": "CHECK (expected_fence >= 0)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "name": "release_activation_preparations_hash_lengths",
+      "type": "c",
+      "definition": "CHECK (octet_length(target_manifest_root) = 32 AND octet_length(canonical_diff_digest) = 32 AND (transition_plan_digest IS NULL OR octet_length(transition_plan_digest) = 32) AND octet_length(compiler_attestation_digest) = 32 AND octet_length(verification_evidence_digest) = 32 AND octet_length(capability_support_digest) = 32 AND octet_length(rendered_diff_evidence_digest) = 32)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "name": "release_activation_preparations_pkey",
+      "type": "p",
+      "definition": "PRIMARY KEY (tenant_id, environment_id, preparation_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "name": "release_activation_preparations_pointer_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, expected_pointer_id) REFERENCES platform.active_release_pointers(tenant_id, environment_id, pointer_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "name": "release_activation_preparations_preparation_id_unique",
+      "type": "u",
+      "definition": "UNIQUE (preparation_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "name": "release_activation_preparations_receipt_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, transition_preparation_receipt_id) REFERENCES platform.transition_preparation_receipts(tenant_id, environment_id, receipt_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "name": "release_activation_preparations_source_release_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, expected_release_id) REFERENCES platform.tenant_releases(tenant_id, environment_id, release_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "name": "release_activation_preparations_target_release_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, target_release_id) REFERENCES platform.tenant_releases(tenant_id, environment_id, release_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "name": "release_activation_preparations_verification_evidence_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (verification_evidence_id) REFERENCES platform.tenant_releases(verification_evidence_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "name": "release_activation_preparations_versions_not_blank",
+      "type": "c",
+      "definition": "CHECK (btrim(preparation_version) <> ''::text AND btrim(compiler_version) <> ''::text AND btrim(compiler_semantic_profile_version) <> ''::text AND btrim(compiler_output_protocol_version) <> ''::text AND btrim(verification_evidence_version) <> ''::text AND btrim(capability_support_version) <> ''::text AND btrim(renderer_version) <> ''::text AND btrim(view_schema_version) <> ''::text)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_write_guard",
+      "name": "release_activation_write_guard_reject",
+      "type": "c",
+      "definition": "CHECK (false)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "name": "release_approvals_activation_attempt_id_unique",
+      "type": "u",
+      "definition": "UNIQUE (activation_attempt_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "name": "release_approvals_approval_id_unique",
+      "type": "u",
+      "definition": "UNIQUE (approval_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "name": "release_approvals_attempt_binding_unique",
+      "type": "u",
+      "definition": "UNIQUE (tenant_id, environment_id, approval_id, activation_attempt_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "name": "release_approvals_authority_version_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, authority_policy_version) REFERENCES platform.release_approver_eligibility_events(tenant_id, policy_version)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "name": "release_approvals_compiler_versions_not_blank",
+      "type": "c",
+      "definition": "CHECK (btrim(compiler_version) <> ''::text AND btrim(compiler_semantic_profile_version) <> ''::text AND btrim(compiler_output_protocol_version) <> ''::text)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "name": "release_approvals_contract_versions",
+      "type": "c",
+      "definition": "CHECK (approval_contract_version = 'northstar.release-approval/v1'::text AND authority_policy_contract_version = 'northstar.release-approver-authority/v1'::text AND expiry_policy_version = 'northstar.release-approval-expiry/v1'::text AND compatibility_policy_version = 'northstar.transition-compatibility-policy/v1'::text)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "name": "release_approvals_diff_binding",
+      "type": "c",
+      "definition": "CHECK (diff_binding_kind = 'INITIAL_ACTIVATION'::text AND diff_binding_version = 'northstar.initial-activation-binding/v1'::text AND expected_release_id IS NULL AND source_manifest_root IS NULL AND release_diff_version IS NULL AND release_diff_algorithm_version IS NULL AND transition_plan_digest IS NULL OR diff_binding_kind = 'RELEASE_DIFF'::text AND diff_binding_version = 'northstar.release-diff-binding/v1'::text AND expected_release_id IS NOT NULL AND octet_length(source_manifest_root) = 32 AND btrim(release_diff_version) <> ''::text AND btrim(release_diff_algorithm_version) <> ''::text)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "name": "release_approvals_expiry",
+      "type": "c",
+      "definition": "CHECK (expires_at > decided_at)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "name": "release_approvals_fence_nonnegative",
+      "type": "c",
+      "definition": "CHECK (expected_fence >= 0)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "name": "release_approvals_hash_lengths",
+      "type": "c",
+      "definition": "CHECK (octet_length(target_manifest_root) = 32 AND octet_length(canonical_diff_digest) = 32 AND (transition_plan_digest IS NULL OR octet_length(transition_plan_digest) = 32) AND octet_length(compiler_attestation_digest) = 32 AND octet_length(verification_evidence_digest) = 32 AND octet_length(capability_support_digest) = 32 AND octet_length(rendered_diff_evidence_digest) = 32)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "name": "release_approvals_pkey",
+      "type": "p",
+      "definition": "PRIMARY KEY (tenant_id, environment_id, approval_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "name": "release_approvals_pointer_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, expected_pointer_id) REFERENCES platform.active_release_pointers(tenant_id, environment_id, pointer_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "name": "release_approvals_preparation_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, preparation_id) REFERENCES platform.release_activation_preparations(tenant_id, environment_id, preparation_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "name": "release_approvals_receipt_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, transition_preparation_receipt_id) REFERENCES platform.transition_preparation_receipts(tenant_id, environment_id, receipt_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "name": "release_approvals_source_release_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, expected_release_id) REFERENCES platform.tenant_releases(tenant_id, environment_id, release_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "name": "release_approvals_target_release_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, target_release_id) REFERENCES platform.tenant_releases(tenant_id, environment_id, release_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approver_eligibility_events",
+      "name": "release_approver_eligibility_events_pkey",
+      "type": "p",
+      "definition": "PRIMARY KEY (tenant_id, policy_version)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approver_eligibility_events",
+      "name": "release_approver_eligibility_events_tenant_id_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id) REFERENCES platform.tenants(id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approver_eligibility_events",
+      "name": "release_approver_events_contract_version",
+      "type": "c",
+      "definition": "CHECK (authority_policy_contract_version = 'northstar.release-approver-authority/v1'::text)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approver_eligibility_events",
+      "name": "release_approver_events_event_id_unique",
+      "type": "u",
+      "definition": "UNIQUE (authority_event_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approver_eligibility_events",
+      "name": "release_approver_events_version_positive",
+      "type": "c",
+      "definition": "CHECK (policy_version > 0)"
     },
     {
       "schema": "platform",
@@ -981,9 +3157,111 @@
       "name": "tenants_slug_unique",
       "type": "u",
       "definition": "UNIQUE (slug)"
+    },
+    {
+      "schema": "platform",
+      "relation": "transition_preparation_receipts",
+      "name": "transition_preparation_receipts_contributor_codes",
+      "type": "c",
+      "definition": "CHECK ((compiler_transition_class = ANY (ARRAY['NO_STORAGE_TRANSITION'::text, 'REVERSIBLE'::text, 'IRREVERSIBLE'::text])) AND (compiler_static_compatibility = ANY (ARRAY['SATISFIED'::text, 'BLOCKED'::text])) AND (executor_applied_state = ANY (ARRAY['NOT_REQUIRED'::text, 'APPLIED'::text, 'NOT_APPLIED'::text, 'UNKNOWN'::text])) AND (compatibility_policy_verdict = ANY (ARRAY['ALLOW'::text, 'DENY'::text])) AND (recovery_mode = ANY (ARRAY['NO_STORAGE_RECOVERY_REQUIRED'::text, 'REVERSIBLE'::text, 'FORWARD_RECOVERY_ONLY'::text])))"
+    },
+    {
+      "schema": "platform",
+      "relation": "transition_preparation_receipts",
+      "name": "transition_preparation_receipts_digest_lengths",
+      "type": "c",
+      "definition": "CHECK (octet_length(compiler_facts_digest) = 32 AND octet_length(executor_evidence_digest) = 32)"
+    },
+    {
+      "schema": "platform",
+      "relation": "transition_preparation_receipts",
+      "name": "transition_preparation_receipts_environment_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id) REFERENCES platform.environments(tenant_id, id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "transition_preparation_receipts",
+      "name": "transition_preparation_receipts_initial_no_storage",
+      "type": "c",
+      "definition": "CHECK (source_release_id IS NOT NULL OR compiler_transition_class = 'NO_STORAGE_TRANSITION'::text AND executor_applied_state = 'NOT_REQUIRED'::text)"
+    },
+    {
+      "schema": "platform",
+      "relation": "transition_preparation_receipts",
+      "name": "transition_preparation_receipts_pkey",
+      "type": "p",
+      "definition": "PRIMARY KEY (tenant_id, environment_id, receipt_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "transition_preparation_receipts",
+      "name": "transition_preparation_receipts_receipt_id_unique",
+      "type": "u",
+      "definition": "UNIQUE (receipt_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "transition_preparation_receipts",
+      "name": "transition_preparation_receipts_recovery_class",
+      "type": "c",
+      "definition": "CHECK (compiler_transition_class = 'NO_STORAGE_TRANSITION'::text AND recovery_mode = 'NO_STORAGE_RECOVERY_REQUIRED'::text OR compiler_transition_class = 'REVERSIBLE'::text AND recovery_mode = 'REVERSIBLE'::text OR compiler_transition_class = 'IRREVERSIBLE'::text AND recovery_mode = 'FORWARD_RECOVERY_ONLY'::text)"
+    },
+    {
+      "schema": "platform",
+      "relation": "transition_preparation_receipts",
+      "name": "transition_preparation_receipts_roots",
+      "type": "c",
+      "definition": "CHECK (octet_length(target_manifest_root) = 32 AND (source_release_id IS NULL AND source_manifest_root IS NULL OR source_release_id IS NOT NULL AND octet_length(source_manifest_root) = 32))"
+    },
+    {
+      "schema": "platform",
+      "relation": "transition_preparation_receipts",
+      "name": "transition_preparation_receipts_scope",
+      "type": "c",
+      "definition": "CHECK ((transition_scope = ANY (ARRAY['tenantLocal'::text, 'sharedDatabase'::text])) AND btrim(storage_domain_id) <> ''::text AND schema_generation >= 0)"
+    },
+    {
+      "schema": "platform",
+      "relation": "transition_preparation_receipts",
+      "name": "transition_preparation_receipts_source_release_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, source_release_id) REFERENCES platform.tenant_releases(tenant_id, environment_id, release_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "transition_preparation_receipts",
+      "name": "transition_preparation_receipts_target_release_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, target_release_id) REFERENCES platform.tenant_releases(tenant_id, environment_id, release_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "transition_preparation_receipts",
+      "name": "transition_preparation_receipts_versions",
+      "type": "c",
+      "definition": "CHECK (receipt_version = 'northstar.transition-preparation-receipt/v1'::text AND compiler_facts_version = 'northstar.compiler-transition-facts/v1'::text AND executor_evidence_version = 'northstar.executor-applied-state-evidence/v1'::text AND compatibility_policy_version = 'northstar.transition-compatibility-policy/v1'::text)"
     }
   ],
   "indexes": [
+    {
+      "schema": "platform",
+      "relation": "active_release_pointers",
+      "name": "active_release_pointers_pkey",
+      "definition": "CREATE UNIQUE INDEX active_release_pointers_pkey ON platform.active_release_pointers USING btree (tenant_id, environment_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "active_release_pointers",
+      "name": "active_release_pointers_pointer_id_unique",
+      "definition": "CREATE UNIQUE INDEX active_release_pointers_pointer_id_unique ON platform.active_release_pointers USING btree (pointer_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "active_release_pointers",
+      "name": "active_release_pointers_scoped_identity_unique",
+      "definition": "CREATE UNIQUE INDEX active_release_pointers_scoped_identity_unique ON platform.active_release_pointers USING btree (tenant_id, environment_id, pointer_id)"
+    },
     {
       "schema": "platform",
       "relation": "app_package_revisions",
@@ -1007,6 +3285,132 @@
       "relation": "environments",
       "name": "environments_tenant_slug_unique",
       "definition": "CREATE UNIQUE INDEX environments_tenant_slug_unique ON platform.environments USING btree (tenant_id, slug)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempt_outcomes",
+      "name": "release_activation_attempt_outcomes_id_unique",
+      "definition": "CREATE UNIQUE INDEX release_activation_attempt_outcomes_id_unique ON platform.release_activation_attempt_outcomes USING btree (outcome_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempt_outcomes",
+      "name": "release_activation_attempt_outcomes_pkey",
+      "definition": "CREATE UNIQUE INDEX release_activation_attempt_outcomes_pkey ON platform.release_activation_attempt_outcomes USING btree (tenant_id, environment_id, activation_attempt_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempts",
+      "name": "release_activation_attempts_approval_unique",
+      "definition": "CREATE UNIQUE INDEX release_activation_attempts_approval_unique ON platform.release_activation_attempts USING btree (approval_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempts",
+      "name": "release_activation_attempts_attempt_id_unique",
+      "definition": "CREATE UNIQUE INDEX release_activation_attempts_attempt_id_unique ON platform.release_activation_attempts USING btree (activation_attempt_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempts",
+      "name": "release_activation_attempts_pkey",
+      "definition": "CREATE UNIQUE INDEX release_activation_attempts_pkey ON platform.release_activation_attempts USING btree (tenant_id, environment_id, activation_attempt_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_history",
+      "name": "release_activation_history_id_unique",
+      "definition": "CREATE UNIQUE INDEX release_activation_history_id_unique ON platform.release_activation_history USING btree (history_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_history",
+      "name": "release_activation_history_pkey",
+      "definition": "CREATE UNIQUE INDEX release_activation_history_pkey ON platform.release_activation_history USING btree (tenant_id, environment_id, history_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_outbox",
+      "name": "release_activation_outbox_attempt_event_unique",
+      "definition": "CREATE UNIQUE INDEX release_activation_outbox_attempt_event_unique ON platform.release_activation_outbox USING btree (activation_attempt_id, event_code)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_outbox",
+      "name": "release_activation_outbox_id_unique",
+      "definition": "CREATE UNIQUE INDEX release_activation_outbox_id_unique ON platform.release_activation_outbox USING btree (outbox_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_outbox",
+      "name": "release_activation_outbox_pkey",
+      "definition": "CREATE UNIQUE INDEX release_activation_outbox_pkey ON platform.release_activation_outbox USING btree (tenant_id, environment_id, outbox_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_phase_receipts",
+      "name": "release_activation_phase_receipts_id_unique",
+      "definition": "CREATE UNIQUE INDEX release_activation_phase_receipts_id_unique ON platform.release_activation_phase_receipts USING btree (phase_receipt_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_phase_receipts",
+      "name": "release_activation_phase_receipts_phase_unique",
+      "definition": "CREATE UNIQUE INDEX release_activation_phase_receipts_phase_unique ON platform.release_activation_phase_receipts USING btree (activation_attempt_id, phase_code)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_phase_receipts",
+      "name": "release_activation_phase_receipts_pkey",
+      "definition": "CREATE UNIQUE INDEX release_activation_phase_receipts_pkey ON platform.release_activation_phase_receipts USING btree (tenant_id, environment_id, phase_receipt_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "name": "release_activation_preparations_pkey",
+      "definition": "CREATE UNIQUE INDEX release_activation_preparations_pkey ON platform.release_activation_preparations USING btree (tenant_id, environment_id, preparation_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "name": "release_activation_preparations_preparation_id_unique",
+      "definition": "CREATE UNIQUE INDEX release_activation_preparations_preparation_id_unique ON platform.release_activation_preparations USING btree (preparation_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "name": "release_approvals_activation_attempt_id_unique",
+      "definition": "CREATE UNIQUE INDEX release_approvals_activation_attempt_id_unique ON platform.release_approvals USING btree (activation_attempt_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "name": "release_approvals_approval_id_unique",
+      "definition": "CREATE UNIQUE INDEX release_approvals_approval_id_unique ON platform.release_approvals USING btree (approval_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "name": "release_approvals_attempt_binding_unique",
+      "definition": "CREATE UNIQUE INDEX release_approvals_attempt_binding_unique ON platform.release_approvals USING btree (tenant_id, environment_id, approval_id, activation_attempt_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "name": "release_approvals_pkey",
+      "definition": "CREATE UNIQUE INDEX release_approvals_pkey ON platform.release_approvals USING btree (tenant_id, environment_id, approval_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approver_eligibility_events",
+      "name": "release_approver_eligibility_events_pkey",
+      "definition": "CREATE UNIQUE INDEX release_approver_eligibility_events_pkey ON platform.release_approver_eligibility_events USING btree (tenant_id, policy_version)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approver_eligibility_events",
+      "name": "release_approver_events_event_id_unique",
+      "definition": "CREATE UNIQUE INDEX release_approver_events_event_id_unique ON platform.release_approver_eligibility_events USING btree (authority_event_id)"
     },
     {
       "schema": "platform",
@@ -1085,9 +3489,41 @@
       "relation": "tenants",
       "name": "tenants_slug_unique",
       "definition": "CREATE UNIQUE INDEX tenants_slug_unique ON platform.tenants USING btree (slug)"
+    },
+    {
+      "schema": "platform",
+      "relation": "transition_preparation_receipts",
+      "name": "transition_preparation_receipts_pkey",
+      "definition": "CREATE UNIQUE INDEX transition_preparation_receipts_pkey ON platform.transition_preparation_receipts USING btree (tenant_id, environment_id, receipt_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "transition_preparation_receipts",
+      "name": "transition_preparation_receipts_receipt_id_unique",
+      "definition": "CREATE UNIQUE INDEX transition_preparation_receipts_receipt_id_unique ON platform.transition_preparation_receipts USING btree (receipt_id)"
     }
   ],
   "policies": [
+    {
+      "schema": "platform",
+      "relation": "active_release_pointers",
+      "name": "active_release_pointers_select_trusted_context",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_runtime}",
+      "cmd": "SELECT",
+      "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))",
+      "with_check": null
+    },
+    {
+      "schema": "platform",
+      "relation": "active_release_pointers",
+      "name": "active_release_pointers_update_trusted_context",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_runtime}",
+      "cmd": "UPDATE",
+      "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))",
+      "with_check": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))"
+    },
     {
       "schema": "platform",
       "relation": "app_package_revisions",
@@ -1102,6 +3538,116 @@
       "schema": "platform",
       "relation": "app_package_revisions",
       "name": "app_package_revisions_select_trusted_context",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_runtime}",
+      "cmd": "SELECT",
+      "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid IS NOT NULL) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))",
+      "with_check": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempt_outcomes",
+      "name": "release_activation_attempt_outcomes_select_trusted_context",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_runtime}",
+      "cmd": "SELECT",
+      "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))",
+      "with_check": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempts",
+      "name": "release_activation_attempts_insert_trusted_context",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_runtime}",
+      "cmd": "INSERT",
+      "qual": null,
+      "with_check": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempts",
+      "name": "release_activation_attempts_select_trusted_context",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_runtime}",
+      "cmd": "SELECT",
+      "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))",
+      "with_check": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_history",
+      "name": "release_activation_history_select_trusted_context",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_runtime}",
+      "cmd": "SELECT",
+      "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))",
+      "with_check": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_outbox",
+      "name": "release_activation_outbox_select_trusted_context",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_runtime}",
+      "cmd": "SELECT",
+      "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))",
+      "with_check": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_phase_receipts",
+      "name": "release_activation_phase_receipts_select_trusted_context",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_runtime}",
+      "cmd": "SELECT",
+      "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))",
+      "with_check": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "name": "release_activation_preparations_insert_trusted_context",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_runtime}",
+      "cmd": "INSERT",
+      "qual": null,
+      "with_check": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "name": "release_activation_preparations_select_trusted_context",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_runtime}",
+      "cmd": "SELECT",
+      "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))",
+      "with_check": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "name": "release_approvals_insert_trusted_context",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_runtime}",
+      "cmd": "INSERT",
+      "qual": null,
+      "with_check": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "name": "release_approvals_select_trusted_context",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_runtime}",
+      "cmd": "SELECT",
+      "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))",
+      "with_check": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approver_eligibility_events",
+      "name": "release_approver_events_select_trusted_context",
       "permissive": "PERMISSIVE",
       "roles": "{north_star_runtime}",
       "cmd": "SELECT",
@@ -1197,9 +3743,36 @@
       "cmd": "SELECT",
       "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))",
       "with_check": null
+    },
+    {
+      "schema": "platform",
+      "relation": "transition_preparation_receipts",
+      "name": "transition_preparation_receipts_insert_trusted_context",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_runtime}",
+      "cmd": "INSERT",
+      "qual": null,
+      "with_check": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))"
+    },
+    {
+      "schema": "platform",
+      "relation": "transition_preparation_receipts",
+      "name": "transition_preparation_receipts_select_trusted_context",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_runtime}",
+      "cmd": "SELECT",
+      "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))",
+      "with_check": null
     }
   ],
   "relations": [
+    {
+      "schema": "platform",
+      "relation": "active_release_pointers",
+      "kind": "r",
+      "row_level_security": true,
+      "force_row_level_security": true
+    },
     {
       "schema": "platform",
       "relation": "app_package_revisions",
@@ -1220,6 +3793,69 @@
       "kind": "r",
       "row_level_security": false,
       "force_row_level_security": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempt_outcomes",
+      "kind": "r",
+      "row_level_security": true,
+      "force_row_level_security": true
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempts",
+      "kind": "r",
+      "row_level_security": true,
+      "force_row_level_security": true
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_history",
+      "kind": "r",
+      "row_level_security": true,
+      "force_row_level_security": true
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_outbox",
+      "kind": "r",
+      "row_level_security": true,
+      "force_row_level_security": true
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_phase_receipts",
+      "kind": "r",
+      "row_level_security": true,
+      "force_row_level_security": true
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "kind": "r",
+      "row_level_security": true,
+      "force_row_level_security": true
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_write_guard",
+      "kind": "r",
+      "row_level_security": false,
+      "force_row_level_security": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "kind": "r",
+      "row_level_security": true,
+      "force_row_level_security": true
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approver_eligibility_events",
+      "kind": "r",
+      "row_level_security": true,
+      "force_row_level_security": true
     },
     {
       "schema": "platform",
@@ -1269,6 +3905,13 @@
       "kind": "r",
       "row_level_security": false,
       "force_row_level_security": false
+    },
+    {
+      "schema": "platform",
+      "relation": "transition_preparation_receipts",
+      "kind": "r",
+      "row_level_security": true,
+      "force_row_level_security": true
     }
   ],
   "schemas": ["platform"],

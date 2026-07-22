@@ -627,6 +627,14 @@ test('immutable release persistence verifies bytes, identities, links, RLS, and 
                   ON namespace.oid = relation.relnamespace
                WHERE namespace.nspname = 'platform'
                  AND rewrite.rulename ~ '_reject_(update|delete)$'
+                 AND relation.relname IN (
+                   'app_package_revisions',
+                   'release_artifact_blobs',
+                   'tenant_releases',
+                   'tenant_release_artifact_links',
+                   'tenant_release_projection_links',
+                   'tenant_release_chunk_links'
+                 )
             `);
               assert.equal(rules.rows[0]?.count, '12');
             } finally {

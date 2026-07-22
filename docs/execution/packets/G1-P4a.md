@@ -20,6 +20,10 @@ Owned paths:
 - `packages/postgres-provider/src/release-approval-service.ts`
 - `packages/postgres-provider/package.json`
 - `test/postgres/release-approval.test.ts`
+- `test/postgres/releases.test.ts` (scope the legacy immutable-rule count to
+  the six G1-P3 release tables only)
+- `test/architecture/release-persistence-boundary.test.ts` (migration-list
+  expectation only)
 - `test/architecture/release-activation-boundary.test.ts`
 - `docs/execution/packets/G1-P0.md`
 - `docs/execution/packets/G1-P4a.md`
@@ -157,6 +161,31 @@ Focused PostgreSQL and application-service tests must prove:
 
 Full candidate gates and Critical-tier review evidence will be recorded after
 the implementation is frozen.
+
+## Writer implementation notes (preliminary)
+
+- Migration 0004 backfills and trigger-creates one nullable, fenced pointer
+  per environment; forced RLS grants the runtime only `SELECT`/`UPDATE`, an
+  exact-swap trigger requires fence `+1`, and a delete-reject rule preserves
+  pointer identity.
+- Approver eligibility is an append-only event stream. A database trigger
+  serializes each tenant and assigns the next policy version; the only mutation
+  entry is a migration-owner function with no runtime `EXECUTE` grant.
+- Immutable preparation, compatibility receipt, approval, prebound SYSTEM
+  attempt, phase/history/outcome, and reserved outbox records use exact scoped
+  foreign keys, bytea digests, append-only rules, and narrow runtime grants.
+- `PostgresReleaseApprovalService.createApproval` accepts identities and actor
+  lineage only. One trusted transaction locks the pointer and authority
+  snapshot, loads the immutable release/preparation/receipt, recomputes the
+  versioned compatibility result, enforces live eligibility and maker-checker,
+  bounds mandatory expiry, and stores approval plus its one prebound attempt.
+- No application method or production SQL mutates the active pointer. The only
+  successful pointer update in P4a is a focused database-constraint test.
+
+Preliminary focused writer gates: schema migration/drift PASS (4 applied, 4
+verified); focused PostgreSQL PASS (9/9); focused activation/persistence
+architecture PASS (7/7); typecheck, lint, and format PASS. Full declared gates
+remain pending until the candidate is frozen; this is not review evidence.
 
 ## Review charter
 

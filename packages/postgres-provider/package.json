@@ -6,6 +6,7 @@
   "exports": {
     ".": "./src/migrations.ts",
     "./readiness": "./src/readiness.ts",
+    "./release-approval-service": "./src/release-approval-service.ts",
     "./release-repository": "./src/release-repository.ts",
     "./request-context": "./src/request-context.ts"
   },
