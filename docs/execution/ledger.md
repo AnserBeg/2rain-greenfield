@@ -27,7 +27,7 @@ before any become `admitted`.
 | G1-P2 | Deterministic compiler + bootstrap package + golden artifacts | G1 | Critical | accepted | `433a382d6244129dde19dc2335b219c3defbbdce` | [packet](packets/G1-P2.md); [cut](packets/G1-P0.md) |
 | G1-P3 | Immutable AppPackageRevision/TenantRelease persistence | G1 | Critical | accepted | `925ec8a7d56dcca120b0cdf192e7d74a568c0ba6` | [packet](packets/G1-P3.md); [cut](packets/G1-P0.md) |
 | G1-P4a | Release activation contracts + real approval substrate, no callable activation | G1 | Critical | accepted | `c3769eba9ee21b3e2121a59c660e8d648037c73f` | [packet](packets/G1-P4a.md); [cut](packets/G1-P0.md) |
-| G1-P4b | Human-approved CAS activation + crash reconciliation + rollback | G1 | Critical | planned | - | [cut](packets/G1-P0.md) |
+| G1-P4b | Human-approved CAS activation + crash reconciliation + rollback | G1 | Critical | active | - | [packet](packets/G1-P4b.md); [cut](packets/G1-P0.md) |
 | G1-P5 | RequestRuntimeView + single-release request pinning | G1 | Critical | planned | - | [cut](packets/G1-P0.md) |
 | G1-P6 | Empty fail-closed Semantic Query/Operation gateways | G1 | Critical | planned | - | [cut](packets/G1-P0.md) |
 | G1-P7 | Compiled SurfaceRuntime shell + component registry | G1 | Behavioral | planned | - | [cut](packets/G1-P0.md) |
