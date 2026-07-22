@@ -3,8 +3,19 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "scripts": {
+    "build:demo-release": "node --import tsx scripts/compile-demo-release.ts",
+    "check:demo-release": "node --import tsx scripts/compile-demo-release.ts --check",
+    "dev": "node --import tsx src/demo-server.ts",
+    "test:contracts": "node --import tsx --test test/surface-runtime-contract.test.ts"
+  },
   "dependencies": {
     "@north-star/observability": "workspace:*",
-    "@north-star/postgres-provider": "workspace:*"
+    "@north-star/postgres-provider": "workspace:*",
+    "@north-star/runtime": "workspace:*"
+  },
+  "devDependencies": {
+    "@north-star/canonical-model": "workspace:*",
+    "@north-star/compiler": "workspace:*"
   }
 }
