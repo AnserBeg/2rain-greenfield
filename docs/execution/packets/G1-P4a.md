@@ -261,7 +261,7 @@ No UI exists in this packet. These commands complete in under ten minutes:
 
 ```bash
 cd /home/rvham/2rain-greenfield-wt/g1-p4a
-test "$(git rev-parse HEAD)" = c3769eba9ee21b3e2121a59c660e8d648037c73f
+git merge-base --is-ancestor c3769eba9ee21b3e2121a59c660e8d648037c73f HEAD
 corepack pnpm check:schema
 node --import tsx --test test/postgres/release-approval.test.ts
 node --import tsx --test test/architecture/release-activation-boundary.test.ts
