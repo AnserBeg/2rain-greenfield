@@ -2,7 +2,9 @@ export interface CanonicalDiagnostic {
   acceptedAlternative: string;
   code: string;
   objectId: string | null;
+  occurrenceIndex: number;
   path: string;
+  phase: string;
   rule: string;
 }
 
@@ -23,8 +25,18 @@ export function diagnostic(
   rule: string,
   acceptedAlternative: string,
   objectId: string | null = null,
+  phase = 'canonicalModel',
+  occurrenceIndex = 0,
 ): CanonicalDiagnostic {
-  return { acceptedAlternative, code, objectId, path, rule };
+  return {
+    acceptedAlternative,
+    code,
+    objectId,
+    occurrenceIndex,
+    path,
+    phase,
+    rule,
+  };
 }
 
 function compareDiagnostics(
@@ -34,9 +46,9 @@ function compareDiagnostics(
   return (
     compareCodeUnits(left.objectId ?? '', right.objectId ?? '') ||
     compareCodeUnits(left.path, right.path) ||
+    compareCodeUnits(left.phase, right.phase) ||
     compareCodeUnits(left.code, right.code) ||
-    compareCodeUnits(left.rule, right.rule) ||
-    compareCodeUnits(left.acceptedAlternative, right.acceptedAlternative)
+    left.occurrenceIndex - right.occurrenceIndex
   );
 }
 
