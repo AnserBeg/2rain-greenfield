@@ -28,7 +28,7 @@ before any become `admitted`.
 | G1-P3 | Immutable AppPackageRevision/TenantRelease persistence | G1 | Critical | accepted | `925ec8a7d56dcca120b0cdf192e7d74a568c0ba6` | [packet](packets/G1-P3.md); [cut](packets/G1-P0.md) |
 | G1-P4a | Release activation contracts + real approval substrate, no callable activation | G1 | Critical | accepted | `c3769eba9ee21b3e2121a59c660e8d648037c73f` | [packet](packets/G1-P4a.md); [cut](packets/G1-P0.md) |
 | G1-P4b | Human-approved CAS activation + crash reconciliation + rollback | G1 | Critical | accepted | `1bb946f9a5668512a6d4cab6876dd66ec0d3753d` | [packet](packets/G1-P4b.md); [cut](packets/G1-P0.md) |
-| G1-P5 | RequestRuntimeView + single-release request pinning | G1 | Critical | active | - | [packet](packets/G1-P5.md); [cut](packets/G1-P0.md) |
+| G1-P5 | RequestRuntimeView + single-release request pinning | G1 | Critical | evidence_ready | `edef3db9940ba479cef7736238008c2e0321858b` | [packet](packets/G1-P5.md); [cut](packets/G1-P0.md) |
 | G1-P6 | Empty fail-closed Semantic Query/Operation gateways | G1 | Critical | planned | - | [cut](packets/G1-P0.md) |
 | G1-P7 | Compiled SurfaceRuntime shell + component registry | G1 | Behavioral | planned | - | [cut](packets/G1-P0.md) |
 | G1-P8 | UX grammar skill-pin + compiled SurfaceRuntime seam | G1 | Mechanical | planned | - | [cut](packets/G1-P0.md) |
