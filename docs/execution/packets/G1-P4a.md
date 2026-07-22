@@ -52,10 +52,11 @@ but an architecture gate proves there is no callable activation/CAS path.
   nullable release, and a monotonic fence. Migration 0004 backfills null rows
   for every existing environment and installs the environment-creation
   invariant for future rows.
-- The pointer is the first runtime-updatable platform table. Forced RLS has
-  distinct `SELECT` and `UPDATE` policies; the update policy uses both `USING`
-  and `WITH CHECK` against the trusted tenant, environment, and principal
-  context.
+- The pointer is designed as the first runtime-updatable platform table.
+  Forced RLS has distinct `SELECT` and `UPDATE` policies; the update policy
+  uses both `USING` and `WITH CHECK` against the trusted tenant, environment,
+  and principal context. P4a grants runtime `SELECT` only. P4b owns enabling
+  `UPDATE` together with the trusted CAS service and crash reconciler.
 - A database trigger permits only a release change with
   `new.fence = old.fence + 1`; it rejects pointer identity changes, skipped or
   repeated fences, and every other mutation shape.
@@ -141,7 +142,8 @@ packet defines that state vocabulary but does not implement any transition.
 - Outcome and outbox envelopes are explicitly versioned. P4b owns committing
   and dispatching the event.
 - P4b must freeze the P5 invalidation contract and may not expose activation
-  without its crash reconciler.
+  without its crash reconciler. It also owns enabling the pointer `UPDATE`
+  privilege in the same packet as that CAS/reconciliation path.
 
 ## Required proof
 
@@ -150,6 +152,8 @@ Focused PostgreSQL and application-service tests must prove:
 - existing-environment backfill and future-environment pointer creation;
 - exact `+1` fence enforcement and rejection of every other update shape;
 - pointer RLS `UPDATE` isolation with both `USING` and `WITH CHECK`;
+- production runtime has no pointer `UPDATE` privilege; focused RLS and trigger
+  tests use a temporary admin grant that is revoked afterward;
 - append-only enforcement and restricted grants;
 - one decisive outcome per attempt;
 - every approver eligibility change advances the tenant policy version;
@@ -165,9 +169,10 @@ the implementation is frozen.
 ## Writer implementation notes (preliminary)
 
 - Migration 0004 backfills and trigger-creates one nullable, fenced pointer
-  per environment; forced RLS grants the runtime only `SELECT`/`UPDATE`, an
-  exact-swap trigger requires fence `+1`, and a delete-reject rule preserves
-  pointer identity.
+  per environment; forced RLS installs `SELECT`/`UPDATE` policies but grants
+  the runtime only `SELECT`. An exact-swap trigger requires fence `+1`, and a
+  delete-reject rule preserves pointer identity. P4b owns granting `UPDATE`
+  with its CAS and crash reconciler.
 - Approver eligibility is an append-only event stream. A database trigger
   serializes each tenant and assigns the next policy version; the only mutation
   entry is a migration-owner function with no runtime `EXECUTE` grant.
@@ -175,12 +180,15 @@ the implementation is frozen.
   attempt, phase/history/outcome, and reserved outbox records use exact scoped
   foreign keys, bytea digests, append-only rules, and narrow runtime grants.
 - `PostgresReleaseApprovalService.createApproval` accepts identities and actor
-  lineage only. One trusted transaction locks the pointer and authority
-  snapshot, loads the immutable release/preparation/receipt, recomputes the
-  versioned compatibility result, enforces live eligibility and maker-checker,
-  bounds mandatory expiry, and stores approval plus its one prebound attempt.
-- No application method or production SQL mutates the active pointer. The only
-  successful pointer update in P4a is a focused database-constraint test.
+  lineage only. One trusted transaction locks the authority snapshot, reads
+  the current pointer and immutable release/preparation/receipt, recomputes
+  the versioned compatibility result, enforces live eligibility and
+  maker-checker, bounds mandatory expiry, and stores approval plus its one
+  prebound attempt. P4b revalidates the immutable pointer binding before CAS.
+- No application method, production SQL, or runtime privilege can mutate the
+  active pointer. The only successful pointer update in P4a is a focused
+  database-constraint test under a temporary admin-installed runtime grant
+  that the test revokes afterward.
 
 Preliminary focused writer gates: schema migration/drift PASS (4 applied, 4
 verified); focused PostgreSQL PASS (9/9); focused activation/persistence

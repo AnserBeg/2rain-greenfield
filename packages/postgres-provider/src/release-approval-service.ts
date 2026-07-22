@@ -464,8 +464,7 @@ async function loadPointer(
   const result = await client.query<PointerRow>(
     `SELECT pointer_id, release_id, fence
        FROM platform.active_release_pointers
-      WHERE tenant_id = $1 AND environment_id = $2
-      FOR SHARE`,
+      WHERE tenant_id = $1 AND environment_id = $2`,
     [context.tenantId, context.environmentId],
   );
   return requiredRow(

@@ -1105,7 +1105,7 @@ REVOKE ALL ON FUNCTION platform.guard_active_release_pointer_swap() FROM PUBLIC;
 REVOKE ALL ON FUNCTION platform.assign_release_approver_policy_version() FROM PUBLIC;
 REVOKE ALL ON FUNCTION platform.set_release_approver_eligibility(uuid, uuid, boolean, uuid, uuid) FROM PUBLIC;
 
-GRANT SELECT, UPDATE ON platform.active_release_pointers TO north_star_runtime;
+GRANT SELECT ON platform.active_release_pointers TO north_star_runtime;
 GRANT SELECT ON platform.release_approver_eligibility_events TO north_star_runtime;
 GRANT SELECT, INSERT ON platform.transition_preparation_receipts TO north_star_runtime;
 GRANT SELECT, INSERT ON platform.release_activation_preparations TO north_star_runtime;

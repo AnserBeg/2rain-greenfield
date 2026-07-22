@@ -628,9 +628,24 @@ test('G1-P4a PostgreSQL contracts and trusted approval service', async (t) => {
               pointer_delete: false,
               pointer_insert: false,
               pointer_select: true,
-              pointer_update: true,
+              pointer_update: false,
               preparation_insert: true,
             });
+
+            await assert.rejects(
+              withTrustedRequestTransaction(
+                runtimePool,
+                approverContext,
+                async (client) =>
+                  client.query(
+                    `UPDATE platform.active_release_pointers
+                        SET release_id = $1, fence = fence + 1
+                      WHERE pointer_id = $2`,
+                    [releaseOne, pointer.pointerId],
+                  ),
+              ),
+              /permission denied for table active_release_pointers/,
+            );
 
             const policies = await pool.query<{
               command: string;
@@ -973,189 +988,191 @@ test('G1-P4a PostgreSQL contracts and trusted approval service', async (t) => {
 
         await t.test(
           'pointer UPDATE RLS enforces USING and WITH CHECK independently',
-          async () => {
-            const policy = await pool.query<{
-              qual: string | null;
-              with_check: string | null;
-            }>(`
-              SELECT qual, with_check
-                FROM pg_catalog.pg_policies
-               WHERE schemaname = 'platform'
-                 AND tablename = 'active_release_pointers'
-                 AND cmd = 'UPDATE'
-            `);
-            assert.match(policy.rows[0]?.qual ?? '', /tenant_id/);
-            assert.match(policy.rows[0]?.qual ?? '', /environment_id/);
-            assert.match(policy.rows[0]?.qual ?? '', /principal_id/);
-            assert.match(policy.rows[0]?.with_check ?? '', /tenant_id/);
-            assert.match(policy.rows[0]?.with_check ?? '', /environment_id/);
-            assert.match(policy.rows[0]?.with_check ?? '', /principal_id/);
+          async () =>
+            withTemporaryPointerUpdateGrant(pool, async () => {
+              const policy = await pool.query<{
+                qual: string | null;
+                with_check: string | null;
+              }>(`
+                SELECT qual, with_check
+                  FROM pg_catalog.pg_policies
+                 WHERE schemaname = 'platform'
+                   AND tablename = 'active_release_pointers'
+                   AND cmd = 'UPDATE'
+              `);
+              assert.match(policy.rows[0]?.qual ?? '', /tenant_id/);
+              assert.match(policy.rows[0]?.qual ?? '', /environment_id/);
+              assert.match(policy.rows[0]?.qual ?? '', /principal_id/);
+              assert.match(policy.rows[0]?.with_check ?? '', /tenant_id/);
+              assert.match(policy.rows[0]?.with_check ?? '', /environment_id/);
+              assert.match(policy.rows[0]?.with_check ?? '', /principal_id/);
 
-            const crossTenant = await withTrustedRequestTransaction(
-              runtimePool,
-              tenantBContext,
-              async (client) =>
-                client.query(
-                  `UPDATE platform.active_release_pointers
-                      SET release_id = $1, fence = fence + 1
-                    WHERE pointer_id = $2`,
-                  [releaseOne, pointer.pointerId],
-                ),
-            );
-            assert.equal(crossTenant.rowCount, 0);
-            const crossEnvironment = await withTrustedRequestTransaction(
-              runtimePool,
-              newEnvironmentContext,
-              async (client) =>
-                client.query(
-                  `UPDATE platform.active_release_pointers
-                      SET release_id = $1, fence = fence + 1
-                    WHERE pointer_id = $2`,
-                  [releaseOne, pointer.pointerId],
-                ),
-            );
-            assert.equal(crossEnvironment.rowCount, 0);
+              const crossTenant = await withTrustedRequestTransaction(
+                runtimePool,
+                tenantBContext,
+                async (client) =>
+                  client.query(
+                    `UPDATE platform.active_release_pointers
+                        SET release_id = $1, fence = fence + 1
+                      WHERE pointer_id = $2`,
+                    [releaseOne, pointer.pointerId],
+                  ),
+              );
+              assert.equal(crossTenant.rowCount, 0);
+              const crossEnvironment = await withTrustedRequestTransaction(
+                runtimePool,
+                newEnvironmentContext,
+                async (client) =>
+                  client.query(
+                    `UPDATE platform.active_release_pointers
+                        SET release_id = $1, fence = fence + 1
+                      WHERE pointer_id = $2`,
+                    [releaseOne, pointer.pointerId],
+                  ),
+              );
+              assert.equal(crossEnvironment.rowCount, 0);
 
-            await assert.rejects(
-              withTrustedRequestTransaction(
+              await assert.rejects(
+                withTrustedRequestTransaction(
+                  runtimePool,
+                  approverContext,
+                  async (client) =>
+                    client.query(
+                      `UPDATE platform.active_release_pointers
+                          SET release_id = $1,
+                              fence = fence +
+                                CASE
+                                  WHEN set_config(
+                                    'north_star.principal_id',
+                                    '',
+                                    true
+                                  ) = '' THEN 1
+                                  ELSE 1
+                                END
+                        WHERE pointer_id = $2`,
+                      [releaseOne, pointer.pointerId],
+                    ),
+                ),
+                /row-level security policy/,
+              );
+            }),
+        );
+
+        await t.test(
+          'pointer trigger permits one +1 release swap and rejects every other shape',
+          async () =>
+            withTemporaryPointerUpdateGrant(pool, async () => {
+              const valid = await withTrustedRequestTransaction(
                 runtimePool,
                 approverContext,
                 async (client) =>
                   client.query(
                     `UPDATE platform.active_release_pointers
-                        SET release_id = $1,
-                            fence = fence +
-                              CASE
-                                WHEN set_config(
-                                  'north_star.principal_id',
-                                  '',
-                                  true
-                                ) = '' THEN 1
-                                ELSE 1
-                              END
-                      WHERE pointer_id = $2`,
-                    [releaseOne, pointer.pointerId],
-                  ),
-              ),
-              /row-level security policy/,
-            );
-          },
-        );
-
-        await t.test(
-          'pointer trigger permits one +1 release swap and rejects every other shape',
-          async () => {
-            const valid = await withTrustedRequestTransaction(
-              runtimePool,
-              approverContext,
-              async (client) =>
-                client.query(
-                  `UPDATE platform.active_release_pointers
                       SET release_id = $1, fence = fence + 1
                     WHERE pointer_id = $2`,
-                  [releaseOne, pointer.pointerId],
-                ),
-            );
-            assert.equal(valid.rowCount, 1);
-            const swapped = await pool.query<{
-              fence: string;
-              release_id: string;
-            }>(
-              `
+                    [releaseOne, pointer.pointerId],
+                  ),
+              );
+              assert.equal(valid.rowCount, 1);
+              const swapped = await pool.query<{
+                fence: string;
+                release_id: string;
+              }>(
+                `
               SELECT release_id, fence
                 FROM platform.active_release_pointers
                WHERE pointer_id = $1
             `,
-              [pointer.pointerId],
-            );
-            assert.deepEqual(swapped.rows[0], {
-              fence: '1',
-              release_id: releaseOne,
-            });
+                [pointer.pointerId],
+              );
+              assert.deepEqual(swapped.rows[0], {
+                fence: '1',
+                release_id: releaseOne,
+              });
 
-            for (const [name, statement, values] of [
-              [
-                'repeated fence',
-                `UPDATE platform.active_release_pointers
+              for (const [name, statement, values] of [
+                [
+                  'repeated fence',
+                  `UPDATE platform.active_release_pointers
                     SET release_id = $1, fence = 1
                   WHERE pointer_id = $2`,
-                [releaseTwo, pointer.pointerId],
-              ],
-              [
-                'skipped fence',
-                `UPDATE platform.active_release_pointers
+                  [releaseTwo, pointer.pointerId],
+                ],
+                [
+                  'skipped fence',
+                  `UPDATE platform.active_release_pointers
                     SET release_id = $1, fence = 3
                   WHERE pointer_id = $2`,
-                [releaseTwo, pointer.pointerId],
-              ],
-              [
-                'fence-only mutation',
-                `UPDATE platform.active_release_pointers
+                  [releaseTwo, pointer.pointerId],
+                ],
+                [
+                  'fence-only mutation',
+                  `UPDATE platform.active_release_pointers
                     SET fence = 2
                   WHERE pointer_id = $1`,
-                [pointer.pointerId],
-              ],
-              [
-                'null release',
-                `UPDATE platform.active_release_pointers
+                  [pointer.pointerId],
+                ],
+                [
+                  'null release',
+                  `UPDATE platform.active_release_pointers
                     SET release_id = NULL, fence = 2
                   WHERE pointer_id = $1`,
-                [pointer.pointerId],
-              ],
-              [
-                'pointer identity mutation',
-                `UPDATE platform.active_release_pointers
+                  [pointer.pointerId],
+                ],
+                [
+                  'pointer identity mutation',
+                  `UPDATE platform.active_release_pointers
                     SET pointer_id = $1, release_id = $2, fence = 2
                   WHERE pointer_id = $3`,
-                [
-                  'a8800000-0000-4000-8000-000000000001',
-                  releaseTwo,
-                  pointer.pointerId,
+                  [
+                    'a8800000-0000-4000-8000-000000000001',
+                    releaseTwo,
+                    pointer.pointerId,
+                  ],
                 ],
-              ],
-              [
-                'scope mutation',
-                `UPDATE platform.active_release_pointers
+                [
+                  'scope mutation',
+                  `UPDATE platform.active_release_pointers
                     SET environment_id = $1, release_id = $2, fence = 2
                   WHERE pointer_id = $3`,
-                [environmentANew, releaseTwo, pointer.pointerId],
-              ],
-              [
-                'unrelated column mutation',
-                `UPDATE platform.active_release_pointers
+                  [environmentANew, releaseTwo, pointer.pointerId],
+                ],
+                [
+                  'unrelated column mutation',
+                  `UPDATE platform.active_release_pointers
                     SET created_at = created_at + interval '1 second',
                         release_id = $1,
                         fence = 2
                   WHERE pointer_id = $2`,
-                [releaseTwo, pointer.pointerId],
-              ],
-            ] as const) {
-              await assert.rejects(
-                pool.query(statement, [...values]),
-                (error: unknown) =>
-                  error instanceof Error &&
-                  error.message.includes(
-                    'updates require one exact release swap and fence + 1',
-                  ) &&
-                  name.length > 0,
-              );
-            }
-            const unchanged = await pool.query<{
-              fence: string;
-              release_id: string;
-            }>(
-              `
+                  [releaseTwo, pointer.pointerId],
+                ],
+              ] as const) {
+                await assert.rejects(
+                  pool.query(statement, [...values]),
+                  (error: unknown) =>
+                    error instanceof Error &&
+                    error.message.includes(
+                      'updates require one exact release swap and fence + 1',
+                    ) &&
+                    name.length > 0,
+                );
+              }
+              const unchanged = await pool.query<{
+                fence: string;
+                release_id: string;
+              }>(
+                `
               SELECT release_id, fence
                 FROM platform.active_release_pointers
                WHERE pointer_id = $1
             `,
-              [pointer.pointerId],
-            );
-            assert.deepEqual(unchanged.rows[0], {
-              fence: '1',
-              release_id: releaseOne,
-            });
-          },
+                [pointer.pointerId],
+              );
+              assert.deepEqual(unchanged.rows[0], {
+                fence: '1',
+                release_id: releaseOne,
+              });
+            }),
         );
       } finally {
         await runtimePool.end();
@@ -1163,6 +1180,30 @@ test('G1-P4a PostgreSQL contracts and trusted approval service', async (t) => {
     },
   );
 });
+
+async function withTemporaryPointerUpdateGrant<T>(
+  adminPool: pg.Pool,
+  run: () => Promise<T>,
+): Promise<T> {
+  await adminPool.query(
+    'GRANT UPDATE ON platform.active_release_pointers TO north_star_runtime',
+  );
+  try {
+    return await run();
+  } finally {
+    await adminPool.query(
+      'REVOKE UPDATE ON platform.active_release_pointers FROM north_star_runtime',
+    );
+    const privilege = await adminPool.query<{ allowed: boolean }>(`
+      SELECT has_table_privilege(
+        'north_star_runtime',
+        'platform.active_release_pointers',
+        'UPDATE'
+      ) AS allowed
+    `);
+    assert.equal(privilege.rows[0]?.allowed, false);
+  }
+}
 
 function identity(
   tenantId: string,

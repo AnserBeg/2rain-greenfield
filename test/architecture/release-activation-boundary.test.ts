@@ -247,11 +247,11 @@ test('production package SQL contains no pointer mutation path', () => {
   assert.doesNotMatch(migration, /UPDATE\s+platform\.active_release_pointers/i);
   assert.match(
     migration,
-    /GRANT SELECT, UPDATE ON platform\.active_release_pointers TO north_star_runtime/,
+    /GRANT SELECT ON platform\.active_release_pointers TO north_star_runtime/,
   );
   assert.doesNotMatch(
     migration,
-    /GRANT[^;]*(?:INSERT|DELETE)[^;]*active_release_pointers/i,
+    /GRANT[^;]*(?:INSERT|UPDATE|DELETE)[^;]*ON platform\.active_release_pointers/i,
   );
   assert.doesNotMatch(
     migration,
