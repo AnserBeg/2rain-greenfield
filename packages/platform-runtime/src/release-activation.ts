@@ -389,6 +389,65 @@ export function classifyActivationTransition(
   return ACTIVATION_TRANSITION_CLASSIFICATIONS[condition];
 }
 
+export const DECISIVE_ACTIVATION_OUTCOME_CODES = Object.freeze([
+  'SWAPPED',
+  'STALE_POINTER',
+  'EXPIRED_APPROVAL',
+  'INVALID_BINDING',
+  'OBSOLETE_POLICY',
+  'DEFINITIVE_BLOCKING_FAILURE',
+  'CANCELLATION',
+  'APPROVER_REVOCATION',
+  'PRE_CAS_POLICY_DENY',
+] as const);
+
+export type DecisiveActivationOutcomeCode =
+  (typeof DECISIVE_ACTIVATION_OUTCOME_CODES)[number];
+
+const TERMINAL_FAILED_NO_SWAP_OUTCOME = Object.freeze({
+  outcomeVersion: ACTIVATION_OUTCOME_VERSION,
+  pointerOutcome: 'NOT_SWAPPED',
+  terminal: true,
+  verificationOutcome: 'NOT_RUN',
+  workflowDisposition: 'CONSUMED',
+  workflowStatus: 'FAILED',
+} satisfies ReleaseActivationOutcomeDimensions);
+
+export const DECISIVE_ACTIVATION_OUTCOME_DIMENSIONS = Object.freeze({
+  SWAPPED: Object.freeze({
+    outcomeVersion: ACTIVATION_OUTCOME_VERSION,
+    pointerOutcome: 'SWAPPED',
+    terminal: false,
+    verificationOutcome: 'NOT_RUN',
+    workflowDisposition: 'CONSUMED',
+    workflowStatus: 'RUNNING',
+  } satisfies ReleaseActivationOutcomeDimensions),
+  STALE_POINTER: TERMINAL_FAILED_NO_SWAP_OUTCOME,
+  EXPIRED_APPROVAL: TERMINAL_FAILED_NO_SWAP_OUTCOME,
+  INVALID_BINDING: TERMINAL_FAILED_NO_SWAP_OUTCOME,
+  OBSOLETE_POLICY: TERMINAL_FAILED_NO_SWAP_OUTCOME,
+  DEFINITIVE_BLOCKING_FAILURE: TERMINAL_FAILED_NO_SWAP_OUTCOME,
+  CANCELLATION: Object.freeze({
+    outcomeVersion: ACTIVATION_OUTCOME_VERSION,
+    pointerOutcome: 'NOT_SWAPPED',
+    terminal: true,
+    verificationOutcome: 'NOT_RUN',
+    workflowDisposition: 'CONSUMED',
+    workflowStatus: 'CANCELLED',
+  } satisfies ReleaseActivationOutcomeDimensions),
+  APPROVER_REVOCATION: TERMINAL_FAILED_NO_SWAP_OUTCOME,
+  PRE_CAS_POLICY_DENY: TERMINAL_FAILED_NO_SWAP_OUTCOME,
+} satisfies Record<
+  DecisiveActivationOutcomeCode,
+  ReleaseActivationOutcomeDimensions
+>);
+
+export function decisiveActivationOutcomeDimensions(
+  outcomeCode: DecisiveActivationOutcomeCode,
+): ReleaseActivationOutcomeDimensions {
+  return DECISIVE_ACTIVATION_OUTCOME_DIMENSIONS[outcomeCode];
+}
+
 export interface DenyOnlyRolloutControlResult {
   readonly policyVersion: typeof ROLLOUT_CONTROL_POLICY_VERSION;
   readonly result: 'DENIED' | 'NOT_DENIED';
@@ -417,9 +476,9 @@ export interface ReleaseActivationHistoryRecord
 export interface ReleaseActivationAttemptOutcome
   extends ReleaseActivationOutcomeDimensions, TenantEnvironmentIdentity {
   readonly activationAttemptId: MintedUuid;
-  readonly condition: ActivationTransitionCondition;
   readonly outcomeDigest: Uint8Array;
   readonly outcomeId: MintedUuid;
+  readonly outcomeCode: DecisiveActivationOutcomeCode;
 }
 
 export interface ReleaseActivationOutboxEnvelope extends TenantEnvironmentIdentity {

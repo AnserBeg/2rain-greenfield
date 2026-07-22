@@ -294,7 +294,7 @@
       "schema": "platform",
       "relation": "release_activation_attempt_outcomes",
       "ordinal_position": 6,
-      "column_name": "condition_code",
+      "column_name": "outcome_code",
       "data_type": "text",
       "udt_name": "text",
       "is_nullable": "NO",
@@ -2477,7 +2477,7 @@
       "relation": "release_activation_attempt_outcomes",
       "name": "release_activation_attempt_outcomes_codes",
       "type": "c",
-      "definition": "CHECK (outcome_version = 'northstar.release-activation-outcome/v1'::text AND (condition_code = ANY (ARRAY['STALE_POINTER'::text, 'EXPIRED_APPROVAL'::text, 'INVALID_BINDING'::text, 'OBSOLETE_POLICY'::text, 'DEFINITIVE_BLOCKING_FAILURE'::text, 'CANCELLATION'::text, 'APPROVER_REVOCATION'::text, 'PRE_CAS_POLICY_DENY'::text, 'INFRASTRUCTURE_ERROR'::text, 'TIMEOUT'::text, 'AMBIGUOUS_COMMIT'::text, 'EXECUTOR_UNAVAILABLE'::text, 'ROLLOUT_PAUSE'::text])) AND (pointer_outcome = ANY (ARRAY['NOT_ATTEMPTED'::text, 'NOT_SWAPPED'::text, 'SWAPPED'::text, 'SWAPPED_THEN_SUPERSEDED'::text, 'AMBIGUOUS'::text])) AND (verification_outcome = ANY (ARRAY['NOT_RUN'::text, 'PASSED'::text, 'FAILED'::text, 'UNKNOWN'::text])) AND (workflow_disposition = ANY (ARRAY['RETAINED'::text, 'CONSUMED'::text])) AND (workflow_status = ANY (ARRAY['RUNNING'::text, 'PAUSED'::text, 'RECONCILING'::text, 'SUCCEEDED'::text, 'FAILED'::text, 'CANCELLED'::text])) AND terminal = (workflow_status = ANY (ARRAY['SUCCEEDED'::text, 'FAILED'::text, 'CANCELLED'::text])) AND octet_length(outcome_digest) = 32)"
+      "definition": "CHECK (outcome_version = 'northstar.release-activation-outcome/v1'::text AND (outcome_code = ANY (ARRAY['SWAPPED'::text, 'STALE_POINTER'::text, 'EXPIRED_APPROVAL'::text, 'INVALID_BINDING'::text, 'OBSOLETE_POLICY'::text, 'DEFINITIVE_BLOCKING_FAILURE'::text, 'CANCELLATION'::text, 'APPROVER_REVOCATION'::text, 'PRE_CAS_POLICY_DENY'::text])) AND (pointer_outcome = ANY (ARRAY['NOT_ATTEMPTED'::text, 'NOT_SWAPPED'::text, 'SWAPPED'::text, 'SWAPPED_THEN_SUPERSEDED'::text, 'AMBIGUOUS'::text])) AND (verification_outcome = ANY (ARRAY['NOT_RUN'::text, 'PASSED'::text, 'FAILED'::text, 'UNKNOWN'::text])) AND (workflow_disposition = ANY (ARRAY['RETAINED'::text, 'CONSUMED'::text])) AND (workflow_status = ANY (ARRAY['RUNNING'::text, 'PAUSED'::text, 'RECONCILING'::text, 'SUCCEEDED'::text, 'FAILED'::text, 'CANCELLED'::text])) AND terminal = (workflow_status = ANY (ARRAY['SUCCEEDED'::text, 'FAILED'::text, 'CANCELLED'::text])) AND (outcome_code = 'SWAPPED'::text AND pointer_outcome = 'SWAPPED'::text AND verification_outcome = 'NOT_RUN'::text AND workflow_disposition = 'CONSUMED'::text AND workflow_status = 'RUNNING'::text AND NOT terminal OR outcome_code = 'CANCELLATION'::text AND pointer_outcome = 'NOT_SWAPPED'::text AND verification_outcome = 'NOT_RUN'::text AND workflow_disposition = 'CONSUMED'::text AND workflow_status = 'CANCELLED'::text AND terminal OR (outcome_code = ANY (ARRAY['STALE_POINTER'::text, 'EXPIRED_APPROVAL'::text, 'INVALID_BINDING'::text, 'OBSOLETE_POLICY'::text, 'DEFINITIVE_BLOCKING_FAILURE'::text, 'APPROVER_REVOCATION'::text, 'PRE_CAS_POLICY_DENY'::text])) AND pointer_outcome = 'NOT_SWAPPED'::text AND verification_outcome = 'NOT_RUN'::text AND workflow_disposition = 'CONSUMED'::text AND workflow_status = 'FAILED'::text AND terminal) AND octet_length(outcome_digest) = 32)"
     },
     {
       "schema": "platform",

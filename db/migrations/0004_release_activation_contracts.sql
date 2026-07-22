@@ -545,7 +545,7 @@ CREATE TABLE platform.release_activation_attempt_outcomes (
   activation_attempt_id uuid NOT NULL,
   outcome_id uuid NOT NULL,
   outcome_version text NOT NULL,
-  condition_code text NOT NULL,
+  outcome_code text NOT NULL,
   pointer_outcome text NOT NULL,
   verification_outcome text NOT NULL,
   workflow_disposition text NOT NULL,
@@ -564,7 +564,8 @@ CREATE TABLE platform.release_activation_attempt_outcomes (
     ),
   CONSTRAINT release_activation_attempt_outcomes_codes CHECK (
     outcome_version = 'northstar.release-activation-outcome/v1'
-    AND condition_code IN (
+    AND outcome_code IN (
+      'SWAPPED',
       'STALE_POINTER',
       'EXPIRED_APPROVAL',
       'INVALID_BINDING',
@@ -572,12 +573,7 @@ CREATE TABLE platform.release_activation_attempt_outcomes (
       'DEFINITIVE_BLOCKING_FAILURE',
       'CANCELLATION',
       'APPROVER_REVOCATION',
-      'PRE_CAS_POLICY_DENY',
-      'INFRASTRUCTURE_ERROR',
-      'TIMEOUT',
-      'AMBIGUOUS_COMMIT',
-      'EXECUTOR_UNAVAILABLE',
-      'ROLLOUT_PAUSE'
+      'PRE_CAS_POLICY_DENY'
     )
     AND pointer_outcome IN (
       'NOT_ATTEMPTED',
@@ -597,6 +593,40 @@ CREATE TABLE platform.release_activation_attempt_outcomes (
       'CANCELLED'
     )
     AND terminal = (workflow_status IN ('SUCCEEDED', 'FAILED', 'CANCELLED'))
+    AND (
+      (
+        outcome_code = 'SWAPPED'
+        AND pointer_outcome = 'SWAPPED'
+        AND verification_outcome = 'NOT_RUN'
+        AND workflow_disposition = 'CONSUMED'
+        AND workflow_status = 'RUNNING'
+        AND NOT terminal
+      )
+      OR (
+        outcome_code = 'CANCELLATION'
+        AND pointer_outcome = 'NOT_SWAPPED'
+        AND verification_outcome = 'NOT_RUN'
+        AND workflow_disposition = 'CONSUMED'
+        AND workflow_status = 'CANCELLED'
+        AND terminal
+      )
+      OR (
+        outcome_code IN (
+          'STALE_POINTER',
+          'EXPIRED_APPROVAL',
+          'INVALID_BINDING',
+          'OBSOLETE_POLICY',
+          'DEFINITIVE_BLOCKING_FAILURE',
+          'APPROVER_REVOCATION',
+          'PRE_CAS_POLICY_DENY'
+        )
+        AND pointer_outcome = 'NOT_SWAPPED'
+        AND verification_outcome = 'NOT_RUN'
+        AND workflow_disposition = 'CONSUMED'
+        AND workflow_status = 'FAILED'
+        AND terminal
+      )
+    )
     AND octet_length(outcome_digest) = 32
   )
 );

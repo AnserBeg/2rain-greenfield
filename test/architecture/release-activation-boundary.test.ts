@@ -6,9 +6,11 @@ import test from 'node:test';
 import {
   ACTIVATION_TRANSITION_CLASSIFICATIONS,
   COMPILER_TRANSITION_FACTS_VERSION,
+  DECISIVE_ACTIVATION_OUTCOME_CODES,
   EXECUTOR_APPLIED_STATE_EVIDENCE_VERSION,
   TRANSITION_COMPATIBILITY_POLICY_VERSION,
   classifyActivationTransition,
+  decisiveActivationOutcomeDimensions,
   evaluateTransitionCompatibility,
 } from '../../packages/platform-runtime/src/release-activation.js';
 
@@ -157,6 +159,60 @@ test('transition classification is exhaustive and keeps outcome dimensions ortho
     classifyActivationTransition('ROLLOUT_PAUSE').workflowStatus,
     'PAUSED',
   );
+
+  assert.deepEqual(DECISIVE_ACTIVATION_OUTCOME_CODES, [
+    'SWAPPED',
+    'STALE_POINTER',
+    'EXPIRED_APPROVAL',
+    'INVALID_BINDING',
+    'OBSOLETE_POLICY',
+    'DEFINITIVE_BLOCKING_FAILURE',
+    'CANCELLATION',
+    'APPROVER_REVOCATION',
+    'PRE_CAS_POLICY_DENY',
+  ]);
+  assert.deepEqual(decisiveActivationOutcomeDimensions('SWAPPED'), {
+    outcomeVersion: 'northstar.release-activation-outcome/v1',
+    pointerOutcome: 'SWAPPED',
+    terminal: false,
+    verificationOutcome: 'NOT_RUN',
+    workflowDisposition: 'CONSUMED',
+    workflowStatus: 'RUNNING',
+  });
+  assert.deepEqual(decisiveActivationOutcomeDimensions('CANCELLATION'), {
+    outcomeVersion: 'northstar.release-activation-outcome/v1',
+    pointerOutcome: 'NOT_SWAPPED',
+    terminal: true,
+    verificationOutcome: 'NOT_RUN',
+    workflowDisposition: 'CONSUMED',
+    workflowStatus: 'CANCELLED',
+  });
+  for (const outcomeCode of DECISIVE_ACTIVATION_OUTCOME_CODES.filter(
+    (code) => code !== 'SWAPPED' && code !== 'CANCELLATION',
+  )) {
+    assert.deepEqual(decisiveActivationOutcomeDimensions(outcomeCode), {
+      outcomeVersion: 'northstar.release-activation-outcome/v1',
+      pointerOutcome: 'NOT_SWAPPED',
+      terminal: true,
+      verificationOutcome: 'NOT_RUN',
+      workflowDisposition: 'CONSUMED',
+      workflowStatus: 'FAILED',
+    });
+  }
+  for (const resumableCondition of [
+    'INFRASTRUCTURE_ERROR',
+    'TIMEOUT',
+    'AMBIGUOUS_COMMIT',
+    'EXECUTOR_UNAVAILABLE',
+    'ROLLOUT_PAUSE',
+  ]) {
+    assert.equal(
+      DECISIVE_ACTIVATION_OUTCOME_CODES.includes(
+        resumableCondition as (typeof DECISIVE_ACTIVATION_OUTCOME_CODES)[number],
+      ),
+      false,
+    );
+  }
 
   const contracts = read('packages/platform-runtime/src/release-activation.ts');
   assert.match(

@@ -306,6 +306,7 @@ test('G1-P4a PostgreSQL contracts and trusted approval service', async (t) => {
           now: () => fixedNow,
         });
         let firstAttemptId: MintedUuid | undefined;
+        let secondAttemptId: MintedUuid | undefined;
 
         await t.test(
           'createApproval recomputes a null-base binding and mandatory expiry',
@@ -410,6 +411,7 @@ test('G1-P4a PostgreSQL contracts and trusted approval service', async (t) => {
               rolloutId: minted('a8500000-0000-4000-8000-000000000002'),
               sourceDecisionId: minted('a8600000-0000-4000-8000-000000000002'),
             });
+            secondAttemptId = created.attempt.activationAttemptId;
             assert.equal(created.approval.expiresAt, explicitExpiry);
             assert.equal(
               created.approval.sourceDecisionId,
@@ -504,6 +506,7 @@ test('G1-P4a PostgreSQL contracts and trusted approval service', async (t) => {
           'append-only privileges, reject rules, and decisive outcome uniqueness hold',
           async () => {
             assert.ok(firstAttemptId);
+            assert.ok(secondAttemptId);
             const privilege = await pool.query<{
               authority_function_execute: boolean;
               guard_select: boolean;
@@ -842,73 +845,127 @@ test('G1-P4a PostgreSQL contracts and trusted approval service', async (t) => {
             `);
             assert.equal(rules.rows[0]?.count, '18');
 
-            await pool.query(
-              `INSERT INTO platform.release_activation_attempt_outcomes (
-                 tenant_id,
-                 environment_id,
-                 activation_attempt_id,
-                 outcome_id,
-                 outcome_version,
-                 condition_code,
-                 pointer_outcome,
-                 verification_outcome,
-                 workflow_disposition,
-                 workflow_status,
-                 terminal,
-                 outcome_digest
-               ) VALUES (
-                 $1, $2, $3, $4,
-                 'northstar.release-activation-outcome/v1',
-                 'CANCELLATION',
-                 'NOT_ATTEMPTED',
-                 'NOT_RUN',
-                 'CONSUMED',
-                 'CANCELLED',
-                 true,
-                 $5
-               )`,
-              [
+            const insertDecisiveOutcome = `
+              INSERT INTO platform.release_activation_attempt_outcomes (
+                tenant_id,
+                environment_id,
+                activation_attempt_id,
+                outcome_id,
+                outcome_version,
+                outcome_code,
+                pointer_outcome,
+                verification_outcome,
+                workflow_disposition,
+                workflow_status,
+                terminal,
+                outcome_digest
+              ) VALUES (
+                $1, $2, $3, $4,
+                'northstar.release-activation-outcome/v1',
+                $5, $6, $7, $8, $9, $10, $11
+              )
+            `;
+
+            await assert.rejects(
+              pool.query(insertDecisiveOutcome, [
+                tenantA,
+                environmentA,
+                secondAttemptId,
+                'a8700000-0000-4000-8000-000000000003',
+                'INFRASTRUCTURE_ERROR',
+                'NOT_ATTEMPTED',
+                'NOT_RUN',
+                'RETAINED',
+                'RUNNING',
+                false,
+                digest('resumable-condition-is-not-decisive'),
+              ]),
+              /release_activation_attempt_outcomes_codes/,
+            );
+            await assert.rejects(
+              pool.query(insertDecisiveOutcome, [
+                tenantA,
+                environmentA,
+                secondAttemptId,
+                'a8700000-0000-4000-8000-000000000004',
+                'SWAPPED',
+                'SWAPPED',
+                'NOT_RUN',
+                'CONSUMED',
+                'FAILED',
+                true,
+                digest('swapped-with-terminal-workflow'),
+              ]),
+              /release_activation_attempt_outcomes_codes/,
+            );
+
+            await pool.query(insertDecisiveOutcome, [
+              tenantA,
+              environmentA,
+              secondAttemptId,
+              'a8700000-0000-4000-8000-000000000005',
+              'SWAPPED',
+              'SWAPPED',
+              'NOT_RUN',
+              'CONSUMED',
+              'RUNNING',
+              false,
+              digest('swapped-decisive-outcome'),
+            ]);
+            const swapped = await pool.query<{
+              outcome_code: string;
+              pointer_outcome: string;
+              terminal: boolean;
+              verification_outcome: string;
+              workflow_disposition: string;
+              workflow_status: string;
+            }>(
+              `SELECT outcome_code,
+                      pointer_outcome,
+                      verification_outcome,
+                      workflow_disposition,
+                      workflow_status,
+                      terminal
+                 FROM platform.release_activation_attempt_outcomes
+                WHERE activation_attempt_id = $1`,
+              [secondAttemptId],
+            );
+            assert.deepEqual(swapped.rows[0], {
+              outcome_code: 'SWAPPED',
+              pointer_outcome: 'SWAPPED',
+              terminal: false,
+              verification_outcome: 'NOT_RUN',
+              workflow_disposition: 'CONSUMED',
+              workflow_status: 'RUNNING',
+            });
+
+            await pool.query(insertDecisiveOutcome, [
+              tenantA,
+              environmentA,
+              firstAttemptId,
+              'a8700000-0000-4000-8000-000000000001',
+              'CANCELLATION',
+              'NOT_SWAPPED',
+              'NOT_RUN',
+              'CONSUMED',
+              'CANCELLED',
+              true,
+              digest('first-decisive-outcome'),
+            ]);
+            await assert.rejects(
+              pool.query(insertDecisiveOutcome, [
                 tenantA,
                 environmentA,
                 firstAttemptId,
-                'a8700000-0000-4000-8000-000000000001',
-                digest('first-decisive-outcome'),
-              ],
-            );
-            await assert.rejects(
-              pool.query(
-                `INSERT INTO platform.release_activation_attempt_outcomes (
-                   tenant_id,
-                   environment_id,
-                   activation_attempt_id,
-                   outcome_id,
-                   outcome_version,
-                   condition_code,
-                   pointer_outcome,
-                   verification_outcome,
-                   workflow_disposition,
-                   workflow_status,
-                   terminal,
-                   outcome_digest
-                 ) VALUES (
-                   $1, $2, $3, $4,
-                   'northstar.release-activation-outcome/v1',
-                   'CANCELLATION',
-                   'NOT_ATTEMPTED',
-                   'NOT_RUN',
-                   'CONSUMED',
-                   'CANCELLED',
-                   true,
-                   $5
-                 )`,
-                [
-                  tenantA,
-                  environmentA,
-                  firstAttemptId,
-                  'a8700000-0000-4000-8000-000000000002',
-                  digest('second-decisive-outcome'),
-                ],
-              ),
+                'a8700000-0000-4000-8000-000000000002',
+                'CANCELLATION',
+                'NOT_SWAPPED',
+                'NOT_RUN',
+                'CONSUMED',
+                'CANCELLED',
+                true,
+                digest('second-decisive-outcome'),
+              ]),
               /duplicate key/,
             );
           },
