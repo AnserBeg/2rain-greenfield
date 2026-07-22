@@ -1,0 +1,226 @@
+{
+  "kind": "applicationPackageRevision",
+  "schemaVersion": "v0-experimental",
+  "languageVersion": "v0-experimental",
+  "package": {
+    "kind": "packageDefinition",
+    "schemaVersion": "v0-experimental",
+    "packageId": "northstar.bootstrap:package.vertical",
+    "namespace": "northstar.bootstrap",
+    "version": "0.1.0",
+    "provenance": "firstParty"
+  },
+  "modules": [
+    {
+      "kind": "moduleDefinition",
+      "schemaVersion": "v0-experimental",
+      "moduleId": "northstar.bootstrap:module.catalog",
+      "ownerPackageId": "northstar.bootstrap:package.vertical",
+      "label": "Catalog",
+      "orderKey": 10,
+      "composition": {
+        "kind": "compositionSeam",
+        "schemaVersion": "v0-experimental",
+        "status": "unsupported"
+      }
+    }
+  ],
+  "entities": [
+    {
+      "kind": "entityDefinition",
+      "schemaVersion": "v0-experimental",
+      "entityId": "northstar.bootstrap:entity.item",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v0-experimental",
+        "targetId": "northstar.bootstrap:module.catalog"
+      },
+      "label": "Item",
+      "orderKey": 10,
+      "storage": {
+        "kind": "storageMappingReference",
+        "schemaVersion": "v0-experimental",
+        "targetId": "northstar.bootstrap:storage.item"
+      }
+    }
+  ],
+  "fields": [
+    {
+      "kind": "fieldDefinition",
+      "schemaVersion": "v0-experimental",
+      "fieldId": "northstar.bootstrap:field.item_name",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v0-experimental",
+        "targetId": "northstar.bootstrap:entity.item"
+      },
+      "label": "Name",
+      "orderKey": 10,
+      "classification": "internal",
+      "fieldType": {
+        "kind": "textFieldType",
+        "schemaVersion": "v0-experimental",
+        "maximumLength": 240
+      },
+      "searchable": true
+    }
+  ],
+  "relations": [],
+  "stateMachines": [],
+  "surfaces": [
+    {
+      "kind": "surfaceDefinition",
+      "schemaVersion": "v0-experimental",
+      "surfaceId": "northstar.bootstrap:surface.item_form",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v0-experimental",
+        "targetId": "northstar.bootstrap:module.catalog"
+      },
+      "label": "Item form",
+      "archetype": "record",
+      "dataSource": {
+        "kind": "queryReference",
+        "schemaVersion": "v0-experimental",
+        "targetId": "northstar.bootstrap:query.item_get"
+      },
+      "slots": [
+        {
+          "kind": "surfaceSlot",
+          "schemaVersion": "v0-experimental",
+          "slotId": "northstar.bootstrap:slot.item_key_facts",
+          "slot": "keyFacts",
+          "orderKey": 10,
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v0-experimental",
+            "targetId": "northstar.bootstrap:capability.auto_form"
+          }
+        }
+      ],
+      "statusRoles": []
+    }
+  ],
+  "queries": [
+    {
+      "kind": "queryDefinition",
+      "schemaVersion": "v0-experimental",
+      "queryId": "northstar.bootstrap:query.item_get",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v0-experimental",
+        "targetId": "northstar.bootstrap:module.catalog"
+      },
+      "sourceEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v0-experimental",
+        "targetId": "northstar.bootstrap:entity.item"
+      },
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v0-experimental",
+        "targetId": "northstar.bootstrap:permission.item_read"
+      },
+      "queryType": "get",
+      "tier": "q0",
+      "maximumResultCount": 1,
+      "selections": [
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v0-experimental",
+          "selectionId": "northstar.bootstrap:selection.item_name",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v0-experimental",
+            "targetId": "northstar.bootstrap:field.item_name"
+          },
+          "orderKey": 10
+        }
+      ]
+    }
+  ],
+  "operations": [
+    {
+      "kind": "operationDefinition",
+      "schemaVersion": "v0-experimental",
+      "operationId": "northstar.bootstrap:operation.item_create",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v0-experimental",
+        "targetId": "northstar.bootstrap:module.catalog"
+      },
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v0-experimental",
+        "targetId": "northstar.bootstrap:permission.item_create"
+      },
+      "tier": "o0",
+      "confirmation": "none",
+      "effect": {
+        "kind": "createRecordEffect",
+        "schemaVersion": "v0-experimental",
+        "entity": {
+          "kind": "entityReference",
+          "schemaVersion": "v0-experimental",
+          "targetId": "northstar.bootstrap:entity.item"
+        }
+      },
+      "readBack": {
+        "kind": "queryReference",
+        "schemaVersion": "v0-experimental",
+        "targetId": "northstar.bootstrap:query.item_get"
+      }
+    }
+  ],
+  "permissions": [
+    {
+      "kind": "permissionDefinition",
+      "schemaVersion": "v0-experimental",
+      "permissionId": "northstar.bootstrap:permission.item_create",
+      "label": "Create item",
+      "action": "create",
+      "resource": {
+        "kind": "entityReference",
+        "schemaVersion": "v0-experimental",
+        "targetId": "northstar.bootstrap:entity.item"
+      }
+    },
+    {
+      "kind": "permissionDefinition",
+      "schemaVersion": "v0-experimental",
+      "permissionId": "northstar.bootstrap:permission.item_read",
+      "label": "Read item",
+      "action": "read",
+      "resource": {
+        "kind": "entityReference",
+        "schemaVersion": "v0-experimental",
+        "targetId": "northstar.bootstrap:entity.item"
+      }
+    }
+  ],
+  "assertions": [],
+  "storageMappings": [
+    {
+      "kind": "storageMappingDefinition",
+      "schemaVersion": "v0-experimental",
+      "storageMappingId": "northstar.bootstrap:storage.item",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v0-experimental",
+        "targetId": "northstar.bootstrap:entity.item"
+      },
+      "storageClass": "generatedTyped"
+    }
+  ],
+  "capabilityRequirements": [
+    {
+      "kind": "capabilityRequirement",
+      "schemaVersion": "v0-experimental",
+      "capabilityId": "northstar.bootstrap:capability.auto_form",
+      "capabilityVersion": 1,
+      "supportStatus": "supported",
+      "declaredEffects": ["read"],
+      "requiredProjections": ["surface"]
+    }
+  ]
+}

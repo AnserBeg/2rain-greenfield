@@ -61,7 +61,11 @@ importers:
         specifier: 4.1.12
         version: 4.1.12
 
-  packages/compiler: {}
+  packages/compiler:
+    dependencies:
+      '@north-star/canonical-model':
+        specifier: workspace:*
+        version: link:../canonical-model
 
   packages/dev-tooling: {}
 

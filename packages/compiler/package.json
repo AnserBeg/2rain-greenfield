@@ -1,5 +1,10 @@
 {
   "name": "@north-star/compiler",
   "private": true,
-  "version": "0.0.0"
+  "version": "0.0.0",
+  "type": "module",
+  "exports": "./src/index.ts",
+  "dependencies": {
+    "@north-star/canonical-model": "workspace:*"
+  }
 }

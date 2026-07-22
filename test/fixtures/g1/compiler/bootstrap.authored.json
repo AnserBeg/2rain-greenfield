@@ -1,0 +1,25 @@
+{
+  "kind": "applicationPackageRevision",
+  "schemaVersion": "v0-experimental",
+  "languageVersion": "v0-experimental",
+  "package": {
+    "kind": "packageDefinition",
+    "schemaVersion": "v0-experimental",
+    "packageId": "northstar.bootstrap:package.empty",
+    "namespace": "northstar.bootstrap",
+    "version": "0.1.0",
+    "provenance": "firstParty"
+  },
+  "modules": [],
+  "entities": [],
+  "fields": [],
+  "relations": [],
+  "stateMachines": [],
+  "surfaces": [],
+  "queries": [],
+  "operations": [],
+  "permissions": [],
+  "assertions": [],
+  "storageMappings": [],
+  "capabilityRequirements": []
+}
