@@ -30,6 +30,6 @@ before any become `admitted`.
 | G1-P4b | Human-approved CAS activation + crash reconciliation + rollback | G1 | Critical | accepted | `1bb946f9a5668512a6d4cab6876dd66ec0d3753d` | [packet](packets/G1-P4b.md); [cut](packets/G1-P0.md) |
 | G1-P5 | RequestRuntimeView + single-release request pinning | G1 | Critical | accepted | `edef3db9940ba479cef7736238008c2e0321858b` | [packet](packets/G1-P5.md); [cut](packets/G1-P0.md) |
 | G1-P6 | Empty fail-closed Semantic Query/Operation gateways | G1 | Critical | planned | - | [cut](packets/G1-P0.md) |
-| G1-P7 | Compiled SurfaceRuntime shell + component registry | G1 | Behavioral | evidence_ready | `e647968` | [packet](packets/G1-P7.md); [cut](packets/G1-P0.md) |
+| G1-P7 | Compiled SurfaceRuntime shell + component registry | G1 | Behavioral | accepted | `e647968` | [packet](packets/G1-P7.md); [cut](packets/G1-P0.md) |
 | G1-P8 | UX grammar skill-pin + compiled SurfaceRuntime seam | G1 | Mechanical | planned | - | [cut](packets/G1-P0.md) |
 | G1-P9 | Consolidated G1 stage-gate evidence | G1 | Mechanical | planned | - | [cut](packets/G1-P0.md) |
