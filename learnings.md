@@ -70,3 +70,8 @@ How to apply: define the admitted active/supported set once conceptually and use
 Date: 2026-07-21
 Why: G1-P2 appended its truncation marker after sorting, violating the frozen structural order even though the output stayed deterministic.
 How to apply: after adding limit, summary, or cascade markers, sort the final emitted diagnostic set by the same versioned structural comparator.
+
+## Keep migration bodies free of transaction-control tokens
+Date: 2026-07-21
+Why: G1-P3's first PL/pgSQL guard used `BEGIN`, and the accepted G0-P4a loader correctly rejected the migration because the runner exclusively owns transactions.
+How to apply: express migration-time guards without transaction-control tokens, and run `loadMigrations` as a focused check before any database suite.

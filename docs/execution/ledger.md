@@ -25,7 +25,7 @@ before any become `admitted`.
 | G1-P0 | G1 stage cut and parallelization map | G1 | Mechanical | accepted | `69b6ff87c28ca3638ac7958efce7acfa011b43a0` | [packet](packets/G1-P0.md) |
 | G1-P1 | Canonical identifiers and minimal object schemas | G1 | Critical | accepted | `18a6b5d62fda9a073450ee47a0acd6d511d557fd` | [packet](packets/G1-P1.md); [cut](packets/G1-P0.md) |
 | G1-P2 | Deterministic compiler + bootstrap package + golden artifacts | G1 | Critical | accepted | `433a382d6244129dde19dc2335b219c3defbbdce` | [packet](packets/G1-P2.md); [cut](packets/G1-P0.md) |
-| G1-P3 | Immutable AppPackageRevision/TenantRelease persistence | G1 | Critical | planned | - | [cut](packets/G1-P0.md) |
+| G1-P3 | Immutable AppPackageRevision/TenantRelease persistence | G1 | Critical | active | - | [packet](packets/G1-P3.md); [cut](packets/G1-P0.md) |
 | G1-P4 | Human-approved CAS activation + history + compatible rollback | G1 | Critical | planned | - | [cut](packets/G1-P0.md) |
 | G1-P5 | RequestRuntimeView + single-release request pinning | G1 | Critical | planned | - | [cut](packets/G1-P0.md) |
 | G1-P6 | Empty fail-closed Semantic Query/Operation gateways | G1 | Critical | planned | - | [cut](packets/G1-P0.md) |
