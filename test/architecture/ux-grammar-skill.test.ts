@@ -36,8 +36,33 @@ test('an induced skill/code vocabulary mismatch fails with UX003', () => {
     assert.ok(
       violations.some(
         (violation) =>
+          violation.file === '.agents/skills/ux-grammar/SKILL.md' &&
           violation.ruleId === 'UX003_VOCABULARY_DRIFT' &&
           violation.message.includes('archetypes'),
+      ),
+    );
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});
+
+test('an induced plan status-vocabulary mismatch fails with UX002', () => {
+  const files = contractFixture();
+  const planPath = 'docs/greenfield-north-star-erp-platform-plan.md';
+  const plan = files[planPath];
+  assert.ok(plan);
+  files[planPath] = plan.replace(
+    'success, attention, blocked, in progress',
+    'success, warning, blocked, in progress',
+  );
+  assert.notEqual(files[planPath], plan);
+  const root = createArchitectureFixture(files);
+
+  try {
+    assert.ok(
+      checkUxGrammarPin(root).violations.some(
+        (violation) =>
+          violation.file === planPath && violation.ruleId === 'UX002_PLAN_PIN',
       ),
     );
   } finally {
@@ -56,7 +81,9 @@ test('frontmatter displaced below prose fails the skill loader shape', () => {
   try {
     assert.ok(
       checkUxGrammarPin(root).violations.some(
-        (violation) => violation.ruleId === 'UX001_SKILL_SHAPE',
+        (violation) =>
+          violation.file === '.agents/skills/ux-grammar/SKILL.md' &&
+          violation.ruleId === 'UX001_SKILL_SHAPE',
       ),
     );
   } finally {

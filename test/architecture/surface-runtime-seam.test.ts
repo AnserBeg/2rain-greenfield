@@ -22,7 +22,25 @@ test('G1 browser surfaces have one compiled issued-view SurfaceRuntime seam', ()
 test('an induced hardcoded screen outside SurfaceRuntime fails with SURF001', () => {
   const files = seamFixture();
   files['apps/web/src/hardcoded-screen.ts'] =
-    "export const hardcodedScreen = '<main><section>Bypass</section></main>';";
+    "export const hardcodedScreen = () => '<html><body><header><h1>Orders</h1></header><form><button>Post</button></form></body></html>';";
+  const appServerPath = 'apps/web/src/app-server.ts';
+  const appServer = files[appServerPath];
+  assert.ok(appServer);
+  files[appServerPath] = [
+    "import { hardcodedScreen } from './hardcoded-screen.js';",
+    appServer.replace(
+      "  if (url.pathname !== '/') {",
+      [
+        "  if (url.pathname === '/orders') {",
+        '    response.end(hardcodedScreen());',
+        '    return;',
+        '  }',
+        '',
+        "  if (url.pathname !== '/') {",
+      ].join('\n'),
+    ),
+  ].join('\n');
+  assert.notEqual(files[appServerPath], appServer);
   const root = createArchitectureFixture(files);
 
   try {
@@ -32,6 +50,39 @@ test('an induced hardcoded screen outside SurfaceRuntime fails with SURF001', ()
         (violation) =>
           violation.file === 'apps/web/src/hardcoded-screen.ts' &&
           violation.ruleId === 'SURF001_RUNTIME_BYPASS',
+      ),
+    );
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});
+
+test('an induced computed registry key fails closed with SURF002', () => {
+  const files = seamFixture();
+  const registryPath = 'apps/web/src/component-registry.ts';
+  const registry = files[registryPath];
+  assert.ok(registry);
+  files[registryPath] = registry
+    .replace(
+      'type SurfaceComponentRenderer =',
+      "const bespokeComponentId = 'northstar.shell:component.bespoke_screen';\n\ntype SurfaceComponentRenderer =",
+    )
+    .replace(
+      "    'northstar.shell:component.error_probe': renderBoundaryProbe,",
+      [
+        '    [bespokeComponentId]: renderBoundaryProbe,',
+        "    'northstar.shell:component.error_probe': renderBoundaryProbe,",
+      ].join('\n'),
+    );
+  assert.notEqual(files[registryPath], registry);
+  const root = createArchitectureFixture(files);
+
+  try {
+    assert.ok(
+      checkSurfaceRuntimeSeam(root).violations.some(
+        (violation) =>
+          violation.file === registryPath &&
+          violation.ruleId === 'SURF002_COMPONENT_VOCABULARY',
       ),
     );
   } finally {

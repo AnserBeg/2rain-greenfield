@@ -48,6 +48,30 @@ const expectedPinIdentity = Object.freeze({
   schemaVersion: 'northstar.ux-grammar-pin/v1',
 });
 
+const planSlotAnchors = Object.freeze({
+  activity: 'activity rail',
+  breadcrumb: 'breadcrumb',
+  bulkActions: 'bulk bar',
+  childTables: 'child tables',
+  commandBar: 'command bar',
+  dataGrid: 'spreadsheet-grade grid',
+  decision: 'one decision per screen',
+  draftBanner: 'visible draft banner',
+  exceptions: 'exception cards',
+  keyFacts: 'key facts',
+  modeSwitch: 'operate/customize mode switch',
+  primaryAction: 'primary action thumb-reachable',
+  properties: 'right properties drawer',
+  publishDiff: 'publish diff',
+  savedViews: 'saved-view tabs',
+  scanInput: 'scan-first input',
+  sections: 'sections',
+  selection: 'edit-in-place selection',
+  setupChecklist: 'setup checklist',
+  title: 'title',
+  titleStatus: 'title + status chip',
+} satisfies Record<string, string>);
+
 export function checkUxGrammarPin(
   rootDirectory: string,
 ): SurfaceContractCheckResult {
@@ -382,9 +406,19 @@ function checkPlanPin(
     'Unknown archetypes, slots, or status roles fail compilation',
     'drift between document, skill, and code fails CI',
   ];
+  const planStatusRoles = statusRolesFromPlan(compact85);
+  const planSlotsMatch = Object.values(pin.slots)
+    .flat()
+    .every((slot) => {
+      const anchor = planSlotAnchors[slot as keyof typeof planSlotAnchors];
+      return anchor !== undefined && compact85.includes(anchor);
+    });
   if (
     required85.some((fragment) => !compact85.includes(fragment)) ||
     required86.some((fragment) => !compact86.includes(fragment)) ||
+    !planStatusRoles ||
+    !sameSet(planStatusRoles, pin.statusRoles) ||
+    !planSlotsMatch ||
     pin.archetypes.some(
       (archetype) => !section85.includes(`| ${capitalize(archetype)} |`),
     )
@@ -579,7 +613,7 @@ function scanForBypass(
     paths.surfaceRuntime,
   ]);
   const structuralMarkup =
-    /<\s*(?:main|nav|aside|section|article)(?:\s|>)|createElement\(\s*['"](?:main|nav|aside|section|article)['"]|(?:jsx|jsxs|jsxDEV)\(\s*['"](?:main|nav|aside|section|article)['"]|data-surface-archetype\s*=|data-component\s*=/i;
+    /<\s*(?:html|body|head|header|footer|main|nav|aside|section|article|form|fieldset|legend|input|select|textarea|button|table|h[1-6])(?:\s|>)|createElement\(\s*['"](?:html|body|head|header|footer|main|nav|aside|section|article|form|fieldset|legend|input|select|textarea|button|table|h[1-6])['"]|(?:jsx|jsxs|jsxDEV)\(\s*['"](?:html|body|head|header|footer|main|nav|aside|section|article|form|fieldset|legend|input|select|textarea|button|table|h[1-6])['"]|data-surface-archetype\s*=|data-component\s*=/i;
 
   for (const file of sourceFiles(sourceRoot)) {
     const repoPath = normalize(relative(root, file));
@@ -624,10 +658,25 @@ function registeredComponentIds(source: string): string[] | undefined {
     /const componentRegistry:[\s\S]*?Object\.freeze\(\{([\s\S]*?)\}\);/,
   );
   if (!match?.[1]) return undefined;
-  return [...match[1].matchAll(/['"]([^'"]+)['"]\s*:/g)]
-    .map((entry) => entry[1])
+  const lines = match[1]
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  const property = /^['"]([^'"]+)['"]\s*:\s*[A-Za-z_$][\w$]*,$/;
+  if (lines.some((line) => !property.test(line))) return undefined;
+  return lines
+    .map((line) => line.match(property)?.[1])
     .filter((entry): entry is string => entry !== undefined)
     .sort();
+}
+
+function statusRolesFromPlan(section85: string): string[] | undefined {
+  const match = section85.match(/one global status-color grammar \(([^)]+)\)/);
+  if (!match?.[1]) return undefined;
+  return match[1].split(',').map((role) => {
+    const normalized = role.trim();
+    return normalized === 'in progress' ? 'inProgress' : normalized;
+  });
 }
 
 function slotVocabulary(
