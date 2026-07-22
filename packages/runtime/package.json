@@ -3,5 +3,9 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "exports": "./src/request-context.ts"
+  "exports": {
+    ".": "./src/request-context.ts",
+    "./request-context": "./src/request-context.ts",
+    "./request-runtime-view": "./src/request-runtime-view.ts"
+  }
 }
