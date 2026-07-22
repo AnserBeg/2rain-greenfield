@@ -389,6 +389,10 @@ test('immutable release persistence verifies bytes, identities, links, RLS, and 
                 ),
               },
               {
+                code: 'RELEASE_MANIFEST_ENVELOPE_MISMATCH',
+                compiled: missingReleaseManifestEnvelopeFields(bootstrap),
+              },
+              {
                 code: 'PROJECTION_MANIFEST_LINK_MISMATCH',
                 compiled: wrongProjectionVersion(
                   bootstrap,
@@ -409,6 +413,10 @@ test('immutable release persistence verifies bytes, identities, links, RLS, and 
               {
                 code: 'PROJECTION_MANIFEST_LINK_MISMATCH',
                 compiled: wrongProjectionReaderProtocolVersion(bootstrap),
+              },
+              {
+                code: 'PROJECTION_MANIFEST_LINK_MISMATCH',
+                compiled: wrongProjectionSemanticDigest(bootstrap),
               },
               {
                 code: 'PROJECTION_CHUNK_LINK_MISMATCH',
@@ -826,6 +834,19 @@ function wrongReleaseManifestIdentity(
   return rebuildReleaseRoot(clone);
 }
 
+function missingReleaseManifestEnvelopeFields(
+  compiled: CompileSuccess,
+): CompileSuccess {
+  const clone = structuredClone(compiled);
+  const manifest = clone.bundle.releaseManifest as unknown as Record<
+    string,
+    unknown
+  >;
+  delete manifest.capabilityFacts;
+  delete manifest.semanticProfileDigest;
+  return rebuildReleaseRoot(clone);
+}
+
 function wrongProjectionVersion(
   compiled: CompileSuccess,
   field: 'chunkingSchemeVersion' | 'manifestVersion' | 'outputProtocolVersion',
@@ -854,6 +875,16 @@ function wrongProjectionReaderProtocolVersion(
     const unsupported = 'northstar.unsupported/minimumReaderProtocolVersion';
     referenceCompatibility.minimumReaderProtocolVersion = unsupported;
     manifestCompatibility.minimumReaderProtocolVersion = unsupported;
+  });
+}
+
+function wrongProjectionSemanticDigest(
+  compiled: CompileSuccess,
+): CompileSuccess {
+  return rebuildProjectionManifest(compiled, (reference, manifest) => {
+    const incorrectDigest = '0'.repeat(64);
+    reference.semanticDigest = incorrectDigest;
+    manifest.semanticDigest = incorrectDigest;
   });
 }
 

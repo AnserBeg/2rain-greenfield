@@ -485,7 +485,12 @@ function verifyCompiledRelease(
       projectionArtifact.canonicalBytes,
       'PROJECTION_MANIFEST_NOT_CANONICAL',
     ) as unknown as ProjectionManifestEnvelope;
-    verifyProjectionReference(reference, projectionManifest);
+    if (!Array.isArray(projectionManifest.chunks)) {
+      throw integrity(
+        'PROJECTION_MANIFEST_LINK_MISMATCH',
+        'projection reference metadata differs from its manifest',
+      );
+    }
     reachable.add(reference.artifactRoot);
     projections.push({
       familyId: reference.familyId,
@@ -494,6 +499,7 @@ function verifyCompiledRelease(
     });
 
     const chunkIds = new Set<string>();
+    const projectionPayloadBytes: Uint8Array[] = [];
     for (const descriptor of projectionManifest.chunks) {
       if (chunkIds.has(descriptor.chunkId)) {
         throw integrity(
@@ -528,6 +534,7 @@ function verifyCompiledRelease(
         chunkArtifact.canonicalBytes,
         'PROJECTION_CHUNK_NOT_CANONICAL',
       );
+      projectionPayloadBytes.push(chunkArtifact.canonicalBytes);
       reachable.add(descriptor.contentHash);
       chunks.push({
         chunkHash: descriptor.contentHash,
@@ -535,6 +542,11 @@ function verifyCompiledRelease(
         projectionInstanceId: reference.instanceId,
       });
     }
+    verifyProjectionReference(
+      reference,
+      projectionManifest,
+      projectionPayloadBytes,
+    );
   }
 
   const closureArtifacts = artifacts.filter(
@@ -588,6 +600,9 @@ function verifyReleaseManifestEnvelope(
     manifest.canonicalizationProfileVersion !==
       revision.canonicalizationProfileVersion ||
     manifest.normalizedDefinitionDigest !== revision.contentHash ||
+    !hasValidCapabilityFacts(manifest.capabilityFacts) ||
+    typeof manifest.semanticProfileDigest !== 'string' ||
+    !sha256Pattern.test(manifest.semanticProfileDigest) ||
     !Array.isArray(manifest.projections) ||
     !Array.isArray(manifest.artifactClosure)
   ) {
@@ -596,6 +611,29 @@ function verifyReleaseManifestEnvelope(
       'release manifest does not bind the immutable revision and Freeze B profiles',
     );
   }
+}
+
+function hasValidCapabilityFacts(value: unknown): boolean {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (fact) =>
+        isRecord(fact) &&
+        typeof fact.capabilityId === 'string' &&
+        fact.capabilityId.length > 0 &&
+        Number.isSafeInteger(fact.capabilityVersion) &&
+        Number(fact.capabilityVersion) >= 1 &&
+        Array.isArray(fact.declaredEffects) &&
+        fact.declaredEffects.every(
+          (effect) => typeof effect === 'string' && effect.length > 0,
+        ) &&
+        Array.isArray(fact.requiredProjectionFamilies) &&
+        fact.requiredProjectionFamilies.every(
+          (familyId) => typeof familyId === 'string' && familyId.length > 0,
+        ) &&
+        fact.supportStatus === 'supported',
+    )
+  );
 }
 
 function verifyAttestation(
@@ -637,6 +675,7 @@ function verifyAttestation(
 function verifyProjectionReference(
   reference: ProjectionReference,
   manifest: ProjectionManifestEnvelope,
+  projectionPayloadBytes: readonly Uint8Array[],
 ): void {
   const sharedKeys = [
     'chunkingSchemeVersion',
@@ -648,8 +687,15 @@ function verifyProjectionReference(
     'outputProtocolVersion',
     'payloadSchemaVersion',
     'requiredRuntimeCapability',
-    'semanticDigest',
   ] as const;
+  const payloadBytes =
+    projectionPayloadBytes.length === 1 ? projectionPayloadBytes[0] : undefined;
+  const semanticDigest = payloadBytes
+    ? hashBytes(
+        `${HASH_DOMAINS.projectionSemantic}/${reference.familyId}`,
+        payloadBytes,
+      )
+    : null;
   if (
     manifest.kind !== 'projectionManifest' ||
     reference.chunkingSchemeVersion !== CHUNKING_SCHEME_VERSION ||
@@ -661,7 +707,9 @@ function verifyProjectionReference(
     !hasSupportedProjectionCompatibility(reference.compatibility) ||
     !hasSupportedProjectionCompatibility(manifest.compatibility) ||
     !Array.isArray(manifest.chunks) ||
-    manifest.chunks.length === 0 ||
+    manifest.chunks.length !== 1 ||
+    reference.semanticDigest !== semanticDigest ||
+    manifest.semanticDigest !== semanticDigest ||
     sharedKeys.some(
       (key) => canonicalize(reference[key]) !== canonicalize(manifest[key]),
     )
