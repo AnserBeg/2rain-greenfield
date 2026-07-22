@@ -1,8 +1,8 @@
 # G0-P5c — Dependency and secret scanning with retained CI evidence
 
-Status: active
+Status: evidence_ready
 Tier: Mechanical
-Frozen candidate: pending
+Frozen candidate: `b48cfc64d653d28b8fe7d13ef4f745869e588e68`
 
 ## Goal and scope
 
@@ -79,3 +79,78 @@ and requires the real scanner to return exit 1 with the configured rule ID.
 The normal repository scan and the negative proof share the same extended
 Gitleaks policy. No package manifest, lockfile, runtime source, or G1-owned path
 changed.
+
+## Gate evidence
+
+All final results below ran with the content frozen as
+`b48cfc64d653d28b8fe7d13ef4f745869e588e68`:
+
+| Gate | Result |
+|---|---|
+| `CI=1 corepack pnpm install --frozen-lockfile --reporter=append-only` | PASS; 12 workspace projects, lockfile unchanged |
+| `.github/scripts/run-security-scans.sh` | PASS; five machine-readable/text evidence files produced |
+| Dependency audit | PASS; exit 0, no advisories and zero high/critical vulnerabilities across 159 dependencies |
+| Clean Git-history secret scan | PASS; exit 0, 62 commits scanned, no leaks found |
+| Committed synthetic-secret negative scan | PASS as a negative gate; real Gitleaks process exited 1, returned the required rule ID, and redacted both match and secret |
+| `corepack pnpm format` | PASS |
+| `corepack pnpm lint` | PASS |
+| `corepack pnpm typecheck` | PASS |
+| `corepack pnpm build` | PASS |
+| `corepack pnpm test:integration` | PASS; 4 tests |
+| `corepack pnpm test:architecture` | PASS; 11 tests |
+| Workflow syntax and pins | PASS; PyYAML parsed the security job and all 13 third-party action references are immutable commit SHAs |
+| `git diff --check origin/main...HEAD` | PASS; no output |
+| Owned paths and clean worktree | PASS; only the seven declared paths changed; no manifest, lockfile, runtime, canonical-model, or G1-P1 path changed |
+
+Pre-freeze red results were not hidden. A direct Prettier invocation over the
+TOML and shell files returned red because this repository has no parser for
+those explicitly named formats; the real repository `format` gate skips
+unknown files and passed, while `bash -n` validated the runner. The first
+branch-range `git diff --check` also found one trailing blank line in the open
+packet record. That line was removed before the candidate was frozen, and the
+complete declared gate set above was then rerun green at the frozen SHA.
+
+## Test it yourself
+
+This command runs the same dependency audit and clean-history secret scan as
+CI, then creates a disposable Git repository, commits a synthetic marker, and
+requires that second secret scan to return red:
+
+```bash
+cd /tmp/2rain-greenfield-g0-p5c
+g0p5c_evidence_dir=$(mktemp -d /tmp/g0-p5c-evidence-XXXXXX)
+SECURITY_EVIDENCE_DIR="$g0p5c_evidence_dir" \
+  .github/scripts/run-security-scans.sh
+sed -n '1,80p' "$g0p5c_evidence_dir/summary.json"
+sed -n '1,80p' "$g0p5c_evidence_dir/dependency-audit.json"
+sed -n '1,80p' "$g0p5c_evidence_dir/gitleaks-clean.json"
+sed -n '1,120p' "$g0p5c_evidence_dir/gitleaks-negative.json"
+```
+
+Expect the runner itself to pass. The summary must show dependency audit 0,
+clean secret scan 0, negative secret scan 1, and
+`negativeRuleDetected: true`. The dependency report has no advisories, the
+clean report is `[]`, and the negative report names
+`north-star-synthetic-test-secret` while both `Match` and `Secret` are
+`REDACTED`. That exit-1 scan is the planted-fixture red proof; the runner treats
+it as a required negative test rather than a CI failure.
+
+## Review evidence
+
+Writer and verifier: Codex orchestrator, Mechanical tier. Per the review-tier
+rule for deterministic configuration work, the review was orchestrator
+verification against the live gates rather than a separate model pass.
+
+Verdict: PASS on unchanged candidate
+`b48cfc64d653d28b8fe7d13ef4f745869e588e68`. The dependency process status is
+propagated to the final gate; any clean-history Gitleaks finding also makes the
+runner nonzero; the temporary committed fixture produces a real exit-1 finding
+with the expected rule ID; and the workflow's `if: always()` evidence upload
+runs after either gate fails. The scanner image and every third-party action are
+pinned immutably. No post-verification product or configuration change was
+made.
+
+Known limits match the charter: this packet does not generate an SBOM, attest
+supply-chain provenance, enforce license policy, or attempt to defeat
+adversarial obfuscation. Those concerns were neither implemented nor used to
+expand the review.
