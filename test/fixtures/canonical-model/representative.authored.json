@@ -232,11 +232,6 @@
         "schemaVersion": "v0-experimental",
         "targetId": "northstar.inventory:entity.item"
       },
-      "stateField": {
-        "kind": "fieldReference",
-        "schemaVersion": "v0-experimental",
-        "targetId": "northstar.inventory:field.item_status"
-      },
       "initialState": {
         "kind": "stateReference",
         "schemaVersion": "v0-experimental",

@@ -7,6 +7,17 @@ export const CONTENT_HASH_ALGORITHM = 'sha256' as const;
 export const CONTENT_HASH_DOMAIN =
   'northstar.app-package.normalized/v0-experimental' as const;
 
+export const CURRENCY_PROFILE_VERSION =
+  'northstar.currency-minor-units/v0-experimental' as const;
+
+// Freeze A admits only the currencies evidenced by the Canadian launch corpus:
+// CAD as the base currency and USD for routine cross-border purchasing. Adding a
+// currency or changing a minor unit is language evolution, not ambient Intl data.
+export const CURRENCY_MINOR_UNITS_V0 = Object.freeze({
+  CAD: 2,
+  USD: 2,
+} as const);
+
 export const IMMUTABLE_DEFAULTS_V0 = Object.freeze({
   lifecycle: 'active' as const,
   presence: 'optional' as const,
@@ -17,10 +28,12 @@ export const IMMUTABLE_DEFAULTS_V0 = Object.freeze({
   relationJoinEligibility: 'none' as const,
   queryFilter: Object.freeze({
     kind: 'booleanPredicate' as const,
+    schemaVersion: LANGUAGE_VERSION,
     value: true,
   }),
   operationPrecondition: Object.freeze({
     kind: 'booleanPredicate' as const,
+    schemaVersion: LANGUAGE_VERSION,
     value: true,
   }),
 });

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import {
   CANONICALIZATION_PROFILE_VERSION,
   CONTENT_HASH_ALGORITHM,
+  CURRENCY_MINOR_UNITS_V0,
   LANGUAGE_VERSION,
   NORMALIZATION_PROFILE_VERSION,
   STATUS_ROLES,
@@ -13,6 +14,11 @@ const nodeVersion = z.literal(LANGUAGE_VERSION);
 const boundedOrderKey = z.int().min(0).max(1_000_000);
 const boundedCount = z.int().min(1).max(1_000_000);
 const positiveVersion = z.int().min(1).max(1_000_000);
+const currencyCodes = Object.keys(CURRENCY_MINOR_UNITS_V0) as [
+  keyof typeof CURRENCY_MINOR_UNITS_V0,
+  ...(keyof typeof CURRENCY_MINOR_UNITS_V0)[],
+];
+const CurrencyCodeSchema = z.enum(currencyCodes);
 
 export const CanonicalIdSchema = z
   .string()
@@ -158,13 +164,18 @@ export const CanonicalScalarSchema: z.ZodType<CanonicalScalar> =
       schemaVersion: nodeVersion,
       value: CanonicalDecimalStringSchema,
     }),
-    z.strictObject({
-      currencyCode: z.string().regex(/^[A-Z]{3}$/),
-      kind: z.literal('moneyValue'),
-      minorUnit: z.int().min(0).max(6),
-      schemaVersion: nodeVersion,
-      value: CanonicalDecimalStringSchema,
-    }),
+    z
+      .strictObject({
+        currencyCode: CurrencyCodeSchema,
+        kind: z.literal('moneyValue'),
+        minorUnit: z.int().min(0).max(6),
+        schemaVersion: nodeVersion,
+        value: CanonicalDecimalStringSchema,
+      })
+      .refine(
+        (value) =>
+          CURRENCY_MINOR_UNITS_V0[value.currencyCode] === value.minorUnit,
+      ),
     z.strictObject({
       kind: z.literal('dateValue'),
       schemaVersion: nodeVersion,
@@ -246,7 +257,7 @@ const exactDecimalFieldType = z
   .refine((value) => value.scale <= value.precision);
 const moneyFieldType = z
   .strictObject({
-    currencyCode: z.string().regex(/^[A-Z]{3}$/),
+    currencyCode: CurrencyCodeSchema,
     kind: z.literal('moneyFieldType'),
     minorUnit: z.int().min(0).max(6),
     precision: z.int().min(1).max(38),
@@ -255,7 +266,10 @@ const moneyFieldType = z
     schemaVersion: nodeVersion,
   })
   .refine(
-    (value) => value.scale <= value.precision && value.minorUnit <= value.scale,
+    (value) =>
+      value.scale <= value.precision &&
+      value.minorUnit <= value.scale &&
+      CURRENCY_MINOR_UNITS_V0[value.currencyCode] === value.minorUnit,
   );
 const dateFieldType = z.strictObject({
   calendar: z.literal('iso8601'),
@@ -419,6 +433,12 @@ const transitionDefinition = z.strictObject({
   toState: CanonicalReferenceSchema,
   transitionId: CanonicalIdSchema,
 });
+const derivedStateField = z.strictObject({
+  fieldId: CanonicalIdSchema,
+  kind: z.literal('derivedStateField'),
+  schemaVersion: nodeVersion,
+  valueKind: z.literal('stateId'),
+});
 const normalizedStateMachineDefinition = z.strictObject({
   entity: CanonicalReferenceSchema,
   initialState: CanonicalReferenceSchema,
@@ -426,12 +446,13 @@ const normalizedStateMachineDefinition = z.strictObject({
   lifecycle: z.enum(['active', 'retired']),
   machineId: CanonicalIdSchema,
   schemaVersion: nodeVersion,
-  stateField: CanonicalReferenceSchema,
+  stateField: derivedStateField,
   states: z.array(stateDefinition).min(1),
   transitions: z.array(transitionDefinition),
 });
 const authoredStateMachineDefinition = normalizedStateMachineDefinition.extend({
   lifecycle: z.enum(['active', 'retired']).optional(),
+  stateField: derivedStateField.optional(),
   states: z.array(authoredStateDefinition),
 });
 

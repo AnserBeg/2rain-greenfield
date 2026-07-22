@@ -84,7 +84,10 @@ place; a new immutable revision is produced.
 
 - Profile IDs:
   `northstar.normalization/v0-experimental` and
-  `northstar.canonical-json/v0-experimental`.
+  `northstar.canonical-json/v0-experimental`. Currency/minor-unit semantics are
+  frozen by `northstar.currency-minor-units/v0-experimental`; the evidenced v0
+  launch set is exactly CAD/2 and USD/2. Adding a currency is language
+  evolution, never an ambient `Intl` lookup.
 - Input JSON is strict UTF-8, no BOM, no duplicate object keys, no lone
   surrogates, and no unknown schema keys.
 - Absence is admitted only for the authored properties named by
@@ -98,9 +101,17 @@ place; a new immutable revision is produced.
   whitespace. Booleans/null use JSON literals; numbers are safe integers only
   with no negative zero. Exact decimal, money, quantity, and large-integer
   values are constrained canonical strings.
-- Set-like families sort by canonical ID. Ordered presentation/state members
-  sort by `(orderKey, canonicalId)`. Commutative predicate terms sort by their
-  canonical member bytes.
+- Unordered families sort by canonical ID. Ordered sibling scopes are package
+  modules, module entities, entity fields, source-entity relations, field enum
+  options, machine states/transitions, surface slots, and query selections;
+  each sorts by `(orderKey, canonicalId)` and rejects duplicate keys only
+  within that owner. Commutative predicate terms sort by canonical member
+  bytes.
+- Field-comparison scalars are checked against their referenced field. UTC
+  instants normalize to one `Z` spelling at the field's declared precision;
+  offset datetimes use one numeric-offset spelling. Money must match the
+  frozen currency/minor-unit pair, quantities the declared base unit, and
+  exact numeric values the field precision/scale.
 - SHA-256 uses domain
   `northstar.app-package.normalized/v0-experimental`, a zero delimiter, and
   normalized canonical bytes. `.golden.bytes` and `.golden.sha256` vectors are
@@ -130,7 +141,7 @@ Common properties are not repeated in every row:
 | Entity | module, label, storage reference | plan §5.1 entity/storage ownership; G1-P2 projection and G2 master entities |
 | Field | entity, label, classification, presence, search/report flags, typed value contract | plan §5.1/§5.8 and v1 corpus §7.2; G1-P2 projections and G2 forms/query/report/policy |
 | Relation | source/target, cardinality, reference versus parent-scoped ownership, requiredness, archive behavior, join eligibility | plan §5.1 relation/child contract; G2 relations and G3 parent-scoped lines |
-| State machine | entity, state field, initial state, ordered states and named transitions with permission | plan §5.1/§5.8; G2 lifecycle and G3 named transitions |
+| State machine | entity, compiler-derived `stateId` field, initial state, ordered states and named transitions with permission | plan §5.1/§5.8 and inherited IR §4.9; G2 lifecycle and G3 named transitions; authored ordinary fields cannot hold machine state |
 | Surface | module, data-source reference, archetype, opaque content slots, status roles | plan §8.5-8.6; G1-P2 compiler, G1-P7 runtime, G1-P8 pin |
 | Query | module, Q0/Q1 tier, get/list/resolve type, source, permission, ordered selection, typed predicate, result bound | plan §5.8-5.9; G1-P6 gateway and G2 query slice |
 | Operation | module, O0/O1 tier, permission, typed predicate, one typed effect, confirmation, read-back query | plan §5.8-5.9; G1-P6 gateway and G2 lifecycle operations |
@@ -146,7 +157,7 @@ Common properties are not repeated in every row:
 | text, boolean | bounded length or exact boolean | plan §5.1 and v1 corpus §7.2; G2 masters |
 | integer | constrained canonical string | T7 exact large-integer rule; G2 identifiers/count metadata |
 | exact decimal | canonical string, precision, scale | plan §5.1 exact types and v1 corpus §7.2 precision/scale; G3 inventory facts |
-| money | canonical string, precision, scale, ISO currency code, minor unit | plan §5.1 currency semantics and v1 corpus §7.2; G4/G5 commercial descriptors |
+| money | canonical string, precision, scale, and a code/minor-unit pair from the versioned launch table (CAD/2, USD/2) | plan §5.1 currency semantics, v1 corpus §7.2, and evidenced Canadian/USD purchasing; G4/G5 commercial descriptors |
 | date | ISO-8601 calendar date with `calendarDate` semantics | plan §5.1 and v1 corpus §7.2 timezone behavior; G2/G4/G5 documents |
 | time | second/millisecond precision and `localWallTime` semantics | same inherited field contract; later scheduled/workflow consumers |
 | datetime | second/millisecond precision and explicit `utcInstant` or `offsetDateTime` | plan timestamps and v1 corpus §7.2; G2+ audit/document consumers |

@@ -7,6 +7,7 @@ import {
   CanonicalModelError,
   CanonicalScalarSchema,
   FieldTypeSchema,
+  canonicalAuthoredProjection,
   normalizeApplicationPackage,
   parseAuthoredApplicationPackageJson,
   type AuthoredApplicationPackage,
@@ -68,6 +69,7 @@ test('unknown kinds, versions, properties, slots, and status roles fail closed',
   expectDiagnostic(
     () => normalizeApplicationPackage(hiddenHook),
     'CANON_SCHEMA_INVALID',
+    { objectId: 'northstar.inventory:operation.item_archive' },
   );
 
   const unknownSlot = structuredClone(fixture());
@@ -171,6 +173,22 @@ test('duplicate order keys and expression depth exceedance fail deterministicall
     'CANON_ORDER_KEY_DUPLICATE',
   );
 
+  const duplicateEntityOrder = structuredClone(fixture());
+  duplicateEntityOrder.entities[1]!.orderKey =
+    duplicateEntityOrder.entities[0]!.orderKey;
+  expectDiagnostic(
+    () => normalizeApplicationPackage(duplicateEntityOrder),
+    'CANON_ORDER_KEY_DUPLICATE',
+    { objectId: 'northstar.inventory:module.inventory' },
+  );
+
+  const independentFieldScopes = structuredClone(fixture());
+  independentFieldScopes.fields[5]!.orderKey =
+    independentFieldScopes.fields[0]!.orderKey;
+  assert.doesNotThrow(() =>
+    normalizeApplicationPackage(independentFieldScopes),
+  );
+
   const tooDeep = structuredClone(fixture());
   let predicate: Record<string, unknown> = {
     kind: 'booleanPredicate',
@@ -200,6 +218,63 @@ test('parent scope, assertion diagnostics, and reference locality are closed', (
     { objectId: 'northstar.inventory:relation.item_alias_parent' },
   );
 
+  const duplicateParent = structuredClone(fixture());
+  const secondParent = structuredClone(duplicateParent.relations[0]!);
+  secondParent.relationId =
+    'northstar.inventory:relation.item_alias_second_parent' as never;
+  secondParent.orderKey = 20;
+  duplicateParent.relations.push(secondParent);
+  expectDiagnostic(
+    () => normalizeApplicationPackage(duplicateParent),
+    'CANON_RELATION_PARENT_OWNER_DUPLICATE',
+    { objectId: 'northstar.inventory:entity.item_alias' },
+  );
+
+  const selfParent = structuredClone(fixture());
+  selfParent.relations[0]!.targetEntity.targetId =
+    'northstar.inventory:entity.item_alias' as never;
+  expectDiagnostic(
+    () => normalizeApplicationPackage(selfParent),
+    'CANON_RELATION_PARENT_TOPOLOGY_INVALID',
+    { objectId: 'northstar.inventory:relation.item_alias_parent' },
+  );
+
+  const nestedParent = structuredClone(fixture());
+  const nestedRelation = structuredClone(nestedParent.relations[0]!);
+  nestedRelation.relationId =
+    'northstar.inventory:relation.item_nested_parent' as never;
+  nestedRelation.sourceEntity.targetId =
+    'northstar.inventory:entity.item' as never;
+  nestedRelation.targetEntity.targetId =
+    'northstar.inventory:entity.item_alias' as never;
+  nestedParent.relations.push(nestedRelation);
+  expectDiagnostic(
+    () => normalizeApplicationPackage(nestedParent),
+    'CANON_RELATION_PARENT_TOPOLOGY_INVALID',
+  );
+
+  const crossModuleParent = structuredClone(fixture());
+  crossModuleParent.modules.push({
+    composition: {
+      kind: 'compositionSeam',
+      schemaVersion: 'v0-experimental',
+      status: 'unsupported',
+    },
+    kind: 'moduleDefinition',
+    label: 'Aliases',
+    moduleId: 'northstar.inventory:module.aliases' as never,
+    orderKey: 20,
+    ownerPackageId: 'northstar.inventory:package.launch' as never,
+    schemaVersion: 'v0-experimental',
+  });
+  crossModuleParent.entities[1]!.module.targetId =
+    'northstar.inventory:module.aliases' as never;
+  expectDiagnostic(
+    () => normalizeApplicationPackage(crossModuleParent),
+    'CANON_RELATION_PARENT_TOPOLOGY_INVALID',
+    { objectId: 'northstar.inventory:relation.item_alias_parent' },
+  );
+
   const assertion = structuredClone(fixture());
   assertion.assertions[0]!.expectedOutcome = 'fails';
   expectDiagnostic(
@@ -224,6 +299,88 @@ test('parent scope, assertion diagnostics, and reference locality are closed', (
     () => normalizeApplicationPackage(selection),
     'CANON_QUERY_FIELD_LOCALITY',
     { objectId: 'northstar.inventory:query.item_get' },
+  );
+
+  const filter = structuredClone(fixture());
+  filter.queries[0]!.filter = {
+    field: {
+      kind: 'fieldReference',
+      schemaVersion: 'v0-experimental',
+      targetId: 'northstar.inventory:field.item_alias_value' as never,
+    },
+    kind: 'fieldComparisonPredicate',
+    operator: 'equals',
+    schemaVersion: 'v0-experimental',
+    value: {
+      kind: 'textValue',
+      schemaVersion: 'v0-experimental',
+      value: 'alias',
+    },
+  };
+  expectDiagnostic(
+    () => normalizeApplicationPackage(filter),
+    'CANON_QUERY_FILTER_FIELD_LOCALITY',
+    { objectId: 'northstar.inventory:query.item_get' },
+  );
+});
+
+test('state storage is derived and authored state-field authority rejects', () => {
+  const authored = fixture();
+  const normalized = normalizeApplicationPackage(authored);
+  assert.deepEqual(normalized.stateMachines[0]!.stateField, {
+    fieldId: 'northstar.inventory:derived_state_field.machine.item_lifecycle',
+    kind: 'derivedStateField',
+    schemaVersion: 'v0-experimental',
+    valueKind: 'stateId',
+  });
+  assert.equal(
+    canonicalAuthoredProjection(normalized).stateMachines[0]!.stateField,
+    undefined,
+  );
+
+  const selected = structuredClone(authored);
+  selected.stateMachines[0]!.stateField = {
+    fieldId: 'northstar.inventory:derived_state_field.author_selected' as never,
+    kind: 'derivedStateField',
+    schemaVersion: 'v0-experimental',
+    valueKind: 'stateId',
+  };
+  expectDiagnostic(
+    () => normalizeApplicationPackage(selected),
+    'CANON_DERIVED_STATE_FIELD_INVALID',
+    { objectId: 'northstar.inventory:machine.item_lifecycle' },
+  );
+});
+
+test('schema diagnostic ownership ignores object property insertion order', () => {
+  const first = structuredClone(fixture()) as unknown as {
+    modules: Array<Record<string, unknown>>;
+  };
+  first.modules[0]!.hiddenHook = true;
+  expectDiagnostic(
+    () => normalizeApplicationPackage(first),
+    'CANON_SCHEMA_INVALID',
+    { objectId: 'northstar.inventory:module.inventory' },
+  );
+
+  const second = structuredClone(fixture()) as unknown as {
+    modules: Array<Record<string, unknown>>;
+  };
+  const module = second.modules[0]!;
+  second.modules[0] = {
+    ownerPackageId: module.ownerPackageId,
+    moduleId: module.moduleId,
+    kind: module.kind,
+    schemaVersion: module.schemaVersion,
+    label: module.label,
+    orderKey: module.orderKey,
+    composition: module.composition,
+    hiddenHook: true,
+  };
+  expectDiagnostic(
+    () => normalizeApplicationPackage(second),
+    'CANON_SCHEMA_INVALID',
+    { objectId: 'northstar.inventory:module.inventory' },
   );
 });
 
@@ -261,6 +418,28 @@ test('date, time, decimal, money, and quantity shapes reject ambiguous values', 
       representation: 'canonicalString',
       currencyCode: 'USD',
       minorUnit: 3,
+    }).success,
+    false,
+  );
+  assert.equal(
+    FieldTypeSchema.safeParse({
+      kind: 'moneyFieldType',
+      schemaVersion: 'v0-experimental',
+      precision: 10,
+      scale: 2,
+      representation: 'canonicalString',
+      currencyCode: 'ZZZ',
+      minorUnit: 2,
+    }).success,
+    false,
+  );
+  assert.equal(
+    CanonicalScalarSchema.safeParse({
+      kind: 'moneyValue',
+      schemaVersion: 'v0-experimental',
+      currencyCode: 'USD',
+      minorUnit: 0,
+      value: '1',
     }).success,
     false,
   );

@@ -20,6 +20,7 @@ import {
   AuthoredApplicationPackageSchema,
   NormalizedApplicationPackageSchema,
   type AuthoredApplicationPackage,
+  type CanonicalScalar,
   type NormalizedApplicationPackage,
   type PredicateExpression,
 } from './schemas.js';
@@ -30,6 +31,8 @@ type CanonicalReference = {
   schemaVersion: typeof LANGUAGE_VERSION;
   targetId: string;
 };
+
+type FieldType = AuthoredApplicationPackage['fields'][number]['fieldType'];
 
 export function parseAuthoredApplicationPackageJson(
   input: string | Uint8Array,
@@ -65,6 +68,10 @@ export function normalizeApplicationPackage(
     ]);
   }
   enforceFamilyBounds(authored);
+  validateAuthoredDerivedStateFields(authored);
+  const fieldTypes = new Map(
+    authored.fields.map((field) => [field.fieldId, field.fieldType] as const),
+  );
 
   const normalizedCandidate = {
     assertions: authored.assertions.map((entry) => ({
@@ -111,6 +118,7 @@ export function normalizeApplicationPackage(
       precondition: normalizePredicate(
         entry.precondition ?? defaultPredicate(),
         1,
+        fieldTypes,
       ),
     })),
     package: {
@@ -123,7 +131,11 @@ export function normalizeApplicationPackage(
     })),
     queries: authored.queries.map((entry) => ({
       ...entry,
-      filter: normalizePredicate(entry.filter ?? defaultPredicate(), 1),
+      filter: normalizePredicate(
+        entry.filter ?? defaultPredicate(),
+        1,
+        fieldTypes,
+      ),
       lifecycle: entry.lifecycle ?? IMMUTABLE_DEFAULTS_V0.lifecycle,
       selections: sortByOrderAndId(entry.selections, 'selectionId'),
     })),
@@ -138,6 +150,7 @@ export function normalizeApplicationPackage(
     stateMachines: authored.stateMachines.map((entry) => ({
       ...entry,
       lifecycle: entry.lifecycle ?? IMMUTABLE_DEFAULTS_V0.lifecycle,
+      stateField: derivedStateField(entry.machineId),
       states: sortByOrderAndId(
         entry.states.map((state) => ({
           ...state,
@@ -166,13 +179,25 @@ export function normalizeApplicationPackage(
       normalizedCandidate.capabilityRequirements,
       'capabilityId',
     ),
-    entities: sortById(normalizedCandidate.entities, 'entityId'),
-    fields: sortByOrderAndId(normalizedCandidate.fields, 'fieldId'),
+    entities: sortByOwnerOrderAndId(
+      normalizedCandidate.entities,
+      (entry) => entry.module.targetId,
+      'entityId',
+    ),
+    fields: sortByOwnerOrderAndId(
+      normalizedCandidate.fields,
+      (entry) => entry.entity.targetId,
+      'fieldId',
+    ),
     modules: sortByOrderAndId(normalizedCandidate.modules, 'moduleId'),
     operations: sortById(normalizedCandidate.operations, 'operationId'),
     permissions: sortById(normalizedCandidate.permissions, 'permissionId'),
     queries: sortById(normalizedCandidate.queries, 'queryId'),
-    relations: sortByOrderAndId(normalizedCandidate.relations, 'relationId'),
+    relations: sortByOwnerOrderAndId(
+      normalizedCandidate.relations,
+      (entry) => entry.sourceEntity.targetId,
+      'relationId',
+    ),
     stateMachines: sortById(normalizedCandidate.stateMachines, 'machineId'),
     storageMappings: sortById(
       normalizedCandidate.storageMappings,
@@ -234,6 +259,9 @@ export function canonicalAuthoredProjection(
     }
     if (object.kind === 'stateDefinition' && object.terminal === false) {
       delete object.terminal;
+    }
+    if (object.kind === 'stateMachineDefinition') {
+      delete object.stateField;
     }
     if (
       object.kind === 'queryDefinition' &&
@@ -458,12 +486,6 @@ function validateOwnedReferences(
       machine.machineId,
     );
     check(
-      machine.stateField,
-      'fieldReference',
-      '$.stateMachines.stateField',
-      machine.machineId,
-    );
-    check(
       machine.initialState,
       'stateReference',
       '$.stateMachines.initialState',
@@ -534,13 +556,8 @@ function validateOwnedReferences(
         query.queryId,
       );
     }
-    visitPredicate(query.filter, (reference, path) =>
-      check(
-        reference,
-        'fieldReference',
-        `$.queries.filter${path}`,
-        query.queryId,
-      ),
+    visitPredicate(query.filter, (reference, path, expectedKind) =>
+      check(reference, expectedKind, `$.queries.filter${path}`, query.queryId),
     );
   }
   for (const operation of packageRevision.operations) {
@@ -562,10 +579,10 @@ function validateOwnedReferences(
       '$.operations.readBack',
       operation.operationId,
     );
-    visitPredicate(operation.precondition, (reference, path) =>
+    visitPredicate(operation.precondition, (reference, path, expectedKind) =>
       check(
         reference,
-        'fieldReference',
+        expectedKind,
         `$.operations.precondition${path}`,
         operation.operationId,
       ),
@@ -679,6 +696,9 @@ function validateReferenceLocality(
       entry.entity.targetId,
     ]),
   );
+  const fieldDefinitions = new Map(
+    packageRevision.fields.map((entry) => [entry.fieldId, entry] as const),
+  );
   const queryModule = new Map(
     packageRevision.queries.map((entry) => [
       entry.queryId,
@@ -698,6 +718,13 @@ function validateReferenceLocality(
       entry.entity.targetId,
     ]),
   );
+  const parentScopes = packageRevision.relations.filter(
+    (relation) => relation.ownership === 'parentScopedChild',
+  );
+  const childEntities = new Set(
+    parentScopes.map((relation) => relation.sourceEntity.targetId),
+  );
+  const parentScopeCount = new Map<string, number>();
 
   for (const entity of packageRevision.entities) {
     if (storageEntity.get(entity.storage.targetId) !== entity.entityId) {
@@ -712,12 +739,14 @@ function validateReferenceLocality(
       );
     }
   }
-  for (const relation of packageRevision.relations) {
+  for (const relation of parentScopes) {
+    const childId = relation.sourceEntity.targetId;
+    const parentId = relation.targetEntity.targetId;
+    parentScopeCount.set(childId, (parentScopeCount.get(childId) ?? 0) + 1);
     if (
-      relation.ownership === 'parentScopedChild' &&
-      (relation.cardinality !== 'manyToOne' ||
-        !relation.required ||
-        relation.archiveBehavior !== 'restrict')
+      relation.cardinality !== 'manyToOne' ||
+      !relation.required ||
+      relation.archiveBehavior !== 'restrict'
     ) {
       diagnostics.push(
         diagnostic(
@@ -729,21 +758,38 @@ function validateReferenceLocality(
         ),
       );
     }
-  }
-  for (const machine of packageRevision.stateMachines) {
     if (
-      fieldEntity.get(machine.stateField.targetId) !== machine.entity.targetId
+      childId === parentId ||
+      childEntities.has(parentId) ||
+      (entityModule.has(childId) &&
+        entityModule.has(parentId) &&
+        entityModule.get(childId) !== entityModule.get(parentId))
     ) {
       diagnostics.push(
         diagnostic(
-          'CANON_STATE_FIELD_ENTITY_MISMATCH',
-          '$.stateMachines.stateField',
-          'the state field belongs to the state machine entity',
-          'reference a field owned by the machine entity',
-          machine.machineId,
+          'CANON_RELATION_PARENT_TOPOLOGY_INVALID',
+          '$.relations',
+          'a v0 parent-scoped child has one distinct top-level parent in the same module',
+          'reference a distinct non-child entity owned by the child module',
+          relation.relationId,
         ),
       );
     }
+  }
+  for (const [childId, count] of parentScopeCount) {
+    if (count > 1) {
+      diagnostics.push(
+        diagnostic(
+          'CANON_RELATION_PARENT_OWNER_DUPLICATE',
+          '$.relations',
+          'a v0 child entity has exactly one parent-scope authority',
+          'keep one parentScopedChild relation for the child entity',
+          childId,
+        ),
+      );
+    }
+  }
+  for (const machine of packageRevision.stateMachines) {
     if (stateOwner.get(machine.initialState.targetId) !== machine.machineId) {
       diagnostics.push(
         diagnostic(
@@ -802,6 +848,40 @@ function validateReferenceLocality(
         );
       }
     }
+    visitFieldComparisons(query.filter, (comparison, path) => {
+      if (
+        fieldEntity.get(comparison.field.targetId) !==
+        query.sourceEntity.targetId
+      ) {
+        diagnostics.push(
+          diagnostic(
+            'CANON_QUERY_FILTER_FIELD_LOCALITY',
+            `$.queries.filter${path}.field`,
+            'v0 query filter fields belong to the source entity',
+            'use a field owned by the query source entity',
+            query.queryId,
+          ),
+        );
+      }
+      validateComparisonValue(
+        comparison,
+        fieldDefinitions.get(comparison.field.targetId),
+        `$.queries.filter${path}.value`,
+        query.queryId,
+        diagnostics,
+      );
+    });
+  }
+  for (const operation of packageRevision.operations) {
+    visitFieldComparisons(operation.precondition, (comparison, path) => {
+      validateComparisonValue(
+        comparison,
+        fieldDefinitions.get(comparison.field.targetId),
+        `$.operations.precondition${path}.value`,
+        operation.operationId,
+        diagnostics,
+      );
+    });
   }
   for (const surface of packageRevision.surfaces) {
     if (
@@ -907,16 +987,32 @@ function validateOrderKeys(
       objectId: packageRevision.package.packageId,
       path: '$.modules',
     },
-    {
-      entries: packageRevision.fields,
-      objectId: packageRevision.package.packageId,
-      path: '$.fields',
-    },
-    {
-      entries: packageRevision.relations,
-      objectId: packageRevision.package.packageId,
-      path: '$.relations',
-    },
+    ...orderCollectionsByOwner(
+      packageRevision.entities,
+      (entry) => entry.module.targetId,
+      '$.entities',
+    ),
+    ...orderCollectionsByOwner(
+      packageRevision.fields,
+      (entry) => entry.entity.targetId,
+      '$.fields',
+    ),
+    ...orderCollectionsByOwner(
+      packageRevision.relations,
+      (entry) => entry.sourceEntity.targetId,
+      '$.relations',
+    ),
+    ...packageRevision.fields.flatMap((field) =>
+      field.fieldType.kind === 'enumFieldType'
+        ? [
+            {
+              entries: field.fieldType.options,
+              objectId: field.fieldId,
+              path: '$.fields.fieldType.options',
+            },
+          ]
+        : [],
+    ),
     ...packageRevision.stateMachines.map((machine) => ({
       entries: machine.states,
       objectId: machine.machineId,
@@ -957,9 +1053,68 @@ function validateOrderKeys(
   }
 }
 
+function validateAuthoredDerivedStateFields(
+  authored: AuthoredApplicationPackage,
+): void {
+  const diagnostics: CanonicalDiagnostic[] = [];
+  for (const machine of authored.stateMachines) {
+    if (
+      machine.stateField !== undefined &&
+      canonicalize(machine.stateField) !==
+        canonicalize(derivedStateField(machine.machineId))
+    ) {
+      diagnostics.push(
+        diagnostic(
+          'CANON_DERIVED_STATE_FIELD_INVALID',
+          '$.stateMachines.stateField',
+          'the state field is compiler-derived from machine identity and stores only canonical stateId values',
+          'omit stateField in authored form or use the exact normalized derived field',
+          machine.machineId,
+        ),
+      );
+    }
+  }
+  if (diagnostics.length > 0) throw new CanonicalModelError(diagnostics);
+}
+
+function derivedStateField(machineId: string): {
+  fieldId: string;
+  kind: 'derivedStateField';
+  schemaVersion: typeof LANGUAGE_VERSION;
+  valueKind: 'stateId';
+} {
+  const separator = machineId.indexOf(':');
+  const namespace = machineId.slice(0, separator);
+  const localIdentity = machineId.slice(separator + 1);
+  return {
+    fieldId: `${namespace}:derived_state_field.${localIdentity}`,
+    kind: 'derivedStateField',
+    schemaVersion: LANGUAGE_VERSION,
+    valueKind: 'stateId',
+  };
+}
+
+function orderCollectionsByOwner<T extends { orderKey: number }>(
+  entries: readonly T[],
+  ownerId: (entry: T) => string,
+  path: string,
+): Array<{ entries: T[]; objectId: string; path: string }> {
+  const grouped = new Map<string, T[]>();
+  for (const entry of entries) {
+    const owner = ownerId(entry);
+    const siblings = grouped.get(owner) ?? [];
+    siblings.push(entry);
+    grouped.set(owner, siblings);
+  }
+  return [...grouped.entries()]
+    .sort(([left], [right]) => compareCodeUnits(left, right))
+    .map(([objectId, siblings]) => ({ entries: siblings, objectId, path }));
+}
+
 function normalizePredicate(
   predicate: PredicateExpression,
   depth: number,
+  fieldTypes: ReadonlyMap<string, FieldType>,
 ): PredicateExpression {
   if (depth > STRUCTURAL_LIMITS_V0.maximumExpressionDepth) {
     throw new CanonicalModelError([
@@ -974,18 +1129,82 @@ function normalizePredicate(
   if (predicate.kind === 'notPredicate') {
     return {
       ...predicate,
-      term: normalizePredicate(predicate.term, depth + 1),
+      term: normalizePredicate(predicate.term, depth + 1, fieldTypes),
     };
   }
   if (predicate.kind === 'allPredicate' || predicate.kind === 'anyPredicate') {
     const terms = predicate.terms
-      .map((term) => normalizePredicate(term, depth + 1))
+      .map((term) => normalizePredicate(term, depth + 1, fieldTypes))
       .sort((left, right) =>
         compareCodeUnits(canonicalize(left), canonicalize(right)),
       );
     return { ...predicate, terms };
   }
+  if (predicate.kind === 'fieldComparisonPredicate') {
+    return {
+      ...predicate,
+      value: normalizeScalarForField(
+        predicate.value,
+        fieldTypes.get(predicate.field.targetId),
+      ),
+    };
+  }
   return predicate;
+}
+
+function normalizeScalarForField(
+  value: CanonicalScalar,
+  fieldType: FieldType | undefined,
+): CanonicalScalar {
+  if (value.kind === 'timeValue' && fieldType?.kind === 'timeFieldType') {
+    const [whole, fraction] = value.value.split('.');
+    return {
+      ...value,
+      value:
+        fieldType.precision === 'millisecond'
+          ? `${whole}.${fraction ?? '000'}`
+          : fraction === undefined || fraction === '000'
+            ? whole!
+            : value.value,
+    };
+  }
+  if (
+    value.kind === 'dateTimeValue' &&
+    fieldType?.kind === 'dateTimeFieldType'
+  ) {
+    return {
+      ...value,
+      value: canonicalDateTime(
+        value.value,
+        fieldType.precision,
+        fieldType.timezoneSemantics,
+      ),
+    };
+  }
+  return value;
+}
+
+function canonicalDateTime(
+  value: string,
+  precision: 'second' | 'millisecond',
+  timezoneSemantics: 'utcInstant' | 'offsetDateTime',
+): string {
+  const match =
+    /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{3}))?(Z|[+-]\d{2}:\d{2})$/.exec(
+      value,
+    );
+  if (!match) return value;
+  const fraction = match[2] ?? '000';
+  if (precision === 'second' && fraction !== '000') return value;
+  if (timezoneSemantics === 'offsetDateTime') {
+    const offset = match[3] === 'Z' ? '+00:00' : match[3];
+    return `${match[1]}${precision === 'millisecond' ? `.${fraction}` : ''}${offset}`;
+  }
+  const instant = new Date(value);
+  if (!Number.isFinite(instant.getTime())) return value;
+  const iso = instant.toISOString();
+  if (!/^\d{4}-/.test(iso)) return value;
+  return precision === 'millisecond' ? iso : `${iso.slice(0, 19)}Z`;
 }
 
 function defaultPredicate(): PredicateExpression {
@@ -1149,6 +1368,7 @@ function collectIds(
     relations: packageRevision.relations.map((entry) => entry.relationId),
     stateMachines: packageRevision.stateMachines.flatMap((entry) => [
       entry.machineId,
+      entry.stateField.fieldId,
       ...entry.states.map((state) => state.stateId),
       ...entry.transitions.map((transition) => transition.transitionId),
     ]),
@@ -1192,6 +1412,18 @@ function sortByOrderAndId<
   );
 }
 
+function sortByOwnerOrderAndId<
+  T extends { orderKey: number } & Record<K, string>,
+  K extends keyof T,
+>(entries: readonly T[], ownerId: (entry: T) => string, idKey: K): T[] {
+  return [...entries].sort(
+    (left, right) =>
+      compareCodeUnits(ownerId(left), ownerId(right)) ||
+      left.orderKey - right.orderKey ||
+      compareCodeUnits(left[idKey], right[idKey]),
+  );
+}
+
 function sortedStrings<T extends string>(entries: readonly T[]): T[] {
   return [...entries].sort(compareCodeUnits);
 }
@@ -1227,22 +1459,80 @@ function findObjectId(input: unknown, path: PropertyKey[]): string | null {
   candidates.push(current);
   for (const candidate of candidates.reverse()) {
     if (typeof candidate !== 'object' || candidate === null) continue;
-    for (const [key, value] of Object.entries(candidate)) {
-      if (key.endsWith('Id') && typeof value === 'string') return value;
+    const object = candidate as Record<string, unknown>;
+    const kind = typeof object.kind === 'string' ? object.kind : null;
+    const identityKey = kind === null ? null : IDENTITY_KEY_BY_KIND[kind];
+    if (identityKey && typeof object[identityKey] === 'string') {
+      return object[identityKey];
+    }
+    for (const key of OWNED_IDENTITY_KEYS) {
+      if (typeof object[key] === 'string') return object[key];
     }
   }
   return null;
 }
 
+const IDENTITY_KEY_BY_KIND: Readonly<Record<string, string>> = Object.freeze({
+  applicationPackageRevision: 'packageId',
+  assertionDefinition: 'assertionId',
+  capabilityRequirement: 'capabilityId',
+  derivedStateField: 'fieldId',
+  entityDefinition: 'entityId',
+  enumOption: 'optionId',
+  fieldDefinition: 'fieldId',
+  moduleDefinition: 'moduleId',
+  operationDefinition: 'operationId',
+  packageDefinition: 'packageId',
+  permissionDefinition: 'permissionId',
+  queryDefinition: 'queryId',
+  querySelection: 'selectionId',
+  relationDefinition: 'relationId',
+  stateDefinition: 'stateId',
+  stateMachineDefinition: 'machineId',
+  storageMappingDefinition: 'storageMappingId',
+  surfaceDefinition: 'surfaceId',
+  surfaceSlot: 'slotId',
+  transitionDefinition: 'transitionId',
+});
+
+const OWNED_IDENTITY_KEYS = Object.freeze([
+  'assertionId',
+  'capabilityId',
+  'entityId',
+  'fieldId',
+  'machineId',
+  'moduleId',
+  'operationId',
+  'optionId',
+  'packageId',
+  'permissionId',
+  'queryId',
+  'relationId',
+  'selectionId',
+  'slotId',
+  'stateId',
+  'storageMappingId',
+  'surfaceId',
+  'transitionId',
+] as const);
+
 function visitPredicate(
   predicate: PredicateExpression,
-  visit: (reference: CanonicalReference, path: string) => void,
+  visit: (
+    reference: CanonicalReference,
+    path: string,
+    expectedKind: 'fieldReference' | 'unitReference',
+  ) => void,
   path = '',
 ): void {
   if (predicate.kind === 'fieldComparisonPredicate') {
-    visit(predicate.field, `${path}.field`);
+    visit(predicate.field, `${path}.field`, 'fieldReference');
     if (predicate.value.kind === 'quantityValue') {
-      visit(predicate.value.baseUnit, `${path}.value.baseUnit`);
+      visit(
+        predicate.value.baseUnit,
+        `${path}.value.baseUnit`,
+        'unitReference',
+      );
     }
   } else if (predicate.kind === 'notPredicate') {
     visitPredicate(predicate.term, visit, `${path}.term`);
@@ -1254,6 +1544,149 @@ function visitPredicate(
       visitPredicate(term, visit, `${path}.terms[${index}]`),
     );
   }
+}
+
+type FieldComparison = Extract<
+  PredicateExpression,
+  { kind: 'fieldComparisonPredicate' }
+>;
+type NormalizedFieldDefinition = NormalizedApplicationPackage['fields'][number];
+
+function visitFieldComparisons(
+  predicate: PredicateExpression,
+  visit: (comparison: FieldComparison, path: string) => void,
+  path = '',
+): void {
+  if (predicate.kind === 'fieldComparisonPredicate') {
+    visit(predicate, path);
+  } else if (predicate.kind === 'notPredicate') {
+    visitFieldComparisons(predicate.term, visit, `${path}.term`);
+  } else if (
+    predicate.kind === 'allPredicate' ||
+    predicate.kind === 'anyPredicate'
+  ) {
+    predicate.terms.forEach((term, index) =>
+      visitFieldComparisons(term, visit, `${path}.terms[${index}]`),
+    );
+  }
+}
+
+function validateComparisonValue(
+  comparison: FieldComparison,
+  field: NormalizedFieldDefinition | undefined,
+  path: string,
+  objectId: string,
+  diagnostics: CanonicalDiagnostic[],
+): void {
+  if (!field) return;
+  const value = comparison.value;
+  const expectedKind: Record<FieldType['kind'], CanonicalScalar['kind']> = {
+    booleanFieldType: 'booleanValue',
+    dateFieldType: 'dateValue',
+    dateTimeFieldType: 'dateTimeValue',
+    enumFieldType: 'textValue',
+    exactDecimalFieldType: 'exactDecimalValue',
+    integerFieldType: 'integerValue',
+    moneyFieldType: 'moneyValue',
+    quantityFieldType: 'quantityValue',
+    textFieldType: 'textValue',
+    timeFieldType: 'timeValue',
+  };
+  let valid = value.kind === expectedKind[field.fieldType.kind];
+  if (valid) {
+    switch (field.fieldType.kind) {
+      case 'textFieldType':
+        valid =
+          value.kind === 'textValue' &&
+          [...value.value].length <= field.fieldType.maximumLength;
+        break;
+      case 'exactDecimalFieldType':
+        valid =
+          value.kind === 'exactDecimalValue' &&
+          decimalFits(
+            value.value,
+            field.fieldType.precision,
+            field.fieldType.scale,
+          );
+        break;
+      case 'moneyFieldType':
+        valid =
+          value.kind === 'moneyValue' &&
+          value.currencyCode === field.fieldType.currencyCode &&
+          value.minorUnit === field.fieldType.minorUnit &&
+          decimalFits(
+            value.value,
+            field.fieldType.precision,
+            field.fieldType.scale,
+          );
+        break;
+      case 'quantityFieldType':
+        valid =
+          value.kind === 'quantityValue' &&
+          value.baseUnit.kind === 'unitReference' &&
+          value.baseUnit.targetId === field.fieldType.baseUnit.targetId &&
+          decimalFits(
+            value.value,
+            field.fieldType.precision,
+            field.fieldType.scale,
+          );
+        break;
+      case 'timeFieldType':
+        valid =
+          value.kind === 'timeValue' &&
+          (field.fieldType.precision === 'millisecond'
+            ? /^\d{2}:\d{2}:\d{2}\.\d{3}$/.test(value.value)
+            : /^\d{2}:\d{2}:\d{2}$/.test(value.value));
+        break;
+      case 'dateTimeFieldType':
+        valid =
+          value.kind === 'dateTimeValue' &&
+          canonicalDateTimePattern(
+            field.fieldType.precision,
+            field.fieldType.timezoneSemantics,
+          ).test(value.value);
+        break;
+      case 'enumFieldType':
+        valid =
+          value.kind === 'textValue' &&
+          field.fieldType.options.some(
+            (option) => option.optionId === value.value,
+          );
+        break;
+      default:
+        break;
+    }
+  }
+  if (!valid) {
+    diagnostics.push(
+      diagnostic(
+        'CANON_PREDICATE_VALUE_INVALID',
+        path,
+        'a field comparison value matches the field type, precision, scale, currency, timezone, or base-unit contract',
+        `use ${expectedKind[field.fieldType.kind]} encoded for field ${field.fieldId}`,
+        objectId,
+      ),
+    );
+  }
+}
+
+function decimalFits(value: string, precision: number, scale: number): boolean {
+  const unsigned = value.startsWith('-') ? value.slice(1) : value;
+  const [integer, fraction = ''] = unsigned.split('.');
+  const integerDigits = integer === '0' ? 0 : integer!.length;
+  const totalDigits = Math.max(1, integerDigits + fraction.length);
+  return fraction.length <= scale && totalDigits <= precision;
+}
+
+function canonicalDateTimePattern(
+  precision: 'second' | 'millisecond',
+  timezoneSemantics: 'utcInstant' | 'offsetDateTime',
+): RegExp {
+  const fraction = precision === 'millisecond' ? '\\.\\d{3}' : '';
+  const zone = timezoneSemantics === 'utcInstant' ? 'Z' : '[+-]\\d{2}:\\d{2}';
+  return new RegExp(
+    `^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}${fraction}${zone}$`,
+  );
 }
 
 function visitObjects(

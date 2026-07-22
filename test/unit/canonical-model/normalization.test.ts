@@ -75,12 +75,58 @@ test('canonical byte and domain-separated hash vectors are stable', () => {
   assert.notEqual(canonicalize({ value: 'é' }), canonicalize({ value: 'é' }));
 });
 
+test('explicit sibling order and equivalent UTC datetime spellings normalize canonically', () => {
+  const authored = parseAuthoredApplicationPackageJson(
+    readFileSync(fixturePath),
+  );
+  authored.entities[0]!.orderKey = 20;
+  authored.entities[1]!.orderKey = 10;
+  const ordered = normalizeApplicationPackage(authored);
+  assert.deepEqual(
+    ordered.entities.map((entity) => entity.entityId),
+    [
+      'northstar.inventory:entity.item_alias',
+      'northstar.inventory:entity.item',
+    ],
+  );
+
+  const withDateTime = (value: string) => {
+    const candidate = parseAuthoredApplicationPackageJson(
+      readFileSync(fixturePath),
+    );
+    candidate.queries[0]!.filter = {
+      field: {
+        kind: 'fieldReference',
+        schemaVersion: 'v0-experimental',
+        targetId: 'northstar.inventory:field.item_counted_at' as never,
+      },
+      kind: 'fieldComparisonPredicate',
+      operator: 'equals',
+      schemaVersion: 'v0-experimental',
+      value: {
+        kind: 'dateTimeValue',
+        schemaVersion: 'v0-experimental',
+        value,
+      },
+    };
+    return normalizeApplicationPackage(candidate);
+  };
+  const zulu = withDateTime('2026-07-21T12:00:00Z');
+  const zeroOffset = withDateTime('2026-07-21T12:00:00+00:00');
+  assert.equal(canonicalize(zulu), canonicalize(zeroOffset));
+  assert.equal(
+    (zulu.queries[0]!.filter as { value: { value: string } }).value.value,
+    '2026-07-21T12:00:00.000Z',
+  );
+});
+
 test('fresh pinned-Node processes ignore timezone and locale inputs', () => {
   const script = [
     "import {readFileSync} from 'node:fs';",
     "import {canonicalizeAndHash,normalizeApplicationPackage,parseAuthoredApplicationPackageJson} from './packages/canonical-model/src/index.ts';",
-    "const input=readFileSync('./test/fixtures/canonical-model/representative.authored.json');",
-    'const result=canonicalizeAndHash(normalizeApplicationPackage(parseAuthoredApplicationPackageJson(input)));',
+    "const authored=parseAuthoredApplicationPackageJson(readFileSync('./test/fixtures/canonical-model/representative.authored.json'));",
+    "authored.queries[0].filter={field:{kind:'fieldReference',schemaVersion:'v0-experimental',targetId:'northstar.inventory:field.item_counted_at'},kind:'fieldComparisonPredicate',operator:'equals',schemaVersion:'v0-experimental',value:{kind:'dateTimeValue',schemaVersion:'v0-experimental',value:'2026-07-21T23:30:00-07:00'}};",
+    'const result=canonicalizeAndHash(normalizeApplicationPackage(authored));',
     'process.stdout.write(`${result.contentHash}:${result.bytes.length}`);',
   ].join('');
   const run = (timezone: string, locale: string): string => {
@@ -114,7 +160,7 @@ test('representative token counts are pinned telemetry, not a correctness gate',
   };
   assert.deepEqual(telemetry, {
     tokenizer: 'js-tiktoken@1.0.21/cl100k_base',
-    authoredTokens: 3_826,
-    normalizedTokens: 2_710,
+    authoredTokens: 3_785,
+    normalizedTokens: 2_721,
   });
 });
