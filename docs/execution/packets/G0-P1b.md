@@ -1,8 +1,8 @@
 # G0-P1b — CI jobs and repository hygiene gates
 
-Status: evidence_ready
+Status: accepted
 Tier: Mechanical
-Frozen candidate: `9c2a837edc4a074a6591d26b296795cf7ebff6a3`
+Frozen candidate: `2b516125f972296481c2cc6fd557db74d37c7386`
 
 ## Goal and scope
 
@@ -82,7 +82,7 @@ artifact retention. No root package script changed.
 ## Gate evidence
 
 All results below ran in the packet worktree with the candidate content that
-became `9c2a837edc4a074a6591d26b296795cf7ebff6a3`:
+became `2b516125f972296481c2cc6fd557db74d37c7386`:
 
 | Gate | Result |
 |---|---|
@@ -119,8 +119,8 @@ corepack pnpm test:postgres && corepack pnpm test:browser
 
 Expect every command to pass. The suites report 1 unit, 1 integration, 11
 architecture/hygiene, and 8 PostgreSQL tests passing; the browser runner reports
-its one scaffold test as intentionally skipped. The hosted GitHub jobs cannot
-run until the workflow reaches a pull request or `main`.
+its one scaffold test as intentionally skipped. The hosted GitHub jobs begin
+when this accepted workflow reaches `main`.
 
 ## Review evidence
 
@@ -128,7 +128,7 @@ Writer: Codex orchestrator, Mechanical tier.
 
 Review: orchestrator deterministic verification, permitted for Mechanical
 configuration/test work. Against unchanged candidate
-`9c2a837edc4a074a6591d26b296795cf7ebff6a3`, the bounded charter checked only
+`2b516125f972296481c2cc6fd557db74d37c7386`, the bounded charter checked only
 ordinary scaffold drift: frozen install, complete existing command coverage,
 read-only workflow permissions, immutable external action refs, artifact
 retention, tracked local/generated artifacts, alternate lockfiles, workflow
@@ -136,7 +136,13 @@ syntax, and owned paths. Verdict: PASS with no findings. The deterministic gate
 set above fully exercises the repository contract; no additional model review
 was warranted by the Mechanical tier.
 
-Known limits: the browser surface remains the accepted scaffold skip; hosted
-runner execution awaits a pull request or integration; secret and dependency
-scanning plus observability/evidence wiring remain explicitly deferred to
-G0-P5.
+The user accepted the packet on 2026-07-21 and directed rebasing onto accepted
+G1-P0 before integration. The original evidence-ready candidate was superseded
+by the rebased candidate above. A clean detached checkout at the exact rebased
+SHA reran the complete gate set green, including workflow YAML parsing and the
+owned-path check; orchestrator verification returned PASS on that unchanged
+SHA before this acceptance record was committed.
+
+Known limits: the browser surface remains the accepted scaffold skip; secret
+and dependency scanning plus observability/evidence wiring remain explicitly
+deferred to G0-P5.
