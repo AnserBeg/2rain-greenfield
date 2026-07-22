@@ -19,7 +19,7 @@ before any become `admitted`.
 | G0-P4a | Ephemeral PostgreSQL + migration runner + schema-drift tests | G0 | Critical | accepted | `399e6098e1b06dd68d20b7280f904b6baa131858` | [packet](packets/G0-P4a.md) |
 | G0-P4b | Trusted request context + two-tenant and pool-reuse isolation | G0 | Critical | accepted | `64458dc55199bc3c5277b62dd22d7cc666823c6a` | [packet](packets/G0-P4b.md) |
 | G0-P5 | Observability baseline + evidence/ledger wiring in CI | G0 | Behavioral | accepted | `d7d21fc021765ab0fcbb8a8c5627d3501eff44a0` | [packet](packets/G0-P5.md) |
-| G0-P5c | Dependency and secret scans in CI | G0 | Mechanical | evidence_ready | `b48cfc64d653d28b8fe7d13ef4f745869e588e68` | [packet](packets/G0-P5c.md) |
+| G0-P5c | Dependency and secret scans in CI | G0 | Mechanical | accepted | `b48cfc64d653d28b8fe7d13ef4f745869e588e68` | [packet](packets/G0-P5c.md) |
 | G0-P6a | X-01 baseline input freeze in an isolated quarry worktree | G0 | Mechanical | accepted | `68f748cde06ecc795b159be5ae507a9d973106ac` | [packet](packets/G0-P6a.md); [baseline](baselines/x01-v1.md) |
 | G0-P6b | X-01 baseline replay in a disposable checkout | G0 | Mechanical | accepted | `2bd1d232426a2b50afd7ea350ad29e2a08c1e11b` | [packet](packets/G0-P6b.md); [replay](baselines/x01-v1-replay.md) — accepted with red replay limitations |
 | G1-P0 | G1 stage cut and parallelization map | G1 | Mechanical | accepted | `69b6ff87c28ca3638ac7958efce7acfa011b43a0` | [packet](packets/G1-P0.md) |

@@ -1,6 +1,6 @@
 # G0-P5c — Dependency and secret scanning with retained CI evidence
 
-Status: evidence_ready
+Status: accepted
 Tier: Mechanical
 Frozen candidate: `b48cfc64d653d28b8fe7d13ef4f745869e588e68`
 
@@ -154,3 +154,10 @@ Known limits match the charter: this packet does not generate an SBOM, attest
 supply-chain provenance, enforce license policy, or attempt to defeat
 adversarial obfuscation. Those concerns were neither implemented nor used to
 expand the review.
+
+The user ran the security scans, confirmed the synthetic committed secret was
+detected with `negativeRuleDetected: true` and redacted evidence, and confirmed
+both the dependency audit and clean-history scan returned 0. The packet was
+accepted on 2026-07-21. A fetch found `origin/main` unchanged from the packet
+base, so the required rebase was a no-op and preserved the frozen candidate
+SHA. The complete declared gate set was rerun green before integration.
