@@ -87,7 +87,7 @@ later stage cuts must create their remaining enforcement packets.
 | Lifecycle / audit / correction / recovery doctrine | ADR-0010; plan §7.3-7.4 | G0-P3 duplicate-authority and hard-delete scan | T-01 trust substrate (G2); drills G7 | partially enforced |
 | No hard delete for business data | ADR-0010; AGENTS.md; plan §7.4 | G0-P3 hard-delete scan | G2 operation gateway test | partially enforced |
 | Backup / restore / RPO / RTO | ADR-0010; plan §7.5 | authority-map review | G7 recovery drill | scheduled |
-| Secrets never in source/fixtures/prompts | AGENTS.md | review | G0-P5c secret scan in CI | scheduled |
+| Secrets never in source/fixtures/prompts | AGENTS.md | review; G0-P5c implementation active | G0-P5c secret scan in CI | scheduled |
 
 ## Process and evidence (already enforced by skills)
 
@@ -106,7 +106,7 @@ later stage cuts must create their remaining enforcement packets.
 | Baseline observability (structured logs, correlation/trace IDs, health/readiness, metrics/error evidence) | plan §15.2; AGENTS.md | G0-P5 propagation, PostgreSQL-loss readiness, redaction, metrics, and CI-evidence tests | G0-P5 observability packet | enforced |
 | SLOs / error budgets | plan §15.1 | — | G7 | prose-only |
 | Tenant isolation (defense in depth) | ADR-0004; plan §7.2 | G0-P4b tenant/environment RLS and pool-reuse tests | G0-P4b smoke fixture; G7 pentest | partially enforced |
-| Dependency / secret scanning | AGENTS.md | — | G0-P5c CI scans | scheduled |
+| Dependency / secret scanning | AGENTS.md | G0-P5c implementation active | G0-P5c CI scans | scheduled |
 
 ## Maintenance rule
 
