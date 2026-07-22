@@ -507,8 +507,16 @@ test('G1-P4a PostgreSQL contracts and trusted approval service', async (t) => {
             const privilege = await pool.query<{
               authority_function_execute: boolean;
               guard_select: boolean;
+              history_delete: boolean;
+              history_insert: boolean;
+              history_select: boolean;
+              history_update: boolean;
               outcome_insert: boolean;
               outcome_select: boolean;
+              phase_receipt_delete: boolean;
+              phase_receipt_insert: boolean;
+              phase_receipt_select: boolean;
+              phase_receipt_update: boolean;
               pointer_delete: boolean;
               pointer_insert: boolean;
               pointer_select: boolean;
@@ -542,6 +550,46 @@ test('G1-P4a PostgreSQL contracts and trusted approval service', async (t) => {
                      ) AS preparation_insert,
                      has_table_privilege(
                        'north_star_runtime',
+                       'platform.release_activation_phase_receipts',
+                       'SELECT'
+                     ) AS phase_receipt_select,
+                     has_table_privilege(
+                       'north_star_runtime',
+                       'platform.release_activation_phase_receipts',
+                       'INSERT'
+                     ) AS phase_receipt_insert,
+                     has_table_privilege(
+                       'north_star_runtime',
+                       'platform.release_activation_phase_receipts',
+                       'UPDATE'
+                     ) AS phase_receipt_update,
+                     has_table_privilege(
+                       'north_star_runtime',
+                       'platform.release_activation_phase_receipts',
+                       'DELETE'
+                     ) AS phase_receipt_delete,
+                     has_table_privilege(
+                       'north_star_runtime',
+                       'platform.release_activation_history',
+                       'SELECT'
+                     ) AS history_select,
+                     has_table_privilege(
+                       'north_star_runtime',
+                       'platform.release_activation_history',
+                       'INSERT'
+                     ) AS history_insert,
+                     has_table_privilege(
+                       'north_star_runtime',
+                       'platform.release_activation_history',
+                       'UPDATE'
+                     ) AS history_update,
+                     has_table_privilege(
+                       'north_star_runtime',
+                       'platform.release_activation_history',
+                       'DELETE'
+                     ) AS history_delete,
+                     has_table_privilege(
+                       'north_star_runtime',
                        'platform.release_activation_attempt_outcomes',
                        'SELECT'
                      ) AS outcome_select,
@@ -564,14 +612,128 @@ test('G1-P4a PostgreSQL contracts and trusted approval service', async (t) => {
             assert.deepEqual(privilege.rows[0], {
               authority_function_execute: false,
               guard_select: false,
+              history_delete: false,
+              history_insert: true,
+              history_select: true,
+              history_update: false,
               outcome_insert: false,
               outcome_select: true,
+              phase_receipt_delete: false,
+              phase_receipt_insert: true,
+              phase_receipt_select: true,
+              phase_receipt_update: false,
               pointer_delete: false,
               pointer_insert: false,
               pointer_select: true,
               pointer_update: true,
               preparation_insert: true,
             });
+
+            const policies = await pool.query<{
+              command: string;
+              relation: string;
+            }>(`
+              SELECT tablename AS relation, cmd AS command
+                FROM pg_catalog.pg_policies
+               WHERE schemaname = 'platform'
+                 AND tablename IN (
+                   'release_activation_phase_receipts',
+                   'release_activation_history'
+                 )
+               ORDER BY tablename, cmd
+            `);
+            assert.deepEqual(policies.rows, [
+              {
+                command: 'INSERT',
+                relation: 'release_activation_history',
+              },
+              {
+                command: 'SELECT',
+                relation: 'release_activation_history',
+              },
+              {
+                command: 'INSERT',
+                relation: 'release_activation_phase_receipts',
+              },
+              {
+                command: 'SELECT',
+                relation: 'release_activation_phase_receipts',
+              },
+            ]);
+
+            await withTrustedRequestTransaction(
+              runtimePool,
+              approverContext,
+              async (client) => {
+                await client.query(
+                  `INSERT INTO platform.release_activation_phase_receipts (
+                     tenant_id,
+                     environment_id,
+                     phase_receipt_id,
+                     activation_attempt_id,
+                     receipt_version,
+                     phase_code,
+                     receipt_digest
+                   ) VALUES (
+                     $1, $2, $3, $4,
+                     'northstar.release-activation-phase-receipt/v1',
+                     'PREPARATION_CONTRACT_PROOF',
+                     $5
+                   )`,
+                  [
+                    tenantA,
+                    environmentA,
+                    'a8900000-0000-4000-8000-000000000001',
+                    firstAttemptId,
+                    digest('phase-receipt-contract-proof'),
+                  ],
+                );
+                await client.query(
+                  `INSERT INTO platform.release_activation_history (
+                     tenant_id,
+                     environment_id,
+                     history_id,
+                     activation_attempt_id,
+                     history_version,
+                     pointer_id,
+                     approving_human_id,
+                     issuing_actor_id,
+                     initiating_human_id,
+                     execution_principal_kind,
+                     execution_principal_id,
+                     from_release_id,
+                     to_release_id,
+                     observed_fence,
+                     pointer_outcome,
+                     verification_outcome,
+                     workflow_disposition,
+                     workflow_status,
+                     terminal
+                   ) VALUES (
+                     $1, $2, $3, $4,
+                     'northstar.release-activation-history/v1',
+                     $5, $6, $6, $6,
+                     'SYSTEM', $7,
+                     NULL, $8, 0,
+                     'NOT_ATTEMPTED',
+                     'NOT_RUN',
+                     'RETAINED',
+                     'RUNNING',
+                     false
+                   )`,
+                  [
+                    tenantA,
+                    environmentA,
+                    'a8a00000-0000-4000-8000-000000000001',
+                    firstAttemptId,
+                    pointer.pointerId,
+                    approverA,
+                    SYSTEM_EXECUTION_PRINCIPAL.principalId,
+                    releaseOne,
+                  ],
+                );
+              },
+            );
 
             await assert.rejects(
               withTrustedRequestTransaction(
@@ -581,6 +743,33 @@ test('G1-P4a PostgreSQL contracts and trusted approval service', async (t) => {
                   client.query(
                     `UPDATE platform.release_approvals
                         SET renderer_version = 'changed'
+                      WHERE activation_attempt_id = $1`,
+                    [firstAttemptId],
+                  ),
+              ),
+              /permission denied/,
+            );
+            await assert.rejects(
+              withTrustedRequestTransaction(
+                runtimePool,
+                approverContext,
+                async (client) =>
+                  client.query(
+                    `UPDATE platform.release_activation_phase_receipts
+                        SET phase_code = 'CHANGED'
+                      WHERE activation_attempt_id = $1`,
+                    [firstAttemptId],
+                  ),
+              ),
+              /permission denied/,
+            );
+            await assert.rejects(
+              withTrustedRequestTransaction(
+                runtimePool,
+                approverContext,
+                async (client) =>
+                  client.query(
+                    `DELETE FROM platform.release_activation_history
                       WHERE activation_attempt_id = $1`,
                     [firstAttemptId],
                   ),
@@ -619,6 +808,11 @@ test('G1-P4a PostgreSQL contracts and trusted approval service', async (t) => {
               `UPDATE platform.release_approver_eligibility_events
                   SET eligible = false
                 WHERE tenant_id = '${tenantA}' AND policy_version = 1`,
+              `UPDATE platform.release_activation_phase_receipts
+                  SET phase_code = 'CHANGED'
+                WHERE activation_attempt_id = '${firstAttemptId}'`,
+              `DELETE FROM platform.release_activation_history
+                WHERE activation_attempt_id = '${firstAttemptId}'`,
             ]) {
               await assert.rejects(
                 pool.query(statement),

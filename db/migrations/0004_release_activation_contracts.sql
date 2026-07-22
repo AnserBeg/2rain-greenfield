@@ -1004,12 +1004,34 @@ CREATE POLICY release_activation_phase_receipts_select_trusted_context
     AND nullif(current_setting('north_star.principal_id', true), '')::uuid IS NOT NULL
   );
 
+CREATE POLICY release_activation_phase_receipts_insert_trusted_context
+  ON platform.release_activation_phase_receipts
+  AS PERMISSIVE
+  FOR INSERT
+  TO north_star_runtime
+  WITH CHECK (
+    tenant_id = nullif(current_setting('north_star.tenant_id', true), '')::uuid
+    AND environment_id = nullif(current_setting('north_star.environment_id', true), '')::uuid
+    AND nullif(current_setting('north_star.principal_id', true), '')::uuid IS NOT NULL
+  );
+
 CREATE POLICY release_activation_history_select_trusted_context
   ON platform.release_activation_history
   AS PERMISSIVE
   FOR SELECT
   TO north_star_runtime
   USING (
+    tenant_id = nullif(current_setting('north_star.tenant_id', true), '')::uuid
+    AND environment_id = nullif(current_setting('north_star.environment_id', true), '')::uuid
+    AND nullif(current_setting('north_star.principal_id', true), '')::uuid IS NOT NULL
+  );
+
+CREATE POLICY release_activation_history_insert_trusted_context
+  ON platform.release_activation_history
+  AS PERMISSIVE
+  FOR INSERT
+  TO north_star_runtime
+  WITH CHECK (
     tenant_id = nullif(current_setting('north_star.tenant_id', true), '')::uuid
     AND environment_id = nullif(current_setting('north_star.environment_id', true), '')::uuid
     AND nullif(current_setting('north_star.principal_id', true), '')::uuid IS NOT NULL
@@ -1059,7 +1081,7 @@ GRANT SELECT, INSERT ON platform.transition_preparation_receipts TO north_star_r
 GRANT SELECT, INSERT ON platform.release_activation_preparations TO north_star_runtime;
 GRANT SELECT, INSERT ON platform.release_approvals TO north_star_runtime;
 GRANT SELECT, INSERT ON platform.release_activation_attempts TO north_star_runtime;
-GRANT SELECT ON platform.release_activation_phase_receipts TO north_star_runtime;
-GRANT SELECT ON platform.release_activation_history TO north_star_runtime;
+GRANT SELECT, INSERT ON platform.release_activation_phase_receipts TO north_star_runtime;
+GRANT SELECT, INSERT ON platform.release_activation_history TO north_star_runtime;
 GRANT SELECT ON platform.release_activation_attempt_outcomes TO north_star_runtime;
 GRANT SELECT ON platform.release_activation_outbox TO north_star_runtime;
