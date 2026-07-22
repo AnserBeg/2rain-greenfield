@@ -19,6 +19,8 @@ export const ACTIVATION_SWAP_RECEIPT_VERSION =
   'northstar.release-activation-swap-receipt/v1' as const;
 export const ACTIVATION_VERIFICATION_RECEIPT_VERSION =
   'northstar.release-activation-verification/v1' as const;
+export const ACTIVATION_RECONCILIATION_START_VERSION =
+  'northstar.release-activation-reconciliation-start/v1' as const;
 export const ACTIVATION_RECONCILIATION_ALARM_VERSION =
   'northstar.release-activation-reconciliation-alarm/v1' as const;
 export const ACTIVATION_INVALIDATION_EVENT_VERSION =
@@ -587,6 +589,14 @@ export interface ReleaseActivationReconciliationAlarm extends TenantEnvironmentI
   readonly alarmVersion: typeof ACTIVATION_RECONCILIATION_ALARM_VERSION;
   readonly maxAgeMilliseconds: number;
   readonly reasonCode: 'RECONCILIATION_OVERDUE';
+}
+
+export interface ReleaseActivationReconciliationStart extends TenantEnvironmentIdentity {
+  readonly activationAttemptId: MintedUuid;
+  readonly maxAgeMilliseconds: number;
+  readonly startReceiptId: MintedUuid;
+  readonly startReceiptVersion: typeof ACTIVATION_RECONCILIATION_START_VERSION;
+  readonly startedAt: string;
 }
 
 /**

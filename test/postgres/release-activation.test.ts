@@ -97,7 +97,7 @@ test('G1-P4b atomic activation, reconciliation, rollback, and invalidation', asy
 
   await withEphemeralPostgres(
     'release-activation',
-    async ({ connection, pool }) => {
+    async ({ connection, containerName, pool }) => {
       const admin = await pool.connect();
       try {
         await runMigrations(admin, await loadMigrations(checkedInMigrations));
@@ -288,6 +288,71 @@ test('G1-P4b atomic activation, reconciliation, rollback, and invalidation', asy
               pool,
               before,
               attempts.map((attempt) => attempt.activationAttemptId),
+            );
+          },
+        );
+
+        await t.test(
+          'no-receipt attempt records LOST_RACE only after a later fence',
+          async () => {
+            const before = await pointer(pool, tenantA, environmentA);
+            const targetA = releaseOtherThan(releasesA, before.releaseId, 3);
+            const attemptA = await prepareApproval(
+              webPool,
+              approverContextA,
+              makerContextA,
+              targetA,
+            );
+            const pending = await webService.reconcileActivation(
+              systemContextA,
+              attemptA,
+            );
+            assert.equal(pending.status, 'RECONCILING');
+            assert.deepEqual(
+              await attemptFactCounts(pool, [attemptA.activationAttemptId]),
+              {
+                histories: 0,
+                outboxRows: 0,
+                outcomes: 0,
+                receipts: 0,
+                swappedOutcomes: 0,
+              },
+            );
+
+            const targetB = releaseOtherThan(releasesA, before.releaseId, 4);
+            const attemptB = await prepareApproval(
+              webPool,
+              approverContextA,
+              makerContextA,
+              targetB,
+            );
+            assert.equal(
+              (await workerService.activate(systemContextA, attemptB)).status,
+              'SWAPPED_VERIFIED',
+            );
+            const generationB = await pointer(pool, tenantA, environmentA);
+            assert.equal(generationB.fence, before.fence + 1);
+
+            const lost = await webService.reconcileActivation(
+              systemContextA,
+              attemptA,
+            );
+            assert.equal(lost.decisiveOutcomeCode, 'LOST_RACE');
+            assert.equal(lost.status, 'NO_SWAP_TERMINAL');
+            assert.equal(lost.terminal, true);
+            assert.deepEqual(
+              await attemptFactCounts(pool, [attemptA.activationAttemptId]),
+              {
+                histories: 0,
+                outboxRows: 0,
+                outcomes: 1,
+                receipts: 0,
+                swappedOutcomes: 0,
+              },
+            );
+            assert.deepEqual(
+              await pointer(pool, tenantA, environmentA),
+              generationB,
             );
           },
         );
@@ -693,7 +758,7 @@ test('G1-P4b atomic activation, reconciliation, rollback, and invalidation', asy
         );
 
         await t.test(
-          'reconciliation max-age alarm is durable and no ambient context is accepted',
+          'reconciliation age survives outage and a fresh coordinator',
           async () => {
             const current = await pointer(pool, tenantA, environmentA);
             const target = releaseOtherThan(releasesA, current.releaseId, 0);
@@ -703,30 +768,131 @@ test('G1-P4b atomic activation, reconciliation, rollback, and invalidation', asy
               makerContextA,
               target,
             );
-            await changeExecutorAuthority(pool, tenantA, false);
-            let monotonic = 10;
-            const alarmService = new PostgresReleaseActivationService(webPool, {
-              monotonicNow: () => monotonic,
-              reconciliationMaxAgeMilliseconds: 5,
-            });
-            assert.equal(
-              (await alarmService.activate(systemContextA, attempt)).alarmDue,
-              false,
-            );
-            monotonic = 16;
-            const overdue = await alarmService.activate(
-              systemContextA,
-              attempt,
-            );
-            assert.equal(overdue.alarmDue, true);
-            const alarm = await pool.query<{ count: string }>(
+            const beforeInstruction = await pool.query<{ count: string }>(
               `SELECT count(*)
-                 FROM platform.release_activation_reconciliation_alarms
+                 FROM platform.release_activation_reconciliation_starts
                 WHERE activation_attempt_id = $1`,
               [attempt.activationAttemptId],
             );
-            assert.equal(alarm.rows[0]?.count, '1');
-            await changeExecutorAuthority(pool, tenantA, true);
+            assert.equal(beforeInstruction.rows[0]?.count, '0');
+            await changeExecutorAuthority(pool, tenantA, false);
+            try {
+              const firstPool = runtimePool(connection, 1);
+              try {
+                const firstCoordinator = new PostgresReleaseActivationService(
+                  firstPool,
+                  { reconciliationMaxAgeMilliseconds: 100 },
+                );
+                const started = await firstCoordinator.activate(
+                  systemContextA,
+                  attempt,
+                );
+                assert.equal(started.status, 'EXECUTOR_UNAVAILABLE');
+                assert.equal(started.alarmDue, false);
+              } finally {
+                await firstPool.end();
+              }
+
+              const start = await pool.query<{
+                count: string;
+                max_age_milliseconds: string;
+              }>(
+                `SELECT count(*) AS count,
+                        max(max_age_milliseconds)::text AS max_age_milliseconds
+                   FROM platform.release_activation_reconciliation_starts
+                  WHERE activation_attempt_id = $1`,
+                [attempt.activationAttemptId],
+              );
+              assert.deepEqual(start.rows[0], {
+                count: '1',
+                max_age_milliseconds: '100',
+              });
+
+              await execFileAsync('docker', ['pause', containerName]);
+              try {
+                const outagePool = new pg.Pool({
+                  ...connection,
+                  connectionTimeoutMillis: 100,
+                  max: 1,
+                  user: 'north_star_runtime',
+                });
+                outagePool.on('error', () => undefined);
+                try {
+                  const outageCoordinator =
+                    new PostgresReleaseActivationService(outagePool);
+                  const unavailable =
+                    await outageCoordinator.reconcileActivation(
+                      systemContextA,
+                      attempt,
+                    );
+                  assert.equal(unavailable.status, 'RECONCILING');
+                  assert.equal(unavailable.alarmDue, false);
+                } finally {
+                  await outagePool.end();
+                }
+                await new Promise((resolveDelay) =>
+                  setTimeout(resolveDelay, 3_100),
+                );
+              } finally {
+                await execFileAsync('docker', ['unpause', containerName]);
+              }
+              await pool.query('SELECT 1');
+
+              const recoveredPool = runtimePool(connection, 1);
+              try {
+                const recoveredCoordinator =
+                  new PostgresReleaseActivationService(recoveredPool);
+                const recovered =
+                  await recoveredCoordinator.reconcileActivation(
+                    systemContextA,
+                    attempt,
+                  );
+                assert.equal(recovered.status, 'RECONCILING');
+                assert.equal(recovered.alarmDue, true);
+                const alarm = await pool.query<{
+                  count: string;
+                  max_age_milliseconds: string;
+                }>(
+                  `SELECT count(*) AS count,
+                          max(max_age_milliseconds)::text AS max_age_milliseconds
+                     FROM platform.release_activation_reconciliation_alarms
+                    WHERE activation_attempt_id = $1`,
+                  [attempt.activationAttemptId],
+                );
+                assert.deepEqual(alarm.rows[0], {
+                  count: '1',
+                  max_age_milliseconds: '100',
+                });
+
+                await changeExecutorAuthority(pool, tenantA, true);
+                const finished = await recoveredCoordinator.activate(
+                  systemContextA,
+                  attempt,
+                );
+                assert.equal(finished.status, 'SWAPPED_VERIFIED');
+                assert.equal(finished.alarmDue, true);
+                const stillOneAlarm = await pool.query<{ count: string }>(
+                  `SELECT count(*)
+                     FROM platform.release_activation_reconciliation_alarms
+                    WHERE activation_attempt_id = $1`,
+                  [attempt.activationAttemptId],
+                );
+                assert.equal(stillOneAlarm.rows[0]?.count, '1');
+              } finally {
+                await recoveredPool.end();
+              }
+              await assert.rejects(
+                pool.query(
+                  `UPDATE platform.release_activation_reconciliation_starts
+                      SET max_age_milliseconds = max_age_milliseconds + 1
+                    WHERE activation_attempt_id = $1`,
+                  [attempt.activationAttemptId],
+                ),
+                /release_activation_write_guard_reject|violates check constraint/,
+              );
+            } finally {
+              await ensureExecutorAuthority(pool, tenantA, true);
+            }
 
             await assert.rejects(
               webService.activate(
@@ -1377,12 +1543,15 @@ async function withCommitDroppingProxy<T>(
   const targetHost = String(connection.host ?? '127.0.0.1');
   const targetPort = Number(connection.port);
   let armed = true;
+  let commitCount = 0;
   const server = createServer((downstream) => {
     const upstream = connect(targetPort, targetHost);
     let dropCommitResponse = false;
     downstream.on('data', (chunk: Buffer) => {
-      const isCommit = armed && chunk.includes(Buffer.from('COMMIT'));
-      if (isCommit) {
+      const hasCommit = chunk.includes(Buffer.from('COMMIT'));
+      if (armed && hasCommit) commitCount += 1;
+      const isCommitToDrop = armed && hasCommit && commitCount === 2;
+      if (isCommitToDrop) {
         armed = false;
         dropCommitResponse = true;
       }

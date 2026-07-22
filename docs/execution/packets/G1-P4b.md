@@ -195,10 +195,10 @@ surfacing the result.
 
 - Migration 0005 adds the per-tenant approver/executor/control authority epoch,
   real append-only executor and deny-only control event streams, swap receipts,
-  generation-bound verification receipts, and durable reconciliation alarms.
-  Its deferred fact-set constraints reject any committed P4b `SWAPPED` outcome
-  that lacks exactly one matching receipt, history record, and invalidation
-  outbox row.
+  generation-bound verification receipts, append-only reconciliation starts,
+  and durable reconciliation alarms. Its deferred fact-set constraints reject
+  any committed P4b `SWAPPED` outcome that lacks exactly one matching receipt,
+  history record, and invalidation outbox row.
 - The trusted PostgreSQL service accepts only a prebound activation-attempt ID.
   It locks that attempt and the governing authority epoch, rebuilds the approval
   and transition binding from canonical rows, checks expiry with
@@ -212,10 +212,13 @@ surfacing the result.
   verification, an unchanged original generation remains retryable through the
   activation call, and a missing receipt plus an advanced fence records
   `LOST_RACE` while holding the attempt and pointer locks. Database uncertainty
-  remains `RECONCILING`; monotonic elapsed time drives an idempotent durable
-  overdue alarm. Only connection loss, explicit database retry/timeout
-  conditions, and ambiguous database failures enter reconciliation; SQL,
-  constraint, binding, and programming defects remain visible.
+  remains `RECONCILING`. A callable activation/reconciliation entry writes one
+  serialized start receipt with PostgreSQL time and the versioned max age;
+  every later worker derives the deadline from that fact and inserts the alarm
+  before finishing overdue recovery. Approval creation alone writes no start.
+  Only connection loss, explicit database retry/timeout conditions, and
+  ambiguous database failures enter reconciliation; SQL, constraint, binding,
+  and programming defects remain visible.
 - Post-swap verification records only pointer read-back, artifact availability,
   and release-kernel invariants. It locks and compares the exact generation
   before committing a verdict, so supersession records `SUPERSEDED`. G1 has no
@@ -231,11 +234,13 @@ surfacing the result.
 - PASS: canonical schema check (`5 applied, 5 verified`, drift clean), frozen
   install, formatting, typecheck, lint, build, and dependency-boundary scan (53
   files).
-- PASS: the focused activation matrix executes all 11 real-PostgreSQL scenarios
-  (12/12 TAP tests including the parent), including complete-fact cardinality
+- PASS: the focused activation matrix executes all 12 real-PostgreSQL scenarios
+  (13/13 TAP tests including the parent), including complete-fact cardinality
   assertions for each same-pointer race, a real commit-response TCP disconnect,
-  and separate child/parent processes and pools.
-- PASS: full PostgreSQL (37/37), architecture (23/23), compiler (21/21),
+  separate child/parent processes and pools, exact no-receipt/advanced-fence
+  `LOST_RACE`, and a PostgreSQL outage recovered by a fresh coordinator that
+  inherits and persists the overdue alarm.
+- PASS: full PostgreSQL (38/38), architecture (23/23), compiler (21/21),
   integration (4/4), and unit (18/18) tests. The browser scaffold has one
   intentional skip because product browser journeys are out of scope at G1.
 

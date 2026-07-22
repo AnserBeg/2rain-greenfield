@@ -1462,6 +1462,76 @@
     },
     {
       "schema": "platform",
+      "relation": "release_activation_reconciliation_starts",
+      "ordinal_position": 1,
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_reconciliation_starts",
+      "ordinal_position": 2,
+      "column_name": "environment_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_reconciliation_starts",
+      "ordinal_position": 3,
+      "column_name": "activation_attempt_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_reconciliation_starts",
+      "ordinal_position": 4,
+      "column_name": "start_receipt_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_reconciliation_starts",
+      "ordinal_position": 5,
+      "column_name": "start_receipt_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_reconciliation_starts",
+      "ordinal_position": 6,
+      "column_name": "max_age_milliseconds",
+      "data_type": "bigint",
+      "udt_name": "int8",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_reconciliation_starts",
+      "ordinal_position": 7,
+      "column_name": "started_at",
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "clock_timestamp()"
+    },
+    {
+      "schema": "platform",
       "relation": "release_activation_swap_receipts",
       "ordinal_position": 1,
       "column_name": "tenant_id",
@@ -3568,13 +3638,6 @@
     {
       "schema": "platform",
       "relation": "release_activation_reconciliation_alarms",
-      "name": "release_activation_reconciliation_alarms_attempt_fkey",
-      "type": "f",
-      "definition": "FOREIGN KEY (tenant_id, environment_id, activation_attempt_id) REFERENCES platform.release_activation_attempts(tenant_id, environment_id, activation_attempt_id)"
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_reconciliation_alarms",
       "name": "release_activation_reconciliation_alarms_id_unique",
       "type": "u",
       "definition": "UNIQUE (alarm_id)"
@@ -3592,6 +3655,41 @@
       "name": "release_activation_reconciliation_alarms_shape",
       "type": "c",
       "definition": "CHECK (alarm_version = 'northstar.release-activation-reconciliation-alarm/v1'::text AND reason_code = 'RECONCILIATION_OVERDUE'::text AND max_age_milliseconds > 0)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_reconciliation_alarms",
+      "name": "release_activation_reconciliation_alarms_start_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, activation_attempt_id) REFERENCES platform.release_activation_reconciliation_starts(tenant_id, environment_id, activation_attempt_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_reconciliation_starts",
+      "name": "release_activation_reconciliation_starts_attempt_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, activation_attempt_id) REFERENCES platform.release_activation_attempts(tenant_id, environment_id, activation_attempt_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_reconciliation_starts",
+      "name": "release_activation_reconciliation_starts_id_unique",
+      "type": "u",
+      "definition": "UNIQUE (start_receipt_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_reconciliation_starts",
+      "name": "release_activation_reconciliation_starts_pkey",
+      "type": "p",
+      "definition": "PRIMARY KEY (tenant_id, environment_id, activation_attempt_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_reconciliation_starts",
+      "name": "release_activation_reconciliation_starts_shape",
+      "type": "c",
+      "definition": "CHECK (start_receipt_version = 'northstar.release-activation-reconciliation-start/v1'::text AND max_age_milliseconds > 0)"
     },
     {
       "schema": "platform",
@@ -4422,6 +4520,18 @@
     },
     {
       "schema": "platform",
+      "relation": "release_activation_reconciliation_starts",
+      "name": "release_activation_reconciliation_starts_id_unique",
+      "definition": "CREATE UNIQUE INDEX release_activation_reconciliation_starts_id_unique ON platform.release_activation_reconciliation_starts USING btree (start_receipt_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_reconciliation_starts",
+      "name": "release_activation_reconciliation_starts_pkey",
+      "definition": "CREATE UNIQUE INDEX release_activation_reconciliation_starts_pkey ON platform.release_activation_reconciliation_starts USING btree (tenant_id, environment_id, activation_attempt_id)"
+    },
+    {
+      "schema": "platform",
       "relation": "release_activation_swap_receipts",
       "name": "release_activation_swap_receipts_id_unique",
       "definition": "CREATE UNIQUE INDEX release_activation_swap_receipts_id_unique ON platform.release_activation_swap_receipts USING btree (swap_receipt_id)"
@@ -4778,7 +4888,7 @@
       "roles": "{north_star_runtime}",
       "cmd": "INSERT",
       "qual": null,
-      "with_check": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))"
+      "with_check": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid = '00000000-0000-4000-8000-000000000001'::uuid))"
     },
     {
       "schema": "platform",
@@ -4787,7 +4897,27 @@
       "permissive": "PERMISSIVE",
       "roles": "{north_star_runtime}",
       "cmd": "SELECT",
-      "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))",
+      "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid = '00000000-0000-4000-8000-000000000001'::uuid))",
+      "with_check": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_reconciliation_starts",
+      "name": "release_activation_reconciliation_starts_insert_trusted_context",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_runtime}",
+      "cmd": "INSERT",
+      "qual": null,
+      "with_check": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid = '00000000-0000-4000-8000-000000000001'::uuid) AND (EXISTS ( SELECT 1\n   FROM platform.release_activation_attempts attempt\n  WHERE ((attempt.tenant_id = release_activation_reconciliation_starts.tenant_id) AND (attempt.environment_id = release_activation_reconciliation_starts.environment_id) AND (attempt.activation_attempt_id = release_activation_reconciliation_starts.activation_attempt_id) AND (attempt.execution_principal_kind = 'SYSTEM'::text) AND (attempt.execution_principal_id = (NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid)))))"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_reconciliation_starts",
+      "name": "release_activation_reconciliation_starts_select_trusted_context",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_runtime}",
+      "cmd": "SELECT",
+      "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid = '00000000-0000-4000-8000-000000000001'::uuid))",
       "with_check": null
     },
     {
@@ -5069,6 +5199,13 @@
     {
       "schema": "platform",
       "relation": "release_activation_reconciliation_alarms",
+      "kind": "r",
+      "row_level_security": true,
+      "force_row_level_security": true
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_reconciliation_starts",
       "kind": "r",
       "row_level_security": true,
       "force_row_level_security": true

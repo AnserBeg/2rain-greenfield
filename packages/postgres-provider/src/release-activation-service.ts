@@ -1,5 +1,4 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { performance } from 'node:perf_hooks';
 
 import {
   ACTIVATION_HISTORY_VERSION,
@@ -9,6 +8,7 @@ import {
   ACTIVATION_OUTCOME_VERSION,
   ACTIVATION_PHASE_RECEIPT_VERSION,
   ACTIVATION_RECONCILIATION_ALARM_VERSION,
+  ACTIVATION_RECONCILIATION_START_VERSION,
   ACTIVATION_SWAP_RECEIPT_VERSION,
   ACTIVATION_VERIFICATION_RECEIPT_VERSION,
   APPROVAL_EXPIRY_SKEW_MARGIN_MILLISECONDS,
@@ -50,7 +50,6 @@ export class ReleaseActivationError extends Error {
 }
 
 export interface ReleaseActivationServiceOptions {
-  readonly monotonicNow?: () => number;
   readonly reconciliationMaxAgeMilliseconds?: number;
 }
 
@@ -132,15 +131,18 @@ interface SwapTransactionResult {
   swapped: boolean;
 }
 
+interface DurableReconciliationAge {
+  alarmDue: boolean;
+  started: boolean;
+}
+
 /**
  * Trusted release activation kernel. The only mutation entry is an already
  * prebound attempt; target, base, approval, authority, and evidence are loaded
  * from canonical PostgreSQL records under the attempt/authority locks.
  */
 export class PostgresReleaseActivationService {
-  readonly #monotonicNow: () => number;
   readonly #reconciliationMaxAgeMilliseconds: number;
-  readonly #reconciliationObservedAt = new Map<string, number>();
 
   constructor(
     private readonly pool: Pool,
@@ -155,7 +157,6 @@ export class PostgresReleaseActivationService {
         'reconciliation max age must be a positive safe integer',
       );
     }
-    this.#monotonicNow = options.monotonicNow ?? (() => performance.now());
     this.#reconciliationMaxAgeMilliseconds = maxAge;
   }
 
@@ -166,12 +167,12 @@ export class PostgresReleaseActivationService {
     assertTrustedRequestContext(context);
     assertAttemptIdentity(command.activationAttemptId);
     try {
+      await this.#recordDurableReconciliationAge(context, command, true);
       const swapped = await this.#executeSwapTransaction(context, command);
-      if (!swapped.swapped) {
-        return await this.#observeIfReconciling(context, swapped.result);
-      }
-      this.#reconciliationObservedAt.delete(command.activationAttemptId);
-      return await this.verifyActivation(context, command);
+      const result = swapped.swapped
+        ? await this.verifyActivation(context, command)
+        : swapped.result;
+      return await this.#finishWithDurableAlarm(context, command, result, true);
     } catch (error) {
       if (error instanceof ReleaseActivationError) throw error;
       if (!isResumableDatabaseFailure(error)) throw error;
@@ -189,17 +190,18 @@ export class PostgresReleaseActivationService {
     assertTrustedRequestContext(context);
     assertAttemptIdentity(command.activationAttemptId);
     try {
+      await this.#recordDurableReconciliationAge(context, command, true);
       const inspected = await withTrustedRequestTransaction(
         this.pool,
         context,
         async (client) =>
           this.#inspectForReconciliation(client, context, command),
       );
-      if (inspected.status === 'SWAPPED_VERIFY_PENDING') {
-        this.#reconciliationObservedAt.delete(command.activationAttemptId);
-        return await this.verifyActivation(context, command);
-      }
-      return await this.#observeIfReconciling(context, inspected);
+      const result =
+        inspected.status === 'SWAPPED_VERIFY_PENDING'
+          ? await this.verifyActivation(context, command)
+          : inspected;
+      return await this.#finishWithDurableAlarm(context, command, result, true);
     } catch (error) {
       if (error instanceof ReleaseActivationError) throw error;
       if (!isResumableDatabaseFailure(error)) throw error;
@@ -217,6 +219,7 @@ export class PostgresReleaseActivationService {
     assertTrustedRequestContext(context);
     assertAttemptIdentity(command.activationAttemptId);
     try {
+      await this.#recordDurableReconciliationAge(context, command, false);
       const cancelled = await withTrustedRequestTransaction(
         this.pool,
         context,
@@ -240,10 +243,16 @@ export class PostgresReleaseActivationService {
           return insertTerminalOutcome(client, context, record, 'CANCELLATION');
         },
       );
-      if (cancelled.status === 'SWAPPED_VERIFY_PENDING') {
-        return await this.verifyActivation(context, command);
-      }
-      return cancelled;
+      const result =
+        cancelled.status === 'SWAPPED_VERIFY_PENDING'
+          ? await this.verifyActivation(context, command)
+          : cancelled;
+      return await this.#finishWithDurableAlarm(
+        context,
+        command,
+        result,
+        false,
+      );
     } catch (error) {
       if (error instanceof ReleaseActivationError) throw error;
       if (!isResumableDatabaseFailure(error)) throw error;
@@ -261,7 +270,8 @@ export class PostgresReleaseActivationService {
     assertTrustedRequestContext(context);
     assertAttemptIdentity(command.activationAttemptId);
     try {
-      return await withTrustedRequestTransaction(
+      await this.#recordDurableReconciliationAge(context, command, true);
+      const verified = await withTrustedRequestTransaction(
         this.pool,
         context,
         async (client) => {
@@ -363,6 +373,12 @@ export class PostgresReleaseActivationService {
             ),
           );
         },
+      );
+      return await this.#finishWithDurableAlarm(
+        context,
+        command,
+        verified,
+        true,
       );
     } catch (error) {
       if (error instanceof ReleaseActivationError) throw error;
@@ -768,106 +784,160 @@ export class PostgresReleaseActivationService {
     return insertTerminalOutcome(client, context, record, 'INVALID_BINDING');
   }
 
-  async #observeIfReconciling(
+  async #recordDurableReconciliationAge(
     context: TrustedRequestContext,
-    result: ActivationKernelResult,
-  ): Promise<ActivationKernelResult> {
-    if (
-      result.status !== 'RECONCILING' &&
-      result.status !== 'EXECUTOR_UNAVAILABLE' &&
-      result.status !== 'PAUSED'
-    ) {
-      this.#reconciliationObservedAt.delete(result.activationAttemptId);
-      return result;
-    }
-    const now = validMonotonicNow(this.#monotonicNow());
-    const first =
-      this.#reconciliationObservedAt.get(result.activationAttemptId) ?? now;
-    this.#reconciliationObservedAt.set(result.activationAttemptId, first);
-    if (now - first < this.#reconciliationMaxAgeMilliseconds) return result;
-
-    try {
-      await withTrustedRequestTransaction(
-        this.pool,
-        context,
-        async (client) => {
-          const locked = await client.query<{
-            activation_attempt_id: MintedUuid;
-          }>(
-            `SELECT activation_attempt_id
-               FROM platform.lock_release_activation_attempt($1, $2, $3)`,
-            [
-              context.tenantId,
-              context.environmentId,
-              result.activationAttemptId,
-            ],
-          );
-          requiredRow(
-            locked.rows[0],
-            'activation attempt is not visible to the trusted request context',
-          );
-          await client.query(
-            `INSERT INTO platform.release_activation_reconciliation_alarms (
-             tenant_id,
-             environment_id,
-             activation_attempt_id,
-             alarm_id,
-             alarm_version,
-             reason_code,
-             max_age_milliseconds
-           )
-           SELECT $1, $2, attempt.activation_attempt_id, $4, $5,
-                  'RECONCILIATION_OVERDUE', $6
-             FROM platform.release_activation_attempts AS attempt
-            WHERE attempt.tenant_id = $1
-              AND attempt.environment_id = $2
-              AND attempt.activation_attempt_id = $3
-              AND NOT EXISTS (
-                SELECT 1
-                  FROM platform.release_activation_verification_receipts AS verification
-                 WHERE verification.activation_attempt_id =
-                       attempt.activation_attempt_id
-              )
-              AND NOT EXISTS (
-                SELECT 1
-                  FROM platform.release_activation_attempt_outcomes AS outcome
-                 WHERE outcome.activation_attempt_id = attempt.activation_attempt_id
-                   AND outcome.terminal
-              )
-              AND NOT EXISTS (
-                SELECT 1
-                  FROM platform.release_activation_reconciliation_alarms AS alarm
-                 WHERE alarm.activation_attempt_id = attempt.activation_attempt_id
-              )`,
-            [
-              context.tenantId,
-              context.environmentId,
-              result.activationAttemptId,
-              randomUUID(),
-              ACTIVATION_RECONCILIATION_ALARM_VERSION,
-              this.#reconciliationMaxAgeMilliseconds,
-            ],
-          );
-        },
+    command: ActivateReleaseCommand,
+    createIfMissing: boolean,
+  ): Promise<DurableReconciliationAge> {
+    return withTrustedRequestTransaction(this.pool, context, async (client) => {
+      const locked = await client.query<{
+        activation_attempt_id: MintedUuid;
+      }>(
+        `SELECT activation_attempt_id
+             FROM platform.lock_release_activation_attempt($1, $2, $3)`,
+        [context.tenantId, context.environmentId, command.activationAttemptId],
       );
-      return Object.freeze({ ...result, alarmDue: true });
-    } catch (error) {
-      if (!isResumableDatabaseFailure(error)) throw error;
-      return Object.freeze({ ...result, alarmDue: true });
-    }
+      requiredRow(
+        locked.rows[0],
+        'activation attempt is not visible to the trusted request context',
+      );
+      const principal = await client.query<
+        Pick<
+          AttemptRecordRow,
+          'execution_principal_id' | 'execution_principal_kind'
+        >
+      >(
+        `SELECT execution_principal_kind, execution_principal_id
+             FROM platform.release_activation_attempts
+            WHERE tenant_id = $1
+              AND environment_id = $2
+              AND activation_attempt_id = $3`,
+        [context.tenantId, context.environmentId, command.activationAttemptId],
+      );
+      assertExecutionPrincipal(
+        context,
+        requiredRow(
+          principal.rows[0],
+          'activation attempt execution principal is unavailable',
+        ),
+      );
+
+      if (createIfMissing) {
+        await client.query(
+          `INSERT INTO platform.release_activation_reconciliation_starts (
+               tenant_id,
+               environment_id,
+               activation_attempt_id,
+               start_receipt_id,
+               start_receipt_version,
+               max_age_milliseconds
+             )
+             SELECT $1, $2, $3, $4, $5, $6
+              WHERE NOT EXISTS (
+                SELECT 1
+                  FROM platform.release_activation_reconciliation_starts AS existing
+                 WHERE existing.activation_attempt_id = $3
+              )`,
+          [
+            context.tenantId,
+            context.environmentId,
+            command.activationAttemptId,
+            randomUUID(),
+            ACTIVATION_RECONCILIATION_START_VERSION,
+            this.#reconciliationMaxAgeMilliseconds,
+          ],
+        );
+      }
+
+      const age = await client.query<{
+        max_age_milliseconds: string;
+        overdue: boolean;
+      }>(
+        `SELECT start.max_age_milliseconds,
+                  clock_timestamp() >=
+                    start.started_at +
+                    (start.max_age_milliseconds::text || ' milliseconds')::interval
+                    AS overdue
+             FROM platform.release_activation_reconciliation_starts AS start
+            WHERE start.activation_attempt_id = $1`,
+        [command.activationAttemptId],
+      );
+      const durable = age.rows[0];
+      if (!durable) return { alarmDue: false, started: false };
+
+      if (durable.overdue) {
+        await client.query(
+          `INSERT INTO platform.release_activation_reconciliation_alarms (
+               tenant_id,
+               environment_id,
+               activation_attempt_id,
+               alarm_id,
+               alarm_version,
+               reason_code,
+               max_age_milliseconds
+             )
+             SELECT start.tenant_id,
+                    start.environment_id,
+                    start.activation_attempt_id,
+                    $2,
+                    $3,
+                    'RECONCILIATION_OVERDUE',
+                    start.max_age_milliseconds
+               FROM platform.release_activation_reconciliation_starts AS start
+              WHERE start.activation_attempt_id = $1
+                AND clock_timestamp() >=
+                      start.started_at +
+                      (start.max_age_milliseconds::text || ' milliseconds')::interval
+                AND NOT EXISTS (
+                  SELECT 1
+                    FROM platform.release_activation_reconciliation_alarms AS alarm
+                   WHERE alarm.activation_attempt_id = start.activation_attempt_id
+                )`,
+          [
+            command.activationAttemptId,
+            randomUUID(),
+            ACTIVATION_RECONCILIATION_ALARM_VERSION,
+          ],
+        );
+      }
+      const alarm = await client.query<{ alarm_due: boolean }>(
+        `SELECT EXISTS (
+             SELECT 1
+               FROM platform.release_activation_reconciliation_alarms
+              WHERE activation_attempt_id = $1
+           ) AS alarm_due`,
+        [command.activationAttemptId],
+      );
+      return {
+        alarmDue: alarm.rows[0]?.alarm_due === true,
+        started: true,
+      };
+    });
+  }
+
+  async #finishWithDurableAlarm(
+    context: TrustedRequestContext,
+    command: ActivateReleaseCommand,
+    result: ActivationKernelResult,
+    createIfMissing: boolean,
+  ): Promise<ActivationKernelResult> {
+    const durable = await this.#recordDurableReconciliationAge(
+      context,
+      command,
+      createIfMissing,
+    );
+    return durable.alarmDue && !result.alarmDue
+      ? Object.freeze({ ...result, alarmDue: true })
+      : result;
   }
 
   #databaseUnavailableResult(
     context: TrustedRequestContext,
     activationAttemptId: MintedUuid,
   ): ActivationKernelResult {
-    const now = validMonotonicNow(this.#monotonicNow());
-    const first =
-      this.#reconciliationObservedAt.get(activationAttemptId) ?? now;
-    this.#reconciliationObservedAt.set(activationAttemptId, first);
     return Object.freeze({
       activationAttemptId,
-      alarmDue: now - first >= this.#reconciliationMaxAgeMilliseconds,
+      alarmDue: false,
       decisiveOutcomeCode: null,
       environmentId: context.environmentId,
       fence: null,
@@ -1687,7 +1757,10 @@ function runningResult(
 
 function assertExecutionPrincipal(
   context: TrustedRequestContext,
-  record: AttemptRecordRow,
+  record: Pick<
+    AttemptRecordRow,
+    'execution_principal_id' | 'execution_principal_kind'
+  >,
 ): void {
   if (
     record.execution_principal_kind !== SYSTEM_EXECUTION_PRINCIPAL.kind ||
@@ -1742,16 +1815,6 @@ function safeFence(value: string): number {
   return converted;
 }
 
-function validMonotonicNow(value: number): number {
-  if (!Number.isFinite(value) || value < 0) {
-    throw new ReleaseActivationError(
-      'MONOTONIC_CLOCK_INVALID',
-      'monotonic clock returned an invalid elapsed value',
-    );
-  }
-  return value;
-}
-
 function requiredRow<T>(value: T | undefined, message: string): T {
   if (value === undefined) {
     throw new ReleaseActivationError('CANONICAL_RECORD_NOT_FOUND', message);
@@ -1794,7 +1857,7 @@ function isResumableDatabaseFailure(error: unknown): boolean {
       return true;
     }
   }
-  return /(?:connection|socket) (?:ended|closed|lost|terminated|was terminated) unexpectedly/i.test(
+  return /(?:connection terminated due to connection timeout|timeout exceeded when trying to connect|(?:connection|socket) (?:ended|closed|lost|terminated|was terminated) unexpectedly)/i.test(
     error.message,
   );
 }

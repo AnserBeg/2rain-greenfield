@@ -369,6 +369,31 @@ CREATE TABLE platform.release_activation_verification_receipts (
   )
 );
 
+CREATE TABLE platform.release_activation_reconciliation_starts (
+  tenant_id uuid NOT NULL,
+  environment_id uuid NOT NULL,
+  activation_attempt_id uuid NOT NULL,
+  start_receipt_id uuid NOT NULL,
+  start_receipt_version text NOT NULL,
+  max_age_milliseconds bigint NOT NULL,
+  started_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+  PRIMARY KEY (tenant_id, environment_id, activation_attempt_id),
+  CONSTRAINT release_activation_reconciliation_starts_id_unique
+    UNIQUE (start_receipt_id),
+  CONSTRAINT release_activation_reconciliation_starts_attempt_fkey
+    FOREIGN KEY (tenant_id, environment_id, activation_attempt_id)
+    REFERENCES platform.release_activation_attempts (
+      tenant_id,
+      environment_id,
+      activation_attempt_id
+    ),
+  CONSTRAINT release_activation_reconciliation_starts_shape CHECK (
+    start_receipt_version =
+      'northstar.release-activation-reconciliation-start/v1'
+    AND max_age_milliseconds > 0
+  )
+);
+
 CREATE TABLE platform.release_activation_reconciliation_alarms (
   tenant_id uuid NOT NULL,
   environment_id uuid NOT NULL,
@@ -381,9 +406,9 @@ CREATE TABLE platform.release_activation_reconciliation_alarms (
   PRIMARY KEY (tenant_id, environment_id, activation_attempt_id),
   CONSTRAINT release_activation_reconciliation_alarms_id_unique
     UNIQUE (alarm_id),
-  CONSTRAINT release_activation_reconciliation_alarms_attempt_fkey
+  CONSTRAINT release_activation_reconciliation_alarms_start_fkey
     FOREIGN KEY (tenant_id, environment_id, activation_attempt_id)
-    REFERENCES platform.release_activation_attempts (
+    REFERENCES platform.release_activation_reconciliation_starts (
       tenant_id,
       environment_id,
       activation_attempt_id
@@ -780,6 +805,18 @@ DO INSTEAD
   INSERT INTO platform.release_activation_write_guard (attempted_relation)
   VALUES ('release_activation_verification_receipts');
 
+CREATE RULE release_activation_reconciliation_starts_reject_update
+AS ON UPDATE TO platform.release_activation_reconciliation_starts
+DO INSTEAD
+  INSERT INTO platform.release_activation_write_guard (attempted_relation)
+  VALUES ('release_activation_reconciliation_starts');
+
+CREATE RULE release_activation_reconciliation_starts_reject_delete
+AS ON DELETE TO platform.release_activation_reconciliation_starts
+DO INSTEAD
+  INSERT INTO platform.release_activation_write_guard (attempted_relation)
+  VALUES ('release_activation_reconciliation_starts');
+
 CREATE RULE release_activation_reconciliation_alarms_reject_update
 AS ON UPDATE TO platform.release_activation_reconciliation_alarms
 DO INSTEAD
@@ -802,6 +839,8 @@ ALTER TABLE platform.release_activation_swap_receipts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE platform.release_activation_swap_receipts FORCE ROW LEVEL SECURITY;
 ALTER TABLE platform.release_activation_verification_receipts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE platform.release_activation_verification_receipts FORCE ROW LEVEL SECURITY;
+ALTER TABLE platform.release_activation_reconciliation_starts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE platform.release_activation_reconciliation_starts FORCE ROW LEVEL SECURITY;
 ALTER TABLE platform.release_activation_reconciliation_alarms ENABLE ROW LEVEL SECURITY;
 ALTER TABLE platform.release_activation_reconciliation_alarms FORCE ROW LEVEL SECURITY;
 
@@ -882,6 +921,41 @@ CREATE POLICY release_activation_verification_receipts_insert_trusted_context
     AND nullif(current_setting('north_star.principal_id', true), '')::uuid IS NOT NULL
   );
 
+CREATE POLICY release_activation_reconciliation_starts_select_trusted_context
+  ON platform.release_activation_reconciliation_starts
+  AS PERMISSIVE
+  FOR SELECT
+  TO north_star_runtime
+  USING (
+    tenant_id = nullif(current_setting('north_star.tenant_id', true), '')::uuid
+    AND environment_id = nullif(current_setting('north_star.environment_id', true), '')::uuid
+    AND nullif(current_setting('north_star.principal_id', true), '')::uuid =
+          '00000000-0000-4000-8000-000000000001'::uuid
+  );
+
+CREATE POLICY release_activation_reconciliation_starts_insert_trusted_context
+  ON platform.release_activation_reconciliation_starts
+  AS PERMISSIVE
+  FOR INSERT
+  TO north_star_runtime
+  WITH CHECK (
+    tenant_id = nullif(current_setting('north_star.tenant_id', true), '')::uuid
+    AND environment_id = nullif(current_setting('north_star.environment_id', true), '')::uuid
+    AND nullif(current_setting('north_star.principal_id', true), '')::uuid =
+          '00000000-0000-4000-8000-000000000001'::uuid
+    AND EXISTS (
+      SELECT 1
+        FROM platform.release_activation_attempts AS attempt
+       WHERE attempt.tenant_id = release_activation_reconciliation_starts.tenant_id
+         AND attempt.environment_id = release_activation_reconciliation_starts.environment_id
+         AND attempt.activation_attempt_id =
+               release_activation_reconciliation_starts.activation_attempt_id
+         AND attempt.execution_principal_kind = 'SYSTEM'
+         AND attempt.execution_principal_id =
+               nullif(current_setting('north_star.principal_id', true), '')::uuid
+    )
+  );
+
 CREATE POLICY release_activation_reconciliation_alarms_select_trusted_context
   ON platform.release_activation_reconciliation_alarms
   AS PERMISSIVE
@@ -890,7 +964,8 @@ CREATE POLICY release_activation_reconciliation_alarms_select_trusted_context
   USING (
     tenant_id = nullif(current_setting('north_star.tenant_id', true), '')::uuid
     AND environment_id = nullif(current_setting('north_star.environment_id', true), '')::uuid
-    AND nullif(current_setting('north_star.principal_id', true), '')::uuid IS NOT NULL
+    AND nullif(current_setting('north_star.principal_id', true), '')::uuid =
+          '00000000-0000-4000-8000-000000000001'::uuid
   );
 
 CREATE POLICY release_activation_reconciliation_alarms_insert_trusted_context
@@ -901,7 +976,8 @@ CREATE POLICY release_activation_reconciliation_alarms_insert_trusted_context
   WITH CHECK (
     tenant_id = nullif(current_setting('north_star.tenant_id', true), '')::uuid
     AND environment_id = nullif(current_setting('north_star.environment_id', true), '')::uuid
-    AND nullif(current_setting('north_star.principal_id', true), '')::uuid IS NOT NULL
+    AND nullif(current_setting('north_star.principal_id', true), '')::uuid =
+          '00000000-0000-4000-8000-000000000001'::uuid
   );
 
 CREATE POLICY release_activation_attempt_outcomes_insert_trusted_context
@@ -931,6 +1007,7 @@ REVOKE ALL ON platform.release_executor_authority_events FROM PUBLIC;
 REVOKE ALL ON platform.release_activation_control_events FROM PUBLIC;
 REVOKE ALL ON platform.release_activation_swap_receipts FROM PUBLIC;
 REVOKE ALL ON platform.release_activation_verification_receipts FROM PUBLIC;
+REVOKE ALL ON platform.release_activation_reconciliation_starts FROM PUBLIC;
 REVOKE ALL ON platform.release_activation_reconciliation_alarms FROM PUBLIC;
 REVOKE ALL ON FUNCTION platform.create_release_activation_authority_epoch_for_tenant() FROM PUBLIC;
 REVOKE ALL ON FUNCTION platform.validate_release_activation_swap_fact_set() FROM PUBLIC;
@@ -946,6 +1023,7 @@ GRANT SELECT ON platform.release_executor_authority_events TO north_star_runtime
 GRANT SELECT ON platform.release_activation_control_events TO north_star_runtime;
 GRANT SELECT, INSERT ON platform.release_activation_swap_receipts TO north_star_runtime;
 GRANT SELECT, INSERT ON platform.release_activation_verification_receipts TO north_star_runtime;
+GRANT SELECT, INSERT ON platform.release_activation_reconciliation_starts TO north_star_runtime;
 GRANT SELECT, INSERT ON platform.release_activation_reconciliation_alarms TO north_star_runtime;
 GRANT UPDATE ON platform.active_release_pointers TO north_star_runtime;
 GRANT INSERT ON platform.release_activation_attempt_outcomes TO north_star_runtime;

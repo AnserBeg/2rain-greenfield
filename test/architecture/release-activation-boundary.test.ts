@@ -347,6 +347,7 @@ test('raw pointer mutation is confined to the trusted kernel and migration privi
   assert.match(kernel, /clock_timestamp\(\)/);
   assert.match(kernel, /release_executor_authority_events/);
   assert.match(kernel, /release_activation_verification_receipts/);
+  assert.match(kernel, /release_activation_reconciliation_starts/);
   assert.match(kernel, /release_activation_reconciliation_alarms/);
   assert.doesNotMatch(
     kernel,
