@@ -193,9 +193,12 @@ export interface ProjectionManifestEnvelope {
 export interface ProjectionReference {
   artifactRoot: string;
   chunkingSchemeVersion: typeof CHUNKING_SCHEME_VERSION;
+  compatibility: ProjectionCompatibility;
   familyId: ProjectionFamilyId;
   instanceId: string;
   logicalScope: LogicalScope;
+  manifestVersion: typeof PROJECTION_MANIFEST_VERSION;
+  outputProtocolVersion: typeof OUTPUT_PROTOCOL_VERSION;
   payloadSchemaVersion: string;
   requiredRuntimeCapability: RuntimeCapabilityRequirement;
   semanticDigest: string;

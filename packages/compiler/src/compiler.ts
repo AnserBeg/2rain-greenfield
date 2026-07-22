@@ -280,6 +280,23 @@ export function compileApplication(
     semanticProfileDigest,
   };
   const releaseManifestBytes = canonicalBytes(releaseManifest);
+  if (
+    totalStagedBytes + releaseManifestBytes.byteLength >
+    input.limits.maximumOutputBytes
+  ) {
+    return failure(
+      [
+        compilerDiagnostic(
+          'COMPILER_OUTPUT_LIMIT_EXCEEDED',
+          'emit',
+          '$.artifacts',
+          packageRevision.package.packageId,
+        ),
+      ],
+      maximumDiagnostics,
+      stagedArtifacts,
+    );
+  }
   const releaseRoot = hashBytes(
     HASH_DOMAINS.releaseManifest,
     releaseManifestBytes,
@@ -293,24 +310,6 @@ export function compileApplication(
     mediaType: 'application/vnd.northstar.canonical+json',
   };
   const allArtifacts = sortArtifacts([...stagedArtifacts, releaseArtifact]);
-  const totalOutputBytes = allArtifacts.reduce(
-    (sum, artifact) => sum + artifact.canonicalBytes.byteLength,
-    0,
-  );
-  if (totalOutputBytes > input.limits.maximumOutputBytes) {
-    return failure(
-      [
-        compilerDiagnostic(
-          'COMPILER_OUTPUT_LIMIT_EXCEEDED',
-          'emit',
-          '$.artifacts',
-          packageRevision.package.packageId,
-        ),
-      ],
-      maximumDiagnostics,
-      allArtifacts,
-    );
-  }
   const nodeContracts = emitted
     .map((entry) => entry.nodeContract)
     .sort((left, right) => compare(left.stableNodeId, right.stableNodeId));
@@ -739,9 +738,10 @@ function validateExpectedActive(
     const projectionManifest = parseCanonicalJson<ProjectionManifestEnvelope>(
       expected.storageTargetProjectionManifestBytes,
     );
-    const storageReference = releaseManifest.projections.find(
+    const storageReferences = releaseManifest.projections.filter(
       (entry) => entry.familyId === PROJECTION_FAMILY_IDS.storageTarget,
     );
+    const storageReference = storageReferences[0];
     const chunk = projectionManifest.chunks[0];
     const valid =
       validHashes &&
@@ -752,21 +752,42 @@ function validateExpectedActive(
         expected.normalizedDefinitionDigest &&
       hashBytes(HASH_DOMAINS.releaseManifest, expected.releaseManifestBytes) ===
         expected.releaseRoot &&
+      storageReferences.length === 1 &&
       storageReference?.artifactRoot === expected.storageTargetArtifactRoot &&
-      storageReference.semanticDigest ===
-        expected.storageTargetSemanticDigest &&
+      equalObjects(storageReference, {
+        artifactRoot: expected.storageTargetArtifactRoot,
+        chunkingSchemeVersion: projectionManifest.chunkingSchemeVersion,
+        compatibility: projectionManifest.compatibility,
+        familyId: projectionManifest.familyId,
+        instanceId: projectionManifest.instanceId,
+        logicalScope: projectionManifest.logicalScope,
+        manifestVersion: projectionManifest.manifestVersion,
+        outputProtocolVersion: projectionManifest.outputProtocolVersion,
+        payloadSchemaVersion: projectionManifest.payloadSchemaVersion,
+        requiredRuntimeCapability: projectionManifest.requiredRuntimeCapability,
+        semanticDigest: expected.storageTargetSemanticDigest,
+      }) &&
       projectionManifest.kind === 'projectionManifest' &&
       projectionManifest.familyId === PROJECTION_FAMILY_IDS.storageTarget &&
+      projectionManifest.manifestVersion === PROJECTION_MANIFEST_VERSION &&
       projectionManifest.outputProtocolVersion === OUTPUT_PROTOCOL_VERSION &&
+      equalObjects(projectionManifest.compatibility, projectionCompatibility) &&
       projectionManifest.semanticDigest ===
         expected.storageTargetSemanticDigest &&
       projectionManifest.chunks.length === 1 &&
+      chunk?.chunkDescriptorVersion === CHUNK_DESCRIPTOR_VERSION &&
       chunk?.byteLength === expected.storageTargetCanonicalBytes.byteLength &&
+      equalObjects(chunk.logicalScope, projectionManifest.logicalScope) &&
+      chunk.mediaType === 'application/vnd.northstar.canonical+json' &&
       chunk.contentHash ===
         hashBytes(
           projectionChunkDomain(PROJECTION_FAMILY_IDS.storageTarget),
           expected.storageTargetCanonicalBytes,
         ) &&
+      releaseManifest.artifactClosure.includes(
+        expected.storageTargetArtifactRoot,
+      ) &&
+      releaseManifest.artifactClosure.includes(chunk.contentHash) &&
       hashBytes(
         projectionSemanticDomain(PROJECTION_FAMILY_IDS.storageTarget),
         expected.storageTargetCanonicalBytes,
@@ -887,9 +908,12 @@ function emitProjection(
     reference: {
       artifactRoot,
       chunkingSchemeVersion: CHUNKING_SCHEME_VERSION,
+      compatibility: projectionCompatibility,
       familyId: plan.familyId,
       instanceId: plan.instanceId,
       logicalScope: plan.logicalScope,
+      manifestVersion: PROJECTION_MANIFEST_VERSION,
+      outputProtocolVersion: OUTPUT_PROTOCOL_VERSION,
       payloadSchemaVersion: plan.payloadSchemaVersion,
       requiredRuntimeCapability: plan.requiredRuntimeCapability,
       semanticDigest,
@@ -1108,6 +1132,11 @@ function buildCapabilityFacts(
   packageRevision: NormalizedApplicationPackage,
 ): CapabilityFact[] {
   return packageRevision.capabilityRequirements
+    .filter(
+      (requirement) =>
+        requirement.lifecycle === 'active' &&
+        requirement.supportStatus === 'supported',
+    )
     .map((requirement) => ({
       capabilityId: requirement.capabilityId,
       capabilityVersion: requirement.capabilityVersion,

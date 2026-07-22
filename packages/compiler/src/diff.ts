@@ -26,6 +26,16 @@ interface SurfaceManifestPayload {
   surfaces: Array<{ fieldIds: string[] }>;
 }
 
+interface StorageTransitionPayload {
+  fromNormalizedDefinitionDigest: string;
+  fromReleaseRoot: string;
+  fromStorageTargetArtifactRoot: string;
+  fromStorageTargetSemanticDigest: string;
+  toNormalizedDefinitionDigest: string;
+  toStorageTargetArtifactRoot: string;
+  toStorageTargetSemanticDigest: string;
+}
+
 const impactByFamily: Record<ProjectionFamilyId, ReleaseImpactCode> = {
   [PROJECTION_FAMILY_IDS.agentDiscovery]: 'agent-discovery-changed',
   [PROJECTION_FAMILY_IDS.operationCatalog]: 'operation-contract-changed',
@@ -42,6 +52,7 @@ export function diffCompiledReleases(
   from: CompileSuccess,
   to: CompileSuccess,
 ): ReleaseDiffEnvelope {
+  const transitionPlanDigest = transitionDigestForPair(from, to);
   const fromSemantic = projectionPayload<SemanticModelPayload>(
     from,
     PROJECTION_FAMILY_IDS.semanticModel,
@@ -119,10 +130,6 @@ export function diffCompiledReleases(
   const impactCodes = [
     ...new Set(changes.flatMap((change) => change.impactCodes)),
   ].sort(compare);
-  const transitionPlanDigest =
-    to.bundle.releaseManifest.projections.find(
-      (entry) => entry.familyId === PROJECTION_FAMILY_IDS.storageTransition,
-    )?.semanticDigest ?? null;
   const core = {
     algorithmVersion: RELEASE_DIFF_ALGORITHM_VERSION,
     changes,
@@ -141,6 +148,51 @@ export function diffCompiledReleases(
     ...core,
     canonicalDiffDigest: hashCanonical(HASH_DOMAINS.diff, core).digest,
   };
+}
+
+function transitionDigestForPair(
+  from: CompileSuccess,
+  to: CompileSuccess,
+): string | null {
+  const fromStorage = projectionReference(
+    from,
+    PROJECTION_FAMILY_IDS.storageTarget,
+  );
+  const toStorage = projectionReference(
+    to,
+    PROJECTION_FAMILY_IDS.storageTarget,
+  );
+  const transitions = to.bundle.releaseManifest.projections.filter(
+    (entry) => entry.familyId === PROJECTION_FAMILY_IDS.storageTransition,
+  );
+  if (transitions.length > 1) {
+    throw new Error('release diff requires exactly one candidate transition');
+  }
+  const transition = transitions[0];
+  if (!transition) {
+    if (fromStorage.semanticDigest !== toStorage.semanticDigest) {
+      throw new Error('release diff storage change has no transition plan');
+    }
+    return null;
+  }
+  const payload = projectionPayload<StorageTransitionPayload>(
+    to,
+    PROJECTION_FAMILY_IDS.storageTransition,
+  );
+  const exactPair =
+    payload.fromNormalizedDefinitionDigest ===
+      from.bundle.releaseManifest.normalizedDefinitionDigest &&
+    payload.fromReleaseRoot === from.releaseRoot &&
+    payload.fromStorageTargetArtifactRoot === fromStorage.artifactRoot &&
+    payload.fromStorageTargetSemanticDigest === fromStorage.semanticDigest &&
+    payload.toNormalizedDefinitionDigest ===
+      to.bundle.releaseManifest.normalizedDefinitionDigest &&
+    payload.toStorageTargetArtifactRoot === toStorage.artifactRoot &&
+    payload.toStorageTargetSemanticDigest === toStorage.semanticDigest;
+  if (!exactPair) {
+    throw new Error('release diff transition does not bind supplied pair');
+  }
+  return transition.semanticDigest;
 }
 
 function surfaceFieldIds(compiled: CompileSuccess): Set<string> {
@@ -208,6 +260,17 @@ function projectionPayload<T>(
   );
   if (!chunk) throw new Error(`missing chunk ${familyId}`);
   return JSON.parse(new TextDecoder().decode(chunk.canonicalBytes)) as T;
+}
+
+function projectionReference(
+  compiled: CompileSuccess,
+  familyId: ProjectionFamilyId,
+) {
+  const reference = compiled.bundle.releaseManifest.projections.find(
+    (entry) => entry.familyId === familyId,
+  );
+  if (!reference) throw new Error(`missing projection ${familyId}`);
+  return reference;
 }
 
 function compare(left: string, right: string): number {

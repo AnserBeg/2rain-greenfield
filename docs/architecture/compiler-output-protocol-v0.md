@@ -59,7 +59,8 @@ never enters frozen fields.
 
 Any error returns `releaseRoot:null`, `bundle:null`, and `attestation:null`.
 Already-emitted chunks may be reported as unreferenced staged artifacts for
-collection, but no publishable root exists. Success is atomic.
+collection, but a release-manifest artifact is never staged or returned on a
+failing path. No publishable root exists. Success is atomic.
 
 ## Merkle release protocol
 
@@ -114,7 +115,9 @@ precompute all release pairs.
 
 The expected-active input includes canonical release-manifest, storage
 projection-manifest, and storage payload bytes. Every domain hash and every
-release-to-projection-to-chunk link is verified before lowering a transition.
+release-to-projection-to-chunk link is verified before lowering a transition,
+including duplicated version, compatibility, scope, capability, semantic, and
+artifact facts.
 
 ## Completeness, capability, and policy facts
 
@@ -166,6 +169,10 @@ digest, and a domain-separated canonical diff digest. `authorization-surface-
 added` means a newly added field is actually present on a compiled surface;
 it does not claim effective permission expansion. Risk tier, prose, renderer,
 and presentation are outside Freeze B.
+
+Diff construction fails closed when a storage change has no transition plan,
+or when the candidate transition does not bind the supplied from/to normalized
+digests, release base, and storage semantic/artifact roots.
 
 G1-P4 must bind a human approval to tenant/environment context, expected
 active base, target root, canonical diff digest, transition digest, compiler

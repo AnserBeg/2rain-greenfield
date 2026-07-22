@@ -9,6 +9,8 @@ import {
   diffCompiledReleases,
   expectedActiveReleaseFrom,
 } from '../../packages/compiler/src/index.js';
+import { hashBytes } from '../../packages/compiler/src/hash.js';
+import { HASH_DOMAINS } from '../../packages/compiler/src/protocol.js';
 import {
   artifactSummary,
   authoredFixture,
@@ -49,6 +51,12 @@ test('bootstrap emits one complete hierarchical release with no tenant identity'
     assert.match(projection.semanticDigest, /^[0-9a-f]{64}$/);
     assert.ok(projection.familyId.startsWith('northstar.compiler:'));
     assert.equal(projection.chunkingSchemeVersion.includes('single'), true);
+    assert.equal(projection.manifestVersion.includes('experimental'), true);
+    assert.equal(
+      projection.outputProtocolVersion.includes('experimental'),
+      true,
+    );
+    assert.equal(projection.compatibility.unknownRequiredFamily, 'reject');
   }
 });
 
@@ -168,6 +176,31 @@ test('transition bases are verified through the release and projection hierarchy
   );
 });
 
+test('transition bases reject contradictory release and projection descriptors', () => {
+  const first = mustCompile(compilerInput(fixtureBytes('vertical-v1')));
+  const expected = expectedActiveReleaseFrom(first);
+  const releaseManifest = JSON.parse(
+    new TextDecoder().decode(expected.releaseManifestBytes),
+  ) as typeof first.bundle.releaseManifest;
+  const storage = releaseManifest.projections.find(
+    (entry) => entry.familyId === PROJECTION_FAMILY_IDS.storageTarget,
+  );
+  assert.ok(storage);
+  storage.payloadSchemaVersion = 'northstar.mismatched-payload/v999';
+  expected.releaseManifestBytes = new TextEncoder().encode(
+    canonicalize(releaseManifest),
+  );
+  expected.releaseRoot = hashBytes(
+    HASH_DOMAINS.releaseManifest,
+    expected.releaseManifestBytes,
+  );
+  const result = compileApplication(
+    compilerInput(fixtureBytes('vertical-v2'), expected),
+  );
+  assert.equal(result.status, 'failed');
+  assert.equal(result.diagnostics[0]?.code, 'COMPILER_TRANSITION_BASE_INVALID');
+});
+
 test('the provisional transition lowerer rejects changes to existing storage fields', () => {
   const first = mustCompile(compilerInput(fixtureBytes('vertical-v1')));
   const authored = authoredFixture('vertical-v2');
@@ -203,6 +236,37 @@ test('identical releases have identical roots and an empty factual diff', () => 
   assert.equal(diff.fromManifestRoot, diff.toManifestRoot);
 });
 
+test('release diff fails closed on a missing or mismatched transition pair', () => {
+  const bootstrap = mustCompile(compilerInput(fixtureBytes('bootstrap')));
+  const first = mustCompile(compilerInput(fixtureBytes('vertical-v1')));
+  const preparedSecond = mustCompile(
+    compilerInput(
+      fixtureBytes('vertical-v2'),
+      expectedActiveReleaseFrom(first),
+    ),
+  );
+  const unpreparedSecond = mustCompile(
+    compilerInput(fixtureBytes('vertical-v2')),
+  );
+  assert.throws(
+    () => diffCompiledReleases(bootstrap, preparedSecond),
+    /transition does not bind supplied pair/,
+  );
+  assert.throws(
+    () => diffCompiledReleases(first, unpreparedSecond),
+    /storage change has no transition plan/,
+  );
+});
+
+test('retired unsupported capabilities are never advertised as supported facts', () => {
+  const authored = authoredFixture('vertical-v1');
+  const capability = authored.capabilityRequirements[0]!;
+  capability.lifecycle = 'retired';
+  capability.supportStatus = 'unsupported';
+  const result = mustCompile(compilerInput(normalizedBytes(authored)));
+  assert.deepEqual(result.bundle.releaseManifest.capabilityFacts, []);
+});
+
 test('partial lowering fails atomically after staging with no release root', () => {
   const result = compileApplication(
     compilerInput(fixtureBytes('partial-lowering')),
@@ -210,6 +274,12 @@ test('partial lowering fails atomically after staging with no release root', () 
   assert.equal(result.status, 'failed');
   assert.equal(result.releaseRoot, null);
   assert.equal(result.bundle, null);
+  assert.equal(
+    result.stagedArtifacts.some(
+      (artifact) => artifact.artifactKind === 'releaseManifest',
+    ),
+    false,
+  );
   assert.equal(result.attestation, null);
   assert.ok(result.stagedArtifacts.length > 0);
   assert.deepEqual(
@@ -245,6 +315,12 @@ test('the output limit covers the final release manifest as well as staged leave
   assert.equal(result.status, 'failed');
   assert.equal(result.releaseRoot, null);
   assert.equal(result.bundle, null);
+  assert.equal(
+    result.stagedArtifacts.some(
+      (artifact) => artifact.artifactKind === 'releaseManifest',
+    ),
+    false,
+  );
   assert.deepEqual(
     result.diagnostics.map(({ code, phase }) => ({ code, phase })),
     [{ code: 'COMPILER_OUTPUT_LIMIT_EXCEEDED', phase: 'emit' }],
