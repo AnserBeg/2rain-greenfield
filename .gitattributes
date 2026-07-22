@@ -1,0 +1,5 @@
+* text=auto eol=lf
+
+# Golden canonical-byte and hash vectors are byte-for-byte fixtures.
+*.golden.bytes -text
+*.golden.sha256 -text
