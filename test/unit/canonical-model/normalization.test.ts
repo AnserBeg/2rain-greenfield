@@ -90,10 +90,20 @@ test('explicit sibling order and equivalent UTC datetime spellings normalize can
     ],
   );
 
-  const withDateTime = (value: string) => {
+  const withDateTime = (
+    value: string,
+    timezoneSemantics: 'utcInstant' | 'offsetDateTime' = 'utcInstant',
+  ) => {
     const candidate = parseAuthoredApplicationPackageJson(
       readFileSync(fixturePath),
     );
+    const dateTimeField = candidate.fields.find(
+      (field) => field.fieldId === 'northstar.inventory:field.item_counted_at',
+    )!;
+    assert.equal(dateTimeField.fieldType.kind, 'dateTimeFieldType');
+    if (dateTimeField.fieldType.kind === 'dateTimeFieldType') {
+      dateTimeField.fieldType.timezoneSemantics = timezoneSemantics;
+    }
     candidate.queries[0]!.filter = {
       field: {
         kind: 'fieldReference',
@@ -117,6 +127,17 @@ test('explicit sibling order and equivalent UTC datetime spellings normalize can
   assert.equal(
     (zulu.queries[0]!.filter as { value: { value: string } }).value.value,
     '2026-07-21T12:00:00.000Z',
+  );
+
+  const offsetZulu = withDateTime('2026-07-21T12:00:00Z', 'offsetDateTime');
+  const explicitOffset = withDateTime(
+    '2026-07-21T12:00:00+00:00',
+    'offsetDateTime',
+  );
+  assert.equal(canonicalize(offsetZulu), canonicalize(explicitOffset));
+  assert.equal(
+    (offsetZulu.queries[0]!.filter as { value: { value: string } }).value.value,
+    '2026-07-21T12:00:00.000+00:00',
   );
 });
 

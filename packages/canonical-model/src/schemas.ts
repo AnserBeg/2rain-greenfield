@@ -744,6 +744,7 @@ function isValidIsoDateTime(value: string): boolean {
     return false;
   }
   if (match[3] === 'Z') return true;
+  if (match[3] === '-00:00') return false;
   const offsetHour = Number(match[4]);
   const offsetMinute = Number(match[5]);
   return (

@@ -403,6 +403,14 @@ test('date, time, decimal, money, and quantity shapes reject ambiguous values', 
   );
   assert.equal(
     CanonicalScalarSchema.safeParse({
+      kind: 'dateTimeValue',
+      schemaVersion: 'v0-experimental',
+      value: '2026-07-21T12:00:00-00:00',
+    }).success,
+    false,
+  );
+  assert.equal(
+    CanonicalScalarSchema.safeParse({
       kind: 'exactDecimalValue',
       schemaVersion: 'v0-experimental',
       value: 1.25,
