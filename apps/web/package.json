@@ -1,5 +1,10 @@
 {
   "name": "@north-star/web",
   "private": true,
-  "version": "0.0.0"
+  "version": "0.0.0",
+  "type": "module",
+  "dependencies": {
+    "@north-star/observability": "workspace:*",
+    "@north-star/postgres-provider": "workspace:*"
+  }
 }
