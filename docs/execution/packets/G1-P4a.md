@@ -1,8 +1,8 @@
 # G1-P4a — release activation contracts and approval substrate
 
-Status: active
+Status: evidence_ready
 Tier: Critical
-Frozen candidate: pending
+Frozen candidate: `c3769eba9ee21b3e2121a59c660e8d648037c73f`
 
 ## Goal and scope
 
@@ -212,12 +212,66 @@ identical unchanged SHA. At most two `REVISE` rounds are permitted.
 
 ## Gate evidence
 
-Pending.
+Frozen candidate: `c3769eba9ee21b3e2121a59c660e8d648037c73f`
+against accepted base `b25043719e2bcced064b416541439cb8802e9126`.
+
+| Gate | Result |
+|---|---|
+| Frozen install | PASS — all 13 workspace projects already up to date |
+| Typecheck | PASS |
+| Lint | PASS |
+| Format | PASS |
+| Build | PASS |
+| Dependency boundaries | PASS — 51 files scanned |
+| Migration/schema drift | PASS — 4 applied, 4 verified; drift clean |
+| Unit | PASS — 18/18 |
+| Compiler | PASS — 21/21 |
+| Integration | PASS — 4/4 |
+| Architecture | PASS — 22/22 |
+| PostgreSQL | PASS — 25/25, including focused P4a 9/9 |
+| Browser | PASS — one intentional scaffold skip |
+| Diff/lease/worktree | PASS — `git diff --check`; 14 authorized paths; clean tree |
+
+During writer development, one pre-candidate PostgreSQL run was 24/25 because
+the unrelated health fixture's Docker cleanup returned `docker rm failed`.
+Its immediate serial rerun passed 25/25, and the independent final-candidate
+run above passed 25/25. No frozen-candidate gate was red.
 
 ## Review evidence
 
-Pending.
+- Fresh naive Codex `gpt-5.6-sol` xhigh: **PASS**, no in-scope material
+  findings and no future-work notes. It inspected the full 14-file diff and
+  ran the focused activation architecture test read-only.
+- Fable max (`claude -p --model fable --effort max`) on the identical unchanged
+  candidate: **PASS**, no in-scope material findings.
+- Worktree and `HEAD` remained clean and equal to the frozen candidate through
+  both reviews.
+
+Fable recorded these valid but out-of-scope future-work notes; per the review
+charter they were not chased in P4a:
+
+| Future work | Route |
+|---|---|
+| Canonicalize UUID identity casing at the trusted boundary before integrating a real IdP adapter, so maker-checker equality and authority advisory-lock keys cannot diverge by case. | Future identity-provider integration; outside P4a owned paths and threat model. |
+| Pin the production migration-role/BYPASSRLS contract before migration execution is designed; FORCE RLS trigger/definer behavior is currently proven with the privileged pinned PostgreSQL test role. | Future migration-execution/deployment packet; migration execution is explicitly outside P4a. |
 
 ## Test it yourself
 
-Pending frozen-candidate commands.
+No UI exists in this packet. These commands complete in under ten minutes:
+
+```bash
+cd /home/rvham/2rain-greenfield-wt/g1-p4a
+test "$(git rev-parse HEAD)" = c3769eba9ee21b3e2121a59c660e8d648037c73f
+corepack pnpm check:schema
+node --import tsx --test test/postgres/release-approval.test.ts
+node --import tsx --test test/architecture/release-activation-boundary.test.ts
+```
+
+Expected: 4 migrations apply and verify with clean schema drift; focused
+PostgreSQL reports 9/9, including real grant/revocation, canonical approval,
+append-only/decisive-outcome constraints, withheld production pointer UPDATE,
+temporary-grant RLS, and exact fence-trigger proof; architecture reports 4/4
+and confirms there is no callable activation/CAS/reconciler path.
+
+Next selectable packet after user acceptance: G1-P4b, the activation kernel
+and crash reconciler. It has not been started.
