@@ -1,6 +1,6 @@
 # G1-P4b — human-approved activation kernel and crash reconciler
 
-Status: evidence_ready
+Status: accepted
 Tier: Critical
 Base: `dbf871dd68bbb5b4ec2abb9e2b2b7a4d407eda87`
 Frozen candidate: `1bb946f9a5668512a6d4cab6876dd66ec0d3753d`
@@ -411,16 +411,16 @@ they were recorded and not chased:
 | Audit event-time semantics before future consumers use phase, history, swap-receipt, or outbox `recorded_at` values. | Those timestamps still default to transaction-start time but are not consumed by P4b overdue/expiry logic. Record for the packet that first treats them as event time. |
 | Make statement-time defaults structural if another writer is introduced for outcome or verification rows. | Current correctness is explicit at the sole P4b insert sites; a future migration may change the table defaults, but migrations were out of scope here. |
 
-G1-P4b is `evidence_ready`. The ledger and doctrine coverage identify the
-reviewed SHA and executable activation/reconciliation evidence. It is not
-integrated; G1-P5 has not been started.
+G1-P4b reached `evidence_ready` with the ledger and doctrine coverage naming
+the reviewed SHA and executable activation/reconciliation evidence. G1-P5 was
+not started.
 
 ## Test it yourself
 
 No UI exists in this packet. These commands complete in under ten minutes:
 
 ```bash
-cd /home/rvham/2rain-greenfield-wt/g1-p4b
+cd /home/rvham/2rain-greenfield
 git merge-base --is-ancestor 1bb946f9a5668512a6d4cab6876dd66ec0d3753d HEAD
 corepack pnpm check:schema
 node --import tsx --test test/postgres/release-activation.test.ts
@@ -430,3 +430,10 @@ Expected: 5 migrations apply and verify with clean drift; the focused P4b
 suite reports 14/14 scenarios and 15/15 TAP tests, including durable-age
 handoff, post-commit/no-alarm derivation, and a recovery transaction proven to
 block across its deadline before being classified `OVERDUE_COMPLETED`.
+
+The user independently reran schema verification and the focused activation
+suite, confirmed all 14 scenarios and 15 TAP tests including the
+transaction-crossing-deadline case, and verified statement-time use throughout
+the deadline path. G1-P4b was accepted on 2026-07-22 through non-squash merge
+`732b6e2e89c64efbae746c3f381bafd346836a6a`, with reviewed SHA
+`1bb946f9a5668512a6d4cab6876dd66ec0d3753d` preserved as an ancestor.
