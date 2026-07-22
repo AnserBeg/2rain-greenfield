@@ -60,8 +60,10 @@ place; a new immutable revision is produced.
 4. Schema keys are camelCase, one term names one concept, and every language
    node has a closed `kind` plus `schemaVersion` discriminator.
 5. Rejections expose stable codes and structured `{objectId, path, rule,
-   acceptedAlternative}`. Ordering uses code-unit comparison, never locale;
-   tests assert fields and codes, not prose.
+   acceptedAlternative, phase, occurrenceIndex}`. Frozen ordering uses only
+   the structural tuple `(objectId, path, phase, code, occurrenceIndex)` with
+   code-unit comparison, never locale or the `rule`/`acceptedAlternative`
+   prose; tests assert structural fields and codes, not prose.
 6. `js-tiktoken@1.0.21/cl100k_base` reports representative authored and
    normalized counts as regression telemetry only. Token count never changes
    language correctness or naming.
@@ -79,6 +81,16 @@ place; a new immutable revision is produced.
 11. Every v0 property is consumed by G1/G2, is traceable to plan §5.1/§5.8 or
     inherited reviewed design, or is the explicit unsupported composition
     seam. No speculative family breadth is admitted.
+
+### Experimental correction note — structural diagnostic order
+
+On 2026-07-21, before Freeze B fixtures were introduced, v0-experimental was
+corrected so diagnostic order cannot drift when explanatory prose changes.
+`objectId` is the canonical diagnostic subject, `phase` identifies the stable
+pipeline phase (precompiler canonical-model diagnostics use
+`canonicalModel`), and `occurrenceIndex` disambiguates repeated structural
+coordinates. This is a bridge/reopen correction inside the explicitly
+experimental Freeze A contract, not production-v1 ratification.
 
 ## Determinism profile
 

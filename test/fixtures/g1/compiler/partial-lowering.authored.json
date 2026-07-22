@@ -1,0 +1,35 @@
+{
+  "kind": "applicationPackageRevision",
+  "schemaVersion": "v0-experimental",
+  "languageVersion": "v0-experimental",
+  "package": {
+    "kind": "packageDefinition",
+    "schemaVersion": "v0-experimental",
+    "packageId": "northstar.partial:package.fixture",
+    "namespace": "northstar.partial",
+    "version": "0.1.0",
+    "provenance": "firstParty"
+  },
+  "modules": [],
+  "entities": [],
+  "fields": [],
+  "relations": [],
+  "stateMachines": [],
+  "surfaces": [],
+  "queries": [],
+  "operations": [],
+  "permissions": [],
+  "assertions": [],
+  "storageMappings": [],
+  "capabilityRequirements": [
+    {
+      "kind": "capabilityRequirement",
+      "schemaVersion": "v0-experimental",
+      "capabilityId": "northstar.partial:capability.reporting",
+      "capabilityVersion": 1,
+      "supportStatus": "supported",
+      "declaredEffects": ["read"],
+      "requiredProjections": ["reporting"]
+    }
+  ]
+}

@@ -35,3 +35,38 @@ How to apply: safety-critical transactions verify both role identity and fail-cl
 Date: 2026-07-21
 Why: G1-P1 review found structurally valid state, relation, scalar, order, and diagnostic nodes whose authority or canonical meaning was still ambiguous.
 How to apply: freeze tests must cover derived authority, ownership topology, equivalent scalar spellings, owner-scoped order, and property-order-independent diagnostics. See `docs/execution/packets/G1-P1.md`.
+
+## Keep diagnostic order independent of prose
+Date: 2026-07-21
+Why: The v0 comparator used `rule` and `acceptedAlternative` text as tie-breakers, so copy edits could change canonical diagnostic order.
+How to apply: Sort frozen diagnostics only by stable subject, canonical path, phase, code, and explicit occurrence index; keep explanatory prose outside identity and ordering.
+
+## Verify every Merkle link, not only each digest
+Date: 2026-07-21
+Why: G1-P2's first expected-active check verified the supplied storage bytes and manifest hash independently but did not prove the release referenced that manifest or the manifest referenced those bytes.
+How to apply: walk and verify every root-to-manifest-to-chunk link, canonical byte encoding, domain hash, semantic digest, and byte length before trusted reuse or transition planning.
+
+## Bind derived evidence to its exact source pair
+Date: 2026-07-21
+Why: G1-P2 review showed a valid transition for one release pair could be included in a diff constructed for a different base, yielding internally inconsistent approval evidence.
+How to apply: before hashing or presenting a diff, verify its transition payload binds the supplied from/to definition digests, release base, and storage semantic/artifact roots; fail closed on a missing or mismatched plan.
+
+## Keep registerable roots off every failure path
+Date: 2026-07-21
+Why: G1-P2 computed and returned a staged release-manifest artifact when the final output-size check failed even though the result-level root was null.
+How to apply: allow collectable unreferenced leaves on failure, but perform final limits and completeness checks before hashing or returning any registerable root manifest.
+
+## Lower selected and compiler-derived storage authority explicitly
+Date: 2026-07-21
+Why: G1-P2 could pair a selected mapping ID with another mapping's class and omitted compiler-derived state fields from a supposedly complete storage target.
+How to apply: resolve selected definitions by canonical ID, carry compiler-derived storage constructs explicitly, and compare both against the normalized source in completeness checks.
+
+## Apply lifecycle admission consistently
+Date: 2026-07-21
+Why: G1-P2 filtered retired unsupported capabilities from manifest facts but still required their runtime projections.
+How to apply: define the admitted active/supported set once conceptually and use it for facts, completeness, and support gates; historical definitions must not create live obligations.
+
+## Sort synthetic diagnostics with source diagnostics
+Date: 2026-07-21
+Why: G1-P2 appended its truncation marker after sorting, violating the frozen structural order even though the output stayed deterministic.
+How to apply: after adding limit, summary, or cascade markers, sort the final emitted diagnostic set by the same versioned structural comparator.
