@@ -15,12 +15,31 @@ export const ACTIVATION_HISTORY_VERSION =
   'northstar.release-activation-history/v1' as const;
 export const ACTIVATION_OUTBOX_ENVELOPE_VERSION =
   'northstar.release-activation-outbox/v1' as const;
+export const ACTIVATION_SWAP_RECEIPT_VERSION =
+  'northstar.release-activation-swap-receipt/v1' as const;
+export const ACTIVATION_VERIFICATION_RECEIPT_VERSION =
+  'northstar.release-activation-verification/v1' as const;
+export const ACTIVATION_RECONCILIATION_START_VERSION =
+  'northstar.release-activation-reconciliation-start/v1' as const;
+export const ACTIVATION_RECONCILIATION_ALARM_VERSION =
+  'northstar.release-activation-reconciliation-alarm/v1' as const;
+export const ACTIVATION_INVALIDATION_EVENT_VERSION =
+  'northstar.release-activation-invalidation/v1' as const;
+export const ACTIVATION_INVALIDATION_EVENT_CODE =
+  'ACTIVE_RELEASE_POINTER_CHANGED' as const;
+export const RELEASE_EXECUTOR_AUTHORITY_POLICY_VERSION =
+  'northstar.release-executor-authority/v1' as const;
+export const RELEASE_ACTIVATION_CONTROL_POLICY_VERSION =
+  'northstar.release-activation-control/v1' as const;
 export const APPROVER_AUTHORITY_POLICY_VERSION =
   'northstar.release-approver-authority/v1' as const;
 export const APPROVAL_EXPIRY_POLICY_VERSION =
   'northstar.release-approval-expiry/v1' as const;
 export const APPROVAL_DEFAULT_EXPIRY_MILLISECONDS = 24 * 60 * 60 * 1000;
 export const APPROVAL_MAX_EXPIRY_MILLISECONDS = 7 * 24 * 60 * 60 * 1000;
+/** Greater than the bounded two-second backward wall-clock step. */
+export const APPROVAL_EXPIRY_SKEW_MARGIN_MILLISECONDS = 3_000;
+export const RECONCILIATION_MAX_AGE_MILLISECONDS = 5 * 60 * 1000;
 export const INITIAL_ACTIVATION_BINDING_VERSION =
   'northstar.initial-activation-binding/v1' as const;
 export const RELEASE_DIFF_BINDING_VERSION =
@@ -289,6 +308,7 @@ export type ActivationTransitionCondition =
   | 'EXPIRED_APPROVAL'
   | 'INFRASTRUCTURE_ERROR'
   | 'INVALID_BINDING'
+  | 'LOST_RACE'
   | 'OBSOLETE_POLICY'
   | 'PRE_CAS_POLICY_DENY'
   | 'ROLLOUT_PAUSE'
@@ -351,6 +371,12 @@ export const ACTIVATION_TRANSITION_CLASSIFICATIONS = Object.freeze({
     terminal: true,
     workflowStatus: 'FAILED',
   },
+  LOST_RACE: {
+    approvalDisposition: 'CONSUMED',
+    resumable: false,
+    terminal: true,
+    workflowStatus: 'FAILED',
+  },
   OBSOLETE_POLICY: {
     approvalDisposition: 'CONSUMED',
     resumable: false,
@@ -394,6 +420,7 @@ export const DECISIVE_ACTIVATION_OUTCOME_CODES = Object.freeze([
   'STALE_POINTER',
   'EXPIRED_APPROVAL',
   'INVALID_BINDING',
+  'LOST_RACE',
   'OBSOLETE_POLICY',
   'DEFINITIVE_BLOCKING_FAILURE',
   'CANCELLATION',
@@ -425,6 +452,7 @@ export const DECISIVE_ACTIVATION_OUTCOME_DIMENSIONS = Object.freeze({
   STALE_POINTER: TERMINAL_FAILED_NO_SWAP_OUTCOME,
   EXPIRED_APPROVAL: TERMINAL_FAILED_NO_SWAP_OUTCOME,
   INVALID_BINDING: TERMINAL_FAILED_NO_SWAP_OUTCOME,
+  LOST_RACE: TERMINAL_FAILED_NO_SWAP_OUTCOME,
   OBSOLETE_POLICY: TERMINAL_FAILED_NO_SWAP_OUTCOME,
   DEFINITIVE_BLOCKING_FAILURE: TERMINAL_FAILED_NO_SWAP_OUTCOME,
   CANCELLATION: Object.freeze({
@@ -487,4 +515,206 @@ export interface ReleaseActivationOutboxEnvelope extends TenantEnvironmentIdenti
   readonly eventCode: string;
   readonly outboxId: MintedUuid;
   readonly payloadDigest: Uint8Array;
+}
+
+export interface ActivateReleaseCommand {
+  /** The only caller-selected activation identity; all authority is persisted. */
+  readonly activationAttemptId: MintedUuid;
+}
+
+export interface CancelReleaseActivationCommand {
+  readonly activationAttemptId: MintedUuid;
+}
+
+export type ActivationKernelStatus =
+  | 'EXECUTOR_UNAVAILABLE'
+  | 'NO_SWAP_TERMINAL'
+  | 'PAUSED'
+  | 'RECONCILING'
+  | 'SUPERSEDED'
+  | 'SWAPPED_VERIFICATION_FAILED'
+  | 'SWAPPED_VERIFIED'
+  | 'SWAPPED_VERIFY_PENDING';
+
+export interface ActivationKernelResult extends TenantEnvironmentIdentity {
+  readonly activationAttemptId: MintedUuid;
+  readonly alarmDue: boolean;
+  readonly decisiveOutcomeCode: DecisiveActivationOutcomeCode | null;
+  readonly fence: number | null;
+  readonly pointerId: MintedUuid | null;
+  readonly releaseId: MintedUuid | null;
+  readonly retryable: boolean;
+  readonly status: ActivationKernelStatus;
+  readonly terminal: boolean;
+}
+
+export interface ReleaseActivationSwapReceipt extends TenantEnvironmentIdentity {
+  readonly activatedReleaseId: MintedUuid;
+  readonly activationAttemptId: MintedUuid;
+  readonly approvalId: MintedUuid;
+  readonly fence: number;
+  readonly historyId: MintedUuid;
+  readonly outboxId: MintedUuid;
+  readonly pointerId: MintedUuid;
+  readonly previousReleaseId: MintedUuid | null;
+  readonly recordedAt: string;
+  readonly swapReceiptId: MintedUuid;
+  readonly swapReceiptVersion: typeof ACTIVATION_SWAP_RECEIPT_VERSION;
+}
+
+export type ActivationVerificationStatus =
+  'SUPERSEDED' | 'SWAPPED_VERIFICATION_FAILED' | 'SWAPPED_VERIFIED';
+
+/** G1 declares no post-swap check nonblocking, so no warning verdict exists. */
+export const NONBLOCKING_POST_SWAP_VERIFICATION_CHECKS = Object.freeze(
+  [] as const,
+);
+
+export interface ReleaseActivationVerificationReceipt extends TenantEnvironmentIdentity {
+  readonly activatedReleaseId: MintedUuid;
+  readonly activationAttemptId: MintedUuid;
+  readonly artifactAvailabilityPassed: boolean;
+  readonly fence: number;
+  readonly pointerId: MintedUuid;
+  readonly pointerReadBackPassed: boolean;
+  readonly releaseKernelInvariantsPassed: boolean;
+  readonly status: ActivationVerificationStatus;
+  readonly verificationReceiptId: MintedUuid;
+  readonly verificationVersion: typeof ACTIVATION_VERIFICATION_RECEIPT_VERSION;
+}
+
+export interface ReleaseActivationReconciliationAlarm extends TenantEnvironmentIdentity {
+  readonly activationAttemptId: MintedUuid;
+  readonly alarmId: MintedUuid;
+  readonly alarmVersion: typeof ACTIVATION_RECONCILIATION_ALARM_VERSION;
+  readonly maxAgeMilliseconds: number;
+  readonly reasonCode: 'RECONCILIATION_OVERDUE';
+}
+
+export interface ReleaseActivationReconciliationStart extends TenantEnvironmentIdentity {
+  readonly activationAttemptId: MintedUuid;
+  readonly maxAgeMilliseconds: number;
+  readonly startReceiptId: MintedUuid;
+  readonly startReceiptVersion: typeof ACTIVATION_RECONCILIATION_START_VERSION;
+  readonly startedAt: string;
+}
+
+export type ReleaseActivationReconciliationState =
+  | 'COMPLETED_WITHIN_MAX_AGE'
+  | 'NOT_STARTED'
+  | 'OVERDUE_COMPLETED'
+  | 'OVERDUE_UNRESOLVED'
+  | 'PENDING';
+
+/**
+ * A read-only projection derived from the durable start, threshold, and
+ * completion facts. Alarm presence is observability metadata, not authority
+ * for whether the attempt is overdue.
+ */
+export interface ReleaseActivationReconciliationInspection extends TenantEnvironmentIdentity {
+  readonly activationAttemptId: MintedUuid;
+  readonly alarmRecorded: boolean;
+  readonly completionAt: string | null;
+  readonly deadlineAt: string | null;
+  readonly maxAgeMilliseconds: number | null;
+  readonly observedAt: string;
+  readonly overdue: boolean;
+  readonly startedAt: string | null;
+  readonly state: ReleaseActivationReconciliationState;
+}
+
+/**
+ * Frozen producer envelope for the G1-P5 activation-invalidation dispatcher.
+ * PostgreSQL commits one row; the dispatcher delivers it at least once and
+ * consumers must deduplicate. This event never selects or pins a release.
+ */
+export interface ReleaseActivationInvalidationEvent extends TenantEnvironmentIdentity {
+  readonly activationAttemptId: MintedUuid;
+  readonly deduplicationKey: string;
+  readonly eventCode: typeof ACTIVATION_INVALIDATION_EVENT_CODE;
+  readonly fence: number;
+  readonly historyId: MintedUuid;
+  readonly newReleaseId: MintedUuid;
+  readonly oldReleaseId: MintedUuid | null;
+  readonly outboxId: MintedUuid;
+  readonly pointerId: MintedUuid;
+  readonly schemaVersion: typeof ACTIVATION_INVALIDATION_EVENT_VERSION;
+}
+
+export type InvalidationConsumerDecision =
+  | 'ACCEPTED_CONTIGUOUS'
+  | 'ACCEPTED_GAP_REREAD_REQUIRED'
+  | 'REJECTED_STALE_OR_DUPLICATE';
+
+export interface InvalidationConsumerResult {
+  readonly decision: InvalidationConsumerDecision;
+  readonly highestFence: number;
+  readonly requestPointerReread: boolean;
+}
+
+/**
+ * P5 consumer helper. It retains only the maximum fence per stable pointer,
+ * rejects duplicate/reordered delivery, and asks for an authoritative pointer
+ * reread on a gap or whenever the caller reports doubt.
+ */
+export class ReleaseInvalidationFenceState {
+  readonly #highestFenceByPointer = new Map<string, number>();
+
+  consume(
+    event: ReleaseActivationInvalidationEvent,
+    options: Readonly<{ doubt?: boolean }> = {},
+  ): InvalidationConsumerResult {
+    assertInvalidationEvent(event);
+    const previous = this.#highestFenceByPointer.get(event.pointerId);
+    if (previous !== undefined && event.fence <= previous) {
+      return Object.freeze({
+        decision: 'REJECTED_STALE_OR_DUPLICATE',
+        highestFence: previous,
+        requestPointerReread: Boolean(options.doubt),
+      });
+    }
+
+    this.#highestFenceByPointer.set(event.pointerId, event.fence);
+    const gap =
+      previous === undefined ? event.fence !== 1 : event.fence !== previous + 1;
+    const doubt = Boolean(options.doubt);
+    return Object.freeze({
+      decision:
+        gap || doubt ? 'ACCEPTED_GAP_REREAD_REQUIRED' : 'ACCEPTED_CONTIGUOUS',
+      highestFence: event.fence,
+      requestPointerReread: gap || doubt,
+    });
+  }
+
+  highestFence(pointerId: MintedUuid): number | null {
+    return this.#highestFenceByPointer.get(pointerId) ?? null;
+  }
+}
+
+export interface FenceTaggedDerivedCacheEntry {
+  /** Read with the pointer in the same PostgreSQL snapshot as the artifacts. */
+  readonly filledAtFence: number;
+  readonly pointerId: MintedUuid;
+}
+
+/** Derived cache entries below the highest invalidated fence are discarded. */
+export function shouldDiscardFenceTaggedCache(
+  entry: FenceTaggedDerivedCacheEntry,
+  highestInvalidatedFence: number,
+): boolean {
+  return entry.filledAtFence < highestInvalidatedFence;
+}
+
+function assertInvalidationEvent(
+  event: ReleaseActivationInvalidationEvent,
+): void {
+  if (
+    event.schemaVersion !== ACTIVATION_INVALIDATION_EVENT_VERSION ||
+    event.eventCode !== ACTIVATION_INVALIDATION_EVENT_CODE ||
+    !Number.isSafeInteger(event.fence) ||
+    event.fence <= 0 ||
+    event.deduplicationKey.trim() === ''
+  ) {
+    throw new Error('invalid release activation invalidation event');
+  }
 }

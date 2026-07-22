@@ -95,3 +95,13 @@ How to apply: schemas and policies may land noncallable, but withhold runtime mu
 Date: 2026-07-22
 Why: A unique immutable outcome row cannot hold a timeout or infrastructure error without preventing the same attempt from later recording its actual swap or terminal no-swap result.
 How to apply: record retryable/paused/reconciling states as append-only phases or history; reserve the one decisive slot for committed effect or proven terminal no-effect. See `docs/execution/packets/G1-P4a.md`.
+
+## Persist reconciliation age across worker lifetimes
+Date: 2026-07-22
+Why: Process-local timers cannot prove a crash-safe overdue alarm after worker failure or handoff.
+How to apply: derive deadlines and completion from durable database facts recorded with PostgreSQL statement-time `clock_timestamp()`; an alarm row is an idempotent projection, never detection authority. See `docs/execution/packets/G1-P4b.md`.
+
+## Use statement time for deadline decisions
+Date: 2026-07-22
+Why: `transaction_timestamp()` and `now()` are transaction-start values that misclassify a transaction blocked across a deadline. This class recurred after the G1-P4 approval-expiry debate in the G1-P4b overdue derivation.
+How to apply: use `clock_timestamp()` for deadline, expiry, and overdue logic and every persisted timestamp it consumes; transaction-start time remains valid for audit-column defaults. Reviewers should check for this class. See `docs/execution/packets/G1-P4b.md`.

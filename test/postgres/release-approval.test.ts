@@ -619,7 +619,7 @@ test('G1-P4a PostgreSQL contracts and trusted approval service', async (t) => {
               history_insert: true,
               history_select: true,
               history_update: false,
-              outcome_insert: false,
+              outcome_insert: true,
               outcome_select: true,
               phase_receipt_delete: false,
               phase_receipt_insert: true,
@@ -628,7 +628,7 @@ test('G1-P4a PostgreSQL contracts and trusted approval service', async (t) => {
               pointer_delete: false,
               pointer_insert: false,
               pointer_select: true,
-              pointer_update: false,
+              pointer_update: true,
               preparation_insert: true,
             });
 
@@ -639,12 +639,12 @@ test('G1-P4a PostgreSQL contracts and trusted approval service', async (t) => {
                 async (client) =>
                   client.query(
                     `UPDATE platform.active_release_pointers
-                        SET release_id = $1, fence = fence + 1
-                      WHERE pointer_id = $2`,
-                    [releaseOne, pointer.pointerId],
+                        SET release_id = release_id, fence = fence
+                      WHERE pointer_id = $1`,
+                    [pointer.pointerId],
                   ),
               ),
-              /permission denied for table active_release_pointers/,
+              /updates require one exact release swap and fence \+ 1/,
             );
 
             const policies = await pool.query<{
@@ -913,19 +913,35 @@ test('G1-P4a PostgreSQL contracts and trusted approval service', async (t) => {
               ]),
               /release_activation_attempt_outcomes_codes/,
             );
+            await assert.rejects(
+              pool.query(insertDecisiveOutcome, [
+                tenantA,
+                environmentA,
+                secondAttemptId,
+                'a8700000-0000-4000-8000-000000000006',
+                'SWAPPED',
+                'SWAPPED',
+                'NOT_RUN',
+                'CONSUMED',
+                'RUNNING',
+                false,
+                digest('partial-swapped-outcome'),
+              ]),
+              /swap requires one matching receipt, history, outcome, and outbox fact set/,
+            );
 
             await pool.query(insertDecisiveOutcome, [
               tenantA,
               environmentA,
               secondAttemptId,
               'a8700000-0000-4000-8000-000000000005',
-              'SWAPPED',
-              'SWAPPED',
+              'LOST_RACE',
+              'NOT_SWAPPED',
               'NOT_RUN',
               'CONSUMED',
-              'RUNNING',
-              false,
-              digest('swapped-decisive-outcome'),
+              'FAILED',
+              true,
+              digest('lost-race-decisive-outcome'),
             ]);
             const swapped = await pool.query<{
               outcome_code: string;
@@ -946,12 +962,12 @@ test('G1-P4a PostgreSQL contracts and trusted approval service', async (t) => {
               [secondAttemptId],
             );
             assert.deepEqual(swapped.rows[0], {
-              outcome_code: 'SWAPPED',
-              pointer_outcome: 'SWAPPED',
-              terminal: false,
+              outcome_code: 'LOST_RACE',
+              pointer_outcome: 'NOT_SWAPPED',
+              terminal: true,
               verification_outcome: 'NOT_RUN',
               workflow_disposition: 'CONSUMED',
-              workflow_status: 'RUNNING',
+              workflow_status: 'FAILED',
             });
 
             await pool.query(insertDecisiveOutcome, [
@@ -1185,15 +1201,27 @@ async function withTemporaryPointerUpdateGrant<T>(
   adminPool: pg.Pool,
   run: () => Promise<T>,
 ): Promise<T> {
-  await adminPool.query(
-    'GRANT UPDATE ON platform.active_release_pointers TO north_star_runtime',
-  );
+  const before = await adminPool.query<{ allowed: boolean }>(`
+    SELECT has_table_privilege(
+      'north_star_runtime',
+      'platform.active_release_pointers',
+      'UPDATE'
+    ) AS allowed
+  `);
+  const alreadyAllowed = before.rows[0]?.allowed === true;
+  if (!alreadyAllowed) {
+    await adminPool.query(
+      'GRANT UPDATE ON platform.active_release_pointers TO north_star_runtime',
+    );
+  }
   try {
     return await run();
   } finally {
-    await adminPool.query(
-      'REVOKE UPDATE ON platform.active_release_pointers FROM north_star_runtime',
-    );
+    if (!alreadyAllowed) {
+      await adminPool.query(
+        'REVOKE UPDATE ON platform.active_release_pointers FROM north_star_runtime',
+      );
+    }
     const privilege = await adminPool.query<{ allowed: boolean }>(`
       SELECT has_table_privilege(
         'north_star_runtime',
@@ -1201,7 +1229,7 @@ async function withTemporaryPointerUpdateGrant<T>(
         'UPDATE'
       ) AS allowed
     `);
-    assert.equal(privilege.rows[0]?.allowed, false);
+    assert.equal(privilege.rows[0]?.allowed, alreadyAllowed);
   }
 }
 
