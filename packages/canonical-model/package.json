@@ -2,5 +2,9 @@
   "name": "@north-star/canonical-model",
   "private": true,
   "version": "0.0.0",
-  "exports": "./src/index.ts"
+  "type": "module",
+  "exports": "./src/index.ts",
+  "dependencies": {
+    "zod": "4.1.12"
+  }
 }

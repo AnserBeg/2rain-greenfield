@@ -23,7 +23,7 @@ before any become `admitted`.
 | G0-P6a | X-01 baseline input freeze in an isolated quarry worktree | G0 | Mechanical | accepted | `68f748cde06ecc795b159be5ae507a9d973106ac` | [packet](packets/G0-P6a.md); [baseline](baselines/x01-v1.md) |
 | G0-P6b | X-01 baseline replay in a disposable checkout | G0 | Mechanical | accepted | `2bd1d232426a2b50afd7ea350ad29e2a08c1e11b` | [packet](packets/G0-P6b.md); [replay](baselines/x01-v1-replay.md) — accepted with red replay limitations |
 | G1-P0 | G1 stage cut and parallelization map | G1 | Mechanical | accepted | `69b6ff87c28ca3638ac7958efce7acfa011b43a0` | [packet](packets/G1-P0.md) |
-| G1-P1 | Canonical identifiers and minimal object schemas | G1 | Critical | planned | - | [cut](packets/G1-P0.md) |
+| G1-P1 | Canonical identifiers and minimal object schemas | G1 | Critical | accepted | `18a6b5d62fda9a073450ee47a0acd6d511d557fd` | [packet](packets/G1-P1.md); [cut](packets/G1-P0.md) |
 | G1-P2 | Deterministic compiler + bootstrap package + golden artifacts | G1 | Critical | planned | - | [cut](packets/G1-P0.md) |
 | G1-P3 | Immutable AppPackageRevision/TenantRelease persistence | G1 | Critical | planned | - | [cut](packets/G1-P0.md) |
 | G1-P4 | Human-approved CAS activation + history + compatible rollback | G1 | Critical | planned | - | [cut](packets/G1-P0.md) |

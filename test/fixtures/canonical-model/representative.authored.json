@@ -1,0 +1,508 @@
+{
+  "kind": "applicationPackageRevision",
+  "schemaVersion": "v0-experimental",
+  "languageVersion": "v0-experimental",
+  "package": {
+    "kind": "packageDefinition",
+    "schemaVersion": "v0-experimental",
+    "packageId": "northstar.inventory:package.launch",
+    "namespace": "northstar.inventory",
+    "version": "0.1.0",
+    "provenance": "firstParty"
+  },
+  "modules": [
+    {
+      "kind": "moduleDefinition",
+      "schemaVersion": "v0-experimental",
+      "moduleId": "northstar.inventory:module.inventory",
+      "ownerPackageId": "northstar.inventory:package.launch",
+      "label": "Inventory",
+      "orderKey": 10,
+      "composition": {
+        "kind": "compositionSeam",
+        "schemaVersion": "v0-experimental",
+        "status": "unsupported"
+      }
+    }
+  ],
+  "entities": [
+    {
+      "kind": "entityDefinition",
+      "schemaVersion": "v0-experimental",
+      "entityId": "northstar.inventory:entity.item",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v0-experimental",
+        "targetId": "northstar.inventory:module.inventory"
+      },
+      "label": "Item",
+      "orderKey": 10,
+      "storage": {
+        "kind": "storageMappingReference",
+        "schemaVersion": "v0-experimental",
+        "targetId": "northstar.inventory:storage.item"
+      }
+    },
+    {
+      "kind": "entityDefinition",
+      "schemaVersion": "v0-experimental",
+      "entityId": "northstar.inventory:entity.item_alias",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v0-experimental",
+        "targetId": "northstar.inventory:module.inventory"
+      },
+      "label": "Item alias",
+      "orderKey": 20,
+      "storage": {
+        "kind": "storageMappingReference",
+        "schemaVersion": "v0-experimental",
+        "targetId": "northstar.inventory:storage.item_alias"
+      }
+    }
+  ],
+  "fields": [
+    {
+      "kind": "fieldDefinition",
+      "schemaVersion": "v0-experimental",
+      "fieldId": "northstar.inventory:field.item_name",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v0-experimental",
+        "targetId": "northstar.inventory:entity.item"
+      },
+      "label": "Name",
+      "orderKey": 10,
+      "classification": "internal",
+      "fieldType": {
+        "kind": "textFieldType",
+        "schemaVersion": "v0-experimental",
+        "maximumLength": 240
+      },
+      "searchable": true,
+      "reportable": true
+    },
+    {
+      "kind": "fieldDefinition",
+      "schemaVersion": "v0-experimental",
+      "fieldId": "northstar.inventory:field.item_status",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v0-experimental",
+        "targetId": "northstar.inventory:entity.item"
+      },
+      "label": "Status",
+      "orderKey": 20,
+      "classification": "internal",
+      "fieldType": {
+        "kind": "enumFieldType",
+        "schemaVersion": "v0-experimental",
+        "options": [
+          {
+            "kind": "enumOption",
+            "schemaVersion": "v0-experimental",
+            "optionId": "northstar.inventory:option.item_status_active",
+            "label": "Active",
+            "orderKey": 10
+          },
+          {
+            "kind": "enumOption",
+            "schemaVersion": "v0-experimental",
+            "optionId": "northstar.inventory:option.item_status_archived",
+            "label": "Archived",
+            "orderKey": 20
+          }
+        ]
+      }
+    },
+    {
+      "kind": "fieldDefinition",
+      "schemaVersion": "v0-experimental",
+      "fieldId": "northstar.inventory:field.item_quantity",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v0-experimental",
+        "targetId": "northstar.inventory:entity.item"
+      },
+      "label": "Base quantity",
+      "orderKey": 30,
+      "classification": "internal",
+      "fieldType": {
+        "kind": "quantityFieldType",
+        "schemaVersion": "v0-experimental",
+        "precision": 20,
+        "scale": 6,
+        "representation": "canonicalString",
+        "baseUnit": {
+          "kind": "unitReference",
+          "schemaVersion": "v0-experimental",
+          "targetId": "northstar.inventory:capability.unit_each"
+        }
+      }
+    },
+    {
+      "kind": "fieldDefinition",
+      "schemaVersion": "v0-experimental",
+      "fieldId": "northstar.inventory:field.item_price",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v0-experimental",
+        "targetId": "northstar.inventory:entity.item"
+      },
+      "label": "Reference price",
+      "orderKey": 40,
+      "classification": "confidential",
+      "fieldType": {
+        "kind": "moneyFieldType",
+        "schemaVersion": "v0-experimental",
+        "precision": 20,
+        "scale": 2,
+        "representation": "canonicalString",
+        "currencyCode": "USD",
+        "minorUnit": 2
+      }
+    },
+    {
+      "kind": "fieldDefinition",
+      "schemaVersion": "v0-experimental",
+      "fieldId": "northstar.inventory:field.item_counted_at",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v0-experimental",
+        "targetId": "northstar.inventory:entity.item"
+      },
+      "label": "Counted at",
+      "orderKey": 50,
+      "classification": "internal",
+      "fieldType": {
+        "kind": "dateTimeFieldType",
+        "schemaVersion": "v0-experimental",
+        "precision": "millisecond",
+        "timezoneSemantics": "utcInstant"
+      }
+    },
+    {
+      "kind": "fieldDefinition",
+      "schemaVersion": "v0-experimental",
+      "fieldId": "northstar.inventory:field.item_alias_value",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v0-experimental",
+        "targetId": "northstar.inventory:entity.item_alias"
+      },
+      "label": "Alias",
+      "orderKey": 60,
+      "classification": "internal",
+      "fieldType": {
+        "kind": "textFieldType",
+        "schemaVersion": "v0-experimental",
+        "maximumLength": 120
+      }
+    }
+  ],
+  "relations": [
+    {
+      "kind": "relationDefinition",
+      "schemaVersion": "v0-experimental",
+      "relationId": "northstar.inventory:relation.item_alias_parent",
+      "sourceEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v0-experimental",
+        "targetId": "northstar.inventory:entity.item_alias"
+      },
+      "targetEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v0-experimental",
+        "targetId": "northstar.inventory:entity.item"
+      },
+      "cardinality": "manyToOne",
+      "ownership": "parentScopedChild",
+      "archiveBehavior": "restrict",
+      "required": true,
+      "orderKey": 10
+    }
+  ],
+  "stateMachines": [
+    {
+      "kind": "stateMachineDefinition",
+      "schemaVersion": "v0-experimental",
+      "machineId": "northstar.inventory:machine.item_lifecycle",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v0-experimental",
+        "targetId": "northstar.inventory:entity.item"
+      },
+      "initialState": {
+        "kind": "stateReference",
+        "schemaVersion": "v0-experimental",
+        "targetId": "northstar.inventory:state.item_active"
+      },
+      "states": [
+        {
+          "kind": "stateDefinition",
+          "schemaVersion": "v0-experimental",
+          "stateId": "northstar.inventory:state.item_active",
+          "label": "Active",
+          "orderKey": 10
+        },
+        {
+          "kind": "stateDefinition",
+          "schemaVersion": "v0-experimental",
+          "stateId": "northstar.inventory:state.item_archived",
+          "label": "Archived",
+          "orderKey": 20,
+          "terminal": true
+        }
+      ],
+      "transitions": [
+        {
+          "kind": "transitionDefinition",
+          "schemaVersion": "v0-experimental",
+          "transitionId": "northstar.inventory:transition.item_archive",
+          "label": "Archive item",
+          "orderKey": 10,
+          "fromState": {
+            "kind": "stateReference",
+            "schemaVersion": "v0-experimental",
+            "targetId": "northstar.inventory:state.item_active"
+          },
+          "toState": {
+            "kind": "stateReference",
+            "schemaVersion": "v0-experimental",
+            "targetId": "northstar.inventory:state.item_archived"
+          },
+          "permission": {
+            "kind": "permissionReference",
+            "schemaVersion": "v0-experimental",
+            "targetId": "northstar.inventory:permission.item_archive"
+          }
+        }
+      ]
+    }
+  ],
+  "surfaces": [
+    {
+      "kind": "surfaceDefinition",
+      "schemaVersion": "v0-experimental",
+      "surfaceId": "northstar.inventory:surface.item_record",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v0-experimental",
+        "targetId": "northstar.inventory:module.inventory"
+      },
+      "label": "Item",
+      "archetype": "record",
+      "dataSource": {
+        "kind": "queryReference",
+        "schemaVersion": "v0-experimental",
+        "targetId": "northstar.inventory:query.item_get"
+      },
+      "slots": [
+        {
+          "kind": "surfaceSlot",
+          "schemaVersion": "v0-experimental",
+          "slotId": "northstar.inventory:slot.item_title_status",
+          "slot": "titleStatus",
+          "orderKey": 10,
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v0-experimental",
+            "targetId": "northstar.inventory:capability.surface_record_content"
+          }
+        },
+        {
+          "kind": "surfaceSlot",
+          "schemaVersion": "v0-experimental",
+          "slotId": "northstar.inventory:slot.item_sections",
+          "slot": "sections",
+          "orderKey": 20,
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v0-experimental",
+            "targetId": "northstar.inventory:capability.surface_record_content"
+          }
+        }
+      ],
+      "statusRoles": ["success", "attention", "blocked", "inProgress"]
+    }
+  ],
+  "queries": [
+    {
+      "kind": "queryDefinition",
+      "schemaVersion": "v0-experimental",
+      "queryId": "northstar.inventory:query.item_get",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v0-experimental",
+        "targetId": "northstar.inventory:module.inventory"
+      },
+      "tier": "q0",
+      "queryType": "get",
+      "sourceEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v0-experimental",
+        "targetId": "northstar.inventory:entity.item"
+      },
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v0-experimental",
+        "targetId": "northstar.inventory:permission.item_read"
+      },
+      "selections": [
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v0-experimental",
+          "selectionId": "northstar.inventory:selection.item_name",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v0-experimental",
+            "targetId": "northstar.inventory:field.item_name"
+          },
+          "orderKey": 10
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v0-experimental",
+          "selectionId": "northstar.inventory:selection.item_status",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v0-experimental",
+            "targetId": "northstar.inventory:field.item_status"
+          },
+          "orderKey": 20
+        }
+      ],
+      "maximumResultCount": 1
+    }
+  ],
+  "operations": [
+    {
+      "kind": "operationDefinition",
+      "schemaVersion": "v0-experimental",
+      "operationId": "northstar.inventory:operation.item_archive",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v0-experimental",
+        "targetId": "northstar.inventory:module.inventory"
+      },
+      "tier": "o0",
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v0-experimental",
+        "targetId": "northstar.inventory:permission.item_archive"
+      },
+      "effect": {
+        "kind": "transitionStateEffect",
+        "schemaVersion": "v0-experimental",
+        "transition": {
+          "kind": "transitionReference",
+          "schemaVersion": "v0-experimental",
+          "targetId": "northstar.inventory:transition.item_archive"
+        }
+      },
+      "confirmation": "humanRequired",
+      "readBack": {
+        "kind": "queryReference",
+        "schemaVersion": "v0-experimental",
+        "targetId": "northstar.inventory:query.item_get"
+      }
+    }
+  ],
+  "permissions": [
+    {
+      "kind": "permissionDefinition",
+      "schemaVersion": "v0-experimental",
+      "permissionId": "northstar.inventory:permission.item_read",
+      "resource": {
+        "kind": "entityReference",
+        "schemaVersion": "v0-experimental",
+        "targetId": "northstar.inventory:entity.item"
+      },
+      "action": "read",
+      "label": "Read items"
+    },
+    {
+      "kind": "permissionDefinition",
+      "schemaVersion": "v0-experimental",
+      "permissionId": "northstar.inventory:permission.item_archive",
+      "resource": {
+        "kind": "entityReference",
+        "schemaVersion": "v0-experimental",
+        "targetId": "northstar.inventory:entity.item"
+      },
+      "action": "archive",
+      "label": "Archive items"
+    }
+  ],
+  "assertions": [
+    {
+      "kind": "assertionDefinition",
+      "schemaVersion": "v0-experimental",
+      "assertionId": "northstar.inventory:assertion.item_archive_readback",
+      "invocation": {
+        "kind": "operationInvocation",
+        "schemaVersion": "v0-experimental",
+        "operation": {
+          "kind": "operationReference",
+          "schemaVersion": "v0-experimental",
+          "targetId": "northstar.inventory:operation.item_archive"
+        }
+      },
+      "expectedOutcome": "succeeds",
+      "expectedDiagnosticCode": null,
+      "evidenceKinds": ["structure", "provider", "userInterface", "agent"]
+    }
+  ],
+  "storageMappings": [
+    {
+      "kind": "storageMappingDefinition",
+      "schemaVersion": "v0-experimental",
+      "storageMappingId": "northstar.inventory:storage.item",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v0-experimental",
+        "targetId": "northstar.inventory:entity.item"
+      },
+      "storageClass": "dedicatedTable"
+    },
+    {
+      "kind": "storageMappingDefinition",
+      "schemaVersion": "v0-experimental",
+      "storageMappingId": "northstar.inventory:storage.item_alias",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v0-experimental",
+        "targetId": "northstar.inventory:entity.item_alias"
+      },
+      "storageClass": "generatedTyped"
+    }
+  ],
+  "capabilityRequirements": [
+    {
+      "kind": "capabilityRequirement",
+      "schemaVersion": "v0-experimental",
+      "capabilityId": "northstar.inventory:capability.unit_each",
+      "capabilityVersion": 1,
+      "declaredEffects": ["read"],
+      "supportStatus": "planned",
+      "requiredProjections": [
+        "storage",
+        "query",
+        "operation",
+        "surface",
+        "agent",
+        "reporting",
+        "verification"
+      ]
+    },
+    {
+      "kind": "capabilityRequirement",
+      "schemaVersion": "v0-experimental",
+      "capabilityId": "northstar.inventory:capability.surface_record_content",
+      "capabilityVersion": 1,
+      "declaredEffects": ["read"],
+      "supportStatus": "planned",
+      "requiredProjections": ["surface", "verification"]
+    }
+  ]
+}

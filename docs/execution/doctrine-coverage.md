@@ -59,6 +59,17 @@ later stage cuts must create their remaining enforcement packets.
 | Drop `@agent-native/core` | ADR-0005 | G0-P3 manifest, lockfile, import, and compatibility-authority scan | G0-P3 boundary checker | enforced |
 | Compiler determinism (round-trip/hash) | ADR-0001 (partial) + plan §5.3 | — | G1-P2 golden/hash tests | scheduled |
 
+## Canonical-language evolution and compatibility
+
+| Concern | Instrument | Enforced today by | Executable at | Status |
+|---|---|---|---|---|
+| Freeze A is v0-experimental; production-v1 requires inventory, purchasing, and sales through every promised projection | canonical language v0 §Freeze meaning; plan §5.8 | G1-P1 version/schema gates | G5 exit evidence, ratified at G7 release-candidate gate | scheduled |
+| Compiler-version-bump identity and approval carry-forward | ADR-0001/ADR-0006; canonical language v0 deferral | version recorded by G1-P1 | G1-P3 revision envelope + G1-P4 approval/activation policy | scheduled |
+| Full package composition/merge and tenant three-way rebase | plan §5.6, §10; canonical language T9 | G1-P1 foreign-reference unsupported fixture | G6 customization stage cut must create the merge/rebase packet | scheduled |
+| Historical compiler/runtime compatibility and retirement | plan §5.4, §7.5; canonical language v0 deferral | version/profile identity from G1-P1 | G7 compatibility/recovery packet | scheduled |
+| Storage backfill and data-validity semantics are part of compiler completeness | plan §5.3, §5.8-5.9 | G1-P1 storage schema carries no false backfill claim | G2 stage cut must create compiler/storage validity enforcement | scheduled |
+| Per-subgraph incremental compilation and memoization | plan §5.3, §10; salvaged SLO budget reference | — | G6 builder/compiler stage cut must create bounded performance packet | scheduled |
+
 ## Runtime, gateways, agent
 
 | Concern | Instrument | Enforced today by | Executable at | Status |

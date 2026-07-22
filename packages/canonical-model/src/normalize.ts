@@ -1,0 +1,1711 @@
+import { ZodError } from 'zod';
+
+import { canonicalize } from './canonicalize.js';
+import {
+  CANONICALIZATION_PROFILE_VERSION,
+  CONTENT_HASH_ALGORITHM,
+  IMMUTABLE_DEFAULTS_V0,
+  LANGUAGE_VERSION,
+  NORMALIZATION_PROFILE_VERSION,
+  STRUCTURAL_LIMITS_V0,
+  SURFACE_SLOTS,
+} from './constants.js';
+import {
+  CanonicalModelError,
+  compareCodeUnits,
+  diagnostic,
+  type CanonicalDiagnostic,
+} from './diagnostics.js';
+import {
+  AuthoredApplicationPackageSchema,
+  NormalizedApplicationPackageSchema,
+  type AuthoredApplicationPackage,
+  type CanonicalScalar,
+  type NormalizedApplicationPackage,
+  type PredicateExpression,
+} from './schemas.js';
+import { parseStrictJson } from './strict-json.js';
+
+type CanonicalReference = {
+  kind: string;
+  schemaVersion: typeof LANGUAGE_VERSION;
+  targetId: string;
+};
+
+type FieldType = AuthoredApplicationPackage['fields'][number]['fieldType'];
+
+export function parseAuthoredApplicationPackageJson(
+  input: string | Uint8Array,
+): AuthoredApplicationPackage {
+  const parsed = parseStrictJson(input);
+  if (parsed.byteLength > STRUCTURAL_LIMITS_V0.maximumAuthoredBytes) {
+    throw new CanonicalModelError([
+      diagnostic(
+        'CANON_LIMIT_PACKAGE_BYTES',
+        '$',
+        `authored package bytes must not exceed ${STRUCTURAL_LIMITS_V0.maximumAuthoredBytes}`,
+        'split non-language evidence from the package or reduce authored content',
+      ),
+    ]);
+  }
+  return parseAuthoredValue(parsed.value);
+}
+
+export function normalizeApplicationPackage(
+  input: unknown,
+): NormalizedApplicationPackage {
+  const authored = parseAuthoredValue(input);
+  const authoredBytes = new TextEncoder().encode(canonicalize(authored));
+  if (authoredBytes.byteLength > STRUCTURAL_LIMITS_V0.maximumAuthoredBytes) {
+    throw new CanonicalModelError([
+      diagnostic(
+        'CANON_LIMIT_PACKAGE_BYTES',
+        '$',
+        `authored package bytes must not exceed ${STRUCTURAL_LIMITS_V0.maximumAuthoredBytes}`,
+        'split non-language evidence from the package or reduce authored content',
+        authored.package.packageId,
+      ),
+    ]);
+  }
+  enforceFamilyBounds(authored);
+  validateAuthoredDerivedStateFields(authored);
+  const fieldTypes = new Map(
+    authored.fields.map((field) => [field.fieldId, field.fieldType] as const),
+  );
+
+  const normalizedCandidate = {
+    assertions: authored.assertions.map((entry) => ({
+      ...entry,
+      evidenceKinds: sortedStrings(entry.evidenceKinds),
+      lifecycle: entry.lifecycle ?? IMMUTABLE_DEFAULTS_V0.lifecycle,
+    })),
+    canonicalizationProfileVersion: CANONICALIZATION_PROFILE_VERSION,
+    capabilityRequirements: authored.capabilityRequirements.map((entry) => ({
+      ...entry,
+      declaredEffects: sortedStrings(entry.declaredEffects),
+      lifecycle: entry.lifecycle ?? IMMUTABLE_DEFAULTS_V0.lifecycle,
+      requiredProjections: sortedStrings(entry.requiredProjections),
+    })),
+    entities: authored.entities.map((entry) => ({
+      ...entry,
+      lifecycle: entry.lifecycle ?? IMMUTABLE_DEFAULTS_V0.lifecycle,
+    })),
+    fields: authored.fields.map((entry) => ({
+      ...entry,
+      fieldType:
+        entry.fieldType.kind === 'enumFieldType'
+          ? {
+              ...entry.fieldType,
+              options: sortByOrderAndId(entry.fieldType.options, 'optionId'),
+            }
+          : entry.fieldType,
+      lifecycle: entry.lifecycle ?? IMMUTABLE_DEFAULTS_V0.lifecycle,
+      presence: entry.presence ?? IMMUTABLE_DEFAULTS_V0.presence,
+      reportable: entry.reportable ?? IMMUTABLE_DEFAULTS_V0.reportable,
+      searchable: entry.searchable ?? IMMUTABLE_DEFAULTS_V0.searchable,
+    })),
+    hashAlgorithm: CONTENT_HASH_ALGORITHM,
+    kind: authored.kind,
+    languageVersion: authored.languageVersion,
+    modules: authored.modules.map((entry) => ({
+      ...entry,
+      lifecycle: entry.lifecycle ?? IMMUTABLE_DEFAULTS_V0.lifecycle,
+    })),
+    normalizationProfileVersion: NORMALIZATION_PROFILE_VERSION,
+    operations: authored.operations.map((entry) => ({
+      ...entry,
+      lifecycle: entry.lifecycle ?? IMMUTABLE_DEFAULTS_V0.lifecycle,
+      precondition: normalizePredicate(
+        entry.precondition ?? defaultPredicate(),
+        1,
+        fieldTypes,
+      ),
+    })),
+    package: {
+      ...authored.package,
+      lifecycle: authored.package.lifecycle ?? IMMUTABLE_DEFAULTS_V0.lifecycle,
+    },
+    permissions: authored.permissions.map((entry) => ({
+      ...entry,
+      lifecycle: entry.lifecycle ?? IMMUTABLE_DEFAULTS_V0.lifecycle,
+    })),
+    queries: authored.queries.map((entry) => ({
+      ...entry,
+      filter: normalizePredicate(
+        entry.filter ?? defaultPredicate(),
+        1,
+        fieldTypes,
+      ),
+      lifecycle: entry.lifecycle ?? IMMUTABLE_DEFAULTS_V0.lifecycle,
+      selections: sortByOrderAndId(entry.selections, 'selectionId'),
+    })),
+    relations: authored.relations.map((entry) => ({
+      ...entry,
+      joinEligibility:
+        entry.joinEligibility ?? IMMUTABLE_DEFAULTS_V0.relationJoinEligibility,
+      lifecycle: entry.lifecycle ?? IMMUTABLE_DEFAULTS_V0.lifecycle,
+      required: entry.required ?? IMMUTABLE_DEFAULTS_V0.relationRequired,
+    })),
+    schemaVersion: authored.schemaVersion,
+    stateMachines: authored.stateMachines.map((entry) => ({
+      ...entry,
+      lifecycle: entry.lifecycle ?? IMMUTABLE_DEFAULTS_V0.lifecycle,
+      stateField: derivedStateField(entry.machineId),
+      states: sortByOrderAndId(
+        entry.states.map((state) => ({
+          ...state,
+          terminal: state.terminal ?? IMMUTABLE_DEFAULTS_V0.terminal,
+        })),
+        'stateId',
+      ),
+      transitions: sortByOrderAndId(entry.transitions, 'transitionId'),
+    })),
+    storageMappings: authored.storageMappings.map((entry) => ({
+      ...entry,
+      lifecycle: entry.lifecycle ?? IMMUTABLE_DEFAULTS_V0.lifecycle,
+    })),
+    surfaces: authored.surfaces.map((entry) => ({
+      ...entry,
+      lifecycle: entry.lifecycle ?? IMMUTABLE_DEFAULTS_V0.lifecycle,
+      slots: sortByOrderAndId(entry.slots, 'slotId'),
+      statusRoles: sortedStrings(entry.statusRoles),
+    })),
+  };
+
+  const sortedCandidate = {
+    ...normalizedCandidate,
+    assertions: sortById(normalizedCandidate.assertions, 'assertionId'),
+    capabilityRequirements: sortById(
+      normalizedCandidate.capabilityRequirements,
+      'capabilityId',
+    ),
+    entities: sortByOwnerOrderAndId(
+      normalizedCandidate.entities,
+      (entry) => entry.module.targetId,
+      'entityId',
+    ),
+    fields: sortByOwnerOrderAndId(
+      normalizedCandidate.fields,
+      (entry) => entry.entity.targetId,
+      'fieldId',
+    ),
+    modules: sortByOrderAndId(normalizedCandidate.modules, 'moduleId'),
+    operations: sortById(normalizedCandidate.operations, 'operationId'),
+    permissions: sortById(normalizedCandidate.permissions, 'permissionId'),
+    queries: sortById(normalizedCandidate.queries, 'queryId'),
+    relations: sortByOwnerOrderAndId(
+      normalizedCandidate.relations,
+      (entry) => entry.sourceEntity.targetId,
+      'relationId',
+    ),
+    stateMachines: sortById(normalizedCandidate.stateMachines, 'machineId'),
+    storageMappings: sortById(
+      normalizedCandidate.storageMappings,
+      'storageMappingId',
+    ),
+    surfaces: sortById(normalizedCandidate.surfaces, 'surfaceId'),
+  };
+
+  let normalized: NormalizedApplicationPackage;
+  try {
+    normalized = NormalizedApplicationPackageSchema.parse(sortedCandidate);
+  } catch (error) {
+    if (error instanceof ZodError) throw schemaError(error, sortedCandidate);
+    throw error;
+  }
+  validateSemantics(normalized);
+  enforceValueBounds(normalized);
+  const normalizedBytes = new TextEncoder().encode(canonicalize(normalized));
+  if (
+    normalizedBytes.byteLength > STRUCTURAL_LIMITS_V0.maximumNormalizedBytes
+  ) {
+    throw new CanonicalModelError([
+      diagnostic(
+        'CANON_LIMIT_NORMALIZED_BYTES',
+        '$',
+        `normalized package bytes must not exceed ${STRUCTURAL_LIMITS_V0.maximumNormalizedBytes}`,
+        'split the package or reduce canonical definitions',
+        normalized.package.packageId,
+      ),
+    ]);
+  }
+  return deepFreeze(normalized);
+}
+
+export function canonicalAuthoredProjection(
+  normalized: NormalizedApplicationPackage,
+): AuthoredApplicationPackage {
+  NormalizedApplicationPackageSchema.parse(normalized);
+  const projected = structuredClone(normalized) as unknown as Record<
+    string,
+    unknown
+  >;
+  delete projected.canonicalizationProfileVersion;
+  delete projected.hashAlgorithm;
+  delete projected.normalizationProfileVersion;
+  visitObjects(projected, (object) => {
+    if (object.lifecycle === IMMUTABLE_DEFAULTS_V0.lifecycle) {
+      delete object.lifecycle;
+    }
+    if (object.kind === 'fieldDefinition') {
+      if (object.presence === IMMUTABLE_DEFAULTS_V0.presence)
+        delete object.presence;
+      if (object.reportable === false) delete object.reportable;
+      if (object.searchable === false) delete object.searchable;
+    }
+    if (object.kind === 'relationDefinition') {
+      if (object.joinEligibility === 'none') delete object.joinEligibility;
+      if (object.required === false) delete object.required;
+    }
+    if (object.kind === 'stateDefinition' && object.terminal === false) {
+      delete object.terminal;
+    }
+    if (object.kind === 'stateMachineDefinition') {
+      delete object.stateField;
+    }
+    if (
+      object.kind === 'queryDefinition' &&
+      isDefaultPredicate(object.filter)
+    ) {
+      delete object.filter;
+    }
+    if (
+      object.kind === 'operationDefinition' &&
+      isDefaultPredicate(object.precondition)
+    ) {
+      delete object.precondition;
+    }
+  });
+  return parseAuthoredValue(projected);
+}
+
+function parseAuthoredValue(input: unknown): AuthoredApplicationPackage {
+  try {
+    return AuthoredApplicationPackageSchema.parse(input);
+  } catch (error) {
+    if (error instanceof ZodError) throw schemaError(error, input);
+    throw error;
+  }
+}
+
+function schemaError(error: ZodError, input: unknown): CanonicalModelError {
+  const diagnostics = error.issues.map((issue) => {
+    const path = `$${issue.path
+      .map((part) =>
+        typeof part === 'number' ? `[${part}]` : `.${String(part)}`,
+      )
+      .join('')}`;
+    const pathParts = issue.path.map(String);
+    const finalPart = pathParts.at(-1) ?? '';
+    const code =
+      finalPart === 'kind'
+        ? 'CANON_KIND_UNSUPPORTED'
+        : finalPart === 'schemaVersion' || finalPart.endsWith('Version')
+          ? 'CANON_VERSION_UNSUPPORTED'
+          : finalPart === 'archetype'
+            ? 'CANON_SURFACE_ARCHETYPE_UNSUPPORTED'
+            : finalPart === 'slot'
+              ? 'CANON_SURFACE_SLOT_UNSUPPORTED'
+              : pathParts.includes('statusRoles')
+                ? 'CANON_SURFACE_STATUS_ROLE_UNSUPPORTED'
+                : 'CANON_SCHEMA_INVALID';
+    return diagnostic(
+      code,
+      path,
+      `value must satisfy the closed ${LANGUAGE_VERSION} schema`,
+      acceptedAlternativeFor(code),
+      findObjectId(input, issue.path),
+    );
+  });
+  return new CanonicalModelError(diagnostics);
+}
+
+function validateSemantics(
+  packageRevision: NormalizedApplicationPackage,
+): void {
+  const diagnostics: CanonicalDiagnostic[] = [];
+  const namespace = packageRevision.package.namespace;
+  const allIds = collectIds(packageRevision);
+  const idOwners = new Map<string, string>();
+  for (const [family, ids] of Object.entries(allIds)) {
+    for (const id of ids) {
+      const prior = idOwners.get(id);
+      if (prior) {
+        diagnostics.push(
+          diagnostic(
+            'CANON_ID_DUPLICATE',
+            '$',
+            `canonical identity is unique across the package; already used by ${prior}`,
+            'mint a new namespaced canonical ID',
+            id,
+          ),
+        );
+      } else {
+        idOwners.set(id, family);
+      }
+      if (namespaceOf(id) !== namespace) {
+        diagnostics.push(
+          diagnostic(
+            'CANON_ID_NAMESPACE_MISMATCH',
+            '$',
+            `owned IDs must be born in package namespace ${namespace}`,
+            `use an ID beginning with ${namespace}:`,
+            id,
+          ),
+        );
+      }
+    }
+  }
+  if (namespaceOf(packageRevision.package.packageId) !== namespace) {
+    diagnostics.push(
+      diagnostic(
+        'CANON_ID_NAMESPACE_MISMATCH',
+        '$.package.packageId',
+        'package identity and namespace must agree',
+        `use an ID beginning with ${namespace}:`,
+        packageRevision.package.packageId,
+      ),
+    );
+  }
+
+  const index = referenceIndex(packageRevision);
+  validateOwnedReferences(packageRevision, index, namespace, diagnostics);
+  validateReferenceLocality(packageRevision, diagnostics);
+  validateSurfaceVocabulary(packageRevision, diagnostics);
+  validateSetCollections(packageRevision, diagnostics);
+  validateOrderKeys(packageRevision, diagnostics);
+  if (diagnostics.length > 0) throw new CanonicalModelError(diagnostics);
+}
+
+function validateOwnedReferences(
+  packageRevision: NormalizedApplicationPackage,
+  index: Map<string, Set<string>>,
+  namespace: string,
+  diagnostics: CanonicalDiagnostic[],
+): void {
+  const check = (
+    reference: CanonicalReference,
+    expectedKind: string,
+    path: string,
+    objectId: string,
+  ): void => {
+    if (reference.kind !== expectedKind) {
+      diagnostics.push(
+        diagnostic(
+          'CANON_REFERENCE_KIND_MISMATCH',
+          path,
+          `reference kind must be ${expectedKind}`,
+          `use {kind:"${expectedKind}",schemaVersion:"${LANGUAGE_VERSION}",targetId:"..."}`,
+          objectId,
+        ),
+      );
+      return;
+    }
+    if (namespaceOf(reference.targetId) !== namespace) {
+      diagnostics.push(
+        diagnostic(
+          'CANON_REFERENCE_CROSS_PACKAGE_UNSUPPORTED',
+          path,
+          'v0-experimental parses namespaced cross-package references but composition is unsupported',
+          'reference an object in this package or wait for the tracked composition packet',
+          objectId,
+        ),
+      );
+      return;
+    }
+    if (!index.get(expectedKind)?.has(reference.targetId)) {
+      diagnostics.push(
+        diagnostic(
+          'CANON_REFERENCE_UNRESOLVED',
+          path,
+          'every reference must resolve inside the complete desired-state snapshot',
+          'add the referenced definition or use an existing canonical ID',
+          objectId,
+        ),
+      );
+    }
+  };
+
+  for (const module of packageRevision.modules) {
+    if (module.ownerPackageId !== packageRevision.package.packageId) {
+      diagnostics.push(
+        diagnostic(
+          'CANON_OWNERSHIP_MISMATCH',
+          '$.modules.ownerPackageId',
+          'modules are owned by the package envelope',
+          `use ${packageRevision.package.packageId}`,
+          module.moduleId,
+        ),
+      );
+    }
+  }
+  for (const entity of packageRevision.entities) {
+    check(
+      entity.module,
+      'moduleReference',
+      '$.entities.module',
+      entity.entityId,
+    );
+    check(
+      entity.storage,
+      'storageMappingReference',
+      '$.entities.storage',
+      entity.entityId,
+    );
+  }
+  for (const field of packageRevision.fields) {
+    check(field.entity, 'entityReference', '$.fields.entity', field.fieldId);
+    if (field.fieldType.kind === 'quantityFieldType') {
+      check(
+        field.fieldType.baseUnit,
+        'unitReference',
+        '$.fields.fieldType.baseUnit',
+        field.fieldId,
+      );
+    }
+  }
+  for (const relation of packageRevision.relations) {
+    check(
+      relation.sourceEntity,
+      'entityReference',
+      '$.relations.sourceEntity',
+      relation.relationId,
+    );
+    check(
+      relation.targetEntity,
+      'entityReference',
+      '$.relations.targetEntity',
+      relation.relationId,
+    );
+  }
+  for (const machine of packageRevision.stateMachines) {
+    check(
+      machine.entity,
+      'entityReference',
+      '$.stateMachines.entity',
+      machine.machineId,
+    );
+    check(
+      machine.initialState,
+      'stateReference',
+      '$.stateMachines.initialState',
+      machine.machineId,
+    );
+    for (const transition of machine.transitions) {
+      check(
+        transition.fromState,
+        'stateReference',
+        '$.stateMachines.transitions.fromState',
+        transition.transitionId,
+      );
+      check(
+        transition.toState,
+        'stateReference',
+        '$.stateMachines.transitions.toState',
+        transition.transitionId,
+      );
+      check(
+        transition.permission,
+        'permissionReference',
+        '$.stateMachines.transitions.permission',
+        transition.transitionId,
+      );
+    }
+  }
+  for (const surface of packageRevision.surfaces) {
+    check(
+      surface.module,
+      'moduleReference',
+      '$.surfaces.module',
+      surface.surfaceId,
+    );
+    check(
+      surface.dataSource,
+      'queryReference',
+      '$.surfaces.dataSource',
+      surface.surfaceId,
+    );
+    for (const slot of surface.slots) {
+      check(
+        slot.content,
+        'opaqueSurfaceContentReference',
+        '$.surfaces.slots.content',
+        surface.surfaceId,
+      );
+    }
+  }
+  for (const query of packageRevision.queries) {
+    check(query.module, 'moduleReference', '$.queries.module', query.queryId);
+    check(
+      query.permission,
+      'permissionReference',
+      '$.queries.permission',
+      query.queryId,
+    );
+    check(
+      query.sourceEntity,
+      'entityReference',
+      '$.queries.sourceEntity',
+      query.queryId,
+    );
+    for (const selection of query.selections) {
+      check(
+        selection.field,
+        'fieldReference',
+        '$.queries.selections.field',
+        query.queryId,
+      );
+    }
+    visitPredicate(query.filter, (reference, path, expectedKind) =>
+      check(reference, expectedKind, `$.queries.filter${path}`, query.queryId),
+    );
+  }
+  for (const operation of packageRevision.operations) {
+    check(
+      operation.module,
+      'moduleReference',
+      '$.operations.module',
+      operation.operationId,
+    );
+    check(
+      operation.permission,
+      'permissionReference',
+      '$.operations.permission',
+      operation.operationId,
+    );
+    check(
+      operation.readBack,
+      'queryReference',
+      '$.operations.readBack',
+      operation.operationId,
+    );
+    visitPredicate(operation.precondition, (reference, path, expectedKind) =>
+      check(
+        reference,
+        expectedKind,
+        `$.operations.precondition${path}`,
+        operation.operationId,
+      ),
+    );
+    if ('entity' in operation.effect) {
+      check(
+        operation.effect.entity,
+        'entityReference',
+        '$.operations.effect.entity',
+        operation.operationId,
+      );
+    } else if ('transition' in operation.effect) {
+      check(
+        operation.effect.transition,
+        'transitionReference',
+        '$.operations.effect.transition',
+        operation.operationId,
+      );
+    } else {
+      check(
+        operation.effect.capability,
+        'capabilityReference',
+        '$.operations.effect.capability',
+        operation.operationId,
+      );
+    }
+  }
+  for (const permission of packageRevision.permissions) {
+    check(
+      permission.resource,
+      'entityReference',
+      '$.permissions.resource',
+      permission.permissionId,
+    );
+  }
+  for (const assertion of packageRevision.assertions) {
+    if (assertion.invocation.kind === 'queryInvocation') {
+      check(
+        assertion.invocation.query,
+        'queryReference',
+        '$.assertions.invocation.query',
+        assertion.assertionId,
+      );
+    } else {
+      check(
+        assertion.invocation.operation,
+        'operationReference',
+        '$.assertions.invocation.operation',
+        assertion.assertionId,
+      );
+    }
+  }
+  for (const storage of packageRevision.storageMappings) {
+    check(
+      storage.entity,
+      'entityReference',
+      '$.storageMappings.entity',
+      storage.storageMappingId,
+    );
+  }
+}
+
+function validateSurfaceVocabulary(
+  packageRevision: NormalizedApplicationPackage,
+  diagnostics: CanonicalDiagnostic[],
+): void {
+  for (const surface of packageRevision.surfaces) {
+    const allowed = new Set<string>(SURFACE_SLOTS[surface.archetype]);
+    const seen = new Set<string>();
+    for (const slot of surface.slots) {
+      if (!allowed.has(slot.slot)) {
+        diagnostics.push(
+          diagnostic(
+            'CANON_SURFACE_SLOT_UNSUPPORTED',
+            '$.surfaces.slots.slot',
+            `slot ${slot.slot} is not declared by ${surface.archetype}`,
+            `use one of: ${[...allowed].join(', ')}`,
+            surface.surfaceId,
+          ),
+        );
+      }
+      if (seen.has(slot.slot)) {
+        diagnostics.push(
+          diagnostic(
+            'CANON_SURFACE_SLOT_DUPLICATE',
+            '$.surfaces.slots.slot',
+            'each named archetype slot has one content authority',
+            'keep one surfaceSlot for the named slot',
+            surface.surfaceId,
+          ),
+        );
+      }
+      seen.add(slot.slot);
+    }
+  }
+}
+
+function validateReferenceLocality(
+  packageRevision: NormalizedApplicationPackage,
+  diagnostics: CanonicalDiagnostic[],
+): void {
+  const entityModule = new Map(
+    packageRevision.entities.map((entry) => [
+      entry.entityId,
+      entry.module.targetId,
+    ]),
+  );
+  const fieldEntity = new Map(
+    packageRevision.fields.map((entry) => [
+      entry.fieldId,
+      entry.entity.targetId,
+    ]),
+  );
+  const fieldDefinitions = new Map(
+    packageRevision.fields.map((entry) => [entry.fieldId, entry] as const),
+  );
+  const queryModule = new Map(
+    packageRevision.queries.map((entry) => [
+      entry.queryId,
+      entry.module.targetId,
+    ]),
+  );
+  const stateOwner = new Map(
+    packageRevision.stateMachines.flatMap((machine) =>
+      machine.states.map(
+        (state) => [state.stateId, machine.machineId] as const,
+      ),
+    ),
+  );
+  const storageEntity = new Map(
+    packageRevision.storageMappings.map((entry) => [
+      entry.storageMappingId,
+      entry.entity.targetId,
+    ]),
+  );
+  const parentScopes = packageRevision.relations.filter(
+    (relation) => relation.ownership === 'parentScopedChild',
+  );
+  const childEntities = new Set(
+    parentScopes.map((relation) => relation.sourceEntity.targetId),
+  );
+  const parentScopeCount = new Map<string, number>();
+
+  for (const entity of packageRevision.entities) {
+    if (storageEntity.get(entity.storage.targetId) !== entity.entityId) {
+      diagnostics.push(
+        diagnostic(
+          'CANON_STORAGE_ENTITY_MISMATCH',
+          '$.entities.storage',
+          'an entity and its storage mapping must reference each other',
+          'use the storage mapping whose entity target is this entity ID',
+          entity.entityId,
+        ),
+      );
+    }
+  }
+  for (const relation of parentScopes) {
+    const childId = relation.sourceEntity.targetId;
+    const parentId = relation.targetEntity.targetId;
+    parentScopeCount.set(childId, (parentScopeCount.get(childId) ?? 0) + 1);
+    if (
+      relation.cardinality !== 'manyToOne' ||
+      !relation.required ||
+      relation.archiveBehavior !== 'restrict'
+    ) {
+      diagnostics.push(
+        diagnostic(
+          'CANON_RELATION_PARENT_SCOPE_INVALID',
+          '$.relations',
+          'a parent-scoped child owns one required many-to-one parent link whose archive behavior is restrict',
+          'use cardinality manyToOne, required true, and archiveBehavior restrict',
+          relation.relationId,
+        ),
+      );
+    }
+    if (
+      childId === parentId ||
+      childEntities.has(parentId) ||
+      (entityModule.has(childId) &&
+        entityModule.has(parentId) &&
+        entityModule.get(childId) !== entityModule.get(parentId))
+    ) {
+      diagnostics.push(
+        diagnostic(
+          'CANON_RELATION_PARENT_TOPOLOGY_INVALID',
+          '$.relations',
+          'a v0 parent-scoped child has one distinct top-level parent in the same module',
+          'reference a distinct non-child entity owned by the child module',
+          relation.relationId,
+        ),
+      );
+    }
+  }
+  for (const [childId, count] of parentScopeCount) {
+    if (count > 1) {
+      diagnostics.push(
+        diagnostic(
+          'CANON_RELATION_PARENT_OWNER_DUPLICATE',
+          '$.relations',
+          'a v0 child entity has exactly one parent-scope authority',
+          'keep one parentScopedChild relation for the child entity',
+          childId,
+        ),
+      );
+    }
+  }
+  for (const machine of packageRevision.stateMachines) {
+    if (stateOwner.get(machine.initialState.targetId) !== machine.machineId) {
+      diagnostics.push(
+        diagnostic(
+          'CANON_STATE_MACHINE_LOCALITY',
+          '$.stateMachines.initialState',
+          'initial state belongs to the same state machine',
+          'reference one state declared by this machine',
+          machine.machineId,
+        ),
+      );
+    }
+    for (const transition of machine.transitions) {
+      if (
+        stateOwner.get(transition.fromState.targetId) !== machine.machineId ||
+        stateOwner.get(transition.toState.targetId) !== machine.machineId
+      ) {
+        diagnostics.push(
+          diagnostic(
+            'CANON_STATE_MACHINE_LOCALITY',
+            '$.stateMachines.transitions',
+            'transition endpoints belong to the same state machine',
+            'reference states declared by this machine',
+            transition.transitionId,
+          ),
+        );
+      }
+    }
+  }
+  for (const query of packageRevision.queries) {
+    if (
+      entityModule.get(query.sourceEntity.targetId) !== query.module.targetId
+    ) {
+      diagnostics.push(
+        diagnostic(
+          'CANON_QUERY_ENTITY_MODULE_MISMATCH',
+          '$.queries.sourceEntity',
+          'v0 queries source an entity owned by their module',
+          'use a source entity from the query module',
+          query.queryId,
+        ),
+      );
+    }
+    for (const selection of query.selections) {
+      if (
+        fieldEntity.get(selection.field.targetId) !==
+        query.sourceEntity.targetId
+      ) {
+        diagnostics.push(
+          diagnostic(
+            'CANON_QUERY_FIELD_LOCALITY',
+            '$.queries.selections.field',
+            'v0 query selections belong to the source entity',
+            'use a field owned by the source entity',
+            query.queryId,
+          ),
+        );
+      }
+    }
+    visitFieldComparisons(query.filter, (comparison, path) => {
+      if (
+        fieldEntity.get(comparison.field.targetId) !==
+        query.sourceEntity.targetId
+      ) {
+        diagnostics.push(
+          diagnostic(
+            'CANON_QUERY_FILTER_FIELD_LOCALITY',
+            `$.queries.filter${path}.field`,
+            'v0 query filter fields belong to the source entity',
+            'use a field owned by the query source entity',
+            query.queryId,
+          ),
+        );
+      }
+      validateComparisonValue(
+        comparison,
+        fieldDefinitions.get(comparison.field.targetId),
+        `$.queries.filter${path}.value`,
+        query.queryId,
+        diagnostics,
+      );
+    });
+  }
+  for (const operation of packageRevision.operations) {
+    visitFieldComparisons(operation.precondition, (comparison, path) => {
+      validateComparisonValue(
+        comparison,
+        fieldDefinitions.get(comparison.field.targetId),
+        `$.operations.precondition${path}.value`,
+        operation.operationId,
+        diagnostics,
+      );
+    });
+  }
+  for (const surface of packageRevision.surfaces) {
+    if (
+      queryModule.get(surface.dataSource.targetId) !== surface.module.targetId
+    ) {
+      diagnostics.push(
+        diagnostic(
+          'CANON_SURFACE_QUERY_MODULE_MISMATCH',
+          '$.surfaces.dataSource',
+          'a v0 surface and its data source belong to the same module',
+          'use a query owned by the surface module',
+          surface.surfaceId,
+        ),
+      );
+    }
+  }
+  for (const assertion of packageRevision.assertions) {
+    const expectsFailure = assertion.expectedOutcome === 'fails';
+    if (expectsFailure !== (assertion.expectedDiagnosticCode !== null)) {
+      diagnostics.push(
+        diagnostic(
+          'CANON_ASSERTION_DIAGNOSTIC_MISMATCH',
+          '$.assertions.expectedDiagnosticCode',
+          'failing assertions name one stable diagnostic code and successful assertions name none',
+          expectsFailure ? 'provide the expected diagnostic code' : 'use null',
+          assertion.assertionId,
+        ),
+      );
+    }
+  }
+}
+
+function validateSetCollections(
+  packageRevision: NormalizedApplicationPackage,
+  diagnostics: CanonicalDiagnostic[],
+): void {
+  for (const surface of packageRevision.surfaces) {
+    rejectDuplicateStrings(
+      surface.statusRoles,
+      '$.surfaces.statusRoles',
+      surface.surfaceId,
+      diagnostics,
+    );
+  }
+  for (const capability of packageRevision.capabilityRequirements) {
+    rejectDuplicateStrings(
+      capability.declaredEffects,
+      '$.capabilityRequirements.declaredEffects',
+      capability.capabilityId,
+      diagnostics,
+    );
+    rejectDuplicateStrings(
+      capability.requiredProjections,
+      '$.capabilityRequirements.requiredProjections',
+      capability.capabilityId,
+      diagnostics,
+    );
+  }
+  for (const assertion of packageRevision.assertions) {
+    rejectDuplicateStrings(
+      assertion.evidenceKinds,
+      '$.assertions.evidenceKinds',
+      assertion.assertionId,
+      diagnostics,
+    );
+  }
+}
+
+function rejectDuplicateStrings(
+  entries: readonly string[],
+  path: string,
+  objectId: string,
+  diagnostics: CanonicalDiagnostic[],
+): void {
+  const seen = new Set<string>();
+  for (const entry of entries) {
+    if (seen.has(entry)) {
+      diagnostics.push(
+        diagnostic(
+          'CANON_SET_MEMBER_DUPLICATE',
+          path,
+          'set-like collections reject duplicate canonical members',
+          'keep one occurrence of the member',
+          objectId,
+        ),
+      );
+    }
+    seen.add(entry);
+  }
+}
+
+function validateOrderKeys(
+  packageRevision: NormalizedApplicationPackage,
+  diagnostics: CanonicalDiagnostic[],
+): void {
+  const collections: Array<{
+    entries: Array<{ orderKey: number }>;
+    objectId: string;
+    path: string;
+  }> = [
+    {
+      entries: packageRevision.modules,
+      objectId: packageRevision.package.packageId,
+      path: '$.modules',
+    },
+    ...orderCollectionsByOwner(
+      packageRevision.entities,
+      (entry) => entry.module.targetId,
+      '$.entities',
+    ),
+    ...orderCollectionsByOwner(
+      packageRevision.fields,
+      (entry) => entry.entity.targetId,
+      '$.fields',
+    ),
+    ...orderCollectionsByOwner(
+      packageRevision.relations,
+      (entry) => entry.sourceEntity.targetId,
+      '$.relations',
+    ),
+    ...packageRevision.fields.flatMap((field) =>
+      field.fieldType.kind === 'enumFieldType'
+        ? [
+            {
+              entries: field.fieldType.options,
+              objectId: field.fieldId,
+              path: '$.fields.fieldType.options',
+            },
+          ]
+        : [],
+    ),
+    ...packageRevision.stateMachines.map((machine) => ({
+      entries: machine.states,
+      objectId: machine.machineId,
+      path: '$.stateMachines.states',
+    })),
+    ...packageRevision.stateMachines.map((machine) => ({
+      entries: machine.transitions,
+      objectId: machine.machineId,
+      path: '$.stateMachines.transitions',
+    })),
+    ...packageRevision.surfaces.map((surface) => ({
+      entries: surface.slots,
+      objectId: surface.surfaceId,
+      path: '$.surfaces.slots',
+    })),
+    ...packageRevision.queries.map((query) => ({
+      entries: query.selections,
+      objectId: query.queryId,
+      path: '$.queries.selections',
+    })),
+  ];
+  for (const collection of collections) {
+    const seen = new Set<number>();
+    for (const entry of collection.entries) {
+      if (seen.has(entry.orderKey)) {
+        diagnostics.push(
+          diagnostic(
+            'CANON_ORDER_KEY_DUPLICATE',
+            collection.path,
+            'ordered siblings use unique explicit orderKey values',
+            'assign a distinct integer orderKey; array position has no meaning',
+            collection.objectId,
+          ),
+        );
+      }
+      seen.add(entry.orderKey);
+    }
+  }
+}
+
+function validateAuthoredDerivedStateFields(
+  authored: AuthoredApplicationPackage,
+): void {
+  const diagnostics: CanonicalDiagnostic[] = [];
+  for (const machine of authored.stateMachines) {
+    if (
+      machine.stateField !== undefined &&
+      canonicalize(machine.stateField) !==
+        canonicalize(derivedStateField(machine.machineId))
+    ) {
+      diagnostics.push(
+        diagnostic(
+          'CANON_DERIVED_STATE_FIELD_INVALID',
+          '$.stateMachines.stateField',
+          'the state field is compiler-derived from machine identity and stores only canonical stateId values',
+          'omit stateField in authored form or use the exact normalized derived field',
+          machine.machineId,
+        ),
+      );
+    }
+  }
+  if (diagnostics.length > 0) throw new CanonicalModelError(diagnostics);
+}
+
+function derivedStateField(machineId: string): {
+  fieldId: string;
+  kind: 'derivedStateField';
+  schemaVersion: typeof LANGUAGE_VERSION;
+  valueKind: 'stateId';
+} {
+  const separator = machineId.indexOf(':');
+  const namespace = machineId.slice(0, separator);
+  const localIdentity = machineId.slice(separator + 1);
+  return {
+    fieldId: `${namespace}:derived_state_field.${localIdentity}`,
+    kind: 'derivedStateField',
+    schemaVersion: LANGUAGE_VERSION,
+    valueKind: 'stateId',
+  };
+}
+
+function orderCollectionsByOwner<T extends { orderKey: number }>(
+  entries: readonly T[],
+  ownerId: (entry: T) => string,
+  path: string,
+): Array<{ entries: T[]; objectId: string; path: string }> {
+  const grouped = new Map<string, T[]>();
+  for (const entry of entries) {
+    const owner = ownerId(entry);
+    const siblings = grouped.get(owner) ?? [];
+    siblings.push(entry);
+    grouped.set(owner, siblings);
+  }
+  return [...grouped.entries()]
+    .sort(([left], [right]) => compareCodeUnits(left, right))
+    .map(([objectId, siblings]) => ({ entries: siblings, objectId, path }));
+}
+
+function normalizePredicate(
+  predicate: PredicateExpression,
+  depth: number,
+  fieldTypes: ReadonlyMap<string, FieldType>,
+): PredicateExpression {
+  if (depth > STRUCTURAL_LIMITS_V0.maximumExpressionDepth) {
+    throw new CanonicalModelError([
+      diagnostic(
+        'CANON_LIMIT_EXPRESSION_DEPTH',
+        '$',
+        `predicate depth must not exceed ${STRUCTURAL_LIMITS_V0.maximumExpressionDepth}`,
+        'split the predicate into a registered typed capability',
+      ),
+    ]);
+  }
+  if (predicate.kind === 'notPredicate') {
+    return {
+      ...predicate,
+      term: normalizePredicate(predicate.term, depth + 1, fieldTypes),
+    };
+  }
+  if (predicate.kind === 'allPredicate' || predicate.kind === 'anyPredicate') {
+    const terms = predicate.terms
+      .map((term) => normalizePredicate(term, depth + 1, fieldTypes))
+      .sort((left, right) =>
+        compareCodeUnits(canonicalize(left), canonicalize(right)),
+      );
+    return { ...predicate, terms };
+  }
+  if (predicate.kind === 'fieldComparisonPredicate') {
+    return {
+      ...predicate,
+      value: normalizeScalarForField(
+        predicate.value,
+        fieldTypes.get(predicate.field.targetId),
+      ),
+    };
+  }
+  return predicate;
+}
+
+function normalizeScalarForField(
+  value: CanonicalScalar,
+  fieldType: FieldType | undefined,
+): CanonicalScalar {
+  if (value.kind === 'timeValue' && fieldType?.kind === 'timeFieldType') {
+    const [whole, fraction] = value.value.split('.');
+    return {
+      ...value,
+      value:
+        fieldType.precision === 'millisecond'
+          ? `${whole}.${fraction ?? '000'}`
+          : fraction === undefined || fraction === '000'
+            ? whole!
+            : value.value,
+    };
+  }
+  if (
+    value.kind === 'dateTimeValue' &&
+    fieldType?.kind === 'dateTimeFieldType'
+  ) {
+    return {
+      ...value,
+      value: canonicalDateTime(
+        value.value,
+        fieldType.precision,
+        fieldType.timezoneSemantics,
+      ),
+    };
+  }
+  return value;
+}
+
+function canonicalDateTime(
+  value: string,
+  precision: 'second' | 'millisecond',
+  timezoneSemantics: 'utcInstant' | 'offsetDateTime',
+): string {
+  const match =
+    /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{3}))?(Z|[+-]\d{2}:\d{2})$/.exec(
+      value,
+    );
+  if (!match) return value;
+  const fraction = match[2] ?? '000';
+  if (precision === 'second' && fraction !== '000') return value;
+  if (timezoneSemantics === 'offsetDateTime') {
+    const offset = match[3] === 'Z' ? '+00:00' : match[3];
+    return `${match[1]}${precision === 'millisecond' ? `.${fraction}` : ''}${offset}`;
+  }
+  const instant = new Date(value);
+  if (!Number.isFinite(instant.getTime())) return value;
+  const iso = instant.toISOString();
+  if (!/^\d{4}-/.test(iso)) return value;
+  return precision === 'millisecond' ? iso : `${iso.slice(0, 19)}Z`;
+}
+
+function defaultPredicate(): PredicateExpression {
+  return {
+    kind: 'booleanPredicate',
+    schemaVersion: LANGUAGE_VERSION,
+    value: true,
+  };
+}
+
+function isDefaultPredicate(value: unknown): boolean {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    (value as { kind?: unknown }).kind === 'booleanPredicate' &&
+    (value as { value?: unknown }).value === true
+  );
+}
+
+function enforceFamilyBounds(authored: AuthoredApplicationPackage): void {
+  const diagnostics: CanonicalDiagnostic[] = [];
+  for (const [family, maximum] of Object.entries(
+    STRUCTURAL_LIMITS_V0.families,
+  )) {
+    const count =
+      authored[family as keyof typeof STRUCTURAL_LIMITS_V0.families].length;
+    if (count > maximum) {
+      diagnostics.push(
+        diagnostic(
+          'CANON_LIMIT_FAMILY_COUNT',
+          `$.${family}`,
+          `${family} count must not exceed ${maximum}`,
+          'split the package before compilation',
+          authored.package.packageId,
+        ),
+      );
+    }
+  }
+  if (diagnostics.length > 0) throw new CanonicalModelError(diagnostics);
+}
+
+function enforceValueBounds(value: unknown): void {
+  const diagnostics: CanonicalDiagnostic[] = [];
+  const visit = (entry: unknown, path: string): void => {
+    if (typeof entry === 'string') {
+      if ([...entry].length > STRUCTURAL_LIMITS_V0.maximumStringScalars) {
+        diagnostics.push(
+          diagnostic(
+            'CANON_LIMIT_STRING_SCALARS',
+            path,
+            `strings must not exceed ${STRUCTURAL_LIMITS_V0.maximumStringScalars} Unicode scalars`,
+            'use bounded external documentation or a shorter label',
+          ),
+        );
+      }
+      return;
+    }
+    if (Array.isArray(entry)) {
+      if (entry.length > STRUCTURAL_LIMITS_V0.maximumCollectionCount) {
+        diagnostics.push(
+          diagnostic(
+            'CANON_LIMIT_COLLECTION_COUNT',
+            path,
+            `collections must not exceed ${STRUCTURAL_LIMITS_V0.maximumCollectionCount} members`,
+            'split the package or collection',
+          ),
+        );
+      }
+      entry.forEach((child, index) => visit(child, `${path}[${index}]`));
+      return;
+    }
+    if (typeof entry === 'object' && entry !== null) {
+      for (const [key, child] of Object.entries(entry))
+        visit(child, `${path}.${key}`);
+    }
+  };
+  visit(value, '$');
+  if (diagnostics.length > 0) throw new CanonicalModelError(diagnostics);
+}
+
+function referenceIndex(
+  packageRevision: NormalizedApplicationPackage,
+): Map<string, Set<string>> {
+  const capabilities = new Set(
+    packageRevision.capabilityRequirements.map((entry) => entry.capabilityId),
+  );
+  return new Map<string, Set<string>>([
+    [
+      'moduleReference',
+      new Set(packageRevision.modules.map((entry) => entry.moduleId)),
+    ],
+    [
+      'entityReference',
+      new Set(packageRevision.entities.map((entry) => entry.entityId)),
+    ],
+    [
+      'fieldReference',
+      new Set(packageRevision.fields.map((entry) => entry.fieldId)),
+    ],
+    [
+      'stateMachineReference',
+      new Set(packageRevision.stateMachines.map((entry) => entry.machineId)),
+    ],
+    [
+      'stateReference',
+      new Set(
+        packageRevision.stateMachines.flatMap((entry) =>
+          entry.states.map((state) => state.stateId),
+        ),
+      ),
+    ],
+    [
+      'transitionReference',
+      new Set(
+        packageRevision.stateMachines.flatMap((entry) =>
+          entry.transitions.map((transition) => transition.transitionId),
+        ),
+      ),
+    ],
+    [
+      'surfaceReference',
+      new Set(packageRevision.surfaces.map((entry) => entry.surfaceId)),
+    ],
+    [
+      'queryReference',
+      new Set(packageRevision.queries.map((entry) => entry.queryId)),
+    ],
+    [
+      'operationReference',
+      new Set(packageRevision.operations.map((entry) => entry.operationId)),
+    ],
+    [
+      'permissionReference',
+      new Set(packageRevision.permissions.map((entry) => entry.permissionId)),
+    ],
+    [
+      'storageMappingReference',
+      new Set(
+        packageRevision.storageMappings.map((entry) => entry.storageMappingId),
+      ),
+    ],
+    ['capabilityReference', capabilities],
+    ['opaqueSurfaceContentReference', capabilities],
+    ['unitReference', capabilities],
+  ]);
+}
+
+function collectIds(
+  packageRevision: NormalizedApplicationPackage,
+): Record<string, string[]> {
+  return {
+    package: [packageRevision.package.packageId],
+    modules: packageRevision.modules.map((entry) => entry.moduleId),
+    entities: packageRevision.entities.map((entry) => entry.entityId),
+    fields: packageRevision.fields.flatMap((entry) => [
+      entry.fieldId,
+      ...(entry.fieldType.kind === 'enumFieldType'
+        ? entry.fieldType.options.map((option) => option.optionId)
+        : []),
+    ]),
+    relations: packageRevision.relations.map((entry) => entry.relationId),
+    stateMachines: packageRevision.stateMachines.flatMap((entry) => [
+      entry.machineId,
+      entry.stateField.fieldId,
+      ...entry.states.map((state) => state.stateId),
+      ...entry.transitions.map((transition) => transition.transitionId),
+    ]),
+    surfaces: packageRevision.surfaces.flatMap((entry) => [
+      entry.surfaceId,
+      ...entry.slots.map((slot) => slot.slotId),
+    ]),
+    queries: packageRevision.queries.flatMap((entry) => [
+      entry.queryId,
+      ...entry.selections.map((selection) => selection.selectionId),
+    ]),
+    operations: packageRevision.operations.map((entry) => entry.operationId),
+    permissions: packageRevision.permissions.map((entry) => entry.permissionId),
+    assertions: packageRevision.assertions.map((entry) => entry.assertionId),
+    storageMappings: packageRevision.storageMappings.map(
+      (entry) => entry.storageMappingId,
+    ),
+    capabilityRequirements: packageRevision.capabilityRequirements.map(
+      (entry) => entry.capabilityId,
+    ),
+  };
+}
+
+function sortById<T extends Record<K, string>, K extends keyof T>(
+  entries: readonly T[],
+  idKey: K,
+): T[] {
+  return [...entries].sort((left, right) =>
+    compareCodeUnits(left[idKey], right[idKey]),
+  );
+}
+
+function sortByOrderAndId<
+  T extends { orderKey: number } & Record<K, string>,
+  K extends keyof T,
+>(entries: readonly T[], idKey: K): T[] {
+  return [...entries].sort(
+    (left, right) =>
+      left.orderKey - right.orderKey ||
+      compareCodeUnits(left[idKey], right[idKey]),
+  );
+}
+
+function sortByOwnerOrderAndId<
+  T extends { orderKey: number } & Record<K, string>,
+  K extends keyof T,
+>(entries: readonly T[], ownerId: (entry: T) => string, idKey: K): T[] {
+  return [...entries].sort(
+    (left, right) =>
+      compareCodeUnits(ownerId(left), ownerId(right)) ||
+      left.orderKey - right.orderKey ||
+      compareCodeUnits(left[idKey], right[idKey]),
+  );
+}
+
+function sortedStrings<T extends string>(entries: readonly T[]): T[] {
+  return [...entries].sort(compareCodeUnits);
+}
+
+function namespaceOf(id: string): string {
+  return id.slice(0, id.indexOf(':'));
+}
+
+function acceptedAlternativeFor(code: string): string {
+  const alternatives: Record<string, string> = {
+    CANON_KIND_UNSUPPORTED: 'use a documented kind discriminator',
+    CANON_SCHEMA_INVALID:
+      'use the exported authored schema and canonical example',
+    CANON_SURFACE_ARCHETYPE_UNSUPPORTED:
+      'use home, list, record, task, or builder',
+    CANON_SURFACE_SLOT_UNSUPPORTED:
+      'use a named slot declared by the selected archetype',
+    CANON_SURFACE_STATUS_ROLE_UNSUPPORTED:
+      'use success, attention, blocked, or inProgress',
+    CANON_VERSION_UNSUPPORTED: `use ${LANGUAGE_VERSION}`,
+  };
+  return alternatives[code] ?? alternatives.CANON_SCHEMA_INVALID!;
+}
+
+function findObjectId(input: unknown, path: PropertyKey[]): string | null {
+  let current = input;
+  const candidates: unknown[] = [];
+  for (const part of path) {
+    if (typeof current !== 'object' || current === null) break;
+    candidates.push(current);
+    current = (current as Record<PropertyKey, unknown>)[part];
+  }
+  candidates.push(current);
+  for (const candidate of candidates.reverse()) {
+    if (typeof candidate !== 'object' || candidate === null) continue;
+    const object = candidate as Record<string, unknown>;
+    const kind = typeof object.kind === 'string' ? object.kind : null;
+    const identityKey = kind === null ? null : IDENTITY_KEY_BY_KIND[kind];
+    if (identityKey && typeof object[identityKey] === 'string') {
+      return object[identityKey];
+    }
+    for (const key of OWNED_IDENTITY_KEYS) {
+      if (typeof object[key] === 'string') return object[key];
+    }
+  }
+  return null;
+}
+
+const IDENTITY_KEY_BY_KIND: Readonly<Record<string, string>> = Object.freeze({
+  applicationPackageRevision: 'packageId',
+  assertionDefinition: 'assertionId',
+  capabilityRequirement: 'capabilityId',
+  derivedStateField: 'fieldId',
+  entityDefinition: 'entityId',
+  enumOption: 'optionId',
+  fieldDefinition: 'fieldId',
+  moduleDefinition: 'moduleId',
+  operationDefinition: 'operationId',
+  packageDefinition: 'packageId',
+  permissionDefinition: 'permissionId',
+  queryDefinition: 'queryId',
+  querySelection: 'selectionId',
+  relationDefinition: 'relationId',
+  stateDefinition: 'stateId',
+  stateMachineDefinition: 'machineId',
+  storageMappingDefinition: 'storageMappingId',
+  surfaceDefinition: 'surfaceId',
+  surfaceSlot: 'slotId',
+  transitionDefinition: 'transitionId',
+});
+
+const OWNED_IDENTITY_KEYS = Object.freeze([
+  'assertionId',
+  'capabilityId',
+  'entityId',
+  'fieldId',
+  'machineId',
+  'moduleId',
+  'operationId',
+  'optionId',
+  'packageId',
+  'permissionId',
+  'queryId',
+  'relationId',
+  'selectionId',
+  'slotId',
+  'stateId',
+  'storageMappingId',
+  'surfaceId',
+  'transitionId',
+] as const);
+
+function visitPredicate(
+  predicate: PredicateExpression,
+  visit: (
+    reference: CanonicalReference,
+    path: string,
+    expectedKind: 'fieldReference' | 'unitReference',
+  ) => void,
+  path = '',
+): void {
+  if (predicate.kind === 'fieldComparisonPredicate') {
+    visit(predicate.field, `${path}.field`, 'fieldReference');
+    if (predicate.value.kind === 'quantityValue') {
+      visit(
+        predicate.value.baseUnit,
+        `${path}.value.baseUnit`,
+        'unitReference',
+      );
+    }
+  } else if (predicate.kind === 'notPredicate') {
+    visitPredicate(predicate.term, visit, `${path}.term`);
+  } else if (
+    predicate.kind === 'allPredicate' ||
+    predicate.kind === 'anyPredicate'
+  ) {
+    predicate.terms.forEach((term, index) =>
+      visitPredicate(term, visit, `${path}.terms[${index}]`),
+    );
+  }
+}
+
+type FieldComparison = Extract<
+  PredicateExpression,
+  { kind: 'fieldComparisonPredicate' }
+>;
+type NormalizedFieldDefinition = NormalizedApplicationPackage['fields'][number];
+
+function visitFieldComparisons(
+  predicate: PredicateExpression,
+  visit: (comparison: FieldComparison, path: string) => void,
+  path = '',
+): void {
+  if (predicate.kind === 'fieldComparisonPredicate') {
+    visit(predicate, path);
+  } else if (predicate.kind === 'notPredicate') {
+    visitFieldComparisons(predicate.term, visit, `${path}.term`);
+  } else if (
+    predicate.kind === 'allPredicate' ||
+    predicate.kind === 'anyPredicate'
+  ) {
+    predicate.terms.forEach((term, index) =>
+      visitFieldComparisons(term, visit, `${path}.terms[${index}]`),
+    );
+  }
+}
+
+function validateComparisonValue(
+  comparison: FieldComparison,
+  field: NormalizedFieldDefinition | undefined,
+  path: string,
+  objectId: string,
+  diagnostics: CanonicalDiagnostic[],
+): void {
+  if (!field) return;
+  const value = comparison.value;
+  const expectedKind: Record<FieldType['kind'], CanonicalScalar['kind']> = {
+    booleanFieldType: 'booleanValue',
+    dateFieldType: 'dateValue',
+    dateTimeFieldType: 'dateTimeValue',
+    enumFieldType: 'textValue',
+    exactDecimalFieldType: 'exactDecimalValue',
+    integerFieldType: 'integerValue',
+    moneyFieldType: 'moneyValue',
+    quantityFieldType: 'quantityValue',
+    textFieldType: 'textValue',
+    timeFieldType: 'timeValue',
+  };
+  let valid = value.kind === expectedKind[field.fieldType.kind];
+  if (valid) {
+    switch (field.fieldType.kind) {
+      case 'textFieldType':
+        valid =
+          value.kind === 'textValue' &&
+          [...value.value].length <= field.fieldType.maximumLength;
+        break;
+      case 'exactDecimalFieldType':
+        valid =
+          value.kind === 'exactDecimalValue' &&
+          decimalFits(
+            value.value,
+            field.fieldType.precision,
+            field.fieldType.scale,
+          );
+        break;
+      case 'moneyFieldType':
+        valid =
+          value.kind === 'moneyValue' &&
+          value.currencyCode === field.fieldType.currencyCode &&
+          value.minorUnit === field.fieldType.minorUnit &&
+          decimalFits(
+            value.value,
+            field.fieldType.precision,
+            field.fieldType.scale,
+          );
+        break;
+      case 'quantityFieldType':
+        valid =
+          value.kind === 'quantityValue' &&
+          value.baseUnit.kind === 'unitReference' &&
+          value.baseUnit.targetId === field.fieldType.baseUnit.targetId &&
+          decimalFits(
+            value.value,
+            field.fieldType.precision,
+            field.fieldType.scale,
+          );
+        break;
+      case 'timeFieldType':
+        valid =
+          value.kind === 'timeValue' &&
+          (field.fieldType.precision === 'millisecond'
+            ? /^\d{2}:\d{2}:\d{2}\.\d{3}$/.test(value.value)
+            : /^\d{2}:\d{2}:\d{2}$/.test(value.value));
+        break;
+      case 'dateTimeFieldType':
+        valid =
+          value.kind === 'dateTimeValue' &&
+          canonicalDateTimePattern(
+            field.fieldType.precision,
+            field.fieldType.timezoneSemantics,
+          ).test(value.value);
+        break;
+      case 'enumFieldType':
+        valid =
+          value.kind === 'textValue' &&
+          field.fieldType.options.some(
+            (option) => option.optionId === value.value,
+          );
+        break;
+      default:
+        break;
+    }
+  }
+  if (!valid) {
+    diagnostics.push(
+      diagnostic(
+        'CANON_PREDICATE_VALUE_INVALID',
+        path,
+        'a field comparison value matches the field type, precision, scale, currency, timezone, or base-unit contract',
+        `use ${expectedKind[field.fieldType.kind]} encoded for field ${field.fieldId}`,
+        objectId,
+      ),
+    );
+  }
+}
+
+function decimalFits(value: string, precision: number, scale: number): boolean {
+  const unsigned = value.startsWith('-') ? value.slice(1) : value;
+  const [integer, fraction = ''] = unsigned.split('.');
+  const integerDigits = integer === '0' ? 0 : integer!.length;
+  const totalDigits = Math.max(1, integerDigits + fraction.length);
+  return fraction.length <= scale && totalDigits <= precision;
+}
+
+function canonicalDateTimePattern(
+  precision: 'second' | 'millisecond',
+  timezoneSemantics: 'utcInstant' | 'offsetDateTime',
+): RegExp {
+  const fraction = precision === 'millisecond' ? '\\.\\d{3}' : '';
+  const zone = timezoneSemantics === 'utcInstant' ? 'Z' : '[+-]\\d{2}:\\d{2}';
+  return new RegExp(
+    `^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}${fraction}${zone}$`,
+  );
+}
+
+function visitObjects(
+  value: unknown,
+  visit: (object: Record<string, unknown>) => void,
+): void {
+  if (Array.isArray(value)) {
+    value.forEach((entry) => visitObjects(entry, visit));
+  } else if (typeof value === 'object' && value !== null) {
+    const object = value as Record<string, unknown>;
+    visit(object);
+    Object.values(object).forEach((entry) => visitObjects(entry, visit));
+  }
+}
+
+function deepFreeze<T>(value: T): T {
+  if (typeof value === 'object' && value !== null && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    Object.values(value).forEach((entry) => deepFreeze(entry));
+  }
+  return value;
+}

@@ -30,3 +30,8 @@ How to apply: every packet and review prompt names in-scope failures and deferre
 Date: 2026-07-21
 Why: G0-P4b review proved that a correctly named PostgreSQL runtime role could still bypass RLS if its `BYPASSRLS` or superuser capability drifted.
 How to apply: safety-critical transactions verify both role identity and fail-closed capabilities inside the transaction, with a live capability-drift negative test. See `docs/execution/packets/G0-P4b.md`.
+
+## Freeze semantic ownership, not only schema shape
+Date: 2026-07-21
+Why: G1-P1 review found structurally valid state, relation, scalar, order, and diagnostic nodes whose authority or canonical meaning was still ambiguous.
+How to apply: freeze tests must cover derived authority, ownership topology, equivalent scalar spellings, owner-scoped order, and property-order-independent diagnostics. See `docs/execution/packets/G1-P1.md`.
