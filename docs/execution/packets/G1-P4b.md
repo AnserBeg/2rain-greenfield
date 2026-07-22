@@ -3,8 +3,9 @@
 Status: active
 Tier: Critical
 Base: `dbf871dd68bbb5b4ec2abb9e2b2b7a4d407eda87`
-Frozen candidate: `94fa8a4e96d78d20d6eeeb0ca540cdef57032ef2`
-(`REVISE` convergence stop; not evidence-ready)
+Frozen candidate: `c95302d340d31697384f0c27f1beaaed99c0f113`
+(`REVISE` after the user-authorized observability verification; not
+evidence-ready)
 
 ## Goal and scope
 
@@ -245,7 +246,7 @@ surfacing the result.
   integration (4/4), and unit (18/18) tests. The browser scaffold has one
   intentional skip because product browser journeys are out of scope at G1.
 
-### Candidate gates
+### Pre-adjudication candidate gates
 
 The orchestrator independently reran the complete declared gate set at
 `94fa8a4e96d78d20d6eeeb0ca540cdef57032ef2` with a clean worktree:
@@ -297,8 +298,60 @@ before freezing `830763d`. No red gate was hidden as candidate evidence.
   `review-tiers`, no third review/fix hunt is started. Fable was not launched
   because the required Codex PASS was not reached on the identical SHA.
 
-G1-P4b remains `active`, not `evidence_ready`. The remaining finding requires
-user adjudication before any further fix. G1-P5 has not been started.
+### User-adjudicated observability fix and scoped verification
+
+The user adjudicated the remaining finding valid but low-materiality and
+authorized one narrow fix round. Critical-tier writer `gpt-5.6-sol` xhigh
+added a read-only reconciliation inspection derived from the immutable start,
+durable max-age, and durable outcome/verification facts. Alarm presence is
+reported separately and remains idempotent under the existing per-attempt
+primary key. A focused PostgreSQL fault test drops the terminal-outcome commit
+response, proves the alarm row is absent, and uses a fresh pool/service to
+derive `OVERDUE_COMPLETED`. No migration was changed.
+
+The orchestrator independently reran the complete declared gate set at frozen
+candidate `c95302d340d31697384f0c27f1beaaed99c0f113`:
+
+| Gate | Result |
+|---|---|
+| Frozen install | PASS — all 13 workspace projects already up to date |
+| Typecheck | PASS |
+| Lint | PASS |
+| Format | PASS |
+| Build | PASS |
+| Dependency boundaries | PASS — 53 files scanned |
+| Migration/schema drift | PASS — 5 applied, 5 verified; drift clean |
+| Unit | PASS — 18/18 |
+| Compiler | PASS — 21/21 |
+| Integration | PASS — 4/4 |
+| Architecture | PASS — 23/23 |
+| PostgreSQL | PASS — 39/39, including focused P4b 13/13 scenarios and 14/14 TAP tests |
+| Browser | PASS — one intentional scaffold skip |
+| Diff/lease/worktree | PASS — `git diff --check`; four authorized fix files only; clean tree |
+
+The one fresh naive Codex `gpt-5.6-sol` xhigh verification returned
+**REVISE** against the exact charter: "does this fix make the overdue condition
+durably derivable and crash-proof, and did it change anything outside that
+concern?" It found one concrete in-scope false-negative: outcome and
+verification `recorded_at` use PostgreSQL `transaction_timestamp()`. A recovery
+transaction can begin before the deadline, block on the pointer lock across
+the deadline, then insert and commit after it. The inspection treats the
+transaction-start timestamp as completion and permanently reports
+`COMPLETED_WITHIN_MAX_AGE`. The new fault test is non-vacuous for the original
+post-commit/pre-alarm crash window, but starts the outcome transaction only
+after the deadline and therefore does not cover this crossing case. The
+reviewer confirmed that the alarm is non-authoritative and idempotent, that no
+unrelated change was introduced, and reported no future-work findings.
+
+The orchestrator confirmed the timestamp semantics and reachable lock path.
+The authorization was exactly one fix round followed by one scoped Codex
+verification, so no second fix/review cycle was started. Fable was not launched
+because Critical-tier sequencing requires a Codex PASS on the identical SHA.
+
+G1-P4b remains `active`, not `evidence_ready`. The transaction-crossing-deadline
+finding requires user direction before any further fix. The ledger therefore
+remains `active`, doctrine coverage is not advanced, and G1-P5 has not been
+started.
 
 ## Test it yourself
 
@@ -306,12 +359,12 @@ No UI exists in this packet. These commands complete in under ten minutes:
 
 ```bash
 cd /home/rvham/2rain-greenfield-wt/g1-p4b
-git merge-base --is-ancestor 94fa8a4e96d78d20d6eeeb0ca540cdef57032ef2 HEAD
+git merge-base --is-ancestor c95302d340d31697384f0c27f1beaaed99c0f113 HEAD
 corepack pnpm check:schema
 node --import tsx --test test/postgres/release-activation.test.ts
 ```
 
 Expected: 5 migrations apply and verify with clean drift; the focused P4b
-suite reports 12/12 scenarios and 13/13 TAP tests, including the durable-age
-fresh-coordinator and no-receipt/advanced-fence cases. Passing tests do not
-override the unresolved round-2 crash-boundary finding above.
+suite reports 13/13 scenarios and 14/14 TAP tests, including the durable-age
+fresh-coordinator, no-receipt/advanced-fence, and post-commit/no-alarm cases.
+Passing tests do not override the scoped verification finding above.
