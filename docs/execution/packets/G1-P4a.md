@@ -1,6 +1,6 @@
 # G1-P4a — release activation contracts and approval substrate
 
-Status: evidence_ready
+Status: accepted
 Tier: Critical
 Frozen candidate: `c3769eba9ee21b3e2121a59c660e8d648037c73f`
 
@@ -275,3 +275,10 @@ and confirms there is no callable activation/CAS/reconciler path.
 
 Next selectable packet after user acceptance: G1-P4b, the activation kernel
 and crash reconciler. It has not been started.
+
+The user independently reran schema verification, approval service tests 9/9,
+and activation-boundary tests 4/4; then confirmed the real monotonic authority
+substrate, initial-activation binding, exact fence-swap trigger, precreated
+nullable pointers, and mandatory expiry. G1-P4a was accepted on 2026-07-22
+with reviewed SHA `c3769eba9ee21b3e2121a59c660e8d648037c73f` preserved as an
+ancestor of the required non-squash merge.
