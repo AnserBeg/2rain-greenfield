@@ -1,11 +1,3 @@
-# ux-grammar (portable skill draft)
-
-> Portable draft maintained in the prior repository. Adopt as
-> `.agents/skills/ux-grammar/SKILL.md` in the greenfield repository at G1,
-> alongside the surface shell. A skill-guidance test must pin this skill to
-> `docs/greenfield-north-star-erp-platform-plan.md` sections 8.5-8.6 so that
-> drift between the plan, this skill, and the code fails CI.
-
 ---
 name: ux-grammar
 description: Binding UI/UX grammar for the ERP. Read BEFORE writing or
@@ -15,6 +7,13 @@ description: Binding UI/UX grammar for the ERP. Read BEFORE writing or
   transformations, and what customization may never change.
 ---
 
+# ux-grammar
+
+Adopted in the greenfield repository alongside the compiled SurfaceRuntime.
+The executable G1 pin below binds this guidance to plan sections 8.5-8.6 and
+the accepted canonical/runtime vocabulary. Changing the plan, skill, or code
+requires changing all three deliberately; accidental drift fails CI.
+
 ## The one rule
 
 Users customize content, never grammar. The platform owns a closed set of
@@ -22,6 +21,52 @@ screen archetypes; every module — first-party, generated, or tenant-authored �
 is content rendered inside them. If you are about to build a screen that is
 not one of the five archetypes, stop: you are either wrong about the screen,
 or you are proposing a platform change that needs an ADR.
+
+## G1 executable contract pin
+
+This block is machine-read by the skill-guidance and SurfaceRuntime-seam
+architecture tests. It records the exact G1 vocabulary, not the later G2
+promise to render every archetype completely.
+
+<!-- ux-grammar-contract:start -->
+```json
+{
+  "archetypes": ["home", "list", "record", "task", "builder"],
+  "componentPolicy": "closed-own-entry-only",
+  "components": [
+    "northstar.shell:component.error_probe",
+    "northstar.shell:component.release_summary",
+    "northstar.shell:component.setup_checklist"
+  ],
+  "definitionSource": "RequestRuntimeView.projections.surface",
+  "planSections": ["8.5", "8.6"],
+  "runtimeEntrypoint": "apps/web/src/surface-runtime.ts#renderSurfaceRuntime",
+  "schemaVersion": "northstar.ux-grammar-pin/v1",
+  "slots": {
+    "home": ["exceptions", "setupChecklist"],
+    "list": ["title", "savedViews", "dataGrid", "bulkActions"],
+    "record": [
+      "breadcrumb",
+      "titleStatus",
+      "commandBar",
+      "keyFacts",
+      "sections",
+      "childTables",
+      "activity"
+    ],
+    "task": ["decision", "scanInput", "primaryAction"],
+    "builder": [
+      "modeSwitch",
+      "selection",
+      "properties",
+      "draftBanner",
+      "publishDiff"
+    ]
+  },
+  "statusRoles": ["success", "attention", "blocked", "inProgress"]
+}
+```
+<!-- ux-grammar-contract:end -->
 
 ## The five archetypes
 
@@ -60,10 +105,11 @@ Rules that follow:
 
 ## Status grammar
 
-One global color grammar: success (green), attention (amber), blocked/danger
-(red), in progress (blue), neutral (gray). Modules may add states; they may
-never recolor meanings. Status colors resolve only from role tokens — a hex
-literal in surface code is a defect.
+One global color grammar: `success` (green), `attention` (amber), `blocked`
+(red), and `inProgress` (blue). Modules may add states, but every rendered
+state must resolve to one of these closed semantic roles; they may never
+recolor meanings. Status colors resolve only from role tokens — a hex literal
+in surface code is a defect.
 
 ## Weight matches consequence
 
