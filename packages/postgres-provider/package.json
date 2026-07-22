@@ -6,9 +6,13 @@
   "exports": {
     ".": "./src/migrations.ts",
     "./readiness": "./src/readiness.ts",
+    "./release-repository": "./src/release-repository.ts",
     "./request-context": "./src/request-context.ts"
   },
   "dependencies": {
+    "@north-star/canonical-model": "workspace:*",
+    "@north-star/compiler": "workspace:*",
+    "@north-star/platform-runtime": "workspace:*",
     "@north-star/runtime": "workspace:*",
     "pg": "^8.22.0"
   },

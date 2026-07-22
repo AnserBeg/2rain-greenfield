@@ -70,3 +70,18 @@ How to apply: define the admitted active/supported set once conceptually and use
 Date: 2026-07-21
 Why: G1-P2 appended its truncation marker after sorting, violating the frozen structural order even though the output stayed deterministic.
 How to apply: after adding limit, summary, or cascade markers, sort the final emitted diagnostic set by the same versioned structural comparator.
+
+## Keep migration bodies free of transaction-control tokens
+Date: 2026-07-21
+Why: G1-P3's first PL/pgSQL guard used `BEGIN`, and the accepted G0-P4a loader correctly rejected the migration because the runner exclusively owns transactions.
+How to apply: express migration-time guards without transaction-control tokens, and run `loadMigrations` as a focused check before any database suite.
+
+## Validate frozen serialized contracts at runtime
+Date: 2026-07-21
+Why: TypeScript types do not validate serialized frozen contracts crossing a process or persistence boundary.
+How to apply: compare every discriminant, version, and invariant to supported runtime constants, and keep a correlated-mutation negative test.
+
+## Validate structure and derive digests independently
+Date: 2026-07-22
+Why: G1-P3 review found that hash-consistent bytes could still omit required envelope fields or carry mutually consistent semantic-digest claims unrelated to their payload.
+How to apply: validate required runtime shape and recompute semantic digests from canonical payload bytes; use correlated rehashing negatives that leave no registered root. See `docs/execution/packets/G1-P3.md`.

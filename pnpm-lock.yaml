@@ -73,8 +73,19 @@ importers:
 
   packages/observability: {}
 
+  packages/platform-runtime: {}
+
   packages/postgres-provider:
     dependencies:
+      '@north-star/canonical-model':
+        specifier: workspace:*
+        version: link:../canonical-model
+      '@north-star/compiler':
+        specifier: workspace:*
+        version: link:../compiler
+      '@north-star/platform-runtime':
+        specifier: workspace:*
+        version: link:../platform-runtime
       '@north-star/runtime':
         specifier: workspace:*
         version: link:../runtime

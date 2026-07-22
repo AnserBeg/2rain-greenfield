@@ -2,6 +2,136 @@
   "columns": [
     {
       "schema": "platform",
+      "relation": "app_package_revisions",
+      "ordinal_position": 1,
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "app_package_revisions",
+      "ordinal_position": 2,
+      "column_name": "revision_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "app_package_revisions",
+      "ordinal_position": 3,
+      "column_name": "parent_revision_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "app_package_revisions",
+      "ordinal_position": 4,
+      "column_name": "schema_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "app_package_revisions",
+      "ordinal_position": 5,
+      "column_name": "language_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "app_package_revisions",
+      "ordinal_position": 6,
+      "column_name": "normalization_profile_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "app_package_revisions",
+      "ordinal_position": 7,
+      "column_name": "canonicalization_profile_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "app_package_revisions",
+      "ordinal_position": 8,
+      "column_name": "hash_algorithm",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "app_package_revisions",
+      "ordinal_position": 9,
+      "column_name": "content_hash",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "app_package_revisions",
+      "ordinal_position": 10,
+      "column_name": "desired_state",
+      "data_type": "bytea",
+      "udt_name": "bytea",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "app_package_revisions",
+      "ordinal_position": 11,
+      "column_name": "provenance",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "app_package_revisions",
+      "ordinal_position": 12,
+      "column_name": "created_by",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "app_package_revisions",
+      "ordinal_position": 13,
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "transaction_timestamp()"
+    },
+    {
+      "schema": "platform",
       "relation": "environments",
       "ordinal_position": 1,
       "column_name": "tenant_id",
@@ -39,6 +169,76 @@
       "udt_name": "timestamptz",
       "is_nullable": "NO",
       "column_default": "transaction_timestamp()"
+    },
+    {
+      "schema": "platform",
+      "relation": "immutable_release_write_guard",
+      "ordinal_position": 1,
+      "column_name": "attempted_relation",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_artifact_blobs",
+      "ordinal_position": 1,
+      "column_name": "content_hash",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_artifact_blobs",
+      "ordinal_position": 2,
+      "column_name": "artifact_kind",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_artifact_blobs",
+      "ordinal_position": 3,
+      "column_name": "domain_tag",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_artifact_blobs",
+      "ordinal_position": 4,
+      "column_name": "media_type",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_artifact_blobs",
+      "ordinal_position": 5,
+      "column_name": "canonical_bytes",
+      "data_type": "bytea",
+      "udt_name": "bytea",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_artifact_blobs",
+      "ordinal_position": 6,
+      "column_name": "byte_length",
+      "data_type": "integer",
+      "udt_name": "int4",
+      "is_nullable": "NO",
+      "column_default": null
     },
     {
       "schema": "platform",
@@ -82,6 +282,326 @@
     },
     {
       "schema": "platform",
+      "relation": "tenant_release_artifact_links",
+      "ordinal_position": 1,
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_release_artifact_links",
+      "ordinal_position": 2,
+      "column_name": "environment_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_release_artifact_links",
+      "ordinal_position": 3,
+      "column_name": "release_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_release_artifact_links",
+      "ordinal_position": 4,
+      "column_name": "content_hash",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_release_artifact_links",
+      "ordinal_position": 5,
+      "column_name": "artifact_kind",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_release_chunk_links",
+      "ordinal_position": 1,
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_release_chunk_links",
+      "ordinal_position": 2,
+      "column_name": "environment_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_release_chunk_links",
+      "ordinal_position": 3,
+      "column_name": "release_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_release_chunk_links",
+      "ordinal_position": 4,
+      "column_name": "projection_instance_id",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_release_chunk_links",
+      "ordinal_position": 5,
+      "column_name": "chunk_id",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_release_chunk_links",
+      "ordinal_position": 6,
+      "column_name": "chunk_hash",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_release_chunk_links",
+      "ordinal_position": 7,
+      "column_name": "artifact_kind",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": "'projectionChunk'::text"
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_release_projection_links",
+      "ordinal_position": 1,
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_release_projection_links",
+      "ordinal_position": 2,
+      "column_name": "environment_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_release_projection_links",
+      "ordinal_position": 3,
+      "column_name": "release_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_release_projection_links",
+      "ordinal_position": 4,
+      "column_name": "projection_instance_id",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_release_projection_links",
+      "ordinal_position": 5,
+      "column_name": "projection_family_id",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_release_projection_links",
+      "ordinal_position": 6,
+      "column_name": "projection_manifest_hash",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_release_projection_links",
+      "ordinal_position": 7,
+      "column_name": "artifact_kind",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": "'projectionManifest'::text"
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_releases",
+      "ordinal_position": 1,
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_releases",
+      "ordinal_position": 2,
+      "column_name": "environment_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_releases",
+      "ordinal_position": 3,
+      "column_name": "release_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_releases",
+      "ordinal_position": 4,
+      "column_name": "app_package_revision_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_releases",
+      "ordinal_position": 5,
+      "column_name": "compiler_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_releases",
+      "ordinal_position": 6,
+      "column_name": "compiler_semantic_profile_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_releases",
+      "ordinal_position": 7,
+      "column_name": "output_protocol_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_releases",
+      "ordinal_position": 8,
+      "column_name": "content_hash",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_releases",
+      "ordinal_position": 9,
+      "column_name": "release_manifest_kind",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": "'releaseManifest'::text"
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_releases",
+      "ordinal_position": 10,
+      "column_name": "compiler_attestation_digest",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_releases",
+      "ordinal_position": 11,
+      "column_name": "verification_evidence_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_releases",
+      "ordinal_position": 12,
+      "column_name": "created_by",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_releases",
+      "ordinal_position": 13,
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "transaction_timestamp()"
+    },
+    {
+      "schema": "platform",
       "relation": "tenants",
       "ordinal_position": 1,
       "column_name": "id",
@@ -114,6 +634,62 @@
   "constraints": [
     {
       "schema": "platform",
+      "relation": "app_package_revisions",
+      "name": "app_package_revisions_desired_state_not_empty",
+      "type": "c",
+      "definition": "CHECK (octet_length(desired_state) > 0)"
+    },
+    {
+      "schema": "platform",
+      "relation": "app_package_revisions",
+      "name": "app_package_revisions_parent_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, parent_revision_id) REFERENCES platform.app_package_revisions(tenant_id, revision_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "app_package_revisions",
+      "name": "app_package_revisions_pkey",
+      "type": "p",
+      "definition": "PRIMARY KEY (tenant_id, revision_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "app_package_revisions",
+      "name": "app_package_revisions_provenance_not_blank",
+      "type": "c",
+      "definition": "CHECK (btrim(provenance) <> ''::text)"
+    },
+    {
+      "schema": "platform",
+      "relation": "app_package_revisions",
+      "name": "app_package_revisions_revision_id_unique",
+      "type": "u",
+      "definition": "UNIQUE (revision_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "app_package_revisions",
+      "name": "app_package_revisions_sha256",
+      "type": "c",
+      "definition": "CHECK (hash_algorithm = 'sha256'::text AND content_hash ~ '^[0-9a-f]{64}$'::text)"
+    },
+    {
+      "schema": "platform",
+      "relation": "app_package_revisions",
+      "name": "app_package_revisions_tenant_id_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id) REFERENCES platform.tenants(id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "app_package_revisions",
+      "name": "app_package_revisions_versions_not_blank",
+      "type": "c",
+      "definition": "CHECK (btrim(schema_version) <> ''::text AND btrim(language_version) <> ''::text AND btrim(normalization_profile_version) <> ''::text AND btrim(canonicalization_profile_version) <> ''::text)"
+    },
+    {
+      "schema": "platform",
       "relation": "environments",
       "name": "environments_pkey",
       "type": "p",
@@ -142,6 +718,62 @@
     },
     {
       "schema": "platform",
+      "relation": "immutable_release_write_guard",
+      "name": "immutable_release_write_guard_reject",
+      "type": "c",
+      "definition": "CHECK (false)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_artifact_blobs",
+      "name": "release_artifact_blobs_domain_not_blank",
+      "type": "c",
+      "definition": "CHECK (btrim(domain_tag) <> ''::text)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_artifact_blobs",
+      "name": "release_artifact_blobs_identity_unique",
+      "type": "u",
+      "definition": "UNIQUE (content_hash, artifact_kind)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_artifact_blobs",
+      "name": "release_artifact_blobs_kind",
+      "type": "c",
+      "definition": "CHECK (artifact_kind = ANY (ARRAY['projectionChunk'::text, 'projectionManifest'::text, 'releaseManifest'::text]))"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_artifact_blobs",
+      "name": "release_artifact_blobs_length",
+      "type": "c",
+      "definition": "CHECK (byte_length > 0 AND byte_length = octet_length(canonical_bytes))"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_artifact_blobs",
+      "name": "release_artifact_blobs_media_type",
+      "type": "c",
+      "definition": "CHECK (media_type = 'application/vnd.northstar.canonical+json'::text)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_artifact_blobs",
+      "name": "release_artifact_blobs_pkey",
+      "type": "p",
+      "definition": "PRIMARY KEY (content_hash)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_artifact_blobs",
+      "name": "release_artifact_blobs_sha256",
+      "type": "c",
+      "definition": "CHECK (content_hash ~ '^[0-9a-f]{64}$'::text)"
+    },
+    {
+      "schema": "platform",
       "relation": "tenant_fixture_records",
       "name": "tenant_fixture_environment_fkey",
       "type": "f",
@@ -160,6 +792,174 @@
       "name": "tenant_fixture_records_pkey",
       "type": "p",
       "definition": "PRIMARY KEY (tenant_id, environment_id, id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_release_artifact_links",
+      "name": "tenant_release_artifact_links_blob_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (content_hash, artifact_kind) REFERENCES platform.release_artifact_blobs(content_hash, artifact_kind)"
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_release_artifact_links",
+      "name": "tenant_release_artifact_links_identity_kind_unique",
+      "type": "u",
+      "definition": "UNIQUE (tenant_id, environment_id, release_id, content_hash, artifact_kind)"
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_release_artifact_links",
+      "name": "tenant_release_artifact_links_non_root",
+      "type": "c",
+      "definition": "CHECK (artifact_kind = ANY (ARRAY['projectionChunk'::text, 'projectionManifest'::text]))"
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_release_artifact_links",
+      "name": "tenant_release_artifact_links_pkey",
+      "type": "p",
+      "definition": "PRIMARY KEY (tenant_id, environment_id, release_id, content_hash)"
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_release_artifact_links",
+      "name": "tenant_release_artifact_links_release_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, release_id) REFERENCES platform.tenant_releases(tenant_id, environment_id, release_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_release_chunk_links",
+      "name": "tenant_release_chunk_links_artifact_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, release_id, chunk_hash, artifact_kind) REFERENCES platform.tenant_release_artifact_links(tenant_id, environment_id, release_id, content_hash, artifact_kind)"
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_release_chunk_links",
+      "name": "tenant_release_chunk_links_id_not_blank",
+      "type": "c",
+      "definition": "CHECK (btrim(chunk_id) <> ''::text)"
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_release_chunk_links",
+      "name": "tenant_release_chunk_links_kind",
+      "type": "c",
+      "definition": "CHECK (artifact_kind = 'projectionChunk'::text)"
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_release_chunk_links",
+      "name": "tenant_release_chunk_links_pkey",
+      "type": "p",
+      "definition": "PRIMARY KEY (tenant_id, environment_id, release_id, projection_instance_id, chunk_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_release_chunk_links",
+      "name": "tenant_release_chunk_links_projection_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, release_id, projection_instance_id) REFERENCES platform.tenant_release_projection_links(tenant_id, environment_id, release_id, projection_instance_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_release_projection_links",
+      "name": "tenant_release_projection_links_artifact_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, release_id, projection_manifest_hash, artifact_kind) REFERENCES platform.tenant_release_artifact_links(tenant_id, environment_id, release_id, content_hash, artifact_kind)"
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_release_projection_links",
+      "name": "tenant_release_projection_links_artifact_unique",
+      "type": "u",
+      "definition": "UNIQUE (tenant_id, environment_id, release_id, projection_manifest_hash)"
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_release_projection_links",
+      "name": "tenant_release_projection_links_kind",
+      "type": "c",
+      "definition": "CHECK (artifact_kind = 'projectionManifest'::text)"
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_release_projection_links",
+      "name": "tenant_release_projection_links_names_not_blank",
+      "type": "c",
+      "definition": "CHECK (btrim(projection_instance_id) <> ''::text AND btrim(projection_family_id) <> ''::text)"
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_release_projection_links",
+      "name": "tenant_release_projection_links_pkey",
+      "type": "p",
+      "definition": "PRIMARY KEY (tenant_id, environment_id, release_id, projection_instance_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_releases",
+      "name": "tenant_releases_environment_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id) REFERENCES platform.environments(tenant_id, id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_releases",
+      "name": "tenant_releases_manifest_blob_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (content_hash, release_manifest_kind) REFERENCES platform.release_artifact_blobs(content_hash, artifact_kind)"
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_releases",
+      "name": "tenant_releases_manifest_kind",
+      "type": "c",
+      "definition": "CHECK (release_manifest_kind = 'releaseManifest'::text)"
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_releases",
+      "name": "tenant_releases_pkey",
+      "type": "p",
+      "definition": "PRIMARY KEY (tenant_id, environment_id, release_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_releases",
+      "name": "tenant_releases_release_id_unique",
+      "type": "u",
+      "definition": "UNIQUE (release_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_releases",
+      "name": "tenant_releases_revision_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, app_package_revision_id) REFERENCES platform.app_package_revisions(tenant_id, revision_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_releases",
+      "name": "tenant_releases_sha256",
+      "type": "c",
+      "definition": "CHECK (content_hash ~ '^[0-9a-f]{64}$'::text AND compiler_attestation_digest ~ '^[0-9a-f]{64}$'::text)"
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_releases",
+      "name": "tenant_releases_verification_evidence_id_unique",
+      "type": "u",
+      "definition": "UNIQUE (verification_evidence_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_releases",
+      "name": "tenant_releases_versions_not_blank",
+      "type": "c",
+      "definition": "CHECK (btrim(compiler_version) <> ''::text AND btrim(compiler_semantic_profile_version) <> ''::text AND btrim(output_protocol_version) <> ''::text)"
     },
     {
       "schema": "platform",
@@ -186,6 +986,18 @@
   "indexes": [
     {
       "schema": "platform",
+      "relation": "app_package_revisions",
+      "name": "app_package_revisions_pkey",
+      "definition": "CREATE UNIQUE INDEX app_package_revisions_pkey ON platform.app_package_revisions USING btree (tenant_id, revision_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "app_package_revisions",
+      "name": "app_package_revisions_revision_id_unique",
+      "definition": "CREATE UNIQUE INDEX app_package_revisions_revision_id_unique ON platform.app_package_revisions USING btree (revision_id)"
+    },
+    {
+      "schema": "platform",
       "relation": "environments",
       "name": "environments_pkey",
       "definition": "CREATE UNIQUE INDEX environments_pkey ON platform.environments USING btree (tenant_id, id)"
@@ -198,9 +1010,69 @@
     },
     {
       "schema": "platform",
+      "relation": "release_artifact_blobs",
+      "name": "release_artifact_blobs_identity_unique",
+      "definition": "CREATE UNIQUE INDEX release_artifact_blobs_identity_unique ON platform.release_artifact_blobs USING btree (content_hash, artifact_kind)"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_artifact_blobs",
+      "name": "release_artifact_blobs_pkey",
+      "definition": "CREATE UNIQUE INDEX release_artifact_blobs_pkey ON platform.release_artifact_blobs USING btree (content_hash)"
+    },
+    {
+      "schema": "platform",
       "relation": "tenant_fixture_records",
       "name": "tenant_fixture_records_pkey",
       "definition": "CREATE UNIQUE INDEX tenant_fixture_records_pkey ON platform.tenant_fixture_records USING btree (tenant_id, environment_id, id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_release_artifact_links",
+      "name": "tenant_release_artifact_links_identity_kind_unique",
+      "definition": "CREATE UNIQUE INDEX tenant_release_artifact_links_identity_kind_unique ON platform.tenant_release_artifact_links USING btree (tenant_id, environment_id, release_id, content_hash, artifact_kind)"
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_release_artifact_links",
+      "name": "tenant_release_artifact_links_pkey",
+      "definition": "CREATE UNIQUE INDEX tenant_release_artifact_links_pkey ON platform.tenant_release_artifact_links USING btree (tenant_id, environment_id, release_id, content_hash)"
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_release_chunk_links",
+      "name": "tenant_release_chunk_links_pkey",
+      "definition": "CREATE UNIQUE INDEX tenant_release_chunk_links_pkey ON platform.tenant_release_chunk_links USING btree (tenant_id, environment_id, release_id, projection_instance_id, chunk_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_release_projection_links",
+      "name": "tenant_release_projection_links_artifact_unique",
+      "definition": "CREATE UNIQUE INDEX tenant_release_projection_links_artifact_unique ON platform.tenant_release_projection_links USING btree (tenant_id, environment_id, release_id, projection_manifest_hash)"
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_release_projection_links",
+      "name": "tenant_release_projection_links_pkey",
+      "definition": "CREATE UNIQUE INDEX tenant_release_projection_links_pkey ON platform.tenant_release_projection_links USING btree (tenant_id, environment_id, release_id, projection_instance_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_releases",
+      "name": "tenant_releases_pkey",
+      "definition": "CREATE UNIQUE INDEX tenant_releases_pkey ON platform.tenant_releases USING btree (tenant_id, environment_id, release_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_releases",
+      "name": "tenant_releases_release_id_unique",
+      "definition": "CREATE UNIQUE INDEX tenant_releases_release_id_unique ON platform.tenant_releases USING btree (release_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_releases",
+      "name": "tenant_releases_verification_evidence_id_unique",
+      "definition": "CREATE UNIQUE INDEX tenant_releases_verification_evidence_id_unique ON platform.tenant_releases USING btree (verification_evidence_id)"
     },
     {
       "schema": "platform",
@@ -218,6 +1090,26 @@
   "policies": [
     {
       "schema": "platform",
+      "relation": "app_package_revisions",
+      "name": "app_package_revisions_insert_trusted_context",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_runtime}",
+      "cmd": "INSERT",
+      "qual": null,
+      "with_check": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid IS NOT NULL) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))"
+    },
+    {
+      "schema": "platform",
+      "relation": "app_package_revisions",
+      "name": "app_package_revisions_select_trusted_context",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_runtime}",
+      "cmd": "SELECT",
+      "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid IS NOT NULL) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))",
+      "with_check": null
+    },
+    {
+      "schema": "platform",
       "relation": "tenant_fixture_records",
       "name": "tenant_fixture_trusted_context",
       "permissive": "PERMISSIVE",
@@ -225,9 +1117,96 @@
       "cmd": "ALL",
       "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))",
       "with_check": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))"
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_release_artifact_links",
+      "name": "tenant_release_artifact_links_insert_trusted_context",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_runtime}",
+      "cmd": "INSERT",
+      "qual": null,
+      "with_check": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))"
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_release_artifact_links",
+      "name": "tenant_release_artifact_links_select_trusted_context",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_runtime}",
+      "cmd": "SELECT",
+      "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))",
+      "with_check": null
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_release_chunk_links",
+      "name": "tenant_release_chunk_links_insert_trusted_context",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_runtime}",
+      "cmd": "INSERT",
+      "qual": null,
+      "with_check": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))"
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_release_chunk_links",
+      "name": "tenant_release_chunk_links_select_trusted_context",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_runtime}",
+      "cmd": "SELECT",
+      "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))",
+      "with_check": null
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_release_projection_links",
+      "name": "tenant_release_projection_links_insert_trusted_context",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_runtime}",
+      "cmd": "INSERT",
+      "qual": null,
+      "with_check": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))"
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_release_projection_links",
+      "name": "tenant_release_projection_links_select_trusted_context",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_runtime}",
+      "cmd": "SELECT",
+      "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))",
+      "with_check": null
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_releases",
+      "name": "tenant_releases_insert_trusted_context",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_runtime}",
+      "cmd": "INSERT",
+      "qual": null,
+      "with_check": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))"
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_releases",
+      "name": "tenant_releases_select_trusted_context",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_runtime}",
+      "cmd": "SELECT",
+      "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))",
+      "with_check": null
     }
   ],
   "relations": [
+    {
+      "schema": "platform",
+      "relation": "app_package_revisions",
+      "kind": "r",
+      "row_level_security": true,
+      "force_row_level_security": true
+    },
     {
       "schema": "platform",
       "relation": "environments",
@@ -237,7 +1216,49 @@
     },
     {
       "schema": "platform",
+      "relation": "immutable_release_write_guard",
+      "kind": "r",
+      "row_level_security": false,
+      "force_row_level_security": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_artifact_blobs",
+      "kind": "r",
+      "row_level_security": false,
+      "force_row_level_security": false
+    },
+    {
+      "schema": "platform",
       "relation": "tenant_fixture_records",
+      "kind": "r",
+      "row_level_security": true,
+      "force_row_level_security": true
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_release_artifact_links",
+      "kind": "r",
+      "row_level_security": true,
+      "force_row_level_security": true
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_release_chunk_links",
+      "kind": "r",
+      "row_level_security": true,
+      "force_row_level_security": true
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_release_projection_links",
+      "kind": "r",
+      "row_level_security": true,
+      "force_row_level_security": true
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_releases",
       "kind": "r",
       "row_level_security": true,
       "force_row_level_security": true
