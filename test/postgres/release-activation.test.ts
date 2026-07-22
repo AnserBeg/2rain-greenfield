@@ -526,6 +526,157 @@ test('G1-P4b atomic activation, reconciliation, rollback, and invalidation', asy
         );
 
         await t.test(
+          'blocked recovery records completion at statement time after its deadline',
+          async () => {
+            const before = await pointer(pool, tenantA, environmentA);
+            const attemptA = await prepareApproval(
+              webPool,
+              approverContextA,
+              makerContextA,
+              releaseOtherThan(releasesA, before.releaseId, 0),
+            );
+            const attemptB = await prepareApproval(
+              webPool,
+              approverContextA,
+              makerContextA,
+              releaseOtherThan(releasesA, before.releaseId, 1),
+            );
+            const maxAgeMilliseconds = 3_000;
+            const boundedService = new PostgresReleaseActivationService(
+              webPool,
+              { reconciliationMaxAgeMilliseconds: maxAgeMilliseconds },
+            );
+            assert.equal(
+              (
+                await boundedService.reconcileActivation(
+                  systemContextA,
+                  attemptA,
+                )
+              ).status,
+              'RECONCILING',
+            );
+            const pending = await boundedService.inspectReconciliationState(
+              systemContextA,
+              attemptA,
+            );
+            assert.equal(pending.state, 'PENDING');
+            assert.ok(pending.deadlineAt);
+
+            assert.equal(
+              (await boundedService.activate(systemContextA, attemptB)).status,
+              'SWAPPED_VERIFIED',
+            );
+            const generationB = await pointer(pool, tenantA, environmentA);
+            const applicationName = `g1-p4b-blocked-${randomUUID()}`;
+            const recoveryPool = runtimePool(
+              { ...connection, application_name: applicationName },
+              1,
+            );
+            const blocker = await pool.connect();
+            let blockerTransactionOpen = false;
+            let recovery: Promise<ActivationKernelResult> | undefined =
+              undefined;
+            try {
+              await blocker.query('BEGIN');
+              blockerTransactionOpen = true;
+              const blockerIdentity = await blocker.query<{ pid: number }>(
+                `SELECT pg_backend_pid() AS pid`,
+              );
+              const blockerPid = blockerIdentity.rows[0]?.pid;
+              assert.ok(blockerPid);
+              await blocker.query(
+                `SELECT pointer_id
+                   FROM platform.active_release_pointers
+                  WHERE tenant_id = $1
+                    AND environment_id = $2
+                    AND pointer_id = $3
+                  FOR UPDATE`,
+                [tenantA, environmentA, generationB.pointerId],
+              );
+
+              const recoveryService = new PostgresReleaseActivationService(
+                recoveryPool,
+              );
+              recovery = recoveryService.reconcileActivation(
+                systemContextA,
+                attemptA,
+              );
+              const blocked = await waitForBlockedRecoveryTransaction(
+                pool,
+                applicationName,
+                blockerPid,
+                pending.deadlineAt,
+              );
+              assert.equal(blocked.beganBeforeDeadline, true);
+              assert.equal(blocked.blockedBeforeDeadline, true);
+              assert.ok(blocked.transactionStartedAt < pending.deadlineAt);
+              assert.ok(blocked.observedAt < pending.deadlineAt);
+
+              const crossedAt = await waitForPostgresDeadline(
+                blocker,
+                pending.deadlineAt,
+              );
+              assert.ok(crossedAt >= pending.deadlineAt);
+              await blocker.query('COMMIT');
+              blockerTransactionOpen = false;
+
+              const recovered = await recovery;
+              assert.equal(recovered.decisiveOutcomeCode, 'LOST_RACE');
+              assert.equal(recovered.status, 'NO_SWAP_TERMINAL');
+              assert.deepEqual(
+                await pointer(pool, tenantA, environmentA),
+                generationB,
+              );
+
+              const completion = await pool.query<{
+                after_deadline: boolean;
+                outcome_code: string;
+                recorded_at: Date;
+              }>(
+                `SELECT outcome_code,
+                        recorded_at,
+                        recorded_at >= $2::timestamptz AS after_deadline
+                   FROM platform.release_activation_attempt_outcomes
+                  WHERE activation_attempt_id = $1`,
+                [attemptA.activationAttemptId, pending.deadlineAt],
+              );
+              assert.equal(completion.rows.length, 1);
+              assert.equal(completion.rows[0]?.outcome_code, 'LOST_RACE');
+              assert.equal(completion.rows[0]?.after_deadline, true);
+              assert.ok(completion.rows[0]);
+              assert.ok(
+                completion.rows[0].recorded_at.toISOString() >
+                  blocked.transactionStartedAt,
+              );
+
+              const observerPool = runtimePool(connection, 1);
+              try {
+                const freshObserver = new PostgresReleaseActivationService(
+                  observerPool,
+                );
+                const overdue = await freshObserver.inspectReconciliationState(
+                  systemContextA,
+                  attemptA,
+                );
+                assert.equal(overdue.state, 'OVERDUE_COMPLETED');
+                assert.equal(overdue.overdue, true);
+                assert.equal(
+                  overdue.completionAt,
+                  completion.rows[0].recorded_at.toISOString(),
+                );
+              } finally {
+                await observerPool.end();
+              }
+            } finally {
+              if (blockerTransactionOpen) await blocker.query('ROLLBACK');
+              if (recovery) await recovery.catch(() => undefined);
+              blocker.release();
+              await recoveryPool.end();
+            }
+          },
+        );
+
+        await t.test(
           'same tenant/different environments and two tenants activate independently',
           async () => {
             const beforeA2 = await pointer(pool, tenantA, environmentA2);
@@ -1702,6 +1853,72 @@ async function waitForReceipt(
     await new Promise((resolveDelay) => setTimeout(resolveDelay, 10));
   }
   assert.fail('swap receipt did not become visible after commit-response loss');
+}
+
+async function waitForBlockedRecoveryTransaction(
+  pool: pg.Pool,
+  applicationName: string,
+  blockerPid: number,
+  deadlineAt: string,
+): Promise<{
+  beganBeforeDeadline: boolean;
+  blockedBeforeDeadline: boolean;
+  observedAt: string;
+  transactionStartedAt: string;
+}> {
+  const startedAt = performance.now();
+  while (performance.now() - startedAt < 5_000) {
+    const result = await pool.query<{
+      began_before_deadline: boolean;
+      blocked_before_deadline: boolean;
+      observed_at: Date;
+      transaction_started_at: Date;
+    }>(
+      `SELECT activity.xact_start AS transaction_started_at,
+              clock_timestamp() AS observed_at,
+              activity.xact_start < $3::timestamptz AS began_before_deadline,
+              clock_timestamp() < $3::timestamptz AS blocked_before_deadline
+         FROM pg_catalog.pg_stat_activity AS activity
+        WHERE activity.application_name = $1
+          AND activity.wait_event_type = 'Lock'
+          AND $2::integer = ANY(pg_catalog.pg_blocking_pids(activity.pid))
+        ORDER BY activity.xact_start
+        LIMIT 1`,
+      [applicationName, blockerPid, deadlineAt],
+    );
+    const row = result.rows[0];
+    if (row) {
+      return {
+        beganBeforeDeadline: row.began_before_deadline,
+        blockedBeforeDeadline: row.blocked_before_deadline,
+        observedAt: row.observed_at.toISOString(),
+        transactionStartedAt: row.transaction_started_at.toISOString(),
+      };
+    }
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 10));
+  }
+  assert.fail('recovery transaction did not block on the pointer row');
+}
+
+async function waitForPostgresDeadline(
+  client: pg.PoolClient,
+  deadlineAt: string,
+): Promise<string> {
+  const startedAt = performance.now();
+  while (performance.now() - startedAt < 10_000) {
+    const result = await client.query<{
+      crossed: boolean;
+      observed_at: Date;
+    }>(
+      `SELECT clock_timestamp() AS observed_at,
+              clock_timestamp() >= $1::timestamptz AS crossed`,
+      [deadlineAt],
+    );
+    const observed = result.rows[0];
+    if (observed?.crossed) return observed.observed_at.toISOString();
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 25));
+  }
+  assert.fail('PostgreSQL clock did not cross the reconciliation deadline');
 }
 
 async function withCommitDroppingProxy<T>(

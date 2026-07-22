@@ -353,10 +353,11 @@ export class PostgresReleaseActivationService {
                artifact_availability_passed,
                release_kernel_invariants_passed,
                warning_count,
-               status
+               status,
+               recorded_at
              ) VALUES (
                $1, $2, $3, $4, $5, $6, $7, $8,
-               $9, $10, $11, 0, $12
+               $9, $10, $11, 0, $12, clock_timestamp()
              )
              RETURNING pointer_id, activated_release_id, fence, status`,
             [
@@ -862,9 +863,10 @@ export class PostgresReleaseActivationService {
                activation_attempt_id,
                start_receipt_id,
                start_receipt_version,
-               max_age_milliseconds
+               max_age_milliseconds,
+               started_at
              )
-             SELECT $1, $2, $3, $4, $5, $6
+             SELECT $1, $2, $3, $4, $5, $6, clock_timestamp()
               WHERE NOT EXISTS (
                 SELECT 1
                   FROM platform.release_activation_reconciliation_starts AS existing
@@ -1504,10 +1506,12 @@ async function insertTerminalOutcome(
        workflow_disposition,
        workflow_status,
        terminal,
-       outcome_digest
+       outcome_digest,
+       recorded_at
      )
      SELECT $1, $2, $3, $4, $5, $6,
-            'NOT_SWAPPED', 'NOT_RUN', 'CONSUMED', $7, true, $8
+            'NOT_SWAPPED', 'NOT_RUN', 'CONSUMED', $7, true, $8,
+            clock_timestamp()
       WHERE NOT EXISTS (
         SELECT 1
           FROM platform.release_activation_swap_receipts AS receipt
@@ -1681,10 +1685,12 @@ async function insertCommittedSwapFacts(
        workflow_disposition,
        workflow_status,
        terminal,
-       outcome_digest
+       outcome_digest,
+       recorded_at
      ) VALUES (
        $1, $2, $3, $4, $5, 'SWAPPED',
-       'SWAPPED', 'NOT_RUN', 'CONSUMED', 'RUNNING', false, $6
+       'SWAPPED', 'NOT_RUN', 'CONSUMED', 'RUNNING', false, $6,
+       clock_timestamp()
      )`,
     [
       context.tenantId,
