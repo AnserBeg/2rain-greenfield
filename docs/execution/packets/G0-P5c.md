@@ -66,3 +66,16 @@ temporary Git repository containing the synthetic fixture is required to fail
 with the configured rule identifier. CI retains the complete evidence directory
 with an `always()` upload step.
 
+## Outcome
+
+The CI workflow now has a dedicated security job. It performs a frozen install,
+runs `pnpm audit` with a high-severity failure threshold, scans complete Git
+history with the official Gitleaks image pinned by immutable digest, and uploads
+all reports for seven days under `if: always()`.
+
+The same runner creates a disposable Git repository, assembles and commits a
+synthetic marker without storing a complete test secret in this repository,
+and requires the real scanner to return exit 1 with the configured rule ID.
+The normal repository scan and the negative proof share the same extended
+Gitleaks policy. No package manifest, lockfile, runtime source, or G1-owned path
+changed.
