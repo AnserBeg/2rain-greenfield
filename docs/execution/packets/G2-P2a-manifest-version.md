@@ -3,9 +3,9 @@
 Status: evidence_ready
 Tier: Critical
 Branch: `fix/g2-p2a-manifest-version`
-Frozen candidate: _this commit_ (resolved to the branch-tip SHA at handoff)
-Review: pending — fresh Codex xhigh, then Fable max on the identical unchanged
-SHA
+Frozen candidate: `eaba9772477b9888b345a4ccb10e88be02f96e27`
+Review: PASS — fresh Codex `gpt-5.6-sol` xhigh, then Fable max on the
+identical unchanged SHA
 
 ## Root cause and invariant
 
@@ -94,9 +94,12 @@ shorthand; no test was changed or selectively rerun to manufacture that count.
 
 ## Review status and limitations
 
-The frozen candidate is awaiting the required fresh Codex xhigh review and
-Fable max confirmation on the identical unchanged SHA. Until both pass and the
-orchestrator accepts it, this corrective packet remains `evidence_ready`.
+Fresh naive Codex `gpt-5.6-sol` xhigh returned PASS on all four decisive
+questions for `eaba9772477b9888b345a4ccb10e88be02f96e27`: one canonical
+version authority, deterministic golden consequences with Freeze-B coverage
+preserved, compiler and unchanged PostgreSQL suites green, and no scope drift.
+Fable max independently returned PASS with no findings on the identical SHA.
+The packet remains `evidence_ready` pending user acceptance.
 
 This packet corrects only persisted release-envelope version authority and its
 deterministic release-level consequences. It does not implement or test the
