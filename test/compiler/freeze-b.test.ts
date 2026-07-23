@@ -3,6 +3,10 @@ import test from 'node:test';
 
 import {
   CanonicalIdSchema,
+  LANGUAGE_VERSION,
+  LEGACY_LANGUAGE_VERSION,
+  LEGACY_NORMALIZATION_PROFILE_VERSION,
+  NORMALIZATION_PROFILE_VERSION,
   canonicalize,
 } from '../../packages/canonical-model/src/index.js';
 import {
@@ -65,6 +69,25 @@ test('bootstrap emits one complete hierarchical release with no tenant identity'
     );
     assert.equal(projection.compatibility.unknownRequiredFamily, 'reject');
   }
+});
+
+test('release manifests derive current versions from canonical authority for legacy compiler input', () => {
+  const input = compilerInput(fixtureBytes('bootstrap'));
+  assert.equal(input.profile.languageVersion, LEGACY_LANGUAGE_VERSION);
+  assert.equal(
+    input.profile.normalizationProfileVersion,
+    LEGACY_NORMALIZATION_PROFILE_VERSION,
+  );
+
+  const compiled = mustCompile(input);
+  assert.equal(
+    compiled.bundle.releaseManifest.languageVersion,
+    LANGUAGE_VERSION,
+  );
+  assert.equal(
+    compiled.bundle.releaseManifest.normalizationProfileVersion,
+    NORMALIZATION_PROFILE_VERSION,
+  );
 });
 
 test('identical input is byte-identical across deterministic schedules', () => {

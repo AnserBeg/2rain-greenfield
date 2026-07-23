@@ -105,3 +105,8 @@ How to apply: derive deadlines and completion from durable database facts record
 Date: 2026-07-22
 Why: `transaction_timestamp()` and `now()` are transaction-start values that misclassify a transaction blocked across a deadline. This class recurred after the G1-P4 approval-expiry debate in the G1-P4b overdue derivation.
 How to apply: use `clock_timestamp()` for deadline, expiry, and overdue logic and every persisted timestamp it consumes; transaction-start time remains valid for audit-column defaults. Reviewers should check for this class. See `docs/execution/packets/G1-P4b.md`.
+
+## Derive persisted envelope versions from canonical authority
+Date: 2026-07-23
+Why: G2-P2a copied legacy-compatible compiler-input versions into a current persisted release envelope, causing downstream PostgreSQL registration to reject it.
+How to apply: derive cross-layer persisted envelope language/profile versions from canonical constants; when compiler roots or persisted metadata change, run downstream PostgreSQL registration suites before acceptance. See [G2-P2a-fix](docs/execution/packets/G2-P2a-manifest-version.md).
