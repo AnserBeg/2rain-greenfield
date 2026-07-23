@@ -117,6 +117,12 @@ silently.
 - When touched: dependency-boundary tests, PostgreSQL provider tests,
   surface-grammar conformance (exists from G2), agent evaluations (once the
   harness exists).
+- If a packet changes compiler or release OUTPUT (release manifest/envelope,
+  version stamps, canonical bytes, projection shapes), the downstream consumer
+  suites that persist or read that output — `test:postgres` above all — are
+  REQUIRED gates before acceptance, even when the provider is not in the
+  packet's owned paths. A cross-layer inconsistency only surfaces where the
+  layers meet, so a compiler-only gate set will pass it straight onto main.
 - Stage gates belong to the plan; a packet never claims a stage gate by
   itself.
 

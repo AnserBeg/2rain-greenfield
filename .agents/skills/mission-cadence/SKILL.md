@@ -41,6 +41,12 @@ A packet must have all of:
 - **Gates** — the exact commands that must pass.
 - **Runnable exit** — the repo builds and runs when the packet ends, even if
   the feature is partial. Stop at a safe boundary rather than overrun.
+- **Foreseeable bridges named up front** — when a packet will predictably need
+  edits outside its owned paths (e.g. a kernel-wiring packet whose own ratified
+  design requires touching shared migration/activation machinery), the packet
+  prompt names those bridges as pre-authorized with guardrails, so the writer
+  does not stop mid-flight at a boundary that was known in advance. An
+  UNforeseen out-of-lease need is still a stop-and-bridge-request.
 
 ## Packet-completion block (mandatory, in this order)
 
