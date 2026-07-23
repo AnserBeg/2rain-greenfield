@@ -134,6 +134,10 @@ Otherwise:
 - Launch reviews with the `codex exec ... -s read-only --output-last-message`
   subprocess method (it returns a captured verdict); do not use unbounded
   background-agent polling.
+- Binding design authority a review depends on (debate verdicts, ADRs) lives
+  IN-REPO — debate outcomes under `docs/execution/debates/` — so a sandboxed
+  reviewer reads the primary source, not a restatement. A charter may summarize
+  it, but the charter's summary must never be the only place it exists.
 
 ## SHA discipline (still binding)
 
