@@ -3,8 +3,8 @@
 Status: evidence_ready
 Tier: Critical
 Branch: `fix/g1-p4b-monotonic-reconciliation`
-Frozen candidate: _this commit_ (resolved to the candidate SHA at handoff)
-Review: pending — fresh Codex `gpt-5.6-sol` xhigh, then Fable max on the
+Frozen candidate: `2648f3349789efbfa8ccdd4b94611fa4bfe47579`
+Review: PASS — fresh Codex `gpt-5.6-sol` xhigh, then Fable max on the
 identical unchanged SHA
 
 ## Root cause and corrected invariant
@@ -122,8 +122,18 @@ stepped wall timestamp. The bounded fix adds the atomic completion anchor and
 the commit-response-loss crossing probe described above. No other finding was
 reported.
 
-The new candidate awaits a fresh naive Codex xhigh re-review and then Fable
-max confirmation on the identical SHA. Any code change invalidates both.
+Fresh naive Codex `gpt-5.6-sol` xhigh round 2 returned **PASS** on all five
+decisive questions for `2648f3349789efbfa8ccdd4b94611fa4bfe47579`, with no
+in-scope material findings. Fable max independently returned **PASS** on the
+identical unchanged SHA and explicitly confirmed unresolved/completed
+monotonic classification, atomic start/completion anchors, outage and
+commit-response-loss recovery, no premature alarm, idempotence, deterministic
+injection, and unchanged unrelated kernel behavior.
+
+An earlier Codex launch carried the correct `920169c` prefix and checkout but
+an invalid invented full suffix; it was stopped before verdict and is not
+counted as a review seat. Both counted reviews above were addressed to and
+verified exact full SHAs.
 
 Program-review triggers do not fire at this checkpoint: this is an unintegrated
 corrective packet, not a first end-to-end slice, fan-out point, stabilized new
@@ -135,7 +145,7 @@ From the repository root:
 
 ```bash
 cd /home/rvham/2rain-greenfield
-git show -s --format='%H %s' <frozen-candidate-sha>
+git show -s --format='%H %s' 2648f3349789efbfa8ccdd4b94611fa4bfe47579
 node --import tsx --test test/postgres/release-activation.test.ts
 corepack pnpm check:schema
 corepack pnpm test:architecture
