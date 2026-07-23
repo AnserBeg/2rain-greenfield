@@ -9,6 +9,12 @@ refine them (plan section 11.3) and present the refined table for user
 selection — packets may be split, merged, or resequenced with user approval
 before any become `admitted`.
 
+## Stage completion
+
+| Stage | Status | Completion packet | Evidence |
+|---|---|---|---|
+| G1 | **COMPLETE** | G1-P9 — reviewed SHA `1e69199078bf0c455d45bfccfd4b3ef631923afd` | [G1 stage-gate evidence](stage-gates/G1.md) |
+
 | ID | Packet | Stage | Tier | Status | SHA | Evidence |
 |---|---|---|---|---|---|---|
 | G0-P1a | Fresh pnpm/TypeScript workspace and clean-install scaffold | G0 | Mechanical | accepted | `856f90ca4a1bd1d4d099760dd2da6dc8ad51e4ae` | [packet](packets/G0-P1a.md) |
@@ -32,4 +38,4 @@ before any become `admitted`.
 | G1-P6 | Empty fail-closed Semantic Query/Operation gateways | G1 | Critical | accepted | `cfeb19c211a4678a9623817c82d859167339a1c3` | [packet](packets/G1-P6.md); [cut](packets/G1-P0.md) |
 | G1-P7 | Compiled SurfaceRuntime shell + component registry | G1 | Behavioral | accepted | `e647968` | [packet](packets/G1-P7.md); [cut](packets/G1-P0.md) |
 | G1-P8 | UX grammar skill-pin + compiled SurfaceRuntime seam | G1 | Mechanical | accepted | `4ea66868d823472fd135a8dc0b71137ff9c4a990` | [packet](packets/G1-P8.md); [cut](packets/G1-P0.md) |
-| G1-P9 | Consolidated G1 stage-gate evidence | G1 | Mechanical | evidence_ready | `1e69199078bf0c455d45bfccfd4b3ef631923afd` | [packet](packets/G1-P9.md); [evidence](stage-gates/G1.md); [cut](packets/G1-P0.md) |
+| G1-P9 | Consolidated G1 stage-gate evidence | G1 | Mechanical | accepted | `1e69199078bf0c455d45bfccfd4b3ef631923afd` | [packet](packets/G1-P9.md); [evidence](stage-gates/G1.md); [cut](packets/G1-P0.md) |

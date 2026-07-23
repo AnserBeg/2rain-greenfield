@@ -29,9 +29,10 @@ pending.
 
 ## G1 stage closure
 
-G1-P9 candidate `1e69199` evaluates the G1-scoped slice of each concern
-separately from its later residual. On integrated product SHA `03c3d41`, no
-obligation routed to G1 by G1-P0 remains merely scheduled or prose-only:
+Accepted G1-P9 reviewed SHA `1e69199` evaluates the G1-scoped slice of each
+concern separately from its later residual. On integrated product SHA
+`03c3d41`, no obligation routed to G1 by G1-P0 remains merely scheduled or
+prose-only:
 
 | G1 obligation | Accepted enforcement | G1 status | Residual after G1 |
 |---|---|---|---|
