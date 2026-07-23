@@ -1,6 +1,46 @@
 {
   "columns": [
     {
+      "schema": "north_star_internal",
+      "relation": "schema_migrations",
+      "ordinal_position": 1,
+      "column_name": "ordinal",
+      "data_type": "bigint",
+      "udt_name": "int8",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "schema_migrations",
+      "ordinal_position": 2,
+      "column_name": "name",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "schema_migrations",
+      "ordinal_position": 3,
+      "column_name": "checksum",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "schema_migrations",
+      "ordinal_position": 4,
+      "column_name": "applied_at",
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "clock_timestamp()"
+    },
+    {
       "schema": "platform",
       "relation": "active_release_pointers",
       "ordinal_position": 1,
@@ -4063,6 +4103,27 @@
   ],
   "constraints": [
     {
+      "schema": "north_star_internal",
+      "relation": "schema_migrations",
+      "name": "schema_migrations_checksum_check",
+      "type": "c",
+      "definition": "CHECK (length(checksum) = 64)"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "schema_migrations",
+      "name": "schema_migrations_name_key",
+      "type": "u",
+      "definition": "UNIQUE (name)"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "schema_migrations",
+      "name": "schema_migrations_pkey",
+      "type": "p",
+      "definition": "PRIMARY KEY (ordinal)"
+    },
+    {
       "schema": "platform",
       "relation": "active_release_pointers",
       "name": "active_release_pointers_environment_fkey",
@@ -5675,6 +5736,18 @@
   ],
   "indexes": [
     {
+      "schema": "north_star_internal",
+      "relation": "schema_migrations",
+      "name": "schema_migrations_name_key",
+      "definition": "CREATE UNIQUE INDEX schema_migrations_name_key ON north_star_internal.schema_migrations USING btree (name)"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "schema_migrations",
+      "name": "schema_migrations_pkey",
+      "definition": "CREATE UNIQUE INDEX schema_migrations_pkey ON north_star_internal.schema_migrations USING btree (ordinal)"
+    },
+    {
       "schema": "platform",
       "relation": "active_release_pointers",
       "name": "active_release_pointers_pkey",
@@ -6601,6 +6674,13 @@
   ],
   "relations": [
     {
+      "schema": "north_star_internal",
+      "relation": "schema_migrations",
+      "kind": "r",
+      "row_level_security": false,
+      "force_row_level_security": false
+    },
+    {
       "schema": "platform",
       "relation": "active_release_pointers",
       "kind": "r",
@@ -6832,6 +6912,9 @@
       "force_row_level_security": true
     }
   ],
-  "schemas": ["platform"],
+  "schemas": [
+    "north_star_internal",
+    "platform"
+  ],
   "version": 2
 }

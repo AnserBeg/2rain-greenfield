@@ -155,7 +155,7 @@ export async function runMigrations(
 
 export async function captureSchemaSnapshot(
   client: PoolClient,
-  schemas: readonly string[] = ['platform'],
+  schemas: readonly string[] = ['north_star_internal', 'platform'],
 ): Promise<SchemaSnapshot> {
   const sortedSchemas = [...schemas].toSorted();
   const relations = await client.query(
@@ -225,7 +225,7 @@ export function formatSchemaSnapshot(snapshot: SchemaSnapshot): string {
 export async function assertSchemaMatchesSnapshot(
   client: PoolClient,
   snapshotPath: string,
-  schemas: readonly string[] = ['platform'],
+  schemas: readonly string[] = ['north_star_internal', 'platform'],
 ): Promise<void> {
   const expected = JSON.parse(
     await readFile(resolve(snapshotPath), 'utf8'),
