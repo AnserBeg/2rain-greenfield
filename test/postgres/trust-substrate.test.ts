@@ -59,10 +59,13 @@ const identities = new Map<string, AuthenticatedIdentity>([
   ['human-b', identity(tenantB, environmentB, humanB)],
 ]);
 
-test('migration 0006 upgrades accepted G1 and converges with the checked-in snapshot', async () => {
+test('migrations 0006-0007 upgrade accepted G1 and converge with the checked-in snapshot', async () => {
   await withEphemeralPostgres('trust-upgrade', async ({ pool }) => {
     const migrations = await loadMigrations(checkedInMigrations);
-    assert.equal(migrations.at(-1)?.name, '0006_trust_substrate.sql');
+    assert.equal(
+      migrations.at(-1)?.name,
+      '0007_module_storage_transitions.sql',
+    );
     const admin = await pool.connect();
     try {
       const acceptedG1 = await runMigrations(admin, migrations.slice(0, 5));
@@ -77,8 +80,11 @@ test('migration 0006 upgrades accepted G1 and converges with the checked-in snap
       );
 
       const upgraded = await runMigrations(admin, migrations);
-      assert.deepEqual(upgraded.applied, ['0006_trust_substrate.sql']);
-      assert.equal(upgraded.verified.length, 6);
+      assert.deepEqual(upgraded.applied, [
+        '0006_trust_substrate.sql',
+        '0007_module_storage_transitions.sql',
+      ]);
+      assert.equal(upgraded.verified.length, 7);
       await assertSchemaMatchesSnapshot(admin, checkedInSnapshot);
     } finally {
       admin.release();
@@ -94,8 +100,8 @@ test('accepted mutation facts are atomic, attributed, redacted, immutable, and t
       const admin = await pool.connect();
       try {
         const emptyPath = await runMigrations(admin, migrations);
-        assert.equal(emptyPath.applied.length, 6);
-        assert.equal(emptyPath.verified.length, 6);
+        assert.equal(emptyPath.applied.length, 7);
+        assert.equal(emptyPath.verified.length, 7);
         await assertSchemaMatchesSnapshot(admin, checkedInSnapshot);
         await seedReleaseFixtures(admin);
         await createBusinessMutationFixture(admin);

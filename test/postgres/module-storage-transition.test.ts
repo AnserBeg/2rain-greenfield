@@ -147,6 +147,7 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
         );
         assert.ok(first.preparedSubsetDigest.some((octet) => octet !== 0));
         assert.ok(first.remainingPlanDigest.some((octet) => octet !== 0));
+        let firstAttemptId: string | undefined;
 
         await t.test(
           'READY_TO_SWAP is fresh provider evidence and the real CAS gate',
@@ -160,6 +161,7 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
               first,
               firstPreparationId,
             );
+            firstAttemptId = attemptId;
             const executed = await materializer.executeApprovedAttempt({
               activationAttemptId: attemptId,
               context: contexts.a,
@@ -321,7 +323,7 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
         );
 
         await t.test(
-          'DDL and destructive DML are unreachable from runtime roles',
+          'DDL, evidence, and scoped kernel readers stay role-isolated',
           async () => {
             const roleFacts = await pool.query<{
               bypassrls: boolean;
@@ -355,6 +357,182 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
               ),
               /permission denied/,
             );
+            await assert.rejects(
+              runtimePool.query(
+                `UPDATE north_star_internal.module_storage_generations
+                    SET state = state WHERE false`,
+              ),
+              /permission denied/,
+            );
+            await assert.rejects(
+              runtimePool.query(
+                `SELECT *
+                   FROM north_star_internal.module_storage_read_active_release_pointer($1, $2)`,
+                [tenantA, environmentA],
+              ),
+              /permission denied/,
+            );
+            await assert.rejects(
+              moduleRuntimePool.query(
+                `SELECT *
+                   FROM north_star_internal.module_storage_read_kernel_live_roots($1, $2)`,
+                [tenantA, environmentA],
+              ),
+              /permission denied/,
+            );
+            assert.ok(firstAttemptId);
+            const policies = await pool.query<{
+              policyname: string;
+              tablename: string;
+            }>(
+              `SELECT tablename, policyname
+                 FROM pg_policies
+                WHERE schemaname = 'platform'
+                  AND 'north_star_module_materializer' = ANY(roles::text[])
+                ORDER BY tablename, policyname`,
+            );
+            assert.deepEqual(policies.rows, []);
+
+            const directPlatformReads = await pool.query<{
+              relation: string;
+            }>(
+              `SELECT relation.relname AS relation
+                 FROM pg_class AS relation
+                 JOIN pg_namespace AS namespace
+                   ON namespace.oid = relation.relnamespace
+                WHERE namespace.nspname = 'platform'
+                  AND relation.relkind IN ('r', 'p', 'v', 'm', 'f')
+                  AND has_table_privilege(
+                    'north_star_module_materializer', relation.oid, 'SELECT'
+                  )
+                ORDER BY relation.relname`,
+            );
+            assert.deepEqual(directPlatformReads.rows, []);
+
+            const functions = await pool.query<{
+              materializer_execute: boolean;
+              module_runtime_execute: boolean;
+              name: string;
+              runtime_execute: boolean;
+              search_path: string[] | null;
+              security_definer: boolean;
+            }>(
+              `SELECT routine.proname AS name,
+                      routine.prosecdef AS security_definer,
+                      routine.proconfig AS search_path,
+                      has_function_privilege(
+                        'north_star_module_materializer', routine.oid, 'EXECUTE'
+                      ) AS materializer_execute,
+                      has_function_privilege(
+                        'north_star_runtime', routine.oid, 'EXECUTE'
+                      ) AS runtime_execute,
+                      has_function_privilege(
+                        'north_star_module_runtime', routine.oid, 'EXECUTE'
+                      ) AS module_runtime_execute
+                 FROM pg_proc AS routine
+                 JOIN pg_namespace AS namespace
+                   ON namespace.oid = routine.pronamespace
+                WHERE namespace.nspname = 'north_star_internal'
+                  AND routine.proname LIKE 'module_storage_read_%'
+                ORDER BY routine.proname`,
+            );
+            assert.equal(functions.rows.length, 5);
+            for (const reader of functions.rows) {
+              assert.equal(reader.security_definer, true, reader.name);
+              assert.deepEqual(reader.search_path, ['search_path=pg_catalog']);
+              assert.equal(reader.materializer_execute, true, reader.name);
+              assert.equal(reader.runtime_execute, false, reader.name);
+              assert.equal(reader.module_runtime_execute, false, reader.name);
+            }
+
+            const client = await materializerPool.connect();
+            try {
+              await client.query('BEGIN');
+              await client.query(
+                `SELECT set_config('north_star.tenant_id', $1, true),
+                        set_config('north_star.environment_id', $2, true)`,
+                [tenantA, environmentA],
+              );
+              const pointer = await client.query<{ release_id: string }>(
+                `SELECT release_id
+                   FROM north_star_internal.module_storage_read_active_release_pointer($1, $2)`,
+                [tenantA, environmentA],
+              );
+              assert.equal(pointer.rowCount, 1);
+              const crossTenantPointer = await client.query(
+                `SELECT *
+                   FROM north_star_internal.module_storage_read_active_release_pointer($1, $2)`,
+                [tenantB, environmentB],
+              );
+              assert.equal(crossTenantPointer.rowCount, 0);
+
+              const artifacts = await client.query<{
+                release_content_hash: string;
+              }>(
+                `SELECT release_content_hash
+                   FROM north_star_internal.module_storage_read_release_artifacts($1, $2, $3)`,
+                [tenantA, environmentA, releases.a.source],
+              );
+              assert.ok((artifacts.rowCount ?? 0) > 0);
+              assert.ok(
+                artifacts.rows.every(
+                  (row) =>
+                    row.release_content_hash ===
+                    Buffer.from(first.sourceManifestRoot).toString('hex'),
+                ),
+              );
+              const crossTenantArtifacts = await client.query(
+                `SELECT *
+                   FROM north_star_internal.module_storage_read_release_artifacts($1, $2, $3)`,
+                [tenantB, environmentB, releases.b.source],
+              );
+              assert.equal(crossTenantArtifacts.rowCount, 0);
+
+              const authority = await client.query<{ authorized: boolean }>(
+                `SELECT authorized
+                   FROM north_star_internal.module_storage_read_preparation_authority($1, $2, $3)`,
+                [tenantA, environmentA, principalA],
+              );
+              assert.deepEqual(authority.rows, [{ authorized: true }]);
+              const crossTenantAuthority = await client.query(
+                `SELECT *
+                   FROM north_star_internal.module_storage_read_preparation_authority($1, $2, $3)`,
+                [tenantB, environmentB, principalB],
+              );
+              assert.equal(crossTenantAuthority.rowCount, 0);
+
+              const approvedAttempt = await client.query(
+                `SELECT approved
+                   FROM north_star_internal.module_storage_read_approved_attempt($1, $2, $3, $4)`,
+                [tenantA, environmentA, firstAttemptId, firstPreparationId],
+              );
+              assert.deepEqual(approvedAttempt.rows, [{ approved: true }]);
+              const crossTenantAttempt = await client.query(
+                `SELECT *
+                   FROM north_star_internal.module_storage_read_approved_attempt($1, $2, $3, $4)`,
+                [tenantB, environmentB, firstAttemptId, firstPreparationId],
+              );
+              assert.equal(crossTenantAttempt.rowCount, 0);
+
+              const roots = await client.query<{ release_id: string }>(
+                `SELECT release_id
+                   FROM north_star_internal.module_storage_read_kernel_live_roots($1, $2)`,
+                [tenantA, environmentA],
+              );
+              assert.ok((roots.rowCount ?? 0) > 0);
+              const crossTenantRoots = await client.query(
+                `SELECT *
+                   FROM north_star_internal.module_storage_read_kernel_live_roots($1, $2)`,
+                [tenantB, environmentB],
+              );
+              assert.equal(crossTenantRoots.rowCount, 0);
+              await client.query('COMMIT');
+            } catch (error) {
+              await client.query('ROLLBACK');
+              throw error;
+            } finally {
+              client.release();
+            }
           },
         );
 

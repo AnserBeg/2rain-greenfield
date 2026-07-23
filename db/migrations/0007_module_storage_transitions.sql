@@ -383,52 +383,223 @@ ALTER TABLE platform.release_activation_verification_receipts
       OR status = 'SUPERSEDED')
   );
 
-CREATE POLICY tenant_releases_module_materializer_select
-  ON platform.tenant_releases FOR SELECT TO north_star_module_materializer
-  USING (tenant_id = nullif(current_setting('north_star.tenant_id', true), '')::uuid
-    AND environment_id = nullif(current_setting('north_star.environment_id', true), '')::uuid);
-CREATE POLICY tenant_release_artifact_links_module_materializer_select
-  ON platform.tenant_release_artifact_links FOR SELECT TO north_star_module_materializer
-  USING (tenant_id = nullif(current_setting('north_star.tenant_id', true), '')::uuid
-    AND environment_id = nullif(current_setting('north_star.environment_id', true), '')::uuid);
-CREATE POLICY tenant_release_projection_links_module_materializer_select
-  ON platform.tenant_release_projection_links FOR SELECT TO north_star_module_materializer
-  USING (tenant_id = nullif(current_setting('north_star.tenant_id', true), '')::uuid
-    AND environment_id = nullif(current_setting('north_star.environment_id', true), '')::uuid);
-CREATE POLICY tenant_release_chunk_links_module_materializer_select
-  ON platform.tenant_release_chunk_links FOR SELECT TO north_star_module_materializer
-  USING (tenant_id = nullif(current_setting('north_star.tenant_id', true), '')::uuid
-    AND environment_id = nullif(current_setting('north_star.environment_id', true), '')::uuid);
-CREATE POLICY release_artifact_blobs_module_materializer_select
-  ON platform.release_artifact_blobs FOR SELECT TO north_star_module_materializer
-  USING (true);
-CREATE POLICY active_release_pointers_module_materializer_select
-  ON platform.active_release_pointers FOR SELECT TO north_star_module_materializer
-  USING (tenant_id = nullif(current_setting('north_star.tenant_id', true), '')::uuid
-    AND environment_id = nullif(current_setting('north_star.environment_id', true), '')::uuid);
-CREATE POLICY release_activation_preparations_module_materializer_select
-  ON platform.release_activation_preparations FOR SELECT TO north_star_module_materializer
-  USING (tenant_id = nullif(current_setting('north_star.tenant_id', true), '')::uuid
-    AND environment_id = nullif(current_setting('north_star.environment_id', true), '')::uuid);
-CREATE POLICY release_approvals_module_materializer_select
-  ON platform.release_approvals FOR SELECT TO north_star_module_materializer
-  USING (tenant_id = nullif(current_setting('north_star.tenant_id', true), '')::uuid
-    AND environment_id = nullif(current_setting('north_star.environment_id', true), '')::uuid);
-CREATE POLICY release_activation_attempts_module_materializer_select
-  ON platform.release_activation_attempts FOR SELECT TO north_star_module_materializer
-  USING (tenant_id = nullif(current_setting('north_star.tenant_id', true), '')::uuid
-    AND environment_id = nullif(current_setting('north_star.environment_id', true), '')::uuid);
-CREATE POLICY release_activation_history_module_materializer_select
-  ON platform.release_activation_history FOR SELECT TO north_star_module_materializer
-  USING (tenant_id = nullif(current_setting('north_star.tenant_id', true), '')::uuid
-    AND environment_id = nullif(current_setting('north_star.environment_id', true), '')::uuid);
-CREATE POLICY release_executor_authority_events_module_materializer_select
-  ON platform.release_executor_authority_events FOR SELECT TO north_star_module_materializer
-  USING (tenant_id = nullif(current_setting('north_star.tenant_id', true), '')::uuid);
-CREATE POLICY release_activation_control_events_module_materializer_select
-  ON platform.release_activation_control_events FOR SELECT TO north_star_module_materializer
-  USING (tenant_id = nullif(current_setting('north_star.tenant_id', true), '')::uuid
-    AND environment_id = nullif(current_setting('north_star.environment_id', true), '')::uuid);
+CREATE FUNCTION north_star_internal.module_storage_read_active_release_pointer(
+  requested_tenant_id uuid,
+  requested_environment_id uuid
+)
+RETURNS TABLE (fence bigint, release_id uuid)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog
+AS $$
+  SELECT pointer.fence, pointer.release_id
+    FROM platform.active_release_pointers AS pointer
+   WHERE requested_tenant_id IS NOT NULL
+     AND requested_environment_id IS NOT NULL
+     AND requested_tenant_id =
+           nullif(current_setting('north_star.tenant_id', true), '')::uuid
+     AND requested_environment_id =
+           nullif(current_setting('north_star.environment_id', true), '')::uuid
+     AND pointer.tenant_id = requested_tenant_id
+     AND pointer.environment_id = requested_environment_id
+$$;
+
+CREATE FUNCTION north_star_internal.module_storage_read_release_artifacts(
+  requested_tenant_id uuid,
+  requested_environment_id uuid,
+  requested_release_id uuid
+)
+RETURNS TABLE (
+  release_content_hash text,
+  artifact_kind text,
+  content_hash text,
+  domain_tag text,
+  canonical_bytes bytea
+)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog
+AS $$
+  WITH scoped_release AS MATERIALIZED (
+    SELECT release.content_hash
+      FROM platform.tenant_releases AS release
+     WHERE requested_tenant_id IS NOT NULL
+       AND requested_environment_id IS NOT NULL
+       AND requested_release_id IS NOT NULL
+       AND requested_tenant_id =
+             nullif(current_setting('north_star.tenant_id', true), '')::uuid
+       AND requested_environment_id =
+             nullif(current_setting('north_star.environment_id', true), '')::uuid
+       AND release.tenant_id = requested_tenant_id
+       AND release.environment_id = requested_environment_id
+       AND release.release_id = requested_release_id
+  )
+  SELECT release.content_hash,
+         blob.artifact_kind,
+         blob.content_hash,
+         blob.domain_tag,
+         blob.canonical_bytes
+    FROM scoped_release AS release
+    JOIN platform.release_artifact_blobs AS blob
+      ON blob.content_hash = release.content_hash
+  UNION ALL
+  SELECT release.content_hash,
+         blob.artifact_kind,
+         blob.content_hash,
+         blob.domain_tag,
+         blob.canonical_bytes
+    FROM scoped_release AS release
+    JOIN platform.tenant_release_artifact_links AS link
+      ON link.tenant_id = requested_tenant_id
+     AND link.environment_id = requested_environment_id
+     AND link.release_id = requested_release_id
+    JOIN platform.release_artifact_blobs AS blob
+      ON blob.content_hash = link.content_hash
+     AND blob.artifact_kind = link.artifact_kind
+   ORDER BY 3
+$$;
+
+CREATE FUNCTION north_star_internal.module_storage_read_preparation_authority(
+  requested_tenant_id uuid,
+  requested_environment_id uuid,
+  requested_principal_id uuid
+)
+RETURNS TABLE (authorized boolean, denied boolean, paused boolean)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog
+AS $$
+  SELECT coalesce((
+           SELECT event.authorized
+             FROM platform.release_executor_authority_events AS event
+            WHERE event.tenant_id = requested_tenant_id
+              AND event.principal_id = requested_principal_id
+            ORDER BY event.policy_version DESC
+            LIMIT 1
+         ), false),
+         coalesce((
+           SELECT event.live_policy_denied
+             FROM platform.release_activation_control_events AS event
+            WHERE event.tenant_id = requested_tenant_id
+              AND event.environment_id = requested_environment_id
+            ORDER BY event.policy_version DESC
+            LIMIT 1
+         ), false),
+         coalesce((
+           SELECT event.rollout_paused
+             FROM platform.release_activation_control_events AS event
+            WHERE event.tenant_id = requested_tenant_id
+              AND event.environment_id = requested_environment_id
+            ORDER BY event.policy_version DESC
+            LIMIT 1
+         ), false)
+   WHERE requested_tenant_id IS NOT NULL
+     AND requested_environment_id IS NOT NULL
+     AND requested_principal_id IS NOT NULL
+     AND requested_tenant_id =
+           nullif(current_setting('north_star.tenant_id', true), '')::uuid
+     AND requested_environment_id =
+           nullif(current_setting('north_star.environment_id', true), '')::uuid
+$$;
+
+CREATE FUNCTION north_star_internal.module_storage_read_approved_attempt(
+  requested_tenant_id uuid,
+  requested_environment_id uuid,
+  requested_activation_attempt_id uuid,
+  requested_preparation_id uuid
+)
+RETURNS TABLE (approved boolean)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog
+AS $$
+  SELECT true
+   WHERE requested_tenant_id IS NOT NULL
+     AND requested_environment_id IS NOT NULL
+     AND requested_activation_attempt_id IS NOT NULL
+     AND requested_preparation_id IS NOT NULL
+     AND requested_tenant_id =
+           nullif(current_setting('north_star.tenant_id', true), '')::uuid
+     AND requested_environment_id =
+           nullif(current_setting('north_star.environment_id', true), '')::uuid
+     AND EXISTS (
+       SELECT 1
+         FROM platform.release_activation_attempts AS attempt
+         JOIN platform.release_approvals AS approval
+           ON approval.tenant_id = attempt.tenant_id
+          AND approval.environment_id = attempt.environment_id
+          AND approval.approval_id = attempt.approval_id
+        WHERE attempt.tenant_id = requested_tenant_id
+          AND attempt.environment_id = requested_environment_id
+          AND attempt.activation_attempt_id = requested_activation_attempt_id
+          AND approval.compatibility_policy_version =
+                'northstar.transition-compatibility-policy/v2'
+          AND approval.preparation_id = requested_preparation_id
+     )
+$$;
+
+CREATE FUNCTION north_star_internal.module_storage_read_kernel_live_roots(
+  requested_tenant_id uuid,
+  requested_environment_id uuid
+)
+RETURNS TABLE (release_id uuid)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog
+AS $$
+  SELECT pointer.release_id
+    FROM platform.active_release_pointers AS pointer
+   WHERE requested_tenant_id IS NOT NULL
+     AND requested_environment_id IS NOT NULL
+     AND requested_tenant_id =
+           nullif(current_setting('north_star.tenant_id', true), '')::uuid
+     AND requested_environment_id =
+           nullif(current_setting('north_star.environment_id', true), '')::uuid
+     AND pointer.tenant_id = requested_tenant_id
+     AND pointer.environment_id = requested_environment_id
+     AND pointer.release_id IS NOT NULL
+  UNION
+  SELECT preparation.target_release_id
+    FROM platform.release_activation_preparations AS preparation
+    LEFT JOIN platform.release_approvals AS approval
+      ON approval.tenant_id = preparation.tenant_id
+     AND approval.environment_id = preparation.environment_id
+     AND approval.preparation_id = preparation.preparation_id
+    LEFT JOIN platform.release_activation_history AS history
+      ON history.tenant_id = approval.tenant_id
+     AND history.environment_id = approval.environment_id
+     AND history.approval_id = approval.approval_id
+     AND history.terminal
+   WHERE requested_tenant_id IS NOT NULL
+     AND requested_environment_id IS NOT NULL
+     AND requested_tenant_id =
+           nullif(current_setting('north_star.tenant_id', true), '')::uuid
+     AND requested_environment_id =
+           nullif(current_setting('north_star.environment_id', true), '')::uuid
+     AND preparation.tenant_id = requested_tenant_id
+     AND preparation.environment_id = requested_environment_id
+     AND history.approval_id IS NULL
+$$;
+
+REVOKE ALL ON FUNCTION
+  north_star_internal.module_storage_read_active_release_pointer(uuid, uuid),
+  north_star_internal.module_storage_read_release_artifacts(uuid, uuid, uuid),
+  north_star_internal.module_storage_read_preparation_authority(uuid, uuid, uuid),
+  north_star_internal.module_storage_read_approved_attempt(uuid, uuid, uuid, uuid),
+  north_star_internal.module_storage_read_kernel_live_roots(uuid, uuid)
+  FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION
+  north_star_internal.module_storage_read_active_release_pointer(uuid, uuid),
+  north_star_internal.module_storage_read_release_artifacts(uuid, uuid, uuid),
+  north_star_internal.module_storage_read_preparation_authority(uuid, uuid, uuid),
+  north_star_internal.module_storage_read_approved_attempt(uuid, uuid, uuid, uuid),
+  north_star_internal.module_storage_read_kernel_live_roots(uuid, uuid)
+  TO north_star_module_materializer;
 
 REVOKE ALL ON ALL TABLES IN SCHEMA north_star_internal
   FROM north_star_module_materializer, north_star_module_runtime;
@@ -446,13 +617,13 @@ GRANT SELECT ON north_star_internal.module_storage_catalog_receipts TO north_sta
 GRANT USAGE ON SCHEMA north_star_internal TO north_star_runtime;
 GRANT SELECT, INSERT, UPDATE ON north_star_internal.module_storage_backfill_checkpoints
   TO north_star_module_runtime;
-GRANT USAGE ON SCHEMA platform, north_star_internal TO north_star_module_materializer;
-GRANT SELECT ON platform.tenant_releases,
+GRANT USAGE ON SCHEMA north_star_internal TO north_star_module_materializer;
+REVOKE SELECT ON platform.tenant_releases,
   platform.tenant_release_artifact_links, platform.release_artifact_blobs,
   platform.tenant_release_projection_links, platform.tenant_release_chunk_links,
   platform.active_release_pointers, platform.release_activation_preparations,
   platform.release_approvals, platform.release_activation_attempts,
   platform.release_activation_history, platform.release_executor_authority_events,
-  platform.release_activation_control_events TO north_star_module_materializer;
+  platform.release_activation_control_events FROM north_star_module_materializer;
 
 REVOKE ALL ON SCHEMA north_star_module FROM north_star_runtime;

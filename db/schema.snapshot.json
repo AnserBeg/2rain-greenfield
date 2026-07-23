@@ -7565,16 +7565,6 @@
     {
       "schema": "platform",
       "relation": "active_release_pointers",
-      "name": "active_release_pointers_module_materializer_select",
-      "permissive": "PERMISSIVE",
-      "roles": "{north_star_module_materializer}",
-      "cmd": "SELECT",
-      "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid))",
-      "with_check": null
-    },
-    {
-      "schema": "platform",
-      "relation": "active_release_pointers",
       "name": "active_release_pointers_select_trusted_context",
       "permissive": "PERMISSIVE",
       "roles": "{north_star_runtime}",
@@ -7645,16 +7635,6 @@
     {
       "schema": "platform",
       "relation": "release_activation_attempts",
-      "name": "release_activation_attempts_module_materializer_select",
-      "permissive": "PERMISSIVE",
-      "roles": "{north_star_module_materializer}",
-      "cmd": "SELECT",
-      "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid))",
-      "with_check": null
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_attempts",
       "name": "release_activation_attempts_select_trusted_context",
       "permissive": "PERMISSIVE",
       "roles": "{north_star_runtime}",
@@ -7670,16 +7650,6 @@
       "roles": "{north_star_runtime}",
       "cmd": "SELECT",
       "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid IS NOT NULL) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))",
-      "with_check": null
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_control_events",
-      "name": "release_activation_control_events_module_materializer_select",
-      "permissive": "PERMISSIVE",
-      "roles": "{north_star_module_materializer}",
-      "cmd": "SELECT",
-      "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid))",
       "with_check": null
     },
     {
@@ -7701,16 +7671,6 @@
       "cmd": "INSERT",
       "qual": null,
       "with_check": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))"
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_history",
-      "name": "release_activation_history_module_materializer_select",
-      "permissive": "PERMISSIVE",
-      "roles": "{north_star_module_materializer}",
-      "cmd": "SELECT",
-      "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid))",
-      "with_check": null
     },
     {
       "schema": "platform",
@@ -7771,16 +7731,6 @@
       "cmd": "INSERT",
       "qual": null,
       "with_check": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))"
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_preparations",
-      "name": "release_activation_preparations_module_materializer_select",
-      "permissive": "PERMISSIVE",
-      "roles": "{north_star_module_materializer}",
-      "cmd": "SELECT",
-      "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid))",
-      "with_check": null
     },
     {
       "schema": "platform",
@@ -7885,16 +7835,6 @@
     {
       "schema": "platform",
       "relation": "release_approvals",
-      "name": "release_approvals_module_materializer_select",
-      "permissive": "PERMISSIVE",
-      "roles": "{north_star_module_materializer}",
-      "cmd": "SELECT",
-      "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid))",
-      "with_check": null
-    },
-    {
-      "schema": "platform",
-      "relation": "release_approvals",
       "name": "release_approvals_select_trusted_context",
       "permissive": "PERMISSIVE",
       "roles": "{north_star_runtime}",
@@ -7910,26 +7850,6 @@
       "roles": "{north_star_runtime}",
       "cmd": "SELECT",
       "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid IS NOT NULL) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))",
-      "with_check": null
-    },
-    {
-      "schema": "platform",
-      "relation": "release_artifact_blobs",
-      "name": "release_artifact_blobs_module_materializer_select",
-      "permissive": "PERMISSIVE",
-      "roles": "{north_star_module_materializer}",
-      "cmd": "SELECT",
-      "qual": "true",
-      "with_check": null
-    },
-    {
-      "schema": "platform",
-      "relation": "release_executor_authority_events",
-      "name": "release_executor_authority_events_module_materializer_select",
-      "permissive": "PERMISSIVE",
-      "roles": "{north_star_module_materializer}",
-      "cmd": "SELECT",
-      "qual": "(tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid)",
       "with_check": null
     },
     {
@@ -7965,16 +7885,6 @@
     {
       "schema": "platform",
       "relation": "tenant_release_artifact_links",
-      "name": "tenant_release_artifact_links_module_materializer_select",
-      "permissive": "PERMISSIVE",
-      "roles": "{north_star_module_materializer}",
-      "cmd": "SELECT",
-      "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid))",
-      "with_check": null
-    },
-    {
-      "schema": "platform",
-      "relation": "tenant_release_artifact_links",
       "name": "tenant_release_artifact_links_select_trusted_context",
       "permissive": "PERMISSIVE",
       "roles": "{north_star_runtime}",
@@ -7991,16 +7901,6 @@
       "cmd": "INSERT",
       "qual": null,
       "with_check": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))"
-    },
-    {
-      "schema": "platform",
-      "relation": "tenant_release_chunk_links",
-      "name": "tenant_release_chunk_links_module_materializer_select",
-      "permissive": "PERMISSIVE",
-      "roles": "{north_star_module_materializer}",
-      "cmd": "SELECT",
-      "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid))",
-      "with_check": null
     },
     {
       "schema": "platform",
@@ -8025,16 +7925,6 @@
     {
       "schema": "platform",
       "relation": "tenant_release_projection_links",
-      "name": "tenant_release_projection_links_module_materializer_select",
-      "permissive": "PERMISSIVE",
-      "roles": "{north_star_module_materializer}",
-      "cmd": "SELECT",
-      "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid))",
-      "with_check": null
-    },
-    {
-      "schema": "platform",
-      "relation": "tenant_release_projection_links",
       "name": "tenant_release_projection_links_select_trusted_context",
       "permissive": "PERMISSIVE",
       "roles": "{north_star_runtime}",
@@ -8051,16 +7941,6 @@
       "cmd": "INSERT",
       "qual": null,
       "with_check": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))"
-    },
-    {
-      "schema": "platform",
-      "relation": "tenant_releases",
-      "name": "tenant_releases_module_materializer_select",
-      "permissive": "PERMISSIVE",
-      "roles": "{north_star_module_materializer}",
-      "cmd": "SELECT",
-      "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid))",
-      "with_check": null
     },
     {
       "schema": "platform",

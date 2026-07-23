@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import {
@@ -203,6 +204,26 @@ test('materializer lock is a finite non-queueing superset of kernel ordering', (
   assert.match(
     MODULE_STORAGE_MIGRATION_LOCK.starvationRule,
     /kernel migrations.*priority/,
+  );
+});
+
+test('materializer runtime SQL reaches the kernel only through scoped readers', () => {
+  const source = readFileSync(
+    'packages/postgres-provider/src/module-storage-materializer.ts',
+    'utf8',
+  );
+  const migration = readFileSync(
+    'db/migrations/0007_module_storage_transitions.sql',
+    'utf8',
+  );
+  assert.doesNotMatch(source, /\b(?:FROM|JOIN)\s+platform\./i);
+  assert.doesNotMatch(
+    migration,
+    /CREATE POLICY[^;]*\bON\s+platform\.[^;]*\bTO\s+north_star_module_materializer/i,
+  );
+  assert.doesNotMatch(
+    migration,
+    /GRANT SELECT ON platform\.[^;]*TO north_star_module_materializer/i,
   );
 });
 

@@ -93,6 +93,7 @@ interface ArtifactRow {
   canonical_bytes: Uint8Array;
   content_hash: string;
   domain_tag: string;
+  release_content_hash: string;
 }
 
 interface VerifiedReleaseStorage {
@@ -109,6 +110,7 @@ interface GenerationRow {
   environment_id: string;
   generation_id: string;
   generation_number: string | number;
+  preparation_id: string;
   prepared_subset_digest: Uint8Array;
   remaining_plan_digest: Uint8Array;
   source_manifest_root: Uint8Array;
@@ -173,9 +175,7 @@ export class PostgresModuleStorageMaterializer {
       }>(
         client,
         `SELECT fence, release_id
-           FROM platform.active_release_pointers
-         WHERE tenant_id = $1 AND environment_id = $2
-        `,
+           FROM north_star_internal.module_storage_read_active_release_pointer($1, $2)`,
         [command.context.tenantId, command.context.environmentId],
         'active release pointer',
       );
@@ -353,21 +353,10 @@ export class PostgresModuleStorageMaterializer {
          )
          SELECT $1,$2,$3,$4,$5,'CLAIMED'
           WHERE EXISTS (
-            SELECT 1
-              FROM platform.release_activation_attempts AS attempt
-              JOIN platform.release_approvals AS approval
-                ON approval.tenant_id = attempt.tenant_id
-               AND approval.environment_id = attempt.environment_id
-               AND approval.approval_id = attempt.approval_id
-             WHERE attempt.tenant_id = $1 AND attempt.environment_id = $2
-               AND attempt.activation_attempt_id = $4
-               AND approval.compatibility_policy_version =
-                 'northstar.transition-compatibility-policy/v2'
-               AND approval.preparation_id = (
-                 SELECT preparation_id
-                   FROM north_star_internal.module_storage_generations
-                  WHERE generation_id = $3
-               )
+            SELECT approved
+              FROM north_star_internal.module_storage_read_approved_attempt(
+                $1, $2, $4, $6
+              )
           )
          ON CONFLICT (tenant_id, environment_id, activation_attempt_id)
          DO NOTHING
@@ -378,6 +367,7 @@ export class PostgresModuleStorageMaterializer {
           command.generationId,
           command.activationAttemptId,
           command.coordinatorId,
+          generation.preparation_id,
         ],
       );
       if (claim.rowCount !== 1) {
@@ -644,30 +634,28 @@ async function loadVerifiedReleaseStorage(
   environmentId: string,
   releaseId: string,
 ): Promise<VerifiedReleaseStorage> {
-  const release = await requiredOne<{ content_hash: string }>(
-    client,
-    `SELECT content_hash FROM platform.tenant_releases
-      WHERE tenant_id = $1 AND environment_id = $2 AND release_id = $3`,
-    [tenantId, environmentId, releaseId],
-    'persisted release root',
-  );
   const artifacts = await client.query<ArtifactRow>(
-    `SELECT blob.artifact_kind, blob.canonical_bytes, blob.content_hash, blob.domain_tag
-       FROM platform.tenant_release_artifact_links AS link
-       JOIN platform.release_artifact_blobs AS blob
-         ON blob.content_hash = link.content_hash
-      WHERE link.tenant_id = $1 AND link.environment_id = $2 AND link.release_id = $3
-      UNION ALL
-     SELECT blob.artifact_kind, blob.canonical_bytes, blob.content_hash, blob.domain_tag
-       FROM platform.tenant_releases AS release
-       JOIN platform.release_artifact_blobs AS blob
-         ON blob.content_hash = release.content_hash
-      WHERE release.tenant_id = $1 AND release.environment_id = $2 AND release.release_id = $3`,
+    `SELECT release_content_hash, artifact_kind, canonical_bytes, content_hash, domain_tag
+       FROM north_star_internal.module_storage_read_release_artifacts($1, $2, $3)`,
     [tenantId, environmentId, releaseId],
   );
+  const releaseContentHash = artifacts.rows[0]?.release_content_hash;
+  if (!releaseContentHash) {
+    throw failure('RECORD_NOT_FOUND', 'persisted release root is unavailable');
+  }
+  if (
+    artifacts.rows.some(
+      (row) => row.release_content_hash !== releaseContentHash,
+    )
+  ) {
+    throw failure(
+      'RELEASE_SCOPE_MISMATCH',
+      'release artifact reader returned more than one scoped release root',
+    );
+  }
   const byHash = new Map(artifacts.rows.map((row) => [row.content_hash, row]));
   for (const row of artifacts.rows) verifyArtifact(row);
-  const manifestRow = byHash.get(release.content_hash);
+  const manifestRow = byHash.get(releaseContentHash);
   if (!manifestRow || manifestRow.artifact_kind !== 'releaseManifest') {
     throw failure(
       'RELEASE_MANIFEST_MISSING',
@@ -743,7 +731,7 @@ async function loadVerifiedReleaseStorage(
     );
   }
   return {
-    manifestRoot: release.content_hash,
+    manifestRoot: releaseContentHash,
     storageTargetArtifactRoot: targetProjection.artifactRoot,
     storageTargetSemanticDigest: targetProjection.semanticDigest,
     target,
@@ -1446,8 +1434,8 @@ async function loadLiveRoots(
   includeReleaseId?: string,
 ): Promise<string[]> {
   const result = await client.query<{ release_id: string }>(
-    `SELECT release_id FROM platform.active_release_pointers
-      WHERE tenant_id = $1 AND environment_id = $2 AND release_id IS NOT NULL
+    `SELECT release_id
+       FROM north_star_internal.module_storage_read_kernel_live_roots($1, $2)
      UNION
      SELECT generation.target_release_id
        FROM north_star_internal.module_storage_generations AS generation
@@ -1455,20 +1443,6 @@ async function loadLiveRoots(
         AND generation.state IN (
           'PREPARING', 'PREPARED', 'IN_ATTEMPT', 'READY_TO_SWAP', 'RECONCILING'
         )
-     UNION
-     SELECT preparation.target_release_id
-       FROM platform.release_activation_preparations AS preparation
-       LEFT JOIN platform.release_approvals AS approval
-         ON approval.tenant_id = preparation.tenant_id
-        AND approval.environment_id = preparation.environment_id
-        AND approval.preparation_id = preparation.preparation_id
-       LEFT JOIN platform.release_activation_history AS history
-         ON history.tenant_id = approval.tenant_id
-        AND history.environment_id = approval.environment_id
-        AND history.approval_id = approval.approval_id
-        AND history.terminal
-      WHERE preparation.tenant_id = $1 AND preparation.environment_id = $2
-        AND history.approval_id IS NULL
      UNION SELECT $3::uuid WHERE $3::uuid IS NOT NULL`,
     [context.tenantId, context.environmentId, includeReleaseId ?? null],
   );
@@ -1537,21 +1511,12 @@ async function loadPreparationAuthority(
   command: PrepareModuleStorageTransitionCommand,
 ): Promise<{ authorized: boolean; denied: boolean; paused: boolean }> {
   const result = await client.query<{
-    authorized: boolean | null;
-    denied: boolean | null;
-    paused: boolean | null;
+    authorized: boolean;
+    denied: boolean;
+    paused: boolean;
   }>(
-    `SELECT (
-       SELECT event.authorized FROM platform.release_executor_authority_events AS event
-        WHERE event.tenant_id = $1 AND event.principal_id = $3
-        ORDER BY event.policy_version DESC LIMIT 1
-     ) AS authorized,
-     (SELECT event.live_policy_denied FROM platform.release_activation_control_events AS event
-       WHERE event.tenant_id = $1 AND event.environment_id = $2
-       ORDER BY event.policy_version DESC LIMIT 1) AS denied,
-     (SELECT event.rollout_paused FROM platform.release_activation_control_events AS event
-       WHERE event.tenant_id = $1 AND event.environment_id = $2
-       ORDER BY event.policy_version DESC LIMIT 1) AS paused`,
+    `SELECT authorized, denied, paused
+       FROM north_star_internal.module_storage_read_preparation_authority($1, $2, $3)`,
     [
       command.context.tenantId,
       command.context.environmentId,
@@ -1559,9 +1524,9 @@ async function loadPreparationAuthority(
     ],
   );
   return {
-    authorized: result.rows[0]?.authorized === true,
-    denied: result.rows[0]?.denied === true,
-    paused: result.rows[0]?.paused === true,
+    authorized: result.rows[0]?.authorized ?? false,
+    denied: result.rows[0]?.denied ?? false,
+    paused: result.rows[0]?.paused ?? false,
   };
 }
 
