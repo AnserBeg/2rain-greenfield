@@ -1,14 +1,23 @@
+import type { TrustedRequestContext } from './request-context.js';
 import {
   REQUEST_RUNTIME_PROJECTION_FAMILIES,
   assertRequestRuntimeView,
   authorizeCurrentPolicy,
+  trustedContextForRequestRuntimeView,
   type CurrentPolicyGateway,
   type ImmutableJsonValue,
 } from './request-runtime-view.js';
 import type { RequestRuntimeView as IssuedRequestRuntimeView } from './request-runtime-view.js';
+import type { SemanticRecordDto } from './semantic-query-gateway.js';
+import {
+  registeredQueryFromPinnedView,
+  type RegisteredQueryDefinition,
+} from './semantic-query-gateway.js';
 
 export const SEMANTIC_OPERATION_REQUEST_VERSION =
   'northstar.semantic-operation-request/v1' as const;
+export const SEMANTIC_OPERATION_RESULT_VERSION =
+  'northstar.semantic-operation-result/v1' as const;
 
 const OPERATION_CATALOG_PAYLOAD_VERSION =
   'northstar.operation-catalog-payload/v0-provisional' as const;
@@ -23,6 +32,64 @@ export interface SemanticOperationRequestEnvelope {
   readonly input: ImmutableJsonValue;
   readonly operationId: string;
   readonly schemaVersion: typeof SEMANTIC_OPERATION_REQUEST_VERSION;
+}
+
+export interface RegisteredOperationDefinition {
+  readonly confirmation: 'humanRequired' | 'none';
+  readonly effect: {
+    readonly entity: {
+      readonly kind: string;
+      readonly schemaVersion: string;
+      readonly targetId: string;
+    };
+    readonly kind:
+      | 'archiveRecordEffect'
+      | 'createRecordEffect'
+      | 'restoreRecordEffect'
+      | 'updateRecordEffect';
+    readonly schemaVersion: string;
+  };
+  readonly infrastructure?: {
+    readonly archiveRepresentation: 'nullableArchivedAt';
+    readonly optimisticRevision: 'compareAndIncrement';
+    readonly recordIdentity: 'canonicalUuid';
+  };
+  readonly lifecycle: 'active' | 'retired';
+  readonly operationId: string;
+  readonly permissionId: string;
+  readonly precondition: Readonly<Record<string, ImmutableJsonValue>>;
+  readonly readBackQueryId: string;
+  readonly tier: 'o0' | 'o1';
+}
+
+export interface SemanticOperationResultEnvelope {
+  readonly kind: 'semanticOperationResult';
+  readonly operationId: string;
+  readonly outcome: 'succeeded' | 'unsupported';
+  readonly readBack: SemanticRecordDto | null;
+  readonly schemaVersion: typeof SEMANTIC_OPERATION_RESULT_VERSION;
+  readonly trust: {
+    readonly changeDocumentId: string;
+    readonly domainEventId: string;
+    readonly invocationId: string;
+    readonly outboxId: string;
+  } | null;
+  readonly unsupportedReason: string | null;
+}
+
+export interface SemanticOperationExecutionRequest {
+  readonly context: TrustedRequestContext;
+  readonly definition: RegisteredOperationDefinition;
+  readonly input: ImmutableJsonValue;
+  readonly policyVersion: string;
+  readonly readBackDefinition: RegisteredQueryDefinition;
+  readonly view: IssuedRequestRuntimeView;
+}
+
+export interface SemanticOperationExecutor {
+  execute(
+    request: SemanticOperationExecutionRequest,
+  ): Promise<SemanticOperationResultEnvelope>;
 }
 
 export class MalformedSemanticOperationRequestError extends Error {
@@ -71,15 +138,19 @@ export class NoSuchRegisteredOperationError extends Error {
 
 /** Sole application mutation ingress for the request-pinned semantic contract. */
 export class SemanticOperationGateway {
-  constructor(private readonly currentPolicy: CurrentPolicyGateway) {}
+  constructor(
+    private readonly currentPolicy: CurrentPolicyGateway,
+    private readonly executor:
+      SemanticOperationExecutor | undefined = undefined,
+  ) {}
 
   async invoke(
     view: IssuedRequestRuntimeView,
     requestInput: unknown,
-  ): Promise<never> {
+  ): Promise<SemanticOperationResultEnvelope> {
     assertRequestRuntimeView(view);
     const request = parseSemanticOperationRequest(requestInput);
-    const policyDecision = await authorizeCurrentPolicy(
+    const boundaryDecision = await authorizeCurrentPolicy(
       this.currentPolicy,
       view,
       OPERATION_BOUNDARY_PERMISSION_ID,
@@ -91,13 +162,75 @@ export class SemanticOperationGateway {
         schemaVersion: OPERATION_POLICY_INPUT_VERSION,
       }),
     );
-    if (policyDecision.decision === 'DENY') {
+    if (boundaryDecision.decision === 'DENY') {
       throw new SemanticOperationPolicyDeniedError(request.operationId, view);
     }
 
-    assertPinnedOperationCatalog(view);
-    throw new NoSuchRegisteredOperationError(request.operationId, view);
+    const definition = findPinnedOperation(view, request.operationId);
+    if (!definition || !this.executor) {
+      throw new NoSuchRegisteredOperationError(request.operationId, view);
+    }
+    const operationDecision = await authorizeCurrentPolicy(
+      this.currentPolicy,
+      view,
+      definition.permissionId,
+      Object.freeze({
+        input: request.input,
+        kind: 'registeredSemanticOperationPolicyInput',
+        operationId: request.operationId,
+        requestId: view.requestId,
+        schemaVersion: OPERATION_POLICY_INPUT_VERSION,
+      }),
+    );
+    if (operationDecision.decision === 'DENY') {
+      throw new SemanticOperationPolicyDeniedError(request.operationId, view);
+    }
+    if (definition.lifecycle !== 'active' || definition.tier !== 'o0') {
+      return unsupportedOperationResult(
+        request.operationId,
+        'operation-tier-unsupported',
+      );
+    }
+    if (!isAlwaysTruePredicate(definition.precondition)) {
+      return unsupportedOperationResult(
+        request.operationId,
+        'operation-precondition-unsupported',
+      );
+    }
+    const readBackDefinition = registeredQueryFromPinnedView(
+      view,
+      definition.readBackQueryId,
+    );
+    if (
+      !readBackDefinition ||
+      readBackDefinition.lifecycle !== 'active' ||
+      readBackDefinition.tier !== 'q0' ||
+      readBackDefinition.queryType !== 'get' ||
+      readBackDefinition.sourceEntityId !== definition.effect.entity.targetId ||
+      !isAlwaysTruePredicate(readBackDefinition.filter)
+    ) {
+      return unsupportedOperationResult(
+        request.operationId,
+        'operation-read-back-unsupported',
+      );
+    }
+    return this.executor.execute(
+      Object.freeze({
+        context: trustedContextForRequestRuntimeView(view),
+        definition,
+        input: request.input,
+        policyVersion: operationDecision.policyVersion,
+        readBackDefinition,
+        view,
+      }),
+    );
   }
+}
+
+function isAlwaysTruePredicate(
+  value: Readonly<Record<string, ImmutableJsonValue>>,
+): boolean {
+  return value.kind === 'booleanPredicate' && value.value === true;
 }
 
 function parseSemanticOperationRequest(
@@ -123,7 +256,6 @@ function parseSemanticOperationRequest(
     'operationId',
     (message) => new MalformedSemanticOperationRequestError(message),
   );
-
   return Object.freeze({
     input: cloneImmutableJson(
       value.input,
@@ -135,7 +267,10 @@ function parseSemanticOperationRequest(
   });
 }
 
-function assertPinnedOperationCatalog(view: IssuedRequestRuntimeView): void {
+function findPinnedOperation(
+  view: IssuedRequestRuntimeView,
+  operationId: string,
+): RegisteredOperationDefinition | undefined {
   const projection = view.projections.operation;
   if (
     projection.familyId !== REQUEST_RUNTIME_PROJECTION_FAMILIES.operation ||
@@ -165,8 +300,8 @@ function assertPinnedOperationCatalog(view: IssuedRequestRuntimeView): void {
       'pinned operation catalog has an invalid kind, version, or shape',
     );
   }
-
   const operationIds = new Set<string>();
+  let selected: RegisteredOperationDefinition | undefined;
   for (const operation of payload.operations) {
     assertOperationDefinition(operation);
     if (operationIds.has(operation.operationId)) {
@@ -175,29 +310,33 @@ function assertPinnedOperationCatalog(view: IssuedRequestRuntimeView): void {
       );
     }
     operationIds.add(operation.operationId);
+    if (operation.operationId === operationId) selected = operation;
   }
+  return selected;
 }
 
 function assertOperationDefinition(
   value: unknown,
-): asserts value is Record<string, unknown> & { operationId: string } {
+): asserts value is RegisteredOperationDefinition {
   const invalid = (message: string): MalformedPinnedOperationCatalogError =>
     new MalformedPinnedOperationCatalogError(message);
   if (!isRecord(value)) {
     throw invalid('pinned operation definition must be an object');
   }
+  const expectedKeys = [
+    'confirmation',
+    'effect',
+    'lifecycle',
+    'operationId',
+    'permissionId',
+    'precondition',
+    'readBackQueryId',
+    'tier',
+  ];
+  const hasInfrastructure = Object.hasOwn(value, 'infrastructure');
   assertExactKeys(
     value,
-    [
-      'confirmation',
-      'effect',
-      'lifecycle',
-      'operationId',
-      'permissionId',
-      'precondition',
-      'readBackQueryId',
-      'tier',
-    ],
+    hasInfrastructure ? [...expectedKeys, 'infrastructure'] : expectedKeys,
     invalid,
   );
   assertCanonicalId(value.operationId, 'operationId', invalid);
@@ -212,6 +351,61 @@ function assertOperationDefinition(
   ) {
     throw invalid('pinned operation definition has an invalid shape');
   }
+  assertExactKeys(value.effect, ['entity', 'kind', 'schemaVersion'], invalid);
+  if (
+    !isRecord(value.effect.entity) ||
+    ![
+      'archiveRecordEffect',
+      'createRecordEffect',
+      'restoreRecordEffect',
+      'updateRecordEffect',
+    ].includes(String(value.effect.kind)) ||
+    typeof value.effect.schemaVersion !== 'string'
+  ) {
+    throw invalid('pinned operation effect is unsupported');
+  }
+  assertExactKeys(
+    value.effect.entity,
+    ['kind', 'schemaVersion', 'targetId'],
+    invalid,
+  );
+  assertCanonicalId(
+    value.effect.entity.targetId,
+    'effect.entity.targetId',
+    invalid,
+  );
+  if (hasInfrastructure) {
+    if (!isRecord(value.infrastructure)) {
+      throw invalid('pinned operation infrastructure must be an object');
+    }
+    assertExactKeys(
+      value.infrastructure,
+      ['archiveRepresentation', 'optimisticRevision', 'recordIdentity'],
+      invalid,
+    );
+    if (
+      value.infrastructure.archiveRepresentation !== 'nullableArchivedAt' ||
+      value.infrastructure.optimisticRevision !== 'compareAndIncrement' ||
+      value.infrastructure.recordIdentity !== 'canonicalUuid'
+    ) {
+      throw invalid('pinned operation infrastructure is unsupported');
+    }
+  }
+}
+
+function unsupportedOperationResult(
+  operationId: string,
+  reason: string,
+): SemanticOperationResultEnvelope {
+  return Object.freeze({
+    kind: 'semanticOperationResult',
+    operationId,
+    outcome: 'unsupported',
+    readBack: null,
+    schemaVersion: SEMANTIC_OPERATION_RESULT_VERSION,
+    trust: null,
+    unsupportedReason: reason,
+  });
 }
 
 function assertCanonicalId(

@@ -161,6 +161,7 @@ export type PinValidationResult =
     };
 
 const issuedViews = new WeakSet<object>();
+const issuedViewContexts = new WeakMap<object, TrustedRequestContext>();
 const sha256Pattern = /^[0-9a-f]{64}$/;
 
 export class RequestRuntimeViewIntegrityError extends Error {
@@ -319,6 +320,24 @@ export function assertRequestRuntimeView(
   }
 }
 
+/**
+ * Supplies the original issued context only to the semantic gateways' generic
+ * executor port. Identity is never reconstructed from operation or query input.
+ */
+export function trustedContextForRequestRuntimeView(
+  view: RequestRuntimeView,
+): TrustedRequestContext {
+  assertRequestRuntimeView(view);
+  const context = issuedViewContexts.get(view);
+  if (!context) {
+    throw new RequestRuntimeViewIntegrityError(
+      'issued request runtime view is missing its trusted context binding',
+    );
+  }
+  assertTrustedRequestContext(context);
+  return context;
+}
+
 function constructRequestRuntimeView(
   context: TrustedRequestContext,
   definition: LoadedRequestRuntimeDefinition,
@@ -360,6 +379,7 @@ function constructRequestRuntimeView(
     tenantId: context.tenantId,
   });
   issuedViews.add(view);
+  issuedViewContexts.set(view, context);
   return view;
 }
 

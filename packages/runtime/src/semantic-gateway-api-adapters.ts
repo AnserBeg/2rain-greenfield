@@ -1,7 +1,13 @@
 import type { UntrustedRequestInput } from './request-context.js';
 import type { AuthenticatedRequestRuntimeEntryAdapter } from './request-runtime-view.js';
-import type { SemanticOperationGateway } from './semantic-operation-gateway.js';
-import type { SemanticQueryGateway } from './semantic-query-gateway.js';
+import type {
+  SemanticOperationGateway,
+  SemanticOperationResultEnvelope,
+} from './semantic-operation-gateway.js';
+import type {
+  SemanticQueryGateway,
+  SemanticQueryResultEnvelope,
+} from './semantic-query-gateway.js';
 
 export class AuthenticatedSemanticQueryApiAdapter {
   constructor(
@@ -12,7 +18,7 @@ export class AuthenticatedSemanticQueryApiAdapter {
   async handle(
     authenticationInput: UntrustedRequestInput,
     semanticEnvelope: unknown,
-  ): Promise<never> {
+  ): Promise<SemanticQueryResultEnvelope> {
     return this.requestEntry.run(authenticationInput, (view) =>
       this.queryGateway.invoke(view, semanticEnvelope),
     );
@@ -28,7 +34,7 @@ export class AuthenticatedSemanticOperationApiAdapter {
   async handle(
     authenticationInput: UntrustedRequestInput,
     semanticEnvelope: unknown,
-  ): Promise<never> {
+  ): Promise<SemanticOperationResultEnvelope> {
     return this.requestEntry.run(authenticationInput, (view) =>
       this.operationGateway.invoke(view, semanticEnvelope),
     );
