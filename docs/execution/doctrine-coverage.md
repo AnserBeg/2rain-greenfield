@@ -36,7 +36,7 @@ packet:
    status-color grammar, weight-matches-consequence) — G1-P7 evidence at
    `e647968` now renders the first compiled-release-only shell with a closed
    own-entry registry, 6/6 focused contracts, and 3/3 Chromium journeys;
-   G1-P8 candidate `4ea6686` adopts the skill and makes plan/skill/code drift,
+   accepted G1-P8 SHA `4ea6686` adopts the skill and makes plan/skill/code drift,
    per-archetype slot drift, hardcoded surface bypass, and registry vocabulary
    escape fail the 9/9 focused and 35/35 architecture suites. The full G2
    five-archetype conformance packet remains to be created at the G2 cut.
@@ -99,7 +99,7 @@ later stage cuts must create their remaining enforcement packets.
 
 | Concern | Instrument | Enforced today by | Executable at | Status |
 |---|---|---|---|---|
-| Surface grammar (5 archetypes, one authority per surface, status colors, weight-matches-consequence) | plan §8.5-8.6; `ux-grammar` skill | G1-P7 reviewed candidate `e647968`: issued-view-only SurfaceRuntime, deterministic compiled-navigation assertion, closed own-entry component registry, rendered unsupported/error diagnostics, status-role styling, 6/6 focused contracts, and 3/3 Chromium journeys; G1-P8 candidate `4ea6686`: loadable versioned skill pin, exact per-archetype plan/skill/code vocabulary checks, closed-registry and compiled SurfaceRuntime seam, 9/9 focused negatives, and 35/35 architecture tests | G1-P7 compiled shell + G1-P8 skill-pin/seam; G2 full conformance | partially enforced |
+| Surface grammar (5 archetypes, one authority per surface, status colors, weight-matches-consequence) | plan §8.5-8.6; `ux-grammar` skill | G1-P7 reviewed candidate `e647968`: issued-view-only SurfaceRuntime, deterministic compiled-navigation assertion, closed own-entry component registry, rendered unsupported/error diagnostics, status-role styling, 6/6 focused contracts, and 3/3 Chromium journeys; accepted G1-P8 SHA `4ea6686`: loadable versioned skill pin, exact per-archetype plan/skill/code vocabulary checks, closed-registry and compiled SurfaceRuntime seam, 9/9 focused negatives, and 35/35 architecture tests | G1-P7 compiled shell + G1-P8 skill-pin/seam; G2 full conformance | partially enforced |
 | Responsive/mobile contract | plan §8.5; `ux-grammar` skill | G1-P8 pins the loadable skill to plan/code vocabulary; compact rendering behavior remains unenforced | G2 compact-projection conformance | partially enforced |
 | Accessibility (WCAG 2.2 AA) | plan §8.4-8.5 | — | G2 conformance; G7 audit | prose-only (packets untracked) |
 | Customize content, never grammar | plan §8.6, §10 | `ux-grammar` skill | G6 customization gates | scheduled |
