@@ -91,6 +91,18 @@ Rules:
 - Codex launcher templates live in `~/2rain-missions`; model policy is
   `gpt-5.6-sol`, effort per the table (codex maximum effort is xhigh).
 
+Packet review is not the only review. A **program review** is a separate,
+trigger-gated whole-app instrument that packet reviews cannot substitute for:
+it checks the whole built system for coherence and ADR-vs-code drift, and it
+returns a direct verdict on the two strategic questions — is the north star
+still the right GOAL, and is our APPROACH the right way to reach it. At every
+checkpoint and stage boundary, evaluate its triggers (first end-to-end slice
+before a fan-out, a new correctness domain, before the first zero-dev-code
+module, or accumulated drift) and propose one when due. The `program-review`
+skill is binding on when and how it runs; it is user-selected, never
+autonomous, and its strategic recommendations are surfaced, never acted on
+silently.
+
 ## 5. Serialization and ownership
 
 - Serial, never concurrent: database schema and migrations, generated
@@ -121,7 +133,9 @@ Rules:
 ## 8. Skills
 
 - `mission-cadence` — the packet contract; read before orchestrating.
-- `review-tiers` — seat matrix mechanics and review prompts.
+- `review-tiers` — seat matrix mechanics and review prompts (one packet).
+- `program-review` — the trigger-gated whole-app review: coherence plus the
+  north-star goal / approach questions. Evaluate its triggers each checkpoint.
 - `salvage-admission` — reuse from the prior repository.
 - `git-workflow` — branching, commit, push, and tag discipline.
 - `ux-grammar` — binding UI/UX grammar (its CI pinning test lands at G1).

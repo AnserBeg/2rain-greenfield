@@ -26,7 +26,9 @@ large batches — even when the next step seems obvious.
 3. **Execute** — run the seats per the `review-tiers` skill inside the
    packet's owned paths.
 4. **Checkpoint** — deliver the packet-completion block (below), update
-   `docs/execution/ledger.md`, then STOP and wait.
+   `docs/execution/ledger.md`, evaluate the `program-review` triggers (a
+   whole-app review may be due at a fan-out point, a new correctness domain,
+   or accumulated drift — propose one if a trigger fires), then STOP and wait.
 
 ## Packet definition
 
