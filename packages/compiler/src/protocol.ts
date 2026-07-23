@@ -35,7 +35,7 @@ export const POSTGRES_PROVIDER_ABI_VERSION =
   'northstar.postgresql-module-provider-abi/v1' as const;
 export const STORAGE_RENDERER_POLICY_VERSION =
   'northstar.storage-renderer-allowlist/v1' as const;
-export const TIGHTENING_DEBT_VERSION = 'northstar.tightening-debt/v1' as const;
+export const TIGHTENING_DEBT_VERSION = 'northstar.tightening-debt/v2' as const;
 export const BACKFILL_ADMISSIBILITY_VERSION =
   'northstar.backfill-admissibility/v1' as const;
 export const HASH_ALGORITHM = 'sha256' as const;
@@ -208,15 +208,17 @@ export interface StorageTransitionElement {
 }
 
 export interface TighteningDebt {
-  affectedReaderQueryIds: string[];
-  affectedWriterOperationIds: string[];
   admissionConsequence: 'blocksTenantAccessibleModuleCreation';
   blockingRootIds: string[];
+  candidateAffectedReaderQueryIds: string[];
+  candidateAffectedWriterOperationIds: string[];
   debtId: string;
   elementId: string;
   liveRootResolution: 'materializerResolvesActiveAndNonTerminalPreparationUnion';
   owner: string;
   prerequisites: string[];
+  priorAffectedReaderQueryIds: string[];
+  priorAffectedWriterOperationIds: string[];
   schemaVersion: typeof TIGHTENING_DEBT_VERSION;
 }
 

@@ -390,6 +390,8 @@ test('relation additions order the column before the FK and debt preserves both 
   const previousWriterIds = ['archive', 'create', 'restore', 'update'].map(
     (suffix) => `${FIXTURE_IDS.namespace}:operation.master_role_${suffix}`,
   );
+  const candidateReaderIds = previousReaderIds.map((id) => `${id}_v2`);
+  const candidateWriterIds = previousWriterIds.map((id) => `${id}_v2`);
   let renamedCandidate: unknown = ordinaryModuleV2();
   for (const id of [...previousReaderIds, ...previousWriterIds]) {
     renamedCandidate = replaceVersion(renamedCandidate, id, `${id}_v2`);
@@ -453,14 +455,24 @@ test('relation additions order the column before the FK and debt preserves both 
     'blocksTenantAccessibleModuleCreation',
   );
   assert.deepEqual(debt.blockingRootIds, [first.releaseRoot]);
+  assert.equal(debt.schemaVersion, 'northstar.tightening-debt/v2');
+  assert.deepEqual(debt.priorAffectedReaderQueryIds, previousReaderIds);
+  assert.deepEqual(debt.candidateAffectedReaderQueryIds, candidateReaderIds);
+  assert.deepEqual(debt.priorAffectedWriterOperationIds, previousWriterIds);
   assert.deepEqual(
-    debt.affectedReaderQueryIds,
-    [...previousReaderIds, ...previousReaderIds.map((id) => `${id}_v2`)].sort(),
+    debt.candidateAffectedWriterOperationIds,
+    candidateWriterIds,
   );
-  assert.deepEqual(
-    debt.affectedWriterOperationIds,
-    [...previousWriterIds, ...previousWriterIds.map((id) => `${id}_v2`)].sort(),
-  );
+  for (const ids of [
+    debt.priorAffectedReaderQueryIds,
+    debt.candidateAffectedReaderQueryIds,
+    debt.priorAffectedWriterOperationIds,
+    debt.candidateAffectedWriterOperationIds,
+  ]) {
+    assert.deepEqual(ids, [...new Set(ids)].sort());
+  }
+  assert.equal('affectedReaderQueryIds' in debt, false);
+  assert.equal('affectedWriterOperationIds' in debt, false);
   assert.equal(
     debt.liveRootResolution,
     'materializerResolvesActiveAndNonTerminalPreparationUnion',

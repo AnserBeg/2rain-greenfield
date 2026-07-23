@@ -1249,15 +1249,18 @@ function tighteningDebt(
   entry: StorageTransitionElement,
   blockingOldReleaseRoot: string,
   affected: {
-    readerQueryIds: string[];
-    writerOperationIds: string[];
+    candidateAffectedReaderQueryIds: string[];
+    candidateAffectedWriterOperationIds: string[];
+    priorAffectedReaderQueryIds: string[];
+    priorAffectedWriterOperationIds: string[];
   },
 ): TighteningDebt {
   return {
-    affectedReaderQueryIds: affected.readerQueryIds,
-    affectedWriterOperationIds: affected.writerOperationIds,
     admissionConsequence: 'blocksTenantAccessibleModuleCreation',
     blockingRootIds: [blockingOldReleaseRoot],
+    candidateAffectedReaderQueryIds: affected.candidateAffectedReaderQueryIds,
+    candidateAffectedWriterOperationIds:
+      affected.candidateAffectedWriterOperationIds,
     debtId: hashCanonical(`${HASH_DOMAINS.storageTransitionElement}/debt`, {
       elementId: entry.elementId,
       owner: entry.subjectId,
@@ -1271,6 +1274,8 @@ function tighteningDebt(
       'affected physical-table writers retired or proven compatible',
       'object-level verifier passes',
     ],
+    priorAffectedReaderQueryIds: affected.priorAffectedReaderQueryIds,
+    priorAffectedWriterOperationIds: affected.priorAffectedWriterOperationIds,
     schemaVersion: TIGHTENING_DEBT_VERSION,
   };
 }
@@ -1279,21 +1284,23 @@ function affectedConsumerWriters(
   previous: StorageEntityTarget | undefined,
   candidate: StorageEntityTarget | undefined,
 ): {
-  readerQueryIds: string[];
-  writerOperationIds: string[];
+  candidateAffectedReaderQueryIds: string[];
+  candidateAffectedWriterOperationIds: string[];
+  priorAffectedReaderQueryIds: string[];
+  priorAffectedWriterOperationIds: string[];
 } {
   return {
-    readerQueryIds: [
-      ...new Set([
-        ...(previous?.consumerWriterRoots.readerQueryIds ?? []),
-        ...(candidate?.consumerWriterRoots.readerQueryIds ?? []),
-      ]),
+    candidateAffectedReaderQueryIds: [
+      ...new Set(candidate?.consumerWriterRoots.readerQueryIds ?? []),
     ].sort(compare),
-    writerOperationIds: [
-      ...new Set([
-        ...(previous?.consumerWriterRoots.writerOperationIds ?? []),
-        ...(candidate?.consumerWriterRoots.writerOperationIds ?? []),
-      ]),
+    candidateAffectedWriterOperationIds: [
+      ...new Set(candidate?.consumerWriterRoots.writerOperationIds ?? []),
+    ].sort(compare),
+    priorAffectedReaderQueryIds: [
+      ...new Set(previous?.consumerWriterRoots.readerQueryIds ?? []),
+    ].sort(compare),
+    priorAffectedWriterOperationIds: [
+      ...new Set(previous?.consumerWriterRoots.writerOperationIds ?? []),
     ].sort(compare),
   };
 }

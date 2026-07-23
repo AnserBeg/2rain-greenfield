@@ -202,13 +202,13 @@ correct residual-row reads is rejected.
 
 Tightening scope comes from the physical table's actual reader/writer roots in
 compiled releases, never package provenance or first-party lineage. Every
-deferred tighten creates `northstar.tightening-debt/v1` with element ID,
-the pairwise blocking old-release root, prior and candidate reader/writer
-identities, owner, prerequisites, admission consequence, and an explicit rule
-that the materializer resolves the active-plus-non-terminal-preparation
-live-root union. `CompilerInput` remains pairwise. Outstanding debt blocks
-tenant-accessible module creation until the cleanup/tighten family ships and
-the union of live roots is revalidated.
+deferred tighten creates `northstar.tightening-debt/v2` with element ID,
+the pairwise blocking old-release root, separately attributed prior and
+candidate reader/writer identities, owner, prerequisites, admission
+consequence, and an explicit rule that the materializer resolves the
+active-plus-non-terminal-preparation live-root union. `CompilerInput` remains
+pairwise. Outstanding debt blocks tenant-accessible module creation until the
+cleanup/tighten family ships and the union of live roots is revalidated.
 
 ### Backfill admissibility
 
