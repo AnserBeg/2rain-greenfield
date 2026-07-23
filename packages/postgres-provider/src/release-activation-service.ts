@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 
 import {
   ACTIVATION_HISTORY_VERSION,
@@ -56,7 +57,18 @@ export class ReleaseActivationError extends Error {
 }
 
 export interface ReleaseActivationServiceOptions {
+  readonly reconciliationClock?: ReleaseActivationReconciliationClock;
   readonly reconciliationMaxAgeMilliseconds?: number;
+}
+
+export interface ReleaseActivationReconciliationClockSample {
+  readonly monotonicMilliseconds: number;
+  readonly origin: string;
+  readonly wallTime: Date;
+}
+
+export interface ReleaseActivationReconciliationClock {
+  sample(): ReleaseActivationReconciliationClockSample;
 }
 
 interface AttemptRecordRow {
@@ -146,17 +158,33 @@ interface DurableReconciliationAge {
 interface ReconciliationInspectionRow {
   alarm_recorded: boolean;
   completion_at: Date | null;
+  completion_monotonic_anchor_code: string | null;
+  completion_monotonic_anchor_wall_at: Date | null;
   deadline_at: Date | null;
   environment_id: string;
   execution_principal_id: string;
   execution_principal_kind: 'SYSTEM';
   max_age_milliseconds: string | null;
+  monotonic_anchor_code: string | null;
+  monotonic_anchor_wall_at: Date | null;
   observed_at: Date;
-  overdue: boolean;
-  reconciliation_state: ReleaseActivationReconciliationState;
   started_at: Date | null;
   tenant_id: string;
 }
+
+interface SystemMonotonicClock {
+  nowMilliseconds(): number;
+  readonly origin: string;
+}
+
+const RECONCILIATION_MONOTONIC_ANCHOR_PREFIX =
+  'RECONCILIATION_MONOTONIC_ANCHOR_V1:';
+const RECONCILIATION_MONOTONIC_COMPLETION_PREFIX =
+  'RECONCILIATION_MONOTONIC_COMPLETION_V1:';
+const reconciliationClockOriginPattern = /^[A-Za-z0-9._-]{1,128}$/;
+// Linux CLOCK_MONOTONIC (via hrtime) is process-independent within one boot;
+// the boot id prevents incomparable samples from different boots being mixed.
+const systemMonotonicClock = createSystemMonotonicClock();
 
 /**
  * Trusted release activation kernel. The only mutation entry is an already
@@ -164,6 +192,8 @@ interface ReconciliationInspectionRow {
  * from canonical PostgreSQL records under the attempt/authority locks.
  */
 export class PostgresReleaseActivationService {
+  readonly #reconciliationClock:
+    ReleaseActivationReconciliationClock | undefined;
   readonly #reconciliationMaxAgeMilliseconds: number;
 
   constructor(
@@ -179,6 +209,16 @@ export class PostgresReleaseActivationService {
         'reconciliation max age must be a positive safe integer',
       );
     }
+    if (
+      options.reconciliationClock !== undefined &&
+      typeof options.reconciliationClock.sample !== 'function'
+    ) {
+      throw new ReleaseActivationError(
+        'RECONCILIATION_CLOCK_INVALID',
+        'reconciliation clock must expose a sample function',
+      );
+    }
+    this.#reconciliationClock = options.reconciliationClock;
     this.#reconciliationMaxAgeMilliseconds = maxAge;
   }
 
@@ -262,7 +302,12 @@ export class PostgresReleaseActivationService {
             command.activationAttemptId,
           );
           if (existing) return resultFromOutcome(context, record, existing);
-          return insertTerminalOutcome(client, context, record, 'CANCELLATION');
+          return this.#insertTerminalOutcome(
+            client,
+            context,
+            record,
+            'CANCELLATION',
+          );
         },
       );
       const result =
@@ -345,6 +390,10 @@ export class PostgresReleaseActivationService {
                 verification.moduleSchemaConformancePassed
               ? 'SWAPPED_VERIFIED'
               : 'SWAPPED_VERIFICATION_FAILED';
+          const completionClock = await sampleReconciliationClock(
+            client,
+            this.#reconciliationClock,
+          );
 
           const inserted = await client.query<VerificationRow>(
             `INSERT INTO platform.release_activation_verification_receipts (
@@ -365,7 +414,7 @@ export class PostgresReleaseActivationService {
                recorded_at
              ) VALUES (
                $1, $2, $3, $4, $5, $6, $7, $8,
-               $9, $10, $11, $12, 0, $13, clock_timestamp()
+               $9, $10, $11, $12, 0, $13, $14
              )
              RETURNING pointer_id, activated_release_id, fence, status`,
             [
@@ -386,6 +435,7 @@ export class PostgresReleaseActivationService {
                 ? verification.moduleSchemaConformancePassed
                 : null,
               status,
+              completionClock.wallTime,
             ],
           );
           await insertPhaseReceipt(
@@ -394,6 +444,12 @@ export class PostgresReleaseActivationService {
             command.activationAttemptId,
             status,
             safeFence(receipt.fence),
+          );
+          await ensureReconciliationMonotonicCompletion(
+            client,
+            context,
+            command.activationAttemptId,
+            completionClock,
           );
           return resultFromVerification(
             context,
@@ -427,13 +483,18 @@ export class PostgresReleaseActivationService {
   ): Promise<ReleaseActivationReconciliationInspection> {
     assertTrustedRequestContext(context);
     assertAttemptIdentity(command.activationAttemptId);
-    return withTrustedRequestTransaction(this.pool, context, async (client) =>
-      loadReconciliationInspection(
+    return withTrustedRequestTransaction(this.pool, context, async (client) => {
+      const clock = await sampleReconciliationClock(
+        client,
+        this.#reconciliationClock,
+      );
+      return loadReconciliationInspection(
         client,
         context,
         command.activationAttemptId,
-      ),
-    );
+        clock,
+      );
+    });
   }
 
   async readInvalidationEvent(
@@ -535,7 +596,7 @@ export class PostgresReleaseActivationService {
       );
       if (!approverEligible) {
         return {
-          result: await insertTerminalOutcome(
+          result: await this.#insertTerminalOutcome(
             client,
             context,
             record,
@@ -551,7 +612,7 @@ export class PostgresReleaseActivationService {
       );
       if (control.livePolicyDenied) {
         return {
-          result: await insertTerminalOutcome(
+          result: await this.#insertTerminalOutcome(
             client,
             context,
             record,
@@ -596,7 +657,7 @@ export class PostgresReleaseActivationService {
         safeFence(record.authority_policy_version)
       ) {
         return {
-          result: await insertTerminalOutcome(
+          result: await this.#insertTerminalOutcome(
             client,
             context,
             record,
@@ -614,7 +675,7 @@ export class PostgresReleaseActivationService {
       );
       if (expiry.rows[0]?.expired !== false) {
         return {
-          result: await insertTerminalOutcome(
+          result: await this.#insertTerminalOutcome(
             client,
             context,
             record,
@@ -625,7 +686,7 @@ export class PostgresReleaseActivationService {
       }
       if (!record.binding_valid) {
         return {
-          result: await insertTerminalOutcome(
+          result: await this.#insertTerminalOutcome(
             client,
             context,
             record,
@@ -636,7 +697,7 @@ export class PostgresReleaseActivationService {
       }
       if (!record.readiness_valid || Number(record.target_artifact_count) < 1) {
         return {
-          result: await insertTerminalOutcome(
+          result: await this.#insertTerminalOutcome(
             client,
             context,
             record,
@@ -653,7 +714,7 @@ export class PostgresReleaseActivationService {
         pointer.fence !== record.expected_fence
       ) {
         return {
-          result: await insertTerminalOutcome(
+          result: await this.#insertTerminalOutcome(
             client,
             context,
             record,
@@ -755,7 +816,12 @@ export class PostgresReleaseActivationService {
               ? 'LOST_RACE'
               : 'STALE_POINTER';
         return {
-          result: await insertTerminalOutcome(client, context, record, code),
+          result: await this.#insertTerminalOutcome(
+            client,
+            context,
+            record,
+            code,
+          ),
           swapped: false,
         };
       }
@@ -825,9 +891,29 @@ export class PostgresReleaseActivationService {
       return runningResult(context, record, 'RECONCILING');
     }
     if (safeFence(pointer.fence) > safeFence(record.expected_fence)) {
-      return insertTerminalOutcome(client, context, record, 'LOST_RACE');
+      return this.#insertTerminalOutcome(client, context, record, 'LOST_RACE');
     }
-    return insertTerminalOutcome(client, context, record, 'INVALID_BINDING');
+    return this.#insertTerminalOutcome(
+      client,
+      context,
+      record,
+      'INVALID_BINDING',
+    );
+  }
+
+  async #insertTerminalOutcome(
+    client: PoolClient,
+    context: TrustedRequestContext,
+    record: AttemptRecordRow,
+    outcomeCode: Exclude<DecisiveActivationOutcomeCode, 'SWAPPED'>,
+  ): Promise<ActivationKernelResult> {
+    return insertTerminalOutcome(
+      client,
+      context,
+      record,
+      outcomeCode,
+      this.#reconciliationClock,
+    );
   }
 
   async #recordDurableReconciliationAge(
@@ -868,6 +954,11 @@ export class PostgresReleaseActivationService {
         ),
       );
 
+      const clock = await sampleReconciliationClock(
+        client,
+        this.#reconciliationClock,
+      );
+
       if (createIfMissing) {
         await client.query(
           `INSERT INTO platform.release_activation_reconciliation_starts (
@@ -879,7 +970,7 @@ export class PostgresReleaseActivationService {
                max_age_milliseconds,
                started_at
              )
-             SELECT $1, $2, $3, $4, $5, $6, clock_timestamp()
+             SELECT $1, $2, $3, $4, $5, $6, $7
               WHERE NOT EXISTS (
                 SELECT 1
                   FROM platform.release_activation_reconciliation_starts AS existing
@@ -892,14 +983,23 @@ export class PostgresReleaseActivationService {
             randomUUID(),
             ACTIVATION_RECONCILIATION_START_VERSION,
             this.#reconciliationMaxAgeMilliseconds,
+            clock.wallTime,
           ],
         );
       }
+
+      await ensureReconciliationMonotonicAnchor(
+        client,
+        context,
+        command.activationAttemptId,
+        clock,
+      );
 
       const durable = await loadReconciliationInspection(
         client,
         context,
         command.activationAttemptId,
+        clock,
       );
       if (durable.state === 'NOT_STARTED') {
         return { alarmDue: false, started: false };
@@ -984,11 +1084,10 @@ async function loadReconciliationInspection(
   client: PoolClient,
   context: TrustedRequestContext,
   activationAttemptId: MintedUuid,
+  clock: ReleaseActivationReconciliationClockSample,
 ): Promise<ReleaseActivationReconciliationInspection> {
   const result = await client.query<ReconciliationInspectionRow>(
-    `WITH observed AS (
-       SELECT clock_timestamp() AS observed_at
-     ), durable AS (
+    `WITH durable AS (
        SELECT attempt.tenant_id,
               attempt.environment_id,
               attempt.execution_principal_kind,
@@ -1005,9 +1104,12 @@ async function loadReconciliationInspection(
                 CASE WHEN outcome.terminal THEN outcome.recorded_at END
               ) AS completion_at,
               alarm.activation_attempt_id IS NOT NULL AS alarm_recorded,
-              observed.observed_at
+              $4::timestamptz AS observed_at,
+              anchor.phase_code AS monotonic_anchor_code,
+              anchor.recorded_at AS monotonic_anchor_wall_at,
+              completion_anchor.phase_code AS completion_monotonic_anchor_code,
+              completion_anchor.recorded_at AS completion_monotonic_anchor_wall_at
          FROM platform.release_activation_attempts AS attempt
-         CROSS JOIN observed
          LEFT JOIN platform.release_activation_reconciliation_starts AS start
            ON start.tenant_id = attempt.tenant_id
           AND start.environment_id = attempt.environment_id
@@ -1024,6 +1126,26 @@ async function loadReconciliationInspection(
            ON alarm.tenant_id = attempt.tenant_id
           AND alarm.environment_id = attempt.environment_id
           AND alarm.activation_attempt_id = attempt.activation_attempt_id
+         LEFT JOIN LATERAL (
+           SELECT phase.phase_code, phase.recorded_at
+             FROM platform.release_activation_phase_receipts AS phase
+            WHERE phase.tenant_id = attempt.tenant_id
+              AND phase.environment_id = attempt.environment_id
+              AND phase.activation_attempt_id = attempt.activation_attempt_id
+              AND left(phase.phase_code, length($5::text)) = $5::text
+            ORDER BY phase.recorded_at, phase.phase_code
+            LIMIT 1
+         ) AS anchor ON true
+         LEFT JOIN LATERAL (
+           SELECT phase.phase_code, phase.recorded_at
+             FROM platform.release_activation_phase_receipts AS phase
+            WHERE phase.tenant_id = attempt.tenant_id
+              AND phase.environment_id = attempt.environment_id
+              AND phase.activation_attempt_id = attempt.activation_attempt_id
+              AND left(phase.phase_code, length($6::text)) = $6::text
+            ORDER BY phase.recorded_at, phase.phase_code
+            LIMIT 1
+         ) AS completion_anchor ON true
         WHERE attempt.tenant_id = $1
           AND attempt.environment_id = $2
           AND attempt.activation_attempt_id = $3
@@ -1038,27 +1160,48 @@ async function loadReconciliationInspection(
             completion_at,
             alarm_recorded,
             observed_at,
-            CASE
-              WHEN started_at IS NULL THEN 'NOT_STARTED'
-              WHEN completion_at IS NULL AND observed_at >= deadline_at
-                THEN 'OVERDUE_UNRESOLVED'
-              WHEN completion_at IS NULL THEN 'PENDING'
-              WHEN completion_at >= deadline_at THEN 'OVERDUE_COMPLETED'
-              ELSE 'COMPLETED_WITHIN_MAX_AGE'
-            END AS reconciliation_state,
-            CASE
-              WHEN started_at IS NULL THEN false
-              WHEN completion_at IS NULL THEN observed_at >= deadline_at
-              ELSE completion_at >= deadline_at
-            END AS overdue
+            monotonic_anchor_code,
+            monotonic_anchor_wall_at,
+            completion_monotonic_anchor_code,
+            completion_monotonic_anchor_wall_at
        FROM durable`,
-    [context.tenantId, context.environmentId, activationAttemptId],
+    [
+      context.tenantId,
+      context.environmentId,
+      activationAttemptId,
+      clock.wallTime,
+      RECONCILIATION_MONOTONIC_ANCHOR_PREFIX,
+      RECONCILIATION_MONOTONIC_COMPLETION_PREFIX,
+    ],
   );
   const row = requiredRow(
     result.rows[0],
     'activation attempt is not visible to the trusted request context',
   );
   assertExecutionPrincipal(context, row);
+  const observedAt = effectiveReconciliationTime(row, clock);
+  const effectiveCompletionAt = effectiveReconciliationCompletionTime(row);
+  const completedAfterDeadline =
+    effectiveCompletionAt !== null &&
+    row.deadline_at !== null &&
+    effectiveCompletionAt >= row.deadline_at;
+  const unresolvedAfterDeadline =
+    row.completion_at === null &&
+    row.deadline_at !== null &&
+    observedAt >= row.deadline_at;
+  const overdue =
+    row.started_at !== null &&
+    (row.alarm_recorded || completedAfterDeadline || unresolvedAfterDeadline);
+  const state: ReleaseActivationReconciliationState =
+    row.started_at === null
+      ? 'NOT_STARTED'
+      : row.completion_at === null
+        ? overdue
+          ? 'OVERDUE_UNRESOLVED'
+          : 'PENDING'
+        : overdue
+          ? 'OVERDUE_COMPLETED'
+          : 'COMPLETED_WITHIN_MAX_AGE';
   return Object.freeze({
     activationAttemptId,
     alarmRecorded: row.alarm_recorded,
@@ -1069,12 +1212,255 @@ async function loadReconciliationInspection(
       row.max_age_milliseconds === null
         ? null
         : safeFence(row.max_age_milliseconds),
-    observedAt: row.observed_at.toISOString(),
-    overdue: row.overdue,
+    observedAt: observedAt.toISOString(),
+    overdue,
     startedAt: row.started_at?.toISOString() ?? null,
-    state: row.reconciliation_state,
+    state,
     tenantId: row.tenant_id,
   });
+}
+
+async function sampleReconciliationClock(
+  client: PoolClient,
+  injectedClock: ReleaseActivationReconciliationClock | undefined,
+): Promise<ReleaseActivationReconciliationClockSample> {
+  if (injectedClock) return validateClockSample(injectedClock.sample());
+  const observed = await client.query<{ wall_time: Date }>(
+    'SELECT clock_timestamp() AS wall_time',
+  );
+  return Object.freeze({
+    monotonicMilliseconds: systemMonotonicClock.nowMilliseconds(),
+    origin: systemMonotonicClock.origin,
+    wallTime: requiredRow(
+      observed.rows[0],
+      'reconciliation clock did not return a wall time',
+    ).wall_time,
+  });
+}
+
+function validateClockSample(
+  sample: ReleaseActivationReconciliationClockSample,
+): ReleaseActivationReconciliationClockSample {
+  if (
+    !(sample.wallTime instanceof Date) ||
+    !Number.isFinite(sample.wallTime.getTime()) ||
+    !Number.isSafeInteger(sample.monotonicMilliseconds) ||
+    sample.monotonicMilliseconds < 0 ||
+    !reconciliationClockOriginPattern.test(sample.origin)
+  ) {
+    throw new ReleaseActivationError(
+      'RECONCILIATION_CLOCK_INVALID',
+      'reconciliation clock returned an invalid sample',
+    );
+  }
+  return Object.freeze({
+    monotonicMilliseconds: sample.monotonicMilliseconds,
+    origin: sample.origin,
+    wallTime: new Date(sample.wallTime.getTime()),
+  });
+}
+
+async function ensureReconciliationMonotonicAnchor(
+  client: PoolClient,
+  context: TrustedRequestContext,
+  activationAttemptId: MintedUuid,
+  clock: ReleaseActivationReconciliationClockSample,
+): Promise<void> {
+  // The existing append-only phase-receipt contract gives this clock anchor
+  // crash durability without making accepted migrations mutable.
+  const phaseCode = `${RECONCILIATION_MONOTONIC_ANCHOR_PREFIX}${clock.origin}:${clock.monotonicMilliseconds}`;
+  await client.query(
+    `INSERT INTO platform.release_activation_phase_receipts (
+       tenant_id,
+       environment_id,
+       phase_receipt_id,
+       activation_attempt_id,
+       receipt_version,
+       phase_code,
+       receipt_digest,
+       recorded_at
+     )
+     SELECT $1, $2, $3, $4, $5, $6, $7, $8
+      WHERE EXISTS (
+        SELECT 1
+          FROM platform.release_activation_reconciliation_starts AS start
+         WHERE start.activation_attempt_id = $4
+      )
+        AND NOT EXISTS (
+        SELECT 1
+          FROM platform.release_activation_phase_receipts AS existing
+         WHERE existing.activation_attempt_id = $4
+           AND left(existing.phase_code, length($9::text)) = $9::text
+      )`,
+    [
+      context.tenantId,
+      context.environmentId,
+      randomUUID(),
+      activationAttemptId,
+      ACTIVATION_PHASE_RECEIPT_VERSION,
+      phaseCode,
+      digestBytes(
+        'activation-reconciliation-monotonic-anchor',
+        activationAttemptId,
+        clock.origin,
+        clock.monotonicMilliseconds,
+        clock.wallTime.toISOString(),
+      ),
+      clock.wallTime,
+      RECONCILIATION_MONOTONIC_ANCHOR_PREFIX,
+    ],
+  );
+}
+
+async function ensureReconciliationMonotonicCompletion(
+  client: PoolClient,
+  context: TrustedRequestContext,
+  activationAttemptId: MintedUuid,
+  clock: ReleaseActivationReconciliationClockSample,
+): Promise<void> {
+  const phaseCode = `${RECONCILIATION_MONOTONIC_COMPLETION_PREFIX}${clock.origin}:${clock.monotonicMilliseconds}`;
+  await client.query(
+    `INSERT INTO platform.release_activation_phase_receipts (
+       tenant_id,
+       environment_id,
+       phase_receipt_id,
+       activation_attempt_id,
+       receipt_version,
+       phase_code,
+       receipt_digest,
+       recorded_at
+     )
+     SELECT $1, $2, $3, $4, $5, $6, $7, $8
+      WHERE EXISTS (
+        SELECT 1
+          FROM platform.release_activation_reconciliation_starts AS start
+         WHERE start.activation_attempt_id = $4
+      )
+        AND NOT EXISTS (
+        SELECT 1
+          FROM platform.release_activation_phase_receipts AS existing
+         WHERE existing.activation_attempt_id = $4
+           AND left(existing.phase_code, length($9::text)) = $9::text
+      )`,
+    [
+      context.tenantId,
+      context.environmentId,
+      randomUUID(),
+      activationAttemptId,
+      ACTIVATION_PHASE_RECEIPT_VERSION,
+      phaseCode,
+      digestBytes(
+        'activation-reconciliation-monotonic-completion',
+        activationAttemptId,
+        clock.origin,
+        clock.monotonicMilliseconds,
+        clock.wallTime.toISOString(),
+      ),
+      clock.wallTime,
+      RECONCILIATION_MONOTONIC_COMPLETION_PREFIX,
+    ],
+  );
+}
+
+function effectiveReconciliationTime(
+  row: ReconciliationInspectionRow,
+  clock: ReleaseActivationReconciliationClockSample,
+): Date {
+  const anchor = parseMonotonicAnchor(
+    row.monotonic_anchor_code,
+    row.monotonic_anchor_wall_at,
+  );
+  if (
+    !anchor ||
+    anchor.origin !== clock.origin ||
+    clock.monotonicMilliseconds < anchor.monotonicMilliseconds
+  ) {
+    return row.observed_at;
+  }
+  const monotonicObservedAt =
+    anchor.wallTime.getTime() +
+    (clock.monotonicMilliseconds - anchor.monotonicMilliseconds);
+  return new Date(Math.max(row.observed_at.getTime(), monotonicObservedAt));
+}
+
+function effectiveReconciliationCompletionTime(
+  row: ReconciliationInspectionRow,
+): Date | null {
+  if (!row.completion_at) return null;
+  const start = parseMonotonicAnchor(
+    row.monotonic_anchor_code,
+    row.monotonic_anchor_wall_at,
+  );
+  const completion = parseMonotonicAnchor(
+    row.completion_monotonic_anchor_code,
+    row.completion_monotonic_anchor_wall_at,
+    RECONCILIATION_MONOTONIC_COMPLETION_PREFIX,
+  );
+  if (
+    !start ||
+    !completion ||
+    start.origin !== completion.origin ||
+    completion.monotonicMilliseconds < start.monotonicMilliseconds
+  ) {
+    return row.completion_at;
+  }
+  const monotonicCompletionAt =
+    start.wallTime.getTime() +
+    (completion.monotonicMilliseconds - start.monotonicMilliseconds);
+  return new Date(Math.max(row.completion_at.getTime(), monotonicCompletionAt));
+}
+
+function parseMonotonicAnchor(
+  phaseCode: string | null,
+  wallTime: Date | null,
+  prefix = RECONCILIATION_MONOTONIC_ANCHOR_PREFIX,
+): {
+  monotonicMilliseconds: number;
+  origin: string;
+  wallTime: Date;
+} | null {
+  if (!phaseCode || !wallTime) return null;
+  const encoded = phaseCode.slice(prefix.length);
+  const separator = encoded.lastIndexOf(':');
+  if (separator <= 0) return null;
+  const origin = encoded.slice(0, separator);
+  const monotonicMilliseconds = Number(encoded.slice(separator + 1));
+  if (
+    !reconciliationClockOriginPattern.test(origin) ||
+    !Number.isSafeInteger(monotonicMilliseconds) ||
+    monotonicMilliseconds < 0
+  ) {
+    return null;
+  }
+  return { monotonicMilliseconds, origin, wallTime };
+}
+
+function createSystemMonotonicClock(): SystemMonotonicClock {
+  try {
+    const origin = `linux-boot-${readFileSync(
+      '/proc/sys/kernel/random/boot_id',
+      'utf8',
+    ).trim()}`;
+    const readLinuxMonotonicMilliseconds = (): number => {
+      const milliseconds = Number(process.hrtime.bigint() / BigInt(1_000_000));
+      if (!Number.isSafeInteger(milliseconds) || milliseconds < 0) {
+        throw new TypeError('Linux monotonic clock is invalid');
+      }
+      return milliseconds;
+    };
+    readLinuxMonotonicMilliseconds();
+    return Object.freeze({
+      nowMilliseconds: readLinuxMonotonicMilliseconds,
+      origin,
+    });
+  } catch {
+    const origin = `process-${randomUUID()}`;
+    return Object.freeze({
+      nowMilliseconds: () =>
+        Number(process.hrtime.bigint() / BigInt(1_000_000)),
+      origin,
+    });
+  }
 }
 
 async function loadAttemptRecord(
@@ -1581,8 +1967,13 @@ async function insertTerminalOutcome(
   context: TrustedRequestContext,
   record: AttemptRecordRow,
   outcomeCode: Exclude<DecisiveActivationOutcomeCode, 'SWAPPED'>,
+  reconciliationClock: ReleaseActivationReconciliationClock | undefined,
 ): Promise<ActivationKernelResult> {
   const cancelled = outcomeCode === 'CANCELLATION';
+  const completionClock = await sampleReconciliationClock(
+    client,
+    reconciliationClock,
+  );
   const result = await client.query<OutcomeRow>(
     `INSERT INTO platform.release_activation_attempt_outcomes (
        tenant_id,
@@ -1601,7 +1992,7 @@ async function insertTerminalOutcome(
      )
      SELECT $1, $2, $3, $4, $5, $6,
             'NOT_SWAPPED', 'NOT_RUN', 'CONSUMED', $7, true, $8,
-            clock_timestamp()
+            $9
       WHERE NOT EXISTS (
         SELECT 1
           FROM platform.release_activation_swap_receipts AS receipt
@@ -1621,6 +2012,7 @@ async function insertTerminalOutcome(
         record.activation_attempt_id,
         outcomeCode,
       ),
+      completionClock.wallTime,
     ],
   );
   const inserted = result.rows[0];
@@ -1640,6 +2032,12 @@ async function insertTerminalOutcome(
     record.activation_attempt_id,
     outcomeCode,
     null,
+  );
+  await ensureReconciliationMonotonicCompletion(
+    client,
+    context,
+    record.activation_attempt_id,
+    completionClock,
   );
   return resultFromOutcome(context, record, inserted);
 }

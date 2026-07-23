@@ -34,6 +34,7 @@ before any become `admitted`.
 | G1-P3 | Immutable AppPackageRevision/TenantRelease persistence | G1 | Critical | accepted | `925ec8a7d56dcca120b0cdf192e7d74a568c0ba6` | [packet](packets/G1-P3.md); [cut](packets/G1-P0.md) |
 | G1-P4a | Release activation contracts + real approval substrate, no callable activation | G1 | Critical | accepted | `c3769eba9ee21b3e2121a59c660e8d648037c73f` | [packet](packets/G1-P4a.md); [cut](packets/G1-P0.md) |
 | G1-P4b | Human-approved CAS activation + crash reconciliation + rollback | G1 | Critical | accepted | `1bb946f9a5668512a6d4cab6876dd66ec0d3753d` | [packet](packets/G1-P4b.md); [cut](packets/G1-P0.md) |
+| G1-P4b-monotonic-reconciliation | Boot-scoped monotonic reconciliation-deadline corrective fix | G1 | Critical | accepted | `2648f3349789efbfa8ccdd4b94611fa4bfe47579` | [packet](packets/G1-P4b-monotonic-reconciliation.md); fresh Codex `gpt-5.6-sol` xhigh PASS and Fable max PASS on the identical reviewed SHA. Corrective acceptance does not reopen completed G1. |
 | G1-P5 | RequestRuntimeView + single-release request pinning | G1 | Critical | accepted | `edef3db9940ba479cef7736238008c2e0321858b` | [packet](packets/G1-P5.md); [cut](packets/G1-P0.md) |
 | G1-P6 | Empty fail-closed Semantic Query/Operation gateways | G1 | Critical | accepted | `cfeb19c211a4678a9623817c82d859167339a1c3` | [packet](packets/G1-P6.md); [cut](packets/G1-P0.md) |
 | G1-P7 | Compiled SurfaceRuntime shell + component registry | G1 | Behavioral | accepted | `e647968` | [packet](packets/G1-P7.md); [cut](packets/G1-P0.md) |
