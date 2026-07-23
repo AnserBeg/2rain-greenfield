@@ -111,6 +111,8 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
         max: 1,
         user: 'north_star_module_runtime',
       });
+      materializerPool.on('error', () => undefined);
+      moduleRuntimePool.on('error', () => undefined);
       try {
         const contexts = await trustedContexts();
         const releases = await persistPairForBothTenants(
@@ -148,6 +150,7 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
         assert.ok(first.preparedSubsetDigest.some((octet) => octet !== 0));
         assert.ok(first.remainingPlanDigest.some((octet) => octet !== 0));
         let firstAttemptId: string | undefined;
+        let tenantIsolatedTableName: string | undefined;
 
         await t.test(
           'READY_TO_SWAP is fresh provider evidence and the real CAS gate',
@@ -162,6 +165,13 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
               firstPreparationId,
             );
             firstAttemptId = attemptId;
+            const validReader = await readApprovedAttempt(
+              materializerPool,
+              contexts.a,
+              attemptId,
+              firstPreparationId,
+            );
+            assert.deepEqual(validReader, [{ approved: true }]);
             const executed = await materializer.executeApprovedAttempt({
               activationAttemptId: attemptId,
               context: contexts.a,
@@ -203,7 +213,7 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
         );
 
         await t.test(
-          'backfill is in-attempt, checkpointed, resumable, and uniquely claimed',
+          'backfill claims survive connection loss and coordinators converge',
           async () => {
             const admissible = ordinaryModuleV2() as {
               fields: Array<Record<string, unknown>>;
@@ -233,65 +243,390 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
               compiled,
               definitionBytes(admissible),
             );
-            const generationId = randomUUID();
-            const preparationId = randomUUID();
-            const prepared = await materializer.prepare({
-              context: contexts.a,
-              expiresAt: new Date(Date.now() + 60_000).toISOString(),
-              generationId,
-              initiatedBy: principalA,
-              preparationId,
-              targetReleaseId: next.target,
-            });
-            assert.equal(prepared.dataState, 'PENDING_IN_ATTEMPT');
-            const attemptId = await createV2Approval(
-              runtimePool,
-              pool,
-              contexts,
-              next,
-              compiled,
-              prepared,
-              preparationId,
-            );
-            const attempts = await Promise.allSettled([
-              materializer.executeApprovedAttempt({
-                activationAttemptId: attemptId,
+            const prepareScenario = async () => {
+              const generationId = randomUUID();
+              const preparationId = randomUUID();
+              const prepared = await materializer.prepare({
+                context: contexts.a,
+                expiresAt: new Date(Date.now() + 60_000).toISOString(),
+                generationId,
+                initiatedBy: principalA,
+                preparationId,
+                targetReleaseId: next.target,
+              });
+              assert.equal(prepared.dataState, 'PENDING_IN_ATTEMPT');
+              const attemptId = await createV2Approval(
+                runtimePool,
+                pool,
+                contexts,
+                next,
+                compiled,
+                prepared,
+                preparationId,
+              );
+              return { attemptId, generationId, preparationId, prepared };
+            };
+
+            {
+              // Loss after the durable claim must resume rather than strand it.
+              const scenario = await prepareScenario();
+              const planted = await seedBackfillRows(
+                pool,
+                scenario.generationId,
+                125,
+              );
+              tenantIsolatedTableName = planted.tableName;
+              const faulting = new PostgresModuleStorageMaterializer(
+                materializerPool,
+                moduleRuntimePool,
+                {
+                  afterClaimCommitted: () => {
+                    throw Object.assign(
+                      new Error('connection terminated unexpectedly'),
+                      { code: 'EPIPE' },
+                    );
+                  },
+                },
+              );
+              const lost = await faulting.executeApprovedAttempt({
+                activationAttemptId: scenario.attemptId,
                 context: contexts.a,
                 coordinatorId: randomUUID(),
-                generationId,
-              }),
-              materializer.executeApprovedAttempt({
-                activationAttemptId: attemptId,
+                generationId: scenario.generationId,
+              });
+              assert.equal(lost.disposition, 'RECONCILING');
+
+              const resumed = await new PostgresModuleStorageMaterializer(
+                materializerPool,
+                moduleRuntimePool,
+              ).executeApprovedAttempt({
+                activationAttemptId: scenario.attemptId,
                 context: contexts.a,
                 coordinatorId: randomUUID(),
-                generationId,
-              }),
-            ]);
-            assert.equal(
-              attempts.filter(
-                (result) =>
-                  result.status === 'fulfilled' &&
-                  result.value.disposition === 'READY_TO_SWAP',
-              ).length,
-              1,
-            );
-            assert.equal(
-              attempts.filter((result) => result.status === 'rejected').length,
-              1,
-            );
-            const checkpoint = await pool.query<{
-              complete: boolean;
-              rows_applied: string;
-            }>(
-              `SELECT complete, rows_applied
-               FROM north_star_internal.module_storage_backfill_checkpoints
-              WHERE generation_id = $1`,
-              [generationId],
-            );
-            assert.deepEqual(checkpoint.rows[0], {
-              complete: true,
-              rows_applied: '0',
-            });
+                generationId: scenario.generationId,
+              });
+              assert.equal(resumed.disposition, 'READY_TO_SWAP');
+              await assertBackfillCheckpoint(
+                pool,
+                scenario.generationId,
+                125,
+                planted,
+              );
+            }
+
+            {
+              // A committed mid-backfill checkpoint is the retry cursor.
+              const scenario = await prepareScenario();
+              const planted = await seedBackfillRows(
+                pool,
+                scenario.generationId,
+                250,
+              );
+              let injected = false;
+              const faulting = new PostgresModuleStorageMaterializer(
+                materializerPool,
+                moduleRuntimePool,
+                {
+                  afterBackfillCheckpointCommitted: () => {
+                    if (injected) return;
+                    injected = true;
+                    throw Object.assign(
+                      new Error('socket closed unexpectedly'),
+                      { code: 'ECONNRESET' },
+                    );
+                  },
+                },
+              );
+              const lost = await faulting.executeApprovedAttempt({
+                activationAttemptId: scenario.attemptId,
+                context: contexts.a,
+                coordinatorId: randomUUID(),
+                generationId: scenario.generationId,
+              });
+              assert.equal(lost.disposition, 'RECONCILING');
+              const partial = await pool.query<{
+                complete: boolean;
+                rows_applied: string;
+              }>(
+                `SELECT complete, rows_applied
+                   FROM north_star_internal.module_storage_backfill_checkpoints
+                  WHERE generation_id = $1`,
+                [scenario.generationId],
+              );
+              assert.deepEqual(partial.rows[0], {
+                complete: false,
+                rows_applied: '100',
+              });
+
+              const resumed = await new PostgresModuleStorageMaterializer(
+                materializerPool,
+                moduleRuntimePool,
+              ).executeApprovedAttempt({
+                activationAttemptId: scenario.attemptId,
+                context: contexts.a,
+                coordinatorId: randomUUID(),
+                generationId: scenario.generationId,
+              });
+              assert.equal(resumed.disposition, 'READY_TO_SWAP');
+              await assertBackfillCheckpoint(
+                pool,
+                scenario.generationId,
+                250,
+                planted,
+              );
+            }
+
+            {
+              // Concurrent coordinators converge on one durable READY receipt.
+              const scenario = await prepareScenario();
+              const planted = await seedBackfillRows(
+                pool,
+                scenario.generationId,
+                225,
+              );
+              const attempts = await Promise.all([
+                materializer.executeApprovedAttempt({
+                  activationAttemptId: scenario.attemptId,
+                  context: contexts.a,
+                  coordinatorId: randomUUID(),
+                  generationId: scenario.generationId,
+                }),
+                materializer.executeApprovedAttempt({
+                  activationAttemptId: scenario.attemptId,
+                  context: contexts.a,
+                  coordinatorId: randomUUID(),
+                  generationId: scenario.generationId,
+                }),
+              ]);
+              assert.ok(
+                attempts.every(
+                  (attempt) => attempt.disposition === 'READY_TO_SWAP',
+                ),
+              );
+              assert.equal(
+                attempts[0]!.receipt?.receiptId,
+                attempts[1]!.receipt?.receiptId,
+              );
+              await assertBackfillCheckpoint(
+                pool,
+                scenario.generationId,
+                225,
+                planted,
+              );
+              const evidence = await pool.query<{ count: string }>(
+                `SELECT count(*)::text AS count
+                   FROM north_star_internal.module_storage_element_applications
+                  WHERE generation_id = $1 AND attempt_id = $2
+                    AND application_state = 'APPLIED'`,
+                [scenario.generationId, scenario.attemptId],
+              );
+              assert.equal(evidence.rows[0]?.count, '1');
+              const receipts = await pool.query<{ count: string }>(
+                `SELECT count(*)::text AS count
+                   FROM north_star_internal.module_storage_catalog_receipts
+                  WHERE generation_id = $1
+                    AND receipt_state = 'READY_TO_SWAP'
+                    AND catalog_verified`,
+                [scenario.generationId],
+              );
+              assert.equal(receipts.rows[0]?.count, '1');
+            }
+
+            {
+              // Authority is revalidated for every mutation batch.
+              const scenario = await prepareScenario();
+              const planted = await seedBackfillRows(
+                pool,
+                scenario.generationId,
+                125,
+              );
+              let revoked = false;
+              const revoking = new PostgresModuleStorageMaterializer(
+                materializerPool,
+                moduleRuntimePool,
+                {
+                  afterBackfillCheckpointCommitted: async () => {
+                    if (revoked) return;
+                    revoked = true;
+                    await setSystemExecutorAuthority(pool, false);
+                  },
+                },
+              );
+              await assert.rejects(
+                revoking.executeApprovedAttempt({
+                  activationAttemptId: scenario.attemptId,
+                  context: contexts.a,
+                  coordinatorId: randomUUID(),
+                  generationId: scenario.generationId,
+                }),
+                (error: unknown) =>
+                  error instanceof ModuleStorageMaterializationError &&
+                  error.code === 'ATTEMPT_NOT_AUTHORIZED',
+              );
+              const partial = await pool.query<{
+                complete: boolean;
+                rows_applied: string;
+              }>(
+                `SELECT complete, rows_applied
+                   FROM north_star_internal.module_storage_backfill_checkpoints
+                  WHERE generation_id = $1`,
+                [scenario.generationId],
+              );
+              assert.deepEqual(partial.rows[0], {
+                complete: false,
+                rows_applied: '100',
+              });
+              await setSystemExecutorAuthority(pool, true);
+              const resumed = await materializer.executeApprovedAttempt({
+                activationAttemptId: scenario.attemptId,
+                context: contexts.a,
+                coordinatorId: randomUUID(),
+                generationId: scenario.generationId,
+              });
+              assert.equal(resumed.disposition, 'READY_TO_SWAP');
+              await assertBackfillCheckpoint(
+                pool,
+                scenario.generationId,
+                125,
+                planted,
+              );
+            }
+
+            {
+              // A completed backfill cannot commit READY after authority changes.
+              const scenario = await prepareScenario();
+              const planted = await seedBackfillRows(
+                pool,
+                scenario.generationId,
+                1,
+              );
+              let revoked = false;
+              const revoking = new PostgresModuleStorageMaterializer(
+                materializerPool,
+                moduleRuntimePool,
+                {
+                  afterBackfillCheckpointCommitted: async () => {
+                    if (revoked) return;
+                    revoked = true;
+                    await setSystemExecutorAuthority(pool, false);
+                  },
+                },
+              );
+              await assert.rejects(
+                revoking.executeApprovedAttempt({
+                  activationAttemptId: scenario.attemptId,
+                  context: contexts.a,
+                  coordinatorId: randomUUID(),
+                  generationId: scenario.generationId,
+                }),
+                (error: unknown) =>
+                  error instanceof ModuleStorageMaterializationError &&
+                  error.code === 'ATTEMPT_NOT_AUTHORIZED',
+              );
+              const readyBeforeRestore = await pool.query<{ count: string }>(
+                `SELECT count(*)::text AS count
+                   FROM north_star_internal.module_storage_catalog_receipts
+                  WHERE generation_id = $1
+                    AND receipt_state = 'READY_TO_SWAP'`,
+                [scenario.generationId],
+              );
+              assert.equal(readyBeforeRestore.rows[0]?.count, '0');
+              await setSystemExecutorAuthority(pool, true);
+              const resumed = await materializer.executeApprovedAttempt({
+                activationAttemptId: scenario.attemptId,
+                context: contexts.a,
+                coordinatorId: randomUUID(),
+                generationId: scenario.generationId,
+              });
+              assert.equal(resumed.disposition, 'READY_TO_SWAP');
+              await assertBackfillCheckpoint(
+                pool,
+                scenario.generationId,
+                1,
+                planted,
+              );
+            }
+
+            {
+              // Invalid attempts cannot claim, mutate a batch, or commit READY.
+              const scenario = await prepareScenario();
+              const rejectAttempt = async (attemptId: string) => {
+                await assert.rejects(
+                  materializer.executeApprovedAttempt({
+                    activationAttemptId: attemptId,
+                    context: contexts.a,
+                    coordinatorId: randomUUID(),
+                    generationId: scenario.generationId,
+                  }),
+                  (error: unknown) =>
+                    error instanceof ModuleStorageMaterializationError &&
+                    error.code === 'ATTEMPT_NOT_AUTHORIZED',
+                );
+                const claim = await pool.query<{ count: string }>(
+                  `SELECT count(*)::text AS count
+                     FROM north_star_internal.module_storage_attempt_claims
+                    WHERE activation_attempt_id = $1`,
+                  [attemptId],
+                );
+                assert.equal(claim.rows[0]?.count, '0');
+              };
+
+              await expireApproval(pool, scenario.attemptId);
+              await rejectAttempt(scenario.attemptId);
+
+              const cancelled = await createAdditionalV2Approval(
+                runtimePool,
+                contexts,
+                next.target,
+                scenario.preparationId,
+              );
+              await new PostgresReleaseActivationService(
+                runtimePool,
+              ).cancelActivation(contexts.system, {
+                activationAttemptId: minted(cancelled),
+              });
+              await rejectAttempt(cancelled);
+
+              const revokedApprover = await createAdditionalV2Approval(
+                runtimePool,
+                contexts,
+                next.target,
+                scenario.preparationId,
+              );
+              await setApproverEligibility(pool, false);
+              await rejectAttempt(revokedApprover);
+              await setApproverEligibility(pool, true);
+
+              const revokedExecutor = await createAdditionalV2Approval(
+                runtimePool,
+                contexts,
+                next.target,
+                scenario.preparationId,
+              );
+              await setSystemExecutorAuthority(pool, false);
+              await rejectAttempt(revokedExecutor);
+              await setSystemExecutorAuthority(pool, true);
+
+              const paused = await createAdditionalV2Approval(
+                runtimePool,
+                contexts,
+                next.target,
+                scenario.preparationId,
+              );
+              await setActivationControl(pool, false, true);
+              await rejectAttempt(paused);
+              await setActivationControl(pool, false, false);
+
+              const denied = await createAdditionalV2Approval(
+                runtimePool,
+                contexts,
+                next.target,
+                scenario.preparationId,
+              );
+              await setActivationControl(pool, true, false);
+              await rejectAttempt(denied);
+              await setActivationControl(pool, false, false);
+            }
           },
         );
 
@@ -339,6 +674,60 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
               createrole: false,
               superuser: false,
             });
+            assert.ok(tenantIsolatedTableName);
+            const managedTable = quoteTestIdentifier(tenantIsolatedTableName);
+            const seededRows = await pool.query<{ count: string }>(
+              `SELECT count(*)::text AS count
+                 FROM north_star_module.${managedTable}
+                WHERE tenant_id = $1 AND environment_id = $2`,
+              [tenantA, environmentA],
+            );
+            assert.ok(Number(seededRows.rows[0]?.count) > 0);
+
+            const tenantBClient = await moduleRuntimePool.connect();
+            try {
+              await tenantBClient.query('BEGIN');
+              await tenantBClient.query(
+                `SELECT set_config('north_star.tenant_id', $1, true),
+                        set_config('north_star.environment_id', $2, true)`,
+                [tenantB, environmentB],
+              );
+              const crossTenantRows = await tenantBClient.query<{
+                count: string;
+              }>(
+                `SELECT count(*)::text AS count
+                   FROM north_star_module.${managedTable}`,
+              );
+              assert.equal(crossTenantRows.rows[0]?.count, '0');
+              await tenantBClient.query('COMMIT');
+            } catch (error) {
+              await tenantBClient.query('ROLLBACK');
+              throw error;
+            } finally {
+              tenantBClient.release();
+            }
+
+            const ddlClient = await materializerPool.connect();
+            try {
+              await ddlClient.query('BEGIN');
+              await ddlClient.query(
+                `SELECT set_config('north_star.tenant_id', $1, true),
+                        set_config('north_star.environment_id', $2, true)`,
+                [tenantA, environmentA],
+              );
+              const ddlVisibleRows = await ddlClient.query<{ count: string }>(
+                `SELECT count(*)::text AS count
+                   FROM north_star_module.${managedTable}`,
+              );
+              assert.equal(ddlVisibleRows.rows[0]?.count, '0');
+              await ddlClient.query('COMMIT');
+            } catch (error) {
+              await ddlClient.query('ROLLBACK');
+              throw error;
+            } finally {
+              ddlClient.release();
+            }
+
             await assert.rejects(
               runtimePool.query(
                 'CREATE TABLE north_star_module.forbidden(id uuid)',
@@ -347,7 +736,7 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
             );
             await assert.rejects(
               moduleRuntimePool.query(
-                `DELETE FROM north_star_module.${await firstManagedTable(pool)}`,
+                `DELETE FROM north_star_module.${managedTable}`,
               ),
               /permission denied/,
             );
@@ -444,6 +833,52 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
               assert.equal(reader.runtime_execute, false, reader.name);
               assert.equal(reader.module_runtime_execute, false, reader.name);
             }
+            const mutationGate = await pool.query<{
+              materializer_execute: boolean;
+              module_runtime_execute: boolean;
+              runtime_execute: boolean;
+              search_path: string[] | null;
+              security_definer: boolean;
+            }>(
+              `SELECT routine.prosecdef AS security_definer,
+                      routine.proconfig AS search_path,
+                      has_function_privilege(
+                        'north_star_module_materializer', routine.oid, 'EXECUTE'
+                      ) AS materializer_execute,
+                      has_function_privilege(
+                        'north_star_runtime', routine.oid, 'EXECUTE'
+                      ) AS runtime_execute,
+                      has_function_privilege(
+                        'north_star_module_runtime', routine.oid, 'EXECUTE'
+                      ) AS module_runtime_execute
+                 FROM pg_proc AS routine
+                 JOIN pg_namespace AS namespace
+                   ON namespace.oid = routine.pronamespace
+                WHERE namespace.nspname = 'north_star_internal'
+                  AND routine.proname =
+                        'module_storage_lock_backfill_attempt'`,
+            );
+            assert.deepEqual(mutationGate.rows[0], {
+              materializer_execute: false,
+              module_runtime_execute: true,
+              runtime_execute: false,
+              search_path: ['search_path=pg_catalog'],
+              security_definer: true,
+            });
+            await assert.rejects(
+              runtimePool.query(
+                `SELECT authorized
+                   FROM north_star_internal.module_storage_lock_backfill_attempt($1,$2,$3,$4)`,
+                [tenantA, environmentA, firstAttemptId, firstPreparationId],
+              ),
+              /permission denied/,
+            );
+            const consumedMutationGate = await moduleRuntimePool.query(
+              `SELECT authorized
+                 FROM north_star_internal.module_storage_lock_backfill_attempt($1,$2,$3,$4)`,
+              [tenantA, environmentA, firstAttemptId, firstPreparationId],
+            );
+            assert.deepEqual(consumedMutationGate.rows, []);
 
             const client = await materializerPool.connect();
             try {
@@ -506,7 +941,7 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
                    FROM north_star_internal.module_storage_read_approved_attempt($1, $2, $3, $4)`,
                 [tenantA, environmentA, firstAttemptId, firstPreparationId],
               );
-              assert.deepEqual(approvedAttempt.rows, [{ approved: true }]);
+              assert.deepEqual(approvedAttempt.rows, []);
               const crossTenantAttempt = await client.query(
                 `SELECT *
                    FROM north_star_internal.module_storage_read_approved_attempt($1, $2, $3, $4)`,
@@ -537,27 +972,215 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
         );
 
         await t.test(
-          'live-set reconciliation recomputes bytes and fails closed on rogue objects',
+          'live-set reconciliation rejects altered, surplus, unknown, and destructive objects',
           async () => {
             const verification = await materializer.verifyLiveCatalog(
               contexts.a,
             );
             assert.deepEqual(verification.drift, []);
+            const tableName = await firstManagedTableName(pool);
+
+            await pool.query(
+              `ALTER TABLE north_star_module."${tableName}"
+                 ALTER COLUMN revision DROP DEFAULT`,
+            );
+            await assertCatalogDrift(
+              materializer,
+              contexts.a,
+              /altered managed column/,
+            );
+            await pool.query(
+              `ALTER TABLE north_star_module."${tableName}"
+                 ALTER COLUMN revision SET DEFAULT 1`,
+            );
+
+            await pool.query(
+              `ALTER TABLE north_star_module."${tableName}"
+                 NO FORCE ROW LEVEL SECURITY`,
+            );
+            await assertCatalogDrift(
+              materializer,
+              contexts.a,
+              /altered managed relation/,
+            );
+            await pool.query(
+              `ALTER TABLE north_star_module."${tableName}"
+                 FORCE ROW LEVEL SECURITY`,
+            );
+
+            await pool.query(
+              `CREATE INDEX rogue_index
+                 ON north_star_module."${tableName}" (revision)`,
+            );
+            await assertCatalogDrift(
+              materializer,
+              contexts.a,
+              /surplus managed index/,
+            );
+            await pool.query('DROP INDEX north_star_module.rogue_index');
+
+            await pool.query(
+              `ALTER TABLE north_star_module."${tableName}"
+                 ADD CONSTRAINT rogue_constraint CHECK (revision > 0)`,
+            );
+            await assertCatalogDrift(
+              materializer,
+              contexts.a,
+              /surplus managed constraint/,
+            );
+            await pool.query(
+              `ALTER TABLE north_star_module."${tableName}"
+                 DROP CONSTRAINT rogue_constraint`,
+            );
+
+            await pool.query(
+              `CREATE POLICY rogue_policy
+                 ON north_star_module."${tableName}"
+                 FOR SELECT TO north_star_module_runtime USING (true)`,
+            );
+            await assertCatalogDrift(
+              materializer,
+              contexts.a,
+              /surplus managed policy/,
+            );
+            await pool.query(
+              `DROP POLICY rogue_policy
+                 ON north_star_module."${tableName}"`,
+            );
+
+            await pool.query(
+              'CREATE SEQUENCE north_star_module.rogue_sequence',
+            );
+            await assertCatalogDrift(
+              materializer,
+              contexts.a,
+              /surplus managed relation/,
+            );
+            await pool.query('DROP SEQUENCE north_star_module.rogue_sequence');
+
+            await pool.query(`
+              CREATE FUNCTION north_star_module.rogue_function()
+              RETURNS integer LANGUAGE sql SET search_path = pg_catalog
+              AS $$ SELECT 1 $$;
+            `);
+            await assertCatalogDrift(
+              materializer,
+              contexts.a,
+              /surplus managed function/,
+            );
+            await pool.query(
+              'DROP FUNCTION north_star_module.rogue_function()',
+            );
+
+            await pool.query(
+              `CREATE TYPE north_star_module.rogue_type AS ENUM ('rogue')`,
+            );
+            await assertCatalogDrift(
+              materializer,
+              contexts.a,
+              /surplus managed standalone type/,
+            );
+            await pool.query('DROP TYPE north_star_module.rogue_type');
+
+            await pool.query('CREATE ROLE arbitrary_destructive_grantee');
+            try {
+              await pool.query(
+                `ALTER SCHEMA north_star_module
+                   OWNER TO arbitrary_destructive_grantee`,
+              );
+              await assertCatalogDrift(
+                materializer,
+                contexts.a,
+                /altered schema/,
+              );
+              await pool.query(
+                `ALTER SCHEMA north_star_module
+                   OWNER TO north_star_module_materializer`,
+              );
+
+              await pool.query(
+                `GRANT DELETE ON north_star_module."${tableName}"
+                   TO arbitrary_destructive_grantee`,
+              );
+              await assertCatalogDrift(
+                materializer,
+                contexts.a,
+                /destructive table privilege DELETE.*arbitrary_destructive_grantee/,
+              );
+              await pool.query(
+                `REVOKE DELETE ON north_star_module."${tableName}"
+                   FROM arbitrary_destructive_grantee`,
+              );
+              await pool.query(
+                `GRANT SELECT (record_id)
+                   ON north_star_module."${tableName}"
+                   TO arbitrary_destructive_grantee`,
+              );
+              await assertCatalogDrift(
+                materializer,
+                contexts.a,
+                /surplus managed column grant/,
+              );
+              await pool.query(
+                `REVOKE SELECT (record_id)
+                   ON north_star_module."${tableName}"
+                   FROM arbitrary_destructive_grantee`,
+              );
+            } finally {
+              await pool.query(
+                'DROP ROLE IF EXISTS arbitrary_destructive_grantee',
+              );
+            }
+
+            await pool.query(`
+              CREATE FUNCTION north_star_module.rogue_trigger_function()
+              RETURNS trigger LANGUAGE plpgsql SET search_path = pg_catalog
+              AS $$ BEGIN RETURN OLD; END $$;
+              CREATE TRIGGER rogue_delete_trigger
+                BEFORE DELETE ON north_star_module."${tableName}"
+                FOR EACH ROW EXECUTE FUNCTION
+                  north_star_module.rogue_trigger_function();
+            `);
+            await assertCatalogDrift(
+              materializer,
+              contexts.a,
+              /surplus managed trigger/,
+            );
+            await pool.query(
+              `DROP TRIGGER rogue_delete_trigger
+                 ON north_star_module."${tableName}";
+               DROP FUNCTION north_star_module.rogue_trigger_function()`,
+            );
+
+            await pool.query(
+              `CREATE RULE rogue_delete_rule AS
+                 ON DELETE TO north_star_module."${tableName}"
+                 DO INSTEAD NOTHING`,
+            );
+            await assertCatalogDrift(
+              materializer,
+              contexts.a,
+              /surplus managed rule/,
+            );
+            await pool.query(
+              `DROP RULE rogue_delete_rule
+                 ON north_star_module."${tableName}"`,
+            );
+
             await pool.query(
               'CREATE TABLE public.rogue_module_object(id uuid)',
             );
-            await assert.rejects(
-              materializer.verifyLiveCatalog(contexts.a),
-              (error: unknown) =>
-                error instanceof ModuleStorageMaterializationError &&
-                error.code === 'CATALOG_DRIFT' &&
-                /0 verifiers/.test(error.message),
+            await assertCatalogDrift(materializer, contexts.a, /0 verifiers/);
+            await pool.query('DROP TABLE public.rogue_module_object');
+            assert.deepEqual(
+              (await materializer.verifyLiveCatalog(contexts.a)).drift,
+              [],
             );
           },
         );
 
         await t.test(
-          'stored provenance is exact and ledger evidence is append-only',
+          'stored provenance is append-only and missing objects fail closed',
           async () => {
             const evidence = await pool.query<{
               applications: string;
@@ -569,7 +1192,7 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
               (SELECT count(*) FROM north_star_internal.module_storage_generations)::text AS generations,
               (SELECT count(*) FROM north_star_internal.module_storage_root_membership)::text AS memberships`,
             );
-            assert.equal(evidence.rows[0]?.generations, '3');
+            assert.ok(Number(evidence.rows[0]?.generations) >= 3);
             assert.ok(Number(evidence.rows[0]?.applications) > 0);
             assert.ok(Number(evidence.rows[0]?.memberships) > 0);
             const before = evidence.rows[0]?.applications;
@@ -581,6 +1204,16 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
               'SELECT count(*) FROM north_star_internal.module_storage_element_applications',
             );
             assert.equal(after.rows[0]?.count, before);
+
+            const tableName = await firstManagedTableName(pool);
+            await pool.query(
+              `DROP TABLE north_star_module."${tableName}" CASCADE`,
+            );
+            await assertCatalogDrift(
+              materializer,
+              contexts.a,
+              new RegExp(`missing managed relation ${tableName}`),
+            );
           },
         );
       } finally {
@@ -986,12 +1619,247 @@ async function createV2Approval(
   return approval.attempt.activationAttemptId;
 }
 
-async function firstManagedTable(pool: pg.Pool): Promise<string> {
+async function createAdditionalV2Approval(
+  runtimePool: pg.Pool,
+  contexts: { approver: TrustedRequestContext },
+  targetReleaseId: MintedUuid,
+  preparationId: string,
+): Promise<string> {
+  const activationAttemptId = minted(randomUUID());
+  const approval = await new PostgresReleaseApprovalService(
+    runtimePool,
+  ).createApproval(contexts.approver, {
+    activationAttemptId,
+    approvalId: minted(randomUUID()),
+    approvingHumanId: approverA,
+    initiatingHumanId: principalA,
+    issuingActorId: approverA,
+    preparationId: minted(preparationId),
+    targetReleaseId,
+  });
+  return approval.attempt.activationAttemptId;
+}
+
+async function readApprovedAttempt(
+  materializerPool: pg.Pool,
+  context: TrustedRequestContext,
+  attemptId: string,
+  preparationId: string,
+): Promise<Array<{ approved: boolean }>> {
+  const client = await materializerPool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      `SELECT set_config('north_star.tenant_id', $1, true),
+              set_config('north_star.environment_id', $2, true)`,
+      [context.tenantId, context.environmentId],
+    );
+    const result = await client.query<{ approved: boolean }>(
+      `SELECT approved
+         FROM north_star_internal.module_storage_read_approved_attempt($1,$2,$3,$4)`,
+      [context.tenantId, context.environmentId, attemptId, preparationId],
+    );
+    await client.query('COMMIT');
+    return result.rows;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+interface PlantedBackfillRows {
+  columnName: string;
+  recordIds: string[];
+  tableName: string;
+}
+
+async function seedBackfillRows(
+  pool: pg.Pool,
+  generationId: string,
+  count: number,
+): Promise<PlantedBackfillRows> {
+  const target = await pool.query<{ column_name: string; table_name: string }>(
+    `SELECT element.physical_object_name AS column_name,
+            column_record.table_name
+       FROM north_star_internal.module_storage_generations AS generation
+       JOIN north_star_internal.module_storage_root_membership AS membership
+         ON membership.tenant_id = generation.tenant_id
+        AND membership.environment_id = generation.environment_id
+        AND membership.release_id = generation.target_release_id
+       JOIN north_star_internal.module_storage_elements AS element
+         ON element.element_id = membership.element_id
+       JOIN information_schema.columns AS column_record
+         ON column_record.table_schema = 'north_star_module'
+        AND column_record.column_name = element.physical_object_name
+      WHERE generation.generation_id = $1 AND element.element_kind = 'backfill'
+      LIMIT 1`,
+    [generationId],
+  );
+  const located = target.rows[0];
+  assert.ok(located, 'compiled backfill target must be visible');
+  const columns = await pool.query<{
+    column_name: string;
+    data_type: string;
+  }>(
+    `SELECT column_name, data_type
+       FROM information_schema.columns
+      WHERE table_schema = 'north_star_module' AND table_name = $1
+        AND is_nullable = 'NO' AND column_default IS NULL
+      ORDER BY ordinal_position`,
+    [located.table_name],
+  );
+  const recordIds = Array.from({ length: count }, () => randomUUID());
+  const values: unknown[] = [];
+  const tuples = recordIds.map((recordId, rowIndex) => {
+    const placeholders = columns.rows.map((column) => {
+      const value =
+        column.column_name === 'tenant_id'
+          ? tenantA
+          : column.column_name === 'environment_id'
+            ? environmentA
+            : column.column_name === 'record_id'
+              ? recordId
+              : column.data_type === 'uuid'
+                ? randomUUID()
+                : column.data_type === 'boolean'
+                  ? false
+                  : column.data_type === 'numeric' ||
+                      column.data_type === 'bigint'
+                    ? rowIndex + 1
+                    : `s${generationId.slice(0, 6)}-${rowIndex}-${column.column_name.slice(-4)}`;
+      values.push(value);
+      return `$${values.length}`;
+    });
+    return `(${placeholders.join(',')})`;
+  });
+  await pool.query(
+    `INSERT INTO north_star_module.${quoteTestIdentifier(located.table_name)}
+       (${columns.rows.map((column) => quoteTestIdentifier(column.column_name)).join(',')})
+     VALUES ${tuples.join(',')}`,
+    values,
+  );
+  return {
+    columnName: located.column_name,
+    recordIds,
+    tableName: located.table_name,
+  };
+}
+
+async function assertBackfillCheckpoint(
+  pool: pg.Pool,
+  generationId: string,
+  expectedRows: number,
+  planted: PlantedBackfillRows,
+): Promise<void> {
+  const checkpoint = await pool.query<{
+    complete: boolean;
+    rows_applied: string;
+  }>(
+    `SELECT complete, rows_applied
+       FROM north_star_internal.module_storage_backfill_checkpoints
+      WHERE generation_id = $1`,
+    [generationId],
+  );
+  assert.deepEqual(checkpoint.rows[0], {
+    complete: true,
+    rows_applied: String(expectedRows),
+  });
+  const rows = await pool.query<{ completed: string; total: string }>(
+    `SELECT count(*)::text AS total,
+            count(*) FILTER (
+              WHERE ${quoteTestIdentifier(planted.columnName)} = ''
+            )::text AS completed
+       FROM north_star_module.${quoteTestIdentifier(planted.tableName)}
+      WHERE record_id = ANY($1::uuid[])`,
+    [planted.recordIds],
+  );
+  assert.deepEqual(rows.rows[0], {
+    completed: String(expectedRows),
+    total: String(expectedRows),
+  });
+}
+
+async function expireApproval(pool: pg.Pool, attemptId: string): Promise<void> {
+  await pool.query(
+    'ALTER TABLE platform.release_approvals DISABLE RULE release_approvals_reject_update',
+  );
+  try {
+    await pool.query(
+      `UPDATE platform.release_approvals
+          SET decided_at = clock_timestamp() - interval '2 minutes',
+              expires_at = clock_timestamp() - interval '1 minute'
+        WHERE activation_attempt_id = $1`,
+      [attemptId],
+    );
+  } finally {
+    await pool.query(
+      'ALTER TABLE platform.release_approvals ENABLE RULE release_approvals_reject_update',
+    );
+  }
+}
+
+async function setApproverEligibility(
+  pool: pg.Pool,
+  eligible: boolean,
+): Promise<void> {
+  await pool.query(
+    `SELECT platform.set_release_approver_eligibility($1,$2,$3,$2,$4)`,
+    [tenantA, approverA, eligible, randomUUID()],
+  );
+}
+
+async function setSystemExecutorAuthority(
+  pool: pg.Pool,
+  authorized: boolean,
+): Promise<void> {
+  await pool.query(
+    `SELECT platform.set_release_executor_authority($1,$2,$3,$2,$4)`,
+    [tenantA, SYSTEM_EXECUTION_PRINCIPAL.principalId, authorized, randomUUID()],
+  );
+}
+
+async function setActivationControl(
+  pool: pg.Pool,
+  denied: boolean,
+  paused: boolean,
+): Promise<void> {
+  await pool.query(
+    `SELECT platform.set_release_activation_control($1,$2,NULL,$3,$4,$5,$6)`,
+    [tenantA, environmentA, denied, paused, approverA, randomUUID()],
+  );
+}
+
+async function assertCatalogDrift(
+  materializer: PostgresModuleStorageMaterializer,
+  context: TrustedRequestContext,
+  message: RegExp,
+): Promise<void> {
+  await assert.rejects(
+    materializer.verifyLiveCatalog(context),
+    (error: unknown) =>
+      error instanceof ModuleStorageMaterializationError &&
+      error.code === 'CATALOG_DRIFT' &&
+      message.test(error.message),
+  );
+}
+
+async function firstManagedTableName(pool: pg.Pool): Promise<string> {
   const result = await pool.query<{ tablename: string }>(
     `SELECT tablename FROM pg_tables
       WHERE schemaname = 'north_star_module' ORDER BY tablename LIMIT 1`,
   );
-  return `"${result.rows[0]!.tablename}"`;
+  return result.rows[0]!.tablename;
+}
+
+function quoteTestIdentifier(value: string): string {
+  assert.match(value, /^[a-z][a-z0-9_]{0,62}$/);
+  return `"${value}"`;
+}
+
+async function firstManagedTable(pool: pg.Pool): Promise<string> {
+  return quoteTestIdentifier(await firstManagedTableName(pool));
 }
 
 function minted(value: string): MintedUuid {

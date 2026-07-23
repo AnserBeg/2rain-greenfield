@@ -88,6 +88,14 @@ export interface ModuleStorageAttemptResult {
   readonly receipt: ModuleStorageCatalogReceipt | null;
 }
 
+export interface ModuleStorageMaterializerFaultHooks {
+  readonly afterBackfillCheckpointCommitted?: (facts: {
+    readonly elementId: string;
+    readonly rowsApplied: number;
+  }) => Promise<void> | void;
+  readonly afterClaimCommitted?: () => Promise<void> | void;
+}
+
 interface ArtifactRow {
   artifact_kind: string;
   canonical_bytes: Uint8Array;
@@ -115,9 +123,42 @@ interface GenerationRow {
   remaining_plan_digest: Uint8Array;
   source_manifest_root: Uint8Array;
   source_release_id: string;
+  state: string;
   target_manifest_root: Uint8Array;
   target_release_id: string;
   tenant_id: string;
+}
+
+interface CatalogReceiptRow {
+  catalog_digest: Uint8Array;
+  catalog_verified: boolean;
+  environment_id: string;
+  generation_id: string;
+  prepared_subset_digest: Uint8Array;
+  receipt_id: string;
+  receipt_state: 'READY_TO_SWAP';
+  receipt_version: string;
+  recorded_at: Date | string;
+  remaining_plan_digest: Uint8Array;
+  source_manifest_root: Uint8Array;
+  source_release_id: string;
+  target_manifest_root: Uint8Array;
+  target_release_id: string;
+  tenant_id: string;
+}
+
+interface ActualIndexShape {
+  columns: string[];
+  constraintName: string | null;
+  definition: string;
+  name: string;
+  owner: string;
+  predicate: string | null;
+  primary: boolean;
+  ready: boolean;
+  tableName: string;
+  unique: boolean;
+  valid: boolean;
 }
 
 interface CatalogVerification {
@@ -137,6 +178,7 @@ export class PostgresModuleStorageMaterializer {
   constructor(
     private readonly materializerPool: Pool,
     private readonly moduleRuntimePool?: Pool,
+    private readonly faultHooks: ModuleStorageMaterializerFaultHooks = {},
   ) {}
 
   async prepare(
@@ -337,43 +379,64 @@ export class PostgresModuleStorageMaterializer {
   async executeApprovedAttempt(
     command: ExecuteModuleStorageAttemptCommand,
   ): Promise<ModuleStorageAttemptResult> {
+    assertUuid(command.context.tenantId, 'tenantId');
+    assertUuid(command.context.environmentId, 'environmentId');
+    assertUuid(command.context.principalId, 'principalId');
     assertUuid(command.activationAttemptId, 'activationAttemptId');
     assertUuid(command.coordinatorId, 'coordinatorId');
     assertUuid(command.generationId, 'generationId');
     const client = await this.materializerPool.connect();
+    let generationLockHeld = false;
     try {
       await assertMaterializerSession(client);
+      await acquireGenerationSessionLock(client, command.generationId);
+      generationLockHeld = true;
       await beginLocked(client);
       await setMaterializerScope(client, command.context);
       const generation = await loadGeneration(client, command);
-      const claim = await client.query<{ coordinator_id: string }>(
+      const completed = await loadCompletedAttemptReceipt(
+        client,
+        command,
+        generation,
+      );
+      if (completed) {
+        await client.query('COMMIT');
+        return { disposition: 'READY_TO_SWAP', receipt: completed };
+      }
+      if (generation.state === 'READY_TO_SWAP') {
+        throw failure(
+          'ATTEMPT_READY_EVIDENCE_MISSING',
+          'ready generation is missing its completed claim and receipt',
+        );
+      }
+      await assertApprovedAttempt(client, command, generation.preparation_id);
+      const claim = await client.query<{
+        coordinator_id: string;
+        generation_id: string;
+      }>(
         `INSERT INTO north_star_internal.module_storage_attempt_claims (
            tenant_id, environment_id, generation_id, activation_attempt_id,
            coordinator_id, claim_state
-         )
-         SELECT $1,$2,$3,$4,$5,'CLAIMED'
-          WHERE EXISTS (
-            SELECT approved
-              FROM north_star_internal.module_storage_read_approved_attempt(
-                $1, $2, $4, $6
-              )
-          )
+         ) VALUES ($1,$2,$3,$4,$5,'CLAIMED')
          ON CONFLICT (tenant_id, environment_id, activation_attempt_id)
-         DO NOTHING
-         RETURNING coordinator_id`,
+         DO UPDATE SET coordinator_id = EXCLUDED.coordinator_id,
+                       claim_state = 'CLAIMED',
+                       updated_at = transaction_timestamp()
+          WHERE module_storage_attempt_claims.generation_id = EXCLUDED.generation_id
+            AND module_storage_attempt_claims.claim_state IN ('CLAIMED', 'RECONCILING')
+         RETURNING coordinator_id, generation_id`,
         [
           command.context.tenantId,
           command.context.environmentId,
           command.generationId,
           command.activationAttemptId,
           command.coordinatorId,
-          generation.preparation_id,
         ],
       );
       if (claim.rowCount !== 1) {
         throw failure(
-          'ATTEMPT_NOT_UNIQUELY_CLAIMED',
-          'backfill/validation may run only in the uniquely claimed approved attempt',
+          'ATTEMPT_CLAIM_MISMATCH',
+          'attempt claim is terminal or belongs to a different generation',
         );
       }
       const [source, target] = await Promise.all([
@@ -394,29 +457,51 @@ export class PostgresModuleStorageMaterializer {
       assertTransitionPair(transition, source, target);
       await client.query(
         `UPDATE north_star_internal.module_storage_generations
-            SET state = 'IN_ATTEMPT' WHERE generation_id = $1`,
+            SET state = 'IN_ATTEMPT'
+          WHERE generation_id = $1
+            AND state IN ('PREPARED', 'IN_ATTEMPT', 'RECONCILING')`,
         [command.generationId],
       );
+      await client.query('COMMIT');
+      await this.faultHooks.afterClaimCommitted?.();
+
       for (const element of transition.elements.filter(
         (candidate) =>
           candidate.classification.preparationValidity === 'inAttemptOnly',
       )) {
         if (element.kind === 'backfill') {
-          await client.query('COMMIT');
-          await this.applyBackfill(command, target.target, element);
-          await client.query('BEGIN');
-          await acquireSharedMigrationLock(client);
+          await this.applyBackfill(
+            command,
+            generation.preparation_id,
+            target.target,
+            element,
+            client,
+          );
+          await beginLocked(client);
+          await setMaterializerScope(client, command.context);
         } else {
-          await applyDdlElement(client, target.target, element);
+          await beginLocked(client);
+          await setMaterializerScope(client, command.context);
         }
-        await appendApplication(
-          client,
-          command,
-          element,
-          'APPLIED',
-          command.activationAttemptId,
-        );
+        await assertApprovedAttempt(client, command, generation.preparation_id);
+        if (!(await hasAppliedAttemptElement(client, command, element))) {
+          if (element.kind !== 'backfill') {
+            await applyDdlElement(client, target.target, element);
+          }
+          await appendApplication(
+            client,
+            command,
+            element,
+            'APPLIED',
+            command.activationAttemptId,
+          );
+        }
+        await client.query('COMMIT');
       }
+
+      await beginLocked(client);
+      await setMaterializerScope(client, command.context);
+      await assertApprovedAttempt(client, command, generation.preparation_id);
       const verification = await verifyCatalogOnClient(
         client,
         await loadAccountedLiveTargets(client, command.context, [
@@ -427,6 +512,7 @@ export class PostgresModuleStorageMaterializer {
       if (verification.drift.length > 0) {
         throw failure('CATALOG_DRIFT', verification.drift.join('; '));
       }
+      await assertApprovedAttempt(client, command, generation.preparation_id);
       const receipt = await appendCatalogReceipt(
         client,
         command.context,
@@ -440,27 +526,55 @@ export class PostgresModuleStorageMaterializer {
         verification.digest,
         'READY_TO_SWAP',
       );
-      await client.query(
+      const completedClaim = await client.query(
         `UPDATE north_star_internal.module_storage_attempt_claims
             SET claim_state = 'COMPLETED', updated_at = transaction_timestamp()
-          WHERE activation_attempt_id = $1 AND coordinator_id = $2`,
-        [command.activationAttemptId, command.coordinatorId],
+          WHERE tenant_id = $1 AND environment_id = $2
+            AND generation_id = $3 AND activation_attempt_id = $4
+            AND coordinator_id = $5 AND claim_state = 'CLAIMED'`,
+        [
+          command.context.tenantId,
+          command.context.environmentId,
+          command.generationId,
+          command.activationAttemptId,
+          command.coordinatorId,
+        ],
       );
-      await client.query(
+      if (completedClaim.rowCount !== 1) {
+        throw failure(
+          'ATTEMPT_CLAIM_COMPLETION_MISMATCH',
+          'READY evidence requires the currently claimed generation and coordinator',
+        );
+      }
+      const readyGeneration = await client.query(
         `UPDATE north_star_internal.module_storage_generations
-            SET state = 'READY_TO_SWAP' WHERE generation_id = $1`,
+            SET state = 'READY_TO_SWAP'
+          WHERE generation_id = $1 AND state IN ('IN_ATTEMPT', 'RECONCILING')`,
         [command.generationId],
       );
+      if (readyGeneration.rowCount !== 1) {
+        throw failure(
+          'GENERATION_READY_STATE_MISMATCH',
+          'READY evidence requires an executable durable generation state',
+        );
+      }
       await client.query('COMMIT');
       return { disposition: 'READY_TO_SWAP', receipt };
     } catch (error) {
       await rollbackQuietly(client);
-      if (isAmbiguousDatabaseError(error)) {
-        await recordReconciling(this.materializerPool, command);
+      if (isAmbiguousModuleStorageDatabaseError(error)) {
+        try {
+          await recordReconciling(this.materializerPool, command);
+        } catch {
+          /* unavailable databases retain the durable claim/checkpoint for retry */
+        }
         return { disposition: 'RECONCILING', receipt: null };
       }
       throw error;
     } finally {
+      if (generationLockHeld) {
+        await releaseGenerationSessionLockQuietly(client, command.generationId);
+      }
       client.release();
     }
   }
@@ -507,8 +621,10 @@ export class PostgresModuleStorageMaterializer {
 
   private async applyBackfill(
     command: ExecuteModuleStorageAttemptCommand,
+    preparationId: string,
     target: StorageTargetPayloadV1,
     element: StorageTransitionElement,
+    controlClient: PoolClient,
   ): Promise<void> {
     if (!this.moduleRuntimePool) {
       throw failure(
@@ -539,16 +655,38 @@ export class PostgresModuleStorageMaterializer {
       }
       let complete = false;
       while (!complete) {
+        await beginLocked(controlClient);
+        await setMaterializerScope(controlClient, command.context);
         await client.query('BEGIN');
         await client.query(
           `SELECT set_config('north_star.tenant_id', $1, true),
-                                   set_config('north_star.environment_id', $2, true)`,
+                  set_config('north_star.environment_id', $2, true)`,
           [command.context.tenantId, command.context.environmentId],
         );
+        const authorized = await client.query<{ authorized: boolean }>(
+          `SELECT authorized
+             FROM north_star_internal.module_storage_lock_backfill_attempt(
+               $1, $2, $3, $4
+             )`,
+          [
+            command.context.tenantId,
+            command.context.environmentId,
+            command.activationAttemptId,
+            preparationId,
+          ],
+        );
+        if (authorized.rowCount !== 1 || !authorized.rows[0]?.authorized) {
+          throw failure(
+            'ATTEMPT_NOT_AUTHORIZED',
+            'backfill mutation requires a current unconsumed approved attempt',
+          );
+        }
         const checkpoint = await client.query<{
+          activation_attempt_id: string;
+          complete: boolean;
           last_record_id: string | null;
         }>(
-          `SELECT last_record_id
+          `SELECT activation_attempt_id, complete, last_record_id
              FROM north_star_internal.module_storage_backfill_checkpoints
             WHERE tenant_id = $1 AND environment_id = $2
               AND generation_id = $3 AND element_id = $4
@@ -560,7 +698,22 @@ export class PostgresModuleStorageMaterializer {
             element.elementId,
           ],
         );
-        const last = checkpoint.rows[0]?.last_record_id ?? null;
+        const prior = checkpoint.rows[0];
+        if (
+          prior &&
+          prior.activation_attempt_id !== command.activationAttemptId
+        ) {
+          throw failure(
+            'BACKFILL_ATTEMPT_MISMATCH',
+            'durable checkpoint belongs to a different activation attempt',
+          );
+        }
+        if (prior?.complete) {
+          await client.query('COMMIT');
+          await controlClient.query('COMMIT');
+          return;
+        }
+        const last = prior?.last_record_id ?? null;
         const updated = await client.query<{ record_id: string }>(
           `WITH batch AS (
              SELECT record_id
@@ -584,7 +737,11 @@ export class PostgresModuleStorageMaterializer {
         );
         const updatedCount = updated.rowCount ?? 0;
         complete = updatedCount < 100;
-        const next = updated.rows.at(-1)?.record_id ?? last;
+        const next =
+          updated.rows
+            .map((row) => row.record_id)
+            .toSorted()
+            .at(-1) ?? last;
         await client.query(
           `INSERT INTO north_star_internal.module_storage_backfill_checkpoints (
              tenant_id, environment_id, generation_id, element_id,
@@ -593,7 +750,9 @@ export class PostgresModuleStorageMaterializer {
            ON CONFLICT (tenant_id, environment_id, generation_id, element_id)
            DO UPDATE SET last_record_id = EXCLUDED.last_record_id,
              rows_applied = module_storage_backfill_checkpoints.rows_applied + EXCLUDED.rows_applied,
-             complete = EXCLUDED.complete, updated_at = transaction_timestamp()`,
+             complete = EXCLUDED.complete, updated_at = transaction_timestamp()
+           WHERE module_storage_backfill_checkpoints.activation_attempt_id =
+                 EXCLUDED.activation_attempt_id`,
           [
             command.context.tenantId,
             command.context.environmentId,
@@ -605,7 +764,33 @@ export class PostgresModuleStorageMaterializer {
             complete,
           ],
         );
+        const stillAuthorized = await client.query<{ authorized: boolean }>(
+          `SELECT authorized
+             FROM north_star_internal.module_storage_lock_backfill_attempt(
+               $1, $2, $3, $4
+             )`,
+          [
+            command.context.tenantId,
+            command.context.environmentId,
+            command.activationAttemptId,
+            preparationId,
+          ],
+        );
+        if (
+          stillAuthorized.rowCount !== 1 ||
+          !stillAuthorized.rows[0]?.authorized
+        ) {
+          throw failure(
+            'ATTEMPT_NOT_AUTHORIZED',
+            'backfill mutation lost approval before its durable checkpoint',
+          );
+        }
         await client.query('COMMIT');
+        await controlClient.query('COMMIT');
+        await this.faultHooks.afterBackfillCheckpointCommitted?.({
+          elementId: element.elementId,
+          rowsApplied: updatedCount,
+        });
       }
     } catch (error) {
       await rollbackQuietly(client);
@@ -866,14 +1051,14 @@ async function applyDdlElement(
         throw failure('NON_INERT_ADD_COLUMN', element.elementId);
       await client.query(
         `ALTER TABLE north_star_module.${quoted(entity.physicalTableName)}
-           ADD COLUMN IF NOT EXISTS ${quoted(column.physicalName)} ${safeType(column.postgresqlType)}`,
+           ADD COLUMN IF NOT EXISTS ${quoted(column.physicalName)} ${safeType(column.postgresqlType)}${defaultSql(column.defaultSemantics, column.defaultValue, column.postgresqlType)}`,
       );
       return;
     }
     case 'createIndex': {
       const located = locateIndex(target, element);
       await client.query(
-        `CREATE INDEX IF NOT EXISTS ${quoted(located.index.physicalName)}
+        `CREATE ${located.index.indexKind === 'caseInsensitiveUnique' ? 'UNIQUE ' : ''}INDEX IF NOT EXISTS ${quoted(located.index.physicalName)}
            ON north_star_module.${quoted(located.entity.physicalTableName)}
            (${located.index.columnNames.map(quoted).join(', ')})`,
       );
@@ -907,12 +1092,18 @@ async function applyDdlElement(
       );
       if (exists.rows[0]?.present) return;
       await client.query(
+        `GRANT REFERENCES ON north_star_module.${quoted(targetEntity.physicalTableName)} TO north_star_module_materializer`,
+      );
+      await client.query(
         `ALTER TABLE north_star_module.${quoted(source.physicalTableName)}
            ADD CONSTRAINT ${quoted(relation.foreignKey.physicalName)}
            FOREIGN KEY (${relation.foreignKey.sourceColumns.map(quoted).join(', ')})
            REFERENCES north_star_module.${quoted(targetEntity.physicalTableName)}
            (${relation.foreignKey.targetColumns.map(quoted).join(', ')})
            ON DELETE RESTRICT ON UPDATE RESTRICT`,
+      );
+      await client.query(
+        `REVOKE REFERENCES ON north_star_module.${quoted(targetEntity.physicalTableName)} FROM north_star_module_materializer`,
       );
       return;
     }
@@ -942,7 +1133,7 @@ async function createManagedTable(
     `${quoted(entity.archive.archivedAtColumn)} timestamp with time zone`,
     ...entity.columns.map(
       (column) =>
-        `${quoted(column.physicalName)} ${safeType(column.postgresqlType)}${column.nullable ? '' : ' NOT NULL'}${defaultSql(column.defaultSemantics, column.defaultValue)}`,
+        `${quoted(column.physicalName)} ${safeType(column.postgresqlType)}${column.nullable ? '' : ' NOT NULL'}${defaultSql(column.defaultSemantics, column.defaultValue, column.postgresqlType)}`,
     ),
     ...relationColumns.map(
       (column) =>
@@ -975,12 +1166,7 @@ async function createManagedTable(
   const predicate = `tenant_id = north_star_internal.trusted_tenant_id()
     AND environment_id = north_star_internal.trusted_environment_id()`;
   for (const command of ['SELECT', 'INSERT', 'UPDATE'] as const) {
-    const policy = `nsm_p_${createHash('sha256')
-      .update(entity.physicalTableName)
-      .update('\0')
-      .update(command)
-      .digest('hex')
-      .slice(0, 32)}`;
+    const policy = managedPolicyName(entity.physicalTableName, command);
     const exists = await client.query<{ present: boolean }>(
       `SELECT EXISTS (SELECT 1 FROM pg_policies
         WHERE schemaname = 'north_star_module' AND tablename = $1 AND policyname = $2) AS present`,
@@ -1008,6 +1194,9 @@ async function createManagedTable(
   await client.query(
     `REVOKE DELETE, TRUNCATE, REFERENCES, TRIGGER ON north_star_module.${quoted(entity.physicalTableName)} FROM north_star_module_runtime`,
   );
+  await client.query(
+    `REVOKE DELETE, TRUNCATE, REFERENCES, TRIGGER ON north_star_module.${quoted(entity.physicalTableName)} FROM north_star_module_materializer`,
+  );
 }
 
 async function verifyCatalogOnClient(
@@ -1015,130 +1204,1200 @@ async function verifyCatalogOnClient(
   targets: readonly StorageTargetPayloadV1[],
 ): Promise<CatalogVerification> {
   const expectedTables = mergeExpectedTables(targets);
+  const expectedRelations = mergeExpectedRelations(targets);
   const drift: string[] = [];
+
+  const registry = await loadObjectOwnershipRegistry(client);
+  for (const object of registry) {
+    const verifierCount =
+      Number(
+        object.schema_name === 'platform' ||
+          object.schema_name === 'north_star_internal',
+      ) + Number(object.schema_name === 'north_star_module');
+    if (verifierCount !== 1) {
+      drift.push(
+        `object ${object.schema_name}.${object.object_name} (${object.object_kind}) has ${verifierCount} verifiers`,
+      );
+    }
+    if (object.object_kind.startsWith('unknown:')) {
+      drift.push(
+        `unknown object kind ${object.object_kind} for ${object.schema_name}.${object.object_name}`,
+      );
+    }
+  }
+
+  const schema = await requiredOne<{
+    owner: string;
+    schema_name: string;
+  }>(
+    client,
+    `SELECT namespace.nspname AS schema_name,
+            pg_get_userbyid(namespace.nspowner) AS owner
+       FROM pg_namespace AS namespace
+      WHERE namespace.nspname = 'north_star_module'`,
+    [],
+    'managed module schema',
+  );
+  compareCatalogCollection(
+    drift,
+    'schema',
+    [
+      {
+        owner: 'north_star_module_materializer',
+        schemaName: 'north_star_module',
+      },
+    ],
+    [{ owner: schema.owner, schemaName: schema.schema_name }],
+    (value) => value.schemaName,
+  );
+
+  const schemaGrants = await client.query<{
+    grantee: string;
+    is_grantable: boolean;
+    privilege_type: string;
+  }>(
+    `SELECT COALESCE(grantee.rolname, 'PUBLIC') AS grantee,
+            privilege.privilege_type,
+            privilege.is_grantable
+       FROM pg_namespace AS namespace
+       CROSS JOIN LATERAL aclexplode(
+         COALESCE(namespace.nspacl, acldefault('n', namespace.nspowner))
+       ) AS privilege
+       LEFT JOIN pg_roles AS grantee ON grantee.oid = privilege.grantee
+      WHERE namespace.nspname = 'north_star_module'
+      ORDER BY grantee, privilege.privilege_type`,
+  );
+  compareCatalogCollection(
+    drift,
+    'schema grant',
+    [
+      {
+        grantee: 'north_star_module_materializer',
+        isGrantable: false,
+        privilegeType: 'CREATE',
+      },
+      {
+        grantee: 'north_star_module_materializer',
+        isGrantable: false,
+        privilegeType: 'USAGE',
+      },
+      {
+        grantee: 'north_star_module_runtime',
+        isGrantable: false,
+        privilegeType: 'USAGE',
+      },
+    ],
+    schemaGrants.rows.map((grant) => ({
+      grantee: grant.grantee,
+      isGrantable: grant.is_grantable,
+      privilegeType: grant.privilege_type,
+    })),
+    (value) => `${value.grantee}:${value.privilegeType}`,
+  );
+
   const relations = await client.query<{
+    force_row_level_security: boolean;
+    is_partition: boolean;
     owner: string;
     relkind: string;
     relname: string;
-    schema_name: string;
+    row_level_security: boolean;
   }>(
-    `SELECT namespace.nspname AS schema_name, relation.relname, relation.relkind,
-            pg_get_userbyid(relation.relowner) AS owner
+    `SELECT relation.relname, relation.relkind,
+            pg_get_userbyid(relation.relowner) AS owner,
+            relation.relrowsecurity AS row_level_security,
+            relation.relforcerowsecurity AS force_row_level_security,
+            relation.relispartition AS is_partition
+      FROM pg_class AS relation
+       JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+      WHERE namespace.nspname = 'north_star_module'
+        AND relation.relkind NOT IN ('i','I','c')
+      ORDER BY relation.relkind, relation.relname`,
+  );
+  compareCatalogCollection(
+    drift,
+    'managed relation',
+    [...expectedTables.keys()].map((tableName) => ({
+      forceRowLevelSecurity: true,
+      isPartition: false,
+      kind: 'r',
+      name: tableName,
+      owner: 'north_star_module_materializer',
+      rowLevelSecurity: true,
+    })),
+    relations.rows.map((relation) => ({
+      forceRowLevelSecurity: relation.force_row_level_security,
+      isPartition: relation.is_partition,
+      kind: relation.relkind,
+      name: relation.relname,
+      owner: relation.owner,
+      rowLevelSecurity: relation.row_level_security,
+    })),
+    (value) => value.name,
+  );
+
+  const columns = await client.query<{
+    column_default: string | null;
+    generated_kind: string;
+    identity_kind: string;
+    is_nullable: boolean;
+    name: string;
+    postgresql_type: string;
+    table_name: string;
+  }>(
+    `SELECT relation.relname AS table_name,
+            attribute.attname AS name,
+            format_type(attribute.atttypid, attribute.atttypmod) AS postgresql_type,
+            NOT attribute.attnotnull AS is_nullable,
+            pg_get_expr(default_value.adbin, default_value.adrelid, true) AS column_default,
+            attribute.attidentity AS identity_kind,
+            attribute.attgenerated AS generated_kind
        FROM pg_class AS relation
        JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
-      WHERE namespace.nspname !~ '^pg_' AND namespace.nspname <> 'information_schema'
-        AND relation.relkind IN ('r','p','v','m','S','f')
-      ORDER BY namespace.nspname, relation.relkind, relation.relname`,
+       JOIN pg_attribute AS attribute ON attribute.attrelid = relation.oid
+       LEFT JOIN pg_attrdef AS default_value
+         ON default_value.adrelid = relation.oid
+        AND default_value.adnum = attribute.attnum
+      WHERE namespace.nspname = 'north_star_module'
+        AND relation.relkind IN ('r','p')
+        AND attribute.attnum > 0 AND NOT attribute.attisdropped
+      ORDER BY relation.relname, attribute.attname`,
   );
-  for (const relation of relations.rows) {
-    const verifierCount =
-      Number(
-        relation.schema_name === 'platform' ||
-          relation.schema_name === 'north_star_internal',
-      ) + Number(relation.schema_name === 'north_star_module');
-    if (verifierCount !== 1) {
+  const expectedColumns = buildExpectedColumns(
+    expectedTables,
+    expectedRelations,
+  );
+  compareCatalogCollection(
+    drift,
+    'managed column',
+    expectedColumns,
+    columns.rows.map((column) => ({
+      defaultExpression: normalizeSqlExpression(column.column_default),
+      generatedKind: column.generated_kind,
+      identityKind: column.identity_kind,
+      name: column.name,
+      nullable: column.is_nullable,
+      postgresqlType: column.postgresql_type,
+      tableName: column.table_name,
+    })),
+    (value) => `${value.tableName}.${value.name}`,
+  );
+
+  const constraints = await client.query<{
+    columns: string[];
+    deferred: boolean;
+    deferrable: boolean;
+    delete_action: string;
+    name: string;
+    referenced_columns: string[] | null;
+    referenced_schema: string | null;
+    referenced_table: string | null;
+    table_name: string;
+    type: string;
+    update_action: string;
+    validated: boolean;
+  }>(
+    `SELECT source.relname AS table_name,
+            constraint_record.conname AS name,
+            constraint_record.contype AS type,
+            ARRAY(
+              SELECT attribute.attname
+                FROM unnest(constraint_record.conkey) WITH ORDINALITY AS key(attnum, ordinal)
+                JOIN pg_attribute AS attribute
+                  ON attribute.attrelid = source.oid
+                 AND attribute.attnum = key.attnum
+               ORDER BY key.ordinal
+            )::text[] AS columns,
+            target_namespace.nspname AS referenced_schema,
+            target.relname AS referenced_table,
+            CASE WHEN constraint_record.confkey IS NULL THEN NULL ELSE ARRAY(
+              SELECT attribute.attname
+                FROM unnest(constraint_record.confkey) WITH ORDINALITY AS key(attnum, ordinal)
+                JOIN pg_attribute AS attribute
+                  ON attribute.attrelid = target.oid
+                 AND attribute.attnum = key.attnum
+               ORDER BY key.ordinal
+            )::text[] END AS referenced_columns,
+            constraint_record.confupdtype AS update_action,
+            constraint_record.confdeltype AS delete_action,
+            constraint_record.convalidated AS validated,
+            constraint_record.condeferrable AS deferrable,
+            constraint_record.condeferred AS deferred
+       FROM pg_constraint AS constraint_record
+       JOIN pg_class AS source ON source.oid = constraint_record.conrelid
+       JOIN pg_namespace AS source_namespace
+         ON source_namespace.oid = source.relnamespace
+       LEFT JOIN pg_class AS target ON target.oid = constraint_record.confrelid
+       LEFT JOIN pg_namespace AS target_namespace
+         ON target_namespace.oid = target.relnamespace
+      WHERE source_namespace.nspname = 'north_star_module'
+      ORDER BY source.relname, constraint_record.conname`,
+  );
+  const expectedConstraints = buildExpectedConstraints(
+    expectedTables,
+    expectedRelations,
+  );
+  const actualConstraints = constraints.rows.map((constraint) => ({
+    columns: constraint.columns,
+    deferred: constraint.deferred,
+    deferrable: constraint.deferrable,
+    deleteAction: constraint.delete_action,
+    name: constraint.name,
+    referencedColumns: constraint.referenced_columns,
+    referencedSchema: constraint.referenced_schema,
+    referencedTable: constraint.referenced_table,
+    tableName: constraint.table_name,
+    type: constraint.type,
+    updateAction: constraint.update_action,
+    validated: constraint.validated,
+  }));
+  compareCatalogCollection(
+    drift,
+    'managed constraint',
+    expectedConstraints,
+    actualConstraints,
+    (value) => `${value.tableName}.${value.name}`,
+  );
+  for (const constraint of actualConstraints) {
+    if (
+      constraint.type === 'f' &&
+      (constraint.deleteAction !== 'r' || constraint.updateAction !== 'r')
+    ) {
       drift.push(
-        `object ${relation.schema_name}.${relation.relname} has ${verifierCount} verifiers`,
+        `destructive foreign key ${constraint.tableName}.${constraint.name}`,
       );
-      continue;
-    }
-    if (relation.schema_name === 'north_star_module') {
-      if (relation.relkind !== 'r')
-        drift.push(`unknown managed object kind ${relation.relkind}`);
-      if (!expectedTables.has(relation.relname))
-        drift.push(`rogue managed relation ${relation.relname}`);
-      if (relation.owner !== 'north_star_module_materializer')
-        drift.push(`wrong owner for ${relation.relname}`);
     }
   }
-  for (const [tableName, entity] of expectedTables) {
-    const present = relations.rows.find(
-      (row) =>
-        row.schema_name === 'north_star_module' && row.relname === tableName,
-    );
-    if (!present) continue;
-    const columns = await client.query<{
-      column_name: string;
-      data_type: string;
-      is_nullable: string;
-    }>(
-      `SELECT column_name, data_type, is_nullable
-         FROM information_schema.columns
-        WHERE table_schema = 'north_star_module' AND table_name = $1`,
-      [tableName],
-    );
-    const relationColumns = targets.flatMap((target) =>
-      target.relations
-        .filter((relation) => relation.sourceEntityId === entity.entityId)
-        .map((relation) => relation.relationColumn.physicalName),
-    );
-    const expectedNames = new Set([
-      'tenant_id',
-      'environment_id',
-      entity.recordIdentity.column,
-      entity.optimisticRevision.column,
-      entity.archive.archivedAtColumn,
-      ...entity.columns.map((column) => column.physicalName),
-      ...entity.derivedStateFields.map((column) => column.physicalName),
-      ...relationColumns,
-    ]);
-    for (const actual of columns.rows) {
-      if (!expectedNames.has(actual.column_name)) {
-        drift.push(`unattributed column ${tableName}.${actual.column_name}`);
-      }
-    }
-    for (const expected of entity.columns) {
-      const actual = columns.rows.find(
-        (column) => column.column_name === expected.physicalName,
-      );
-      if (!actual)
-        drift.push(`missing column ${tableName}.${expected.physicalName}`);
-      else if (!expected.nullable && actual.is_nullable !== 'NO')
-        drift.push(`nullable drift ${tableName}.${expected.physicalName}`);
-    }
-  }
-  const dangerous = await client.query<{ description: string }>(
-    `SELECT 'DELETE grant ' || table_schema || '.' || table_name AS description
-      FROM information_schema.role_table_grants
-      WHERE table_schema = 'north_star_module' AND privilege_type IN ('DELETE', 'TRUNCATE')
-        AND grantee IN ('PUBLIC', 'north_star_runtime', 'north_star_module_runtime')
-     UNION ALL
-     SELECT 'trigger ' || event_object_schema || '.' || event_object_table || '.' || trigger_name
-       FROM information_schema.triggers WHERE event_object_schema = 'north_star_module'
-     UNION ALL
-     SELECT 'rule ' || schemaname || '.' || tablename || '.' || rulename
-       FROM pg_rules WHERE schemaname = 'north_star_module'`,
+
+  const indexes = await client.query<{
+    columns: string[];
+    constraint_name: string | null;
+    definition: string;
+    is_primary: boolean;
+    is_ready: boolean;
+    is_unique: boolean;
+    is_valid: boolean;
+    name: string;
+    owner: string;
+    predicate: string | null;
+    table_name: string;
+  }>(
+    `SELECT source.relname AS table_name,
+            index_relation.relname AS name,
+            pg_get_userbyid(index_relation.relowner) AS owner,
+            index_record.indisunique AS is_unique,
+            index_record.indisprimary AS is_primary,
+            index_record.indisvalid AS is_valid,
+            index_record.indisready AS is_ready,
+            pg_get_indexdef(index_record.indexrelid, 0, true) AS definition,
+            ARRAY(
+              SELECT pg_get_indexdef(index_record.indexrelid, ordinal, true)
+                FROM generate_series(1, index_record.indnkeyatts) AS ordinal
+               ORDER BY ordinal
+            ) AS columns,
+            pg_get_expr(index_record.indpred, index_record.indrelid, true) AS predicate,
+            constraint_record.conname AS constraint_name
+       FROM pg_index AS index_record
+       JOIN pg_class AS source ON source.oid = index_record.indrelid
+       JOIN pg_namespace AS namespace ON namespace.oid = source.relnamespace
+       JOIN pg_class AS index_relation
+         ON index_relation.oid = index_record.indexrelid
+       LEFT JOIN pg_constraint AS constraint_record
+         ON constraint_record.conindid = index_record.indexrelid
+        AND constraint_record.contype IN ('p','u','x')
+      WHERE namespace.nspname = 'north_star_module'
+      ORDER BY source.relname, index_relation.relname`,
   );
-  drift.push(...dangerous.rows.map((row) => row.description));
+  const actualIndexes: ActualIndexShape[] = indexes.rows.map((index) => ({
+    columns: index.columns.map(normalizeSqlExpressionRequired),
+    constraintName: index.constraint_name,
+    definition: normalizeSqlExpressionRequired(index.definition),
+    name: index.name,
+    owner: index.owner,
+    predicate: normalizeSqlExpression(index.predicate),
+    primary: index.is_primary,
+    ready: index.is_ready,
+    tableName: index.table_name,
+    unique: index.is_unique,
+    valid: index.is_valid,
+  }));
+  compareCatalogCollection(
+    drift,
+    'managed index',
+    buildExpectedIndexes(expectedTables),
+    actualIndexes,
+    (value) => `${value.tableName}.${value.name}`,
+  );
+
   const policies = await client.query<{
     cmd: string;
+    permissive: boolean;
     policyname: string;
+    qual: string | null;
+    roles: string[];
     tablename: string;
+    with_check: string | null;
   }>(
-    `SELECT tablename, policyname, cmd FROM pg_policies
-      WHERE schemaname = 'north_star_module'`,
+    `SELECT relation.relname AS tablename,
+            policy.polname AS policyname,
+            policy.polpermissive AS permissive,
+            ARRAY(
+              SELECT role.rolname
+                FROM unnest(policy.polroles) AS role_oid
+                JOIN pg_roles AS role ON role.oid = role_oid
+               ORDER BY role.rolname
+            )::text[] AS roles,
+            CASE policy.polcmd
+              WHEN 'r' THEN 'SELECT'
+              WHEN 'a' THEN 'INSERT'
+              WHEN 'w' THEN 'UPDATE'
+              WHEN 'd' THEN 'DELETE'
+              ELSE 'ALL'
+            END AS cmd,
+            pg_get_expr(policy.polqual, policy.polrelid, true) AS qual,
+            pg_get_expr(policy.polwithcheck, policy.polrelid, true) AS with_check
+       FROM pg_policy AS policy
+       JOIN pg_class AS relation ON relation.oid = policy.polrelid
+       JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+      WHERE namespace.nspname = 'north_star_module'
+      ORDER BY relation.relname, policy.polname`,
   );
-  for (const policy of policies.rows) {
-    if (!['SELECT', 'INSERT', 'UPDATE'].includes(policy.cmd)) {
+  const actualPolicies = policies.rows.map((policy) => ({
+    command: policy.cmd,
+    name: policy.policyname,
+    permissive: policy.permissive,
+    qual: normalizePolicyExpression(policy.qual),
+    roles: policy.roles,
+    tableName: policy.tablename,
+    withCheck: normalizePolicyExpression(policy.with_check),
+  }));
+  compareCatalogCollection(
+    drift,
+    'managed policy',
+    buildExpectedPolicies(expectedTables),
+    actualPolicies,
+    (value) => `${value.tableName}.${value.name}`,
+  );
+  for (const policy of actualPolicies) {
+    if (!['SELECT', 'INSERT', 'UPDATE'].includes(policy.command)) {
+      drift.push(`delete-capable policy ${policy.tableName}.${policy.name}`);
+    }
+  }
+
+  const tableGrants = await client.query<{
+    grantee: string;
+    is_grantable: boolean;
+    privilege_type: string;
+    table_name: string;
+  }>(
+    `SELECT relation.relname AS table_name,
+            COALESCE(grantee.rolname, 'PUBLIC') AS grantee,
+            privilege.privilege_type,
+            privilege.is_grantable
+       FROM pg_class AS relation
+       JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+       CROSS JOIN LATERAL aclexplode(
+         COALESCE(relation.relacl, acldefault('r', relation.relowner))
+       ) AS privilege
+       LEFT JOIN pg_roles AS grantee ON grantee.oid = privilege.grantee
+      WHERE namespace.nspname = 'north_star_module'
+        AND relation.relkind IN ('r','p')
+      ORDER BY relation.relname, grantee, privilege.privilege_type`,
+  );
+  const actualTableGrants = tableGrants.rows.map((grant) => ({
+    grantee: grant.grantee,
+    isGrantable: grant.is_grantable,
+    privilegeType: grant.privilege_type,
+    tableName: grant.table_name,
+  }));
+  compareCatalogCollection(
+    drift,
+    'managed table grant',
+    buildExpectedTableGrants(expectedTables),
+    actualTableGrants,
+    (value) => `${value.tableName}.${value.grantee}.${value.privilegeType}`,
+  );
+  for (const grant of actualTableGrants) {
+    if (
+      ['DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER'].includes(
+        grant.privilegeType,
+      )
+    ) {
       drift.push(
-        `delete-capable policy ${policy.tablename}.${policy.policyname}`,
+        `destructive table privilege ${grant.privilegeType} on ${grant.tableName} to ${grant.grantee}`,
       );
     }
   }
+
+  const columnGrants = await client.query<{
+    column_name: string;
+    grantee: string;
+    is_grantable: boolean;
+    privilege_type: string;
+    table_name: string;
+  }>(
+    `SELECT relation.relname AS table_name,
+            attribute.attname AS column_name,
+            COALESCE(grantee.rolname, 'PUBLIC') AS grantee,
+            privilege.privilege_type,
+            privilege.is_grantable
+       FROM pg_attribute AS attribute
+       JOIN pg_class AS relation ON relation.oid = attribute.attrelid
+       JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+       CROSS JOIN LATERAL aclexplode(attribute.attacl) AS privilege
+       LEFT JOIN pg_roles AS grantee ON grantee.oid = privilege.grantee
+      WHERE namespace.nspname = 'north_star_module'
+        AND relation.relkind IN ('r','p')
+        AND attribute.attnum > 0 AND NOT attribute.attisdropped
+      ORDER BY relation.relname, attribute.attname, grantee,
+               privilege.privilege_type`,
+  );
+  const actualColumnGrants = columnGrants.rows.map((grant) => ({
+    columnName: grant.column_name,
+    grantee: grant.grantee,
+    isGrantable: grant.is_grantable,
+    privilegeType: grant.privilege_type,
+    tableName: grant.table_name,
+  }));
+  compareCatalogCollection(
+    drift,
+    'managed column grant',
+    [],
+    actualColumnGrants,
+    (value) =>
+      `${value.tableName}.${value.columnName}.${value.grantee}.${value.privilegeType}`,
+  );
+
+  const functions = await client.query<{
+    arguments: string;
+    kind: string;
+    name: string;
+    owner: string;
+  }>(
+    `SELECT routine.proname AS name,
+            pg_get_function_identity_arguments(routine.oid) AS arguments,
+            routine.prokind AS kind,
+            pg_get_userbyid(routine.proowner) AS owner
+       FROM pg_proc AS routine
+       JOIN pg_namespace AS namespace ON namespace.oid = routine.pronamespace
+      WHERE namespace.nspname = 'north_star_module'
+      ORDER BY routine.proname, arguments`,
+  );
+  compareCatalogCollection(
+    drift,
+    'managed function',
+    [],
+    functions.rows,
+    (value) => `${value.name}(${value.arguments})`,
+  );
+
+  const triggers = await client.query<{
+    definition: string;
+    name: string;
+    table_name: string;
+  }>(
+    `SELECT relation.relname AS table_name,
+            trigger_record.tgname AS name,
+            pg_get_triggerdef(trigger_record.oid, true) AS definition
+       FROM pg_trigger AS trigger_record
+       JOIN pg_class AS relation ON relation.oid = trigger_record.tgrelid
+       JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+      WHERE namespace.nspname = 'north_star_module'
+        AND NOT trigger_record.tgisinternal
+      ORDER BY relation.relname, trigger_record.tgname`,
+  );
+  compareCatalogCollection(
+    drift,
+    'managed trigger',
+    [],
+    triggers.rows,
+    (value) => `${value.table_name}.${value.name}`,
+  );
+  for (const trigger of triggers.rows) {
+    drift.push(
+      `delete-capable trigger seam ${trigger.table_name}.${trigger.name}`,
+    );
+  }
+
+  const rules = await client.query<{
+    definition: string;
+    name: string;
+    table_name: string;
+  }>(
+    `SELECT relation.relname AS table_name,
+            rule.rulename AS name,
+            pg_get_ruledef(rule.oid, true) AS definition
+       FROM pg_rewrite AS rule
+       JOIN pg_class AS relation ON relation.oid = rule.ev_class
+       JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+      WHERE namespace.nspname = 'north_star_module'
+      ORDER BY relation.relname, rule.rulename`,
+  );
+  compareCatalogCollection(
+    drift,
+    'managed rule',
+    [],
+    rules.rows,
+    (value) => `${value.table_name}.${value.name}`,
+  );
+  for (const rule of rules.rows) {
+    drift.push(`delete-capable rule seam ${rule.table_name}.${rule.name}`);
+  }
+
+  const types = await client.query<{
+    kind: string;
+    name: string;
+    owner: string;
+  }>(
+    `SELECT type_record.typname AS name,
+            type_record.typtype AS kind,
+            pg_get_userbyid(type_record.typowner) AS owner
+       FROM pg_type AS type_record
+       JOIN pg_namespace AS namespace ON namespace.oid = type_record.typnamespace
+       LEFT JOIN pg_class AS relation ON relation.oid = type_record.typrelid
+      WHERE namespace.nspname = 'north_star_module'
+        AND type_record.typelem = 0
+        AND (type_record.typrelid = 0 OR relation.relkind = 'c')
+      ORDER BY type_record.typname`,
+  );
+  compareCatalogCollection(
+    drift,
+    'managed standalone type',
+    [],
+    types.rows,
+    (value) => value.name,
+  );
+
   const digest = new Uint8Array(
     createHash('sha256')
       .update('northstar.module-storage-live-catalog/v1')
       .update('\0')
       .update(
         canonicalize({
+          columns: columns.rows,
+          columnGrants: actualColumnGrants,
+          constraints: actualConstraints,
+          functions: functions.rows,
+          indexes: actualIndexes,
           relations: relations.rows,
+          registry,
           drift,
-          policies: policies.rows,
+          policies: actualPolicies,
+          rules: rules.rows,
+          schema,
+          schemaGrants: schemaGrants.rows,
+          tableGrants: actualTableGrants,
+          triggers: triggers.rows,
+          types: types.rows,
         }),
       )
       .digest(),
   );
   return Object.freeze({ digest, drift: Object.freeze(drift.toSorted()) });
+}
+
+type StorageRelationTarget = StorageTargetPayloadV1['relations'][number];
+
+interface ExpectedColumnShape {
+  defaultExpression: string | null;
+  generatedKind: string;
+  identityKind: string;
+  name: string;
+  nullable: boolean;
+  postgresqlType: string;
+  tableName: string;
+}
+
+interface ExpectedConstraintShape {
+  columns: string[];
+  deferred: boolean;
+  deferrable: boolean;
+  deleteAction: string;
+  name: string;
+  referencedColumns: string[] | null;
+  referencedSchema: string | null;
+  referencedTable: string | null;
+  tableName: string;
+  type: string;
+  updateAction: string;
+  validated: boolean;
+}
+
+interface ExpectedIndexShape {
+  columns: string[];
+  constraintName: string | null;
+  definition: string;
+  name: string;
+  owner: string;
+  predicate: string | null;
+  primary: boolean;
+  ready: boolean;
+  tableName: string;
+  unique: boolean;
+  valid: boolean;
+}
+
+async function loadObjectOwnershipRegistry(
+  client: PoolClient,
+): Promise<
+  Array<{ object_kind: string; object_name: string; schema_name: string }>
+> {
+  const result = await client.query<{
+    object_kind: string;
+    object_name: string;
+    schema_name: string;
+  }>(
+    `WITH registry AS (
+       SELECT namespace.nspname AS schema_name,
+              relation.relname AS object_name,
+              CASE relation.relkind
+                WHEN 'r' THEN 'table'
+                WHEN 'p' THEN 'partitioned_table'
+                WHEN 'i' THEN 'index'
+                WHEN 'I' THEN 'partitioned_index'
+                WHEN 'S' THEN 'sequence'
+                WHEN 'v' THEN 'view'
+                WHEN 'm' THEN 'materialized_view'
+                WHEN 'c' THEN 'composite_relation'
+                WHEN 'f' THEN 'foreign_table'
+                ELSE 'unknown:relation:' || relation.relkind::text
+              END AS object_kind
+         FROM pg_class AS relation
+         JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+        WHERE namespace.nspname !~ '^pg_'
+          AND namespace.nspname <> 'information_schema'
+       UNION ALL
+       SELECT namespace.nspname,
+              relation.relname || '.' || attribute.attname,
+              'column'
+         FROM pg_attribute AS attribute
+         JOIN pg_class AS relation ON relation.oid = attribute.attrelid
+         JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+        WHERE namespace.nspname !~ '^pg_'
+          AND namespace.nspname <> 'information_schema'
+          AND relation.relkind IN ('r','p','v','m','f')
+          AND attribute.attnum > 0 AND NOT attribute.attisdropped
+       UNION ALL
+       SELECT namespace.nspname,
+              relation.relname || '.' || attribute.attname,
+              'default'
+         FROM pg_attrdef AS default_value
+         JOIN pg_class AS relation ON relation.oid = default_value.adrelid
+         JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+         JOIN pg_attribute AS attribute
+           ON attribute.attrelid = relation.oid
+          AND attribute.attnum = default_value.adnum
+        WHERE namespace.nspname !~ '^pg_'
+          AND namespace.nspname <> 'information_schema'
+       UNION ALL
+       SELECT namespace.nspname,
+              relation.relname || '.' || constraint_record.conname,
+              CASE constraint_record.contype
+                WHEN 'c' THEN 'constraint:check'
+                WHEN 'f' THEN 'constraint:foreign_key'
+                WHEN 'n' THEN 'constraint:not_null'
+                WHEN 'p' THEN 'constraint:primary_key'
+                WHEN 'u' THEN 'constraint:unique'
+                WHEN 'x' THEN 'constraint:exclusion'
+                WHEN 't' THEN 'constraint:trigger'
+                ELSE 'unknown:constraint:' || constraint_record.contype::text
+              END
+         FROM pg_constraint AS constraint_record
+         JOIN pg_class AS relation ON relation.oid = constraint_record.conrelid
+         JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+        WHERE namespace.nspname !~ '^pg_'
+          AND namespace.nspname <> 'information_schema'
+       UNION ALL
+       SELECT namespace.nspname,
+              relation.relname || '.' || policy.polname,
+              'policy'
+         FROM pg_policy AS policy
+         JOIN pg_class AS relation ON relation.oid = policy.polrelid
+         JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+        WHERE namespace.nspname !~ '^pg_'
+          AND namespace.nspname <> 'information_schema'
+       UNION ALL
+       SELECT namespace.nspname,
+              routine.proname || '(' || pg_get_function_identity_arguments(routine.oid) || ')',
+              CASE routine.prokind
+                WHEN 'f' THEN 'function'
+                WHEN 'p' THEN 'procedure'
+                WHEN 'a' THEN 'aggregate'
+                WHEN 'w' THEN 'window_function'
+                ELSE 'unknown:routine:' || routine.prokind::text
+              END
+         FROM pg_proc AS routine
+         JOIN pg_namespace AS namespace ON namespace.oid = routine.pronamespace
+        WHERE namespace.nspname !~ '^pg_'
+          AND namespace.nspname <> 'information_schema'
+       UNION ALL
+       SELECT namespace.nspname,
+              relation.relname || '.' || trigger_record.tgname,
+              'trigger'
+         FROM pg_trigger AS trigger_record
+         JOIN pg_class AS relation ON relation.oid = trigger_record.tgrelid
+         JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+        WHERE namespace.nspname !~ '^pg_'
+          AND namespace.nspname <> 'information_schema'
+          AND NOT trigger_record.tgisinternal
+       UNION ALL
+       SELECT namespace.nspname,
+              relation.relname || '.' || rule.rulename,
+              'rule'
+         FROM pg_rewrite AS rule
+         JOIN pg_class AS relation ON relation.oid = rule.ev_class
+         JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+        WHERE namespace.nspname !~ '^pg_'
+          AND namespace.nspname <> 'information_schema'
+       UNION ALL
+       SELECT namespace.nspname,
+              type_record.typname,
+              'standalone_type'
+         FROM pg_type AS type_record
+         JOIN pg_namespace AS namespace ON namespace.oid = type_record.typnamespace
+        WHERE namespace.nspname !~ '^pg_'
+          AND namespace.nspname <> 'information_schema'
+          AND type_record.typrelid = 0
+          AND type_record.typelem = 0
+          AND type_record.typtype IN ('c','d','e','m','r')
+       UNION ALL
+       SELECT namespace.nspname, collation_record.collname, 'unknown:collation'
+         FROM pg_collation AS collation_record
+         JOIN pg_namespace AS namespace ON namespace.oid = collation_record.collnamespace
+        WHERE namespace.nspname !~ '^pg_'
+          AND namespace.nspname <> 'information_schema'
+       UNION ALL
+       SELECT namespace.nspname, conversion_record.conname, 'unknown:conversion'
+         FROM pg_conversion AS conversion_record
+         JOIN pg_namespace AS namespace ON namespace.oid = conversion_record.connamespace
+        WHERE namespace.nspname !~ '^pg_'
+          AND namespace.nspname <> 'information_schema'
+       UNION ALL
+       SELECT namespace.nspname,
+              operator_record.oprname || '(' ||
+                pg_get_userbyid(operator_record.oprowner) || ')',
+              'unknown:operator'
+         FROM pg_operator AS operator_record
+         JOIN pg_namespace AS namespace ON namespace.oid = operator_record.oprnamespace
+        WHERE namespace.nspname !~ '^pg_'
+          AND namespace.nspname <> 'information_schema'
+       UNION ALL
+       SELECT namespace.nspname, operator_class.opcname, 'unknown:operator_class'
+         FROM pg_opclass AS operator_class
+         JOIN pg_namespace AS namespace ON namespace.oid = operator_class.opcnamespace
+        WHERE namespace.nspname !~ '^pg_'
+          AND namespace.nspname <> 'information_schema'
+       UNION ALL
+       SELECT namespace.nspname, operator_family.opfname, 'unknown:operator_family'
+         FROM pg_opfamily AS operator_family
+         JOIN pg_namespace AS namespace ON namespace.oid = operator_family.opfnamespace
+        WHERE namespace.nspname !~ '^pg_'
+          AND namespace.nspname <> 'information_schema'
+       UNION ALL
+       SELECT namespace.nspname, statistics_record.stxname, 'unknown:statistics'
+         FROM pg_statistic_ext AS statistics_record
+         JOIN pg_namespace AS namespace ON namespace.oid = statistics_record.stxnamespace
+        WHERE namespace.nspname !~ '^pg_'
+          AND namespace.nspname <> 'information_schema'
+       UNION ALL
+       SELECT namespace.nspname, configuration.cfgname,
+              'unknown:text_search_configuration'
+         FROM pg_ts_config AS configuration
+         JOIN pg_namespace AS namespace ON namespace.oid = configuration.cfgnamespace
+        WHERE namespace.nspname !~ '^pg_'
+          AND namespace.nspname <> 'information_schema'
+       UNION ALL
+       SELECT namespace.nspname, dictionary.dictname,
+              'unknown:text_search_dictionary'
+         FROM pg_ts_dict AS dictionary
+         JOIN pg_namespace AS namespace ON namespace.oid = dictionary.dictnamespace
+        WHERE namespace.nspname !~ '^pg_'
+          AND namespace.nspname <> 'information_schema'
+       UNION ALL
+       SELECT namespace.nspname, parser.prsname, 'unknown:text_search_parser'
+         FROM pg_ts_parser AS parser
+         JOIN pg_namespace AS namespace ON namespace.oid = parser.prsnamespace
+        WHERE namespace.nspname !~ '^pg_'
+          AND namespace.nspname <> 'information_schema'
+       UNION ALL
+       SELECT namespace.nspname, template.tmplname,
+              'unknown:text_search_template'
+         FROM pg_ts_template AS template
+         JOIN pg_namespace AS namespace ON namespace.oid = template.tmplnamespace
+        WHERE namespace.nspname !~ '^pg_'
+          AND namespace.nspname <> 'information_schema'
+     )
+     SELECT schema_name, object_name, object_kind
+       FROM registry
+      ORDER BY schema_name, object_kind, object_name`,
+  );
+  return result.rows;
+}
+
+function compareCatalogCollection<T>(
+  drift: string[],
+  label: string,
+  expected: readonly T[],
+  actual: readonly T[],
+  keyOf: (value: T) => string,
+): void {
+  const expectedByKey = uniqueCatalogMap(
+    drift,
+    `expected ${label}`,
+    expected,
+    keyOf,
+  );
+  const actualByKey = uniqueCatalogMap(drift, `actual ${label}`, actual, keyOf);
+  for (const [key, expectedValue] of expectedByKey) {
+    const actualValue = actualByKey.get(key);
+    if (!actualValue) {
+      drift.push(`missing ${label} ${key}`);
+    } else if (canonicalize(expectedValue) !== canonicalize(actualValue)) {
+      drift.push(`altered ${label} ${key}`);
+    }
+  }
+  for (const key of actualByKey.keys()) {
+    if (!expectedByKey.has(key)) drift.push(`surplus ${label} ${key}`);
+  }
+}
+
+function uniqueCatalogMap<T>(
+  drift: string[],
+  label: string,
+  values: readonly T[],
+  keyOf: (value: T) => string,
+): Map<string, T> {
+  const result = new Map<string, T>();
+  for (const value of values) {
+    const key = keyOf(value);
+    if (result.has(key)) drift.push(`multiply owned ${label} ${key}`);
+    else result.set(key, value);
+  }
+  return result;
+}
+
+function mergeExpectedRelations(
+  targets: readonly StorageTargetPayloadV1[],
+): Map<string, StorageRelationTarget> {
+  const result = new Map<string, StorageRelationTarget>();
+  for (const relation of targets.flatMap((target) => target.relations)) {
+    const key = relation.foreignKey.physicalName;
+    const existing = result.get(key);
+    if (existing && canonicalize(existing) !== canonicalize(relation)) {
+      throw failure(
+        'LIVE_SET_SHAPE_CONFLICT',
+        `conflicting live roots claim managed relation ${key}`,
+      );
+    }
+    result.set(key, relation);
+  }
+  return result;
+}
+
+function buildExpectedColumns(
+  tables: ReadonlyMap<string, StorageEntityTarget>,
+  relations: ReadonlyMap<string, StorageRelationTarget>,
+): ExpectedColumnShape[] {
+  const result = new Map<string, ExpectedColumnShape>();
+  const entityById = new Map(
+    [...tables.values()].map((entity) => [entity.entityId, entity]),
+  );
+  const add = (shape: ExpectedColumnShape) => {
+    const key = `${shape.tableName}.${shape.name}`;
+    const prior = result.get(key);
+    if (prior && canonicalize(prior) !== canonicalize(shape)) {
+      throw failure('LIVE_SET_SHAPE_CONFLICT', `conflicting column ${key}`);
+    }
+    result.set(key, shape);
+  };
+  for (const entity of tables.values()) {
+    const base = (
+      name: string,
+      postgresqlType: string,
+      nullable: boolean,
+      defaultExpression: string | null = null,
+    ) =>
+      add({
+        defaultExpression,
+        generatedKind: '',
+        identityKind: '',
+        name,
+        nullable,
+        postgresqlType: catalogType(postgresqlType),
+        tableName: entity.physicalTableName,
+      });
+    base('tenant_id', 'uuid', false);
+    base('environment_id', 'uuid', false);
+    base(
+      entity.recordIdentity.column,
+      entity.recordIdentity.postgresqlType,
+      false,
+    );
+    base(
+      entity.optimisticRevision.column,
+      entity.optimisticRevision.postgresqlType,
+      false,
+      normalizeSqlExpressionRequired(entity.optimisticRevision.initialValue),
+    );
+    base(entity.archive.archivedAtColumn, 'timestamp with time zone', true);
+    for (const column of entity.columns) {
+      base(
+        column.physicalName,
+        column.postgresqlType,
+        column.nullable,
+        expectedDefaultExpression(
+          column.defaultSemantics,
+          column.defaultValue,
+          column.postgresqlType,
+        ),
+      );
+    }
+    for (const column of entity.derivedStateFields) {
+      base(column.physicalName, column.postgresqlType, true);
+    }
+  }
+  for (const relation of relations.values()) {
+    const entity = entityById.get(relation.sourceEntityId);
+    if (!entity) {
+      throw failure('ENTITY_TARGET_MISSING', relation.sourceEntityId);
+    }
+    add({
+      defaultExpression: null,
+      generatedKind: '',
+      identityKind: '',
+      name: relation.relationColumn.physicalName,
+      nullable: relation.relationColumn.nullable,
+      postgresqlType: catalogType(relation.relationColumn.postgresqlType),
+      tableName: entity.physicalTableName,
+    });
+  }
+  return [...result.values()].toSorted((left, right) =>
+    `${left.tableName}.${left.name}`.localeCompare(
+      `${right.tableName}.${right.name}`,
+    ),
+  );
+}
+
+function buildExpectedConstraints(
+  tables: ReadonlyMap<string, StorageEntityTarget>,
+  relations: ReadonlyMap<string, StorageRelationTarget>,
+): ExpectedConstraintShape[] {
+  const entityById = new Map(
+    [...tables.values()].map((entity) => [entity.entityId, entity]),
+  );
+  const result: ExpectedConstraintShape[] = [...tables.values()].map(
+    (entity) => ({
+      columns: [...entity.primaryKey.columns],
+      deferred: false,
+      deferrable: false,
+      deleteAction: ' ',
+      name: entity.primaryKey.physicalName,
+      referencedColumns: null,
+      referencedSchema: null,
+      referencedTable: null,
+      tableName: entity.physicalTableName,
+      type: 'p',
+      updateAction: ' ',
+      validated: true,
+    }),
+  );
+  for (const relation of relations.values()) {
+    const source = entityById.get(relation.sourceEntityId);
+    const target = entityById.get(relation.targetEntityId);
+    if (!source || !target) {
+      throw failure('ENTITY_TARGET_MISSING', relation.relationId);
+    }
+    result.push({
+      columns: [...relation.foreignKey.sourceColumns],
+      deferred: false,
+      deferrable: false,
+      deleteAction: 'r',
+      name: relation.foreignKey.physicalName,
+      referencedColumns: [...relation.foreignKey.targetColumns],
+      referencedSchema: 'north_star_module',
+      referencedTable: target.physicalTableName,
+      tableName: source.physicalTableName,
+      type: 'f',
+      updateAction: 'r',
+      validated: true,
+    });
+  }
+  return result.toSorted((left, right) =>
+    `${left.tableName}.${left.name}`.localeCompare(
+      `${right.tableName}.${right.name}`,
+    ),
+  );
+}
+
+function buildExpectedIndexes(
+  tables: ReadonlyMap<string, StorageEntityTarget>,
+): ExpectedIndexShape[] {
+  const result: ExpectedIndexShape[] = [];
+  for (const entity of tables.values()) {
+    result.push({
+      columns: [...entity.primaryKey.columns],
+      constraintName: entity.primaryKey.physicalName,
+      definition: expectedIndexDefinition(
+        entity.physicalTableName,
+        entity.primaryKey.physicalName,
+        entity.primaryKey.columns,
+        true,
+      ),
+      name: entity.primaryKey.physicalName,
+      owner: 'north_star_module_materializer',
+      predicate: null,
+      primary: true,
+      ready: true,
+      tableName: entity.physicalTableName,
+      unique: true,
+      valid: true,
+    });
+    for (const unique of entity.uniqueKeys) {
+      result.push({
+        columns: [...unique.columns],
+        constraintName: null,
+        definition: expectedIndexDefinition(
+          entity.physicalTableName,
+          unique.physicalName,
+          unique.columns,
+          true,
+        ),
+        name: unique.physicalName,
+        owner: 'north_star_module_materializer',
+        predicate: null,
+        primary: false,
+        ready: true,
+        tableName: entity.physicalTableName,
+        unique: true,
+        valid: true,
+      });
+    }
+    for (const index of entity.indexes) {
+      result.push({
+        columns: [...index.columnNames],
+        constraintName: null,
+        definition: expectedIndexDefinition(
+          entity.physicalTableName,
+          index.physicalName,
+          index.columnNames,
+          index.indexKind === 'caseInsensitiveUnique',
+        ),
+        name: index.physicalName,
+        owner: 'north_star_module_materializer',
+        predicate: null,
+        primary: false,
+        ready: true,
+        tableName: entity.physicalTableName,
+        unique: index.indexKind === 'caseInsensitiveUnique',
+        valid: true,
+      });
+    }
+  }
+  return result.toSorted((left, right) =>
+    `${left.tableName}.${left.name}`.localeCompare(
+      `${right.tableName}.${right.name}`,
+    ),
+  );
+}
+
+function expectedIndexDefinition(
+  tableName: string,
+  indexName: string,
+  columns: readonly string[],
+  unique: boolean,
+): string {
+  return normalizeSqlExpressionRequired(
+    `CREATE ${unique ? 'UNIQUE ' : ''}INDEX ${indexName}
+       ON north_star_module.${tableName} USING btree (${columns.join(', ')})`,
+  );
+}
+
+function buildExpectedPolicies(
+  tables: ReadonlyMap<string, StorageEntityTarget>,
+) {
+  const predicate = normalizePolicyExpression(
+    `tenant_id = north_star_internal.trusted_tenant_id()
+     AND environment_id = north_star_internal.trusted_environment_id()`,
+  );
+  return [...tables.keys()].flatMap((tableName) =>
+    (['SELECT', 'INSERT', 'UPDATE'] as const).map((command) => ({
+      command,
+      name: managedPolicyName(tableName, command),
+      permissive: true,
+      qual: command === 'INSERT' ? null : predicate,
+      roles: ['north_star_module_runtime'],
+      tableName,
+      withCheck: command === 'SELECT' ? null : predicate,
+    })),
+  );
+}
+
+function buildExpectedTableGrants(
+  tables: ReadonlyMap<string, StorageEntityTarget>,
+) {
+  return [...tables.keys()].flatMap((tableName) =>
+    ['north_star_module_materializer', 'north_star_module_runtime'].flatMap(
+      (grantee) =>
+        ['INSERT', 'SELECT', 'UPDATE'].map((privilegeType) => ({
+          grantee,
+          isGrantable: false,
+          privilegeType,
+          tableName,
+        })),
+    ),
+  );
+}
+
+function managedPolicyName(
+  tableName: string,
+  command: 'INSERT' | 'SELECT' | 'UPDATE',
+): string {
+  return `nsm_p_${createHash('sha256')
+    .update(tableName)
+    .update('\0')
+    .update(command)
+    .digest('hex')
+    .slice(0, 32)}`;
+}
+
+function catalogType(postgresqlType: string): string {
+  return postgresqlType.replace(/^varchar\(/, 'character varying(');
+}
+
+function expectedDefaultExpression(
+  semantics: string,
+  value: unknown,
+  postgresqlType: string,
+): string | null {
+  if (semantics !== 'declaredDefault') return null;
+  const scalar = databaseDefaultValue(value);
+  if (typeof scalar === 'string') {
+    const castType = catalogType(postgresqlType).replace(/\([0-9,]+\)$/, '');
+    return normalizeSqlExpressionRequired(
+      `'${scalar.replaceAll("'", "''")}'::${castType}`,
+    );
+  }
+  if (typeof scalar === 'boolean') {
+    return scalar ? 'true' : 'false';
+  }
+  if (typeof scalar === 'number' && Number.isFinite(scalar)) {
+    return String(scalar);
+  }
+  throw failure('DECLARED_DEFAULT_REJECTED', 'default is not a closed scalar');
+}
+
+function normalizeSqlExpression(value: string | null): string | null {
+  return value === null ? null : normalizeSqlExpressionRequired(value);
+}
+
+function normalizeSqlExpressionRequired(value: string): string {
+  return value.trim().replace(/\s+/g, ' ').replaceAll('"', '');
+}
+
+function normalizePolicyExpression(value: string | null): string | null {
+  return value === null
+    ? null
+    : normalizeSqlExpressionRequired(value).replace(/[()\s]/g, '');
 }
 
 async function loadAccountedLiveTargets(
@@ -1576,6 +2835,34 @@ async function acquireSharedMigrationLock(client: PoolClient): Promise<void> {
   }
 }
 
+async function acquireGenerationSessionLock(
+  client: PoolClient,
+  generationId: string,
+): Promise<void> {
+  await client.query(
+    `SELECT pg_advisory_lock(
+       hashtext('north-star:module-storage-generation:v1'), hashtext($1)
+     )`,
+    [generationId],
+  );
+}
+
+async function releaseGenerationSessionLockQuietly(
+  client: PoolClient,
+  generationId: string,
+): Promise<void> {
+  try {
+    await client.query(
+      `SELECT pg_advisory_unlock(
+         hashtext('north-star:module-storage-generation:v1'), hashtext($1)
+       )`,
+      [generationId],
+    );
+  } catch {
+    /* connection loss releases session locks on the server */
+  }
+}
+
 async function assertMaterializerSession(client: PoolClient): Promise<void> {
   const result = await client.query<{
     bypassrls: boolean;
@@ -1623,7 +2910,8 @@ async function loadGeneration(
     client,
     `SELECT * FROM north_star_internal.module_storage_generations
       WHERE tenant_id = $1 AND environment_id = $2 AND generation_id = $3
-        AND state IN ('PREPARED', 'IN_ATTEMPT', 'RECONCILING') FOR UPDATE`,
+        AND state IN ('PREPARED', 'IN_ATTEMPT', 'RECONCILING', 'READY_TO_SWAP')
+      FOR UPDATE`,
     [
       command.context.tenantId,
       command.context.environmentId,
@@ -1631,6 +2919,125 @@ async function loadGeneration(
     ],
     'prepared module storage generation',
   );
+}
+
+async function assertApprovedAttempt(
+  client: PoolClient,
+  command: ExecuteModuleStorageAttemptCommand,
+  preparationId: string,
+): Promise<void> {
+  const approved = await client.query<{ approved: boolean }>(
+    `SELECT approved
+       FROM north_star_internal.module_storage_read_approved_attempt(
+         $1, $2, $3, $4
+       )`,
+    [
+      command.context.tenantId,
+      command.context.environmentId,
+      command.activationAttemptId,
+      preparationId,
+    ],
+  );
+  if (approved.rowCount !== 1 || !approved.rows[0]?.approved) {
+    throw failure(
+      'ATTEMPT_NOT_AUTHORIZED',
+      'claim and execution require one current unconsumed v2 approved attempt',
+    );
+  }
+}
+
+async function hasAppliedAttemptElement(
+  client: PoolClient,
+  command: ExecuteModuleStorageAttemptCommand,
+  element: StorageTransitionElement,
+): Promise<boolean> {
+  const result = await client.query<{ present: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1
+         FROM north_star_internal.module_storage_element_applications
+        WHERE tenant_id = $1 AND environment_id = $2
+          AND generation_id = $3 AND element_id = $4
+          AND attempt_id = $5 AND application_state = 'APPLIED'
+     ) AS present`,
+    [
+      command.context.tenantId,
+      command.context.environmentId,
+      command.generationId,
+      element.elementId,
+      command.activationAttemptId,
+    ],
+  );
+  return result.rows[0]?.present === true;
+}
+
+async function loadCompletedAttemptReceipt(
+  client: PoolClient,
+  command: ExecuteModuleStorageAttemptCommand,
+  generation: GenerationRow,
+): Promise<ModuleStorageCatalogReceipt | null> {
+  const result = await client.query<CatalogReceiptRow>(
+    `SELECT receipt.*
+       FROM north_star_internal.module_storage_attempt_claims AS claim
+       JOIN LATERAL (
+         SELECT candidate.*
+           FROM north_star_internal.module_storage_catalog_receipts AS candidate
+          WHERE candidate.tenant_id = claim.tenant_id
+            AND candidate.environment_id = claim.environment_id
+            AND candidate.generation_id = claim.generation_id
+            AND candidate.receipt_state = 'READY_TO_SWAP'
+            AND candidate.catalog_verified
+          ORDER BY candidate.recorded_at DESC, candidate.receipt_id DESC
+          LIMIT 1
+       ) AS receipt ON true
+      WHERE claim.tenant_id = $1 AND claim.environment_id = $2
+        AND claim.generation_id = $3 AND claim.activation_attempt_id = $4
+        AND claim.claim_state = 'COMPLETED'`,
+    [
+      command.context.tenantId,
+      command.context.environmentId,
+      command.generationId,
+      command.activationAttemptId,
+    ],
+  );
+  const row = result.rows[0];
+  if (!row) return null;
+  if (
+    row.receipt_version !== MODULE_STORAGE_CATALOG_RECEIPT_VERSION ||
+    row.tenant_id !== generation.tenant_id ||
+    row.environment_id !== generation.environment_id ||
+    row.generation_id !== generation.generation_id ||
+    row.source_release_id !== generation.source_release_id ||
+    row.target_release_id !== generation.target_release_id ||
+    !equalBytes(row.source_manifest_root, generation.source_manifest_root) ||
+    !equalBytes(row.target_manifest_root, generation.target_manifest_root) ||
+    !equalBytes(
+      row.prepared_subset_digest,
+      generation.prepared_subset_digest,
+    ) ||
+    !equalBytes(row.remaining_plan_digest, generation.remaining_plan_digest)
+  ) {
+    throw failure(
+      'READY_RECEIPT_BINDING_MISMATCH',
+      'completed claim receipt does not bind the durable generation',
+    );
+  }
+  return Object.freeze({
+    catalogDigest: new Uint8Array(row.catalog_digest),
+    catalogVerified: row.catalog_verified,
+    createdAt: new Date(row.recorded_at).toISOString(),
+    environmentId: row.environment_id,
+    generationId: row.generation_id as never,
+    preparedSubsetDigest: new Uint8Array(row.prepared_subset_digest),
+    receiptId: row.receipt_id as never,
+    receiptVersion: MODULE_STORAGE_CATALOG_RECEIPT_VERSION,
+    remainingPlanDigest: new Uint8Array(row.remaining_plan_digest),
+    sourceManifestRoot: new Uint8Array(row.source_manifest_root),
+    sourceReleaseId: row.source_release_id as never,
+    state: row.receipt_state,
+    targetManifestRoot: new Uint8Array(row.target_manifest_root),
+    targetReleaseId: row.target_release_id as never,
+    tenantId: row.tenant_id,
+  });
 }
 
 async function recordReconciling(
@@ -1642,19 +3049,38 @@ async function recordReconciling(
     await client.query('BEGIN');
     await client.query(
       `UPDATE north_star_internal.module_storage_generations SET state = 'RECONCILING'
-        WHERE generation_id = $1`,
-      [command.generationId],
+        WHERE tenant_id = $1 AND environment_id = $2 AND generation_id = $3
+          AND state IN ('PREPARED', 'IN_ATTEMPT', 'RECONCILING')`,
+      [
+        command.context.tenantId,
+        command.context.environmentId,
+        command.generationId,
+      ],
     );
     await client.query(
       `UPDATE north_star_internal.module_storage_attempt_claims
           SET claim_state = 'RECONCILING', updated_at = transaction_timestamp()
-        WHERE activation_attempt_id = $1`,
-      [command.activationAttemptId],
+        WHERE tenant_id = $1 AND environment_id = $2
+          AND generation_id = $3 AND activation_attempt_id = $4
+          AND claim_state IN ('CLAIMED', 'RECONCILING')`,
+      [
+        command.context.tenantId,
+        command.context.environmentId,
+        command.generationId,
+        command.activationAttemptId,
+      ],
     );
     await client.query('COMMIT');
   } finally {
     client.release();
   }
+}
+
+function equalBytes(left: Uint8Array, right: Uint8Array): boolean {
+  return (
+    left.byteLength === right.byteLength &&
+    left.every((value, index) => value === right[index])
+  );
 }
 
 function locateColumn(
@@ -1739,13 +3165,20 @@ function safeType(type: string): string {
   return type;
 }
 
-function defaultSql(semantics: string, value: unknown): string {
+function defaultSql(
+  semantics: string,
+  value: unknown,
+  postgresqlType: string,
+): string {
   if (semantics !== 'declaredDefault') return '';
-  if (typeof value === 'string')
-    return ` DEFAULT '${value.replaceAll("'", "''")}'`;
-  if (typeof value === 'boolean') return ` DEFAULT ${value ? 'true' : 'false'}`;
-  if (typeof value === 'number' && Number.isFinite(value))
-    return ` DEFAULT ${String(value)}`;
+  const scalar = databaseDefaultValue(value);
+  if (typeof scalar === 'string') {
+    return ` DEFAULT '${scalar.replaceAll("'", "''")}'::${safeType(postgresqlType)}`;
+  }
+  if (typeof scalar === 'boolean')
+    return ` DEFAULT ${scalar ? 'true' : 'false'}`;
+  if (typeof scalar === 'number' && Number.isFinite(scalar))
+    return ` DEFAULT ${String(scalar)}`;
   throw failure(
     'DECLARED_DEFAULT_REJECTED',
     'only closed scalar defaults may enter DDL',
@@ -1852,13 +3285,40 @@ async function rollbackQuietly(client: PoolClient): Promise<void> {
   }
 }
 
-function isAmbiguousDatabaseError(error: unknown): boolean {
-  return Boolean(
-    error &&
-    typeof error === 'object' &&
-    ['08000', '08003', '08006', '57P01'].includes(
-      String((error as { code?: unknown }).code ?? ''),
-    ),
+const resumableDatabaseErrorCodes = new Set([
+  '40001',
+  '40P01',
+  '55P03',
+  '57014',
+  '57P01',
+  '57P02',
+  '57P03',
+  '53300',
+  '53400',
+  'ECONNREFUSED',
+  'ECONNRESET',
+  'EHOSTUNREACH',
+  'ENETDOWN',
+  'ENETUNREACH',
+  'EPIPE',
+  'ETIMEDOUT',
+]);
+
+export function isAmbiguousModuleStorageDatabaseError(error: unknown): boolean {
+  if (error instanceof AggregateError) {
+    return error.errors.some((nested) =>
+      isAmbiguousModuleStorageDatabaseError(nested),
+    );
+  }
+  if (!(error instanceof Error)) return false;
+  const code = (error as Error & { code?: unknown }).code;
+  if (typeof code === 'string') {
+    if (code.startsWith('08') || resumableDatabaseErrorCodes.has(code)) {
+      return true;
+    }
+  }
+  return /(?:connection terminated due to connection timeout|timeout exceeded when trying to connect|(?:connection|socket) (?:ended|closed|lost|terminated|was terminated) unexpectedly)/i.test(
+    error.message,
   );
 }
 

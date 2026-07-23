@@ -5089,6 +5089,13 @@
     {
       "schema": "north_star_internal",
       "relation": "module_storage_attempt_claims",
+      "name": "module_storage_attempt_claims_generation_unique",
+      "type": "u",
+      "definition": "UNIQUE (tenant_id, environment_id, generation_id)"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_attempt_claims",
       "name": "module_storage_attempt_claims_pkey",
       "type": "p",
       "definition": "PRIMARY KEY (tenant_id, environment_id, activation_attempt_id)"
@@ -6995,6 +7002,12 @@
     {
       "schema": "north_star_internal",
       "relation": "module_storage_attempt_claims",
+      "name": "module_storage_attempt_claims_generation_unique",
+      "definition": "CREATE UNIQUE INDEX module_storage_attempt_claims_generation_unique ON north_star_internal.module_storage_attempt_claims USING btree (tenant_id, environment_id, generation_id)"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_attempt_claims",
       "name": "module_storage_attempt_claims_pkey",
       "definition": "CREATE UNIQUE INDEX module_storage_attempt_claims_pkey ON north_star_internal.module_storage_attempt_claims USING btree (tenant_id, environment_id, activation_attempt_id)"
     },
@@ -7014,7 +7027,7 @@
       "schema": "north_star_internal",
       "relation": "module_storage_catalog_receipts",
       "name": "module_storage_catalog_receipts_ready_idx",
-      "definition": "CREATE INDEX module_storage_catalog_receipts_ready_idx ON north_star_internal.module_storage_catalog_receipts USING btree (tenant_id, environment_id, generation_id, recorded_at DESC) WHERE ((receipt_state = 'READY_TO_SWAP'::text) AND catalog_verified)"
+      "definition": "CREATE UNIQUE INDEX module_storage_catalog_receipts_ready_idx ON north_star_internal.module_storage_catalog_receipts USING btree (tenant_id, environment_id, generation_id) WHERE ((receipt_state = 'READY_TO_SWAP'::text) AND catalog_verified)"
     },
     {
       "schema": "north_star_internal",

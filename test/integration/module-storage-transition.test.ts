@@ -17,7 +17,10 @@ import {
   evaluateTransitionCompatibilityV2,
   type MintedUuid,
 } from '../../packages/platform-runtime/src/index.js';
-import { assertNonDestructiveStorageStatements } from '../../packages/postgres-provider/src/module-storage-materializer.js';
+import {
+  assertNonDestructiveStorageStatements,
+  isAmbiguousModuleStorageDatabaseError,
+} from '../../packages/postgres-provider/src/module-storage-materializer.js';
 
 const root = new Uint8Array(32).fill(7);
 const otherRoot = new Uint8Array(32).fill(9);
@@ -252,4 +255,46 @@ test('crash classification consumes definitive mismatches and reconciles ambigui
     workflowDisposition: 'CONSUMED',
     workflowStatus: 'RUNNING',
   });
+
+  for (const code of [
+    '08000',
+    '08003',
+    '08006',
+    '40001',
+    '40P01',
+    '55P03',
+    '57014',
+    '57P01',
+    '57P02',
+    '57P03',
+    '53300',
+    '53400',
+    'ECONNREFUSED',
+    'ECONNRESET',
+    'EHOSTUNREACH',
+    'ENETDOWN',
+    'ENETUNREACH',
+    'EPIPE',
+    'ETIMEDOUT',
+  ]) {
+    assert.equal(
+      isAmbiguousModuleStorageDatabaseError(
+        Object.assign(new Error('database unavailable'), { code }),
+      ),
+      true,
+      code,
+    );
+  }
+  assert.equal(
+    isAmbiguousModuleStorageDatabaseError(
+      new Error('connection terminated unexpectedly'),
+    ),
+    true,
+  );
+  assert.equal(
+    isAmbiguousModuleStorageDatabaseError(
+      Object.assign(new Error('constraint mismatch'), { code: '23514' }),
+    ),
+    false,
+  );
 });

@@ -231,6 +231,8 @@ CREATE TABLE north_star_internal.module_storage_attempt_claims (
   claimed_at timestamptz NOT NULL DEFAULT transaction_timestamp(),
   updated_at timestamptz NOT NULL DEFAULT transaction_timestamp(),
   PRIMARY KEY (tenant_id, environment_id, activation_attempt_id),
+  CONSTRAINT module_storage_attempt_claims_generation_unique
+    UNIQUE (tenant_id, environment_id, generation_id),
   CONSTRAINT module_storage_attempt_claims_generation_fkey
     FOREIGN KEY (tenant_id, environment_id, generation_id)
     REFERENCES north_star_internal.module_storage_generations (
@@ -284,9 +286,9 @@ CREATE TABLE north_star_internal.module_storage_catalog_receipts (
     AND (receipt_state = 'DRIFT' OR catalog_verified)
   )
 );
-CREATE INDEX module_storage_catalog_receipts_ready_idx
+CREATE UNIQUE INDEX module_storage_catalog_receipts_ready_idx
   ON north_star_internal.module_storage_catalog_receipts (
-    tenant_id, environment_id, generation_id, recorded_at DESC
+    tenant_id, environment_id, generation_id
   ) WHERE receipt_state = 'READY_TO_SWAP' AND catalog_verified;
 ALTER TABLE north_star_internal.module_storage_catalog_receipts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE north_star_internal.module_storage_catalog_receipts FORCE ROW LEVEL SECURITY;
@@ -512,12 +514,35 @@ CREATE FUNCTION north_star_internal.module_storage_read_approved_attempt(
   requested_preparation_id uuid
 )
 RETURNS TABLE (approved boolean)
-LANGUAGE sql
-STABLE
+LANGUAGE plpgsql
+VOLATILE
 SECURITY DEFINER
 SET search_path = pg_catalog
-AS $$
-  SELECT true
+AS $$ BEGIN
+  PERFORM 1
+    FROM platform.release_activation_authority_epochs AS epoch
+   WHERE epoch.tenant_id = requested_tenant_id
+   FOR SHARE;
+  IF NOT FOUND THEN RETURN; END IF;
+
+  PERFORM 1
+    FROM platform.release_activation_attempts AS attempt
+   WHERE attempt.tenant_id = requested_tenant_id
+     AND attempt.environment_id = requested_environment_id
+     AND attempt.activation_attempt_id = requested_activation_attempt_id
+   FOR SHARE;
+  IF NOT FOUND THEN RETURN; END IF;
+
+  RETURN QUERY
+  SELECT true AS approved
+    FROM platform.release_activation_attempts AS attempt
+    JOIN platform.release_approvals AS approval
+      ON approval.tenant_id = attempt.tenant_id
+     AND approval.environment_id = attempt.environment_id
+     AND approval.approval_id = attempt.approval_id
+     AND approval.activation_attempt_id = attempt.activation_attempt_id
+    JOIN platform.release_activation_authority_epochs AS epoch
+      ON epoch.tenant_id = attempt.tenant_id
    WHERE requested_tenant_id IS NOT NULL
      AND requested_environment_id IS NOT NULL
      AND requested_activation_attempt_id IS NOT NULL
@@ -526,20 +551,113 @@ AS $$
            nullif(current_setting('north_star.tenant_id', true), '')::uuid
      AND requested_environment_id =
            nullif(current_setting('north_star.environment_id', true), '')::uuid
-     AND EXISTS (
+     AND attempt.tenant_id = requested_tenant_id
+     AND attempt.environment_id = requested_environment_id
+     AND attempt.activation_attempt_id = requested_activation_attempt_id
+     AND attempt.attempt_contract_version =
+           'northstar.release-activation-attempt/v1'
+     AND attempt.execution_principal_kind = 'SYSTEM'
+     AND attempt.execution_principal_id =
+           '00000000-0000-4000-8000-000000000001'::uuid
+     AND attempt.attempt_state = 'PREBOUND'
+     AND approval.approval_contract_version = 'northstar.release-approval/v1'
+     AND approval.authority_policy_contract_version =
+           'northstar.release-approver-authority/v1'
+     AND approval.expiry_policy_version = 'northstar.release-approval-expiry/v1'
+     AND approval.compatibility_policy_version =
+           'northstar.transition-compatibility-policy/v2'
+     AND approval.preparation_id = requested_preparation_id
+     AND approval.approving_human_id <> attempt.execution_principal_id
+     AND clock_timestamp() < approval.expires_at - interval '3 seconds'
+     AND epoch.approver_policy_version = approval.authority_policy_version
+     AND (
+       SELECT event.eligible
+         FROM platform.release_approver_eligibility_events AS event
+        WHERE event.tenant_id = attempt.tenant_id
+          AND event.principal_id = approval.approving_human_id
+          AND event.authority_policy_contract_version =
+                'northstar.release-approver-authority/v1'
+        ORDER BY event.policy_version DESC
+        LIMIT 1
+     ) IS TRUE
+     AND (
+       SELECT event.authorized
+         FROM platform.release_executor_authority_events AS event
+        WHERE event.tenant_id = attempt.tenant_id
+          AND event.principal_id = attempt.execution_principal_id
+          AND event.authority_policy_contract_version =
+                'northstar.release-executor-authority/v1'
+        ORDER BY event.policy_version DESC
+        LIMIT 1
+     ) IS TRUE
+     AND NOT EXISTS (
        SELECT 1
-         FROM platform.release_activation_attempts AS attempt
-         JOIN platform.release_approvals AS approval
-           ON approval.tenant_id = attempt.tenant_id
-          AND approval.environment_id = attempt.environment_id
-          AND approval.approval_id = attempt.approval_id
-        WHERE attempt.tenant_id = requested_tenant_id
-          AND attempt.environment_id = requested_environment_id
-          AND attempt.activation_attempt_id = requested_activation_attempt_id
-          AND approval.compatibility_policy_version =
-                'northstar.transition-compatibility-policy/v2'
-          AND approval.preparation_id = requested_preparation_id
+         FROM (
+           SELECT DISTINCT ON (control.rollout_id)
+                  control.live_policy_denied,
+                  control.rollout_paused,
+                  control.control_policy_contract_version
+             FROM platform.release_activation_control_events AS control
+            WHERE control.tenant_id = attempt.tenant_id
+              AND control.environment_id = attempt.environment_id
+              AND (
+                control.rollout_id IS NULL
+                OR control.rollout_id IS NOT DISTINCT FROM approval.rollout_id
+              )
+            ORDER BY control.rollout_id, control.policy_version DESC
+         ) AS current_control
+        WHERE current_control.live_policy_denied
+           OR current_control.rollout_paused
+           OR current_control.control_policy_contract_version <>
+                'northstar.release-activation-control/v1'
      )
+     AND NOT EXISTS (
+       SELECT 1
+         FROM platform.release_activation_attempt_outcomes AS outcome
+        WHERE outcome.tenant_id = attempt.tenant_id
+          AND outcome.environment_id = attempt.environment_id
+          AND outcome.activation_attempt_id = attempt.activation_attempt_id
+          AND (
+            outcome.terminal
+            OR outcome.workflow_disposition = 'CONSUMED'
+            OR outcome.workflow_status IN ('PAUSED', 'FAILED', 'CANCELLED', 'SUCCEEDED')
+          )
+     )
+     AND NOT EXISTS (
+       SELECT 1
+         FROM platform.release_activation_history AS history
+        WHERE history.tenant_id = attempt.tenant_id
+          AND history.environment_id = attempt.environment_id
+          AND history.activation_attempt_id = attempt.activation_attempt_id
+          AND (
+            history.terminal
+            OR history.workflow_disposition = 'CONSUMED'
+            OR history.workflow_status IN ('PAUSED', 'FAILED', 'CANCELLED', 'SUCCEEDED')
+          )
+     ); END $$;
+
+CREATE FUNCTION north_star_internal.module_storage_lock_backfill_attempt(
+  requested_tenant_id uuid,
+  requested_environment_id uuid,
+  requested_activation_attempt_id uuid,
+  requested_preparation_id uuid
+)
+RETURNS TABLE (authorized boolean)
+LANGUAGE sql
+VOLATILE
+SECURITY DEFINER
+SET search_path = pg_catalog
+AS $$
+  SELECT true
+   WHERE EXISTS (
+     SELECT approved
+       FROM north_star_internal.module_storage_read_approved_attempt(
+         requested_tenant_id,
+         requested_environment_id,
+         requested_activation_attempt_id,
+         requested_preparation_id
+       )
+   )
 $$;
 
 CREATE FUNCTION north_star_internal.module_storage_read_kernel_live_roots(
@@ -600,6 +718,12 @@ GRANT EXECUTE ON FUNCTION
   north_star_internal.module_storage_read_approved_attempt(uuid, uuid, uuid, uuid),
   north_star_internal.module_storage_read_kernel_live_roots(uuid, uuid)
   TO north_star_module_materializer;
+REVOKE ALL ON FUNCTION
+  north_star_internal.module_storage_lock_backfill_attempt(uuid, uuid, uuid, uuid)
+  FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION
+  north_star_internal.module_storage_lock_backfill_attempt(uuid, uuid, uuid, uuid)
+  TO north_star_module_runtime;
 
 REVOKE ALL ON ALL TABLES IN SCHEMA north_star_internal
   FROM north_star_module_materializer, north_star_module_runtime;
