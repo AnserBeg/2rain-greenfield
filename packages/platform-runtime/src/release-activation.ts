@@ -3,6 +3,8 @@ import type {
   TenantEnvironmentIdentity,
 } from './release-records.js';
 
+export * from './module-storage-transition.js';
+
 export const APPROVAL_CONTRACT_VERSION =
   'northstar.release-approval/v1' as const;
 export const ACTIVATION_ATTEMPT_CONTRACT_VERSION =
@@ -242,7 +244,9 @@ export interface ReleaseApproval extends TenantEnvironmentIdentity {
   readonly compilerOutputProtocolVersion: string;
   readonly compilerSemanticProfileVersion: string;
   readonly compilerVersion: string;
-  readonly compatibilityPolicyVersion: typeof TRANSITION_COMPATIBILITY_POLICY_VERSION;
+  readonly compatibilityPolicyVersion:
+    | typeof TRANSITION_COMPATIBILITY_POLICY_VERSION
+    | typeof import('./module-storage-transition.js').TRANSITION_COMPATIBILITY_POLICY_V2_VERSION;
   readonly decidedAt: string;
   readonly expectedFence: number;
   readonly expectedPointerId: MintedUuid;
