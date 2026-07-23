@@ -42,8 +42,10 @@ import {
   PostgresModuleStorageMaterializer,
 } from '../../packages/postgres-provider/src/module-storage-materializer.js';
 import {
+  assertSchemaMatchesSnapshot,
   loadMigrations,
   runMigrations,
+  SchemaDriftError,
 } from '../../packages/postgres-provider/src/migrations.js';
 import { PostgresImmutableReleaseRepository } from '../../packages/postgres-provider/src/release-repository.js';
 import { withTrustedRequestTransaction } from '../../packages/postgres-provider/src/request-context.js';
@@ -59,6 +61,7 @@ import {
 import { withEphemeralPostgres } from '../helpers/postgres.js';
 
 const migrations = resolve('db/migrations');
+const checkedInSnapshot = resolve('db/schema.snapshot.json');
 const tenantA = 'a1000000-0000-4000-8000-000000000001';
 const tenantB = 'b1000000-0000-4000-8000-000000000001';
 const environmentA = 'a2000000-0000-4000-8000-000000000002';
@@ -151,6 +154,19 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
         assert.ok(first.remainingPlanDigest.some((octet) => octet !== 0));
         let firstAttemptId: string | undefined;
         let tenantIsolatedTableName: string | undefined;
+        let obsoleteRoot: {
+          columnName: string;
+          elementId: string;
+          generationId: string;
+          tableName: string;
+        } | null = null;
+        let obsoleteAttemptIds: string[] = [];
+        let liveSetSiblingEvidence: {
+          pausedAttemptId: string;
+          preparationId: string;
+          targetReleaseId: string;
+          terminalAttemptId: string;
+        } | null = null;
 
         await t.test(
           'READY_TO_SWAP is fresh provider evidence and the real CAS gate',
@@ -614,8 +630,25 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
                 scenario.preparationId,
               );
               await setActivationControl(pool, false, true);
-              await rejectAttempt(paused);
-              await setActivationControl(pool, false, false);
+              try {
+                const pausedResult = await new PostgresReleaseActivationService(
+                  runtimePool,
+                ).activate(contexts.system, {
+                  activationAttemptId: minted(paused),
+                });
+                assert.equal(pausedResult.status, 'PAUSED');
+                assert.equal(pausedResult.terminal, false);
+                assert.equal(pausedResult.decisiveOutcomeCode, null);
+                await rejectAttempt(paused);
+              } finally {
+                await setActivationControl(pool, false, false);
+              }
+              liveSetSiblingEvidence = {
+                pausedAttemptId: paused,
+                preparationId: scenario.preparationId,
+                targetReleaseId: next.target,
+                terminalAttemptId: cancelled,
+              };
 
               const denied = await createAdditionalV2Approval(
                 runtimePool,
@@ -627,6 +660,231 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
               await rejectAttempt(denied);
               await setActivationControl(pool, false, false);
             }
+
+            assert.ok(liveSetSiblingEvidence);
+            const openAttempts = await pool.query<{
+              activation_attempt_id: string;
+            }>(
+              `SELECT approval.activation_attempt_id
+                 FROM platform.release_approvals AS approval
+                WHERE approval.tenant_id = $1
+                  AND approval.environment_id = $2
+                  AND approval.target_release_id = $3
+                  AND NOT EXISTS (
+                    SELECT 1
+                      FROM platform.release_activation_attempt_outcomes AS outcome
+                     WHERE outcome.tenant_id = approval.tenant_id
+                       AND outcome.environment_id = approval.environment_id
+                       AND outcome.activation_attempt_id =
+                             approval.activation_attempt_id
+                       AND (
+                         outcome.terminal
+                         OR outcome.workflow_disposition = 'CONSUMED'
+                       )
+                  )
+                  AND NOT EXISTS (
+                    SELECT 1
+                      FROM platform.release_activation_history AS history
+                     WHERE history.tenant_id = approval.tenant_id
+                       AND history.environment_id = approval.environment_id
+                       AND (
+                         history.approval_id = approval.approval_id
+                         OR history.activation_attempt_id =
+                              approval.activation_attempt_id
+                       )
+                       AND (
+                         history.terminal
+                         OR history.workflow_disposition = 'CONSUMED'
+                       )
+                  )
+                ORDER BY approval.activation_attempt_id`,
+              [tenantA, environmentA, next.target],
+            );
+            const activation = new PostgresReleaseActivationService(
+              runtimePool,
+            );
+            for (const attempt of openAttempts.rows) {
+              if (
+                attempt.activation_attempt_id ===
+                liveSetSiblingEvidence.pausedAttemptId
+              ) {
+                continue;
+              }
+              await activation.cancelActivation(contexts.system, {
+                activationAttemptId: minted(attempt.activation_attempt_id),
+              });
+            }
+            const siblingEvidence = await pool.query<{
+              paused_phase: boolean;
+              paused_retired: boolean;
+              terminal_retired: boolean;
+            }>(
+              `SELECT
+                 EXISTS (
+                   SELECT 1
+                     FROM platform.release_activation_phase_receipts AS phase
+                    WHERE phase.activation_attempt_id = $1
+                      AND phase.phase_code = 'ROLLOUT_PAUSED'
+                 ) AS paused_phase,
+                 EXISTS (
+                   SELECT 1
+                     FROM platform.release_activation_attempt_outcomes AS outcome
+                    WHERE outcome.activation_attempt_id = $1
+                      AND (
+                        outcome.terminal
+                        OR outcome.workflow_disposition = 'CONSUMED'
+                      )
+                   UNION ALL
+                   SELECT 1
+                     FROM platform.release_activation_history AS history
+                    WHERE (
+                            history.approval_id = (
+                              SELECT approval_id
+                                FROM platform.release_approvals
+                               WHERE activation_attempt_id = $1
+                            )
+                            OR history.activation_attempt_id = $1
+                          )
+                      AND (
+                        history.terminal
+                        OR history.workflow_disposition = 'CONSUMED'
+                      )
+                 ) AS paused_retired,
+                 EXISTS (
+                   SELECT 1
+                     FROM platform.release_activation_attempt_outcomes AS outcome
+                    WHERE outcome.activation_attempt_id = $2
+                      AND (
+                        outcome.terminal
+                        OR outcome.workflow_disposition = 'CONSUMED'
+                      )
+                   UNION ALL
+                   SELECT 1
+                     FROM platform.release_activation_history AS history
+                    WHERE (
+                            history.approval_id = (
+                              SELECT approval_id
+                                FROM platform.release_approvals
+                               WHERE activation_attempt_id = $2
+                            )
+                            OR history.activation_attempt_id = $2
+                          )
+                      AND (
+                        history.terminal
+                        OR history.workflow_disposition = 'CONSUMED'
+                      )
+                 ) AS terminal_retired`,
+              [
+                liveSetSiblingEvidence.pausedAttemptId,
+                liveSetSiblingEvidence.terminalAttemptId,
+              ],
+            );
+            assert.deepEqual(siblingEvidence.rows[0], {
+              paused_phase: true,
+              paused_retired: false,
+              terminal_retired: true,
+            });
+            const mixedSiblingRoots = await readKernelLiveRoots(
+              materializerPool,
+              contexts.a,
+            );
+            assert.ok(
+              mixedSiblingRoots.includes(
+                liveSetSiblingEvidence.targetReleaseId,
+              ),
+            );
+
+            await materializer.verifyLiveCatalog(contexts.a);
+            const accounted = await pool.query<{
+              element_id: string;
+              generation_id: string;
+              live_root_count: string;
+              physical_object_name: string;
+            }>(
+              `SELECT generation.generation_id, element.element_id,
+                      element.physical_object_name,
+                      reference.live_root_count::text
+                 FROM north_star_internal.module_storage_generations AS generation
+                 JOIN north_star_internal.module_storage_root_membership AS membership
+                   ON membership.tenant_id = generation.tenant_id
+                  AND membership.environment_id = generation.environment_id
+                  AND membership.generation_id = generation.generation_id
+                 JOIN north_star_internal.module_storage_elements AS element
+                   ON element.element_id = membership.element_id
+                 JOIN north_star_internal.module_storage_reference_counts AS reference
+                   ON reference.tenant_id = generation.tenant_id
+                  AND reference.environment_id = generation.environment_id
+                  AND reference.generation_id = generation.generation_id
+                  AND reference.element_id = element.element_id
+                WHERE generation.tenant_id = $1
+                  AND generation.environment_id = $2
+                  AND generation.target_release_id = $3
+                  AND element.element_kind = 'addColumn'
+                ORDER BY generation.generation_number
+                LIMIT 1`,
+              [tenantA, environmentA, next.target],
+            );
+            assert.ok(Number(accounted.rows[0]?.live_root_count) > 0);
+            const addedColumn = accounted.rows[0]?.physical_object_name;
+            assert.ok(addedColumn);
+            const containingTable = await pool.query<{ table_name: string }>(
+              `SELECT relation.relname AS table_name
+                 FROM pg_catalog.pg_attribute AS attribute
+                 JOIN pg_catalog.pg_class AS relation
+                   ON relation.oid = attribute.attrelid
+                 JOIN pg_catalog.pg_namespace AS namespace
+                   ON namespace.oid = relation.relnamespace
+                WHERE namespace.nspname = 'north_star_module'
+                  AND attribute.attname = $1
+                  AND attribute.attnum > 0
+                  AND NOT attribute.attisdropped`,
+              [addedColumn],
+            );
+            assert.equal(containingTable.rowCount, 1);
+            obsoleteRoot = {
+              columnName: addedColumn,
+              elementId: accounted.rows[0]!.element_id,
+              generationId: accounted.rows[0]!.generation_id,
+              tableName: containingTable.rows[0]!.table_name,
+            };
+
+            const attempts = await pool.query<{
+              activation_attempt_id: string;
+            }>(
+              `SELECT approval.activation_attempt_id
+                 FROM platform.release_approvals AS approval
+                WHERE approval.tenant_id = $1
+                  AND approval.environment_id = $2
+                  AND approval.target_release_id = $3
+                  AND NOT EXISTS (
+                    SELECT 1
+                      FROM platform.release_activation_attempt_outcomes AS outcome
+                     WHERE outcome.tenant_id = approval.tenant_id
+                       AND outcome.environment_id = approval.environment_id
+                       AND outcome.activation_attempt_id =
+                             approval.activation_attempt_id
+                  )
+                  AND NOT EXISTS (
+                    SELECT 1
+                      FROM platform.release_activation_history AS history
+                     WHERE history.tenant_id = approval.tenant_id
+                       AND history.environment_id = approval.environment_id
+                       AND history.activation_attempt_id =
+                             approval.activation_attempt_id
+                       AND (
+                         history.terminal
+                         OR history.workflow_disposition = 'CONSUMED'
+                       )
+                  )
+                ORDER BY approval.activation_attempt_id`,
+              [tenantA, environmentA, next.target],
+            );
+            obsoleteAttemptIds = attempts.rows.map(
+              (attempt) => attempt.activation_attempt_id,
+            );
+            assert.deepEqual(obsoleteAttemptIds, [
+              liveSetSiblingEvidence.pausedAttemptId,
+            ]);
           },
         );
 
@@ -974,10 +1232,116 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
         await t.test(
           'live-set reconciliation rejects altered, surplus, unknown, and destructive objects',
           async () => {
+            assert.ok(obsoleteRoot);
+            assert.ok(obsoleteAttemptIds.length > 0);
+            assert.ok(liveSetSiblingEvidence);
+            const liveSet = liveSetSiblingEvidence;
+            const activation = new PostgresReleaseActivationService(
+              runtimePool,
+            );
+            for (const attemptId of obsoleteAttemptIds) {
+              await activation.cancelActivation(contexts.system, {
+                activationAttemptId: minted(attemptId),
+              });
+            }
+            const retiredSiblings = await pool.query<{
+              approval_count: string;
+              retired_count: string;
+            }>(
+              `SELECT count(*)::text AS approval_count,
+                      count(*) FILTER (
+                        WHERE EXISTS (
+                          SELECT 1
+                            FROM platform.release_activation_attempt_outcomes AS outcome
+                           WHERE outcome.tenant_id = approval.tenant_id
+                             AND outcome.environment_id = approval.environment_id
+                             AND outcome.activation_attempt_id =
+                                   approval.activation_attempt_id
+                             AND (
+                               outcome.terminal
+                               OR outcome.workflow_disposition = 'CONSUMED'
+                             )
+                        )
+                        OR EXISTS (
+                          SELECT 1
+                            FROM platform.release_activation_history AS history
+                           WHERE history.tenant_id = approval.tenant_id
+                             AND history.environment_id = approval.environment_id
+                             AND (
+                               history.approval_id = approval.approval_id
+                               OR history.activation_attempt_id =
+                                    approval.activation_attempt_id
+                             )
+                             AND (
+                               history.terminal
+                               OR history.workflow_disposition = 'CONSUMED'
+                             )
+                        )
+                      )::text AS retired_count
+                 FROM platform.release_approvals AS approval
+                WHERE approval.tenant_id = $1
+                  AND approval.environment_id = $2
+                  AND approval.preparation_id = $3`,
+              [tenantA, environmentA, liveSet.preparationId],
+            );
+            assert.ok(
+              Number(retiredSiblings.rows[0]?.approval_count) > 1,
+              'the retirement proof requires multiple approval siblings',
+            );
+            assert.equal(
+              retiredSiblings.rows[0]?.retired_count,
+              retiredSiblings.rows[0]?.approval_count,
+            );
+            const retiredRoots = await readKernelLiveRoots(
+              materializerPool,
+              contexts.a,
+            );
+            assert.ok(!retiredRoots.includes(liveSet.targetReleaseId));
+            await assertCatalogDrift(
+              materializer,
+              contexts.a,
+              new RegExp(
+                `surplus managed column ${obsoleteRoot.tableName}\\.${obsoleteRoot.columnName}`,
+              ),
+            );
+            const staleReference = await pool.query<{
+              live_root_count: string;
+            }>(
+              `SELECT live_root_count::text
+                 FROM north_star_internal.module_storage_reference_counts
+                WHERE tenant_id = $1 AND environment_id = $2
+                  AND generation_id = $3 AND element_id = $4`,
+              [
+                tenantA,
+                environmentA,
+                obsoleteRoot.generationId,
+                obsoleteRoot.elementId,
+              ],
+            );
+            assert.ok(Number(staleReference.rows[0]?.live_root_count) > 0);
+            await pool.query(
+              `ALTER TABLE north_star_module.${quoteTestIdentifier(obsoleteRoot.tableName)}
+                 DROP COLUMN ${quoteTestIdentifier(obsoleteRoot.columnName)}`,
+            );
             const verification = await materializer.verifyLiveCatalog(
               contexts.a,
             );
             assert.deepEqual(verification.drift, []);
+            const reconciledReference = await pool.query<{
+              live_root_count: string;
+            }>(
+              `SELECT live_root_count::text
+                 FROM north_star_internal.module_storage_reference_counts
+                WHERE tenant_id = $1 AND environment_id = $2
+                  AND generation_id = $3 AND element_id = $4`,
+              [
+                tenantA,
+                environmentA,
+                obsoleteRoot.generationId,
+                obsoleteRoot.elementId,
+              ],
+            );
+            assert.equal(reconciledReference.rows[0]?.live_root_count, '0');
             const tableName = await firstManagedTableName(pool);
 
             await pool.query(
@@ -1081,6 +1445,45 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
               /surplus managed standalone type/,
             );
             await pool.query('DROP TYPE north_star_module.rogue_type');
+
+            await pool.query(`
+              CREATE FUNCTION platform.snapshot_probe()
+              RETURNS integer LANGUAGE sql SET search_path = pg_catalog
+              AS $$ SELECT 1 $$;
+            `);
+            await assertKernelSnapshotDrift(pool);
+            await pool.query('DROP FUNCTION platform.snapshot_probe()');
+
+            await pool.query(
+              'GRANT USAGE ON SCHEMA platform TO north_star_module_runtime',
+            );
+            await assertKernelSnapshotDrift(pool);
+            await pool.query(
+              'REVOKE USAGE ON SCHEMA platform FROM north_star_module_runtime',
+            );
+
+            await pool.query(
+              `ALTER DEFAULT PRIVILEGES IN SCHEMA platform
+                 GRANT SELECT ON TABLES TO north_star_module_runtime`,
+            );
+            await assertKernelSnapshotDrift(pool);
+            await pool.query(
+              `ALTER DEFAULT PRIVILEGES IN SCHEMA platform
+                 REVOKE SELECT ON TABLES FROM north_star_module_runtime`,
+            );
+
+            await pool.query(
+              'CREATE SEQUENCE platform.snapshot_probe_sequence',
+            );
+            await assertKernelSnapshotDrift(pool);
+            await pool.query('DROP SEQUENCE platform.snapshot_probe_sequence');
+
+            await pool.query(
+              `CREATE TYPE platform.snapshot_probe_type AS ENUM ('probe')`,
+            );
+            await assertKernelSnapshotDrift(pool);
+            await pool.query('DROP TYPE platform.snapshot_probe_type');
+            await assertKernelSnapshotMatches(pool);
 
             await pool.query('CREATE ROLE arbitrary_destructive_grantee');
             try {
@@ -1669,6 +2072,34 @@ async function readApprovedAttempt(
   }
 }
 
+async function readKernelLiveRoots(
+  materializerPool: pg.Pool,
+  context: TrustedRequestContext,
+): Promise<string[]> {
+  const client = await materializerPool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      `SELECT set_config('north_star.tenant_id', $1, true),
+              set_config('north_star.environment_id', $2, true)`,
+      [context.tenantId, context.environmentId],
+    );
+    const result = await client.query<{ release_id: string }>(
+      `SELECT release_id
+         FROM north_star_internal.module_storage_read_kernel_live_roots($1,$2)
+        ORDER BY release_id`,
+      [context.tenantId, context.environmentId],
+    );
+    await client.query('COMMIT');
+    return result.rows.map((row) => row.release_id);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 interface PlantedBackfillRows {
   columnName: string;
   recordIds: string[];
@@ -1843,6 +2274,29 @@ async function assertCatalogDrift(
       error.code === 'CATALOG_DRIFT' &&
       message.test(error.message),
   );
+}
+
+async function assertKernelSnapshotDrift(pool: pg.Pool): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await assert.rejects(
+      assertSchemaMatchesSnapshot(client, checkedInSnapshot),
+      (error: unknown) =>
+        error instanceof SchemaDriftError &&
+        /physical schema differs/.test(error.message),
+    );
+  } finally {
+    client.release();
+  }
+}
+
+async function assertKernelSnapshotMatches(pool: pg.Pool): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await assertSchemaMatchesSnapshot(client, checkedInSnapshot);
+  } finally {
+    client.release();
+  }
 }
 
 async function firstManagedTableName(pool: pg.Pool): Promise<string> {

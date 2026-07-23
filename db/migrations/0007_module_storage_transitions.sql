@@ -684,15 +684,6 @@ AS $$
   UNION
   SELECT preparation.target_release_id
     FROM platform.release_activation_preparations AS preparation
-    LEFT JOIN platform.release_approvals AS approval
-      ON approval.tenant_id = preparation.tenant_id
-     AND approval.environment_id = preparation.environment_id
-     AND approval.preparation_id = preparation.preparation_id
-    LEFT JOIN platform.release_activation_history AS history
-      ON history.tenant_id = approval.tenant_id
-     AND history.environment_id = approval.environment_id
-     AND history.approval_id = approval.approval_id
-     AND history.terminal
    WHERE requested_tenant_id IS NOT NULL
      AND requested_environment_id IS NOT NULL
      AND requested_tenant_id =
@@ -701,7 +692,49 @@ AS $$
            nullif(current_setting('north_star.environment_id', true), '')::uuid
      AND preparation.tenant_id = requested_tenant_id
      AND preparation.environment_id = requested_environment_id
-     AND history.approval_id IS NULL
+     AND (
+       NOT EXISTS (
+         SELECT 1
+           FROM platform.release_approvals AS approval
+          WHERE approval.tenant_id = preparation.tenant_id
+            AND approval.environment_id = preparation.environment_id
+            AND approval.preparation_id = preparation.preparation_id
+       )
+       OR EXISTS (
+         SELECT 1
+           FROM platform.release_approvals AS approval
+          WHERE approval.tenant_id = preparation.tenant_id
+            AND approval.environment_id = preparation.environment_id
+            AND approval.preparation_id = preparation.preparation_id
+            AND NOT EXISTS (
+              SELECT 1
+                FROM platform.release_activation_attempt_outcomes AS outcome
+               WHERE outcome.tenant_id = approval.tenant_id
+                 AND outcome.environment_id = approval.environment_id
+                 AND outcome.activation_attempt_id =
+                       approval.activation_attempt_id
+                 AND (
+                   outcome.terminal
+                   OR outcome.workflow_disposition = 'CONSUMED'
+                 )
+            )
+            AND NOT EXISTS (
+              SELECT 1
+                FROM platform.release_activation_history AS history
+               WHERE history.tenant_id = approval.tenant_id
+                 AND history.environment_id = approval.environment_id
+                 AND (
+                   history.approval_id = approval.approval_id
+                   OR history.activation_attempt_id =
+                        approval.activation_attempt_id
+                 )
+                 AND (
+                   history.terminal
+                   OR history.workflow_disposition = 'CONSUMED'
+                 )
+            )
+       )
+     )
 $$;
 
 REVOKE ALL ON FUNCTION

@@ -39,6 +39,32 @@ const allowedTypes = [
   /^uuid$/,
   /^varchar\([1-9][0-9]*\)$/,
 ];
+const catalogVerifiedObjectKinds = new Set([
+  'column',
+  'composite_relation',
+  'constraint:check',
+  'constraint:exclusion',
+  'constraint:foreign_key',
+  'constraint:not_null',
+  'constraint:primary_key',
+  'constraint:trigger',
+  'constraint:unique',
+  'default',
+  'foreign_table',
+  'function',
+  'index',
+  'materialized_view',
+  'partitioned_index',
+  'partitioned_table',
+  'policy',
+  'procedure',
+  'rule',
+  'sequence',
+  'standalone_type',
+  'table',
+  'trigger',
+  'view',
+]);
 
 export class ModuleStorageMaterializationError extends Error {
   override readonly name = 'ModuleStorageMaterializationError';
@@ -1209,19 +1235,21 @@ async function verifyCatalogOnClient(
 
   const registry = await loadObjectOwnershipRegistry(client);
   for (const object of registry) {
+    const recognized = catalogVerifiedObjectKinds.has(object.object_kind);
     const verifierCount =
       Number(
-        object.schema_name === 'platform' ||
-          object.schema_name === 'north_star_internal',
-      ) + Number(object.schema_name === 'north_star_module');
+        recognized &&
+          (object.schema_name === 'platform' ||
+            object.schema_name === 'north_star_internal'),
+      ) + Number(recognized && object.schema_name === 'north_star_module');
     if (verifierCount !== 1) {
       drift.push(
         `object ${object.schema_name}.${object.object_name} (${object.object_kind}) has ${verifierCount} verifiers`,
       );
     }
-    if (object.object_kind.startsWith('unknown:')) {
+    if (!recognized) {
       drift.push(
-        `unknown object kind ${object.object_kind} for ${object.schema_name}.${object.object_name}`,
+        `unknown or uninspected object kind ${object.object_kind} for ${object.schema_name}.${object.object_name}`,
       );
     }
   }
@@ -1359,7 +1387,7 @@ async function verifyCatalogOnClient(
          ON default_value.adrelid = relation.oid
         AND default_value.adnum = attribute.attnum
       WHERE namespace.nspname = 'north_star_module'
-        AND relation.relkind IN ('r','p')
+        AND relation.relkind IN ('r','p','v','m','c','f')
         AND attribute.attnum > 0 AND NOT attribute.attisdropped
       ORDER BY relation.relname, attribute.attname`,
   );
@@ -1922,8 +1950,6 @@ async function loadObjectOwnershipRegistry(
               CASE routine.prokind
                 WHEN 'f' THEN 'function'
                 WHEN 'p' THEN 'procedure'
-                WHEN 'a' THEN 'aggregate'
-                WHEN 'w' THEN 'window_function'
                 ELSE 'unknown:routine:' || routine.prokind::text
               END
          FROM pg_proc AS routine
@@ -2405,36 +2431,38 @@ async function loadAccountedLiveTargets(
   restoreContext: TrustedRequestContext,
   initial: readonly StorageTargetPayloadV1[],
 ): Promise<StorageTargetPayloadV1[]> {
-  const generations = await client.query<{
+  const scopes = await client.query<{
     environment_id: string;
-    target_release_id: string;
     tenant_id: string;
   }>(
-    `SELECT DISTINCT tenant_id, environment_id, target_release_id
-       FROM north_star_internal.module_storage_generations
-      WHERE state IN (
-        'PREPARING', 'PREPARED', 'IN_ATTEMPT', 'READY_TO_SWAP', 'SWAPPED',
-        'RECONCILING'
-      )`,
+    `SELECT DISTINCT tenant_id, environment_id
+       FROM north_star_internal.module_storage_generations`,
   );
   const targets = [...initial];
   try {
-    for (const generation of generations.rows) {
+    for (const scope of scopes.rows) {
       await client.query(
         `SELECT set_config('north_star.tenant_id', $1, true),
                 set_config('north_star.environment_id', $2, true)`,
-        [generation.tenant_id, generation.environment_id],
+        [scope.tenant_id, scope.environment_id],
       );
-      targets.push(
-        (
-          await loadVerifiedReleaseStorage(
-            client,
-            generation.tenant_id,
-            generation.environment_id,
-            generation.target_release_id,
-          )
-        ).target,
+      const roots = await client.query<{ release_id: string }>(
+        `SELECT release_id
+           FROM north_star_internal.module_storage_read_kernel_live_roots($1, $2)`,
+        [scope.tenant_id, scope.environment_id],
       );
+      for (const root of roots.rows) {
+        targets.push(
+          (
+            await loadVerifiedReleaseStorage(
+              client,
+              scope.tenant_id,
+              scope.environment_id,
+              root.release_id,
+            )
+          ).target,
+        );
+      }
     }
   } finally {
     await setMaterializerScope(client, restoreContext);
@@ -2638,11 +2666,7 @@ async function persistRootMembership(
       ],
     );
   }
-  const roots = await loadLiveRoots(
-    client,
-    command.context,
-    command.targetReleaseId,
-  );
+  const roots = await loadLiveRoots(client, command.context);
   await reconcileReferenceCounts(
     client,
     command.context,
@@ -2668,6 +2692,14 @@ async function reconcileReferenceCounts(
       ).rows.map((row) => row.generation_id);
   for (const generation of generations) {
     await client.query(
+      `UPDATE north_star_internal.module_storage_reference_counts
+          SET live_root_count = 0,
+              last_full_reconciliation_at = transaction_timestamp(),
+              updated_at = transaction_timestamp()
+        WHERE tenant_id = $1 AND environment_id = $2 AND generation_id = $3`,
+      [context.tenantId, context.environmentId, generation],
+    );
+    await client.query(
       `INSERT INTO north_star_internal.module_storage_reference_counts (
          tenant_id, environment_id, generation_id, element_id, live_root_count,
          last_full_reconciliation_at
@@ -2690,20 +2722,11 @@ async function reconcileReferenceCounts(
 async function loadLiveRoots(
   client: PoolClient,
   context: TrustedRequestContext,
-  includeReleaseId?: string,
 ): Promise<string[]> {
   const result = await client.query<{ release_id: string }>(
     `SELECT release_id
-       FROM north_star_internal.module_storage_read_kernel_live_roots($1, $2)
-     UNION
-     SELECT generation.target_release_id
-       FROM north_star_internal.module_storage_generations AS generation
-      WHERE generation.tenant_id = $1 AND generation.environment_id = $2
-        AND generation.state IN (
-          'PREPARING', 'PREPARED', 'IN_ATTEMPT', 'READY_TO_SWAP', 'RECONCILING'
-        )
-     UNION SELECT $3::uuid WHERE $3::uuid IS NOT NULL`,
-    [context.tenantId, context.environmentId, includeReleaseId ?? null],
+       FROM north_star_internal.module_storage_read_kernel_live_roots($1, $2)`,
+    [context.tenantId, context.environmentId],
   );
   return result.rows.map((row) => row.release_id);
 }
