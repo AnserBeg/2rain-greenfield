@@ -25,6 +25,12 @@ Elapsed reconciliation age now has two authorities with distinct purposes:
   persists the first sample as an immutable activation phase receipt under the
   already-serialized attempt lock.
 
+Terminal outcomes and verification receipts persist a matching monotonic
+completion anchor in their own transaction. Classification compares that
+completion sample with the start sample, so a recovery that starts before the
+deadline and commits after it cannot be misclassified when wall time steps
+backward. Completion evidence and its anchor commit or roll back together.
+
 The effective observation is the later of fresh PostgreSQL wall time and the
 persisted anchor wall time plus monotonic elapsed milliseconds. A backward
 wall step therefore cannot reduce or pause elapsed age. The anchor is durable,
@@ -50,6 +56,14 @@ origin, then proves this sequence without waiting on wall time:
 4. after unpause, a fresh pool and coordinator at 10,101 ms derive the overdue
    state from the persisted anchor and record exactly one alarm;
 5. normal recovery completes and retains the durable alarm.
+
+A second probe starts a recovery at monotonic +99 ms after another activation
+has advanced the pointer, then completes the terminal `LOST_RACE` fact at
++101 ms while wall time remains two seconds behind. A proxy drops that
+transaction's commit response before the separate alarm projection can run.
+The test proves the terminal outcome and monotonic completion anchor committed
+atomically, the alarm row is absent, and a fresh coordinator still derives
+`OVERDUE_COMPLETED` before recording the one alarm.
 
 The 3.1-second sleep is removed. The test asserts the single immutable anchor,
 the synthetic effective observation, the pre-deadline non-alarm, and the
@@ -101,8 +115,15 @@ The fresh Critical-tier reviewers must decide only whether:
    sleeping against wall time; and
 5. no other activation-kernel behavior changed.
 
-The frozen candidate awaits the required fresh naive Codex xhigh PASS and then
-Fable max confirmation on the identical SHA. Any code change invalidates both.
+Fresh naive Codex xhigh round 1 reviewed `920169c5ae06e2ab2e037a0530d7be88ae71ee86`
+and returned **REVISE** with one material finding: unresolved age used the
+monotonic timeline, but completed recovery still classified only from its
+stepped wall timestamp. The bounded fix adds the atomic completion anchor and
+the commit-response-loss crossing probe described above. No other finding was
+reported.
+
+The new candidate awaits a fresh naive Codex xhigh re-review and then Fable
+max confirmation on the identical SHA. Any code change invalidates both.
 
 Program-review triggers do not fire at this checkpoint: this is an unintegrated
 corrective packet, not a first end-to-end slice, fan-out point, stabilized new

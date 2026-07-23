@@ -1283,6 +1283,170 @@ test('G1-P4b atomic activation, reconciliation, rollback, and invalidation', asy
                 ),
                 /release_activation_write_guard_reject|violates check constraint/,
               );
+
+              const crossingBase = await pointer(pool, tenantA, environmentA);
+              const crossingAttempt = await prepareApproval(
+                webPool,
+                approverContextA,
+                makerContextA,
+                releaseOtherThan(releasesA, crossingBase.releaseId, 1),
+              );
+              const competingAttempt = await prepareApproval(
+                webPool,
+                approverContextA,
+                makerContextA,
+                releaseOtherThan(releasesA, crossingBase.releaseId, 2),
+              );
+              const crossingWall = await pool.query<{ observed_at: Date }>(
+                'SELECT clock_timestamp() AS observed_at',
+              );
+              const crossingStartedAt = crossingWall.rows[0]?.observed_at;
+              assert.ok(crossingStartedAt);
+              let crossingClockSample = {
+                monotonicMilliseconds: 20_000,
+                origin: 'g1-p4b-crossing-boot',
+                wallTime: crossingStartedAt,
+              };
+              const crossingClock = {
+                sample: () => crossingClockSample,
+              };
+              await changeExecutorAuthority(pool, tenantA, false);
+              const crossingStartPool = runtimePool(connection, 1);
+              try {
+                const crossingStartCoordinator =
+                  new PostgresReleaseActivationService(crossingStartPool, {
+                    reconciliationClock: crossingClock,
+                    reconciliationMaxAgeMilliseconds: 100,
+                  });
+                const crossingStart = await crossingStartCoordinator.activate(
+                  systemContextA,
+                  crossingAttempt,
+                );
+                assert.equal(crossingStart.status, 'EXECUTOR_UNAVAILABLE');
+                assert.equal(crossingStart.alarmDue, false);
+              } finally {
+                await crossingStartPool.end();
+              }
+              await changeExecutorAuthority(pool, tenantA, true);
+              assert.equal(
+                (await workerService.activate(systemContextA, competingAttempt))
+                  .status,
+                'SWAPPED_VERIFIED',
+              );
+
+              const crossingSamples = [
+                {
+                  monotonicMilliseconds: 20_099,
+                  origin: 'g1-p4b-crossing-boot',
+                  wallTime: new Date(crossingStartedAt.getTime() - 2_000),
+                },
+                {
+                  monotonicMilliseconds: 20_101,
+                  origin: 'g1-p4b-crossing-boot',
+                  wallTime: new Date(crossingStartedAt.getTime() - 2_000),
+                },
+              ] as const;
+              let crossingSampleIndex = 0;
+              const crossingCompletionClock = {
+                sample: () =>
+                  crossingSamples[
+                    Math.min(crossingSampleIndex++, crossingSamples.length - 1)
+                  ]!,
+              };
+              await withCommitDroppingProxy(
+                connection,
+                async (proxyPort) => {
+                  const faultPool = runtimePool(
+                    { ...connection, host: '127.0.0.1', port: proxyPort },
+                    1,
+                  );
+                  faultPool.on('error', () => undefined);
+                  faultPool.on('connect', (client) => {
+                    client.on('error', () => undefined);
+                  });
+                  try {
+                    const faultingCoordinator =
+                      new PostgresReleaseActivationService(faultPool, {
+                        reconciliationClock: crossingCompletionClock,
+                      });
+                    const ambiguous =
+                      await faultingCoordinator.reconcileActivation(
+                        systemContextA,
+                        crossingAttempt,
+                      );
+                    assert.equal(ambiguous.status, 'RECONCILING');
+                    assert.equal(ambiguous.alarmDue, false);
+                  } finally {
+                    await faultPool.end();
+                  }
+                },
+                { dropCommitResponseNumber: 2 },
+              );
+              assert.equal(crossingSampleIndex, 2);
+
+              const crossingFacts = await pool.query<{
+                alarms: string;
+                completion_anchors: string;
+                outcomes: string;
+              }>(
+                `SELECT (
+                          SELECT count(*)
+                            FROM platform.release_activation_attempt_outcomes
+                           WHERE activation_attempt_id = $1
+                             AND terminal
+                        )::text AS outcomes,
+                        (
+                          SELECT count(*)
+                            FROM platform.release_activation_reconciliation_alarms
+                           WHERE activation_attempt_id = $1
+                        )::text AS alarms,
+                        (
+                          SELECT count(*)
+                            FROM platform.release_activation_phase_receipts
+                           WHERE activation_attempt_id = $1
+                             AND phase_code LIKE
+                               'RECONCILIATION_MONOTONIC_COMPLETION_V1:%'
+                        )::text AS completion_anchors`,
+                [crossingAttempt.activationAttemptId],
+              );
+              assert.deepEqual(crossingFacts.rows[0], {
+                alarms: '0',
+                completion_anchors: '1',
+                outcomes: '1',
+              });
+
+              crossingClockSample = crossingSamples[1];
+              const crossingObserverPool = runtimePool(connection, 1);
+              try {
+                const crossingObserver = new PostgresReleaseActivationService(
+                  crossingObserverPool,
+                  {
+                    reconciliationClock: crossingClock,
+                  },
+                );
+                const overdueCompletion =
+                  await crossingObserver.inspectReconciliationState(
+                    systemContextA,
+                    crossingAttempt,
+                  );
+                assert.equal(overdueCompletion.state, 'OVERDUE_COMPLETED');
+                assert.equal(overdueCompletion.overdue, true);
+                assert.equal(overdueCompletion.alarmRecorded, false);
+                assert.ok(overdueCompletion.completionAt);
+                assert.ok(overdueCompletion.deadlineAt);
+                assert.ok(
+                  overdueCompletion.completionAt < overdueCompletion.deadlineAt,
+                );
+
+                const alarmed = await crossingObserver.reconcileActivation(
+                  systemContextA,
+                  crossingAttempt,
+                );
+                assert.equal(alarmed.decisiveOutcomeCode, 'LOST_RACE');
+                assert.equal(alarmed.alarmDue, true);
+              } finally {
+                await crossingObserverPool.end();
+              }
             } finally {
               await ensureExecutorAuthority(pool, tenantA, true);
             }
