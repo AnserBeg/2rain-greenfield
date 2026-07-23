@@ -118,13 +118,13 @@ From the repository root, these commands take under ten minutes:
 
 ```bash
 cd /home/rvham/2rain-greenfield
-git show -s --format='%H %s' HEAD
+git show -s --format='%H %s' eaba9772477b9888b345a4ccb10e88be02f96e27
 corepack pnpm test:compiler
 node --import tsx --test test/compiler/g2-module-*.test.ts
 corepack pnpm test:postgres
 ```
 
-Expect the first command to show the frozen SHA reported at handoff and
+Expect the first command to show the frozen reviewed SHA and
 `fix(compiler): align release manifest canonical versions`. Expect 45/45
 compiler tests, 23/23 focused G2 tests, and 48/48 PostgreSQL tests. In the
 compiler run, the focused Freeze-B regression proves that a legacy compiler
