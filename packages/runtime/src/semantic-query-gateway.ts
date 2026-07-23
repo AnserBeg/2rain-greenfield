@@ -1,7 +1,9 @@
+import type { TrustedRequestContext } from './request-context.js';
 import {
   REQUEST_RUNTIME_PROJECTION_FAMILIES,
   assertRequestRuntimeView,
   authorizeCurrentPolicy,
+  trustedContextForRequestRuntimeView,
   type CurrentPolicyGateway,
   type ImmutableJsonValue,
 } from './request-runtime-view.js';
@@ -9,6 +11,8 @@ import type { RequestRuntimeView as IssuedRequestRuntimeView } from './request-r
 
 export const SEMANTIC_QUERY_REQUEST_VERSION =
   'northstar.semantic-query-request/v1' as const;
+export const SEMANTIC_QUERY_RESULT_VERSION =
+  'northstar.semantic-query-result/v1' as const;
 
 const QUERY_CATALOG_PAYLOAD_VERSION =
   'northstar.query-catalog-payload/v0-provisional' as const;
@@ -23,6 +27,57 @@ export interface SemanticQueryRequestEnvelope {
   readonly arguments: ImmutableJsonValue;
   readonly queryId: string;
   readonly schemaVersion: typeof SEMANTIC_QUERY_REQUEST_VERSION;
+}
+
+export interface SemanticRecordDto {
+  readonly archived: boolean;
+  readonly entityId: string;
+  readonly recordId: string;
+  readonly revision: number;
+  readonly values: Readonly<Record<string, ImmutableJsonValue>>;
+}
+
+export interface SemanticQueryResultEnvelope {
+  readonly kind: 'semanticQueryResult';
+  readonly outcome: 'ambiguous' | 'exact' | 'not-found' | 'unsupported';
+  readonly queryId: string;
+  readonly records: readonly SemanticRecordDto[];
+  readonly schemaVersion: typeof SEMANTIC_QUERY_RESULT_VERSION;
+  readonly unsupportedReason: string | null;
+}
+
+export interface RegisteredQueryDefinition {
+  readonly filter: Readonly<Record<string, ImmutableJsonValue>>;
+  readonly infrastructure?: {
+    readonly archive: 'nullableArchivedAt';
+    readonly optimisticRevision: 'requiredOnMutation';
+    readonly recordIdentity: 'canonicalUuid';
+  };
+  readonly lifecycle: 'active' | 'retired';
+  readonly maximumResultCount: number;
+  readonly permissionId: string;
+  readonly queryId: string;
+  readonly queryType: 'get' | 'list' | 'resolve' | 'search';
+  readonly selections: readonly {
+    readonly fieldId: string;
+    readonly orderKey: number;
+    readonly selectionId: string;
+  }[];
+  readonly sourceEntityId: string;
+  readonly tier: 'q0' | 'q1';
+}
+
+export interface SemanticQueryExecutionRequest {
+  readonly arguments: ImmutableJsonValue;
+  readonly context: TrustedRequestContext;
+  readonly definition: RegisteredQueryDefinition;
+  readonly view: IssuedRequestRuntimeView;
+}
+
+export interface SemanticQueryExecutor {
+  execute(
+    request: SemanticQueryExecutionRequest,
+  ): Promise<SemanticQueryResultEnvelope>;
 }
 
 export class MalformedSemanticQueryRequestError extends Error {
@@ -71,15 +126,18 @@ export class NoSuchRegisteredQueryError extends Error {
 
 /** Sole application read ingress for the request-pinned semantic contract. */
 export class SemanticQueryGateway {
-  constructor(private readonly currentPolicy: CurrentPolicyGateway) {}
+  constructor(
+    private readonly currentPolicy: CurrentPolicyGateway,
+    private readonly executor: SemanticQueryExecutor | undefined = undefined,
+  ) {}
 
   async invoke(
     view: IssuedRequestRuntimeView,
     requestInput: unknown,
-  ): Promise<never> {
+  ): Promise<SemanticQueryResultEnvelope> {
     assertRequestRuntimeView(view);
     const request = parseSemanticQueryRequest(requestInput);
-    const policyDecision = await authorizeCurrentPolicy(
+    const boundaryDecision = await authorizeCurrentPolicy(
       this.currentPolicy,
       view,
       QUERY_BOUNDARY_PERMISSION_ID,
@@ -91,12 +149,46 @@ export class SemanticQueryGateway {
         schemaVersion: QUERY_POLICY_INPUT_VERSION,
       }),
     );
-    if (policyDecision.decision === 'DENY') {
+    if (boundaryDecision.decision === 'DENY') {
       throw new SemanticQueryPolicyDeniedError(request.queryId, view);
     }
 
-    assertPinnedQueryCatalog(view);
-    throw new NoSuchRegisteredQueryError(request.queryId, view);
+    const definition = registeredQueryFromPinnedView(view, request.queryId);
+    if (!definition || !this.executor) {
+      throw new NoSuchRegisteredQueryError(request.queryId, view);
+    }
+    const queryDecision = await authorizeCurrentPolicy(
+      this.currentPolicy,
+      view,
+      definition.permissionId,
+      Object.freeze({
+        arguments: request.arguments,
+        kind: 'registeredSemanticQueryPolicyInput',
+        queryId: request.queryId,
+        requestId: view.requestId,
+        schemaVersion: QUERY_POLICY_INPUT_VERSION,
+      }),
+    );
+    if (queryDecision.decision === 'DENY') {
+      throw new SemanticQueryPolicyDeniedError(request.queryId, view);
+    }
+    if (definition.lifecycle !== 'active' || definition.tier !== 'q0') {
+      return unsupportedQueryResult(request.queryId, 'query-tier-unsupported');
+    }
+    if (!isAlwaysTruePredicate(definition.filter)) {
+      return unsupportedQueryResult(
+        request.queryId,
+        'query-filter-unsupported',
+      );
+    }
+    return this.executor.execute(
+      Object.freeze({
+        arguments: request.arguments,
+        context: trustedContextForRequestRuntimeView(view),
+        definition,
+        view,
+      }),
+    );
   }
 }
 
@@ -123,7 +215,6 @@ function parseSemanticQueryRequest(
     'queryId',
     (message) => new MalformedSemanticQueryRequestError(message),
   );
-
   return Object.freeze({
     arguments: cloneImmutableJson(
       value.arguments,
@@ -135,7 +226,10 @@ function parseSemanticQueryRequest(
   });
 }
 
-function assertPinnedQueryCatalog(view: IssuedRequestRuntimeView): void {
+export function registeredQueryFromPinnedView(
+  view: IssuedRequestRuntimeView,
+  queryId: string,
+): RegisteredQueryDefinition | undefined {
   const projection = view.projections.query;
   if (
     projection.familyId !== REQUEST_RUNTIME_PROJECTION_FAMILIES.query ||
@@ -165,8 +259,8 @@ function assertPinnedQueryCatalog(view: IssuedRequestRuntimeView): void {
       'pinned query catalog has an invalid kind, version, or shape',
     );
   }
-
   const queryIds = new Set<string>();
+  let selected: RegisteredQueryDefinition | undefined;
   for (const query of payload.queries) {
     assertQueryDefinition(query);
     if (queryIds.has(query.queryId)) {
@@ -175,30 +269,40 @@ function assertPinnedQueryCatalog(view: IssuedRequestRuntimeView): void {
       );
     }
     queryIds.add(query.queryId);
+    if (query.queryId === queryId) selected = query;
   }
+  return selected;
+}
+
+function isAlwaysTruePredicate(
+  value: Readonly<Record<string, ImmutableJsonValue>>,
+): boolean {
+  return value.kind === 'booleanPredicate' && value.value === true;
 }
 
 function assertQueryDefinition(
   value: unknown,
-): asserts value is Record<string, unknown> & { queryId: string } {
+): asserts value is RegisteredQueryDefinition {
   const invalid = (message: string): MalformedPinnedQueryCatalogError =>
     new MalformedPinnedQueryCatalogError(message);
   if (!isRecord(value)) {
     throw invalid('pinned query definition must be an object');
   }
+  const expectedKeys = [
+    'filter',
+    'lifecycle',
+    'maximumResultCount',
+    'permissionId',
+    'queryId',
+    'queryType',
+    'selections',
+    'sourceEntityId',
+    'tier',
+  ];
+  const hasInfrastructure = Object.hasOwn(value, 'infrastructure');
   assertExactKeys(
     value,
-    [
-      'filter',
-      'lifecycle',
-      'maximumResultCount',
-      'permissionId',
-      'queryId',
-      'queryType',
-      'selections',
-      'sourceEntityId',
-      'tier',
-    ],
+    hasInfrastructure ? [...expectedKeys, 'infrastructure'] : expectedKeys,
     invalid,
   );
   assertCanonicalId(value.queryId, 'queryId', invalid);
@@ -208,7 +312,8 @@ function assertQueryDefinition(
     (value.lifecycle !== 'active' && value.lifecycle !== 'retired') ||
     (value.queryType !== 'get' &&
       value.queryType !== 'list' &&
-      value.queryType !== 'resolve') ||
+      value.queryType !== 'resolve' &&
+      value.queryType !== 'search') ||
     (value.tier !== 'q0' && value.tier !== 'q1') ||
     !Number.isSafeInteger(value.maximumResultCount) ||
     Number(value.maximumResultCount) < 1 ||
@@ -216,6 +321,26 @@ function assertQueryDefinition(
     !Array.isArray(value.selections)
   ) {
     throw invalid('pinned query definition has an invalid shape');
+  }
+  if (value.queryType === 'search' && !hasInfrastructure) {
+    throw invalid('search requires the v1 infrastructure contract');
+  }
+  if (hasInfrastructure) {
+    if (!isRecord(value.infrastructure)) {
+      throw invalid('pinned query infrastructure must be an object');
+    }
+    assertExactKeys(
+      value.infrastructure,
+      ['archive', 'optimisticRevision', 'recordIdentity'],
+      invalid,
+    );
+    if (
+      value.infrastructure.archive !== 'nullableArchivedAt' ||
+      value.infrastructure.optimisticRevision !== 'requiredOnMutation' ||
+      value.infrastructure.recordIdentity !== 'canonicalUuid'
+    ) {
+      throw invalid('pinned query infrastructure is unsupported');
+    }
   }
   for (const selection of value.selections) {
     if (!isRecord(selection)) {
@@ -232,6 +357,20 @@ function assertQueryDefinition(
       throw invalid('pinned query selection has an invalid orderKey');
     }
   }
+}
+
+function unsupportedQueryResult(
+  queryId: string,
+  reason: string,
+): SemanticQueryResultEnvelope {
+  return Object.freeze({
+    kind: 'semanticQueryResult',
+    outcome: 'unsupported',
+    queryId,
+    records: Object.freeze([]),
+    schemaVersion: SEMANTIC_QUERY_RESULT_VERSION,
+    unsupportedReason: reason,
+  });
 }
 
 function assertCanonicalId(

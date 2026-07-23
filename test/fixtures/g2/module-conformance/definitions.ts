@@ -250,6 +250,18 @@ export function ordinaryModuleV2(): Record<string, unknown> {
   return definition;
 }
 
+export function ordinaryModuleV1ForNamespace(
+  targetNamespace: string,
+): Record<string, unknown> {
+  if (!/^northstar\.[a-z][a-z0-9]*$/.test(targetNamespace)) {
+    throw new TypeError('fixture namespace must be canonical and lowercase');
+  }
+  return replaceNamespace(ordinaryModuleV1(), targetNamespace) as Record<
+    string,
+    unknown
+  >;
+}
+
 export const FIXTURE_IDS = Object.freeze({
   contentCapabilityId,
   entityIds,
@@ -400,4 +412,26 @@ function assertion(local: string, queryId: string): Record<string, unknown> {
     kind: 'assertionDefinition',
     schemaVersion: version,
   };
+}
+
+function replaceNamespace(value: unknown, targetNamespace: string): unknown {
+  if (typeof value === 'string') {
+    return value === namespace
+      ? targetNamespace
+      : value.startsWith(`${namespace}:`)
+        ? `${targetNamespace}${value.slice(namespace.length)}`
+        : value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) => replaceNamespace(entry, targetNamespace));
+  }
+  if (typeof value === 'object' && value !== null) {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [
+        key,
+        replaceNamespace(entry, targetNamespace),
+      ]),
+    );
+  }
+  return value;
 }
