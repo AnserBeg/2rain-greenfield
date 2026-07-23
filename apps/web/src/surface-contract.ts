@@ -1,5 +1,10 @@
 import { assertRequestRuntimeView } from '@north-star/runtime/request-runtime-view';
 import type * as RuntimeViewContract from '@north-star/runtime/request-runtime-view';
+import type { RegisteredOperationDefinition } from '../../../packages/runtime/src/semantic-operation-gateway.js';
+import {
+  registeredQueryFromPinnedView,
+  type RegisteredQueryDefinition,
+} from '../../../packages/runtime/src/semantic-query-gateway.js';
 
 export const SURFACE_MANIFEST_PAYLOAD_VERSION =
   'northstar.surface-manifest-payload/v0-provisional' as const;
@@ -7,6 +12,9 @@ export const SURFACE_MANIFEST_PAYLOAD_VERSION =
 const archetypes = ['builder', 'home', 'list', 'record', 'task'] as const;
 const lifecycleValues = ['active', 'retired'] as const;
 const statusRoles = ['attention', 'blocked', 'inProgress', 'success'] as const;
+const surfaceRoles = ['form', 'list', 'record'] as const;
+const operationCatalogPayloadVersion =
+  'northstar.operation-catalog-payload/v0-provisional' as const;
 const slotsByArchetype = Object.freeze({
   builder: Object.freeze([
     'modeSwitch',
@@ -31,6 +39,9 @@ const slotsByArchetype = Object.freeze({
 
 export type CompiledSurfaceArchetype = (typeof archetypes)[number];
 export type CompiledSurfaceStatusRole = (typeof statusRoles)[number];
+export type CompiledSurfaceRole = (typeof surfaceRoles)[number];
+export type SurfaceOperationIntent =
+  'archive' | 'create' | 'restore' | 'update';
 
 export interface CompiledSurfaceSlot {
   readonly contentReferenceId: string;
@@ -48,6 +59,18 @@ export interface CompiledSurfaceDefinition {
   readonly slots: readonly CompiledSurfaceSlot[];
   readonly statusRoles: readonly CompiledSurfaceStatusRole[];
   readonly surfaceId: string;
+  readonly surfaceRole: CompiledSurfaceRole | null;
+}
+
+export interface CompiledSurfaceOperationBinding {
+  readonly confirmation: RegisteredOperationDefinition['confirmation'];
+  readonly intent: SurfaceOperationIntent;
+  readonly operationId: string;
+}
+
+export interface CompiledSurfaceDataBinding {
+  readonly operations: readonly CompiledSurfaceOperationBinding[];
+  readonly query: RegisteredQueryDefinition;
 }
 
 export interface CompiledSurfaceManifest {
@@ -62,6 +85,7 @@ export class SurfaceProjectionError extends Error {
   constructor(
     readonly code:
       | 'DUPLICATE_SURFACE_ID'
+      | 'INVALID_SURFACE_BINDING'
       | 'INVALID_SURFACE_MANIFEST'
       | 'INVALID_SURFACE_SLOT'
       | 'UNSUPPORTED_SURFACE_VERSION',
@@ -69,6 +93,82 @@ export class SurfaceProjectionError extends Error {
   ) {
     super(message);
   }
+}
+
+/**
+ * Resolves a surface's semantic read/write binding exclusively from the
+ * request-pinned projections. Operation IDs are never selected by browser
+ * input and physical storage metadata is not part of this contract.
+ */
+export function readCompiledSurfaceDataBinding(
+  view: RuntimeViewContract.RequestRuntimeView,
+  surface: CompiledSurfaceDefinition,
+): CompiledSurfaceDataBinding {
+  assertRequestRuntimeView(view);
+  const query = registeredQueryFromPinnedView(view, surface.dataSourceQueryId);
+  if (!query) {
+    throw invalidBinding(
+      'surface query is not registered in the pinned release',
+    );
+  }
+  const queryFieldIds = query.selections.map((selection) => selection.fieldId);
+  if (
+    queryFieldIds.length !== surface.fieldIds.length ||
+    queryFieldIds.some((fieldId, index) => fieldId !== surface.fieldIds[index])
+  ) {
+    throw invalidBinding(
+      'surface fields do not match the pinned data-source query selections',
+    );
+  }
+
+  const projection = view.projections.operation;
+  const payload = projection.payload;
+  if (
+    projection.payloadSchemaVersion !== operationCatalogPayloadVersion ||
+    !isRecord(payload) ||
+    payload.kind !== 'operationCatalogPayload' ||
+    payload.schemaVersion !== operationCatalogPayloadVersion ||
+    !Array.isArray(payload.operations)
+  ) {
+    throw invalidBinding('pinned operation catalog has an invalid envelope');
+  }
+
+  const byIntent = new Map<
+    SurfaceOperationIntent,
+    CompiledSurfaceOperationBinding
+  >();
+  for (const value of payload.operations) {
+    const operation = parseOperationBinding(value);
+    if (
+      operation.lifecycle !== 'active' ||
+      operation.tier !== 'o0' ||
+      operation.entityId !== query.sourceEntityId
+    ) {
+      continue;
+    }
+    if (byIntent.has(operation.intent)) {
+      throw invalidBinding(
+        `surface entity has more than one active O0 ${operation.intent} operation`,
+      );
+    }
+    byIntent.set(
+      operation.intent,
+      Object.freeze({
+        confirmation: operation.confirmation,
+        intent: operation.intent,
+        operationId: operation.operationId,
+      }),
+    );
+  }
+
+  return Object.freeze({
+    operations: Object.freeze(
+      [...byIntent.values()].sort((left, right) =>
+        left.intent.localeCompare(right.intent),
+      ),
+    ),
+    query,
+  });
 }
 
 /**
@@ -127,8 +227,12 @@ function parseSurface(
   if (!isRecord(value)) invalidSurface(index);
   const archetype = value.archetype;
   const lifecycle = value.lifecycle;
+  const surfaceRole = value.surfaceRole ?? null;
   if (!includes(archetypes, archetype)) invalidSurface(index);
   if (!includes(lifecycleValues, lifecycle)) invalidSurface(index);
+  if (surfaceRole !== null && !includes(surfaceRoles, surfaceRole)) {
+    invalidSurface(index);
+  }
   if (!Array.isArray(value.fieldIds) || !value.fieldIds.every(isNonBlank)) {
     invalidSurface(index);
   }
@@ -168,7 +272,65 @@ function parseSurface(
     slots: Object.freeze(slots),
     statusRoles: Object.freeze([...value.statusRoles]),
     surfaceId: value.surfaceId,
+    surfaceRole,
   });
+}
+
+function parseOperationBinding(value: unknown): {
+  readonly confirmation: RegisteredOperationDefinition['confirmation'];
+  readonly entityId: string;
+  readonly intent: SurfaceOperationIntent;
+  readonly lifecycle: RegisteredOperationDefinition['lifecycle'];
+  readonly operationId: string;
+  readonly tier: RegisteredOperationDefinition['tier'];
+} {
+  if (
+    !isRecord(value) ||
+    (value.confirmation !== 'none' && value.confirmation !== 'humanRequired') ||
+    (value.lifecycle !== 'active' && value.lifecycle !== 'retired') ||
+    (value.tier !== 'o0' && value.tier !== 'o1') ||
+    !isNonBlank(value.operationId) ||
+    !isRecord(value.effect) ||
+    !isRecord(value.effect.entity) ||
+    !isNonBlank(value.effect.entity.targetId)
+  ) {
+    throw invalidBinding(
+      'pinned operation catalog contains an invalid operation',
+    );
+  }
+  const intent = operationIntent(value.effect.kind);
+  if (!intent) {
+    throw invalidBinding(
+      'pinned operation catalog contains a destructive or unknown effect',
+    );
+  }
+  return {
+    confirmation: value.confirmation,
+    entityId: value.effect.entity.targetId,
+    intent,
+    lifecycle: value.lifecycle,
+    operationId: value.operationId,
+    tier: value.tier,
+  };
+}
+
+function operationIntent(value: unknown): SurfaceOperationIntent | null {
+  switch (value) {
+    case 'archiveRecordEffect':
+      return 'archive';
+    case 'createRecordEffect':
+      return 'create';
+    case 'restoreRecordEffect':
+      return 'restore';
+    case 'updateRecordEffect':
+      return 'update';
+    default:
+      return null;
+  }
+}
+
+function invalidBinding(message: string): SurfaceProjectionError {
+  return new SurfaceProjectionError('INVALID_SURFACE_BINDING', message);
 }
 
 function parseSlot(

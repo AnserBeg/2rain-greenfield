@@ -1,17 +1,52 @@
+import { randomUUID } from 'node:crypto';
+
 import { assertRequestRuntimeView } from '@north-star/runtime/request-runtime-view';
 import type * as RuntimeViewContract from '@north-star/runtime/request-runtime-view';
+import {
+  NoSuchRegisteredOperationError,
+  SEMANTIC_OPERATION_REQUEST_VERSION,
+  SemanticOperationPolicyDeniedError,
+} from '../../../packages/runtime/src/semantic-operation-gateway.js';
+import type { SemanticOperationGateway } from '../../../packages/runtime/src/semantic-operation-gateway.js';
+import {
+  NoSuchRegisteredQueryError,
+  SEMANTIC_QUERY_REQUEST_VERSION,
+  SemanticQueryPolicyDeniedError,
+  type SemanticQueryResultEnvelope,
+} from '../../../packages/runtime/src/semantic-query-gateway.js';
+import type { SemanticQueryGateway } from '../../../packages/runtime/src/semantic-query-gateway.js';
 
-import { renderRegisteredSurfaceComponent } from './component-registry.js';
+import {
+  renderRegisteredSurfaceComponent,
+  renderSurfaceDataComponent,
+  type SurfaceDataRenderState,
+  type SurfaceOperationFeedback,
+} from './component-registry.js';
 import { escapeHtml, shortIdentity } from './html.js';
 import {
   readCompiledSurfaceManifest,
+  readCompiledSurfaceDataBinding,
   SurfaceProjectionError,
+  type CompiledSurfaceDataBinding,
   type CompiledSurfaceDefinition,
+  type SurfaceOperationIntent,
 } from './surface-contract.js';
 
 export interface SurfaceRuntimeResponse {
   readonly html: string;
   readonly statusCode: number;
+}
+
+export interface SurfaceRuntimeGateways {
+  readonly operationGateway: SemanticOperationGateway;
+  readonly queryGateway: SemanticQueryGateway;
+}
+
+export type SurfaceRuntimeSubmission = Readonly<Record<string, string>>;
+
+interface SelectedSurface {
+  readonly selected: CompiledSurfaceDefinition;
+  readonly surfaces: readonly CompiledSurfaceDefinition[];
 }
 
 /**
@@ -23,7 +58,193 @@ export function renderSurfaceRuntime(
   requestUrl: string,
 ): SurfaceRuntimeResponse {
   assertRequestRuntimeView(view);
+  const selection = selectSurface(view, requestUrl);
+  if ('statusCode' in selection) return selection;
+  return renderSelectedSurface(
+    view,
+    selection,
+    { status: 'UNBOUND' },
+    null,
+    [],
+  );
+}
 
+/** Loads live DTOs through the semantic read gateway for one pinned surface. */
+export async function renderSurfaceRuntimeWithData(
+  view: RuntimeViewContract.RequestRuntimeView,
+  requestUrl: string,
+  gateways: SurfaceRuntimeGateways,
+  feedback: SurfaceOperationFeedback | null = null,
+): Promise<SurfaceRuntimeResponse> {
+  assertRequestRuntimeView(view);
+  const selection = selectSurface(view, requestUrl);
+  if ('statusCode' in selection) return selection;
+  let binding: CompiledSurfaceDataBinding;
+  try {
+    binding = readCompiledSurfaceDataBinding(view, selection.selected);
+  } catch {
+    return renderSelectedSurface(
+      view,
+      selection,
+      { code: 'QUERY_UNSUPPORTED', status: 'DIAGNOSTIC' },
+      feedback,
+      [],
+      422,
+    );
+  }
+
+  const url = new URL(requestUrl, 'http://surface-runtime.local');
+  const queryArguments = argumentsForSurface(binding, url);
+  if (queryArguments === null) {
+    const state: SurfaceDataRenderState =
+      selection.selected.surfaceRole === 'form'
+        ? { status: 'EMPTY' }
+        : { code: 'QUERY_NOT_FOUND', status: 'DIAGNOSTIC' };
+    return renderSelectedSurface(
+      view,
+      selection,
+      state,
+      feedback,
+      binding.operations,
+    );
+  }
+
+  let data: SurfaceDataRenderState;
+  try {
+    const result = await gateways.queryGateway.invoke(view, {
+      arguments: queryArguments,
+      queryId: selection.selected.dataSourceQueryId,
+      schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+    });
+    data = dataState(result);
+  } catch (error) {
+    data = {
+      code:
+        error instanceof SemanticQueryPolicyDeniedError
+          ? 'QUERY_PERMISSION_DENIED'
+          : error instanceof NoSuchRegisteredQueryError
+            ? 'QUERY_UNSUPPORTED'
+            : 'QUERY_UNAVAILABLE',
+      status: 'DIAGNOSTIC',
+    };
+  }
+  return renderSelectedSurface(
+    view,
+    selection,
+    data,
+    feedback,
+    binding.operations,
+  );
+}
+
+/** Resolves a browser intent to a pinned O0 binding; no operation ID is accepted. */
+export async function submitSurfaceRuntimeIntent(
+  view: RuntimeViewContract.RequestRuntimeView,
+  requestUrl: string,
+  submission: SurfaceRuntimeSubmission,
+  gateways: SurfaceRuntimeGateways,
+): Promise<SurfaceRuntimeResponse> {
+  assertRequestRuntimeView(view);
+  const selection = selectSurface(view, requestUrl);
+  if ('statusCode' in selection) return selection;
+  let binding: CompiledSurfaceDataBinding;
+  try {
+    binding = readCompiledSurfaceDataBinding(view, selection.selected);
+  } catch {
+    return operationDiagnostic('OPERATION_UNSUPPORTED', 422);
+  }
+  const intent = operationIntent(submission.intent);
+  const operation = intent
+    ? binding.operations.find((candidate) => candidate.intent === intent)
+    : undefined;
+  if (
+    !intent ||
+    !operation ||
+    !surfaceAllowsIntent(selection.selected, intent)
+  ) {
+    return operationDiagnostic('OPERATION_UNSUPPORTED', 422);
+  }
+  if (
+    operation.confirmation === 'humanRequired' &&
+    submission.confirmed !== 'yes'
+  ) {
+    return operationDiagnostic('OPERATION_CONFIRMATION_REQUIRED', 422);
+  }
+
+  let result;
+  try {
+    result = await gateways.operationGateway.invoke(view, {
+      input: operationInput(selection.selected, intent, submission),
+      operationId: operation.operationId,
+      schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
+    });
+  } catch (error) {
+    return operationDiagnostic(
+      error instanceof SemanticOperationPolicyDeniedError
+        ? 'OPERATION_PERMISSION_DENIED'
+        : error instanceof NoSuchRegisteredOperationError
+          ? 'OPERATION_UNSUPPORTED'
+          : 'OPERATION_UNAVAILABLE',
+      error instanceof SemanticOperationPolicyDeniedError ? 403 : 422,
+    );
+  }
+  if (result.outcome !== 'succeeded' || !result.readBack) {
+    return operationDiagnostic('OPERATION_UNSUPPORTED', 422);
+  }
+
+  const reflectedUrl = new URL(requestUrl, 'http://surface-runtime.local');
+  reflectedUrl.searchParams.set('record', result.readBack.recordId);
+  if (result.readBack.archived)
+    reflectedUrl.searchParams.set('archived', 'yes');
+  return renderSurfaceRuntimeWithData(view, reflectedUrl.href, gateways, {
+    intent,
+    record: result.readBack,
+    trustLinked: result.trust !== null,
+  });
+}
+
+function renderSelectedSurface(
+  view: RuntimeViewContract.RequestRuntimeView,
+  { selected, surfaces }: SelectedSurface,
+  data: SurfaceDataRenderState,
+  feedback: SurfaceOperationFeedback | null,
+  operations: CompiledSurfaceDataBinding['operations'],
+  statusCode = 200,
+): SurfaceRuntimeResponse {
+  const renderedSlots = selected.slots.map((slot) =>
+    renderRegisteredSurfaceComponent({ slot, surface: selected, view }),
+  );
+  const renderedData = renderSurfaceDataComponent({
+    data,
+    feedback,
+    operations,
+    surface: selected,
+  });
+  const body = `<header class="surface-heading">
+      <div>
+        <p class="eyebrow">${escapeHtml(selected.archetype)} surface · compiled release</p>
+        <h1>${escapeHtml(selected.label)}</h1>
+        <p class="surface-id">${escapeHtml(selected.surfaceId)}</p>
+      </div>
+      <div class="surface-status" aria-label="Surface status roles">
+        ${selected.statusRoles.map((role) => `<span data-status-role="${escapeHtml(role)}">${escapeHtml(role)}</span>`).join('')}
+      </div>
+    </header>
+    <div class="surface-grid" data-surface-archetype="${escapeHtml(selected.archetype)}">
+      ${renderedSlots.map((result) => result.html).join('')}
+      ${renderedData}
+    </div>`;
+
+  return Object.freeze({
+    html: shellDocument(view, surfaces, selected, body),
+    statusCode,
+  });
+}
+
+function selectSurface(
+  view: RuntimeViewContract.RequestRuntimeView,
+  requestUrl: string,
+): SelectedSurface | SurfaceRuntimeResponse {
   let surfaces: readonly CompiledSurfaceDefinition[];
   try {
     surfaces = readCompiledSurfaceManifest(view).surfaces.filter(
@@ -44,7 +265,6 @@ export function renderSurfaceRuntime(
       statusCode: 422,
     });
   }
-
   if (surfaces.length === 0) {
     return Object.freeze({
       html: diagnosticDocument(
@@ -56,7 +276,6 @@ export function renderSurfaceRuntime(
       statusCode: 422,
     });
   }
-
   const requestedSurfaceId = new URL(
     requestUrl,
     'http://surface-runtime.local',
@@ -64,7 +283,6 @@ export function renderSurfaceRuntime(
   const selected = requestedSurfaceId
     ? surfaces.find((surface) => surface.surfaceId === requestedSurfaceId)
     : surfaces[0];
-
   if (!selected) {
     return Object.freeze({
       html: shellDocument(
@@ -79,28 +297,130 @@ export function renderSurfaceRuntime(
       statusCode: 404,
     });
   }
+  return { selected, surfaces };
+}
 
-  const renderedSlots = selected.slots.map((slot) =>
-    renderRegisteredSurfaceComponent({ slot, surface: selected, view }),
+function argumentsForSurface(
+  binding: CompiledSurfaceDataBinding,
+  url: URL,
+): Record<string, boolean | number | string> | null {
+  const includeArchived = url.searchParams.get('archived') === 'yes';
+  switch (binding.query.queryType) {
+    case 'get': {
+      const recordId = url.searchParams.get('record');
+      return recordId ? { includeArchived, recordId } : null;
+    }
+    case 'list':
+      return { includeArchived, limit: binding.query.maximumResultCount };
+    case 'resolve':
+    case 'search': {
+      const text = url.searchParams.get('q');
+      return text
+        ? {
+            includeArchived,
+            limit: binding.query.maximumResultCount,
+            text,
+          }
+        : null;
+    }
+  }
+}
+
+function dataState(
+  result: SemanticQueryResultEnvelope,
+): SurfaceDataRenderState {
+  switch (result.outcome) {
+    case 'exact':
+      return result.records.length === 0
+        ? { status: 'EMPTY' }
+        : { records: result.records, status: 'READY' };
+    case 'ambiguous':
+      return { code: 'QUERY_AMBIGUOUS', status: 'DIAGNOSTIC' };
+    case 'not-found':
+      return { code: 'QUERY_NOT_FOUND', status: 'DIAGNOSTIC' };
+    case 'unsupported':
+      return { code: 'QUERY_UNSUPPORTED', status: 'DIAGNOSTIC' };
+  }
+}
+
+function operationInput(
+  surface: CompiledSurfaceDefinition,
+  intent: SurfaceOperationIntent,
+  submission: SurfaceRuntimeSubmission,
+): Record<string, number | string | Readonly<Record<string, string>>> {
+  const values = Object.freeze(
+    Object.fromEntries(
+      surface.fieldIds
+        .map((fieldId) => [fieldId, submission[`value:${fieldId}`]] as const)
+        .filter(
+          (entry): entry is readonly [string, string] =>
+            typeof entry[1] === 'string',
+        ),
+    ),
   );
-  const body = `<header class="surface-heading">
-      <div>
-        <p class="eyebrow">${escapeHtml(selected.archetype)} surface · compiled release</p>
-        <h1>${escapeHtml(selected.label)}</h1>
-        <p class="surface-id">${escapeHtml(selected.surfaceId)}</p>
-      </div>
-      <div class="surface-status" aria-label="Surface status roles">
-        ${selected.statusRoles.map((role) => `<span data-status-role="${escapeHtml(role)}">${escapeHtml(role)}</span>`).join('')}
-      </div>
-    </header>
-    <div class="surface-grid" data-surface-archetype="${escapeHtml(selected.archetype)}">
-      ${renderedSlots.map((result) => result.html).join('')}
-    </div>`;
+  if (intent === 'create') {
+    return { recordId: randomUUID(), values };
+  }
+  const recordId = submission.recordId ?? '';
+  const expectedRevision = Number.parseInt(
+    submission.expectedRevision ?? '',
+    10,
+  );
+  return intent === 'update'
+    ? { expectedRevision, patch: values, recordId }
+    : { expectedRevision, recordId };
+}
 
-  return Object.freeze({
-    html: shellDocument(view, surfaces, selected, body),
-    statusCode: 200,
-  });
+function operationIntent(
+  value: string | undefined,
+): SurfaceOperationIntent | null {
+  return value === 'archive' ||
+    value === 'create' ||
+    value === 'restore' ||
+    value === 'update'
+    ? value
+    : null;
+}
+
+function surfaceAllowsIntent(
+  surface: CompiledSurfaceDefinition,
+  intent: SurfaceOperationIntent,
+): boolean {
+  return surface.surfaceRole === 'form'
+    ? intent === 'create' || intent === 'update'
+    : surface.surfaceRole === 'record'
+      ? intent === 'archive' || intent === 'restore'
+      : false;
+}
+
+function operationDiagnostic(
+  code:
+    | 'OPERATION_CONFIRMATION_REQUIRED'
+    | 'OPERATION_PERMISSION_DENIED'
+    | 'OPERATION_UNAVAILABLE'
+    | 'OPERATION_UNSUPPORTED',
+  statusCode: number,
+): SurfaceRuntimeResponse {
+  const copy = {
+    OPERATION_CONFIRMATION_REQUIRED: [
+      'Confirmation required',
+      'This semantic operation requires explicit human confirmation.',
+    ],
+    OPERATION_PERMISSION_DENIED: [
+      'Access denied',
+      'Current policy does not allow this operation.',
+    ],
+    OPERATION_UNAVAILABLE: [
+      'Save unavailable',
+      'The semantic operation could not be completed safely.',
+    ],
+    OPERATION_UNSUPPORTED: [
+      'Operation unavailable',
+      'The pinned release does not provide this semantic operation.',
+    ],
+  } as const;
+  const [title, message] = copy[code];
+  return renderApplicationDiagnostic(statusCode, title, message, code);
 }
 
 export function renderApplicationDiagnostic(
@@ -178,6 +498,7 @@ function navigationItem(
 const styles = `
 :root{--ink:#17221d;--muted:#66736c;--line:#dce4df;--paper:#f6f8f5;--panel:#fff;--forest:#183d2f;--mint:#dff2e7;--lime:#b8dc74;--amber:#d88b2e;--danger:#ad3f35;--shadow:0 18px 55px rgba(24,61,47,.09);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--ink);background:var(--paper)}
 *{box-sizing:border-box}body{margin:0;min-width:320px;background:radial-gradient(circle at 80% 0,rgba(184,220,116,.16),transparent 30rem),var(--paper);font-size:15px}.skip-link{position:fixed;left:1rem;top:-5rem;z-index:5;background:var(--forest);color:white;padding:.7rem 1rem;border-radius:.6rem}.skip-link:focus{top:1rem}.app-shell{min-height:100vh;display:grid;grid-template-columns:17.5rem minmax(0,1fr)}.sidebar{position:sticky;top:0;height:100vh;display:flex;flex-direction:column;padding:1.5rem 1.2rem;background:linear-gradient(165deg,#173b2e 0%,#102a21 100%);color:#f6fff9}.brand{display:flex;gap:.8rem;align-items:center;padding:.2rem .55rem 1.8rem}.brand__mark{display:grid;place-items:center;width:2.3rem;height:2.3rem;border-radius:.75rem;background:var(--lime);color:#15382b;font-size:1.3rem;font-weight:800;box-shadow:inset 0 0 0 1px rgba(255,255,255,.45)}.brand strong,.brand small{display:block}.brand strong{font-size:1.15rem;letter-spacing:.01em}.brand small{margin-top:.1rem;color:#a9c2b6;font-size:.72rem}.nav-label{padding:0 .7rem;color:#88a599;font-size:.65rem;font-weight:800;letter-spacing:.14em;text-transform:uppercase}.sidebar ul{display:grid;gap:.32rem;padding:0;margin:.55rem 0;list-style:none}.sidebar a{display:grid;grid-template-columns:2rem 1fr auto;gap:.6rem;align-items:center;min-height:2.8rem;padding:.42rem .65rem;border:1px solid transparent;border-radius:.8rem;color:#cfe0d8;text-decoration:none;font-weight:650}.sidebar a:hover{background:rgba(255,255,255,.07);color:white}.sidebar a:focus-visible{outline:3px solid var(--lime);outline-offset:2px}.sidebar a[aria-current=page]{background:#f7fbf8;color:var(--forest);box-shadow:0 9px 24px rgba(4,18,12,.25)}.nav-icon{display:grid;place-items:center;width:1.9rem;height:1.9rem;border-radius:.55rem;background:rgba(255,255,255,.09);font-size:.72rem;font-weight:800}.sidebar a[aria-current=page] .nav-icon{background:var(--mint)}.nav-arrow{font-size:1.4rem;opacity:.55}.release-card{display:flex;gap:.7rem;align-items:flex-start;margin-top:auto;padding:1rem;border:1px solid rgba(255,255,255,.1);border-radius:.9rem;background:rgba(255,255,255,.045)}.release-card__pulse{width:.52rem;height:.52rem;margin-top:.28rem;border-radius:50%;background:var(--lime);box-shadow:0 0 0 .3rem rgba(184,220,116,.12)}.release-card small,.release-card strong,.release-card span{display:block}.release-card small{color:#9bb3a8;font-size:.67rem;text-transform:uppercase;letter-spacing:.08em}.release-card strong{margin:.22rem 0;color:white;font-family:ui-monospace,monospace;font-size:.72rem}.release-card span{color:#aec2b8;font-size:.72rem}.workspace{min-width:0}.topbar{height:4.5rem;display:flex;align-items:center;justify-content:space-between;padding:0 clamp(1.2rem,3vw,3rem);border-bottom:1px solid var(--line);background:rgba(246,248,245,.84);backdrop-filter:blur(14px);color:var(--muted)}.topbar__context{color:var(--ink);font-weight:700}.topbar__divider{padding:0 .5rem;color:#aab5af}.principal{display:flex;align-items:center;gap:.65rem}.principal__avatar{display:grid;place-items:center;width:2rem;height:2rem;border-radius:50%;background:var(--mint);color:var(--forest);font-size:.67rem;font-weight:800}.principal small,.principal strong{display:block}.principal small{font-size:.62rem;color:var(--muted)}.principal strong{font-size:.74rem;color:var(--ink);font-family:ui-monospace,monospace}main{width:min(82rem,100%);margin:0 auto;padding:clamp(2rem,5vw,4.5rem) clamp(1.2rem,4vw,4rem) 5rem}.surface-heading{display:flex;align-items:flex-end;justify-content:space-between;gap:2rem;margin-bottom:2rem}.eyebrow{margin:0 0 .6rem;color:#587267;font-size:.68rem;font-weight:800;letter-spacing:.14em;text-transform:uppercase}.surface-heading h1,.standalone h1{margin:0;font-family:Georgia,"Times New Roman",serif;font-size:clamp(2.6rem,5vw,4.8rem);font-weight:500;line-height:.95;letter-spacing:-.04em}.surface-id{margin:.8rem 0 0;color:var(--muted);font-family:ui-monospace,monospace;font-size:.72rem}.surface-status{display:flex;gap:.45rem;flex-wrap:wrap;justify-content:flex-end}.surface-status span,.status-pill{padding:.4rem .65rem;border:1px solid #cbd8d1;border-radius:999px;background:rgba(255,255,255,.7);color:#52655c;font-size:.68rem;font-weight:750}.surface-status [data-status-role=success]{border-color:#a7d3b8;background:#e8f6ed;color:#246240}.surface-status [data-status-role=attention]{border-color:#efc98c;background:#fff7e8;color:#8a5918}.surface-status [data-status-role=blocked]{border-color:#e3aaa4;background:#fff0ee;color:#8f3028}.surface-status [data-status-role=inProgress]{border-color:#abc8d8;background:#edf7fc;color:#2d607d}.surface-grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:1.2rem}.panel,.diagnostic{grid-column:span 12;border:1px solid var(--line);border-radius:1.25rem;background:rgba(255,255,255,.92);box-shadow:var(--shadow)}.panel{padding:clamp(1.3rem,3vw,2rem)}.panel--hero{position:relative;overflow:hidden;background:linear-gradient(135deg,#fff 20%,#f1f8ed 100%)}.panel__accent{position:absolute;right:1.4rem;top:1.2rem;display:grid;place-items:center;width:3rem;height:3rem;border-radius:1rem;background:var(--forest);color:var(--lime);font-size:1.45rem}.panel h2,.diagnostic h2{max-width:43rem;margin:.2rem 0 .75rem;font-family:Georgia,"Times New Roman",serif;font-size:clamp(1.65rem,3vw,2.5rem);font-weight:500;letter-spacing:-.025em}.lede{max-width:45rem;color:#55665e;font-size:1.02rem;line-height:1.7}.fact-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:.75rem;margin:2rem 0 0}.fact-grid div{padding:1rem;border:1px solid #e1e8e3;border-radius:.85rem;background:rgba(255,255,255,.68)}.fact-grid dt{color:var(--muted);font-size:.64rem;font-weight:800;text-transform:uppercase;letter-spacing:.1em}.fact-grid dd{margin:.35rem 0 0;font-family:ui-monospace,monospace;font-size:.76rem;font-weight:700}.panel__heading{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem}.panel__heading h2{margin:0}.checklist{display:grid;gap:.75rem;padding:0;margin:1.7rem 0 0;list-style:none}.checklist li{display:grid;grid-template-columns:2.2rem 1fr;gap:.8rem;align-items:start;padding:1rem 0;border-top:1px solid #e8ede9}.checklist li>span{display:grid;place-items:center;width:2rem;height:2rem;border-radius:.6rem;background:var(--mint);color:var(--forest);font-size:.65rem;font-weight:800}.checklist strong{font-size:.88rem}.checklist p{margin:.25rem 0 0;color:var(--muted);line-height:1.5}.diagnostic{display:flex;gap:1rem;align-items:flex-start;padding:1.5rem;border-color:#ebc8a2;background:#fffaf4}.diagnostic__mark{flex:0 0 auto;display:grid;place-items:center;width:2.5rem;height:2.5rem;border-radius:.8rem;background:#f6d7b3;color:#7f4810;font-size:1.2rem;font-weight:900}.diagnostic h2{font-size:1.65rem}.diagnostic p{color:#685b4e;line-height:1.55}.diagnostic code,.standalone code{display:inline-block;padding:.3rem .5rem;border-radius:.4rem;background:#f4e7d9;color:#734714;font-size:.7rem}.diagnostic--page h1{margin:.2rem 0 .7rem;font-family:Georgia,"Times New Roman",serif;font-size:2.5rem;font-weight:500}.standalone{min-height:100vh;display:grid;place-items:center;padding:1.5rem;background:radial-gradient(circle at 20% 10%,var(--mint),transparent 28rem),var(--paper)}.standalone__card{width:min(42rem,100%);padding:clamp(2rem,6vw,4rem);border:1px solid var(--line);border-radius:1.4rem;background:white;box-shadow:var(--shadow)}.standalone__card>p{color:var(--muted);line-height:1.65}.diagnostic-release{margin-top:2rem;font-family:ui-monospace,monospace;font-size:.75rem}
-@media(max-width:800px){.app-shell{display:block}.sidebar{position:static;width:100%;height:auto;padding:1rem}.brand{padding-bottom:.8rem}.sidebar nav ul{display:flex;overflow-x:auto}.sidebar nav li{flex:0 0 auto}.sidebar a{grid-template-columns:1.8rem auto}.nav-arrow,.release-card,.nav-label{display:none}.topbar{height:auto;min-height:4rem;gap:1rem}.surface-heading{align-items:flex-start;flex-direction:column}.surface-status{justify-content:flex-start}.fact-grid{grid-template-columns:1fr}.principal strong{max-width:9rem;overflow:hidden;text-overflow:ellipsis}.surface-heading h1{font-size:2.8rem}}
+.data-panel,.data-empty,.operation-feedback{grid-column:span 12}.data-table-wrap{margin-top:1.4rem;overflow-x:auto}.data-table-wrap table{width:100%;border-collapse:collapse;text-align:left}.data-table-wrap th,.data-table-wrap td{padding:.85rem .75rem;border-bottom:1px solid var(--line);vertical-align:top}.data-table-wrap th{color:var(--muted);font-size:.68rem;text-transform:uppercase;letter-spacing:.08em}.data-table-wrap code{font-size:.72rem}.record-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.8rem;margin:1.5rem 0}.record-fields div{padding:1rem;border:1px solid var(--line);border-radius:.8rem}.record-fields dt,.form-fields span{color:var(--muted);font-size:.7rem;font-weight:800;text-transform:uppercase;letter-spacing:.07em}.record-fields dd{margin:.45rem 0 0}.form-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem;margin:1.5rem 0}.form-fields label{display:grid;gap:.45rem}.form-fields input{width:100%;min-height:2.75rem;padding:.7rem .8rem;border:1px solid #bccbc3;border-radius:.65rem;background:white;color:var(--ink);font:inherit}.form-fields input:focus-visible,button:focus-visible{outline:3px solid var(--lime);outline-offset:2px}button{min-height:2.75rem;padding:.7rem 1rem;border:0;border-radius:.65rem;background:var(--forest);color:white;font:inherit;font-weight:750;cursor:pointer}.lifecycle-action{margin-top:1.25rem}.operation-feedback{padding:1rem 1.2rem;border:1px solid #a7d3b8;border-radius:.9rem;background:#e8f6ed;color:#246240}.operation-feedback strong{margin-right:.35rem}.muted{color:var(--muted)}
+@media(max-width:800px){.app-shell{display:block}.sidebar{position:static;width:100%;height:auto;padding:1rem}.brand{padding-bottom:.8rem}.sidebar nav ul{display:flex;overflow-x:auto}.sidebar nav li{flex:0 0 auto}.sidebar a{grid-template-columns:1.8rem auto}.nav-arrow,.release-card,.nav-label{display:none}.topbar{height:auto;min-height:4rem;gap:1rem}.surface-heading{align-items:flex-start;flex-direction:column}.surface-status{justify-content:flex-start}.fact-grid,.record-fields,.form-fields{grid-template-columns:1fr}.principal strong{max-width:9rem;overflow:hidden;text-overflow:ellipsis}.surface-heading h1{font-size:2.8rem}}
 @media(prefers-reduced-motion:no-preference){.sidebar a,.panel{transition:transform .18s ease,background .18s ease,box-shadow .18s ease}.panel:hover{transform:translateY(-2px);box-shadow:0 22px 60px rgba(24,61,47,.12)}}
 `;

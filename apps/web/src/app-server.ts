@@ -10,37 +10,44 @@ import type { AuthenticatedRequestRuntimeEntryAdapter } from '@north-star/runtim
 import {
   renderApplicationDiagnostic,
   renderSurfaceRuntime,
+  renderSurfaceRuntimeWithData,
+  submitSurfaceRuntimeIntent,
+  type SurfaceRuntimeGateways,
   type SurfaceRuntimeResponse,
 } from './surface-runtime.js';
 
 /** HTTP composition owns transport only; the issued view owns definition. */
 export function createSurfaceRuntimeServer(
   entry: AuthenticatedRequestRuntimeEntryAdapter,
+  gateways?: SurfaceRuntimeGateways,
 ): Server {
   return createServer((request, response) => {
-    void handleRequest(entry, request, response);
+    void handleRequest(entry, gateways, request, response);
   });
 }
 
 async function handleRequest(
   entry: AuthenticatedRequestRuntimeEntryAdapter,
+  gateways: SurfaceRuntimeGateways | undefined,
   request: IncomingMessage,
   response: ServerResponse,
 ): Promise<void> {
   response.setHeader('cache-control', 'no-store');
   response.setHeader(
     'content-security-policy',
-    "default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    `default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action ${gateways ? "'self'" : "'none'"}; frame-ancestors 'none'`,
   );
   response.setHeader('x-content-type-options', 'nosniff');
 
-  if (request.method !== 'GET') {
+  if (request.method !== 'GET' && (request.method !== 'POST' || !gateways)) {
     writeHtml(
       response,
       renderApplicationDiagnostic(
         405,
         'Method not allowed',
-        'The SurfaceRuntime shell accepts browser reads only.',
+        gateways
+          ? 'The SurfaceRuntime accepts semantic reads and form intents only.'
+          : 'The SurfaceRuntime shell accepts browser reads only.',
         'METHOD_NOT_ALLOWED',
       ),
     );
@@ -62,9 +69,17 @@ async function handleRequest(
   }
 
   try {
-    const result = await entry.run({ headers: request.headers }, (view) =>
-      renderSurfaceRuntime(view, url.href),
-    );
+    const submission =
+      request.method === 'POST' ? await readFormSubmission(request) : null;
+    const result = gateways
+      ? await entry.run({ headers: request.headers }, (view) =>
+          submission
+            ? submitSurfaceRuntimeIntent(view, url.href, submission, gateways)
+            : renderSurfaceRuntimeWithData(view, url.href, gateways),
+        )
+      : await entry.run({ headers: request.headers }, (view) =>
+          renderSurfaceRuntime(view, url.href),
+        );
     writeHtml(response, result);
   } catch (error) {
     if (error instanceof AuthenticationRequiredError) {
@@ -101,6 +116,32 @@ async function handleRequest(
       ),
     );
   }
+}
+
+async function readFormSubmission(
+  request: IncomingMessage,
+): Promise<Readonly<Record<string, string>>> {
+  if (
+    !String(request.headers['content-type'] ?? '').startsWith(
+      'application/x-www-form-urlencoded',
+    )
+  ) {
+    return Object.freeze({});
+  }
+  const chunks: Buffer[] = [];
+  let bytes = 0;
+  for await (const chunk of request) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    bytes += buffer.byteLength;
+    if (bytes > 64 * 1024) return Object.freeze({});
+    chunks.push(buffer);
+  }
+  const values = new URLSearchParams(Buffer.concat(chunks).toString('utf8'));
+  return Object.freeze(
+    Object.fromEntries(
+      [...values.entries()].filter(([key]) => !Object.hasOwn({}, key)),
+    ),
+  );
 }
 
 function writeHtml(
