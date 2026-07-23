@@ -11,15 +11,19 @@ import {
   ACTIVATION_RECONCILIATION_START_VERSION,
   ACTIVATION_SWAP_RECEIPT_VERSION,
   ACTIVATION_VERIFICATION_RECEIPT_VERSION,
+  ACTIVATION_VERIFICATION_RECEIPT_V2_VERSION,
   APPROVAL_EXPIRY_SKEW_MARGIN_MILLISECONDS,
   COMPILER_TRANSITION_FACTS_VERSION,
   EXECUTOR_APPLIED_STATE_EVIDENCE_VERSION,
+  EXECUTOR_APPLIED_STATE_EVIDENCE_V2_VERSION,
   RECONCILIATION_MAX_AGE_MILLISECONDS,
   RELEASE_ACTIVATION_CONTROL_POLICY_VERSION,
   RELEASE_EXECUTOR_AUTHORITY_POLICY_VERSION,
   ROLLOUT_CONTROL_POLICY_VERSION,
   SYSTEM_EXECUTION_PRINCIPAL,
   TRANSITION_COMPATIBILITY_POLICY_VERSION,
+  TRANSITION_COMPATIBILITY_POLICY_V2_VERSION,
+  TRANSITION_PREPARATION_RECEIPT_V2_VERSION,
   type ActivateReleaseCommand,
   type ActivationKernelResult,
   type CancelReleaseActivationCommand,
@@ -72,6 +76,7 @@ interface AttemptRecordRow {
   expected_release_id: MintedUuid | null;
   initiating_human_id: string;
   issuing_actor_id: string;
+  module_transition: boolean;
   preparation_id: MintedUuid;
   readiness_valid: boolean;
   rollout_id: MintedUuid | null;
@@ -335,7 +340,9 @@ export class PostgresReleaseActivationService {
           );
           const status = !pointerIsGeneration
             ? 'SUPERSEDED'
-            : verification.artifactsAvailable && verification.invariantsPassed
+            : verification.artifactsAvailable &&
+                verification.invariantsPassed &&
+                verification.moduleSchemaConformancePassed
               ? 'SWAPPED_VERIFIED'
               : 'SWAPPED_VERIFICATION_FAILED';
 
@@ -352,12 +359,13 @@ export class PostgresReleaseActivationService {
                pointer_read_back_passed,
                artifact_availability_passed,
                release_kernel_invariants_passed,
+               module_schema_conformance_passed,
                warning_count,
                status,
                recorded_at
              ) VALUES (
                $1, $2, $3, $4, $5, $6, $7, $8,
-               $9, $10, $11, 0, $12, clock_timestamp()
+               $9, $10, $11, $12, 0, $13, clock_timestamp()
              )
              RETURNING pointer_id, activated_release_id, fence, status`,
             [
@@ -365,13 +373,18 @@ export class PostgresReleaseActivationService {
               context.environmentId,
               command.activationAttemptId,
               randomUUID(),
-              ACTIVATION_VERIFICATION_RECEIPT_VERSION,
+              record.module_transition
+                ? ACTIVATION_VERIFICATION_RECEIPT_V2_VERSION
+                : ACTIVATION_VERIFICATION_RECEIPT_VERSION,
               receipt.pointer_id,
               receipt.activated_release_id,
               receipt.fence,
               pointerIsGeneration,
               verification.artifactsAvailable,
               verification.invariantsPassed,
+              record.module_transition
+                ? verification.moduleSchemaConformancePassed
+                : null,
               status,
             ],
           );
@@ -1102,6 +1115,7 @@ async function loadAttemptRecord(
             approval.compiler_attestation_digest,
             approval.authority_policy_version,
             approval.expires_at,
+            receipt.receipt_version = $7 AS module_transition,
             (
               approval.preparation_id = preparation.preparation_id
               AND approval.target_release_id = preparation.target_release_id
@@ -1164,7 +1178,7 @@ async function loadAttemptRecord(
               AND approval.verification_evidence_id =
                     target.verification_evidence_id
             ) AS binding_valid,
-            (
+            ((
               receipt.receipt_version =
                 'northstar.transition-preparation-receipt/v1'
               AND receipt.compiler_facts_version = $4
@@ -1177,7 +1191,35 @@ async function loadAttemptRecord(
               AND receipt.compatibility_policy_version = $6
               AND receipt.compatibility_policy_verdict = 'ALLOW'
               AND receipt.recovery_mode = 'NO_STORAGE_RECOVERY_REQUIRED'
-            ) AS readiness_valid,
+            ) OR (
+              receipt.receipt_version = $7
+              AND receipt.compiler_facts_version = $4
+              AND receipt.compiler_transition_class = 'REVERSIBLE'
+              AND receipt.compiler_static_compatibility = 'SATISFIED'
+              AND receipt.compiler_exact_pair
+              AND receipt.executor_evidence_version = $8
+              AND receipt.executor_applied_state = 'APPLIED'
+              AND receipt.executor_schema_state = 'APPLIED'
+              AND receipt.executor_data_state IN (
+                'PENDING_IN_ATTEMPT', 'APPLIED', 'NOT_REQUIRED'
+              )
+              AND receipt.executor_exact_pair
+              AND receipt.compatibility_policy_version = $9
+              AND receipt.compatibility_policy_verdict = 'ALLOW'
+              AND receipt.recovery_mode = 'REVERSIBLE'
+              AND receipt.generation_id = generation.generation_id
+              AND approval.transition_plan_digest = generation.transition_plan_digest
+              AND generation.state = 'READY_TO_SWAP'
+              AND ready.receipt_state = 'READY_TO_SWAP'
+              AND ready.catalog_verified
+              AND ready.source_release_id = approval.expected_release_id
+              AND ready.source_manifest_root = approval.source_manifest_root
+              AND ready.target_release_id = approval.target_release_id
+              AND ready.target_manifest_root = approval.target_manifest_root
+              AND ready.prepared_subset_digest = receipt.prepared_subset_digest
+              AND ready.remaining_plan_digest = receipt.remaining_plan_digest
+              AND ready.recorded_at >= approval.decided_at
+            )) AS readiness_valid,
             (
               SELECT count(*)
                 FROM platform.read_tenant_release_artifacts(
@@ -1202,6 +1244,19 @@ async function loadAttemptRecord(
          ON target.tenant_id = approval.tenant_id
         AND target.environment_id = approval.environment_id
         AND target.release_id = approval.target_release_id
+       LEFT JOIN north_star_internal.module_storage_generations AS generation
+         ON generation.tenant_id = receipt.tenant_id
+        AND generation.environment_id = receipt.environment_id
+        AND generation.generation_id = receipt.generation_id
+       LEFT JOIN LATERAL (
+         SELECT catalog.*
+           FROM north_star_internal.module_storage_catalog_receipts AS catalog
+          WHERE catalog.tenant_id = receipt.tenant_id
+            AND catalog.environment_id = receipt.environment_id
+            AND catalog.generation_id = receipt.generation_id
+          ORDER BY catalog.recorded_at DESC, catalog.receipt_id DESC
+          LIMIT 1
+       ) AS ready ON true
       WHERE attempt.tenant_id = $1
         AND attempt.environment_id = $2
         AND attempt.activation_attempt_id = $3`,
@@ -1212,6 +1267,9 @@ async function loadAttemptRecord(
       COMPILER_TRANSITION_FACTS_VERSION,
       EXECUTOR_APPLIED_STATE_EVIDENCE_VERSION,
       TRANSITION_COMPATIBILITY_POLICY_VERSION,
+      TRANSITION_PREPARATION_RECEIPT_V2_VERSION,
+      EXECUTOR_APPLIED_STATE_EVIDENCE_V2_VERSION,
+      TRANSITION_COMPATIBILITY_POLICY_V2_VERSION,
     ],
   );
   return requiredRow(
@@ -1436,10 +1494,15 @@ async function loadVerificationFacts(
   client: PoolClient,
   receipt: SwapReceiptRow,
   record: AttemptRecordRow,
-): Promise<{ artifactsAvailable: boolean; invariantsPassed: boolean }> {
+): Promise<{
+  artifactsAvailable: boolean;
+  invariantsPassed: boolean;
+  moduleSchemaConformancePassed: boolean;
+}> {
   const result = await client.query<{
     artifacts_available: boolean;
     invariants_passed: boolean;
+    module_schema_conformance_passed: boolean;
   }>(
     `SELECT EXISTS (
               SELECT 1
@@ -1456,7 +1519,31 @@ async function loadVerificationFacts(
                        encode($3::bytea, 'hex')
             )
             AND $4::uuid = $5::uuid
-            AND $6::bigint > 0 AS invariants_passed`,
+            AND $6::bigint > 0 AS invariants_passed,
+            CASE WHEN NOT $7::boolean THEN true ELSE EXISTS (
+              SELECT 1
+                FROM platform.release_approvals AS approval
+                JOIN platform.transition_preparation_receipts AS preparation_receipt
+                  ON preparation_receipt.tenant_id = approval.tenant_id
+                 AND preparation_receipt.environment_id = approval.environment_id
+                 AND preparation_receipt.receipt_id = approval.transition_preparation_receipt_id
+                JOIN LATERAL (
+                  SELECT catalog.*
+                    FROM north_star_internal.module_storage_catalog_receipts AS catalog
+                   WHERE catalog.tenant_id = approval.tenant_id
+                     AND catalog.environment_id = approval.environment_id
+                     AND catalog.generation_id = preparation_receipt.generation_id
+                   ORDER BY catalog.recorded_at DESC, catalog.receipt_id DESC
+                   LIMIT 1
+                ) AS catalog ON true
+               WHERE approval.activation_attempt_id = $8
+                 AND approval.target_release_id = $1
+                 AND catalog.receipt_state = 'READY_TO_SWAP'
+                 AND catalog.catalog_verified
+                 AND catalog.target_manifest_root = $2
+                 AND catalog.prepared_subset_digest = preparation_receipt.prepared_subset_digest
+                 AND catalog.remaining_plan_digest = preparation_receipt.remaining_plan_digest
+            ) END AS module_schema_conformance_passed`,
     [
       receipt.activated_release_id,
       record.target_manifest_root,
@@ -1464,12 +1551,15 @@ async function loadVerificationFacts(
       receipt.pointer_id,
       record.expected_pointer_id,
       receipt.fence,
+      record.module_transition,
+      record.activation_attempt_id,
     ],
   );
   const row = requiredRow(result.rows[0], 'verification facts are unavailable');
   return {
     artifactsAvailable: row.artifacts_available,
     invariantsPassed: row.invariants_passed,
+    moduleSchemaConformancePassed: row.module_schema_conformance_passed,
   };
 }
 

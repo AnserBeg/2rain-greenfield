@@ -8,8 +8,11 @@ import {
   INITIAL_ACTIVATION_BINDING_VERSION,
   RELEASE_DIFF_BINDING_VERSION,
   SYSTEM_EXECUTION_PRINCIPAL,
+  TRANSITION_COMPATIBILITY_POLICY_V2_VERSION,
+  TRANSITION_PREPARATION_RECEIPT_V2_VERSION,
   type TRANSITION_COMPATIBILITY_POLICY_VERSION,
   evaluateTransitionCompatibility,
+  evaluateTransitionCompatibilityV2,
   type ApprovalDiffBinding,
   type CreateReleaseApprovalCommand,
   type CreatedReleaseApproval,
@@ -100,6 +103,14 @@ interface PreparationRow {
   receipt_executor_evidence_digest: Uint8Array;
   receipt_executor_evidence_version: string;
   receipt_executor_exact_pair: boolean;
+  receipt_executor_data_state:
+    'APPLIED' | 'NOT_REQUIRED' | 'PENDING_IN_ATTEMPT' | null;
+  receipt_executor_schema_state: 'APPLIED' | 'NOT_REQUIRED' | null;
+  receipt_generation_id: MintedUuid | null;
+  receipt_schema_generation: string;
+  receipt_prepared_subset_digest: Uint8Array | null;
+  receipt_remaining_plan_digest: Uint8Array | null;
+  receipt_version: string;
   receipt_policy_verdict: 'ALLOW' | 'DENY';
   receipt_policy_version: string;
   receipt_recovery_mode: RecoveryMode;
@@ -107,6 +118,7 @@ interface PreparationRow {
   receipt_source_release_id: MintedUuid | null;
   receipt_target_manifest_root: Uint8Array;
   receipt_target_release_id: MintedUuid;
+  generation_transition_plan_digest: Uint8Array | null;
 }
 
 interface ApprovalRow {
@@ -123,7 +135,9 @@ interface ApprovalRow {
   compiler_output_protocol_version: string;
   compiler_semantic_profile_version: string;
   compiler_version: string;
-  compatibility_policy_version: typeof TRANSITION_COMPATIBILITY_POLICY_VERSION;
+  compatibility_policy_version:
+    | typeof TRANSITION_COMPATIBILITY_POLICY_VERSION
+    | typeof TRANSITION_COMPATIBILITY_POLICY_V2_VERSION;
   decided_at: Date | string;
   diff_binding_kind: 'INITIAL_ACTIVATION' | 'RELEASE_DIFF';
   diff_binding_version: string;
@@ -517,14 +531,26 @@ async function loadPreparation(
             receipt.executor_evidence_digest AS receipt_executor_evidence_digest,
             receipt.executor_applied_state AS receipt_executor_applied_state,
             receipt.executor_exact_pair AS receipt_executor_exact_pair,
+            receipt.executor_data_state AS receipt_executor_data_state,
+            receipt.executor_schema_state AS receipt_executor_schema_state,
+            receipt.generation_id AS receipt_generation_id,
+            receipt.schema_generation AS receipt_schema_generation,
+            receipt.prepared_subset_digest AS receipt_prepared_subset_digest,
+            receipt.remaining_plan_digest AS receipt_remaining_plan_digest,
+            receipt.receipt_version AS receipt_version,
             receipt.compatibility_policy_version AS receipt_policy_version,
             receipt.compatibility_policy_verdict AS receipt_policy_verdict,
-            receipt.recovery_mode AS receipt_recovery_mode
+            receipt.recovery_mode AS receipt_recovery_mode,
+            generation.transition_plan_digest AS generation_transition_plan_digest
        FROM platform.release_activation_preparations AS preparation
        JOIN platform.transition_preparation_receipts AS receipt
          ON receipt.tenant_id = preparation.tenant_id
         AND receipt.environment_id = preparation.environment_id
         AND receipt.receipt_id = preparation.transition_preparation_receipt_id
+       LEFT JOIN north_star_internal.module_storage_generations AS generation
+         ON generation.tenant_id = receipt.tenant_id
+        AND generation.environment_id = receipt.environment_id
+        AND generation.generation_id = receipt.generation_id
       WHERE preparation.tenant_id = $1
         AND preparation.environment_id = $2
         AND preparation.preparation_id = $3
@@ -683,24 +709,75 @@ async function assertCanonicalBinding(
     );
   }
 
-  const compatibility = evaluateTransitionCompatibility({
+  const compatibility =
+    preparation.receipt_version === TRANSITION_PREPARATION_RECEIPT_V2_VERSION
+      ? evaluateV2Compatibility(preparation, sourceRoot)
+      : evaluateTransitionCompatibility({
+          compilerExactPair: preparation.receipt_compiler_exact_pair,
+          compilerFactsVersion: preparation.receipt_compiler_facts_version,
+          compilerStaticCompatibility:
+            preparation.receipt_compiler_static_compatibility,
+          compilerTransitionClass:
+            preparation.receipt_compiler_transition_class,
+          executorAppliedState: preparation.receipt_executor_applied_state,
+          executorEvidenceVersion:
+            preparation.receipt_executor_evidence_version,
+          executorExactPair: preparation.receipt_executor_exact_pair,
+          policyVersion: preparation.receipt_policy_version,
+          sourceManifestRoot: sourceRoot,
+          targetManifestRoot: preparation.target_manifest_root,
+        });
+  assertStoredCompatibility(compatibility, preparation);
+}
+
+function evaluateV2Compatibility(
+  preparation: PreparationRow,
+  sourceRoot: Uint8Array | null,
+): ReturnType<typeof evaluateTransitionCompatibilityV2> {
+  if (
+    sourceRoot === null ||
+    preparation.receipt_generation_id === null ||
+    preparation.receipt_prepared_subset_digest === null ||
+    preparation.receipt_remaining_plan_digest === null ||
+    preparation.receipt_executor_schema_state === null ||
+    preparation.receipt_executor_data_state === null ||
+    preparation.transition_plan_digest === null ||
+    preparation.generation_transition_plan_digest === null ||
+    !equalBytes(
+      preparation.transition_plan_digest,
+      preparation.generation_transition_plan_digest,
+    )
+  ) {
+    fail(
+      'MATERIALIZATION_RECEIPT_MISMATCH',
+      'v2 receipt must bind one persisted generation and the exact transition plan',
+    );
+  }
+  return evaluateTransitionCompatibilityV2({
     compilerExactPair: preparation.receipt_compiler_exact_pair,
     compilerFactsVersion: preparation.receipt_compiler_facts_version,
     compilerStaticCompatibility:
       preparation.receipt_compiler_static_compatibility,
-    compilerTransitionClass: preparation.receipt_compiler_transition_class,
-    executorAppliedState: preparation.receipt_executor_applied_state,
+    dataState: preparation.receipt_executor_data_state,
     executorEvidenceVersion: preparation.receipt_executor_evidence_version,
     executorExactPair: preparation.receipt_executor_exact_pair,
     policyVersion: preparation.receipt_policy_version,
+    preparedSubsetDigest: preparation.receipt_prepared_subset_digest,
+    remainingPlanDigest: preparation.receipt_remaining_plan_digest,
+    schemaGeneration: safeBigIntNumber(
+      preparation.receipt_schema_generation,
+      'module schema generation',
+    ),
+    schemaState: preparation.receipt_executor_schema_state,
     sourceManifestRoot: sourceRoot,
     targetManifestRoot: preparation.target_manifest_root,
   });
-  assertStoredCompatibility(compatibility, preparation);
 }
 
 function assertStoredCompatibility(
-  decision: TransitionCompatibilityDecision,
+  decision:
+    | TransitionCompatibilityDecision
+    | ReturnType<typeof evaluateTransitionCompatibilityV2>,
   preparation: PreparationRow,
 ): void {
   if (

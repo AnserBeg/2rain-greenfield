@@ -2,6 +2,916 @@
   "columns": [
     {
       "schema": "north_star_internal",
+      "relation": "module_storage_attempt_claims",
+      "ordinal_position": 1,
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_attempt_claims",
+      "ordinal_position": 2,
+      "column_name": "environment_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_attempt_claims",
+      "ordinal_position": 3,
+      "column_name": "generation_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_attempt_claims",
+      "ordinal_position": 4,
+      "column_name": "activation_attempt_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_attempt_claims",
+      "ordinal_position": 5,
+      "column_name": "coordinator_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_attempt_claims",
+      "ordinal_position": 6,
+      "column_name": "claim_state",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_attempt_claims",
+      "ordinal_position": 7,
+      "column_name": "claimed_at",
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "transaction_timestamp()"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_attempt_claims",
+      "ordinal_position": 8,
+      "column_name": "updated_at",
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "transaction_timestamp()"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_backfill_checkpoints",
+      "ordinal_position": 1,
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_backfill_checkpoints",
+      "ordinal_position": 2,
+      "column_name": "environment_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_backfill_checkpoints",
+      "ordinal_position": 3,
+      "column_name": "generation_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_backfill_checkpoints",
+      "ordinal_position": 4,
+      "column_name": "element_id",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_backfill_checkpoints",
+      "ordinal_position": 5,
+      "column_name": "activation_attempt_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_backfill_checkpoints",
+      "ordinal_position": 6,
+      "column_name": "last_record_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_backfill_checkpoints",
+      "ordinal_position": 7,
+      "column_name": "rows_applied",
+      "data_type": "bigint",
+      "udt_name": "int8",
+      "is_nullable": "NO",
+      "column_default": "0"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_backfill_checkpoints",
+      "ordinal_position": 8,
+      "column_name": "complete",
+      "data_type": "boolean",
+      "udt_name": "bool",
+      "is_nullable": "NO",
+      "column_default": "false"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_backfill_checkpoints",
+      "ordinal_position": 9,
+      "column_name": "updated_at",
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "transaction_timestamp()"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_catalog_receipts",
+      "ordinal_position": 1,
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_catalog_receipts",
+      "ordinal_position": 2,
+      "column_name": "environment_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_catalog_receipts",
+      "ordinal_position": 3,
+      "column_name": "receipt_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_catalog_receipts",
+      "ordinal_position": 4,
+      "column_name": "receipt_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_catalog_receipts",
+      "ordinal_position": 5,
+      "column_name": "generation_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_catalog_receipts",
+      "ordinal_position": 6,
+      "column_name": "source_release_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_catalog_receipts",
+      "ordinal_position": 7,
+      "column_name": "source_manifest_root",
+      "data_type": "bytea",
+      "udt_name": "bytea",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_catalog_receipts",
+      "ordinal_position": 8,
+      "column_name": "target_release_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_catalog_receipts",
+      "ordinal_position": 9,
+      "column_name": "target_manifest_root",
+      "data_type": "bytea",
+      "udt_name": "bytea",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_catalog_receipts",
+      "ordinal_position": 10,
+      "column_name": "prepared_subset_digest",
+      "data_type": "bytea",
+      "udt_name": "bytea",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_catalog_receipts",
+      "ordinal_position": 11,
+      "column_name": "remaining_plan_digest",
+      "data_type": "bytea",
+      "udt_name": "bytea",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_catalog_receipts",
+      "ordinal_position": 12,
+      "column_name": "catalog_digest",
+      "data_type": "bytea",
+      "udt_name": "bytea",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_catalog_receipts",
+      "ordinal_position": 13,
+      "column_name": "receipt_state",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_catalog_receipts",
+      "ordinal_position": 14,
+      "column_name": "catalog_verified",
+      "data_type": "boolean",
+      "udt_name": "bool",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_catalog_receipts",
+      "ordinal_position": 15,
+      "column_name": "recorded_at",
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "transaction_timestamp()"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_element_applications",
+      "ordinal_position": 1,
+      "column_name": "application_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_element_applications",
+      "ordinal_position": 2,
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_element_applications",
+      "ordinal_position": 3,
+      "column_name": "environment_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_element_applications",
+      "ordinal_position": 4,
+      "column_name": "generation_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_element_applications",
+      "ordinal_position": 5,
+      "column_name": "element_id",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_element_applications",
+      "ordinal_position": 6,
+      "column_name": "attempt_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_element_applications",
+      "ordinal_position": 7,
+      "column_name": "application_state",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_element_applications",
+      "ordinal_position": 8,
+      "column_name": "application_digest",
+      "data_type": "bytea",
+      "udt_name": "bytea",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_element_applications",
+      "ordinal_position": 9,
+      "column_name": "detail_code",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_element_applications",
+      "ordinal_position": 10,
+      "column_name": "recorded_at",
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "transaction_timestamp()"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_elements",
+      "ordinal_position": 1,
+      "column_name": "element_id",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_elements",
+      "ordinal_position": 2,
+      "column_name": "element_kind",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_elements",
+      "ordinal_position": 3,
+      "column_name": "physical_object_name",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_elements",
+      "ordinal_position": 4,
+      "column_name": "shape_fingerprint",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_elements",
+      "ordinal_position": 5,
+      "column_name": "first_generation_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_elements",
+      "ordinal_position": 6,
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "transaction_timestamp()"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_generations",
+      "ordinal_position": 1,
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_generations",
+      "ordinal_position": 2,
+      "column_name": "environment_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_generations",
+      "ordinal_position": 3,
+      "column_name": "generation_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_generations",
+      "ordinal_position": 4,
+      "column_name": "generation_number",
+      "data_type": "bigint",
+      "udt_name": "int8",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_generations",
+      "ordinal_position": 5,
+      "column_name": "source_release_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_generations",
+      "ordinal_position": 6,
+      "column_name": "source_manifest_root",
+      "data_type": "bytea",
+      "udt_name": "bytea",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_generations",
+      "ordinal_position": 7,
+      "column_name": "target_release_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_generations",
+      "ordinal_position": 8,
+      "column_name": "target_manifest_root",
+      "data_type": "bytea",
+      "udt_name": "bytea",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_generations",
+      "ordinal_position": 9,
+      "column_name": "preparation_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_generations",
+      "ordinal_position": 10,
+      "column_name": "prepared_subset_digest",
+      "data_type": "bytea",
+      "udt_name": "bytea",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_generations",
+      "ordinal_position": 11,
+      "column_name": "remaining_plan_digest",
+      "data_type": "bytea",
+      "udt_name": "bytea",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_generations",
+      "ordinal_position": 12,
+      "column_name": "transition_plan_digest",
+      "data_type": "bytea",
+      "udt_name": "bytea",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_generations",
+      "ordinal_position": 13,
+      "column_name": "transition_artifact_root",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_generations",
+      "ordinal_position": 14,
+      "column_name": "target_artifact_root",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_generations",
+      "ordinal_position": 15,
+      "column_name": "state",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_generations",
+      "ordinal_position": 16,
+      "column_name": "expires_at",
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_generations",
+      "ordinal_position": 17,
+      "column_name": "tenant_lifecycle",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": "'ACTIVE'::text"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_generations",
+      "ordinal_position": 18,
+      "column_name": "ancient_root_disposition",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": "'NONE'::text"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_generations",
+      "ordinal_position": 19,
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "transaction_timestamp()"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_reference_counts",
+      "ordinal_position": 1,
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_reference_counts",
+      "ordinal_position": 2,
+      "column_name": "environment_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_reference_counts",
+      "ordinal_position": 3,
+      "column_name": "generation_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_reference_counts",
+      "ordinal_position": 4,
+      "column_name": "element_id",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_reference_counts",
+      "ordinal_position": 5,
+      "column_name": "live_root_count",
+      "data_type": "bigint",
+      "udt_name": "int8",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_reference_counts",
+      "ordinal_position": 6,
+      "column_name": "last_full_reconciliation_at",
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_reference_counts",
+      "ordinal_position": 7,
+      "column_name": "updated_at",
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "transaction_timestamp()"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_root_membership",
+      "ordinal_position": 1,
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_root_membership",
+      "ordinal_position": 2,
+      "column_name": "environment_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_root_membership",
+      "ordinal_position": 3,
+      "column_name": "release_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_root_membership",
+      "ordinal_position": 4,
+      "column_name": "release_root",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_root_membership",
+      "ordinal_position": 5,
+      "column_name": "generation_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_root_membership",
+      "ordinal_position": 6,
+      "column_name": "element_id",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_root_membership",
+      "ordinal_position": 7,
+      "column_name": "provenance_artifact_root",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_root_membership",
+      "ordinal_position": 8,
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "transaction_timestamp()"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_tightening_debt",
+      "ordinal_position": 1,
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_tightening_debt",
+      "ordinal_position": 2,
+      "column_name": "environment_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_tightening_debt",
+      "ordinal_position": 3,
+      "column_name": "generation_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_tightening_debt",
+      "ordinal_position": 4,
+      "column_name": "debt_id",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_tightening_debt",
+      "ordinal_position": 5,
+      "column_name": "element_id",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_tightening_debt",
+      "ordinal_position": 6,
+      "column_name": "owner_id",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_tightening_debt",
+      "ordinal_position": 7,
+      "column_name": "prerequisites",
+      "data_type": "jsonb",
+      "udt_name": "jsonb",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_tightening_debt",
+      "ordinal_position": 8,
+      "column_name": "blocking_root_ids",
+      "data_type": "jsonb",
+      "udt_name": "jsonb",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_tightening_debt",
+      "ordinal_position": 9,
+      "column_name": "resolved_at",
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "north_star_internal",
       "relation": "schema_migrations",
       "ordinal_position": 1,
       "column_name": "ordinal",
@@ -1842,6 +2752,16 @@
     },
     {
       "schema": "platform",
+      "relation": "release_activation_verification_receipts",
+      "ordinal_position": 15,
+      "column_name": "module_schema_conformance_passed",
+      "data_type": "boolean",
+      "udt_name": "bool",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
       "relation": "release_activation_write_guard",
       "ordinal_position": 1,
       "column_name": "attempted_relation",
@@ -3122,6 +4042,56 @@
     },
     {
       "schema": "platform",
+      "relation": "transition_preparation_receipts",
+      "ordinal_position": 25,
+      "column_name": "generation_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "transition_preparation_receipts",
+      "ordinal_position": 26,
+      "column_name": "prepared_subset_digest",
+      "data_type": "bytea",
+      "udt_name": "bytea",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "transition_preparation_receipts",
+      "ordinal_position": 27,
+      "column_name": "remaining_plan_digest",
+      "data_type": "bytea",
+      "udt_name": "bytea",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "transition_preparation_receipts",
+      "ordinal_position": 28,
+      "column_name": "executor_schema_state",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "transition_preparation_receipts",
+      "ordinal_position": 29,
+      "column_name": "executor_data_state",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
       "relation": "trust_action_invocations",
       "ordinal_position": 1,
       "column_name": "tenant_id",
@@ -4104,6 +5074,286 @@
   "constraints": [
     {
       "schema": "north_star_internal",
+      "relation": "module_storage_attempt_claims",
+      "name": "module_storage_attempt_claims_attempt_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, activation_attempt_id) REFERENCES platform.release_activation_attempts(tenant_id, environment_id, activation_attempt_id)"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_attempt_claims",
+      "name": "module_storage_attempt_claims_generation_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, generation_id) REFERENCES north_star_internal.module_storage_generations(tenant_id, environment_id, generation_id)"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_attempt_claims",
+      "name": "module_storage_attempt_claims_pkey",
+      "type": "p",
+      "definition": "PRIMARY KEY (tenant_id, environment_id, activation_attempt_id)"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_attempt_claims",
+      "name": "module_storage_attempt_claims_shape",
+      "type": "c",
+      "definition": "CHECK (claim_state = ANY (ARRAY['CLAIMED'::text, 'COMPLETED'::text, 'FAILED'::text, 'RECONCILING'::text]))"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_backfill_checkpoints",
+      "name": "module_storage_backfill_attempt_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, activation_attempt_id) REFERENCES platform.release_activation_attempts(tenant_id, environment_id, activation_attempt_id)"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_backfill_checkpoints",
+      "name": "module_storage_backfill_checkpoints_pkey",
+      "type": "p",
+      "definition": "PRIMARY KEY (tenant_id, environment_id, generation_id, element_id)"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_backfill_checkpoints",
+      "name": "module_storage_backfill_element_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (element_id) REFERENCES north_star_internal.module_storage_elements(element_id)"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_backfill_checkpoints",
+      "name": "module_storage_backfill_generation_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, generation_id) REFERENCES north_star_internal.module_storage_generations(tenant_id, environment_id, generation_id)"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_backfill_checkpoints",
+      "name": "module_storage_backfill_rows_nonnegative",
+      "type": "c",
+      "definition": "CHECK (rows_applied >= 0)"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_catalog_receipts",
+      "name": "module_storage_catalog_receipts_generation_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, generation_id) REFERENCES north_star_internal.module_storage_generations(tenant_id, environment_id, generation_id)"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_catalog_receipts",
+      "name": "module_storage_catalog_receipts_pkey",
+      "type": "p",
+      "definition": "PRIMARY KEY (receipt_id)"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_catalog_receipts",
+      "name": "module_storage_catalog_receipts_release_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, source_release_id) REFERENCES platform.tenant_releases(tenant_id, environment_id, release_id)"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_catalog_receipts",
+      "name": "module_storage_catalog_receipts_shape",
+      "type": "c",
+      "definition": "CHECK (receipt_version = 'northstar.module-storage-catalog-receipt/v1'::text AND octet_length(source_manifest_root) = 32 AND octet_length(target_manifest_root) = 32 AND octet_length(prepared_subset_digest) = 32 AND octet_length(remaining_plan_digest) = 32 AND octet_length(catalog_digest) = 32 AND (receipt_state = ANY (ARRAY['PREPARED'::text, 'READY_TO_SWAP'::text, 'RECONCILED'::text, 'DRIFT'::text])) AND (receipt_state = 'DRIFT'::text OR catalog_verified))"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_catalog_receipts",
+      "name": "module_storage_catalog_receipts_target_release_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, target_release_id) REFERENCES platform.tenant_releases(tenant_id, environment_id, release_id)"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_element_applications",
+      "name": "module_storage_applications_element_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (element_id) REFERENCES north_star_internal.module_storage_elements(element_id)"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_element_applications",
+      "name": "module_storage_applications_generation_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, generation_id) REFERENCES north_star_internal.module_storage_generations(tenant_id, environment_id, generation_id)"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_element_applications",
+      "name": "module_storage_applications_shape",
+      "type": "c",
+      "definition": "CHECK ((application_state = ANY (ARRAY['STARTED'::text, 'APPLIED'::text, 'VERIFIED'::text, 'FAILED'::text, 'RECONCILING'::text])) AND octet_length(application_digest) = 32 AND btrim(detail_code) <> ''::text)"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_element_applications",
+      "name": "module_storage_element_applications_pkey",
+      "type": "p",
+      "definition": "PRIMARY KEY (application_id)"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_elements",
+      "name": "module_storage_elements_generation_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (first_generation_id) REFERENCES north_star_internal.module_storage_generations(generation_id)"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_elements",
+      "name": "module_storage_elements_pkey",
+      "type": "p",
+      "definition": "PRIMARY KEY (element_id)"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_elements",
+      "name": "module_storage_elements_shape",
+      "type": "c",
+      "definition": "CHECK (btrim(element_id) <> ''::text AND (element_kind = ANY (ARRAY['addColumn'::text, 'addForeignKey'::text, 'addNotValidConstraint'::text, 'backfill'::text, 'createIndex'::text, 'createTable'::text, 'duplicateScan'::text, 'tightenNotNull'::text, 'validateConstraint'::text])) AND btrim(physical_object_name) <> ''::text AND shape_fingerprint ~ '^[0-9a-f]{64}$'::text)"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_generations",
+      "name": "module_storage_generations_id_unique",
+      "type": "u",
+      "definition": "UNIQUE (generation_id)"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_generations",
+      "name": "module_storage_generations_pkey",
+      "type": "p",
+      "definition": "PRIMARY KEY (tenant_id, environment_id, generation_id)"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_generations",
+      "name": "module_storage_generations_preparation_unique",
+      "type": "u",
+      "definition": "UNIQUE (preparation_id)"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_generations",
+      "name": "module_storage_generations_shape",
+      "type": "c",
+      "definition": "CHECK (generation_number > 0 AND octet_length(source_manifest_root) = 32 AND octet_length(target_manifest_root) = 32 AND octet_length(prepared_subset_digest) = 32 AND octet_length(remaining_plan_digest) = 32 AND octet_length(transition_plan_digest) = 32 AND transition_artifact_root ~ '^[0-9a-f]{64}$'::text AND target_artifact_root ~ '^[0-9a-f]{64}$'::text AND (state = ANY (ARRAY['PREPARING'::text, 'PREPARED'::text, 'IN_ATTEMPT'::text, 'READY_TO_SWAP'::text, 'SWAPPED'::text, 'RECONCILING'::text, 'FAILED'::text, 'EXPIRED'::text])) AND (tenant_lifecycle = ANY (ARRAY['ACTIVE'::text, 'SUSPENDED'::text, 'DECOMMISSIONED'::text])) AND (ancient_root_disposition = ANY (ARRAY['NONE'::text, 'MIGRATE'::text, 'ISOLATE'::text])) AND expires_at > created_at)"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_generations",
+      "name": "module_storage_generations_source_release_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, source_release_id) REFERENCES platform.tenant_releases(tenant_id, environment_id, release_id)"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_generations",
+      "name": "module_storage_generations_target_release_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, target_release_id) REFERENCES platform.tenant_releases(tenant_id, environment_id, release_id)"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_reference_counts",
+      "name": "module_storage_reference_counts_element_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (element_id) REFERENCES north_star_internal.module_storage_elements(element_id)"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_reference_counts",
+      "name": "module_storage_reference_counts_generation_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, generation_id) REFERENCES north_star_internal.module_storage_generations(tenant_id, environment_id, generation_id)"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_reference_counts",
+      "name": "module_storage_reference_counts_nonnegative",
+      "type": "c",
+      "definition": "CHECK (live_root_count >= 0)"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_reference_counts",
+      "name": "module_storage_reference_counts_pkey",
+      "type": "p",
+      "definition": "PRIMARY KEY (tenant_id, environment_id, generation_id, element_id)"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_root_membership",
+      "name": "module_storage_root_membership_element_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (element_id) REFERENCES north_star_internal.module_storage_elements(element_id)"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_root_membership",
+      "name": "module_storage_root_membership_generation_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (generation_id) REFERENCES north_star_internal.module_storage_generations(generation_id)"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_root_membership",
+      "name": "module_storage_root_membership_hashes",
+      "type": "c",
+      "definition": "CHECK (release_root ~ '^[0-9a-f]{64}$'::text AND provenance_artifact_root ~ '^[0-9a-f]{64}$'::text)"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_root_membership",
+      "name": "module_storage_root_membership_pkey",
+      "type": "p",
+      "definition": "PRIMARY KEY (tenant_id, environment_id, release_id, element_id)"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_root_membership",
+      "name": "module_storage_root_membership_release_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, release_id) REFERENCES platform.tenant_releases(tenant_id, environment_id, release_id)"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_tightening_debt",
+      "name": "module_storage_tightening_debt_element_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (element_id) REFERENCES north_star_internal.module_storage_elements(element_id)"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_tightening_debt",
+      "name": "module_storage_tightening_debt_generation_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, generation_id) REFERENCES north_star_internal.module_storage_generations(tenant_id, environment_id, generation_id)"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_tightening_debt",
+      "name": "module_storage_tightening_debt_pkey",
+      "type": "p",
+      "definition": "PRIMARY KEY (tenant_id, environment_id, generation_id, debt_id)"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_tightening_debt",
+      "name": "module_storage_tightening_debt_shape",
+      "type": "c",
+      "definition": "CHECK (btrim(debt_id) <> ''::text AND btrim(owner_id) <> ''::text AND jsonb_typeof(prerequisites) = 'array'::text AND jsonb_typeof(blocking_root_ids) = 'array'::text)"
+    },
+    {
+      "schema": "north_star_internal",
       "relation": "schema_migrations",
       "name": "schema_migrations_checksum_check",
       "type": "c",
@@ -4849,7 +6099,7 @@
       "relation": "release_activation_verification_receipts",
       "name": "release_activation_verification_receipts_shape",
       "type": "c",
-      "definition": "CHECK (verification_version = 'northstar.release-activation-verification/v1'::text AND fence > 0 AND warning_count >= 0 AND (status = ANY (ARRAY['SWAPPED_VERIFIED'::text, 'SWAPPED_VERIFICATION_FAILED'::text, 'SUPERSEDED'::text])) AND (status = 'SWAPPED_VERIFIED'::text AND pointer_read_back_passed AND artifact_availability_passed AND release_kernel_invariants_passed AND warning_count = 0 OR status = 'SWAPPED_VERIFICATION_FAILED'::text AND (NOT pointer_read_back_passed OR NOT artifact_availability_passed OR NOT release_kernel_invariants_passed) OR status = 'SUPERSEDED'::text))"
+      "definition": "CHECK ((verification_version = 'northstar.release-activation-verification/v1'::text AND module_schema_conformance_passed IS NULL OR verification_version = 'northstar.release-activation-verification/v2'::text AND module_schema_conformance_passed IS NOT NULL) AND fence > 0 AND warning_count >= 0 AND (status = ANY (ARRAY['SWAPPED_VERIFIED'::text, 'SWAPPED_VERIFICATION_FAILED'::text, 'SUPERSEDED'::text])) AND (status = 'SWAPPED_VERIFIED'::text AND pointer_read_back_passed AND artifact_availability_passed AND release_kernel_invariants_passed AND COALESCE(module_schema_conformance_passed, true) AND warning_count = 0 OR status = 'SWAPPED_VERIFICATION_FAILED'::text AND (NOT pointer_read_back_passed OR NOT artifact_availability_passed OR NOT release_kernel_invariants_passed OR NOT COALESCE(module_schema_conformance_passed, true)) OR status = 'SUPERSEDED'::text))"
     },
     {
       "schema": "platform",
@@ -4898,7 +6148,7 @@
       "relation": "release_approvals",
       "name": "release_approvals_contract_versions",
       "type": "c",
-      "definition": "CHECK (approval_contract_version = 'northstar.release-approval/v1'::text AND authority_policy_contract_version = 'northstar.release-approver-authority/v1'::text AND expiry_policy_version = 'northstar.release-approval-expiry/v1'::text AND compatibility_policy_version = 'northstar.transition-compatibility-policy/v1'::text)"
+      "definition": "CHECK (approval_contract_version = 'northstar.release-approval/v1'::text AND authority_policy_contract_version = 'northstar.release-approver-authority/v1'::text AND expiry_policy_version = 'northstar.release-approval-expiry/v1'::text AND (compatibility_policy_version = ANY (ARRAY['northstar.transition-compatibility-policy/v1'::text, 'northstar.transition-compatibility-policy/v2'::text])))"
     },
     {
       "schema": "platform",
@@ -5323,6 +6573,13 @@
     {
       "schema": "platform",
       "relation": "transition_preparation_receipts",
+      "name": "transition_preparation_receipts_generation_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, generation_id) REFERENCES north_star_internal.module_storage_generations(tenant_id, environment_id, generation_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "transition_preparation_receipts",
       "name": "transition_preparation_receipts_initial_no_storage",
       "type": "c",
       "definition": "CHECK (source_release_id IS NOT NULL OR compiler_transition_class = 'NO_STORAGE_TRANSITION'::text AND executor_applied_state = 'NOT_REQUIRED'::text)"
@@ -5381,7 +6638,7 @@
       "relation": "transition_preparation_receipts",
       "name": "transition_preparation_receipts_versions",
       "type": "c",
-      "definition": "CHECK (receipt_version = 'northstar.transition-preparation-receipt/v1'::text AND compiler_facts_version = 'northstar.compiler-transition-facts/v1'::text AND executor_evidence_version = 'northstar.executor-applied-state-evidence/v1'::text AND compatibility_policy_version = 'northstar.transition-compatibility-policy/v1'::text)"
+      "definition": "CHECK (receipt_version = 'northstar.transition-preparation-receipt/v1'::text AND compiler_facts_version = 'northstar.compiler-transition-facts/v1'::text AND executor_evidence_version = 'northstar.executor-applied-state-evidence/v1'::text AND compatibility_policy_version = 'northstar.transition-compatibility-policy/v1'::text AND generation_id IS NULL AND prepared_subset_digest IS NULL AND remaining_plan_digest IS NULL AND executor_schema_state IS NULL AND executor_data_state IS NULL OR receipt_version = 'northstar.transition-preparation-receipt/v2'::text AND compiler_facts_version = 'northstar.compiler-transition-facts/v1'::text AND executor_evidence_version = 'northstar.executor-applied-state-evidence/v2'::text AND compatibility_policy_version = 'northstar.transition-compatibility-policy/v2'::text AND generation_id IS NOT NULL AND schema_generation > 0 AND octet_length(prepared_subset_digest) = 32 AND octet_length(remaining_plan_digest) = 32 AND (executor_schema_state = ANY (ARRAY['APPLIED'::text, 'NOT_REQUIRED'::text])) AND (executor_data_state = ANY (ARRAY['PENDING_IN_ATTEMPT'::text, 'APPLIED'::text, 'NOT_REQUIRED'::text])))"
     },
     {
       "schema": "platform",
@@ -5735,6 +6992,90 @@
     }
   ],
   "indexes": [
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_attempt_claims",
+      "name": "module_storage_attempt_claims_pkey",
+      "definition": "CREATE UNIQUE INDEX module_storage_attempt_claims_pkey ON north_star_internal.module_storage_attempt_claims USING btree (tenant_id, environment_id, activation_attempt_id)"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_backfill_checkpoints",
+      "name": "module_storage_backfill_checkpoints_pkey",
+      "definition": "CREATE UNIQUE INDEX module_storage_backfill_checkpoints_pkey ON north_star_internal.module_storage_backfill_checkpoints USING btree (tenant_id, environment_id, generation_id, element_id)"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_catalog_receipts",
+      "name": "module_storage_catalog_receipts_pkey",
+      "definition": "CREATE UNIQUE INDEX module_storage_catalog_receipts_pkey ON north_star_internal.module_storage_catalog_receipts USING btree (receipt_id)"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_catalog_receipts",
+      "name": "module_storage_catalog_receipts_ready_idx",
+      "definition": "CREATE INDEX module_storage_catalog_receipts_ready_idx ON north_star_internal.module_storage_catalog_receipts USING btree (tenant_id, environment_id, generation_id, recorded_at DESC) WHERE ((receipt_state = 'READY_TO_SWAP'::text) AND catalog_verified)"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_element_applications",
+      "name": "module_storage_element_applications_lookup_idx",
+      "definition": "CREATE INDEX module_storage_element_applications_lookup_idx ON north_star_internal.module_storage_element_applications USING btree (tenant_id, environment_id, generation_id, element_id, recorded_at DESC)"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_element_applications",
+      "name": "module_storage_element_applications_pkey",
+      "definition": "CREATE UNIQUE INDEX module_storage_element_applications_pkey ON north_star_internal.module_storage_element_applications USING btree (application_id)"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_elements",
+      "name": "module_storage_elements_pkey",
+      "definition": "CREATE UNIQUE INDEX module_storage_elements_pkey ON north_star_internal.module_storage_elements USING btree (element_id)"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_generations",
+      "name": "module_storage_generations_id_unique",
+      "definition": "CREATE UNIQUE INDEX module_storage_generations_id_unique ON north_star_internal.module_storage_generations USING btree (generation_id)"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_generations",
+      "name": "module_storage_generations_number_idx",
+      "definition": "CREATE UNIQUE INDEX module_storage_generations_number_idx ON north_star_internal.module_storage_generations USING btree (tenant_id, environment_id, generation_number)"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_generations",
+      "name": "module_storage_generations_pkey",
+      "definition": "CREATE UNIQUE INDEX module_storage_generations_pkey ON north_star_internal.module_storage_generations USING btree (tenant_id, environment_id, generation_id)"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_generations",
+      "name": "module_storage_generations_preparation_unique",
+      "definition": "CREATE UNIQUE INDEX module_storage_generations_preparation_unique ON north_star_internal.module_storage_generations USING btree (preparation_id)"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_reference_counts",
+      "name": "module_storage_reference_counts_pkey",
+      "definition": "CREATE UNIQUE INDEX module_storage_reference_counts_pkey ON north_star_internal.module_storage_reference_counts USING btree (tenant_id, environment_id, generation_id, element_id)"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_root_membership",
+      "name": "module_storage_root_membership_pkey",
+      "definition": "CREATE UNIQUE INDEX module_storage_root_membership_pkey ON north_star_internal.module_storage_root_membership USING btree (tenant_id, environment_id, release_id, element_id)"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_tightening_debt",
+      "name": "module_storage_tightening_debt_pkey",
+      "definition": "CREATE UNIQUE INDEX module_storage_tightening_debt_pkey ON north_star_internal.module_storage_tightening_debt USING btree (tenant_id, environment_id, generation_id, debt_id)"
+    },
     {
       "schema": "north_star_internal",
       "relation": "schema_migrations",
@@ -6182,6 +7523,56 @@
   ],
   "policies": [
     {
+      "schema": "north_star_internal",
+      "relation": "module_storage_catalog_receipts",
+      "name": "module_storage_catalog_receipts_materializer",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_module_materializer}",
+      "cmd": "ALL",
+      "qual": "true",
+      "with_check": "true"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_catalog_receipts",
+      "name": "module_storage_catalog_receipts_runtime_select",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_runtime}",
+      "cmd": "SELECT",
+      "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid))",
+      "with_check": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_generations",
+      "name": "module_storage_generations_materializer",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_module_materializer}",
+      "cmd": "ALL",
+      "qual": "true",
+      "with_check": "true"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_generations",
+      "name": "module_storage_generations_runtime_select",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_runtime}",
+      "cmd": "SELECT",
+      "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid))",
+      "with_check": null
+    },
+    {
+      "schema": "platform",
+      "relation": "active_release_pointers",
+      "name": "active_release_pointers_module_materializer_select",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_module_materializer}",
+      "cmd": "SELECT",
+      "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid))",
+      "with_check": null
+    },
+    {
       "schema": "platform",
       "relation": "active_release_pointers",
       "name": "active_release_pointers_select_trusted_context",
@@ -6254,6 +7645,16 @@
     {
       "schema": "platform",
       "relation": "release_activation_attempts",
+      "name": "release_activation_attempts_module_materializer_select",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_module_materializer}",
+      "cmd": "SELECT",
+      "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid))",
+      "with_check": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempts",
       "name": "release_activation_attempts_select_trusted_context",
       "permissive": "PERMISSIVE",
       "roles": "{north_star_runtime}",
@@ -6269,6 +7670,16 @@
       "roles": "{north_star_runtime}",
       "cmd": "SELECT",
       "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid IS NOT NULL) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))",
+      "with_check": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_control_events",
+      "name": "release_activation_control_events_module_materializer_select",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_module_materializer}",
+      "cmd": "SELECT",
+      "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid))",
       "with_check": null
     },
     {
@@ -6290,6 +7701,16 @@
       "cmd": "INSERT",
       "qual": null,
       "with_check": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_history",
+      "name": "release_activation_history_module_materializer_select",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_module_materializer}",
+      "cmd": "SELECT",
+      "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid))",
+      "with_check": null
     },
     {
       "schema": "platform",
@@ -6350,6 +7771,16 @@
       "cmd": "INSERT",
       "qual": null,
       "with_check": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))"
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "name": "release_activation_preparations_module_materializer_select",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_module_materializer}",
+      "cmd": "SELECT",
+      "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid))",
+      "with_check": null
     },
     {
       "schema": "platform",
@@ -6454,6 +7885,16 @@
     {
       "schema": "platform",
       "relation": "release_approvals",
+      "name": "release_approvals_module_materializer_select",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_module_materializer}",
+      "cmd": "SELECT",
+      "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid))",
+      "with_check": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
       "name": "release_approvals_select_trusted_context",
       "permissive": "PERMISSIVE",
       "roles": "{north_star_runtime}",
@@ -6469,6 +7910,26 @@
       "roles": "{north_star_runtime}",
       "cmd": "SELECT",
       "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid IS NOT NULL) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))",
+      "with_check": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_artifact_blobs",
+      "name": "release_artifact_blobs_module_materializer_select",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_module_materializer}",
+      "cmd": "SELECT",
+      "qual": "true",
+      "with_check": null
+    },
+    {
+      "schema": "platform",
+      "relation": "release_executor_authority_events",
+      "name": "release_executor_authority_events_module_materializer_select",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_module_materializer}",
+      "cmd": "SELECT",
+      "qual": "(tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid)",
       "with_check": null
     },
     {
@@ -6504,6 +7965,16 @@
     {
       "schema": "platform",
       "relation": "tenant_release_artifact_links",
+      "name": "tenant_release_artifact_links_module_materializer_select",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_module_materializer}",
+      "cmd": "SELECT",
+      "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid))",
+      "with_check": null
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_release_artifact_links",
       "name": "tenant_release_artifact_links_select_trusted_context",
       "permissive": "PERMISSIVE",
       "roles": "{north_star_runtime}",
@@ -6520,6 +7991,16 @@
       "cmd": "INSERT",
       "qual": null,
       "with_check": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))"
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_release_chunk_links",
+      "name": "tenant_release_chunk_links_module_materializer_select",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_module_materializer}",
+      "cmd": "SELECT",
+      "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid))",
+      "with_check": null
     },
     {
       "schema": "platform",
@@ -6544,6 +8025,16 @@
     {
       "schema": "platform",
       "relation": "tenant_release_projection_links",
+      "name": "tenant_release_projection_links_module_materializer_select",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_module_materializer}",
+      "cmd": "SELECT",
+      "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid))",
+      "with_check": null
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_release_projection_links",
       "name": "tenant_release_projection_links_select_trusted_context",
       "permissive": "PERMISSIVE",
       "roles": "{north_star_runtime}",
@@ -6560,6 +8051,16 @@
       "cmd": "INSERT",
       "qual": null,
       "with_check": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))"
+    },
+    {
+      "schema": "platform",
+      "relation": "tenant_releases",
+      "name": "tenant_releases_module_materializer_select",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_module_materializer}",
+      "cmd": "SELECT",
+      "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid))",
+      "with_check": null
     },
     {
       "schema": "platform",
@@ -6673,6 +8174,69 @@
     }
   ],
   "relations": [
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_attempt_claims",
+      "kind": "r",
+      "row_level_security": false,
+      "force_row_level_security": false
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_backfill_checkpoints",
+      "kind": "r",
+      "row_level_security": false,
+      "force_row_level_security": false
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_catalog_receipts",
+      "kind": "r",
+      "row_level_security": true,
+      "force_row_level_security": true
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_element_applications",
+      "kind": "r",
+      "row_level_security": false,
+      "force_row_level_security": false
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_elements",
+      "kind": "r",
+      "row_level_security": false,
+      "force_row_level_security": false
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_generations",
+      "kind": "r",
+      "row_level_security": true,
+      "force_row_level_security": true
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_reference_counts",
+      "kind": "r",
+      "row_level_security": false,
+      "force_row_level_security": false
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_root_membership",
+      "kind": "r",
+      "row_level_security": false,
+      "force_row_level_security": false
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_storage_tightening_debt",
+      "kind": "r",
+      "row_level_security": false,
+      "force_row_level_security": false
+    },
     {
       "schema": "north_star_internal",
       "relation": "schema_migrations",
@@ -6912,9 +8476,6 @@
       "force_row_level_security": true
     }
   ],
-  "schemas": [
-    "north_star_internal",
-    "platform"
-  ],
+  "schemas": ["north_star_internal", "platform"],
   "version": 2
 }
