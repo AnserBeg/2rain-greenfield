@@ -59,7 +59,7 @@ evidence.
 |---|---|---|
 | Storage validity/backfill truth and shared-schema transition coexistence | G2-P2 | additive transition, old/new release coexistence, retry, and bounded preparation tests |
 | Surface grammar, compact/mobile transforms, and G2 automated accessibility | G2-P4 | compiler/structural negatives and five-archetype desktop/compact browser journeys |
-| Transactional lifecycle/audit/outbox plus authorization-decision evidence | G2-P1 | rollback/attribution/redaction/two-tenant provider evidence |
+| Transactional lifecycle/audit/outbox plus authorization-decision evidence | G2-P1 | evidence-ready reviewed candidate `a71aa33`: atomic rollback, trusted attribution/delegation, redaction, immutable correlation, and two-tenant provider evidence |
 | No business hard delete through Semantic Operation | G2-P2 | compiler/conformance/gateway negatives; archive/restore is the only O0 lifecycle path |
 | Exact/ambiguous/not-found resolver behavior | G2-P3 | deterministic Party resolver envelope including duplicate, weak, empty, and cross-tenant cases |
 | Agent and human read the same DTO | G2-P6 | Item UI and fixed-tool Operation create paths read back through one Query DTO |
@@ -77,9 +77,10 @@ packet:
    §5.5; enforcement lands at G6/per-capability, correctly later, but should be
    confirmed as tracked packets when those stages are cut.
 The G2 surface, responsive, accessibility, storage, trust, lifecycle,
-resolver, channel-parity, and relation-isolation obligations are now routed by
-G2-P0. None is yet claimed executable; each must be promoted by its owning
-accepted packet.
+resolver, channel-parity, and relation-isolation obligations are routed by
+G2-P0. G2-P1 now has an evidence-ready, dual-reviewed Freeze E candidate;
+acceptance/integration is still pending. The remaining obligations must be
+promoted by their owning packets.
 
 ## Authority and structure
 
@@ -141,9 +142,9 @@ accepted packet.
 
 | Concern | Instrument | Enforced today by | Executable at | Status |
 |---|---|---|---|---|
-| Lifecycle / audit / correction / recovery doctrine | ADR-0010; plan §7.3-7.4 | G0-P3 duplicate-authority and hard-delete scan + G1-P4a append-only approval/attempt/phase/history contracts + G1-P4b atomic history/outbox facts, decisive receipt reconciliation, generation-bound verification, no-pointer-move reconciler, and durable statement-time overdue detection | G1-P4b activation recovery; G2-P1 T-01 trust substrate; drills G7 | partially enforced |
-| Authorization audit captures policy/evaluator version, relevant inputs, and decision | ADR-0008/ADR-0010; Freeze B | G1-P2 pins policy references/model version and declares live deny-capable decisions | G2-P1 T-01 invocation/change evidence and two-tenant provider tests | scheduled |
-| No hard delete for business data | ADR-0010; AGENTS.md; plan §7.4 | G0-P3 hard-delete scan | G2-P2 module compiler/conformance and Operation-gateway negatives; O0 archive/restore only | partially enforced |
+| Lifecycle / audit / correction / recovery doctrine | ADR-0010; plan §7.3-7.4 | G0-P3 duplicate-authority and hard-delete scan + G1-P4a append-only approval/attempt/phase/history contracts + G1-P4b atomic history/outbox facts, decisive receipt reconciliation, generation-bound verification, no-pointer-move reconciler, and durable statement-time overdue detection + G2-P1 reviewed candidate `a71aa33` for atomic mutation/invocation/change/event/outbox facts, immutable links, attribution, redaction, and write-side outbox | G1-P4b activation recovery; G2-P1 T-01 trust substrate; correction/recovery drills G7 | partially enforced |
+| Authorization audit captures policy/evaluator version, relevant inputs, and decision | ADR-0008/ADR-0010; Freeze B | G1-P2 pins policy references/model version and declares live deny-capable decisions + G2-P1 reviewed candidate `a71aa33` persists versioned policy/evaluator evidence, redacted relevant inputs, decision, actor/delegation envelope, and two-tenant provider proof | G2-P1 T-01 invocation/change evidence and two-tenant provider tests | enforced |
+| No hard delete for business data | ADR-0010; AGENTS.md; plan §7.4 | G0-P3 hard-delete scan + G2-P1 reviewed candidate `a71aa33` exposes archive/restore-only `LifecycleService` through the Semantic Operation Gateway and makes trust facts append-only | G2-P2 module compiler/conformance and Operation-gateway negatives; O0 archive/restore only | partially enforced |
 | Cross-tenant relation rejection at service and policy layers | ADR-0004; plan §6.4, §7.2, §11.5 | G0-P4b trusted context/RLS base and G1 issued-view/gateway tenant scope | G2-P3 Party-role validation/service, policy, and forced-RLS/provider tests | partially enforced |
 | Backup / restore / RPO / RTO | ADR-0010; plan §7.5 | authority-map review | G7 recovery drill | scheduled |
 | PITR/restore cannot revive pre-restore activation coordinators | ADR-0006/ADR-0010; G1-P4 debate | — | G7 recovery packet must define isolated restore, logical promotion, and a recovery incarnation that invalidates pre-restore zombies | scheduled |
@@ -166,7 +167,7 @@ accepted packet.
 |---|---|---|---|---|
 | Baseline observability (structured logs, correlation/trace IDs, health/readiness, metrics/error evidence) | plan §15.2; AGENTS.md | G0-P5 propagation, PostgreSQL-loss readiness, redaction, metrics, and CI-evidence tests | G0-P5 observability packet | enforced |
 | SLOs / error budgets | plan §15.1; Freeze B SLO families | G1-P2 monotonic numeric 4,096-field full-compile budget + G1-P4b durable reconciliation start/max-age facts, crash-independent overdue derivation, idempotent alarm projection, and fresh-worker/lock-crossing proofs; other release-path families remain separate | G1-P4b activation telemetry; G2-P2 transition preparation; G6 preview/incremental; G7 platform budgets | partially enforced |
-| Tenant isolation (defense in depth) | ADR-0004; plan §7.2 | G0-P4b context transaction + G1-P3 forced-RLS release persistence + G1-P4a forced pointer/approval RLS and cross-tenant/environment UPDATE denial + G1-P4b trusted activation context and concurrent activation proofs + G1-P5 issued-context-only two-tenant request views, scoped cache keys, and no ambient fallback | G0-P4b/G1 base; G2-P1 trust evidence; G2-P3/G2-P6/G2-P7 module and relation provider tests; G7 pentest | partially enforced |
+| Tenant isolation (defense in depth) | ADR-0004; plan §7.2 | G0-P4b context transaction + G1-P3 forced-RLS release persistence + G1-P4a forced pointer/approval RLS and cross-tenant/environment UPDATE denial + G1-P4b trusted activation context and concurrent activation proofs + G1-P5 issued-context-only two-tenant request views, scoped cache keys, and no ambient fallback + G2-P1 reviewed candidate `a71aa33` forced-RLS trust tables, trusted insert context, two-tenant visibility, and one-backend pool-reuse cleanup | G0-P4b/G1 base; G2-P1 trust evidence; G2-P3/G2-P6/G2-P7 module and relation provider tests; G7 pentest | partially enforced |
 | Dependency / secret scanning | AGENTS.md | G0-P5c high/critical dependency audit, clean-history scan, negative secret fixture, and retained CI reports | G0-P5c CI scans | enforced |
 | Cross-tenant CAS deduplication domains prevent hash-oracle/existence leaks | Freeze B; plan §7.2 | G1-P2 keeps identity out of content; G1-P3 internally deduplicates verified policy-free bytes, stores no tenant columns on blobs, denies runtime blob SELECT, and exposes no hash lookup product API | G7 security stage cut must define authorization/encryption/dedup domains before global artifact reuse | partially enforced |
 
