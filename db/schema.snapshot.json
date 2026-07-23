@@ -3079,6 +3079,986 @@
       "udt_name": "timestamptz",
       "is_nullable": "NO",
       "column_default": "transaction_timestamp()"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "ordinal_position": 1,
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "ordinal_position": 2,
+      "column_name": "environment_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "ordinal_position": 3,
+      "column_name": "invocation_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "ordinal_position": 4,
+      "column_name": "invocation_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "ordinal_position": 5,
+      "column_name": "request_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "ordinal_position": 6,
+      "column_name": "action_id",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "ordinal_position": 7,
+      "column_name": "channel",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "ordinal_position": 8,
+      "column_name": "outcome",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "ordinal_position": 9,
+      "column_name": "correlation_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "ordinal_position": 10,
+      "column_name": "causation_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "ordinal_position": 11,
+      "column_name": "release_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "ordinal_position": 12,
+      "column_name": "release_content_hash",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "ordinal_position": 13,
+      "column_name": "execution_principal_kind",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "ordinal_position": 14,
+      "column_name": "execution_principal_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "ordinal_position": 15,
+      "column_name": "subject_principal_kind",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "ordinal_position": 16,
+      "column_name": "subject_principal_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "ordinal_position": 17,
+      "column_name": "initiating_human_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "ordinal_position": 18,
+      "column_name": "approving_human_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "ordinal_position": 19,
+      "column_name": "delegation_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "ordinal_position": 20,
+      "column_name": "delegating_principal_kind",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "ordinal_position": 21,
+      "column_name": "delegating_principal_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "ordinal_position": 22,
+      "column_name": "delegated_to_principal_kind",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "ordinal_position": 23,
+      "column_name": "delegated_to_principal_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "ordinal_position": 24,
+      "column_name": "policy_evidence_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "ordinal_position": 25,
+      "column_name": "policy_decision",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "ordinal_position": 26,
+      "column_name": "policy_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "ordinal_position": 27,
+      "column_name": "policy_evaluator_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "ordinal_position": 28,
+      "column_name": "policy_inputs",
+      "data_type": "jsonb",
+      "udt_name": "jsonb",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "ordinal_position": 29,
+      "column_name": "metadata",
+      "data_type": "jsonb",
+      "udt_name": "jsonb",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "ordinal_position": 30,
+      "column_name": "failure_code",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "ordinal_position": 31,
+      "column_name": "change_document_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "ordinal_position": 32,
+      "column_name": "domain_event_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "ordinal_position": 33,
+      "column_name": "outbox_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "ordinal_position": 34,
+      "column_name": "recorded_at",
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "clock_timestamp()"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "ordinal_position": 1,
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "ordinal_position": 2,
+      "column_name": "environment_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "ordinal_position": 3,
+      "column_name": "change_document_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "ordinal_position": 4,
+      "column_name": "document_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "ordinal_position": 5,
+      "column_name": "invocation_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "ordinal_position": 6,
+      "column_name": "invocation_outcome",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": "'SUCCEEDED'::text"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "ordinal_position": 7,
+      "column_name": "request_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "ordinal_position": 8,
+      "column_name": "action_id",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "ordinal_position": 9,
+      "column_name": "correlation_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "ordinal_position": 10,
+      "column_name": "release_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "ordinal_position": 11,
+      "column_name": "release_content_hash",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "ordinal_position": 12,
+      "column_name": "record_type",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "ordinal_position": 13,
+      "column_name": "record_id",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "ordinal_position": 14,
+      "column_name": "revision",
+      "data_type": "bigint",
+      "udt_name": "int8",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "ordinal_position": 15,
+      "column_name": "changes",
+      "data_type": "jsonb",
+      "udt_name": "jsonb",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "ordinal_position": 16,
+      "column_name": "execution_principal_kind",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "ordinal_position": 17,
+      "column_name": "execution_principal_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "ordinal_position": 18,
+      "column_name": "subject_principal_kind",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "ordinal_position": 19,
+      "column_name": "subject_principal_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "ordinal_position": 20,
+      "column_name": "initiating_human_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "ordinal_position": 21,
+      "column_name": "approving_human_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "ordinal_position": 22,
+      "column_name": "delegation_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "ordinal_position": 23,
+      "column_name": "delegating_principal_kind",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "ordinal_position": 24,
+      "column_name": "delegating_principal_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "ordinal_position": 25,
+      "column_name": "delegated_to_principal_kind",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "ordinal_position": 26,
+      "column_name": "delegated_to_principal_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "ordinal_position": 27,
+      "column_name": "domain_event_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "ordinal_position": 28,
+      "column_name": "outbox_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "ordinal_position": 29,
+      "column_name": "recorded_at",
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "clock_timestamp()"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_domain_events",
+      "ordinal_position": 1,
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_domain_events",
+      "ordinal_position": 2,
+      "column_name": "environment_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_domain_events",
+      "ordinal_position": 3,
+      "column_name": "domain_event_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_domain_events",
+      "ordinal_position": 4,
+      "column_name": "domain_event_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_domain_events",
+      "ordinal_position": 5,
+      "column_name": "invocation_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_domain_events",
+      "ordinal_position": 6,
+      "column_name": "invocation_outcome",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": "'SUCCEEDED'::text"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_domain_events",
+      "ordinal_position": 7,
+      "column_name": "change_document_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_domain_events",
+      "ordinal_position": 8,
+      "column_name": "request_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_domain_events",
+      "ordinal_position": 9,
+      "column_name": "action_id",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_domain_events",
+      "ordinal_position": 10,
+      "column_name": "correlation_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_domain_events",
+      "ordinal_position": 11,
+      "column_name": "release_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_domain_events",
+      "ordinal_position": 12,
+      "column_name": "release_content_hash",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_domain_events",
+      "ordinal_position": 13,
+      "column_name": "event_type",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_domain_events",
+      "ordinal_position": 14,
+      "column_name": "event_schema_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_domain_events",
+      "ordinal_position": 15,
+      "column_name": "payload",
+      "data_type": "jsonb",
+      "udt_name": "jsonb",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_domain_events",
+      "ordinal_position": 16,
+      "column_name": "outbox_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_domain_events",
+      "ordinal_position": 17,
+      "column_name": "occurred_at",
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "clock_timestamp()"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_immutable_write_guard",
+      "ordinal_position": 1,
+      "column_name": "attempted_relation",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_outbox",
+      "ordinal_position": 1,
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_outbox",
+      "ordinal_position": 2,
+      "column_name": "environment_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_outbox",
+      "ordinal_position": 3,
+      "column_name": "outbox_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_outbox",
+      "ordinal_position": 4,
+      "column_name": "outbox_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_outbox",
+      "ordinal_position": 5,
+      "column_name": "invocation_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_outbox",
+      "ordinal_position": 6,
+      "column_name": "invocation_outcome",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": "'SUCCEEDED'::text"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_outbox",
+      "ordinal_position": 7,
+      "column_name": "change_document_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_outbox",
+      "ordinal_position": 8,
+      "column_name": "domain_event_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_outbox",
+      "ordinal_position": 9,
+      "column_name": "request_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_outbox",
+      "ordinal_position": 10,
+      "column_name": "action_id",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_outbox",
+      "ordinal_position": 11,
+      "column_name": "correlation_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_outbox",
+      "ordinal_position": 12,
+      "column_name": "release_id",
+      "data_type": "uuid",
+      "udt_name": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_outbox",
+      "ordinal_position": 13,
+      "column_name": "release_content_hash",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_outbox",
+      "ordinal_position": 14,
+      "column_name": "event_type",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_outbox",
+      "ordinal_position": 15,
+      "column_name": "event_schema_version",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_outbox",
+      "ordinal_position": 16,
+      "column_name": "deduplication_key",
+      "data_type": "text",
+      "udt_name": "text",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_outbox",
+      "ordinal_position": 17,
+      "column_name": "recorded_at",
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "is_nullable": "NO",
+      "column_default": "clock_timestamp()"
     }
   ],
   "constraints": [
@@ -4341,6 +5321,356 @@
       "name": "transition_preparation_receipts_versions",
       "type": "c",
       "definition": "CHECK (receipt_version = 'northstar.transition-preparation-receipt/v1'::text AND compiler_facts_version = 'northstar.compiler-transition-facts/v1'::text AND executor_evidence_version = 'northstar.executor-applied-state-evidence/v1'::text AND compatibility_policy_version = 'northstar.transition-compatibility-policy/v1'::text)"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "name": "trust_action_invocations_actor_kind",
+      "type": "c",
+      "definition": "CHECK ((execution_principal_kind = ANY (ARRAY['AGENT'::text, 'AUTOMATION'::text, 'HUMAN'::text, 'SERVICE'::text, 'SYSTEM'::text])) AND ((subject_principal_kind = ANY (ARRAY['AGENT'::text, 'AUTOMATION'::text, 'HUMAN'::text, 'SERVICE'::text, 'SYSTEM'::text])) OR subject_principal_kind IS NULL))"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "name": "trust_action_invocations_change_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, change_document_id, invocation_id) REFERENCES platform.trust_business_change_documents(tenant_id, environment_id, change_document_id, invocation_id) DEFERRABLE INITIALLY DEFERRED"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "name": "trust_action_invocations_channel",
+      "type": "c",
+      "definition": "CHECK (channel = ANY (ARRAY['AGENT'::text, 'API'::text, 'IMPORT'::text, 'SYSTEM'::text, 'UI'::text, 'WORKFLOW'::text]))"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "name": "trust_action_invocations_correlation_identity_unique",
+      "type": "u",
+      "definition": "UNIQUE (tenant_id, environment_id, invocation_id, outcome, request_id, action_id, correlation_id, release_id, release_content_hash)"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "name": "trust_action_invocations_delegation_shape",
+      "type": "c",
+      "definition": "CHECK (delegation_id IS NULL AND delegating_principal_kind IS NULL AND delegating_principal_id IS NULL AND delegated_to_principal_kind IS NULL AND delegated_to_principal_id IS NULL OR delegation_id IS NOT NULL AND (delegating_principal_kind = ANY (ARRAY['AGENT'::text, 'AUTOMATION'::text, 'HUMAN'::text, 'SERVICE'::text, 'SYSTEM'::text])) AND delegating_principal_id IS NOT NULL AND (delegated_to_principal_kind = ANY (ARRAY['AGENT'::text, 'AUTOMATION'::text, 'HUMAN'::text, 'SERVICE'::text, 'SYSTEM'::text])) AND delegated_to_principal_id IS NOT NULL AND delegated_to_principal_kind = execution_principal_kind AND delegated_to_principal_id = execution_principal_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "name": "trust_action_invocations_environment_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id) REFERENCES platform.environments(tenant_id, id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "name": "trust_action_invocations_event_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, domain_event_id, invocation_id) REFERENCES platform.trust_domain_events(tenant_id, environment_id, domain_event_id, invocation_id) DEFERRABLE INITIALLY DEFERRED"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "name": "trust_action_invocations_fact_shape",
+      "type": "c",
+      "definition": "CHECK (outcome = 'SUCCEEDED'::text AND failure_code IS NULL AND change_document_id IS NOT NULL AND domain_event_id IS NOT NULL AND outbox_id IS NOT NULL OR (outcome = ANY (ARRAY['DENIED'::text, 'FAILED'::text, 'TIMED_OUT'::text])) AND failure_code IS NOT NULL AND btrim(failure_code) <> ''::text AND change_document_id IS NULL AND domain_event_id IS NULL AND outbox_id IS NULL)"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "name": "trust_action_invocations_metadata_shape",
+      "type": "c",
+      "definition": "CHECK (jsonb_typeof(policy_inputs) = 'object'::text AND jsonb_typeof(metadata) = 'object'::text AND NOT platform.trust_json_contains_exposed_classified_value(policy_inputs) AND NOT platform.trust_json_contains_exposed_classified_value(metadata))"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "name": "trust_action_invocations_outbox_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, outbox_id, invocation_id) REFERENCES platform.trust_outbox(tenant_id, environment_id, outbox_id, invocation_id) DEFERRABLE INITIALLY DEFERRED"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "name": "trust_action_invocations_outcome",
+      "type": "c",
+      "definition": "CHECK (outcome = ANY (ARRAY['DENIED'::text, 'FAILED'::text, 'SUCCEEDED'::text, 'TIMED_OUT'::text]))"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "name": "trust_action_invocations_outcome_identity_unique",
+      "type": "u",
+      "definition": "UNIQUE (tenant_id, environment_id, invocation_id, outcome)"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "name": "trust_action_invocations_pkey",
+      "type": "p",
+      "definition": "PRIMARY KEY (tenant_id, environment_id, invocation_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "name": "trust_action_invocations_policy_decision",
+      "type": "c",
+      "definition": "CHECK ((policy_decision = ANY (ARRAY['ALLOW'::text, 'DENY'::text])) AND (outcome <> 'DENIED'::text OR policy_decision = 'DENY'::text) AND (outcome <> 'SUCCEEDED'::text OR policy_decision = 'ALLOW'::text))"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "name": "trust_action_invocations_release_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, release_id) REFERENCES platform.tenant_releases(tenant_id, environment_id, release_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "name": "trust_action_invocations_sha256",
+      "type": "c",
+      "definition": "CHECK (release_content_hash ~ '^[0-9a-f]{64}$'::text)"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "name": "trust_action_invocations_subject_pair",
+      "type": "c",
+      "definition": "CHECK ((subject_principal_kind IS NULL) = (subject_principal_id IS NULL))"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "name": "trust_action_invocations_text_not_blank",
+      "type": "c",
+      "definition": "CHECK (btrim(action_id) <> ''::text AND btrim(policy_version) <> ''::text AND btrim(policy_evaluator_version) <> ''::text)"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "name": "trust_action_invocations_version",
+      "type": "c",
+      "definition": "CHECK (invocation_version = 'northstar.action-invocation/v1'::text AND policy_evidence_version = 'northstar.policy-decision-evidence/v1'::text)"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "name": "trust_business_change_documents_actor_kind",
+      "type": "c",
+      "definition": "CHECK ((execution_principal_kind = ANY (ARRAY['AGENT'::text, 'AUTOMATION'::text, 'HUMAN'::text, 'SERVICE'::text, 'SYSTEM'::text])) AND ((subject_principal_kind = ANY (ARRAY['AGENT'::text, 'AUTOMATION'::text, 'HUMAN'::text, 'SERVICE'::text, 'SYSTEM'::text])) OR subject_principal_kind IS NULL))"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "name": "trust_business_change_documents_changes",
+      "type": "c",
+      "definition": "CHECK (jsonb_typeof(changes) = 'array'::text AND jsonb_array_length(changes) > 0 AND NOT platform.trust_json_contains_exposed_classified_value(changes))"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "name": "trust_business_change_documents_delegation_shape",
+      "type": "c",
+      "definition": "CHECK (delegation_id IS NULL AND delegating_principal_kind IS NULL AND delegating_principal_id IS NULL AND delegated_to_principal_kind IS NULL AND delegated_to_principal_id IS NULL OR delegation_id IS NOT NULL AND (delegating_principal_kind = ANY (ARRAY['AGENT'::text, 'AUTOMATION'::text, 'HUMAN'::text, 'SERVICE'::text, 'SYSTEM'::text])) AND delegating_principal_id IS NOT NULL AND (delegated_to_principal_kind = ANY (ARRAY['AGENT'::text, 'AUTOMATION'::text, 'HUMAN'::text, 'SERVICE'::text, 'SYSTEM'::text])) AND delegated_to_principal_id IS NOT NULL AND delegated_to_principal_kind = execution_principal_kind AND delegated_to_principal_id = execution_principal_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "name": "trust_business_change_documents_event_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, domain_event_id, invocation_id) REFERENCES platform.trust_domain_events(tenant_id, environment_id, domain_event_id, invocation_id) DEFERRABLE INITIALLY DEFERRED"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "name": "trust_business_change_documents_identity",
+      "type": "c",
+      "definition": "CHECK (btrim(action_id) <> ''::text AND btrim(record_type) <> ''::text AND btrim(record_id) <> ''::text AND release_content_hash ~ '^[0-9a-f]{64}$'::text AND revision > 0)"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "name": "trust_business_change_documents_invocation_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, invocation_id, invocation_outcome, request_id, action_id, correlation_id, release_id, release_content_hash) REFERENCES platform.trust_action_invocations(tenant_id, environment_id, invocation_id, outcome, request_id, action_id, correlation_id, release_id, release_content_hash) DEFERRABLE INITIALLY DEFERRED"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "name": "trust_business_change_documents_invocation_unique",
+      "type": "u",
+      "definition": "UNIQUE (tenant_id, environment_id, invocation_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "name": "trust_business_change_documents_link_unique",
+      "type": "u",
+      "definition": "UNIQUE (tenant_id, environment_id, change_document_id, invocation_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "name": "trust_business_change_documents_outbox_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, outbox_id, invocation_id) REFERENCES platform.trust_outbox(tenant_id, environment_id, outbox_id, invocation_id) DEFERRABLE INITIALLY DEFERRED"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "name": "trust_business_change_documents_pkey",
+      "type": "p",
+      "definition": "PRIMARY KEY (tenant_id, environment_id, change_document_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "name": "trust_business_change_documents_subject_pair",
+      "type": "c",
+      "definition": "CHECK ((subject_principal_kind IS NULL) = (subject_principal_id IS NULL))"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "name": "trust_business_change_documents_version",
+      "type": "c",
+      "definition": "CHECK (document_version = 'northstar.business-change-document/v1'::text AND invocation_outcome = 'SUCCEEDED'::text)"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_domain_events",
+      "name": "trust_domain_events_change_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, change_document_id, invocation_id) REFERENCES platform.trust_business_change_documents(tenant_id, environment_id, change_document_id, invocation_id) DEFERRABLE INITIALLY DEFERRED"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_domain_events",
+      "name": "trust_domain_events_identity",
+      "type": "c",
+      "definition": "CHECK (btrim(action_id) <> ''::text AND btrim(event_type) <> ''::text AND btrim(event_schema_version) <> ''::text AND release_content_hash ~ '^[0-9a-f]{64}$'::text)"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_domain_events",
+      "name": "trust_domain_events_invocation_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, invocation_id, invocation_outcome, request_id, action_id, correlation_id, release_id, release_content_hash) REFERENCES platform.trust_action_invocations(tenant_id, environment_id, invocation_id, outcome, request_id, action_id, correlation_id, release_id, release_content_hash) DEFERRABLE INITIALLY DEFERRED"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_domain_events",
+      "name": "trust_domain_events_invocation_unique",
+      "type": "u",
+      "definition": "UNIQUE (tenant_id, environment_id, invocation_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_domain_events",
+      "name": "trust_domain_events_link_unique",
+      "type": "u",
+      "definition": "UNIQUE (tenant_id, environment_id, domain_event_id, invocation_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_domain_events",
+      "name": "trust_domain_events_outbox_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, outbox_id, invocation_id) REFERENCES platform.trust_outbox(tenant_id, environment_id, outbox_id, invocation_id) DEFERRABLE INITIALLY DEFERRED"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_domain_events",
+      "name": "trust_domain_events_payload",
+      "type": "c",
+      "definition": "CHECK (jsonb_typeof(payload) = 'object'::text AND NOT platform.trust_json_contains_exposed_classified_value(payload))"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_domain_events",
+      "name": "trust_domain_events_pkey",
+      "type": "p",
+      "definition": "PRIMARY KEY (tenant_id, environment_id, domain_event_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_domain_events",
+      "name": "trust_domain_events_version",
+      "type": "c",
+      "definition": "CHECK (domain_event_version = 'northstar.trust-domain-event/v1'::text AND invocation_outcome = 'SUCCEEDED'::text)"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_immutable_write_guard",
+      "name": "trust_immutable_write_guard_reject",
+      "type": "c",
+      "definition": "CHECK (false)"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_outbox",
+      "name": "trust_outbox_change_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, change_document_id, invocation_id) REFERENCES platform.trust_business_change_documents(tenant_id, environment_id, change_document_id, invocation_id) DEFERRABLE INITIALLY DEFERRED"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_outbox",
+      "name": "trust_outbox_deduplication_unique",
+      "type": "u",
+      "definition": "UNIQUE (tenant_id, environment_id, deduplication_key)"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_outbox",
+      "name": "trust_outbox_event_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, domain_event_id, invocation_id) REFERENCES platform.trust_domain_events(tenant_id, environment_id, domain_event_id, invocation_id) DEFERRABLE INITIALLY DEFERRED"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_outbox",
+      "name": "trust_outbox_identity",
+      "type": "c",
+      "definition": "CHECK (btrim(action_id) <> ''::text AND btrim(event_type) <> ''::text AND btrim(event_schema_version) <> ''::text AND btrim(deduplication_key) <> ''::text AND release_content_hash ~ '^[0-9a-f]{64}$'::text)"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_outbox",
+      "name": "trust_outbox_invocation_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, invocation_id, invocation_outcome, request_id, action_id, correlation_id, release_id, release_content_hash) REFERENCES platform.trust_action_invocations(tenant_id, environment_id, invocation_id, outcome, request_id, action_id, correlation_id, release_id, release_content_hash) DEFERRABLE INITIALLY DEFERRED"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_outbox",
+      "name": "trust_outbox_invocation_unique",
+      "type": "u",
+      "definition": "UNIQUE (tenant_id, environment_id, invocation_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_outbox",
+      "name": "trust_outbox_link_unique",
+      "type": "u",
+      "definition": "UNIQUE (tenant_id, environment_id, outbox_id, invocation_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_outbox",
+      "name": "trust_outbox_pkey",
+      "type": "p",
+      "definition": "PRIMARY KEY (tenant_id, environment_id, outbox_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_outbox",
+      "name": "trust_outbox_version",
+      "type": "c",
+      "definition": "CHECK (outbox_version = 'northstar.trust-outbox/v1'::text AND invocation_outcome = 'SUCCEEDED'::text)"
     }
   ],
   "indexes": [
@@ -4697,6 +6027,84 @@
       "relation": "transition_preparation_receipts",
       "name": "transition_preparation_receipts_receipt_id_unique",
       "definition": "CREATE UNIQUE INDEX transition_preparation_receipts_receipt_id_unique ON platform.transition_preparation_receipts USING btree (receipt_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "name": "trust_action_invocations_correlation_identity_unique",
+      "definition": "CREATE UNIQUE INDEX trust_action_invocations_correlation_identity_unique ON platform.trust_action_invocations USING btree (tenant_id, environment_id, invocation_id, outcome, request_id, action_id, correlation_id, release_id, release_content_hash)"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "name": "trust_action_invocations_outcome_identity_unique",
+      "definition": "CREATE UNIQUE INDEX trust_action_invocations_outcome_identity_unique ON platform.trust_action_invocations USING btree (tenant_id, environment_id, invocation_id, outcome)"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "name": "trust_action_invocations_pkey",
+      "definition": "CREATE UNIQUE INDEX trust_action_invocations_pkey ON platform.trust_action_invocations USING btree (tenant_id, environment_id, invocation_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "name": "trust_business_change_documents_invocation_unique",
+      "definition": "CREATE UNIQUE INDEX trust_business_change_documents_invocation_unique ON platform.trust_business_change_documents USING btree (tenant_id, environment_id, invocation_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "name": "trust_business_change_documents_link_unique",
+      "definition": "CREATE UNIQUE INDEX trust_business_change_documents_link_unique ON platform.trust_business_change_documents USING btree (tenant_id, environment_id, change_document_id, invocation_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "name": "trust_business_change_documents_pkey",
+      "definition": "CREATE UNIQUE INDEX trust_business_change_documents_pkey ON platform.trust_business_change_documents USING btree (tenant_id, environment_id, change_document_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_domain_events",
+      "name": "trust_domain_events_invocation_unique",
+      "definition": "CREATE UNIQUE INDEX trust_domain_events_invocation_unique ON platform.trust_domain_events USING btree (tenant_id, environment_id, invocation_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_domain_events",
+      "name": "trust_domain_events_link_unique",
+      "definition": "CREATE UNIQUE INDEX trust_domain_events_link_unique ON platform.trust_domain_events USING btree (tenant_id, environment_id, domain_event_id, invocation_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_domain_events",
+      "name": "trust_domain_events_pkey",
+      "definition": "CREATE UNIQUE INDEX trust_domain_events_pkey ON platform.trust_domain_events USING btree (tenant_id, environment_id, domain_event_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_outbox",
+      "name": "trust_outbox_deduplication_unique",
+      "definition": "CREATE UNIQUE INDEX trust_outbox_deduplication_unique ON platform.trust_outbox USING btree (tenant_id, environment_id, deduplication_key)"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_outbox",
+      "name": "trust_outbox_invocation_unique",
+      "definition": "CREATE UNIQUE INDEX trust_outbox_invocation_unique ON platform.trust_outbox USING btree (tenant_id, environment_id, invocation_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_outbox",
+      "name": "trust_outbox_link_unique",
+      "definition": "CREATE UNIQUE INDEX trust_outbox_link_unique ON platform.trust_outbox USING btree (tenant_id, environment_id, outbox_id, invocation_id)"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_outbox",
+      "name": "trust_outbox_pkey",
+      "definition": "CREATE UNIQUE INDEX trust_outbox_pkey ON platform.trust_outbox USING btree (tenant_id, environment_id, outbox_id)"
     }
   ],
   "policies": [
@@ -5109,6 +6517,86 @@
       "cmd": "SELECT",
       "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))",
       "with_check": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "name": "trust_action_invocations_insert_trusted_context",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_runtime}",
+      "cmd": "INSERT",
+      "qual": null,
+      "with_check": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND (execution_principal_id = (NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid) AND (request_id = (NULLIF(current_setting('north_star.request_id'::text, true), ''::text))::uuid))"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "name": "trust_action_invocations_select_trusted_context",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_runtime}",
+      "cmd": "SELECT",
+      "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))",
+      "with_check": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "name": "trust_business_change_documents_insert_trusted_context",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_runtime}",
+      "cmd": "INSERT",
+      "qual": null,
+      "with_check": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND (execution_principal_id = (NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid) AND (request_id = (NULLIF(current_setting('north_star.request_id'::text, true), ''::text))::uuid))"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "name": "trust_business_change_documents_select_trusted_context",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_runtime}",
+      "cmd": "SELECT",
+      "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))",
+      "with_check": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_domain_events",
+      "name": "trust_domain_events_insert_trusted_context",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_runtime}",
+      "cmd": "INSERT",
+      "qual": null,
+      "with_check": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND (request_id = (NULLIF(current_setting('north_star.request_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_domain_events",
+      "name": "trust_domain_events_select_trusted_context",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_runtime}",
+      "cmd": "SELECT",
+      "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))",
+      "with_check": null
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_outbox",
+      "name": "trust_outbox_insert_trusted_context",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_runtime}",
+      "cmd": "INSERT",
+      "qual": null,
+      "with_check": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND (request_id = (NULLIF(current_setting('north_star.request_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))"
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_outbox",
+      "name": "trust_outbox_select_trusted_context",
+      "permissive": "PERMISSIVE",
+      "roles": "{north_star_runtime}",
+      "cmd": "SELECT",
+      "qual": "((tenant_id = (NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text))::uuid) AND (environment_id = (NULLIF(current_setting('north_star.environment_id'::text, true), ''::text))::uuid) AND ((NULLIF(current_setting('north_star.principal_id'::text, true), ''::text))::uuid IS NOT NULL))",
+      "with_check": null
     }
   ],
   "relations": [
@@ -5304,6 +6792,41 @@
     {
       "schema": "platform",
       "relation": "transition_preparation_receipts",
+      "kind": "r",
+      "row_level_security": true,
+      "force_row_level_security": true
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_action_invocations",
+      "kind": "r",
+      "row_level_security": true,
+      "force_row_level_security": true
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "kind": "r",
+      "row_level_security": true,
+      "force_row_level_security": true
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_domain_events",
+      "kind": "r",
+      "row_level_security": true,
+      "force_row_level_security": true
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_immutable_write_guard",
+      "kind": "r",
+      "row_level_security": false,
+      "force_row_level_security": false
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_outbox",
       "kind": "r",
       "row_level_security": true,
       "force_row_level_security": true
