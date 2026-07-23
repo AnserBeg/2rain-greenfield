@@ -21,6 +21,23 @@ export const COMPILER_ATTESTATION_VERSION =
   'northstar.compiler-attestation/v0-experimental' as const;
 export const POLICY_MODEL_VERSION =
   'northstar.policy-model/v0-experimental' as const;
+export const STORAGE_TARGET_PAYLOAD_VERSION =
+  'northstar.storage-target-payload/v1' as const;
+export const STORAGE_TRANSITION_ENVELOPE_VERSION =
+  'northstar.storage-transition-envelope/v1' as const;
+export const STORAGE_ELEMENT_CONTRACT_VERSION =
+  'northstar.storage-transition-element/v1' as const;
+export const STORAGE_COMPATIBILITY_MATRIX_VERSION =
+  'northstar.storage-compatibility-matrix/v1' as const;
+export const PHYSICAL_MAPPING_VERSION =
+  'northstar.physical-mapping/v1' as const;
+export const POSTGRES_PROVIDER_ABI_VERSION =
+  'northstar.postgresql-module-provider-abi/v1' as const;
+export const STORAGE_RENDERER_POLICY_VERSION =
+  'northstar.storage-renderer-allowlist/v1' as const;
+export const TIGHTENING_DEBT_VERSION = 'northstar.tightening-debt/v2' as const;
+export const BACKFILL_ADMISSIBILITY_VERSION =
+  'northstar.backfill-admissibility/v1' as const;
 export const HASH_ALGORITHM = 'sha256' as const;
 
 export const HASH_DOMAINS = Object.freeze({
@@ -30,12 +47,14 @@ export const HASH_DOMAINS = Object.freeze({
   diff: 'northstar.compiler.release-diff/v0-experimental',
   limits: 'northstar.compiler.limits/v0-experimental',
   nodeOutput: 'northstar.compiler.node-output/v0-experimental',
+  physicalName: 'northstar.compiler.physical-name/v1',
   profile: 'northstar.compiler.semantic-profile/v0-experimental',
   projectionChunk: 'northstar.compiler.projection-chunk/v0-experimental',
   projectionManifest: 'northstar.compiler.projection-manifest/v0-experimental',
   projectionSemantic: 'northstar.compiler.projection-semantic/v0-experimental',
   releaseManifest: 'northstar.compiler.release-manifest/v0-experimental',
   semanticConstruct: 'northstar.compiler.semantic-construct/v0-experimental',
+  storageTransitionElement: 'northstar.compiler.storage-transition-element/v1',
 } as const);
 
 export const PROJECTION_FAMILY_IDS = Object.freeze({
@@ -43,6 +62,7 @@ export const PROJECTION_FAMILY_IDS = Object.freeze({
   operationCatalog: 'northstar.compiler:projection-family.operation-catalog',
   policyReferences: 'northstar.compiler:projection-family.policy-references',
   queryCatalog: 'northstar.compiler:projection-family.query-catalog',
+  reporting: 'northstar.compiler:projection-family.reporting',
   semanticModel: 'northstar.compiler:projection-family.semantic-model',
   storageTarget: 'northstar.compiler:projection-family.storage-target',
   storageTransition: 'northstar.compiler:projection-family.storage-transition',
@@ -63,6 +83,12 @@ export const REQUIRED_BASE_PROJECTION_FAMILIES: readonly ProjectionFamilyId[] =
     PROJECTION_FAMILY_IDS.storageTarget,
     PROJECTION_FAMILY_IDS.surfaceManifest,
     PROJECTION_FAMILY_IDS.verificationPlan,
+  ]);
+
+export const REQUIRED_MODULE_PROJECTION_FAMILIES: readonly ProjectionFamilyId[] =
+  Object.freeze([
+    ...REQUIRED_BASE_PROJECTION_FAMILIES,
+    PROJECTION_FAMILY_IDS.reporting,
   ]);
 
 export const OPERATIONS_AGENT_TOOL_IDS = Object.freeze([
@@ -123,6 +149,113 @@ export interface CompilerInput {
 export interface CompilerExecutionOptions {
   projectionSchedule?: 'canonical' | 'interleaved' | 'reverse';
 }
+
+export type StorageTransitionElementKind =
+  | 'addColumn'
+  | 'addForeignKey'
+  | 'addNotValidConstraint'
+  | 'backfill'
+  | 'createIndex'
+  | 'createTable'
+  | 'duplicateScan'
+  | 'tightenNotNull'
+  | 'validateConstraint';
+
+export type PreparationValidity =
+  | 'preApprovalInert'
+  | 'inAttemptOnly'
+  | 'deferredOnlineFamily'
+  | 'deferredTightening';
+export type SemanticEffect = 'none' | 'additive' | 'tightening';
+export type DataEffect = 'none' | 'catalogOnly' | 'rowMutation' | 'dataScan';
+export type OperationalRisk =
+  'none' | 'boundedCatalogLock' | 'onlineStrategyRequired' | 'longRunning';
+export type CompatibilityState =
+  'compatible' | 'notApplicable' | 'requiresReadFallback' | 'mayReject';
+
+export interface StorageCompatibilityCell {
+  admission: 'additive' | 'blockingWhileAffectedWritersLive' | 'deferred';
+  newRead: CompatibilityState;
+  newWrite: CompatibilityState;
+  oldRead: CompatibilityState;
+  oldWrite: CompatibilityState;
+}
+
+export interface StorageElementClassification {
+  dataEffect: DataEffect;
+  operationalRisk: OperationalRisk;
+  preparationValidity: PreparationValidity;
+  semanticEffect: SemanticEffect;
+}
+
+export interface StorageTransitionElement {
+  classification: StorageElementClassification;
+  coexistence: StorageCompatibilityCell;
+  coexistenceImpact: 'none' | 'oldWritesMayReject' | 'requiresReadFallback';
+  declaredDependencyIds: string[];
+  elementId: string;
+  fieldId: string | null;
+  kind: StorageTransitionElementKind;
+  physicalObjectName: string;
+  schemaVersion: typeof STORAGE_ELEMENT_CONTRACT_VERSION;
+  scope: {
+    keyColumns: readonly ['tenant_id', 'environment_id'];
+    kind: 'tenantEnvironment';
+  };
+  storageDomain: 'managedModule';
+  storageGeneration: 'dedicatedTyped/v1';
+  subjectId: string;
+}
+
+export interface TighteningDebt {
+  admissionConsequence: 'blocksTenantAccessibleModuleCreation';
+  blockingRootIds: string[];
+  candidateAffectedReaderQueryIds: string[];
+  candidateAffectedWriterOperationIds: string[];
+  debtId: string;
+  elementId: string;
+  liveRootResolution: 'materializerResolvesActiveAndNonTerminalPreparationUnion';
+  owner: string;
+  prerequisites: string[];
+  priorAffectedReaderQueryIds: string[];
+  priorAffectedWriterOperationIds: string[];
+  schemaVersion: typeof TIGHTENING_DEBT_VERSION;
+}
+
+export interface StorageTransitionEnvelope {
+  backfillAdmissibilityVersion: typeof BACKFILL_ADMISSIBILITY_VERSION;
+  compatibilityMatrixVersion: typeof STORAGE_COMPATIBILITY_MATRIX_VERSION;
+  elements: StorageTransitionElement[];
+  fromNormalizedDefinitionDigest: string;
+  fromReleaseRoot: string;
+  fromStorageTargetArtifactRoot: string;
+  fromStorageTargetSemanticDigest: string;
+  kind: 'storageTransitionEnvelope';
+  rendererPolicyVersion: typeof STORAGE_RENDERER_POLICY_VERSION;
+  schemaVersion: typeof STORAGE_TRANSITION_ENVELOPE_VERSION;
+  tighteningDebt: TighteningDebt[];
+  toNormalizedDefinitionDigest: string;
+  toStorageTargetArtifactRoot: string;
+  toStorageTargetSemanticDigest: string;
+  totalOrdering: 'declaredDependenciesThenElementIdCodeUnits';
+}
+
+export interface PhysicalMappingRecord {
+  canonicalId: string;
+  mappingVersion: typeof PHYSICAL_MAPPING_VERSION;
+  objectKind: 'column' | 'constraint' | 'index' | 'table';
+  physicalName: string;
+  shapeFingerprint: string;
+  storageDomain: 'managedModule';
+}
+
+export type StorageRendererStatement =
+  | { kind: 'addColumn' | 'createIndex' | 'createTable' }
+  | { kind: 'addForeignKey'; onDelete: 'restrict'; onUpdate: 'restrict' }
+  | { kind: 'addNotValidConstraint' | 'validateConstraint' }
+  | { kind: 'onDeleteCascade' }
+  | { kind: 'deleteCapableRule' | 'deleteCapableTrigger' }
+  | { kind: 'truncateTable' | 'removePartition' | 'dropBusinessObject' };
 
 export type CompilerPhase =
   | 'decodeSchemaCheck'
@@ -305,6 +438,7 @@ export const RELEASE_IMPACT_CODES = Object.freeze([
   'operation-contract-changed',
   'policy-reference-changed',
   'query-contract-changed',
+  'reporting-projection-changed',
   'semantic-contract-changed',
   'storage-target-changed',
   'storage-transition-required',

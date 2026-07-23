@@ -4,13 +4,15 @@ import {
   CANONICALIZATION_PROFILE_VERSION,
   CONTENT_HASH_ALGORITHM,
   CURRENCY_MINOR_UNITS_V0,
-  LANGUAGE_VERSION,
-  NORMALIZATION_PROFILE_VERSION,
+  PROMOTE_STORAGE_CLASS_CAPABILITY_ID,
+  SUPPORTED_LANGUAGE_VERSIONS,
+  SUPPORTED_NORMALIZATION_PROFILE_VERSIONS,
   STATUS_ROLES,
   SURFACE_ARCHETYPES,
+  type CanonicalLanguageVersion,
 } from './constants.js';
 
-const nodeVersion = z.literal(LANGUAGE_VERSION);
+const nodeVersion = z.enum(SUPPORTED_LANGUAGE_VERSIONS);
 const boundedOrderKey = z.int().min(0).max(1_000_000);
 const boundedCount = z.int().min(1).max(1_000_000);
 const positiveVersion = z.int().min(1).max(1_000_000);
@@ -86,59 +88,59 @@ export const CanonicalReferenceSchema = z.strictObject({
 export type PredicateExpression =
   | {
       kind: 'booleanPredicate';
-      schemaVersion: typeof LANGUAGE_VERSION;
+      schemaVersion: CanonicalLanguageVersion;
       value: boolean;
     }
   | {
       field: z.infer<typeof CanonicalReferenceSchema>;
       kind: 'fieldComparisonPredicate';
       operator: 'equals' | 'notEquals' | 'lessThan' | 'greaterThan';
-      schemaVersion: typeof LANGUAGE_VERSION;
+      schemaVersion: CanonicalLanguageVersion;
       value: CanonicalScalar;
     }
   | {
       kind: 'allPredicate' | 'anyPredicate';
-      schemaVersion: typeof LANGUAGE_VERSION;
+      schemaVersion: CanonicalLanguageVersion;
       terms: PredicateExpression[];
     }
   | {
       kind: 'notPredicate';
-      schemaVersion: typeof LANGUAGE_VERSION;
+      schemaVersion: CanonicalLanguageVersion;
       term: PredicateExpression;
     };
 
 export type CanonicalScalar =
   | {
       kind: 'textValue';
-      schemaVersion: typeof LANGUAGE_VERSION;
+      schemaVersion: CanonicalLanguageVersion;
       value: string;
     }
   | {
       kind: 'booleanValue';
-      schemaVersion: typeof LANGUAGE_VERSION;
+      schemaVersion: CanonicalLanguageVersion;
       value: boolean;
     }
   | {
       kind: 'integerValue' | 'exactDecimalValue';
-      schemaVersion: typeof LANGUAGE_VERSION;
+      schemaVersion: CanonicalLanguageVersion;
       value: string;
     }
   | {
       currencyCode: string;
       kind: 'moneyValue';
       minorUnit: number;
-      schemaVersion: typeof LANGUAGE_VERSION;
+      schemaVersion: CanonicalLanguageVersion;
       value: string;
     }
   | {
       kind: 'dateValue' | 'timeValue' | 'dateTimeValue';
-      schemaVersion: typeof LANGUAGE_VERSION;
+      schemaVersion: CanonicalLanguageVersion;
       value: string;
     }
   | {
       baseUnit: z.infer<typeof CanonicalReferenceSchema>;
       kind: 'quantityValue';
-      schemaVersion: typeof LANGUAGE_VERSION;
+      schemaVersion: CanonicalLanguageVersion;
       value: string;
     };
 
@@ -372,7 +374,15 @@ const authoredEntityDefinition = normalizedEntityDefinition.extend({
 });
 
 const normalizedFieldDefinition = z.strictObject({
+  businessKey: z
+    .enum(['none', 'tenantEnvironmentCaseInsensitiveUnique'])
+    .optional(),
   classification: z.enum(['public', 'internal', 'confidential', 'restricted']),
+  collation: z.enum(['binary', 'unicodeCaseInsensitive']).optional(),
+  defaultSemantics: z
+    .enum(['none', 'nullable', 'declaredDefault', 'coalesceAtRead'])
+    .optional(),
+  defaultValue: CanonicalScalarSchema.optional(),
   entity: CanonicalReferenceSchema,
   fieldId: CanonicalIdSchema,
   fieldType: FieldTypeSchema,
@@ -384,6 +394,17 @@ const normalizedFieldDefinition = z.strictObject({
   reportable: z.boolean(),
   schemaVersion: nodeVersion,
   searchable: z.boolean(),
+  storageEvolution: z
+    .strictObject({
+      kind: z.literal('backfillEvolution'),
+      residualReadSemantics: z.enum([
+        'declaredDefault',
+        'coalesceAtRead',
+        'requiresCompleteness',
+      ]),
+      schemaVersion: nodeVersion,
+    })
+    .optional(),
 });
 const authoredFieldDefinition = normalizedFieldDefinition.extend({
   lifecycle: z.enum(['active', 'retired']).optional(),
@@ -395,6 +416,13 @@ const authoredFieldDefinition = normalizedFieldDefinition.extend({
 const normalizedRelationDefinition = z.strictObject({
   archiveBehavior: z.enum(['restrict', 'retainReference']),
   cardinality: z.enum(['oneToOne', 'manyToOne', 'oneToMany']),
+  foreignKeyActions: z
+    .strictObject({
+      onDelete: z.literal('restrict'),
+      onUpdate: z.literal('restrict'),
+      schemaVersion: nodeVersion,
+    })
+    .optional(),
   joinEligibility: z.enum(['none', 'query']),
   kind: z.literal('relationDefinition'),
   lifecycle: z.enum(['active', 'retired']),
@@ -471,10 +499,18 @@ const normalizedSurfaceDefinition = z.strictObject({
   label: LabelSchema,
   lifecycle: z.enum(['active', 'retired']),
   module: CanonicalReferenceSchema,
+  renderer: z
+    .strictObject({
+      kind: z.literal('rendererForm'),
+      rendererId: CanonicalIdSchema,
+      schemaVersion: nodeVersion,
+    })
+    .optional(),
   schemaVersion: nodeVersion,
   slots: z.array(surfaceSlot),
   statusRoles: z.array(z.enum(STATUS_ROLES)),
   surfaceId: CanonicalIdSchema,
+  surfaceRole: z.enum(['list', 'record', 'form']).optional(),
 });
 const authoredSurfaceDefinition = normalizedSurfaceDefinition.extend({
   lifecycle: z.enum(['active', 'retired']).optional(),
@@ -495,7 +531,7 @@ const normalizedQueryDefinition = z.strictObject({
   module: CanonicalReferenceSchema,
   permission: CanonicalReferenceSchema,
   queryId: CanonicalIdSchema,
-  queryType: z.enum(['get', 'list', 'resolve']),
+  queryType: z.enum(['get', 'list', 'search', 'resolve']),
   schemaVersion: nodeVersion,
   selections: z.array(querySelection).min(1),
   sourceEntity: CanonicalReferenceSchema,
@@ -525,6 +561,21 @@ const operationEffect = z.discriminatedUnion('kind', [
   z.strictObject({
     entity: CanonicalReferenceSchema,
     kind: z.literal('restoreRecordEffect'),
+    schemaVersion: nodeVersion,
+  }),
+  z.strictObject({
+    entity: CanonicalReferenceSchema,
+    kind: z.literal('deleteRecordEffect'),
+    schemaVersion: nodeVersion,
+  }),
+  z.strictObject({
+    entity: CanonicalReferenceSchema,
+    kind: z.literal('purgeRecordEffect'),
+    schemaVersion: nodeVersion,
+  }),
+  z.strictObject({
+    entity: CanonicalReferenceSchema,
+    kind: z.literal('destroyRecordEffect'),
     schemaVersion: nodeVersion,
   }),
   z.strictObject({
@@ -618,8 +669,21 @@ const normalizedStorageMappingDefinition = z.strictObject({
   entity: CanonicalReferenceSchema,
   kind: z.literal('storageMappingDefinition'),
   lifecycle: z.enum(['active', 'retired']),
+  promotion: z
+    .strictObject({
+      capabilityId: z.literal(PROMOTE_STORAGE_CLASS_CAPABILITY_ID),
+      invariantVersion: z.literal(
+        'northstar.storage-class-promotion-invariant/v1',
+      ),
+      kind: z.literal('storageClassPromotionReserve'),
+      schemaVersion: nodeVersion,
+    })
+    .optional(),
   schemaVersion: nodeVersion,
-  storageClass: z.enum(['dedicatedTable', 'generatedTyped']),
+  storageClass: z
+    .enum(['dedicatedTable', 'generatedTyped'])
+    .nullable()
+    .optional(),
   storageMappingId: CanonicalIdSchema,
 });
 const authoredStorageMappingDefinition =
@@ -664,9 +728,9 @@ const normalizedShape = {
   fields: z.array(normalizedFieldDefinition),
   hashAlgorithm: z.literal(CONTENT_HASH_ALGORITHM),
   kind: z.literal('applicationPackageRevision'),
-  languageVersion: z.literal(LANGUAGE_VERSION),
+  languageVersion: z.enum(SUPPORTED_LANGUAGE_VERSIONS),
   modules: z.array(normalizedModuleDefinition),
-  normalizationProfileVersion: z.literal(NORMALIZATION_PROFILE_VERSION),
+  normalizationProfileVersion: z.enum(SUPPORTED_NORMALIZATION_PROFILE_VERSIONS),
   operations: z.array(normalizedOperationDefinition),
   package: normalizedPackageDefinition,
   permissions: z.array(normalizedPermissionDefinition),
@@ -691,10 +755,10 @@ export const AuthoredApplicationPackageSchema = z.strictObject({
   fields: z.array(authoredFieldDefinition),
   hashAlgorithm: z.literal(CONTENT_HASH_ALGORITHM).optional(),
   kind: z.literal('applicationPackageRevision'),
-  languageVersion: z.literal(LANGUAGE_VERSION),
+  languageVersion: z.enum(SUPPORTED_LANGUAGE_VERSIONS),
   modules: z.array(authoredModuleDefinition),
   normalizationProfileVersion: z
-    .literal(NORMALIZATION_PROFILE_VERSION)
+    .enum(SUPPORTED_NORMALIZATION_PROFILE_VERSIONS)
     .optional(),
   operations: z.array(authoredOperationDefinition),
   package: authoredPackageDefinition,

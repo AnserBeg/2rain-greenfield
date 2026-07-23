@@ -1,0 +1,18 @@
+{
+  "languageVersion": "v1",
+  "normalizationProfileVersion": "northstar.normalization/v1",
+  "transitionSchemaVersion": "northstar.storage-transition-envelope/v1",
+  "v1ProjectionFamilies": [
+    "northstar.compiler:projection-family.agent-discovery",
+    "northstar.compiler:projection-family.operation-catalog",
+    "northstar.compiler:projection-family.policy-references",
+    "northstar.compiler:projection-family.query-catalog",
+    "northstar.compiler:projection-family.reporting",
+    "northstar.compiler:projection-family.semantic-model",
+    "northstar.compiler:projection-family.storage-target",
+    "northstar.compiler:projection-family.surface-manifest",
+    "northstar.compiler:projection-family.verification-plan"
+  ],
+  "v1ReleaseRoot": "ccafe49c1d64c5e75505cf0f641905bd9c14f4116d7efda6750e378cd65e101b",
+  "v2ReleaseRoot": "8f16a9b6a6042e5ba9708900310ddfc9baad252fb3e7f9ef549cb502d2d6fdc4"
+}

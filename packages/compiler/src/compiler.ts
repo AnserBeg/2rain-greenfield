@@ -1,5 +1,7 @@
 import {
   CANONICALIZATION_PROFILE_VERSION,
+  LEGACY_LANGUAGE_VERSION,
+  LEGACY_NORMALIZATION_PROFILE_VERSION,
   LANGUAGE_VERSION,
   NORMALIZATION_PROFILE_VERSION,
   CanonicalModelError,
@@ -10,6 +12,7 @@ import {
   type NormalizedApplicationPackage,
 } from '@north-star/canonical-model';
 
+import { validateModuleConformance } from './conformance.js';
 import { compilerDiagnostic, finalizeDiagnostics } from './diagnostics.js';
 import {
   canonicalBytes,
@@ -23,6 +26,12 @@ import {
   requiredProjectionFamily,
   type ProjectionPayloadPlan,
 } from './projections.js';
+import {
+  buildStorageTransitionEnvelope,
+  buildStorageTransitionEnvelopeFromLegacyTargets,
+  validatePhysicalMappingRecords,
+  type StorageTargetPayloadV1,
+} from './storage.js';
 import {
   CHUNK_DESCRIPTOR_VERSION,
   CHUNKING_SCHEME_VERSION,
@@ -38,6 +47,9 @@ import {
   PROJECTION_MANIFEST_VERSION,
   RELEASE_MANIFEST_VERSION,
   REQUIRED_BASE_PROJECTION_FAMILIES,
+  REQUIRED_MODULE_PROJECTION_FAMILIES,
+  STORAGE_TARGET_PAYLOAD_VERSION,
+  STORAGE_TRANSITION_ENVELOPE_VERSION,
   type CapabilityFact,
   type CompilationNodeContract,
   type CompileFailure,
@@ -55,6 +67,7 @@ import {
   type ProjectionManifestEnvelope,
   type ProjectionReference,
   type ReleaseManifestEnvelope,
+  type StorageTransitionEnvelope,
 } from './protocol.js';
 
 export const DEFAULT_COMPILER_PROFILE: CompilerSemanticProfile = Object.freeze({
@@ -63,10 +76,16 @@ export const DEFAULT_COMPILER_PROFILE: CompilerSemanticProfile = Object.freeze({
   compilerSemanticProfileVersion: COMPILER_SEMANTIC_PROFILE_VERSION,
   compilerVersion: COMPILER_VERSION,
   hashAlgorithm: HASH_ALGORITHM,
-  languageVersion: LANGUAGE_VERSION,
-  normalizationProfileVersion: NORMALIZATION_PROFILE_VERSION,
+  languageVersion: LEGACY_LANGUAGE_VERSION,
+  normalizationProfileVersion: LEGACY_NORMALIZATION_PROFILE_VERSION,
   outputProtocolVersion: OUTPUT_PROTOCOL_VERSION,
   policyModelVersion: POLICY_MODEL_VERSION,
+});
+
+export const MODULE_COMPILER_PROFILE: CompilerSemanticProfile = Object.freeze({
+  ...DEFAULT_COMPILER_PROFILE,
+  languageVersion: LANGUAGE_VERSION,
+  normalizationProfileVersion: NORMALIZATION_PROFILE_VERSION,
 });
 
 export const DEFAULT_COMPILER_LIMITS: CompilerLimits = Object.freeze({
@@ -127,6 +146,23 @@ export function compileApplication(
   }
 
   const { normalizedDefinitionDigest, packageRevision } = decoded;
+  if (
+    input.profile.languageVersion !== packageRevision.languageVersion ||
+    input.profile.normalizationProfileVersion !==
+      packageRevision.normalizationProfileVersion
+  ) {
+    return failure(
+      [
+        compilerDiagnostic(
+          'COMPILER_PROFILE_UNSUPPORTED',
+          'decodeSchemaCheck',
+          '$.profile',
+          packageRevision.package.packageId,
+        ),
+      ],
+      maximumDiagnostics,
+    );
+  }
   const symbols = collectSymbols(packageRevision);
   if (symbols.diagnostics.length > 0) {
     return failure(symbols.diagnostics, maximumDiagnostics);
@@ -173,7 +209,15 @@ export function compileApplication(
     semanticProfileDigest,
   }).digest;
 
-  const basePlans = lowerBaseProjectionPayloads(packageRevision);
+  const previousStorageTarget = input.expectedActiveRelease
+    ? parseStorageTarget(
+        input.expectedActiveRelease.storageTargetCanonicalBytes,
+      )
+    : null;
+  const basePlans = lowerBaseProjectionPayloads(
+    packageRevision,
+    isStorageTargetV1(previousStorageTarget) ? previousStorageTarget : null,
+  );
   const emittedBase = emitScheduledProjections(
     basePlans,
     normalizedDefinitionDigest,
@@ -199,11 +243,27 @@ export function compileApplication(
       flattenArtifacts(emittedBase),
     );
   }
+  if (
+    packageRevision.languageVersion === LANGUAGE_VERSION &&
+    isStorageTargetV1(storageProjection.payload)
+  ) {
+    const mappingDiagnostics = validatePhysicalMappingRecords(
+      storageProjection.payload.physicalMapping.records,
+    );
+    if (mappingDiagnostics.length > 0) {
+      return failure(
+        mappingDiagnostics,
+        maximumDiagnostics,
+        flattenArtifacts(emittedBase),
+      );
+    }
+  }
 
   const transition = input.expectedActiveRelease
     ? lowerStorageTransition(
         packageRevision,
         input.expectedActiveRelease,
+        previousStorageTarget!,
         storageProjection,
         normalizedDefinitionDigest,
         semanticProfileDigest,
@@ -651,13 +711,15 @@ function validateWholeModel(
       );
     }
   });
+  diagnostics.push(...validateModuleConformance(packageRevision));
   return diagnostics;
 }
 
 function validateProfile(
   profile: CompilerSemanticProfile,
 ): CompilerDiagnostic[] {
-  return equalObjects(profile, DEFAULT_COMPILER_PROFILE)
+  return equalObjects(profile, DEFAULT_COMPILER_PROFILE) ||
+    equalObjects(profile, MODULE_COMPILER_PROFILE)
     ? []
     : [
         compilerDiagnostic(
@@ -924,26 +986,75 @@ function emitProjection(
 function lowerStorageTransition(
   packageRevision: NormalizedApplicationPackage,
   expected: ExpectedActiveRelease,
+  previous: StorageTargetPayload,
   candidateStorage: EmittedProjection,
   normalizedDefinitionDigest: string,
   semanticProfileDigest: string,
   orderedDependencyDigests: string[],
   cacheInputIdentity: string,
 ): EmittedProjection | { diagnostic: CompilerDiagnostic } {
-  const previous = parseStorageTarget(expected.storageTargetCanonicalBytes);
   const candidate = candidateStorage.payload as StorageTargetPayload;
-  const previousFields = collectStorageFields(previous);
-  const candidateFields = collectStorageFields(candidate);
-  const operations: Array<{
+  if (isStorageTargetV1(candidateStorage.payload)) {
+    if (!isStorageTargetV1(previous)) {
+      return {
+        diagnostic: compilerDiagnostic(
+          'COMPILER_STORAGE_TRANSITION_UNSUPPORTED',
+          'postLoweringValidation',
+          '$.schemaVersion',
+          packageRevision.package.packageId,
+        ),
+      };
+    }
+    const lowered = buildStorageTransitionEnvelope(
+      packageRevision,
+      previous,
+      candidateStorage.payload,
+      {
+        fromNormalizedDefinitionDigest: expected.normalizedDefinitionDigest,
+        fromReleaseRoot: expected.releaseRoot,
+        fromStorageTargetArtifactRoot: expected.storageTargetArtifactRoot,
+        fromStorageTargetSemanticDigest: expected.storageTargetSemanticDigest,
+        toNormalizedDefinitionDigest: normalizedDefinitionDigest,
+        toStorageTargetArtifactRoot: candidateStorage.reference.artifactRoot,
+        toStorageTargetSemanticDigest:
+          candidateStorage.reference.semanticDigest,
+      },
+    );
+    if ('diagnostic' in lowered) return lowered;
+    return emitStorageTransitionProjection(
+      packageRevision,
+      expected,
+      candidateStorage,
+      lowered,
+      normalizedDefinitionDigest,
+      semanticProfileDigest,
+      orderedDependencyDigests,
+      cacheInputIdentity,
+    );
+  }
+  if (isStorageTargetV1(previous)) {
+    return {
+      diagnostic: compilerDiagnostic(
+        'COMPILER_STORAGE_TRANSITION_UNSUPPORTED',
+        'postLoweringValidation',
+        '$.schemaVersion',
+        packageRevision.package.packageId,
+      ),
+    };
+  }
+  const legacyPrevious = previous as LegacyStorageTargetPayload;
+  const legacyCandidate = candidate as LegacyStorageTargetPayload;
+  const previousFields = collectStorageFields(legacyPrevious);
+  const candidateFields = collectStorageFields(legacyCandidate);
+  const additions: Array<{
     entityId: string;
     fieldId: string;
-    kind: 'addOptionalField';
   }> = [];
 
   if (
     !equalObjects(
-      storageEntitySkeletons(previous),
-      storageEntitySkeletons(candidate),
+      storageEntitySkeletons(legacyPrevious),
+      storageEntitySkeletons(legacyCandidate),
     )
   ) {
     return {
@@ -969,10 +1080,9 @@ function lowerStorageTransition(
           ),
         };
       }
-      operations.push({
+      additions.push({
         entityId: field.entityId,
         fieldId,
-        kind: 'addOptionalField',
       });
     } else if (previousField.fingerprint !== field.fingerprint) {
       return {
@@ -997,19 +1107,38 @@ function lowerStorageTransition(
       };
     }
   }
-  operations.sort((left, right) => compare(left.fieldId, right.fieldId));
-  const payload = {
+  additions.sort((left, right) => compare(left.fieldId, right.fieldId));
+  const envelope = buildStorageTransitionEnvelopeFromLegacyTargets(additions, {
     fromNormalizedDefinitionDigest: expected.normalizedDefinitionDigest,
     fromReleaseRoot: expected.releaseRoot,
     fromStorageTargetArtifactRoot: expected.storageTargetArtifactRoot,
     fromStorageTargetSemanticDigest: expected.storageTargetSemanticDigest,
-    kind: 'storageTransitionPayload',
-    operations,
-    schemaVersion: 'northstar.storage-transition-payload/v0-provisional',
     toNormalizedDefinitionDigest: normalizedDefinitionDigest,
     toStorageTargetArtifactRoot: candidateStorage.reference.artifactRoot,
     toStorageTargetSemanticDigest: candidateStorage.reference.semanticDigest,
-  };
+  });
+  return emitStorageTransitionProjection(
+    packageRevision,
+    expected,
+    candidateStorage,
+    envelope,
+    normalizedDefinitionDigest,
+    semanticProfileDigest,
+    orderedDependencyDigests,
+    cacheInputIdentity,
+  );
+}
+
+function emitStorageTransitionProjection(
+  packageRevision: NormalizedApplicationPackage,
+  expected: ExpectedActiveRelease,
+  candidateStorage: EmittedProjection,
+  payload: StorageTransitionEnvelope,
+  normalizedDefinitionDigest: string,
+  semanticProfileDigest: string,
+  orderedDependencyDigests: string[],
+  cacheInputIdentity: string,
+): EmittedProjection {
   const namespace = packageRevision.package.namespace;
   const plan: ProjectionPayloadPlan = {
     familyId: PROJECTION_FAMILY_IDS.storageTransition,
@@ -1019,7 +1148,7 @@ function lowerStorageTransition(
       scopeId: `${expected.storageTargetArtifactRoot}:${candidateStorage.reference.artifactRoot}`,
     },
     payload,
-    payloadSchemaVersion: 'northstar.storage-transition-payload/v0-provisional',
+    payloadSchemaVersion: STORAGE_TRANSITION_ENVELOPE_VERSION,
     requiredRuntimeCapability: {
       capabilityId: 'northstar.runtime:capability.storage-transition',
       minimumVersion: 1,
@@ -1040,7 +1169,11 @@ function verifyCompleteness(
 ): CompilerDiagnostic[] {
   const diagnostics: CompilerDiagnostic[] = [];
   const families = new Set(emitted.map((entry) => entry.reference.familyId));
-  for (const familyId of REQUIRED_BASE_PROJECTION_FAMILIES) {
+  const requiredFamilies =
+    packageRevision.languageVersion === LANGUAGE_VERSION
+      ? REQUIRED_MODULE_PROJECTION_FAMILIES
+      : REQUIRED_BASE_PROJECTION_FAMILIES;
+  for (const familyId of requiredFamilies) {
     if (!families.has(familyId)) {
       diagnostics.push(
         compilerDiagnostic(
@@ -1074,13 +1207,18 @@ function verifyCompleteness(
   const byFamily = new Map(
     emitted.map((entry) => [entry.reference.familyId, entry.payload] as const),
   );
-  const storageFields = collectStorageFields(
-    byFamily.get(PROJECTION_FAMILY_IDS.storageTarget) as StorageTargetPayload,
-  );
+  const emittedStorage = byFamily.get(
+    PROJECTION_FAMILY_IDS.storageTarget,
+  ) as StorageTargetPayload;
+  const storageFieldIds = isStorageTargetV1(emittedStorage)
+    ? emittedStorage.entities.flatMap((entity) =>
+        entity.columns.map((field) => field.canonicalFieldId),
+      )
+    : [...collectStorageFields(emittedStorage).keys()];
   const expectedFields = new Set(
     packageRevision.fields.map((field) => field.fieldId),
   );
-  if (!setsEqual(new Set(storageFields.keys()), expectedFields)) {
+  if (!setsEqual(new Set(storageFieldIds), expectedFields)) {
     diagnostics.push(
       compilerDiagnostic(
         'COMPILER_PROJECTION_INVARIANT_FAILED',
@@ -1094,11 +1232,13 @@ function verifyCompleteness(
     packageRevision.stateMachines.map((machine) => machine.stateField.fieldId),
   );
   const emittedStateFields = new Set(
-    (
-      byFamily.get(PROJECTION_FAMILY_IDS.storageTarget) as StorageTargetPayload
-    ).entities.flatMap((entity) =>
-      entity.derivedStateFields.map((field) => field.fieldId),
-    ),
+    isStorageTargetV1(emittedStorage)
+      ? emittedStorage.entities.flatMap((entity) =>
+          entity.derivedStateFields.map((field) => field.fieldId),
+        )
+      : emittedStorage.entities.flatMap((entity) =>
+          entity.derivedStateFields.map((field) => field.fieldId),
+        ),
   );
   if (!setsEqual(emittedStateFields, expectedStateFields)) {
     diagnostics.push(
@@ -1116,9 +1256,6 @@ function verifyCompleteness(
       mapping,
     ]),
   );
-  const emittedStorage = byFamily.get(
-    PROJECTION_FAMILY_IDS.storageTarget,
-  ) as StorageTargetPayload;
   for (const entity of emittedStorage.entities) {
     const source = packageRevision.entities.find(
       (candidate) => candidate.entityId === entity.entityId,
@@ -1136,6 +1273,29 @@ function verifyCompleteness(
           'verifyCompleteness',
           '$.projections.storageTarget.storageMapping',
           entity.entityId,
+        ),
+      );
+    }
+  }
+  if (packageRevision.languageVersion === LANGUAGE_VERSION) {
+    const reporting = byFamily.get(PROJECTION_FAMILY_IDS.reporting) as {
+      entities?: Array<{ entityId: string }>;
+    };
+    const expectedEntityIds = new Set(
+      packageRevision.entities
+        .filter((entity) => entity.lifecycle === 'active')
+        .map((entity) => entity.entityId),
+    );
+    const reportingEntityIds = new Set(
+      (reporting.entities ?? []).map((entity) => entity.entityId),
+    );
+    if (!setsEqual(reportingEntityIds, expectedEntityIds)) {
+      diagnostics.push(
+        compilerDiagnostic(
+          'COMPILER_PROJECTION_INVARIANT_FAILED',
+          'verifyCompleteness',
+          '$.projections.reporting.entities',
+          packageRevision.package.packageId,
         ),
       );
     }
@@ -1290,7 +1450,7 @@ function projectionManifestDomain(familyId: string): string {
   return `${HASH_DOMAINS.projectionManifest}/${familyId}`;
 }
 
-interface StorageTargetPayload {
+interface LegacyStorageTargetPayload {
   entities: Array<{
     derivedStateFields: Array<{
       fieldId: string;
@@ -1314,12 +1474,23 @@ interface StorageTargetPayload {
   schemaVersion: string;
 }
 
+type StorageTargetPayload = LegacyStorageTargetPayload | StorageTargetPayloadV1;
+
 function parseStorageTarget(bytes: Uint8Array): StorageTargetPayload {
   return JSON.parse(new TextDecoder().decode(bytes)) as StorageTargetPayload;
 }
 
+function isStorageTargetV1(value: unknown): value is StorageTargetPayloadV1 {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    (value as { schemaVersion?: unknown }).schemaVersion ===
+      STORAGE_TARGET_PAYLOAD_VERSION
+  );
+}
+
 function collectStorageFields(
-  payload: StorageTargetPayload,
+  payload: LegacyStorageTargetPayload,
 ): Map<string, { entityId: string; fingerprint: string; presence: string }> {
   const fields = new Map<
     string,
@@ -1340,7 +1511,7 @@ function collectStorageFields(
   return fields;
 }
 
-function storageEntitySkeletons(payload: StorageTargetPayload): unknown {
+function storageEntitySkeletons(payload: LegacyStorageTargetPayload): unknown {
   return {
     entities: payload.entities.map((entity) => ({
       derivedStateFields: entity.derivedStateFields,
@@ -1367,7 +1538,11 @@ function containsForbiddenShareableIdentity(value: unknown): boolean {
     return value.some(containsForbiddenShareableIdentity);
   if (!value || typeof value !== 'object') return false;
   for (const [key, entry] of Object.entries(value)) {
-    if (/tenant|coordinator|principal|environmentId|approvalId/i.test(key)) {
+    if (
+      /^(tenantId|coordinatorId|principalId|environmentId|approvalId)$/i.test(
+        key,
+      )
+    ) {
       return true;
     }
     if (containsForbiddenShareableIdentity(entry)) return true;

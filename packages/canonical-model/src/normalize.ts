@@ -5,10 +5,13 @@ import {
   CANONICALIZATION_PROFILE_VERSION,
   CONTENT_HASH_ALGORITHM,
   IMMUTABLE_DEFAULTS_V0,
+  LEGACY_LANGUAGE_VERSION,
+  LEGACY_NORMALIZATION_PROFILE_VERSION,
   LANGUAGE_VERSION,
   NORMALIZATION_PROFILE_VERSION,
   STRUCTURAL_LIMITS_V0,
   SURFACE_SLOTS,
+  type CanonicalLanguageVersion,
 } from './constants.js';
 import {
   CanonicalModelError,
@@ -28,7 +31,7 @@ import { parseStrictJson } from './strict-json.js';
 
 type CanonicalReference = {
   kind: string;
-  schemaVersion: typeof LANGUAGE_VERSION;
+  schemaVersion: CanonicalLanguageVersion;
   targetId: string;
 };
 
@@ -111,12 +114,14 @@ export function normalizeApplicationPackage(
       ...entry,
       lifecycle: entry.lifecycle ?? IMMUTABLE_DEFAULTS_V0.lifecycle,
     })),
-    normalizationProfileVersion: NORMALIZATION_PROFILE_VERSION,
+    normalizationProfileVersion: normalizationProfileFor(
+      authored.languageVersion,
+    ),
     operations: authored.operations.map((entry) => ({
       ...entry,
       lifecycle: entry.lifecycle ?? IMMUTABLE_DEFAULTS_V0.lifecycle,
       precondition: normalizePredicate(
-        entry.precondition ?? defaultPredicate(),
+        entry.precondition ?? defaultPredicate(authored.languageVersion),
         1,
         fieldTypes,
       ),
@@ -132,7 +137,7 @@ export function normalizeApplicationPackage(
     queries: authored.queries.map((entry) => ({
       ...entry,
       filter: normalizePredicate(
-        entry.filter ?? defaultPredicate(),
+        entry.filter ?? defaultPredicate(authored.languageVersion),
         1,
         fieldTypes,
       ),
@@ -150,7 +155,7 @@ export function normalizeApplicationPackage(
     stateMachines: authored.stateMachines.map((entry) => ({
       ...entry,
       lifecycle: entry.lifecycle ?? IMMUTABLE_DEFAULTS_V0.lifecycle,
-      stateField: derivedStateField(entry.machineId),
+      stateField: derivedStateField(entry.machineId, authored.languageVersion),
       states: sortByOrderAndId(
         entry.states.map((state) => ({
           ...state,
@@ -163,6 +168,9 @@ export function normalizeApplicationPackage(
     storageMappings: authored.storageMappings.map((entry) => ({
       ...entry,
       lifecycle: entry.lifecycle ?? IMMUTABLE_DEFAULTS_V0.lifecycle,
+      ...(authored.languageVersion === LANGUAGE_VERSION
+        ? { storageClass: entry.storageClass ?? null }
+        : {}),
     })),
     surfaces: authored.surfaces.map((entry) => ({
       ...entry,
@@ -325,6 +333,102 @@ function validateSemantics(
 ): void {
   const diagnostics: CanonicalDiagnostic[] = [];
   const namespace = packageRevision.package.namespace;
+  visitObjects(packageRevision, (object) => {
+    if (
+      typeof object.schemaVersion === 'string' &&
+      object.schemaVersion !== packageRevision.languageVersion
+    ) {
+      diagnostics.push(
+        diagnostic(
+          'CANON_VERSION_MIXED',
+          '$',
+          'one package uses one language version for its envelope and every nested canonical node',
+          `use ${packageRevision.languageVersion} for every schemaVersion`,
+          findObjectId(object, []),
+        ),
+      );
+    }
+  });
+  if (
+    packageRevision.normalizationProfileVersion !==
+    normalizationProfileFor(packageRevision.languageVersion)
+  ) {
+    diagnostics.push(
+      diagnostic(
+        'CANON_VERSION_PROFILE_MISMATCH',
+        '$.normalizationProfileVersion',
+        'the normalization profile is selected by the package language version',
+        `use ${normalizationProfileFor(packageRevision.languageVersion)}`,
+        packageRevision.package.packageId,
+      ),
+    );
+  }
+  if (
+    packageRevision.languageVersion === LEGACY_LANGUAGE_VERSION &&
+    packageRevision.queries.some((query) => query.queryType === 'search')
+  ) {
+    diagnostics.push(
+      diagnostic(
+        'CANON_QUERY_TYPE_VERSION_UNSUPPORTED',
+        '$.queries.queryType',
+        'search is introduced by canonical language v1 and does not widen v0-experimental',
+        `upgrade the complete package to ${LANGUAGE_VERSION}`,
+        packageRevision.queries.find((query) => query.queryType === 'search')
+          ?.queryId ?? packageRevision.package.packageId,
+      ),
+    );
+  }
+  if (packageRevision.languageVersion === LEGACY_LANGUAGE_VERSION) {
+    const v1OnlyObjectIds = [
+      ...packageRevision.fields
+        .filter(
+          (field) =>
+            field.businessKey !== undefined ||
+            field.collation !== undefined ||
+            field.defaultSemantics !== undefined ||
+            field.defaultValue !== undefined ||
+            field.storageEvolution !== undefined,
+        )
+        .map((field) => field.fieldId),
+      ...packageRevision.relations
+        .filter((relation) => relation.foreignKeyActions !== undefined)
+        .map((relation) => relation.relationId),
+      ...packageRevision.operations
+        .filter((operation) =>
+          [
+            'deleteRecordEffect',
+            'destroyRecordEffect',
+            'purgeRecordEffect',
+          ].includes(operation.effect.kind),
+        )
+        .map((operation) => operation.operationId),
+      ...packageRevision.surfaces
+        .filter(
+          (surface) =>
+            surface.renderer !== undefined || surface.surfaceRole !== undefined,
+        )
+        .map((surface) => surface.surfaceId),
+      ...packageRevision.storageMappings
+        .filter(
+          (mapping) =>
+            mapping.storageClass === null ||
+            mapping.storageClass === undefined ||
+            mapping.promotion !== undefined,
+        )
+        .map((mapping) => mapping.storageMappingId),
+    ].sort(compareCodeUnits);
+    for (const objectId of v1OnlyObjectIds) {
+      diagnostics.push(
+        diagnostic(
+          'CANON_CONSTRUCT_VERSION_UNSUPPORTED',
+          '$',
+          'v1 storage, surface-role, renderer-reserve, and destructive-operation representations do not widen v0-experimental',
+          `upgrade the complete package to ${LANGUAGE_VERSION}`,
+          objectId,
+        ),
+      );
+    }
+  }
   const allIds = collectIds(packageRevision);
   const idOwners = new Map<string, string>();
   for (const [family, ids] of Object.entries(allIds)) {
@@ -460,6 +564,14 @@ function validateOwnedReferences(
         field.fieldType.baseUnit,
         'unitReference',
         '$.fields.fieldType.baseUnit',
+        field.fieldId,
+      );
+    }
+    if (field.defaultValue?.kind === 'quantityValue') {
+      check(
+        field.defaultValue.baseUnit,
+        'unitReference',
+        '$.fields.defaultValue.baseUnit',
         field.fieldId,
       );
     }
@@ -725,6 +837,44 @@ function validateReferenceLocality(
     parentScopes.map((relation) => relation.sourceEntity.targetId),
   );
   const parentScopeCount = new Map<string, number>();
+
+  for (const field of packageRevision.fields) {
+    const requiresDefault =
+      field.defaultSemantics === 'declaredDefault' ||
+      field.defaultSemantics === 'coalesceAtRead';
+    if (requiresDefault !== (field.defaultValue !== undefined)) {
+      diagnostics.push(
+        diagnostic(
+          'CANON_FIELD_DEFAULT_INVALID',
+          '$.fields.defaultValue',
+          'declared-default and coalesce-at-read semantics carry one typed canonical default value and other modes carry none',
+          requiresDefault
+            ? 'provide a defaultValue matching the field type'
+            : 'remove defaultValue or declare default/coalesce semantics',
+          field.fieldId,
+        ),
+      );
+    }
+    if (field.defaultValue !== undefined) {
+      validateComparisonValue(
+        {
+          field: {
+            kind: 'fieldReference',
+            schemaVersion: packageRevision.languageVersion,
+            targetId: field.fieldId,
+          },
+          kind: 'fieldComparisonPredicate',
+          operator: 'equals',
+          schemaVersion: packageRevision.languageVersion,
+          value: field.defaultValue,
+        },
+        field,
+        '$.fields.defaultValue',
+        field.fieldId,
+        diagnostics,
+      );
+    }
+  }
 
   for (const entity of packageRevision.entities) {
     if (storageEntity.get(entity.storage.targetId) !== entity.entityId) {
@@ -1061,7 +1211,9 @@ function validateAuthoredDerivedStateFields(
     if (
       machine.stateField !== undefined &&
       canonicalize(machine.stateField) !==
-        canonicalize(derivedStateField(machine.machineId))
+        canonicalize(
+          derivedStateField(machine.machineId, authored.languageVersion),
+        )
     ) {
       diagnostics.push(
         diagnostic(
@@ -1077,10 +1229,13 @@ function validateAuthoredDerivedStateFields(
   if (diagnostics.length > 0) throw new CanonicalModelError(diagnostics);
 }
 
-function derivedStateField(machineId: string): {
+function derivedStateField(
+  machineId: string,
+  schemaVersion: CanonicalLanguageVersion,
+): {
   fieldId: string;
   kind: 'derivedStateField';
-  schemaVersion: typeof LANGUAGE_VERSION;
+  schemaVersion: CanonicalLanguageVersion;
   valueKind: 'stateId';
 } {
   const separator = machineId.indexOf(':');
@@ -1089,7 +1244,7 @@ function derivedStateField(machineId: string): {
   return {
     fieldId: `${namespace}:derived_state_field.${localIdentity}`,
     kind: 'derivedStateField',
-    schemaVersion: LANGUAGE_VERSION,
+    schemaVersion,
     valueKind: 'stateId',
   };
 }
@@ -1207,12 +1362,24 @@ function canonicalDateTime(
   return precision === 'millisecond' ? iso : `${iso.slice(0, 19)}Z`;
 }
 
-function defaultPredicate(): PredicateExpression {
+function defaultPredicate(
+  schemaVersion: CanonicalLanguageVersion,
+): PredicateExpression {
   return {
     kind: 'booleanPredicate',
-    schemaVersion: LANGUAGE_VERSION,
+    schemaVersion,
     value: true,
   };
+}
+
+function normalizationProfileFor(
+  languageVersion: CanonicalLanguageVersion,
+):
+  | typeof LEGACY_NORMALIZATION_PROFILE_VERSION
+  | typeof NORMALIZATION_PROFILE_VERSION {
+  return languageVersion === LEGACY_LANGUAGE_VERSION
+    ? LEGACY_NORMALIZATION_PROFILE_VERSION
+    : NORMALIZATION_PROFILE_VERSION;
 }
 
 function isDefaultPredicate(value: unknown): boolean {
@@ -1374,6 +1541,7 @@ function collectIds(
     ]),
     surfaces: packageRevision.surfaces.flatMap((entry) => [
       entry.surfaceId,
+      ...(entry.renderer ? [entry.renderer.rendererId] : []),
       ...entry.slots.map((slot) => slot.slotId),
     ]),
     queries: packageRevision.queries.flatMap((entry) => [
@@ -1487,6 +1655,7 @@ const IDENTITY_KEY_BY_KIND: Readonly<Record<string, string>> = Object.freeze({
   queryDefinition: 'queryId',
   querySelection: 'selectionId',
   relationDefinition: 'relationId',
+  rendererForm: 'rendererId',
   stateDefinition: 'stateId',
   stateMachineDefinition: 'machineId',
   storageMappingDefinition: 'storageMappingId',
@@ -1508,6 +1677,7 @@ const OWNED_IDENTITY_KEYS = Object.freeze([
   'permissionId',
   'queryId',
   'relationId',
+  'rendererId',
   'selectionId',
   'slotId',
   'stateId',
