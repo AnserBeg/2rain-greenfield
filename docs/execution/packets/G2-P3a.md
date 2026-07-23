@@ -1,8 +1,8 @@
 # G2-P3a — Generic SurfaceRuntime semantic data binding
 
-Status: active
+Status: evidence_ready
 Tier: Critical
-Frozen candidate: pending
+Frozen candidate: `f0ca4b51c051c9ada1c2adaccc0a1e03df5c794d`
 
 ## Goal and scope
 
@@ -98,7 +98,8 @@ maximum two REVISE rounds.
 
 ## Evidence
 
-Candidate freeze is pending the writer commit. The completed proof establishes:
+The frozen candidate is
+`f0ca4b51c051c9ada1c2adaccc0a1e03df5c794d`. The completed proof establishes:
 
 - the exact P2c fixture definition compiles at test time and supplies the
   surface/query/operation projections; production web source contains no
@@ -139,9 +140,12 @@ Fresh Codex `gpt-5.6-sol` xhigh review round 1 returned REVISE on
 collection query, successful writes re-queried instead of rendering the
 authoritative operation read-back, and human-confirmed create/update forms did
 not submit confirmation. The bounded in-lease fixes above resolve all three;
-the replacement candidate's fresh Codex review and Fable confirmation are
-pending. No compiler, runtime, provider, migration, schema-snapshot,
-real-module, or out-of-lease file changed.
+fresh naive Codex `gpt-5.6-sol` xhigh returned PASS on all five charter
+questions for replacement candidate `f0ca4b5`, with no material or out-of-scope
+finding. Fable max then returned PASS on the identical unchanged SHA with no
+material finding; its observations were explicitly immaterial or deferred UX
+polish. No compiler, runtime, provider, migration, schema-snapshot, real-module,
+or out-of-lease file changed.
 
 ## Test it yourself
 
@@ -149,14 +153,16 @@ From the repository root, the deterministic proof takes under ten minutes:
 
 ```bash
 cd /home/rvham/2rain-greenfield
+git show -s --format=%H f0ca4b51c051c9ada1c2adaccc0a1e03df5c794d
 node --import tsx --test test/integration/surface-data-binding.test.ts
 node --import tsx --test test/architecture/surface-data-binding.test.ts
 corepack pnpm test:postgres
 corepack pnpm check:schema
 ```
 
-Expect 4/4 focused integration tests, 3/3 focused architecture tests, 57/57
-PostgreSQL tests, and `8 applied / 8 verified` with clean drift.
+Expect the exact frozen SHA, 4/4 focused integration tests, 3/3 focused
+architecture tests, 57/57 PostgreSQL tests, and `8 applied / 8 verified` with
+clean drift.
 
 For a screenshot-able browser walkthrough, run:
 
@@ -183,6 +189,11 @@ clean integrated `main` checkpoint, and the first real Party walking slice has
 not landed. Re-evaluate after accepted G2-P3b Party, immediately before the
 Catalog/Location fan-out; that is the doctrine's highest-value milestone
 trigger.
+
+## Candidate next packet
+
+The next user-selectable packet is G2-P3b, the real Party walking slice and
+reusable module template. It has not been started.
 
 Stop at this packet's reviewed checkpoint. Do not integrate and do not start
 G2-P3b.
