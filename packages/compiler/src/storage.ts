@@ -262,6 +262,7 @@ export interface StorageColumnTarget {
   nullable: boolean;
   physicalName: string;
   postgresqlType: string;
+  requiredAfterTightening: boolean;
   searchMapping: 'none' | 'normalizedTextIndex';
   shapeFingerprint: string;
 }
@@ -308,21 +309,56 @@ export interface TransitionBinding {
   toStorageTargetSemanticDigest: string;
 }
 
+export function buildStorageTransitionEnvelopeFromLegacyTargets(
+  additions: Array<{ entityId: string; fieldId: string }>,
+  binding: TransitionBinding,
+): StorageTransitionEnvelope {
+  const elements = additions.map(({ entityId, fieldId }) =>
+    element(
+      'addColumn',
+      entityId,
+      fieldId,
+      physicalNameFor('column', fieldId),
+      [],
+      'existing',
+    ),
+  );
+  return {
+    backfillAdmissibilityVersion: BACKFILL_ADMISSIBILITY_VERSION,
+    compatibilityMatrixVersion: STORAGE_COMPATIBILITY_MATRIX_VERSION,
+    elements: totalOrder(elements),
+    ...binding,
+    kind: 'storageTransitionEnvelope',
+    rendererPolicyVersion: STORAGE_RENDERER_POLICY_VERSION,
+    schemaVersion: STORAGE_TRANSITION_ENVELOPE_VERSION,
+    tighteningDebt: [],
+    totalOrdering: 'declaredDependenciesThenElementIdCodeUnits',
+  };
+}
+
 export function lowerStorageTargetV1(
   packageRevision: NormalizedApplicationPackage,
+  previousStorageTarget: StorageTargetPayloadV1 | null = null,
 ): StorageTargetPayloadV1 {
   const mappings: PhysicalMappingRecord[] = [];
+  const previousEntities = new Map(
+    (previousStorageTarget?.entities ?? []).map((entity) => [
+      entity.entityId,
+      entity,
+    ]),
+  );
   const fieldsByEntity = groupBy(
     packageRevision.fields,
     (field) => field.entity.targetId,
   );
   const queriesByEntity = groupBy(
-    packageRevision.queries,
+    packageRevision.queries.filter((query) => query.lifecycle === 'active'),
     (query) => query.sourceEntity.targetId,
   );
   const operationsByEntity = groupBy(
     packageRevision.operations.filter(
-      (operation) => 'entity' in operation.effect,
+      (operation) =>
+        operation.lifecycle === 'active' && 'entity' in operation.effect,
     ),
     (operation) =>
       'entity' in operation.effect ? operation.effect.entity.targetId : '',
@@ -362,8 +398,22 @@ export function lowerStorageTargetV1(
         primaryKeyName,
         { columns: ['tenant_id', 'environment_id', 'record_id'] },
       );
-      const columns = (fieldsByEntity.get(entity.entityId) ?? []).map((field) =>
-        lowerColumn(field, mappings),
+      const previousEntity = previousEntities.get(entity.entityId);
+      const previousColumns = new Map(
+        (previousEntity?.columns ?? []).map((column) => [
+          column.canonicalFieldId,
+          column,
+        ]),
+      );
+      const columns = (fieldsByEntity.get(entity.entityId) ?? []).map(
+        (field) => {
+          const previousColumn = previousColumns.get(field.fieldId);
+          const deferRequiredTightening =
+            field.presence === 'required' &&
+            previousEntity !== undefined &&
+            (previousColumn === undefined || previousColumn.nullable);
+          return lowerColumn(field, mappings, deferRequiredTightening);
+        },
       );
       const derivedStateFields = (
         stateMachinesByEntity.get(entity.entityId) ?? []
@@ -508,13 +558,6 @@ export function lowerStorageTargetV1(
         'column',
         `${relation.relationId}/target-record-id`,
       );
-      addMapping(
-        mappings,
-        'column',
-        `${relation.relationId}#target-record-id`,
-        relationColumn,
-        { postgresqlType: 'uuid', relationId: relation.relationId },
-      );
       const physicalName = physicalNameFor(
         'constraint',
         `${relation.relationId}/foreign-key`,
@@ -530,14 +573,7 @@ export function lowerStorageTargetV1(
           target.recordIdentity.column,
         ],
       };
-      addMapping(
-        mappings,
-        'constraint',
-        `${relation.relationId}#foreign-key`,
-        physicalName,
-        foreignKey,
-      );
-      return {
+      const targetShape: StorageRelationTarget = {
         foreignKey,
         ownership: relation.ownership,
         relationColumn: {
@@ -549,6 +585,29 @@ export function lowerStorageTargetV1(
         sourceEntityId: relation.sourceEntity.targetId,
         targetEntityId: relation.targetEntity.targetId,
       };
+      const compatibilityShape = {
+        foreignKey: targetShape.foreignKey,
+        ownership: targetShape.ownership,
+        relationColumn: targetShape.relationColumn,
+        relationId: targetShape.relationId,
+        sourceEntityId: targetShape.sourceEntityId,
+        targetEntityId: targetShape.targetEntityId,
+      };
+      addMapping(
+        mappings,
+        'column',
+        `${relation.relationId}#target-record-id`,
+        relationColumn,
+        compatibilityShape,
+      );
+      addMapping(
+        mappings,
+        'constraint',
+        `${relation.relationId}#foreign-key`,
+        physicalName,
+        compatibilityShape,
+      );
+      return targetShape;
     },
   );
 
@@ -748,17 +807,18 @@ export function buildStorageTransitionEnvelope(
         'existing',
       );
       elements.push(addColumn);
+      let tightenDependency = addColumn;
       if (sourceField.storageEvolution) {
-        elements.push(
-          element(
-            'backfill',
-            entity.entityId,
-            fieldId,
-            field.physicalName,
-            [addColumn.elementId],
-            'existing',
-          ),
+        const backfill = element(
+          'backfill',
+          entity.entityId,
+          fieldId,
+          field.physicalName,
+          [addColumn.elementId],
+          'existing',
         );
+        elements.push(backfill);
+        tightenDependency = backfill;
       }
       if (field.searchMapping === 'normalizedTextIndex') {
         const index = entity.indexes.find((candidateIndex) =>
@@ -777,32 +837,100 @@ export function buildStorageTransitionEnvelope(
           );
         }
       }
+      if (field.requiredAfterTightening) {
+        const tighten = element(
+          'tightenNotNull',
+          entity.entityId,
+          fieldId,
+          field.physicalName,
+          [tightenDependency.elementId],
+          'existing',
+        );
+        elements.push(tighten);
+        debts.push(
+          tighteningDebt(
+            tighten,
+            binding.fromReleaseRoot,
+            affectedConsumerWriters(oldEntity, entity),
+          ),
+        );
+      }
     }
   }
 
-  const previousRelations = new Set(
-    previous.relations.map((relation) => relation.relationId),
+  const previousRelations = new Map(
+    previous.relations.map((relation) => [relation.relationId, relation]),
   );
+  const candidateRelations = new Map(
+    candidate.relations.map((relation) => [relation.relationId, relation]),
+  );
+  for (const relation of previous.relations) {
+    if (!candidateRelations.has(relation.relationId)) {
+      return failureDiagnostic(
+        'COMPILER_STORAGE_RELATION_MUTATION_UNSUPPORTED',
+        '$.relations',
+        relation.relationId,
+      );
+    }
+  }
   for (const relation of candidate.relations) {
-    if (!previousRelations.has(relation.relationId)) {
-      const entry = element(
-        'addForeignKey',
+    const previousRelation = previousRelations.get(relation.relationId);
+    if (previousRelation) {
+      if (!sameRelationShape(previousRelation, relation)) {
+        return failureDiagnostic(
+          'COMPILER_STORAGE_RELATION_MUTATION_UNSUPPORTED',
+          '$.relations',
+          relation.relationId,
+        );
+      }
+      continue;
+    }
+    const sourceOrigin = previousEntities.has(relation.sourceEntityId)
+      ? 'existing'
+      : 'samePlan';
+    if (sourceOrigin === 'existing' && !relation.relationColumn.nullable) {
+      return failureDiagnostic(
+        'COMPILER_STORAGE_RELATION_MUTATION_UNSUPPORTED',
+        '$.relations.required',
+        relation.relationId,
+      );
+    }
+    const dependencies = [
+      createdTableElementIds.get(relation.sourceEntityId),
+      createdTableElementIds.get(relation.targetEntityId),
+    ].filter((entry): entry is string => entry !== undefined);
+    if (sourceOrigin === 'existing') {
+      const relationColumn = element(
+        'addColumn',
         relation.relationId,
         null,
-        relation.foreignKey.physicalName,
-        [
-          createdTableElementIds.get(relation.sourceEntityId),
-          createdTableElementIds.get(relation.targetEntityId),
-        ].filter((entry): entry is string => entry !== undefined),
-        previousEntities.has(relation.sourceEntityId) ? 'existing' : 'samePlan',
+        relation.relationColumn.physicalName,
+        [],
+        'existing',
       );
-      elements.push(entry);
-      if (entry.coexistence.admission === 'blockingWhileAffectedWritersLive') {
-        const roots =
-          candidateEntities.get(relation.sourceEntityId)?.consumerWriterRoots
-            .writerOperationIds ?? [];
-        debts.push(tighteningDebt(entry, roots));
-      }
+      elements.push(relationColumn);
+      dependencies.push(relationColumn.elementId);
+    }
+    const entry = element(
+      'addForeignKey',
+      relation.relationId,
+      null,
+      relation.foreignKey.physicalName,
+      dependencies,
+      sourceOrigin,
+    );
+    elements.push(entry);
+    if (entry.coexistence.admission === 'blockingWhileAffectedWritersLive') {
+      debts.push(
+        tighteningDebt(
+          entry,
+          binding.fromReleaseRoot,
+          affectedConsumerWriters(
+            previousEntities.get(relation.sourceEntityId),
+            candidateEntities.get(relation.sourceEntityId),
+          ),
+        ),
+      );
     }
   }
 
@@ -1037,6 +1165,7 @@ export function postgresqlTypeFor(fieldType: FieldType): string {
 function lowerColumn(
   field: Field,
   mappings: PhysicalMappingRecord[],
+  deferRequiredTightening: boolean,
 ): StorageColumnTarget {
   const physicalName = physicalNameFor('column', field.fieldId);
   const postgresqlType = postgresqlTypeFor(field.fieldType);
@@ -1046,15 +1175,16 @@ function lowerColumn(
   const value = {
     canonicalFieldId: field.fieldId,
     coexistenceImpact:
-      field.presence === 'required'
+      field.presence === 'required' && !deferRequiredTightening
         ? ('none' as const)
         : ('requiresReadFallback' as const),
     collation: field.collation ?? ('binary' as const),
     defaultSemantics,
     defaultValue: field.defaultValue ?? null,
-    nullable: field.presence !== 'required',
+    nullable: field.presence !== 'required' || deferRequiredTightening,
     physicalName,
     postgresqlType,
+    requiredAfterTightening: deferRequiredTightening,
     searchMapping: field.searchable
       ? ('normalizedTextIndex' as const)
       : ('none' as const),
@@ -1066,7 +1196,9 @@ function lowerColumn(
         defaultSemantics,
         defaultValue: field.defaultValue ?? null,
         fieldType: field.fieldType,
+        nullable: field.presence !== 'required' || deferRequiredTightening,
         presence: field.presence,
+        requiredAfterTightening: deferRequiredTightening,
         searchable: field.searchable,
       },
     ).digest,
@@ -1115,16 +1247,24 @@ function element(
 
 function tighteningDebt(
   entry: StorageTransitionElement,
-  blockingRootIds: string[],
+  blockingOldReleaseRoot: string,
+  affected: {
+    readerQueryIds: string[];
+    writerOperationIds: string[];
+  },
 ): TighteningDebt {
   return {
+    affectedReaderQueryIds: affected.readerQueryIds,
+    affectedWriterOperationIds: affected.writerOperationIds,
     admissionConsequence: 'blocksTenantAccessibleModuleCreation',
-    blockingRootIds: [...blockingRootIds].sort(compare),
+    blockingRootIds: [blockingOldReleaseRoot],
     debtId: hashCanonical(`${HASH_DOMAINS.storageTransitionElement}/debt`, {
       elementId: entry.elementId,
       owner: entry.subjectId,
     }).digest,
     elementId: entry.elementId,
+    liveRootResolution:
+      'materializerResolvesActiveAndNonTerminalPreparationUnion',
     owner: entry.subjectId,
     prerequisites: [
       'union-live-root completeness revalidated',
@@ -1133,6 +1273,45 @@ function tighteningDebt(
     ],
     schemaVersion: TIGHTENING_DEBT_VERSION,
   };
+}
+
+function affectedConsumerWriters(
+  previous: StorageEntityTarget | undefined,
+  candidate: StorageEntityTarget | undefined,
+): {
+  readerQueryIds: string[];
+  writerOperationIds: string[];
+} {
+  return {
+    readerQueryIds: [
+      ...new Set([
+        ...(previous?.consumerWriterRoots.readerQueryIds ?? []),
+        ...(candidate?.consumerWriterRoots.readerQueryIds ?? []),
+      ]),
+    ].sort(compare),
+    writerOperationIds: [
+      ...new Set([
+        ...(previous?.consumerWriterRoots.writerOperationIds ?? []),
+        ...(candidate?.consumerWriterRoots.writerOperationIds ?? []),
+      ]),
+    ].sort(compare),
+  };
+}
+
+function sameRelationShape(
+  previous: StorageRelationTarget,
+  candidate: StorageRelationTarget,
+): boolean {
+  return (
+    hashCanonical(
+      `${HASH_DOMAINS.projectionSemantic}/storage-relation-shape`,
+      previous,
+    ).digest ===
+    hashCanonical(
+      `${HASH_DOMAINS.projectionSemantic}/storage-relation-shape`,
+      candidate,
+    ).digest
+  );
 }
 
 function totalOrder(
@@ -1179,6 +1358,7 @@ function failureDiagnostic(
   code:
     | 'COMPILER_BACKFILL_INADMISSIBLE'
     | 'COMPILER_PHYSICAL_NAME_REUSE_INCOMPATIBLE'
+    | 'COMPILER_STORAGE_RELATION_MUTATION_UNSUPPORTED'
     | 'COMPILER_STORAGE_RENAME_AS_ADD_UNSUPPORTED'
     | 'COMPILER_STORAGE_RETYPE_UNSUPPORTED'
     | 'COMPILER_STORAGE_TRANSITION_UNSUPPORTED',

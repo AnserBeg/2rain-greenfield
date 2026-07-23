@@ -103,6 +103,30 @@ test('compiler-derived conformance names the entity and missing family', () => {
   ]);
 });
 
+test('compiler-derived conformance requires recovery evidence per active entity', () => {
+  const candidate = ordinaryModuleV1() as {
+    assertions: Array<{
+      assertionId: string;
+      evidenceKinds: string[];
+    }>;
+  };
+  const childAssertion = candidate.assertions.find((assertion) =>
+    assertion.assertionId.endsWith('master_role_conformance'),
+  )!;
+  childAssertion.evidenceKinds = childAssertion.evidenceKinds.filter(
+    (kind) => kind !== 'recovery',
+  );
+  const result = compileApplication(input(candidate));
+  assert.equal(result.status, 'failed');
+  assert.deepEqual(structuralDiagnostics(result), [
+    {
+      code: 'COMPILER_ENTITY_PROJECTION_MISSING',
+      path: '$.conformance.verification.recovery',
+      subjectId: FIXTURE_IDS.entityIds.child,
+    },
+  ]);
+});
+
 test('parent-scoped children receive the complete Q0/O0 and surface quartet', () => {
   const compiled = mustCompile(input(ordinaryModuleV1()));
   const queries = projectionPayload<{
@@ -358,9 +382,19 @@ test('generatedTyped and promotion reserves normalize and round-trip but compile
   ]);
 });
 
-test('tightening debt uses the physical table actual writer roots', () => {
+test('relation additions order the column before the FK and debt preserves both release writer sets', () => {
   const first = mustCompile(input(ordinaryModuleV1()));
-  const candidate = ordinaryModuleV2() as {
+  const previousReaderIds = ['get', 'list', 'resolve', 'search'].map(
+    (suffix) => `${FIXTURE_IDS.namespace}:query.master_role_${suffix}`,
+  );
+  const previousWriterIds = ['archive', 'create', 'restore', 'update'].map(
+    (suffix) => `${FIXTURE_IDS.namespace}:operation.master_role_${suffix}`,
+  );
+  let renamedCandidate: unknown = ordinaryModuleV2();
+  for (const id of [...previousReaderIds, ...previousWriterIds]) {
+    renamedCandidate = replaceVersion(renamedCandidate, id, `${id}_v2`);
+  }
+  const candidate = renamedCandidate as {
     relations: Array<Record<string, unknown>>;
   };
   candidate.relations.push({
@@ -396,17 +430,41 @@ test('tightening debt uses the physical table actual writer roots', () => {
     compiled,
     PROJECTION_FAMILY_IDS.storageTransition,
   );
+  const relationId = `${FIXTURE_IDS.namespace}:relation.master_role_secondary_parent`;
+  const relationColumn = transition.elements.find(
+    (entry) => entry.kind === 'addColumn' && entry.subjectId === relationId,
+  );
+  const foreignKey = transition.elements.find(
+    (entry) => entry.kind === 'addForeignKey' && entry.subjectId === relationId,
+  );
+  assert.ok(relationColumn);
+  assert.ok(foreignKey);
+  assert.ok(
+    transition.elements.indexOf(relationColumn) <
+      transition.elements.indexOf(foreignKey),
+  );
+  assert.deepEqual(foreignKey.declaredDependencyIds, [
+    relationColumn.elementId,
+  ]);
   assert.equal(transition.tighteningDebt.length, 1);
+  const debt = transition.tighteningDebt[0]!;
   assert.equal(
-    transition.tighteningDebt[0]?.admissionConsequence,
+    debt.admissionConsequence,
     'blocksTenantAccessibleModuleCreation',
   );
-  assert.deepEqual(transition.tighteningDebt[0]?.blockingRootIds, [
-    `${FIXTURE_IDS.namespace}:operation.master_role_archive`,
-    `${FIXTURE_IDS.namespace}:operation.master_role_create`,
-    `${FIXTURE_IDS.namespace}:operation.master_role_restore`,
-    `${FIXTURE_IDS.namespace}:operation.master_role_update`,
-  ]);
+  assert.deepEqual(debt.blockingRootIds, [first.releaseRoot]);
+  assert.deepEqual(
+    debt.affectedReaderQueryIds,
+    [...previousReaderIds, ...previousReaderIds.map((id) => `${id}_v2`)].sort(),
+  );
+  assert.deepEqual(
+    debt.affectedWriterOperationIds,
+    [...previousWriterIds, ...previousWriterIds.map((id) => `${id}_v2`)].sort(),
+  );
+  assert.equal(
+    debt.liveRootResolution,
+    'materializerResolvesActiveAndNonTerminalPreparationUnion',
+  );
 });
 
 function input(

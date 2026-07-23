@@ -28,6 +28,7 @@ import {
 } from './projections.js';
 import {
   buildStorageTransitionEnvelope,
+  buildStorageTransitionEnvelopeFromLegacyTargets,
   validatePhysicalMappingRecords,
   type StorageTargetPayloadV1,
 } from './storage.js';
@@ -66,6 +67,7 @@ import {
   type ProjectionManifestEnvelope,
   type ProjectionReference,
   type ReleaseManifestEnvelope,
+  type StorageTransitionEnvelope,
 } from './protocol.js';
 
 export const DEFAULT_COMPILER_PROFILE: CompilerSemanticProfile = Object.freeze({
@@ -207,7 +209,15 @@ export function compileApplication(
     semanticProfileDigest,
   }).digest;
 
-  const basePlans = lowerBaseProjectionPayloads(packageRevision);
+  const previousStorageTarget = input.expectedActiveRelease
+    ? parseStorageTarget(
+        input.expectedActiveRelease.storageTargetCanonicalBytes,
+      )
+    : null;
+  const basePlans = lowerBaseProjectionPayloads(
+    packageRevision,
+    isStorageTargetV1(previousStorageTarget) ? previousStorageTarget : null,
+  );
   const emittedBase = emitScheduledProjections(
     basePlans,
     normalizedDefinitionDigest,
@@ -253,6 +263,7 @@ export function compileApplication(
     ? lowerStorageTransition(
         packageRevision,
         input.expectedActiveRelease,
+        previousStorageTarget!,
         storageProjection,
         normalizedDefinitionDigest,
         semanticProfileDigest,
@@ -975,13 +986,13 @@ function emitProjection(
 function lowerStorageTransition(
   packageRevision: NormalizedApplicationPackage,
   expected: ExpectedActiveRelease,
+  previous: StorageTargetPayload,
   candidateStorage: EmittedProjection,
   normalizedDefinitionDigest: string,
   semanticProfileDigest: string,
   orderedDependencyDigests: string[],
   cacheInputIdentity: string,
 ): EmittedProjection | { diagnostic: CompilerDiagnostic } {
-  const previous = parseStorageTarget(expected.storageTargetCanonicalBytes);
   const candidate = candidateStorage.payload as StorageTargetPayload;
   if (isStorageTargetV1(candidateStorage.payload)) {
     if (!isStorageTargetV1(previous)) {
@@ -1035,10 +1046,9 @@ function lowerStorageTransition(
   const legacyCandidate = candidate as LegacyStorageTargetPayload;
   const previousFields = collectStorageFields(legacyPrevious);
   const candidateFields = collectStorageFields(legacyCandidate);
-  const operations: Array<{
+  const additions: Array<{
     entityId: string;
     fieldId: string;
-    kind: 'addOptionalField';
   }> = [];
 
   if (
@@ -1070,10 +1080,9 @@ function lowerStorageTransition(
           ),
         };
       }
-      operations.push({
+      additions.push({
         entityId: field.entityId,
         fieldId,
-        kind: 'addOptionalField',
       });
     } else if (previousField.fingerprint !== field.fingerprint) {
       return {
@@ -1098,34 +1107,25 @@ function lowerStorageTransition(
       };
     }
   }
-  operations.sort((left, right) => compare(left.fieldId, right.fieldId));
-  // Historical v0 compilation remains byte-reproducible for accepted G1
-  // evidence. It is not accepted by the opt-in v1 module profile and is not a
-  // Freeze F transition authority.
-  const legacyPayloadVersion =
-    'northstar.storage-transition-payload/v0-provisional' as const;
-  const payload = {
+  additions.sort((left, right) => compare(left.fieldId, right.fieldId));
+  const envelope = buildStorageTransitionEnvelopeFromLegacyTargets(additions, {
     fromNormalizedDefinitionDigest: expected.normalizedDefinitionDigest,
     fromReleaseRoot: expected.releaseRoot,
     fromStorageTargetArtifactRoot: expected.storageTargetArtifactRoot,
     fromStorageTargetSemanticDigest: expected.storageTargetSemanticDigest,
-    kind: 'storageTransitionPayload',
-    operations,
-    schemaVersion: legacyPayloadVersion,
     toNormalizedDefinitionDigest: normalizedDefinitionDigest,
     toStorageTargetArtifactRoot: candidateStorage.reference.artifactRoot,
     toStorageTargetSemanticDigest: candidateStorage.reference.semanticDigest,
-  };
+  });
   return emitStorageTransitionProjection(
     packageRevision,
     expected,
     candidateStorage,
-    payload,
+    envelope,
     normalizedDefinitionDigest,
     semanticProfileDigest,
     orderedDependencyDigests,
     cacheInputIdentity,
-    legacyPayloadVersion,
   );
 }
 
@@ -1133,12 +1133,11 @@ function emitStorageTransitionProjection(
   packageRevision: NormalizedApplicationPackage,
   expected: ExpectedActiveRelease,
   candidateStorage: EmittedProjection,
-  payload: unknown,
+  payload: StorageTransitionEnvelope,
   normalizedDefinitionDigest: string,
   semanticProfileDigest: string,
   orderedDependencyDigests: string[],
   cacheInputIdentity: string,
-  payloadSchemaVersion: string = STORAGE_TRANSITION_ENVELOPE_VERSION,
 ): EmittedProjection {
   const namespace = packageRevision.package.namespace;
   const plan: ProjectionPayloadPlan = {
@@ -1149,7 +1148,7 @@ function emitStorageTransitionProjection(
       scopeId: `${expected.storageTargetArtifactRoot}:${candidateStorage.reference.artifactRoot}`,
     },
     payload,
-    payloadSchemaVersion,
+    payloadSchemaVersion: STORAGE_TRANSITION_ENVELOPE_VERSION,
     requiredRuntimeCapability: {
       capabilityId: 'northstar.runtime:capability.storage-transition',
       minimumVersion: 1,

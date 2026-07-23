@@ -27,6 +27,7 @@ const REQUIRED_VERIFICATION_EVIDENCE = Object.freeze([
   'agent',
   'migration',
   'provider',
+  'recovery',
   'structure',
   'userInterface',
 ] as const);
@@ -202,12 +203,12 @@ export function validateModuleConformance(
       }
     }
 
-    const evidence = assertedEvidenceByEntity.get(entity.entityId);
-    if (
-      !evidence ||
-      REQUIRED_VERIFICATION_EVIDENCE.some((kind) => !evidence.has(kind))
-    ) {
-      missing(diagnostics, entity.entityId, 'verification');
+    const evidence =
+      assertedEvidenceByEntity.get(entity.entityId) ?? new Set<string>();
+    for (const kind of REQUIRED_VERIFICATION_EVIDENCE) {
+      if (!evidence.has(kind)) {
+        missing(diagnostics, entity.entityId, `verification.${kind}`);
+      }
     }
   }
   return diagnostics;

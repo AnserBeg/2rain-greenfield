@@ -208,10 +208,13 @@ export interface StorageTransitionElement {
 }
 
 export interface TighteningDebt {
+  affectedReaderQueryIds: string[];
+  affectedWriterOperationIds: string[];
   admissionConsequence: 'blocksTenantAccessibleModuleCreation';
   blockingRootIds: string[];
   debtId: string;
   elementId: string;
+  liveRootResolution: 'materializerResolvesActiveAndNonTerminalPreparationUnion';
   owner: string;
   prerequisites: string[];
   schemaVersion: typeof TIGHTENING_DEBT_VERSION;

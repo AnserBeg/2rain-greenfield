@@ -125,6 +125,11 @@ export const COMPILER_DIAGNOSTIC_COPY = Object.freeze({
       'preserve canonical field identity; a future governed evolution family must own renames',
     rule: 'v1 does not reinterpret a removed field and added field as a rename',
   },
+  COMPILER_STORAGE_RELATION_MUTATION_UNSUPPORTED: {
+    acceptedAlternative:
+      'preserve the complete existing physical relation shape or add a distinct optional relation through the v1 additive path',
+    rule: 'v1 rejects mutation or removal of an existing relation physical shape, requiredness, ownership, target, or referential action',
+  },
   COMPILER_STORAGE_RETYPE_UNSUPPORTED: {
     acceptedAlternative:
       'preserve the existing field type or defer retyping to a future governed evolution family',

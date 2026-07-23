@@ -4,12 +4,14 @@ import {
   PROJECTION_FAMILY_IDS,
   RELEASE_DIFF_ALGORITHM_VERSION,
   RELEASE_DIFF_VERSION,
+  STORAGE_TRANSITION_ENVELOPE_VERSION,
   type CompileSuccess,
   type ProjectionFamilyId,
   type ProjectionManifestEnvelope,
   type ReleaseChange,
   type ReleaseDiffEnvelope,
   type ReleaseImpactCode,
+  type StorageTransitionEnvelope,
 } from './protocol.js';
 
 interface SemanticConstruct {
@@ -24,16 +26,6 @@ interface SemanticModelPayload {
 
 interface SurfaceManifestPayload {
   surfaces: Array<{ fieldIds: string[] }>;
-}
-
-interface StorageTransitionPayload {
-  fromNormalizedDefinitionDigest: string;
-  fromReleaseRoot: string;
-  fromStorageTargetArtifactRoot: string;
-  fromStorageTargetSemanticDigest: string;
-  toNormalizedDefinitionDigest: string;
-  toStorageTargetArtifactRoot: string;
-  toStorageTargetSemanticDigest: string;
 }
 
 const impactByFamily: Record<ProjectionFamilyId, ReleaseImpactCode> = {
@@ -176,10 +168,29 @@ function transitionDigestForPair(
     }
     return null;
   }
-  const payload = projectionPayload<StorageTransitionPayload>(
+  if (transition.payloadSchemaVersion !== STORAGE_TRANSITION_ENVELOPE_VERSION) {
+    throw new Error('release diff accepts only storage transition envelope v1');
+  }
+  const transitionManifest = projectionManifest(
     to,
     PROJECTION_FAMILY_IDS.storageTransition,
   );
+  if (
+    transitionManifest.payloadSchemaVersion !==
+    STORAGE_TRANSITION_ENVELOPE_VERSION
+  ) {
+    throw new Error('release diff accepts only storage transition envelope v1');
+  }
+  const payload = projectionPayload<StorageTransitionEnvelope>(
+    to,
+    PROJECTION_FAMILY_IDS.storageTransition,
+  );
+  if (
+    payload.kind !== 'storageTransitionEnvelope' ||
+    payload.schemaVersion !== STORAGE_TRANSITION_ENVELOPE_VERSION
+  ) {
+    throw new Error('release diff accepts only storage transition envelope v1');
+  }
   const exactPair =
     payload.fromNormalizedDefinitionDigest ===
       from.bundle.releaseManifest.normalizedDefinitionDigest &&
@@ -244,6 +255,19 @@ function projectionPayload<T>(
   compiled: CompileSuccess,
   familyId: ProjectionFamilyId,
 ): T {
+  const manifest = projectionManifest(compiled, familyId);
+  const chunkHash = manifest.chunks[0]?.contentHash;
+  const chunk = compiled.bundle.artifacts.find(
+    (entry) => entry.contentHash === chunkHash,
+  );
+  if (!chunk) throw new Error(`missing chunk ${familyId}`);
+  return JSON.parse(new TextDecoder().decode(chunk.canonicalBytes)) as T;
+}
+
+function projectionManifest(
+  compiled: CompileSuccess,
+  familyId: ProjectionFamilyId,
+): ProjectionManifestEnvelope {
   const reference = compiled.bundle.releaseManifest.projections.find(
     (entry) => entry.familyId === familyId,
   );
@@ -255,12 +279,7 @@ function projectionPayload<T>(
   const manifest = JSON.parse(
     new TextDecoder().decode(manifestArtifact.canonicalBytes),
   ) as ProjectionManifestEnvelope;
-  const chunkHash = manifest.chunks[0]?.contentHash;
-  const chunk = compiled.bundle.artifacts.find(
-    (entry) => entry.contentHash === chunkHash,
-  );
-  if (!chunk) throw new Error(`missing chunk ${familyId}`);
-  return JSON.parse(new TextDecoder().decode(chunk.canonicalBytes)) as T;
+  return manifest;
 }
 
 function projectionReference(

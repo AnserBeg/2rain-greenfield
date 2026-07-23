@@ -137,10 +137,13 @@ Changing any row is a storage payload/version evolution, not provider choice.
 ### Transition envelope v1
 
 `northstar.storage-transition-envelope/v1` supersedes the provisional
-pairwise transition payload for the Freeze F profile. It is the only current
-transition authority. Accepted G1 v0 artifacts remain byte-reproducible for
-historical golden evidence, but their provisional transition payload is not
-admitted as a Freeze F materialization or activation input.
+pairwise transition payload. It is the only current transition authority:
+current compiler and release-diff paths emit and accept only envelope v1.
+Accepted G1 canonical definitions and storage targets may be adapted forward
+into envelope v1, but there is no callable provisional payload emitter,
+payload kind, schema, or parallel transition authority. The resulting G1
+vertical release-root and v1-to-v2 diff golden migration is deliberate
+forward migration of provisional evidence under verdict A7, not a G1 reopen.
 
 The compiler remains hermetic and pairwise. `CompilerInput` contains at most
 one verified `expectedActiveRelease`; it never contains a live-root union,
@@ -191,14 +194,21 @@ Required fields on an entity created by the same plan are storage `NOT NULL`
 immediately and have coexistence impact `none`: no old writer exists. Required
 semantics distinguish new-write-required from read-non-null. An
 `old-writes-may-reject` cell is a blocker while any affected writer root is
-live; it is not executable additive work.
+live; it is not executable additive work. A required field added to an
+existing physical table is instead stored nullable with declared-default or
+coalesce-at-read semantics, followed by a dependency-ordered deferred
+`tightenNotNull` element and tightening debt. A shape that cannot preserve
+correct residual-row reads is rejected.
 
 Tightening scope comes from the physical table's actual reader/writer roots in
 compiled releases, never package provenance or first-party lineage. Every
 deferred tighten creates `northstar.tightening-debt/v1` with element ID,
-blocking roots, owner, prerequisites, and admission consequence. Outstanding
-debt blocks tenant-accessible module creation until the cleanup/tighten family
-ships and the union of live roots is revalidated.
+the pairwise blocking old-release root, prior and candidate reader/writer
+identities, owner, prerequisites, admission consequence, and an explicit rule
+that the materializer resolves the active-plus-non-terminal-preparation
+live-root union. `CompilerInput` remains pairwise. Outstanding debt blocks
+tenant-accessible module creation until the cleanup/tighten family ships and
+the union of live roots is revalidated.
 
 ### Backfill admissibility
 
@@ -303,7 +313,7 @@ parent-scoped child, must have:
 - list, record, and form `SurfaceDefinition` roles;
 - agent discovery/lazy contract coverage;
 - a reporting projection with canonical lineage; and
-- verification coverage.
+- verification coverage including per-entity recovery evidence.
 
 The reporting family is a new projection family under projection
 compatibility's `newFamilyOrPayloadVersion` rule.

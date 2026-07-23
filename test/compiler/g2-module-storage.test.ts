@@ -15,9 +15,12 @@ import {
   PROJECTION_FAMILY_IDS,
   STORAGE_COMPATIBILITY_MATRIX,
   STORAGE_TRANSITION_ENVELOPE_VERSION,
+  buildStorageTransitionEnvelope,
   classifyStorageTransitionElement,
   compileApplication,
+  diffCompiledReleases,
   expectedActiveReleaseFrom,
+  lowerStorageTargetV1,
   validatePhysicalMappingRecords,
   validateStorageRendererStatements,
   type CompileSuccess,
@@ -101,6 +104,72 @@ test('the v1 transition envelope matches its structural golden and has no provis
         'utf8',
       ),
     ),
+  );
+});
+
+test('release diff rejects every non-envelope transition schema and payload kind', () => {
+  const first = mustCompile(input(ordinaryModuleV1()));
+  const second = mustCompile(
+    input(ordinaryModuleV2(), expectedActiveReleaseFrom(first)),
+  );
+
+  const wrongSchema = structuredClone(second);
+  const wrongSchemaReference =
+    wrongSchema.bundle.releaseManifest.projections.find(
+      (projection) =>
+        projection.familyId === PROJECTION_FAMILY_IDS.storageTransition,
+    )!;
+  wrongSchemaReference.payloadSchemaVersion =
+    'northstar.storage-transition-payload/v0-provisional';
+  assert.throws(
+    () => diffCompiledReleases(first, wrongSchema),
+    /accepts only storage transition envelope v1/,
+  );
+
+  const wrongManifestSchema = structuredClone(second);
+  const wrongManifestReference =
+    wrongManifestSchema.bundle.releaseManifest.projections.find(
+      (projection) =>
+        projection.familyId === PROJECTION_FAMILY_IDS.storageTransition,
+    )!;
+  const wrongManifestArtifact = wrongManifestSchema.bundle.artifacts.find(
+    (artifact) => artifact.contentHash === wrongManifestReference.artifactRoot,
+  )!;
+  const wrongManifest = JSON.parse(
+    new TextDecoder().decode(wrongManifestArtifact.canonicalBytes),
+  ) as Record<string, unknown>;
+  wrongManifest.payloadSchemaVersion =
+    'northstar.storage-transition-payload/v0-provisional';
+  wrongManifestArtifact.canonicalBytes = new TextEncoder().encode(
+    canonicalize(wrongManifest),
+  );
+  assert.throws(
+    () => diffCompiledReleases(first, wrongManifestSchema),
+    /accepts only storage transition envelope v1/,
+  );
+
+  const wrongKind = structuredClone(second);
+  const transitionReference = wrongKind.bundle.releaseManifest.projections.find(
+    (projection) =>
+      projection.familyId === PROJECTION_FAMILY_IDS.storageTransition,
+  )!;
+  const manifestArtifact = wrongKind.bundle.artifacts.find(
+    (artifact) => artifact.contentHash === transitionReference.artifactRoot,
+  )!;
+  const manifest = JSON.parse(
+    new TextDecoder().decode(manifestArtifact.canonicalBytes),
+  ) as ProjectionManifestEnvelope;
+  const chunk = wrongKind.bundle.artifacts.find(
+    (artifact) => artifact.contentHash === manifest.chunks[0]?.contentHash,
+  )!;
+  const payload = JSON.parse(
+    new TextDecoder().decode(chunk.canonicalBytes),
+  ) as Record<string, unknown>;
+  payload.kind = 'storageTransitionPayload';
+  chunk.canonicalBytes = new TextEncoder().encode(canonicalize(payload));
+  assert.throws(
+    () => diffCompiledReleases(first, wrongKind),
+    /accepts only storage transition envelope v1/,
   );
 });
 
@@ -326,6 +395,178 @@ test('new-in-plan entities create required NOT NULL storage with coexistence imp
   );
 });
 
+test('required fields added to existing tables stay nullable until deferred tightening', () => {
+  const first = mustCompile(input(ordinaryModuleV1()));
+  const candidate = ordinaryModuleV2() as {
+    fields: Array<Record<string, unknown>>;
+  };
+  const added = candidate.fields.find(
+    (field) => field.fieldId === FIXTURE_IDS.fieldIds.parentNotes,
+  )!;
+  added.presence = 'required';
+  added.defaultSemantics = 'coalesceAtRead';
+  added.defaultValue = {
+    kind: 'textValue',
+    schemaVersion: 'v1',
+    value: '',
+  };
+
+  const compiled = mustCompile(
+    input(candidate, expectedActiveReleaseFrom(first)),
+  );
+  const storage = projectionPayload<StorageTargetPayloadV1>(
+    compiled,
+    PROJECTION_FAMILY_IDS.storageTarget,
+  );
+  const column = storage.entities
+    .flatMap((entity) => entity.columns)
+    .find(
+      (candidateColumn) =>
+        candidateColumn.canonicalFieldId === FIXTURE_IDS.fieldIds.parentNotes,
+    );
+  assert.deepEqual(
+    {
+      coexistenceImpact: column?.coexistenceImpact,
+      defaultSemantics: column?.defaultSemantics,
+      nullable: column?.nullable,
+      requiredAfterTightening: column?.requiredAfterTightening,
+    },
+    {
+      coexistenceImpact: 'requiresReadFallback',
+      defaultSemantics: 'coalesceAtRead',
+      nullable: true,
+      requiredAfterTightening: true,
+    },
+  );
+
+  const transition = projectionPayload<StorageTransitionEnvelope>(
+    compiled,
+    PROJECTION_FAMILY_IDS.storageTransition,
+  );
+  const addColumn = transition.elements.find(
+    (entry) =>
+      entry.kind === 'addColumn' &&
+      entry.fieldId === FIXTURE_IDS.fieldIds.parentNotes,
+  );
+  const tighten = transition.elements.find(
+    (entry) =>
+      entry.kind === 'tightenNotNull' &&
+      entry.fieldId === FIXTURE_IDS.fieldIds.parentNotes,
+  );
+  assert.equal(addColumn?.coexistenceImpact, 'requiresReadFallback');
+  assert.equal(
+    addColumn?.classification.preparationValidity,
+    'preApprovalInert',
+  );
+  assert.deepEqual(tighten?.declaredDependencyIds, [addColumn?.elementId]);
+  assert.equal(tighten?.coexistence.oldWrite, 'mayReject');
+  assert.equal(
+    tighten?.coexistence.admission,
+    'blockingWhileAffectedWritersLive',
+  );
+  assert.equal(
+    tighten?.classification.preparationValidity,
+    'deferredTightening',
+  );
+  assert.equal(
+    transition.elements.some(
+      (entry) =>
+        entry.coexistenceImpact === 'oldWritesMayReject' &&
+        entry.coexistence.admission === 'additive',
+    ),
+    false,
+  );
+  const debt = transition.tighteningDebt.find(
+    (entry) => entry.elementId === tighten?.elementId,
+  );
+  assert.deepEqual(debt?.blockingRootIds, [first.releaseRoot]);
+  assert.equal(
+    debt?.liveRootResolution,
+    'materializerResolvesActiveAndNonTerminalPreparationUnion',
+  );
+});
+
+test('relation mapping fingerprints include nullability and existing physical mutations fail closed', () => {
+  const optional = ordinaryModuleV1() as {
+    relations: Array<Record<string, unknown>>;
+  };
+  optional.relations.push(secondaryParentRelation(false));
+  const required = ordinaryModuleV1() as {
+    relations: Array<Record<string, unknown>>;
+  };
+  required.relations.push(secondaryParentRelation(true));
+  const relationMappingId = `${FIXTURE_IDS.namespace}:relation.master_role_secondary_parent#target-record-id`;
+  const optionalMapping = lowerStorageTargetV1(
+    normalizeApplicationPackage(optional),
+  ).physicalMapping.records.find(
+    (record) => record.canonicalId === relationMappingId,
+  );
+  const requiredMapping = lowerStorageTargetV1(
+    normalizeApplicationPackage(required),
+  ).physicalMapping.records.find(
+    (record) => record.canonicalId === relationMappingId,
+  );
+  assert.ok(optionalMapping);
+  assert.ok(requiredMapping);
+  assert.notEqual(
+    optionalMapping.shapeFingerprint,
+    requiredMapping.shapeFingerprint,
+  );
+
+  const packageRevision = normalizeApplicationPackage(ordinaryModuleV1());
+  const previous = lowerStorageTargetV1(packageRevision);
+  const relationId = previous.relations[0]!.relationId;
+  const mutations: Array<(target: StorageTargetPayloadV1) => void> = [
+    (target) => {
+      target.relations.splice(0, 1);
+    },
+    (target) => {
+      target.relations[0]!.relationColumn.nullable =
+        !target.relations[0]!.relationColumn.nullable;
+    },
+    (target) => {
+      target.relations[0]!.ownership = 'reference';
+    },
+    (target) => {
+      target.relations[0]!.targetEntityId = FIXTURE_IDS.entityIds.child;
+    },
+    (target) => {
+      (
+        target.relations[0]!.foreignKey as {
+          onDelete: string;
+        }
+      ).onDelete = 'cascade';
+    },
+    (target) => {
+      target.relations[0]!.relationColumn.physicalName = `${target.relations[0]!.relationColumn.physicalName}_changed`;
+    },
+  ];
+  for (const mutate of mutations) {
+    const candidate = structuredClone(previous);
+    mutate(candidate);
+    const result = buildStorageTransitionEnvelope(
+      packageRevision,
+      previous,
+      candidate,
+      transitionBinding(),
+    );
+    assert.ok('diagnostic' in result);
+    if (!('diagnostic' in result)) continue;
+    assert.deepEqual(
+      {
+        code: result.diagnostic.code,
+        path: result.diagnostic.path,
+        subjectId: result.diagnostic.subjectId,
+      },
+      {
+        code: 'COMPILER_STORAGE_RELATION_MUTATION_UNSUPPORTED',
+        path: '$.relations',
+        subjectId: relationId,
+      },
+    );
+  }
+});
+
 test('the compatibility matrix is closed and old-writes-may-reject is never additive', () => {
   assert.deepEqual(Object.keys(STORAGE_COMPATIBILITY_MATRIX).sort(), [
     'addColumn',
@@ -494,6 +735,47 @@ function structuralTransition(transition: StorageTransitionEnvelope): unknown {
     schemaVersion: transition.schemaVersion,
     tighteningDebt: transition.tighteningDebt,
     totalOrdering: transition.totalOrdering,
+  };
+}
+
+function secondaryParentRelation(required: boolean): Record<string, unknown> {
+  return {
+    archiveBehavior: 'retainReference',
+    cardinality: 'manyToOne',
+    foreignKeyActions: {
+      onDelete: 'restrict',
+      onUpdate: 'restrict',
+      schemaVersion: 'v1',
+    },
+    joinEligibility: 'query',
+    kind: 'relationDefinition',
+    orderKey: 20,
+    ownership: 'reference',
+    relationId: `${FIXTURE_IDS.namespace}:relation.master_role_secondary_parent`,
+    required,
+    schemaVersion: 'v1',
+    sourceEntity: {
+      kind: 'entityReference',
+      schemaVersion: 'v1',
+      targetId: FIXTURE_IDS.entityIds.child,
+    },
+    targetEntity: {
+      kind: 'entityReference',
+      schemaVersion: 'v1',
+      targetId: FIXTURE_IDS.entityIds.parent,
+    },
+  };
+}
+
+function transitionBinding() {
+  return {
+    fromNormalizedDefinitionDigest: '0'.repeat(64),
+    fromReleaseRoot: '1'.repeat(64),
+    fromStorageTargetArtifactRoot: '2'.repeat(64),
+    fromStorageTargetSemanticDigest: '3'.repeat(64),
+    toNormalizedDefinitionDigest: '4'.repeat(64),
+    toStorageTargetArtifactRoot: '5'.repeat(64),
+    toStorageTargetSemanticDigest: '6'.repeat(64),
   };
 }
 

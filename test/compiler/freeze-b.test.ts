@@ -8,9 +8,13 @@ import {
 import {
   PROJECTION_FAMILY_IDS,
   REQUIRED_BASE_PROJECTION_FAMILIES,
+  STORAGE_ELEMENT_CONTRACT_VERSION,
+  STORAGE_TRANSITION_ENVELOPE_VERSION,
   compileApplication,
   diffCompiledReleases,
   expectedActiveReleaseFrom,
+  physicalNameFor,
+  type StorageTransitionEnvelope,
 } from '../../packages/compiler/src/index.js';
 import { hashBytes } from '../../packages/compiler/src/hash.js';
 import { HASH_DOMAINS } from '../../packages/compiler/src/protocol.js';
@@ -108,19 +112,51 @@ test('revision two adds one optional field to storage and the existing form', ()
       expectedActiveReleaseFrom(first),
     ),
   );
-  const transition = projectionPayload<{
-    fromReleaseRoot: string;
-    operations: Array<{ entityId: string; fieldId: string; kind: string }>;
-    toStorageTargetArtifactRoot: string;
-  }>(second, PROJECTION_FAMILY_IDS.storageTransition);
+  const transition = projectionPayload<StorageTransitionEnvelope>(
+    second,
+    PROJECTION_FAMILY_IDS.storageTransition,
+  );
   assert.equal(transition.fromReleaseRoot, first.releaseRoot);
-  assert.deepEqual(transition.operations, [
-    {
-      entityId: 'northstar.bootstrap:entity.item',
-      fieldId: 'northstar.bootstrap:field.item_description',
-      kind: 'addOptionalField',
-    },
-  ]);
+  assert.equal(transition.kind, 'storageTransitionEnvelope');
+  assert.equal(transition.schemaVersion, STORAGE_TRANSITION_ENVELOPE_VERSION);
+  assert.equal(transition.elements.length, 1);
+  assert.match(transition.elements[0]?.elementId ?? '', /^[0-9a-f]{64}$/);
+  assert.deepEqual(
+    transition.elements.map(({ elementId: _elementId, ...element }) => element),
+    [
+      {
+        classification: {
+          dataEffect: 'catalogOnly',
+          operationalRisk: 'boundedCatalogLock',
+          preparationValidity: 'preApprovalInert',
+          semanticEffect: 'additive',
+        },
+        coexistence: {
+          admission: 'additive',
+          newRead: 'requiresReadFallback',
+          newWrite: 'compatible',
+          oldRead: 'compatible',
+          oldWrite: 'compatible',
+        },
+        coexistenceImpact: 'requiresReadFallback',
+        declaredDependencyIds: [],
+        fieldId: 'northstar.bootstrap:field.item_description',
+        kind: 'addColumn',
+        physicalObjectName: physicalNameFor(
+          'column',
+          'northstar.bootstrap:field.item_description',
+        ),
+        schemaVersion: STORAGE_ELEMENT_CONTRACT_VERSION,
+        scope: {
+          keyColumns: ['tenant_id', 'environment_id'],
+          kind: 'tenantEnvironment',
+        },
+        storageDomain: 'managedModule',
+        storageGeneration: 'dedicatedTyped/v1',
+        subjectId: 'northstar.bootstrap:entity.item',
+      },
+    ],
+  );
 
   const surface = projectionPayload<{
     surfaces: Array<{ fieldIds: string[]; surfaceId: string }>;

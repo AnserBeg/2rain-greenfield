@@ -42,7 +42,7 @@ before any become `admitted`.
 | G2-P0 | G2 stage cut and parallelization map | G2 | Mechanical | accepted | `ce6649d7951802cbb95366809f31d39412d77b9a` | [packet](packets/G2-P0.md) |
 | G2-P1 | Transactional trust/audit/change/outbox substrate | G2 | Critical | accepted | `a71aa33157ac35f54dd3c9e4f36bd65b5c5e0861` | [packet](packets/G2-P1.md); [cut](packets/G2-P0.md) |
 | G2-P1a | Mechanical bridge: architecture migration-list for 0006 | G2 | Mechanical | accepted | _this commit_ | [packet](packets/G2-P1.md) |
-| G2-P2 | Consolidated projections, typed-storage transition safety, and module conformance | G2 | Critical | active | - | [packet](packets/G2-P2.md); [cut](packets/G2-P0.md) |
+| G2-P2 | Consolidated projections, typed-storage transition safety, and module conformance | G2 | Critical | active | - | [packet](packets/G2-P2.md); [cut](packets/G2-P0.md); G2-P2a supersedes the G1-P2 v0-provisional storageTransitionPayload; G1 vertical release-root + v1->v2 diff goldens regenerated; Freeze-B determinism gates green. Deliberate forward migration of provisional G1 evidence under verdict A7, not a G1 reopen. |
 | G2-P3 | Party walking slice, resolver, and reusable module template | G2 | Critical | planned | - | [cut](packets/G2-P0.md) |
 | G2-P4 | Full surface-grammar, compact/mobile, and accessibility conformance | G2 | Behavioral | planned | - | [cut](packets/G2-P0.md) |
 | G2-P5 | Shared master-data table behavior and saved filters | G2 | Critical | planned | - | [cut](packets/G2-P0.md) |

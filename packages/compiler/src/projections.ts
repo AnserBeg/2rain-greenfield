@@ -4,7 +4,10 @@ import {
 } from '@north-star/canonical-model';
 
 import { hashCanonical } from './hash.js';
-import { lowerStorageTargetV1 } from './storage.js';
+import {
+  lowerStorageTargetV1,
+  type StorageTargetPayloadV1,
+} from './storage.js';
 import {
   HASH_DOMAINS,
   OPERATIONS_AGENT_TOOL_IDS,
@@ -92,6 +95,7 @@ const runtimeCapabilities: Record<
 
 export function lowerBaseProjectionPayloads(
   packageRevision: NormalizedApplicationPackage,
+  previousStorageTarget: StorageTargetPayloadV1 | null = null,
 ): ProjectionPayloadPlan[] {
   const namespace = packageRevision.package.namespace;
   const packageScope: LogicalScope = {
@@ -115,7 +119,7 @@ export function lowerBaseProjectionPayloads(
       namespace,
       packageScope,
       isModuleV1
-        ? lowerStorageTargetV1(packageRevision)
+        ? lowerStorageTargetV1(packageRevision, previousStorageTarget)
         : storageTargetPayload(packageRevision),
       isModuleV1 ? STORAGE_TARGET_PAYLOAD_VERSION : undefined,
     ),
