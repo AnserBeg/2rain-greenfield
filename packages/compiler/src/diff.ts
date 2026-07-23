@@ -41,6 +41,7 @@ const impactByFamily: Record<ProjectionFamilyId, ReleaseImpactCode> = {
   [PROJECTION_FAMILY_IDS.operationCatalog]: 'operation-contract-changed',
   [PROJECTION_FAMILY_IDS.policyReferences]: 'policy-reference-changed',
   [PROJECTION_FAMILY_IDS.queryCatalog]: 'query-contract-changed',
+  [PROJECTION_FAMILY_IDS.reporting]: 'reporting-projection-changed',
   [PROJECTION_FAMILY_IDS.semanticModel]: 'semantic-contract-changed',
   [PROJECTION_FAMILY_IDS.storageTarget]: 'storage-target-changed',
   [PROJECTION_FAMILY_IDS.storageTransition]: 'storage-transition-required',

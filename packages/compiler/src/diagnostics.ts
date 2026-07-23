@@ -5,6 +5,11 @@ import {
 } from './protocol.js';
 
 export const COMPILER_DIAGNOSTIC_COPY = Object.freeze({
+  COMPILER_BACKFILL_INADMISSIBLE: {
+    acceptedAlternative:
+      'declare a default or coalesce-at-read rule that keeps every residual unbackfilled row correct',
+    rule: 'v1 backfill completeness is never load-bearing for new-release reads',
+  },
   COMPILER_CAPABILITY_NOT_SUPPORTED: {
     acceptedAlternative:
       'use a supported capability or leave the construct planned and out of the active package',
@@ -14,6 +19,16 @@ export const COMPILER_DIAGNOSTIC_COPY = Object.freeze({
     acceptedAlternative:
       'supply canonical normalized bytes accepted by the frozen application language',
     rule: 'compiler input must be a valid normalized application package',
+  },
+  COMPILER_DESTRUCTIVE_OPERATION_UNSUPPORTED: {
+    acceptedAlternative:
+      'use archive or restore; separately governed retention purge has no launch capability',
+    rule: 'ordinary module operations never delete, purge, or destroy business data',
+  },
+  COMPILER_DESTRUCTIVE_STORAGE_DDL_UNSUPPORTED: {
+    acceptedAlternative:
+      'render only the versioned additive allowlist with restrict-only foreign keys',
+    rule: 'storage rendering rejects ON DELETE CASCADE, delete-capable triggers or rules, TRUNCATE, partition removal, and destructive business-data DDL',
   },
   COMPILER_DEPENDENCY_INVALID: {
     acceptedAlternative:
@@ -40,6 +55,31 @@ export const COMPILER_DIAGNOSTIC_COPY = Object.freeze({
       'reduce the package within v0 bounds or adopt a new reviewed output-limit profile',
     rule: 'the complete emitted artifact closure stays within explicit compiler limits',
   },
+  COMPILER_ENTITY_PROJECTION_MISSING: {
+    acceptedAlternative:
+      'add the required entity-specific query, operation, surface, agent, reporting, or verification definition',
+    rule: 'compiler-derived conformance requires every applicable active entity in every mandatory projection family',
+  },
+  COMPILER_GENERATED_STORAGE_UNSUPPORTED: {
+    acceptedAlternative:
+      'use dedicatedTable storage until generated typed storage has provider and runtime evidence',
+    rule: 'generatedTyped is representable but intentionally unsupported by the Freeze F candidate',
+  },
+  COMPILER_PHYSICAL_NAME_COLLISION: {
+    acceptedAlternative:
+      'use the compiler-owned domain-separated SHA-256/base32 physical mapping without overrides',
+    rule: 'one physical identifier maps to exactly one canonical storage object',
+  },
+  COMPILER_PHYSICAL_NAME_REUSE_INCOMPATIBLE: {
+    acceptedAlternative:
+      'preserve the prior object shape or mint a distinct compiler-derived physical identifier',
+    rule: 'a physical identifier cannot be reused for an incompatible canonical storage shape',
+  },
+  COMPILER_PHYSICAL_NAME_TOO_LONG: {
+    acceptedAlternative:
+      'use the versioned compiler-derived digest name bounded to 63 UTF-8 bytes',
+    rule: 'every emitted PostgreSQL identifier fits the 63-byte identifier limit',
+  },
   COMPILER_PROFILE_UNSUPPORTED: {
     acceptedAlternative:
       'use the exact supported compiler semantic, output, hash, and policy profile',
@@ -65,10 +105,35 @@ export const COMPILER_DIAGNOSTIC_COPY = Object.freeze({
       'implement and verify the required projection family before claiming support',
     rule: 'every declared supported capability lowers through every required projection',
   },
+  COMPILER_RENDERER_FORM_UNSUPPORTED: {
+    acceptedAlternative:
+      'bind list, record, and form roles through the closed SurfaceDefinition registry',
+    rule: 'module definitions cannot introduce executable renderer forms',
+  },
+  COMPILER_STORAGE_CLASS_REQUIRED: {
+    acceptedAlternative:
+      'declare dedicatedTable explicitly for every active entity storage mapping',
+    rule: 'storageClass is non-null and explicit at v1 compile time',
+  },
+  COMPILER_STORAGE_PROMOTION_UNSUPPORTED: {
+    acceptedAlternative:
+      'retain the promotion capability ID and invariant as a non-executable reserve',
+    rule: 'storage-class promotion is representable but has no executable phase topology in v1',
+  },
+  COMPILER_STORAGE_RENAME_AS_ADD_UNSUPPORTED: {
+    acceptedAlternative:
+      'preserve canonical field identity; a future governed evolution family must own renames',
+    rule: 'v1 does not reinterpret a removed field and added field as a rename',
+  },
+  COMPILER_STORAGE_RETYPE_UNSUPPORTED: {
+    acceptedAlternative:
+      'preserve the existing field type or defer retyping to a future governed evolution family',
+    rule: 'v1 storage transitions do not retype existing physical columns',
+  },
   COMPILER_STORAGE_TRANSITION_UNSUPPORTED: {
     acceptedAlternative:
-      'use the admitted optional-field addition or defer the storage change to its owning packet',
-    rule: 'Freeze B lowers only the evidenced additive optional-field storage transition',
+      'use a closed v1 additive element or defer the change to its governed evolution family',
+    rule: 'the selected compiler profile lowers only its versioned evidenced storage transition kinds',
   },
   COMPILER_TRANSITION_BASE_INVALID: {
     acceptedAlternative:

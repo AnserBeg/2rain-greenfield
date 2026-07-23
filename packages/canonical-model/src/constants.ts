@@ -1,11 +1,28 @@
-export const LANGUAGE_VERSION = 'v0-experimental' as const;
-export const NORMALIZATION_PROFILE_VERSION =
+export const LEGACY_LANGUAGE_VERSION = 'v0-experimental' as const;
+export const LANGUAGE_VERSION = 'v1' as const;
+export const SUPPORTED_LANGUAGE_VERSIONS = Object.freeze([
+  LEGACY_LANGUAGE_VERSION,
+  LANGUAGE_VERSION,
+] as const);
+export type CanonicalLanguageVersion =
+  (typeof SUPPORTED_LANGUAGE_VERSIONS)[number];
+
+export const LEGACY_NORMALIZATION_PROFILE_VERSION =
   'northstar.normalization/v0-experimental' as const;
+export const NORMALIZATION_PROFILE_VERSION =
+  'northstar.normalization/v1' as const;
+export const SUPPORTED_NORMALIZATION_PROFILE_VERSIONS = Object.freeze([
+  LEGACY_NORMALIZATION_PROFILE_VERSION,
+  NORMALIZATION_PROFILE_VERSION,
+] as const);
 export const CANONICALIZATION_PROFILE_VERSION =
   'northstar.canonical-json/v0-experimental' as const;
 export const CONTENT_HASH_ALGORITHM = 'sha256' as const;
 export const CONTENT_HASH_DOMAIN =
   'northstar.app-package.normalized/v0-experimental' as const;
+
+export const PROMOTE_STORAGE_CLASS_CAPABILITY_ID =
+  'northstar.storage:capability.promote-storage-class' as const;
 
 export const CURRENCY_PROFILE_VERSION =
   'northstar.currency-minor-units/v0-experimental' as const;

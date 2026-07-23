@@ -1,11 +1,16 @@
-import type { NormalizedApplicationPackage } from '@north-star/canonical-model';
+import {
+  LANGUAGE_VERSION,
+  type NormalizedApplicationPackage,
+} from '@north-star/canonical-model';
 
 import { hashCanonical } from './hash.js';
+import { lowerStorageTargetV1 } from './storage.js';
 import {
   HASH_DOMAINS,
   OPERATIONS_AGENT_TOOL_IDS,
   POLICY_MODEL_VERSION,
   PROJECTION_FAMILY_IDS,
+  STORAGE_TARGET_PAYLOAD_VERSION,
   type LogicalScope,
   type ProjectionFamilyId,
   type RuntimeCapabilityRequirement,
@@ -32,6 +37,7 @@ const payloadSchemaVersions: Record<
     'northstar.policy-references-payload/v0-provisional',
   [PROJECTION_FAMILY_IDS.queryCatalog]:
     'northstar.query-catalog-payload/v0-provisional',
+  [PROJECTION_FAMILY_IDS.reporting]: 'northstar.reporting-payload/v1',
   [PROJECTION_FAMILY_IDS.semanticModel]:
     'northstar.semantic-model-payload/v0-provisional',
   [PROJECTION_FAMILY_IDS.storageTarget]:
@@ -60,6 +66,10 @@ const runtimeCapabilities: Record<
   },
   [PROJECTION_FAMILY_IDS.queryCatalog]: {
     capabilityId: 'northstar.runtime:capability.query-catalog',
+    minimumVersion: 1,
+  },
+  [PROJECTION_FAMILY_IDS.reporting]: {
+    capabilityId: 'northstar.runtime:capability.reporting-projection',
     minimumVersion: 1,
   },
   [PROJECTION_FAMILY_IDS.semanticModel]: {
@@ -92,7 +102,8 @@ export function lowerBaseProjectionPayloads(
     packageRevision.queries.map((query) => [query.queryId, query] as const),
   );
 
-  return [
+  const isModuleV1 = packageRevision.languageVersion === LANGUAGE_VERSION;
+  const plans = [
     plan(
       PROJECTION_FAMILY_IDS.semanticModel,
       namespace,
@@ -103,7 +114,10 @@ export function lowerBaseProjectionPayloads(
       PROJECTION_FAMILY_IDS.storageTarget,
       namespace,
       packageScope,
-      storageTargetPayload(packageRevision),
+      isModuleV1
+        ? lowerStorageTargetV1(packageRevision)
+        : storageTargetPayload(packageRevision),
+      isModuleV1 ? STORAGE_TARGET_PAYLOAD_VERSION : undefined,
     ),
     plan(
       PROJECTION_FAMILY_IDS.queryCatalog,
@@ -142,6 +156,17 @@ export function lowerBaseProjectionPayloads(
       verificationPlanPayload(packageRevision),
     ),
   ];
+  if (isModuleV1) {
+    plans.push(
+      plan(
+        PROJECTION_FAMILY_IDS.reporting,
+        namespace,
+        packageScope,
+        reportingPayload(packageRevision),
+      ),
+    );
+  }
+  return plans;
 }
 
 export function requiredProjectionFamily(
@@ -152,7 +177,7 @@ export function requiredProjectionFamily(
     operation: PROJECTION_FAMILY_IDS.operationCatalog,
     policy: PROJECTION_FAMILY_IDS.policyReferences,
     query: PROJECTION_FAMILY_IDS.queryCatalog,
-    reporting: null,
+    reporting: PROJECTION_FAMILY_IDS.reporting,
     storage: PROJECTION_FAMILY_IDS.storageTarget,
     surface: PROJECTION_FAMILY_IDS.surfaceManifest,
     verification: PROJECTION_FAMILY_IDS.verificationPlan,
@@ -168,6 +193,7 @@ function plan(
   namespace: string,
   logicalScope: LogicalScope,
   payload: unknown,
+  payloadSchemaVersion?: string,
 ): ProjectionPayloadPlan {
   const suffix = familyId.slice(familyId.lastIndexOf('.') + 1);
   return {
@@ -175,7 +201,8 @@ function plan(
     instanceId: `${namespace}:projection.${suffix}`,
     logicalScope,
     payload,
-    payloadSchemaVersion: payloadSchemaVersions[familyId],
+    payloadSchemaVersion:
+      payloadSchemaVersion ?? payloadSchemaVersions[familyId],
     requiredRuntimeCapability: runtimeCapabilities[familyId],
   };
 }
@@ -305,6 +332,15 @@ function queryCatalogPayload(
       })),
       sourceEntityId: query.sourceEntity.targetId,
       tier: query.tier,
+      ...(packageRevision.languageVersion === LANGUAGE_VERSION
+        ? {
+            infrastructure: {
+              archive: 'nullableArchivedAt',
+              optimisticRevision: 'requiredOnMutation',
+              recordIdentity: 'canonicalUuid',
+            },
+          }
+        : {}),
     })),
     schemaVersion: payloadSchemaVersions[PROJECTION_FAMILY_IDS.queryCatalog],
   };
@@ -324,6 +360,15 @@ function operationCatalogPayload(
       precondition: operation.precondition,
       readBackQueryId: operation.readBack.targetId,
       tier: operation.tier,
+      ...(packageRevision.languageVersion === LANGUAGE_VERSION
+        ? {
+            infrastructure: {
+              archiveRepresentation: 'nullableArchivedAt',
+              optimisticRevision: 'compareAndIncrement',
+              recordIdentity: 'canonicalUuid',
+            },
+          }
+        : {}),
     })),
     schemaVersion:
       payloadSchemaVersions[PROJECTION_FAMILY_IDS.operationCatalog],
@@ -354,7 +399,39 @@ function surfaceManifestPayload(
       })),
       statusRoles: surface.statusRoles,
       surfaceId: surface.surfaceId,
+      ...(packageRevision.languageVersion === LANGUAGE_VERSION
+        ? { surfaceRole: surface.surfaceRole ?? null }
+        : {}),
     })),
+  };
+}
+
+function reportingPayload(
+  packageRevision: NormalizedApplicationPackage,
+): unknown {
+  const fieldsByEntity = new Map<string, typeof packageRevision.fields>();
+  for (const field of packageRevision.fields) {
+    const fields = fieldsByEntity.get(field.entity.targetId) ?? [];
+    fields.push(field);
+    fieldsByEntity.set(field.entity.targetId, fields);
+  }
+  return {
+    entities: packageRevision.entities
+      .filter((entity) => entity.lifecycle === 'active')
+      .map((entity) => ({
+        entityId: entity.entityId,
+        fields: (fieldsByEntity.get(entity.entityId) ?? []).map((field) => ({
+          fieldId: field.fieldId,
+          lineage: {
+            canonicalEntityId: entity.entityId,
+            canonicalFieldId: field.fieldId,
+          },
+          reportable: field.reportable,
+          searchable: field.searchable,
+        })),
+      })),
+    kind: 'reportingPayload',
+    schemaVersion: payloadSchemaVersions[PROJECTION_FAMILY_IDS.reporting],
   };
 }
 
