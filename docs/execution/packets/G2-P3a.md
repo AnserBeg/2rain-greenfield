@@ -43,6 +43,9 @@ contract changes, migrations, and schema changes.
   instances as injected ports; `apps/web` has no provider, PostgreSQL, SQL, or
   direct database seam.
 - A surface's compiled query ID is validated against the pinned query catalog.
+  Collection queries bind only to list surfaces; singular queries bind only to
+  form/record surfaces, so a compiler-valid but cardinality-incompatible pair
+  fails closed before a query or operation runs.
   Its source entity selects the active O0 create/update/archive/restore entries
   from the pinned operation catalog. Duplicate bindings, unknown/destructive
   effects, and malformed projection envelopes fail closed.
@@ -53,8 +56,10 @@ contract changes, migrations, and schema changes.
 - POST accepts a semantic intent, record/revision facts, and compiled field
   values. It never accepts an operation ID, handler name, trusted identity, or
   SQL. The operation ID is resolved from the pinned catalog, dispatched through
-  the operation gateway, then its gateway read-back is queried and reflected
-  in the same pinned request view.
+  the operation gateway, then its authoritative gateway read-back is reflected
+  directly in the same pinned request view without a second query displacing
+  the affected record. Compiled human-confirmation requirements are carried by
+  create/update and lifecycle forms.
 - The accepted G1 data-less renderer/server composition remains supported for
   the shell fixture. Live binding is enabled only when the composition root
   provides both semantic gateways.
@@ -106,6 +111,10 @@ Candidate freeze is pending the writer commit. The completed proof establishes:
 - exact data, empty, ambiguous, not-found, unsupported, denied, and thrown
   error paths render deterministic bounded states; planted physical table text
   in an exception is not reflected;
+- a compiler-valid form-to-list mismatch fails closed before gateway execution,
+  human-confirmed create/update forms submit confirmation, and a deliberately
+  unavailable follow-up query cannot displace the authoritative operation
+  read-back;
 - the Chromium fixture journey displays live rows and fields, creates through
   the form, reflects read-back plus linked-trust status, and then shows the new
   row in the list; and
@@ -118,15 +127,21 @@ Candidate freeze is pending the writer commit. The completed proof establishes:
 | `corepack pnpm typecheck` | PASS |
 | `corepack pnpm check:boundaries` | PASS — 87 production files scanned |
 | `corepack pnpm format` | PASS |
-| `corepack pnpm test:integration` | PASS — 36/36 tests |
+| `corepack pnpm test:integration` | PASS — 38/38 tests |
 | `corepack pnpm test:architecture` | PASS — 41/41 tests |
 | `corepack pnpm test:browser` | PASS — 4/4 Chromium journeys |
 | `corepack pnpm test:postgres` | PASS — 57/57 tests |
 | `corepack pnpm check:schema` | PASS — 8/8, clean drift |
 | `git diff --check` and owned-path audit | PASS |
 
-Critical review is pending on the frozen writer SHA. No compiler, runtime,
-provider, migration, schema-snapshot, real-module, or out-of-lease file changed.
+Fresh Codex `gpt-5.6-sol` xhigh review round 1 returned REVISE on
+`13c6eb737a277008eea2aeef9ff410f18220b4a0`: singular surfaces could consume a
+collection query, successful writes re-queried instead of rendering the
+authoritative operation read-back, and human-confirmed create/update forms did
+not submit confirmation. The bounded in-lease fixes above resolve all three;
+the replacement candidate's fresh Codex review and Fable confirmation are
+pending. No compiler, runtime, provider, migration, schema-snapshot,
+real-module, or out-of-lease file changed.
 
 ## Test it yourself
 
@@ -140,7 +155,7 @@ corepack pnpm test:postgres
 corepack pnpm check:schema
 ```
 
-Expect 2/2 focused integration tests, 3/3 focused architecture tests, 57/57
+Expect 4/4 focused integration tests, 3/3 focused architecture tests, 57/57
 PostgreSQL tests, and `8 applied / 8 verified` with clean drift.
 
 For a screenshot-able browser walkthrough, run:

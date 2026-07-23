@@ -192,15 +192,17 @@ export async function submitSurfaceRuntimeIntent(
     return operationDiagnostic('OPERATION_UNSUPPORTED', 422);
   }
 
-  const reflectedUrl = new URL(requestUrl, 'http://surface-runtime.local');
-  reflectedUrl.searchParams.set('record', result.readBack.recordId);
-  if (result.readBack.archived)
-    reflectedUrl.searchParams.set('archived', 'yes');
-  return renderSurfaceRuntimeWithData(view, reflectedUrl.href, gateways, {
-    intent,
-    record: result.readBack,
-    trustLinked: result.trust !== null,
-  });
+  return renderSelectedSurface(
+    view,
+    selection,
+    { records: [result.readBack], status: 'READY' },
+    {
+      intent,
+      record: result.readBack,
+      trustLinked: result.trust !== null,
+    },
+    binding.operations,
+  );
 }
 
 function renderSelectedSurface(

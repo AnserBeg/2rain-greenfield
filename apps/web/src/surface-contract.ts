@@ -111,6 +111,11 @@ export function readCompiledSurfaceDataBinding(
       'surface query is not registered in the pinned release',
     );
   }
+  if (!surfaceRoleAcceptsQuery(surface.surfaceRole, query.queryType)) {
+    throw invalidBinding(
+      'surface role is incompatible with the pinned data-source query kind',
+    );
+  }
   const queryFieldIds = query.selections.map((selection) => selection.fieldId);
   if (
     queryFieldIds.length !== surface.fieldIds.length ||
@@ -169,6 +174,17 @@ export function readCompiledSurfaceDataBinding(
     ),
     query,
   });
+}
+
+function surfaceRoleAcceptsQuery(
+  surfaceRole: CompiledSurfaceRole | null,
+  queryType: RegisteredQueryDefinition['queryType'],
+): boolean {
+  return surfaceRole === 'list'
+    ? queryType === 'list' || queryType === 'search'
+    : surfaceRole === 'form' || surfaceRole === 'record'
+      ? queryType === 'get' || queryType === 'resolve'
+      : false;
 }
 
 /**

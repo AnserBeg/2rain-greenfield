@@ -49,6 +49,7 @@ import {
 import { createSurfaceRuntimeServer } from '../../apps/web/src/app-server.js';
 import {
   renderSurfaceRuntimeWithData,
+  submitSurfaceRuntimeIntent,
   type SurfaceRuntimeGateways,
 } from '../../apps/web/src/surface-runtime.js';
 import {
@@ -233,6 +234,124 @@ test('frozen Q0 outcomes and gateway failures render bounded safe states', async
   });
   assert.match(unavailable.html, /QUERY_UNAVAILABLE/);
   assert.doesNotMatch(unavailable.html, /private_table|north_star_module/);
+});
+
+test('compiler-valid collection queries fail closed on singular surfaces', async () => {
+  const definition = ordinaryModuleV1();
+  assert.ok(Array.isArray(definition.surfaces));
+  const form = definition.surfaces
+    .map(asRecord)
+    .find(
+      (surface) =>
+        surface.surfaceId === `${FIXTURE_IDS.namespace}:surface.master_form`,
+    );
+  assert.ok(form);
+  asRecord(form.dataSource).targetId =
+    `${FIXTURE_IDS.namespace}:query.master_list`;
+
+  const compiled = compileFixture(definition);
+  const policy = new RecordingPolicy('ALLOW');
+  const executor = new InMemoryGenericExecutor();
+  const view = await issuedView(
+    runtimeEntry(compiled, policy, {
+      a: identity(tenantA, environmentA, principalA),
+    }),
+    'a',
+  );
+  const result = await renderSurfaceRuntimeWithData(
+    view,
+    `/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_form`)}`,
+    semanticGateways(policy, executor),
+  );
+
+  assert.equal(result.statusCode, 422);
+  assert.match(result.html, /QUERY_UNSUPPORTED/);
+  assert.equal(executor.queryCalls.length, 0);
+});
+
+test('human-confirmed forms render the authoritative operation read-back without a follow-up query', async () => {
+  const definition = ordinaryModuleV1();
+  assert.ok(Array.isArray(definition.operations));
+  for (const operation of definition.operations.map(asRecord)) {
+    if (
+      operation.operationId ===
+        `${FIXTURE_IDS.namespace}:operation.master_create` ||
+      operation.operationId ===
+        `${FIXTURE_IDS.namespace}:operation.master_update`
+    ) {
+      operation.confirmation = 'humanRequired';
+    }
+  }
+
+  const compiled = compileFixture(definition);
+  const policy = new RecordingPolicy('ALLOW');
+  const executor = new InMemoryGenericExecutor();
+  let queryCalls = 0;
+  const gateways: SurfaceRuntimeGateways = {
+    operationGateway: new SemanticOperationGateway(policy, executor),
+    queryGateway: new SemanticQueryGateway(policy, {
+      async execute() {
+        queryCalls += 1;
+        throw new Error('follow-up query must not replace operation read-back');
+      },
+    }),
+  };
+  const view = await issuedView(
+    runtimeEntry(compiled, policy, {
+      a: identity(tenantA, environmentA, principalA),
+    }),
+    'a',
+  );
+  const formUrl = `/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_form`)}`;
+  const initial = await renderSurfaceRuntimeWithData(view, formUrl, gateways);
+  assert.match(initial.html, /name="confirmed" value="yes"/);
+
+  const blocked = await submitSurfaceRuntimeIntent(
+    view,
+    formUrl,
+    {
+      intent: 'create',
+      [`value:${FIXTURE_IDS.fieldIds.parentName}`]: 'Not yet confirmed',
+    },
+    gateways,
+  );
+  assert.equal(blocked.statusCode, 422);
+  assert.match(blocked.html, /OPERATION_CONFIRMATION_REQUIRED/);
+  assert.equal(executor.operationCalls.length, 0);
+
+  const created = await submitSurfaceRuntimeIntent(
+    view,
+    formUrl,
+    {
+      confirmed: 'yes',
+      intent: 'create',
+      [`value:${FIXTURE_IDS.fieldIds.parentName}`]: 'Authoritative read-back',
+    },
+    gateways,
+  );
+  assert.equal(created.statusCode, 200);
+  assert.match(created.html, /Authoritative read-back/);
+  assert.match(created.html, /name="confirmed" value="yes"/);
+  assert.equal(queryCalls, 0);
+  assert.equal(executor.operationCalls.length, 1);
+
+  const createInput = asRecord(executor.operationCalls[0]!.input);
+  const updated = await submitSurfaceRuntimeIntent(
+    view,
+    formUrl,
+    {
+      confirmed: 'yes',
+      expectedRevision: '1',
+      intent: 'update',
+      recordId: String(createInput.recordId),
+      [`value:${FIXTURE_IDS.fieldIds.parentName}`]: 'Updated read-back',
+    },
+    gateways,
+  );
+  assert.equal(updated.statusCode, 200);
+  assert.match(updated.html, /Updated read-back/);
+  assert.equal(queryCalls, 0);
+  assert.equal(executor.operationCalls.length, 2);
 });
 
 class RecordingPolicy implements CurrentPolicyGateway {
@@ -521,8 +640,10 @@ function decode(value: ContentAddressedArtifact): Record<string, unknown> {
   return decoded;
 }
 
-function compileFixture(): CompileSuccess {
-  const normalized = normalizeApplicationPackage(ordinaryModuleV1());
+function compileFixture(
+  definition: Record<string, unknown> = ordinaryModuleV1(),
+): CompileSuccess {
+  const normalized = normalizeApplicationPackage(definition);
   const result = compileApplication({
     dependencies: [],
     expectedActiveRelease: null,
