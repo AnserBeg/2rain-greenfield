@@ -60,7 +60,7 @@ const planSlotAnchors = Object.freeze({
   exceptions: 'exception cards',
   keyFacts: 'key facts',
   modeSwitch: 'operate/customize mode switch',
-  primaryAction: 'primary action thumb-reachable',
+  primaryAction: 'large touch targets',
   properties: 'right properties drawer',
   publishDiff: 'publish diff',
   savedViews: 'saved-view tabs',
@@ -407,12 +407,18 @@ function checkPlanPin(
     'drift between document, skill, and code fails CI',
   ];
   const planStatusRoles = statusRolesFromPlan(compact85);
-  const planSlotsMatch = Object.values(pin.slots)
-    .flat()
-    .every((slot) => {
-      const anchor = planSlotAnchors[slot as keyof typeof planSlotAnchors];
-      return anchor !== undefined && compact85.includes(anchor);
-    });
+  const planSlotsMatch = pin.archetypes.every((archetype) => {
+    const row = fixedAnatomyRow(section85, archetype);
+    const slots = pin.slots[archetype];
+    return (
+      row !== undefined &&
+      slots !== undefined &&
+      slots.every((slot) => {
+        const anchor = planSlotAnchors[slot as keyof typeof planSlotAnchors];
+        return anchor !== undefined && row.includes(anchor);
+      })
+    );
+  });
   if (
     required85.some((fragment) => !compact85.includes(fragment)) ||
     required86.some((fragment) => !compact86.includes(fragment)) ||
@@ -677,6 +683,16 @@ function statusRolesFromPlan(section85: string): string[] | undefined {
     const normalized = role.trim();
     return normalized === 'in progress' ? 'inProgress' : normalized;
   });
+}
+
+function fixedAnatomyRow(
+  section85: string,
+  archetype: string,
+): string | undefined {
+  const prefix = `| ${capitalize(archetype)} |`;
+  const rows = section85.split('\n').filter((line) => line.startsWith(prefix));
+  if (rows.length !== 1) return undefined;
+  return rows[0]?.slice(prefix.length, rows[0].lastIndexOf('|')).trim();
 }
 
 function slotVocabulary(

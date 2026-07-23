@@ -70,6 +70,34 @@ test('an induced plan status-vocabulary mismatch fails with UX002', () => {
   }
 });
 
+test('an induced List-only plan slot mismatch fails with UX002', () => {
+  const files = contractFixture();
+  const planPath = 'docs/greenfield-north-star-erp-platform-plan.md';
+  const plan = files[planPath];
+  assert.ok(plan);
+  files[planPath] = plan.replace(
+    '| List | title, saved-view tabs,',
+    '| List | heading, saved-view tabs,',
+  );
+  assert.notEqual(files[planPath], plan);
+  assert.match(
+    files[planPath],
+    /\| Record \| breadcrumb; title \+ status chip;/,
+  );
+  const root = createArchitectureFixture(files);
+
+  try {
+    assert.ok(
+      checkUxGrammarPin(root).violations.some(
+        (violation) =>
+          violation.file === planPath && violation.ruleId === 'UX002_PLAN_PIN',
+      ),
+    );
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});
+
 test('frontmatter displaced below prose fails the skill loader shape', () => {
   const files = contractFixture();
   const skillPath = '.agents/skills/ux-grammar/SKILL.md';
