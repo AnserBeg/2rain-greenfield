@@ -32,4 +32,4 @@ before any become `admitted`.
 | G1-P6 | Empty fail-closed Semantic Query/Operation gateways | G1 | Critical | accepted | `cfeb19c211a4678a9623817c82d859167339a1c3` | [packet](packets/G1-P6.md); [cut](packets/G1-P0.md) |
 | G1-P7 | Compiled SurfaceRuntime shell + component registry | G1 | Behavioral | accepted | `e647968` | [packet](packets/G1-P7.md); [cut](packets/G1-P0.md) |
 | G1-P8 | UX grammar skill-pin + compiled SurfaceRuntime seam | G1 | Mechanical | accepted | `4ea66868d823472fd135a8dc0b71137ff9c4a990` | [packet](packets/G1-P8.md); [cut](packets/G1-P0.md) |
-| G1-P9 | Consolidated G1 stage-gate evidence | G1 | Mechanical | planned | - | [cut](packets/G1-P0.md) |
+| G1-P9 | Consolidated G1 stage-gate evidence | G1 | Mechanical | evidence_ready | `1e69199078bf0c455d45bfccfd4b3ef631923afd` | [packet](packets/G1-P9.md); [evidence](stage-gates/G1.md); [cut](packets/G1-P0.md) |
