@@ -27,6 +27,26 @@ that structural boundary enforced now; `partially enforced` means only that a
 separate runtime/provider proof remains scheduled, not that the P3 gate is
 pending.
 
+## G1 stage closure
+
+G1-P9 evaluates the G1-scoped slice of each concern separately from its later
+residual. On integrated product SHA `03c3d41`, no obligation routed to G1 by
+G1-P0 remains merely scheduled or prose-only:
+
+| G1 obligation | Accepted enforcement | G1 status | Residual after G1 |
+|---|---|---|---|
+| One application/release authority | P3 immutable release root, P4a-b sole approval/CAS path, P5 issued view | ENFORCED | compatibility and fleet rollout |
+| Trusted request context and pinning | P5 same-snapshot issued view, live policy, explicit deferred context | ENFORCED | later job/cache/report consumers |
+| Compiler determinism | P1 canonical language and P2 byte-stable complete compiler output | ENFORCED | breadth and measured optimization |
+| Human-controlled activation | P4a real authority substrate and P4b atomic attempt-only activation | ENFORCED | G6 authoring/product flow |
+| Semantic gateway ownership | P6 sole authenticated empty Query/Operation gateways | ENFORCED | G2 domain bindings/channel parity |
+| Agent tool prohibition at the G1 seam | P2 five-tool projection and P6 raw-capability prohibition | ENFORCED | later agent behavior/evals |
+| UX grammar and compiled surface seam | P7 compiled shell and P8 plan/skill/code pin plus bypass negatives | ENFORCED | G2/G7 full UX/mobile/accessibility |
+
+The stage evidence is `docs/execution/stage-gates/G1.md`. Global rows below
+correctly remain `partially enforced` when the named concern spans a later
+stage; that does not reopen the G1 slice certified here.
+
 ## Open gaps to close (the action list)
 
 As of 2026-07-21, the binding rules not yet backed by a tracked enforcement
