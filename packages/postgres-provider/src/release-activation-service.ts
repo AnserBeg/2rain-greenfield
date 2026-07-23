@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 
 import {
   ACTIVATION_HISTORY_VERSION,
@@ -56,7 +57,18 @@ export class ReleaseActivationError extends Error {
 }
 
 export interface ReleaseActivationServiceOptions {
+  readonly reconciliationClock?: ReleaseActivationReconciliationClock;
   readonly reconciliationMaxAgeMilliseconds?: number;
+}
+
+export interface ReleaseActivationReconciliationClockSample {
+  readonly monotonicMilliseconds: number;
+  readonly origin: string;
+  readonly wallTime: Date;
+}
+
+export interface ReleaseActivationReconciliationClock {
+  sample(): ReleaseActivationReconciliationClockSample;
 }
 
 interface AttemptRecordRow {
@@ -151,12 +163,24 @@ interface ReconciliationInspectionRow {
   execution_principal_id: string;
   execution_principal_kind: 'SYSTEM';
   max_age_milliseconds: string | null;
+  monotonic_anchor_code: string | null;
+  monotonic_anchor_wall_at: Date | null;
   observed_at: Date;
-  overdue: boolean;
-  reconciliation_state: ReleaseActivationReconciliationState;
   started_at: Date | null;
   tenant_id: string;
 }
+
+interface SystemMonotonicClock {
+  nowMilliseconds(): number;
+  readonly origin: string;
+}
+
+const RECONCILIATION_MONOTONIC_ANCHOR_PREFIX =
+  'RECONCILIATION_MONOTONIC_ANCHOR_V1:';
+const reconciliationClockOriginPattern = /^[A-Za-z0-9._-]{1,128}$/;
+// Linux CLOCK_MONOTONIC (via hrtime) is process-independent within one boot;
+// the boot id prevents incomparable samples from different boots being mixed.
+const systemMonotonicClock = createSystemMonotonicClock();
 
 /**
  * Trusted release activation kernel. The only mutation entry is an already
@@ -164,6 +188,8 @@ interface ReconciliationInspectionRow {
  * from canonical PostgreSQL records under the attempt/authority locks.
  */
 export class PostgresReleaseActivationService {
+  readonly #reconciliationClock:
+    ReleaseActivationReconciliationClock | undefined;
   readonly #reconciliationMaxAgeMilliseconds: number;
 
   constructor(
@@ -179,6 +205,16 @@ export class PostgresReleaseActivationService {
         'reconciliation max age must be a positive safe integer',
       );
     }
+    if (
+      options.reconciliationClock !== undefined &&
+      typeof options.reconciliationClock.sample !== 'function'
+    ) {
+      throw new ReleaseActivationError(
+        'RECONCILIATION_CLOCK_INVALID',
+        'reconciliation clock must expose a sample function',
+      );
+    }
+    this.#reconciliationClock = options.reconciliationClock;
     this.#reconciliationMaxAgeMilliseconds = maxAge;
   }
 
@@ -427,13 +463,18 @@ export class PostgresReleaseActivationService {
   ): Promise<ReleaseActivationReconciliationInspection> {
     assertTrustedRequestContext(context);
     assertAttemptIdentity(command.activationAttemptId);
-    return withTrustedRequestTransaction(this.pool, context, async (client) =>
-      loadReconciliationInspection(
+    return withTrustedRequestTransaction(this.pool, context, async (client) => {
+      const clock = await sampleReconciliationClock(
+        client,
+        this.#reconciliationClock,
+      );
+      return loadReconciliationInspection(
         client,
         context,
         command.activationAttemptId,
-      ),
-    );
+        clock,
+      );
+    });
   }
 
   async readInvalidationEvent(
@@ -868,6 +909,11 @@ export class PostgresReleaseActivationService {
         ),
       );
 
+      const clock = await sampleReconciliationClock(
+        client,
+        this.#reconciliationClock,
+      );
+
       if (createIfMissing) {
         await client.query(
           `INSERT INTO platform.release_activation_reconciliation_starts (
@@ -879,7 +925,7 @@ export class PostgresReleaseActivationService {
                max_age_milliseconds,
                started_at
              )
-             SELECT $1, $2, $3, $4, $5, $6, clock_timestamp()
+             SELECT $1, $2, $3, $4, $5, $6, $7
               WHERE NOT EXISTS (
                 SELECT 1
                   FROM platform.release_activation_reconciliation_starts AS existing
@@ -892,14 +938,23 @@ export class PostgresReleaseActivationService {
             randomUUID(),
             ACTIVATION_RECONCILIATION_START_VERSION,
             this.#reconciliationMaxAgeMilliseconds,
+            clock.wallTime,
           ],
         );
       }
+
+      await ensureReconciliationMonotonicAnchor(
+        client,
+        context,
+        command.activationAttemptId,
+        clock,
+      );
 
       const durable = await loadReconciliationInspection(
         client,
         context,
         command.activationAttemptId,
+        clock,
       );
       if (durable.state === 'NOT_STARTED') {
         return { alarmDue: false, started: false };
@@ -984,11 +1039,10 @@ async function loadReconciliationInspection(
   client: PoolClient,
   context: TrustedRequestContext,
   activationAttemptId: MintedUuid,
+  clock: ReleaseActivationReconciliationClockSample,
 ): Promise<ReleaseActivationReconciliationInspection> {
   const result = await client.query<ReconciliationInspectionRow>(
-    `WITH observed AS (
-       SELECT clock_timestamp() AS observed_at
-     ), durable AS (
+    `WITH durable AS (
        SELECT attempt.tenant_id,
               attempt.environment_id,
               attempt.execution_principal_kind,
@@ -1005,9 +1059,10 @@ async function loadReconciliationInspection(
                 CASE WHEN outcome.terminal THEN outcome.recorded_at END
               ) AS completion_at,
               alarm.activation_attempt_id IS NOT NULL AS alarm_recorded,
-              observed.observed_at
+              $4::timestamptz AS observed_at,
+              anchor.phase_code AS monotonic_anchor_code,
+              anchor.recorded_at AS monotonic_anchor_wall_at
          FROM platform.release_activation_attempts AS attempt
-         CROSS JOIN observed
          LEFT JOIN platform.release_activation_reconciliation_starts AS start
            ON start.tenant_id = attempt.tenant_id
           AND start.environment_id = attempt.environment_id
@@ -1024,6 +1079,16 @@ async function loadReconciliationInspection(
            ON alarm.tenant_id = attempt.tenant_id
           AND alarm.environment_id = attempt.environment_id
           AND alarm.activation_attempt_id = attempt.activation_attempt_id
+         LEFT JOIN LATERAL (
+           SELECT phase.phase_code, phase.recorded_at
+             FROM platform.release_activation_phase_receipts AS phase
+            WHERE phase.tenant_id = attempt.tenant_id
+              AND phase.environment_id = attempt.environment_id
+              AND phase.activation_attempt_id = attempt.activation_attempt_id
+              AND left(phase.phase_code, length($5::text)) = $5::text
+            ORDER BY phase.recorded_at, phase.phase_code
+            LIMIT 1
+         ) AS anchor ON true
         WHERE attempt.tenant_id = $1
           AND attempt.environment_id = $2
           AND attempt.activation_attempt_id = $3
@@ -1038,27 +1103,44 @@ async function loadReconciliationInspection(
             completion_at,
             alarm_recorded,
             observed_at,
-            CASE
-              WHEN started_at IS NULL THEN 'NOT_STARTED'
-              WHEN completion_at IS NULL AND observed_at >= deadline_at
-                THEN 'OVERDUE_UNRESOLVED'
-              WHEN completion_at IS NULL THEN 'PENDING'
-              WHEN completion_at >= deadline_at THEN 'OVERDUE_COMPLETED'
-              ELSE 'COMPLETED_WITHIN_MAX_AGE'
-            END AS reconciliation_state,
-            CASE
-              WHEN started_at IS NULL THEN false
-              WHEN completion_at IS NULL THEN observed_at >= deadline_at
-              ELSE completion_at >= deadline_at
-            END AS overdue
+            monotonic_anchor_code,
+            monotonic_anchor_wall_at
        FROM durable`,
-    [context.tenantId, context.environmentId, activationAttemptId],
+    [
+      context.tenantId,
+      context.environmentId,
+      activationAttemptId,
+      clock.wallTime,
+      RECONCILIATION_MONOTONIC_ANCHOR_PREFIX,
+    ],
   );
   const row = requiredRow(
     result.rows[0],
     'activation attempt is not visible to the trusted request context',
   );
   assertExecutionPrincipal(context, row);
+  const observedAt = effectiveReconciliationTime(row, clock);
+  const completedAfterDeadline =
+    row.completion_at !== null &&
+    row.deadline_at !== null &&
+    row.completion_at >= row.deadline_at;
+  const unresolvedAfterDeadline =
+    row.completion_at === null &&
+    row.deadline_at !== null &&
+    observedAt >= row.deadline_at;
+  const overdue =
+    row.started_at !== null &&
+    (row.alarm_recorded || completedAfterDeadline || unresolvedAfterDeadline);
+  const state: ReleaseActivationReconciliationState =
+    row.started_at === null
+      ? 'NOT_STARTED'
+      : row.completion_at === null
+        ? overdue
+          ? 'OVERDUE_UNRESOLVED'
+          : 'PENDING'
+        : overdue
+          ? 'OVERDUE_COMPLETED'
+          : 'COMPLETED_WITHIN_MAX_AGE';
   return Object.freeze({
     activationAttemptId,
     alarmRecorded: row.alarm_recorded,
@@ -1069,12 +1151,179 @@ async function loadReconciliationInspection(
       row.max_age_milliseconds === null
         ? null
         : safeFence(row.max_age_milliseconds),
-    observedAt: row.observed_at.toISOString(),
-    overdue: row.overdue,
+    observedAt: observedAt.toISOString(),
+    overdue,
     startedAt: row.started_at?.toISOString() ?? null,
-    state: row.reconciliation_state,
+    state,
     tenantId: row.tenant_id,
   });
+}
+
+async function sampleReconciliationClock(
+  client: PoolClient,
+  injectedClock: ReleaseActivationReconciliationClock | undefined,
+): Promise<ReleaseActivationReconciliationClockSample> {
+  if (injectedClock) return validateClockSample(injectedClock.sample());
+  const observed = await client.query<{ wall_time: Date }>(
+    'SELECT clock_timestamp() AS wall_time',
+  );
+  return Object.freeze({
+    monotonicMilliseconds: systemMonotonicClock.nowMilliseconds(),
+    origin: systemMonotonicClock.origin,
+    wallTime: requiredRow(
+      observed.rows[0],
+      'reconciliation clock did not return a wall time',
+    ).wall_time,
+  });
+}
+
+function validateClockSample(
+  sample: ReleaseActivationReconciliationClockSample,
+): ReleaseActivationReconciliationClockSample {
+  if (
+    !(sample.wallTime instanceof Date) ||
+    !Number.isFinite(sample.wallTime.getTime()) ||
+    !Number.isSafeInteger(sample.monotonicMilliseconds) ||
+    sample.monotonicMilliseconds < 0 ||
+    !reconciliationClockOriginPattern.test(sample.origin)
+  ) {
+    throw new ReleaseActivationError(
+      'RECONCILIATION_CLOCK_INVALID',
+      'reconciliation clock returned an invalid sample',
+    );
+  }
+  return Object.freeze({
+    monotonicMilliseconds: sample.monotonicMilliseconds,
+    origin: sample.origin,
+    wallTime: new Date(sample.wallTime.getTime()),
+  });
+}
+
+async function ensureReconciliationMonotonicAnchor(
+  client: PoolClient,
+  context: TrustedRequestContext,
+  activationAttemptId: MintedUuid,
+  clock: ReleaseActivationReconciliationClockSample,
+): Promise<void> {
+  // The existing append-only phase-receipt contract gives this clock anchor
+  // crash durability without making accepted migrations mutable.
+  const phaseCode = `${RECONCILIATION_MONOTONIC_ANCHOR_PREFIX}${clock.origin}:${clock.monotonicMilliseconds}`;
+  await client.query(
+    `INSERT INTO platform.release_activation_phase_receipts (
+       tenant_id,
+       environment_id,
+       phase_receipt_id,
+       activation_attempt_id,
+       receipt_version,
+       phase_code,
+       receipt_digest,
+       recorded_at
+     )
+     SELECT $1, $2, $3, $4, $5, $6, $7, $8
+      WHERE EXISTS (
+        SELECT 1
+          FROM platform.release_activation_reconciliation_starts AS start
+         WHERE start.activation_attempt_id = $4
+      )
+        AND NOT EXISTS (
+        SELECT 1
+          FROM platform.release_activation_phase_receipts AS existing
+         WHERE existing.activation_attempt_id = $4
+           AND left(existing.phase_code, length($9::text)) = $9::text
+      )`,
+    [
+      context.tenantId,
+      context.environmentId,
+      randomUUID(),
+      activationAttemptId,
+      ACTIVATION_PHASE_RECEIPT_VERSION,
+      phaseCode,
+      digestBytes(
+        'activation-reconciliation-monotonic-anchor',
+        activationAttemptId,
+        clock.origin,
+        clock.monotonicMilliseconds,
+        clock.wallTime.toISOString(),
+      ),
+      clock.wallTime,
+      RECONCILIATION_MONOTONIC_ANCHOR_PREFIX,
+    ],
+  );
+}
+
+function effectiveReconciliationTime(
+  row: ReconciliationInspectionRow,
+  clock: ReleaseActivationReconciliationClockSample,
+): Date {
+  const anchor = parseMonotonicAnchor(
+    row.monotonic_anchor_code,
+    row.monotonic_anchor_wall_at,
+  );
+  if (
+    !anchor ||
+    anchor.origin !== clock.origin ||
+    clock.monotonicMilliseconds < anchor.monotonicMilliseconds
+  ) {
+    return row.observed_at;
+  }
+  const monotonicObservedAt =
+    anchor.wallTime.getTime() +
+    (clock.monotonicMilliseconds - anchor.monotonicMilliseconds);
+  return new Date(Math.max(row.observed_at.getTime(), monotonicObservedAt));
+}
+
+function parseMonotonicAnchor(
+  phaseCode: string | null,
+  wallTime: Date | null,
+): {
+  monotonicMilliseconds: number;
+  origin: string;
+  wallTime: Date;
+} | null {
+  if (!phaseCode || !wallTime) return null;
+  const encoded = phaseCode.slice(
+    RECONCILIATION_MONOTONIC_ANCHOR_PREFIX.length,
+  );
+  const separator = encoded.lastIndexOf(':');
+  if (separator <= 0) return null;
+  const origin = encoded.slice(0, separator);
+  const monotonicMilliseconds = Number(encoded.slice(separator + 1));
+  if (
+    !reconciliationClockOriginPattern.test(origin) ||
+    !Number.isSafeInteger(monotonicMilliseconds) ||
+    monotonicMilliseconds < 0
+  ) {
+    return null;
+  }
+  return { monotonicMilliseconds, origin, wallTime };
+}
+
+function createSystemMonotonicClock(): SystemMonotonicClock {
+  try {
+    const origin = `linux-boot-${readFileSync(
+      '/proc/sys/kernel/random/boot_id',
+      'utf8',
+    ).trim()}`;
+    const readLinuxMonotonicMilliseconds = (): number => {
+      const milliseconds = Number(process.hrtime.bigint() / BigInt(1_000_000));
+      if (!Number.isSafeInteger(milliseconds) || milliseconds < 0) {
+        throw new TypeError('Linux monotonic clock is invalid');
+      }
+      return milliseconds;
+    };
+    readLinuxMonotonicMilliseconds();
+    return Object.freeze({
+      nowMilliseconds: readLinuxMonotonicMilliseconds,
+      origin,
+    });
+  } catch {
+    const origin = `process-${randomUUID()}`;
+    return Object.freeze({
+      nowMilliseconds: () =>
+        Number(process.hrtime.bigint() / BigInt(1_000_000)),
+      origin,
+    });
+  }
 }
 
 async function loadAttemptRecord(

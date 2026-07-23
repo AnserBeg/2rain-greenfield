@@ -106,6 +106,11 @@ Date: 2026-07-22
 Why: `transaction_timestamp()` and `now()` are transaction-start values that misclassify a transaction blocked across a deadline. This class recurred after the G1-P4 approval-expiry debate in the G1-P4b overdue derivation.
 How to apply: use `clock_timestamp()` for deadline, expiry, and overdue logic and every persisted timestamp it consumes; transaction-start time remains valid for audit-column defaults. Reviewers should check for this class. See `docs/execution/packets/G1-P4b.md`.
 
+## Measure elapsed deadlines with a durable monotonic anchor
+Date: 2026-07-23
+Why: fresh `clock_timestamp()` reads are statement-time but still steppable wall time, so a backward correction can delay a deadline derived from an earlier persisted wall timestamp.
+How to apply: supersedes the elapsed-age part of “Use statement time for deadline decisions”: persist a boot-scoped monotonic anchor, inject wall/monotonic time in regression tests, and use wall time only for timestamp representation. See `docs/execution/packets/G1-P4b-monotonic-reconciliation.md`.
+
 ## Derive persisted envelope versions from canonical authority
 Date: 2026-07-23
 Why: G2-P2a copied legacy-compatible compiler-input versions into a current persisted release envelope, causing downstream PostgreSQL registration to reject it.

@@ -1077,7 +1077,7 @@ test('G1-P4b atomic activation, reconciliation, rollback, and invalidation', asy
         );
 
         await t.test(
-          'reconciliation age survives outage and a fresh coordinator',
+          'reconciliation age survives a backward clock step, outage, and fresh coordinator',
           async () => {
             const current = await pointer(pool, tenantA, environmentA);
             const target = releaseOtherThan(releasesA, current.releaseId, 0);
@@ -1094,13 +1094,29 @@ test('G1-P4b atomic activation, reconciliation, rollback, and invalidation', asy
               [attempt.activationAttemptId],
             );
             assert.equal(beforeInstruction.rows[0]?.count, '0');
+            const wallClock = await pool.query<{ observed_at: Date }>(
+              'SELECT clock_timestamp() AS observed_at',
+            );
+            const startedAt = wallClock.rows[0]?.observed_at;
+            assert.ok(startedAt);
+            let clockSample = {
+              monotonicMilliseconds: 10_000,
+              origin: 'g1-p4b-test-boot',
+              wallTime: startedAt,
+            };
+            const reconciliationClock = {
+              sample: () => clockSample,
+            };
             await changeExecutorAuthority(pool, tenantA, false);
             try {
               const firstPool = runtimePool(connection, 1);
               try {
                 const firstCoordinator = new PostgresReleaseActivationService(
                   firstPool,
-                  { reconciliationMaxAgeMilliseconds: 100 },
+                  {
+                    reconciliationClock,
+                    reconciliationMaxAgeMilliseconds: 100,
+                  },
                 );
                 const started = await firstCoordinator.activate(
                   systemContextA,
@@ -1127,8 +1143,48 @@ test('G1-P4b atomic activation, reconciliation, rollback, and invalidation', asy
                 max_age_milliseconds: '100',
               });
 
+              clockSample = {
+                monotonicMilliseconds: 10_099,
+                origin: 'g1-p4b-test-boot',
+                wallTime: new Date(startedAt.getTime() - 2_000),
+              };
+              const steppedPool = runtimePool(connection, 1);
+              try {
+                const steppedCoordinator = new PostgresReleaseActivationService(
+                  steppedPool,
+                  {
+                    reconciliationClock,
+                  },
+                );
+                const beforeDeadline =
+                  await steppedCoordinator.reconcileActivation(
+                    systemContextA,
+                    attempt,
+                  );
+                assert.equal(beforeDeadline.status, 'RECONCILING');
+                assert.equal(beforeDeadline.alarmDue, false);
+                const pending =
+                  await steppedCoordinator.inspectReconciliationState(
+                    systemContextA,
+                    attempt,
+                  );
+                assert.equal(pending.state, 'PENDING');
+                assert.equal(pending.overdue, false);
+                assert.equal(
+                  pending.observedAt,
+                  new Date(startedAt.getTime() + 99).toISOString(),
+                );
+              } finally {
+                await steppedPool.end();
+              }
+
               await execFileAsync('docker', ['pause', containerName]);
               try {
+                clockSample = {
+                  monotonicMilliseconds: 10_101,
+                  origin: 'g1-p4b-test-boot',
+                  wallTime: new Date(startedAt.getTime() - 2_000),
+                };
                 const outagePool = new pg.Pool({
                   ...connection,
                   connectionTimeoutMillis: 100,
@@ -1138,7 +1194,9 @@ test('G1-P4b atomic activation, reconciliation, rollback, and invalidation', asy
                 outagePool.on('error', () => undefined);
                 try {
                   const outageCoordinator =
-                    new PostgresReleaseActivationService(outagePool);
+                    new PostgresReleaseActivationService(outagePool, {
+                      reconciliationClock,
+                    });
                   const unavailable =
                     await outageCoordinator.reconcileActivation(
                       systemContextA,
@@ -1149,9 +1207,6 @@ test('G1-P4b atomic activation, reconciliation, rollback, and invalidation', asy
                 } finally {
                   await outagePool.end();
                 }
-                await new Promise((resolveDelay) =>
-                  setTimeout(resolveDelay, 3_100),
-                );
               } finally {
                 await execFileAsync('docker', ['unpause', containerName]);
               }
@@ -1160,7 +1215,9 @@ test('G1-P4b atomic activation, reconciliation, rollback, and invalidation', asy
               const recoveredPool = runtimePool(connection, 1);
               try {
                 const recoveredCoordinator =
-                  new PostgresReleaseActivationService(recoveredPool);
+                  new PostgresReleaseActivationService(recoveredPool, {
+                    reconciliationClock,
+                  });
                 const recovered =
                   await recoveredCoordinator.reconcileActivation(
                     systemContextA,
@@ -1182,6 +1239,23 @@ test('G1-P4b atomic activation, reconciliation, rollback, and invalidation', asy
                   count: '1',
                   max_age_milliseconds: '100',
                 });
+                const anchor = await pool.query<{
+                  count: string;
+                  phase_code: string;
+                }>(
+                  `SELECT count(*) AS count,
+                          min(phase_code) AS phase_code
+                     FROM platform.release_activation_phase_receipts
+                    WHERE activation_attempt_id = $1
+                      AND phase_code LIKE
+                        'RECONCILIATION_MONOTONIC_ANCHOR_V1:%'`,
+                  [attempt.activationAttemptId],
+                );
+                assert.equal(anchor.rows[0]?.count, '1');
+                assert.equal(
+                  anchor.rows[0]?.phase_code,
+                  'RECONCILIATION_MONOTONIC_ANCHOR_V1:g1-p4b-test-boot:10000',
+                );
 
                 await changeExecutorAuthority(pool, tenantA, true);
                 const finished = await recoveredCoordinator.activate(
