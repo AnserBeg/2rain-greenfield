@@ -132,7 +132,7 @@ export function digestModuleTransitionElements(
           physicalObjectName,
         }))
         .toSorted((left, right) =>
-          left.elementId.localeCompare(right.elementId),
+          compareCodeUnits(left.elementId, right.elementId),
         ),
     ),
   );
@@ -143,6 +143,10 @@ export function digestModuleTransitionElements(
       .update(bytes)
       .digest(),
   );
+}
+
+function compareCodeUnits(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 export interface ModuleStorageCatalogReceipt extends TenantEnvironmentIdentity {

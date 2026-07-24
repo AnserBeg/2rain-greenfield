@@ -11,6 +11,9 @@ importers:
       '@eslint/js':
         specifier: ^9.34.0
         version: 9.39.5
+      '@north-star/canonical-model':
+        specifier: workspace:*
+        version: link:packages/canonical-model
       '@playwright/test':
         specifier: ^1.55.0
         version: 1.61.1

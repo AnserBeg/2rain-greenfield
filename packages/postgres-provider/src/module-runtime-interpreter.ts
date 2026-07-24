@@ -1350,7 +1350,7 @@ function compareEntry(
   left: readonly [string, unknown],
   right: readonly [string, unknown],
 ): number {
-  return left[0].localeCompare(right[0]);
+  return left[0] < right[0] ? -1 : left[0] > right[0] ? 1 : 0;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

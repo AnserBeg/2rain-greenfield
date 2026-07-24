@@ -1,7 +1,7 @@
 import {
   LANGUAGE_VERSION,
   NORMALIZATION_PROFILE_VERSION,
-} from '../../../../packages/canonical-model/src/index.js';
+} from '@north-star/canonical-model';
 
 const version = LANGUAGE_VERSION;
 const namespace = 'northstar.modulefixture';

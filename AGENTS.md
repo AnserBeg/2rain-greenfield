@@ -113,7 +113,13 @@ silently.
 
 ## 6. Gates
 
-- Every packet: typecheck plus the packet's focused tests.
+- A packet is acceptable only when the **full CI matrix** is green at the
+  exact integrated SHA — never from a packet-selected subset. Focused tests
+  may shorten the development loop but cannot replace the full matrix. The
+  packet's ledger row records the integrated SHA and that full-matrix run.
+- Deadline, expiry, and elapsed-time logic never compares raw wall-clock
+  samples. Production elapsed-time decisions use a monotonic source; timing
+  tests inject a controlled clock and never sleep-and-measure.
 - When touched: dependency-boundary tests, PostgreSQL provider tests,
   surface-grammar conformance (exists from G2), agent evaluations (once the
   harness exists).
@@ -132,8 +138,8 @@ silently.
 - No hard-delete paths for business data, anywhere, ever (plan doctrine).
 - All repository commands run in Ubuntu/WSL against `/home/rvham/...`
   paths.
-- WSL2 on this machine steps its wall clock backward ~2s under CPU load:
-  any test with ordering assumptions uses monotonic time.
+- WSL2 on this machine steps its wall clock backward ~2s under CPU load; the
+  binding monotonic-time and controlled-clock rule is in section 6.
 - Record adjudicated lessons via the `capture-learnings` skill.
 
 ## 8. Skills

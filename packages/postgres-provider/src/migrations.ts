@@ -66,7 +66,7 @@ export async function loadMigrations(directory: string): Promise<Migration[]> {
   }
 
   const ordered = sqlEntries.toSorted((left, right) =>
-    left.name.localeCompare(right.name),
+    compareCodeUnits(left.name, right.name),
   );
   const migrations: Migration[] = [];
 
@@ -97,6 +97,10 @@ export async function loadMigrations(directory: string): Promise<Migration[]> {
   }
 
   return migrations;
+}
+
+function compareCodeUnits(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 export async function runMigrations(

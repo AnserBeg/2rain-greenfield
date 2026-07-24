@@ -51,8 +51,13 @@ A packet must have all of:
 ## Packet-completion block (mandatory, in this order)
 
 1. Frozen candidate SHA (any later fix produces a new SHA and fresh review).
-2. Gate results, honest — a red gate is reported with output, never hidden
-   or explained away.
+2. Gate results, honest — the **full CI matrix** must be green at the exact
+   integrated SHA, never only a packet-selected subset. A red gate is reported
+   with output, never hidden or explained away, and the ledger row records the
+   integrated SHA plus the full-matrix run. Deadline, expiry, and elapsed-time
+   logic never compares raw wall-clock samples: production uses a monotonic
+   source, and timing tests inject a controlled clock rather than
+   sleep-and-measure.
 3. **Test it yourself** — copy-paste commands and/or UI steps with expected
    observations. Must be executable by the user in under 10 minutes without
    reading the diff. If the packet has no runtime surface, say what to read
