@@ -15,6 +15,12 @@ before any become `admitted`.
 |---|---|---|---|
 | G1 | **COMPLETE** | G1-P9 — reviewed SHA `1e69199078bf0c455d45bfccfd4b3ef631923afd` | [G1 stage-gate evidence](stage-gates/G1.md) |
 
+## Program reviews
+
+| Milestone | Reviewed SHA | Status | Strategic verdicts | Disposition |
+|---|---|---|---|---|
+| G2-P3 Party, before Catalog/Location fan-out | `12e6c66ac1834274391e0b63c9d44a60eb2514c7` | **CONVERGED** | B1 **KEEP**; B2 **ADJUST — sequencing only** | [Converged record](program-reviews/2026-07-24-g2-p3-party/converged-record.md); correctives PR-1, PR-2, and PR-3 before fan-out |
+
 | ID | Packet | Stage | Tier | Status | SHA | Evidence |
 |---|---|---|---|---|---|---|
 | G0-P1a | Fresh pnpm/TypeScript workspace and clean-install scaffold | G0 | Mechanical | accepted | `856f90ca4a1bd1d4d099760dd2da6dc8ad51e4ae` | [packet](packets/G0-P1a.md) |

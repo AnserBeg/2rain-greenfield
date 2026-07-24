@@ -1,0 +1,154 @@
+## DIAL A FINDINGS
+
+**Overall Dial A verdict:** the release, pinning, storage, role, RLS, and successful-write trust kernel is coherent. The semantic factory above it is not yet coherent enough for Catalog/Location fan-out. I found **no CRITICAL findings, 10 MATERIAL findings, and 2 MINOR findings**.
+
+The Party create trace is:
+
+`POST form` → transport-only server → authenticated entry constructs one opaque issued view → compiled surface intent selects a pinned operation → Operation Gateway rechecks current boundary and operation policy → interpreter reloads and verifies the pinned storage artifact → assumes the DML-only module role → module DML/read-back → restores the runtime role → inserts invocation/change/event/outbox in the same transaction → renders the returned DTO. Evidence: [app-server.ts](/home/rvham/2rain-greenfield/apps/web/src/app-server.ts:71), [request-runtime-view.ts](/home/rvham/2rain-greenfield/packages/runtime/src/request-runtime-view.ts:175), [semantic-operation-gateway.ts](/home/rvham/2rain-greenfield/packages/runtime/src/semantic-operation-gateway.ts:139), [module-runtime-interpreter.ts](/home/rvham/2rain-greenfield/packages/postgres-provider/src/module-runtime-interpreter.ts:137), [role assumption](/home/rvham/2rain-greenfield/packages/postgres-provider/src/module-runtime-interpreter.ts:988), [atomic trust transaction](/home/rvham/2rain-greenfield/packages/postgres-provider/src/trust/postgres-trust-service.ts:102), and [surface read-back rendering](/home/rvham/2rain-greenfield/apps/web/src/surface-runtime.ts:191).
+
+That path is fail-closed at its main seams. The exceptions are findings 3–8.
+
+1. **[MATERIAL] Compiler-derived conformance is currently self-attestation, not executable evidence.**  
+   **Evidence:** conformance gathers `evidenceKinds` strings from assertions and checks only their presence in [conformance.ts](/home/rvham/2rain-greenfield/packages/compiler/src/conformance.ts:134); Party declares all six labels itself in [definition.ts](/home/rvham/2rain-greenfield/packages/domain/src/party/definition.ts:434); the verification projection merely copies those declarations in [projections.ts](/home/rvham/2rain-greenfield/packages/compiler/src/projections.ts:491); its test proves removing the word `recovery` fails in [g2-module-conformance.test.ts](/home/rvham/2rain-greenfield/test/compiler/g2-module-conformance.test.ts:143). The real-PostgreSQL metamorphic test is a happy create/read/trust journey, not an invariant matrix: [module-runtime.test.ts](/home/rvham/2rain-greenfield/test/postgres/module-runtime.test.ts:434).  
+   **Why it matters:** a definition can claim migration, recovery, UI, agent, and provider evidence even though no runner executes the assertion. This is the systemic generator behind semantic escapes.  
+   **Smallest fix:** make `verificationPlan` executable. Generate scenario IDs from compiled semantics and require linked real-provider results; declaration labels alone must never satisfy conformance.  
+   **Disposition:** `fix-before-fan-out`.
+
+2. **[MATERIAL] `archiveBehavior: restrict` is declared, required by normalization, then dropped; Party’s accepted test blesses the violation.**  
+   **Evidence:** the PartyRole→Party relation declares `restrict` in [definition.ts](/home/rvham/2rain-greenfield/packages/domain/src/party/definition.ts:163), and normalization requires it for parent-scoped children in [normalize.ts](/home/rvham/2rain-greenfield/packages/canonical-model/src/normalize.ts:941). The compiled relation target has no archive behavior in [storage.ts](/home/rvham/2rain-greenfield/packages/compiler/src/storage.ts:283), and lowering omits it in [storage.ts](/home/rvham/2rain-greenfield/packages/compiler/src/storage.ts:550). Runtime relation lookup accepts archived parents, while parent archive blindly updates the record in [module-runtime-interpreter.ts](/home/rvham/2rain-greenfield/packages/postgres-provider/src/module-runtime-interpreter.ts:417) and [module-runtime-interpreter.ts](/home/rvham/2rain-greenfield/packages/postgres-provider/src/module-runtime-interpreter.ts:484). The Party test creates active roles and then successfully archives their parent in [party-runtime.test.ts](/home/rvham/2rain-greenfield/test/postgres/party-runtime.test.ts:132) and [party-runtime.test.ts](/home/rvham/2rain-greenfield/test/postgres/party-runtime.test.ts:240).  
+   **Why it matters:** active children can point to an archived parent, and new/restored children can enter work against archived masters—the exact lifecycle invariant the language declares.  
+   **Smallest fix:** carry `archiveBehavior` into the runtime contract; atomically reject parent archive with active dependents and child create/restore against an archived parent.  
+   **Disposition:** `fix-before-fan-out`.
+
+3. **[MATERIAL] Field classification is retained as metadata but not enforced across read-back, query, surface, agent, or reporting paths.**  
+   **Evidence:** `contactSummary` is confidential in [definition.ts](/home/rvham/2rain-greenfield/packages/domain/src/party/definition.ts:92). Classification appears in the semantic projection, but query, reporting, policy-reference, and agent projections do not carry a usable field decision in [projections.ts](/home/rvham/2rain-greenfield/packages/compiler/src/projections.ts:297), [projections.ts](/home/rvham/2rain-greenfield/packages/compiler/src/projections.ts:425), and [projections.ts](/home/rvham/2rain-greenfield/packages/compiler/src/projections.ts:454). The interpreter returns every selected field without a classification check in [module-runtime-interpreter.ts](/home/rvham/2rain-greenfield/packages/postgres-provider/src/module-runtime-interpreter.ts:835), and accepted changes label every business field `SENSITIVE` rather than using its canonical classification in [module-runtime-interpreter.ts](/home/rvham/2rain-greenfield/packages/postgres-provider/src/module-runtime-interpreter.ts:1094). The current integration test expects the confidential value in browser HTML in [party-runtime.test.ts](/home/rvham/2rain-greenfield/test/integration/party-runtime.test.ts:94).  
+   **Why it matters:** this is not evidence of an unauthorized leak under the current allow-all fixture; it is evidence that the generic runtime cannot make the field/classification decision ADR-0008 requires. Operation read-back also avoids any query-side field decision.  
+   **Smallest fix:** propagate canonical classification into all consumer contracts and enforce filter/mask/deny decisions consistently. Until that exists, non-public classifications should fail compilation as unsupported.  
+   **Disposition:** `fix-before-fan-out`.
+
+4. **[MATERIAL] Canonical value domains—most clearly enum membership—are not executable runtime contracts.**  
+   **Evidence:** PartyRole declares closed supplier/customer and active/inactive enum options in [definition.ts](/home/rvham/2rain-greenfield/packages/domain/src/party/definition.ts:102). The compiler lowers enum fields to unconstrained PostgreSQL `text` in [storage.ts](/home/rvham/2rain-greenfield/packages/compiler/src/storage.ts:1140); `StorageColumnTarget` exposes no enum domain in [storage.ts](/home/rvham/2rain-greenfield/packages/compiler/src/storage.ts:256); the operation projection has no input schema in [projections.ts](/home/rvham/2rain-greenfield/packages/compiler/src/projections.ts:365). The generic renderer emits text inputs for every field in [component-registry.ts](/home/rvham/2rain-greenfield/apps/web/src/component-registry.ts:206), while the interpreter accepts any scalar in [module-runtime-interpreter.ts](/home/rvham/2rain-greenfield/packages/postgres-provider/src/module-runtime-interpreter.ts:1207).  
+   **Why it matters:** an arbitrary role/status string can be persisted even though the canonical language says the domain is closed. Other types often fall through to PostgreSQL coercion instead of stable service diagnostics.  
+   **Smallest fix:** emit a versioned field/input contract containing field kind, enum option IDs, requiredness, limits, and writable fields; validate it generically before DML, with a PostgreSQL `CHECK` as defense-in-depth.  
+   **Disposition:** `fix-before-fan-out`.
+
+5. **[MATERIAL] Human confirmation is presentation-only and bypassable by every non-browser channel.**  
+   **Evidence:** archive declares `humanRequired` in [definition.ts](/home/rvham/2rain-greenfield/packages/domain/src/party/definition.ts:337). The operation request contains no confirmation grant and the gateway never verifies one in [semantic-operation-gateway.ts](/home/rvham/2rain-greenfield/packages/runtime/src/semantic-operation-gateway.ts:31) and [semantic-operation-gateway.ts](/home/rvham/2rain-greenfield/packages/runtime/src/semantic-operation-gateway.ts:147). SurfaceRuntime trusts `confirmed=yes` in [surface-runtime.ts](/home/rvham/2rain-greenfield/apps/web/src/surface-runtime.ts:167), and the renderer automatically emits that hidden value in [component-registry.ts](/home/rvham/2rain-greenfield/apps/web/src/component-registry.ts:217). The browser test archives with one click in [party-runtime.spec.ts](/home/rvham/2rain-greenfield/apps/web/test/browser/party-runtime.spec.ts:25).  
+   **Why it matters:** the UI has duplicated an authority ADR-0008 assigns to the Operation Gateway, while API/agent callers can omit confirmation entirely.  
+   **Smallest fix:** require a server-issued, exact confirmation grant bound to release view, operation, target, input digest, and revision; implement an actual preview/confirm transition.  
+   **Disposition:** `fix-before-fan-out`.
+
+6. **[MATERIAL] The ADR-mandated shared `LifecycleService` is unused and incompatible with the real O0 lifecycle contract.**  
+   **Evidence:** the service requires IDs ending `:archive`/`:restore` and sends `{lifecycleAction, reason, schemaVersion,...}` in [lifecycle-service.ts](/home/rvham/2rain-greenfield/packages/platform-runtime/src/trust/lifecycle-service.ts:69). Party operation IDs end `.party_archive`/`.party_restore` in [definition.ts](/home/rvham/2rain-greenfield/packages/domain/src/party/definition.ts:337), and the interpreter rejects every lifecycle input field except `recordId` and `expectedRevision` in [module-runtime-interpreter.ts](/home/rvham/2rain-greenfield/packages/postgres-provider/src/module-runtime-interpreter.ts:1059). Repository search found no production construction of `LifecycleService`; only its focused integration test uses it. ADR-0010 calls it the sole generic executor in [ADR-0010](/home/rvham/2rain-greenfield/docs/decisions/ADR-0010-lifecycle-audit-correction-and-recovery.md:27).  
+   **Why it matters:** lifecycle currently has two contradictory authorities, one dead and one incomplete. Future channels cannot compose the documented service.  
+   **Smallest fix:** align canonical operation IDs and lifecycle input schema, then route every UI/API/agent lifecycle request through the shared service and gateway.  
+   **Disposition:** `fix-before-fan-out`.
+
+7. **[MATERIAL] Successful mutations are atomic, but the promised cross-channel invocation ledger is not universal.**  
+   **Evidence:** accepted DML plus invocation/change/event/outbox is correctly atomic in [postgres-trust-service.ts](/home/rvham/2rain-greenfield/packages/postgres-provider/src/trust/postgres-trust-service.ts:110). `recordNonAcceptedInvocation` exists in [postgres-trust-service.ts](/home/rvham/2rain-greenfield/packages/postgres-provider/src/trust/postgres-trust-service.ts:167), but repository search found no production caller; policy denial and validation failures throw directly from the gateways. The interpreter also hardcodes every invocation channel to `API` in [module-runtime-interpreter.ts](/home/rvham/2rain-greenfield/packages/postgres-provider/src/module-runtime-interpreter.ts:257), including browser traffic and any future agent use.  
+   **Why it matters:** ADR-0010’s allowed/denied/failed/timed-out/succeeded authority and truthful channel attribution are not yet true of the real gateway path.  
+   **Smallest fix:** introduce trusted channel context at entry and one gateway execution orchestrator that records exactly one terminal invocation outcome, without accepting channel from business input.  
+   **Disposition:** `fix-in-named-later-packet` — a G2 trust-integration corrective before G2-P8/G3.
+
+8. **[MATERIAL] O0 has no idempotency contract or replay protection.**  
+   **Evidence:** the operation request has no idempotency key in [semantic-operation-gateway.ts](/home/rvham/2rain-greenfield/packages/runtime/src/semantic-operation-gateway.ts:31); the browser creates a new record UUID on every submission in [surface-runtime.ts](/home/rvham/2rain-greenfield/apps/web/src/surface-runtime.ts:348); interpreter invocation/outbox identities are freshly random and the deduplication key includes that random invocation ID in [module-runtime-interpreter.ts](/home/rvham/2rain-greenfield/packages/postgres-provider/src/module-runtime-interpreter.ts:157) and [module-runtime-interpreter.ts](/home/rvham/2rain-greenfield/packages/postgres-provider/src/module-runtime-interpreter.ts:293).  
+   **Why it matters:** a retry or double-submit can create duplicate masters; the outbox “deduplication” key cannot recognize the retry.  
+   **Smallest fix:** add a scoped durable idempotency receipt binding principal, pinned view, operation, canonical input digest, and result; the UI must retain the same key across transport retries.  
+   **Disposition:** `fix-in-named-later-packet` — the same G2 operation-mediation corrective, before durable import or G3.
+
+9. **[MATERIAL] Gate discovery and CI have concrete blind spots.**  
+   **Evidence:** `test:unit` uses the unquoted shell glob `test/unit/**/*.test.ts` in [package.json](/home/rvham/2rain-greenfield/package.json:20). Because nested canonical-model tests exist, the shell expands it to those three files and silently omits the three root-level unit tests; I observed the command report green with only those three files. CI runs unit/integration/architecture but omits `test:compiler`, `check:schema`, and the agent test in [ci.yml](/home/rvham/2rain-greenfield/.github/workflows/ci.yml:42). The hygiene test claiming “every scaffold gate” also omits those commands from its required list in [repository-hygiene.test.ts](/home/rvham/2rain-greenfield/test/architecture/repository-hygiene.test.ts:72).  
+   **Why it matters:** a green primary gate does not mean the intended suite was discovered, and compiler/provider contract drift can reach main.  
+   **Smallest fix:** make test discovery explicit and self-checking, add compiler/schema/agent gates to CI, and assert the discovered file set rather than only command success.  
+   **Disposition:** `fix-before-fan-out`.
+
+10. **[MATERIAL] Q0’s typed-result contract remains incomplete and can silently truncate data.**  
+    **Evidence:** ADR-0008 requires typed arguments, provenance, freshness, paging, and truncation in [ADR-0008](/home/rvham/2rain-greenfield/docs/decisions/ADR-0008-semantic-query-and-operation-gateways.md:16). The result envelope contains none of those fields in [semantic-query-gateway.ts](/home/rvham/2rain-greenfield/packages/runtime/src/semantic-query-gateway.ts:40); request parsing only validates immutable JSON, not query-specific closed arguments, in [semantic-query-gateway.ts](/home/rvham/2rain-greenfield/packages/runtime/src/semantic-query-gateway.ts:201). List queries return exactly `limit` rows without a next cursor/truncated signal in [module-runtime-interpreter.ts](/home/rvham/2rain-greenfield/packages/postgres-provider/src/module-runtime-interpreter.ts:540). Search uses PostgreSQL `lower()` while resolver/uniqueness use the declared Unicode case-fold function in [module-runtime-interpreter.ts](/home/rvham/2rain-greenfield/packages/postgres-provider/src/module-runtime-interpreter.ts:629) and [module-runtime-interpreter.ts](/home/rvham/2rain-greenfield/packages/postgres-provider/src/module-runtime-interpreter.ts:740).  
+    **Why it matters:** users can see incomplete lists without knowing they are incomplete, and search/resolve/uniqueness semantics can disagree.  
+    **Smallest fix:** complete the Q0 envelope and closed argument schemas, fetch `limit + 1`, emit cursor/truncation, and use the same declared normalization primitive.  
+    **Disposition:** `fix-in-named-later-packet` — G2-P5, re-sequenced before P6/P7.
+
+11. **[MINOR] Locale-dependent comparison remains in deterministic/evidence paths.**  
+    **Evidence:** module transition element digests sort with ambient `localeCompare` in [module-storage-transition.ts](/home/rvham/2rain-greenfield/packages/platform-runtime/src/module-storage-transition.ts:123), and audit change ordering does the same in [module-runtime-interpreter.ts](/home/rvham/2rain-greenfield/packages/postgres-provider/src/module-runtime-interpreter.ts:1349).  
+    **Why it matters:** exact hashes/order should not depend on the host ICU locale. Current identifiers are restricted enough that the practical risk is bounded; I did not reproduce a divergent digest.  
+    **Smallest fix:** replace with the compiler’s code-unit comparator and add a multi-locale subprocess vector.  
+    **Disposition:** `fix-before-fan-out`.
+
+12. **[MINOR] ADR-0011’s status contradicts the accepted ledger.**  
+    **Evidence:** ADR-0011 still says “candidate—Freeze F is not ratified” in [ADR-0011](/home/rvham/2rain-greenfield/docs/decisions/ADR-0011-compiled-module-storage-transitions.md:3), while the ledger records Freeze F as ratified and G2-P2 complete in [ledger.md](/home/rvham/2rain-greenfield/docs/execution/ledger.md:50).  
+    **Why it matters:** readers following the authority chain receive contradictory constitutional state.  
+    **Smallest fix:** update the ADR status and ratification reference without changing its decision.  
+    **Disposition:** `fix-in-named-later-packet` — the next mechanical documentation packet.
+
+### A2/A4/A5/A6/A7 closure
+
+- **ADR drift:** ADR-0001–0006 are materially aligned with the implementation. ADR-0007 is future inventory work, not claimed current behavior. ADR-0008 divergences are findings 3–5, 8, and 10. ADR-0009’s five-tool/boundary doctrine is intact, though real agent execution is not yet composed. ADR-0010 divergences are findings 2, 6, and 7. ADR-0011’s physical ownership, materializer, RLS, role bridge, and transition kernel align; its conformance claim and status drift are findings 1 and 12.
+
+- **Deferred seams and versions:** generated-storage promotion, Q1/O1, outbox delivery, recovery orchestration, retention, and higher Q/O tiers are still either explicit typed-unsupported seams or clearly stage-deferred. I found no new version half-bump: language/normalization v2 in [constants.ts](/home/rvham/2rain-greenfield/packages/canonical-model/src/constants.ts:1), storage/envelope/provider ABI v1 and tightening debt v2 in [protocol.ts](/home/rvham/2rain-greenfield/packages/compiler/src/protocol.ts:24), and transition receipt/policy v2 in [module-storage-transition.ts](/home/rvham/2rain-greenfield/packages/platform-runtime/src/module-storage-transition.ts:8) are separate versioned contracts, not numbers expected to match. The rotting seams are specifically the unused verification plan and incompatible LifecycleService.
+
+- **Security:** I found no cross-tenant bypass. Trusted context is transaction-local and role-checked in [request-context.ts](/home/rvham/2rain-greenfield/packages/postgres-provider/src/request-context.ts:10); module roles are `NOINHERIT`, non-superuser, and `NOBYPASSRLS` in [0007 migration](/home/rvham/2rain-greenfield/db/migrations/0007_module_storage_transitions.sql:1); the bridge is one-directional and SET-only in [0008 migration](/home/rvham/2rain-greenfield/db/migrations/0008_module_runtime_role_assumption.sql:1). Party proves equal no-existence diagnostics and both service/FK defenses in [party-runtime.test.ts](/home/rvham/2rain-greenfield/test/postgres/party-runtime.test.ts:199). No ordinary hard-delete path was found. The material security gap is field/classification enforcement, not RLS.
+
+- **Determinism/time:** I found no recurrence of the activation wall-clock defect and no unsorted Map iteration in compiler output. Runtime identity UUIDs and archive timestamps are not release determinism. Successful business writes are atomic; universality fails only for non-accepted invocation evidence. The remaining deterministic concern is finding 11.
+
+- **Gate architecture:** the working hypothesis is **confirmed but refined**. It explains defects 3–5 and the newly found archive, enum, classification, and confirmation gaps: structure exists, but enforcement is not executed. Defect 1 was a downstream-consumer gate failure; defect 2 was a temporal fault-injection failure. The program therefore has two weaknesses: executable semantic oracles, and cross-layer/temporal scenario placement.
+
+The single highest-value addition is a required `test:semantic-contract` gate: generated from the compiled verification plan, executed against real PostgreSQL on both a random metamorphic module and the real Party definition, with positive and negative scenarios for every declared invariant. It should deliberately fail when either the declaration or one enforcement layer is removed.
+
+## SEMANTIC-CONTRACT CHECKLIST
+
+Declared but not behaviorally proved today include archive restriction and archived relation targets; enum membership and full typed/closed query-operation inputs; field/classification decisions across query/read-back/UI/agent/reporting; exact confirmation grants; idempotent replay; denied/failed/timed-out invocation recording; truthful browser/agent channel attribution; Q0 paging/truncation/provenance; Unicode search parity; and execution of compiled verification assertions. Several are not merely untested—the current contract lacks the necessary metadata or enforcement.
+
+| Invariant class | Compiler conformance | Generic metamorphic fixture, real PostgreSQL | Per-module packet | Review charter |
+|---|---|---|---|---|
+| Closed input/DTO types | Emit requiredness, kinds, enum domains, bounds, writable fields, closed argument keys | Valid boundary cases plus invalid type/enum/bounds/unknown-key; stable diagnostic; no row or trust residue | Exercise every field family the module actually declares; UI/query/agent/read-back DTO equality | Removing a validator or enum option must make a test fail |
+| Uniqueness and normalization | One declared normalization primitive flows to storage, search, and resolver | Same-scope duplicate, case-fold expansion, different tenant/environment allowance, concurrent duplicate | Every business key and scope | Prove behavior, not merely index presence |
+| Relations | Emit scope columns, requiredness, ownership, archive behavior, service diagnostic contract | Missing, cross-tenant, same-tenant/different-environment, archived target; prove service + RLS + FK and no existence leak | Each declared relation and parent/child direction | Require both service and provider layers where doctrine says defense-in-depth |
+| Lifecycle/no delete | Emit archive/restore-only operations and inbound dependency rules | Archive visibility, restrict, restore conflict, child restore, revision race; scan grants for DELETE/TRUNCATE absence | Real parent/child dependencies | Reject a packet that defers a declared lifecycle semantic |
+| Tenant/environment/policy | Stable permission/resource bindings; no caller-controlled scope fields | Two tenants and two environments; boundary DENY and resource DENY; hidden and missing share diagnostics | Representative permitted and denied principals | Check UI, API, agent, report, and read-back parity |
+| Resolver authority | Require explicit identifier/advisory keys and common normalization | Unique identifier exact; single/multiple advisory ambiguous; collisions, Unicode, fuzzy, cross-scope | Every business identifier and name-like key | No count-based or field-name inference |
+| Classification/redaction/actor | Propagate field class to policy, DTO, reporting, agent, and audit bindings | Two principals with field allow/mask/deny; journal uses canonical class; HUMAN/AGENT/AUTOMATION channel attribution | At least one non-public field and one delegated/agent case where applicable | No consumer may invent or omit classification |
+| Confirmation/idempotency/concurrency | Emit risk, grant requirements, idempotency scope, revision/precondition contract | Missing/wrong/stale/replayed confirmation; double-submit/retry; stale revision; canonical replay result | Every risky or externally meaningful operation | Direct gateway calls must behave identically to browser calls |
+| Trust atomicity | Bind mutation, invocation, change, event, outbox, read-back | Fault injection before/after DML and each trust insert; accepted all-or-none; denied/failed exactly one invocation | One success and each relevant rejection path | Search for alternate writers and unrecorded terminal outcomes |
+| Query/result semantics | Emit closed args, maximums, ordering, cursor, freshness/provenance and normalization | `limit + 1`, cursor continuation, truncation, unknown args, archived defaults, Unicode search | Actual list/search/resolve sizes and sort keys | No silent truncation or channel-specific query semantics |
+| Release/version/determinism | Pin every consumer version and require downstream compatibility | Cold/repeated compile, locale/time/cwd variants, old/new view coexistence, provider consumer suite | One live additive change on populated data | Any output-contract change runs every persisted/read consumer suite |
+| Verification evidence | Compile executable scenario IDs and expected outcomes—not evidence labels | Runner emits linked scenario/result digests from actual execution | Module adds declarations, not bespoke platform branches | Reject self-attestation; evidence must identify the executed oracle |
+
+## DIAL B VERDICT B1 (goal): KEEP
+
+The north star remains the right goal.
+
+Party is the first credible payoff: one definition produces typed storage, generic Q0/O0 behavior, surfaces, agent discovery, reporting metadata, audit bindings, resolver authority, and real PostgreSQL execution without a Party-specific production handler. The random-namespace fixture independently demonstrates that the press is generic.
+
+The defects do not show that compiler-backed zero-module-code ERP is untenable. They show that the compiler currently proves less than the program says it proves. That is a verification and contract-preservation problem, not a reason to retreat to generated CRUD, EAV, or shallow agent overlays.
+
+For $10–100M businesses, the expensive parts—migration safety, tenant isolation, deterministic releases, auditability, and coherent cross-channel semantics—are precisely the moat shallow API-overlay products cannot cheaply add later. Much of that foundation cost is already sunk and visibly reusable.
+
+One qualification should become explicit: “zero per-module code” means **no per-module production platform branch**. Every module still needs declared semantic scenarios, but the factory should generate and execute them. A module is not “supported” merely because all projection artifacts exist.
+
+## DIAL B VERDICT B2 (approach): ADJUST
+
+Keep the modular monolith, PostgreSQL sole provider, human-controlled activation, step-packet cadence, dual-model review, and one-real-module-before-fan-out strategy. Adjust the immediate sequencing:
+
+1. **Insert corrective packets before Catalog/Location.**
+
+   - A small mechanical gate-integrity packet: fix discovery and require compiler/schema/agent gates in CI.
+   - A critical semantic-preservation packet: executable verification plan, enum/value contracts, archive behavior, and the generated real-PostgreSQL semantic matrix.
+   - A critical operation-mediation packet: classification/read-back enforcement, confirmation grants, idempotency, non-accepted invocation evidence, and truthful channel attribution.
+
+2. **Move G2-P4 and the minimum G2-P5 behavior ahead of broad module fan-out.** Surface grammar, typed controls, closed list semantics, paging, and diagnostics are part of the reusable press. Catalog and Location should not reproduce today’s weak controls and silent-list contract.
+
+3. **Use Catalog as the second-module factory test; do not treat it merely as another walking slice.** Its acceptance criterion should be that it requires only definition data and declared semantic scenarios—no generic press changes. If it exposes a press change, stop and harden the press before Location.
+
+4. **Bring forward one narrow, visible authoring experience.** After semantic enforcement is sound, implement a constrained “add one optional field” flow: author definition change → compiled diff → human approval → activation → new field appears in form/detail/list and agent discovery against populated data. It should use the existing compiler/CAS path, not a shortcut or direct schema mutation. This gives an end-user customization story before a full G6 builder.
+
+5. **Keep durable import before G3 and keep accounting out of launch scope.** However, define an accounting handoff/export contract before pilots. Position the launch as an inventory/purchasing/sales operations ERP that integrates with accounting, not as a complete financial ERP.
+
+6. **Keep dual-model review, but change what review is asked to verify.** Reviewers should receive the compiled invariant matrix and ask whether each declared semantic has a behavioral oracle at the right layers. Review cannot substitute for that oracle.
+
+## NEW CONCERNS
+
+1. **The full product is not yet independently runnable outside test composition.** The complete Party server is assembled in a test fixture, while [apps/api/package.json](/home/rvham/2rain-greenfield/apps/api/package.json:1) and [apps/worker/package.json](/home/rvham/2rain-greenfield/apps/worker/package.json:1) are still manifests only. A stable demo/deployment composition should become a near-term checkpoint.
+
+2. **The visible “authoring” surface is still TypeScript source.** Party proves definition-only runtime behavior, but not that a tenant or AI can safely create and understand a change without repository-level development. The narrow one-field authoring flow above should test that product premise before more domains obscure it.
+
+3. **The no-accounting launch wedge needs an explicit systems boundary.** For the target market, inventory/purchasing/sales must hand off taxes, invoices, landed costs, and financial postings predictably. Building a GL is unnecessary now; leaving the integration/export contract implicit is risky.
