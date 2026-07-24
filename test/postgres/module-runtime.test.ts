@@ -27,7 +27,10 @@ import type {
   RegisterTenantReleaseCommand,
   StoreAppPackageRevisionCommand,
 } from '../../packages/platform-runtime/src/index.js';
-import { PostgresModuleRuntimeInterpreter } from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
+import {
+  ModuleRuntimeInterpreterError,
+  PostgresModuleRuntimeInterpreter,
+} from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
 import { PostgresModuleStorageMaterializer } from '../../packages/postgres-provider/src/module-storage-materializer.js';
 import {
   loadMigrations,
@@ -362,7 +365,12 @@ test('definition-only module is served generically through Q0/O0, trust, RLS, an
             },
             values: { [FIXTURE_IDS.fieldIds.childRole]: 'forbidden' },
           }),
-          /foreign key constraint/,
+          (error: unknown) => {
+            assert.ok(error instanceof ModuleRuntimeInterpreterError);
+            assert.equal(error.code, 'MODULE_RELATION_TARGET_NOT_FOUND');
+            assert.equal(error.message, 'relation target was not found');
+            return true;
+          },
         );
         assert.equal(
           await trustFactCount(pool, tenantA, environmentA),

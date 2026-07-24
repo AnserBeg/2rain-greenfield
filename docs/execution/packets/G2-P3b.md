@@ -111,6 +111,11 @@ focused evidence:
 - The real Chromium journey renders Party and role rows, archives/restores,
   creates through the generic form, shows linked trust feedback, and runs its
   resolver plus agent/query DTO proof against the same migrated database.
+- Named Mechanical bridge: the accepted P2c generic service-path expectation
+  now asserts `MODULE_RELATION_TARGET_NOT_FOUND`, the expected ripple of the
+  generic pre-insert relation guard. Its no-trust-residue assertion is
+  unchanged, and Party's separate raw-provider composite-FK rejection remains
+  the independent storage backstop.
 
 Required packet gates are green. The accepted G2-P2b case-fold corrective also
 resolved the inherited stale v0/v1 canonical-diagnostic unit expectation on
