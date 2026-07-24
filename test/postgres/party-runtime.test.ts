@@ -5,6 +5,7 @@ import test from 'node:test';
 import type { Pool } from 'pg';
 
 import { PROJECTION_FAMILY_IDS } from '../../packages/compiler/src/index.js';
+import { ModuleRuntimeInterpreterError } from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
 import { PARTY_IDS } from '../fixtures/g2/party/definition.js';
 import { projectionPayload } from '../fixtures/g2/party/compiler.js';
 import {
@@ -183,19 +184,26 @@ test('Party walking slice reaches real PostgreSQL with trust, lifecycle, resolve
     assert.equal(restoredRole.readBack?.archived, false);
 
     const trustBeforeCrossTenant = await trustCount(runtime.adminPool);
-    await assert.rejects(
-      invokePartyOperation(runtime, runtime.views.a, 'party_role_create', {
-        recordId: randomUUID(),
-        relations: { [PARTY_IDS.relationIds.roleParty]: hiddenPartyId },
-        values: {
-          [PARTY_IDS.fieldIds.roleKind]:
-            `${PARTY_IDS.namespace}:option.supplier`,
-          [PARTY_IDS.fieldIds.roleStatus]:
-            `${PARTY_IDS.namespace}:option.active`,
+    for (const targetId of [hiddenPartyId, randomUUID()]) {
+      await assert.rejects(
+        invokePartyOperation(runtime, runtime.views.a, 'party_role_create', {
+          recordId: randomUUID(),
+          relations: { [PARTY_IDS.relationIds.roleParty]: targetId },
+          values: {
+            [PARTY_IDS.fieldIds.roleKind]:
+              `${PARTY_IDS.namespace}:option.supplier`,
+            [PARTY_IDS.fieldIds.roleStatus]:
+              `${PARTY_IDS.namespace}:option.active`,
+          },
+        }),
+        (error: unknown) => {
+          assert.ok(error instanceof ModuleRuntimeInterpreterError);
+          assert.equal(error.code, 'MODULE_RELATION_TARGET_NOT_FOUND');
+          assert.equal(error.message, 'relation target was not found');
+          return true;
         },
-      }),
-      /foreign key constraint/i,
-    );
+      );
+    }
     assert.equal(await trustCount(runtime.adminPool), trustBeforeCrossTenant);
     await assertProviderRejectsCrossTenantRelation(
       runtime.adminPool,
