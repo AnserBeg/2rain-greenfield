@@ -292,6 +292,11 @@ export interface ModuleFieldContract {
   normalization: 'none' | 'unicodeCaseFoldNoCompatibilityNormalization';
   required: boolean;
   schemaVersion: typeof MODULE_FIELD_CONTRACT_VERSION;
+  temporal: {
+    precision: 'millisecond' | 'second' | null;
+    timezoneSemantics:
+      'calendarDate' | 'localWallTime' | 'offsetDateTime' | 'utcInstant' | null;
+  };
   writable: true;
 }
 
@@ -1322,8 +1327,30 @@ function fieldContract(field: Field): ModuleFieldContract {
         : 'none',
     required: field.presence === 'required',
     schemaVersion: MODULE_FIELD_CONTRACT_VERSION,
+    temporal: temporalContract(field.fieldType),
     writable: true,
   };
+}
+
+function temporalContract(
+  fieldType: FieldType,
+): ModuleFieldContract['temporal'] {
+  switch (fieldType.kind) {
+    case 'dateFieldType':
+      return { precision: null, timezoneSemantics: 'calendarDate' };
+    case 'timeFieldType':
+      return {
+        precision: fieldType.precision,
+        timezoneSemantics: 'localWallTime',
+      };
+    case 'dateTimeFieldType':
+      return {
+        precision: fieldType.precision,
+        timezoneSemantics: fieldType.timezoneSemantics,
+      };
+    default:
+      return { precision: null, timezoneSemantics: null };
+  }
 }
 
 function element(

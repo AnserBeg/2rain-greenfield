@@ -157,6 +157,7 @@ export class PostgresModuleRuntimeInterpreter
         request.definition.effect.entity.targetId,
       );
     }
+    assertModuleSemanticStorageContract(storage);
     const entity = requiredEntity(
       storage,
       request.definition.effect.entity.targetId,
@@ -183,6 +184,7 @@ export class PostgresModuleRuntimeInterpreter
       command,
       async (client) => {
         const currentStorage = await loadPinnedStorageTarget(client, request);
+        assertModuleSemanticStorageContract(currentStorage);
         const currentEntity = requiredEntity(
           currentStorage,
           request.definition.effect.entity.targetId,
@@ -1183,34 +1185,28 @@ function parseMutationInput(
   definition: RegisteredOperationDefinition,
   value: ImmutableJsonValue,
 ): MutationInput {
+  const contract = definition.inputContract;
+  if (!contract) {
+    throw failure(
+      'MODULE_SEMANTIC_CONTRACT_UNSUPPORTED',
+      'pinned operation lacks the required semantic input contract',
+      definition.operationId,
+    );
+  }
   const input = requireRecord(value, 'operation input');
   const recordId = requiredUuid(input.recordId, 'recordId');
   switch (definition.effect.kind) {
     case 'createRecordEffect':
-      assertAllowedKeys(
-        input,
-        definition.inputContract?.closedArgumentKeys ?? [
-          'recordId',
-          'relations',
-          'values',
-        ],
-      );
-      return validateMutationInput(definition.inputContract, {
+      assertAllowedKeys(input, contract.closedArgumentKeys);
+      return validateMutationInput(contract, {
         expectedRevision: null,
         patch: immutableRecord(input.values, 'values'),
         recordId,
         relations: uuidRecord(input.relations, 'relations'),
       });
     case 'updateRecordEffect':
-      assertAllowedKeys(
-        input,
-        definition.inputContract?.closedArgumentKeys ?? [
-          'expectedRevision',
-          'patch',
-          'recordId',
-        ],
-      );
-      return validateMutationInput(definition.inputContract, {
+      assertAllowedKeys(input, contract.closedArgumentKeys);
+      return validateMutationInput(contract, {
         expectedRevision: requiredRevision(input.expectedRevision),
         patch: immutableRecord(input.patch, 'patch'),
         recordId,
@@ -1218,14 +1214,8 @@ function parseMutationInput(
       });
     case 'archiveRecordEffect':
     case 'restoreRecordEffect':
-      assertAllowedKeys(
-        input,
-        definition.inputContract?.closedArgumentKeys ?? [
-          'expectedRevision',
-          'recordId',
-        ],
-      );
-      return validateMutationInput(definition.inputContract, {
+      assertAllowedKeys(input, contract.closedArgumentKeys);
+      return validateMutationInput(contract, {
         expectedRevision: requiredRevision(input.expectedRevision),
         patch: Object.freeze({}),
         recordId,
@@ -1235,10 +1225,9 @@ function parseMutationInput(
 }
 
 function validateMutationInput(
-  contract: RegisteredOperationInputContract | undefined,
+  contract: RegisteredOperationInputContract,
   input: MutationInput,
 ): MutationInput {
-  if (!contract) return input;
   const fields = new Map(
     contract.fields.map((field) => [field.fieldId, field] as const),
   );
@@ -1337,10 +1326,18 @@ function validateFieldValue(
       valid = typeof value === 'string' && isValidIsoDate(value);
       break;
     case 'timeFieldType':
-      valid = typeof value === 'string' && isValidIsoTime(value);
+      valid =
+        typeof value === 'string' &&
+        isValidIsoTime(value, field.temporal.precision);
       break;
     case 'dateTimeFieldType':
-      valid = typeof value === 'string' && isValidIsoDateTime(value);
+      valid =
+        typeof value === 'string' &&
+        isValidIsoDateTime(
+          value,
+          field.temporal.precision,
+          field.temporal.timezoneSemantics,
+        );
       break;
   }
   if (!valid) {
@@ -1387,8 +1384,15 @@ function isValidIsoDate(value: string): boolean {
   return day <= days[month - 1]!;
 }
 
-function isValidIsoTime(value: string): boolean {
-  const match = /^(\d{2}):(\d{2}):(\d{2})(?:\.\d{3})?$/u.exec(value);
+function isValidIsoTime(
+  value: string,
+  precision: 'millisecond' | 'second' | null,
+): boolean {
+  if (precision === null) return false;
+  const match = new RegExp(
+    `^(\\d{2}):(\\d{2}):(\\d{2})${precision === 'millisecond' ? '\\.\\d{3}' : ''}$`,
+    'u',
+  ).exec(value);
   return (
     match !== null &&
     Number(match[1]) < 24 &&
@@ -1397,22 +1401,66 @@ function isValidIsoTime(value: string): boolean {
   );
 }
 
-function isValidIsoDateTime(value: string): boolean {
-  const match =
-    /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2}(?:\.\d{3})?)(Z|[+-](\d{2}):(\d{2}))$/u.exec(
-      value,
-    );
-  if (!match || !isValidIsoDate(match[1]!) || !isValidIsoTime(match[2]!)) {
+function isValidIsoDateTime(
+  value: string,
+  precision: 'millisecond' | 'second' | null,
+  timezoneSemantics:
+    'calendarDate' | 'localWallTime' | 'offsetDateTime' | 'utcInstant' | null,
+): boolean {
+  if (
+    precision === null ||
+    (timezoneSemantics !== 'utcInstant' &&
+      timezoneSemantics !== 'offsetDateTime')
+  ) {
     return false;
   }
-  if (match[3] === 'Z') return true;
-  if (match[3] === '-00:00') return false;
-  const offsetHour = Number(match[4]);
-  const offsetMinute = Number(match[5]);
+  const fraction = precision === 'millisecond' ? '(\\.\\d{3})' : '';
+  const zone =
+    timezoneSemantics === 'utcInstant' ? '(Z)' : '([+-](\\d{2}):(\\d{2}))';
+  const match = new RegExp(
+    `^(\\d{4}-\\d{2}-\\d{2})T(\\d{2}:\\d{2}:\\d{2})${fraction}${zone}$`,
+    'u',
+  ).exec(value);
+  if (!match || !isValidIsoDate(match[1]!)) return false;
+  const time = `${match[2]}${precision === 'millisecond' ? match[3] : ''}`;
+  if (!isValidIsoTime(time, precision)) return false;
+  if (timezoneSemantics === 'utcInstant') return true;
+  const zoneValue = match.at(-3);
+  const offsetHour = Number(match.at(-2));
+  const offsetMinute = Number(match.at(-1));
+  if (zoneValue === '-00:00') return false;
   return (
     offsetMinute < 60 &&
     (offsetHour < 14 || (offsetHour === 14 && offsetMinute === 0))
   );
+}
+
+export function assertModuleSemanticStorageContract(
+  storage: StorageTargetPayloadV1,
+): void {
+  const invalidEntity = storage.entities.find(
+    (entity) =>
+      !Array.isArray(entity.checkConstraints) ||
+      entity.columns.some(
+        (column) =>
+          !column.fieldContract ||
+          column.fieldContract.schemaVersion !==
+            'northstar.module-field-contract/v1' ||
+          !column.fieldContract.temporal,
+      ),
+  );
+  const invalidRelation = storage.relations.find(
+    (relation) =>
+      relation.archiveBehavior !== 'restrict' &&
+      relation.archiveBehavior !== 'retainReference',
+  );
+  if (invalidEntity || invalidRelation) {
+    throw failure(
+      'MODULE_SEMANTIC_CONTRACT_UNSUPPORTED',
+      'pinned storage lacks the required semantic enforcement contract',
+      invalidRelation?.relationId ?? invalidEntity?.entityId ?? null,
+    );
+  }
 }
 
 function createChanges(

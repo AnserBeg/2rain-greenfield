@@ -9,13 +9,15 @@ export { COMPILER_DIAGNOSTIC_COPY } from './diagnostics.js';
 export { diffCompiledReleases } from './diff.js';
 export { requiredProjectionFamily } from './projections.js';
 export {
-  executedVerificationResult,
+  executeVerificationPlan,
   validateExecutedVerificationPlan,
+  type ExecutedVerificationProbe,
   type ExecutedVerificationResult,
   type VerificationConformanceDiagnostic,
   type VerificationConformanceResult,
   type VerificationPlanPayloadV1,
   type VerificationScenario,
+  type VerificationScenarioExecutor,
 } from './verification.js';
 export {
   CHUNK_DESCRIPTOR_VERSION,

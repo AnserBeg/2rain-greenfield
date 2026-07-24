@@ -36,10 +36,20 @@ export interface ExecutedVerificationResult {
   readonly negativeProbeDigest: string | null;
   readonly positiveProbeDigest: string;
   readonly provider: 'realPostgresql';
+  readonly providerRunId: string;
   readonly scenarioFingerprint: string;
   readonly scenarioId: string;
   readonly schemaVersion: typeof VERIFICATION_RESULT_VERSION;
 }
+
+export interface ExecutedVerificationProbe {
+  readonly negativeProbe?: unknown;
+  readonly positiveProbe: unknown;
+}
+
+export type VerificationScenarioExecutor = (
+  scenario: VerificationScenario,
+) => ExecutedVerificationProbe | Promise<ExecutedVerificationProbe>;
 
 export interface VerificationConformanceDiagnostic {
   readonly code:
@@ -55,24 +65,35 @@ export interface VerificationConformanceResult {
   readonly status: 'failed' | 'passed';
 }
 
-export function executedVerificationResult(
-  scenario: VerificationScenario,
-  proof: {
-    readonly negativeProbe?: unknown;
-    readonly positiveProbe: unknown;
-  },
-): ExecutedVerificationResult {
-  return Object.freeze({
-    negativeProbeDigest:
-      scenario.probePolarity === 'positiveAndNegative'
-        ? digestProof(proof.negativeProbe)
-        : null,
-    positiveProbeDigest: digestProof(proof.positiveProbe),
-    provider: 'realPostgresql',
-    scenarioFingerprint: scenario.scenarioFingerprint,
-    scenarioId: scenario.scenarioId,
-    schemaVersion: VERIFICATION_RESULT_VERSION,
-  });
+const executedResultRegistry = new WeakSet<ExecutedVerificationResult>();
+
+export async function executeVerificationPlan(
+  plan: VerificationPlanPayloadV1,
+  providerRunId: string,
+  execute: VerificationScenarioExecutor,
+): Promise<readonly ExecutedVerificationResult[]> {
+  if (providerRunId.trim() === '') {
+    throw new TypeError('providerRunId must identify a real PostgreSQL run');
+  }
+  const results: ExecutedVerificationResult[] = [];
+  for (const scenario of plan.scenarios) {
+    const probe = await execute(scenario);
+    const result = Object.freeze({
+      negativeProbeDigest:
+        scenario.probePolarity === 'positiveAndNegative'
+          ? digestProof(probe.negativeProbe)
+          : null,
+      positiveProbeDigest: digestProof(probe.positiveProbe),
+      provider: 'realPostgresql' as const,
+      providerRunId,
+      scenarioFingerprint: scenario.scenarioFingerprint,
+      scenarioId: scenario.scenarioId,
+      schemaVersion: VERIFICATION_RESULT_VERSION,
+    });
+    executedResultRegistry.add(result);
+    results.push(result);
+  }
+  return Object.freeze(results);
 }
 
 export function validateExecutedVerificationPlan(
@@ -112,7 +133,9 @@ export function validateExecutedVerificationPlan(
     const valid =
       result.schemaVersion === VERIFICATION_RESULT_VERSION &&
       result.provider === 'realPostgresql' &&
+      result.providerRunId.trim() !== '' &&
       result.scenarioFingerprint === scenario.scenarioFingerprint &&
+      executedResultRegistry.has(result) &&
       isDigest(result.positiveProbeDigest) &&
       (scenario.probePolarity === 'positiveAndNegative'
         ? isDigest(result.negativeProbeDigest)

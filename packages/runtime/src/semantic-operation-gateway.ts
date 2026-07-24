@@ -87,6 +87,15 @@ export interface RegisteredOperationInputContract {
     readonly normalization:
       'none' | 'unicodeCaseFoldNoCompatibilityNormalization';
     readonly required: boolean;
+    readonly temporal: {
+      readonly precision: 'millisecond' | 'second' | null;
+      readonly timezoneSemantics:
+        | 'calendarDate'
+        | 'localWallTime'
+        | 'offsetDateTime'
+        | 'utcInstant'
+        | null;
+    };
     readonly writable: true;
   }[];
   readonly relationInputs: readonly {
@@ -478,6 +487,7 @@ function assertOperationInputContract(
         'fieldKind',
         'normalization',
         'required',
+        'temporal',
         'writable',
       ],
       invalid,
@@ -487,6 +497,7 @@ function assertOperationInputContract(
       !isRecord(field.bounds) ||
       !Array.isArray(field.enumOptionIds) ||
       !field.enumOptionIds.every((entry) => typeof entry === 'string') ||
+      !isRecord(field.temporal) ||
       typeof field.required !== 'boolean' ||
       field.writable !== true ||
       ![
@@ -519,6 +530,14 @@ function assertOperationInputContract(
     ) {
       throw invalid('pinned field input bounds have an invalid shape');
     }
+    assertExactKeys(
+      field.temporal,
+      ['precision', 'timezoneSemantics'],
+      invalid,
+    );
+    if (!isTemporalContract(field.fieldKind, field.temporal)) {
+      throw invalid('pinned field temporal contract has an invalid shape');
+    }
   }
   for (const relation of value.relationInputs) {
     if (!isRecord(relation)) {
@@ -542,6 +561,34 @@ function assertOperationInputContract(
     ) {
       throw invalid('pinned relation input contract has an invalid shape');
     }
+  }
+}
+
+function isTemporalContract(
+  fieldKind: unknown,
+  temporal: Record<string, unknown>,
+): boolean {
+  switch (fieldKind) {
+    case 'dateFieldType':
+      return (
+        temporal.precision === null &&
+        temporal.timezoneSemantics === 'calendarDate'
+      );
+    case 'timeFieldType':
+      return (
+        (temporal.precision === 'second' ||
+          temporal.precision === 'millisecond') &&
+        temporal.timezoneSemantics === 'localWallTime'
+      );
+    case 'dateTimeFieldType':
+      return (
+        (temporal.precision === 'second' ||
+          temporal.precision === 'millisecond') &&
+        (temporal.timezoneSemantics === 'utcInstant' ||
+          temporal.timezoneSemantics === 'offsetDateTime')
+      );
+    default:
+      return temporal.precision === null && temporal.timezoneSemantics === null;
   }
 }
 

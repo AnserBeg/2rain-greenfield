@@ -19,13 +19,13 @@ import {
   PROJECTION_FAMILY_IDS,
   compileApplication,
   diffCompiledReleases,
-  executedVerificationResult,
   expectedActiveReleaseFrom,
   requiredProjectionFamily,
   validateExecutedVerificationPlan,
   type CompileResult,
   type CompileSuccess,
   type CompilerInput,
+  type ExecutedVerificationResult,
   type ProjectionFamilyId,
   type ProjectionManifestEnvelope,
   type StorageTargetPayloadV1,
@@ -144,7 +144,7 @@ test('compiler-derived conformance names the entity and missing family', () => {
   ]);
 });
 
-test('executable conformance rejects declaration labels without linked real-provider results', () => {
+test('executable conformance rejects declarations and fabricated linked results', () => {
   const compiled = mustCompile(input(ordinaryModuleV1()));
   const plan = projectionPayload<VerificationPlanPayloadV1>(
     compiled,
@@ -154,41 +154,29 @@ test('executable conformance rejects declaration labels without linked real-prov
   assert.equal(labelsOnly.status, 'failed');
   assert.equal(labelsOnly.diagnostics.length, plan.scenarios.length);
 
-  const recovery = plan.scenarios.find(
-    (scenario) =>
-      scenario.kind === 'declaredEvidence' &&
-      scenario.entityId === FIXTURE_IDS.entityIds.child &&
-      scenario.evidenceKind === 'recovery',
+  const fabricated = plan.scenarios.map(
+    (scenario): ExecutedVerificationResult => ({
+      negativeProbeDigest:
+        scenario.probePolarity === 'positiveAndNegative'
+          ? '0'.repeat(64)
+          : null,
+      positiveProbeDigest: '1'.repeat(64),
+      provider: 'realPostgresql',
+      providerRunId: 'fabricated',
+      scenarioFingerprint: scenario.scenarioFingerprint,
+      scenarioId: scenario.scenarioId,
+      schemaVersion: 'northstar.verification-result/v1',
+    }),
   );
-  assert.ok(recovery);
-  const withoutRecovery = plan.scenarios
-    .filter((scenario) => scenario.scenarioId !== recovery.scenarioId)
-    .map((scenario) =>
-      executedVerificationResult(scenario, {
-        negativeProbe:
-          scenario.probePolarity === 'positiveAndNegative'
-            ? { rejected: true }
-            : undefined,
-        positiveProbe: { executed: true },
-      }),
-    );
-  assert.deepEqual(
-    validateExecutedVerificationPlan(plan, withoutRecovery).diagnostics,
-    [
-      {
-        code: 'VERIFICATION_EXECUTED_RESULT_MISSING',
-        scenarioId: recovery.scenarioId,
-      },
-    ],
-  );
+  const fabricatedResult = validateExecutedVerificationPlan(plan, fabricated);
+  assert.equal(fabricatedResult.status, 'failed');
+  assert.equal(fabricatedResult.diagnostics.length, plan.scenarios.length);
   assert.equal(
-    validateExecutedVerificationPlan(plan, [
-      ...withoutRecovery,
-      executedVerificationResult(recovery, {
-        positiveProbe: { recoveryRoundTripExecuted: true },
-      }),
-    ]).status,
-    'passed',
+    fabricatedResult.diagnostics.every(
+      (diagnostic) =>
+        diagnostic.code === 'VERIFICATION_EXECUTED_RESULT_INVALID',
+    ),
+    true,
   );
 });
 
@@ -261,6 +249,10 @@ test('compiled field/input contracts and enum defenses preserve declared semanti
           fieldKind: string;
           normalization: string;
           required: boolean;
+          temporal: {
+            precision: string | null;
+            timezoneSemantics: string | null;
+          };
         }>;
         schemaVersion: string;
         writableFieldIds: string[];
@@ -288,6 +280,7 @@ test('compiled field/input contracts and enum defenses preserve declared semanti
         fieldKind: 'enumFieldType',
         normalization: 'none',
         required: true,
+        temporal: { precision: null, timezoneSemantics: null },
         writable: true,
       },
     ],
@@ -329,6 +322,7 @@ test('compiled field/input contracts and enum defenses preserve declared semanti
     normalization: 'none',
     required: true,
     schemaVersion: 'northstar.module-field-contract/v1',
+    temporal: { precision: null, timezoneSemantics: null },
     writable: true,
   });
   assert.deepEqual(child?.checkConstraints, [
@@ -341,6 +335,49 @@ test('compiled field/input contracts and enum defenses preserve declared semanti
     },
   ]);
   assert.equal(storage.relations[0]?.archiveBehavior, 'restrict');
+
+  const temporalCompiled = mustCompile(input(ordinaryModuleV2()));
+  const temporalOperations = projectionPayload<{
+    operations: Array<{
+      inputContract?: {
+        fields: Array<{
+          fieldId: string;
+          temporal: {
+            precision: string | null;
+            timezoneSemantics: string | null;
+          };
+        }>;
+      };
+      operationId: string;
+    }>;
+  }>(temporalCompiled, PROJECTION_FAMILY_IDS.operationCatalog).operations;
+  const temporalFields = temporalOperations
+    .find((operation) =>
+      operation.operationId.endsWith(':operation.master_update'),
+    )
+    ?.inputContract?.fields.filter((field) =>
+      new Set<string>([
+        FIXTURE_IDS.fieldIds.parentLocalTime,
+        FIXTURE_IDS.fieldIds.parentUtcInstant,
+      ]).has(field.fieldId),
+    )
+    .map((field) => ({ fieldId: field.fieldId, temporal: field.temporal }));
+  assert.deepEqual(temporalFields, [
+    {
+      fieldId: FIXTURE_IDS.fieldIds.parentLocalTime,
+      temporal: {
+        precision: 'second',
+        timezoneSemantics: 'localWallTime',
+      },
+    },
+    {
+      fieldId: FIXTURE_IDS.fieldIds.parentUtcInstant,
+      temporal: {
+        precision: 'millisecond',
+        timezoneSemantics: 'utcInstant',
+      },
+    },
+  ]);
 });
 
 test('reporting is a sanctioned required family and has per-entity lineage', () => {

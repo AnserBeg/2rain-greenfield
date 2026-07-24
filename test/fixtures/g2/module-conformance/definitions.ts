@@ -23,6 +23,8 @@ const fieldIds = {
   parentNumber: `${namespace}:field.master_number`,
   parentNotes: `${namespace}:field.master_notes`,
   parentTier: `${namespace}:field.master_tier`,
+  parentLocalTime: `${namespace}:field.master_local_time`,
+  parentUtcInstant: `${namespace}:field.master_utc_instant`,
 } as const;
 const optionIds = {
   buyer: `${namespace}:option.buyer`,
@@ -300,6 +302,46 @@ export function ordinaryModuleV2(): Record<string, unknown> {
     schemaVersion: version,
     searchable: false,
   });
+  definition.fields.push({
+    classification: 'internal',
+    collation: 'binary',
+    defaultSemantics: 'nullable',
+    entity: reference('entityReference', entityIds.parent),
+    fieldId: fieldIds.parentLocalTime,
+    fieldType: {
+      kind: 'timeFieldType',
+      precision: 'second',
+      schemaVersion: version,
+      timezoneSemantics: 'localWallTime',
+    },
+    kind: 'fieldDefinition',
+    label: 'Local time',
+    orderKey: 50,
+    presence: 'optional',
+    reportable: true,
+    schemaVersion: version,
+    searchable: false,
+  });
+  definition.fields.push({
+    classification: 'internal',
+    collation: 'binary',
+    defaultSemantics: 'nullable',
+    entity: reference('entityReference', entityIds.parent),
+    fieldId: fieldIds.parentUtcInstant,
+    fieldType: {
+      kind: 'dateTimeFieldType',
+      precision: 'millisecond',
+      schemaVersion: version,
+      timezoneSemantics: 'utcInstant',
+    },
+    kind: 'fieldDefinition',
+    label: 'UTC instant',
+    orderKey: 60,
+    presence: 'optional',
+    reportable: true,
+    schemaVersion: version,
+    searchable: false,
+  });
   for (const query of definition.queries.filter((entry) =>
     new RegExp(`^${namespace}:query\\.master_(get|list|search|resolve)$`).test(
       entry.queryId,
@@ -312,6 +354,22 @@ export function ordinaryModuleV2(): Record<string, unknown> {
       schemaVersion: version,
       selectionId: `${query.queryId.replace(':query.', ':selection.')}_notes`,
     });
+    query.selections.push(
+      {
+        field: reference('fieldReference', fieldIds.parentLocalTime),
+        kind: 'querySelection',
+        orderKey: 40,
+        schemaVersion: version,
+        selectionId: `${query.queryId.replace(':query.', ':selection.')}_local_time`,
+      },
+      {
+        field: reference('fieldReference', fieldIds.parentUtcInstant),
+        kind: 'querySelection',
+        orderKey: 50,
+        schemaVersion: version,
+        selectionId: `${query.queryId.replace(':query.', ':selection.')}_utc_instant`,
+      },
+    );
   }
   return definition;
 }

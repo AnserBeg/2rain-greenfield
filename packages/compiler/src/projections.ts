@@ -666,7 +666,10 @@ function operationInputContract(
                 ? field.fieldType.maximumLength
                 : null,
             precision:
-              'precision' in field.fieldType ? field.fieldType.precision : null,
+              'precision' in field.fieldType &&
+              typeof field.fieldType.precision === 'number'
+                ? field.fieldType.precision
+                : null,
             scale: 'scale' in field.fieldType ? field.fieldType.scale : null,
           },
           enumOptionIds:
@@ -680,6 +683,23 @@ function operationInputContract(
               ? 'unicodeCaseFoldNoCompatibilityNormalization'
               : 'none',
           required: field.presence === 'required',
+          temporal:
+            field.fieldType.kind === 'dateFieldType'
+              ? {
+                  precision: null,
+                  timezoneSemantics: 'calendarDate',
+                }
+              : field.fieldType.kind === 'timeFieldType'
+                ? {
+                    precision: field.fieldType.precision,
+                    timezoneSemantics: 'localWallTime',
+                  }
+                : field.fieldType.kind === 'dateTimeFieldType'
+                  ? {
+                      precision: field.fieldType.precision,
+                      timezoneSemantics: field.fieldType.timezoneSemantics,
+                    }
+                  : { precision: null, timezoneSemantics: null },
           writable: true,
         }))
       : [],

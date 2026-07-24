@@ -96,7 +96,7 @@ test('the v1 transition envelope matches its structural golden and has no provis
   assert.doesNotMatch(canonicalize(transition), /v0-provisional/);
   assert.doesNotMatch(canonicalize(transition), /storageTransitionPayload/);
   assert.equal(transition.fromReleaseRoot, first.releaseRoot);
-  assert.equal(transition.elements.length, 3);
+  assert.equal(transition.elements.length, 5);
   assert.deepEqual(
     structuralTransition(transition),
     JSON.parse(

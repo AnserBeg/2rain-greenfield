@@ -6,7 +6,7 @@ import type { Pool } from 'pg';
 
 import {
   PROJECTION_FAMILY_IDS,
-  executedVerificationResult,
+  executeVerificationPlan,
   validateExecutedVerificationPlan,
   type StorageTargetPayloadV1,
   type VerificationPlanPayloadV1,
@@ -566,19 +566,273 @@ test('Party executes the compiled declared-semantics contract on real PostgreSQL
         ],
       );
     }
-    const executedResults = verificationPlan.scenarios.map((scenario) =>
-      executedVerificationResult(scenario, {
-        negativeProbe:
-          scenario.probePolarity === 'positiveAndNegative'
-            ? { rejectedBySemanticGateway: true }
-            : undefined,
-        positiveProbe: {
-          linkedRealPostgresqlRun: 'party-walking-slice',
-          recoveryRoundTrip:
-            scenario.kind === 'declaredEvidence' &&
-            scenario.evidenceKind === 'recovery',
-        },
-      }),
+    const executedResults = await executeVerificationPlan(
+      verificationPlan,
+      'party-walking-slice',
+      async (scenario) => {
+        const party = scenario.entityId === PARTY_IDS.entityIds.party;
+        const localEntity = party ? 'party' : 'party_role';
+        const scenarioRecordId = party ? partyId : supplierRoleId;
+        if (scenario.kind === 'declaredEvidence') {
+          if (scenario.evidenceKind === 'recovery') {
+            const recoveryRecordId = randomUUID();
+            if (party) {
+              await invokePartyOperation(
+                runtime,
+                runtime.views.a,
+                'party_create',
+                {
+                  recordId: recoveryRecordId,
+                  values: partyValues(
+                    `R-${recoveryRecordId}`,
+                    'Recovery probe',
+                    '',
+                  ),
+                },
+              );
+            } else {
+              await invokePartyOperation(
+                runtime,
+                runtime.views.a,
+                'party_role_create',
+                {
+                  recordId: recoveryRecordId,
+                  relations: {
+                    [PARTY_IDS.relationIds.roleParty]: partyId,
+                  },
+                  values: {
+                    [PARTY_IDS.fieldIds.roleKind]:
+                      `${PARTY_IDS.namespace}:option.supplier`,
+                    [PARTY_IDS.fieldIds.roleStatus]:
+                      `${PARTY_IDS.namespace}:option.active`,
+                  },
+                },
+              );
+            }
+            await invokePartyOperation(
+              runtime,
+              runtime.views.a,
+              `${localEntity}_archive`,
+              { expectedRevision: 1, recordId: recoveryRecordId },
+            );
+            const restored = await invokePartyOperation(
+              runtime,
+              runtime.views.a,
+              `${localEntity}_restore`,
+              { expectedRevision: 2, recordId: recoveryRecordId },
+            );
+            assert.equal(restored.readBack?.archived, false);
+            return { positiveProbe: restored };
+          }
+          const invocation = scenario.invocation as {
+            query: { targetId: string };
+          };
+          const result = await invokePartyQuery(
+            runtime,
+            runtime.views.a,
+            invocation.query.targetId.split(':query.')[1]!,
+            { recordId: scenarioRecordId },
+          );
+          assert.equal(result.outcome, 'exact');
+          return { positiveProbe: result };
+        }
+        if (scenario.kind === 'searchableExclusion') {
+          const excludedValue = new Map<string, string>([
+            [PARTY_IDS.fieldIds.contactSummary, 'secret@example.test'],
+            [
+              PARTY_IDS.fieldIds.roleKind,
+              `${PARTY_IDS.namespace}:option.supplier`,
+            ],
+            [
+              PARTY_IDS.fieldIds.roleStatus,
+              `${PARTY_IDS.namespace}:option.inactive`,
+            ],
+          ]).get(scenario.subjectId);
+          assert.ok(excludedValue);
+          const excluded = await invokePartyQuery(
+            runtime,
+            runtime.views.a,
+            `${localEntity}_search`,
+            { text: excludedValue },
+          );
+          assert.equal(excluded.records.length, 0);
+          const included = await invokePartyQuery(
+            runtime,
+            runtime.views.a,
+            'party_search',
+            { text: 'NORTHWIND EQUIPMENT' },
+          );
+          assert.equal(included.records.length, 1);
+          return { negativeProbe: excluded, positiveProbe: included };
+        }
+        if (scenario.kind === 'enumReject') {
+          const current = await invokePartyQuery(
+            runtime,
+            runtime.views.a,
+            'party_role_get',
+            { recordId: supplierRoleId },
+          );
+          const invalid = await rejectedTypedError(
+            invokePartyOperation(
+              runtime,
+              runtime.views.a,
+              'party_role_update',
+              {
+                expectedRevision: current.records[0]!.revision,
+                patch: {
+                  [scenario.subjectId]: `${PARTY_IDS.namespace}:option.not-declared`,
+                },
+                recordId: supplierRoleId,
+              },
+            ),
+            'MODULE_ENUM_VALUE_INVALID',
+            scenario.subjectId,
+          );
+          const accepted = await invokePartyOperation(
+            runtime,
+            runtime.views.a,
+            'party_role_update',
+            {
+              expectedRevision: current.records[0]!.revision,
+              patch: {
+                [scenario.subjectId]:
+                  scenario.subjectId === PARTY_IDS.fieldIds.roleKind
+                    ? `${PARTY_IDS.namespace}:option.supplier`
+                    : `${PARTY_IDS.namespace}:option.inactive`,
+              },
+              recordId: supplierRoleId,
+            },
+          );
+          return { negativeProbe: invalid, positiveProbe: accepted };
+        }
+        if (scenario.kind === 'resolverAuthority') {
+          const current = await invokePartyQuery(
+            runtime,
+            runtime.views.a,
+            `${localEntity}_get`,
+            { recordId: scenarioRecordId },
+          );
+          const text = party
+            ? 'P-001'
+            : String(current.records[0]?.values[PARTY_IDS.fieldIds.roleKind]);
+          const resolved = await invokePartyQuery(
+            runtime,
+            runtime.views.a,
+            `${localEntity}_resolve`,
+            { text },
+          );
+          assert.equal(resolved.outcome, party ? 'exact' : 'ambiguous');
+          const missing = await invokePartyQuery(
+            runtime,
+            runtime.views.a,
+            `${localEntity}_resolve`,
+            { text: `missing-${randomUUID()}` },
+          );
+          assert.equal(missing.outcome, 'not-found');
+          return { negativeProbe: missing, positiveProbe: resolved };
+        }
+        if (scenario.kind === 'typedErrorSurface') {
+          const read = await invokePartyQuery(
+            runtime,
+            runtime.views.a,
+            `${localEntity}_get`,
+            { recordId: scenarioRecordId },
+          );
+          const rejected = party
+            ? await rejectedTypedError(
+                invokePartyOperation(runtime, runtime.views.a, 'party_create', {
+                  recordId: randomUUID(),
+                  values: partyValues('p-001', 'Typed duplicate', ''),
+                }),
+                'MODULE_UNIQUE_VIOLATION',
+                PARTY_IDS.fieldIds.number,
+              )
+            : await rejectedTypedError(
+                invokePartyOperation(
+                  runtime,
+                  runtime.views.a,
+                  'party_role_create',
+                  {
+                    recordId: randomUUID(),
+                    relations: {
+                      [PARTY_IDS.relationIds.roleParty]: randomUUID(),
+                    },
+                    values: {
+                      [PARTY_IDS.fieldIds.roleKind]:
+                        `${PARTY_IDS.namespace}:option.supplier`,
+                      [PARTY_IDS.fieldIds.roleStatus]:
+                        `${PARTY_IDS.namespace}:option.active`,
+                    },
+                  },
+                ),
+                'MODULE_RELATION_TARGET_NOT_FOUND',
+                null,
+              );
+          return { negativeProbe: rejected, positiveProbe: read };
+        }
+        if (scenario.kind === 'archiveRestrict') {
+          const parentId = randomUUID();
+          const dependentId = randomUUID();
+          await invokePartyOperation(runtime, runtime.views.a, 'party_create', {
+            recordId: parentId,
+            values: partyValues(`R-${parentId}`, 'Restrict parent', ''),
+          });
+          await invokePartyOperation(
+            runtime,
+            runtime.views.a,
+            'party_role_create',
+            {
+              recordId: dependentId,
+              relations: { [PARTY_IDS.relationIds.roleParty]: parentId },
+              values: {
+                [PARTY_IDS.fieldIds.roleKind]:
+                  `${PARTY_IDS.namespace}:option.supplier`,
+                [PARTY_IDS.fieldIds.roleStatus]:
+                  `${PARTY_IDS.namespace}:option.active`,
+              },
+            },
+          );
+          const rejected = await rejectedTypedError(
+            invokePartyOperation(runtime, runtime.views.a, 'party_archive', {
+              expectedRevision: 1,
+              recordId: parentId,
+            }),
+            'MODULE_ARCHIVE_RESTRICTED',
+            scenario.subjectId,
+          );
+          const accepted = await invokePartyOperation(
+            runtime,
+            runtime.views.a,
+            'party_role_archive',
+            { expectedRevision: 1, recordId: dependentId },
+          );
+          return { negativeProbe: rejected, positiveProbe: accepted };
+        }
+        const uniqueId = randomUUID();
+        const uniqueValue = `V-${uniqueId}`;
+        const accepted = await invokePartyOperation(
+          runtime,
+          runtime.views.a,
+          'party_create',
+          {
+            recordId: uniqueId,
+            values: partyValues(uniqueValue, 'Fold probe', ''),
+          },
+        );
+        const rejected = await rejectedTypedError(
+          invokePartyOperation(runtime, runtime.views.a, 'party_create', {
+            recordId: randomUUID(),
+            values: partyValues(
+              uniqueValue.toLowerCase(),
+              'Fold duplicate',
+              '',
+            ),
+          }),
+          'MODULE_UNIQUE_VIOLATION',
+          scenario.subjectId,
+        );
+        return { negativeProbe: rejected, positiveProbe: accepted };
+      },
     );
     assert.deepEqual(
       validateExecutedVerificationPlan(verificationPlan, executedResults),
@@ -782,7 +1036,7 @@ function assertNoPhysicalDetails(value: unknown): void {
 function assertTypedError(
   error: unknown,
   code: string,
-  subjectId: string,
+  subjectId: string | null,
 ): true {
   assert.ok(error instanceof ModuleRuntimeInterpreterError);
   assert.equal(error.code, code);
@@ -793,4 +1047,18 @@ function assertTypedError(
     subjectId: error.subjectId,
   });
   return true;
+}
+
+async function rejectedTypedError(
+  promise: Promise<unknown>,
+  code: string,
+  subjectId: string | null,
+): Promise<{ code: string; subjectId: string | null }> {
+  try {
+    await promise;
+  } catch (error) {
+    assertTypedError(error, code, subjectId);
+    return { code, subjectId };
+  }
+  assert.fail(`expected ${code}`);
 }
