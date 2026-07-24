@@ -46,6 +46,13 @@ export {
   canonicalizeAndHash,
   type CanonicalizedContent,
 } from './canonicalize.js';
+export {
+  UNICODE_CASE_FOLD_EXPANSIONS,
+  UNICODE_CASE_FOLD_SIMPLE_SOURCES,
+  UNICODE_CASE_FOLD_SIMPLE_TARGETS,
+  UNICODE_CASE_FOLD_VERSION,
+  unicodeCaseFold,
+} from './unicode-case-fold.js';
 
 export const platformContract = Object.freeze({
   authority: 'canonical-model',

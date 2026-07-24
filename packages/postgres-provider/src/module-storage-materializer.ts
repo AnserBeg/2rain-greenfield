@@ -1,7 +1,12 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 
-import { canonicalize } from '@north-star/canonical-model';
+import {
+  UNICODE_CASE_FOLD_EXPANSIONS,
+  UNICODE_CASE_FOLD_SIMPLE_SOURCES,
+  UNICODE_CASE_FOLD_SIMPLE_TARGETS,
+  canonicalize,
+} from '@north-star/canonical-model';
 import {
   HASH_DOMAINS,
   PROJECTION_FAMILY_IDS,
@@ -28,6 +33,7 @@ import type { Pool, PoolClient, QueryResultRow } from 'pg';
 
 const sha256Pattern = /^[0-9a-f]{64}$/;
 const identifierPattern = /^[a-z][a-z0-9_]{0,62}$/;
+const unicodeCaseFoldFunctionName = 'nsm_unicode_case_fold_v1';
 const allowedTypes = [
   /^boolean$/,
   /^date$/,
@@ -1083,10 +1089,12 @@ async function applyDdlElement(
     }
     case 'createIndex': {
       const located = locateIndex(target, element);
+      await ensureUnicodeCaseFoldFunction(client);
+      const columns = indexColumnExpressions(located.entity, located.index);
       await client.query(
         `CREATE ${located.index.indexKind === 'caseInsensitiveUnique' ? 'UNIQUE ' : ''}INDEX IF NOT EXISTS ${quoted(located.index.physicalName)}
            ON north_star_module.${quoted(located.entity.physicalTableName)}
-           (${located.index.columnNames.map(quoted).join(', ')})`,
+           (${columns.join(', ')})`,
       );
       return;
     }
@@ -1148,6 +1156,7 @@ async function createManagedTable(
   target: StorageTargetPayloadV1,
   entity: StorageEntityTarget,
 ): Promise<void> {
+  await ensureUnicodeCaseFoldFunction(client);
   const relationColumns = target.relations
     .filter((relation) => relation.sourceEntityId === entity.entityId)
     .map((relation) => relation.relationColumn);
@@ -1177,10 +1186,11 @@ async function createManagedTable(
      )`,
   );
   for (const unique of entity.uniqueKeys) {
+    const columns = uniqueKeyColumnExpressions(entity, unique);
     await client.query(
       `CREATE UNIQUE INDEX IF NOT EXISTS ${quoted(unique.physicalName)}
          ON north_star_module.${quoted(entity.physicalTableName)}
-         (${unique.columns.map(quoted).join(', ')})`,
+         (${columns.join(', ')})`,
     );
   }
   await client.query(
@@ -1698,25 +1708,111 @@ async function verifyCatalogOnClient(
 
   const functions = await client.query<{
     arguments: string;
+    configuration: string[] | null;
     kind: string;
+    language: string;
     name: string;
     owner: string;
+    parallel_safety: string;
+    result_type: string;
+    security_definer: boolean;
+    source: string;
+    strict: boolean;
+    volatility: string;
   }>(
     `SELECT routine.proname AS name,
             pg_get_function_identity_arguments(routine.oid) AS arguments,
             routine.prokind AS kind,
-            pg_get_userbyid(routine.proowner) AS owner
+            pg_get_userbyid(routine.proowner) AS owner,
+            language.lanname AS language,
+            pg_get_function_result(routine.oid) AS result_type,
+            routine.prosrc AS source,
+            routine.provolatile AS volatility,
+            routine.proisstrict AS strict,
+            routine.prosecdef AS security_definer,
+            routine.proparallel AS parallel_safety,
+            routine.proconfig AS configuration
        FROM pg_proc AS routine
        JOIN pg_namespace AS namespace ON namespace.oid = routine.pronamespace
+       JOIN pg_language AS language ON language.oid = routine.prolang
       WHERE namespace.nspname = 'north_star_module'
       ORDER BY routine.proname, arguments`,
   );
   compareCatalogCollection(
     drift,
     'managed function',
-    [],
-    functions.rows,
+    expectedTables.size === 0
+      ? []
+      : [
+          {
+            arguments: 'value text',
+            configuration: ['search_path=pg_catalog'],
+            kind: 'f',
+            language: 'sql',
+            name: unicodeCaseFoldFunctionName,
+            owner: 'north_star_module_materializer',
+            parallel_safety: 's',
+            result_type: 'text',
+            security_definer: false,
+            source: normalizeSqlExpressionRequired(
+              `SELECT ${unicodeCaseFoldImplementationSql('value')}`,
+            ),
+            strict: true,
+            volatility: 'i',
+          },
+        ],
+    functions.rows.map((routine) => ({
+      ...routine,
+      source: normalizeSqlExpressionRequired(routine.source),
+    })),
     (value) => `${value.name}(${value.arguments})`,
+  );
+
+  const functionGrants = await client.query<{
+    arguments: string;
+    grantee: string;
+    is_grantable: boolean;
+    name: string;
+    privilege_type: string;
+  }>(
+    `SELECT routine.proname AS name,
+            pg_get_function_identity_arguments(routine.oid) AS arguments,
+            COALESCE(grantee.rolname, 'PUBLIC') AS grantee,
+            privilege.privilege_type,
+            privilege.is_grantable
+       FROM pg_proc AS routine
+       JOIN pg_namespace AS namespace ON namespace.oid = routine.pronamespace
+       CROSS JOIN LATERAL aclexplode(
+         COALESCE(routine.proacl, acldefault('f', routine.proowner))
+       ) AS privilege
+       LEFT JOIN pg_roles AS grantee ON grantee.oid = privilege.grantee
+      WHERE namespace.nspname = 'north_star_module'
+      ORDER BY routine.proname, arguments, grantee, privilege.privilege_type`,
+  );
+  compareCatalogCollection(
+    drift,
+    'managed function grant',
+    expectedTables.size === 0
+      ? []
+      : [
+          {
+            arguments: 'value text',
+            grantee: 'north_star_module_materializer',
+            is_grantable: false,
+            name: unicodeCaseFoldFunctionName,
+            privilege_type: 'EXECUTE',
+          },
+          {
+            arguments: 'value text',
+            grantee: 'north_star_module_runtime',
+            is_grantable: false,
+            name: unicodeCaseFoldFunctionName,
+            privilege_type: 'EXECUTE',
+          },
+        ],
+    functionGrants.rows,
+    (value) =>
+      `${value.name}(${value.arguments}).${value.grantee}.${value.privilege_type}`,
   );
 
   const triggers = await client.query<{
@@ -2279,13 +2375,14 @@ function buildExpectedIndexes(
       valid: true,
     });
     for (const unique of entity.uniqueKeys) {
+      const columns = uniqueKeyColumnExpressions(entity, unique);
       result.push({
-        columns: [...unique.columns],
+        columns: columns.map(normalizeSqlExpressionRequired),
         constraintName: null,
         definition: expectedIndexDefinition(
           entity.physicalTableName,
           unique.physicalName,
-          unique.columns,
+          columns,
           true,
         ),
         name: unique.physicalName,
@@ -2299,13 +2396,14 @@ function buildExpectedIndexes(
       });
     }
     for (const index of entity.indexes) {
+      const columns = indexColumnExpressions(entity, index);
       result.push({
-        columns: [...index.columnNames],
+        columns: columns.map(normalizeSqlExpressionRequired),
         constraintName: null,
         definition: expectedIndexDefinition(
           entity.physicalTableName,
           index.physicalName,
-          index.columnNames,
+          columns,
           index.indexKind === 'caseInsensitiveUnique',
         ),
         name: index.physicalName,
@@ -2336,6 +2434,84 @@ function expectedIndexDefinition(
     `CREATE ${unique ? 'UNIQUE ' : ''}INDEX ${indexName}
        ON north_star_module.${tableName} USING btree (${columns.join(', ')})`,
   );
+}
+
+function indexColumnExpressions(
+  entity: StorageEntityTarget,
+  index: StorageEntityTarget['indexes'][number],
+): string[] {
+  if (index.indexKind !== 'caseInsensitiveUnique') {
+    return index.columnNames.map(quoted);
+  }
+  const unique = entity.uniqueKeys.find(
+    (candidate) =>
+      candidate.columns.length === index.columnNames.length &&
+      candidate.columns.every(
+        (column, position) => column === index.columnNames[position],
+      ),
+  );
+  if (!unique) {
+    throw failure(
+      'CASE_FOLD_CONTRACT_MISSING',
+      `case-insensitive index ${index.physicalName} lacks its unicodeCaseFold unique contract`,
+    );
+  }
+  return uniqueKeyColumnExpressions(entity, unique);
+}
+
+function uniqueKeyColumnExpressions(
+  entity: StorageEntityTarget,
+  unique: StorageEntityTarget['uniqueKeys'][number],
+): string[] {
+  if (
+    unique.collation !== 'unicodeCaseInsensitive' ||
+    unique.normalization !== 'unicodeCaseFold'
+  ) {
+    throw failure(
+      'CASE_FOLD_CONTRACT_UNSUPPORTED',
+      `unique key ${unique.physicalName} has an unsupported normalization contract`,
+    );
+  }
+  const scopeColumns = new Set(entity.scopeKeyColumns);
+  return unique.columns.map((column) =>
+    scopeColumns.has(column as (typeof entity.scopeKeyColumns)[number])
+      ? quoted(column)
+      : unicodeCaseFoldSql(quoted(column)),
+  );
+}
+
+function unicodeCaseFoldSql(valueExpression: string): string {
+  return `north_star_module.${unicodeCaseFoldFunctionName}(${valueExpression}::text)`;
+}
+
+async function ensureUnicodeCaseFoldFunction(
+  client: PoolClient,
+): Promise<void> {
+  await client.query(
+    `CREATE OR REPLACE FUNCTION north_star_module.${unicodeCaseFoldFunctionName}(value text)
+       RETURNS text
+       LANGUAGE sql
+       IMMUTABLE STRICT PARALLEL SAFE
+       SET search_path = pg_catalog
+       AS $case_fold$
+         SELECT ${unicodeCaseFoldImplementationSql('value')}
+       $case_fold$;
+     REVOKE ALL ON FUNCTION north_star_module.${unicodeCaseFoldFunctionName}(text) FROM PUBLIC;
+     GRANT EXECUTE ON FUNCTION north_star_module.${unicodeCaseFoldFunctionName}(text)
+       TO north_star_module_runtime`,
+  );
+}
+
+function unicodeCaseFoldImplementationSql(valueExpression: string): string {
+  let folded = `translate(${valueExpression}, ${sqlTextLiteral(UNICODE_CASE_FOLD_SIMPLE_SOURCES)}, ${sqlTextLiteral(UNICODE_CASE_FOLD_SIMPLE_TARGETS)})`;
+  for (const [source, target] of UNICODE_CASE_FOLD_EXPANSIONS) {
+    folded = `replace(${folded}, ${sqlTextLiteral(source)}, ${sqlTextLiteral(target)})`;
+  }
+  return folded;
+}
+
+function sqlTextLiteral(value: string): string {
+  return `'${value.replaceAll("'", "''")}'::text`;
 }
 
 function buildExpectedPolicies(

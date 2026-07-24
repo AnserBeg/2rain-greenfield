@@ -10,17 +10,23 @@ import {
   CONTENT_HASH_ALGORITHM,
   LANGUAGE_VERSION,
   NORMALIZATION_PROFILE_VERSION,
+  UNICODE_CASE_FOLD_EXPANSIONS,
+  UNICODE_CASE_FOLD_SIMPLE_SOURCES,
   canonicalize,
   canonicalizeAndHash,
   normalizeApplicationPackage,
+  unicodeCaseFold,
 } from '../../packages/canonical-model/src/index.js';
 import {
   DEFAULT_COMPILER_LIMITS,
   MODULE_COMPILER_PROFILE,
+  PROJECTION_FAMILY_IDS,
   compileApplication,
   expectedActiveReleaseFrom,
   type CompileSuccess,
   type CompilerInput,
+  type ProjectionManifestEnvelope,
+  type StorageTargetPayloadV1,
 } from '../../packages/compiler/src/index.js';
 import type {
   MintedUuid,
@@ -153,6 +159,122 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
         );
         assert.ok(first.preparedSubsetDigest.some((octet) => octet !== 0));
         assert.ok(first.remainingPlanDigest.some((octet) => octet !== 0));
+
+        await t.test(
+          'unicode case-folded unique keys are storage-enforced and match the application fold',
+          async () => {
+            const storage = projectionPayload<StorageTargetPayloadV1>(
+              target,
+              PROJECTION_FAMILY_IDS.storageTarget,
+            );
+            const entity = storage.entities.find(
+              (candidate) =>
+                candidate.entityId === FIXTURE_IDS.entityIds.parent,
+            );
+            assert.ok(entity);
+            const unique = entity.uniqueKeys[0];
+            assert.ok(unique);
+            const valueColumn = unique.columns.find(
+              (column) => !entity.scopeKeyColumns.includes(column as never),
+            );
+            assert.ok(valueColumn);
+            const client = await moduleRuntimePool.connect();
+            try {
+              await client.query('BEGIN');
+              const foldInputs = [
+                ...Array.from(UNICODE_CASE_FOLD_SIMPLE_SOURCES),
+                ...UNICODE_CASE_FOLD_EXPANSIONS.map(([source]) => source),
+                'P-001',
+                'Straße-003',
+                'Σ-004',
+              ];
+              const databaseFold = await client.query<{
+                folded: string;
+                ordinal: string;
+              }>(
+                `SELECT north_star_module.nsm_unicode_case_fold_v1(input.value) AS folded,
+                        input.ordinal::text AS ordinal
+                   FROM unnest($1::text[]) WITH ORDINALITY AS input(value, ordinal)
+                  ORDER BY input.ordinal`,
+                [foldInputs],
+              );
+              assert.equal(databaseFold.rows.length, foldInputs.length);
+              for (const row of databaseFold.rows) {
+                const input = foldInputs[Number(row.ordinal) - 1];
+                assert.ok(input);
+                assert.equal(row.folded, unicodeCaseFold(input), input);
+              }
+
+              const pairs = [
+                ['P-001', 'P-001'],
+                ['Å-002', 'å-002'],
+                ['Straße-003', 'STRASSE-003'],
+              ] as const;
+              for (const [original, duplicate] of pairs) {
+                assert.equal(
+                  unicodeCaseFold(original),
+                  unicodeCaseFold(duplicate),
+                );
+                await insertUniqueKeyRecord(
+                  client,
+                  contexts.a,
+                  entity,
+                  valueColumn,
+                  original,
+                );
+                await client.query('SAVEPOINT duplicate_probe');
+                await assert.rejects(
+                  insertUniqueKeyRecord(
+                    client,
+                    contexts.a,
+                    entity,
+                    valueColumn,
+                    duplicate,
+                  ),
+                  (error: unknown) =>
+                    error instanceof Error &&
+                    (error as Error & { code?: string }).code === '23505',
+                );
+                await client.query('ROLLBACK TO SAVEPOINT duplicate_probe');
+              }
+
+              await insertUniqueKeyRecord(
+                client,
+                contexts.b,
+                entity,
+                valueColumn,
+                'p-001',
+              );
+              const definitions = await pool.query<{ indexdef: string }>(
+                `SELECT indexdef
+                   FROM pg_indexes
+                  WHERE schemaname = 'north_star_module'
+                    AND tablename = $1
+                    AND indexname = ANY($2::text[])
+                  ORDER BY indexname`,
+                [
+                  entity.physicalTableName,
+                  [
+                    unique.physicalName,
+                    ...entity.indexes
+                      .filter(
+                        (index) => index.indexKind === 'caseInsensitiveUnique',
+                      )
+                      .map((index) => index.physicalName),
+                  ],
+                ],
+              );
+              assert.equal(definitions.rows.length, 2);
+              for (const definition of definitions.rows) {
+                assert.match(definition.indexdef, /nsm_unicode_case_fold_v1/);
+                assert.doesNotMatch(definition.indexdef, /\blower\s*\(/i);
+              }
+            } finally {
+              await client.query('ROLLBACK');
+              client.release();
+            }
+          },
+        );
         let firstAttemptId: string | undefined;
         let tenantIsolatedTableName: string | undefined;
         let obsoleteRoot: {
@@ -1675,6 +1797,69 @@ function mustCompile(input: CompilerInput): CompileSuccess {
   if (result.status !== 'compiled')
     throw new Error(JSON.stringify(result.diagnostics));
   return result;
+}
+
+function projectionPayload<T>(compiled: CompileSuccess, familyId: string): T {
+  const reference = compiled.bundle.releaseManifest.projections.find(
+    (entry) => entry.familyId === familyId,
+  );
+  assert.ok(reference);
+  const manifestArtifact = compiled.bundle.artifacts.find(
+    (entry) => entry.contentHash === reference.artifactRoot,
+  );
+  assert.ok(manifestArtifact);
+  const manifest = JSON.parse(
+    new TextDecoder().decode(manifestArtifact.canonicalBytes),
+  ) as ProjectionManifestEnvelope;
+  const chunk = compiled.bundle.artifacts.find(
+    (entry) => entry.contentHash === manifest.chunks[0]?.contentHash,
+  );
+  assert.ok(chunk);
+  return JSON.parse(new TextDecoder().decode(chunk.canonicalBytes)) as T;
+}
+
+async function insertUniqueKeyRecord(
+  client: pg.PoolClient,
+  context: TrustedRequestContext,
+  entity: StorageTargetPayloadV1['entities'][number],
+  uniqueValueColumn: string,
+  uniqueValue: string,
+): Promise<void> {
+  await client.query(
+    `SELECT set_config('north_star.tenant_id', $1, true),
+            set_config('north_star.environment_id', $2, true)`,
+    [context.tenantId, context.environmentId],
+  );
+  const requiredColumns = entity.columns.filter(
+    (column) => !column.nullable && column.defaultSemantics === 'none',
+  );
+  const columns = [
+    'tenant_id',
+    'environment_id',
+    entity.recordIdentity.column,
+    ...requiredColumns.map((column) => column.physicalName),
+  ];
+  const recordId = randomUUID();
+  const values: unknown[] = [context.tenantId, context.environmentId, recordId];
+  for (const column of requiredColumns) {
+    if (column.physicalName === uniqueValueColumn) {
+      values.push(uniqueValue);
+    } else if (column.postgresqlType === 'uuid') {
+      values.push(randomUUID());
+    } else if (column.postgresqlType === 'boolean') {
+      values.push(false);
+    } else if (/^(?:bigint|numeric)/.test(column.postgresqlType)) {
+      values.push('1');
+    } else {
+      values.push(`case-fold-${recordId.slice(0, 8)}`);
+    }
+  }
+  await client.query(
+    `INSERT INTO north_star_module.${quoteTestIdentifier(entity.physicalTableName)}
+         (${columns.map(quoteTestIdentifier).join(', ')})
+       VALUES (${values.map((_, index) => `$${index + 1}`).join(', ')})`,
+    values,
+  );
 }
 
 async function trustedContexts(): Promise<{
