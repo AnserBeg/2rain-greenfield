@@ -1,0 +1,2 @@
+# G2-P1 synthetic SECRET redaction sentinel; its test proves this exact value never persists.
+a71aa33157ac35f54dd3c9e4f36bd65b5c5e0861:test/postgres/trust-substrate.test.ts:generic-api-key:52

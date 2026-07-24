@@ -120,3 +120,8 @@ How to apply: derive cross-layer persisted envelope language/profile versions fr
 Date: 2026-07-23
 Why: P2b emitted raw unique indexes for a compiled Unicode case-fold contract, so application-equivalent case variants remained distinct in storage.
 How to apply: drive application normalization and storage indexes from one versioned fold table, verify every mapped scalar across both implementations, and test exact/case/tenant duplicate behavior. See [G2-P2b corrective](docs/execution/packets/G2-P2b-case-fold-unique.md).
+
+## Scope synthetic-secret exceptions to one fingerprint
+Date: 2026-07-24
+Why: PR-1's full matrix found that gitleaks classified G2-P1's static redaction sentinel as a generic API key even though its test proves the value never persists.
+How to apply: verify the value is synthetic, then ignore only its exact commit/file/rule/line fingerprint with an adjacent justification; never exempt a path or rule.
