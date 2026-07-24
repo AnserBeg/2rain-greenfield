@@ -364,13 +364,13 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
             field.defaultSemantics = 'coalesceAtRead';
             field.defaultValue = {
               kind: 'textValue',
-              schemaVersion: 'v1',
+              schemaVersion: LANGUAGE_VERSION,
               value: '',
             };
             field.storageEvolution = {
               kind: 'backfillEvolution',
               residualReadSemantics: 'coalesceAtRead',
-              schemaVersion: 'v1',
+              schemaVersion: LANGUAGE_VERSION,
             };
             const compiled = mustCompile(
               moduleInput(admissible, expectedActiveReleaseFrom(target)),

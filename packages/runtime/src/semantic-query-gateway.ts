@@ -58,6 +58,12 @@ export interface RegisteredQueryDefinition {
   readonly permissionId: string;
   readonly queryId: string;
   readonly queryType: 'get' | 'list' | 'resolve' | 'search';
+  readonly resolveMatchKeys?: readonly {
+    readonly authority: 'advisory' | 'identifier';
+    readonly fieldId: string;
+    readonly matchKeyId: string;
+    readonly orderKey: number;
+  }[];
   readonly selections: readonly {
     readonly fieldId: string;
     readonly orderKey: number;
@@ -300,9 +306,14 @@ function assertQueryDefinition(
     'tier',
   ];
   const hasInfrastructure = Object.hasOwn(value, 'infrastructure');
+  const hasResolveMatchKeys = Object.hasOwn(value, 'resolveMatchKeys');
   assertExactKeys(
     value,
-    hasInfrastructure ? [...expectedKeys, 'infrastructure'] : expectedKeys,
+    [
+      ...expectedKeys,
+      ...(hasInfrastructure ? ['infrastructure'] : []),
+      ...(hasResolveMatchKeys ? ['resolveMatchKeys'] : []),
+    ],
     invalid,
   );
   assertCanonicalId(value.queryId, 'queryId', invalid);
@@ -318,12 +329,27 @@ function assertQueryDefinition(
     !Number.isSafeInteger(value.maximumResultCount) ||
     Number(value.maximumResultCount) < 1 ||
     !isRecord(value.filter) ||
-    !Array.isArray(value.selections)
+    !Array.isArray(value.selections) ||
+    (hasResolveMatchKeys && !Array.isArray(value.resolveMatchKeys))
   ) {
     throw invalid('pinned query definition has an invalid shape');
   }
   if (value.queryType === 'search' && !hasInfrastructure) {
     throw invalid('search requires the v1 infrastructure contract');
+  }
+  if (
+    value.queryType === 'resolve' &&
+    (!Array.isArray(value.resolveMatchKeys) ||
+      value.resolveMatchKeys.length === 0)
+  ) {
+    throw invalid('resolve requires explicit match authority');
+  }
+  if (
+    value.queryType !== 'resolve' &&
+    Array.isArray(value.resolveMatchKeys) &&
+    value.resolveMatchKeys.length > 0
+  ) {
+    throw invalid('resolve match authority belongs only to resolve queries');
   }
   if (hasInfrastructure) {
     if (!isRecord(value.infrastructure)) {
@@ -356,6 +382,39 @@ function assertQueryDefinition(
     ) {
       throw invalid('pinned query selection has an invalid orderKey');
     }
+  }
+  const matchKeyIds = new Set<string>();
+  const matchFieldIds = new Set<string>();
+  for (const matchKey of Array.isArray(value.resolveMatchKeys)
+    ? value.resolveMatchKeys
+    : []) {
+    if (!isRecord(matchKey)) {
+      throw invalid('pinned resolve match key must be an object');
+    }
+    assertExactKeys(
+      matchKey,
+      ['authority', 'fieldId', 'matchKeyId', 'orderKey'],
+      invalid,
+    );
+    assertCanonicalId(matchKey.fieldId, 'fieldId', invalid);
+    assertCanonicalId(matchKey.matchKeyId, 'matchKeyId', invalid);
+    if (
+      (matchKey.authority !== 'identifier' &&
+        matchKey.authority !== 'advisory') ||
+      !Number.isSafeInteger(matchKey.orderKey) ||
+      Number(matchKey.orderKey) < 0 ||
+      Number(matchKey.orderKey) > 1_000_000
+    ) {
+      throw invalid('pinned resolve match key has an invalid shape');
+    }
+    if (
+      matchKeyIds.has(matchKey.matchKeyId) ||
+      matchFieldIds.has(matchKey.fieldId)
+    ) {
+      throw invalid('pinned resolve match authority contains duplicates');
+    }
+    matchKeyIds.add(matchKey.matchKeyId);
+    matchFieldIds.add(matchKey.fieldId);
   }
 }
 

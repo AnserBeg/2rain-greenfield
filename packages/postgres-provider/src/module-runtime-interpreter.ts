@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 
-import { canonicalize } from '@north-star/canonical-model';
+import { canonicalize, unicodeCaseFold } from '@north-star/canonical-model';
 import {
   PROJECTION_FAMILY_IDS,
   STORAGE_TARGET_PAYLOAD_VERSION,
@@ -37,6 +37,7 @@ import { TrustedActorEnvelopeIssuer } from './trust/trusted-actor-envelope.js';
 
 const artifactMediaType = 'application/vnd.northstar.canonical+json';
 const identifierPattern = /^[a-z][a-z0-9_]{0,62}$/;
+const unicodeCaseFoldFunctionName = 'nsm_unicode_case_fold_v1';
 const sha256Pattern = /^[0-9a-f]{64}$/;
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -538,7 +539,6 @@ async function executeQueryOnClient(
         text,
         includeArchived,
         limit,
-        false,
       );
       return queryResult(
         definition.queryId,
@@ -549,25 +549,27 @@ async function executeQueryOnClient(
     }
     case 'resolve': {
       const text = requiredSearchText(args.text);
-      records = await matchRecords(
+      const matches = await matchResolveRecords(
         client,
         entity,
         definition,
         text,
         includeArchived,
         Math.max(2, definition.maximumResultCount),
-        true,
       );
       const outcome =
-        records.length === 0
+        matches.records.length === 0
           ? 'not-found'
-          : records.length === 1
+          : matches.advisoryMatchCount === 0 &&
+              matches.identifierMatchCount === 1
             ? 'exact'
             : 'ambiguous';
       return queryResult(
         definition.queryId,
         outcome,
-        records.map((entry) => toDto(entity, entry, definition.selections)),
+        matches.records.map((entry) =>
+          toDto(entity, entry, definition.selections),
+        ),
         null,
       );
     }
@@ -606,7 +608,6 @@ async function matchRecords(
   text: string,
   includeArchived: boolean,
   limit: number,
-  exact: boolean,
 ): Promise<RawRecord[]> {
   const selected = new Set(definition.selections.map((item) => item.fieldId));
   const columns = entity.columns.filter(
@@ -617,14 +618,117 @@ async function matchRecords(
   );
   if (columns.length === 0) return [];
   const values: unknown[] = [];
-  const textParameter = parameter(values, exact ? text : `%${text}%`);
-  const operator = exact ? '=' : 'LIKE';
+  const textParameter = parameter(values, `%${text}%`);
   const predicates = archivePredicate(entity, includeArchived);
   predicates.push(
     `(${columns
       .map(
         (column) =>
-          `lower(${quoted(column.physicalName)}::text) ${operator} lower(${textParameter})`,
+          `lower(${quoted(column.physicalName)}::text) LIKE lower(${textParameter})`,
+      )
+      .join(' OR ')})`,
+  );
+  const rows = await client.query<QueryResultRow>(
+    selectSql(
+      entity,
+      predicates,
+      `ORDER BY ${quoted(entity.recordIdentity.column)} LIMIT ${parameter(values, limit)}`,
+    ),
+    values,
+  );
+  return rows.rows.map((row) => rawRecord(entity, row));
+}
+
+async function matchResolveRecords(
+  client: PoolClient,
+  entity: StorageEntity,
+  definition: RegisteredQueryDefinition,
+  text: string,
+  includeArchived: boolean,
+  limit: number,
+): Promise<{
+  advisoryMatchCount: number;
+  identifierMatchCount: number;
+  records: RawRecord[];
+}> {
+  const keys = definition.resolveMatchKeys ?? [];
+  if (keys.length === 0) {
+    throw failure(
+      'MODULE_RESOLVE_MATCH_AUTHORITY_REQUIRED',
+      `resolve query ${definition.queryId} has no declared match authority`,
+    );
+  }
+  const columnsById = new Map(
+    entity.columns.map((column) => [column.canonicalFieldId, column] as const),
+  );
+  const columnsFor = (authority: 'advisory' | 'identifier') =>
+    keys
+      .filter((key) => key.authority === authority)
+      .map((key) => {
+        const column = columnsById.get(key.fieldId);
+        if (
+          !column ||
+          !/^(?:text|character varying|varchar)/.test(column.postgresqlType)
+        ) {
+          throw failure(
+            'MODULE_RESOLVE_MATCH_KEY_UNSUPPORTED',
+            `resolve match key ${key.matchKeyId} has no supported text storage column`,
+          );
+        }
+        return column;
+      });
+  const identifierMatches = await exactFoldedMatches(
+    client,
+    entity,
+    columnsFor('identifier'),
+    text,
+    includeArchived,
+    limit,
+  );
+  const advisoryMatches = await exactFoldedMatches(
+    client,
+    entity,
+    columnsFor('advisory'),
+    text,
+    includeArchived,
+    limit,
+  );
+  const recordsById = new Map<string, RawRecord>();
+  for (const record of [...identifierMatches, ...advisoryMatches]) {
+    recordsById.set(record.recordId, record);
+  }
+  return {
+    advisoryMatchCount: advisoryMatches.length,
+    identifierMatchCount: identifierMatches.length,
+    records: [...recordsById.values()]
+      .sort((left, right) =>
+        left.recordId < right.recordId
+          ? -1
+          : left.recordId > right.recordId
+            ? 1
+            : 0,
+      )
+      .slice(0, limit),
+  };
+}
+
+async function exactFoldedMatches(
+  client: PoolClient,
+  entity: StorageEntity,
+  columns: readonly StorageEntity['columns'][number][],
+  text: string,
+  includeArchived: boolean,
+  limit: number,
+): Promise<RawRecord[]> {
+  if (columns.length === 0) return [];
+  const values: unknown[] = [];
+  const textParameter = parameter(values, unicodeCaseFold(text));
+  const predicates = archivePredicate(entity, includeArchived);
+  predicates.push(
+    `(${columns
+      .map(
+        (column) =>
+          `north_star_module.${unicodeCaseFoldFunctionName}(${quoted(column.physicalName)}::text) = ${textParameter}`,
       )
       .join(' OR ')})`,
   );

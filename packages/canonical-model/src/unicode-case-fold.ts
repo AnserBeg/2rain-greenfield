@@ -1,6 +1,7 @@
 /**
  * Frozen Unicode 15.0.0 full case-fold mapping for
- * `northstar.normalization/v1` storage business keys.
+ * storage business keys introduced by `northstar.normalization/v1` and
+ * retained unchanged by later normalization profiles.
  *
  * The table is generated from the Unicode 15.0.0 case-fold data exposed by
  * CPython's `unicodedata`/`str.casefold`. Keep the version fixed: changing it

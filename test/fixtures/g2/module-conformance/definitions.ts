@@ -1,4 +1,9 @@
-const version = 'v1' as const;
+import {
+  LANGUAGE_VERSION,
+  NORMALIZATION_PROFILE_VERSION,
+} from '../../../../packages/canonical-model/src/index.js';
+
+const version = LANGUAGE_VERSION;
 const namespace = 'northstar.modulefixture';
 
 const reference = (kind: string, targetId: string) => ({
@@ -24,7 +29,12 @@ const contentCapabilityId = `${namespace}:capability.standard_surface_content`;
 
 export function ordinaryModuleV1(): Record<string, unknown> {
   const queries = [
-    ...entityQueries('master', entityIds.parent, fieldIds.parentName),
+    ...entityQueries(
+      'master',
+      entityIds.parent,
+      fieldIds.parentName,
+      fieldIds.parentNumber,
+    ),
     ...entityQueries('master_role', entityIds.child, fieldIds.childRole),
   ];
   const operations = [
@@ -160,7 +170,7 @@ export function ordinaryModuleV1(): Record<string, unknown> {
         schemaVersion: version,
       },
     ],
-    normalizationProfileVersion: 'northstar.normalization/v1',
+    normalizationProfileVersion: NORMALIZATION_PROFILE_VERSION,
     operations,
     package: {
       kind: 'packageDefinition',
@@ -274,30 +284,59 @@ function entityQueries(
   local: string,
   entityId: string,
   selectedFieldId: string,
+  identifierFieldId?: string,
 ): Array<Record<string, unknown>> {
-  return ['get', 'list', 'search', 'resolve'].map((queryType) => ({
-    kind: 'queryDefinition',
-    maximumResultCount: queryType === 'get' ? 1 : 100,
-    module: reference('moduleReference', moduleId),
-    permission: reference(
-      'permissionReference',
-      `${namespace}:permission.${local}_read`,
-    ),
-    queryId: `${namespace}:query.${local}_${queryType}`,
-    queryType,
-    schemaVersion: version,
-    selections: [
-      {
-        field: reference('fieldReference', selectedFieldId),
-        kind: 'querySelection',
-        orderKey: 10,
-        schemaVersion: version,
-        selectionId: `${namespace}:selection.${local}_${queryType}_primary`,
-      },
-    ],
-    sourceEntity: reference('entityReference', entityId),
-    tier: 'q0',
-  }));
+  return ['get', 'list', 'search', 'resolve'].map((queryType) => {
+    const queryId = `${namespace}:query.${local}_${queryType}`;
+    return {
+      kind: 'queryDefinition',
+      maximumResultCount: queryType === 'get' ? 1 : 100,
+      module: reference('moduleReference', moduleId),
+      permission: reference(
+        'permissionReference',
+        `${namespace}:permission.${local}_read`,
+      ),
+      queryId,
+      queryType,
+      resolveMatchKeys:
+        queryType === 'resolve'
+          ? [
+              ...(identifierFieldId
+                ? [
+                    {
+                      authority: 'identifier',
+                      field: reference('fieldReference', identifierFieldId),
+                      kind: 'resolveMatchKey',
+                      matchKeyId: `${namespace}:resolve-key.${local}_identifier`,
+                      orderKey: 10,
+                      schemaVersion: version,
+                    },
+                  ]
+                : []),
+              {
+                authority: 'advisory',
+                field: reference('fieldReference', selectedFieldId),
+                kind: 'resolveMatchKey',
+                matchKeyId: `${namespace}:resolve-key.${local}_advisory`,
+                orderKey: 20,
+                schemaVersion: version,
+              },
+            ]
+          : [],
+      schemaVersion: version,
+      selections: [
+        {
+          field: reference('fieldReference', selectedFieldId),
+          kind: 'querySelection',
+          orderKey: 10,
+          schemaVersion: version,
+          selectionId: `${namespace}:selection.${local}_${queryType}_primary`,
+        },
+      ],
+      sourceEntity: reference('entityReference', entityId),
+      tier: 'q0',
+    };
+  });
 }
 
 function entityOperations(

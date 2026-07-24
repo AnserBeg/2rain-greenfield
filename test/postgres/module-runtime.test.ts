@@ -228,23 +228,39 @@ test('definition-only module is served generically through Q0/O0, trust, RLS, an
         assert.equal(
           (
             await query(queryGateway, viewA1, 'master_resolve', {
-              text: 'Solo',
+              text: 'a-001',
             })
           ).outcome,
           'exact',
         );
-        assert.equal(
-          (
-            await query(queryGateway, viewA1, 'master_resolve', {
-              text: 'Acme',
-            })
-          ).outcome,
-          'ambiguous',
+        const advisorySingle = await query(
+          queryGateway,
+          viewA1,
+          'master_resolve',
+          { text: 'Solo' },
         );
+        assert.equal(advisorySingle.outcome, 'ambiguous');
+        assert.equal(advisorySingle.records.length, 1);
+        const advisoryMultiple = await query(
+          queryGateway,
+          viewA1,
+          'master_resolve',
+          { text: 'Acme' },
+        );
+        assert.equal(advisoryMultiple.outcome, 'ambiguous');
+        assert.equal(advisoryMultiple.records.length, 2);
         assert.equal(
           (
             await query(queryGateway, viewA1, 'master_resolve', {
               text: 'Missing',
+            })
+          ).outcome,
+          'not-found',
+        );
+        assert.equal(
+          (
+            await query(queryGateway, viewA1, 'master_resolve', {
+              text: 'B-001',
             })
           ).outcome,
           'not-found',
@@ -387,6 +403,14 @@ test('definition-only module is served generically through Q0/O0, trust, RLS, an
         assert.equal(
           newPinned.records[0]?.values[FIXTURE_IDS.fieldIds.parentNotes],
           'served by v2',
+        );
+        assert.equal(
+          (
+            await query(queryGateway, viewA2, 'master_resolve', {
+              text: 'served by v2',
+            })
+          ).outcome,
+          'not-found',
         );
       } finally {
         await Promise.all([

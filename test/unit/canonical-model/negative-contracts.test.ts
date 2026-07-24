@@ -56,7 +56,7 @@ test('unknown kinds, versions, properties, slots, and status roles fail closed',
   const unknownVersion = structuredClone(fixture()) as unknown as {
     modules: Array<Record<string, unknown>>;
   };
-  unknownVersion.modules[0]!.schemaVersion = 'v2';
+  unknownVersion.modules[0]!.schemaVersion = 'v3';
   expectDiagnostic(
     () => normalizeApplicationPackage(unknownVersion),
     'CANON_VERSION_UNSUPPORTED',
