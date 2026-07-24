@@ -61,6 +61,7 @@ test('the conformance fixture is definition data, not emitted module TypeScript'
   const names = readdirSync(fixtureDirectory).sort();
   assert.deepEqual(names, [
     'definitions.ts',
+    'package.json',
     'v1-v2.release.structural.golden.json',
     'v1-v2.transition.structural.golden.json',
   ]);
