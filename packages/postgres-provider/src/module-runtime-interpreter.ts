@@ -391,6 +391,7 @@ async function insertRecord(
         `unknown relation ${relationId}`,
       );
     }
+    await requireRelationTarget(client, storage, relation, recordId);
     columns.push(relation.relationColumn.physicalName);
     parameters.push(parameter(values, recordId));
   }
@@ -411,6 +412,30 @@ async function insertRecord(
      VALUES (${parameters.join(', ')})`,
     values,
   );
+}
+
+async function requireRelationTarget(
+  client: PoolClient,
+  storage: StorageTargetPayloadV1,
+  relation: StorageTargetPayloadV1['relations'][number],
+  recordId: string,
+): Promise<void> {
+  const target = requiredEntity(storage, relation.targetEntityId);
+  const result = await client.query(
+    `SELECT 1
+       FROM north_star_module.${quoted(target.physicalTableName)}
+      WHERE tenant_id = north_star_internal.trusted_tenant_id()
+        AND environment_id = north_star_internal.trusted_environment_id()
+        AND ${quoted(target.recordIdentity.column)} = $1
+      LIMIT 1`,
+    [recordId],
+  );
+  if (result.rowCount !== 1) {
+    throw failure(
+      'MODULE_RELATION_TARGET_NOT_FOUND',
+      'relation target was not found',
+    );
+  }
 }
 
 async function updateRecord(
