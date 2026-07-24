@@ -3,8 +3,8 @@
 Status: evidence_ready
 Tier: Critical
 Branch: `fix/g2-p2b-case-fold-unique`
-Frozen candidate: _this commit_ (resolved to the branch-tip SHA at handoff)
-Review: pending — fresh Codex `gpt-5.6-sol` xhigh, then Fable max on the
+Frozen candidate: `5f2e7826e893b32671fc15546a461fa678c6f24c`
+Review: PASS — fresh Codex `gpt-5.6-sol` xhigh, then Fable max on the
 identical unchanged SHA
 
 ## Root cause and corrected invariant
@@ -98,6 +98,8 @@ Party work is preserved separately and is not present in this branch.
 | `corepack pnpm check:schema` | PASS — 8 applied / 8 verified, clean drift; snapshot unchanged |
 | `corepack pnpm test:architecture` | PASS — 41/41 tests |
 | `git diff --check` | PASS |
+| Fresh Codex `gpt-5.6-sol` xhigh | PASS — all four charter questions; no material findings |
+| Fable max | PASS — identical candidate; all four charter questions; no material findings |
 
 ## Review charter and status
 
@@ -117,9 +119,19 @@ The fresh Critical reviewers decide only whether:
 4. the v0/v1 unit correction is accurately classified as a stale test input
    and preserves the intended fail-closed diagnostic test.
 
-The candidate is awaiting a fresh naive Codex `gpt-5.6-sol` xhigh review and,
-if it passes, Fable max on the identical SHA. Until both pass, this corrective
-packet remains `evidence_ready`.
+Fresh naive Codex `gpt-5.6-sol` xhigh returned **PASS** on all four decisive
+questions for `5f2e7826e893b32671fc15546a461fa678c6f24c`, with no material
+findings. It independently compared the 1,530 frozen mappings with Unicode
+15.0 and found zero mismatches. Fable max returned **PASS** on the identical
+unchanged SHA, confirming storage enforcement, all-string fold equivalence,
+tenant/environment scoping, catalog-verifier completeness, unchanged other
+index behavior, and the stale-unit classification. No REVISE round was
+needed. The packet remains `evidence_ready` pending user acceptance.
+
+The first Codex launcher command was rejected before a reviewer started
+because its local concurrency setting used an invalid `agents.max_depth=0`;
+it produced no session or verdict and is not counted as a review seat. The
+subsequent valid invocation was fresh and is the PASS recorded above.
 
 The program-review trigger does not fire here: this is an unintegrated local
 corrective packet, not the clean integrated Party walking-slice checkpoint.
