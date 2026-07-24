@@ -1,10 +1,11 @@
 # PR-3 — CRITICAL OPERATION-MEDIATION corrective
 
-Status: evidence_ready
+Status: accepted
 Tier: Critical
 Branch: `fix/pr3-operation-mediation`
 Base: `2b98441bca829f1f2125a596135a6d42c3ba1b7d`
 Frozen reviewed candidate: `35d731e8fd64c731294aaa0401453c340d1394b2`
+Acceptance merge: `01ad1c04d668896133b4d3ffeea376d194cef397`
 Review: PASS — fresh naive Codex `gpt-5.6-sol` xhigh, then Fable max on
 the identical unchanged candidate
 
@@ -124,11 +125,14 @@ configuration SHA-256 before and after the bridge is identically
 | `cda4470ca7f1a86253f87db50fe314fea87130d8` | Bound malformed-attempt evidence identifiers and add the overlong-ID regression |
 | `35d731e8fd64c731294aaa0401453c340d1394b2` | Isolated pnpm 11 brace-expansion security override and lock regeneration |
 
-## Full-matrix evidence on the frozen candidate
+## Full-matrix evidence
 
-The commands below ran from a clean checkout at exactly
-`35d731e8fd64c731294aaa0401453c340d1394b2`. Focused development runs and the
-earlier reviewed candidates did not substitute for this final matrix.
+The commands below first ran from a clean checkout at frozen candidate
+`35d731e8fd64c731294aaa0401453c340d1394b2`. After acceptance, the same complete
+matrix ran again at exactly the non-squash integrated merge
+`01ad1c04d668896133b4d3ffeea376d194cef397`, with the results below. Focused
+development runs and earlier reviewed candidates did not substitute for either
+complete run.
 
 | Gate | Result |
 |---|---|
@@ -190,7 +194,8 @@ After the separately authorized security bridge, fresh Codex round 3 reviewed
 independently confirmed **PASS** on the identical unchanged SHA. The packet
 used exactly two REVISE rounds and then converged to PASS/PASS.
 
-The reviewers recorded four valid non-blocking future observations:
+The reviewers and acceptance record contain five valid non-blocking future
+observations:
 
 - align the lower-authority runtime authority map's stale `LifecycleService`
   mention with amended ADR-0010;
@@ -200,7 +205,12 @@ The reviewers recorded four valid non-blocking future observations:
   a real API transport is introduced;
 - add grant expiry/single-use semantics when the agent-channel threat model is
   admitted; current revision/input/principal/release binding satisfies this
-  packet's honest-code threat model.
+  packet's honest-code threat model;
+- the create path now takes `recordId` from the submitted form so the target
+  bound into a confirmation grant survives preview → confirm. RLS and primary-
+  key uniqueness bound the current consequence; reevaluate caller-selected
+  create IDs together with grant expiry/single-use when an adversarial channel
+  threat model is admitted.
 
 These observations do not weaken or defer a PR-3 disposition. The policy
 engine/trust read model, Q0 paging, agent execution, and performance remain the
@@ -212,7 +222,7 @@ From the repository root, these commands take under ten minutes:
 
 ```bash
 cd /home/rvham/2rain-greenfield
-git switch fix/pr3-operation-mediation
+git switch main
 git merge-base --is-ancestor 35d731e8fd64c731294aaa0401453c340d1394b2 HEAD
 corepack pnpm test:compiler
 corepack pnpm test:integration
@@ -228,12 +238,12 @@ required synthetic-negative control.
 
 ## Checkpoint
 
-PR-3 is evidence-ready for user acceptance. Together PR-1, PR-2, and PR-3 now
-implement every corrective in the converged G2-P3 program-review disposition;
-the reviewed candidate is not accepted until the user authorizes its
-non-squash merge to `main` and the full matrix passes at that integrated SHA.
+PR-3 was accepted by non-squash merge
+`01ad1c04d668896133b4d3ffeea376d194cef397`, preserving reviewed candidate
+`35d731e8fd64c731294aaa0401453c340d1394b2` as an ancestor. The complete matrix
+passed at that exact integrated SHA. Together PR-1, PR-2, and PR-3 implement
+every corrective in the converged G2-P3 program-review disposition.
 
 The program-review trigger has already been satisfied by the archived,
 converged G2-P3 whole-app review whose corrective sequence this packet closes.
-The only proposed next action is user acceptance/integration of PR-3. Do not
-start G2-P4 or any fan-out packet without a new explicit selection.
+Do not start G2-P4 or any fan-out packet without a new explicit selection.

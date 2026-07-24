@@ -125,3 +125,8 @@ How to apply: drive application normalization and storage indexes from one versi
 Date: 2026-07-24
 Why: PR-1's full matrix found that gitleaks classified G2-P1's static redaction sentinel as a generic API key even though its test proves the value never persists.
 How to apply: verify the value is synthetic, then ignore only its exact commit/file/rule/line fingerprint with an adjacent justification; never exempt a path or rule.
+
+## Put pnpm 11 overrides in the workspace manifest
+Date: 2026-07-24
+Why: PR-3 found that pnpm 11 silently ignored a root `package.json` `pnpm.overrides` entry after emitting only a warning.
+How to apply: declare pnpm 11 dependency overrides under `overrides` in `pnpm-workspace.yaml`, regenerate the lockfile, and verify the resolved graph and audit. See `docs/execution/packets/PR-3.md`.

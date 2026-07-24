@@ -53,9 +53,11 @@ the newly enforced relation contract.
    schema migration count remains eight.
 4. **Searchability and normalization parity.** Search matches only columns
    whose compiled `searchMapping` is `normalizedTextIndex`; the former raw-type
-   fallback is gone, so Party's confidential `contactSummary` is excluded.
-   Search, resolver matching, and case-insensitive uniqueness all call the same
-   pinned `nsm_unicode_case_fold_v1` database primitive.
+   fallback is gone, so Party's `contactSummary` is excluded. PR-3 later
+   changed that field's classification from confidential to internal; search
+   exclusion is driven by `searchMapping`, so this behavior is unchanged.
+   Search, resolver matching, and case-insensitive uniqueness all call the
+   same pinned `nsm_unicode_case_fold_v1` database primitive.
 
    The business-key normalization decision is **no NFKC compatibility
    normalization**. Case-fold-equivalent keys conflict, while compatibility-
