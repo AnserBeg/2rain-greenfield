@@ -82,7 +82,7 @@ test('the conformance fixture is definition data, not emitted module TypeScript'
     resolve('test/postgres/module-runtime.test.ts'),
     'utf8',
   );
-  assert.match(metamorphic, /ordinaryModuleV1ForNamespace\(namespace\)/);
+  assert.match(metamorphic, /ordinaryModuleV2ForNamespace\(namespace\)/);
   assert.match(metamorphic, /randomUUID\(\)/);
   assert.match(metamorphic, /new PostgresModuleRuntimeInterpreter/);
 });
