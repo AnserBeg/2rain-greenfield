@@ -2498,10 +2498,6 @@ function quoteTestIdentifier(value: string): string {
   return `"${value}"`;
 }
 
-async function firstManagedTable(pool: pg.Pool): Promise<string> {
-  return quoteTestIdentifier(await firstManagedTableName(pool));
-}
-
 function minted(value: string): MintedUuid {
   return value as MintedUuid;
 }

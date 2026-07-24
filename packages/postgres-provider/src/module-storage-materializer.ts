@@ -2675,6 +2675,11 @@ function mergeCompatibleEntity(
       uniqueKeys: _uniqueKeys,
       ...base
     } = entity;
+    void _columns;
+    void _consumerWriterRoots;
+    void _derivedStateFields;
+    void _indexes;
+    void _uniqueKeys;
     return base;
   };
   if (

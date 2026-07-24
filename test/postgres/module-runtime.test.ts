@@ -574,6 +574,7 @@ class AllowPolicy implements CurrentPolicyGateway {
   async readCurrentVersion(
     _subject: CurrentPolicySubject,
   ): Promise<{ policyVersion: string }> {
+    void _subject;
     return { policyVersion: 'module-runtime-policy/v1' };
   }
 }

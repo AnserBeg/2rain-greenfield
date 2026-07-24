@@ -2,6 +2,7 @@ import type {
   MintedUuid,
   TenantEnvironmentIdentity,
 } from './release-records.js';
+import type { TRANSITION_COMPATIBILITY_POLICY_V2_VERSION } from './module-storage-transition.js';
 
 export * from './module-storage-transition.js';
 
@@ -246,7 +247,7 @@ export interface ReleaseApproval extends TenantEnvironmentIdentity {
   readonly compilerVersion: string;
   readonly compatibilityPolicyVersion:
     | typeof TRANSITION_COMPATIBILITY_POLICY_VERSION
-    | typeof import('./module-storage-transition.js').TRANSITION_COMPATIBILITY_POLICY_V2_VERSION;
+    | typeof TRANSITION_COMPATIBILITY_POLICY_V2_VERSION;
   readonly decidedAt: string;
   readonly expectedFence: number;
   readonly expectedPointerId: MintedUuid;

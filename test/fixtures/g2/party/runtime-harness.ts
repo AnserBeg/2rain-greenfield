@@ -226,6 +226,7 @@ class AllowPolicy implements CurrentPolicyGateway {
   }
 
   async readCurrentVersion(_subject: CurrentPolicySubject) {
+    void _subject;
     return { policyVersion: 'party-runtime-policy/v1' };
   }
 }

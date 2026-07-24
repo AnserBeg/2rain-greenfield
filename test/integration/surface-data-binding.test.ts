@@ -369,6 +369,7 @@ class RecordingPolicy implements CurrentPolicyGateway {
   }
 
   async readCurrentVersion(_subject: CurrentPolicySubject) {
+    void _subject;
     return { policyVersion: 'surface-binding-policy/v1' };
   }
 }

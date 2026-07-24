@@ -33,7 +33,7 @@ import type { Pool, PoolClient, QueryResultRow } from 'pg';
 
 import { withTrustedRequestTransaction } from './request-context.js';
 import { PostgresTrustService } from './trust/postgres-trust-service.js';
-import { TrustedActorEnvelopeIssuer } from './trust/trusted-actor-envelope.js';
+import type { TrustedActorEnvelopeIssuer } from './trust/trusted-actor-envelope.js';
 
 const artifactMediaType = 'application/vnd.northstar.canonical+json';
 const identifierPattern = /^[a-z][a-z0-9_]{0,62}$/;
