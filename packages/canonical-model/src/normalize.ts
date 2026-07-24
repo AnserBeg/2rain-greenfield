@@ -9,6 +9,8 @@ import {
   LEGACY_NORMALIZATION_PROFILE_VERSION,
   LANGUAGE_VERSION,
   NORMALIZATION_PROFILE_VERSION,
+  PREVIOUS_LANGUAGE_VERSION,
+  PREVIOUS_NORMALIZATION_PROFILE_VERSION,
   STRUCTURAL_LIMITS_V0,
   SURFACE_SLOTS,
   type CanonicalLanguageVersion,
@@ -142,6 +144,15 @@ export function normalizeApplicationPackage(
         fieldTypes,
       ),
       lifecycle: entry.lifecycle ?? IMMUTABLE_DEFAULTS_V0.lifecycle,
+      ...(entry.resolveMatchKeys !== undefined ||
+      authored.languageVersion === LANGUAGE_VERSION
+        ? {
+            resolveMatchKeys: sortByOrderAndId(
+              entry.resolveMatchKeys ?? [],
+              'matchKeyId',
+            ),
+          }
+        : {}),
       selections: sortByOrderAndId(entry.selections, 'selectionId'),
     })),
     relations: authored.relations.map((entry) => ({
@@ -168,7 +179,7 @@ export function normalizeApplicationPackage(
     storageMappings: authored.storageMappings.map((entry) => ({
       ...entry,
       lifecycle: entry.lifecycle ?? IMMUTABLE_DEFAULTS_V0.lifecycle,
-      ...(authored.languageVersion === LANGUAGE_VERSION
+      ...(authored.languageVersion !== LEGACY_LANGUAGE_VERSION
         ? { storageClass: entry.storageClass ?? null }
         : {}),
     })),
@@ -377,6 +388,36 @@ function validateSemantics(
           ?.queryId ?? packageRevision.package.packageId,
       ),
     );
+  }
+  for (const query of packageRevision.queries) {
+    if (
+      query.queryType !== 'resolve' &&
+      (query.resolveMatchKeys?.length ?? 0) > 0
+    ) {
+      diagnostics.push(
+        diagnostic(
+          'CANON_RESOLVE_MATCH_KEYS_QUERY_TYPE_MISMATCH',
+          '$.queries.resolveMatchKeys',
+          'resolve match authority belongs only to resolve queries',
+          'remove resolveMatchKeys or change the queryType to resolve',
+          query.queryId,
+        ),
+      );
+    }
+    if (
+      packageRevision.languageVersion !== LANGUAGE_VERSION &&
+      (query.resolveMatchKeys?.length ?? 0) > 0
+    ) {
+      diagnostics.push(
+        diagnostic(
+          'CANON_RESOLVE_MATCH_AUTHORITY_VERSION_UNSUPPORTED',
+          '$.queries.resolveMatchKeys',
+          'explicit resolve match authority is introduced by canonical language v2 and does not widen prior language versions',
+          `upgrade the complete package to ${LANGUAGE_VERSION}`,
+          query.queryId,
+        ),
+      );
+    }
   }
   if (packageRevision.languageVersion === LEGACY_LANGUAGE_VERSION) {
     const v1OnlyObjectIds = [
@@ -665,6 +706,14 @@ function validateOwnedReferences(
         selection.field,
         'fieldReference',
         '$.queries.selections.field',
+        query.queryId,
+      );
+    }
+    for (const matchKey of query.resolveMatchKeys ?? []) {
+      check(
+        matchKey.field,
+        'fieldReference',
+        '$.queries.resolveMatchKeys.field',
         query.queryId,
       );
     }
@@ -1098,6 +1147,14 @@ function validateSetCollections(
       diagnostics,
     );
   }
+  for (const query of packageRevision.queries) {
+    rejectDuplicateStrings(
+      (query.resolveMatchKeys ?? []).map((matchKey) => matchKey.field.targetId),
+      '$.queries.resolveMatchKeys.field',
+      query.queryId,
+      diagnostics,
+    );
+  }
 }
 
 function rejectDuplicateStrings(
@@ -1182,6 +1239,11 @@ function validateOrderKeys(
       entries: query.selections,
       objectId: query.queryId,
       path: '$.queries.selections',
+    })),
+    ...packageRevision.queries.map((query) => ({
+      entries: query.resolveMatchKeys ?? [],
+      objectId: query.queryId,
+      path: '$.queries.resolveMatchKeys',
     })),
   ];
   for (const collection of collections) {
@@ -1376,9 +1438,13 @@ function normalizationProfileFor(
   languageVersion: CanonicalLanguageVersion,
 ):
   | typeof LEGACY_NORMALIZATION_PROFILE_VERSION
+  | typeof PREVIOUS_NORMALIZATION_PROFILE_VERSION
   | typeof NORMALIZATION_PROFILE_VERSION {
-  return languageVersion === LEGACY_LANGUAGE_VERSION
-    ? LEGACY_NORMALIZATION_PROFILE_VERSION
+  if (languageVersion === LEGACY_LANGUAGE_VERSION) {
+    return LEGACY_NORMALIZATION_PROFILE_VERSION;
+  }
+  return languageVersion === PREVIOUS_LANGUAGE_VERSION
+    ? PREVIOUS_NORMALIZATION_PROFILE_VERSION
     : NORMALIZATION_PROFILE_VERSION;
 }
 
@@ -1546,6 +1612,7 @@ function collectIds(
     ]),
     queries: packageRevision.queries.flatMap((entry) => [
       entry.queryId,
+      ...(entry.resolveMatchKeys ?? []).map((matchKey) => matchKey.matchKeyId),
       ...entry.selections.map((selection) => selection.selectionId),
     ]),
     operations: packageRevision.operations.map((entry) => entry.operationId),
@@ -1654,6 +1721,7 @@ const IDENTITY_KEY_BY_KIND: Readonly<Record<string, string>> = Object.freeze({
   permissionDefinition: 'permissionId',
   queryDefinition: 'queryId',
   querySelection: 'selectionId',
+  resolveMatchKey: 'matchKeyId',
   relationDefinition: 'relationId',
   rendererForm: 'rendererId',
   stateDefinition: 'stateId',
@@ -1669,6 +1737,7 @@ const OWNED_IDENTITY_KEYS = Object.freeze([
   'capabilityId',
   'entityId',
   'fieldId',
+  'matchKeyId',
   'machineId',
   'moduleId',
   'operationId',

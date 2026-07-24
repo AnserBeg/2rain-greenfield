@@ -329,6 +329,18 @@ function queryCatalogPayload(
       permissionId: query.permission.targetId,
       queryId: query.queryId,
       queryType: query.queryType,
+      ...(packageRevision.languageVersion === LANGUAGE_VERSION
+        ? {
+            resolveMatchKeys: (query.resolveMatchKeys ?? []).map(
+              (matchKey) => ({
+                authority: matchKey.authority,
+                fieldId: matchKey.field.targetId,
+                matchKeyId: matchKey.matchKeyId,
+                orderKey: matchKey.orderKey,
+              }),
+            ),
+          }
+        : {}),
       selections: query.selections.map((selection) => ({
         fieldId: selection.field.targetId,
         orderKey: selection.orderKey,

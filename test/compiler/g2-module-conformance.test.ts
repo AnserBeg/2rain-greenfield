@@ -6,6 +6,8 @@ import {
   CanonicalModelError,
   LANGUAGE_VERSION,
   NORMALIZATION_PROFILE_VERSION,
+  PREVIOUS_LANGUAGE_VERSION,
+  PREVIOUS_NORMALIZATION_PROFILE_VERSION,
   PROMOTE_STORAGE_CLASS_CAPABILITY_ID,
   canonicalAuthoredProjection,
   canonicalize,
@@ -59,6 +61,41 @@ test('ordinary v1 and v2 parent/child definitions compile cleanly and twice iden
     'resolve',
     'search',
   ]);
+  const resolveQueries = projectionPayload<{
+    queries: Array<{
+      queryId: string;
+      queryType: string;
+      resolveMatchKeys: Array<{
+        authority: string;
+        fieldId: string;
+        matchKeyId: string;
+      }>;
+    }>;
+  }>(second, PROJECTION_FAMILY_IDS.queryCatalog).queries.filter(
+    (query) => query.queryType === 'resolve',
+  );
+  assert.deepEqual(
+    resolveQueries.map((query) => ({
+      authorities: query.resolveMatchKeys.map((key) => key.authority),
+      fields: query.resolveMatchKeys.map((key) => key.fieldId),
+      queryId: query.queryId,
+    })),
+    [
+      {
+        authorities: ['identifier', 'advisory'],
+        fields: [
+          FIXTURE_IDS.fieldIds.parentNumber,
+          FIXTURE_IDS.fieldIds.parentName,
+        ],
+        queryId: `${FIXTURE_IDS.namespace}:query.master_resolve`,
+      },
+      {
+        authorities: ['advisory'],
+        fields: [FIXTURE_IDS.fieldIds.childRole],
+        queryId: `${FIXTURE_IDS.namespace}:query.master_role_resolve`,
+      },
+    ],
+  );
   const transitionReference = second.bundle.releaseManifest.projections.find(
     (projection) =>
       projection.familyId === PROJECTION_FAMILY_IDS.storageTransition,
@@ -221,13 +258,18 @@ test('reporting is a sanctioned required family and has per-entity lineage', () 
   );
 });
 
-test('search is explicit language v1 evolution and never widens v0-experimental', () => {
-  assert.equal(LANGUAGE_VERSION, 'v1');
-  assert.equal(NORMALIZATION_PROFILE_VERSION, 'northstar.normalization/v1');
-  assert.equal(MODULE_COMPILER_PROFILE.languageVersion, 'v1');
+test('resolver authority is explicit language v2 evolution while v1 remains profile-stable', () => {
+  assert.equal(PREVIOUS_LANGUAGE_VERSION, 'v1');
+  assert.equal(
+    PREVIOUS_NORMALIZATION_PROFILE_VERSION,
+    'northstar.normalization/v1',
+  );
+  assert.equal(LANGUAGE_VERSION, 'v2');
+  assert.equal(NORMALIZATION_PROFILE_VERSION, 'northstar.normalization/v2');
+  assert.equal(MODULE_COMPILER_PROFILE.languageVersion, 'v2');
   const legacy = replaceVersion(
     ordinaryModuleV1(),
-    'v1',
+    LANGUAGE_VERSION,
     'v0-experimental',
   ) as Record<string, unknown>;
   legacy.normalizationProfileVersion =
@@ -241,6 +283,26 @@ test('search is explicit language v1 evolution and never widens v0-experimental'
           diagnostic.code === 'CANON_QUERY_TYPE_VERSION_UNSUPPORTED',
       ),
   );
+});
+
+test('compiler rejects a v2 resolve query with no declared match authority', () => {
+  const normalized = structuredClone(
+    normalizeApplicationPackage(ordinaryModuleV1()),
+  );
+  const resolve = normalized.queries.find(
+    (query) =>
+      query.queryId === `${FIXTURE_IDS.namespace}:query.master_resolve`,
+  )!;
+  resolve.resolveMatchKeys = [];
+  const result = compileApplication(inputNormalized(normalized));
+  assert.equal(result.status, 'failed');
+  assert.deepEqual(structuralDiagnostics(result), [
+    {
+      code: 'COMPILER_RESOLVE_MATCH_AUTHORITY_REQUIRED',
+      path: '$.queries.resolveMatchKeys',
+      subjectId: resolve.queryId,
+    },
+  ]);
 });
 
 test('missing and null storageClass produce the same stable compiler diagnostic', () => {
@@ -289,7 +351,7 @@ test('delete operations and renderer forms fail with compiler-owned diagnostics'
   rendered.surfaces[0]!.renderer = {
     kind: 'rendererForm',
     rendererId: `${FIXTURE_IDS.namespace}:renderer.destructive_form`,
-    schemaVersion: 'v1',
+    schemaVersion: LANGUAGE_VERSION,
   };
   const rendererResult = compileApplication(input(rendered));
   assert.equal(rendererResult.status, 'failed');
@@ -368,7 +430,7 @@ test('generatedTyped and promotion reserves normalize and round-trip but compile
     capabilityId: PROMOTE_STORAGE_CLASS_CAPABILITY_ID,
     invariantVersion: 'northstar.storage-class-promotion-invariant/v1',
     kind: 'storageClassPromotionReserve',
-    schemaVersion: 'v1',
+    schemaVersion: LANGUAGE_VERSION,
   };
   assertCanonicalRoundTrip(promotion);
   const promotionResult = compileApplication(input(promotion));
@@ -405,7 +467,7 @@ test('relation additions order the column before the FK and debt preserves both 
     foreignKeyActions: {
       onDelete: 'restrict',
       onUpdate: 'restrict',
-      schemaVersion: 'v1',
+      schemaVersion: LANGUAGE_VERSION,
     },
     joinEligibility: 'query',
     kind: 'relationDefinition',
@@ -413,15 +475,15 @@ test('relation additions order the column before the FK and debt preserves both 
     ownership: 'reference',
     relationId: `${FIXTURE_IDS.namespace}:relation.master_role_secondary_parent`,
     required: false,
-    schemaVersion: 'v1',
+    schemaVersion: LANGUAGE_VERSION,
     sourceEntity: {
       kind: 'entityReference',
-      schemaVersion: 'v1',
+      schemaVersion: LANGUAGE_VERSION,
       targetId: FIXTURE_IDS.entityIds.child,
     },
     targetEntity: {
       kind: 'entityReference',
-      schemaVersion: 'v1',
+      schemaVersion: LANGUAGE_VERSION,
       targetId: FIXTURE_IDS.entityIds.parent,
     },
   });
@@ -483,13 +545,23 @@ function input(
   definition: unknown,
   expectedActiveRelease: CompilerInput['expectedActiveRelease'] = null,
 ): CompilerInput {
+  return inputNormalized(
+    normalizeApplicationPackage(definition),
+    expectedActiveRelease,
+  );
+}
+
+function inputNormalized(
+  normalizedDefinition: unknown,
+  expectedActiveRelease: CompilerInput['expectedActiveRelease'] = null,
+): CompilerInput {
   return {
     dependencies: [],
     expectedActiveRelease,
     kind: 'compilerInput',
     limits: { ...DEFAULT_COMPILER_LIMITS },
     normalizedDefinitionBytes: new TextEncoder().encode(
-      canonicalize(normalizeApplicationPackage(definition)),
+      canonicalize(normalizedDefinition),
     ),
     profile: { ...MODULE_COMPILER_PROFILE },
   };

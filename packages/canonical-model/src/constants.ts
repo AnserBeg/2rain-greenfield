@@ -1,7 +1,9 @@
 export const LEGACY_LANGUAGE_VERSION = 'v0-experimental' as const;
-export const LANGUAGE_VERSION = 'v1' as const;
+export const PREVIOUS_LANGUAGE_VERSION = 'v1' as const;
+export const LANGUAGE_VERSION = 'v2' as const;
 export const SUPPORTED_LANGUAGE_VERSIONS = Object.freeze([
   LEGACY_LANGUAGE_VERSION,
+  PREVIOUS_LANGUAGE_VERSION,
   LANGUAGE_VERSION,
 ] as const);
 export type CanonicalLanguageVersion =
@@ -9,10 +11,13 @@ export type CanonicalLanguageVersion =
 
 export const LEGACY_NORMALIZATION_PROFILE_VERSION =
   'northstar.normalization/v0-experimental' as const;
-export const NORMALIZATION_PROFILE_VERSION =
+export const PREVIOUS_NORMALIZATION_PROFILE_VERSION =
   'northstar.normalization/v1' as const;
+export const NORMALIZATION_PROFILE_VERSION =
+  'northstar.normalization/v2' as const;
 export const SUPPORTED_NORMALIZATION_PROFILE_VERSIONS = Object.freeze([
   LEGACY_NORMALIZATION_PROFILE_VERSION,
+  PREVIOUS_NORMALIZATION_PROFILE_VERSION,
   NORMALIZATION_PROFILE_VERSION,
 ] as const);
 export const CANONICALIZATION_PROFILE_VERSION =

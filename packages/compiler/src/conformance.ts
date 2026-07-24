@@ -94,6 +94,21 @@ export function validateModuleConformance(
       );
     }
   }
+  for (const query of packageRevision.queries) {
+    if (
+      query.queryType === 'resolve' &&
+      (query.resolveMatchKeys?.length ?? 0) === 0
+    ) {
+      diagnostics.push(
+        compilerDiagnostic(
+          'COMPILER_RESOLVE_MATCH_AUTHORITY_REQUIRED',
+          'wholeModelValidation',
+          '$.queries.resolveMatchKeys',
+          query.queryId,
+        ),
+      );
+    }
+  }
   for (const surface of packageRevision.surfaces) {
     if (surface.renderer) {
       diagnostics.push(

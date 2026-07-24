@@ -1,6 +1,6 @@
 {
-  "languageVersion": "v1",
-  "normalizationProfileVersion": "northstar.normalization/v1",
+  "languageVersion": "v2",
+  "normalizationProfileVersion": "northstar.normalization/v2",
   "transitionSchemaVersion": "northstar.storage-transition-envelope/v1",
   "v1ProjectionFamilies": [
     "northstar.compiler:projection-family.agent-discovery",
@@ -13,6 +13,6 @@
     "northstar.compiler:projection-family.surface-manifest",
     "northstar.compiler:projection-family.verification-plan"
   ],
-  "v1ReleaseRoot": "ccafe49c1d64c5e75505cf0f641905bd9c14f4116d7efda6750e378cd65e101b",
-  "v2ReleaseRoot": "8f16a9b6a6042e5ba9708900310ddfc9baad252fb3e7f9ef549cb502d2d6fdc4"
+  "v1ReleaseRoot": "53595e9377d66e362876acb36ca793c91a748bac108c013211bddf9afcd66ece",
+  "v2ReleaseRoot": "6b9c88ea1d860518035326fbe319f1952c9e69353c826860c22851e2c316c1d8"
 }

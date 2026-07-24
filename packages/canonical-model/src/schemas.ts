@@ -523,6 +523,14 @@ const querySelection = z.strictObject({
   schemaVersion: nodeVersion,
   selectionId: CanonicalIdSchema,
 });
+const resolveMatchKey = z.strictObject({
+  authority: z.enum(['identifier', 'advisory']),
+  field: CanonicalReferenceSchema,
+  kind: z.literal('resolveMatchKey'),
+  matchKeyId: CanonicalIdSchema,
+  orderKey: boundedOrderKey,
+  schemaVersion: nodeVersion,
+});
 const normalizedQueryDefinition = z.strictObject({
   filter: PredicateExpressionSchema,
   kind: z.literal('queryDefinition'),
@@ -532,6 +540,7 @@ const normalizedQueryDefinition = z.strictObject({
   permission: CanonicalReferenceSchema,
   queryId: CanonicalIdSchema,
   queryType: z.enum(['get', 'list', 'search', 'resolve']),
+  resolveMatchKeys: z.array(resolveMatchKey).optional(),
   schemaVersion: nodeVersion,
   selections: z.array(querySelection).min(1),
   sourceEntity: CanonicalReferenceSchema,
@@ -540,6 +549,7 @@ const normalizedQueryDefinition = z.strictObject({
 const authoredQueryDefinition = normalizedQueryDefinition.extend({
   filter: PredicateExpressionSchema.optional(),
   lifecycle: z.enum(['active', 'retired']).optional(),
+  resolveMatchKeys: z.array(resolveMatchKey).optional(),
 });
 
 const operationEffect = z.discriminatedUnion('kind', [

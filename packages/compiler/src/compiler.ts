@@ -577,6 +577,9 @@ function collectSymbols(
     for (const selection of query.selections) {
       add(selection.selectionId, selection.kind, []);
     }
+    for (const matchKey of query.resolveMatchKeys ?? []) {
+      add(matchKey.matchKeyId, matchKey.kind, []);
+    }
   }
   for (const value of packageRevision.operations) {
     add(value.operationId, value.kind, ['operationReference']);
@@ -660,6 +663,21 @@ function typeCheck(
             'typeCheck',
             '$.queries.selections.field',
             selection.selectionId,
+          ),
+        );
+      }
+    }
+    for (const matchKey of query.resolveMatchKeys ?? []) {
+      if (
+        fieldById.get(matchKey.field.targetId)?.entity.targetId !==
+        query.sourceEntity.targetId
+      ) {
+        diagnostics.push(
+          compilerDiagnostic(
+            'COMPILER_TYPE_INVALID',
+            'typeCheck',
+            '$.queries.resolveMatchKeys.field',
+            matchKey.matchKeyId,
           ),
         );
       }

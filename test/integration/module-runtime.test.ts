@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  LANGUAGE_VERSION,
   canonicalize,
   normalizeApplicationPackage,
 } from '../../packages/canonical-model/src/index.js';
@@ -120,7 +121,7 @@ test('unsupported compiled predicates fail closed before the generic executor', 
       ...entry,
       precondition: {
         kind: 'booleanPredicate',
-        schemaVersion: 'v1',
+        schemaVersion: LANGUAGE_VERSION,
         value: false,
       },
     })),
@@ -128,7 +129,7 @@ test('unsupported compiled predicates fail closed before the generic executor', 
       ...entry,
       filter: {
         kind: 'booleanPredicate',
-        schemaVersion: 'v1',
+        schemaVersion: LANGUAGE_VERSION,
         value: false,
       },
     })),

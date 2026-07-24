@@ -110,6 +110,11 @@ export const COMPILER_DIAGNOSTIC_COPY = Object.freeze({
       'bind list, record, and form roles through the closed SurfaceDefinition registry',
     rule: 'module definitions cannot introduce executable renderer forms',
   },
+  COMPILER_RESOLVE_MATCH_AUTHORITY_REQUIRED: {
+    acceptedAlternative:
+      'declare one or more resolveMatchKeys and mark every key as identifier or advisory',
+    rule: 'v2 resolve queries fail closed unless their match authority is explicit in canonical definition data',
+  },
   COMPILER_STORAGE_CLASS_REQUIRED: {
     acceptedAlternative:
       'declare dedicatedTable explicitly for every active entity storage mapping',

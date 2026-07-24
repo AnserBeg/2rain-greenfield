@@ -38,6 +38,11 @@ test('authored collection permutations converge before compilation', () => {
     );
     candidate.queries = candidate.queries.map((query) => ({
       ...query,
+      ...(query.resolveMatchKeys === undefined
+        ? {}
+        : {
+            resolveMatchKeys: permute(query.resolveMatchKeys, seed + 23),
+          }),
       selections: permute(query.selections, seed + 17),
     }));
     const result = compileApplication(
