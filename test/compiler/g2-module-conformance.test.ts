@@ -341,6 +341,10 @@ test('compiled field/input contracts and enum defenses preserve declared semanti
     operations: Array<{
       inputContract?: {
         fields: Array<{
+          bounds: {
+            precision: number | null;
+            scale: number | null;
+          };
           fieldId: string;
           temporal: {
             precision: string | null;
@@ -378,6 +382,16 @@ test('compiled field/input contracts and enum defenses preserve declared semanti
       },
     },
   ]);
+  assert.deepEqual(
+    temporalOperations
+      .find((operation) =>
+        operation.operationId.endsWith(':operation.master_update'),
+      )
+      ?.inputContract?.fields.find(
+        (field) => field.fieldId === FIXTURE_IDS.fieldIds.parentAmount,
+      )?.bounds,
+    { maximumLength: null, precision: 5, scale: 2 },
+  );
 });
 
 test('reporting is a sanctioned required family and has per-entity lineage', () => {

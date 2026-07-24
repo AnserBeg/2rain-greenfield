@@ -19,6 +19,7 @@ const entityIds = {
 
 const fieldIds = {
   childRole: `${namespace}:field.master_role_kind`,
+  parentAmount: `${namespace}:field.master_amount`,
   parentName: `${namespace}:field.master_name`,
   parentNumber: `${namespace}:field.master_number`,
   parentNotes: `${namespace}:field.master_notes`,
@@ -254,6 +255,27 @@ export function ordinaryModuleV2(): Record<string, unknown> {
     collation: 'binary',
     defaultSemantics: 'nullable',
     entity: reference('entityReference', entityIds.parent),
+    fieldId: fieldIds.parentAmount,
+    fieldType: {
+      kind: 'exactDecimalFieldType',
+      precision: 5,
+      representation: 'canonicalString',
+      scale: 2,
+      schemaVersion: version,
+    },
+    kind: 'fieldDefinition',
+    label: 'Amount',
+    orderKey: 70,
+    presence: 'optional',
+    reportable: true,
+    schemaVersion: version,
+    searchable: false,
+  });
+  definition.fields.push({
+    classification: 'internal',
+    collation: 'binary',
+    defaultSemantics: 'nullable',
+    entity: reference('entityReference', entityIds.parent),
     fieldId: fieldIds.parentNotes,
     fieldType: {
       kind: 'textFieldType',
@@ -368,6 +390,13 @@ export function ordinaryModuleV2(): Record<string, unknown> {
         orderKey: 50,
         schemaVersion: version,
         selectionId: `${query.queryId.replace(':query.', ':selection.')}_utc_instant`,
+      },
+      {
+        field: reference('fieldReference', fieldIds.parentAmount),
+        kind: 'querySelection',
+        orderKey: 60,
+        schemaVersion: version,
+        selectionId: `${query.queryId.replace(':query.', ':selection.')}_amount`,
       },
     );
   }

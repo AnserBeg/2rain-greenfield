@@ -74,6 +74,34 @@
       },
       "coexistenceImpact": "requiresReadFallback",
       "declaredDependencyIds": [],
+      "fieldId": "northstar.modulefixture:field.master_amount",
+      "kind": "addColumn",
+      "physicalObjectName": "nsm_c_oysgaanml5lxldi2ucr7ipiuehyiq6k4fqgxgds5hf5xxtvwsrra",
+      "schemaVersion": "northstar.storage-transition-element/v1",
+      "scope": {
+        "keyColumns": ["tenant_id", "environment_id"],
+        "kind": "tenantEnvironment"
+      },
+      "storageDomain": "managedModule",
+      "storageGeneration": "dedicatedTyped/v1",
+      "subjectId": "northstar.modulefixture:entity.master"
+    },
+    {
+      "classification": {
+        "dataEffect": "catalogOnly",
+        "operationalRisk": "boundedCatalogLock",
+        "preparationValidity": "preApprovalInert",
+        "semanticEffect": "additive"
+      },
+      "coexistence": {
+        "admission": "additive",
+        "newRead": "requiresReadFallback",
+        "newWrite": "compatible",
+        "oldRead": "compatible",
+        "oldWrite": "compatible"
+      },
+      "coexistenceImpact": "requiresReadFallback",
+      "declaredDependencyIds": [],
       "fieldId": "northstar.modulefixture:field.master_utc_instant",
       "kind": "addColumn",
       "physicalObjectName": "nsm_c_2dxsm6j5eppvbxuki5dn66qjkacrigupylrcic5wtoeroz4eobka",

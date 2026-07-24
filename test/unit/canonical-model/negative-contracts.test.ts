@@ -352,6 +352,35 @@ test('state storage is derived and authored state-field authority rejects', () =
   );
 });
 
+test('decimal predicate bounds reserve the declared fractional scale', () => {
+  const authored = structuredClone(fixture());
+  authored.queries[0]!.filter = {
+    field: {
+      kind: 'fieldReference',
+      schemaVersion: 'v0-experimental',
+      targetId: 'northstar.inventory:field.item_quantity' as never,
+    },
+    kind: 'fieldComparisonPredicate',
+    operator: 'equals',
+    schemaVersion: 'v0-experimental',
+    value: {
+      baseUnit: {
+        kind: 'unitReference',
+        schemaVersion: 'v0-experimental',
+        targetId: 'northstar.inventory:capability.unit_each' as never,
+      },
+      kind: 'quantityValue',
+      schemaVersion: 'v0-experimental',
+      value: '123456789012345',
+    },
+  };
+  expectDiagnostic(
+    () => normalizeApplicationPackage(authored),
+    'CANON_PREDICATE_VALUE_INVALID',
+    { objectId: 'northstar.inventory:query.item_get' },
+  );
+});
+
 test('schema diagnostic ownership ignores object property insertion order', () => {
   const first = structuredClone(fixture()) as unknown as {
     modules: Array<Record<string, unknown>>;

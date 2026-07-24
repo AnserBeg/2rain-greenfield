@@ -450,6 +450,7 @@ test('definition-only module is served generically through Q0/O0, trust, RLS, an
         );
         assert.equal(v2Update.readBack?.revision, 5);
         assert.deepEqual(v2Update.readBack?.values, {
+          [FIXTURE_IDS.fieldIds.parentAmount]: null,
           [FIXTURE_IDS.fieldIds.parentLocalTime]: null,
           [FIXTURE_IDS.fieldIds.parentName]: 'Solo Updated',
           [FIXTURE_IDS.fieldIds.parentNotes]: 'served by v2',
@@ -469,6 +470,7 @@ test('definition-only module is served generically through Q0/O0, trust, RLS, an
           FIXTURE_IDS.fieldIds.parentNotes,
           FIXTURE_IDS.fieldIds.parentLocalTime,
           FIXTURE_IDS.fieldIds.parentUtcInstant,
+          FIXTURE_IDS.fieldIds.parentAmount,
         ]);
         assert.equal(
           newPinned.records[0]?.values[FIXTURE_IDS.fieldIds.parentNotes],
@@ -560,6 +562,7 @@ test('metamorphic random namespace executes the compiled declared-semantics cont
           {
             recordId,
             values: {
+              [`${namespace}:field.master_amount`]: '123.45',
               [`${namespace}:field.master_name`]: 'Metamorphic',
               [`${namespace}:field.master_local_time`]: '08:15:30',
               [`${namespace}:field.master_notes`]: 'never-search-this-secret',
@@ -702,6 +705,7 @@ test('metamorphic random namespace executes the compiled declared-semantics cont
         for (const [fieldId, invalidValue] of [
           [`${namespace}:field.master_local_time`, '08:15:30.000'],
           [`${namespace}:field.master_utc_instant`, '2026-07-24T12:34:56Z'],
+          [`${namespace}:field.master_amount`, '12345'],
         ] as const) {
           await assert.rejects(
             operation(
@@ -954,6 +958,7 @@ test('metamorphic random namespace executes the compiled declared-semantics cont
             }
             if (scenario.kind === 'searchableExclusion') {
               const excludedValue = new Map([
+                [`${namespace}:field.master_amount`, '123.45'],
                 [`${namespace}:field.master_notes`, 'NEVER-SEARCH-THIS-SECRET'],
                 [
                   `${namespace}:field.master_tier`,

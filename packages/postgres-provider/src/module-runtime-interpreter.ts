@@ -1368,6 +1368,7 @@ function decimalFits(
   const integerDigits = integer === '0' ? 0 : integer!.length;
   return (
     fraction.length <= scale &&
+    integerDigits <= precision - scale &&
     Math.max(1, integerDigits + fraction.length) <= precision
   );
 }
