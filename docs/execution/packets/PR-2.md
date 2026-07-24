@@ -1,10 +1,11 @@
 # PR-2 — CRITICAL SEMANTIC-PRESERVATION corrective
 
-Status: evidence_ready
+Status: accepted
 Tier: Critical
 Branch: `fix/pr2-semantic-preservation`
 Base: `cf2d669b2aaf2e09fdf4ae8c9d8c0de2c769b331`
 Frozen reviewed candidate: `9d5f4187866410da3311e321f9982d56c4c073a3`
+Acceptance merge: `5d5676f9c6e3ef26d6ebf808c1f3ec02da690ff5`
 Review: PASS — fresh naive Codex `gpt-5.6-sol` xhigh, then Fable max on
 the identical unchanged candidate
 
@@ -197,8 +198,10 @@ the generated Party and metamorphic semantic-contract probes, architecture
 
 ## Checkpoint
 
-PR-2 is evidence-ready for user acceptance. The converged G2-P3 program review
-still governs sequencing: PR-3 remains required before Catalog/Location
-fan-out. No new whole-app review trigger fires while that already-converged
-corrective sequence is incomplete. Do not start PR-3 without explicit user
-selection.
+PR-2 was accepted by non-squash merge
+`5d5676f9c6e3ef26d6ebf808c1f3ec02da690ff5`, preserving reviewed candidate
+`9d5f4187866410da3311e321f9982d56c4c073a3` as an ancestor. The converged
+G2-P3 program review still governs sequencing: PR-3 remains required before
+Catalog/Location fan-out. No new whole-app review trigger fires while that
+already-converged corrective sequence is incomplete. Do not start PR-3
+without explicit user selection.
