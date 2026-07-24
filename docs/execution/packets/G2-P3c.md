@@ -1,9 +1,9 @@
 # G2-P3c — Explicit resolver authority
 
-Status: active
+Status: evidence_ready
 Tier: Critical
 Branch: `packet/g2-p3c-resolver-authority`
-Frozen candidate: pending
+Frozen candidate: `01bddcfce741ff7cc64df1527b84654483f5c0d9`
 
 ## Goal and sequencing
 
@@ -104,11 +104,85 @@ maximum two REVISE rounds.
 
 ## Evidence
 
-Pending frozen candidate, final gates, and both Critical reviews.
+The product candidate is frozen at
+`01bddcfce741ff7cc64df1527b84654483f5c0d9`. The evidence-only packet close
+commit does not alter the reviewed product bytes.
+
+Implemented proof:
+
+- Canonical language and normalization profiles advance from v1 to v2 through
+  their shared source-of-truth constants. v0-experimental and v1 remain
+  supported with their original normalization meanings.
+- Resolve match authority is strict canonical data and survives normalization,
+  compiler type checking, query-catalog projection, pinned-artifact parsing,
+  and generic PostgreSQL execution. The interpreter has no field-name,
+  uniqueness, caller, or module-specific authority inference.
+- The generic runtime returns `exact` only for one identifier match with no
+  advisory match. One or many advisory matches return `ambiguous`; multiple
+  identifier matches return `ambiguous`; no declared-key match returns
+  `not-found`. The PostgreSQL journey also proves forced-RLS cross-tenant
+  not-found and that a selected but undeclared text field is not matched.
+- An authority-less v2 resolve fails compilation with the stable typed
+  `COMPILER_RESOLVE_MATCH_AUTHORITY_REQUIRED` diagnostic. Runtime registration
+  and provider execution independently fail closed on absent or malformed
+  authority metadata.
+- Get, list, and search retain their existing generic paths. No Party or other
+  module code is present.
+
+Named consequences:
+
+1. **Canonical-v2 golden bridge:** all affected values were regenerated from
+   real compiler output and reproduced by two determinism runs. The resulting
+   G1 roots are bootstrap
+   `68ab5ef2235ebcda45623d72aaad12aef50f5cca92ad932b0abf80a981df2b3a`,
+   vertical v1
+   `2c2945947ca5f18224935a8f7e1ad3e1e95c875c193967d6d136caad77188993`,
+   vertical v2
+   `06efa88bb1d6adb4173b23544bcb2ba5e4a3b304603c4ab8bda04788b05a8c74`,
+   and v1-to-v2 diff
+   `dd5519ec94ec6400023349a0b01ca9bf59900faa7f23933030e945839cc69826`.
+   The G2 release roots are
+   `53595e9377d66e362876acb36ca793c91a748bac108c013211bddf9afcd66ece`
+   and
+   `6b9c88ea1d860518035326fbe319f1952c9e69353c826860c22851e2c316c1d8`.
+   Storage-manifest, chunk, and transition-envelope-v1 goldens did not move.
+2. **Compiler fixture version consequence:** storage-transition definition
+   nodes now consume the current canonical version constant; their frozen ABI
+   assertions are unchanged.
+3. **Consumer-suite version consequence:** only stale canonical-version
+   literals moved in the integration gateway fixture, materializer backfill
+   fixture, and unsupported-version negative. No behavior assertion was
+   removed or weakened.
+
+Frozen-candidate gates:
+
+| Gate | Result |
+|---|---|
+| `corepack pnpm typecheck` | PASS |
+| `corepack pnpm check:boundaries` | PASS — 88 production files |
+| `corepack pnpm format` | PASS |
+| `corepack pnpm test:compiler` | PASS — 46/46 |
+| Determinism, Freeze-B, goldens, and focused G2 compiler suite, run twice | PASS — 45/45 both runs; fresh-process determinism executed |
+| `corepack pnpm test:unit` | PASS — 18/18 |
+| `corepack pnpm test:integration` | PASS — 38/38 |
+| `node --import tsx --test test/postgres/module-runtime.test.ts` | PASS — 2/2 top-level journeys |
+| `corepack pnpm test:postgres` | PASS — 58/58 |
+| `corepack pnpm test:architecture` | PASS — 41/41 |
+| `corepack pnpm check:schema` | PASS — 8/8, clean drift |
+| `git diff --check` | PASS |
+
+Critical review chain on the identical frozen candidate:
+
+- Fresh naive Codex `gpt-5.6-sol` xhigh: **PASS** on all five charter
+  questions; no actionable findings.
+- Fable max: **PASS** on all five charter questions; no actionable in-scope
+  findings. It independently confirmed explicit authority through every layer,
+  advisory-never-auto-select semantics, complete v1-to-v2 versioning, the
+  stable compiler diagnostic, and zero module-specific serving code.
 
 ## Test it yourself
 
-After the candidate is frozen, from the repository root:
+From the repository root:
 
 ```bash
 cd /home/rvham/2rain-greenfield
