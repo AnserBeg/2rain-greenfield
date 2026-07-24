@@ -22,6 +22,13 @@ const fieldIds = {
   parentName: `${namespace}:field.master_name`,
   parentNumber: `${namespace}:field.master_number`,
   parentNotes: `${namespace}:field.master_notes`,
+  parentTier: `${namespace}:field.master_tier`,
+} as const;
+const optionIds = {
+  buyer: `${namespace}:option.buyer`,
+  owner: `${namespace}:option.owner`,
+  premium: `${namespace}:option.premium`,
+  standard: `${namespace}:option.standard`,
 } as const;
 
 const moduleId = `${namespace}:module.master`;
@@ -139,8 +146,23 @@ export function ordinaryModuleV1(): Record<string, unknown> {
         entity: reference('entityReference', entityIds.child),
         fieldId: fieldIds.childRole,
         fieldType: {
-          kind: 'textFieldType',
-          maximumLength: 40,
+          kind: 'enumFieldType',
+          options: [
+            {
+              kind: 'enumOption',
+              label: 'Owner',
+              optionId: optionIds.owner,
+              orderKey: 10,
+              schemaVersion: version,
+            },
+            {
+              kind: 'enumOption',
+              label: 'Buyer',
+              optionId: optionIds.buyer,
+              orderKey: 20,
+              schemaVersion: version,
+            },
+          ],
           schemaVersion: version,
         },
         kind: 'fieldDefinition',
@@ -244,6 +266,40 @@ export function ordinaryModuleV2(): Record<string, unknown> {
     schemaVersion: version,
     searchable: false,
   });
+  definition.fields.push({
+    classification: 'internal',
+    collation: 'binary',
+    defaultSemantics: 'nullable',
+    entity: reference('entityReference', entityIds.parent),
+    fieldId: fieldIds.parentTier,
+    fieldType: {
+      kind: 'enumFieldType',
+      options: [
+        {
+          kind: 'enumOption',
+          label: 'Standard',
+          optionId: optionIds.standard,
+          orderKey: 10,
+          schemaVersion: version,
+        },
+        {
+          kind: 'enumOption',
+          label: 'Premium',
+          optionId: optionIds.premium,
+          orderKey: 20,
+          schemaVersion: version,
+        },
+      ],
+      schemaVersion: version,
+    },
+    kind: 'fieldDefinition',
+    label: 'Tier',
+    orderKey: 40,
+    presence: 'optional',
+    reportable: true,
+    schemaVersion: version,
+    searchable: false,
+  });
   for (const query of definition.queries.filter((entry) =>
     new RegExp(`^${namespace}:query\\.master_(get|list|search|resolve)$`).test(
       entry.queryId,
@@ -272,12 +328,25 @@ export function ordinaryModuleV1ForNamespace(
   >;
 }
 
+export function ordinaryModuleV2ForNamespace(
+  targetNamespace: string,
+): Record<string, unknown> {
+  if (!/^northstar\.[a-z][a-z0-9]*$/.test(targetNamespace)) {
+    throw new TypeError('fixture namespace must be canonical and lowercase');
+  }
+  return replaceNamespace(ordinaryModuleV2(), targetNamespace) as Record<
+    string,
+    unknown
+  >;
+}
+
 export const FIXTURE_IDS = Object.freeze({
   contentCapabilityId,
   entityIds,
   fieldIds,
   moduleId,
   namespace,
+  optionIds,
 });
 
 function entityQueries(

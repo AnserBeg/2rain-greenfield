@@ -283,6 +283,12 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
           generationId: string;
           tableName: string;
         } | null = null;
+        let obsoleteRoots: Array<{
+          columnName: string;
+          elementId: string;
+          generationId: string;
+          tableName: string;
+        }> = [];
         let obsoleteAttemptIds: string[] = [];
         let liveSetSiblingEvidence: {
           pausedAttemptId: string;
@@ -451,6 +457,50 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
                 125,
                 planted,
               );
+              const compiledStorage = projectionPayload<StorageTargetPayloadV1>(
+                compiled,
+                PROJECTION_FAMILY_IDS.storageTarget,
+              );
+              const parent = compiledStorage.entities.find(
+                (entity) => entity.entityId === FIXTURE_IDS.entityIds.parent,
+              );
+              assert.ok(parent);
+              const tierCheck = parent.checkConstraints.find(
+                (check) =>
+                  check.canonicalFieldId === FIXTURE_IDS.fieldIds.parentTier,
+              );
+              assert.ok(tierCheck);
+              const tierColumn = parent.columns.find(
+                (column) =>
+                  column.canonicalFieldId === FIXTURE_IDS.fieldIds.parentTier,
+              );
+              assert.ok(tierColumn);
+              const installedCheck = await pool.query<{
+                convalidated: boolean;
+              }>(
+                `SELECT constraint_record.convalidated
+                   FROM pg_catalog.pg_constraint AS constraint_record
+                   JOIN pg_catalog.pg_class AS relation_record
+                     ON relation_record.oid = constraint_record.conrelid
+                   JOIN pg_catalog.pg_namespace AS namespace_record
+                     ON namespace_record.oid = relation_record.relnamespace
+                  WHERE namespace_record.nspname = 'north_star_module'
+                    AND relation_record.relname = $1
+                    AND constraint_record.conname = $2`,
+                [parent.physicalTableName, tierCheck.physicalName],
+              );
+              assert.deepEqual(installedCheck.rows, [{ convalidated: false }]);
+              await assert.rejects(
+                pool.query(
+                  `UPDATE north_star_module.${quoteTestIdentifier(parent.physicalTableName)}
+                      SET ${quoteTestIdentifier(tierColumn.physicalName)} = $1
+                    WHERE record_id = $2`,
+                  ['not-a-declared-option', planted.recordIds[0]],
+                ),
+                (error: unknown) =>
+                  error instanceof Error &&
+                  (error as Error & { code?: string }).code === '23514',
+              );
             }
 
             {
@@ -554,9 +604,13 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
               );
               const evidence = await pool.query<{ count: string }>(
                 `SELECT count(*)::text AS count
-                   FROM north_star_internal.module_storage_element_applications
-                  WHERE generation_id = $1 AND attempt_id = $2
-                    AND application_state = 'APPLIED'`,
+                   FROM north_star_internal.module_storage_element_applications AS application
+                   JOIN north_star_internal.module_storage_elements AS element
+                     ON element.element_id = application.element_id
+                  WHERE application.generation_id = $1
+                    AND application.attempt_id = $2
+                    AND application.application_state = 'APPLIED'
+                    AND element.element_kind = 'backfill'`,
                 [scenario.generationId, scenario.attemptId],
               );
               assert.equal(evidence.rows[0]?.count, '1');
@@ -943,33 +997,38 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
                   AND generation.environment_id = $2
                   AND generation.target_release_id = $3
                   AND element.element_kind = 'addColumn'
-                ORDER BY generation.generation_number
-                LIMIT 1`,
+                ORDER BY generation.generation_number,
+                         element.physical_object_name`,
               [tenantA, environmentA, next.target],
             );
-            assert.ok(Number(accounted.rows[0]?.live_root_count) > 0);
-            const addedColumn = accounted.rows[0]?.physical_object_name;
-            assert.ok(addedColumn);
-            const containingTable = await pool.query<{ table_name: string }>(
-              `SELECT relation.relname AS table_name
-                 FROM pg_catalog.pg_attribute AS attribute
-                 JOIN pg_catalog.pg_class AS relation
-                   ON relation.oid = attribute.attrelid
-                 JOIN pg_catalog.pg_namespace AS namespace
-                   ON namespace.oid = relation.relnamespace
-                WHERE namespace.nspname = 'north_star_module'
-                  AND attribute.attname = $1
-                  AND attribute.attnum > 0
-                  AND NOT attribute.attisdropped`,
-              [addedColumn],
-            );
-            assert.equal(containingTable.rowCount, 1);
-            obsoleteRoot = {
-              columnName: addedColumn,
-              elementId: accounted.rows[0]!.element_id,
-              generationId: accounted.rows[0]!.generation_id,
-              tableName: containingTable.rows[0]!.table_name,
-            };
+            assert.ok(accounted.rows.length > 0);
+            obsoleteRoots = [];
+            for (const row of accounted.rows) {
+              assert.ok(Number(row.live_root_count) > 0);
+              const containingTable = await pool.query<{
+                table_name: string;
+              }>(
+                `SELECT relation.relname AS table_name
+                   FROM pg_catalog.pg_attribute AS attribute
+                   JOIN pg_catalog.pg_class AS relation
+                     ON relation.oid = attribute.attrelid
+                   JOIN pg_catalog.pg_namespace AS namespace
+                     ON namespace.oid = relation.relnamespace
+                  WHERE namespace.nspname = 'north_star_module'
+                    AND attribute.attname = $1
+                    AND attribute.attnum > 0
+                    AND NOT attribute.attisdropped`,
+                [row.physical_object_name],
+              );
+              assert.equal(containingTable.rowCount, 1);
+              obsoleteRoots.push({
+                columnName: row.physical_object_name,
+                elementId: row.element_id,
+                generationId: row.generation_id,
+                tableName: containingTable.rows[0]!.table_name,
+              });
+            }
+            obsoleteRoot = obsoleteRoots[0] ?? null;
 
             const attempts = await pool.query<{
               activation_attempt_id: string;
@@ -1356,6 +1415,7 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
           'live-set reconciliation rejects altered, surplus, unknown, and destructive objects',
           async () => {
             assert.ok(obsoleteRoot);
+            assert.ok(obsoleteRoots.length > 0);
             assert.ok(obsoleteAttemptIds.length > 0);
             assert.ok(liveSetSiblingEvidence);
             const liveSet = liveSetSiblingEvidence;
@@ -1442,10 +1502,12 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
               ],
             );
             assert.ok(Number(staleReference.rows[0]?.live_root_count) > 0);
-            await pool.query(
-              `ALTER TABLE north_star_module.${quoteTestIdentifier(obsoleteRoot.tableName)}
-                 DROP COLUMN ${quoteTestIdentifier(obsoleteRoot.columnName)}`,
-            );
+            for (const root of obsoleteRoots) {
+              await pool.query(
+                `ALTER TABLE north_star_module.${quoteTestIdentifier(root.tableName)}
+                   DROP COLUMN ${quoteTestIdentifier(root.columnName)}`,
+              );
+            }
             const verification = await materializer.verifyLiveCatalog(
               contexts.a,
             );

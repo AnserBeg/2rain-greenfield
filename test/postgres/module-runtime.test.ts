@@ -20,9 +20,13 @@ import {
   DEFAULT_COMPILER_LIMITS,
   MODULE_COMPILER_PROFILE,
   compileApplication,
+  executedVerificationResult,
   expectedActiveReleaseFrom,
+  PROJECTION_FAMILY_IDS,
+  validateExecutedVerificationPlan,
   type CompileSuccess,
   type CompilerInput,
+  type VerificationPlanPayloadV1,
 } from '../../packages/compiler/src/index.js';
 import type {
   MintedUuid,
@@ -67,8 +71,8 @@ import {
 import {
   FIXTURE_IDS,
   ordinaryModuleV1,
-  ordinaryModuleV1ForNamespace,
   ordinaryModuleV2,
+  ordinaryModuleV2ForNamespace,
 } from '../fixtures/g2/module-conformance/definitions.js';
 import { withEphemeralPostgres } from '../helpers/postgres.js';
 
@@ -330,7 +334,9 @@ test('definition-only module is served generically through Q0/O0, trust, RLS, an
             relations: {
               [`${FIXTURE_IDS.namespace}:relation.master_role_parent`]: soloId,
             },
-            values: { [FIXTURE_IDS.fieldIds.childRole]: 'owner' },
+            values: {
+              [FIXTURE_IDS.fieldIds.childRole]: FIXTURE_IDS.optionIds.owner,
+            },
           },
         );
         assert.equal(childCreated.readBack?.revision, 1);
@@ -338,7 +344,9 @@ test('definition-only module is served generically through Q0/O0, trust, RLS, an
           (
             await operation(operationGateway, viewA1, 'master_role_update', {
               expectedRevision: 1,
-              patch: { [FIXTURE_IDS.fieldIds.childRole]: 'buyer' },
+              patch: {
+                [FIXTURE_IDS.fieldIds.childRole]: FIXTURE_IDS.optionIds.buyer,
+              },
               recordId: childId,
             })
           ).readBack?.revision,
@@ -371,7 +379,9 @@ test('definition-only module is served generically through Q0/O0, trust, RLS, an
               [`${FIXTURE_IDS.namespace}:relation.master_role_parent`]:
                 tenantBId,
             },
-            values: { [FIXTURE_IDS.fieldIds.childRole]: 'forbidden' },
+            values: {
+              [FIXTURE_IDS.fieldIds.childRole]: FIXTURE_IDS.optionIds.owner,
+            },
           }),
           (error: unknown) => {
             assert.ok(error instanceof ModuleRuntimeInterpreterError);
@@ -439,10 +449,10 @@ test('definition-only module is served generically through Q0/O0, trust, RLS, an
   );
 });
 
-test('metamorphic random namespace compiles, materializes, serves, and records trust without module code', async () => {
+test('metamorphic random namespace executes the compiled declared-semantics contract without module code', async () => {
   const suffix = randomUUID().replaceAll('-', '').slice(0, 12);
   const namespace = `northstar.metamorphic${suffix}`;
-  const definition = ordinaryModuleV1ForNamespace(namespace);
+  const definition = ordinaryModuleV2ForNamespace(namespace);
   const empty = mustCompile(moduleInput(emptyDefinition(definition)));
   const compiled = mustCompile(
     moduleInput(definition, expectedActiveReleaseFrom(empty)),
@@ -507,6 +517,7 @@ test('metamorphic random namespace compiles, materializes, serves, and records t
             recordId,
             values: {
               [`${namespace}:field.master_name`]: 'Metamorphic',
+              [`${namespace}:field.master_notes`]: 'never-search-this-secret',
               [`${namespace}:field.master_number`]: 'M-001',
             },
           },
@@ -525,6 +536,302 @@ test('metamorphic random namespace compiles, materializes, serves, and records t
         assert.equal(read.records[0]?.recordId, recordId);
         assertNoPhysicalDetails(read);
         await assertLinkedTrustFacts(pool, result, tenant, environment);
+
+        assert.equal(
+          (
+            await query(
+              queries,
+              view,
+              'master_search',
+              { text: 'NEVER-SEARCH-THIS-SECRET' },
+              namespace,
+            )
+          ).records.length,
+          0,
+        );
+        assert.equal(
+          (
+            await query(
+              queries,
+              view,
+              'master_search',
+              { text: 'METAMORPHIC' },
+              namespace,
+            )
+          ).records.length,
+          1,
+        );
+        await assert.rejects(
+          operation(
+            operations,
+            view,
+            'master_create',
+            {
+              recordId: randomUUID(),
+              values: {
+                [`${namespace}:field.master_name`]: 'Fold duplicate',
+                [`${namespace}:field.master_number`]: 'm-001',
+              },
+            },
+            namespace,
+          ),
+          (error: unknown) =>
+            assertModuleError(
+              error,
+              'MODULE_UNIQUE_VIOLATION',
+              `${namespace}:field.master_number`,
+            ),
+        );
+        for (const [number, name] of [
+          ['Ｍ－１００', 'Fullwidth'],
+          ['M-100', 'ASCII'],
+        ] as const) {
+          await operation(
+            operations,
+            view,
+            'master_create',
+            {
+              recordId: randomUUID(),
+              values: {
+                [`${namespace}:field.master_name`]: name,
+                [`${namespace}:field.master_number`]: number,
+              },
+            },
+            namespace,
+          );
+        }
+        assert.equal(
+          (
+            await query(
+              queries,
+              view,
+              'master_resolve',
+              { text: 'M-001' },
+              namespace,
+            )
+          ).outcome,
+          'exact',
+        );
+
+        await assert.rejects(
+          operation(
+            operations,
+            view,
+            'master_update',
+            {
+              expectedRevision: 1,
+              patch: {
+                [`${namespace}:field.master_tier`]: `${namespace}:option.not-declared`,
+              },
+              recordId,
+            },
+            namespace,
+          ),
+          (error: unknown) =>
+            assertModuleError(
+              error,
+              'MODULE_ENUM_VALUE_INVALID',
+              `${namespace}:field.master_tier`,
+            ),
+        );
+        assert.equal(
+          (
+            await operation(
+              operations,
+              view,
+              'master_update',
+              {
+                expectedRevision: 1,
+                patch: {
+                  [`${namespace}:field.master_tier`]: `${namespace}:option.standard`,
+                },
+                recordId,
+              },
+              namespace,
+            )
+          ).readBack?.revision,
+          2,
+        );
+
+        await assert.rejects(
+          operation(
+            operations,
+            view,
+            'master_role_create',
+            {
+              recordId: randomUUID(),
+              relations: {
+                [`${namespace}:relation.master_role_parent`]: recordId,
+              },
+              values: {
+                [`${namespace}:field.master_role_kind`]: `${namespace}:option.not-declared`,
+              },
+            },
+            namespace,
+          ),
+          (error: unknown) =>
+            assertModuleError(
+              error,
+              'MODULE_ENUM_VALUE_INVALID',
+              `${namespace}:field.master_role_kind`,
+            ),
+        );
+        const childId = randomUUID();
+        await operation(
+          operations,
+          view,
+          'master_role_create',
+          {
+            recordId: childId,
+            relations: {
+              [`${namespace}:relation.master_role_parent`]: recordId,
+            },
+            values: {
+              [`${namespace}:field.master_role_kind`]: `${namespace}:option.owner`,
+            },
+          },
+          namespace,
+        );
+        await assert.rejects(
+          operation(
+            operations,
+            view,
+            'master_archive',
+            { expectedRevision: 2, recordId },
+            namespace,
+          ),
+          (error: unknown) =>
+            assertModuleError(
+              error,
+              'MODULE_ARCHIVE_RESTRICTED',
+              `${namespace}:relation.master_role_parent`,
+            ),
+        );
+        await operation(
+          operations,
+          view,
+          'master_role_archive',
+          { expectedRevision: 1, recordId: childId },
+          namespace,
+        );
+        await operation(
+          operations,
+          view,
+          'master_archive',
+          { expectedRevision: 2, recordId },
+          namespace,
+        );
+        await assert.rejects(
+          operation(
+            operations,
+            view,
+            'master_role_create',
+            {
+              recordId: randomUUID(),
+              relations: {
+                [`${namespace}:relation.master_role_parent`]: recordId,
+              },
+              values: {
+                [`${namespace}:field.master_role_kind`]: `${namespace}:option.owner`,
+              },
+            },
+            namespace,
+          ),
+          (error: unknown) =>
+            assertModuleError(
+              error,
+              'MODULE_RELATION_VIOLATION',
+              `${namespace}:relation.master_role_parent`,
+            ),
+        );
+        await assert.rejects(
+          operation(
+            operations,
+            view,
+            'master_role_restore',
+            { expectedRevision: 2, recordId: childId },
+            namespace,
+          ),
+          (error: unknown) =>
+            assertModuleError(
+              error,
+              'MODULE_RELATION_VIOLATION',
+              `${namespace}:relation.master_role_parent`,
+            ),
+        );
+        await operation(
+          operations,
+          view,
+          'master_restore',
+          { expectedRevision: 3, recordId },
+          namespace,
+        );
+        await operation(
+          operations,
+          view,
+          'master_role_restore',
+          { expectedRevision: 2, recordId: childId },
+          namespace,
+        );
+
+        const verificationPlan =
+          compiledProjectionPayload<VerificationPlanPayloadV1>(
+            compiled,
+            PROJECTION_FAMILY_IDS.verificationPlan,
+          );
+        assert.deepEqual(
+          new Set(verificationPlan.scenarios.map((scenario) => scenario.kind)),
+          new Set([
+            'archiveRestrict',
+            'declaredEvidence',
+            'enumReject',
+            'resolverAuthority',
+            'searchableExclusion',
+            'typedErrorSurface',
+            'uniquenessFold',
+          ]),
+        );
+        for (const entityId of [
+          `${namespace}:entity.master`,
+          `${namespace}:entity.master_role`,
+        ]) {
+          assert.deepEqual(
+            verificationPlan.scenarios
+              .filter(
+                (scenario) =>
+                  scenario.kind === 'declaredEvidence' &&
+                  scenario.entityId === entityId,
+              )
+              .map((scenario) => scenario.evidenceKind)
+              .sort(),
+            [
+              'agent',
+              'migration',
+              'provider',
+              'recovery',
+              'structure',
+              'userInterface',
+            ],
+          );
+        }
+        const results = verificationPlan.scenarios.map((scenario) =>
+          executedVerificationResult(scenario, {
+            negativeProbe:
+              scenario.probePolarity === 'positiveAndNegative'
+                ? { rejectedBySemanticGateway: true }
+                : undefined,
+            positiveProbe: {
+              linkedRealPostgresqlRun: 'module-metamorphic',
+              recoveryRoundTrip:
+                scenario.kind === 'declaredEvidence' &&
+                scenario.evidenceKind === 'recovery',
+            },
+          }),
+        );
+        assert.deepEqual(
+          validateExecutedVerificationPlan(verificationPlan, results),
+          { diagnostics: [], status: 'passed' },
+        );
       } finally {
         await Promise.all([
           runtimePool.end(),
@@ -1027,6 +1334,44 @@ function mustCompile(input: CompilerInput): CompileSuccess {
     throw new Error(JSON.stringify(result.diagnostics));
   }
   return result;
+}
+
+function compiledProjectionPayload<T>(
+  compiled: CompileSuccess,
+  familyId: string,
+): T {
+  const reference = compiled.bundle.releaseManifest.projections.find(
+    (candidate) => candidate.familyId === familyId,
+  );
+  assert.ok(reference);
+  const manifestArtifact = compiled.bundle.artifacts.find(
+    (artifact) => artifact.contentHash === reference.artifactRoot,
+  );
+  assert.ok(manifestArtifact);
+  const manifest = JSON.parse(
+    new TextDecoder().decode(manifestArtifact.canonicalBytes),
+  ) as { chunks: Array<{ contentHash: string }> };
+  const chunk = compiled.bundle.artifacts.find(
+    (artifact) => artifact.contentHash === manifest.chunks[0]?.contentHash,
+  );
+  assert.ok(chunk);
+  return JSON.parse(new TextDecoder().decode(chunk.canonicalBytes)) as T;
+}
+
+function assertModuleError(
+  error: unknown,
+  code: string,
+  subjectId: string,
+): true {
+  assert.ok(error instanceof ModuleRuntimeInterpreterError);
+  assert.equal(error.code, code);
+  assert.equal(error.subjectId, subjectId);
+  assertNoPhysicalDetails({
+    code: error.code,
+    message: error.message,
+    subjectId: error.subjectId,
+  });
+  return true;
 }
 
 async function runPersistedOrderingProbe(

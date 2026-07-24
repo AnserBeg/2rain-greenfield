@@ -23,6 +23,16 @@ export const POLICY_MODEL_VERSION =
   'northstar.policy-model/v0-experimental' as const;
 export const STORAGE_TARGET_PAYLOAD_VERSION =
   'northstar.storage-target-payload/v1' as const;
+export const MODULE_FIELD_CONTRACT_VERSION =
+  'northstar.module-field-contract/v1' as const;
+export const MODULE_INPUT_CONTRACT_VERSION =
+  'northstar.module-input-contract/v1' as const;
+export const VERIFICATION_PLAN_PAYLOAD_VERSION =
+  'northstar.verification-plan-payload/v1' as const;
+export const VERIFICATION_SCENARIO_VERSION =
+  'northstar.verification-scenario/v1' as const;
+export const VERIFICATION_RESULT_VERSION =
+  'northstar.verification-result/v1' as const;
 export const STORAGE_TRANSITION_ENVELOPE_VERSION =
   'northstar.storage-transition-envelope/v1' as const;
 export const STORAGE_ELEMENT_CONTRACT_VERSION =
@@ -55,6 +65,7 @@ export const HASH_DOMAINS = Object.freeze({
   releaseManifest: 'northstar.compiler.release-manifest/v0-experimental',
   semanticConstruct: 'northstar.compiler.semantic-construct/v0-experimental',
   storageTransitionElement: 'northstar.compiler.storage-transition-element/v1',
+  verificationScenario: 'northstar.compiler.verification-scenario/v1',
 } as const);
 
 export const PROJECTION_FAMILY_IDS = Object.freeze({

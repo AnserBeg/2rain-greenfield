@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 
-import { canonicalize, unicodeCaseFold } from '@north-star/canonical-model';
+import { canonicalize } from '@north-star/canonical-model';
 import {
   PROJECTION_FAMILY_IDS,
   STORAGE_TARGET_PAYLOAD_VERSION,
@@ -15,6 +15,7 @@ import type {
 import { POLICY_DECISION_EVIDENCE_VERSION } from '../../platform-runtime/src/trust/contracts.js';
 import type {
   RegisteredOperationDefinition,
+  RegisteredOperationInputContract,
   SemanticOperationExecutionRequest,
   SemanticOperationExecutor,
   SemanticOperationResultEnvelope,
@@ -79,6 +80,7 @@ export class ModuleRuntimeInterpreterError extends Error {
   constructor(
     readonly code: string,
     message: string,
+    readonly subjectId: string | null = null,
   ) {
     super(message);
   }
@@ -117,32 +119,44 @@ export class PostgresModuleRuntimeInterpreter
   async #executeQuery(
     request: SemanticQueryExecutionRequest,
   ): Promise<SemanticQueryResultEnvelope> {
-    return withTrustedRequestTransaction(
-      this.pool,
-      request.context,
-      async (client) => {
-        const storage = await loadPinnedStorageTarget(client, request);
-        return withModuleRuntimeRole(client, () =>
-          executeQueryOnClient(
-            client,
-            storage,
-            request.definition,
-            request.arguments,
-          ),
-        );
-      },
-    );
+    try {
+      return await withTrustedRequestTransaction(
+        this.pool,
+        request.context,
+        async (client) => {
+          const storage = await loadPinnedStorageTarget(client, request);
+          return withModuleRuntimeRole(client, () =>
+            executeQueryOnClient(
+              client,
+              storage,
+              request.definition,
+              request.arguments,
+            ),
+          );
+        },
+      );
+    } catch (error) {
+      throw providerBoundaryFailure(error, request.definition.sourceEntityId);
+    }
   }
 
   async #executeOperation(
     request: SemanticOperationExecutionRequest,
   ): Promise<SemanticOperationResultEnvelope> {
     const input = parseMutationInput(request.definition, request.input);
-    const storage = await withTrustedRequestTransaction(
-      this.pool,
-      request.context,
-      async (client) => loadPinnedStorageTarget(client, request),
-    );
+    let storage: StorageTargetPayloadV1;
+    try {
+      storage = await withTrustedRequestTransaction(
+        this.pool,
+        request.context,
+        async (client) => loadPinnedStorageTarget(client, request),
+      );
+    } catch (error) {
+      throw providerBoundaryFailure(
+        error,
+        request.definition.effect.entity.targetId,
+      );
+    }
     const entity = requiredEntity(
       storage,
       request.definition.effect.entity.targetId,
@@ -173,16 +187,24 @@ export class PostgresModuleRuntimeInterpreter
           currentStorage,
           request.definition.effect.entity.targetId,
         );
-        return withModuleRuntimeRole(client, () =>
-          executeMutationOnClient(
-            client,
-            currentStorage,
-            currentEntity,
-            request.definition,
-            input,
-            request.readBackDefinition.selections,
-          ),
-        );
+        return withModuleRuntimeRole(client, async () => {
+          try {
+            return await executeMutationOnClient(
+              client,
+              currentStorage,
+              currentEntity,
+              request.definition,
+              input,
+              request.readBackDefinition.selections,
+            );
+          } catch (error) {
+            throw translateModuleProviderError(
+              error,
+              currentStorage,
+              currentEntity.entityId,
+            );
+          }
+        });
       },
     );
     return Object.freeze({
@@ -218,14 +240,19 @@ async function prepareMutation(
       recordId: input.recordId,
     };
   }
-  const prior = await withTrustedRequestTransaction(
-    pool,
-    request.context,
-    async (client) =>
-      withModuleRuntimeRole(client, () =>
-        loadRawRecord(client, entity, input.recordId, true),
-      ),
-  );
+  let prior: RawRecord | null;
+  try {
+    prior = await withTrustedRequestTransaction(
+      pool,
+      request.context,
+      async (client) =>
+        withModuleRuntimeRole(client, () =>
+          loadRawRecord(client, entity, input.recordId, true),
+        ),
+    );
+  } catch (error) {
+    throw translateModuleProviderError(error, storage, entity.entityId);
+  }
   if (!prior) {
     throw failure('MODULE_RECORD_NOT_FOUND', 'module record was not found');
   }
@@ -321,10 +348,10 @@ async function executeMutationOnClient(
       await updateRecord(client, entity, input);
       break;
     case 'archiveRecordEffect':
-      await setArchiveState(client, entity, input, true);
+      await setArchiveState(client, storage, entity, input, true);
       break;
     case 'restoreRecordEffect':
-      await setArchiveState(client, entity, input, false);
+      await setArchiveState(client, storage, entity, input, false);
       break;
   }
   const record = await loadRawRecord(client, entity, input.recordId, true);
@@ -422,18 +449,29 @@ async function requireRelationTarget(
 ): Promise<void> {
   const target = requiredEntity(storage, relation.targetEntityId);
   const result = await client.query(
-    `SELECT 1
+    `SELECT ${quoted(target.archive.archivedAtColumn)} IS NULL AS active
        FROM north_star_module.${quoted(target.physicalTableName)}
       WHERE tenant_id = north_star_internal.trusted_tenant_id()
         AND environment_id = north_star_internal.trusted_environment_id()
         AND ${quoted(target.recordIdentity.column)} = $1
-      LIMIT 1`,
+      LIMIT 1
+      FOR SHARE`,
     [recordId],
   );
   if (result.rowCount !== 1) {
     throw failure(
       'MODULE_RELATION_TARGET_NOT_FOUND',
       'relation target was not found',
+    );
+  }
+  if (
+    relation.archiveBehavior === 'restrict' &&
+    result.rows[0]?.active !== true
+  ) {
+    throw failure(
+      'MODULE_RELATION_VIOLATION',
+      'relation target cannot accept active dependents',
+      relation.relationId,
     );
   }
 }
@@ -483,10 +521,17 @@ async function updateRecord(
 
 async function setArchiveState(
   client: PoolClient,
+  storage: StorageTargetPayloadV1,
   entity: StorageEntity,
   input: MutationInput,
   archive: boolean,
 ): Promise<void> {
+  await lockLifecycleRecord(client, entity, input.recordId);
+  if (archive) {
+    await assertNoActiveDependents(client, storage, entity, input.recordId);
+  } else {
+    await assertRestorableRelations(client, storage, entity, input.recordId);
+  }
   const values: unknown[] = [];
   const recordParameter = parameter(values, input.recordId);
   const revisionParameter = parameter(values, input.expectedRevision);
@@ -500,6 +545,85 @@ async function setArchiveState(
     values,
   );
   requireMutation(result.rowCount);
+}
+
+async function lockLifecycleRecord(
+  client: PoolClient,
+  entity: StorageEntity,
+  recordId: string,
+): Promise<void> {
+  await client.query(
+    `SELECT 1
+       FROM north_star_module.${quoted(entity.physicalTableName)}
+      WHERE ${quoted(entity.recordIdentity.column)} = $1
+      FOR NO KEY UPDATE`,
+    [recordId],
+  );
+}
+
+async function assertNoActiveDependents(
+  client: PoolClient,
+  storage: StorageTargetPayloadV1,
+  entity: StorageEntity,
+  recordId: string,
+): Promise<void> {
+  for (const relation of storage.relations.filter(
+    (entry) =>
+      entry.targetEntityId === entity.entityId &&
+      entry.archiveBehavior === 'restrict',
+  )) {
+    const source = requiredEntity(storage, relation.sourceEntityId);
+    const result = await client.query(
+      `SELECT 1
+         FROM north_star_module.${quoted(source.physicalTableName)}
+        WHERE ${quoted(relation.relationColumn.physicalName)} = $1
+          AND ${quoted(source.archive.archivedAtColumn)} IS NULL
+        LIMIT 1`,
+      [recordId],
+    );
+    if (result.rowCount === 1) {
+      throw failure(
+        'MODULE_ARCHIVE_RESTRICTED',
+        'record has active dependent records',
+        relation.relationId,
+      );
+    }
+  }
+}
+
+async function assertRestorableRelations(
+  client: PoolClient,
+  storage: StorageTargetPayloadV1,
+  entity: StorageEntity,
+  recordId: string,
+): Promise<void> {
+  for (const relation of storage.relations.filter(
+    (entry) =>
+      entry.sourceEntityId === entity.entityId &&
+      entry.archiveBehavior === 'restrict',
+  )) {
+    const target = requiredEntity(storage, relation.targetEntityId);
+    const result = await client.query(
+      `SELECT target.${quoted(target.archive.archivedAtColumn)} IS NULL AS active
+         FROM north_star_module.${quoted(entity.physicalTableName)} AS source
+         JOIN north_star_module.${quoted(target.physicalTableName)} AS target
+           ON target.tenant_id = source.tenant_id
+          AND target.environment_id = source.environment_id
+          AND target.${quoted(target.recordIdentity.column)} =
+              source.${quoted(relation.relationColumn.physicalName)}
+        WHERE source.${quoted(entity.recordIdentity.column)} = $1
+        LIMIT 1
+        FOR SHARE OF target`,
+      [recordId],
+    );
+    if (result.rows[0]?.active !== true) {
+      throw failure(
+        'MODULE_RELATION_VIOLATION',
+        'relation target cannot accept active dependents',
+        relation.relationId,
+      );
+    }
+  }
 }
 
 async function executeQueryOnClient(
@@ -638,18 +762,17 @@ async function matchRecords(
   const columns = entity.columns.filter(
     (column) =>
       selected.has(column.canonicalFieldId) &&
-      (column.searchMapping === 'normalizedTextIndex' ||
-        /^(?:text|character varying|varchar)/.test(column.postgresqlType)),
+      column.searchMapping === 'normalizedTextIndex',
   );
   if (columns.length === 0) return [];
   const values: unknown[] = [];
-  const textParameter = parameter(values, `%${text}%`);
+  const textParameter = parameter(values, text);
   const predicates = archivePredicate(entity, includeArchived);
   predicates.push(
     `(${columns
       .map(
         (column) =>
-          `lower(${quoted(column.physicalName)}::text) LIKE lower(${textParameter})`,
+          `north_star_module.${unicodeCaseFoldFunctionName}(${quoted(column.physicalName)}::text) LIKE ('%' || north_star_module.${unicodeCaseFoldFunctionName}(${textParameter}::text) || '%')`,
       )
       .join(' OR ')})`,
   );
@@ -747,13 +870,13 @@ async function exactFoldedMatches(
 ): Promise<RawRecord[]> {
   if (columns.length === 0) return [];
   const values: unknown[] = [];
-  const textParameter = parameter(values, unicodeCaseFold(text));
+  const textParameter = parameter(values, text);
   const predicates = archivePredicate(entity, includeArchived);
   predicates.push(
     `(${columns
       .map(
         (column) =>
-          `north_star_module.${unicodeCaseFoldFunctionName}(${quoted(column.physicalName)}::text) = ${textParameter}`,
+          `north_star_module.${unicodeCaseFoldFunctionName}(${quoted(column.physicalName)}::text) = north_star_module.${unicodeCaseFoldFunctionName}(${textParameter}::text)`,
       )
       .join(' OR ')})`,
   );
@@ -1064,31 +1187,232 @@ function parseMutationInput(
   const recordId = requiredUuid(input.recordId, 'recordId');
   switch (definition.effect.kind) {
     case 'createRecordEffect':
-      assertAllowedKeys(input, ['recordId', 'relations', 'values']);
-      return {
+      assertAllowedKeys(
+        input,
+        definition.inputContract?.closedArgumentKeys ?? [
+          'recordId',
+          'relations',
+          'values',
+        ],
+      );
+      return validateMutationInput(definition.inputContract, {
         expectedRevision: null,
         patch: immutableRecord(input.values, 'values'),
         recordId,
         relations: uuidRecord(input.relations, 'relations'),
-      };
+      });
     case 'updateRecordEffect':
-      assertAllowedKeys(input, ['expectedRevision', 'patch', 'recordId']);
-      return {
+      assertAllowedKeys(
+        input,
+        definition.inputContract?.closedArgumentKeys ?? [
+          'expectedRevision',
+          'patch',
+          'recordId',
+        ],
+      );
+      return validateMutationInput(definition.inputContract, {
         expectedRevision: requiredRevision(input.expectedRevision),
         patch: immutableRecord(input.patch, 'patch'),
         recordId,
         relations: Object.freeze({}),
-      };
+      });
     case 'archiveRecordEffect':
     case 'restoreRecordEffect':
-      assertAllowedKeys(input, ['expectedRevision', 'recordId']);
-      return {
+      assertAllowedKeys(
+        input,
+        definition.inputContract?.closedArgumentKeys ?? [
+          'expectedRevision',
+          'recordId',
+        ],
+      );
+      return validateMutationInput(definition.inputContract, {
         expectedRevision: requiredRevision(input.expectedRevision),
         patch: Object.freeze({}),
         recordId,
         relations: Object.freeze({}),
-      };
+      });
   }
+}
+
+function validateMutationInput(
+  contract: RegisteredOperationInputContract | undefined,
+  input: MutationInput,
+): MutationInput {
+  if (!contract) return input;
+  const fields = new Map(
+    contract.fields.map((field) => [field.fieldId, field] as const),
+  );
+  const writable = new Set(contract.writableFieldIds);
+  for (const [fieldId, value] of Object.entries(input.patch)) {
+    const field = fields.get(fieldId);
+    if (!field || !writable.has(fieldId) || !field.writable) {
+      throw failure(
+        'MODULE_FIELD_UNSUPPORTED',
+        'operation input contains a field outside its writable set',
+        fieldId,
+      );
+    }
+    validateFieldValue(field, value);
+  }
+  if (input.expectedRevision === null) {
+    for (const field of contract.fields) {
+      if (field.required && !Object.hasOwn(input.patch, field.fieldId)) {
+        throw failure(
+          'MODULE_REQUIRED_FIELD_MISSING',
+          'required operation input field is missing',
+          field.fieldId,
+        );
+      }
+    }
+  }
+  const relations = new Map(
+    contract.relationInputs.map(
+      (relation) => [relation.relationId, relation] as const,
+    ),
+  );
+  for (const relationId of Object.keys(input.relations)) {
+    if (!relations.has(relationId)) {
+      throw failure(
+        'MODULE_RELATION_UNSUPPORTED',
+        'operation input contains an unknown relation',
+        relationId,
+      );
+    }
+  }
+  for (const relation of contract.relationInputs) {
+    if (
+      relation.required &&
+      !Object.hasOwn(input.relations, relation.relationId)
+    ) {
+      throw failure(
+        'MODULE_REQUIRED_RELATION_MISSING',
+        'required operation input relation is missing',
+        relation.relationId,
+      );
+    }
+  }
+  return input;
+}
+
+function validateFieldValue(
+  field: RegisteredOperationInputContract['fields'][number],
+  value: ImmutableJsonValue,
+): void {
+  if (value === null) {
+    if (field.required) {
+      throw failure(
+        'MODULE_REQUIRED_FIELD_CLEAR_FORBIDDEN',
+        'required operation input field cannot be cleared',
+        field.fieldId,
+      );
+    }
+    return;
+  }
+  let valid = false;
+  switch (field.fieldKind) {
+    case 'booleanFieldType':
+      valid = typeof value === 'boolean';
+      break;
+    case 'textFieldType':
+      valid =
+        typeof value === 'string' &&
+        (field.bounds.maximumLength === null ||
+          [...value].length <= field.bounds.maximumLength);
+      break;
+    case 'enumFieldType':
+      valid = typeof value === 'string' && field.enumOptionIds.includes(value);
+      break;
+    case 'integerFieldType':
+      valid =
+        typeof value === 'string' && /^(?:0|-[1-9]\d*|[1-9]\d*)$/u.test(value);
+      break;
+    case 'exactDecimalFieldType':
+    case 'moneyFieldType':
+    case 'quantityFieldType':
+      valid =
+        typeof value === 'string' &&
+        decimalFits(value, field.bounds.precision, field.bounds.scale);
+      break;
+    case 'dateFieldType':
+      valid = typeof value === 'string' && isValidIsoDate(value);
+      break;
+    case 'timeFieldType':
+      valid = typeof value === 'string' && isValidIsoTime(value);
+      break;
+    case 'dateTimeFieldType':
+      valid = typeof value === 'string' && isValidIsoDateTime(value);
+      break;
+  }
+  if (!valid) {
+    throw failure(
+      field.fieldKind === 'enumFieldType'
+        ? 'MODULE_ENUM_VALUE_INVALID'
+        : 'MODULE_FIELD_VALUE_INVALID',
+      'operation input field violates its compiled value contract',
+      field.fieldId,
+    );
+  }
+}
+
+function decimalFits(
+  value: string,
+  precision: number | null,
+  scale: number | null,
+): boolean {
+  if (
+    precision === null ||
+    scale === null ||
+    !/^(?:0|-[1-9]\d*|[1-9]\d*)(?:\.\d*[1-9])?$/u.test(value)
+  ) {
+    return false;
+  }
+  const unsigned = value.startsWith('-') ? value.slice(1) : value;
+  const [integer, fraction = ''] = unsigned.split('.');
+  const integerDigits = integer === '0' ? 0 : integer!.length;
+  return (
+    fraction.length <= scale &&
+    Math.max(1, integerDigits + fraction.length) <= precision
+  );
+}
+
+function isValidIsoDate(value: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(value);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (month < 1 || month > 12 || day < 1) return false;
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return day <= days[month - 1]!;
+}
+
+function isValidIsoTime(value: string): boolean {
+  const match = /^(\d{2}):(\d{2}):(\d{2})(?:\.\d{3})?$/u.exec(value);
+  return (
+    match !== null &&
+    Number(match[1]) < 24 &&
+    Number(match[2]) < 60 &&
+    Number(match[3]) < 60
+  );
+}
+
+function isValidIsoDateTime(value: string): boolean {
+  const match =
+    /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2}(?:\.\d{3})?)(Z|[+-](\d{2}):(\d{2}))$/u.exec(
+      value,
+    );
+  if (!match || !isValidIsoDate(match[1]!) || !isValidIsoTime(match[2]!)) {
+    return false;
+  }
+  if (match[3] === 'Z') return true;
+  if (match[3] === '-00:00') return false;
+  const offsetHour = Number(match[4]);
+  const offsetMinute = Number(match[5]);
+  return (
+    offsetMinute < 60 &&
+    (offsetHour < 14 || (offsetHour === 14 && offsetMinute === 0))
+  );
 }
 
 function createChanges(
@@ -1307,7 +1631,7 @@ function requiredSearchText(value: ImmutableJsonValue | undefined): string {
   if (typeof value !== 'string' || value.trim() === '' || value.length > 240) {
     throw failure('MODULE_INPUT_MALFORMED', 'text must be non-blank');
   }
-  return value.normalize('NFKC');
+  return value;
 }
 
 function optionalUuid(
@@ -1357,6 +1681,90 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function failure(code: string, message: string): ModuleRuntimeInterpreterError {
-  return new ModuleRuntimeInterpreterError(code, message);
+export function translateModuleProviderError(
+  error: unknown,
+  storage: StorageTargetPayloadV1,
+  entityId: string,
+): ModuleRuntimeInterpreterError {
+  const entity = requiredEntity(storage, entityId);
+  if (error instanceof ModuleRuntimeInterpreterError) return error;
+  const code = providerErrorProperty(error, 'code');
+  const constraint = providerErrorProperty(error, 'constraint');
+  if (code === '23505') {
+    const unique = entity.uniqueKeys.find(
+      (candidate) => candidate.physicalName === constraint,
+    );
+    const subjectId = unique
+      ? canonicalConstraintSubject(storage, unique.physicalName)
+      : entity.entityId;
+    return failure(
+      'MODULE_UNIQUE_VIOLATION',
+      'module uniqueness contract rejected the value',
+      subjectId,
+    );
+  }
+  if (code === '23503') {
+    const relation = storage.relations.find(
+      (candidate) => candidate.foreignKey.physicalName === constraint,
+    );
+    return failure(
+      'MODULE_RELATION_VIOLATION',
+      'module relation contract rejected the value',
+      relation?.relationId ?? entity.entityId,
+    );
+  }
+  if (code && /^[0-9A-Z]{5}$/u.test(code)) {
+    return failure(
+      'MODULE_PROVIDER_FAILURE',
+      'module provider rejected the operation',
+      entity.entityId,
+    );
+  }
+  return failure(
+    'MODULE_PROVIDER_FAILURE',
+    'module provider rejected the operation',
+    entity.entityId,
+  );
+}
+
+function canonicalConstraintSubject(
+  storage: StorageTargetPayloadV1,
+  physicalName: string,
+): string {
+  const mapping = storage.physicalMapping.records.find(
+    (record) =>
+      record.objectKind === 'constraint' &&
+      record.physicalName === physicalName,
+  );
+  return mapping?.canonicalId.split('#')[0] ?? 'module:field.unknown';
+}
+
+function providerErrorProperty(
+  error: unknown,
+  property: 'code' | 'constraint',
+): string | null {
+  if (typeof error !== 'object' || error === null) return null;
+  const value = (error as Record<string, unknown>)[property];
+  return typeof value === 'string' ? value : null;
+}
+
+function providerBoundaryFailure(
+  error: unknown,
+  subjectId: string,
+): ModuleRuntimeInterpreterError {
+  return error instanceof ModuleRuntimeInterpreterError
+    ? error
+    : failure(
+        'MODULE_PROVIDER_FAILURE',
+        'module provider rejected the operation',
+        subjectId,
+      );
+}
+
+function failure(
+  code: string,
+  message: string,
+  subjectId: string | null = null,
+): ModuleRuntimeInterpreterError {
+  return new ModuleRuntimeInterpreterError(code, message, subjectId);
 }

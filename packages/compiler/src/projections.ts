@@ -10,10 +10,13 @@ import {
 } from './storage.js';
 import {
   HASH_DOMAINS,
+  MODULE_INPUT_CONTRACT_VERSION,
   OPERATIONS_AGENT_TOOL_IDS,
   POLICY_MODEL_VERSION,
   PROJECTION_FAMILY_IDS,
   STORAGE_TARGET_PAYLOAD_VERSION,
+  VERIFICATION_PLAN_PAYLOAD_VERSION,
+  VERIFICATION_SCENARIO_VERSION,
   type LogicalScope,
   type ProjectionFamilyId,
   type RuntimeCapabilityRequirement,
@@ -47,8 +50,7 @@ const payloadSchemaVersions: Record<
     'northstar.storage-target-payload/v0-provisional',
   [PROJECTION_FAMILY_IDS.surfaceManifest]:
     'northstar.surface-manifest-payload/v0-provisional',
-  [PROJECTION_FAMILY_IDS.verificationPlan]:
-    'northstar.verification-plan-payload/v0-provisional',
+  [PROJECTION_FAMILY_IDS.verificationPlan]: VERIFICATION_PLAN_PAYLOAD_VERSION,
 };
 
 const runtimeCapabilities: Record<
@@ -365,6 +367,16 @@ function queryCatalogPayload(
 function operationCatalogPayload(
   packageRevision: NormalizedApplicationPackage,
 ): unknown {
+  const fieldsByEntity = groupBy(
+    packageRevision.fields.filter((field) => field.lifecycle === 'active'),
+    (field) => field.entity.targetId,
+  );
+  const relationsByEntity = groupBy(
+    packageRevision.relations.filter(
+      (relation) => relation.lifecycle === 'active',
+    ),
+    (relation) => relation.sourceEntity.targetId,
+  );
   return {
     kind: 'operationCatalogPayload',
     operations: packageRevision.operations.map((operation) => ({
@@ -378,6 +390,16 @@ function operationCatalogPayload(
       tier: operation.tier,
       ...(packageRevision.languageVersion === LANGUAGE_VERSION
         ? {
+            inputContract: operationInputContract(
+              operation,
+              'entity' in operation.effect
+                ? (fieldsByEntity.get(operation.effect.entity.targetId) ?? [])
+                : [],
+              'entity' in operation.effect
+                ? (relationsByEntity.get(operation.effect.entity.targetId) ??
+                    [])
+                : [],
+            ),
             infrastructure: {
               archiveRepresentation: 'nullableArchivedAt',
               optimisticRevision: 'compareAndIncrement',
@@ -491,18 +513,203 @@ function agentDiscoveryPayload(
 function verificationPlanPayload(
   packageRevision: NormalizedApplicationPackage,
 ): unknown {
+  const queryById = new Map(
+    packageRevision.queries.map((query) => [query.queryId, query] as const),
+  );
+  const operationById = new Map(
+    packageRevision.operations.map(
+      (operation) => [operation.operationId, operation] as const,
+    ),
+  );
+  const scenarios: Array<Record<string, unknown>> = [];
+  const addScenario = (scenario: Record<string, unknown>) => {
+    const scenarioFingerprint = hashCanonical(
+      HASH_DOMAINS.verificationScenario,
+      scenario,
+    ).digest;
+    scenarios.push({
+      ...scenario,
+      scenarioFingerprint,
+      scenarioId: `${packageRevision.package.namespace}:verification-scenario.${scenarioFingerprint}`,
+      schemaVersion: VERIFICATION_SCENARIO_VERSION,
+    });
+  };
+  for (const assertion of packageRevision.assertions.filter(
+    (entry) => entry.lifecycle === 'active',
+  )) {
+    const entityId =
+      assertion.invocation.kind === 'queryInvocation'
+        ? queryById.get(assertion.invocation.query.targetId)?.sourceEntity
+            .targetId
+        : (() => {
+            const operation = operationById.get(
+              assertion.invocation.operation.targetId,
+            );
+            return operation && 'entity' in operation.effect
+              ? operation.effect.entity.targetId
+              : undefined;
+          })();
+    if (!entityId) continue;
+    for (const evidenceKind of assertion.evidenceKinds) {
+      addScenario({
+        assertionId: assertion.assertionId,
+        entityId,
+        evidenceKind,
+        expectedDiagnosticCode: assertion.expectedDiagnosticCode,
+        expectedOutcome: assertion.expectedOutcome,
+        invocation: assertion.invocation,
+        kind: 'declaredEvidence',
+        probePolarity: 'declaredOutcome',
+        provider: 'realPostgresql',
+        subjectId: entityId,
+      });
+    }
+  }
+  for (const field of packageRevision.fields.filter(
+    (entry) => entry.lifecycle === 'active',
+  )) {
+    if (field.fieldType.kind === 'enumFieldType') {
+      addScenario({
+        entityId: field.entity.targetId,
+        kind: 'enumReject',
+        probePolarity: 'positiveAndNegative',
+        provider: 'realPostgresql',
+        subjectId: field.fieldId,
+      });
+    }
+    if (!field.searchable) {
+      addScenario({
+        entityId: field.entity.targetId,
+        kind: 'searchableExclusion',
+        probePolarity: 'positiveAndNegative',
+        provider: 'realPostgresql',
+        subjectId: field.fieldId,
+      });
+    }
+    if (field.businessKey === 'tenantEnvironmentCaseInsensitiveUnique') {
+      addScenario({
+        entityId: field.entity.targetId,
+        kind: 'uniquenessFold',
+        nfkcPolicy: 'preserveCompatibilityDistinctions',
+        probePolarity: 'positiveAndNegative',
+        provider: 'realPostgresql',
+        subjectId: field.fieldId,
+      });
+    }
+  }
+  for (const relation of packageRevision.relations.filter(
+    (entry) =>
+      entry.lifecycle === 'active' && entry.archiveBehavior === 'restrict',
+  )) {
+    addScenario({
+      entityId: relation.sourceEntity.targetId,
+      kind: 'archiveRestrict',
+      probePolarity: 'positiveAndNegative',
+      provider: 'realPostgresql',
+      subjectId: relation.relationId,
+      targetEntityId: relation.targetEntity.targetId,
+    });
+  }
+  for (const query of packageRevision.queries.filter(
+    (entry) => entry.lifecycle === 'active' && entry.queryType === 'resolve',
+  )) {
+    addScenario({
+      entityId: query.sourceEntity.targetId,
+      kind: 'resolverAuthority',
+      probePolarity: 'positiveAndNegative',
+      provider: 'realPostgresql',
+      subjectId: query.queryId,
+    });
+  }
+  for (const entity of packageRevision.entities.filter(
+    (entry) => entry.lifecycle === 'active',
+  )) {
+    addScenario({
+      entityId: entity.entityId,
+      kind: 'typedErrorSurface',
+      probePolarity: 'positiveAndNegative',
+      provider: 'realPostgresql',
+      subjectId: entity.entityId,
+    });
+  }
+  scenarios.sort((left, right) =>
+    compare(String(left.scenarioId), String(right.scenarioId)),
+  );
   return {
-    assertions: packageRevision.assertions.map((assertion) => ({
-      assertionId: assertion.assertionId,
-      evidenceKinds: assertion.evidenceKinds,
-      expectedDiagnosticCode: assertion.expectedDiagnosticCode,
-      expectedOutcome: assertion.expectedOutcome,
-      invocation: assertion.invocation,
-    })),
     kind: 'verificationPlanPayload',
+    scenarios,
     schemaVersion:
       payloadSchemaVersions[PROJECTION_FAMILY_IDS.verificationPlan],
   };
+}
+
+function operationInputContract(
+  operation: NormalizedApplicationPackage['operations'][number],
+  fields: NormalizedApplicationPackage['fields'],
+  relations: NormalizedApplicationPackage['relations'],
+): unknown {
+  const effectKind = operation.effect.kind;
+  const writesFields =
+    effectKind === 'createRecordEffect' || effectKind === 'updateRecordEffect';
+  return {
+    closedArgumentKeys:
+      effectKind === 'createRecordEffect'
+        ? ['recordId', 'relations', 'values']
+        : effectKind === 'updateRecordEffect'
+          ? ['expectedRevision', 'patch', 'recordId']
+          : ['expectedRevision', 'recordId'],
+    fields: writesFields
+      ? fields.map((field) => ({
+          bounds: {
+            maximumLength:
+              field.fieldType.kind === 'textFieldType'
+                ? field.fieldType.maximumLength
+                : null,
+            precision:
+              'precision' in field.fieldType ? field.fieldType.precision : null,
+            scale: 'scale' in field.fieldType ? field.fieldType.scale : null,
+          },
+          enumOptionIds:
+            field.fieldType.kind === 'enumFieldType'
+              ? field.fieldType.options.map((option) => option.optionId)
+              : [],
+          fieldId: field.fieldId,
+          fieldKind: field.fieldType.kind,
+          normalization:
+            field.businessKey === 'tenantEnvironmentCaseInsensitiveUnique'
+              ? 'unicodeCaseFoldNoCompatibilityNormalization'
+              : 'none',
+          required: field.presence === 'required',
+          writable: true,
+        }))
+      : [],
+    relationInputs:
+      effectKind === 'createRecordEffect'
+        ? relations.map((relation) => ({
+            archiveBehavior: relation.archiveBehavior,
+            relationId: relation.relationId,
+            required: relation.required,
+          }))
+        : [],
+    schemaVersion: MODULE_INPUT_CONTRACT_VERSION,
+    writableFieldIds: writesFields
+      ? fields.map((field) => field.fieldId).sort(compare)
+      : [],
+  };
+}
+
+function groupBy<T>(
+  values: readonly T[],
+  key: (value: T) => string,
+): Map<string, T[]> {
+  const grouped = new Map<string, T[]>();
+  for (const value of values) {
+    const identity = key(value);
+    const entries = grouped.get(identity) ?? [];
+    entries.push(value);
+    grouped.set(identity, entries);
+  }
+  return grouped;
 }
 
 function addFamily<T extends Record<string, unknown>>(

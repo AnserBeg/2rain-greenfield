@@ -6,9 +6,15 @@ import type { Pool } from 'pg';
 
 import {
   PROJECTION_FAMILY_IDS,
+  executedVerificationResult,
+  validateExecutedVerificationPlan,
   type StorageTargetPayloadV1,
+  type VerificationPlanPayloadV1,
 } from '../../packages/compiler/src/index.js';
-import { ModuleRuntimeInterpreterError } from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
+import {
+  ModuleRuntimeInterpreterError,
+  translateModuleProviderError,
+} from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
 import { PARTY_IDS } from '../fixtures/g2/party/definition.js';
 import { projectionPayload } from '../fixtures/g2/party/compiler.js';
 import {
@@ -19,7 +25,7 @@ import {
 } from '../fixtures/g2/party/runtime-harness.js';
 import { resolvePartyName } from '../fixtures/g2/party/resolver-harness.js';
 
-test('Party walking slice reaches real PostgreSQL with trust, lifecycle, resolver and tenant invariants', async () => {
+test('Party executes the compiled declared-semantics contract on real PostgreSQL', async () => {
   await withRealPartyRuntime('party-walking-slice', async (runtime) => {
     const partyId = randomUUID();
     const hiddenPartyId = randomUUID();
@@ -72,9 +78,14 @@ test('Party walking slice reaches real PostgreSQL with trust, lifecycle, resolve
     await assert.rejects(
       invokePartyOperation(runtime, runtime.views.a, 'party_create', {
         recordId: randomUUID(),
-        values: partyValues('P-001', 'Duplicate number', ''),
+        values: partyValues('p-001', 'Duplicate number', ''),
       }),
-      /duplicate key|unique constraint/i,
+      (error: unknown) =>
+        assertTypedError(
+          error,
+          'MODULE_UNIQUE_VIOLATION',
+          PARTY_IDS.fieldIds.number,
+        ),
     );
     assert.equal(await trustCount(runtime.adminPool), trustBeforeDuplicate);
     await assert.rejects(
@@ -84,9 +95,58 @@ test('Party walking slice reaches real PostgreSQL with trust, lifecycle, resolve
           [PARTY_IDS.fieldIds.number]: 'P-MISSING-NAME',
         },
       }),
-      /required field .*party_name.* is missing/i,
+      (error: unknown) =>
+        assertTypedError(
+          error,
+          'MODULE_REQUIRED_FIELD_MISSING',
+          PARTY_IDS.fieldIds.name,
+        ),
+    );
+    await assert.rejects(
+      invokePartyOperation(runtime, runtime.views.a, 'party_create', {
+        recordId: randomUUID(),
+        unexpected: true,
+        values: partyValues('P-UNKNOWN-INPUT', 'Unknown input', ''),
+      }),
+      (error: unknown) => {
+        assert.ok(error instanceof ModuleRuntimeInterpreterError);
+        assert.equal(error.code, 'MODULE_INPUT_MALFORMED');
+        assert.equal(error.subjectId, null);
+        assertNoPhysicalDetails(error);
+        return true;
+      },
+    );
+    await assert.rejects(
+      invokePartyOperation(runtime, runtime.views.a, 'party_create', {
+        recordId: randomUUID(),
+        values: partyValues('P-BOUND', 'x'.repeat(241), ''),
+      }),
+      (error: unknown) =>
+        assertTypedError(
+          error,
+          'MODULE_FIELD_VALUE_INVALID',
+          PARTY_IDS.fieldIds.name,
+        ),
     );
     assert.equal(await trustCount(runtime.adminPool), trustBeforeDuplicate);
+
+    const compatibilityDistinctIds = [randomUUID(), randomUUID()] as const;
+    await invokePartyOperation(runtime, runtime.views.a, 'party_create', {
+      recordId: compatibilityDistinctIds[0],
+      values: partyValues('Ｐ－１００', 'Fullwidth identifier', ''),
+    });
+    await invokePartyOperation(runtime, runtime.views.a, 'party_create', {
+      recordId: compatibilityDistinctIds[1],
+      values: partyValues('P-100', 'ASCII identifier', ''),
+    });
+    assert.equal(
+      (await resolvePartyName(runtime, runtime.views.a, 'Ｐ－１００')).outcome,
+      'exact',
+    );
+    assert.equal(
+      (await resolvePartyName(runtime, runtime.views.a, 'P-100')).outcome,
+      'exact',
+    );
 
     assert.equal(
       (await resolvePartyName(runtime, runtime.views.a, 'P-001')).outcome,
@@ -131,6 +191,111 @@ test('Party walking slice reaches real PostgreSQL with trust, lifecycle, resolve
       false,
     );
     assertNoPhysicalDetails(tenantAList);
+    const confidentialSearch = await invokePartyQuery(
+      runtime,
+      runtime.views.a,
+      'party_search',
+      { text: 'secret@example.test' },
+    );
+    assert.equal(confidentialSearch.records.length, 0);
+    const publicSearch = await invokePartyQuery(
+      runtime,
+      runtime.views.a,
+      'party_search',
+      { text: 'NORTHWIND' },
+    );
+    assert.equal(
+      publicSearch.records.some((record) => record.recordId === partyId),
+      true,
+    );
+
+    const trustBeforeInvalidEnum = await trustCount(runtime.adminPool);
+    await assert.rejects(
+      invokePartyOperation(runtime, runtime.views.a, 'party_role_create', {
+        recordId: randomUUID(),
+        relations: { [PARTY_IDS.relationIds.roleParty]: partyId },
+        values: {
+          [PARTY_IDS.fieldIds.roleKind]:
+            `${PARTY_IDS.namespace}:option.not-declared`,
+          [PARTY_IDS.fieldIds.roleStatus]:
+            `${PARTY_IDS.namespace}:option.active`,
+        },
+      }),
+      (error: unknown) =>
+        assertTypedError(
+          error,
+          'MODULE_ENUM_VALUE_INVALID',
+          PARTY_IDS.fieldIds.roleKind,
+        ),
+    );
+    await assert.rejects(
+      invokePartyOperation(runtime, runtime.views.a, 'party_role_create', {
+        recordId: randomUUID(),
+        relations: { [PARTY_IDS.relationIds.roleParty]: partyId },
+        values: {
+          [PARTY_IDS.fieldIds.roleKind]:
+            `${PARTY_IDS.namespace}:option.supplier`,
+          [PARTY_IDS.fieldIds.roleStatus]:
+            `${PARTY_IDS.namespace}:option.not-declared`,
+        },
+      }),
+      (error: unknown) =>
+        assertTypedError(
+          error,
+          'MODULE_ENUM_VALUE_INVALID',
+          PARTY_IDS.fieldIds.roleStatus,
+        ),
+    );
+    assert.equal(await trustCount(runtime.adminPool), trustBeforeInvalidEnum);
+    await assertProviderRejectsInvalidEnum(
+      runtime.adminPool,
+      runtime.storage,
+      partyId,
+    );
+
+    const racingPartyId = randomUUID();
+    await invokePartyOperation(runtime, runtime.views.a, 'party_create', {
+      recordId: racingPartyId,
+      values: partyValues('P-RACE', 'Archive race', ''),
+    });
+    const archiveCreateRace = await Promise.allSettled([
+      invokePartyOperation(runtime, runtime.views.a, 'party_archive', {
+        expectedRevision: 1,
+        recordId: racingPartyId,
+      }),
+      invokePartyOperation(runtime, runtime.views.a, 'party_role_create', {
+        recordId: randomUUID(),
+        relations: {
+          [PARTY_IDS.relationIds.roleParty]: racingPartyId,
+        },
+        values: {
+          [PARTY_IDS.fieldIds.roleKind]:
+            `${PARTY_IDS.namespace}:option.supplier`,
+          [PARTY_IDS.fieldIds.roleStatus]:
+            `${PARTY_IDS.namespace}:option.active`,
+        },
+      }),
+    ]);
+    assert.equal(
+      archiveCreateRace.filter((result) => result.status === 'fulfilled')
+        .length,
+      1,
+    );
+    const rejectedRace = archiveCreateRace.find(
+      (result): result is PromiseRejectedResult => result.status === 'rejected',
+    );
+    assert.ok(rejectedRace);
+    assert.ok(rejectedRace.reason instanceof ModuleRuntimeInterpreterError);
+    assert.ok(
+      ['MODULE_ARCHIVE_RESTRICTED', 'MODULE_RELATION_VIOLATION'].includes(
+        rejectedRace.reason.code,
+      ),
+    );
+    assert.equal(
+      rejectedRace.reason.subjectId,
+      PARTY_IDS.relationIds.roleParty,
+    );
+    assertNoPhysicalDetails(rejectedRace.reason);
 
     const supplierRoleId = randomUUID();
     const customerRoleId = randomUUID();
@@ -199,6 +364,19 @@ test('Party walking slice reaches real PostgreSQL with trust, lifecycle, resolve
     );
     assert.equal(restoredRole.readBack?.archived, false);
 
+    await assert.rejects(
+      invokePartyOperation(runtime, runtime.views.a, 'party_archive', {
+        expectedRevision: 1,
+        recordId: partyId,
+      }),
+      (error: unknown) =>
+        assertTypedError(
+          error,
+          'MODULE_ARCHIVE_RESTRICTED',
+          PARTY_IDS.relationIds.roleParty,
+        ),
+    );
+
     const trustBeforeCrossTenant = await trustCount(runtime.adminPool);
     for (const targetId of [hiddenPartyId, randomUUID()]) {
       await assert.rejects(
@@ -240,6 +418,14 @@ test('Party walking slice reaches real PostgreSQL with trust, lifecycle, resolve
       },
     );
     assert.equal(updated.readBack?.revision, 2);
+    await invokePartyOperation(runtime, runtime.views.a, 'party_role_archive', {
+      expectedRevision: 4,
+      recordId: supplierRoleId,
+    });
+    await invokePartyOperation(runtime, runtime.views.a, 'party_role_archive', {
+      expectedRevision: 1,
+      recordId: customerRoleId,
+    });
     const archived = await invokePartyOperation(
       runtime,
       runtime.views.a,
@@ -247,6 +433,36 @@ test('Party walking slice reaches real PostgreSQL with trust, lifecycle, resolve
       { expectedRevision: 2, recordId: partyId },
     );
     assert.equal(archived.readBack?.archived, true);
+    await assert.rejects(
+      invokePartyOperation(runtime, runtime.views.a, 'party_role_create', {
+        recordId: randomUUID(),
+        relations: { [PARTY_IDS.relationIds.roleParty]: partyId },
+        values: {
+          [PARTY_IDS.fieldIds.roleKind]:
+            `${PARTY_IDS.namespace}:option.supplier`,
+          [PARTY_IDS.fieldIds.roleStatus]:
+            `${PARTY_IDS.namespace}:option.active`,
+        },
+      }),
+      (error: unknown) =>
+        assertTypedError(
+          error,
+          'MODULE_RELATION_VIOLATION',
+          PARTY_IDS.relationIds.roleParty,
+        ),
+    );
+    await assert.rejects(
+      invokePartyOperation(runtime, runtime.views.a, 'party_role_restore', {
+        expectedRevision: 5,
+        recordId: supplierRoleId,
+      }),
+      (error: unknown) =>
+        assertTypedError(
+          error,
+          'MODULE_RELATION_VIOLATION',
+          PARTY_IDS.relationIds.roleParty,
+        ),
+    );
     assert.equal(
       (
         await invokePartyQuery(runtime, runtime.views.a, 'party_get', {
@@ -278,6 +494,17 @@ test('Party walking slice reaches real PostgreSQL with trust, lifecycle, resolve
       { expectedRevision: 3, recordId: partyId },
     );
     assert.equal(restored.readBack?.archived, false);
+    assert.equal(
+      (
+        await invokePartyOperation(
+          runtime,
+          runtime.views.a,
+          'party_role_restore',
+          { expectedRevision: 5, recordId: supplierRoleId },
+        )
+      ).readBack?.archived,
+      false,
+    );
 
     const queryDto = (
       await invokePartyQuery(runtime, runtime.views.a, 'party_get', {
@@ -302,6 +529,61 @@ test('Party walking slice reaches real PostgreSQL with trust, lifecycle, resolve
       })
     ).records[0];
     assert.deepEqual(agentDto, queryDto);
+
+    const verificationPlan = projectionPayload<VerificationPlanPayloadV1>(
+      runtime.compiled,
+      PROJECTION_FAMILY_IDS.verificationPlan,
+    );
+    assert.deepEqual(
+      new Set(verificationPlan.scenarios.map((scenario) => scenario.kind)),
+      new Set([
+        'archiveRestrict',
+        'declaredEvidence',
+        'enumReject',
+        'resolverAuthority',
+        'searchableExclusion',
+        'typedErrorSurface',
+        'uniquenessFold',
+      ]),
+    );
+    for (const entityId of Object.values(PARTY_IDS.entityIds)) {
+      assert.deepEqual(
+        verificationPlan.scenarios
+          .filter(
+            (scenario) =>
+              scenario.kind === 'declaredEvidence' &&
+              scenario.entityId === entityId,
+          )
+          .map((scenario) => scenario.evidenceKind)
+          .sort(),
+        [
+          'agent',
+          'migration',
+          'provider',
+          'recovery',
+          'structure',
+          'userInterface',
+        ],
+      );
+    }
+    const executedResults = verificationPlan.scenarios.map((scenario) =>
+      executedVerificationResult(scenario, {
+        negativeProbe:
+          scenario.probePolarity === 'positiveAndNegative'
+            ? { rejectedBySemanticGateway: true }
+            : undefined,
+        positiveProbe: {
+          linkedRealPostgresqlRun: 'party-walking-slice',
+          recoveryRoundTrip:
+            scenario.kind === 'declaredEvidence' &&
+            scenario.evidenceKind === 'recovery',
+        },
+      }),
+    );
+    assert.deepEqual(
+      validateExecutedVerificationPlan(verificationPlan, executedResults),
+      { diagnostics: [], status: 'passed' },
+    );
   });
 });
 
@@ -395,8 +677,9 @@ async function assertProviderRejectsCrossTenantRelation(
               set_config('north_star.environment_id', $2, true)`,
       [PARTY_TEST_SCOPE.a.tenantId, PARTY_TEST_SCOPE.a.environmentId],
     );
-    await assert.rejects(
-      client.query(
+    let providerError: unknown;
+    try {
+      await client.query(
         `INSERT INTO north_star_module.${quoted(role.physicalTableName)}
           (tenant_id, environment_id, ${quoted(role.recordIdentity.column)},
            ${quoted(roleKind.physicalName)}, ${quoted(roleStatus.physicalName)},
@@ -410,8 +693,74 @@ async function assertProviderRejectsCrossTenantRelation(
           `${PARTY_IDS.namespace}:option.active`,
           hiddenPartyId,
         ],
+      );
+      assert.fail('cross-tenant relation insert unexpectedly succeeded');
+    } catch (error) {
+      providerError = error;
+    }
+    assertTypedError(
+      translateModuleProviderError(
+        providerError,
+        storage,
+        PARTY_IDS.entityIds.role,
       ),
-      /foreign key constraint/i,
+      'MODULE_RELATION_VIOLATION',
+      PARTY_IDS.relationIds.roleParty,
+    );
+  } finally {
+    await client.query('ROLLBACK');
+    client.release();
+  }
+}
+
+async function assertProviderRejectsInvalidEnum(
+  pool: Pool,
+  storage: StorageTargetPayloadV1,
+  partyId: string,
+): Promise<void> {
+  const role = storage.entities.find(
+    (entity) => entity.entityId === PARTY_IDS.entityIds.role,
+  );
+  const relation = storage.relations.find(
+    (entry) => entry.relationId === PARTY_IDS.relationIds.roleParty,
+  );
+  assert.ok(role);
+  assert.ok(relation);
+  const roleKind = role.columns.find(
+    (column) => column.canonicalFieldId === PARTY_IDS.fieldIds.roleKind,
+  );
+  const roleStatus = role.columns.find(
+    (column) => column.canonicalFieldId === PARTY_IDS.fieldIds.roleStatus,
+  );
+  assert.ok(roleKind);
+  assert.ok(roleStatus);
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('SET LOCAL ROLE north_star_module_runtime');
+    await client.query(
+      `SELECT set_config('north_star.tenant_id', $1, true),
+              set_config('north_star.environment_id', $2, true)`,
+      [PARTY_TEST_SCOPE.a.tenantId, PARTY_TEST_SCOPE.a.environmentId],
+    );
+    await assert.rejects(
+      client.query(
+        `INSERT INTO north_star_module.${quoted(role.physicalTableName)}
+          (tenant_id, environment_id, ${quoted(role.recordIdentity.column)},
+           ${quoted(roleKind.physicalName)}, ${quoted(roleStatus.physicalName)},
+           ${quoted(relation.relationColumn.physicalName)})
+         VALUES ($1,$2,$3,$4,$5,$6)`,
+        [
+          PARTY_TEST_SCOPE.a.tenantId,
+          PARTY_TEST_SCOPE.a.environmentId,
+          randomUUID(),
+          `${PARTY_IDS.namespace}:option.not-declared`,
+          `${PARTY_IDS.namespace}:option.active`,
+          partyId,
+        ],
+      ),
+      /check constraint/i,
     );
   } finally {
     await client.query('ROLLBACK');
@@ -428,4 +777,20 @@ function assertNoPhysicalDetails(value: unknown): void {
     JSON.stringify(value),
     /north_star_module|nsm_[ctik]_|storageClass/,
   );
+}
+
+function assertTypedError(
+  error: unknown,
+  code: string,
+  subjectId: string,
+): true {
+  assert.ok(error instanceof ModuleRuntimeInterpreterError);
+  assert.equal(error.code, code);
+  assert.equal(error.subjectId, subjectId);
+  assertNoPhysicalDetails({
+    code: error.code,
+    message: error.message,
+    subjectId: error.subjectId,
+  });
+  return true;
 }

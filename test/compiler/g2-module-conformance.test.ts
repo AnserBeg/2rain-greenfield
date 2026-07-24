@@ -19,14 +19,18 @@ import {
   PROJECTION_FAMILY_IDS,
   compileApplication,
   diffCompiledReleases,
+  executedVerificationResult,
   expectedActiveReleaseFrom,
   requiredProjectionFamily,
+  validateExecutedVerificationPlan,
   type CompileResult,
   type CompileSuccess,
   type CompilerInput,
   type ProjectionFamilyId,
   type ProjectionManifestEnvelope,
+  type StorageTargetPayloadV1,
   type StorageTransitionEnvelope,
+  type VerificationPlanPayloadV1,
 } from '../../packages/compiler/src/index.js';
 import {
   FIXTURE_IDS,
@@ -140,28 +144,52 @@ test('compiler-derived conformance names the entity and missing family', () => {
   ]);
 });
 
-test('compiler-derived conformance requires recovery evidence per active entity', () => {
-  const candidate = ordinaryModuleV1() as {
-    assertions: Array<{
-      assertionId: string;
-      evidenceKinds: string[];
-    }>;
-  };
-  const childAssertion = candidate.assertions.find((assertion) =>
-    assertion.assertionId.endsWith('master_role_conformance'),
-  )!;
-  childAssertion.evidenceKinds = childAssertion.evidenceKinds.filter(
-    (kind) => kind !== 'recovery',
+test('executable conformance rejects declaration labels without linked real-provider results', () => {
+  const compiled = mustCompile(input(ordinaryModuleV1()));
+  const plan = projectionPayload<VerificationPlanPayloadV1>(
+    compiled,
+    PROJECTION_FAMILY_IDS.verificationPlan,
   );
-  const result = compileApplication(input(candidate));
-  assert.equal(result.status, 'failed');
-  assert.deepEqual(structuralDiagnostics(result), [
-    {
-      code: 'COMPILER_ENTITY_PROJECTION_MISSING',
-      path: '$.conformance.verification.recovery',
-      subjectId: FIXTURE_IDS.entityIds.child,
-    },
-  ]);
+  const labelsOnly = validateExecutedVerificationPlan(plan, []);
+  assert.equal(labelsOnly.status, 'failed');
+  assert.equal(labelsOnly.diagnostics.length, plan.scenarios.length);
+
+  const recovery = plan.scenarios.find(
+    (scenario) =>
+      scenario.kind === 'declaredEvidence' &&
+      scenario.entityId === FIXTURE_IDS.entityIds.child &&
+      scenario.evidenceKind === 'recovery',
+  );
+  assert.ok(recovery);
+  const withoutRecovery = plan.scenarios
+    .filter((scenario) => scenario.scenarioId !== recovery.scenarioId)
+    .map((scenario) =>
+      executedVerificationResult(scenario, {
+        negativeProbe:
+          scenario.probePolarity === 'positiveAndNegative'
+            ? { rejected: true }
+            : undefined,
+        positiveProbe: { executed: true },
+      }),
+    );
+  assert.deepEqual(
+    validateExecutedVerificationPlan(plan, withoutRecovery).diagnostics,
+    [
+      {
+        code: 'VERIFICATION_EXECUTED_RESULT_MISSING',
+        scenarioId: recovery.scenarioId,
+      },
+    ],
+  );
+  assert.equal(
+    validateExecutedVerificationPlan(plan, [
+      ...withoutRecovery,
+      executedVerificationResult(recovery, {
+        positiveProbe: { recoveryRoundTripExecuted: true },
+      }),
+    ]).status,
+    'passed',
+  );
 });
 
 test('parent-scoped children receive the complete Q0/O0 and surface quartet', () => {
@@ -219,6 +247,100 @@ test('parent-scoped children receive the complete Q0/O0 and surface quartet', ()
     ).length,
     4,
   );
+});
+
+test('compiled field/input contracts and enum defenses preserve declared semantics generically', () => {
+  const compiled = mustCompile(input(ordinaryModuleV1()));
+  const operations = projectionPayload<{
+    operations: Array<{
+      inputContract?: {
+        closedArgumentKeys: string[];
+        fields: Array<{
+          enumOptionIds: string[];
+          fieldId: string;
+          fieldKind: string;
+          normalization: string;
+          required: boolean;
+        }>;
+        schemaVersion: string;
+        writableFieldIds: string[];
+      };
+      operationId: string;
+    }>;
+  }>(compiled, PROJECTION_FAMILY_IDS.operationCatalog).operations;
+  const childCreate = operations.find((operation) =>
+    operation.operationId.endsWith(':operation.master_role_create'),
+  );
+  assert.deepEqual(childCreate?.inputContract, {
+    closedArgumentKeys: ['recordId', 'relations', 'values'],
+    fields: [
+      {
+        bounds: {
+          maximumLength: null,
+          precision: null,
+          scale: null,
+        },
+        enumOptionIds: [
+          FIXTURE_IDS.optionIds.owner,
+          FIXTURE_IDS.optionIds.buyer,
+        ],
+        fieldId: FIXTURE_IDS.fieldIds.childRole,
+        fieldKind: 'enumFieldType',
+        normalization: 'none',
+        required: true,
+        writable: true,
+      },
+    ],
+    relationInputs: [
+      {
+        archiveBehavior: 'restrict',
+        relationId: `${FIXTURE_IDS.namespace}:relation.master_role_parent`,
+        required: true,
+      },
+    ],
+    schemaVersion: 'northstar.module-input-contract/v1',
+    writableFieldIds: [FIXTURE_IDS.fieldIds.childRole],
+  });
+  const parentCreate = operations.find((operation) =>
+    operation.operationId.endsWith(':operation.master_create'),
+  );
+  assert.equal(
+    parentCreate?.inputContract?.fields.find(
+      (field) => field.fieldId === FIXTURE_IDS.fieldIds.parentNumber,
+    )?.normalization,
+    'unicodeCaseFoldNoCompatibilityNormalization',
+  );
+
+  const storage = projectionPayload<StorageTargetPayloadV1>(
+    compiled,
+    PROJECTION_FAMILY_IDS.storageTarget,
+  );
+  const child = storage.entities.find(
+    (entity) => entity.entityId === FIXTURE_IDS.entityIds.child,
+  );
+  const childRole = child?.columns.find(
+    (column) => column.canonicalFieldId === FIXTURE_IDS.fieldIds.childRole,
+  );
+  assert.deepEqual(childRole?.fieldContract, {
+    bounds: { maximumLength: null, precision: null, scale: null },
+    enumOptionIds: [FIXTURE_IDS.optionIds.buyer, FIXTURE_IDS.optionIds.owner],
+    fieldId: FIXTURE_IDS.fieldIds.childRole,
+    fieldKind: 'enumFieldType',
+    normalization: 'none',
+    required: true,
+    schemaVersion: 'northstar.module-field-contract/v1',
+    writable: true,
+  });
+  assert.deepEqual(child?.checkConstraints, [
+    {
+      canonicalFieldId: FIXTURE_IDS.fieldIds.childRole,
+      checkKind: 'enumDomain',
+      enumOptionIds: [FIXTURE_IDS.optionIds.buyer, FIXTURE_IDS.optionIds.owner],
+      physicalName: child?.checkConstraints[0]?.physicalName,
+      validated: false,
+    },
+  ]);
+  assert.equal(storage.relations[0]?.archiveBehavior, 'restrict');
 });
 
 test('reporting is a sanctioned required family and has per-entity lineage', () => {

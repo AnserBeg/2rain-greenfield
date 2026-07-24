@@ -54,12 +54,48 @@ export interface RegisteredOperationDefinition {
     readonly optimisticRevision: 'compareAndIncrement';
     readonly recordIdentity: 'canonicalUuid';
   };
+  readonly inputContract?: RegisteredOperationInputContract;
   readonly lifecycle: 'active' | 'retired';
   readonly operationId: string;
   readonly permissionId: string;
   readonly precondition: Readonly<Record<string, ImmutableJsonValue>>;
   readonly readBackQueryId: string;
   readonly tier: 'o0' | 'o1';
+}
+
+export interface RegisteredOperationInputContract {
+  readonly closedArgumentKeys: readonly string[];
+  readonly fields: readonly {
+    readonly bounds: {
+      readonly maximumLength: number | null;
+      readonly precision: number | null;
+      readonly scale: number | null;
+    };
+    readonly enumOptionIds: readonly string[];
+    readonly fieldId: string;
+    readonly fieldKind:
+      | 'booleanFieldType'
+      | 'dateFieldType'
+      | 'dateTimeFieldType'
+      | 'enumFieldType'
+      | 'exactDecimalFieldType'
+      | 'integerFieldType'
+      | 'moneyFieldType'
+      | 'quantityFieldType'
+      | 'textFieldType'
+      | 'timeFieldType';
+    readonly normalization:
+      'none' | 'unicodeCaseFoldNoCompatibilityNormalization';
+    readonly required: boolean;
+    readonly writable: true;
+  }[];
+  readonly relationInputs: readonly {
+    readonly archiveBehavior: 'restrict' | 'retainReference';
+    readonly relationId: string;
+    readonly required: boolean;
+  }[];
+  readonly schemaVersion: 'northstar.module-input-contract/v1';
+  readonly writableFieldIds: readonly string[];
 }
 
 export interface SemanticOperationResultEnvelope {
@@ -334,9 +370,14 @@ function assertOperationDefinition(
     'tier',
   ];
   const hasInfrastructure = Object.hasOwn(value, 'infrastructure');
+  const hasInputContract = Object.hasOwn(value, 'inputContract');
   assertExactKeys(
     value,
-    hasInfrastructure ? [...expectedKeys, 'infrastructure'] : expectedKeys,
+    [
+      ...expectedKeys,
+      ...(hasInfrastructure ? ['infrastructure'] : []),
+      ...(hasInputContract ? ['inputContract'] : []),
+    ],
     invalid,
   );
   assertCanonicalId(value.operationId, 'operationId', invalid);
@@ -391,6 +432,125 @@ function assertOperationDefinition(
       throw invalid('pinned operation infrastructure is unsupported');
     }
   }
+  if (hasInputContract) assertOperationInputContract(value.inputContract);
+}
+
+function assertOperationInputContract(
+  value: unknown,
+): asserts value is RegisteredOperationInputContract {
+  const invalid = (message: string): MalformedPinnedOperationCatalogError =>
+    new MalformedPinnedOperationCatalogError(message);
+  if (!isRecord(value)) {
+    throw invalid('pinned operation input contract must be an object');
+  }
+  assertExactKeys(
+    value,
+    [
+      'closedArgumentKeys',
+      'fields',
+      'relationInputs',
+      'schemaVersion',
+      'writableFieldIds',
+    ],
+    invalid,
+  );
+  if (
+    value.schemaVersion !== 'northstar.module-input-contract/v1' ||
+    !Array.isArray(value.closedArgumentKeys) ||
+    !Array.isArray(value.fields) ||
+    !Array.isArray(value.relationInputs) ||
+    !Array.isArray(value.writableFieldIds) ||
+    !value.closedArgumentKeys.every((entry) => typeof entry === 'string') ||
+    !value.writableFieldIds.every((entry) => typeof entry === 'string')
+  ) {
+    throw invalid('pinned operation input contract has an invalid shape');
+  }
+  for (const field of value.fields) {
+    if (!isRecord(field)) {
+      throw invalid('pinned field input contract must be an object');
+    }
+    assertExactKeys(
+      field,
+      [
+        'bounds',
+        'enumOptionIds',
+        'fieldId',
+        'fieldKind',
+        'normalization',
+        'required',
+        'writable',
+      ],
+      invalid,
+    );
+    assertCanonicalId(field.fieldId, 'inputContract.fields.fieldId', invalid);
+    if (
+      !isRecord(field.bounds) ||
+      !Array.isArray(field.enumOptionIds) ||
+      !field.enumOptionIds.every((entry) => typeof entry === 'string') ||
+      typeof field.required !== 'boolean' ||
+      field.writable !== true ||
+      ![
+        'booleanFieldType',
+        'dateFieldType',
+        'dateTimeFieldType',
+        'enumFieldType',
+        'exactDecimalFieldType',
+        'integerFieldType',
+        'moneyFieldType',
+        'quantityFieldType',
+        'textFieldType',
+        'timeFieldType',
+      ].includes(String(field.fieldKind)) ||
+      !['none', 'unicodeCaseFoldNoCompatibilityNormalization'].includes(
+        String(field.normalization),
+      )
+    ) {
+      throw invalid('pinned field input contract has an invalid shape');
+    }
+    assertExactKeys(
+      field.bounds,
+      ['maximumLength', 'precision', 'scale'],
+      invalid,
+    );
+    if (
+      !isPositiveIntegerOrNull(field.bounds.maximumLength) ||
+      !isPositiveIntegerOrNull(field.bounds.precision) ||
+      !isNonNegativeIntegerOrNull(field.bounds.scale)
+    ) {
+      throw invalid('pinned field input bounds have an invalid shape');
+    }
+  }
+  for (const relation of value.relationInputs) {
+    if (!isRecord(relation)) {
+      throw invalid('pinned relation input contract must be an object');
+    }
+    assertExactKeys(
+      relation,
+      ['archiveBehavior', 'relationId', 'required'],
+      invalid,
+    );
+    assertCanonicalId(
+      relation.relationId,
+      'inputContract.relationInputs.relationId',
+      invalid,
+    );
+    if (
+      !['restrict', 'retainReference'].includes(
+        String(relation.archiveBehavior),
+      ) ||
+      typeof relation.required !== 'boolean'
+    ) {
+      throw invalid('pinned relation input contract has an invalid shape');
+    }
+  }
+}
+
+function isPositiveIntegerOrNull(value: unknown): value is number | null {
+  return value === null || (Number.isSafeInteger(value) && Number(value) > 0);
+}
+
+function isNonNegativeIntegerOrNull(value: unknown): value is number | null {
+  return value === null || (Number.isSafeInteger(value) && Number(value) >= 0);
 }
 
 function unsupportedOperationResult(

@@ -23,15 +23,6 @@ const REQUIRED_SURFACE_ROLES = Object.freeze([
   'list',
   'record',
 ] as const);
-const REQUIRED_VERIFICATION_EVIDENCE = Object.freeze([
-  'agent',
-  'migration',
-  'provider',
-  'recovery',
-  'structure',
-  'userInterface',
-] as const);
-
 export function validateModuleConformance(
   packageRevision: NormalizedApplicationPackage,
 ): CompilerDiagnostic[] {
@@ -131,29 +122,21 @@ export function validateModuleConformance(
       operation,
     ]),
   );
-  const assertedEvidenceByEntity = new Map<string, Set<string>>();
+  const assertedEntities = new Set<string>();
   for (const assertion of packageRevision.assertions.filter(
     (entry) => entry.lifecycle === 'active',
   )) {
     if (assertion.invocation.kind === 'queryInvocation') {
       const query = queryById.get(assertion.invocation.query.targetId);
       if (query) {
-        addEvidence(
-          assertedEvidenceByEntity,
-          query.sourceEntity.targetId,
-          assertion.evidenceKinds,
-        );
+        assertedEntities.add(query.sourceEntity.targetId);
       }
     } else {
       const operation = operationById.get(
         assertion.invocation.operation.targetId,
       );
       if (operation && 'entity' in operation.effect) {
-        addEvidence(
-          assertedEvidenceByEntity,
-          operation.effect.entity.targetId,
-          assertion.evidenceKinds,
-        );
+        assertedEntities.add(operation.effect.entity.targetId);
       }
     }
   }
@@ -218,25 +201,11 @@ export function validateModuleConformance(
       }
     }
 
-    const evidence =
-      assertedEvidenceByEntity.get(entity.entityId) ?? new Set<string>();
-    for (const kind of REQUIRED_VERIFICATION_EVIDENCE) {
-      if (!evidence.has(kind)) {
-        missing(diagnostics, entity.entityId, `verification.${kind}`);
-      }
+    if (!assertedEntities.has(entity.entityId)) {
+      missing(diagnostics, entity.entityId, 'verification.executableScenario');
     }
   }
   return diagnostics;
-}
-
-function addEvidence(
-  evidenceByEntity: Map<string, Set<string>>,
-  entityId: string,
-  evidenceKinds: readonly string[],
-): void {
-  const evidence = evidenceByEntity.get(entityId) ?? new Set<string>();
-  for (const kind of evidenceKinds) evidence.add(kind);
-  evidenceByEntity.set(entityId, evidence);
 }
 
 function missing(
