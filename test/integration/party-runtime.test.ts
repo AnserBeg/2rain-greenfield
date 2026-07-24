@@ -16,8 +16,10 @@ import {
   SEMANTIC_OPERATION_REQUEST_VERSION,
   SEMANTIC_OPERATION_RESULT_VERSION,
   SemanticOperationGateway,
+  SemanticOperationMediationAuthority,
   type SemanticOperationExecutionRequest,
   type SemanticOperationExecutor,
+  type SemanticOperationNonAcceptedRequest,
   type SemanticOperationResultEnvelope,
 } from '../../packages/runtime/src/semantic-operation-gateway.js';
 import {
@@ -54,19 +56,30 @@ test('Party definition serves one tenant-scoped DTO to query, agent, surface and
   const policy = allowPolicy();
   const executor = new PartyMemoryExecutor();
   const queryGateway = new SemanticQueryGateway(policy, executor);
-  const operationGateway = new SemanticOperationGateway(policy, executor);
+  const operationMediation = new SemanticOperationMediationAuthority();
+  const operationGateway = new SemanticOperationGateway(
+    policy,
+    executor,
+    operationMediation,
+  );
   const entry = runtimeEntry(compiled, policy);
   const viewA = await issuedView(entry, 'a');
   const viewB = await issuedView(entry, 'b');
 
-  const created = await operationGateway.invoke(viewA, {
-    input: {
-      recordId: '74000000-0000-4000-8000-000000000004',
-      values: partyValues('P-100', 'Northern Equipment', 'ops@example.test'),
+  const created = await operationGateway.invoke(
+    viewA,
+    {
+      confirmationGrant: null,
+      idempotencyKey: randomUUID(),
+      input: {
+        recordId: '74000000-0000-4000-8000-000000000004',
+        values: partyValues('P-100', 'Northern Equipment', 'ops@example.test'),
+      },
+      operationId: `${PARTY_IDS.namespace}:operation.party_create`,
+      schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
     },
-    operationId: `${PARTY_IDS.namespace}:operation.party_create`,
-    schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
-  });
+    operationMediation.issueInvocation(viewA, 'API'),
+  );
   assert.equal(created.outcome, 'succeeded');
   assert.ok(created.readBack);
 
@@ -94,7 +107,7 @@ test('Party definition serves one tenant-scoped DTO to query, agent, surface and
   const surface = await renderSurfaceRuntimeWithData(
     viewA,
     `http://party.test/?surface=${encodeURIComponent(`${PARTY_IDS.namespace}:surface.party_detail`)}&record=${created.readBack.recordId}`,
-    { operationGateway, queryGateway },
+    { operationGateway, operationMediation, queryGateway },
   );
   assert.equal(surface.statusCode, 200);
   assert.match(surface.html, /Northern Equipment/);
@@ -222,6 +235,12 @@ class PartyMemoryExecutor
   implements SemanticQueryExecutor, SemanticOperationExecutor
 {
   private readonly records = new Map<string, Map<string, SemanticRecordDto>>();
+
+  async recordNonAccepted(
+    _request: SemanticOperationNonAcceptedRequest,
+  ): Promise<void> {
+    void _request;
+  }
 
   seed(tenantId: string, recordId: string, number: string, name: string): void {
     this.tenantRecords(tenantId).set(

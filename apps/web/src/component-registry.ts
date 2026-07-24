@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import type * as RuntimeViewContract from '@north-star/runtime/request-runtime-view';
 import type { SemanticRecordDto } from '../../../packages/runtime/src/semantic-query-gateway.js';
 
@@ -211,7 +213,9 @@ function renderFormSurface(
   const intent = record ? 'update' : 'create';
   const operation = operations.find((binding) => binding.intent === intent);
   if (!operation) return dataDiagnostic('QUERY_UNSUPPORTED');
-  return `<section class="panel data-panel" data-data-state="${record ? 'exact' : 'empty'}"><div class="panel__heading"><div><p class="eyebrow">Semantic operation</p><h2>${record ? 'Update' : 'Create'} ${escapeHtml(surface.label)}</h2></div>${record ? `<span class="status-pill">Revision ${record.revision}</span>` : ''}</div><form method="post" action="/?surface=${encodeURIComponent(surface.surfaceId)}"><input type="hidden" name="intent" value="${intent}">${record ? `<input type="hidden" name="recordId" value="${escapeHtml(record.recordId)}"><input type="hidden" name="expectedRevision" value="${record.revision}">` : ''}${operation.confirmation === 'humanRequired' ? '<input type="hidden" name="confirmed" value="yes">' : ''}<div class="form-fields">${surface.fieldIds.map((fieldId) => `<label><span>${escapeHtml(fieldLabel(fieldId))}</span><input name="value:${escapeHtml(fieldId)}" value="${record ? renderInputValue(record.values[fieldId]) : ''}" autocomplete="off"></label>`).join('')}</div><button type="submit">${record ? 'Save changes' : 'Create record'}</button></form></section>`;
+  const idempotencyKey = randomUUID();
+  const recordId = record?.recordId ?? randomUUID();
+  return `<section class="panel data-panel" data-data-state="${record ? 'exact' : 'empty'}"><div class="panel__heading"><div><p class="eyebrow">Semantic operation</p><h2>${record ? 'Update' : 'Create'} ${escapeHtml(surface.label)}</h2></div>${record ? `<span class="status-pill">Revision ${record.revision}</span>` : ''}</div><form method="post" action="/?surface=${encodeURIComponent(surface.surfaceId)}"><input type="hidden" name="intent" value="${intent}"><input type="hidden" name="idempotencyKey" value="${idempotencyKey}"><input type="hidden" name="recordId" value="${escapeHtml(recordId)}">${record ? `<input type="hidden" name="expectedRevision" value="${record.revision}">` : ''}<div class="form-fields">${surface.fieldIds.map((fieldId) => `<label><span>${escapeHtml(fieldLabel(fieldId))}</span><input name="value:${escapeHtml(fieldId)}" value="${record ? renderInputValue(record.values[fieldId]) : ''}" autocomplete="off"></label>`).join('')}</div><button type="submit">${record ? 'Save changes' : 'Create record'}</button></form></section>`;
 }
 
 function renderLifecycleForm(
@@ -219,7 +223,7 @@ function renderLifecycleForm(
   record: SemanticRecordDto,
   operation: CompiledSurfaceOperationBinding,
 ): string {
-  return `<form class="lifecycle-action" method="post" action="/?surface=${encodeURIComponent(surface.surfaceId)}"><input type="hidden" name="intent" value="${operation.intent}"><input type="hidden" name="recordId" value="${escapeHtml(record.recordId)}"><input type="hidden" name="expectedRevision" value="${record.revision}">${operation.confirmation === 'humanRequired' ? '<input type="hidden" name="confirmed" value="yes">' : ''}<button type="submit">${escapeHtml(operationLabel(operation.intent))}</button></form>`;
+  return `<form class="lifecycle-action" method="post" action="/?surface=${encodeURIComponent(surface.surfaceId)}"><input type="hidden" name="intent" value="${operation.intent}"><input type="hidden" name="idempotencyKey" value="${randomUUID()}"><input type="hidden" name="recordId" value="${escapeHtml(record.recordId)}"><input type="hidden" name="expectedRevision" value="${record.revision}"><button type="submit">${escapeHtml(operationLabel(operation.intent))}</button></form>`;
 }
 
 function dataDiagnostic(

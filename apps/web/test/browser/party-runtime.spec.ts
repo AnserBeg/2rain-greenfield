@@ -30,6 +30,11 @@ test('real Party surface renders roles, creates, and archives/restores through t
     ).toBeVisible();
     await expect(page.getByText('P-WEB-001', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Archive' }).click();
+    await expect(
+      page.getByRole('heading', { name: 'Confirm Archive' }),
+    ).toBeVisible();
+    await expect(page.locator('input[name="confirmed"]')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Confirm Archive' }).click();
     await expect(page.getByRole('status')).toContainText('Archive complete');
     await expect(page.getByText(/Archived · revision 2/)).toBeVisible();
     await page.getByRole('button', { name: 'Restore' }).click();

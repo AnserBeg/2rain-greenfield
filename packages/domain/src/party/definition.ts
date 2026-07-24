@@ -90,7 +90,7 @@ export function partyModuleDefinition(): Record<string, unknown> {
         searchable: true,
       }),
       textField({
-        classification: 'confidential',
+        classification: 'internal',
         entityId: entityIds.party,
         fieldId: fieldIds.contactSummary,
         label: 'Contact summary',
@@ -224,7 +224,7 @@ function entity(
 
 function textField(input: {
   businessKey?: 'tenantEnvironmentCaseInsensitiveUnique';
-  classification?: 'confidential' | 'internal';
+  classification?: 'internal';
   entityId: string;
   fieldId: string;
   label: string;

@@ -1,6 +1,14 @@
+import {
+  createHash,
+  createHmac,
+  randomBytes,
+  timingSafeEqual,
+} from 'node:crypto';
+
 import type { TrustedRequestContext } from './request-context.js';
 import {
   REQUEST_RUNTIME_PROJECTION_FAMILIES,
+  RequestRuntimeViewIntegrityError,
   assertRequestRuntimeView,
   authorizeCurrentPolicy,
   trustedContextForRequestRuntimeView,
@@ -19,16 +27,23 @@ export const SEMANTIC_OPERATION_REQUEST_VERSION =
 export const SEMANTIC_OPERATION_RESULT_VERSION =
   'northstar.semantic-operation-result/v1' as const;
 
+export type TrustedInvocationChannel =
+  'AGENT' | 'API' | 'IMPORT' | 'SYSTEM' | 'UI' | 'WORKFLOW';
+
 const OPERATION_CATALOG_PAYLOAD_VERSION =
   'northstar.operation-catalog-payload/v0-provisional' as const;
 const OPERATION_POLICY_INPUT_VERSION =
   'northstar.semantic-operation-policy-input/v1' as const;
 const OPERATION_BOUNDARY_PERMISSION_ID =
   'northstar.runtime:permission.semantic-operation-boundary' as const;
+const MALFORMED_OPERATION_ACTION_ID =
+  'northstar.runtime:operation.malformed_request' as const;
 const canonicalIdPattern =
   /^[a-z][a-z0-9]*(?:\.[a-z][a-z0-9]*)+:[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/;
 
 export interface SemanticOperationRequestEnvelope {
+  readonly confirmationGrant: string | null;
+  readonly idempotencyKey: string;
   readonly input: ImmutableJsonValue;
   readonly operationId: string;
   readonly schemaVersion: typeof SEMANTIC_OPERATION_REQUEST_VERSION;
@@ -71,6 +86,7 @@ export interface RegisteredOperationInputContract {
       readonly precision: number | null;
       readonly scale: number | null;
     };
+    readonly classification: 'INTERNAL' | 'PUBLIC';
     readonly enumOptionIds: readonly string[];
     readonly fieldId: string;
     readonly fieldKind:
@@ -123,9 +139,12 @@ export interface SemanticOperationResultEnvelope {
 }
 
 export interface SemanticOperationExecutionRequest {
+  readonly channel: TrustedInvocationChannel;
   readonly context: TrustedRequestContext;
   readonly definition: RegisteredOperationDefinition;
+  readonly idempotencyKey: string;
   readonly input: ImmutableJsonValue;
+  readonly inputDigest: string;
   readonly policyVersion: string;
   readonly readBackDefinition: RegisteredQueryDefinition;
   readonly view: IssuedRequestRuntimeView;
@@ -135,6 +154,185 @@ export interface SemanticOperationExecutor {
   execute(
     request: SemanticOperationExecutionRequest,
   ): Promise<SemanticOperationResultEnvelope>;
+  recordNonAccepted(
+    request: SemanticOperationNonAcceptedRequest,
+  ): Promise<void>;
+}
+
+export interface SemanticOperationNonAcceptedRequest {
+  readonly channel: TrustedInvocationChannel;
+  readonly context: TrustedRequestContext;
+  readonly failureCode: string;
+  readonly operationId: string;
+  readonly outcome: 'DENIED' | 'FAILED';
+  readonly policyDecision: 'ALLOW' | 'DENY';
+  readonly policyVersion: string;
+  readonly view: IssuedRequestRuntimeView;
+}
+
+export interface TrustedSemanticOperationInvocation {
+  readonly channel: TrustedInvocationChannel;
+}
+
+interface ConfirmationGrantClaims {
+  readonly environmentId: string;
+  readonly expectedRevision: number | null;
+  readonly inputDigest: string;
+  readonly operationId: string;
+  readonly principalId: string;
+  readonly releaseContentHash: string;
+  readonly releaseId: string;
+  readonly schemaVersion: 'northstar.semantic-operation-confirmation-grant/v1';
+  readonly targetRecordId: string;
+  readonly tenantId: string;
+}
+
+/** Server-owned authority for trusted channel attribution and signed grants. */
+export class SemanticOperationMediationAuthority {
+  readonly #confirmationKey = randomBytes(32);
+  readonly #issuedInvocations = new WeakMap<object, IssuedRequestRuntimeView>();
+
+  issueInvocation(
+    view: IssuedRequestRuntimeView,
+    channel: TrustedInvocationChannel,
+  ): TrustedSemanticOperationInvocation {
+    assertRequestRuntimeView(view);
+    if (!isInvocationChannel(channel)) {
+      throw new SemanticOperationInvocationContextError(
+        'semantic operation channel is not supported',
+      );
+    }
+    const invocation = Object.freeze({ channel });
+    this.#issuedInvocations.set(invocation, view);
+    return invocation;
+  }
+
+  issueConfirmationGrant(
+    view: IssuedRequestRuntimeView,
+    operationId: string,
+    input: ImmutableJsonValue,
+  ): string {
+    assertRequestRuntimeView(view);
+    const definition = findPinnedOperation(view, operationId);
+    if (
+      !definition ||
+      definition.lifecycle !== 'active' ||
+      definition.confirmation !== 'humanRequired'
+    ) {
+      throw new SemanticOperationConfirmationGrantError(
+        'confirmation grant requires an active human-confirmed operation',
+      );
+    }
+    const binding = operationTargetBinding(input);
+    const claims: ConfirmationGrantClaims = Object.freeze({
+      environmentId: view.environmentId,
+      expectedRevision: binding.expectedRevision,
+      inputDigest: digestOperationInput(input),
+      operationId,
+      principalId: view.principalId,
+      releaseContentHash: view.release.contentHash,
+      releaseId: view.release.releaseId,
+      schemaVersion: 'northstar.semantic-operation-confirmation-grant/v1',
+      targetRecordId: binding.targetRecordId,
+      tenantId: view.tenantId,
+    });
+    const payload = Buffer.from(canonicalJson(claims)).toString('base64url');
+    const signature = createHmac('sha256', this.#confirmationKey)
+      .update(payload)
+      .digest('base64url');
+    return `${payload}.${signature}`;
+  }
+
+  assertInvocation(
+    view: IssuedRequestRuntimeView,
+    invocation: TrustedSemanticOperationInvocation,
+  ): void {
+    if (this.#issuedInvocations.get(invocation) !== view) {
+      throw new SemanticOperationInvocationContextError(
+        'semantic operation invocation must be issued at a trusted entry',
+      );
+    }
+  }
+
+  assertConfirmationGrant(
+    view: IssuedRequestRuntimeView,
+    definition: RegisteredOperationDefinition,
+    input: ImmutableJsonValue,
+    token: string | null,
+  ): void {
+    if (definition.confirmation === 'none') {
+      if (token !== null) {
+        throw new SemanticOperationConfirmationGrantError(
+          'confirmation grant is not accepted for this operation',
+        );
+      }
+      return;
+    }
+    if (token === null) {
+      throw new SemanticOperationConfirmationRequiredError(
+        definition.operationId,
+      );
+    }
+    const claims = this.#verifiedClaims(token);
+    const binding = operationTargetBinding(input);
+    if (
+      claims.schemaVersion !==
+        'northstar.semantic-operation-confirmation-grant/v1' ||
+      claims.tenantId !== view.tenantId ||
+      claims.environmentId !== view.environmentId ||
+      claims.principalId !== view.principalId ||
+      claims.releaseId !== view.release.releaseId ||
+      claims.releaseContentHash !== view.release.contentHash ||
+      claims.operationId !== definition.operationId ||
+      claims.targetRecordId !== binding.targetRecordId ||
+      claims.expectedRevision !== binding.expectedRevision ||
+      claims.inputDigest !== digestOperationInput(input)
+    ) {
+      throw new SemanticOperationConfirmationStaleError(definition.operationId);
+    }
+  }
+
+  #verifiedClaims(token: string): ConfirmationGrantClaims {
+    const [payload, signature, extra] = token.split('.');
+    if (!payload || !signature || extra !== undefined || token.length > 4096) {
+      throw new SemanticOperationConfirmationGrantError(
+        'confirmation grant has an invalid envelope',
+      );
+    }
+    const expected = createHmac('sha256', this.#confirmationKey)
+      .update(payload)
+      .digest();
+    let received: Buffer;
+    try {
+      received = Buffer.from(signature, 'base64url');
+    } catch {
+      throw new SemanticOperationConfirmationGrantError(
+        'confirmation grant signature is invalid',
+      );
+    }
+    if (
+      received.byteLength !== expected.byteLength ||
+      !timingSafeEqual(received, expected)
+    ) {
+      throw new SemanticOperationConfirmationGrantError(
+        'confirmation grant signature is invalid',
+      );
+    }
+    let claims: unknown;
+    try {
+      claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    } catch {
+      throw new SemanticOperationConfirmationGrantError(
+        'confirmation grant payload is invalid',
+      );
+    }
+    if (!isConfirmationGrantClaims(claims)) {
+      throw new SemanticOperationConfirmationGrantError(
+        'confirmation grant claims are invalid',
+      );
+    }
+    return claims;
+  }
 }
 
 export class MalformedSemanticOperationRequestError extends Error {
@@ -145,6 +343,45 @@ export class MalformedSemanticOperationRequestError extends Error {
 export class MalformedPinnedOperationCatalogError extends Error {
   readonly code = 'MALFORMED_PINNED_OPERATION_CATALOG' as const;
   override readonly name = 'MalformedPinnedOperationCatalogError';
+}
+
+export class SemanticOperationInvocationContextError extends Error {
+  readonly code = 'SEMANTIC_OPERATION_INVOCATION_CONTEXT_INVALID' as const;
+  override readonly name = 'SemanticOperationInvocationContextError';
+}
+
+export class SemanticOperationConfirmationRequiredError extends Error {
+  readonly code = 'SEMANTIC_OPERATION_CONFIRMATION_REQUIRED' as const;
+  override readonly name = 'SemanticOperationConfirmationRequiredError';
+
+  constructor(readonly operationId: string) {
+    super(
+      `operation ${operationId} requires a server-issued confirmation grant`,
+    );
+  }
+}
+
+export class SemanticOperationConfirmationGrantError extends Error {
+  readonly code = 'SEMANTIC_OPERATION_CONFIRMATION_INVALID' as const;
+  override readonly name = 'SemanticOperationConfirmationGrantError';
+}
+
+export class SemanticOperationConfirmationStaleError extends Error {
+  readonly code = 'SEMANTIC_OPERATION_CONFIRMATION_STALE' as const;
+  override readonly name = 'SemanticOperationConfirmationStaleError';
+
+  constructor(readonly operationId: string) {
+    super(`confirmation grant no longer matches operation ${operationId}`);
+  }
+}
+
+export class SemanticOperationExecutionFailedError extends Error {
+  readonly code = 'SEMANTIC_OPERATION_EXECUTION_FAILED' as const;
+  override readonly name = 'SemanticOperationExecutionFailedError';
+
+  constructor() {
+    super('semantic operation execution failed');
+  }
 }
 
 export class SemanticOperationPolicyDeniedError extends Error {
@@ -187,85 +424,180 @@ export class SemanticOperationGateway {
     private readonly currentPolicy: CurrentPolicyGateway,
     private readonly executor:
       SemanticOperationExecutor | undefined = undefined,
+    private readonly mediation: SemanticOperationMediationAuthority = new SemanticOperationMediationAuthority(),
   ) {}
 
   async invoke(
     view: IssuedRequestRuntimeView,
     requestInput: unknown,
+    invocation: TrustedSemanticOperationInvocation,
   ): Promise<SemanticOperationResultEnvelope> {
     assertRequestRuntimeView(view);
-    const request = parseSemanticOperationRequest(requestInput);
-    const boundaryDecision = await authorizeCurrentPolicy(
-      this.currentPolicy,
-      view,
-      OPERATION_BOUNDARY_PERMISSION_ID,
-      Object.freeze({
-        input: request.input,
-        kind: 'semanticOperationPolicyInput',
-        operationId: request.operationId,
-        requestId: view.requestId,
-        schemaVersion: OPERATION_POLICY_INPUT_VERSION,
-      }),
-    );
-    if (boundaryDecision.decision === 'DENY') {
-      throw new SemanticOperationPolicyDeniedError(request.operationId, view);
-    }
+    this.mediation.assertInvocation(view, invocation);
+    let operationId = attemptedOperationId(requestInput);
+    let policyDecision: 'ALLOW' | 'DENY' = 'DENY';
+    let policyVersion = view.entryPolicyVersion;
+    let recorded = false;
+    try {
+      const request = parseSemanticOperationRequest(requestInput);
+      operationId = request.operationId;
+      const boundaryDecision = await authorizeCurrentPolicy(
+        this.currentPolicy,
+        view,
+        OPERATION_BOUNDARY_PERMISSION_ID,
+        Object.freeze({
+          input: request.input,
+          kind: 'semanticOperationPolicyInput',
+          operationId: request.operationId,
+          requestId: view.requestId,
+          schemaVersion: OPERATION_POLICY_INPUT_VERSION,
+        }),
+      );
+      policyDecision = boundaryDecision.decision;
+      policyVersion = boundaryDecision.policyVersion;
+      if (boundaryDecision.decision === 'DENY') {
+        throw new SemanticOperationPolicyDeniedError(request.operationId, view);
+      }
 
-    const definition = findPinnedOperation(view, request.operationId);
-    if (!definition || !this.executor) {
-      throw new NoSuchRegisteredOperationError(request.operationId, view);
-    }
-    const operationDecision = await authorizeCurrentPolicy(
-      this.currentPolicy,
-      view,
-      definition.permissionId,
-      Object.freeze({
-        input: request.input,
-        kind: 'registeredSemanticOperationPolicyInput',
-        operationId: request.operationId,
-        requestId: view.requestId,
-        schemaVersion: OPERATION_POLICY_INPUT_VERSION,
-      }),
-    );
-    if (operationDecision.decision === 'DENY') {
-      throw new SemanticOperationPolicyDeniedError(request.operationId, view);
-    }
-    if (definition.lifecycle !== 'active' || definition.tier !== 'o0') {
-      return unsupportedOperationResult(
-        request.operationId,
-        'operation-tier-unsupported',
+      const definition = findPinnedOperation(view, request.operationId);
+      if (!definition || !this.executor) {
+        throw new NoSuchRegisteredOperationError(request.operationId, view);
+      }
+      const operationDecision = await authorizeCurrentPolicy(
+        this.currentPolicy,
+        view,
+        definition.permissionId,
+        Object.freeze({
+          input: request.input,
+          kind: 'registeredSemanticOperationPolicyInput',
+          operationId: request.operationId,
+          requestId: view.requestId,
+          schemaVersion: OPERATION_POLICY_INPUT_VERSION,
+        }),
       );
-    }
-    if (!isAlwaysTruePredicate(definition.precondition)) {
-      return unsupportedOperationResult(
-        request.operationId,
-        'operation-precondition-unsupported',
-      );
-    }
-    const readBackDefinition = registeredQueryFromPinnedView(
-      view,
-      definition.readBackQueryId,
-    );
-    if (
-      !readBackDefinition ||
-      readBackDefinition.lifecycle !== 'active' ||
-      readBackDefinition.tier !== 'q0' ||
-      readBackDefinition.queryType !== 'get' ||
-      readBackDefinition.sourceEntityId !== definition.effect.entity.targetId ||
-      !isAlwaysTruePredicate(readBackDefinition.filter)
-    ) {
-      return unsupportedOperationResult(
-        request.operationId,
-        'operation-read-back-unsupported',
-      );
-    }
-    return this.executor.execute(
-      Object.freeze({
-        context: trustedContextForRequestRuntimeView(view),
+      policyDecision = operationDecision.decision;
+      policyVersion = operationDecision.policyVersion;
+      if (operationDecision.decision === 'DENY') {
+        throw new SemanticOperationPolicyDeniedError(request.operationId, view);
+      }
+      this.mediation.assertConfirmationGrant(
+        view,
         definition,
-        input: request.input,
-        policyVersion: operationDecision.policyVersion,
-        readBackDefinition,
+        request.input,
+        request.confirmationGrant,
+      );
+      if (definition.lifecycle !== 'active' || definition.tier !== 'o0') {
+        await this.#recordNonAccepted(
+          view,
+          invocation,
+          operationId,
+          'FAILED',
+          'SEMANTIC_OPERATION_TIER_UNSUPPORTED',
+          policyDecision,
+          policyVersion,
+        );
+        recorded = true;
+        return unsupportedOperationResult(
+          request.operationId,
+          'operation-tier-unsupported',
+        );
+      }
+      if (!isAlwaysTruePredicate(definition.precondition)) {
+        await this.#recordNonAccepted(
+          view,
+          invocation,
+          operationId,
+          'FAILED',
+          'SEMANTIC_OPERATION_PRECONDITION_UNSUPPORTED',
+          policyDecision,
+          policyVersion,
+        );
+        recorded = true;
+        return unsupportedOperationResult(
+          request.operationId,
+          'operation-precondition-unsupported',
+        );
+      }
+      const readBackDefinition = registeredQueryFromPinnedView(
+        view,
+        definition.readBackQueryId,
+      );
+      if (
+        !readBackDefinition ||
+        readBackDefinition.lifecycle !== 'active' ||
+        readBackDefinition.tier !== 'q0' ||
+        readBackDefinition.queryType !== 'get' ||
+        readBackDefinition.sourceEntityId !==
+          definition.effect.entity.targetId ||
+        !isAlwaysTruePredicate(readBackDefinition.filter)
+      ) {
+        await this.#recordNonAccepted(
+          view,
+          invocation,
+          request.operationId,
+          'FAILED',
+          'SEMANTIC_OPERATION_READ_BACK_UNSUPPORTED',
+          policyDecision,
+          policyVersion,
+        );
+        recorded = true;
+        return unsupportedOperationResult(
+          request.operationId,
+          'operation-read-back-unsupported',
+        );
+      }
+      return await this.executor.execute(
+        Object.freeze({
+          channel: invocation.channel,
+          context: trustedContextForRequestRuntimeView(view),
+          definition,
+          idempotencyKey: request.idempotencyKey,
+          input: request.input,
+          inputDigest: digestOperationInput(request.input),
+          policyVersion: operationDecision.policyVersion,
+          readBackDefinition,
+          view,
+        }),
+      );
+    } catch (error) {
+      if (!recorded && this.executor) {
+        const outcome =
+          error instanceof SemanticOperationPolicyDeniedError
+            ? 'DENIED'
+            : 'FAILED';
+        await this.#recordNonAccepted(
+          view,
+          invocation,
+          operationId,
+          outcome,
+          stableFailureCode(error),
+          outcome === 'DENIED' ? 'DENY' : policyDecision,
+          policyVersion,
+        );
+      }
+      throw typedOperationFailure(error);
+    }
+  }
+
+  async #recordNonAccepted(
+    view: IssuedRequestRuntimeView,
+    invocation: TrustedSemanticOperationInvocation,
+    operationId: string,
+    outcome: 'DENIED' | 'FAILED',
+    failureCode: string,
+    policyDecision: 'ALLOW' | 'DENY',
+    policyVersion: string,
+  ): Promise<void> {
+    if (!this.executor) return;
+    await this.executor.recordNonAccepted(
+      Object.freeze({
+        channel: invocation.channel,
+        context: trustedContextForRequestRuntimeView(view),
+        failureCode,
+        operationId,
+        outcome,
+        policyDecision,
+        policyVersion,
         view,
       }),
     );
@@ -288,7 +620,13 @@ function parseSemanticOperationRequest(
   }
   assertExactKeys(
     value,
-    ['input', 'operationId', 'schemaVersion'],
+    [
+      'confirmationGrant',
+      'idempotencyKey',
+      'input',
+      'operationId',
+      'schemaVersion',
+    ],
     (message) => new MalformedSemanticOperationRequestError(message),
   );
   if (value.schemaVersion !== SEMANTIC_OPERATION_REQUEST_VERSION) {
@@ -301,7 +639,18 @@ function parseSemanticOperationRequest(
     'operationId',
     (message) => new MalformedSemanticOperationRequestError(message),
   );
+  if (
+    (value.confirmationGrant !== null &&
+      typeof value.confirmationGrant !== 'string') ||
+    !isUuid(value.idempotencyKey)
+  ) {
+    throw new MalformedSemanticOperationRequestError(
+      'semantic operation mediation fields are invalid',
+    );
+  }
   return Object.freeze({
+    confirmationGrant: value.confirmationGrant,
+    idempotencyKey: value.idempotencyKey,
     input: cloneImmutableJson(
       value.input,
       '$.input',
@@ -482,6 +831,7 @@ function assertOperationInputContract(
       field,
       [
         'bounds',
+        'classification',
         'enumOptionIds',
         'fieldId',
         'fieldKind',
@@ -495,6 +845,8 @@ function assertOperationInputContract(
     assertCanonicalId(field.fieldId, 'inputContract.fields.fieldId', invalid);
     if (
       !isRecord(field.bounds) ||
+      (field.classification !== 'INTERNAL' &&
+        field.classification !== 'PUBLIC') ||
       !Array.isArray(field.enumOptionIds) ||
       !field.enumOptionIds.every((entry) => typeof entry === 'string') ||
       !isRecord(field.temporal) ||
@@ -673,6 +1025,145 @@ function cloneImmutableJson(
     );
   }
   throw error(`${path} must contain only immutable JSON values`);
+}
+
+function digestOperationInput(input: ImmutableJsonValue): string {
+  return createHash('sha256').update(canonicalJson(input)).digest('hex');
+}
+
+function attemptedOperationId(value: unknown): string {
+  return isRecord(value) &&
+    typeof value.operationId === 'string' &&
+    value.operationId.length >= 5 &&
+    value.operationId.length <= 180 &&
+    canonicalIdPattern.test(value.operationId)
+    ? value.operationId
+    : MALFORMED_OPERATION_ACTION_ID;
+}
+
+function canonicalJson(value: unknown): string {
+  return JSON.stringify(canonicalJsonValue(value));
+}
+
+function canonicalJsonValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalJsonValue);
+  if (!isRecord(value)) return value;
+  return Object.fromEntries(
+    Object.keys(value)
+      .sort(compareCodeUnits)
+      .map((key) => [key, canonicalJsonValue(value[key])]),
+  );
+}
+
+function compareCodeUnits(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function operationTargetBinding(input: ImmutableJsonValue): {
+  readonly expectedRevision: number | null;
+  readonly targetRecordId: string;
+} {
+  if (!isRecord(input) || typeof input.recordId !== 'string') {
+    throw new MalformedSemanticOperationRequestError(
+      'semantic operation input requires a target recordId',
+    );
+  }
+  const expectedRevision = Object.hasOwn(input, 'expectedRevision')
+    ? input.expectedRevision
+    : null;
+  if (
+    expectedRevision !== null &&
+    (!Number.isSafeInteger(expectedRevision) || Number(expectedRevision) < 1)
+  ) {
+    throw new MalformedSemanticOperationRequestError(
+      'semantic operation expectedRevision is invalid',
+    );
+  }
+  return Object.freeze({
+    expectedRevision: expectedRevision as number | null,
+    targetRecordId: input.recordId,
+  });
+}
+
+function isConfirmationGrantClaims(
+  value: unknown,
+): value is ConfirmationGrantClaims {
+  if (!isRecord(value)) return false;
+  const keys = [
+    'environmentId',
+    'expectedRevision',
+    'inputDigest',
+    'operationId',
+    'principalId',
+    'releaseContentHash',
+    'releaseId',
+    'schemaVersion',
+    'targetRecordId',
+    'tenantId',
+  ].sort();
+  if (Object.keys(value).sort().join('\0') !== keys.join('\0')) return false;
+  return (
+    isUuid(value.environmentId) &&
+    (value.expectedRevision === null ||
+      (Number.isSafeInteger(value.expectedRevision) &&
+        Number(value.expectedRevision) > 0)) &&
+    typeof value.inputDigest === 'string' &&
+    /^[0-9a-f]{64}$/.test(value.inputDigest) &&
+    typeof value.operationId === 'string' &&
+    canonicalIdPattern.test(value.operationId) &&
+    isUuid(value.principalId) &&
+    typeof value.releaseContentHash === 'string' &&
+    /^[0-9a-f]{64}$/.test(value.releaseContentHash) &&
+    isUuid(value.releaseId) &&
+    value.schemaVersion ===
+      'northstar.semantic-operation-confirmation-grant/v1' &&
+    typeof value.targetRecordId === 'string' &&
+    value.targetRecordId.length > 0 &&
+    isUuid(value.tenantId)
+  );
+}
+
+function isInvocationChannel(
+  value: unknown,
+): value is TrustedInvocationChannel {
+  return (
+    value === 'AGENT' ||
+    value === 'API' ||
+    value === 'IMPORT' ||
+    value === 'SYSTEM' ||
+    value === 'UI' ||
+    value === 'WORKFLOW'
+  );
+}
+
+function isUuid(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      value,
+    )
+  );
+}
+
+function stableFailureCode(error: unknown): string {
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    typeof error.code === 'string' &&
+    /^[A-Z][A-Z0-9_]{1,79}$/.test(error.code)
+  ) {
+    return error.code;
+  }
+  return 'SEMANTIC_OPERATION_EXECUTION_FAILED';
+}
+
+function typedOperationFailure(error: unknown): Error {
+  return error instanceof Error &&
+    (stableFailureCode(error) !== 'SEMANTIC_OPERATION_EXECUTION_FAILED' ||
+      error instanceof RequestRuntimeViewIntegrityError)
+    ? error
+    : new SemanticOperationExecutionFailedError();
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

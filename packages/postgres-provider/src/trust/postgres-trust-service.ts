@@ -18,6 +18,7 @@ import {
   type AcceptedMutationCommand,
   type ActorKind,
   type InvocationChannel,
+  type IdempotentMutationBinding,
   type NonAcceptedInvocationCommand,
   type NonAcceptedInvocationOutcome,
   type PersistedBusinessFieldChange,
@@ -48,6 +49,13 @@ export interface NonAcceptedInvocationReceipt {
 export type BusinessMutation<TMutationResult> = (
   transaction: PoolClient,
 ) => Promise<TMutationResult>;
+
+export type IdempotentBusinessMutation<TMutationResult> = (
+  transaction: PoolClient,
+) => Promise<{
+  readonly command: AcceptedMutationCommand;
+  readonly mutationResult: TMutationResult;
+}>;
 
 export class TrustEvidenceError extends Error {
   override readonly name = 'TrustEvidenceError';
@@ -82,6 +90,17 @@ interface InvocationLinks {
 }
 
 interface RecordedInvocationRow {
+  recorded_at: Date;
+}
+
+interface RecordedIdempotencyRow<TMutationResult> {
+  change_document_id: string;
+  correlation_id: string;
+  domain_event_id: string;
+  input_digest: string;
+  invocation_id: string;
+  mutation_result: TMutationResult;
+  outbox_id: string;
   recorded_at: Date;
 }
 
@@ -128,39 +147,72 @@ export class PostgresTrustService {
     return withTrustedRequestTransaction(this.pool, context, async (client) => {
       await assertPinnedRelease(client, context, prepared);
       const mutationResult = await mutate(client);
-      const actor = actorColumns(actorEnvelope.actor);
-      const invocation = await insertInvocation(
+      return persistAcceptedEvidence(
         client,
         context,
-        actor,
-        prepared,
-        'SUCCEEDED',
-        null,
-        {
-          changeDocumentId: command.change.changeDocumentId,
-          domainEventId: command.event.eventId,
-          outboxId: command.outbox.outboxId,
-        },
-      );
-      await insertBusinessChangeDocument(
-        client,
-        context,
-        actor,
-        prepared,
+        actorEnvelope,
         command,
+        prepared,
         changes,
-      );
-      await insertDomainEvent(client, context, prepared, command, eventPayload);
-      await insertOutbox(client, context, prepared, command);
-      return Object.freeze({
-        changeDocumentId: command.change.changeDocumentId,
-        correlationId: prepared.correlationId,
-        domainEventId: command.event.eventId,
-        invocationId: prepared.invocationId,
+        eventPayload,
         mutationResult,
-        outboxId: command.outbox.outboxId,
-        recordedAt: invocation.recorded_at.toISOString(),
-      });
+      );
+    });
+  }
+
+  async executeIdempotentAcceptedMutation<TMutationResult>(
+    context: TrustedRequestContext,
+    actorEnvelope: TrustedActorEnvelope,
+    binding: IdempotentMutationBinding,
+    mutate: IdempotentBusinessMutation<TMutationResult>,
+  ): Promise<AcceptedMutationReceipt<TMutationResult>> {
+    assertExecutionAuthority(context, actorEnvelope);
+    validateIdempotencyBinding(binding);
+    return withTrustedRequestTransaction(this.pool, context, async (client) => {
+      await lockIdempotencyBinding(client, context, binding);
+      const existing = await findIdempotencyReceipt<TMutationResult>(
+        client,
+        context,
+        binding,
+      );
+      if (existing) {
+        if (existing.input_digest !== binding.inputDigest) {
+          throw new TrustEvidenceError(
+            'SEMANTIC_OPERATION_IDEMPOTENCY_CONFLICT',
+            'idempotency key is already bound to different canonical input',
+          );
+        }
+        return Object.freeze({
+          changeDocumentId: existing.change_document_id,
+          correlationId: existing.correlation_id,
+          domainEventId: existing.domain_event_id,
+          invocationId: existing.invocation_id,
+          mutationResult: existing.mutation_result,
+          outboxId: existing.outbox_id,
+          recordedAt: existing.recorded_at.toISOString(),
+        });
+      }
+      await assertPinnedRelease(client, context, binding);
+      const attempted = await mutate(client);
+      assertCommandMatchesIdempotencyBinding(attempted.command, binding);
+      const prepared = prepareInvocation(attempted.command, 'SUCCEEDED');
+      const changes = redactBusinessChanges(attempted.command.change.changes);
+      validateAcceptedMutation(attempted.command);
+      const eventPayload = redactEvidenceMetadata(
+        attempted.command.event.payload,
+      );
+      const receipt = await persistAcceptedEvidence(
+        client,
+        context,
+        actorEnvelope,
+        attempted.command,
+        prepared,
+        changes,
+        eventPayload,
+        attempted.mutationResult,
+      );
+      await insertIdempotencyReceipt(client, context, binding, receipt);
+      return receipt;
     });
   }
 
@@ -203,6 +255,169 @@ export class PostgresTrustService {
       });
     });
   }
+}
+
+async function persistAcceptedEvidence<TMutationResult>(
+  client: PoolClient,
+  context: TrustedRequestContext,
+  actorEnvelope: TrustedActorEnvelope,
+  command: AcceptedMutationCommand,
+  prepared: PreparedInvocation,
+  changes: readonly PersistedBusinessFieldChange[],
+  eventPayload: PersistedEvidenceMetadata,
+  mutationResult: TMutationResult,
+): Promise<AcceptedMutationReceipt<TMutationResult>> {
+  const actor = actorColumns(actorEnvelope.actor);
+  const invocation = await insertInvocation(
+    client,
+    context,
+    actor,
+    prepared,
+    'SUCCEEDED',
+    null,
+    {
+      changeDocumentId: command.change.changeDocumentId,
+      domainEventId: command.event.eventId,
+      outboxId: command.outbox.outboxId,
+    },
+  );
+  await insertBusinessChangeDocument(
+    client,
+    context,
+    actor,
+    prepared,
+    command,
+    changes,
+  );
+  await insertDomainEvent(client, context, prepared, command, eventPayload);
+  await insertOutbox(client, context, prepared, command);
+  return Object.freeze({
+    changeDocumentId: command.change.changeDocumentId,
+    correlationId: prepared.correlationId,
+    domainEventId: command.event.eventId,
+    invocationId: prepared.invocationId,
+    mutationResult,
+    outboxId: command.outbox.outboxId,
+    recordedAt: invocation.recorded_at.toISOString(),
+  });
+}
+
+function validateIdempotencyBinding(binding: IdempotentMutationBinding): void {
+  assertCanonicalId(binding.actionId, 'actionId');
+  assertUuid(binding.idempotencyKey, 'idempotencyKey');
+  assertUuid(binding.releaseId, 'releaseId');
+  if (!/^[0-9a-f]{64}$/.test(binding.inputDigest)) {
+    throw new TypeError('inputDigest must be a lowercase SHA-256 digest');
+  }
+  if (!/^[0-9a-f]{64}$/.test(binding.releaseContentHash)) {
+    throw new TypeError(
+      'releaseContentHash must be a lowercase SHA-256 digest',
+    );
+  }
+}
+
+function assertCommandMatchesIdempotencyBinding(
+  command: AcceptedMutationCommand,
+  binding: IdempotentMutationBinding,
+): void {
+  if (
+    command.actionId !== binding.actionId ||
+    command.releaseId !== binding.releaseId ||
+    command.releaseContentHash !== binding.releaseContentHash
+  ) {
+    throw new TrustEvidenceError(
+      'IDEMPOTENCY_EVIDENCE_BINDING_MISMATCH',
+      'accepted mutation evidence does not match its idempotency binding',
+    );
+  }
+}
+
+async function lockIdempotencyBinding(
+  client: PoolClient,
+  context: TrustedRequestContext,
+  binding: IdempotentMutationBinding,
+): Promise<void> {
+  const lockIdentity = [
+    context.tenantId,
+    context.environmentId,
+    context.principalId,
+    binding.releaseId,
+    binding.releaseContentHash,
+    binding.actionId,
+    binding.idempotencyKey,
+  ].join('\u001f');
+  await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [
+    lockIdentity,
+  ]);
+}
+
+async function findIdempotencyReceipt<TMutationResult>(
+  client: PoolClient,
+  context: TrustedRequestContext,
+  binding: IdempotentMutationBinding,
+): Promise<RecordedIdempotencyRow<TMutationResult> | null> {
+  const result = await client.query<RecordedIdempotencyRow<TMutationResult>>(
+    `SELECT input_digest, mutation_result, invocation_id, correlation_id,
+            change_document_id, domain_event_id, outbox_id, recorded_at
+       FROM platform.semantic_operation_receipts
+      WHERE tenant_id = $1
+        AND environment_id = $2
+        AND principal_id = $3
+        AND release_id = $4
+        AND release_content_hash = $5
+        AND action_id = $6
+        AND idempotency_key = $7`,
+    [
+      context.tenantId,
+      context.environmentId,
+      context.principalId,
+      binding.releaseId,
+      binding.releaseContentHash,
+      binding.actionId,
+      binding.idempotencyKey,
+    ],
+  );
+  return result.rows[0] ?? null;
+}
+
+async function insertIdempotencyReceipt<TMutationResult>(
+  client: PoolClient,
+  context: TrustedRequestContext,
+  binding: IdempotentMutationBinding,
+  receipt: AcceptedMutationReceipt<TMutationResult>,
+): Promise<void> {
+  const serialized = JSON.stringify(receipt.mutationResult);
+  if (serialized === undefined) {
+    throw new TypeError('idempotent mutation result must be JSON serializable');
+  }
+  await client.query(
+    `INSERT INTO platform.semantic_operation_receipts (
+       tenant_id, environment_id, principal_id, release_id,
+       release_content_hash, action_id, idempotency_key, input_digest,
+       mutation_result, invocation_id, correlation_id, change_document_id,
+       domain_event_id, outbox_id, recorded_at
+     ) VALUES (
+       $1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, $12, $13,
+       $14, $15
+     )`,
+    [
+      context.tenantId,
+      context.environmentId,
+      context.principalId,
+      binding.releaseId,
+      binding.releaseContentHash,
+      binding.actionId,
+      binding.idempotencyKey,
+      binding.inputDigest,
+      serialized,
+      receipt.invocationId,
+      receipt.correlationId,
+      receipt.changeDocumentId,
+      receipt.domainEventId,
+      receipt.outboxId,
+      receipt.recordedAt,
+    ],
+  );
 }
 
 function assertExecutionAuthority(
@@ -308,7 +523,7 @@ function validateAcceptedMutation(command: AcceptedMutationCommand): void {
 async function assertPinnedRelease(
   client: PoolClient,
   context: TrustedRequestContext,
-  invocation: PreparedInvocation,
+  invocation: Pick<PreparedInvocation, 'releaseContentHash' | 'releaseId'>,
 ): Promise<void> {
   const result = await client.query<{ content_hash: string }>(
     `SELECT content_hash

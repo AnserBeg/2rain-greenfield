@@ -186,6 +186,14 @@ export interface AcceptedMutationCommand extends InvocationEvidenceCommand {
   readonly outbox: TrustOutboxInput;
 }
 
+export interface IdempotentMutationBinding {
+  readonly actionId: string;
+  readonly idempotencyKey: string;
+  readonly inputDigest: string;
+  readonly releaseContentHash: string;
+  readonly releaseId: string;
+}
+
 export interface ActionInvocation extends TrustedContextIdentity {
   readonly actionId: string;
   readonly actor: ResolvedActorAttribution;

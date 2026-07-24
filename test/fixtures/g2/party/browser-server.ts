@@ -115,6 +115,7 @@ async function main(): Promise<void> {
 
     const server = createSurfaceRuntimeServer(runtime.entry, {
       operationGateway: runtime.operationGateway,
+      operationMediation: runtime.operationMediation,
       queryGateway: runtime.queryGateway,
     });
     const baseUrl = await listen(server);

@@ -50,6 +50,11 @@ export const COMPILER_DIAGNOSTIC_COPY = Object.freeze({
       'provide only process-serializable data values and Uint8Array byte fields',
     rule: 'the compiler boundary contains no functions, closures, or ambient handles',
   },
+  MODULE_CLASSIFICATION_UNSUPPORTED: {
+    acceptedAlternative:
+      'use public or internal until the policy engine and trust read model enforce confidential and restricted fields',
+    rule: 'active fields compile only when every declared classification is enforced on both write and read paths',
+  },
   COMPILER_OUTPUT_LIMIT_EXCEEDED: {
     acceptedAlternative:
       'reduce the package within v0 bounds or adopt a new reviewed output-limit profile',

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import test from 'node:test';
 
@@ -14,12 +14,6 @@ import {
   type ActorKind,
   type ResolvedActorAttribution,
 } from '../../packages/platform-runtime/src/trust/contracts.js';
-import {
-  LIFECYCLE_OPERATION_INPUT_VERSION,
-  LifecycleService,
-  SEMANTIC_OPERATION_REQUEST_VERSION,
-  type SemanticOperationGatewayPort,
-} from '../../packages/platform-runtime/src/trust/lifecycle-service.js';
 import {
   TrustedActorEnvelopeIssuer,
   assertTrustedActorEnvelope,
@@ -204,95 +198,23 @@ test('classified evidence redacts secret and sensitive values before persistence
   assert.doesNotMatch(JSON.stringify(changes), /g2-(?:secret|sensitive)/);
 });
 
-test('LifecycleService exposes archive and restore only through the Semantic Operation Gateway port', async () => {
-  const calls: Array<{ context: object; request: unknown }> = [];
-  const gateway: SemanticOperationGatewayPort<object, { accepted: true }> = {
-    async invoke(context, request) {
-      calls.push({ context, request });
-      return { accepted: true };
-    },
-  };
-  const context = Object.freeze({ request: 'issued-view-fixture' });
-  const service = new LifecycleService(gateway);
-  const binding = {
-    archiveOperationId: 'fixture.master:archive',
-    restoreOperationId: 'fixture.master:restore',
-  };
-
-  assert.deepEqual(
-    await service.archive(context, binding, {
-      expectedRevision: 4,
-      reason: 'inactive fixture',
-      recordId: 'master-1',
-    }),
-    { accepted: true },
+test('compiled O0 is the single lifecycle authority and the superseded service is absent', () => {
+  assert.equal(
+    existsSync(
+      resolve('packages/platform-runtime/src/trust/lifecycle-service.ts'),
+    ),
+    false,
   );
-  assert.deepEqual(
-    await service.restore(context, binding, {
-      expectedRevision: 5,
-      reason: 'fixture reopened',
-      recordId: 'master-1',
-    }),
-    { accepted: true },
-  );
-  assert.deepEqual(calls, [
-    {
-      context,
-      request: {
-        input: {
-          expectedRevision: 4,
-          lifecycleAction: 'ARCHIVE',
-          reason: 'inactive fixture',
-          recordId: 'master-1',
-          schemaVersion: LIFECYCLE_OPERATION_INPUT_VERSION,
-        },
-        operationId: 'fixture.master:archive',
-        schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
-      },
-    },
-    {
-      context,
-      request: {
-        input: {
-          expectedRevision: 5,
-          lifecycleAction: 'RESTORE',
-          reason: 'fixture reopened',
-          recordId: 'master-1',
-          schemaVersion: LIFECYCLE_OPERATION_INPUT_VERSION,
-        },
-        operationId: 'fixture.master:restore',
-        schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
-      },
-    },
-  ]);
-  assert.throws(
-    () =>
-      service.archive(
-        context,
-        {
-          archiveOperationId: 'fixture.master:remove',
-          restoreOperationId: 'fixture.master:restore',
-        },
-        {
-          expectedRevision: 6,
-          reason: 'invalid binding proof',
-          recordId: 'master-1',
-        },
-      ),
-    /archive binding must end with :archive/,
-  );
-  assert.equal(calls.length, 2);
-
-  assert.deepEqual(
-    Object.getOwnPropertyNames(LifecycleService.prototype).toSorted(),
-    ['archive', 'constructor', 'restore'],
-  );
-  const source = readFileSync(
-    resolve('packages/platform-runtime/src/trust/lifecycle-service.ts'),
+  const decision = readFileSync(
+    resolve(
+      'docs/decisions/ADR-0010-lifecycle-audit-correction-and-recovery.md',
+    ),
     'utf8',
   );
-  assert.match(source, /SemanticOperationGatewayPort/);
-  assert.doesNotMatch(source, /\b(?:DELETE|delete|table|repository|sql)\b/);
+  assert.match(
+    decision,
+    /compiled O0 archive\/restore path through `SemanticOperationGateway` is\s+the sole generic lifecycle executor/,
+  );
 });
 
 function identity(principalId: string): AuthenticatedIdentity {

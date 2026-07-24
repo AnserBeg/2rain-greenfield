@@ -1,6 +1,7 @@
 import type { UntrustedRequestInput } from './request-context.js';
 import type { AuthenticatedRequestRuntimeEntryAdapter } from './request-runtime-view.js';
 import type {
+  SemanticOperationMediationAuthority,
   SemanticOperationGateway,
   SemanticOperationResultEnvelope,
 } from './semantic-operation-gateway.js';
@@ -29,6 +30,7 @@ export class AuthenticatedSemanticOperationApiAdapter {
   constructor(
     private readonly requestEntry: AuthenticatedRequestRuntimeEntryAdapter,
     private readonly operationGateway: SemanticOperationGateway,
+    private readonly mediation: SemanticOperationMediationAuthority,
   ) {}
 
   async handle(
@@ -36,7 +38,11 @@ export class AuthenticatedSemanticOperationApiAdapter {
     semanticEnvelope: unknown,
   ): Promise<SemanticOperationResultEnvelope> {
     return this.requestEntry.run(authenticationInput, (view) =>
-      this.operationGateway.invoke(view, semanticEnvelope),
+      this.operationGateway.invoke(
+        view,
+        semanticEnvelope,
+        this.mediation.issueInvocation(view, 'API'),
+      ),
     );
   }
 }

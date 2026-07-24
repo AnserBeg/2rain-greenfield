@@ -24,10 +24,12 @@ The shared trust substrate has these exclusive contracts:
   accepted meaningful business mutation. It records the affected canonical
   record, operation/event identity, explicit old/new/absent/cleared semantics,
   revision, release, and actor/delegation envelope.
-- The shared `LifecycleService` is the sole generic archive/restore executor
-  for eligible master and draft records. It executes only registered lifecycle
-  operations through `SemanticOperationGateway` and rechecks current policy,
-  relations, conflicts, and versions.
+- The compiled O0 archive/restore path through `SemanticOperationGateway` is
+  the sole generic lifecycle executor for eligible master and draft records.
+  The earlier unused `LifecycleService` contract is superseded because its ID
+  convention and input shape did not match the compiled O0 contract. The
+  gateway and generic provider interpreter recheck current policy, relations,
+  conflicts, versions, confirmation, and idempotency.
 - An immutable domain `CorrectionLink` between original and correcting facts
   is the sole cross-cutting correction-lineage authority. The registered domain
   correction/reversal operation owns compensating business semantics.

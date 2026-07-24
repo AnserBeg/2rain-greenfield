@@ -34,6 +34,7 @@ import {
 import {
   SEMANTIC_OPERATION_REQUEST_VERSION,
   SemanticOperationGateway,
+  SemanticOperationMediationAuthority,
   type SemanticOperationResultEnvelope,
 } from '../../../../packages/runtime/src/semantic-operation-gateway';
 import {
@@ -47,6 +48,7 @@ import {
   type CurrentPolicyDecisionRequest,
   type CurrentPolicyGateway,
   type CurrentPolicySubject,
+  type ImmutableJsonValue,
   type RequestRuntimeView,
 } from '../../../../packages/runtime/src/request-runtime-view';
 import { withEphemeralPostgres } from '../../../helpers/postgres';
@@ -79,6 +81,7 @@ export interface RealPartyRuntime {
   readonly contexts: Readonly<Record<'a' | 'b', TrustedRequestContext>>;
   readonly entry: AuthenticatedRequestRuntimeEntryAdapter;
   readonly operationGateway: SemanticOperationGateway;
+  readonly operationMediation: SemanticOperationMediationAuthority;
   readonly queryGateway: SemanticQueryGateway;
   readonly runtimePool: pg.Pool;
   readonly storage: ReturnType<typeof partyStorageTarget>;
@@ -157,9 +160,11 @@ export async function withRealPartyRuntime<T>(
         humanActorIssuer(),
       );
       const queryGateway = new SemanticQueryGateway(policy, interpreter);
+      const operationMediation = new SemanticOperationMediationAuthority();
       const operationGateway = new SemanticOperationGateway(
         policy,
         interpreter,
+        operationMediation,
       );
       const entry = runtimeEntry(runtimePool, policy);
       const views = {
@@ -172,6 +177,7 @@ export async function withRealPartyRuntime<T>(
         contexts,
         entry,
         operationGateway,
+        operationMediation,
         queryGateway,
         runtimePool,
         storage: partyStorageTarget(fixture.compiled),
@@ -193,11 +199,33 @@ export function invokePartyOperation(
   localId: string,
   input: Record<string, unknown>,
 ): Promise<SemanticOperationResultEnvelope> {
-  return runtime.operationGateway.invoke(view, {
-    input,
-    operationId: `${PARTY_IDS.namespace}:operation.${localId}`,
-    schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
-  });
+  const operationId = `${PARTY_IDS.namespace}:operation.${localId}`;
+  const confirmationRequired = (
+    view.projections.operation.payload as {
+      operations: Array<{ confirmation: string; operationId: string }>;
+    }
+  ).operations.some(
+    (operation) =>
+      operation.operationId === operationId &&
+      operation.confirmation === 'humanRequired',
+  );
+  return runtime.operationGateway.invoke(
+    view,
+    {
+      confirmationGrant: confirmationRequired
+        ? runtime.operationMediation.issueConfirmationGrant(
+            view,
+            operationId,
+            input as ImmutableJsonValue,
+          )
+        : null,
+      idempotencyKey: randomUUID(),
+      input,
+      operationId,
+      schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
+    },
+    runtime.operationMediation.issueInvocation(view, 'API'),
+  );
 }
 
 export function invokePartyQuery(
@@ -297,8 +325,8 @@ async function migrateAndSeed(pool: pg.Pool): Promise<void> {
       client,
       await loadMigrations(migrations),
     );
-    assert.equal(result.applied.length, 8);
-    assert.equal(result.verified.length, 8);
+    assert.equal(result.applied.length, 9);
+    assert.equal(result.verified.length, 9);
     for (const [scope, slug] of [
       [PARTY_TEST_SCOPE.a, 'party-a'],
       [PARTY_TEST_SCOPE.b, 'party-b'],

@@ -55,6 +55,7 @@ import {
 import {
   SEMANTIC_OPERATION_REQUEST_VERSION,
   SemanticOperationGateway,
+  SemanticOperationMediationAuthority,
   type SemanticOperationResultEnvelope,
 } from '../../packages/runtime/src/semantic-operation-gateway.js';
 import {
@@ -68,6 +69,7 @@ import {
   type CurrentPolicyDecisionRequest,
   type CurrentPolicyGateway,
   type CurrentPolicySubject,
+  type ImmutableJsonValue,
   type RequestRuntimeView,
 } from '../../packages/runtime/src/request-runtime-view.js';
 import {
@@ -138,6 +140,10 @@ test('definition-only module is served generically through Q0/O0, trust, RLS, an
   const v2 = mustCompile(
     moduleInput(ordinaryModuleV2(), expectedActiveReleaseFrom(v1)),
   );
+  const storageV1 = compiledProjectionPayload<StorageTargetPayloadV1>(
+    v1,
+    PROJECTION_FAMILY_IDS.storageTarget,
+  );
 
   await withEphemeralPostgres(
     'module-runtime',
@@ -172,6 +178,7 @@ test('definition-only module is served generically through Q0/O0, trust, RLS, an
           [empty, emptyDefinition(ordinaryModuleV1())],
           [v1, ordinaryModuleV1()],
           [v2, ordinaryModuleV2()],
+          [v1, ordinaryModuleV1()],
         ]);
         const releasesB = await persistSequence(runtimePool, contexts.b!, [
           [empty, emptyDefinition(ordinaryModuleV1())],
@@ -189,6 +196,7 @@ test('definition-only module is served generically through Q0/O0, trust, RLS, an
           modulePool,
         );
         await prepare(materializer, contexts.a!, principalA, releasesA[1]!);
+        await prepare(materializer, contexts.a!, principalA, releasesA[3]!);
         await prepare(materializer, contexts.b!, principalB, releasesB[1]!);
         await setPointer(pool, tenantA, environmentA, releasesA[1]!);
         await setPointer(pool, tenantB, environmentB, releasesB[1]!);
@@ -199,10 +207,7 @@ test('definition-only module is served generically through Q0/O0, trust, RLS, an
           humanActorIssuer(),
         );
         const queryGateway = new SemanticQueryGateway(policy, interpreter);
-        const operationGateway = new SemanticOperationGateway(
-          policy,
-          interpreter,
-        );
+        const operationGateway = operationGatewayFor(policy, interpreter);
         const entry = runtimeEntry(runtimePool, {
           a: identity(tenantA, environmentA, principalA),
           b: identity(tenantB, environmentB, principalB),
@@ -216,17 +221,21 @@ test('definition-only module is served generically through Q0/O0, trust, RLS, an
         const acmeOneId = randomUUID();
         const acmeTwoId = randomUUID();
         const tenantBId = randomUUID();
+        const soloKey = randomUUID();
+        const soloInput = {
+          recordId: soloId,
+          values: {
+            [FIXTURE_IDS.fieldIds.parentName]: 'Solo',
+            [FIXTURE_IDS.fieldIds.parentNumber]: 'A-001',
+          },
+        };
         const created = await operation(
           operationGateway,
           viewA1,
           'master_create',
-          {
-            recordId: soloId,
-            values: {
-              [FIXTURE_IDS.fieldIds.parentName]: 'Solo',
-              [FIXTURE_IDS.fieldIds.parentNumber]: 'A-001',
-            },
-          },
+          soloInput,
+          FIXTURE_IDS.namespace,
+          soloKey,
         );
         assert.equal(created.outcome, 'succeeded');
         assert.equal(created.readBack?.recordId, soloId);
@@ -235,6 +244,113 @@ test('definition-only module is served generically through Q0/O0, trust, RLS, an
         });
         assert.ok(created.trust);
         await assertLinkedTrustFacts(pool, created, tenantA, environmentA);
+
+        const retryFactsBefore = await trustFactCount(
+          pool,
+          tenantA,
+          environmentA,
+        );
+        const firstAttempt = await operation(
+          operationGateway,
+          viewA1,
+          'master_create',
+          soloInput,
+          FIXTURE_IDS.namespace,
+          soloKey,
+        );
+        assert.deepEqual(firstAttempt, created);
+        assert.equal(
+          await trustFactCount(pool, tenantA, environmentA),
+          retryFactsBefore,
+        );
+        const retryPersistence = await pool.query<{
+          business_rows: string;
+          deduplication_key: string;
+          receipts: string;
+        }>(
+          `SELECT
+             (SELECT count(*)
+                FROM north_star_module.${storageV1.entities[0]!.physicalTableName}
+               WHERE record_id = $1) AS business_rows,
+             (SELECT deduplication_key
+                FROM platform.trust_outbox
+               WHERE outbox_id = $2) AS deduplication_key,
+             (SELECT count(*)
+                FROM platform.semantic_operation_receipts
+               WHERE idempotency_key = $3) AS receipts`,
+          [soloId, firstAttempt.trust!.outboxId, soloKey],
+        );
+        assert.deepEqual(retryPersistence.rows[0], {
+          business_rows: '1',
+          deduplication_key: `${principalA}:${viewA1.release.contentHash}:${viewA1.release.releaseId}:${FIXTURE_IDS.namespace}:operation.master_create:${soloKey}`,
+          receipts: '1',
+        });
+        await assert.rejects(
+          operation(
+            operationGateway,
+            viewA1,
+            'master_create',
+            {
+              ...soloInput,
+              values: {
+                ...soloInput.values,
+                [FIXTURE_IDS.fieldIds.parentName]: 'Different retry input',
+              },
+            },
+            FIXTURE_IDS.namespace,
+            soloKey,
+          ),
+          (error: unknown) =>
+            typeof error === 'object' &&
+            error !== null &&
+            'code' in error &&
+            error.code === 'SEMANTIC_OPERATION_IDEMPOTENCY_CONFLICT',
+        );
+
+        await setPointer(pool, tenantA, environmentA, releasesA[3]!);
+        const duplicateReleaseView = await issuedView(entry, 'a');
+        assert.notEqual(
+          duplicateReleaseView.release.releaseId,
+          viewA1.release.releaseId,
+        );
+        assert.equal(
+          duplicateReleaseView.release.contentHash,
+          viewA1.release.contentHash,
+        );
+        const duplicateReleaseRecordId = randomUUID();
+        const duplicateReleaseResult = await operation(
+          operationGateway,
+          duplicateReleaseView,
+          'master_create',
+          {
+            recordId: duplicateReleaseRecordId,
+            values: {
+              [FIXTURE_IDS.fieldIds.parentName]: 'Duplicate release scope',
+              [FIXTURE_IDS.fieldIds.parentNumber]: 'A-RELEASE',
+            },
+          },
+          FIXTURE_IDS.namespace,
+          soloKey,
+        );
+        const duplicateReleaseOutbox = await pool.query<{
+          deduplication_key: string;
+        }>(
+          `SELECT deduplication_key
+             FROM platform.trust_outbox
+            WHERE outbox_id = $1`,
+          [duplicateReleaseResult.trust!.outboxId],
+        );
+        assert.equal(
+          duplicateReleaseOutbox.rows[0]?.deduplication_key,
+          `${principalA}:${duplicateReleaseView.release.contentHash}:${duplicateReleaseView.release.releaseId}:${FIXTURE_IDS.namespace}:operation.master_create:${soloKey}`,
+        );
+        await operation(
+          operationGateway,
+          duplicateReleaseView,
+          'master_archive',
+          { expectedRevision: 1, recordId: duplicateReleaseRecordId },
+        );
+        await setPointer(pool, tenantA, environmentA, releasesA[1]!);
 
         for (const [recordId, number] of [
           [acmeOneId, 'A-002'],
@@ -432,8 +548,54 @@ test('definition-only module is served generically through Q0/O0, trust, RLS, an
         );
         assert.equal(
           await trustFactCount(pool, tenantA, environmentA),
-          factsBefore,
+          factsBefore + 1,
         );
+        const failedInvocation = await pool.query<{
+          channel: string;
+          count: string;
+          outcome: string;
+        }>(
+          `SELECT channel, outcome, count(*) AS count
+             FROM platform.trust_action_invocations
+            WHERE tenant_id = $1
+              AND environment_id = $2
+              AND failure_code = 'MODULE_RELATION_TARGET_NOT_FOUND'
+            GROUP BY channel, outcome`,
+          [tenantA, environmentA],
+        );
+        assert.deepEqual(failedInvocation.rows, [
+          { channel: 'API', count: '1', outcome: 'FAILED' },
+        ]);
+        const deniedGateway = operationGatewayFor(
+          new DenyPolicy(),
+          interpreter,
+        );
+        await assert.rejects(
+          operation(deniedGateway, viewA1, 'master_create', {
+            recordId: randomUUID(),
+            values: {
+              [FIXTURE_IDS.fieldIds.parentName]: 'Denied',
+              [FIXTURE_IDS.fieldIds.parentNumber]: 'A-DENIED',
+            },
+          }),
+          /current policy denied operation/,
+        );
+        const deniedInvocation = await pool.query<{
+          channel: string;
+          count: string;
+          outcome: string;
+        }>(
+          `SELECT channel, outcome, count(*) AS count
+             FROM platform.trust_action_invocations
+            WHERE tenant_id = $1
+              AND environment_id = $2
+              AND failure_code = 'SEMANTIC_OPERATION_POLICY_DENIED'
+            GROUP BY channel, outcome`,
+          [tenantA, environmentA],
+        );
+        assert.deepEqual(deniedInvocation.rows, [
+          { channel: 'API', count: '1', outcome: 'DENIED' },
+        ]);
 
         await prepare(materializer, contexts.a!, principalA, releasesA[2]!);
         await setPointer(pool, tenantA, environmentA, releasesA[2]!);
@@ -498,7 +660,14 @@ test('definition-only module is served generically through Q0/O0, trust, RLS, an
 test('metamorphic random namespace executes the compiled declared-semantics contract without module code', async () => {
   const suffix = randomUUID().replaceAll('-', '').slice(0, 12);
   const namespace = `northstar.metamorphic${suffix}`;
-  const definition = ordinaryModuleV2ForNamespace(namespace);
+  const definition = ordinaryModuleV2ForNamespace(namespace) as {
+    fields: Array<{ classification: string; fieldId: string }>;
+  } & Record<string, unknown>;
+  const publicName = definition.fields.find(
+    (field) => field.fieldId === `${namespace}:field.master_name`,
+  );
+  assert.ok(publicName);
+  publicName.classification = 'public';
   const empty = mustCompile(moduleInput(emptyDefinition(definition)));
   const compiled = mustCompile(
     moduleInput(definition, expectedActiveReleaseFrom(empty)),
@@ -548,7 +717,7 @@ test('metamorphic random namespace executes the compiled declared-semantics cont
           runtimePool,
           humanActorIssuer(),
         );
-        const operations = new SemanticOperationGateway(policy, interpreter);
+        const operations = operationGatewayFor(policy, interpreter);
         const queries = new SemanticQueryGateway(policy, interpreter);
         const entry = runtimeEntry(runtimePool, {
           m: identity(tenant, environment, principal),
@@ -586,6 +755,31 @@ test('metamorphic random namespace executes the compiled declared-semantics cont
         assert.equal(read.records[0]?.recordId, recordId);
         assertNoPhysicalDetails(read);
         await assertLinkedTrustFacts(pool, result, tenant, environment);
+        const classifiedChanges = await pool.query<{
+          changes: Array<{
+            classification: string;
+            fieldId: string;
+            newState: { representation?: string; value?: unknown };
+          }>;
+        }>(
+          `SELECT changes
+             FROM platform.trust_business_change_documents
+            WHERE change_document_id = $1`,
+          [result.trust!.changeDocumentId],
+        );
+        const persistedPublicName = classifiedChanges.rows[0]?.changes.find(
+          (change) => change.fieldId === `${namespace}.field.master_name`,
+        );
+        assert.deepEqual(persistedPublicName, {
+          classification: 'PUBLIC',
+          fieldId: `${namespace}.field.master_name`,
+          newState: {
+            representation: 'VALUE',
+            state: 'VALUE',
+            value: 'Metamorphic',
+          },
+          oldState: { state: 'ABSENT' },
+        });
 
         assert.equal(
           (
@@ -1255,18 +1449,74 @@ class AllowPolicy implements CurrentPolicyGateway {
   }
 }
 
+class DenyPolicy implements CurrentPolicyGateway {
+  async authorize(_request: CurrentPolicyDecisionRequest) {
+    void _request;
+    return {
+      decision: 'DENY' as const,
+      decisionVersion: CURRENT_POLICY_DECISION_VERSION,
+      policyVersion: 'module-runtime-deny-policy/v1',
+    };
+  }
+
+  async readCurrentVersion(_subject: CurrentPolicySubject) {
+    void _subject;
+    return { policyVersion: 'module-runtime-deny-policy/v1' };
+  }
+}
+
 async function operation(
   gateway: SemanticOperationGateway,
   view: RequestRuntimeView,
   localId: string,
   input: Record<string, unknown>,
   namespace: string = FIXTURE_IDS.namespace,
+  idempotencyKey: string = randomUUID(),
 ): Promise<SemanticOperationResultEnvelope> {
-  return gateway.invoke(view, {
-    input,
-    operationId: `${namespace}:operation.${localId}`,
-    schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
-  });
+  const mediation = operationMediationByGateway.get(gateway);
+  assert.ok(mediation);
+  const operationId = `${namespace}:operation.${localId}`;
+  const confirmationRequired = (
+    view.projections.operation.payload as {
+      operations: Array<{ confirmation: string; operationId: string }>;
+    }
+  ).operations.some(
+    (candidate) =>
+      candidate.operationId === operationId &&
+      candidate.confirmation === 'humanRequired',
+  );
+  return gateway.invoke(
+    view,
+    {
+      confirmationGrant: confirmationRequired
+        ? mediation.issueConfirmationGrant(
+            view,
+            operationId,
+            input as ImmutableJsonValue,
+          )
+        : null,
+      idempotencyKey,
+      input,
+      operationId,
+      schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
+    },
+    mediation.issueInvocation(view, 'API'),
+  );
+}
+
+const operationMediationByGateway = new WeakMap<
+  SemanticOperationGateway,
+  SemanticOperationMediationAuthority
+>();
+
+function operationGatewayFor(
+  policy: CurrentPolicyGateway,
+  interpreter: PostgresModuleRuntimeInterpreter,
+): SemanticOperationGateway {
+  const mediation = new SemanticOperationMediationAuthority();
+  const gateway = new SemanticOperationGateway(policy, interpreter, mediation);
+  operationMediationByGateway.set(gateway, mediation);
+  return gateway;
 }
 
 async function query(
@@ -1362,8 +1612,8 @@ async function migrateAndSeed(
       client,
       await loadMigrations(migrations),
     );
-    assert.equal(result.applied.length, 8);
-    assert.equal(result.verified.length, 8);
+    assert.equal(result.applied.length, 9);
+    assert.equal(result.verified.length, 9);
     for (const [tenantId, environmentId, slug] of scopes) {
       await client.query(
         'INSERT INTO platform.tenants (id, slug) VALUES ($1,$2)',
@@ -1632,9 +1882,9 @@ async function assertLinkedTrustFacts(
     [tenantId, environmentId, result.trust.changeDocumentId],
   );
   const serializedChanges = JSON.stringify(redacted.rows[0]?.changes);
-  assert.doesNotMatch(serializedChanges, /Solo|A-001/);
-  assert.match(serializedChanges, /SENSITIVE/);
-  assert.match(serializedChanges, /REDACTED/);
+  assert.match(serializedChanges, /INTERNAL/);
+  assert.match(serializedChanges, /"representation":"VALUE"/);
+  assert.doesNotMatch(serializedChanges, /SENSITIVE|REDACTED/);
 }
 
 async function trustFactCount(
@@ -1841,7 +2091,7 @@ async function persistedLocaleOrderingChanges(): Promise<string> {
           runtimePool,
           humanActorIssuer(),
         );
-        const gateway = new SemanticOperationGateway(policy, interpreter);
+        const gateway = operationGatewayFor(policy, interpreter);
         const entry = runtimeEntry(runtimePool, {
           l: identity(tenant, environment, principal),
         });

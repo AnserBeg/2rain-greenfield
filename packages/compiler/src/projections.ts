@@ -672,6 +672,8 @@ function operationInputContract(
                 : null,
             scale: 'scale' in field.fieldType ? field.fieldType.scale : null,
           },
+          classification:
+            field.classification === 'public' ? 'PUBLIC' : 'INTERNAL',
           enumOptionIds:
             field.fieldType.kind === 'enumFieldType'
               ? field.fieldType.options.map((option) => option.optionId)

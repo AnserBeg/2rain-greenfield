@@ -244,6 +244,7 @@ test('compiled field/input contracts and enum defenses preserve declared semanti
       inputContract?: {
         closedArgumentKeys: string[];
         fields: Array<{
+          classification: string;
           enumOptionIds: string[];
           fieldId: string;
           fieldKind: string;
@@ -272,6 +273,7 @@ test('compiled field/input contracts and enum defenses preserve declared semanti
           precision: null,
           scale: null,
         },
+        classification: 'INTERNAL',
         enumOptionIds: [
           FIXTURE_IDS.optionIds.owner,
           FIXTURE_IDS.optionIds.buyer,
@@ -392,6 +394,31 @@ test('compiled field/input contracts and enum defenses preserve declared semanti
       )?.bounds,
     { maximumLength: null, precision: 5, scale: 2 },
   );
+});
+
+test('unsupported field classifications fail closed with one stable compiler diagnostic', () => {
+  for (const classification of ['confidential', 'restricted'] as const) {
+    const definition = ordinaryModuleV1() as {
+      fields: Array<{ classification: string; fieldId: string }>;
+    };
+    const field = definition.fields[0]!;
+    field.classification = classification;
+    const result = compileApplication(input(definition));
+    assert.equal(result.status, 'failed');
+    assert.deepEqual(structuralDiagnostics(result), [
+      {
+        code: 'MODULE_CLASSIFICATION_UNSUPPORTED',
+        path: '$.fields.classification',
+        subjectId: field.fieldId,
+      },
+    ]);
+  }
+
+  const supported = ordinaryModuleV1() as {
+    fields: Array<{ classification: string }>;
+  };
+  supported.fields[0]!.classification = 'public';
+  assert.equal(compileApplication(input(supported)).status, 'compiled');
 });
 
 test('reporting is a sanctioned required family and has per-entity lineage', () => {
