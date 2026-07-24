@@ -1,10 +1,12 @@
 # PR-1 — Mechanical GATE-INTEGRITY corrective
 
-Status: evidence_ready
+Status: accepted
 Tier: Mechanical-leaning (Behavioral edge: locale comparator)
 Branch: `fix/pr1-gate-integrity`
 Base: `12e6c66ac1834274391e0b63c9d44a60eb2514c7`
 Frozen reviewed candidate: `318cb7cdc2599b52cf6e4e50b759f4853ef55d2d`
+Integrated evidence candidate: `b389f71498ce5a9a3cc4c287342b56b9469dd514`
+Acceptance merge: `58538e20358b990e0ef613aa7bbd21dd60f2421e`
 Review: PASS — one fresh naive Codex `gpt-5.6-sol` xhigh on the identical
 unchanged candidate
 
@@ -149,7 +151,7 @@ From the repository root, these commands take under ten minutes:
 
 ```bash
 cd /home/rvham/2rain-greenfield
-git show -s --format='%H %s' 318cb7cdc2599b52cf6e4e50b759f4853ef55d2d
+git show -s --format='%H %s' b389f71498ce5a9a3cc4c287342b56b9469dd514
 corepack pnpm lint
 corepack pnpm test:architecture
 corepack pnpm test:locale
@@ -165,8 +167,10 @@ negative fixture, and an overall pass.
 
 ## Checkpoint
 
-PR-1 is `evidence_ready`, not accepted. The just-converged G2-P3 whole-app
-program review already governs this corrective sequence, so no new program
-review trigger fires at this checkpoint. The next candidate packet is PR-2,
-but it remains unstarted and requires explicit user selection. Do not fan out
-to Catalog or Location.
+PR-1 is accepted by non-squash merge
+`58538e20358b990e0ef613aa7bbd21dd60f2421e`, preserving integrated candidate
+`b389f71498ce5a9a3cc4c287342b56b9469dd514` as an ancestor. The archived and
+converged G2-P3 whole-app program review governs the remaining corrective
+sequence, and the full-matrix-at-integrated-SHA rule is in force. No new
+program-review trigger fires at this checkpoint. PR-2 remains unstarted and
+requires explicit user selection. Do not fan out to Catalog or Location.
