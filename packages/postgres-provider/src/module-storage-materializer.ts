@@ -353,6 +353,11 @@ export class PostgresModuleStorageMaterializer {
           source.target,
           target.target,
         ]),
+        new Set(
+          remaining
+            .filter((element) => element.kind === 'addNotValidConstraint')
+            .map((element) => element.physicalObjectName),
+        ),
       );
       if (verification.drift.length > 0) {
         throw failure(
@@ -1144,6 +1149,11 @@ async function applyDdlElement(
     case 'backfill':
       throw failure('BACKFILL_REQUIRES_DML_ROLE', element.elementId);
     case 'addNotValidConstraint':
+      {
+        const located = locateCheckConstraint(target, element);
+        await ensureEnumCheckConstraint(client, located.entity, located.check);
+      }
+      return;
     case 'duplicateScan':
     case 'tightenNotNull':
     case 'validateConstraint':
@@ -1185,6 +1195,9 @@ async function createManagedTable(
          (${entity.primaryKey.columns.map(quoted).join(', ')})
      )`,
   );
+  for (const check of entity.checkConstraints ?? []) {
+    await ensureEnumCheckConstraint(client, entity, check);
+  }
   for (const unique of entity.uniqueKeys) {
     const columns = uniqueKeyColumnExpressions(entity, unique);
     await client.query(
@@ -1235,9 +1248,58 @@ async function createManagedTable(
   );
 }
 
+async function ensureEnumCheckConstraint(
+  client: PoolClient,
+  entity: StorageEntityTarget,
+  check: StorageEntityTarget['checkConstraints'][number],
+): Promise<void> {
+  const exists = await client.query<{ present: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1
+         FROM pg_constraint AS constraint_record
+         JOIN pg_class AS relation_record
+           ON relation_record.oid = constraint_record.conrelid
+         JOIN pg_namespace AS namespace_record
+           ON namespace_record.oid = relation_record.relnamespace
+        WHERE namespace_record.nspname = 'north_star_module'
+          AND relation_record.relname = $1
+          AND constraint_record.conname = $2
+     ) AS present`,
+    [entity.physicalTableName, check.physicalName],
+  );
+  if (exists.rows[0]?.present) return;
+  await client.query(
+    `ALTER TABLE north_star_module.${quoted(entity.physicalTableName)}
+       ADD CONSTRAINT ${quoted(check.physicalName)}
+       CHECK (${enumCheckExpression(entity, check)}) NOT VALID`,
+  );
+}
+
+function enumCheckExpression(
+  entity: StorageEntityTarget,
+  check: StorageEntityTarget['checkConstraints'][number],
+): string {
+  const column = requiredStorageColumn(entity, check.canonicalFieldId);
+  return `${quoted(column.physicalName)} = ANY (ARRAY[${check.enumOptionIds
+    .map(sqlTextLiteral)
+    .join(', ')}])`;
+}
+
+function requiredStorageColumn(
+  entity: StorageEntityTarget,
+  canonicalFieldId: string,
+): StorageEntityTarget['columns'][number] {
+  const column = entity.columns.find(
+    (candidate) => candidate.canonicalFieldId === canonicalFieldId,
+  );
+  if (!column) throw failure('FIELD_TARGET_MISSING', canonicalFieldId);
+  return column;
+}
+
 async function verifyCatalogOnClient(
   client: PoolClient,
   targets: readonly StorageTargetPayloadV1[],
+  pendingConstraintNames: ReadonlySet<string> = new Set(),
 ): Promise<CatalogVerification> {
   const expectedTables = mergeExpectedTables(targets);
   const expectedRelations = mergeExpectedRelations(targets);
@@ -1425,6 +1487,7 @@ async function verifyCatalogOnClient(
     columns: string[];
     deferred: boolean;
     deferrable: boolean;
+    definition: string;
     delete_action: string;
     name: string;
     referenced_columns: string[] | null;
@@ -1438,6 +1501,11 @@ async function verifyCatalogOnClient(
     `SELECT source.relname AS table_name,
             constraint_record.conname AS name,
             constraint_record.contype AS type,
+            pg_get_expr(
+              constraint_record.conbin,
+              constraint_record.conrelid,
+              true
+            ) AS definition,
             ARRAY(
               SELECT attribute.attname
                 FROM unnest(constraint_record.conkey) WITH ORDINALITY AS key(attnum, ordinal)
@@ -1471,14 +1539,37 @@ async function verifyCatalogOnClient(
       WHERE source_namespace.nspname = 'north_star_module'
       ORDER BY source.relname, constraint_record.conname`,
   );
+  const effectivePendingConstraintNames = new Set(pendingConstraintNames);
+  if (effectivePendingConstraintNames.size > 0) {
+    const appliedConstraints = await client.query<{
+      physical_object_name: string;
+    }>(
+      `SELECT DISTINCT element.physical_object_name
+         FROM north_star_internal.module_storage_elements AS element
+         JOIN north_star_internal.module_storage_element_applications AS application
+           ON application.element_id = element.element_id
+        WHERE element.element_kind = 'addNotValidConstraint'
+          AND element.physical_object_name = ANY($1::text[])
+          AND application.application_state = 'APPLIED'`,
+      [[...effectivePendingConstraintNames]],
+    );
+    for (const applied of appliedConstraints.rows) {
+      effectivePendingConstraintNames.delete(applied.physical_object_name);
+    }
+  }
   const expectedConstraints = buildExpectedConstraints(
     expectedTables,
     expectedRelations,
+    effectivePendingConstraintNames,
   );
   const actualConstraints = constraints.rows.map((constraint) => ({
     columns: constraint.columns,
     deferred: constraint.deferred,
     deferrable: constraint.deferrable,
+    definition:
+      constraint.type === 'c'
+        ? normalizeSqlExpressionRequired(constraint.definition)
+        : null,
     deleteAction: constraint.delete_action,
     name: constraint.name,
     referencedColumns: constraint.referenced_columns,
@@ -1936,6 +2027,7 @@ interface ExpectedConstraintShape {
   columns: string[];
   deferred: boolean;
   deferrable: boolean;
+  definition: string | null;
   deleteAction: string;
   name: string;
   referencedColumns: string[] | null;
@@ -2202,16 +2294,33 @@ function mergeExpectedRelations(
   targets: readonly StorageTargetPayloadV1[],
 ): Map<string, StorageRelationTarget> {
   const result = new Map<string, StorageRelationTarget>();
+  const physicalShape = (value: StorageRelationTarget) => {
+    const { archiveBehavior: _archiveBehavior, ...shape } = value;
+    void _archiveBehavior;
+    return shape;
+  };
   for (const relation of targets.flatMap((target) => target.relations)) {
     const key = relation.foreignKey.physicalName;
     const existing = result.get(key);
-    if (existing && canonicalize(existing) !== canonicalize(relation)) {
+    if (
+      existing &&
+      (canonicalize(physicalShape(existing)) !==
+        canonicalize(physicalShape(relation)) ||
+        (Object.hasOwn(existing, 'archiveBehavior') &&
+          Object.hasOwn(relation, 'archiveBehavior') &&
+          existing.archiveBehavior !== relation.archiveBehavior))
+    ) {
       throw failure(
         'LIVE_SET_SHAPE_CONFLICT',
         `conflicting live roots claim managed relation ${key}`,
       );
     }
-    result.set(key, relation);
+    result.set(
+      key,
+      Object.hasOwn(relation, 'archiveBehavior') || !existing
+        ? relation
+        : existing,
+    );
   }
   return result;
 }
@@ -2303,6 +2412,7 @@ function buildExpectedColumns(
 function buildExpectedConstraints(
   tables: ReadonlyMap<string, StorageEntityTarget>,
   relations: ReadonlyMap<string, StorageRelationTarget>,
+  pendingConstraintNames: ReadonlySet<string>,
 ): ExpectedConstraintShape[] {
   const entityById = new Map(
     [...tables.values()].map((entity) => [entity.entityId, entity]),
@@ -2312,6 +2422,7 @@ function buildExpectedConstraints(
       columns: [...entity.primaryKey.columns],
       deferred: false,
       deferrable: false,
+      definition: null,
       deleteAction: ' ',
       name: entity.primaryKey.physicalName,
       referencedColumns: null,
@@ -2333,6 +2444,7 @@ function buildExpectedConstraints(
       columns: [...relation.foreignKey.sourceColumns],
       deferred: false,
       deferrable: false,
+      definition: null,
       deleteAction: 'r',
       name: relation.foreignKey.physicalName,
       referencedColumns: [...relation.foreignKey.targetColumns],
@@ -2343,6 +2455,30 @@ function buildExpectedConstraints(
       updateAction: 'r',
       validated: true,
     });
+  }
+  for (const entity of tables.values()) {
+    for (const check of entity.checkConstraints ?? []) {
+      if (pendingConstraintNames.has(check.physicalName)) continue;
+      result.push({
+        columns: [
+          requiredStorageColumn(entity, check.canonicalFieldId).physicalName,
+        ],
+        deferred: false,
+        deferrable: false,
+        definition: normalizeSqlExpressionRequired(
+          enumCheckExpression(entity, check),
+        ),
+        deleteAction: ' ',
+        name: check.physicalName,
+        referencedColumns: null,
+        referencedSchema: null,
+        referencedTable: null,
+        tableName: entity.physicalTableName,
+        type: 'c',
+        updateAction: ' ',
+        validated: false,
+      });
+    }
   }
   return result.toSorted((left, right) =>
     `${left.tableName}.${left.name}`.localeCompare(
@@ -2669,6 +2805,7 @@ function mergeCompatibleEntity(
   const withoutAdditive = (entity: StorageEntityTarget) => {
     const {
       columns: _columns,
+      checkConstraints: _checkConstraints,
       consumerWriterRoots: _consumerWriterRoots,
       derivedStateFields: _derivedStateFields,
       indexes: _indexes,
@@ -2676,6 +2813,7 @@ function mergeCompatibleEntity(
       ...base
     } = entity;
     void _columns;
+    void _checkConstraints;
     void _consumerWriterRoots;
     void _derivedStateFields;
     void _indexes;
@@ -2711,13 +2849,56 @@ function mergeCompatibleEntity(
       name(leftValue).localeCompare(name(rightValue)),
     );
   };
+  const mergeColumns = (): StorageEntityTarget['columns'] => {
+    const values = new Map(
+      prior.columns.map((column) => [column.physicalName, column]),
+    );
+    for (const column of next.columns) {
+      const existing = values.get(column.physicalName);
+      if (!existing) {
+        values.set(column.physicalName, column);
+        continue;
+      }
+      const withoutContract = (
+        value: StorageEntityTarget['columns'][number],
+      ) => {
+        const { fieldContract: _fieldContract, ...shape } = value;
+        void _fieldContract;
+        return shape;
+      };
+      if (
+        canonicalize(withoutContract(existing)) !==
+          canonicalize(withoutContract(column)) ||
+        (Object.hasOwn(existing, 'fieldContract') &&
+          Object.hasOwn(column, 'fieldContract') &&
+          canonicalize(existing.fieldContract) !==
+            canonicalize(column.fieldContract))
+      ) {
+        throw failure(
+          'LIVE_SET_SHAPE_CONFLICT',
+          `conflicting live roots claim ${next.physicalTableName}.${column.physicalName}`,
+        );
+      }
+      if (Object.hasOwn(column, 'fieldContract')) {
+        values.set(column.physicalName, column);
+      }
+    }
+    return [...values.values()].toSorted((left, right) =>
+      left.physicalName < right.physicalName
+        ? -1
+        : left.physicalName > right.physicalName
+          ? 1
+          : 0,
+    );
+  };
   return {
     ...next,
-    columns: mergeNamed(
-      prior.columns,
-      next.columns,
+    checkConstraints: mergeNamed(
+      prior.checkConstraints ?? [],
+      next.checkConstraints ?? [],
       (value) => value.physicalName,
     ),
+    columns: mergeColumns(),
     derivedStateFields: mergeNamed(
       prior.derivedStateFields,
       next.derivedStateFields,
@@ -3309,6 +3490,19 @@ function locateIndex(
       (candidate) => candidate.physicalName === element.physicalObjectName,
     );
     if (index) return { entity, index };
+  }
+  throw failure('ELEMENT_TARGET_MISSING', element.elementId);
+}
+
+function locateCheckConstraint(
+  target: StorageTargetPayloadV1,
+  element: StorageTransitionElement,
+) {
+  for (const entity of target.entities) {
+    const check = (entity.checkConstraints ?? []).find(
+      (candidate) => candidate.physicalName === element.physicalObjectName,
+    );
+    if (check) return { check, entity };
   }
   throw failure('ELEMENT_TARGET_MISSING', element.elementId);
 }

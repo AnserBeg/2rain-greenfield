@@ -7,6 +7,7 @@ import { hashCanonical } from './hash.js';
 import {
   BACKFILL_ADMISSIBILITY_VERSION,
   HASH_DOMAINS,
+  MODULE_FIELD_CONTRACT_VERSION,
   PHYSICAL_MAPPING_VERSION,
   POSTGRES_PROVIDER_ABI_VERSION,
   STORAGE_COMPATIBILITY_MATRIX_VERSION,
@@ -220,6 +221,7 @@ export interface StorageEntityTarget {
     representation: 'nullableTimestamp';
   };
   columns: StorageColumnTarget[];
+  checkConstraints: StorageCheckConstraintTarget[];
   consumerWriterRoots: {
     readerQueryIds: string[];
     writerOperationIds: string[];
@@ -259,12 +261,51 @@ export interface StorageColumnTarget {
   collation: 'binary' | 'unicodeCaseInsensitive';
   defaultSemantics: 'none' | 'nullable' | 'declaredDefault' | 'coalesceAtRead';
   defaultValue: unknown | null;
+  fieldContract: ModuleFieldContract;
   nullable: boolean;
   physicalName: string;
   postgresqlType: string;
   requiredAfterTightening: boolean;
   searchMapping: 'none' | 'normalizedTextIndex';
   shapeFingerprint: string;
+}
+
+export interface ModuleFieldContract {
+  bounds: {
+    maximumLength: number | null;
+    precision: number | null;
+    scale: number | null;
+  };
+  enumOptionIds: string[];
+  fieldId: string;
+  fieldKind:
+    | 'booleanFieldType'
+    | 'dateFieldType'
+    | 'dateTimeFieldType'
+    | 'enumFieldType'
+    | 'exactDecimalFieldType'
+    | 'integerFieldType'
+    | 'moneyFieldType'
+    | 'quantityFieldType'
+    | 'textFieldType'
+    | 'timeFieldType';
+  normalization: 'none' | 'unicodeCaseFoldNoCompatibilityNormalization';
+  required: boolean;
+  schemaVersion: typeof MODULE_FIELD_CONTRACT_VERSION;
+  temporal: {
+    precision: 'millisecond' | 'second' | null;
+    timezoneSemantics:
+      'calendarDate' | 'localWallTime' | 'offsetDateTime' | 'utcInstant' | null;
+  };
+  writable: true;
+}
+
+export interface StorageCheckConstraintTarget {
+  canonicalFieldId: string;
+  checkKind: 'enumDomain';
+  enumOptionIds: string[];
+  physicalName: string;
+  validated: false;
 }
 
 export interface StorageIndexTarget {
@@ -281,6 +322,7 @@ export interface StorageUniqueKeyTarget {
 }
 
 export interface StorageRelationTarget {
+  archiveBehavior: 'restrict' | 'retainReference';
   foreignKey: {
     onDelete: 'restrict';
     onUpdate: 'restrict';
@@ -415,6 +457,32 @@ export function lowerStorageTargetV1(
           return lowerColumn(field, mappings, deferRequiredTightening);
         },
       );
+      const checkConstraints = (
+        fieldsByEntity.get(entity.entityId) ?? []
+      ).flatMap((field): StorageCheckConstraintTarget[] => {
+        if (field.fieldType.kind !== 'enumFieldType') return [];
+        const physicalName = physicalNameFor(
+          'constraint',
+          `${field.fieldId}/enum-domain`,
+        );
+        const constraint = {
+          canonicalFieldId: field.fieldId,
+          checkKind: 'enumDomain' as const,
+          enumOptionIds: field.fieldType.options
+            .map((option) => option.optionId)
+            .sort(compare),
+          physicalName,
+          validated: false as const,
+        };
+        addMapping(
+          mappings,
+          'constraint',
+          `${field.fieldId}#enum-domain`,
+          physicalName,
+          constraint,
+        );
+        return [constraint];
+      });
       const derivedStateFields = (
         stateMachinesByEntity.get(entity.entityId) ?? []
       )
@@ -508,6 +576,7 @@ export function lowerStorageTargetV1(
           defaultVisibility: 'excludeArchived',
           representation: 'nullableTimestamp',
         },
+        checkConstraints,
         columns,
         consumerWriterRoots: {
           readerQueryIds: (queriesByEntity.get(entity.entityId) ?? [])
@@ -574,6 +643,7 @@ export function lowerStorageTargetV1(
         ],
       };
       const targetShape: StorageRelationTarget = {
+        archiveBehavior: relation.archiveBehavior,
         foreignKey,
         ownership: relation.ownership,
         relationColumn: {
@@ -586,6 +656,7 @@ export function lowerStorageTargetV1(
         targetEntityId: relation.targetEntity.targetId,
       };
       const compatibilityShape = {
+        archiveBehavior: targetShape.archiveBehavior,
         foreignKey: targetShape.foreignKey,
         ownership: targetShape.ownership,
         relationColumn: targetShape.relationColumn,
@@ -719,9 +790,13 @@ export function buildStorageTransitionEnvelope(
     const oldFields = new Map(
       oldEntity.columns.map((field) => [field.canonicalFieldId, field]),
     );
+    const oldChecks = new Set(
+      (oldEntity.checkConstraints ?? []).map((check) => check.physicalName),
+    );
     const newFields = new Map(
       entity.columns.map((field) => [field.canonicalFieldId, field]),
     );
+    const addedColumnElementIds = new Map<string, string>();
     const removed = [...oldFields.keys()].filter(
       (fieldId) => !newFields.has(fieldId),
     );
@@ -807,6 +882,7 @@ export function buildStorageTransitionEnvelope(
         'existing',
       );
       elements.push(addColumn);
+      addedColumnElementIds.set(fieldId, addColumn.elementId);
       let tightenDependency = addColumn;
       if (sourceField.storageEvolution) {
         const backfill = element(
@@ -855,6 +931,21 @@ export function buildStorageTransitionEnvelope(
           ),
         );
       }
+    }
+    for (const check of entity.checkConstraints) {
+      if (oldChecks.has(check.physicalName)) continue;
+      elements.push(
+        element(
+          'addNotValidConstraint',
+          entity.entityId,
+          check.canonicalFieldId,
+          check.physicalName,
+          [addedColumnElementIds.get(check.canonicalFieldId)].filter(
+            (dependency): dependency is string => dependency !== undefined,
+          ),
+          'existing',
+        ),
+      );
     }
   }
 
@@ -1181,6 +1272,7 @@ function lowerColumn(
     collation: field.collation ?? ('binary' as const),
     defaultSemantics,
     defaultValue: field.defaultValue ?? null,
+    fieldContract: fieldContract(field),
     nullable: field.presence !== 'required' || deferRequiredTightening,
     physicalName,
     postgresqlType,
@@ -1205,6 +1297,60 @@ function lowerColumn(
   };
   addMapping(mappings, 'column', field.fieldId, physicalName, value);
   return value;
+}
+
+function fieldContract(field: Field): ModuleFieldContract {
+  const precision =
+    'precision' in field.fieldType &&
+    typeof field.fieldType.precision === 'number'
+      ? field.fieldType.precision
+      : null;
+  const scale = 'scale' in field.fieldType ? field.fieldType.scale : null;
+  return {
+    bounds: {
+      maximumLength:
+        field.fieldType.kind === 'textFieldType'
+          ? field.fieldType.maximumLength
+          : null,
+      precision,
+      scale,
+    },
+    enumOptionIds:
+      field.fieldType.kind === 'enumFieldType'
+        ? field.fieldType.options.map((option) => option.optionId).sort(compare)
+        : [],
+    fieldId: field.fieldId,
+    fieldKind: field.fieldType.kind,
+    normalization:
+      field.businessKey === 'tenantEnvironmentCaseInsensitiveUnique'
+        ? 'unicodeCaseFoldNoCompatibilityNormalization'
+        : 'none',
+    required: field.presence === 'required',
+    schemaVersion: MODULE_FIELD_CONTRACT_VERSION,
+    temporal: temporalContract(field.fieldType),
+    writable: true,
+  };
+}
+
+function temporalContract(
+  fieldType: FieldType,
+): ModuleFieldContract['temporal'] {
+  switch (fieldType.kind) {
+    case 'dateFieldType':
+      return { precision: null, timezoneSemantics: 'calendarDate' };
+    case 'timeFieldType':
+      return {
+        precision: fieldType.precision,
+        timezoneSemantics: 'localWallTime',
+      };
+    case 'dateTimeFieldType':
+      return {
+        precision: fieldType.precision,
+        timezoneSemantics: fieldType.timezoneSemantics,
+      };
+    default:
+      return { precision: null, timezoneSemantics: null };
+  }
 }
 
 function element(
@@ -1309,14 +1455,22 @@ function sameRelationShape(
   previous: StorageRelationTarget,
   candidate: StorageRelationTarget,
 ): boolean {
+  const physicalShape = (relation: StorageRelationTarget) => ({
+    foreignKey: relation.foreignKey,
+    ownership: relation.ownership,
+    relationColumn: relation.relationColumn,
+    relationId: relation.relationId,
+    sourceEntityId: relation.sourceEntityId,
+    targetEntityId: relation.targetEntityId,
+  });
   return (
     hashCanonical(
       `${HASH_DOMAINS.projectionSemantic}/storage-relation-shape`,
-      previous,
+      physicalShape(previous),
     ).digest ===
     hashCanonical(
       `${HASH_DOMAINS.projectionSemantic}/storage-relation-shape`,
-      candidate,
+      physicalShape(candidate),
     ).digest
   );
 }

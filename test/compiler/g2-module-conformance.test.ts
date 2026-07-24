@@ -21,12 +21,16 @@ import {
   diffCompiledReleases,
   expectedActiveReleaseFrom,
   requiredProjectionFamily,
+  validateExecutedVerificationPlan,
   type CompileResult,
   type CompileSuccess,
   type CompilerInput,
+  type ExecutedVerificationResult,
   type ProjectionFamilyId,
   type ProjectionManifestEnvelope,
+  type StorageTargetPayloadV1,
   type StorageTransitionEnvelope,
+  type VerificationPlanPayloadV1,
 } from '../../packages/compiler/src/index.js';
 import {
   FIXTURE_IDS,
@@ -140,28 +144,40 @@ test('compiler-derived conformance names the entity and missing family', () => {
   ]);
 });
 
-test('compiler-derived conformance requires recovery evidence per active entity', () => {
-  const candidate = ordinaryModuleV1() as {
-    assertions: Array<{
-      assertionId: string;
-      evidenceKinds: string[];
-    }>;
-  };
-  const childAssertion = candidate.assertions.find((assertion) =>
-    assertion.assertionId.endsWith('master_role_conformance'),
-  )!;
-  childAssertion.evidenceKinds = childAssertion.evidenceKinds.filter(
-    (kind) => kind !== 'recovery',
+test('executable conformance rejects declarations and fabricated linked results', () => {
+  const compiled = mustCompile(input(ordinaryModuleV1()));
+  const plan = projectionPayload<VerificationPlanPayloadV1>(
+    compiled,
+    PROJECTION_FAMILY_IDS.verificationPlan,
   );
-  const result = compileApplication(input(candidate));
-  assert.equal(result.status, 'failed');
-  assert.deepEqual(structuralDiagnostics(result), [
-    {
-      code: 'COMPILER_ENTITY_PROJECTION_MISSING',
-      path: '$.conformance.verification.recovery',
-      subjectId: FIXTURE_IDS.entityIds.child,
-    },
-  ]);
+  const labelsOnly = validateExecutedVerificationPlan(plan, []);
+  assert.equal(labelsOnly.status, 'failed');
+  assert.equal(labelsOnly.diagnostics.length, plan.scenarios.length);
+
+  const fabricated = plan.scenarios.map(
+    (scenario): ExecutedVerificationResult => ({
+      negativeProbeDigest:
+        scenario.probePolarity === 'positiveAndNegative'
+          ? '0'.repeat(64)
+          : null,
+      positiveProbeDigest: '1'.repeat(64),
+      provider: 'realPostgresql',
+      providerRunId: 'fabricated',
+      scenarioFingerprint: scenario.scenarioFingerprint,
+      scenarioId: scenario.scenarioId,
+      schemaVersion: 'northstar.verification-result/v1',
+    }),
+  );
+  const fabricatedResult = validateExecutedVerificationPlan(plan, fabricated);
+  assert.equal(fabricatedResult.status, 'failed');
+  assert.equal(fabricatedResult.diagnostics.length, plan.scenarios.length);
+  assert.equal(
+    fabricatedResult.diagnostics.every(
+      (diagnostic) =>
+        diagnostic.code === 'VERIFICATION_EXECUTED_RESULT_INVALID',
+    ),
+    true,
+  );
 });
 
 test('parent-scoped children receive the complete Q0/O0 and surface quartet', () => {
@@ -218,6 +234,163 @@ test('parent-scoped children receive the complete Q0/O0 and surface quartet', ()
       operation.operationId.includes('master_role_'),
     ).length,
     4,
+  );
+});
+
+test('compiled field/input contracts and enum defenses preserve declared semantics generically', () => {
+  const compiled = mustCompile(input(ordinaryModuleV1()));
+  const operations = projectionPayload<{
+    operations: Array<{
+      inputContract?: {
+        closedArgumentKeys: string[];
+        fields: Array<{
+          enumOptionIds: string[];
+          fieldId: string;
+          fieldKind: string;
+          normalization: string;
+          required: boolean;
+          temporal: {
+            precision: string | null;
+            timezoneSemantics: string | null;
+          };
+        }>;
+        schemaVersion: string;
+        writableFieldIds: string[];
+      };
+      operationId: string;
+    }>;
+  }>(compiled, PROJECTION_FAMILY_IDS.operationCatalog).operations;
+  const childCreate = operations.find((operation) =>
+    operation.operationId.endsWith(':operation.master_role_create'),
+  );
+  assert.deepEqual(childCreate?.inputContract, {
+    closedArgumentKeys: ['recordId', 'relations', 'values'],
+    fields: [
+      {
+        bounds: {
+          maximumLength: null,
+          precision: null,
+          scale: null,
+        },
+        enumOptionIds: [
+          FIXTURE_IDS.optionIds.owner,
+          FIXTURE_IDS.optionIds.buyer,
+        ],
+        fieldId: FIXTURE_IDS.fieldIds.childRole,
+        fieldKind: 'enumFieldType',
+        normalization: 'none',
+        required: true,
+        temporal: { precision: null, timezoneSemantics: null },
+        writable: true,
+      },
+    ],
+    relationInputs: [
+      {
+        archiveBehavior: 'restrict',
+        relationId: `${FIXTURE_IDS.namespace}:relation.master_role_parent`,
+        required: true,
+      },
+    ],
+    schemaVersion: 'northstar.module-input-contract/v1',
+    writableFieldIds: [FIXTURE_IDS.fieldIds.childRole],
+  });
+  const parentCreate = operations.find((operation) =>
+    operation.operationId.endsWith(':operation.master_create'),
+  );
+  assert.equal(
+    parentCreate?.inputContract?.fields.find(
+      (field) => field.fieldId === FIXTURE_IDS.fieldIds.parentNumber,
+    )?.normalization,
+    'unicodeCaseFoldNoCompatibilityNormalization',
+  );
+
+  const storage = projectionPayload<StorageTargetPayloadV1>(
+    compiled,
+    PROJECTION_FAMILY_IDS.storageTarget,
+  );
+  const child = storage.entities.find(
+    (entity) => entity.entityId === FIXTURE_IDS.entityIds.child,
+  );
+  const childRole = child?.columns.find(
+    (column) => column.canonicalFieldId === FIXTURE_IDS.fieldIds.childRole,
+  );
+  assert.deepEqual(childRole?.fieldContract, {
+    bounds: { maximumLength: null, precision: null, scale: null },
+    enumOptionIds: [FIXTURE_IDS.optionIds.buyer, FIXTURE_IDS.optionIds.owner],
+    fieldId: FIXTURE_IDS.fieldIds.childRole,
+    fieldKind: 'enumFieldType',
+    normalization: 'none',
+    required: true,
+    schemaVersion: 'northstar.module-field-contract/v1',
+    temporal: { precision: null, timezoneSemantics: null },
+    writable: true,
+  });
+  assert.deepEqual(child?.checkConstraints, [
+    {
+      canonicalFieldId: FIXTURE_IDS.fieldIds.childRole,
+      checkKind: 'enumDomain',
+      enumOptionIds: [FIXTURE_IDS.optionIds.buyer, FIXTURE_IDS.optionIds.owner],
+      physicalName: child?.checkConstraints[0]?.physicalName,
+      validated: false,
+    },
+  ]);
+  assert.equal(storage.relations[0]?.archiveBehavior, 'restrict');
+
+  const temporalCompiled = mustCompile(input(ordinaryModuleV2()));
+  const temporalOperations = projectionPayload<{
+    operations: Array<{
+      inputContract?: {
+        fields: Array<{
+          bounds: {
+            precision: number | null;
+            scale: number | null;
+          };
+          fieldId: string;
+          temporal: {
+            precision: string | null;
+            timezoneSemantics: string | null;
+          };
+        }>;
+      };
+      operationId: string;
+    }>;
+  }>(temporalCompiled, PROJECTION_FAMILY_IDS.operationCatalog).operations;
+  const temporalFields = temporalOperations
+    .find((operation) =>
+      operation.operationId.endsWith(':operation.master_update'),
+    )
+    ?.inputContract?.fields.filter((field) =>
+      new Set<string>([
+        FIXTURE_IDS.fieldIds.parentLocalTime,
+        FIXTURE_IDS.fieldIds.parentUtcInstant,
+      ]).has(field.fieldId),
+    )
+    .map((field) => ({ fieldId: field.fieldId, temporal: field.temporal }));
+  assert.deepEqual(temporalFields, [
+    {
+      fieldId: FIXTURE_IDS.fieldIds.parentLocalTime,
+      temporal: {
+        precision: 'second',
+        timezoneSemantics: 'localWallTime',
+      },
+    },
+    {
+      fieldId: FIXTURE_IDS.fieldIds.parentUtcInstant,
+      temporal: {
+        precision: 'millisecond',
+        timezoneSemantics: 'utcInstant',
+      },
+    },
+  ]);
+  assert.deepEqual(
+    temporalOperations
+      .find((operation) =>
+        operation.operationId.endsWith(':operation.master_update'),
+      )
+      ?.inputContract?.fields.find(
+        (field) => field.fieldId === FIXTURE_IDS.fieldIds.parentAmount,
+      )?.bounds,
+    { maximumLength: null, precision: 5, scale: 2 },
   );
 });
 

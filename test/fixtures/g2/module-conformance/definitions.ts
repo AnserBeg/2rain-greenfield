@@ -19,9 +19,19 @@ const entityIds = {
 
 const fieldIds = {
   childRole: `${namespace}:field.master_role_kind`,
+  parentAmount: `${namespace}:field.master_amount`,
   parentName: `${namespace}:field.master_name`,
   parentNumber: `${namespace}:field.master_number`,
   parentNotes: `${namespace}:field.master_notes`,
+  parentTier: `${namespace}:field.master_tier`,
+  parentLocalTime: `${namespace}:field.master_local_time`,
+  parentUtcInstant: `${namespace}:field.master_utc_instant`,
+} as const;
+const optionIds = {
+  buyer: `${namespace}:option.buyer`,
+  owner: `${namespace}:option.owner`,
+  premium: `${namespace}:option.premium`,
+  standard: `${namespace}:option.standard`,
 } as const;
 
 const moduleId = `${namespace}:module.master`;
@@ -139,8 +149,23 @@ export function ordinaryModuleV1(): Record<string, unknown> {
         entity: reference('entityReference', entityIds.child),
         fieldId: fieldIds.childRole,
         fieldType: {
-          kind: 'textFieldType',
-          maximumLength: 40,
+          kind: 'enumFieldType',
+          options: [
+            {
+              kind: 'enumOption',
+              label: 'Owner',
+              optionId: optionIds.owner,
+              orderKey: 10,
+              schemaVersion: version,
+            },
+            {
+              kind: 'enumOption',
+              label: 'Buyer',
+              optionId: optionIds.buyer,
+              orderKey: 20,
+              schemaVersion: version,
+            },
+          ],
           schemaVersion: version,
         },
         kind: 'fieldDefinition',
@@ -230,6 +255,27 @@ export function ordinaryModuleV2(): Record<string, unknown> {
     collation: 'binary',
     defaultSemantics: 'nullable',
     entity: reference('entityReference', entityIds.parent),
+    fieldId: fieldIds.parentAmount,
+    fieldType: {
+      kind: 'exactDecimalFieldType',
+      precision: 5,
+      representation: 'canonicalString',
+      scale: 2,
+      schemaVersion: version,
+    },
+    kind: 'fieldDefinition',
+    label: 'Amount',
+    orderKey: 70,
+    presence: 'optional',
+    reportable: true,
+    schemaVersion: version,
+    searchable: false,
+  });
+  definition.fields.push({
+    classification: 'internal',
+    collation: 'binary',
+    defaultSemantics: 'nullable',
+    entity: reference('entityReference', entityIds.parent),
     fieldId: fieldIds.parentNotes,
     fieldType: {
       kind: 'textFieldType',
@@ -239,6 +285,80 @@ export function ordinaryModuleV2(): Record<string, unknown> {
     kind: 'fieldDefinition',
     label: 'Notes',
     orderKey: 30,
+    presence: 'optional',
+    reportable: true,
+    schemaVersion: version,
+    searchable: false,
+  });
+  definition.fields.push({
+    classification: 'internal',
+    collation: 'binary',
+    defaultSemantics: 'nullable',
+    entity: reference('entityReference', entityIds.parent),
+    fieldId: fieldIds.parentTier,
+    fieldType: {
+      kind: 'enumFieldType',
+      options: [
+        {
+          kind: 'enumOption',
+          label: 'Standard',
+          optionId: optionIds.standard,
+          orderKey: 10,
+          schemaVersion: version,
+        },
+        {
+          kind: 'enumOption',
+          label: 'Premium',
+          optionId: optionIds.premium,
+          orderKey: 20,
+          schemaVersion: version,
+        },
+      ],
+      schemaVersion: version,
+    },
+    kind: 'fieldDefinition',
+    label: 'Tier',
+    orderKey: 40,
+    presence: 'optional',
+    reportable: true,
+    schemaVersion: version,
+    searchable: false,
+  });
+  definition.fields.push({
+    classification: 'internal',
+    collation: 'binary',
+    defaultSemantics: 'nullable',
+    entity: reference('entityReference', entityIds.parent),
+    fieldId: fieldIds.parentLocalTime,
+    fieldType: {
+      kind: 'timeFieldType',
+      precision: 'second',
+      schemaVersion: version,
+      timezoneSemantics: 'localWallTime',
+    },
+    kind: 'fieldDefinition',
+    label: 'Local time',
+    orderKey: 50,
+    presence: 'optional',
+    reportable: true,
+    schemaVersion: version,
+    searchable: false,
+  });
+  definition.fields.push({
+    classification: 'internal',
+    collation: 'binary',
+    defaultSemantics: 'nullable',
+    entity: reference('entityReference', entityIds.parent),
+    fieldId: fieldIds.parentUtcInstant,
+    fieldType: {
+      kind: 'dateTimeFieldType',
+      precision: 'millisecond',
+      schemaVersion: version,
+      timezoneSemantics: 'utcInstant',
+    },
+    kind: 'fieldDefinition',
+    label: 'UTC instant',
+    orderKey: 60,
     presence: 'optional',
     reportable: true,
     schemaVersion: version,
@@ -256,6 +376,29 @@ export function ordinaryModuleV2(): Record<string, unknown> {
       schemaVersion: version,
       selectionId: `${query.queryId.replace(':query.', ':selection.')}_notes`,
     });
+    query.selections.push(
+      {
+        field: reference('fieldReference', fieldIds.parentLocalTime),
+        kind: 'querySelection',
+        orderKey: 40,
+        schemaVersion: version,
+        selectionId: `${query.queryId.replace(':query.', ':selection.')}_local_time`,
+      },
+      {
+        field: reference('fieldReference', fieldIds.parentUtcInstant),
+        kind: 'querySelection',
+        orderKey: 50,
+        schemaVersion: version,
+        selectionId: `${query.queryId.replace(':query.', ':selection.')}_utc_instant`,
+      },
+      {
+        field: reference('fieldReference', fieldIds.parentAmount),
+        kind: 'querySelection',
+        orderKey: 60,
+        schemaVersion: version,
+        selectionId: `${query.queryId.replace(':query.', ':selection.')}_amount`,
+      },
+    );
   }
   return definition;
 }
@@ -272,12 +415,25 @@ export function ordinaryModuleV1ForNamespace(
   >;
 }
 
+export function ordinaryModuleV2ForNamespace(
+  targetNamespace: string,
+): Record<string, unknown> {
+  if (!/^northstar\.[a-z][a-z0-9]*$/.test(targetNamespace)) {
+    throw new TypeError('fixture namespace must be canonical and lowercase');
+  }
+  return replaceNamespace(ordinaryModuleV2(), targetNamespace) as Record<
+    string,
+    unknown
+  >;
+}
+
 export const FIXTURE_IDS = Object.freeze({
   contentCapabilityId,
   entityIds,
   fieldIds,
   moduleId,
   namespace,
+  optionIds,
 });
 
 function entityQueries(

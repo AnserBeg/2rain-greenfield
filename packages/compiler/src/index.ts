@@ -9,6 +9,17 @@ export { COMPILER_DIAGNOSTIC_COPY } from './diagnostics.js';
 export { diffCompiledReleases } from './diff.js';
 export { requiredProjectionFamily } from './projections.js';
 export {
+  executeVerificationPlan,
+  validateExecutedVerificationPlan,
+  type ExecutedVerificationProbe,
+  type ExecutedVerificationResult,
+  type VerificationConformanceDiagnostic,
+  type VerificationConformanceResult,
+  type VerificationPlanPayloadV1,
+  type VerificationScenario,
+  type VerificationScenarioExecutor,
+} from './verification.js';
+export {
   CHUNK_DESCRIPTOR_VERSION,
   BACKFILL_ADMISSIBILITY_VERSION,
   CHUNKING_SCHEME_VERSION,
@@ -19,6 +30,8 @@ export {
   HASH_ALGORITHM,
   HASH_DOMAINS,
   INCREMENTAL_EQUIVALENCE_INVARIANT,
+  MODULE_FIELD_CONTRACT_VERSION,
+  MODULE_INPUT_CONTRACT_VERSION,
   OPERATIONS_AGENT_TOOL_IDS,
   OUTPUT_PROTOCOL_VERSION,
   POLICY_MODEL_VERSION,
@@ -38,6 +51,9 @@ export {
   STORAGE_TARGET_PAYLOAD_VERSION,
   STORAGE_TRANSITION_ENVELOPE_VERSION,
   TIGHTENING_DEBT_VERSION,
+  VERIFICATION_PLAN_PAYLOAD_VERSION,
+  VERIFICATION_RESULT_VERSION,
+  VERIFICATION_SCENARIO_VERSION,
   type CapabilityFact,
   type CompilationNodeContract,
   type CompiledReleaseBundle,

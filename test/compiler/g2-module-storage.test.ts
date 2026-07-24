@@ -96,7 +96,7 @@ test('the v1 transition envelope matches its structural golden and has no provis
   assert.doesNotMatch(canonicalize(transition), /v0-provisional/);
   assert.doesNotMatch(canonicalize(transition), /storageTransitionPayload/);
   assert.equal(transition.fromReleaseRoot, first.releaseRoot);
-  assert.equal(transition.elements.length, 1);
+  assert.equal(transition.elements.length, 6);
   assert.deepEqual(
     structuralTransition(transition),
     JSON.parse(
@@ -568,6 +568,45 @@ test('relation mapping fingerprints include nullability and existing physical mu
   }
 });
 
+test('the PR-2 metadata bridge adds enum checks without retyping persisted columns', () => {
+  const packageRevision = normalizeApplicationPackage(ordinaryModuleV1());
+  const current = lowerStorageTargetV1(packageRevision);
+  const previous = structuredClone(current) as StorageTargetPayloadV1;
+  for (const entity of previous.entities) {
+    delete (entity as Partial<typeof entity>).checkConstraints;
+    for (const column of entity.columns) {
+      delete (column as Partial<typeof column>).fieldContract;
+    }
+  }
+  for (const relation of previous.relations) {
+    delete (relation as Partial<typeof relation>).archiveBehavior;
+  }
+
+  const candidate = lowerStorageTargetV1(packageRevision, previous);
+  const result = buildStorageTransitionEnvelope(
+    packageRevision,
+    previous,
+    candidate,
+    transitionBinding(),
+  );
+  assert.equal('diagnostic' in result, false);
+  if ('diagnostic' in result) return;
+  assert.deepEqual(
+    result.elements.map((element) => ({
+      fieldId: element.fieldId,
+      kind: element.kind,
+      subjectId: element.subjectId,
+    })),
+    [
+      {
+        fieldId: FIXTURE_IDS.fieldIds.childRole,
+        kind: 'addNotValidConstraint',
+        subjectId: FIXTURE_IDS.entityIds.child,
+      },
+    ],
+  );
+});
+
 test('the compatibility matrix is closed and old-writes-may-reject is never additive', () => {
   assert.deepEqual(Object.keys(STORAGE_COMPATIBILITY_MATRIX).sort(), [
     'addColumn',
@@ -617,7 +656,9 @@ test('backfill completeness cannot become load-bearing', () => {
     (element) => element.kind === 'backfill',
   );
   const column = admissibleTransition.elements.find(
-    (element) => element.kind === 'addColumn',
+    (element) =>
+      element.kind === 'addColumn' &&
+      element.fieldId === FIXTURE_IDS.fieldIds.parentNotes,
   );
   assert.deepEqual(backfill?.declaredDependencyIds, [column?.elementId]);
   assert.equal(backfill?.classification.preparationValidity, 'inAttemptOnly');

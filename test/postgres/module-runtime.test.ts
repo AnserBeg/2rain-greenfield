@@ -20,9 +20,14 @@ import {
   DEFAULT_COMPILER_LIMITS,
   MODULE_COMPILER_PROFILE,
   compileApplication,
+  executeVerificationPlan,
   expectedActiveReleaseFrom,
+  PROJECTION_FAMILY_IDS,
+  validateExecutedVerificationPlan,
   type CompileSuccess,
   type CompilerInput,
+  type StorageTargetPayloadV1,
+  type VerificationPlanPayloadV1,
 } from '../../packages/compiler/src/index.js';
 import type {
   MintedUuid,
@@ -30,6 +35,7 @@ import type {
   StoreAppPackageRevisionCommand,
 } from '../../packages/platform-runtime/src/index.js';
 import {
+  assertModuleSemanticStorageContract,
   ModuleRuntimeInterpreterError,
   PostgresModuleRuntimeInterpreter,
 } from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
@@ -67,8 +73,8 @@ import {
 import {
   FIXTURE_IDS,
   ordinaryModuleV1,
-  ordinaryModuleV1ForNamespace,
   ordinaryModuleV2,
+  ordinaryModuleV2ForNamespace,
 } from '../fixtures/g2/module-conformance/definitions.js';
 import { withEphemeralPostgres } from '../helpers/postgres.js';
 
@@ -84,6 +90,44 @@ const principalB = 'b3000000-0000-4000-8000-000000000003';
 const localeOrderingFieldIds = Object.freeze({
   digit: `${FIXTURE_IDS.namespace}:field.a0`,
   punctuation: `${FIXTURE_IDS.namespace}:field.a_a`,
+});
+
+test('accepted pre-PR-2 semantic metadata fails closed before module DML', () => {
+  const compiled = mustCompile(moduleInput(ordinaryModuleV1()));
+  const storage = compiledProjectionPayload<StorageTargetPayloadV1>(
+    compiled,
+    PROJECTION_FAMILY_IDS.storageTarget,
+  );
+  const withoutArchiveBehavior = structuredClone(storage);
+  delete (
+    withoutArchiveBehavior.relations[0] as Partial<
+      (typeof withoutArchiveBehavior.relations)[number]
+    >
+  ).archiveBehavior;
+  assert.throws(
+    () => assertModuleSemanticStorageContract(withoutArchiveBehavior),
+    (error: unknown) =>
+      assertModuleError(
+        error,
+        'MODULE_SEMANTIC_CONTRACT_UNSUPPORTED',
+        storage.relations[0]!.relationId,
+      ),
+  );
+
+  const withoutFieldContract = structuredClone(storage);
+  delete (
+    withoutFieldContract.entities[0]!.columns[0] as Partial<
+      (typeof withoutFieldContract.entities)[number]['columns'][number]
+    >
+  ).fieldContract;
+  assert.throws(
+    () => assertModuleSemanticStorageContract(withoutFieldContract),
+    (error: unknown) => {
+      assert.ok(error instanceof ModuleRuntimeInterpreterError);
+      assert.equal(error.code, 'MODULE_SEMANTIC_CONTRACT_UNSUPPORTED');
+      return true;
+    },
+  );
 });
 
 test('definition-only module is served generically through Q0/O0, trust, RLS, and pinned coexistence', async () => {
@@ -330,7 +374,9 @@ test('definition-only module is served generically through Q0/O0, trust, RLS, an
             relations: {
               [`${FIXTURE_IDS.namespace}:relation.master_role_parent`]: soloId,
             },
-            values: { [FIXTURE_IDS.fieldIds.childRole]: 'owner' },
+            values: {
+              [FIXTURE_IDS.fieldIds.childRole]: FIXTURE_IDS.optionIds.owner,
+            },
           },
         );
         assert.equal(childCreated.readBack?.revision, 1);
@@ -338,7 +384,9 @@ test('definition-only module is served generically through Q0/O0, trust, RLS, an
           (
             await operation(operationGateway, viewA1, 'master_role_update', {
               expectedRevision: 1,
-              patch: { [FIXTURE_IDS.fieldIds.childRole]: 'buyer' },
+              patch: {
+                [FIXTURE_IDS.fieldIds.childRole]: FIXTURE_IDS.optionIds.buyer,
+              },
               recordId: childId,
             })
           ).readBack?.revision,
@@ -371,7 +419,9 @@ test('definition-only module is served generically through Q0/O0, trust, RLS, an
               [`${FIXTURE_IDS.namespace}:relation.master_role_parent`]:
                 tenantBId,
             },
-            values: { [FIXTURE_IDS.fieldIds.childRole]: 'forbidden' },
+            values: {
+              [FIXTURE_IDS.fieldIds.childRole]: FIXTURE_IDS.optionIds.owner,
+            },
           }),
           (error: unknown) => {
             assert.ok(error instanceof ModuleRuntimeInterpreterError);
@@ -400,8 +450,11 @@ test('definition-only module is served generically through Q0/O0, trust, RLS, an
         );
         assert.equal(v2Update.readBack?.revision, 5);
         assert.deepEqual(v2Update.readBack?.values, {
+          [FIXTURE_IDS.fieldIds.parentAmount]: null,
+          [FIXTURE_IDS.fieldIds.parentLocalTime]: null,
           [FIXTURE_IDS.fieldIds.parentName]: 'Solo Updated',
           [FIXTURE_IDS.fieldIds.parentNotes]: 'served by v2',
+          [FIXTURE_IDS.fieldIds.parentUtcInstant]: null,
         });
         const oldPinned = await query(queryGateway, viewA1, 'master_get', {
           recordId: soloId,
@@ -415,6 +468,9 @@ test('definition-only module is served generically through Q0/O0, trust, RLS, an
         assert.deepEqual(Object.keys(newPinned.records[0]!.values), [
           FIXTURE_IDS.fieldIds.parentName,
           FIXTURE_IDS.fieldIds.parentNotes,
+          FIXTURE_IDS.fieldIds.parentLocalTime,
+          FIXTURE_IDS.fieldIds.parentUtcInstant,
+          FIXTURE_IDS.fieldIds.parentAmount,
         ]);
         assert.equal(
           newPinned.records[0]?.values[FIXTURE_IDS.fieldIds.parentNotes],
@@ -439,10 +495,10 @@ test('definition-only module is served generically through Q0/O0, trust, RLS, an
   );
 });
 
-test('metamorphic random namespace compiles, materializes, serves, and records trust without module code', async () => {
+test('metamorphic random namespace executes the compiled declared-semantics contract without module code', async () => {
   const suffix = randomUUID().replaceAll('-', '').slice(0, 12);
   const namespace = `northstar.metamorphic${suffix}`;
-  const definition = ordinaryModuleV1ForNamespace(namespace);
+  const definition = ordinaryModuleV2ForNamespace(namespace);
   const empty = mustCompile(moduleInput(emptyDefinition(definition)));
   const compiled = mustCompile(
     moduleInput(definition, expectedActiveReleaseFrom(empty)),
@@ -506,8 +562,13 @@ test('metamorphic random namespace compiles, materializes, serves, and records t
           {
             recordId,
             values: {
+              [`${namespace}:field.master_amount`]: '123.45',
               [`${namespace}:field.master_name`]: 'Metamorphic',
+              [`${namespace}:field.master_local_time`]: '08:15:30',
+              [`${namespace}:field.master_notes`]: 'never-search-this-secret',
               [`${namespace}:field.master_number`]: 'M-001',
+              [`${namespace}:field.master_utc_instant`]:
+                '2026-07-24T12:34:56.789Z',
             },
           },
           namespace,
@@ -525,6 +586,621 @@ test('metamorphic random namespace compiles, materializes, serves, and records t
         assert.equal(read.records[0]?.recordId, recordId);
         assertNoPhysicalDetails(read);
         await assertLinkedTrustFacts(pool, result, tenant, environment);
+
+        assert.equal(
+          (
+            await query(
+              queries,
+              view,
+              'master_search',
+              { text: 'NEVER-SEARCH-THIS-SECRET' },
+              namespace,
+            )
+          ).records.length,
+          0,
+        );
+        assert.equal(
+          (
+            await query(
+              queries,
+              view,
+              'master_search',
+              { text: 'METAMORPHIC' },
+              namespace,
+            )
+          ).records.length,
+          1,
+        );
+        await assert.rejects(
+          operation(
+            operations,
+            view,
+            'master_create',
+            {
+              recordId: randomUUID(),
+              values: {
+                [`${namespace}:field.master_name`]: 'Fold duplicate',
+                [`${namespace}:field.master_number`]: 'm-001',
+              },
+            },
+            namespace,
+          ),
+          (error: unknown) =>
+            assertModuleError(
+              error,
+              'MODULE_UNIQUE_VIOLATION',
+              `${namespace}:field.master_number`,
+            ),
+        );
+        for (const [number, name] of [
+          ['Ｍ－１００', 'Fullwidth'],
+          ['M-100', 'ASCII'],
+        ] as const) {
+          await operation(
+            operations,
+            view,
+            'master_create',
+            {
+              recordId: randomUUID(),
+              values: {
+                [`${namespace}:field.master_name`]: name,
+                [`${namespace}:field.master_number`]: number,
+              },
+            },
+            namespace,
+          );
+        }
+        assert.equal(
+          (
+            await query(
+              queries,
+              view,
+              'master_resolve',
+              { text: 'M-001' },
+              namespace,
+            )
+          ).outcome,
+          'exact',
+        );
+
+        await assert.rejects(
+          operation(
+            operations,
+            view,
+            'master_update',
+            {
+              expectedRevision: 1,
+              patch: {
+                [`${namespace}:field.master_tier`]: `${namespace}:option.not-declared`,
+              },
+              recordId,
+            },
+            namespace,
+          ),
+          (error: unknown) =>
+            assertModuleError(
+              error,
+              'MODULE_ENUM_VALUE_INVALID',
+              `${namespace}:field.master_tier`,
+            ),
+        );
+        assert.equal(
+          (
+            await operation(
+              operations,
+              view,
+              'master_update',
+              {
+                expectedRevision: 1,
+                patch: {
+                  [`${namespace}:field.master_tier`]: `${namespace}:option.standard`,
+                },
+                recordId,
+              },
+              namespace,
+            )
+          ).readBack?.revision,
+          2,
+        );
+        for (const [fieldId, invalidValue] of [
+          [`${namespace}:field.master_local_time`, '08:15:30.000'],
+          [`${namespace}:field.master_utc_instant`, '2026-07-24T12:34:56Z'],
+          [`${namespace}:field.master_amount`, '12345'],
+        ] as const) {
+          await assert.rejects(
+            operation(
+              operations,
+              view,
+              'master_update',
+              {
+                expectedRevision: 2,
+                patch: { [fieldId]: invalidValue },
+                recordId,
+              },
+              namespace,
+            ),
+            (error: unknown) =>
+              assertModuleError(error, 'MODULE_FIELD_VALUE_INVALID', fieldId),
+          );
+        }
+
+        await assert.rejects(
+          operation(
+            operations,
+            view,
+            'master_role_create',
+            {
+              recordId: randomUUID(),
+              relations: {
+                [`${namespace}:relation.master_role_parent`]: recordId,
+              },
+              values: {
+                [`${namespace}:field.master_role_kind`]: `${namespace}:option.not-declared`,
+              },
+            },
+            namespace,
+          ),
+          (error: unknown) =>
+            assertModuleError(
+              error,
+              'MODULE_ENUM_VALUE_INVALID',
+              `${namespace}:field.master_role_kind`,
+            ),
+        );
+        const childId = randomUUID();
+        await operation(
+          operations,
+          view,
+          'master_role_create',
+          {
+            recordId: childId,
+            relations: {
+              [`${namespace}:relation.master_role_parent`]: recordId,
+            },
+            values: {
+              [`${namespace}:field.master_role_kind`]: `${namespace}:option.owner`,
+            },
+          },
+          namespace,
+        );
+        await assert.rejects(
+          operation(
+            operations,
+            view,
+            'master_archive',
+            { expectedRevision: 2, recordId },
+            namespace,
+          ),
+          (error: unknown) =>
+            assertModuleError(
+              error,
+              'MODULE_ARCHIVE_RESTRICTED',
+              `${namespace}:relation.master_role_parent`,
+            ),
+        );
+        await operation(
+          operations,
+          view,
+          'master_role_archive',
+          { expectedRevision: 1, recordId: childId },
+          namespace,
+        );
+        await operation(
+          operations,
+          view,
+          'master_archive',
+          { expectedRevision: 2, recordId },
+          namespace,
+        );
+        await assert.rejects(
+          operation(
+            operations,
+            view,
+            'master_role_create',
+            {
+              recordId: randomUUID(),
+              relations: {
+                [`${namespace}:relation.master_role_parent`]: recordId,
+              },
+              values: {
+                [`${namespace}:field.master_role_kind`]: `${namespace}:option.owner`,
+              },
+            },
+            namespace,
+          ),
+          (error: unknown) =>
+            assertModuleError(
+              error,
+              'MODULE_RELATION_VIOLATION',
+              `${namespace}:relation.master_role_parent`,
+            ),
+        );
+        await assert.rejects(
+          operation(
+            operations,
+            view,
+            'master_role_restore',
+            { expectedRevision: 2, recordId: childId },
+            namespace,
+          ),
+          (error: unknown) =>
+            assertModuleError(
+              error,
+              'MODULE_RELATION_VIOLATION',
+              `${namespace}:relation.master_role_parent`,
+            ),
+        );
+        await operation(
+          operations,
+          view,
+          'master_restore',
+          { expectedRevision: 3, recordId },
+          namespace,
+        );
+        await operation(
+          operations,
+          view,
+          'master_role_restore',
+          { expectedRevision: 2, recordId: childId },
+          namespace,
+        );
+
+        const verificationPlan =
+          compiledProjectionPayload<VerificationPlanPayloadV1>(
+            compiled,
+            PROJECTION_FAMILY_IDS.verificationPlan,
+          );
+        assert.deepEqual(
+          new Set(verificationPlan.scenarios.map((scenario) => scenario.kind)),
+          new Set([
+            'archiveRestrict',
+            'declaredEvidence',
+            'enumReject',
+            'resolverAuthority',
+            'searchableExclusion',
+            'typedErrorSurface',
+            'uniquenessFold',
+          ]),
+        );
+        for (const entityId of [
+          `${namespace}:entity.master`,
+          `${namespace}:entity.master_role`,
+        ]) {
+          assert.deepEqual(
+            verificationPlan.scenarios
+              .filter(
+                (scenario) =>
+                  scenario.kind === 'declaredEvidence' &&
+                  scenario.entityId === entityId,
+              )
+              .map((scenario) => scenario.evidenceKind)
+              .sort(),
+            [
+              'agent',
+              'migration',
+              'provider',
+              'recovery',
+              'structure',
+              'userInterface',
+            ],
+          );
+        }
+        const results = await executeVerificationPlan(
+          verificationPlan,
+          'module-metamorphic',
+          async (scenario) => {
+            const parent = scenario.entityId === `${namespace}:entity.master`;
+            const localEntity = parent ? 'master' : 'master_role';
+            const scenarioRecordId = parent ? recordId : childId;
+            if (scenario.kind === 'declaredEvidence') {
+              if (scenario.evidenceKind === 'recovery') {
+                const recoveryRecordId = randomUUID();
+                if (parent) {
+                  await operation(
+                    operations,
+                    view,
+                    'master_create',
+                    {
+                      recordId: recoveryRecordId,
+                      values: {
+                        [`${namespace}:field.master_name`]: 'Recovery probe',
+                        [`${namespace}:field.master_number`]: `R-${recoveryRecordId}`,
+                      },
+                    },
+                    namespace,
+                  );
+                } else {
+                  await operation(
+                    operations,
+                    view,
+                    'master_role_create',
+                    {
+                      recordId: recoveryRecordId,
+                      relations: {
+                        [`${namespace}:relation.master_role_parent`]: recordId,
+                      },
+                      values: {
+                        [`${namespace}:field.master_role_kind`]: `${namespace}:option.owner`,
+                      },
+                    },
+                    namespace,
+                  );
+                }
+                await operation(
+                  operations,
+                  view,
+                  `${localEntity}_archive`,
+                  { expectedRevision: 1, recordId: recoveryRecordId },
+                  namespace,
+                );
+                const restored = await operation(
+                  operations,
+                  view,
+                  `${localEntity}_restore`,
+                  { expectedRevision: 2, recordId: recoveryRecordId },
+                  namespace,
+                );
+                assert.equal(restored.readBack?.archived, false);
+                return { positiveProbe: restored };
+              }
+              const invocation = scenario.invocation as {
+                query: { targetId: string };
+              };
+              const result = await query(
+                queries,
+                view,
+                invocation.query.targetId.split(':query.')[1]!,
+                { recordId: scenarioRecordId },
+                namespace,
+              );
+              assert.equal(result.outcome, 'exact');
+              return { positiveProbe: result };
+            }
+            if (scenario.kind === 'searchableExclusion') {
+              const excludedValue = new Map([
+                [`${namespace}:field.master_amount`, '123.45'],
+                [`${namespace}:field.master_notes`, 'NEVER-SEARCH-THIS-SECRET'],
+                [
+                  `${namespace}:field.master_tier`,
+                  `${namespace}:option.standard`,
+                ],
+                [`${namespace}:field.master_local_time`, '08:15:30'],
+                [
+                  `${namespace}:field.master_utc_instant`,
+                  '2026-07-24T12:34:56.789Z',
+                ],
+              ]).get(scenario.subjectId);
+              assert.ok(excludedValue);
+              const excluded = await query(
+                queries,
+                view,
+                `${localEntity}_search`,
+                { text: excludedValue },
+                namespace,
+              );
+              assert.equal(excluded.records.length, 0);
+              const included = await query(
+                queries,
+                view,
+                'master_search',
+                { text: 'METAMORPHIC' },
+                namespace,
+              );
+              assert.equal(included.records.length, 1);
+              return { negativeProbe: excluded, positiveProbe: included };
+            }
+            if (scenario.kind === 'enumReject') {
+              const current = await query(
+                queries,
+                view,
+                `${localEntity}_get`,
+                { recordId: scenarioRecordId },
+                namespace,
+              );
+              const fieldId = scenario.subjectId;
+              const invalid = await rejectedModuleError(
+                operation(
+                  operations,
+                  view,
+                  `${localEntity}_update`,
+                  {
+                    expectedRevision: current.records[0]!.revision,
+                    patch: { [fieldId]: `${namespace}:option.not-declared` },
+                    recordId: scenarioRecordId,
+                  },
+                  namespace,
+                ),
+                'MODULE_ENUM_VALUE_INVALID',
+                fieldId,
+              );
+              const validValue = parent
+                ? `${namespace}:option.premium`
+                : `${namespace}:option.buyer`;
+              const accepted = await operation(
+                operations,
+                view,
+                `${localEntity}_update`,
+                {
+                  expectedRevision: current.records[0]!.revision,
+                  patch: { [fieldId]: validValue },
+                  recordId: scenarioRecordId,
+                },
+                namespace,
+              );
+              return { negativeProbe: invalid, positiveProbe: accepted };
+            }
+            if (scenario.kind === 'resolverAuthority') {
+              const current = await query(
+                queries,
+                view,
+                `${localEntity}_get`,
+                { recordId: scenarioRecordId },
+                namespace,
+              );
+              const text = parent
+                ? 'M-001'
+                : String(
+                    current.records[0]?.values[
+                      `${namespace}:field.master_role_kind`
+                    ],
+                  );
+              const resolved = await query(
+                queries,
+                view,
+                `${localEntity}_resolve`,
+                { text },
+                namespace,
+              );
+              assert.equal(resolved.outcome, parent ? 'exact' : 'ambiguous');
+              const missing = await query(
+                queries,
+                view,
+                `${localEntity}_resolve`,
+                { text: `missing-${randomUUID()}` },
+                namespace,
+              );
+              assert.equal(missing.outcome, 'not-found');
+              return { negativeProbe: missing, positiveProbe: resolved };
+            }
+            if (scenario.kind === 'typedErrorSurface') {
+              const read = await query(
+                queries,
+                view,
+                `${localEntity}_get`,
+                { recordId: scenarioRecordId },
+                namespace,
+              );
+              const rejected = parent
+                ? await rejectedModuleError(
+                    operation(
+                      operations,
+                      view,
+                      'master_create',
+                      {
+                        recordId: randomUUID(),
+                        values: {
+                          [`${namespace}:field.master_name`]: 'Typed duplicate',
+                          [`${namespace}:field.master_number`]: 'm-001',
+                        },
+                      },
+                      namespace,
+                    ),
+                    'MODULE_UNIQUE_VIOLATION',
+                    `${namespace}:field.master_number`,
+                  )
+                : await rejectedModuleError(
+                    operation(
+                      operations,
+                      view,
+                      'master_role_create',
+                      {
+                        recordId: randomUUID(),
+                        relations: {
+                          [`${namespace}:relation.master_role_parent`]:
+                            randomUUID(),
+                        },
+                        values: {
+                          [`${namespace}:field.master_role_kind`]: `${namespace}:option.owner`,
+                        },
+                      },
+                      namespace,
+                    ),
+                    'MODULE_RELATION_TARGET_NOT_FOUND',
+                    null,
+                  );
+              return { negativeProbe: rejected, positiveProbe: read };
+            }
+            if (scenario.kind === 'archiveRestrict') {
+              const parentId = randomUUID();
+              const dependentId = randomUUID();
+              await operation(
+                operations,
+                view,
+                'master_create',
+                {
+                  recordId: parentId,
+                  values: {
+                    [`${namespace}:field.master_name`]: 'Restrict parent',
+                    [`${namespace}:field.master_number`]: `R-${parentId}`,
+                  },
+                },
+                namespace,
+              );
+              await operation(
+                operations,
+                view,
+                'master_role_create',
+                {
+                  recordId: dependentId,
+                  relations: {
+                    [`${namespace}:relation.master_role_parent`]: parentId,
+                  },
+                  values: {
+                    [`${namespace}:field.master_role_kind`]: `${namespace}:option.owner`,
+                  },
+                },
+                namespace,
+              );
+              const rejected = await rejectedModuleError(
+                operation(
+                  operations,
+                  view,
+                  'master_archive',
+                  { expectedRevision: 1, recordId: parentId },
+                  namespace,
+                ),
+                'MODULE_ARCHIVE_RESTRICTED',
+                scenario.subjectId,
+              );
+              const accepted = await operation(
+                operations,
+                view,
+                'master_role_archive',
+                { expectedRevision: 1, recordId: dependentId },
+                namespace,
+              );
+              return { negativeProbe: rejected, positiveProbe: accepted };
+            }
+            const uniqueId = randomUUID();
+            const uniqueValue = `V-${uniqueId}`;
+            const accepted = await operation(
+              operations,
+              view,
+              'master_create',
+              {
+                recordId: uniqueId,
+                values: {
+                  [`${namespace}:field.master_name`]: 'Fold probe',
+                  [`${namespace}:field.master_number`]: uniqueValue,
+                },
+              },
+              namespace,
+            );
+            const rejected = await rejectedModuleError(
+              operation(
+                operations,
+                view,
+                'master_create',
+                {
+                  recordId: randomUUID(),
+                  values: {
+                    [`${namespace}:field.master_name`]: 'Fold duplicate',
+                    [`${namespace}:field.master_number`]:
+                      uniqueValue.toLowerCase(),
+                  },
+                },
+                namespace,
+              ),
+              'MODULE_UNIQUE_VIOLATION',
+              scenario.subjectId,
+            );
+            return { negativeProbe: rejected, positiveProbe: accepted };
+          },
+        );
+        assert.deepEqual(
+          validateExecutedVerificationPlan(verificationPlan, results),
+          { diagnostics: [], status: 'passed' },
+        );
       } finally {
         await Promise.all([
           runtimePool.end(),
@@ -1027,6 +1703,58 @@ function mustCompile(input: CompilerInput): CompileSuccess {
     throw new Error(JSON.stringify(result.diagnostics));
   }
   return result;
+}
+
+function compiledProjectionPayload<T>(
+  compiled: CompileSuccess,
+  familyId: string,
+): T {
+  const reference = compiled.bundle.releaseManifest.projections.find(
+    (candidate) => candidate.familyId === familyId,
+  );
+  assert.ok(reference);
+  const manifestArtifact = compiled.bundle.artifacts.find(
+    (artifact) => artifact.contentHash === reference.artifactRoot,
+  );
+  assert.ok(manifestArtifact);
+  const manifest = JSON.parse(
+    new TextDecoder().decode(manifestArtifact.canonicalBytes),
+  ) as { chunks: Array<{ contentHash: string }> };
+  const chunk = compiled.bundle.artifacts.find(
+    (artifact) => artifact.contentHash === manifest.chunks[0]?.contentHash,
+  );
+  assert.ok(chunk);
+  return JSON.parse(new TextDecoder().decode(chunk.canonicalBytes)) as T;
+}
+
+function assertModuleError(
+  error: unknown,
+  code: string,
+  subjectId: string | null,
+): true {
+  assert.ok(error instanceof ModuleRuntimeInterpreterError);
+  assert.equal(error.code, code);
+  assert.equal(error.subjectId, subjectId);
+  assertNoPhysicalDetails({
+    code: error.code,
+    message: error.message,
+    subjectId: error.subjectId,
+  });
+  return true;
+}
+
+async function rejectedModuleError(
+  promise: Promise<unknown>,
+  code: string,
+  subjectId: string | null,
+): Promise<{ code: string; subjectId: string | null }> {
+  try {
+    await promise;
+  } catch (error) {
+    assertModuleError(error, code, subjectId);
+    return { code, subjectId };
+  }
+  assert.fail(`expected ${code}`);
 }
 
 async function runPersistedOrderingProbe(

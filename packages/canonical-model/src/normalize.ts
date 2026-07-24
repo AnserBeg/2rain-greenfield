@@ -1914,7 +1914,11 @@ function decimalFits(value: string, precision: number, scale: number): boolean {
   const [integer, fraction = ''] = unsigned.split('.');
   const integerDigits = integer === '0' ? 0 : integer!.length;
   const totalDigits = Math.max(1, integerDigits + fraction.length);
-  return fraction.length <= scale && totalDigits <= precision;
+  return (
+    fraction.length <= scale &&
+    integerDigits <= precision - scale &&
+    totalDigits <= precision
+  );
 }
 
 function canonicalDateTimePattern(

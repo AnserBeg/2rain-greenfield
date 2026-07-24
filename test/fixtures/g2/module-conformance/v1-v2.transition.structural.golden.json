@@ -18,9 +18,151 @@
       },
       "coexistenceImpact": "requiresReadFallback",
       "declaredDependencyIds": [],
+      "fieldId": "northstar.modulefixture:field.master_tier",
+      "kind": "addColumn",
+      "physicalObjectName": "nsm_c_fjggadegslgcx437xiteigh5bjuvh2bdjwyrocov6zluugxjthwa",
+      "schemaVersion": "northstar.storage-transition-element/v1",
+      "scope": {
+        "keyColumns": ["tenant_id", "environment_id"],
+        "kind": "tenantEnvironment"
+      },
+      "storageDomain": "managedModule",
+      "storageGeneration": "dedicatedTyped/v1",
+      "subjectId": "northstar.modulefixture:entity.master"
+    },
+    {
+      "classification": {
+        "dataEffect": "catalogOnly",
+        "operationalRisk": "boundedCatalogLock",
+        "preparationValidity": "preApprovalInert",
+        "semanticEffect": "additive"
+      },
+      "coexistence": {
+        "admission": "additive",
+        "newRead": "requiresReadFallback",
+        "newWrite": "compatible",
+        "oldRead": "compatible",
+        "oldWrite": "compatible"
+      },
+      "coexistenceImpact": "requiresReadFallback",
+      "declaredDependencyIds": [],
+      "fieldId": "northstar.modulefixture:field.master_local_time",
+      "kind": "addColumn",
+      "physicalObjectName": "nsm_c_yoopdme6p3n5iz7gt7wtuggnig3rysp5ashd3opjn5kwh276qapa",
+      "schemaVersion": "northstar.storage-transition-element/v1",
+      "scope": {
+        "keyColumns": ["tenant_id", "environment_id"],
+        "kind": "tenantEnvironment"
+      },
+      "storageDomain": "managedModule",
+      "storageGeneration": "dedicatedTyped/v1",
+      "subjectId": "northstar.modulefixture:entity.master"
+    },
+    {
+      "classification": {
+        "dataEffect": "catalogOnly",
+        "operationalRisk": "boundedCatalogLock",
+        "preparationValidity": "preApprovalInert",
+        "semanticEffect": "additive"
+      },
+      "coexistence": {
+        "admission": "additive",
+        "newRead": "requiresReadFallback",
+        "newWrite": "compatible",
+        "oldRead": "compatible",
+        "oldWrite": "compatible"
+      },
+      "coexistenceImpact": "requiresReadFallback",
+      "declaredDependencyIds": [],
+      "fieldId": "northstar.modulefixture:field.master_amount",
+      "kind": "addColumn",
+      "physicalObjectName": "nsm_c_oysgaanml5lxldi2ucr7ipiuehyiq6k4fqgxgds5hf5xxtvwsrra",
+      "schemaVersion": "northstar.storage-transition-element/v1",
+      "scope": {
+        "keyColumns": ["tenant_id", "environment_id"],
+        "kind": "tenantEnvironment"
+      },
+      "storageDomain": "managedModule",
+      "storageGeneration": "dedicatedTyped/v1",
+      "subjectId": "northstar.modulefixture:entity.master"
+    },
+    {
+      "classification": {
+        "dataEffect": "catalogOnly",
+        "operationalRisk": "boundedCatalogLock",
+        "preparationValidity": "preApprovalInert",
+        "semanticEffect": "additive"
+      },
+      "coexistence": {
+        "admission": "additive",
+        "newRead": "requiresReadFallback",
+        "newWrite": "compatible",
+        "oldRead": "compatible",
+        "oldWrite": "compatible"
+      },
+      "coexistenceImpact": "requiresReadFallback",
+      "declaredDependencyIds": [],
+      "fieldId": "northstar.modulefixture:field.master_utc_instant",
+      "kind": "addColumn",
+      "physicalObjectName": "nsm_c_2dxsm6j5eppvbxuki5dn66qjkacrigupylrcic5wtoeroz4eobka",
+      "schemaVersion": "northstar.storage-transition-element/v1",
+      "scope": {
+        "keyColumns": ["tenant_id", "environment_id"],
+        "kind": "tenantEnvironment"
+      },
+      "storageDomain": "managedModule",
+      "storageGeneration": "dedicatedTyped/v1",
+      "subjectId": "northstar.modulefixture:entity.master"
+    },
+    {
+      "classification": {
+        "dataEffect": "catalogOnly",
+        "operationalRisk": "boundedCatalogLock",
+        "preparationValidity": "preApprovalInert",
+        "semanticEffect": "additive"
+      },
+      "coexistence": {
+        "admission": "additive",
+        "newRead": "requiresReadFallback",
+        "newWrite": "compatible",
+        "oldRead": "compatible",
+        "oldWrite": "compatible"
+      },
+      "coexistenceImpact": "requiresReadFallback",
+      "declaredDependencyIds": [],
       "fieldId": "northstar.modulefixture:field.master_notes",
       "kind": "addColumn",
       "physicalObjectName": "nsm_c_c6clxtde6lr3tgihqhj2og7aki5vcvrnj5bhpgj4uyrxucxvndza",
+      "schemaVersion": "northstar.storage-transition-element/v1",
+      "scope": {
+        "keyColumns": ["tenant_id", "environment_id"],
+        "kind": "tenantEnvironment"
+      },
+      "storageDomain": "managedModule",
+      "storageGeneration": "dedicatedTyped/v1",
+      "subjectId": "northstar.modulefixture:entity.master"
+    },
+    {
+      "classification": {
+        "dataEffect": "catalogOnly",
+        "operationalRisk": "boundedCatalogLock",
+        "preparationValidity": "inAttemptOnly",
+        "semanticEffect": "tightening"
+      },
+      "coexistence": {
+        "admission": "blockingWhileAffectedWritersLive",
+        "newRead": "compatible",
+        "newWrite": "compatible",
+        "oldRead": "compatible",
+        "oldWrite": "mayReject"
+      },
+      "coexistenceImpact": "oldWritesMayReject",
+      "declaredDependencyIds": [
+        "1e502e35c8631ddd1ec398588e54e9cbfcaefb8bf93a6eb567501ed3618bf43e"
+      ],
+      "fieldId": "northstar.modulefixture:field.master_tier",
+      "kind": "addNotValidConstraint",
+      "physicalObjectName": "nsm_k_2g5bf37hp3zhqv2xafc6pkiicfnqtkqo6gbivk5ugbqgurqebayq",
       "schemaVersion": "northstar.storage-transition-element/v1",
       "scope": {
         "keyColumns": ["tenant_id", "environment_id"],
