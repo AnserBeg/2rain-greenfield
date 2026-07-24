@@ -178,6 +178,7 @@ test('definition-only module is served generically through Q0/O0, trust, RLS, an
           [empty, emptyDefinition(ordinaryModuleV1())],
           [v1, ordinaryModuleV1()],
           [v2, ordinaryModuleV2()],
+          [v1, ordinaryModuleV1()],
         ]);
         const releasesB = await persistSequence(runtimePool, contexts.b!, [
           [empty, emptyDefinition(ordinaryModuleV1())],
@@ -195,6 +196,7 @@ test('definition-only module is served generically through Q0/O0, trust, RLS, an
           modulePool,
         );
         await prepare(materializer, contexts.a!, principalA, releasesA[1]!);
+        await prepare(materializer, contexts.a!, principalA, releasesA[3]!);
         await prepare(materializer, contexts.b!, principalB, releasesB[1]!);
         await setPointer(pool, tenantA, environmentA, releasesA[1]!);
         await setPointer(pool, tenantB, environmentB, releasesB[1]!);
@@ -280,7 +282,7 @@ test('definition-only module is served generically through Q0/O0, trust, RLS, an
         );
         assert.deepEqual(retryPersistence.rows[0], {
           business_rows: '1',
-          deduplication_key: `${principalA}:${viewA1.release.contentHash}:${FIXTURE_IDS.namespace}:operation.master_create:${soloKey}`,
+          deduplication_key: `${principalA}:${viewA1.release.contentHash}:${viewA1.release.releaseId}:${FIXTURE_IDS.namespace}:operation.master_create:${soloKey}`,
           receipts: '1',
         });
         await assert.rejects(
@@ -304,6 +306,51 @@ test('definition-only module is served generically through Q0/O0, trust, RLS, an
             'code' in error &&
             error.code === 'SEMANTIC_OPERATION_IDEMPOTENCY_CONFLICT',
         );
+
+        await setPointer(pool, tenantA, environmentA, releasesA[3]!);
+        const duplicateReleaseView = await issuedView(entry, 'a');
+        assert.notEqual(
+          duplicateReleaseView.release.releaseId,
+          viewA1.release.releaseId,
+        );
+        assert.equal(
+          duplicateReleaseView.release.contentHash,
+          viewA1.release.contentHash,
+        );
+        const duplicateReleaseRecordId = randomUUID();
+        const duplicateReleaseResult = await operation(
+          operationGateway,
+          duplicateReleaseView,
+          'master_create',
+          {
+            recordId: duplicateReleaseRecordId,
+            values: {
+              [FIXTURE_IDS.fieldIds.parentName]: 'Duplicate release scope',
+              [FIXTURE_IDS.fieldIds.parentNumber]: 'A-RELEASE',
+            },
+          },
+          FIXTURE_IDS.namespace,
+          soloKey,
+        );
+        const duplicateReleaseOutbox = await pool.query<{
+          deduplication_key: string;
+        }>(
+          `SELECT deduplication_key
+             FROM platform.trust_outbox
+            WHERE outbox_id = $1`,
+          [duplicateReleaseResult.trust!.outboxId],
+        );
+        assert.equal(
+          duplicateReleaseOutbox.rows[0]?.deduplication_key,
+          `${principalA}:${duplicateReleaseView.release.contentHash}:${duplicateReleaseView.release.releaseId}:${FIXTURE_IDS.namespace}:operation.master_create:${soloKey}`,
+        );
+        await operation(
+          operationGateway,
+          duplicateReleaseView,
+          'master_archive',
+          { expectedRevision: 1, recordId: duplicateReleaseRecordId },
+        );
+        await setPointer(pool, tenantA, environmentA, releasesA[1]!);
 
         for (const [recordId, number] of [
           [acmeOneId, 'A-002'],

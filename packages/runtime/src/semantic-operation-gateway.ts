@@ -36,6 +36,8 @@ const OPERATION_POLICY_INPUT_VERSION =
   'northstar.semantic-operation-policy-input/v1' as const;
 const OPERATION_BOUNDARY_PERMISSION_ID =
   'northstar.runtime:permission.semantic-operation-boundary' as const;
+const MALFORMED_OPERATION_ACTION_ID =
+  'northstar.runtime:operation.malformed_request' as const;
 const canonicalIdPattern =
   /^[a-z][a-z0-9]*(?:\.[a-z][a-z0-9]*)+:[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/;
 
@@ -432,11 +434,13 @@ export class SemanticOperationGateway {
   ): Promise<SemanticOperationResultEnvelope> {
     assertRequestRuntimeView(view);
     this.mediation.assertInvocation(view, invocation);
-    const request = parseSemanticOperationRequest(requestInput);
-    let policyDecision: 'ALLOW' | 'DENY' = 'ALLOW';
+    let operationId = attemptedOperationId(requestInput);
+    let policyDecision: 'ALLOW' | 'DENY' = 'DENY';
     let policyVersion = view.entryPolicyVersion;
     let recorded = false;
     try {
+      const request = parseSemanticOperationRequest(requestInput);
+      operationId = request.operationId;
       const boundaryDecision = await authorizeCurrentPolicy(
         this.currentPolicy,
         view,
@@ -486,7 +490,7 @@ export class SemanticOperationGateway {
         await this.#recordNonAccepted(
           view,
           invocation,
-          request.operationId,
+          operationId,
           'FAILED',
           'SEMANTIC_OPERATION_TIER_UNSUPPORTED',
           policyDecision,
@@ -502,7 +506,7 @@ export class SemanticOperationGateway {
         await this.#recordNonAccepted(
           view,
           invocation,
-          request.operationId,
+          operationId,
           'FAILED',
           'SEMANTIC_OPERATION_PRECONDITION_UNSUPPORTED',
           policyDecision,
@@ -564,7 +568,7 @@ export class SemanticOperationGateway {
         await this.#recordNonAccepted(
           view,
           invocation,
-          request.operationId,
+          operationId,
           outcome,
           stableFailureCode(error),
           outcome === 'DENIED' ? 'DENY' : policyDecision,
@@ -1025,6 +1029,14 @@ function cloneImmutableJson(
 
 function digestOperationInput(input: ImmutableJsonValue): string {
   return createHash('sha256').update(canonicalJson(input)).digest('hex');
+}
+
+function attemptedOperationId(value: unknown): string {
+  return isRecord(value) &&
+    typeof value.operationId === 'string' &&
+    canonicalIdPattern.test(value.operationId)
+    ? value.operationId
+    : MALFORMED_OPERATION_ACTION_ID;
 }
 
 function canonicalJson(value: unknown): string {

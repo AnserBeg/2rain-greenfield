@@ -333,6 +333,7 @@ function acceptedCommand(
       deduplicationKey: [
         request.context.principalId,
         request.view.release.contentHash,
+        request.view.release.releaseId,
         request.definition.operationId,
         request.idempotencyKey,
       ].join(':'),

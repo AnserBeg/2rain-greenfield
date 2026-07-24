@@ -19,6 +19,7 @@ import {
   type AuthenticatedIdentity,
 } from '../../packages/runtime/src/request-context.js';
 import {
+  MalformedSemanticOperationRequestError,
   SEMANTIC_OPERATION_REQUEST_VERSION,
   SEMANTIC_OPERATION_RESULT_VERSION,
   SemanticOperationGateway,
@@ -260,11 +261,14 @@ test('human-required operations refuse every channel without a matching server g
   );
   assert.equal(executor.nonAcceptedCalls.length, channels.length + 1);
 
+  const [grantPayload, grantSignature] = grant.split('.');
+  assert.ok(grantPayload && grantSignature);
+  const forgedGrant = `${grantPayload}.${grantSignature.startsWith('a') ? 'b' : 'a'}${grantSignature.slice(1)}`;
   await assert.rejects(
     gateway.invoke(
       view,
       {
-        confirmationGrant: `${grant.slice(0, -1)}${grant.endsWith('a') ? 'b' : 'a'}`,
+        confirmationGrant: forgedGrant,
         idempotencyKey: randomUUID(),
         input,
         operationId,
@@ -361,6 +365,38 @@ test('gateway records exactly one trusted denied or failed terminal outcome', as
       {
         channel: 'API',
         failureCode: 'FIXTURE_VALIDATION_FAILED',
+        outcome: 'FAILED',
+      },
+    ],
+  );
+
+  const malformedExecutor = new RecordingExecutor();
+  const malformedMediation = new SemanticOperationMediationAuthority();
+  const malformedGateway = new SemanticOperationGateway(
+    allowedPolicy,
+    malformedExecutor,
+    malformedMediation,
+  );
+  await assert.rejects(
+    malformedGateway.invoke(
+      failedView,
+      { ...createRequest(), idempotencyKey: '' },
+      malformedMediation.issueInvocation(failedView, 'API'),
+    ),
+    MalformedSemanticOperationRequestError,
+  );
+  assert.deepEqual(
+    malformedExecutor.nonAcceptedCalls.map((call) => ({
+      channel: call.channel,
+      failureCode: call.failureCode,
+      operationId: call.operationId,
+      outcome: call.outcome,
+    })),
+    [
+      {
+        channel: 'API',
+        failureCode: 'MALFORMED_SEMANTIC_OPERATION_REQUEST',
+        operationId: `${FIXTURE_IDS.namespace}:operation.master_create`,
         outcome: 'FAILED',
       },
     ],
