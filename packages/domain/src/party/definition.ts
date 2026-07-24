@@ -1,4 +1,5 @@
-const version = 'v1' as const;
+const version = 'v2' as const;
+const normalizationProfileVersion = 'northstar.normalization/v2' as const;
 
 export const PARTY_NAMESPACE = 'northstar.party' as const;
 
@@ -125,7 +126,7 @@ export function partyModuleDefinition(): Record<string, unknown> {
         schemaVersion: version,
       },
     ],
-    normalizationProfileVersion: 'northstar.normalization/v1',
+    normalizationProfileVersion,
     operations: [
       ...entityOperations('party', entityIds.party),
       ...entityOperations('party_role', entityIds.role),
@@ -143,8 +144,21 @@ export function partyModuleDefinition(): Record<string, unknown> {
       ...entityPermissions('party_role', entityIds.role),
     ],
     queries: [
-      ...entityQueries('party', entityIds.party, partyFields),
-      ...entityQueries('party_role', entityIds.role, roleFields),
+      ...entityQueries('party', entityIds.party, partyFields, [
+        {
+          authority: 'identifier',
+          fieldId: fieldIds.number,
+          localId: 'number',
+        },
+        { authority: 'advisory', fieldId: fieldIds.name, localId: 'name' },
+      ]),
+      ...entityQueries('party_role', entityIds.role, roleFields, [
+        {
+          authority: 'advisory',
+          fieldId: fieldIds.roleKind,
+          localId: 'role_kind',
+        },
+      ]),
     ],
     relations: [
       {
@@ -279,6 +293,11 @@ function entityQueries(
   local: string,
   entityId: string,
   selectedFieldIds: readonly string[],
+  resolveKeys: readonly {
+    authority: 'advisory' | 'identifier';
+    fieldId: string;
+    localId: string;
+  }[],
 ): Array<Record<string, unknown>> {
   return ['get', 'list', 'search', 'resolve'].map((queryType) => ({
     kind: 'queryDefinition',
@@ -290,6 +309,18 @@ function entityQueries(
     ),
     queryId: `${PARTY_NAMESPACE}:query.${local}_${queryType}`,
     queryType,
+    ...(queryType === 'resolve'
+      ? {
+          resolveMatchKeys: resolveKeys.map((key, index) => ({
+            authority: key.authority,
+            field: reference('fieldReference', key.fieldId),
+            kind: 'resolveMatchKey',
+            matchKeyId: `${PARTY_NAMESPACE}:resolve-key.${local}_${key.localId}`,
+            orderKey: (index + 1) * 10,
+            schemaVersion: version,
+          })),
+        }
+      : {}),
     schemaVersion: version,
     selections: selectedFieldIds.map((fieldId, index) => ({
       field: reference('fieldReference', fieldId),

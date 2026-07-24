@@ -35,9 +35,15 @@ test('Party definition compiles into every walking-slice projection with no dele
     assertions: Array<Record<string, unknown>>;
     entities: Array<Record<string, unknown>>;
     operations: Array<{ effect: { kind: string }; operationId: string }>;
+    languageVersion: string;
+    normalizationProfileVersion: string;
     queries: Array<{
       queryId: string;
       queryType: string;
+      resolveMatchKeys?: Array<{
+        authority: 'advisory' | 'identifier';
+        field: { targetId: string };
+      }>;
       selections: Array<{ field: { targetId: string } }>;
     }>;
     relations: Array<Record<string, unknown>>;
@@ -49,9 +55,29 @@ test('Party definition compiles into every walking-slice projection with no dele
   assert.equal(definition.surfaces.length, 6);
   assert.equal(definition.assertions.length, 2);
   assert.equal(definition.relations.length, 1);
+  assert.equal(definition.languageVersion, 'v2');
+  assert.equal(
+    definition.normalizationProfileVersion,
+    'northstar.normalization/v2',
+  );
   assert.deepEqual(
     new Set(definition.queries.map((query) => query.queryType)),
     new Set(['get', 'list', 'search', 'resolve']),
+  );
+  assert.deepEqual(
+    definition.queries
+      .find(
+        (query) =>
+          query.queryId === `${PARTY_IDS.namespace}:query.party_resolve`,
+      )
+      ?.resolveMatchKeys?.map((key) => ({
+        authority: key.authority,
+        fieldId: key.field.targetId,
+      })),
+    [
+      { authority: 'identifier', fieldId: PARTY_IDS.fieldIds.number },
+      { authority: 'advisory', fieldId: PARTY_IDS.fieldIds.name },
+    ],
   );
   assert.equal(
     definition.operations.some((operation) =>
@@ -94,7 +120,14 @@ test('Party definition compiles into every walking-slice projection with no dele
 test('Party and role queries expose one DTO field identity to UI, query, agent and read-back', () => {
   const { compiled } = compilePartyFixture();
   const query = projectionPayload<{
-    queries: Array<{ queryId: string; selections: Array<{ fieldId: string }> }>;
+    queries: Array<{
+      queryId: string;
+      resolveMatchKeys?: Array<{
+        authority: 'advisory' | 'identifier';
+        fieldId: string;
+      }>;
+      selections: Array<{ fieldId: string }>;
+    }>;
   }>(compiled, PROJECTION_FAMILY_IDS.queryCatalog);
   const agent = projectionPayload<{
     operations: Array<{ operationId: string; readBackQueryId: string }>;
@@ -112,6 +145,21 @@ test('Party and role queries expose one DTO field identity to UI, query, agent a
     PARTY_IDS.fieldIds.name,
     PARTY_IDS.fieldIds.contactSummary,
   ];
+  assert.deepEqual(
+    query.queries
+      .find(
+        (entry) =>
+          entry.queryId === `${PARTY_IDS.namespace}:query.party_resolve`,
+      )
+      ?.resolveMatchKeys?.map((key) => ({
+        authority: key.authority,
+        fieldId: key.fieldId,
+      })),
+    [
+      { authority: 'identifier', fieldId: PARTY_IDS.fieldIds.number },
+      { authority: 'advisory', fieldId: PARTY_IDS.fieldIds.name },
+    ],
+  );
   for (const queryDefinition of query.queries.filter((entry) =>
     entry.queryId.includes(':query.party_'),
   )) {

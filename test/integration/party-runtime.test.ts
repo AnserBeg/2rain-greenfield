@@ -3,11 +3,11 @@ import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 
 import { renderSurfaceRuntimeWithData } from '../../apps/web/src/surface-runtime.js';
+import { unicodeCaseFold } from '../../packages/canonical-model/src/index.js';
 import {
   AuthenticatedRequestEntryAdapter,
   type AuthenticatedIdentity,
 } from '../../packages/runtime/src/request-context.js';
-import { resolveByName } from '../../packages/runtime/src/resolve-by-name.js';
 import {
   SEMANTIC_OPERATION_REQUEST_VERSION,
   SEMANTIC_OPERATION_RESULT_VERSION,
@@ -106,7 +106,7 @@ test('Party definition serves one tenant-scoped DTO to query, agent, surface and
   assert.equal(tenantBRead.outcome, 'not-found');
 });
 
-test('generic resolve-by-name exact/ambiguous/not-found contract never weakly auto-picks', async () => {
+test('compiled resolver authority serves exact/ambiguous/not-found through the gateway', async () => {
   const compiled = compilePartyFixture().compiled;
   const policy = allowPolicy();
   const executor = new PartyMemoryExecutor();
@@ -143,11 +143,9 @@ test('generic resolve-by-name exact/ambiguous/not-found contract never weakly au
     (await resolveParty(gateway, viewA, 'Acme Rentals')).outcome,
     'ambiguous',
   );
-  const weak = await resolveParty(gateway, viewA, 'Maxmium Constructon');
-  assert.equal(weak.outcome, 'ambiguous');
   assert.equal(
-    weak.records[0]?.recordId,
-    '74100000-0000-4000-8000-000000000003',
+    (await resolveParty(gateway, viewA, 'Maximum Construction')).outcome,
+    'ambiguous',
   );
   assert.equal(
     (await resolveParty(gateway, viewA, 'Missing')).outcome,
@@ -165,17 +163,11 @@ function resolveParty(
   view: RequestRuntimeView,
   text: string,
 ): Promise<SemanticQueryResultEnvelope> {
-  return resolveByName(
-    gateway,
-    view,
-    {
-      exactIdentifierFieldIds: [PARTY_IDS.fieldIds.number],
-      listQueryId: `${PARTY_IDS.namespace}:query.party_list`,
-      nameFieldIds: [PARTY_IDS.fieldIds.name],
-      resolveQueryId: `${PARTY_IDS.namespace}:query.party_resolve`,
-    },
-    text,
-  );
+  return gateway.invoke(view, {
+    arguments: { text },
+    queryId: `${PARTY_IDS.namespace}:query.party_resolve`,
+    schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+  });
 }
 
 class PartyMemoryExecutor
@@ -226,18 +218,39 @@ class PartyMemoryExecutor
     const args = asRecord(request.arguments);
     const visible = [...this.tenantRecords(request.context.tenantId).values()];
     let records: SemanticRecordDto[];
+    let outcome: SemanticQueryResultEnvelope['outcome'] | undefined;
     switch (request.definition.queryType) {
       case 'get':
         records = visible.filter((record) => record.recordId === args.recordId);
         break;
       case 'resolve': {
-        const normalized = String(args.text ?? '').toLowerCase();
-        records = visible.filter((record) =>
-          [PARTY_IDS.fieldIds.number, PARTY_IDS.fieldIds.name].some(
-            (fieldId) =>
-              String(record.values[fieldId] ?? '').toLowerCase() === normalized,
-          ),
-        );
+        const folded = unicodeCaseFold(String(args.text ?? ''));
+        const matches = (authority: 'advisory' | 'identifier') =>
+          visible.filter((record) =>
+            (request.definition.resolveMatchKeys ?? [])
+              .filter((key) => key.authority === authority)
+              .some(
+                (key) =>
+                  unicodeCaseFold(String(record.values[key.fieldId] ?? '')) ===
+                  folded,
+              ),
+          );
+        const identifiers = matches('identifier');
+        const advisory = matches('advisory');
+        records = [
+          ...new Map(
+            [...identifiers, ...advisory].map((record) => [
+              record.recordId,
+              record,
+            ]),
+          ).values(),
+        ];
+        outcome =
+          records.length === 0
+            ? 'not-found'
+            : identifiers.length === 1 && advisory.length === 0
+              ? 'exact'
+              : 'ambiguous';
         break;
       }
       case 'list':
@@ -248,14 +261,15 @@ class PartyMemoryExecutor
     return {
       kind: 'semanticQueryResult',
       outcome:
-        request.definition.queryType === 'list' ||
+        outcome ??
+        (request.definition.queryType === 'list' ||
         request.definition.queryType === 'search'
           ? 'exact'
           : records.length === 0
             ? 'not-found'
             : records.length === 1
               ? 'exact'
-              : 'ambiguous',
+              : 'ambiguous'),
       queryId: request.definition.queryId,
       records,
       schemaVersion: SEMANTIC_QUERY_RESULT_VERSION,

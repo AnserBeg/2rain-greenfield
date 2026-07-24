@@ -58,12 +58,12 @@ async function main(): Promise<void> {
       'exact',
     );
     assert.equal(
-      (await resolvePartyName(runtime, runtime.views.a, 'Browser Duplicate'))
+      (await resolvePartyName(runtime, runtime.views.a, 'Browser Party'))
         .outcome,
       'ambiguous',
     );
     assert.equal(
-      (await resolvePartyName(runtime, runtime.views.a, 'Browser Duplicte'))
+      (await resolvePartyName(runtime, runtime.views.a, 'Browser Duplicate'))
         .outcome,
       'ambiguous',
     );

@@ -86,12 +86,12 @@ test('Party walking slice reaches real PostgreSQL with trust, lifecycle, resolve
       'exact',
     );
     assert.equal(
-      (await resolvePartyName(runtime, runtime.views.a, 'Duplicate Trading'))
+      (await resolvePartyName(runtime, runtime.views.a, 'Maximum Construction'))
         .outcome,
       'ambiguous',
     );
     assert.equal(
-      (await resolvePartyName(runtime, runtime.views.a, 'Maxmium Constructon'))
+      (await resolvePartyName(runtime, runtime.views.a, 'Duplicate Trading'))
         .outcome,
       'ambiguous',
     );
