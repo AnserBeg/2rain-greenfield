@@ -401,6 +401,31 @@ test('gateway records exactly one trusted denied or failed terminal outcome', as
       },
     ],
   );
+
+  await assert.rejects(
+    malformedGateway.invoke(
+      failedView,
+      {
+        ...createRequest(),
+        operationId: `${FIXTURE_IDS.namespace}:operation.${'a'.repeat(181)}`,
+      },
+      malformedMediation.issueInvocation(failedView, 'API'),
+    ),
+    MalformedSemanticOperationRequestError,
+  );
+  assert.deepEqual(
+    malformedExecutor.nonAcceptedCalls.at(-1) && {
+      failureCode: malformedExecutor.nonAcceptedCalls.at(-1)!.failureCode,
+      operationId: malformedExecutor.nonAcceptedCalls.at(-1)!.operationId,
+      outcome: malformedExecutor.nonAcceptedCalls.at(-1)!.outcome,
+    },
+    {
+      failureCode: 'MALFORMED_SEMANTIC_OPERATION_REQUEST',
+      operationId: 'northstar.runtime:operation.malformed_request',
+      outcome: 'FAILED',
+    },
+  );
+  assert.equal(malformedExecutor.nonAcceptedCalls.length, 2);
 });
 
 function createRequest() {

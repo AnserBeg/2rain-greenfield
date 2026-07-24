@@ -1034,6 +1034,8 @@ function digestOperationInput(input: ImmutableJsonValue): string {
 function attemptedOperationId(value: unknown): string {
   return isRecord(value) &&
     typeof value.operationId === 'string' &&
+    value.operationId.length >= 5 &&
+    value.operationId.length <= 180 &&
     canonicalIdPattern.test(value.operationId)
     ? value.operationId
     : MALFORMED_OPERATION_ACTION_ID;
