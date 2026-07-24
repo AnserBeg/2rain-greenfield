@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 
 import {
@@ -21,9 +22,15 @@ import {
   SEMANTIC_OPERATION_REQUEST_VERSION,
   SEMANTIC_OPERATION_RESULT_VERSION,
   SemanticOperationGateway,
+  SemanticOperationConfirmationGrantError,
+  SemanticOperationConfirmationRequiredError,
+  SemanticOperationConfirmationStaleError,
+  SemanticOperationMediationAuthority,
   type SemanticOperationExecutionRequest,
   type SemanticOperationExecutor,
+  type SemanticOperationNonAcceptedRequest,
   type SemanticOperationResultEnvelope,
+  type TrustedInvocationChannel,
 } from '../../packages/runtime/src/semantic-operation-gateway.js';
 import {
   SEMANTIC_QUERY_REQUEST_VERSION,
@@ -63,24 +70,35 @@ test('compiled registration data drives both generic gateway ports from one pinn
   const executor = new RecordingExecutor();
   const view = await issuedView(compiled, policy);
   const queries = new SemanticQueryGateway(policy, executor);
-  const operations = new SemanticOperationGateway(policy, executor);
+  const operationMediation = new SemanticOperationMediationAuthority();
+  const operations = new SemanticOperationGateway(
+    policy,
+    executor,
+    operationMediation,
+  );
 
   const query = await queries.invoke(view, {
     arguments: { recordId: 'd6000000-0000-4000-8000-000000000006' },
     queryId: `${FIXTURE_IDS.namespace}:query.master_get`,
     schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
   });
-  const operation = await operations.invoke(view, {
-    input: {
-      recordId: 'd7000000-0000-4000-8000-000000000007',
-      values: {
-        [FIXTURE_IDS.fieldIds.parentName]: 'Definition data',
-        [FIXTURE_IDS.fieldIds.parentNumber]: 'D-001',
+  const operation = await operations.invoke(
+    view,
+    {
+      confirmationGrant: null,
+      idempotencyKey: randomUUID(),
+      input: {
+        recordId: 'd7000000-0000-4000-8000-000000000007',
+        values: {
+          [FIXTURE_IDS.fieldIds.parentName]: 'Definition data',
+          [FIXTURE_IDS.fieldIds.parentNumber]: 'D-001',
+        },
       },
+      operationId: `${FIXTURE_IDS.namespace}:operation.master_create`,
+      schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
     },
-    operationId: `${FIXTURE_IDS.namespace}:operation.master_create`,
-    schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
-  });
+    operationMediation.issueInvocation(view, 'API'),
+  );
 
   assert.equal(query.outcome, 'exact');
   assert.equal(operation.outcome, 'succeeded');
@@ -139,9 +157,16 @@ test('unsupported compiled predicates fail closed before the generic executor', 
     queryId: `${FIXTURE_IDS.namespace}:query.master_get`,
     schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
   });
-  const operation = await new SemanticOperationGateway(policy, executor).invoke(
+  const operationMediation = new SemanticOperationMediationAuthority();
+  const operation = await new SemanticOperationGateway(
+    policy,
+    executor,
+    operationMediation,
+  ).invoke(
     view,
     {
+      confirmationGrant: null,
+      idempotencyKey: randomUUID(),
       input: {
         recordId: 'd7000000-0000-4000-8000-000000000007',
         values: {},
@@ -149,6 +174,7 @@ test('unsupported compiled predicates fail closed before the generic executor', 
       operationId: `${FIXTURE_IDS.namespace}:operation.master_create`,
       schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
     },
+    operationMediation.issueInvocation(view, 'API'),
   );
 
   assert.deepEqual(
@@ -166,11 +192,211 @@ test('unsupported compiled predicates fail closed before the generic executor', 
   assert.equal(executor.operationCalls.length, 0);
 });
 
+test('human-required operations refuse every channel without a matching server grant and stale grants fail', async () => {
+  const compiled = compileFixture();
+  const policy = new AllowPolicy();
+  const executor = new RecordingExecutor();
+  const view = await issuedView(compiled, policy);
+  const mediation = new SemanticOperationMediationAuthority();
+  const gateway = new SemanticOperationGateway(policy, executor, mediation);
+  const operationId = `${FIXTURE_IDS.namespace}:operation.master_archive`;
+  const input = Object.freeze({
+    expectedRevision: 1,
+    recordId: 'd7000000-0000-4000-8000-000000000007',
+  });
+  const channels: readonly TrustedInvocationChannel[] = [
+    'AGENT',
+    'API',
+    'IMPORT',
+    'SYSTEM',
+    'UI',
+    'WORKFLOW',
+  ];
+
+  for (const channel of channels) {
+    await assert.rejects(
+      gateway.invoke(
+        view,
+        {
+          confirmationGrant: null,
+          idempotencyKey: randomUUID(),
+          input,
+          operationId,
+          schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
+        },
+        mediation.issueInvocation(view, channel),
+      ),
+      SemanticOperationConfirmationRequiredError,
+    );
+  }
+  assert.deepEqual(
+    executor.nonAcceptedCalls.map((call) => [
+      call.channel,
+      call.outcome,
+      call.failureCode,
+    ]),
+    channels.map((channel) => [
+      channel,
+      'FAILED',
+      'SEMANTIC_OPERATION_CONFIRMATION_REQUIRED',
+    ]),
+  );
+  assert.equal(executor.operationCalls.length, 0);
+
+  const grant = mediation.issueConfirmationGrant(view, operationId, input);
+  await assert.rejects(
+    gateway.invoke(
+      view,
+      {
+        confirmationGrant: grant,
+        idempotencyKey: randomUUID(),
+        input: { ...input, expectedRevision: 2 },
+        operationId,
+        schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
+      },
+      mediation.issueInvocation(view, 'API'),
+    ),
+    SemanticOperationConfirmationStaleError,
+  );
+  assert.equal(executor.nonAcceptedCalls.length, channels.length + 1);
+
+  await assert.rejects(
+    gateway.invoke(
+      view,
+      {
+        confirmationGrant: `${grant.slice(0, -1)}${grant.endsWith('a') ? 'b' : 'a'}`,
+        idempotencyKey: randomUUID(),
+        input,
+        operationId,
+        schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
+      },
+      mediation.issueInvocation(view, 'API'),
+    ),
+    SemanticOperationConfirmationGrantError,
+  );
+  assert.equal(executor.nonAcceptedCalls.length, channels.length + 2);
+
+  const accepted = await gateway.invoke(
+    view,
+    {
+      confirmationGrant: grant,
+      idempotencyKey: randomUUID(),
+      input,
+      operationId,
+      schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
+    },
+    mediation.issueInvocation(view, 'UI'),
+  );
+  assert.equal(accepted.outcome, 'succeeded');
+  assert.equal(executor.operationCalls.length, 1);
+});
+
+test('gateway records exactly one trusted denied or failed terminal outcome', async () => {
+  const compiled = compileFixture();
+
+  const deniedPolicy = new DenyPolicy();
+  const deniedExecutor = new RecordingExecutor();
+  const deniedView = await issuedView(compiled, deniedPolicy);
+  const deniedMediation = new SemanticOperationMediationAuthority();
+  const deniedGateway = new SemanticOperationGateway(
+    deniedPolicy,
+    deniedExecutor,
+    deniedMediation,
+  );
+  await assert.rejects(
+    deniedGateway.invoke(
+      deniedView,
+      createRequest(),
+      deniedMediation.issueInvocation(deniedView, 'UI'),
+    ),
+    /current policy denied operation/,
+  );
+  assert.deepEqual(
+    deniedExecutor.nonAcceptedCalls.map((call) => ({
+      channel: call.channel,
+      failureCode: call.failureCode,
+      outcome: call.outcome,
+      policyDecision: call.policyDecision,
+    })),
+    [
+      {
+        channel: 'UI',
+        failureCode: 'SEMANTIC_OPERATION_POLICY_DENIED',
+        outcome: 'DENIED',
+        policyDecision: 'DENY',
+      },
+    ],
+  );
+
+  const allowedPolicy = new AllowPolicy();
+  const failure = Object.assign(new Error('fixture validation detail'), {
+    code: 'FIXTURE_VALIDATION_FAILED',
+  });
+  const failedExecutor = new RecordingExecutor(failure);
+  const failedView = await issuedView(compiled, allowedPolicy);
+  const failedMediation = new SemanticOperationMediationAuthority();
+  const failedGateway = new SemanticOperationGateway(
+    allowedPolicy,
+    failedExecutor,
+    failedMediation,
+  );
+  await assert.rejects(
+    failedGateway.invoke(
+      failedView,
+      createRequest(),
+      failedMediation.issueInvocation(failedView, 'API'),
+    ),
+    (error: unknown) =>
+      error instanceof Error &&
+      'code' in error &&
+      error.code === 'FIXTURE_VALIDATION_FAILED',
+  );
+  assert.deepEqual(
+    failedExecutor.nonAcceptedCalls.map((call) => ({
+      channel: call.channel,
+      failureCode: call.failureCode,
+      outcome: call.outcome,
+    })),
+    [
+      {
+        channel: 'API',
+        failureCode: 'FIXTURE_VALIDATION_FAILED',
+        outcome: 'FAILED',
+      },
+    ],
+  );
+});
+
+function createRequest() {
+  return {
+    confirmationGrant: null,
+    idempotencyKey: randomUUID(),
+    input: {
+      recordId: 'd7000000-0000-4000-8000-000000000007',
+      values: {
+        [FIXTURE_IDS.fieldIds.parentName]: 'Failure evidence',
+        [FIXTURE_IDS.fieldIds.parentNumber]: 'D-002',
+      },
+    },
+    operationId: `${FIXTURE_IDS.namespace}:operation.master_create`,
+    schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
+  } as const;
+}
+
 class RecordingExecutor
   implements SemanticQueryExecutor, SemanticOperationExecutor
 {
+  readonly nonAcceptedCalls: SemanticOperationNonAcceptedRequest[] = [];
   readonly operationCalls: SemanticOperationExecutionRequest[] = [];
   readonly queryCalls: SemanticQueryExecutionRequest[] = [];
+
+  constructor(private readonly operationFailure: Error | null = null) {}
+
+  async recordNonAccepted(
+    request: SemanticOperationNonAcceptedRequest,
+  ): Promise<void> {
+    this.nonAcceptedCalls.push(request);
+  }
 
   execute(
     request: SemanticQueryExecutionRequest,
@@ -192,6 +418,7 @@ class RecordingExecutor
         unsupportedReason: null,
       };
     }
+    if (this.operationFailure) throw this.operationFailure;
     this.operationCalls.push(request);
     return {
       kind: 'semanticOperationResult',
@@ -225,6 +452,22 @@ class AllowPolicy implements CurrentPolicyGateway {
   async readCurrentVersion(_subject: CurrentPolicySubject) {
     void _subject;
     return { policyVersion: 'module-runtime-integration-policy/v1' };
+  }
+}
+
+class DenyPolicy implements CurrentPolicyGateway {
+  async authorize(_request: CurrentPolicyDecisionRequest) {
+    void _request;
+    return {
+      decision: 'DENY' as const,
+      decisionVersion: CURRENT_POLICY_DECISION_VERSION,
+      policyVersion: 'module-runtime-deny-policy/v1',
+    };
+  }
+
+  async readCurrentVersion(_subject: CurrentPolicySubject) {
+    void _subject;
+    return { policyVersion: 'module-runtime-deny-policy/v1' };
   }
 }
 

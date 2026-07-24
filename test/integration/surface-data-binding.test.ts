@@ -21,8 +21,10 @@ import {
 import {
   SEMANTIC_OPERATION_RESULT_VERSION,
   SemanticOperationGateway,
+  SemanticOperationMediationAuthority,
   type SemanticOperationExecutionRequest,
   type SemanticOperationExecutor,
+  type SemanticOperationNonAcceptedRequest,
   type SemanticOperationResultEnvelope,
 } from '../../packages/runtime/src/semantic-operation-gateway.js';
 import {
@@ -100,7 +102,9 @@ test('compiled fixture surfaces bind live Q0/O0 data through one pinned request 
       `${baseUrl}/?surface=${encodeURIComponent(formSurface)}`,
       {
         body: new URLSearchParams({
+          idempotencyKey: randomUUID(),
           intent: 'create',
+          recordId: randomUUID(),
           [`value:${FIXTURE_IDS.fieldIds.parentName}`]: 'Created in browser',
         }),
         headers: {
@@ -141,7 +145,6 @@ test('compiled fixture surfaces bind live Q0/O0 data through one pinned request 
     assert.match(update, /Updated in browser/);
     const recordSurface = `${FIXTURE_IDS.namespace}:surface.master_record`;
     const archived = await postIntent(baseUrl, recordSurface, {
-      confirmed: 'yes',
       expectedRevision: '2',
       intent: 'archive',
       recordId: createdId,
@@ -184,9 +187,11 @@ test('frozen Q0 outcomes and gateway failures render bounded safe states', async
     }),
     'a',
   );
+  const operationMediation = new SemanticOperationMediationAuthority();
   const operationGateway = new SemanticOperationGateway(
     policy,
     new InMemoryGenericExecutor(),
+    operationMediation,
   );
   const recordUrl = `/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_record`)}&record=${randomUUID()}`;
   const cases: ReadonlyArray<
@@ -199,6 +204,7 @@ test('frozen Q0 outcomes and gateway failures render bounded safe states', async
   for (const [outcome, diagnostic] of cases) {
     const result = await renderSurfaceRuntimeWithData(view, recordUrl, {
       operationGateway,
+      operationMediation,
       queryGateway: fixedQueryGateway(outcome, []),
     });
     assert.equal(result.statusCode, 200);
@@ -210,6 +216,7 @@ test('frozen Q0 outcomes and gateway failures render bounded safe states', async
     `/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_list`)}`,
     {
       operationGateway,
+      operationMediation,
       queryGateway: fixedQueryGateway('exact', []),
     },
   );
@@ -217,6 +224,7 @@ test('frozen Q0 outcomes and gateway failures render bounded safe states', async
 
   const denied = await renderSurfaceRuntimeWithData(view, recordUrl, {
     operationGateway,
+    operationMediation,
     queryGateway: new SemanticQueryGateway(
       new RecordingPolicy('DENY'),
       new InMemoryGenericExecutor(),
@@ -226,6 +234,7 @@ test('frozen Q0 outcomes and gateway failures render bounded safe states', async
 
   const unavailable = await renderSurfaceRuntimeWithData(view, recordUrl, {
     operationGateway,
+    operationMediation,
     queryGateway: new SemanticQueryGateway(new RecordingPolicy('ALLOW'), {
       async execute() {
         throw new Error('north_star_module.private_table');
@@ -287,8 +296,14 @@ test('human-confirmed forms render the authoritative operation read-back without
   const policy = new RecordingPolicy('ALLOW');
   const executor = new InMemoryGenericExecutor();
   let queryCalls = 0;
+  const operationMediation = new SemanticOperationMediationAuthority();
   const gateways: SurfaceRuntimeGateways = {
-    operationGateway: new SemanticOperationGateway(policy, executor),
+    operationGateway: new SemanticOperationGateway(
+      policy,
+      executor,
+      operationMediation,
+    ),
+    operationMediation,
     queryGateway: new SemanticQueryGateway(policy, {
       async execute() {
         queryCalls += 1;
@@ -304,47 +319,66 @@ test('human-confirmed forms render the authoritative operation read-back without
   );
   const formUrl = `/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_form`)}`;
   const initial = await renderSurfaceRuntimeWithData(view, formUrl, gateways);
-  assert.match(initial.html, /name="confirmed" value="yes"/);
+  assert.doesNotMatch(initial.html, /name="confirmed"/);
+  assert.match(initial.html, /name="idempotencyKey"/);
 
-  const blocked = await submitSurfaceRuntimeIntent(
+  const createSubmission = {
+    idempotencyKey: randomUUID(),
+    intent: 'create',
+    recordId: randomUUID(),
+    [`value:${FIXTURE_IDS.fieldIds.parentName}`]: 'Authoritative read-back',
+  };
+  const preview = await submitSurfaceRuntimeIntent(
     view,
     formUrl,
-    {
-      intent: 'create',
-      [`value:${FIXTURE_IDS.fieldIds.parentName}`]: 'Not yet confirmed',
-    },
+    createSubmission,
     gateways,
   );
-  assert.equal(blocked.statusCode, 422);
-  assert.match(blocked.html, /OPERATION_CONFIRMATION_REQUIRED/);
+  assert.equal(preview.statusCode, 200);
+  assert.match(preview.html, /data-confirmation-step="preview"/);
+  assert.match(preview.html, /Confirm Create/);
   assert.equal(executor.operationCalls.length, 0);
+  assert.equal(
+    hiddenValue(preview.html, 'idempotencyKey'),
+    createSubmission.idempotencyKey,
+  );
+  const createGrant = hiddenValue(preview.html, 'confirmationGrant');
 
   const created = await submitSurfaceRuntimeIntent(
     view,
     formUrl,
     {
-      confirmed: 'yes',
-      intent: 'create',
-      [`value:${FIXTURE_IDS.fieldIds.parentName}`]: 'Authoritative read-back',
+      ...createSubmission,
+      confirmationGrant: createGrant,
     },
     gateways,
   );
   assert.equal(created.statusCode, 200);
   assert.match(created.html, /Authoritative read-back/);
-  assert.match(created.html, /name="confirmed" value="yes"/);
+  assert.doesNotMatch(created.html, /name="confirmed"/);
   assert.equal(queryCalls, 0);
   assert.equal(executor.operationCalls.length, 1);
 
   const createInput = asRecord(executor.operationCalls[0]!.input);
+  const updateSubmission = {
+    expectedRevision: '1',
+    idempotencyKey: randomUUID(),
+    intent: 'update',
+    recordId: String(createInput.recordId),
+    [`value:${FIXTURE_IDS.fieldIds.parentName}`]: 'Updated read-back',
+  };
+  const updatePreview = await submitSurfaceRuntimeIntent(
+    view,
+    formUrl,
+    updateSubmission,
+    gateways,
+  );
   const updated = await submitSurfaceRuntimeIntent(
     view,
     formUrl,
     {
-      confirmed: 'yes',
-      expectedRevision: '1',
-      intent: 'update',
-      recordId: String(createInput.recordId),
-      [`value:${FIXTURE_IDS.fieldIds.parentName}`]: 'Updated read-back',
+      ...updateSubmission,
+      confirmationGrant: hiddenValue(updatePreview.html, 'confirmationGrant'),
     },
     gateways,
   );
@@ -377,6 +411,7 @@ class RecordingPolicy implements CurrentPolicyGateway {
 class InMemoryGenericExecutor
   implements SemanticQueryExecutor, SemanticOperationExecutor
 {
+  readonly nonAcceptedCalls: SemanticOperationNonAcceptedRequest[] = [];
   readonly operationCalls: SemanticOperationExecutionRequest[] = [];
   readonly queryCalls: SemanticQueryExecutionRequest[] = [];
   readonly trustFacts: Array<{
@@ -394,6 +429,12 @@ class InMemoryGenericExecutor
       recordId,
       record(recordId, name, FIXTURE_IDS.entityIds.parent),
     );
+  }
+
+  async recordNonAccepted(
+    request: SemanticOperationNonAcceptedRequest,
+  ): Promise<void> {
+    this.nonAcceptedCalls.push(request);
   }
 
   execute(
@@ -479,10 +520,22 @@ function semanticGateways(
   policy: CurrentPolicyGateway,
   executor: InMemoryGenericExecutor,
 ): SurfaceRuntimeGateways {
+  const operationMediation = new SemanticOperationMediationAuthority();
   return {
-    operationGateway: new SemanticOperationGateway(policy, executor),
+    operationGateway: new SemanticOperationGateway(
+      policy,
+      executor,
+      operationMediation,
+    ),
+    operationMediation,
     queryGateway: new SemanticQueryGateway(policy, executor),
   };
+}
+
+function hiddenValue(html: string, name: string): string {
+  const match = new RegExp(`name="${name}" value="([^"]+)"`).exec(html);
+  assert.ok(match?.[1]);
+  return match[1];
 }
 
 function fixedQueryGateway(
@@ -680,10 +733,14 @@ async function postIntent(
   surfaceId: string,
   submission: Record<string, string>,
 ): Promise<string> {
+  const mediated = {
+    idempotencyKey: randomUUID(),
+    ...submission,
+  };
   const response = await fetch(
     `${baseUrl}/?surface=${encodeURIComponent(surfaceId)}`,
     {
-      body: new URLSearchParams(submission),
+      body: new URLSearchParams(mediated),
       headers: {
         authorization: 'a',
         'content-type': 'application/x-www-form-urlencoded',
@@ -692,7 +749,26 @@ async function postIntent(
     },
   );
   assert.equal(response.status, 200);
-  return response.text();
+  const html = await response.text();
+  if (!html.includes('data-confirmation-step="preview"')) return html;
+  const confirmed = Object.fromEntries(
+    [
+      ...html.matchAll(/<input type="hidden" name="([^"]+)" value="([^"]*)">/g),
+    ].map((match) => [match[1]!, match[2]!]),
+  );
+  const confirmedResponse = await fetch(
+    `${baseUrl}/?surface=${encodeURIComponent(surfaceId)}`,
+    {
+      body: new URLSearchParams(confirmed),
+      headers: {
+        authorization: 'a',
+        'content-type': 'application/x-www-form-urlencoded',
+      },
+      method: 'POST',
+    },
+  );
+  assert.equal(confirmedResponse.status, 200);
+  return confirmedResponse.text();
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

@@ -50,7 +50,10 @@ test('Party executes the compiled declared-semantics contract on real PostgreSQL
       partyValues('P-001', 'Northwind Rentals', 'secret@example.test'),
     );
     await assertLinkedTrust(runtime.adminPool, createdTrust.invocationId);
-    await assertRedacted(runtime.adminPool, createdTrust.changeDocumentId);
+    await assertInternalEvidence(
+      runtime.adminPool,
+      createdTrust.changeDocumentId,
+    );
 
     await invokePartyOperation(runtime, runtime.views.b, 'party_create', {
       recordId: hiddenPartyId,
@@ -87,7 +90,7 @@ test('Party executes the compiled declared-semantics contract on real PostgreSQL
           PARTY_IDS.fieldIds.number,
         ),
     );
-    assert.equal(await trustCount(runtime.adminPool), trustBeforeDuplicate);
+    assert.equal(await trustCount(runtime.adminPool), trustBeforeDuplicate + 1);
     await assert.rejects(
       invokePartyOperation(runtime, runtime.views.a, 'party_create', {
         recordId: randomUUID(),
@@ -128,7 +131,7 @@ test('Party executes the compiled declared-semantics contract on real PostgreSQL
           PARTY_IDS.fieldIds.name,
         ),
     );
-    assert.equal(await trustCount(runtime.adminPool), trustBeforeDuplicate);
+    assert.equal(await trustCount(runtime.adminPool), trustBeforeDuplicate + 4);
 
     const compatibilityDistinctIds = [randomUUID(), randomUUID()] as const;
     await invokePartyOperation(runtime, runtime.views.a, 'party_create', {
@@ -246,7 +249,10 @@ test('Party executes the compiled declared-semantics contract on real PostgreSQL
           PARTY_IDS.fieldIds.roleStatus,
         ),
     );
-    assert.equal(await trustCount(runtime.adminPool), trustBeforeInvalidEnum);
+    assert.equal(
+      await trustCount(runtime.adminPool),
+      trustBeforeInvalidEnum + 2,
+    );
     await assertProviderRejectsInvalidEnum(
       runtime.adminPool,
       runtime.storage,
@@ -398,7 +404,10 @@ test('Party executes the compiled declared-semantics contract on real PostgreSQL
         },
       );
     }
-    assert.equal(await trustCount(runtime.adminPool), trustBeforeCrossTenant);
+    assert.equal(
+      await trustCount(runtime.adminPool),
+      trustBeforeCrossTenant + 2,
+    );
     await assertProviderRejectsCrossTenantRelation(
       runtime.adminPool,
       runtime.storage,
@@ -885,7 +894,7 @@ async function assertLinkedTrust(
   assert.equal(result.rows[0]?.count, '1');
 }
 
-async function assertRedacted(
+async function assertInternalEvidence(
   pool: Pool,
   changeDocumentId: string,
 ): Promise<void> {
@@ -896,8 +905,11 @@ async function assertRedacted(
     [changeDocumentId],
   );
   const serialized = JSON.stringify(result.rows[0]?.changes);
-  assert.doesNotMatch(serialized, /Northwind|secret@example\.test|P-001/);
-  assert.match(serialized, /REDACTED/);
+  assert.match(serialized, /Northwind Rentals/);
+  assert.match(serialized, /secret@example\.test/);
+  assert.match(serialized, /P-001/);
+  assert.match(serialized, /INTERNAL/);
+  assert.doesNotMatch(serialized, /REDACTED|SENSITIVE|SECRET/);
 }
 
 async function assertProviderRejectsCrossTenantRelation(

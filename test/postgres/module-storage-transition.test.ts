@@ -99,8 +99,9 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
         assert.deepEqual(migrationResult.applied, [
           '0007_module_storage_transitions.sql',
           '0008_module_runtime_role_assumption.sql',
+          '0009_semantic_operation_receipts.sql',
         ]);
-        assert.equal(migrationResult.verified.length, 8);
+        assert.equal(migrationResult.verified.length, 9);
         await seedScope(admin);
       } finally {
         admin.release();

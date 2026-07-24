@@ -85,6 +85,21 @@ export function validateModuleConformance(
       );
     }
   }
+  for (const field of packageRevision.fields) {
+    if (
+      field.classification === 'confidential' ||
+      field.classification === 'restricted'
+    ) {
+      diagnostics.push(
+        compilerDiagnostic(
+          'MODULE_CLASSIFICATION_UNSUPPORTED',
+          'wholeModelValidation',
+          '$.fields.classification',
+          field.fieldId,
+        ),
+      );
+    }
+  }
   for (const query of packageRevision.queries) {
     if (
       query.queryType === 'resolve' &&

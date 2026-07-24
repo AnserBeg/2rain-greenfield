@@ -18,6 +18,7 @@ import type {
   RegisteredOperationInputContract,
   SemanticOperationExecutionRequest,
   SemanticOperationExecutor,
+  SemanticOperationNonAcceptedRequest,
   SemanticOperationResultEnvelope,
 } from '../../runtime/src/semantic-operation-gateway.js';
 import { SEMANTIC_OPERATION_RESULT_VERSION } from '../../runtime/src/semantic-operation-gateway.js';
@@ -116,6 +117,39 @@ export class PostgresModuleRuntimeInterpreter
       : this.#executeOperation(request);
   }
 
+  async recordNonAccepted(
+    request: SemanticOperationNonAcceptedRequest,
+  ): Promise<void> {
+    const actor = await this.actorIssuer.issue(request.context);
+    const metadata: EvidenceMetadataInput = Object.freeze({
+      operationId: classified('INTERNAL', request.operationId),
+      requestKind: classified('INTERNAL', 'generic-o0'),
+    });
+    await this.#trust.recordNonAcceptedInvocation(
+      request.context,
+      actor,
+      Object.freeze({
+        actionId: request.operationId,
+        causationId: null,
+        channel: request.channel,
+        correlationId: randomUUID(),
+        failureCode: request.failureCode,
+        invocationId: randomUUID(),
+        metadata,
+        outcome: request.outcome,
+        policy: Object.freeze({
+          decision: request.policyDecision,
+          evaluatorVersion: 'northstar.semantic-gateway-policy-evaluator/v1',
+          policyVersion: request.policyVersion,
+          relevantInputs: metadata,
+          schemaVersion: POLICY_DECISION_EVIDENCE_VERSION,
+        }),
+        releaseContentHash: request.view.release.contentHash,
+        releaseId: request.view.release.releaseId,
+      }),
+    );
+  }
+
   async #executeQuery(
     request: SemanticQueryExecutionRequest,
   ): Promise<SemanticQueryResultEnvelope> {
@@ -144,44 +178,17 @@ export class PostgresModuleRuntimeInterpreter
     request: SemanticOperationExecutionRequest,
   ): Promise<SemanticOperationResultEnvelope> {
     const input = parseMutationInput(request.definition, request.input);
-    let storage: StorageTargetPayloadV1;
-    try {
-      storage = await withTrustedRequestTransaction(
-        this.pool,
-        request.context,
-        async (client) => loadPinnedStorageTarget(client, request),
-      );
-    } catch (error) {
-      throw providerBoundaryFailure(
-        error,
-        request.definition.effect.entity.targetId,
-      );
-    }
-    assertModuleSemanticStorageContract(storage);
-    const entity = requiredEntity(
-      storage,
-      request.definition.effect.entity.targetId,
-    );
-    const preparation = await prepareMutation(
-      this.pool,
-      request,
-      storage,
-      entity,
-      input,
-    );
     const actor = await this.actorIssuer.issue(request.context);
-    const ids = {
-      changeDocumentId: randomUUID(),
-      correlationId: randomUUID(),
-      eventId: randomUUID(),
-      invocationId: randomUUID(),
-      outboxId: randomUUID(),
-    };
-    const command = acceptedCommand(request, preparation, ids);
-    const receipt = await this.#trust.executeAcceptedMutation(
+    const receipt = await this.#trust.executeIdempotentAcceptedMutation(
       request.context,
       actor,
-      command,
+      Object.freeze({
+        actionId: request.definition.operationId,
+        idempotencyKey: request.idempotencyKey,
+        inputDigest: request.inputDigest,
+        releaseContentHash: request.view.release.contentHash,
+        releaseId: request.view.release.releaseId,
+      }),
       async (client) => {
         const currentStorage = await loadPinnedStorageTarget(client, request);
         assertModuleSemanticStorageContract(currentStorage);
@@ -191,7 +198,20 @@ export class PostgresModuleRuntimeInterpreter
         );
         return withModuleRuntimeRole(client, async () => {
           try {
-            return await executeMutationOnClient(
+            const preparation = await prepareMutation(
+              client,
+              request,
+              currentEntity,
+              input,
+            );
+            const ids = {
+              changeDocumentId: randomUUID(),
+              correlationId: randomUUID(),
+              eventId: randomUUID(),
+              invocationId: randomUUID(),
+              outboxId: randomUUID(),
+            };
+            const mutationResult = await executeMutationOnClient(
               client,
               currentStorage,
               currentEntity,
@@ -199,6 +219,10 @@ export class PostgresModuleRuntimeInterpreter
               input,
               request.readBackDefinition.selections,
             );
+            return Object.freeze({
+              command: acceptedCommand(request, preparation, ids),
+              mutationResult,
+            });
           } catch (error) {
             throw translateModuleProviderError(
               error,
@@ -227,34 +251,21 @@ export class PostgresModuleRuntimeInterpreter
 }
 
 async function prepareMutation(
-  pool: Pool,
+  client: PoolClient,
   request: SemanticOperationExecutionRequest,
-  storage: StorageTargetPayloadV1,
   entity: StorageEntity,
   input: MutationInput,
 ): Promise<MutationPreparation> {
   const kind = request.definition.effect.kind;
   if (kind === 'createRecordEffect') {
     return {
-      changes: createChanges(input),
+      changes: createChanges(request.definition.inputContract, input),
       expectedRevision: null,
       projectedRevision: 1,
       recordId: input.recordId,
     };
   }
-  let prior: RawRecord | null;
-  try {
-    prior = await withTrustedRequestTransaction(
-      pool,
-      request.context,
-      async (client) =>
-        withModuleRuntimeRole(client, () =>
-          loadRawRecord(client, entity, input.recordId, true),
-        ),
-    );
-  } catch (error) {
-    throw translateModuleProviderError(error, storage, entity.entityId);
-  }
+  const prior = await loadRawRecord(client, entity, input.recordId, true);
   if (!prior) {
     throw failure('MODULE_RECORD_NOT_FOUND', 'module record was not found');
   }
@@ -266,7 +277,7 @@ async function prepareMutation(
   }
   const changes =
     kind === 'updateRecordEffect'
-      ? updateChanges(prior, input.patch)
+      ? updateChanges(request.definition.inputContract, prior, input.patch)
       : [
           Object.freeze({
             classification: 'INTERNAL' as const,
@@ -308,7 +319,7 @@ function acceptedCommand(
       recordType: request.definition.effect.entity.targetId,
       revision: preparation.projectedRevision,
     }),
-    channel: 'API',
+    channel: request.channel,
     correlationId: ids.correlationId,
     event: Object.freeze({
       eventId: ids.eventId,
@@ -319,7 +330,12 @@ function acceptedCommand(
     invocationId: ids.invocationId,
     metadata,
     outbox: Object.freeze({
-      deduplicationKey: `${request.definition.operationId}:${preparation.recordId}:${ids.invocationId}`,
+      deduplicationKey: [
+        request.context.principalId,
+        request.view.release.contentHash,
+        request.definition.operationId,
+        request.idempotencyKey,
+      ].join(':'),
       outboxId: ids.outboxId,
     }),
     policy: Object.freeze({
@@ -1465,6 +1481,7 @@ export function assertModuleSemanticStorageContract(
 }
 
 function createChanges(
+  contract: RegisteredOperationInputContract | undefined,
   input: MutationInput,
 ): readonly BusinessFieldChangeInput[] {
   const changes: BusinessFieldChangeInput[] = [
@@ -1480,7 +1497,7 @@ function createChanges(
   )) {
     changes.push(
       Object.freeze({
-        classification: 'SENSITIVE',
+        classification: fieldClassification(contract, fieldId),
         fieldId: auditFieldId(fieldId),
         newState: valueState(value),
         oldState: Object.freeze({ state: 'ABSENT' }),
@@ -1492,7 +1509,7 @@ function createChanges(
   )) {
     changes.push(
       Object.freeze({
-        classification: 'SENSITIVE',
+        classification: 'INTERNAL',
         fieldId: auditFieldId(relationId),
         newState: valueState(recordId),
         oldState: Object.freeze({ state: 'ABSENT' }),
@@ -1503,6 +1520,7 @@ function createChanges(
 }
 
 function updateChanges(
+  contract: RegisteredOperationInputContract | undefined,
   prior: RawRecord,
   patch: Readonly<Record<string, ImmutableJsonValue>>,
 ): readonly BusinessFieldChangeInput[] {
@@ -1514,13 +1532,30 @@ function updateChanges(
       .sort(compareEntry)
       .map(([fieldId, value]) =>
         Object.freeze({
-          classification: 'SENSITIVE' as const,
+          classification: fieldClassification(contract, fieldId),
           fieldId: auditFieldId(fieldId),
           newState: valueState(value),
           oldState: valueState(prior.values[fieldId] ?? null),
         }),
       ),
   );
+}
+
+function fieldClassification(
+  contract: RegisteredOperationInputContract | undefined,
+  fieldId: string,
+): 'INTERNAL' | 'PUBLIC' {
+  const field = contract?.fields.find(
+    (candidate) => candidate.fieldId === fieldId,
+  );
+  if (!field) {
+    throw failure(
+      'MODULE_SEMANTIC_CONTRACT_UNSUPPORTED',
+      'pinned operation lacks canonical field classification',
+      fieldId,
+    );
+  }
+  return field.classification;
 }
 
 function valueState(value: unknown): BusinessValueStateInput {

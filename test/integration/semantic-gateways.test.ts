@@ -33,6 +33,7 @@ import {
   NoSuchRegisteredOperationError,
   SEMANTIC_OPERATION_REQUEST_VERSION,
   SemanticOperationGateway,
+  SemanticOperationMediationAuthority,
   SemanticOperationPolicyDeniedError,
   type SemanticOperationRequestEnvelope,
 } from '../../packages/runtime/src/semantic-operation-gateway.js';
@@ -69,6 +70,8 @@ const queryRequest: SemanticQueryRequestEnvelope = Object.freeze({
   schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
 });
 const operationRequest: SemanticOperationRequestEnvelope = Object.freeze({
+  confirmationGrant: null,
+  idempotencyKey: 'ab000000-0000-4000-8000-000000000001',
   input: Object.freeze({ note: 'fixture input' }),
   operationId,
   schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
@@ -243,9 +246,17 @@ test('a separately issued synthetic catalog cannot replace the view being handle
       return true;
     },
   );
-  const operationGateway = new SemanticOperationGateway(emptyFixture.policy);
+  const operationGateway = new SemanticOperationGateway(
+    emptyFixture.policy,
+    undefined,
+    emptyFixture.operationMediation,
+  );
   await assert.rejects(
-    operationGateway.invoke(emptyView, operationRequest),
+    operationGateway.invoke(
+      emptyView,
+      operationRequest,
+      emptyFixture.operationMediation.issueInvocation(emptyView, 'API'),
+    ),
     (error: unknown) => {
       assert.ok(error instanceof NoSuchRegisteredOperationError);
       assert.equal(error.pinnedReleaseId, releaseId);
@@ -394,6 +405,7 @@ test('unissued views fail before catalog access at each direct gateway boundary'
     Reflect.apply(operationGateway.invoke, operationGateway, [
       forgedOperationView,
       operationRequest,
+      { channel: 'API' },
     ]),
     TypeError,
   );
@@ -429,12 +441,18 @@ test('owned gateway sources expose one authority each, closed request keys, and 
   );
   assert.deepEqual(
     publicReadonlyKeys(operationSource, 'SemanticOperationRequestEnvelope'),
-    ['input', 'operationId', 'schemaVersion'],
+    [
+      'confirmationGrant',
+      'idempotencyKey',
+      'input',
+      'operationId',
+      'schemaVersion',
+    ],
   );
   assert.equal(SemanticQueryGateway.length, 1);
   assert.equal(SemanticOperationGateway.length, 1);
   assert.equal(AuthenticatedSemanticQueryApiAdapter.length, 2);
-  assert.equal(AuthenticatedSemanticOperationApiAdapter.length, 2);
+  assert.equal(AuthenticatedSemanticOperationApiAdapter.length, 3);
   assert.doesNotMatch(
     ownedSources,
     /\b(?:db|database|sql|table|storage|source|filesystem|shell|http|compiler|handler|route|transaction|patch|purge|activation|dispatcher|dispatch)\b/i,
@@ -501,6 +519,7 @@ class RecordingPolicyGateway implements CurrentPolicyGateway {
 function createFixture(options: FixtureOptions = {}): {
   loader: FixtureDefinitionLoader;
   operationApi: AuthenticatedSemanticOperationApiAdapter;
+  operationMediation: SemanticOperationMediationAuthority;
   policy: RecordingPolicyGateway;
   queryApi: AuthenticatedSemanticQueryApiAdapter;
   requestEntry: AuthenticatedRequestRuntimeEntryAdapter;
@@ -519,12 +538,15 @@ function createFixture(options: FixtureOptions = {}): {
     loader,
     policy,
   );
+  const operationMediation = new SemanticOperationMediationAuthority();
   return {
     loader,
     operationApi: new AuthenticatedSemanticOperationApiAdapter(
       requestEntry,
-      new SemanticOperationGateway(policy),
+      new SemanticOperationGateway(policy, undefined, operationMediation),
+      operationMediation,
     ),
+    operationMediation,
     policy,
     queryApi: new AuthenticatedSemanticQueryApiAdapter(
       requestEntry,

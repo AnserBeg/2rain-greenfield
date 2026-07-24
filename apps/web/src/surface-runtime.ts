@@ -1,13 +1,16 @@
-import { randomUUID } from 'node:crypto';
-
 import { assertRequestRuntimeView } from '@north-star/runtime/request-runtime-view';
 import type * as RuntimeViewContract from '@north-star/runtime/request-runtime-view';
 import {
   NoSuchRegisteredOperationError,
   SEMANTIC_OPERATION_REQUEST_VERSION,
+  SemanticOperationConfirmationGrantError,
+  SemanticOperationConfirmationStaleError,
   SemanticOperationPolicyDeniedError,
 } from '../../../packages/runtime/src/semantic-operation-gateway.js';
-import type { SemanticOperationGateway } from '../../../packages/runtime/src/semantic-operation-gateway.js';
+import type {
+  SemanticOperationGateway,
+  SemanticOperationMediationAuthority,
+} from '../../../packages/runtime/src/semantic-operation-gateway.js';
 import {
   NoSuchRegisteredQueryError,
   SEMANTIC_QUERY_REQUEST_VERSION,
@@ -38,6 +41,7 @@ export interface SurfaceRuntimeResponse {
 }
 
 export interface SurfaceRuntimeGateways {
+  readonly operationMediation: SemanticOperationMediationAuthority;
   readonly operationGateway: SemanticOperationGateway;
   readonly queryGateway: SemanticQueryGateway;
 }
@@ -164,27 +168,51 @@ export async function submitSurfaceRuntimeIntent(
   ) {
     return operationDiagnostic('OPERATION_UNSUPPORTED', 422);
   }
+  const input = operationInput(selection.selected, intent, submission);
   if (
     operation.confirmation === 'humanRequired' &&
-    submission.confirmed !== 'yes'
+    typeof submission.confirmationGrant !== 'string'
   ) {
-    return operationDiagnostic('OPERATION_CONFIRMATION_REQUIRED', 422);
+    try {
+      const grant = gateways.operationMediation.issueConfirmationGrant(
+        view,
+        operation.operationId,
+        input,
+      );
+      return renderConfirmationTransition(
+        selection.selected,
+        intent,
+        submission,
+        grant,
+      );
+    } catch {
+      return operationDiagnostic('OPERATION_CONFIRMATION_REQUIRED', 422);
+    }
   }
 
   let result;
   try {
-    result = await gateways.operationGateway.invoke(view, {
-      input: operationInput(selection.selected, intent, submission),
-      operationId: operation.operationId,
-      schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
-    });
+    result = await gateways.operationGateway.invoke(
+      view,
+      {
+        confirmationGrant: submission.confirmationGrant ?? null,
+        idempotencyKey: submission.idempotencyKey ?? '',
+        input,
+        operationId: operation.operationId,
+        schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
+      },
+      gateways.operationMediation.issueInvocation(view, 'UI'),
+    );
   } catch (error) {
     return operationDiagnostic(
       error instanceof SemanticOperationPolicyDeniedError
         ? 'OPERATION_PERMISSION_DENIED'
-        : error instanceof NoSuchRegisteredOperationError
-          ? 'OPERATION_UNSUPPORTED'
-          : 'OPERATION_UNAVAILABLE',
+        : error instanceof SemanticOperationConfirmationStaleError ||
+            error instanceof SemanticOperationConfirmationGrantError
+          ? 'OPERATION_CONFIRMATION_STALE'
+          : error instanceof NoSuchRegisteredOperationError
+            ? 'OPERATION_UNSUPPORTED'
+            : 'OPERATION_UNAVAILABLE',
       error instanceof SemanticOperationPolicyDeniedError ? 403 : 422,
     );
   }
@@ -361,7 +389,7 @@ function operationInput(
     ),
   );
   if (intent === 'create') {
-    return { recordId: randomUUID(), values };
+    return { recordId: submission.recordId ?? '', values };
   }
   const recordId = submission.recordId ?? '';
   const expectedRevision = Number.parseInt(
@@ -398,6 +426,7 @@ function surfaceAllowsIntent(
 function operationDiagnostic(
   code:
     | 'OPERATION_CONFIRMATION_REQUIRED'
+    | 'OPERATION_CONFIRMATION_STALE'
     | 'OPERATION_PERMISSION_DENIED'
     | 'OPERATION_UNAVAILABLE'
     | 'OPERATION_UNSUPPORTED',
@@ -407,6 +436,10 @@ function operationDiagnostic(
     OPERATION_CONFIRMATION_REQUIRED: [
       'Confirmation required',
       'This semantic operation requires explicit human confirmation.',
+    ],
+    OPERATION_CONFIRMATION_STALE: [
+      'Confirmation expired',
+      'The operation input or expected revision changed after preview. Preview it again.',
     ],
     OPERATION_PERMISSION_DENIED: [
       'Access denied',
@@ -423,6 +456,29 @@ function operationDiagnostic(
   } as const;
   const [title, message] = copy[code];
   return renderApplicationDiagnostic(statusCode, title, message, code);
+}
+
+function renderConfirmationTransition(
+  surface: CompiledSurfaceDefinition,
+  intent: SurfaceOperationIntent,
+  submission: SurfaceRuntimeSubmission,
+  grant: string,
+): SurfaceRuntimeResponse {
+  const preserved = Object.entries(submission)
+    .filter(([key]) => key !== 'confirmationGrant' && key !== 'confirmed')
+    .map(
+      ([key, value]) =>
+        `<input type="hidden" name="${escapeHtml(key)}" value="${escapeHtml(value)}">`,
+    )
+    .join('');
+  return Object.freeze({
+    html: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Confirm ${escapeHtml(intentLabel(intent))} · 2rain</title><style>${styles}</style></head><body class="standalone"><main class="standalone__card" data-confirmation-step="preview"><p class="eyebrow">Operation preview</p><h1>Confirm ${escapeHtml(intentLabel(intent))}</h1><p>Review this ${escapeHtml(surface.label)} operation before it is executed.</p><form method="post" action="/?surface=${encodeURIComponent(surface.surfaceId)}">${preserved}<input type="hidden" name="confirmationGrant" value="${escapeHtml(grant)}"><button type="submit">Confirm ${escapeHtml(intentLabel(intent))}</button></form></main></body></html>`,
+    statusCode: 200,
+  });
+}
+
+function intentLabel(intent: SurfaceOperationIntent): string {
+  return intent.slice(0, 1).toUpperCase() + intent.slice(1);
 }
 
 export function renderApplicationDiagnostic(

@@ -59,12 +59,12 @@ const identities = new Map<string, AuthenticatedIdentity>([
   ['human-b', identity(tenantB, environmentB, humanB)],
 ]);
 
-test('migrations 0006-0008 upgrade accepted G1 and converge with the checked-in snapshot', async () => {
+test('migrations 0006-0009 upgrade accepted G1 and converge with the checked-in snapshot', async () => {
   await withEphemeralPostgres('trust-upgrade', async ({ pool }) => {
     const migrations = await loadMigrations(checkedInMigrations);
     assert.equal(
       migrations.at(-1)?.name,
-      '0008_module_runtime_role_assumption.sql',
+      '0009_semantic_operation_receipts.sql',
     );
     const admin = await pool.connect();
     try {
@@ -84,8 +84,9 @@ test('migrations 0006-0008 upgrade accepted G1 and converge with the checked-in 
         '0006_trust_substrate.sql',
         '0007_module_storage_transitions.sql',
         '0008_module_runtime_role_assumption.sql',
+        '0009_semantic_operation_receipts.sql',
       ]);
-      assert.equal(upgraded.verified.length, 8);
+      assert.equal(upgraded.verified.length, 9);
       await assertSchemaMatchesSnapshot(admin, checkedInSnapshot);
     } finally {
       admin.release();
@@ -101,8 +102,8 @@ test('accepted mutation facts are atomic, attributed, redacted, immutable, and t
       const admin = await pool.connect();
       try {
         const emptyPath = await runMigrations(admin, migrations);
-        assert.equal(emptyPath.applied.length, 8);
-        assert.equal(emptyPath.verified.length, 8);
+        assert.equal(emptyPath.applied.length, 9);
+        assert.equal(emptyPath.verified.length, 9);
         await assertSchemaMatchesSnapshot(admin, checkedInSnapshot);
         await seedReleaseFixtures(admin);
         await createBusinessMutationFixture(admin);
@@ -770,11 +771,12 @@ async function assertForcedRls(pool: pg.Pool): Promise<void> {
          'trust_action_invocations',
          'trust_business_change_documents',
          'trust_domain_events',
-         'trust_outbox'
+         'trust_outbox',
+         'semantic_operation_receipts'
        )
      ORDER BY c.relname
   `);
-  assert.equal(result.rows.length, 4);
+  assert.equal(result.rows.length, 5);
   for (const row of result.rows) {
     assert.equal(row.row_level_security, true, row.relation);
     assert.equal(row.force_row_level_security, true, row.relation);
@@ -799,6 +801,7 @@ async function assertAppendOnly(pool: pg.Pool): Promise<void> {
     'trust_business_change_documents',
     'trust_domain_events',
     'trust_outbox',
+    'semantic_operation_receipts',
   ]) {
     const timestampColumn =
       relation === 'trust_domain_events' ? 'occurred_at' : 'recorded_at';
@@ -818,7 +821,12 @@ async function assertAppendOnly(pool: pg.Pool): Promise<void> {
 function assertProviderApiIsClosed(): void {
   assert.deepEqual(
     Object.getOwnPropertyNames(PostgresTrustService.prototype).toSorted(),
-    ['constructor', 'executeAcceptedMutation', 'recordNonAcceptedInvocation'],
+    [
+      'constructor',
+      'executeAcceptedMutation',
+      'executeIdempotentAcceptedMutation',
+      'recordNonAcceptedInvocation',
+    ],
   );
   const source = readFileSync(
     resolve('packages/postgres-provider/src/trust/postgres-trust-service.ts'),

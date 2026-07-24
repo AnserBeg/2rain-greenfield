@@ -21,8 +21,10 @@ import {
 import {
   SEMANTIC_OPERATION_RESULT_VERSION,
   SemanticOperationGateway,
+  SemanticOperationMediationAuthority,
   type SemanticOperationExecutionRequest,
   type SemanticOperationExecutor,
+  type SemanticOperationNonAcceptedRequest,
   type SemanticOperationResultEnvelope,
 } from '../../../../packages/runtime/src/semantic-operation-gateway.js';
 import {
@@ -62,9 +64,15 @@ test.beforeAll(async () => {
   const compiled = compileFixture();
   const policy = allowPolicy();
   const executor = new BrowserFixtureExecutor();
+  const operationMediation = new SemanticOperationMediationAuthority();
   executor.createSeed('Existing live master');
   server = createSurfaceRuntimeServer(runtimeEntry(compiled, policy), {
-    operationGateway: new SemanticOperationGateway(policy, executor),
+    operationGateway: new SemanticOperationGateway(
+      policy,
+      executor,
+      operationMediation,
+    ),
+    operationMediation,
     queryGateway: new SemanticQueryGateway(policy, executor),
   });
   baseUrl = await listen(server);
@@ -122,6 +130,12 @@ class BrowserFixtureExecutor
   createSeed(name: string): void {
     const recordId = randomUUID();
     this.records.set(recordId, dto(recordId, name));
+  }
+
+  async recordNonAccepted(
+    _request: SemanticOperationNonAcceptedRequest,
+  ): Promise<void> {
+    void _request;
   }
 
   execute(
