@@ -16,6 +16,11 @@ stop and surface it — do not improvise.
 - Execution state lives in `docs/execution/ledger.md`. Statuses:
   `planned -> admitted -> active -> evidence_ready -> accepted`; `blocked`
   only for an explicit dependency or user decision.
+- **`docs/execution/current-plan.md` is the active queue** — what runs next and
+  why, the operating model, open plan-level decisions, and the dispositioned
+  findings inventory. Read it after this file and before proposing or running
+  any packet; the ledger says what happened, current-plan says what is next.
+  Keep it current whenever the queue changes.
 
 ## 2. The prior repository (the quarry)
 
