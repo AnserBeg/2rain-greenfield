@@ -1,7 +1,5 @@
-import {
-  SEMANTIC_QUERY_REQUEST_VERSION,
-  type SemanticQueryResultEnvelope,
-} from '../../../../packages/runtime/src/semantic-query-gateway.js';
+import { type SemanticQueryResultEnvelope } from '../../../../packages/runtime/src/semantic-query-gateway.js';
+import { resolveByName } from '../../../../packages/runtime/src/resolve-by-name.js';
 import type { RequestRuntimeView } from '../../../../packages/runtime/src/request-runtime-view.js';
 
 import { PARTY_IDS } from './definition.js';
@@ -12,9 +10,15 @@ export function resolvePartyName(
   view: RequestRuntimeView,
   text: string,
 ): Promise<SemanticQueryResultEnvelope> {
-  return runtime.queryGateway.invoke(view, {
-    arguments: { text },
-    queryId: `${PARTY_IDS.namespace}:query.party_resolve`,
-    schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
-  });
+  return resolveByName(
+    runtime.queryGateway,
+    view,
+    {
+      exactIdentifierFieldIds: [PARTY_IDS.fieldIds.number],
+      listQueryId: `${PARTY_IDS.namespace}:query.party_list`,
+      nameFieldIds: [PARTY_IDS.fieldIds.name],
+      resolveQueryId: `${PARTY_IDS.namespace}:query.party_resolve`,
+    },
+    text,
+  );
 }

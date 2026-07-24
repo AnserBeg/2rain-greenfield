@@ -60,6 +60,10 @@ test('Party walking slice reaches real PostgreSQL with trust, lifecycle, resolve
       recordId: randomUUID(),
       values: partyValues('P-004', 'Maximum Construction', ''),
     });
+    await invokePartyOperation(runtime, runtime.views.a, 'party_create', {
+      recordId: randomUUID(),
+      values: partyValues('P-005', 'P-004', ''),
+    });
 
     const trustBeforeDuplicate = await trustCount(runtime.adminPool);
     await assert.rejects(
@@ -92,6 +96,15 @@ test('Party walking slice reaches real PostgreSQL with trust, lifecycle, resolve
     );
     assert.equal(
       (await resolvePartyName(runtime, runtime.views.a, 'Duplicate Trading'))
+        .outcome,
+      'ambiguous',
+    );
+    assert.equal(
+      (await resolvePartyName(runtime, runtime.views.a, 'P-004')).outcome,
+      'ambiguous',
+    );
+    assert.equal(
+      (await resolvePartyName(runtime, runtime.views.a, 'Maxmium Constructon'))
         .outcome,
       'ambiguous',
     );

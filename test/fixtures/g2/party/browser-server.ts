@@ -53,6 +53,10 @@ async function main(): Promise<void> {
         values: partyValues(number, 'Browser Duplicate'),
       });
     }
+    await invokePartyOperation(runtime, runtime.views.a, 'party_create', {
+      recordId: randomUUID(),
+      values: partyValues('P-WEB-005', 'P-WEB-002'),
+    });
     assert.equal(
       (await resolvePartyName(runtime, runtime.views.a, 'P-WEB-001')).outcome,
       'exact',
@@ -64,6 +68,15 @@ async function main(): Promise<void> {
     );
     assert.equal(
       (await resolvePartyName(runtime, runtime.views.a, 'Browser Duplicate'))
+        .outcome,
+      'ambiguous',
+    );
+    assert.equal(
+      (await resolvePartyName(runtime, runtime.views.a, 'P-WEB-002')).outcome,
+      'ambiguous',
+    );
+    assert.equal(
+      (await resolvePartyName(runtime, runtime.views.a, 'Browser Duplicte'))
         .outcome,
       'ambiguous',
     );

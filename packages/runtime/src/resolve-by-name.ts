@@ -35,20 +35,7 @@ export async function resolveByName(
     queryId: contract.resolveQueryId,
     schemaVersion: SemanticQueryContract.SEMANTIC_QUERY_REQUEST_VERSION,
   });
-  if (exact.outcome === 'unsupported') return exact;
-
-  const identifierMatches = exact.records.filter((record) =>
-    contract.exactIdentifierFieldIds.some(
-      (fieldId) =>
-        normalizeResolverText(stringValue(record, fieldId)) === queryText,
-    ),
-  );
-  if (identifierMatches.length === 1) {
-    return result(contract.resolveQueryId, 'exact', identifierMatches);
-  }
-  if (identifierMatches.length > 1 || exact.records.length > 0) {
-    return result(contract.resolveQueryId, 'ambiguous', exact.records);
-  }
+  if (exact.outcome !== 'not-found') return exact;
 
   const candidates = await gateway.invoke(view, {
     arguments: { limit: declared.maximumResultCount },
@@ -157,6 +144,16 @@ function assertContract(
   const listSelections = new Set(
     list?.selections.map((selection) => selection.fieldId) ?? [],
   );
+  const identifierAuthorities = new Set(
+    resolve?.resolveMatchKeys
+      ?.filter((key) => key.authority === 'identifier')
+      .map((key) => key.fieldId) ?? [],
+  );
+  const advisoryAuthorities = new Set(
+    resolve?.resolveMatchKeys
+      ?.filter((key) => key.authority === 'advisory')
+      .map((key) => key.fieldId) ?? [],
+  );
   if (
     !resolve ||
     !list ||
@@ -166,16 +163,30 @@ function assertContract(
     contract.exactIdentifierFieldIds.length === 0 ||
     contract.nameFieldIds.length === 0 ||
     new Set(allFieldIds).size !== allFieldIds.length ||
+    !sameMembers(
+      identifierAuthorities,
+      new Set(contract.exactIdentifierFieldIds),
+    ) ||
+    !sameMembers(advisoryAuthorities, new Set(contract.nameFieldIds)) ||
     allFieldIds.some(
       (fieldId) =>
         !resolveSelections.has(fieldId) || !listSelections.has(fieldId),
     )
   ) {
     throw new InvalidResolveByNameContractError(
-      'resolve-by-name requires compatible compiled resolve/list queries and explicitly declared selected fields',
+      'resolve-by-name requires compatible compiled resolve/list queries whose selected fields match the declared identifier/advisory authority',
     );
   }
   return { maximumResultCount: list.maximumResultCount };
+}
+
+function sameMembers(
+  left: ReadonlySet<string>,
+  right: ReadonlySet<string>,
+): boolean {
+  return (
+    left.size === right.size && [...left].every((member) => right.has(member))
+  );
 }
 
 function stringValue(

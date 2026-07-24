@@ -9,6 +9,10 @@ import {
   type AuthenticatedIdentity,
 } from '../../packages/runtime/src/request-context.js';
 import {
+  InvalidResolveByNameContractError,
+  resolveByName,
+} from '../../packages/runtime/src/resolve-by-name.js';
+import {
   SEMANTIC_OPERATION_REQUEST_VERSION,
   SEMANTIC_OPERATION_RESULT_VERSION,
   SemanticOperationGateway,
@@ -113,6 +117,24 @@ test('compiled resolver authority serves exact/ambiguous/not-found through the g
   const gateway = new SemanticQueryGateway(policy, executor);
   const viewA = await issuedView(runtimeEntry(compiled, policy), 'a');
   const viewB = await issuedView(runtimeEntry(compiled, policy), 'b');
+  await assert.rejects(
+    resolveByName(
+      gateway,
+      viewA,
+      {
+        exactIdentifierFieldIds: [PARTY_IDS.fieldIds.name],
+        listQueryId: `${PARTY_IDS.namespace}:query.party_list`,
+        nameFieldIds: [PARTY_IDS.fieldIds.number],
+        resolveQueryId: `${PARTY_IDS.namespace}:query.party_resolve`,
+      },
+      'P-101',
+    ),
+    (error: unknown) => {
+      assert.ok(error instanceof InvalidResolveByNameContractError);
+      assert.equal(error.code, 'INVALID_RESOLVE_BY_NAME_CONTRACT');
+      return true;
+    },
+  );
   executor.seed(
     tenantA,
     '74100000-0000-4000-8000-000000000001',
@@ -132,6 +154,12 @@ test('compiled resolver authority serves exact/ambiguous/not-found through the g
     'Maximum Construction',
   );
   executor.seed(
+    tenantA,
+    '74100000-0000-4000-8000-000000000004',
+    'P-104',
+    'P-103',
+  );
+  executor.seed(
     tenantB,
     '84100000-0000-4000-8000-000000000001',
     'B-900',
@@ -146,6 +174,20 @@ test('compiled resolver authority serves exact/ambiguous/not-found through the g
   assert.equal(
     (await resolveParty(gateway, viewA, 'Maximum Construction')).outcome,
     'ambiguous',
+  );
+  assert.equal(
+    (await resolveParty(gateway, viewA, 'Maxmium Constructon')).outcome,
+    'ambiguous',
+  );
+  const authoritativeCollision = await gateway.invoke(viewA, {
+    arguments: { text: 'P-103' },
+    queryId: `${PARTY_IDS.namespace}:query.party_resolve`,
+    schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+  });
+  assert.equal(authoritativeCollision.outcome, 'ambiguous');
+  assert.deepEqual(
+    await resolveParty(gateway, viewA, 'P-103'),
+    authoritativeCollision,
   );
   assert.equal(
     (await resolveParty(gateway, viewA, 'Missing')).outcome,
@@ -163,11 +205,17 @@ function resolveParty(
   view: RequestRuntimeView,
   text: string,
 ): Promise<SemanticQueryResultEnvelope> {
-  return gateway.invoke(view, {
-    arguments: { text },
-    queryId: `${PARTY_IDS.namespace}:query.party_resolve`,
-    schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
-  });
+  return resolveByName(
+    gateway,
+    view,
+    {
+      exactIdentifierFieldIds: [PARTY_IDS.fieldIds.number],
+      listQueryId: `${PARTY_IDS.namespace}:query.party_list`,
+      nameFieldIds: [PARTY_IDS.fieldIds.name],
+      resolveQueryId: `${PARTY_IDS.namespace}:query.party_resolve`,
+    },
+    text,
+  );
 }
 
 class PartyMemoryExecutor
