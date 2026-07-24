@@ -30,6 +30,11 @@ async function main(): Promise<void> {
       },
     );
     assert.ok(created.trust);
+    const rolePartyId = randomUUID();
+    await invokePartyOperation(runtime, runtime.views.a, 'party_create', {
+      recordId: rolePartyId,
+      values: partyValues('P-WEB-ROLES', 'Browser Role Parent'),
+    });
     for (const localRole of ['supplier', 'customer'] as const) {
       const role = await invokePartyOperation(
         runtime,
@@ -37,7 +42,7 @@ async function main(): Promise<void> {
         'party_role_create',
         {
           recordId: randomUUID(),
-          relations: { [PARTY_IDS.relationIds.roleParty]: partyId },
+          relations: { [PARTY_IDS.relationIds.roleParty]: rolePartyId },
           values: {
             [PARTY_IDS.fieldIds.roleKind]:
               `${PARTY_IDS.namespace}:option.${localRole}`,
