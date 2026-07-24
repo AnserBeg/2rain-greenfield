@@ -115,3 +115,8 @@ How to apply: supersedes the elapsed-age part of “Use statement time for deadl
 Date: 2026-07-23
 Why: G2-P2a copied legacy-compatible compiler-input versions into a current persisted release envelope, causing downstream PostgreSQL registration to reject it.
 How to apply: derive cross-layer persisted envelope language/profile versions from canonical constants; when compiler roots or persisted metadata change, run downstream PostgreSQL registration suites before acceptance. See [G2-P2a-fix](docs/execution/packets/G2-P2a-manifest-version.md).
+
+## Enforce semantic normalization where uniqueness lives
+Date: 2026-07-23
+Why: P2b emitted raw unique indexes for a compiled Unicode case-fold contract, so application-equivalent case variants remained distinct in storage.
+How to apply: drive application normalization and storage indexes from one versioned fold table, verify every mapped scalar across both implementations, and test exact/case/tenant duplicate behavior. See [G2-P2b corrective](docs/execution/packets/G2-P2b-case-fold-unique.md).
