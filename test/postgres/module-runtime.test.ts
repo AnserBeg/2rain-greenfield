@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import test from 'node:test';
+import { promisify } from 'node:util';
 
 import pg from 'pg';
 
@@ -71,12 +73,18 @@ import {
 import { withEphemeralPostgres } from '../helpers/postgres.js';
 
 const migrations = resolve('db/migrations');
+const execFileAsync = promisify(execFile);
+const localeProbeChild = process.env.PR1_LOCALE_PROBE_CHILD === '1';
 const tenantA = 'a1000000-0000-4000-8000-000000000001';
 const environmentA = 'a2000000-0000-4000-8000-000000000002';
 const principalA = 'a3000000-0000-4000-8000-000000000003';
 const tenantB = 'b1000000-0000-4000-8000-000000000001';
 const environmentB = 'b2000000-0000-4000-8000-000000000002';
 const principalB = 'b3000000-0000-4000-8000-000000000003';
+const localeOrderingFieldIds = Object.freeze({
+  digit: `${FIXTURE_IDS.namespace}:field.a0`,
+  punctuation: `${FIXTURE_IDS.namespace}:field.a_a`,
+});
 
 test('definition-only module is served generically through Q0/O0, trust, RLS, and pinned coexistence', async () => {
   const empty = mustCompile(moduleInput(emptyDefinition(ordinaryModuleV1())));
@@ -528,6 +536,25 @@ test('metamorphic random namespace compiles, materializes, serves, and records t
   );
 });
 
+test('persisted change-document ordering is byte-identical under a non-C locale', async () => {
+  const baseline = await runPersistedOrderingProbe('C');
+  const nonC = await runPersistedOrderingProbe('sv_SE.UTF-8');
+
+  assert.equal(nonC.locale, 'sv-SE');
+  assert.deepEqual(nonC.bytes, baseline.bytes);
+  const changes = JSON.parse(nonC.bytes.toString('utf8')) as Array<{
+    fieldId?: unknown;
+  }>;
+  assert.deepEqual(
+    changes.map((change) => change.fieldId),
+    [
+      'recordLifecycle',
+      'northstar.modulefixture.field.a0',
+      'northstar.modulefixture.field.a_a',
+    ],
+  );
+});
+
 class AllowPolicy implements CurrentPolicyGateway {
   readonly calls: CurrentPolicyDecisionRequest[] = [];
 
@@ -547,6 +574,7 @@ class AllowPolicy implements CurrentPolicyGateway {
   async readCurrentVersion(
     _subject: CurrentPolicySubject,
   ): Promise<{ policyVersion: string }> {
+    void _subject;
     return { policyVersion: 'module-runtime-policy/v1' };
   }
 }
@@ -1001,6 +1029,164 @@ function mustCompile(input: CompilerInput): CompileSuccess {
   return result;
 }
 
+async function runPersistedOrderingProbe(
+  locale: string,
+): Promise<{ bytes: Buffer; locale: string }> {
+  const probeEnvironment = { ...process.env };
+  delete probeEnvironment.NODE_TEST_CONTEXT;
+  const { stdout } = await execFileAsync(
+    process.execPath,
+    [
+      '--import',
+      'tsx',
+      '--test',
+      '--test-name-pattern=emits persisted ordering probe bytes',
+      resolve('test/postgres/module-runtime.test.ts'),
+    ],
+    {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+      env: {
+        ...probeEnvironment,
+        LANG: locale,
+        LC_ALL: locale,
+        PR1_LOCALE_PROBE_CHILD: '1',
+      },
+      maxBuffer: 2 * 1024 * 1024,
+      timeout: 120_000,
+    },
+  );
+  const match = /PR1_LOCALE_PROBE=(\{[^\n]+\})/u.exec(stdout);
+  assert.ok(match?.[1], `locale probe produced no result:\n${stdout}`);
+  const result = JSON.parse(match[1]) as { bytes: string; locale: string };
+  return { bytes: Buffer.from(result.bytes, 'base64'), locale: result.locale };
+}
+
+async function persistedLocaleOrderingChanges(): Promise<string> {
+  const definition = localeOrderingDefinition();
+  const empty = mustCompile(moduleInput(emptyDefinition(definition)));
+  const compiled = mustCompile(
+    moduleInput(definition, expectedActiveReleaseFrom(empty)),
+  );
+  const tenant = 'd1000000-0000-4000-8000-000000000001';
+  const environment = 'd2000000-0000-4000-8000-000000000002';
+  const principal = 'd3000000-0000-4000-8000-000000000003';
+
+  return withEphemeralPostgres(
+    'module-locale-order',
+    async ({ connection, pool }) => {
+      await migrateAndSeed(pool, [[tenant, environment, 'locale-order']]);
+      const runtimePool = new pg.Pool({
+        ...connection,
+        max: 3,
+        user: 'north_star_runtime',
+      });
+      const materializerPool = new pg.Pool({
+        ...connection,
+        max: 2,
+        user: 'north_star_module_materializer',
+      });
+      const modulePool = new pg.Pool({
+        ...connection,
+        max: 1,
+        user: 'north_star_module_runtime',
+      });
+      try {
+        const context = (
+          await contextsFor([['l', tenant, environment, principal]])
+        ).l!;
+        const releases = await persistSequence(runtimePool, context, [
+          [empty, emptyDefinition(definition)],
+          [compiled, definition],
+        ]);
+        await setPointer(pool, tenant, environment, releases[0]!);
+        await grantExecutorAuthority(pool, [[tenant, principal]]);
+        const materializer = new PostgresModuleStorageMaterializer(
+          materializerPool,
+          modulePool,
+        );
+        await prepare(materializer, context, principal, releases[1]!);
+        await setPointer(pool, tenant, environment, releases[1]!);
+
+        const policy = new AllowPolicy();
+        const interpreter = new PostgresModuleRuntimeInterpreter(
+          runtimePool,
+          humanActorIssuer(),
+        );
+        const gateway = new SemanticOperationGateway(policy, interpreter);
+        const entry = runtimeEntry(runtimePool, {
+          l: identity(tenant, environment, principal),
+        });
+        const view = await issuedView(entry, 'l');
+        const result = await operation(gateway, view, 'master_create', {
+          recordId: randomUUID(),
+          values: {
+            [localeOrderingFieldIds.punctuation]: 'punctuation',
+            [localeOrderingFieldIds.digit]: 'digit',
+          },
+        });
+        assert.ok(result.trust);
+        const persisted = await pool.query<{ changes: string }>(
+          `SELECT changes::text AS changes
+             FROM platform.trust_business_change_documents
+            WHERE change_document_id = $1`,
+          [result.trust.changeDocumentId],
+        );
+        const changes = persisted.rows[0]?.changes;
+        assert.ok(changes);
+        return changes;
+      } finally {
+        await Promise.all([
+          runtimePool.end(),
+          materializerPool.end(),
+          modulePool.end(),
+        ]);
+      }
+    },
+  );
+}
+
+function localeOrderingDefinition(): Record<string, unknown> {
+  return replaceDefinitionIds(
+    ordinaryModuleV1(),
+    new Map([
+      [FIXTURE_IDS.fieldIds.parentName, localeOrderingFieldIds.punctuation],
+      [FIXTURE_IDS.fieldIds.parentNumber, localeOrderingFieldIds.digit],
+    ]),
+  ) as Record<string, unknown>;
+}
+
+function replaceDefinitionIds(
+  value: unknown,
+  replacements: ReadonlyMap<string, string>,
+): unknown {
+  if (typeof value === 'string') return replacements.get(value) ?? value;
+  if (Array.isArray(value)) {
+    return value.map((entry) => replaceDefinitionIds(entry, replacements));
+  }
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [
+        key,
+        replaceDefinitionIds(entry, replacements),
+      ]),
+    );
+  }
+  return value;
+}
+
 function minted(value: string): MintedUuid {
   return value as MintedUuid;
+}
+
+if (localeProbeChild) {
+  test('emits persisted ordering probe bytes', async () => {
+    const changes = await persistedLocaleOrderingChanges();
+    process.stdout.write(
+      `PR1_LOCALE_PROBE=${JSON.stringify({
+        bytes: Buffer.from(changes, 'utf8').toString('base64'),
+        locale: Intl.Collator().resolvedOptions().locale,
+      })}\n`,
+    );
+  });
 }

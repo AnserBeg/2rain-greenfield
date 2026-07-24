@@ -119,9 +119,11 @@ async function stopFixture(
     }, 15_000);
     child.once('exit', (code) => {
       clearTimeout(timeout);
-      code === 0
-        ? resolve()
-        : reject(new Error(`Party fixture exited with ${String(code)}`));
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(new Error(`Party fixture exited with ${String(code)}`));
+      }
     });
   });
 }

@@ -728,9 +728,10 @@ function structuralTransition(transition: StorageTransitionEnvelope): unknown {
   return {
     backfillAdmissibilityVersion: transition.backfillAdmissibilityVersion,
     compatibilityMatrixVersion: transition.compatibilityMatrixVersion,
-    elements: transition.elements.map(
-      ({ elementId: _elementId, ...entry }) => entry,
-    ),
+    elements: transition.elements.map(({ elementId, ...entry }) => {
+      void elementId;
+      return entry;
+    }),
     kind: transition.kind,
     rendererPolicyVersion: transition.rendererPolicyVersion,
     schemaVersion: transition.schemaVersion,

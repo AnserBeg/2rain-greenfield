@@ -49,8 +49,12 @@ jobs:
         run: corepack pnpm build
       - name: Run unit tests
         run: corepack pnpm test:unit
+      - name: Run compiler tests
+        run: corepack pnpm test:compiler
       - name: Run integration tests
         run: corepack pnpm test:integration
+      - name: Run agent tests
+        run: corepack pnpm test:agent
       - name: Run architecture and hygiene tests
         run: corepack pnpm test:architecture
       - name: Check patch whitespace and repository cleanliness
@@ -87,8 +91,12 @@ jobs:
         run: corepack enable
       - name: Install frozen dependencies
         run: corepack pnpm install --frozen-lockfile --reporter=append-only
+      - name: Check schema drift
+        run: corepack pnpm check:schema
       - name: Run PostgreSQL tests
         run: corepack pnpm test:postgres
+      - name: Run non-C locale determinism probe
+        run: corepack pnpm test:locale
 
   browser:
     name: Browser runner

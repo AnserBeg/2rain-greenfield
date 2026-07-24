@@ -1,7 +1,7 @@
 # ADR-0011: Compiled module storage and transitions
 
 Date: 2026-07-22
-Status: candidate — Freeze F is not ratified before G2-P2c
+Status: ratified — Freeze F ratification is recorded by the G2-P2 completion in `docs/execution/ledger.md`
 Tier: Critical (review per `review-tiers`)
 
 ## Context

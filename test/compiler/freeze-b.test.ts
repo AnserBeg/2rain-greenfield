@@ -145,7 +145,10 @@ test('revision two adds one optional field to storage and the existing form', ()
   assert.equal(transition.elements.length, 1);
   assert.match(transition.elements[0]?.elementId ?? '', /^[0-9a-f]{64}$/);
   assert.deepEqual(
-    transition.elements.map(({ elementId: _elementId, ...element }) => element),
+    transition.elements.map(({ elementId, ...element }) => {
+      void elementId;
+      return element;
+    }),
     [
       {
         classification: {

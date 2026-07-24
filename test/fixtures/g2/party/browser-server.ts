@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import type { Server } from 'node:http';
 
 import { createSurfaceRuntimeServer } from '../../../../apps/web/src/app-server.js';
 
@@ -128,7 +129,7 @@ function partyValues(number: string, name: string): Record<string, string> {
   };
 }
 
-async function listen(server: import('node:http').Server): Promise<string> {
+async function listen(server: Server): Promise<string> {
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject);
     server.listen(0, '127.0.0.1', resolve);
@@ -145,7 +146,7 @@ async function shutdownSignal(): Promise<void> {
   });
 }
 
-async function close(server: import('node:http').Server): Promise<void> {
+async function close(server: Server): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     server.close((error) => (error ? reject(error) : resolve()));
   });

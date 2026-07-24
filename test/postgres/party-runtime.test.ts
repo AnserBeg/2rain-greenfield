@@ -4,7 +4,10 @@ import test from 'node:test';
 
 import type { Pool } from 'pg';
 
-import { PROJECTION_FAMILY_IDS } from '../../packages/compiler/src/index.js';
+import {
+  PROJECTION_FAMILY_IDS,
+  type StorageTargetPayloadV1,
+} from '../../packages/compiler/src/index.js';
 import { ModuleRuntimeInterpreterError } from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
 import { PARTY_IDS } from '../fixtures/g2/party/definition.js';
 import { projectionPayload } from '../fixtures/g2/party/compiler.js';
@@ -363,7 +366,7 @@ async function assertRedacted(
 
 async function assertProviderRejectsCrossTenantRelation(
   pool: Pool,
-  storage: import('../../packages/compiler/src/index.js').StorageTargetPayloadV1,
+  storage: StorageTargetPayloadV1,
   hiddenPartyId: string,
 ): Promise<void> {
   const role = storage.entities.find(

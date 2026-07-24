@@ -15,6 +15,12 @@ before any become `admitted`.
 |---|---|---|---|
 | G1 | **COMPLETE** | G1-P9 — reviewed SHA `1e69199078bf0c455d45bfccfd4b3ef631923afd` | [G1 stage-gate evidence](stage-gates/G1.md) |
 
+## Program reviews
+
+| Milestone | Reviewed SHA | Status | Strategic verdicts | Disposition |
+|---|---|---|---|---|
+| G2-P3 Party, before Catalog/Location fan-out | `12e6c66ac1834274391e0b63c9d44a60eb2514c7` | **CONVERGED** | B1 **KEEP**; B2 **ADJUST — sequencing only** | [Converged record](program-reviews/2026-07-24-g2-p3-party/converged-record.md); correctives PR-1, PR-2, and PR-3 before fan-out |
+
 | ID | Packet | Stage | Tier | Status | SHA | Evidence |
 |---|---|---|---|---|---|---|
 | G0-P1a | Fresh pnpm/TypeScript workspace and clean-install scaffold | G0 | Mechanical | accepted | `856f90ca4a1bd1d4d099760dd2da6dc8ad51e4ae` | [packet](packets/G0-P1a.md) |
@@ -52,6 +58,7 @@ before any become `admitted`.
 | G2-P3a | Generic SurfaceRuntime ↔ semantic-gateway data binding | G2 | Critical | accepted | `f0ca4b51c051c9ada1c2adaccc0a1e03df5c794d` | [packet](packets/G2-P3a.md); accepted by non-squash integration with the reviewed candidate preserved as an ancestor. Inserted before Party; composes ratified Freeze F with the accepted SurfaceRuntime and narrows G2-P4 by moving generic live data binding here. Round 1 REVISE on `13c6eb737a277008eea2aeef9ff410f18220b4a0`; fresh Codex `gpt-5.6-sol` xhigh PASS and Fable max PASS on the identical replacement candidate, with all gates green. |
 | G2-P3c | Explicit resolver authority in canonical query data and the generic press | G2 | Critical | accepted | `01bddcfce741ff7cc64df1527b84654483f5c0d9` | [packet](packets/G2-P3c.md); accepted by non-squash integration with the reviewed candidate preserved as an ancestor. Inserted before Party completion to resolve authority at the foundation. Canonical language and normalization profile advance together from v1 to v2; no Party code is in scope. Full compiler/determinism, consumer, PostgreSQL 58/58, architecture 41/41, and schema 8/8 gates are green. Fresh Codex `gpt-5.6-sol` xhigh PASS and Fable max PASS reviewed the identical frozen candidate with no actionable findings. |
 | G2-P3b | Party walking slice, resolver, and reusable module template | G2 | Critical | accepted | `aa5226a8dfc155f6dd421fea4fbb81636e262a0e` | [packet](packets/G2-P3b.md); [cut](packets/G2-P0.md). Party walking slice **COMPLETE** and Freeze G **INTEGRATED** by non-squash merge `186b1cb2f22326e7f23a8d520c2b2440fff037d8`, preserving the reviewed candidate as an ancestor. Initial Codex xhigh REVISE on `370c90c` corrected the generic resolver bridge's authoritative-outcome preservation and compiled-authority validation. Fresh Codex `gpt-5.6-sol` xhigh PASS and Fable max PASS reviewed the identical accepted SHA with all gates green. The first-real-module program-review trigger is **DUE** before Catalog/Location fan-out. |
+| PR-1 | Mechanical GATE-INTEGRITY corrective from the converged G2-P3 program review | G2 corrective | Mechanical-leaning | evidence_ready | `318cb7cdc2599b52cf6e4e50b759f4853ef55d2d` | [packet](packets/PR-1.md); full CI matrix green at the exact frozen SHA; fresh Codex `gpt-5.6-sol` xhigh PASS on the identical unchanged candidate. PR-2/PR-3 remain required before fan-out. |
 | G2-P4 | Surface-grammar, compact/mobile, and accessibility conformance suite | G2 | Behavioral | planned | - | [cut](packets/G2-P0.md); narrowed to plan §8.6 grammar conformance because generic SurfaceRuntime data binding is owned by G2-P3a. |
 | G2-P5 | Shared master-data table behavior and saved filters | G2 | Critical | planned | - | [cut](packets/G2-P0.md) |
 | G2-P6 | Catalog/item walking slice | G2 | Critical | planned | - | [cut](packets/G2-P0.md) |
