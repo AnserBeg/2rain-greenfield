@@ -10,6 +10,12 @@ export interface ReachabilityProducer {
   readonly rawEvidencePath?: string;
 }
 
+export const observabilityTestFiles = [
+  'test/unit/observability.test.ts',
+  'test/integration/observability-ci-contract.test.ts',
+  'test/postgres/observability-health.test.ts',
+] as const;
+
 export const reachabilityProducers = [
   nodeProducer('unit', 'quality', 'test:unit'),
   nodeProducer('compiler', 'quality', 'test:compiler'),
@@ -30,8 +36,7 @@ export const reachabilityProducers = [
   {
     id: 'observability',
     runner: 'node:test',
-    command:
-      'node --import tsx --test test/unit/observability.test.ts test/integration/observability-ci-contract.test.ts test/postgres/observability-health.test.ts',
+    command: `node --import tsx --test ${observabilityTestFiles.join(' ')}`,
     ciJob: 'observability',
     ciInvocation: 'REACHABILITY_SUITE_ID: observability',
     evidencePath: 'test-results/reachability/observability.json',

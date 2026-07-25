@@ -285,6 +285,7 @@ test('root test aggregate includes every CI-invoked test command and reachabilit
   assert.ok(aggregate, 'package.json is missing the root test aggregate');
 
   assert.deepEqual(parseAggregateScripts(aggregate), requiredAggregateScripts);
+  assert.match(aggregate, /test\/helpers\/run-observability-producer\.ts/u);
 });
 
 function nodeResult(
