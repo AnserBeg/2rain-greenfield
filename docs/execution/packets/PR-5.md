@@ -1,11 +1,11 @@
 # PR-5 — Idempotency scope
 
-Status: active — implementation and focused provider evidence green; full matrix and Critical review pending
+Status: evidence_ready — full matrix green; Critical Codex and Fable reviews PASS
 Tier: Critical
 Branch: `packet/pr-5`
 Base: `17d175a7b5f2df903dcf9db4afeca5524babb56d`
-Frozen reviewed candidate: pending
-Review: pending — fresh naive Codex `gpt-5.6-sol` xhigh to PASS, then Fable max on the identical SHA
+Frozen reviewed candidate: `7393eeed91bfb5f8e353ec9bd83ce2a065354ead`
+Review: PASS — fresh naive Codex `gpt-5.6-sol` xhigh, then Fable max on the identical SHA
 
 ## Authority and outcome
 
@@ -152,22 +152,113 @@ uses opposite-case key spellings. No other in-scope finding was reported.
 
 ## Full-matrix evidence
 
-Pending frozen-candidate run.
+The full matrix ran from a clean tree at exact frozen candidate
+`7393eeed91bfb5f8e353ec9bd83ce2a065354ead`. PostgreSQL passed on its first
+attempt; no WSL2 container retry was needed.
+
+| Gate | Result |
+|---|---|
+| frozen install | PASS — pnpm 11.9.0; all 13 workspace projects already current |
+| format | PASS |
+| lint | PASS |
+| typecheck | PASS |
+| dependency boundaries | PASS — 94 files scanned |
+| build | PASS |
+| unit | PASS — 27/27 |
+| compiler | PASS — 49/49 |
+| integration | PASS — 42/42 |
+| agent | PASS — 1/1 |
+| architecture | PASS — 51/51 |
+| demo-release check | PASS |
+| contracts | PASS — 6/6 |
+| schema | PASS — 10 applied / 10 verified; no drift |
+| PostgreSQL | PASS — 62/62 on the first attempt, including mixed-case concurrent receipt contention |
+| locale | PASS — 1/1 |
+| browser | PASS — 5/5 |
+| observability inline producer | PASS — 5/5 |
+| executed-file reachability | PASS — 49/49 files from 9 producer artifacts |
+| security | PASS — 215 commits clean; 1 expected finding in the disposable negative fixture |
+| patch and tree cleanliness | PASS — `git diff --check main...HEAD`, empty worktree diff, and no tracked or untracked residue |
+
+The matrix used reachability run token
+`f65729e5-282c-4c51-90f1-a22da2d2ca76`. Focused runs and the earlier complete
+matrix at `f5f6fd1` were development evidence only and did not substitute for
+this exact-candidate run.
+
+| Commit | Purpose |
+|---|---|
+| `e8885ec7a8263f6ac4c2881aab4ddf798e894eb9` | Narrow receipt PK, lookup, lock, and RLS; add refusal and real-provider evidence; regenerate the schema snapshot |
+| `f5f6fd1a3fbcb4416ef0421764a6004bca74de4d` | Record implementation and development evidence |
+| `7393eeed91bfb5f8e353ec9bd83ce2a065354ead` | Canonicalize UUID lock identity and prove mixed-case concurrent retries serialize |
 
 ## Review evidence
 
-Pending the required fresh Codex xhigh PASS and Fable max confirmation on the
-identical unchanged SHA.
+Both reviewers received the same bounded Critical charter: accept the ruled
+four-column identity; trace PK, lookup, advisory lock, and both RLS policies;
+decide whether concurrent retries can execute twice; prove a principal
+mismatch returns neither payload nor a second mutation; verify migration
+refusal preserves immutable guards, foreign keys, CHECK, FORCE RLS, and grants;
+verify two-tenant isolation and persisted-effect assertions; and reject scope,
+dependency, golden, fixture, hard-delete, or assertion regressions. The threat
+model was an honest retry after timeout, activation, or recompile plus two
+concurrent retries. PR-6, key minting/expiry, G3 natural-key idempotency,
+reachability internals, compiler/release correctness, performance, style,
+pending plan decisions, and adversarial key forgery were explicitly excluded.
+
+Fresh Codex round 1 reviewed
+`f5f6fd1a3fbcb4416ef0421764a6004bca74de4d` and returned **REVISE** on question
+2. PostgreSQL `uuid` equality normalizes case, but the advisory lock hashed raw
+UUID text, so upper- and lowercase spellings of one key could enter module DML
+under different locks. This was the first finding in the packet's hard-tripwire
+class. The one authorized bounded fix lowercased the UUID lock components and
+principal comparison, and strengthened the real contention test to send one
+uppercase and one lowercase key.
+
+Fresh Codex round 2 reviewed
+`7393eeed91bfb5f8e353ec9bd83ce2a065354ead` and returned **PASS**, with no
+in-scope material findings. Questions 1–7 all passed. Fable max then independently
+reviewed the identical unchanged SHA and returned **PASS** on all seven
+questions. Its only observation was non-material: the focused scope evidence
+was added to the two existing owned PostgreSQL test files instead of a new
+optional file. No finding remained to disposition as future work or dismissal.
 
 ## Test it yourself
 
-Pending final candidate SHA. The final commands will run the named real-provider
-journey and the duplicate-refusal migration probe in under ten minutes.
+From the repository root, these commands take under ten minutes:
+
+```bash
+cd /home/rvham/2rain-greenfield
+git switch packet/pr-5
+git merge-base --is-ancestor 7393eeed91bfb5f8e353ec9bd83ce2a065354ead HEAD
+node --import tsx --test --test-name-pattern="definition-only module is served" test/postgres/module-runtime.test.ts
+node --import tsx --test --test-name-pattern="migration 0010 refuses" test/postgres/trust-substrate.test.ts
+corepack pnpm check:schema
+```
+
+Expect the ancestry command to exit zero. The first probe reports 1/1 and runs
+the real provider journey: cross-principal and different-input retries conflict
+without another business row; activation and recompile retries return the
+original result; and uppercase/lowercase concurrent retries leave exactly one
+module row, one change document, and one receipt. The second reports 1/1 and
+proves a conflicting 0009 history makes 0010 fail atomically without removing
+either receipt. The schema command reports 10 applied / 10 verified and no
+drift.
 
 ## Draft ledger row (do not commit to `ledger.md`)
 
-Pending final reviewed SHA and verdicts.
+```markdown
+| PR-5 | Idempotency scope | G2 corrective | Critical | evidence_ready | `7393eeed91bfb5f8e353ec9bd83ce2a065354ead` | [packet](packets/PR-5.md); durable receipt identity narrowed across PK, lookup, advisory lock, and RLS; principal/digest mismatch returns a typed conflict; activation/recompile replay; real mixed-case concurrency leaves one persisted effect; migration refuses conflicting immutable history; full matrix green at schema 10/10 and PostgreSQL 62/62; fresh Codex xhigh PASS and Fable max PASS on the identical SHA. |
+```
 
 ## Checkpoint
 
-Pending full matrix and Critical review chain. Do not start PR-6.
+PR-5 is evidence-ready on reviewed candidate
+`7393eeed91bfb5f8e353ec9bd83ce2a065354ead`. The packet has not been merged and
+the ledger has not been edited; both await user acceptance and an integrated
+SHA.
+
+The program-review trigger check found no new trigger. PR-5 is a bounded
+correction inside the already-reviewed G2 trust/idempotency domain, not a stage
+boundary, imminent fan-out, first zero-dev-code module, or newly stabilized
+correctness domain. The converged G2-P3 whole-app review remains current. Stop
+here; do not start PR-6 without explicit user selection.
