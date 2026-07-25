@@ -57,15 +57,16 @@ Ordered. Each row names its source and why it holds its slot.
 
 | # | Packet | Tier | Why here |
 |---|---|---|---|
-| 1 | **Materializer — data-affecting DDL on existing tables** | Critical | **Newly on the critical path.** PR-6 proved `createIndex` on a pre-existing table classifies as `deferredOnlineFamily`, which the materializer never processes; there is no `CONCURRENTLY` path in the repository. Blocks relation indexes *and* PR-6b's folded columns from ever reaching Party. Absorbs the two findings already routed here: `indisvalid` in declared shape, and step-receipt in the same transaction as its DDL. |
-| 2 | **PR-6b — folded-column index mechanics** | Critical | Binding output of the [RLS index-access debate](debates/pr6-rls-index-access-verdict.md). Compiler-emitted stored generated folded columns + indexes for unique **and** advisory-resolve keys; retire the raw-column `search` index; prefix lowered to leakproof range quals. **Has a deadline**: adding a stored generated column is a full table rewrite under `ACCESS EXCLUSIVE`, ~free now and an all-tenant write outage once G3 posts movements. |
+| 1 | **PR-6b — folded-column index mechanics** | Critical | Binding output of the [RLS index-access debate](debates/pr6-rls-index-access-verdict.md). Compiler-emitted stored generated folded columns + indexes for unique **and** advisory-resolve keys; retire the raw-column `search` index; prefix lowered to leakproof range quals. **Has a deadline**: adding a stored generated column is a full table rewrite under `ACCESS EXCLUSIVE`, ~free now and an all-tenant write outage once G3 posts movements. |
+| 2 | **Materializer — data-affecting DDL on existing tables** | Critical | PR-6 proved `createIndex` on a pre-existing table classifies as `deferredOnlineFamily`, which the materializer never processes; there is no `CONCURRENTLY` path in the repository. **Not a fan-out blocker** — new modules are born with their indexes and folded columns (`samePlan` → `preApprovalInert`), and every test materializes from scratch. It blocks only in-place upgrade of a *pre-existing deployment*, of which there are none, so it is a pre-launch concern rather than a G2 one. Orchestrator ruling: build the plain locking DDL path with the blocking window recorded and a numeric promotion trigger — `CONCURRENTLY` does not help the `ADD COLUMN … GENERATED … STORED` rewrite anyway, and carving a non-transactional exception into a runner whose transaction ownership is gated is a cost to pay when a customer cannot take a window. Absorbs the two findings already routed here: `indisvalid` in declared shape, and step-receipt in the same transaction as its DDL. |
 | 3 | G2-P4 — surface-grammar conformance | Behavioral | Roadmap resumes. Narrowed by G2-P3a to the pure conformance suite. |
 | 4 | G2-P5 — shared table behavior + Q0 envelope | Critical | Paging/truncation/cursor, saved filters, shape-specialized SQL. |
 | 5 | `adding-a-module` skill | Mechanical | Written against the proven Freeze G template; the fan-out consumes it. |
 | 6 | Catalog (G2-P6) → Location (G2-P7) | Critical | **Catalog is the factory test: acceptance requires ZERO press changes.** If it needs one, stop and harden before Location. |
-| 7 | PR-7 — provider hot path | Behavioral | Release-load cache (flagged by two independent reviews), relation N+1, round-trip reduction, advisory-lock namespacing. Before G3. |
-| 8 | Policy/identity kernel | Critical | The one kernel seam with **no owner** — see decisions below. After fan-out, before G3. |
-| 9 | G2-P8 import → G2-P9 stage gate | — | Completes G2. |
+| 7 | **Q1 compositional query tier** | Critical | **G3-blocking**, per verdict S2: G3's correctness contract is `SUM(posted movement.quantity_delta)`, so without Q1 the inventory stage hand-rolls aggregation against ADR-0011's grain. The plan already specifies the tier (§5.1, §5.9, §9.2.2) — filters, traversal, joins, grouping, aggregates, reports, exports over semantic entities. Today the gateway rejects every tier above Q0 and every filter other than literal `true`. Placed after the fan-out so it is designed against three real modules. Also the answer to "can the agent analyse data" — see verdict R8/R9. |
+| 8 | PR-7 — provider hot path | Behavioral | Release-load cache (flagged by two independent reviews), relation N+1, round-trip reduction, advisory-lock namespacing. Before G3. |
+| 9 | Policy/identity kernel | Critical | The one kernel seam with **no owner** — see decisions below. After fan-out, before G3. |
+| 10 | G2-P8 import → G2-P9 stage gate | — | Completes G2. |
 
 ## Settled by debate (2026-07-25)
 
@@ -86,11 +87,6 @@ These are **not code work**. They change the storage model or the launch scope, 
 are cheapest to decide before inventory exists. Recommended as one focused debate
 (they are entangled), run by the orchestrator.
 
-0. **Q1 compositional query tier — now schedule-critical.** The gateway today rejects
-   every tier above Q0 and every filter other than literal `true`. G3's correctness
-   contract is `SUM(posted movement.quantity_delta)`, so without Q1 the inventory
-   stage hand-rolls aggregation against ADR-0011's grain. Not a debate — a sequencing
-   decision: where does Q1 land relative to the Catalog/Location fan-out?
 1. **Erasure / data-subject rights.** No-hard-delete + additive-only + append-only trust
    facts + one shared database currently has **no erasure path**. Raised independently by
    two external reviews. Crypto-shredding (per-subject key, delete the key) is the standard
