@@ -14,7 +14,7 @@ import { renderSurfaceRuntime } from '../src/surface-runtime.js';
 import { readCompiledSurfaceManifest } from '../src/surface-contract.js';
 import { compiledFixturePath, demoEntry, webRoot } from './helpers.js';
 
-test('checked-in shell artifact is exact deterministic compiler output', () => {
+test('checked-in shell artifact is parse-normalized deterministic compiler output', () => {
   execFileSync(
     process.execPath,
     [

@@ -5,14 +5,24 @@ import test from 'node:test';
 
 const workflowPath = '.github/workflows/ci.yml';
 const packagePath = 'package.json';
-const expectedUnitTestFiles = [
-  'test/unit/canonical-model/diagnostic-ordering.test.ts',
-  'test/unit/canonical-model/negative-contracts.test.ts',
-  'test/unit/canonical-model/normalization.test.ts',
-  'test/unit/observability.test.ts',
-  'test/unit/party-definition.test.ts',
-  'test/unit/workspace-contract.test.ts',
+const suiteDefinitions = [
+  { discoveryPattern: 'test/unit/**/*.test.ts', script: 'test:unit' },
+  { discoveryPattern: 'test/compiler/**/*.test.ts', script: 'test:compiler' },
+  {
+    discoveryPattern: 'test/integration/**/*.test.ts',
+    script: 'test:integration',
+  },
+  {
+    discoveryPattern: 'test/architecture/**/*.test.ts',
+    script: 'test:architecture',
+  },
+  { discoveryPattern: 'test/postgres/**/*.test.ts', script: 'test:postgres' },
 ] as const;
+
+interface ShellToken {
+  readonly quoted: boolean;
+  readonly value: string;
+}
 
 function gitFiles(arguments_: readonly string[]): string[] {
   return execFileSync('git', [...arguments_], {
@@ -78,23 +88,56 @@ test('no ignored artifact is force-added to the repository', () => {
   assert.deepEqual(ignoredTrackedFiles, []);
 });
 
-test('unit test command explicitly covers the complete discovered file set', () => {
+test('suite commands exactly cover all independently discovered test files', () => {
   const packageJson = JSON.parse(readFileSync(packagePath, 'utf8')) as {
     scripts?: Record<string, string>;
   };
-  const unitCommand = packageJson.scripts?.['test:unit'];
-  assert.ok(unitCommand, 'package.json is missing test:unit');
+  const scripts = packageJson.scripts ?? {};
 
-  const discoveredFiles = globSync('test/unit/**/*.test.ts').sort();
-  const commandFiles = [
-    ...unitCommand.matchAll(/test\/unit\/[^\s"]+\.test\.ts/gu),
-  ]
-    .map((match) => match[0])
-    .sort();
+  for (const suite of suiteDefinitions) {
+    const command = scripts[suite.script];
+    assert.ok(command, `package.json is missing ${suite.script}`);
 
-  assert.equal(discoveredFiles.length, 6);
-  assert.deepEqual(discoveredFiles, [...expectedUnitTestFiles]);
-  assert.deepEqual(commandFiles, discoveredFiles);
+    const discoveredFiles = globSync(suite.discoveryPattern).sort();
+    assert.ok(
+      discoveredFiles.length > 0,
+      `${suite.discoveryPattern} discovered no tests`,
+    );
+
+    const commandFiles = shellTokens(command)
+      .filter((token) => /\.(?:spec|test)\.ts$/u.test(token.value))
+      .flatMap((token) =>
+        containsGlob(token.value) ? globSync(token.value) : [token.value],
+      )
+      .sort();
+    assert.ok(commandFiles.length > 0, `${suite.script} reaches no tests`);
+    assert.deepEqual(
+      [...new Set(commandFiles)],
+      discoveredFiles,
+      `${suite.script} diverges from ${suite.discoveryPattern}`,
+    );
+  }
+});
+
+test('every test-script glob is quoted before the shell can expand it', () => {
+  const packageJson = JSON.parse(readFileSync(packagePath, 'utf8')) as {
+    scripts?: Record<string, string>;
+  };
+
+  // globSync sees the intended pattern, but an unquoted shell glob is mangled
+  // before Node starts. The raw script string is the only place to catch it.
+  for (const [script, command] of Object.entries(packageJson.scripts ?? {})) {
+    if (!script.startsWith('test:')) continue;
+    for (const token of shellTokens(command).filter((candidate) =>
+      containsGlob(candidate.value),
+    )) {
+      assert.equal(
+        token.quoted,
+        true,
+        `${script} has an unquoted glob: ${token.value}`,
+      );
+    }
+  }
 });
 
 test('CI runs every scaffold gate from a frozen install', () => {
@@ -110,6 +153,8 @@ test('CI runs every scaffold gate from a frozen install', () => {
     'corepack pnpm test:integration',
     'corepack pnpm test:agent',
     'corepack pnpm test:architecture',
+    'corepack pnpm check:demo-release',
+    'corepack pnpm test:contracts',
     'corepack pnpm check:schema',
     'corepack pnpm test:postgres',
     'corepack pnpm test:locale',
@@ -126,6 +171,19 @@ test('CI runs every scaffold gate from a frozen install', () => {
   assert.match(workflow, /uses: actions\/upload-artifact@/u);
   assert.match(workflow, /retention-days: 7/u);
 });
+
+function shellTokens(command: string): readonly ShellToken[] {
+  return [...command.matchAll(/"([^"]+)"|'([^']+)'|([^\s"';&|]+)/gu)].map(
+    (match) => ({
+      quoted: match[1] !== undefined || match[2] !== undefined,
+      value: match[1] ?? match[2] ?? match[3] ?? '',
+    }),
+  );
+}
+
+function containsGlob(value: string): boolean {
+  return value.includes('*') || value.includes('?') || value.includes('[');
+}
 
 test('CI third-party actions use immutable commit refs', () => {
   const workflow = readFileSync(workflowPath, 'utf8');
