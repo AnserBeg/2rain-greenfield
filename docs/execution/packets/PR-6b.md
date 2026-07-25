@@ -1,13 +1,14 @@
 # PR-6b — Folded-column index mechanics
 
-Status: active — final E4 prevention ruling implemented; fresh Critical review pending
+Status: blocked — final E4 prevention review found an approved-attempt ordering defect; terminus reached
 Tier: Critical
 Branch: `packet/pr-6b`
 Requested base: `28aaf3c`; current rebased base: `1b40706a8155efee580b5184eb6ecb6e99aae7a2`
 Prior frozen candidates: `b4a0960`, `01ff6c2`, `aefa288`
 Prior execution-oracle candidate: `d03c0f6dbb2a2e213ab296856dab878b3ab3647a`
 Prior E4 catalog candidate: `4683ef8c7cbd954a1f548658bff97b59e63b0eee`
-Review: prior Codex REVISE; prevention candidate review pending
+Final prevention candidate: `92c660e563b3b4bd4e357010781fc00cbe8bb932`
+Review: Codex REVISE; Fable not launched; E4 terminus requires user disposition
 
 ## Authority and outcome
 
@@ -119,15 +120,25 @@ digest result did not prove that rows had always used that body. No later
 measurement can repair this ordering defect because the verifier and repairer
 share the materialization path.
 
-The final ruling removes that drift gate instead of refining it again. The
-versioned `nsm_unicode_case_fold_v1` function is now immutable by construction:
+The final ruling removes that drift gate instead of refining it again. Candidate
+`92c660e` attempts to make the versioned `nsm_unicode_case_fold_v1` function
+immutable by construction:
 
-- before any preparation or attempt DDL/DML, an absent function is created;
+- before preparation DDL/DML, an absent function is created;
 - an existing function's raw `pg_proc.prosrc` must equal the original v1 body;
 - a mismatch raises named
   `CASE_FOLD_FUNCTION_DEFINITION_MISMATCH` without executing replacement DDL;
   and
 - production contains no `CREATE OR REPLACE FUNCTION` path for v1.
+
+The fresh review found that this prevention does **not** yet hold on the
+approved-attempt path: the durable-claim `INSERT ... ON CONFLICT DO UPDATE`
+runs before the fold-body check. The ordinary mismatch rolls that transaction
+back, but an existing claim can instead produce `ATTEMPT_CLAIM_MISMATCH` before
+the required named fold-definition refusal. The prepare-path negative control
+does not exercise that ordering. This is an E4 finding, not an R1/R2 oracle
+finding. Under the user's terminus, it is not repaired in this packet and E4
+cannot be claimed by this candidate.
 
 This is prevention, not detection. PostgreSQL computes a stored generated
 column and rejects direct writes; its exact generation expression names v1;
@@ -440,10 +451,10 @@ percentiles or error budgets.
   Mapping the observed SQL field explicitly and reading each folded subject
   sequentially returned the focused journey to 3/3 green.
 
-## Full-matrix evidence at the E4 catalog candidate
+## Full-matrix evidence at the final prevention candidate
 
 The final full matrix ran from a clean tree at exactly
-`4683ef8c7cbd954a1f548658bff97b59e63b0eee`:
+`92c660e563b3b4bd4e357010781fc00cbe8bb932`:
 
 | Gate | Result |
 |---|---|
@@ -451,7 +462,7 @@ The final full matrix ran from a clean tree at exactly
 | format / lint / typecheck | green |
 | architecture boundaries | 94 files scanned |
 | build | green |
-| reachability run | token `c3539a4c-1952-4b11-840a-0febbd4b6085` |
+| reachability run | token `e6e3aae9-0a84-4082-9be1-aec7cd9cb104` |
 | unit | 27/27 |
 | compiler | 52/52 |
 | integration | 42/42 |
@@ -465,7 +476,7 @@ The final full matrix ran from a clean tree at exactly
 | browser | 5/5 |
 | observability inline producer | 5/5 |
 | executed-file reachability | 50/50 files from 9 producer artifacts |
-| security | 246 commits clean; one expected finding in the disposable negative fixture |
+| security | 251 commits clean; one expected finding in the disposable negative fixture |
 | diff / worktree | `git diff --check main...HEAD`, worktree diff, and complete status all clean |
 
 ## Review evidence
@@ -645,6 +656,42 @@ one fresh Codex review; that review did not reach PASS. A further lifecycle
 change and its negative control require a new ruling rather than an autonomous
 writer round. Fable was not launched because the Critical chain requires Codex
 PASS first.
+
+## Final E4 prevention review and terminus
+
+After rebasing onto accepted `main` at
+`1b40706a8155efee580b5184eb6ecb6e99aae7a2`, candidate
+`92c660e563b3b4bd4e357010781fc00cbe8bb932` replaced repair-and-measure with
+create-once/refuse-on-change prevention and deleted the production drift gate.
+The exact full matrix above was green. A fresh, naive, read-only Codex
+`gpt-5.6-sol` xhigh review returned `REVISE` with one in-scope material finding:
+
+1. **Question 3 — E4 verification occurs after attempt DML.**
+   `executeApprovedAttempt()` performs the claim
+   `INSERT ... ON CONFLICT DO UPDATE` at
+   `packages/postgres-provider/src/module-storage-materializer.ts:456`, while
+   `ensureUnicodeCaseFoldFunction()` is not called until line 505. The reachable
+   sequence is: prepare successfully, replace v1's body, then execute the
+   approved attempt. Claim DML executes—and may return
+   `ATTEMPT_CLAIM_MISMATCH`—before the required
+   `CASE_FOLD_FUNCTION_DEFINITION_MISMATCH`. Rollback prevents a durable claim
+   in the ordinary mismatch case, but the prevention contract required refusal
+   before attempt DML. The negative control at
+   `test/postgres/module-storage-transition.test.ts:1151` exercises only
+   `prepare()`.
+
+The reviewer explicitly reported **no HARD TRIPWIRE**. It confirmed that the
+R1/R2 oracle uses the interpreter predicate, exact expected-index counter
+deltas, tree-wide zero filter removals, a genuine missing-index red, every
+milestone, fail-closed structural parsing, and no disabled sequential scans.
+It reported no other in-scope material finding.
+
+Disposition: **not fixed**. This is the failure condition named by the user's
+E4 terminus. The writer did not reinterpret the contract, move the check, add a
+new control, or launch another review. E4 must now be dropped from PR-6b or
+owned by the materializer packet through an explicit user disposition; the
+current candidate cannot claim E4 completion. Fable was not launched because
+the Critical chain requires Codex PASS first.
 
 ## Test it yourself
 
