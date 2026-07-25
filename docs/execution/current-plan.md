@@ -5,7 +5,7 @@ narrative companion to `ledger.md`: the ledger records what each packet *was*, t
 records what we are doing *next* and *why*. Update it whenever the queue changes;
 delete rows once they are accepted and recorded in the ledger.
 
-Last updated: 2026-07-25, at `main` = `55b5e4b4c6e07d933200b35cf338077bea9f25ba`.
+Last updated: 2026-07-25, at `main` = `44dabaf40da09263394dd157a8d6eb9c50327db4`.
 
 ## Operating model
 
@@ -38,6 +38,8 @@ executable verification, archive-restrict, enum contracts, typed errors) · `PR-
 (operation mediation — confirmation grants, classification, invocation evidence,
 idempotency).
 
+`PR-6` (**relation index coverage** — additive `relation` index kind, forced-RLS `EXPLAIN` probe requiring the index by name, and `runtime-slos.md`) is accepted.
+
 Two gate-completeness correctives followed, both accepted: `PR-4` (quoted globs, the
 two orphaned compiled-shell guards wired, doctrine/debt coverage, external reviews
 archived) · `PR-4b` (**executed-file reachability** — every test file must be observed
@@ -55,7 +57,7 @@ Ordered. Each row names its source and why it holds its slot.
 
 | # | Packet | Tier | Why here |
 |---|---|---|---|
-| 1 | **PR-6 — index coverage + request-path SLOs** | Critical | Relations get no index; the search index is a raw btree that cannot serve `fold(col) LIKE '%x%'`; advisory resolve keys have no folded index. Every fan-out module inherits these. Adds an **`EXPLAIN` conformance probe** (fail on Seq Scan over a module table) and `runtime-slos.md`. |
+| 1 | **Materializer — data-affecting DDL on existing tables** | Critical | **Newly on the critical path.** PR-6 proved `createIndex` on a pre-existing table classifies as `deferredOnlineFamily`, which the materializer never processes; there is no `CONCURRENTLY` path in the repository. Blocks relation indexes *and* PR-6b's folded columns from ever reaching Party. Absorbs the two findings already routed here: `indisvalid` in declared shape, and step-receipt in the same transaction as its DDL. |
 | 2 | **PR-6b — folded-column index mechanics** | Critical | Binding output of the [RLS index-access debate](debates/pr6-rls-index-access-verdict.md). Compiler-emitted stored generated folded columns + indexes for unique **and** advisory-resolve keys; retire the raw-column `search` index; prefix lowered to leakproof range quals. **Has a deadline**: adding a stored generated column is a full table rewrite under `ACCESS EXCLUSIVE`, ~free now and an all-tenant write outage once G3 posts movements. |
 | 3 | G2-P4 — surface-grammar conformance | Behavioral | Roadmap resumes. Narrowed by G2-P3a to the pure conformance suite. |
 | 4 | G2-P5 — shared table behavior + Q0 envelope | Critical | Paging/truncation/cursor, saved filters, shape-specialized SQL. |
