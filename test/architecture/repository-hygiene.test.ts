@@ -6,17 +6,80 @@ import test from 'node:test';
 const workflowPath = '.github/workflows/ci.yml';
 const packagePath = 'package.json';
 const suiteDefinitions = [
-  { discoveryPattern: 'test/unit/**/*.test.ts', script: 'test:unit' },
-  { discoveryPattern: 'test/compiler/**/*.test.ts', script: 'test:compiler' },
+  {
+    discoveryPattern: 'test/unit/**/*.test.ts',
+    expectedFiles: [
+      'test/unit/canonical-model/diagnostic-ordering.test.ts',
+      'test/unit/canonical-model/negative-contracts.test.ts',
+      'test/unit/canonical-model/normalization.test.ts',
+      'test/unit/observability.test.ts',
+      'test/unit/party-definition.test.ts',
+      'test/unit/workspace-contract.test.ts',
+    ],
+    script: 'test:unit',
+  },
+  {
+    discoveryPattern: 'test/compiler/**/*.test.ts',
+    expectedFiles: [
+      'test/compiler/determinism.test.ts',
+      'test/compiler/freeze-b.test.ts',
+      'test/compiler/g2-module-conformance.test.ts',
+      'test/compiler/g2-module-storage.test.ts',
+      'test/compiler/golden-vectors.test.ts',
+      'test/compiler/performance-budget.test.ts',
+    ],
+    script: 'test:compiler',
+  },
   {
     discoveryPattern: 'test/integration/**/*.test.ts',
+    expectedFiles: [
+      'test/integration/module-runtime.test.ts',
+      'test/integration/module-storage-transition.test.ts',
+      'test/integration/observability-ci-contract.test.ts',
+      'test/integration/party-runtime.test.ts',
+      'test/integration/security-scan-contract.test.ts',
+      'test/integration/semantic-gateways.test.ts',
+      'test/integration/surface-data-binding.test.ts',
+      'test/integration/toolchain-contract.test.ts',
+      'test/integration/trust-substrate.test.ts',
+    ],
     script: 'test:integration',
   },
   {
     discoveryPattern: 'test/architecture/**/*.test.ts',
+    expectedFiles: [
+      'test/architecture/canonical-contracts-purity.test.ts',
+      'test/architecture/compiler-hermeticity.test.ts',
+      'test/architecture/dependency-boundaries.test.ts',
+      'test/architecture/module-conformance-runtime.test.ts',
+      'test/architecture/release-activation-boundary.test.ts',
+      'test/architecture/release-persistence-boundary.test.ts',
+      'test/architecture/repository-hygiene.test.ts',
+      'test/architecture/request-runtime-view-boundary.test.ts',
+      'test/architecture/surface-data-binding.test.ts',
+      'test/architecture/surface-runtime-seam.test.ts',
+      'test/architecture/test-reachability.test.ts',
+      'test/architecture/ux-grammar-skill.test.ts',
+    ],
     script: 'test:architecture',
   },
-  { discoveryPattern: 'test/postgres/**/*.test.ts', script: 'test:postgres' },
+  {
+    discoveryPattern: 'test/postgres/**/*.test.ts',
+    expectedFiles: [
+      'test/postgres/migrations.test.ts',
+      'test/postgres/module-runtime.test.ts',
+      'test/postgres/module-storage-transition.test.ts',
+      'test/postgres/observability-health.test.ts',
+      'test/postgres/party-runtime.test.ts',
+      'test/postgres/release-activation.test.ts',
+      'test/postgres/release-approval.test.ts',
+      'test/postgres/releases.test.ts',
+      'test/postgres/request-runtime-view.test.ts',
+      'test/postgres/tenant-isolation.test.ts',
+      'test/postgres/trust-substrate.test.ts',
+    ],
+    script: 'test:postgres',
+  },
 ] as const;
 
 interface ShellToken {
@@ -102,6 +165,11 @@ test('suite commands exactly cover all independently discovered test files', () 
     assert.ok(
       discoveredFiles.length > 0,
       `${suite.discoveryPattern} discovered no tests`,
+    );
+    assert.deepEqual(
+      discoveredFiles,
+      [...suite.expectedFiles],
+      `${suite.discoveryPattern} diverges from its reviewed inventory`,
     );
 
     const commandFiles = shellTokens(command)
