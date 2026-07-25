@@ -1,12 +1,13 @@
 # PR-4 — Gate completeness round 2 + coverage audit
 
-Status: evidence_ready (full-matrix and review pending)
+Status: evidence_ready — third REVISE surfaced for user adjudication
 Tier: Mechanical
 Branch: `packet/pr-4`
 Base: `982d2df01204107f560469f34336da723ae9cd93`
-Frozen reviewed candidate: pending
-Final evidence commit: pending
-Review: pending — one fresh naive Codex `gpt-5.6-sol` xhigh
+Frozen reviewed candidate: `7d506f54be1be12d0c5ceb5424a3a7c4ff45a365`
+Final evidence commit: post-review record only; reported in the completion block
+Review: REVISE — two findings fixed in bounded fresh-review rounds; the third
+material finding is surfaced unresolved under the convergence cap
 
 ## Authority and outcome
 
@@ -32,8 +33,9 @@ than `apps/web/release/shell.compiled.json`.
    fails if a glob is not quoted before shell expansion.
 2. **Five-suite discovery.** Unit, compiler, integration, architecture, and
    PostgreSQL commands are compared with independently expanded filesystem
-   discovery. Every discovery and command selection must be non-empty, and the
-   sets must be identical.
+   discovery and a reviewed inventory. Every discovery and command selection
+   must be non-empty, and the inventory, discovery, and command sets must be
+   identical.
 3. **Structural reachability.** `test-reachability.test.ts` parses every CI
    `run:` form, resolves root and filtered web scripts, parses explicit Node
    test targets, expands quoted globs, and resolves Playwright `testDir`. Exact
@@ -72,20 +74,27 @@ than `apps/web/release/shell.compiled.json`.
 | `0527d64` | Regenerate only the stale compiled-shell `releaseRoot` |
 | `84cc0d3` | Quote globs, wire guards, remove dead scaffold, and add structural reachability gates |
 | `2019d93` | Record doctrine/debt coverage, archive external reviews, and capture the learning |
-| pending | Packet evidence record and frozen candidate |
+| `3a26329` | Record the packet demonstrations and initial evidence |
+| `04e4be7` | Normalize whitespace exposed by the first full-matrix cleanliness gate |
+| `1aa5780` | Retain independent reviewed inventories for all five filesystem suites |
+| `7d506f5` | Parse run-only workflow steps and add a workflow-level fail-closed canary |
 
 ## Required demonstrations
 
 ### (a) Permanent in-suite canaries
 
-`test-reachability.test.ts` ships two focused canaries:
+`test-reachability.test.ts` ships three focused canaries:
 
 - a pure comparison receives `test/orphan-demo/orphan.test.ts` in the synthetic
   discovered set but not the reachable set and returns exactly that path;
 - the script parser receives `future-test-runner --all` and must throw
-  `Unparsed synthetic script body: future-test-runner --all`.
+  `Unparsed synthetic script body: future-test-runner --all`;
+- the workflow parser receives a valid run-only step written as
+  `- run: future-test-runner --all` and must throw
+  `Unparsed CI command: future-test-runner --all` rather than silently omit the
+  step.
 
-Both ran within the green 48-test architecture suite before the full matrix.
+All three ran within the final green 49-test architecture suite.
 
 ### (b) Real unreachable file, end to end
 
@@ -272,13 +281,55 @@ No finding was re-dispositioned in `current-plan.md`.
 
 ## Full-matrix evidence on the frozen candidate
 
-Pending. The complete matrix will run from a clean tree at the exact candidate
-SHA before review; real per-suite counts will replace this paragraph.
+The complete matrix ran serially from a clean tree at exactly
+`7d506f54be1be12d0c5ceb5424a3a7c4ff45a365`. Focused development runs did not
+substitute for it.
+
+| Gate | Result |
+|---|---|
+| Frozen install | PASS — pnpm 11.9.0, all 13 workspace projects |
+| `corepack pnpm format` | PASS |
+| `corepack pnpm lint` | PASS |
+| `corepack pnpm typecheck` | PASS |
+| `corepack pnpm check:boundaries` | PASS — 93 files scanned |
+| `corepack pnpm build` | PASS |
+| `corepack pnpm test:unit` | PASS — 27/27 |
+| `corepack pnpm test:compiler` | PASS — 49/49 |
+| `corepack pnpm test:integration` | PASS — 42/42 |
+| `corepack pnpm test:agent` | PASS — 1/1 |
+| `corepack pnpm test:architecture` | PASS — 49/49 |
+| `corepack pnpm test:contracts` | PASS — 6/6 |
+| `corepack pnpm check:demo-release` | PASS |
+| `corepack pnpm check:schema` | PASS — 9 applied, 9 verified, no drift |
+| `corepack pnpm test:postgres` | PASS — 61/61 |
+| `corepack pnpm test:locale` | PASS — 1/1 |
+| `corepack pnpm test:browser` | PASS — 5/5 |
+| Security CI job | PASS — dependency audit; 197-commit clean scan found no leaks; disposable negative fixture found exactly one leak |
+| Observability inline CI command | PASS — 5/5 |
+| Patch and tree cleanliness | PASS — `git diff --check main...HEAD`, no tracked or untracked residue |
+
+In addition to the retained development reds above, the first two review
+rounds exposed executable omissions before this final matrix: removal of the
+fixed unit inventory had weakened deletion detection, and a valid run-only YAML
+step (`- run: ...`) was silently skipped. The reviewed five-suite inventories
+and workflow-level parser canary corrected those findings before the final run.
 
 ## Review evidence
 
-Pending. The fresh read-only reviewer will receive the exact charter below and
-only the frozen `main...candidate` diff.
+Every invocation was a new ephemeral, naive, read-only Codex session using
+`gpt-5.6-sol` at xhigh effort. Each received only the frozen diff, owned paths,
+green-gate counts, and the verbatim charter below; no session was resumed.
+
+| Round | Frozen SHA | Verdict and disposition |
+|---|---|---|
+| 1 | `04e4be76693820df870e14f3c412ba6e055f0e5b` | **REVISE** — the filesystem was both expected set and command comparator, weakening PR-1's fixed unit inventory and allowing a deleted test to shrink both sides. **Fixed** in `1aa5780` by reviewed inventories for all five suites. |
+| 2 | `1aa578087105bd64d195fd3e0dd5ad925f9bd624` | **REVISE** — a valid run-only workflow step (`- run: ...`) did not match the extractor and was silently skipped. **Fixed** in `7d506f5` with optional-list-marker parsing and a permanent workflow-level negative canary. |
+| 3 | `7d506f54be1be12d0c5ceb5424a3a7c4ff45a365` | **REVISE** — Playwright config parsing rejects `projects`, `testIgnore`, and `testMatch`, but not `grep` or `grepInvert`; either option could select no tests from a file while the gate counts every file under `testDir`. **Surfaced unresolved** under the binding two-REVISE cap; neither fixed nor dismissed. |
+
+Round 3 reported no other in-scope material findings: questions 1–2 and 4–9
+passed, including direct byte comparison of all four archives. Because the
+remaining question-3 finding is material and in scope, this candidate is
+evidence-ready but not acceptance-ready without user adjudication.
 
 ### Review charter
 
@@ -357,20 +408,22 @@ corepack pnpm test:contracts
 ```
 
 The first architecture command must be red and name
-`test/orphan-demo/orphan.test.ts`; the second must be green at 48/48. The two
+`test/orphan-demo/orphan.test.ts`; the second must be green at 49/49. The two
 compiled-shell commands, both red at `main` before PR-4, must be green, with
 contracts at 6/6.
 
 ## Draft ledger row (do not commit to `ledger.md`)
 
 ```markdown
-| PR-4 | Gate completeness round 2 + coverage audit | G2 corrective | Mechanical | evidence_ready | `<frozen-reviewed-sha>` | [packet](packets/PR-4.md); full CI matrix green at the exact frozen SHA; every repository test is structurally reachable from CI; fresh Codex `gpt-5.6-sol` xhigh `<verdict>`. |
+| PR-4 | Gate completeness round 2 + coverage audit | G2 corrective | Mechanical | evidence_ready | `7d506f54be1be12d0c5ceb5424a3a7c4ff45a365` | [packet](packets/PR-4.md); full CI matrix green at the exact frozen SHA; every current repository test is structurally reachable from CI; two bounded review findings fixed, then a third fresh Codex `gpt-5.6-sol` xhigh REVISE was surfaced for Playwright `grep`/`grepInvert` selection under the convergence cap. Not accepted. |
 ```
 
 ## Checkpoint
 
-Pending the full matrix and scoped review. No program-review trigger is
-expected: PR-4 is a mechanical corrective under the still-current G2-P3
-whole-app review, with no new correctness domain, fan-out, or stage boundary.
-After completion, PR-5 and PR-6 remain unstarted and require explicit user
-selection.
+The full matrix is green, but the third review's Playwright-selection finding
+remains open by rule. No program-review trigger fires: PR-4 is a mechanical
+corrective under the still-current G2-P3 whole-app review, with no new
+correctness domain, fan-out, or stage boundary. The recommended next selection
+is a bounded PR-4 follow-up that rejects `grep` and `grepInvert` (or explicitly
+parses them), reruns the matrix, and receives a fresh review. PR-5 and PR-6
+remain unstarted and require explicit user selection after PR-4 is accepted.
