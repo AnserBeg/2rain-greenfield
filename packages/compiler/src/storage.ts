@@ -468,7 +468,7 @@ export function lowerStorageTargetV1(
           return lowerColumn(field, mappings, deferRequiredTightening);
         },
       );
-      const resolveMatchFieldIds = new Set(
+      const resolveMatchFieldIds = new Set<string>(
         (queriesByEntity.get(entity.entityId) ?? []).flatMap((query) =>
           query.queryType === 'resolve'
             ? (query.resolveMatchKeys ?? []).map(
@@ -610,6 +610,7 @@ export function lowerStorageTargetV1(
         }
         if (
           foldedColumn &&
+          resolveMatchFieldIds.has(column.canonicalFieldId) &&
           !uniqueKeys.some((unique) =>
             unique.columns.includes(column.physicalName),
           )

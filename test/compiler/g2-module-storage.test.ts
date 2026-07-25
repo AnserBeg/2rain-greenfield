@@ -387,6 +387,34 @@ test('folded access covers advisory resolve keys and defers populated-table rewr
   );
 });
 
+test('search-only fields retain stored folds without an unused prefix index', () => {
+  const authored = ordinaryModuleV2() as {
+    fields: Array<Record<string, unknown>>;
+  };
+  const searchOnlyField = authored.fields.find(
+    (field) => field.fieldId === FIXTURE_IDS.fieldIds.parentNotes,
+  );
+  assert.ok(searchOnlyField);
+  searchOnlyField.searchable = true;
+  const storage = lowerStorageTargetV1(normalizeApplicationPackage(authored));
+  const entity = storage.entities.find(
+    (entry) => entry.entityId === FIXTURE_IDS.entityIds.parent,
+  );
+  assert.ok(entity);
+  const foldedColumn = entity.foldedColumns.find(
+    (column) => column.canonicalFieldId === FIXTURE_IDS.fieldIds.parentNotes,
+  );
+  assert.ok(foldedColumn);
+  assert.equal(
+    entity.indexes.some(
+      (index) =>
+        index.indexKind === 'foldedAccess' &&
+        index.columnNames.includes(foldedColumn.physicalName),
+    ),
+    false,
+  );
+});
+
 test('physical mapping validation rejects collisions, incompatible reuse, and overlength names stably', () => {
   const base: PhysicalMappingRecord = {
     canonicalId: 'northstar.fixture:field.a',

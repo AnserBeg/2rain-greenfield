@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 
-import { canonicalize, unicodeCaseFold } from '@north-star/canonical-model';
+import { canonicalize } from '@north-star/canonical-model';
 import {
   PROJECTION_FAMILY_IDS,
   STORAGE_TARGET_PAYLOAD_VERSION,
@@ -699,14 +699,12 @@ async function executeQueryOnClient(
     }
     case 'search': {
       const text = requiredSearchText(args.text);
-      const matchMode = optionalSearchMatchMode(args.matchMode);
       const limit = boundedLimit(args.limit, definition.maximumResultCount);
       records = await matchRecords(
         client,
         entity,
         definition,
         text,
-        matchMode,
         includeArchived,
         limit,
       );
@@ -776,7 +774,6 @@ async function matchRecords(
   entity: StorageEntity,
   definition: RegisteredQueryDefinition,
   text: string,
-  matchMode: 'prefix' | 'substring',
   includeArchived: boolean,
   limit: number,
 ): Promise<RawRecord[]> {
@@ -787,7 +784,7 @@ async function matchRecords(
       column.searchMapping === 'normalizedTextIndex',
   );
   if (columns.length === 0) return [];
-  const match = buildFoldedMatchPredicate(entity, columns, text, matchMode);
+  const match = buildFoldedMatchPredicate(entity, columns, text, 'substring');
   const values = [...match.values];
   const predicates = archivePredicate(entity, includeArchived);
   predicates.push(match.sql);
@@ -903,7 +900,7 @@ export function buildFoldedMatchPredicate(
   entity: StorageTargetPayloadV1['entities'][number],
   columns: readonly StorageTargetPayloadV1['entities'][number]['columns'][number][],
   text: string,
-  mode: 'exact' | 'prefix' | 'substring',
+  mode: 'exact' | 'substring',
 ): { readonly sql: string; readonly values: readonly unknown[] } {
   if (columns.length === 0) {
     throw failure(
@@ -914,12 +911,6 @@ export function buildFoldedMatchPredicate(
   const values: unknown[] = [];
   const textParameter = parameter(values, text);
   const foldedParameter = `north_star_module.${unicodeCaseFoldFunctionName}(${textParameter}::text)`;
-  const upperBound =
-    mode === 'prefix' ? foldedPrefixUpperBound(text) : undefined;
-  const upperParameter =
-    upperBound === null || upperBound === undefined
-      ? null
-      : parameter(values, upperBound);
   const terms = columns.map((column) => {
     const foldedColumn = foldedColumnSql(entity, column);
     switch (mode) {
@@ -927,40 +918,12 @@ export function buildFoldedMatchPredicate(
         return `${foldedColumn} = ${foldedParameter}`;
       case 'substring':
         return `${foldedColumn} LIKE ('%' || ${foldedParameter} || '%')`;
-      case 'prefix':
-        return upperParameter === null
-          ? `${foldedColumn} COLLATE "C" >= ${foldedParameter} COLLATE "C"`
-          : `(${foldedColumn} COLLATE "C" >= ${foldedParameter} COLLATE "C" AND ${foldedColumn} COLLATE "C" < ${upperParameter}::text COLLATE "C")`;
     }
   });
   return Object.freeze({
     sql: `(${terms.join(' OR ')})`,
     values: Object.freeze(values),
   });
-}
-
-export function foldedPrefixUpperBound(value: string): string | null {
-  const folded = unicodeCaseFold(value);
-  const codePoints = Array.from(folded, (character) => {
-    const codePoint = character.codePointAt(0)!;
-    if (codePoint >= 0xd800 && codePoint <= 0xdfff) {
-      throw failure(
-        'MODULE_INPUT_MALFORMED',
-        'text must contain only Unicode scalar values',
-      );
-    }
-    return codePoint;
-  });
-  for (let index = codePoints.length - 1; index >= 0; index -= 1) {
-    const codePoint = codePoints[index]!;
-    if (codePoint === 0x10ffff) continue;
-    const successor =
-      codePoint + 1 >= 0xd800 && codePoint + 1 <= 0xdfff
-        ? 0xe000
-        : codePoint + 1;
-    return String.fromCodePoint(...codePoints.slice(0, index), successor);
-  }
-  return null;
 }
 
 function foldedColumnSql(
@@ -1803,17 +1766,6 @@ function requiredSearchText(value: ImmutableJsonValue | undefined): string {
     throw failure('MODULE_INPUT_MALFORMED', 'text must be non-blank');
   }
   return value;
-}
-
-function optionalSearchMatchMode(
-  value: ImmutableJsonValue | undefined,
-): 'prefix' | 'substring' {
-  if (value === undefined || value === 'substring') return 'substring';
-  if (value === 'prefix') return 'prefix';
-  throw failure(
-    'MODULE_INPUT_MALFORMED',
-    'matchMode must be prefix or substring',
-  );
 }
 
 function optionalUuid(

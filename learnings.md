@@ -169,5 +169,10 @@ How to apply: prefer observation (counters, artifacts, persisted effects) over i
 
 ## Move security-sensitive normalization into an accounted stored shape
 Date: 2026-07-25
-Why: forced RLS kept a non-leakproof row-side fold out of index conditions, while a stored C-collated fold column made equality and prefix range predicates ordinary leakproof comparisons.
-How to apply: compile the generated expression, collation, index, runtime predicate, catalog shape, and row-drift probe as one versioned contract; a future fold version mints a new function and column and requires an accounted rewrite. See `docs/execution/packets/PR-6b.md`.
+Why: forced RLS kept a non-leakproof row-side fold out of index conditions, while a stored C-collated fold column made equality predicates ordinary leakproof comparisons.
+How to apply: compile the generated expression, collation, equality index, runtime predicate, catalog shape, and row-drift probe as one versioned contract; a future fold version mints a new function and column and requires an accounted rewrite. See `docs/execution/packets/PR-6b.md`.
+
+## Observe plan qualification instead of crediting identifier text
+Date: 2026-07-25
+Why: PR-6b's second review showed that bare containment in PostgreSQL's `Index Cond` string could credit an unrelated occurrence of the folded column name.
+How to apply: pair the exact index name with an operator-bound folded identifier, then use `EXPLAIN ANALYZE` to require zero rows removed by post-filter on the qualifying node; retain a real missing-index negative control. See `docs/execution/packets/PR-6b.md`.

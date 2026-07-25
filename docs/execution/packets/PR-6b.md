@@ -1,15 +1,16 @@
 # PR-6b — Folded-column index mechanics
 
-Status: blocked — second in-class review finding triggered the hard stop
+Status: active — final narrowed R1/R2 review chain authorized
 Tier: Critical
 Branch: `packet/pr-6b`
 Requested base: `28aaf3c`; actual accepted branch point: `3d394a536668519f1eb978065d63f38eee10674e`
-Frozen reviewed candidate: `01ff6c2811615eaebbf1a8d7de8d2006d7f116aa`
-Review: REVISE — HARD TRIPWIRE; Fable not launched
+Prior frozen candidate: `01ff6c2811615eaebbf1a8d7de8d2006d7f116aa`
+Final narrowed candidate: pending
+Review: prior rounds retained below; final Codex/Fable chain pending
 
 ## Authority and outcome
 
-PR-6b implements the closed R1-R3 decisions in
+PR-6b implements the closed R1-R2 decisions in
 [`pr6-rls-index-access-verdict.md`](../debates/pr6-rls-index-access-verdict.md).
 For every searchable, case-insensitive-unique, or declared resolve-match text
 field, the compiler emits one deterministic companion column:
@@ -19,14 +20,13 @@ text COLLATE "C"
 GENERATED ALWAYS AS (north_star_module.nsm_unicode_case_fold_v1(source)) STORED
 ```
 
-Non-unique folded access uses a btree over
+Declared resolve keys receive a non-unique btree over
 `(tenant_id, environment_id, folded_column)`. The two pre-existing physical
 unique-index classes now use the same stored column. Resolve and unique
-predicates compare the stored column with `fold($1)`. Prefix search computes the
-exclusive successor of the already-folded input and emits explicit C-collated
-`>= lower AND < upper` range qualifications. Unanchored substring search reads
-the stored fold but deliberately remains a tenant-partition scan, as verdict R4
-requires.
+predicates compare the stored column with `fold($1)`. Unanchored substring
+search reads the stored fold but deliberately remains a tenant-partition scan,
+as verdict R4 requires; searchable-only fields do not receive a btree that no
+current predicate can use.
 
 The requested base `28aaf3c` remained an ancestor, but accepted `main` and
 `origin/main` were both `3d394a5` when work began. The sole intervening commit
@@ -61,8 +61,10 @@ The compiler derives the folded set from three independent declaration paths:
 case-insensitive business keys, searchable fields, and active resolve match
 keys. A permanent compiler test switches an advisory resolve field to
 `searchable: false` and still requires its generated column and non-unique
-folded index. Unique fields use their two existing unique physical index classes
-rather than receiving a redundant third folded-access index.
+folded index. A second test makes a non-resolve field searchable and requires
+its stored fold while rejecting an unused prefix-only btree. Unique fields use
+their two existing unique physical index classes rather than receiving a
+redundant third folded-access index.
 
 Fresh-table materialization creates the generated column before its indexes.
 Catalog conformance pins all of the following rather than checking existence
@@ -88,44 +90,51 @@ PostgreSQL returns `23505`; both original rows remain, and the failed index is
 absent. The constraint is the guard. No row is deleted or rewritten to conceal
 the conflict.
 
-## R3 prefix-bound correctness
+## R3 descope — search semantics before range lowering
 
-The prefix lower bound is the canonical Unicode case fold of the input. The
-exclusive upper bound increments the last Unicode scalar that can advance and
-truncates the suffix, skipping the surrogate interval. An all-maximum-scalar
-prefix has no finite upper bound and therefore uses only `>= lower`. Both the
-stored column and comparisons are C-collated, making code-point-derived UTF-8
-bounds byte-ordered and independent of database locale.
+The final design ruling removes R3 from PR-6b. The prototype made prefix input
+literal text: `%`, `_`, and `\` were ordinary characters passed to
+`foldedPrefixUpperBound()`. The existing substring path concatenates the same
+input unescaped into `LIKE`, where `%` and `_` are wildcards and `\` participates
+in pattern escaping. For example, prefix `%` became the literal C-collated
+range `['%', '&')`, while the existing substring pattern `LIKE '%%'` matches
+every value. Shipping both would silently give one compiled query contract two
+incompatible escaping rules.
 
-Permanent provider journeys compare actual returned rows against canonical
-`unicodeCaseFold(...).startsWith(...)` expectations for case expansion
-(`Straße`/`STRASSE`), the U+D7FF to U+E000 surrogate boundary, and U+10FFFF.
-They also prove the public default remains substring matching: an infix is found
-without `matchMode`, while the same input in prefix mode is not.
+The prefix lowerer, public `matchMode`, prefix-only indexes, and prefix plan and
+semantic assertions are therefore absent from the narrowed packet. Stored folds
+still remove per-row normalization from substring scans, and resolve/unique
+equality indexes remain R1/R2. The active queue now owns a separate Critical
+packet with PR-2-style semantic-preservation evidence to decide whether search
+input is literal text or a user-visible pattern before any range lowering is
+reintroduced.
 
 ## Plan-shape gate and red/green demonstration
 
 `test/postgres/module-index-conformance.test.ts` exercises the real compiled
 Party module as the forced-RLS `NOBYPASSRLS` runtime role. It covers relation,
-advisory resolve, case-insensitive unique lookup, and prefix range predicates.
-The folded probes use the interpreter's complete query shape: selected record
-columns, archive predicate, `ORDER BY record_id`, runtime limit, and—for Party
-prefix search—the OR across both searchable fields. The prefix value selects a
-real row at the largest milestone without turning the predicate into a broad
-11%-of-table request for which the ordering index is legitimately cheaper.
+advisory resolve, and case-insensitive unique lookup predicates. The folded
+probes use the interpreter's complete equality-query shape: selected record
+columns, archive predicate, `ORDER BY record_id`, runtime limit, and a value
+that selects exactly one seeded row.
 
 The table grows through 10, 100, 500, 1,000, 5,000, and 10,000-row milestones,
 with `ANALYZE` and a plan assertion at every milestone. Once a predicate first
 uses its intended index, any later milestone that stops doing so is red. On the
-pinned image all four predicates first choose their intended indexes at **100
+pinned image all three predicates first choose their intended indexes at **100
 rows** and retain them through 10,000 rows.
 
-The gate walks `EXPLAIN (FORMAT JSON)` structurally, fails closed on unknown
+The gate walks `EXPLAIN (ANALYZE, FORMAT JSON)` structurally, fails closed on unknown
 envelopes, node types, child collections, index names, and index-condition
-shapes, never disables sequential scans, and requires both an accepted exact
-physical index name and the intended folded column in `Index Cond`. Permanent
-canaries reject a sequential scan, a wrong index, a missing folded condition,
-and an unknown node.
+shapes, never disables sequential scans, and requires three independent facts:
+an accepted exact physical index name; the intended folded identifier followed
+by an equality/range operator in `Index Cond`; and `Rows Removed by Filter`
+absent or zero on the qualifying index node. The last fact is execution-observed
+evidence that the one-row predicate was not demoted to a post-filter. It is more
+trustworthy than trying to infer execution from a more elaborate string match.
+Permanent canaries reject a sequential scan, a wrong index, a bare/literal
+identifier mention, a non-zero post-filter removal count, malformed observed
+counts, a missing folded condition, and an unknown node.
 
 The disposable negative-control command was:
 
@@ -140,14 +149,14 @@ printf 'red_exit=%s\n' "$status"
 ```
 
 It dropped the declared advisory-resolve index only inside the ephemeral
-database and produced:
+database. The decisive verbatim lines were:
 
 ```text
-# PR-6b prefix planner flip rows=100; analyzed rows=10000
 # PR-6b relation planner flip rows=100; analyzed rows=10000
 # PR-6b resolve planner flip rows=100; analyzed rows=10000
 # PR-6b unique planner flip rows=100; analyzed rows=10000
-not ok 2 - forced-RLS relation, resolve, unique, and prefix predicates use their declared indexes
+# Subtest: forced-RLS relation, resolve, and unique predicates use their declared indexes
+not ok 2 - forced-RLS relation, resolve, and unique predicates use their declared indexes
 error: 'resolve predicate did not use expected folded index nsm_i_swxw5hidgwkk4fgmyjyzplq3zpetzcnyqwaivlkdhx7v634tffra; used nsm_k_jbe7q7wxb6o3hmshj2wokbak4dxkhmm2cnzohhhdg7nztdodmf3a'
 # tests 2
 # pass 1
@@ -155,7 +164,7 @@ error: 'resolve predicate did not use expected folded index nsm_i_swxw5hidgwkk4f
 red_exit=1
 ```
 
-The immediate normal rerun returned 2/2, repeated all four 100-row flip lines,
+The immediate normal rerun returned 2/2, repeated all three 100-row flip lines,
 and reported 10,000 analyzed rows. Each run provisions and destroys its own
 PostgreSQL container, so the dropped index left no database or repository
 residue.
@@ -215,12 +224,16 @@ migration was needed; `check:schema` remains 10 applied / 10 verified.
 
 ## Runtime SLO update
 
-`docs/operations/runtime-slos.md` now marks stored-column equality and explicit
-prefix ranges as current for newly materialized tables. Latency numbers are not
-new measurements: they are cited from the binding pinned-image verdict. Resolve
-moved from the measured 4,472 ms row-folding plan to about 0.33 ms (0.24 ms
-forced-generic), and prefix moved from 89.7 ms leaky `LIKE` to 0.31 ms range
-lowering. The local executable evidence is plan shape, not latency.
+`docs/operations/runtime-slos.md` marks stored-column equality as current for
+newly materialized tables. Latency numbers are not new measurements: they are
+cited from the binding pinned-image verdict. Resolve moved from the measured
+4,472 ms row-folding plan to about 0.33 ms (0.24 ms forced-generic). The local
+executable evidence is plan shape and observed filter behavior, not latency.
+
+Prefix/typeahead remains non-current. The verdict's 89.7 ms leaky `LIKE` and
+0.31 ms range measurements remain design evidence, but the semantic decision
+described above owns whether and how the range form can become a compiled query
+contract.
 
 Unanchored substring search is still stated honestly as a partition scan. It no
 longer folds each row; the verdict measured 123 ms for a 20-match exit and 188 ms
@@ -247,11 +260,16 @@ percentiles or error budgets.
   fixture. Its real `ORDER BY record_id LIMIT 100` plan correctly moved from the
   folded bitmap indexes to the ordering index at 10,000 rows, producing:
   `prefix predicate stopped using its declared index at 10000 analyzed rows
-  after first using it at 100`. The conformance probe now uses the selective,
-  real-row prefix `Ordinary party 7000`; it exercises the identical runtime SQL
-  shape and requires both searchable-field indexes through every milestone.
+  after first using it at 100`. The round-1 fix used the selective real-row
+  prefix `Ordinary party 7000`; the final design ruling then removed R3 and all
+  prefix assertions from this packet rather than shipping divergent semantics.
 - The exact-name missing-index demonstration above remains retained as the
   required genuine negative control.
+- The first narrowed typecheck rejected `resolveMatchFieldIds.has(...)` because
+  inference gave the set its branded canonical-ID type while the stored column
+  exposes a plain string ID. Declaring the comparison set as `Set<string>`
+  returned typecheck and both focused suites green without changing identity
+  semantics.
 
 ## Full-matrix evidence
 
@@ -288,8 +306,8 @@ Round 1 reviewed `b4a0960639824e3ca386b6bd293884ab03b648a2`. Codex returned
 
 1. The prefix probe simplified the interpreter query to one column and omitted
    its selected columns, second searchable field, ordering, and runtime limit.
-   Disposition: fixed. The probe now explains the real Party search shape and
-   requires both folded index classes.
+   Disposition at round 1: fixed against the complete Party search shape. Final
+   disposition: removed with R3 under the later design ruling.
 2. The milestone loop stopped as soon as all predicates first flipped at 100
    rows, so the advertised larger milestones were never evaluated.
    Disposition: fixed. Every milestone now runs, is analyzed, and must retain
@@ -313,8 +331,10 @@ returned `REVISE` with two in-scope findings:
    identifier. The falsely credited fact is “the intended folded column occurs
    in the index qualification.” This is the second review round to find that the
    plan-shape gate can report success without proving the interpreter's intended
-   index path, so the binding hard stop fired. Disposition: **not fixed; frozen
-   and surfaced for a design ruling**.
+   index path, so the binding hard stop fired. Disposition at round 2: frozen and
+   surfaced. Final disposition: fixed only after the orchestrator's narrowed
+   restart, using operator-bound qualification plus observed zero post-filter
+   removals from `EXPLAIN ANALYZE`.
 2. **Prefix pattern-character semantics diverge.** The reachable inputs `%`,
    `_`, and `\` are literal characters to `foldedPrefixUpperBound()` at
    `packages/postgres-provider/src/module-runtime-interpreter.ts:917`, while
@@ -323,12 +343,22 @@ returned `REVISE` with two in-scope findings:
    '%%'` matches every string. The provider oracle at
    `test/postgres/module-index-conformance.test.ts:561` compares with JavaScript
    `startsWith()` and therefore does not adjudicate whether prefix input is a
-   literal prefix or a SQL-LIKE pattern. Disposition: **not fixed; surfaced with
-   the hard stop for an explicit semantics ruling**.
+   literal prefix or a SQL-LIKE pattern. Disposition at round 2: surfaced.
+   Final disposition: R3 and every prefix implementation/probe artifact were
+   descoped to the queued semantic-preservation packet.
 
 No other in-scope material findings were reported. Fable was deliberately not
 launched: Critical review requires Codex PASS first, and the hard-tripwire rule
 forbids another writer fix round.
+
+Both reviewers earned their findings. Round 1 forced the probe onto the complete
+runtime SQL shape and every declared milestone; round 2 exposed both a false
+credit oracle and a real escaping-contract decision. The orchestrator's final
+design ruling restarted review only after narrowing the packet: R3 moved to its
+own semantic-preservation packet, while the folded equality oracle now combines
+exact index identity, operator-bound qualification, and observed zero
+post-filter removals. This is the final allowance; any further in-class finding
+stops the packet without another writer fix.
 
 ## Test it yourself
 
@@ -350,7 +380,7 @@ node --import tsx --test \
 ```
 
 The first command exits 1 and names the missing expected folded index. The next
-commands are green; the plan run reports all four planner flips at 100 rows, the
+commands are green; the plan run reports all three planner flips at 100 rows, the
 transition suite retains the `23505` duplicate refusal and exact
 `CATALOG_DRIFT`, and all databases are disposable containers.
 
@@ -359,5 +389,5 @@ transition suite retains the `23505` duplicate refusal and exact
 Do not commit this row before acceptance; the merge SHA does not yet exist:
 
 ```text
-| PR-6b | Folded-column index mechanics | Critical | accepted | <merge-sha> | Stored C-collated generated folds make forced-RLS resolve, unique lookup, and prefix ranges use their declared indexes; raw search btree retired; plan/collation/uniqueness/drift proofs green; full matrix and Critical review chain recorded in docs/execution/packets/PR-6b.md. |
+| PR-6b | Folded-column index mechanics | Critical | accepted | <merge-sha> | Stored C-collated generated folds make forced-RLS resolve and unique lookup use their declared indexes; raw search and prefix-only btrees retired; EXPLAIN ANALYZE, catalog, uniqueness, and drift proofs green; R3 explicitly descoped; full matrix and Critical review chain recorded in docs/execution/packets/PR-6b.md. |
 ```
