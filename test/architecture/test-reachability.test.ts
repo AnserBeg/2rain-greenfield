@@ -24,6 +24,10 @@ import {
   reachabilityProducers,
   type ReachabilityProducer,
 } from '../helpers/reachability-producers.js';
+import {
+  beginReachabilityRun,
+  reachabilityRunIdPath,
+} from '../helpers/reachability-run.mjs';
 import { assertUnfilteredPlaywrightRun } from '../helpers/playwright-unfiltered-reporter.js';
 
 const workflowPath = '.github/workflows/ci.yml';
@@ -128,25 +132,46 @@ test('comparison canary reports exactly an unreachable synthetic test', () => {
 test('aggregator fails closed on incomplete or invalid evidence', () => {
   withFixtureRepository((root, producer, evidence) => {
     assert.throws(
-      () => aggregateEvidence(root, [producer]),
+      () => aggregateEvidence(root, [producer], { environment: {} }),
       /Missing reachability evidence for synthetic/u,
     );
 
     writeFileSync(resolve(root, producer.evidencePath), '');
     assert.throws(
-      () => aggregateEvidence(root, [producer]),
+      () => aggregateEvidence(root, [producer], { environment: {} }),
       /Empty reachability evidence for synthetic/u,
+    );
+
+    writeRawEvidence(root, producer, { ...evidence, runId: undefined });
+    assert.throws(
+      () => aggregateEvidence(root, [producer], { environment: {} }),
+      /Missing reachability run token from synthetic/u,
+    );
+
+    writeEvidence(root, producer, { ...evidence, runId: 'previous-run' });
+    assert.throws(
+      () => aggregateEvidence(root, [producer], { environment: {} }),
+      /Stale reachability evidence for synthetic: expected run fixture-run, received previous-run/u,
+    );
+
+    writeEvidence(root, producer, {
+      ...evidence,
+      argv: ['test/a-different-file.test.ts'],
+    });
+    assert.throws(
+      () => aggregateEvidence(root, [producer], { environment: {} }),
+      /Observed argv mismatch for synthetic/u,
     );
 
     writeEvidence(root, producer, { ...evidence, files: [] });
     assert.throws(
-      () => aggregateEvidence(root, [producer]),
+      () => aggregateEvidence(root, [producer], { environment: {} }),
       /Evidence producer executed zero test files: synthetic/u,
     );
 
     writeEvidence(root, producer, { ...evidence, suiteSucceeded: false });
     assert.throws(
-      () => aggregateEvidence(root, [producer]),
+      () => aggregateEvidence(root, [producer], { environment: {} }),
       /Evidence producer did not succeed: synthetic/u,
     );
 
@@ -155,7 +180,7 @@ test('aggregator fails closed on incomplete or invalid evidence', () => {
       files: [{ path: '/outside/repository.test.ts', realResultCount: 1 }],
     });
     assert.throws(
-      () => aggregateEvidence(root, [producer]),
+      () => aggregateEvidence(root, [producer], { environment: {} }),
       /Unnormalizable executed-file path: \/outside\/repository\.test\.ts/u,
     );
 
@@ -166,15 +191,22 @@ test('aggregator fails closed on incomplete or invalid evidence', () => {
       files: [{ path: undiscovered, realResultCount: 1 }],
     });
     assert.throws(
-      () => aggregateEvidence(root, [producer]),
+      () => aggregateEvidence(root, [producer], { environment: {} }),
       /Executed file is outside repository test discovery: test\/not-a-test\.ts/u,
+    );
+
+    writeEvidence(root, producer, evidence);
+    rmSync(resolve(root, reachabilityRunIdPath));
+    assert.throws(
+      () => aggregateEvidence(root, [producer], { environment: {} }),
+      /Unresolvable reachability run token/u,
     );
   });
 
   const emptyRoot = mkdtempSync(join(tmpdir(), 'reachability-empty-'));
   try {
     assert.throws(
-      () => aggregateEvidence(emptyRoot, []),
+      () => aggregateEvidence(emptyRoot, [], { environment: {} }),
       /Repository test discovery returned zero files/u,
     );
   } finally {
@@ -186,6 +218,10 @@ test('declared unfiltered producers are wired to CI and their evidence paths', (
   const workflow = readFileSync(workflowPath, 'utf8');
   const rootScripts = loadScripts('package.json');
   const webScripts = loadScripts('apps/web/package.json');
+  assert.match(
+    workflow,
+    /^ {2}REACHABILITY_RUN_ID: \$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}$/mu,
+  );
 
   for (const producer of reachabilityProducers) {
     const job = extractWorkflowJob(workflow, producer.ciJob);
@@ -197,24 +233,17 @@ test('declared unfiltered producers are wired to CI and their evidence paths', (
       job.includes(producer.evidencePath),
       `${producer.id} evidence path is absent from CI job ${producer.ciJob}`,
     );
+    assert.match(job, /test\/helpers\/begin-reachability-run\.ts/u);
 
-    if (producer.id === 'observability') {
-      assert.doesNotMatch(job, nodeSelectionArguments);
-      continue;
-    }
-    const scriptName = producer.command.replace('corepack pnpm ', '');
-    const body =
-      producer.id === 'contracts'
-        ? webScripts[scriptName]
-        : rootScripts[scriptName];
-    assert.ok(body, `missing declared producer script: ${scriptName}`);
+    const body = loadProducerImplementation(producer, rootScripts, webScripts);
     if (producer.runner === 'node:test') {
-      assert.match(
-        body,
-        new RegExp(`REACHABILITY_SUITE_ID=${producer.id}`, 'u'),
-      );
+      assert.match(body, /REACHABILITY_SUITE_ID\s*[:=]/u);
       assert.match(body, /node-test-evidence-reporter\.mjs/u);
-      assert.match(body, new RegExp(`${producer.id}\\.json`, 'u'));
+      assert.ok(
+        body.includes(`${producer.id}.json`) ||
+          body.includes('producer.evidencePath'),
+        `${producer.id} implementation lacks its declared evidence path`,
+      );
       assert.doesNotMatch(body, nodeSelectionArguments);
     } else {
       assert.doesNotMatch(body, playwrightSelectionArguments);
@@ -231,6 +260,7 @@ test('CI aggregates only after every evidence-producing job succeeds', () => {
     assert.match(job, new RegExp(`^ {6}- ${producerJob}$`, 'mu'));
   }
   assert.match(job, /run: corepack pnpm check:reachability/u);
+  assert.match(job, /test\/helpers\/begin-reachability-run\.ts/u);
   assert.match(job, /actions\/download-artifact@[0-9a-f]{40}/u);
   assert.doesNotMatch(job, /if:\s*always\(\)/u);
 });
@@ -285,6 +315,17 @@ test('root test aggregate includes every CI-invoked test command and reachabilit
   assert.ok(aggregate, 'package.json is missing the root test aggregate');
 
   assert.deepEqual(parseAggregateScripts(aggregate), requiredAggregateScripts);
+  assert.deepEqual(
+    parseAggregateScripts(
+      'echo corepack pnpm test:compiler && corepack pnpm test:unit',
+    ),
+    ['test:unit'],
+    'aggregate discovery matches whole command segments, not substrings',
+  );
+  assert.match(
+    aggregate,
+    /^node --import tsx test\/helpers\/begin-reachability-run\.ts &&/u,
+  );
   assert.match(aggregate, /test\/helpers\/run-observability-producer\.ts/u);
 });
 
@@ -321,14 +362,25 @@ function withFixtureRepository(
       id: 'synthetic',
       runner: 'node:test',
       command: 'synthetic command',
+      argv: ['test/example.test.ts'],
       ciJob: 'synthetic',
       ciInvocation: 'synthetic command',
       evidencePath: 'test-results/reachability/synthetic.json',
+      implementation: {
+        kind: 'helper',
+        sourcePath: 'test/helpers/synthetic.ts',
+      },
     };
+    beginReachabilityRun({
+      repositoryRoot: root,
+      environment: {},
+      generateRunId: () => 'fixture-run',
+    });
     const evidence: SuiteEvidence = {
-      version: 1,
+      version: 2,
       suiteId: producer.id,
-      command: producer.command,
+      runId: 'fixture-run',
+      argv: producer.argv,
       runner: producer.runner,
       suiteSucceeded: true,
       files: [{ path: testFile, realResultCount: 1 }],
@@ -337,6 +389,17 @@ function withFixtureRepository(
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+}
+
+function writeRawEvidence(
+  root: string,
+  producer: ReachabilityProducer,
+  evidence: unknown,
+): void {
+  writeFileSync(
+    resolve(root, producer.evidencePath),
+    `${JSON.stringify(evidence)}\n`,
+  );
 }
 
 function writeEvidence(
@@ -358,6 +421,26 @@ function loadScripts(path: string): Readonly<Record<string, string>> {
   return manifest.scripts;
 }
 
+function loadProducerImplementation(
+  producer: ReachabilityProducer,
+  rootScripts: Readonly<Record<string, string>>,
+  webScripts: Readonly<Record<string, string>>,
+): string {
+  if (producer.implementation.kind === 'helper') {
+    return readFileSync(producer.implementation.sourcePath, 'utf8');
+  }
+  const scripts =
+    producer.implementation.manifestPath === 'package.json'
+      ? rootScripts
+      : webScripts;
+  const body = scripts[producer.implementation.script];
+  assert.ok(
+    body,
+    `missing declared producer script: ${producer.implementation.script}`,
+  );
+  return body;
+}
+
 function extractWorkflowJob(workflow: string, jobName: string): string {
   const lines = workflow.split(/\r?\n/u);
   const start = lines.findIndex((line) => line === `  ${jobName}:`);
@@ -369,7 +452,9 @@ function extractWorkflowJob(workflow: string, jobName: string): string {
 }
 
 function parseAggregateScripts(command: string): string[] {
-  return [...command.matchAll(/corepack pnpm ([\w:-]+)/gu)]
-    .map((match) => match[1] ?? '')
+  return command
+    .split(/\s*&&\s*/u)
+    .map((segment) => /^corepack pnpm ([\w:-]+)$/u.exec(segment.trim())?.[1])
+    .filter((script): script is string => script !== undefined)
     .sort();
 }

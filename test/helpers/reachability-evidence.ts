@@ -12,6 +12,7 @@ import {
   type ReachabilityProducer,
   type ReachabilityRunner,
 } from './reachability-producers.js';
+import { resolveReachabilityRunId } from './reachability-run.mjs';
 
 export interface ExecutedFileEvidence {
   readonly path: string;
@@ -19,12 +20,17 @@ export interface ExecutedFileEvidence {
 }
 
 export interface SuiteEvidence {
-  readonly version: 1;
+  readonly version: 2;
   readonly suiteId: string;
-  readonly command: string;
+  readonly runId: string;
+  readonly argv: readonly string[];
   readonly runner: ReachabilityRunner;
   readonly suiteSucceeded: boolean;
   readonly files: readonly ExecutedFileEvidence[];
+}
+
+export interface AggregateEvidenceOptions {
+  readonly environment?: Readonly<Record<string, string | undefined>>;
 }
 
 const repositoryGlobExcludes = [
@@ -64,11 +70,17 @@ export function findUnreachableTests(
 export function aggregateEvidence(
   repositoryRoot = process.cwd(),
   producers: readonly ReachabilityProducer[] = reachabilityProducers,
+  options: AggregateEvidenceOptions = {},
 ): { readonly discoveredCount: number; readonly executedCount: number } {
   const discovered = discoverRepositoryTests(repositoryRoot);
   if (discovered.size === 0) {
     throw new Error('Repository test discovery returned zero files');
   }
+  const currentRunId = resolveReachabilityRunId(
+    options.environment === undefined
+      ? { repositoryRoot }
+      : { repositoryRoot, environment: options.environment },
+  );
 
   const executed = new Set<string>();
   for (const producer of producers) {
@@ -84,7 +96,7 @@ export function aggregateEvidence(
         `Empty reachability evidence for ${producer.id}: ${producer.evidencePath}`,
       );
     }
-    const evidence = parseEvidence(serialized, producer);
+    const evidence = parseEvidence(serialized, producer, currentRunId);
     if (!evidence.suiteSucceeded) {
       throw new Error(`Evidence producer did not succeed: ${producer.id}`);
     }
@@ -154,6 +166,7 @@ export function normalizeEvidencePath(
 function parseEvidence(
   serialized: string,
   producer: ReachabilityProducer,
+  currentRunId: string,
 ): SuiteEvidence {
   let value: unknown;
   try {
@@ -166,10 +179,31 @@ function parseEvidence(
   if (!isRecord(value)) {
     throw new Error(`Invalid reachability evidence object for ${producer.id}`);
   }
+  if (value.version !== 2 || value.suiteId !== producer.id) {
+    throw new Error(
+      `Reachability evidence metadata mismatch for ${producer.id}`,
+    );
+  }
+  if (typeof value.runId !== 'string') {
+    throw new Error(`Missing reachability run token from ${producer.id}`);
+  }
+  if (value.runId !== currentRunId) {
+    throw new Error(
+      `Stale reachability evidence for ${producer.id}: expected run ${currentRunId}, received ${value.runId}`,
+    );
+  }
   if (
-    value.version !== 1 ||
-    value.suiteId !== producer.id ||
-    value.command !== producer.command ||
+    !Array.isArray(value.argv) ||
+    value.argv.some((argument) => typeof argument !== 'string')
+  ) {
+    throw new Error(`Invalid observed argv from ${producer.id}`);
+  }
+  if (!sameArguments(value.argv, producer.argv)) {
+    throw new Error(
+      `Observed argv mismatch for ${producer.id}: expected ${JSON.stringify(producer.argv)}, received ${JSON.stringify(value.argv)}`,
+    );
+  }
+  if (
     value.runner !== producer.runner ||
     typeof value.suiteSucceeded !== 'boolean' ||
     !Array.isArray(value.files)
@@ -189,13 +223,24 @@ function parseEvidence(
     return { path: file.path, realResultCount: file.realResultCount };
   });
   return {
-    version: 1,
+    version: 2,
     suiteId: producer.id,
-    command: producer.command,
+    runId: currentRunId,
+    argv: value.argv,
     runner: producer.runner,
     suiteSucceeded: value.suiteSucceeded,
     files,
   };
+}
+
+function sameArguments(
+  observed: readonly string[],
+  declared: readonly string[],
+): boolean {
+  return (
+    observed.length === declared.length &&
+    observed.every((argument, index) => argument === declared[index])
+  );
 }
 
 function normalizeSeparators(path: string): string {

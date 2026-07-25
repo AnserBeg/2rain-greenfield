@@ -6,23 +6,24 @@ import {
   assertUnfilteredNodeArguments,
   creditableNodeResultPath,
 } from './node-reporter-core.mjs';
+import { resolveReachabilityRunId } from './reachability-run.mjs';
 
 const reporterPath = fileURLToPath(import.meta.url);
 const repositoryRoot = fileURLToPath(new URL('../../', import.meta.url));
 
 export default async function* nodeTestEvidenceReporter(source) {
   const suiteId = process.env.REACHABILITY_SUITE_ID;
-  const command = process.env.REACHABILITY_COMMAND;
   if (!suiteId || !/^[a-z][a-z0-9-]*$/u.test(suiteId)) {
     throw new Error('A valid REACHABILITY_SUITE_ID is required');
   }
-  if (!command) throw new Error('REACHABILITY_COMMAND is required');
   assertUnfilteredNodeArguments(process.execArgv, {
     suiteId,
     workingDirectory: process.cwd(),
     reporterPath,
     repositoryRoot,
   });
+  const runId = resolveReachabilityRunId({ repositoryRoot });
+  const argv = process.argv.slice(1);
 
   const counts = new Map();
   let suiteSucceeded;
@@ -37,9 +38,10 @@ export default async function* nodeTestEvidenceReporter(source) {
   }
 
   const evidence = {
-    version: 1,
+    version: 2,
     suiteId,
-    command,
+    runId,
+    argv,
     runner: 'node:test',
     suiteSucceeded: suiteSucceeded === true,
     files: [...counts]

@@ -5,10 +5,24 @@ import type { JSONReport, JSONReportSuite } from '@playwright/test/reporter';
 
 import type { SuiteEvidence } from './reachability-evidence.js';
 import { getReachabilityProducer } from './reachability-producers.js';
+import { resolveReachabilityRunId } from './reachability-run.mjs';
 
 const producer = getReachabilityProducer('browser');
 if (!producer.rawEvidencePath) {
   throw new Error('Browser producer is missing its raw JSON evidence path');
+}
+if (!producer.invocationEvidencePath) {
+  throw new Error('Browser producer is missing its invocation evidence path');
+}
+const repositoryRoot = resolve('.');
+const currentRunId = resolveReachabilityRunId({ repositoryRoot });
+const invocation = parseObservedInvocation(
+  readFileSync(resolve(producer.invocationEvidencePath), 'utf8'),
+);
+if (invocation.runId !== currentRunId) {
+  throw new Error(
+    `Stale Playwright invocation evidence: expected run ${currentRunId}, received ${invocation.runId}`,
+  );
 }
 const rawReport = JSON.parse(
   readFileSync(resolve(producer.rawEvidencePath), 'utf8'),
@@ -19,9 +33,10 @@ for (const suite of rawReport.suites)
   collectSuiteResults(suite, rawReport, counts);
 
 const evidence: SuiteEvidence = {
-  version: 1,
+  version: 2,
   suiteId: producer.id,
-  command: producer.command,
+  runId: currentRunId,
+  argv: invocation.argv,
   runner: producer.runner,
   suiteSucceeded:
     rawReport.errors.length === 0 && rawReport.stats.unexpected === 0,
@@ -29,6 +44,27 @@ const evidence: SuiteEvidence = {
     .map(([path, realResultCount]) => ({ path, realResultCount }))
     .sort((left, right) => left.path.localeCompare(right.path)),
 };
+
+function parseObservedInvocation(serialized: string): {
+  readonly runId: string;
+  readonly argv: readonly string[];
+} {
+  const value: unknown = JSON.parse(serialized);
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    !('version' in value) ||
+    value.version !== 1 ||
+    !('runId' in value) ||
+    typeof value.runId !== 'string' ||
+    !('argv' in value) ||
+    !Array.isArray(value.argv) ||
+    value.argv.some((argument) => typeof argument !== 'string')
+  ) {
+    throw new Error('Invalid observed Playwright invocation evidence');
+  }
+  return { runId: value.runId, argv: value.argv };
+}
 
 mkdirSync(dirname(resolve(producer.evidencePath)), { recursive: true });
 writeFileSync(

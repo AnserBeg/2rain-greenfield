@@ -6,8 +6,10 @@ import {
   getReachabilityProducer,
   observabilityTestFiles,
 } from './reachability-producers.js';
+import { ensureReachabilityRun } from './reachability-run.mjs';
 
 const producer = getReachabilityProducer('observability');
+ensureReachabilityRun({ repositoryRoot: resolve('.') });
 const evidencePath = resolve(producer.evidencePath);
 mkdirSync(dirname(evidencePath), { recursive: true });
 rmSync(evidencePath, { force: true });
@@ -27,7 +29,6 @@ const result = spawnSync(
   {
     env: {
       ...process.env,
-      REACHABILITY_COMMAND: producer.command,
       REACHABILITY_SUITE_ID: producer.id,
     },
     stdio: 'inherit',

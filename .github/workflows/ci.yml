@@ -16,6 +16,7 @@ concurrency:
 
 env:
   CI: '1'
+  REACHABILITY_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
 
 defaults:
   run:
@@ -39,6 +40,8 @@ jobs:
         run: corepack enable
       - name: Install frozen dependencies
         run: corepack pnpm install --frozen-lockfile --reporter=append-only
+      - name: Begin executed-file evidence run
+        run: node --import tsx test/helpers/begin-reachability-run.ts
       - name: Check formatting
         run: corepack pnpm format
       - name: Lint
@@ -108,6 +111,8 @@ jobs:
         run: corepack enable
       - name: Install frozen dependencies
         run: corepack pnpm install --frozen-lockfile --reporter=append-only
+      - name: Begin executed-file evidence run
+        run: node --import tsx test/helpers/begin-reachability-run.ts
       - name: Check schema drift
         run: corepack pnpm check:schema
       - name: Run PostgreSQL tests
@@ -137,6 +142,8 @@ jobs:
         run: corepack enable
       - name: Install frozen dependencies
         run: corepack pnpm install --frozen-lockfile --reporter=append-only
+      - name: Begin executed-file evidence run
+        run: node --import tsx test/helpers/begin-reachability-run.ts
       - name: Install Chromium
         run: corepack pnpm exec playwright install --with-deps chromium
       - name: Run browser tests
@@ -197,22 +204,14 @@ jobs:
         run: corepack enable
       - name: Install frozen dependencies
         run: corepack pnpm install --frozen-lockfile --reporter=append-only
+      - name: Begin executed-file evidence run
+        run: node --import tsx test/helpers/begin-reachability-run.ts
       - name: Capture observability evidence
         env:
           OBSERVABILITY_EVIDENCE_DIR: test-results/observability
-          REACHABILITY_COMMAND: node --import tsx --test test/unit/observability.test.ts test/integration/observability-ci-contract.test.ts test/postgres/observability-health.test.ts
-          REACHABILITY_SUITE_ID: observability
         run: |
           mkdir -p test-results/observability
-          node --import tsx test/helpers/prepare-reachability-evidence.ts observability
-          node --import tsx --test \
-            --test-reporter=./test/helpers/node-test-evidence-reporter.mjs \
-            --test-reporter-destination=test-results/reachability/observability.json \
-            --test-reporter=tap \
-            --test-reporter-destination=stdout \
-            test/unit/observability.test.ts \
-            test/integration/observability-ci-contract.test.ts \
-            test/postgres/observability-health.test.ts \
+          node --import tsx test/helpers/run-observability-producer.ts \
             | tee test-results/observability/tests.tap
       - name: Retain observability executed-file evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -250,6 +249,8 @@ jobs:
         run: corepack enable
       - name: Install frozen dependencies
         run: corepack pnpm install --frozen-lockfile --reporter=append-only
+      - name: Begin executed-file evidence run
+        run: node --import tsx test/helpers/begin-reachability-run.ts
       - name: Download executed-file evidence
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:

@@ -1,17 +1,21 @@
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+
 import type { FullConfig, Reporter } from '@playwright/test/reporter';
 
-const expectedArguments = [
-  'test',
-  '--config',
-  'apps/web/playwright.config.ts',
-] as const;
+import { getReachabilityProducer } from './reachability-producers.js';
+import { resolveReachabilityRunId } from './reachability-run.mjs';
+
+const producer = getReachabilityProducer('browser');
 
 export default class PlaywrightUnfilteredReporter implements Reporter {
   private violation: string | undefined;
 
   onBegin(config: FullConfig): void {
     try {
-      assertUnfilteredPlaywrightRun(process.argv.slice(2), config);
+      const argv = process.argv.slice(2);
+      assertUnfilteredPlaywrightRun(argv, config);
+      writeObservedInvocation(argv);
     } catch (error) {
       this.violation = error instanceof Error ? error.message : String(error);
       process.stderr.write(`${this.violation}\n`);
@@ -32,8 +36,8 @@ export function assertUnfilteredPlaywrightRun(
   config: Pick<FullConfig, 'grep' | 'grepInvert' | 'projects' | 'shard'>,
 ): void {
   if (
-    arguments_.length !== expectedArguments.length ||
-    arguments_.some((argument, index) => argument !== expectedArguments[index])
+    arguments_.length !== producer.argv.length ||
+    arguments_.some((argument, index) => argument !== producer.argv[index])
   ) {
     throw new Error(
       `Filtered or unrecognized Playwright arguments: ${arguments_.join(' ')}`,
@@ -55,6 +59,20 @@ export function assertUnfilteredPlaywrightRun(
       );
     }
   }
+}
+
+function writeObservedInvocation(argv: readonly string[]): void {
+  if (!producer.invocationEvidencePath) {
+    throw new Error('Browser producer is missing its invocation evidence path');
+  }
+  const repositoryRoot = resolve('.');
+  const path = resolve(repositoryRoot, producer.invocationEvidencePath);
+  const runId = resolveReachabilityRunId({ repositoryRoot });
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(
+    path,
+    `${JSON.stringify({ version: 1, runId, argv }, null, 2)}\n`,
+  );
 }
 
 function isDefaultGrep(value: RegExp | readonly RegExp[]): boolean {
