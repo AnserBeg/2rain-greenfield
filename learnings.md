@@ -155,3 +155,8 @@ How to apply: begin one run token, stamp it plus observed argv into every produc
 Date: 2026-07-25
 Why: PR-5's narrower idempotency key could conflict with receipts admitted by the prior schema, but collapsing them would violate their append-only trust contract.
 How to apply: let the new constraint fail inside the migration transaction, and test that rows, prior constraints, and migration history remain unchanged. See `docs/execution/packets/PR-5.md`.
+
+## Require the intended index in plan-shape gates
+Date: 2026-07-25
+Why: PR-6's relation query still avoided a sequential scan after its new index was dropped because PostgreSQL used the scope-leading primary key; a “no Seq Scan” assertion would have false-greened.
+How to apply: parse `EXPLAIN (FORMAT JSON)` structurally under the real security role and require the exact declared index or index condition meant to serve the predicate. See `docs/execution/packets/PR-6.md`.

@@ -25,15 +25,18 @@ design exists or authorize its implementation in an unrelated packet.
 - **Closes when:** a selected documentation packet establishes the register,
   its update cadence, ownership, and links from execution authority.
 
-## SLO ratification beyond compiler SLOs
+## Remaining SLO and error-budget ratification
 
-- **Missing:** ratified service objectives and error-budget ownership for the
-  runtime, gateways, jobs, release operations, and user-facing paths beyond
-  `compiler-slos.md`.
+- **Missing:** PR-6's `runtime-slos.md` now records measured request-path bounds
+  and the executable relation-plan objective. Ratified percentiles and
+  error-budget ownership remain absent for gateways, jobs, release operations,
+  user-facing paths, and fleet capacity.
 - **Why it matters:** performance and reliability gates cannot make launch
-  claims without named objectives, measurement boundaries, and owners.
-- **Closes when:** the owning runtime/operations packets ratify the SLO set and
-  executable measurement evidence, then link it from the plan and stage gates.
+  claims from plan shapes or single-host measurements without named percentile
+  objectives, measurement boundaries, and owners.
+- **Closes when:** the owning runtime/operations packets ratify those remaining
+  SLO and error-budget families with executable measurement evidence, then link
+  them from the plan and stage gates.
 
 ## Seed skills
 
