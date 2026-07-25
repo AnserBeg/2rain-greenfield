@@ -104,12 +104,12 @@ not ok 41 - every repository test file is reachable from a CI-invoked command
   error: |-
     Test files not reachable from CI: test/orphan-demo/orphan.test.ts
     + actual - expected
-    
+
     + [
     +   'test/orphan-demo/orphan.test.ts'
     + ]
     - []
-    
+
   code: 'ERR_ASSERTION'
   name: 'AssertionError'
   expected:
@@ -188,6 +188,20 @@ an unparsed command and reported `Unparsed CI run declaration: run:` in all
 three structural checks. The parser now recognizes exactly the empty
 `defaults.run` mapping followed by `shell: bash`; any other empty `run:` mapping
 fails closed. Architecture then passed 48/48.
+
+The first full-matrix candidate, `3a263297810275bd1d3e371274820391e2115e52`,
+passed every functional gate through observability 5/5, then failed the final
+patch-whitespace gate honestly:
+
+```text
+docs/execution/packets/PR-4.md:107: trailing whitespace.
++<four spaces>
+docs/execution/packets/PR-4.md:112: trailing whitespace.
++<four spaces>
+```
+
+Those were whitespace-only lines preserved inside the pasted orphan-canary
+failure block. They were normalized to empty lines; no evidence text changed.
 
 ## Stale demo artifact evidence
 
