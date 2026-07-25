@@ -177,7 +177,10 @@ export class PostgresTrustService {
         binding,
       );
       if (existing) {
-        if (existing.principal_id !== context.principalId) {
+        if (
+          existing.principal_id.toLowerCase() !==
+          context.principalId.toLowerCase()
+        ) {
           throw new TrustEvidenceError(
             'SEMANTIC_OPERATION_IDEMPOTENCY_CONFLICT',
             'idempotency key is already bound to another principal',
@@ -345,10 +348,10 @@ async function lockIdempotencyBinding(
   binding: IdempotentMutationBinding,
 ): Promise<void> {
   const lockIdentity = [
-    context.tenantId,
-    context.environmentId,
+    context.tenantId.toLowerCase(),
+    context.environmentId.toLowerCase(),
     binding.actionId,
-    binding.idempotencyKey,
+    binding.idempotencyKey.toLowerCase(),
   ].join('\u001f');
   await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [
     lockIdentity,

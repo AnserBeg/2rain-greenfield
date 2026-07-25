@@ -96,7 +96,9 @@ The real PostgreSQL provider journey proves all seven required cases:
 
 The concurrency barrier observes PostgreSQL's advisory-lock wait state and
 uses `process.hrtime.bigint()` only as a fail-safe deadline. It does not sleep
-and infer ordering from elapsed wall time.
+and infer ordering from elapsed wall time. One request spells the UUID
+idempotency key in lowercase and the other in uppercase; both wait on the same
+canonicalized lock identity, matching PostgreSQL `uuid` equality.
 
 A separate migration probe creates two valid 0009 receipts that differ only by
 principal, attempts 0010, and proves `23505`, both immutable rows retained, the
@@ -138,6 +140,15 @@ ruling. The orchestrator ruled that immutable receipts must never be collapsed:
 the primary-key unique violation is the migration guard. After replacing the
 collapse with transactional refusal, the boundary gate passed and the focused
 refusal test proved zero rows removed.
+
+The first Critical Codex review returned `REVISE` on question 2: PostgreSQL
+normalizes UUID values for primary-key equality, while the advisory lock hashed
+their original text. Concurrent honest retries using lower- and uppercase
+spellings of the same key could therefore take different locks and enter module
+DML twice. This is the packet's first in-class finding, so the hard-tripwire rule
+permits this one bounded fix. Lock UUID components and the recorded-principal
+comparison now use lowercase canonical text, and the real contention journey
+uses opposite-case key spellings. No other in-scope finding was reported.
 
 ## Full-matrix evidence
 

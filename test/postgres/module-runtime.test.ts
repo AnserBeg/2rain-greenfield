@@ -1642,10 +1642,10 @@ async function executeConcurrentRetryBehindBarrier(
 > {
   const operationId = `${FIXTURE_IDS.namespace}:operation.master_create`;
   const lockIdentity = [
-    view.tenantId,
-    view.environmentId,
+    view.tenantId.toLowerCase(),
+    view.environmentId.toLowerCase(),
     operationId,
-    idempotencyKey,
+    idempotencyKey.toLowerCase(),
   ].join('\u001f');
   const blocker = await pool.connect();
   let released = false;
@@ -1668,7 +1668,7 @@ async function executeConcurrentRetryBehindBarrier(
         'master_create',
         input,
         FIXTURE_IDS.namespace,
-        idempotencyKey,
+        idempotencyKey.toUpperCase(),
       ),
       operation(
         gateway,
