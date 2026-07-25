@@ -67,6 +67,7 @@ const suiteDefinitions = [
     discoveryPattern: 'test/postgres/**/*.test.ts',
     expectedFiles: [
       'test/postgres/migrations.test.ts',
+      'test/postgres/module-index-conformance.test.ts',
       'test/postgres/module-runtime.test.ts',
       'test/postgres/module-storage-transition.test.ts',
       'test/postgres/observability-health.test.ts',
