@@ -1,10 +1,10 @@
 # PR-4b — Executed-file reachability (dynamic ground truth)
 
-Status: blocked — full matrix green; fresh review triggered the packet's explicit hard stop
+Status: active — round 2 implementation and demonstrations complete; full matrix and fresh review pending
 Tier: Mechanical
 Branch: `packet/pr-4b`
 Base: `e17da77221772f007c52be74b975e45ba7523759`
-Implementation commits: `8ea8c45f506f3f2a86fdce994fdfda6a0a890e0a`, `ffb6165`, `3925746`
+Implementation commits: `8ea8c45f506f3f2a86fdce994fdfda6a0a890e0a`, `ffb6165`, `3925746`, `8e4df3d`
 Frozen reviewed candidate: `3925746b9057f1b071e046ed4359c75e29a19259`
 Review: **REVISE / HARD TRIPWIRE** — one fresh naive `gpt-5.6-sol` xhigh review
 
@@ -325,3 +325,210 @@ findings recorded. No program-review trigger fires: the dual-model G2-P3 review
 remains current, and this mechanical gate corrective adds no product
 correctness domain, stage boundary, or fan-out. PR-4b is not acceptance-ready
 until the user rules on the false-green design seam.
+
+## Round 2 — bind evidence to the run
+
+The orchestrator adjudicated round 1's two findings against the code and ruled
+that its hard tripwire had not fired: multiple findings in the same review
+count as one round, and round 2 is the one authorized in-class fix. Round 1's
+implementation, five demonstrations, matrix, and review remain unchanged
+above. This section records only the bounded continuation from branch base
+`6556002bd70b89a0921f8096e1e566872f980916`.
+
+### Freshness is now the guarantee
+
+`begin-reachability-run.ts` starts one token per local aggregate. It uses the
+workflow-provided `REACHABILITY_RUN_ID` when present; otherwise it generates a
+token and persists it at ignored path `test-results/reachability/run-id`.
+Every producer prepare step resolves that token, so standalone suite commands
+reuse the last orchestrated run or create a token only when none exists. The CI
+workflow sets `${{ github.run_id }}-${{ github.run_attempt }}` globally and
+begins the same token in every producer and aggregation job.
+
+Version-2 evidence carries `runId` and observed runner `argv`. The Node reporter
+records `process.argv.slice(1)` rather than the removed
+`REACHABILITY_COMMAND` self-assertion. The Playwright reporter records its
+observed arguments in a token-bound sidecar, which the normalizer carries into
+the final evidence. Aggregation resolves the current token first and rejects a
+missing token field, a stale token, an unresolvable current token, or argv that
+differs from the producer declaration before crediting any file.
+
+The root aggregate's script inventory now matches complete `&&`-separated
+`corepack pnpm <script>` segments, so inert text such as
+`echo corepack pnpm test:compiler` earns no convenience credit. That scan is
+explicitly **not** the safety guarantee and remains order-insensitive by
+design. Freshness tokens make skipped, echoed, conditionally unreached,
+deleted, or reordered producers fail regardless of what the text scan says.
+
+The observability CI job now calls
+`test/helpers/run-observability-producer.ts`, making
+`observabilityTestFiles` its only executable file-list source. The prior
+observability exemption in the declaration gate is gone. The authorized bridge
+`test/integration/observability-ci-contract.test.ts` replaces its three inline
+workflow-path assertions with two stronger checks: CI must invoke the helper,
+and the shared declaration must equal the reviewed three-file inventory. Its
+existing job ordering, TAP path, artifact, and `if: always()` assertions remain
+unchanged.
+
+The workflow still pipes the helper through
+`tee test-results/observability/tests.tap`. The exact Actions-style
+`bash --noprofile --norc -eo pipefail` form returned exit 1 when an invalid run
+token made the helper fail, then returned 5/5 after restoration. The helper's
+exit therefore propagates through `tee`, while the retained TAP artifact is
+still produced.
+
+GitHub-side artifact upload/download remains unverified because `gh` is not
+available. As in round 1, YAML contains only token plumbing and calls the shared
+entry points; all token resolution, observation, normalization, and comparison
+logic was executed locally.
+
+### Round 2 development reds
+
+The first focused format check was red on the edited architecture test and new
+run helper; repository Prettier resolved it. The next typecheck was red because
+`exactOptionalPropertyTypes` rejected explicitly passing an undefined
+environment; constructing the resolver context conditionally fixed it. The
+next lint was red on three unbound `process` references in native `.mjs`;
+importing `node:process` fixed them.
+
+The first observability run after deleting the inline workflow list was red at
+4/5 because `test/integration/observability-ci-contract.test.ts:11-15` still
+pinned those inline paths. Work stopped for the required bridge; the user
+authorized the reviewed-inventory replacement described above, after which the
+suite passed 5/5. A first aggregate capture piped through plain local `tee`
+without `pipefail`; the output stream was interrupted, the capture command
+returned zero, and PostgreSQL evidence was empty. Standalone aggregation
+correctly failed with `Empty reachability evidence for postgres`. The
+authoritative rerun redirected output instead, returned the actual aggregate
+exit code, passed PostgreSQL 61/61, and ended at 49/49.
+
+### Round 2 required demonstrations
+
+All four demonstrations ran against implementation commit `8e4df3d` and
+returned the tracked and untracked tree to clean state.
+
+#### 1. Stale artifact is rejected
+
+Starting from a complete 49/49 run, a fresh token was begun and every producer
+except compiler was rerun:
+
+```bash
+node --import tsx test/helpers/begin-reachability-run.ts
+corepack pnpm test:unit
+corepack pnpm test:integration
+corepack pnpm test:agent
+corepack pnpm test:architecture
+corepack pnpm test:contracts
+corepack pnpm test:postgres
+corepack pnpm test:browser
+node --import tsx test/helpers/run-observability-producer.ts
+corepack pnpm check:reachability
+```
+
+The real failure named compiler and both tokens:
+
+```text
+previous_run=182a0c0b-b1a3-4927-9efb-bddad85fbd32
+current_run=5b6a26f4-8068-4421-99e7-208a205625b7
+red_exit=1
+$ node --import tsx test/helpers/check-reachability.ts
+reachability: FAIL
+Stale reachability evidence for compiler: expected run 5b6a26f4-8068-4421-99e7-208a205625b7, received 182a0c0b-b1a3-4927-9efb-bddad85fbd32
+[ELIFECYCLE] Command failed with exit code 1.
+```
+
+`corepack pnpm test:compiler` then stamped the current token and standalone
+aggregation returned `PASS (49/49 test files executed; 9 producer artifacts)`.
+`git_status_after_stale=` was empty.
+
+#### 2. Reordering is caught
+
+The compiler segment was temporarily moved from before integration to after
+`check:reachability` in the root `test` script. No script was deleted, and the
+order-insensitive aggregate convenience assertion passed at architecture
+51/51. Running the exact aggregate was nevertheless red before compiler could
+execute:
+
+```text
+$ corepack pnpm test
+reachability run: 497a9e22-606b-41e3-8882-1affac36767e
+# tests 51
+# pass 51
+reachability: FAIL
+Stale reachability evidence for compiler: expected run 497a9e22-606b-41e3-8882-1affac36767e, received 5b6a26f4-8068-4421-99e7-208a205625b7
+[ELIFECYCLE] Command failed with exit code 1.
+[ELIFECYCLE] Test failed. See above for more details.
+```
+
+After restoring the exact script, `corepack pnpm test` passed PostgreSQL 61/61,
+browser 5/5, and reachability 49/49 under fresh token
+`e2980567-4f2f-4f95-a2be-c613ef9b0f5a`; `git_status_after_reorder=` was empty.
+
+#### 3. Observed-argv mismatch is caught
+
+Only the ignored unit artifact's first stamped argument was temporarily changed
+from `diagnostic-ordering.test.ts` to
+`not-the-declared-command.test.ts`. Standalone aggregation returned:
+
+```text
+argv_mismatch_exit=1
+$ node --import tsx test/helpers/check-reachability.ts
+reachability: FAIL
+Observed argv mismatch for unit: expected ["test/unit/canonical-model/diagnostic-ordering.test.ts","test/unit/canonical-model/negative-contracts.test.ts","test/unit/canonical-model/normalization.test.ts","test/unit/observability.test.ts","test/unit/party-definition.test.ts","test/unit/workspace-contract.test.ts"], received ["test/unit/canonical-model/not-the-declared-command.test.ts","test/unit/canonical-model/negative-contracts.test.ts","test/unit/canonical-model/normalization.test.ts","test/unit/observability.test.ts","test/unit/party-definition.test.ts","test/unit/workspace-contract.test.ts"]
+[ELIFECYCLE] Command failed with exit code 1.
+```
+
+`corepack pnpm test:unit` restored observed evidence, aggregation returned
+49/49, and `git_status_after_argv=` was empty.
+
+#### 4. Standalone flows still work
+
+With the last complete run persisted, the two entry points were invoked
+independently:
+
+```text
+$ corepack pnpm test:unit
+standalone_unit_exit=0
+run_before=e2980567-4f2f-4f95-a2be-c613ef9b0f5a
+run_after=e2980567-4f2f-4f95-a2be-c613ef9b0f5a
+# tests 27
+# pass 27
+# fail 0
+$ corepack pnpm check:reachability
+reachability: PASS (49/49 test files executed; 9 producer artifacts)
+git_status_after_standalone=
+```
+
+### Round 2 full-matrix evidence
+
+Pending at the new frozen candidate.
+
+### Round 2 review evidence
+
+Pending one fresh naive read-only `gpt-5.6-sol` xhigh review against the ruled
+six-question charter. Any further incomplete-current-run false green is an
+immediate hard stop.
+
+### Round 2 test it yourself
+
+From the candidate, this exercises both stale-token rejection and the retained
+real-file completeness proof in under ten minutes:
+
+```bash
+cd /home/rvham/2rain-greenfield
+corepack pnpm test
+node --import tsx test/helpers/begin-reachability-run.ts
+! corepack pnpm check:reachability
+corepack pnpm test
+mkdir -p test/orphan-demo
+printf "import test from 'node:test';\ntest('throwaway orphan', () => {});\n" > test/orphan-demo/orphan.test.ts
+! corepack pnpm check:reachability
+rm test/orphan-demo/orphan.test.ts
+rmdir test/orphan-demo
+corepack pnpm check:reachability
+```
+
+The first red must name stale evidence from the prior token. After the second
+full run, the orphan red must name exactly
+`test/orphan-demo/orphan.test.ts`; deleting it must return aggregation to
+49/49.

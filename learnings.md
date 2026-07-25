@@ -145,3 +145,8 @@ How to apply: when static configuration parsing stands in for executed-file evid
 Date: 2026-07-24
 Why: PR-4 found four fail-open static-parser surfaces, and PR-4b found that Node emits a passing file-level event even when a name filter runs no real test in that file.
 How to apply: supersedes “Allowlist every selection-bearing configuration surface” as a completeness mechanism. Accept evidence only from successful declared unfiltered suites and only for real non-skip, non-todo, non-synthetic results; fail on every missing, empty, or unnormalizable artifact. Delivered by `docs/execution/packets/PR-4b.md` and graduated into AGENTS.md section 6.
+
+## Bind evidence to the run that produced it
+Date: 2026-07-25
+Why: PR-4b round 1 could accept a prior artifact when an aggregate producer was skipped or reordered because evidence proved content but not freshness.
+How to apply: begin one run token, stamp it plus observed argv into every producer artifact, and reject missing, stale, unresolvable, or declaration-mismatched evidence before crediting files. See `docs/execution/packets/PR-4b.md`.
