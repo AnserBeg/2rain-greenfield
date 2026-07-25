@@ -123,6 +123,16 @@ silently.
   may shorten the development loop but cannot replace the full matrix. The
   packet's ledger row records the integrated SHA and that full-matrix run.
 - Every `*.test.ts` and `*.spec.ts` file must be proven reachable by executed-file evidence from successful CI-invoked suites.
+- A gate must **observe** the fact it asserts, never a proxy for it. Parsing a
+  tool's output, inferring from a declaration, and matching a string are proxies;
+  reading an execution counter, a produced artifact, or a persisted effect is
+  observation. Where only a proxy is available, the packet record states what the
+  gate cannot prove.
+- Every gate ships with a **negative control for each way it could pass
+  vacuously** — one recorded red per vacuity vector, not one red overall. A gate
+  never observed failing is not evidence. Vacuity vectors include: the subject
+  absent entirely, the check reading zero input, a proxy satisfied while the fact
+  does not hold, and output shapes the parser does not recognize.
 - Deadline, expiry, and elapsed-time logic never compares raw wall-clock
   samples. Production elapsed-time decisions use a monotonic source; timing
   tests inject a controlled clock and never sleep-and-measure.

@@ -160,3 +160,9 @@ How to apply: let the new constraint fail inside the migration transaction, and 
 Date: 2026-07-25
 Why: PR-6's relation query still avoided a sequential scan after its new index was dropped because PostgreSQL used the scope-leading primary key; a “no Seq Scan” assertion would have false-greened.
 How to apply: parse `EXPLAIN (FORMAT JSON)` structurally under the real security role and require the exact declared index or index condition meant to serve the predicate. See `docs/execution/packets/PR-6.md`.
+
+## Make gates observe, and prove each way they could pass vacuously
+Date: 2026-07-25
+Supersedes, as the generalization of: Prove every test is reachable from CI; Use executed evidence for open-ended test runners; Bind evidence to the run that produced it; Require the intended index in plan-shape gates.
+Why: six consecutive learnings entries were the same defect — a gate that passes without proving anything — and each was recorded as an instance rather than graduated, so every packet rediscovered it. PR-6b alone hit four: substring matching on a plan string, a filter counter read on the wrong bitmap node, and a drift query the schema-owning materializer ran under FORCE RLS with no policy, seeing zero rows and passing trivially.
+How to apply: prefer observation (counters, artifacts, persisted effects) over inference (parsing output, reading declarations); enumerate the vacuity vectors before writing the gate and ship a recorded red for each; treat green on a gate never seen red as unproven. Graduated into AGENTS.md section 6.
