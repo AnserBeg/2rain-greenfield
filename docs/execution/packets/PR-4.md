@@ -1,23 +1,28 @@
 # PR-4 — Gate completeness round 2 + coverage audit
 
-Status: active — user-authorized bounded exception fix implemented; matrix and review pending
+Status: evidence_ready — hard-tripwire REVISE surfaced for design adjudication
 Tier: Mechanical
 Branch: `packet/pr-4`
 Base: `982d2df01204107f560469f34336da723ae9cd93`
 Prior reviewed candidate: `7d506f54be1be12d0c5ceb5424a3a7c4ff45a365`
-New frozen candidate: pending
+Frozen reviewed candidate: `7711a89758134b942e77a6a2277fcde05e393537`
 Final evidence commit: post-review record only; reported in the completion block
-Review: pending — the third material finding received a deliberate, named,
-single-fix exception to the two-REVISE cap; this is not a loop reset
+Review: REVISE — the Playwright allowlist correction passed, but a fourth
+same-class fail-open surface tripped the user's hard stop; no further fix round
 
 ## Authority and outcome
 
-PR-4 closes the class of declared-but-unexecuted gates exposed after PR-1. It
-quotes the remaining recursive test globs, independently proves the coverage of
-the five filesystem suites, and adds a fail-closed structural architecture gate
+PR-4 quotes the remaining recursive test globs, independently proves the
+coverage of the five filesystem suites, and adds a structural architecture gate
 that derives every reachable test from CI and package-script declarations. A
-future `*.test.ts` or `*.spec.ts` file that no CI-invoked command executes makes
+future `*.test.ts` or `*.spec.ts` file outside the declared selectors makes
 `test:architecture` red with the exact unreachable path.
+
+The candidate does not yet close the whole declared-but-unexecuted class. The
+authorized Playwright correction is fail-closed, but the fresh review found
+that the Node parser accepts `--test-name-pattern` while ignoring its selection
+effect. That fourth same-class surface triggered the user's required design
+reconsideration stop.
 
 The packet also wires the two hidden compiled-shell guards, removes the dead
 root Playwright scaffold, regenerates the one authorized stale content-addressed
@@ -41,14 +46,15 @@ than `apps/web/release/shell.compiled.json`.
    `run:` form, resolves root and filtered web scripts, parses explicit Node
    test targets, expands quoted globs, and resolves Playwright `testDir`. Exact
    recognized non-test commands and the repository-cleanliness block are
-   classified explicitly; any other CI command, package-script body, option,
-   target, continuation, or mapping throws with the unparsed text. Playwright
+   classified explicitly; unrecognized CI commands, package-script bodies,
+   targets, continuations, and mappings throw with the unparsed text. Playwright
    configuration is parsed as TypeScript and every top-level key must be in an
    explicit selection-neutral allowlist; `testDir` is the sole parsed
    file-selection root. The permanent script allowlist contains only root
    `test` (developer aggregate) and `check:boundaries` (transitively executed
    by `dependency-boundaries.test.ts`). The aggregate is compared with every
-   CI-invoked `test:*` command plus `check:demo-release`.
+   CI-invoked `test:*` command plus `check:demo-release`. Known open finding:
+   the accepted Node `--test-name-pattern` option is treated as selection-neutral.
 4. **Orphans made live or removed.** Root passthroughs and quality-job steps now
    invoke `check:demo-release` and `test:contracts`; the hygiene test requires
    both. The unreferenced root `playwright.config.ts` and its skipped
@@ -81,6 +87,7 @@ than `apps/web/release/shell.compiled.json`.
 | `04e4be7` | Normalize whitespace exposed by the first full-matrix cleanliness gate |
 | `1aa5780` | Retain independent reviewed inventories for all five filesystem suites |
 | `7d506f5` | Parse run-only workflow steps and add a workflow-level fail-closed canary |
+| `7711a89` | Replace the Playwright selection-key denylist with a parsed top-level allowlist and retain its red/green evidence |
 
 ## Required demonstrations
 
@@ -320,7 +327,7 @@ No finding was re-dispositioned in `current-plan.md`.
 ## Full-matrix evidence on the frozen candidate
 
 The complete matrix ran serially from a clean tree at exactly
-`7d506f54be1be12d0c5ceb5424a3a7c4ff45a365`. Focused development runs did not
+`7711a89758134b942e77a6a2277fcde05e393537`. Focused development runs did not
 substitute for it.
 
 | Gate | Result |
@@ -335,40 +342,49 @@ substitute for it.
 | `corepack pnpm test:compiler` | PASS — 49/49 |
 | `corepack pnpm test:integration` | PASS — 42/42 |
 | `corepack pnpm test:agent` | PASS — 1/1 |
-| `corepack pnpm test:architecture` | PASS — 49/49 |
+| `corepack pnpm test:architecture` | PASS — 50/50 |
 | `corepack pnpm test:contracts` | PASS — 6/6 |
 | `corepack pnpm check:demo-release` | PASS |
 | `corepack pnpm check:schema` | PASS — 9 applied, 9 verified, no drift |
 | `corepack pnpm test:postgres` | PASS — 61/61 |
 | `corepack pnpm test:locale` | PASS — 1/1 |
 | `corepack pnpm test:browser` | PASS — 5/5 |
-| Security CI job | PASS — dependency audit; 197-commit clean scan found no leaks; disposable negative fixture found exactly one leak |
+| Security CI job | PASS — dependency audit; 199-commit clean scan found no leaks; disposable negative fixture found exactly one leak |
 | Observability inline CI command | PASS — 5/5 |
 | Patch and tree cleanliness | PASS — `git diff --check main...HEAD`, no tracked or untracked residue |
 
 In addition to the retained development reds above, the first two review
-rounds exposed executable omissions before this final matrix: removal of the
-fixed unit inventory had weakened deletion detection, and a valid run-only YAML
-step (`- run: ...`) was silently skipped. The reviewed five-suite inventories
-and workflow-level parser canary corrected those findings before the final run.
+rounds exposed executable omissions before this matrix: removal of the fixed
+unit inventory had weakened deletion detection, and a valid run-only YAML step
+(`- run: ...`) was silently skipped. Those findings were corrected before this
+run. The matrix is green, but the subsequent hard-tripwire review correctly
+shows that green does not settle the parser design.
 
 ## Review evidence
 
 Every invocation was a new ephemeral, naive, read-only Codex session using
 `gpt-5.6-sol` at xhigh effort. Each received only the frozen diff, owned paths,
-green-gate counts, and the verbatim charter below; no session was resumed.
+green-gate counts, and its bounded charter; no session was resumed. Rounds 1–3
+used the original charter below. Round 4 used the separately recorded
+user-authorized exception charter.
 
 | Round | Frozen SHA | Verdict and disposition |
 |---|---|---|
 | 1 | `04e4be76693820df870e14f3c412ba6e055f0e5b` | **REVISE** — the filesystem was both expected set and command comparator, weakening PR-1's fixed unit inventory and allowing a deleted test to shrink both sides. **Fixed** in `1aa5780` by reviewed inventories for all five suites. |
 | 2 | `1aa578087105bd64d195fd3e0dd5ad925f9bd624` | **REVISE** — a valid run-only workflow step (`- run: ...`) did not match the extractor and was silently skipped. **Fixed** in `7d506f5` with optional-list-marker parsing and a permanent workflow-level negative canary. |
 | 3 | `7d506f54be1be12d0c5ceb5424a3a7c4ff45a365` | **REVISE** — Playwright config parsing rejects `projects`, `testIgnore`, and `testMatch`, but not `grep` or `grepInvert`; either option could select no tests from a file while the gate counts every file under `testDir`. **Fixed under the user's deliberate single-finding exception** by replacing the denylist with a TypeScript-parsed top-level allowlist and adding synthetic plus real-red canaries. |
+| 4 | `7711a89758134b942e77a6a2277fcde05e393537` | **REVISE / HARD TRIPWIRE** — the Playwright fix and its demonstrations pass, and original questions 1–2 and 4–9 have no regression. `parseNodeTestCommand()` accepts `--test-name-pattern=...` at `test/architecture/test-reachability.test.ts:428` but ignores its selection effect before marking every expanded file reachable at line 435. An honest globbed suite can therefore skip every test in a nonmatching file while the reachability gate stays green. **Surfaced; not fixed or dismissed.** |
 
 Round 3 reported no other in-scope material findings: questions 1–2 and 4–9
 passed, including direct byte comparison of all four archives. The user
 authorized exactly one bounded correction and one fresh review. Any newly
 identified fail-open reachability-parser surface is a hard stop for design
 reconsideration, not another fix round.
+
+Round 4 was a fresh ephemeral read-only `gpt-5.6-sol` invocation at xhigh
+effort. It returned **REVISE** with exactly the hard-tripwire finding above and
+modified no files. Per the user's explicit instruction, the writer did not
+open another correction round.
 
 ### Review charter
 
@@ -429,6 +445,31 @@ recorded as debt by design.
 (design-level). For each finding state the question it answers, the concrete
 failure it enables, and the exact file:line.
 
+### Authorized exception review charter
+
+The fourth reviewer received the exact frozen SHA, owned paths, and green
+matrix counts above, plus this bounded scope:
+
+- confirm that the Playwright config now uses a top-level allowlist, rejects
+  every unknown key or structural form with named text, treats `testDir` as the
+  sole interpreted selector, and gives a correct selection-neutral reason for
+  every other allowed current key;
+- confirm the permanent unknown-key canary and the retained real `grep: /x/`
+  red/green demonstration with no residue;
+- identify any other concrete fail-open reachability-parser surface under the
+  honest-omission threat model as a **hard tripwire**, naming the accepted form,
+  omitted tests, and exact line, without proposing or performing a fix; and
+- check only for regressions to original questions 1–2 and 4–9, all of which
+  passed at `7d506f5`.
+
+The threat model remained accidental omission by an honest developer or AI
+writer, not malicious parser evasion. The out-of-scope list remained PR-5,
+PR-6, product behavior, CI topology, parser performance, style, pending plan
+decisions, compiler/release-kernel correctness, archived-review merits,
+byte-exact demo checking, and a static-to-dynamic redesign unless the hard
+tripwire fired. Verdicts remained PASS / REVISE / BLOCK with concrete failure
+and file:line evidence.
+
 ## Test it yourself
 
 From the repository root, the following takes under ten minutes and directly
@@ -454,14 +495,17 @@ contracts at 6/6.
 ## Draft ledger row (do not commit to `ledger.md`)
 
 ```markdown
-| PR-4 | Gate completeness round 2 + coverage audit | G2 corrective | Mechanical | evidence_ready | `7d506f54be1be12d0c5ceb5424a3a7c4ff45a365` | [packet](packets/PR-4.md); full CI matrix green at the exact frozen SHA; every current repository test is structurally reachable from CI; two bounded review findings fixed, then a third fresh Codex `gpt-5.6-sol` xhigh REVISE was surfaced for Playwright `grep`/`grepInvert` selection under the convergence cap. Not accepted. |
+| PR-4 | Gate completeness round 2 + coverage audit | G2 corrective | Mechanical | evidence_ready | `7711a89758134b942e77a6a2277fcde05e393537` | [packet](packets/PR-4.md); full CI matrix green at the exact frozen SHA; the authorized Playwright allowlist correction and real-red canary passed fresh review, but the same review tripped the design stop because Node `--test-name-pattern` selection is accepted without being modeled. REVISE; not accepted. |
 ```
 
 ## Checkpoint
 
-The user-authorized Playwright allowlist correction is implemented and its real
-red/green demonstration is retained. The new exact-SHA full matrix and one
-fresh review remain pending. No program-review trigger fires: PR-4 is a
-mechanical corrective under the still-current G2-P3 whole-app review, with no
-new correctness domain, fan-out, or stage boundary. PR-5 and PR-6 remain
-unstarted and require explicit user selection after PR-4 is accepted.
+The user-authorized Playwright allowlist correction is implemented, its real
+red/green demonstration is retained, and the exact-SHA full matrix is green.
+The fresh review nevertheless found a fourth same-class fail-open parser
+surface, so the explicit hard tripwire fired. No further fix was attempted. The
+candidate is frozen for the user's design adjudication, including whether the
+structural inference should be replaced by executed-file evidence from a test
+reporter. No program-review trigger fires: PR-4 is a mechanical corrective
+under the still-current G2-P3 whole-app review, with no new correctness domain,
+fan-out, or stage boundary. PR-5 and PR-6 remain unstarted.
