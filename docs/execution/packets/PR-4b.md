@@ -1,12 +1,12 @@
 # PR-4b — Executed-file reachability (dynamic ground truth)
 
-Status: active — implementation and demonstrations complete; full matrix and fresh review pending
+Status: blocked — full matrix green; fresh review triggered the packet's explicit hard stop
 Tier: Mechanical
 Branch: `packet/pr-4b`
 Base: `e17da77221772f007c52be74b975e45ba7523759`
-Implementation commits: `8ea8c45f506f3f2a86fdce994fdfda6a0a890e0a`, `ffb6165`
-Frozen reviewed candidate: pending
-Review: pending — one fresh naive `gpt-5.6-sol` xhigh review
+Implementation commits: `8ea8c45f506f3f2a86fdce994fdfda6a0a890e0a`, `ffb6165`, `3925746`
+Frozen reviewed candidate: `3925746b9057f1b071e046ed4359c75e29a19259`
+Review: **REVISE / HARD TRIPWIRE** — one fresh naive `gpt-5.6-sol` xhigh review
 
 ## Authority and outcome
 
@@ -38,6 +38,12 @@ metadata drift, invalid counts, duplicates, any path that is relative,
 nonexistent, or outside the repository, and any executed file outside the
 discovery rules. It then reports every discovered file absent from the union.
 Current local ground truth is 49/49 files from nine artifacts.
+
+The fresh review found a second distinct way for aggregation to report success
+without complete current-run evidence. The packet's binding hard tripwire says
+not to fix that second instance autonomously. The implementation therefore
+remains frozen for an orchestrator design decision; the green matrix below is
+evidence about this exact candidate, not an acceptance claim.
 
 ## CI and local topology
 
@@ -73,7 +79,8 @@ product source, golden file, fixture, or persisted digest changes.
 |---|---|
 | `8ea8c45` | Replace static inference with reporters, normalized evidence, aggregation, CI artifact topology, and permanent canaries |
 | `ffb6165` | Make the root developer aggregate produce observability evidence through the shared declaration |
-| pending | Record doctrine, demonstrations, matrix, and review evidence |
+| `3925746` | Record doctrine and the five required demonstrations before the full matrix and review |
+| evidence-only follow-up | Record the green matrix and hard-tripwire review without changing implementation |
 
 ## Permanent canaries
 
@@ -213,15 +220,76 @@ rerun passed 61/61 and wrote a complete successful artifact.
 
 ## Full-matrix evidence on the frozen candidate
 
-Pending. The complete matrix will run serially from a clean tree at the exact
-frozen SHA; focused development runs do not substitute for it.
+The complete matrix ran serially from a clean tree at exact SHA
+`3925746b9057f1b071e046ed4359c75e29a19259`:
+
+| Gate | Result |
+|---|---|
+| frozen install | green; 13 workspace projects, pnpm 11.9.0 |
+| format | green |
+| lint | green |
+| typecheck | green |
+| dependency boundaries | green; 93 files checked |
+| build | green |
+| unit | green; 27/27 |
+| compiler | green; 49/49 |
+| integration | green; 42/42 |
+| agent | green; 1/1 |
+| architecture | green; 51/51 |
+| demo-release check | green |
+| contracts | green; 6/6 |
+| schema | green; 9 applied / 9 verified, no drift |
+| PostgreSQL | green on the first standalone gate run; 61/61, no retry |
+| locale | green; 1/1; intentionally contributes no evidence |
+| browser | green; 5/5 |
+| observability inline producer | green; 5/5 |
+| executed-file reachability | green; 49/49 files from 9 producer artifacts |
+| security | green; 206 commits scanned with no leak, plus 1 expected disposable-fixture finding |
+| patch and tree cleanliness | green; exact SHA and no tracked or untracked residue |
+
+The successful evidence union comprised: unit 6 files / 27 real results;
+compiler 6/49; integration 9/42; agent 1/1; architecture 12/51; contracts
+1/6; PostgreSQL 11/61; browser 3/5; and observability 3/5.
 
 ## Review evidence
 
-Pending. One fresh, naive, read-only Codex `gpt-5.6-sol` xhigh review will
-receive the exact frozen diff, owned paths, green counts, and the user-supplied
-seven-question charter. Any in-class finding follows the packet's explicit
-hard tripwire.
+A fresh, naive, read-only Codex `gpt-5.6-sol` xhigh review inspected only the
+frozen diff, owned paths, green counts, and the supplied charter. The charter
+asked whether: credited files have real results; all named malformed or missing
+evidence forms fail closed; only declared unfiltered commands produce evidence
+and the declaration is pinned to CI; aggregation waits for every producer and
+shares its local entry point; the five demonstrations are genuine and leave no
+residue; static inference is removed while the shallow checks remain; and the
+diff respects the product/dependency/artifact boundaries. It explicitly barred
+a return to static selection inference and required a second distinct
+incomplete-evidence false green to be labelled `HARD TRIPWIRE`.
+
+Verdict: **REVISE**, with two material findings and no implementation change:
+
+1. **HARD TRIPWIRE — questions 6 and 7.** At frozen
+   `test/architecture/test-reachability.test.ts:372`,
+   `parseAggregateScripts()` credits any textual `corepack pnpm <script>`
+   occurrence. The accepted honest form `echo corepack pnpm test:compiler`
+   satisfies aggregate completeness without executing the compiler producer.
+   Because that form does not clear a previous `compiler.json`, stale evidence
+   can let local aggregation report success without current-run compiler
+   evidence. The reviewer classified this as the second distinct false-green
+   form after the already-handled synthetic Node file event and explicitly
+   invoked the hard tripwire.
+2. **Question 3.** At frozen
+   `test/helpers/reachability-producers.ts:41`, observability's
+   `ciInvocation` names only its suite-id marker, while the special case at
+   `test/architecture/test-reachability.test.ts:201` skips exact command-body
+   verification. An honest edit can omit a positional observability file from
+   `.github/workflows/ci.yml:208` while retaining the declared command metadata.
+   Since those files overlap other producers, union aggregation can remain
+   green while that producer has drifted.
+
+The review passed questions 1, 2, 4, and 5 otherwise. It confirmed that static
+selection inference was removed, the quoted-glob and five-suite inventory
+assertions remain intact, no demonstration residue exists, and no dependency,
+product source, golden, fixture, digest, or unowned path moved. Per the binding
+tripwire, neither finding was patched and no re-review was launched.
 
 ## Test it yourself
 
@@ -246,11 +314,14 @@ first standalone reachability command must be red and name exactly
 
 ## Draft ledger row (do not commit to `ledger.md`)
 
-Pending final SHA and review verdict.
+```text
+| PR-4b | Executed-file reachability (dynamic ground truth) | G2 corrective | Mechanical | blocked | `3925746b9057f1b071e046ed4359c75e29a19259` | [packet](packets/PR-4b.md); full local matrix green at the frozen candidate, but the fresh Codex xhigh review found a second distinct incomplete-evidence false green and triggered the packet's binding hard stop. Awaiting user design decision; not acceptance-ready. |
+```
 
 ## Checkpoint
 
-Pending the full matrix and fresh scoped review. No program-review trigger
-fires: the dual-model G2-P3 review remains current, and PR-4b is a mechanical
-gate corrective that closes its assigned runner-evidence seam without adding a
-product correctness domain, stage boundary, or fan-out.
+Stopped at the explicit hard tripwire with the implementation frozen and both
+findings recorded. No program-review trigger fires: the dual-model G2-P3 review
+remains current, and this mechanical gate corrective adds no product
+correctness domain, stage boundary, or fan-out. PR-4b is not acceptance-ready
+until the user rules on the false-green design seam.
