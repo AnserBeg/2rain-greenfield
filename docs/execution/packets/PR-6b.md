@@ -1,12 +1,12 @@
 # PR-6b — Folded-column index mechanics
 
-Status: blocked — final narrowed Codex review found an out-of-tripwire E4 defect
+Status: active — E4 catalog ruling implemented; fresh Critical review pending
 Tier: Critical
 Branch: `packet/pr-6b`
 Requested base: `28aaf3c`; actual accepted branch point: `3d394a536668519f1eb978065d63f38eee10674e`
 Prior frozen candidates: `b4a0960`, `01ff6c2`, `aefa288`
-Final execution-oracle candidate: `d03c0f6dbb2a2e213ab296856dab878b3ab3647a`
-Review: Codex REVISE; Fable not launched because Critical review requires Codex PASS
+Prior execution-oracle candidate: `d03c0f6dbb2a2e213ab296856dab878b3ab3647a`
+Review: prior Codex REVISE; replacement Codex and Fable pending
 
 ## Authority and outcome
 
@@ -72,10 +72,17 @@ alone:
 
 - `attgenerated = 's'`;
 - collation `C`;
-- the normalized `nsm_unicode_case_fold_v1(source)` generation expression;
+- the exact normalized `nsm_unicode_case_fold_v1(source)` generation expression;
+- SHA-256
+  `64f811a35df63f8ea9c2974c998e181d34b3813cc0d0373c60f2a7ace041323c`
+  over the referenced function's raw `pg_proc.prosrc`;
 - both unique physical indexes over the stored folded column; and
-- zero rows where the generated value is distinct from a fresh fold of its
-  source.
+- in the provider suite, as `north_star_module_runtime` under a known trusted
+  tenant context, a nonzero visible row set with zero rows where the generated
+  value is distinct from a fresh fold of its source.
+
+The production catalog verifier intentionally performs no business-row scan.
+The E4 ruling and negative controls below explain why.
 
 The uniqueness contract remains unchanged. The provider scenarios still prove
 that case-fold-equivalent values conflict across exact/case variants while NFKC
@@ -89,6 +96,148 @@ the generated column, and then attempts the narrowed stored-column unique index.
 PostgreSQL returns `23505`; both original rows remain, and the failed index is
 absent. The constraint is the guard. No row is deleted or rewritten to conceal
 the conflict.
+
+## E4 ruling — prevent fold drift in the catalog, observe rows in tests
+
+The packet rebased onto accepted `main` at `c8bc021`, which added the binding
+rules that a gate observes the fact it claims and demonstrates every way it
+could pass vacuously. The `learnings.md` rebase conflict retained both appended
+entries before this packet's own adjudicated learning was refined.
+
+The prior production row query was vacuous. Migration 0007 makes
+`north_star_module_materializer` the managed schema/table owner; managed tables
+use `FORCE ROW LEVEL SECURITY`; and their policies and DML grants name only
+`north_star_module_runtime`. The materializer is `NOBYPASSRLS`, so its
+`count(*) ... WHERE folded IS DISTINCT FROM fold(source)` query saw zero rows.
+Both the input count and mismatch count were therefore zero, regardless of
+persisted content.
+
+The fix does not widen the materializer's data access and does not add a table
+scan to activation. A stored generated column rejects direct writes and
+PostgreSQL computes its value from its declared expression. Once
+`attgenerated = 's'` and that exact expression are pinned, the reachable drift
+vector is replacing the same-named fold function underneath already stored
+rows. The production verifier now hashes the actual catalog
+`pg_proc.prosrc` and compares it with the pinned v1 digest above. A future fold
+body must therefore mint a new function and folded-column version with an
+accounted rewrite; `CREATE OR REPLACE FUNCTION` under the old name fails the
+catalog gate before any row can silently diverge.
+
+The row assertion remains as independent end-to-end evidence in
+`test/postgres/module-index-conformance.test.ts`. It runs under
+`north_star_module_runtime` in a trusted-context transaction, requires at least
+one visible row per folded subject, and then requires zero mismatches. The
+production catalog path is O(1) in table size; the test path proves the emitted
+shape over actual tenant rows.
+
+### E4 negative controls — one red per vacuity vector
+
+All controls ran against disposable PostgreSQL containers after the rebase.
+Each command exited 1, and a normal run afterward was 3/3 green with relation,
+resolve, and unique planner flips at 100 rows.
+
+1. **Subject absent / zero folded columns**
+
+   ```sh
+   PR6B_DEMONSTRATE_FOLD_CONFORMANCE=subject-absent \
+     node --import tsx --test test/postgres/module-index-conformance.test.ts
+   ```
+
+   ```text
+   not ok 3 - forced-RLS relation, resolve, and unique predicates use their declared indexes
+   error: 'fold catalog conformance observed zero folded columns'
+   # tests 3
+   # pass 2
+   # fail 1
+   ```
+
+2. **Same function name, changed body**
+
+   ```sh
+   PR6B_DEMONSTRATE_FOLD_CONFORMANCE=function-source \
+     node --import tsx --test test/postgres/module-index-conformance.test.ts
+   ```
+
+   ```text
+   not ok 3 - forced-RLS relation, resolve, and unique predicates use their declared indexes
+   error: |-
+     fold function source digest changed: nsm_t_jzr3rnshvgk5ddy3mfqsfxdbwt2wekn5tclqqzhbscjttwrvlzza.nsm_c_frwqqfk6miakviqx5sqfxbyvqqceshj6umszcx5cev5q4ly2xuma
+     + actual - expected
+
+     + 'ff8d75ca7cb4a82182e6b375ff217b74d8f04cbcde43b3c2dc9853901c597e25'
+     - '64f811a35df63f8ea9c2974c998e181d34b3813cc0d0373c60f2a7ace041323c'
+   # tests 3
+   # pass 2
+   # fail 1
+   ```
+
+   The production `verifyLiveCatalog()` path has a permanent same-name body
+   replacement canary and reports
+   `managed function source digest nsm_unicode_case_fold_v1(value text)`.
+
+3. **Unexpected generation expression**
+
+   ```sh
+   PR6B_DEMONSTRATE_FOLD_CONFORMANCE=generation-expression \
+     node --import tsx --test test/postgres/module-index-conformance.test.ts
+   ```
+
+   ```text
+   not ok 3 - forced-RLS relation, resolve, and unique predicates use their declared indexes
+   error: |-
+     fold generation expression changed: nsm_t_jzr3rnshvgk5ddy3mfqsfxdbwt2wekn5tclqqzhbscjttwrvlzza.nsm_c_vzbun2j3bnoe276ocuuudz43limqmjypmydgxmrkfx6w3rdnylpa
+     + actual - expected
+
+     + 'nsm_c_on6zjh4vcpvtjitxbmhyvfdfkn4w3xvvnpvm3wuulpnaunajnqjq::text'
+     - 'north_star_module.nsm_unicode_case_fold_v1(nsm_c_on6zjh4vcpvtjitxbmhyvfdfkn4w3xvvnpvm3wuulpnaunajnqjq::text)'
+   # tests 3
+   # pass 2
+   # fail 1
+   ```
+
+   A permanent in-suite canary independently rejects an unexpected
+   `attgenerated` value.
+
+4. **Row check sees zero RLS-visible input**
+
+   ```sh
+   PR6B_DEMONSTRATE_FOLD_CONFORMANCE=zero-visible-rows \
+     node --import tsx --test test/postgres/module-index-conformance.test.ts
+   ```
+
+   ```text
+   not ok 3 - forced-RLS relation, resolve, and unique predicates use their declared indexes
+   error: 'fold row conformance observed zero visible rows for nsm_t_jzr3rnshvgk5ddy3mfqsfxdbwt2wekn5tclqqzhbscjttwrvlzza.nsm_c_frwqqfk6miakviqx5sqfxbyvqqceshj6umszcx5cev5q4ly2xuma'
+   expected: '0'
+   actual: '0'
+   operator: 'notStrictEqual'
+   # tests 3
+   # pass 2
+   # fail 1
+   ```
+
+The relocated row oracle itself also has a real negative control. The catalog
+shape is first verified, the same-name function body is then replaced, and all
+10,000 visible rows disagree with their stored value:
+
+```sh
+PR6B_DEMONSTRATE_FOLD_CONFORMANCE=row-drift \
+  node --import tsx --test test/postgres/module-index-conformance.test.ts
+```
+
+```text
+not ok 3 - forced-RLS relation, resolve, and unique predicates use their declared indexes
+error: |-
+  fold row conformance observed generated-value drift for nsm_t_jzr3rnshvgk5ddy3mfqsfxdbwt2wekn5tclqqzhbscjttwrvlzza.nsm_c_frwqqfk6miakviqx5sqfxbyvqqceshj6umszcx5cev5q4ly2xuma
+
+  '10000' !== '0'
+expected: '0'
+actual: '10000'
+operator: 'strictEqual'
+# tests 3
+# pass 2
+# fail 1
+```
 
 ## R3 descope — search semantics before range lowering
 
@@ -301,6 +450,13 @@ percentiles or error budgets.
   outside the transaction while leaving `pg_stat_force_next_flush()` between
   query execution and commit/read produced the expected delta 1 from 100 rows
   onward.
+- The first relocated row-evidence run queried the right runtime-visible rows
+  but read PostgreSQL's `observed_rows` result as the camel-case
+  `observedRows`; it also issued parallel queries on one `pg` client. The run
+  failed closed with
+  `fold row conformance returned an invalid row count for <table>.<column>`.
+  Mapping the observed SQL field explicitly and reading each folded subject
+  sequentially returned the focused journey to 3/3 green.
 
 ## Full-matrix evidence
 

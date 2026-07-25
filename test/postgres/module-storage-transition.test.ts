@@ -1652,6 +1652,34 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
               'DROP FUNCTION north_star_module.rogue_function()',
             );
 
+            const foldFunctionDefinition = await pool.query<{
+              definition: string;
+            }>(
+              `SELECT pg_get_functiondef(routine.oid) AS definition
+                 FROM pg_proc AS routine
+                 JOIN pg_namespace AS namespace
+                   ON namespace.oid = routine.pronamespace
+                WHERE namespace.nspname = 'north_star_module'
+                  AND routine.proname = 'nsm_unicode_case_fold_v1'
+                  AND pg_get_function_identity_arguments(routine.oid) =
+                        'value text'`,
+            );
+            assert.equal(foldFunctionDefinition.rows.length, 1);
+            await pool.query(
+              `CREATE OR REPLACE FUNCTION north_star_module.nsm_unicode_case_fold_v1(value text)
+                 RETURNS text
+                 LANGUAGE sql
+                 IMMUTABLE STRICT PARALLEL SAFE
+                 SET search_path = pg_catalog
+                 AS $case_fold$ SELECT value $case_fold$`,
+            );
+            await assertCatalogDrift(
+              materializer,
+              contexts.a,
+              /managed function source digest nsm_unicode_case_fold_v1\(value text\)/,
+            );
+            await pool.query(foldFunctionDefinition.rows[0]!.definition);
+
             await pool.query(
               `CREATE TYPE north_star_module.rogue_type AS ENUM ('rogue')`,
             );

@@ -1,11 +1,14 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import test from 'node:test';
 
 import type { Pool, PoolClient } from 'pg';
 
 import type { StorageTargetPayloadV1 } from '../../packages/compiler/src/index.js';
+import { MODULE_UNICODE_CASE_FOLD_V1_SOURCE_SHA256 } from '../../packages/postgres-provider/src/module-storage-materializer.js';
 import { buildFoldedMatchPredicate } from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
 import { withTrustedRequestTransaction } from '../../packages/postgres-provider/src/request-context.js';
+import type { TrustedRequestContext } from '../../packages/runtime/src/request-context.js';
 import { PARTY_IDS } from '../fixtures/g2/party/definition.js';
 import {
   PARTY_TEST_SCOPE,
@@ -17,6 +20,8 @@ const targetRow = 7;
 const demonstrateMissingIndex = process.env.PR6_DEMONSTRATE_MISSING_INDEX;
 const demonstrateMissingFoldedIndex =
   process.env.PR6B_DEMONSTRATE_MISSING_INDEX;
+const demonstrateFoldConformance =
+  process.env.PR6B_DEMONSTRATE_FOLD_CONFORMANCE;
 
 if (
   demonstrateMissingIndex !== undefined &&
@@ -32,6 +37,20 @@ if (
 ) {
   throw new Error(
     `unsupported PR6B_DEMONSTRATE_MISSING_INDEX value: ${demonstrateMissingFoldedIndex}`,
+  );
+}
+if (
+  demonstrateFoldConformance !== undefined &&
+  ![
+    'function-source',
+    'generation-expression',
+    'row-drift',
+    'subject-absent',
+    'zero-visible-rows',
+  ].includes(demonstrateFoldConformance)
+) {
+  throw new Error(
+    `unsupported PR6B_DEMONSTRATE_FOLD_CONFORMANCE value: ${demonstrateFoldConformance}`,
   );
 }
 
@@ -97,6 +116,57 @@ test('EXPLAIN plan guard rejects sequential and wrong-index scans structurally',
         'Rows Removed by Filter': '3',
       }),
     /unrecognized EXPLAIN rows removed by filter: 3/,
+  );
+});
+
+test('fold conformance rejects absent subjects, altered catalog shape, changed source, and zero-row evidence', () => {
+  assert.throws(
+    () => requireFoldSubjects([]),
+    /fold catalog conformance observed zero folded columns/,
+  );
+  const expected: FoldCatalogExpectation = {
+    columnName: 'value_folded',
+    expression: 'north_star_module.nsm_unicode_case_fold_v1(value)',
+    tableName: 'example',
+  };
+  const actual: FoldCatalogEvidence = {
+    collation: 'C',
+    expression: expected.expression,
+    generatedKind: 's',
+    sourceDigest: MODULE_UNICODE_CASE_FOLD_V1_SOURCE_SHA256,
+  };
+  assert.throws(
+    () =>
+      assertFoldCatalogEvidence(
+        { ...actual, sourceDigest: '0'.repeat(64) },
+        expected,
+      ),
+    /fold function source digest changed/,
+  );
+  assert.throws(
+    () =>
+      assertFoldCatalogEvidence({ ...actual, expression: 'value' }, expected),
+    /fold generation expression changed/,
+  );
+  assert.throws(
+    () => assertFoldCatalogEvidence({ ...actual, generatedKind: '' }, expected),
+    /fold column is not GENERATED ALWAYS AS STORED/,
+  );
+  assert.throws(
+    () =>
+      assertFoldRowEvidence(
+        { mismatches: '0', observedRows: '0' },
+        'example.value_folded',
+      ),
+    /fold row conformance observed zero visible rows/,
+  );
+  assert.throws(
+    () =>
+      assertFoldRowEvidence(
+        { mismatches: '1', observedRows: '1' },
+        'example.value_folded',
+      ),
+    /fold row conformance observed generated-value drift/,
   );
 });
 
@@ -206,7 +276,35 @@ test('forced-RLS relation, resolve, and unique predicates use their declared ind
       'unique',
       foldedIndexRequirements(targets, 'unique'),
     );
-    await assertGeneratedFoldCatalog(runtime.adminPool, targets);
+    if (demonstrateFoldConformance === 'function-source') {
+      await installIdentityFoldFunction(runtime.adminPool);
+    }
+    if (demonstrateFoldConformance === 'generation-expression') {
+      await runtime.adminPool.query(
+        `DROP INDEX north_star_module.${quoted(targets.nameFoldedIndex.physicalName)};
+         ALTER TABLE north_star_module.${quoted(targets.party.physicalTableName)}
+           DROP COLUMN ${quoted(targets.nameFoldedColumn.physicalName)};
+         ALTER TABLE north_star_module.${quoted(targets.party.physicalTableName)}
+           ADD COLUMN ${quoted(targets.nameFoldedColumn.physicalName)} text COLLATE "C"
+           GENERATED ALWAYS AS (${quoted(targets.nameColumn.physicalName)}::text) STORED`,
+      );
+    }
+
+    await assertGeneratedFoldCatalog(
+      runtime.adminPool,
+      targets,
+      demonstrateFoldConformance === 'subject-absent' ? [] : undefined,
+    );
+    if (demonstrateFoldConformance === 'row-drift') {
+      await installIdentityFoldFunction(runtime.adminPool);
+    }
+    await assertGeneratedFoldRows(
+      runtime.runtimePool,
+      demonstrateFoldConformance === 'zero-visible-rows'
+        ? runtime.contexts.b
+        : runtime.contexts.a,
+      targets,
+    );
   });
 });
 
@@ -515,46 +613,244 @@ async function readIndexScanCounters(
 async function assertGeneratedFoldCatalog(
   pool: Pool,
   targets: RelationTargets,
+  subjectOverride?: readonly FoldSubject[],
 ): Promise<void> {
-  for (const entity of [targets.party, targets.role]) {
-    for (const foldedColumn of entity.foldedColumns) {
-      const catalog = await pool.query<{
-        collation_name: string;
-        expression: string;
-        generated_kind: string;
-      }>(
-        `SELECT attribute.attgenerated AS generated_kind,
-                collation_record.collname AS collation_name,
-                pg_get_expr(definition.adbin, definition.adrelid, true) AS expression
-           FROM pg_attribute AS attribute
-           JOIN pg_class AS relation ON relation.oid = attribute.attrelid
-           JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
-           JOIN pg_attrdef AS definition
-             ON definition.adrelid = attribute.attrelid
-            AND definition.adnum = attribute.attnum
-           JOIN pg_collation AS collation_record
-             ON collation_record.oid = attribute.attcollation
-          WHERE namespace.nspname = 'north_star_module'
-            AND relation.relname = $1
-            AND attribute.attname = $2`,
-        [entity.physicalTableName, foldedColumn.physicalName],
-      );
-      assert.equal(catalog.rows.length, 1);
-      assert.equal(catalog.rows[0]?.generated_kind, 's');
-      assert.equal(catalog.rows[0]?.collation_name, 'C');
-      assert.match(
-        catalog.rows[0]?.expression ?? '',
-        new RegExp(`nsm_unicode_case_fold_v1\\(.*${foldedColumn.sourceColumn}`),
-      );
-      const drift = await pool.query<{ mismatches: string }>(
-        `SELECT count(*)::text AS mismatches
-           FROM north_star_module.${quoted(entity.physicalTableName)}
-          WHERE ${quoted(foldedColumn.physicalName)} IS DISTINCT FROM
-                north_star_module.nsm_unicode_case_fold_v1(${quoted(foldedColumn.sourceColumn)}::text)`,
-      );
-      assert.equal(drift.rows[0]?.mismatches, '0');
-    }
+  const subjects = requireFoldSubjects(
+    subjectOverride ?? foldedSubjects(targets),
+  );
+  const foldFunction = await pool.query<{ source: string }>(
+    `SELECT routine.prosrc AS source
+       FROM pg_proc AS routine
+       JOIN pg_namespace AS namespace ON namespace.oid = routine.pronamespace
+      WHERE namespace.nspname = 'north_star_module'
+        AND routine.proname = 'nsm_unicode_case_fold_v1'
+        AND pg_get_function_identity_arguments(routine.oid) = 'value text'`,
+  );
+  assert.equal(
+    foldFunction.rows.length,
+    1,
+    'fold catalog conformance requires exactly one referenced fold function',
+  );
+  const sourceDigest = createHash('sha256')
+    .update(foldFunction.rows[0]!.source)
+    .digest('hex');
+  for (const subject of subjects) {
+    const catalog = await pool.query<{
+      collation_name: string | null;
+      expression: string | null;
+      generated_kind: string;
+    }>(
+      `SELECT attribute.attgenerated AS generated_kind,
+              collation_record.collname AS collation_name,
+              pg_get_expr(definition.adbin, definition.adrelid, true) AS expression
+         FROM pg_attribute AS attribute
+         JOIN pg_class AS relation ON relation.oid = attribute.attrelid
+         JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+         LEFT JOIN pg_attrdef AS definition
+           ON definition.adrelid = attribute.attrelid
+          AND definition.adnum = attribute.attnum
+         LEFT JOIN pg_collation AS collation_record
+           ON collation_record.oid = attribute.attcollation
+        WHERE namespace.nspname = 'north_star_module'
+          AND relation.relname = $1
+          AND attribute.attname = $2
+          AND attribute.attnum > 0
+          AND NOT attribute.attisdropped`,
+      [subject.expectation.tableName, subject.expectation.columnName],
+    );
+    assert.equal(
+      catalog.rows.length,
+      1,
+      `fold catalog conformance missing ${subject.expectation.tableName}.${subject.expectation.columnName}`,
+    );
+    const observed = catalog.rows[0]!;
+    assertFoldCatalogEvidence(
+      {
+        collation: observed.collation_name,
+        expression: observed.expression,
+        generatedKind: observed.generated_kind,
+        sourceDigest,
+      },
+      subject.expectation,
+    );
   }
+}
+
+async function installIdentityFoldFunction(pool: Pool): Promise<void> {
+  await pool.query(
+    `CREATE OR REPLACE FUNCTION north_star_module.nsm_unicode_case_fold_v1(value text)
+       RETURNS text
+       LANGUAGE sql
+       IMMUTABLE STRICT PARALLEL SAFE
+       SET search_path = pg_catalog
+       AS $case_fold$ SELECT value $case_fold$`,
+  );
+}
+
+interface FoldCatalogEvidence {
+  readonly collation: string | null;
+  readonly expression: string | null;
+  readonly generatedKind: string;
+  readonly sourceDigest: string;
+}
+
+interface FoldCatalogExpectation {
+  readonly columnName: string;
+  readonly expression: string;
+  readonly tableName: string;
+}
+
+interface FoldSubject {
+  readonly expectation: FoldCatalogExpectation;
+  readonly foldedColumn: StorageTargetPayloadV1['entities'][number]['foldedColumns'][number];
+}
+
+interface FoldRowEvidence {
+  readonly mismatches: string;
+  readonly observedRows: string;
+}
+
+function foldedSubjects(targets: RelationTargets): readonly FoldSubject[] {
+  return [targets.party, targets.role].flatMap((entity) =>
+    entity.foldedColumns.map((foldedColumn) => {
+      const source = entity.columns.find(
+        (column) => column.physicalName === foldedColumn.sourceColumn,
+      );
+      assert.ok(
+        source,
+        `folded column ${foldedColumn.physicalName} lacks its declared source`,
+      );
+      return {
+        expectation: {
+          columnName: foldedColumn.physicalName,
+          expression: `${foldedColumn.foldFunction}(${foldedColumn.sourceColumn}${source.postgresqlType === 'text' ? '' : '::text'})`,
+          tableName: entity.physicalTableName,
+        },
+        foldedColumn,
+      };
+    }),
+  );
+}
+
+function requireFoldSubjects(
+  subjects: readonly FoldSubject[],
+): readonly FoldSubject[] {
+  assert.ok(
+    subjects.length > 0,
+    'fold catalog conformance observed zero folded columns',
+  );
+  return subjects;
+}
+
+function assertFoldCatalogEvidence(
+  evidence: FoldCatalogEvidence,
+  expected: FoldCatalogExpectation,
+): void {
+  const subject = `${expected.tableName}.${expected.columnName}`;
+  assert.equal(
+    evidence.generatedKind,
+    's',
+    `fold column is not GENERATED ALWAYS AS STORED: ${subject}`,
+  );
+  assert.equal(
+    evidence.collation,
+    'C',
+    `fold column lost C collation: ${subject}`,
+  );
+  assert.equal(
+    normalizeCatalogExpression(evidence.expression),
+    normalizeCatalogExpression(expected.expression),
+    `fold generation expression changed: ${subject}`,
+  );
+  assert.equal(
+    evidence.sourceDigest,
+    MODULE_UNICODE_CASE_FOLD_V1_SOURCE_SHA256,
+    `fold function source digest changed: ${subject}`,
+  );
+}
+
+async function assertGeneratedFoldRows(
+  pool: Pool,
+  context: TrustedRequestContext,
+  targets: RelationTargets,
+): Promise<void> {
+  const subjects = requireFoldSubjects(foldedSubjects(targets));
+  const evidence = await withTrustedRequestTransaction(
+    pool,
+    context,
+    async (client) => {
+      await client.query('SET LOCAL ROLE north_star_module_runtime');
+      try {
+        const results: Array<{
+          evidence: FoldRowEvidence;
+          subject: string;
+        }> = [];
+        for (const subject of subjects) {
+          const result = await client.query<{
+            mismatches: string;
+            observed_rows: string;
+          }>(
+            `SELECT count(*)::text AS observed_rows,
+                    count(*) FILTER (
+                      WHERE ${quoted(subject.foldedColumn.physicalName)} IS DISTINCT FROM
+                            north_star_module.nsm_unicode_case_fold_v1(${quoted(subject.foldedColumn.sourceColumn)}::text)
+                    )::text AS mismatches
+               FROM north_star_module.${quoted(subject.expectation.tableName)}`,
+          );
+          assert.equal(
+            result.rows.length,
+            1,
+            `fold row conformance returned no aggregate for ${subject.expectation.tableName}.${subject.expectation.columnName}`,
+          );
+          results.push({
+            evidence: {
+              mismatches: result.rows[0]!.mismatches,
+              observedRows: result.rows[0]!.observed_rows,
+            },
+            subject: `${subject.expectation.tableName}.${subject.expectation.columnName}`,
+          });
+        }
+        return results;
+      } finally {
+        await client.query('RESET ROLE');
+      }
+    },
+  );
+  for (const observed of evidence) {
+    assertFoldRowEvidence(observed.evidence, observed.subject);
+  }
+}
+
+function assertFoldRowEvidence(
+  evidence: FoldRowEvidence,
+  subject: string,
+): void {
+  assert.match(
+    evidence.observedRows,
+    /^(?:0|[1-9][0-9]*)$/,
+    `fold row conformance returned an invalid row count for ${subject}`,
+  );
+  assert.match(
+    evidence.mismatches,
+    /^(?:0|[1-9][0-9]*)$/,
+    `fold row conformance returned an invalid mismatch count for ${subject}`,
+  );
+  assert.notEqual(
+    evidence.observedRows,
+    '0',
+    `fold row conformance observed zero visible rows for ${subject}`,
+  );
+  assert.equal(
+    evidence.mismatches,
+    '0',
+    `fold row conformance observed generated-value drift for ${subject}`,
+  );
+}
+
+function normalizeCatalogExpression(value: string | null): string | null {
+  return value === null
+    ? null
+    : value.trim().replace(/\s+/g, ' ').replaceAll('"', '');
 }
 
 async function explain(

@@ -34,6 +34,8 @@ import type { Pool, PoolClient, QueryResultRow } from 'pg';
 const sha256Pattern = /^[0-9a-f]{64}$/;
 const identifierPattern = /^[a-z][a-z0-9_]{0,62}$/;
 const unicodeCaseFoldFunctionName = 'nsm_unicode_case_fold_v1';
+export const MODULE_UNICODE_CASE_FOLD_V1_SOURCE_SHA256 =
+  '64f811a35df63f8ea9c2974c998e181d34b3813cc0d0373c60f2a7ace041323c';
 const allowedTypes = [
   /^boolean$/,
   /^date$/,
@@ -1493,23 +1495,6 @@ async function verifyCatalogOnClient(
     })),
     (value) => `${value.tableName}.${value.name}`,
   );
-  if (drift.length === 0) {
-    for (const entity of expectedTables.values()) {
-      for (const foldedColumn of entity.foldedColumns ?? []) {
-        const mismatch = await client.query<{ mismatches: string }>(
-          `SELECT count(*)::text AS mismatches
-             FROM north_star_module.${quoted(entity.physicalTableName)}
-            WHERE ${quoted(foldedColumn.physicalName)} IS DISTINCT FROM
-                  ${unicodeCaseFoldSql(quoted(foldedColumn.sourceColumn))}`,
-        );
-        if (mismatch.rows[0]?.mismatches !== '0') {
-          drift.push(
-            `managed generated fold drift ${entity.physicalTableName}.${foldedColumn.physicalName}: ${mismatch.rows[0]?.mismatches ?? 'unknown'} mismatched rows`,
-          );
-        }
-      }
-    }
-  }
 
   const constraints = await client.query<{
     columns: string[];
@@ -1857,6 +1842,21 @@ async function verifyCatalogOnClient(
       WHERE namespace.nspname = 'north_star_module'
       ORDER BY routine.proname, arguments`,
   );
+  const unicodeCaseFoldFunction = functions.rows.find(
+    (routine) =>
+      routine.name === unicodeCaseFoldFunctionName &&
+      routine.arguments === 'value text',
+  );
+  if (expectedTables.size > 0 && unicodeCaseFoldFunction) {
+    const sourceDigest = createHash('sha256')
+      .update(unicodeCaseFoldFunction.source)
+      .digest('hex');
+    if (sourceDigest !== MODULE_UNICODE_CASE_FOLD_V1_SOURCE_SHA256) {
+      drift.push(
+        `managed function source digest ${unicodeCaseFoldFunctionName}(value text) expected ${MODULE_UNICODE_CASE_FOLD_V1_SOURCE_SHA256} but received ${sourceDigest}`,
+      );
+    }
+  }
   compareCatalogCollection(
     drift,
     'managed function',

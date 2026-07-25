@@ -170,7 +170,7 @@ How to apply: prefer observation (counters, artifacts, persisted effects) over i
 ## Move security-sensitive normalization into an accounted stored shape
 Date: 2026-07-25
 Why: forced RLS kept a non-leakproof row-side fold out of index conditions, while a stored C-collated fold column made equality predicates ordinary leakproof comparisons.
-How to apply: compile the generated expression, collation, equality index, runtime predicate, catalog shape, and row-drift probe as one versioned contract; a future fold version mints a new function and column and requires an accounted rewrite. See `docs/execution/packets/PR-6b.md`.
+How to apply: compile the generated expression, collation, equality index, and runtime predicate as one versioned contract; pin the generation expression and fold-function source digest in the production catalog check, and run row equality evidence only as the runtime role with a nonzero-visible-row assertion. A future fold version mints a new function and column and requires an accounted rewrite. See `docs/execution/packets/PR-6b.md`.
 
 ## Observe index execution across the whole plan tree
 Date: 2026-07-25
