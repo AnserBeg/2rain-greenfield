@@ -1,6 +1,6 @@
 # PR-6b — Folded-column index mechanics
 
-Status: active — implementation evidence green; full matrix and Critical review pending
+Status: active — round-1 findings fixed; replacement matrix and Critical review pending
 Tier: Critical
 Branch: `packet/pr-6b`
 Requested base: `28aaf3c`; actual accepted branch point: `3d394a536668519f1eb978065d63f38eee10674e`
@@ -108,9 +108,17 @@ without `matchMode`, while the same input in prefix mode is not.
 `test/postgres/module-index-conformance.test.ts` exercises the real compiled
 Party module as the forced-RLS `NOBYPASSRLS` runtime role. It covers relation,
 advisory resolve, case-insensitive unique lookup, and prefix range predicates.
+The folded probes use the interpreter's complete query shape: selected record
+columns, archive predicate, `ORDER BY record_id`, runtime limit, and—for Party
+prefix search—the OR across both searchable fields. The prefix value selects a
+real row at the largest milestone without turning the predicate into a broad
+11%-of-table request for which the ordering index is legitimately cheaper.
+
 The table grows through 10, 100, 500, 1,000, 5,000, and 10,000-row milestones,
-with `ANALYZE` at every milestone. On the pinned image all four predicates first
-choose their intended indexes at **100 rows**.
+with `ANALYZE` and a plan assertion at every milestone. Once a predicate first
+uses its intended index, any later milestone that stops doing so is red. On the
+pinned image all four predicates first choose their intended indexes at **100
+rows** and retain them through 10,000 rows.
 
 The gate walks `EXPLAIN (FORMAT JSON)` structurally, fails closed on unknown
 envelopes, node types, child collections, index names, and index-condition
@@ -135,21 +143,22 @@ It dropped the declared advisory-resolve index only inside the ephemeral
 database and produced:
 
 ```text
-# PR-6b prefix planner flip rows=100; analyzed rows=100
-# PR-6b relation planner flip rows=100; analyzed rows=100
-# PR-6b resolve planner flip rows=100; analyzed rows=100
-# PR-6b unique planner flip rows=100; analyzed rows=100
+# PR-6b prefix planner flip rows=100; analyzed rows=10000
+# PR-6b relation planner flip rows=100; analyzed rows=10000
+# PR-6b resolve planner flip rows=100; analyzed rows=10000
+# PR-6b unique planner flip rows=100; analyzed rows=10000
 not ok 2 - forced-RLS relation, resolve, unique, and prefix predicates use their declared indexes
-error: 'resolve predicate did not use expected folded index nsm_i_swxw5hidgwkk4fgmyjyzplq3zpetzcnyqwaivlkdhx7v634tffra; used nsm_i_ma6nkvkk54syueq7c3jw5pytacq5onwiiquotptewaxhyg3ibxaa'
+error: 'resolve predicate did not use expected folded index nsm_i_swxw5hidgwkk4fgmyjyzplq3zpetzcnyqwaivlkdhx7v634tffra; used nsm_k_jbe7q7wxb6o3hmshj2wokbak4dxkhmm2cnzohhhdg7nztdodmf3a'
 # tests 2
 # pass 1
 # fail 1
 red_exit=1
 ```
 
-The immediate normal rerun returned 2/2 and repeated all four 100-row flip
-lines. Each run provisions and destroys its own PostgreSQL container, so the
-dropped index left no database or repository residue.
+The immediate normal rerun returned 2/2, repeated all four 100-row flip lines,
+and reported 10,000 analyzed rows. Each run provisions and destroys its own
+PostgreSQL container, so the dropped index left no database or repository
+residue.
 
 ## Pre-existing-table boundary
 
@@ -230,6 +239,17 @@ percentiles or error budgets.
   original fail-closed diagnostic while still checking every conforming table.
 - The first `corepack pnpm format` run was red on five changed source/test files.
   Formatting only the owned files returned format, lint, and typecheck green.
+- The first round-1 probe fix used the complete ordered query and correctly
+  failed closed on the newly observed `Sort` plan node. Admitting that known
+  structural node made the plan readable without weakening any scan or index
+  assertion.
+- A broad prefix (`Ordinary party 7`) matched roughly 11% of the 10,000-row
+  fixture. Its real `ORDER BY record_id LIMIT 100` plan correctly moved from the
+  folded bitmap indexes to the ordering index at 10,000 rows, producing:
+  `prefix predicate stopped using its declared index at 10000 analyzed rows
+  after first using it at 100`. The conformance probe now uses the selective,
+  real-row prefix `Ordinary party 7000`; it exercises the identical runtime SQL
+  shape and requires both searchable-field indexes through every milestone.
 - The exact-name missing-index demonstration above remains retained as the
   required genuine negative control.
 
@@ -239,7 +259,23 @@ Pending the frozen candidate run.
 
 ## Review evidence
 
-Pending the fresh Critical Codex review and identical-SHA Fable confirmation.
+Round 1 reviewed `b4a0960639824e3ca386b6bd293884ab03b648a2`. Codex returned
+`REVISE` with two in-scope findings:
+
+1. The prefix probe simplified the interpreter query to one column and omitted
+   its selected columns, second searchable field, ordering, and runtime limit.
+   Disposition: fixed. The probe now explains the real Party search shape and
+   requires both folded index classes.
+2. The milestone loop stopped as soon as all predicates first flipped at 100
+   rows, so the advertised larger milestones were never evaluated.
+   Disposition: fixed. Every milestone now runs, is analyzed, and must retain
+   its intended plan after the first flip.
+
+The first finding is the packet's first hard-tripwire-class finding. The one
+authorized bounded fix has therefore been consumed. Any further finding that an
+emitted index does not serve its intended predicate or that the plan gate cannot
+fail is a hard stop. The fresh replacement Codex review and identical-SHA Fable
+confirmation remain pending.
 
 ## Test it yourself
 
