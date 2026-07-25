@@ -325,8 +325,8 @@ async function migrateAndSeed(pool: pg.Pool): Promise<void> {
       client,
       await loadMigrations(migrations),
     );
-    assert.equal(result.applied.length, 9);
-    assert.equal(result.verified.length, 9);
+    assert.equal(result.applied.length, 10);
+    assert.equal(result.verified.length, 10);
     for (const [scope, slug] of [
       [PARTY_TEST_SCOPE.a, 'party-a'],
       [PARTY_TEST_SCOPE.b, 'party-b'],

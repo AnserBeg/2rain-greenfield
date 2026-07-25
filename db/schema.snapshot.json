@@ -9907,7 +9907,7 @@
       "domain": null,
       "name": "semantic_operation_receipts_pkey",
       "type": "p",
-      "definition": "PRIMARY KEY (tenant_id, environment_id, principal_id, release_id, release_content_hash, action_id, idempotency_key)",
+      "definition": "PRIMARY KEY (tenant_id, environment_id, action_id, idempotency_key)",
       "deferrable": false,
       "initially_deferred": false,
       "validated": true,
@@ -12437,7 +12437,7 @@
       "name": "semantic_operation_receipts_pkey",
       "owner": "postgres",
       "access_method": "btree",
-      "definition": "CREATE UNIQUE INDEX semantic_operation_receipts_pkey ON platform.semantic_operation_receipts USING btree (tenant_id, environment_id, principal_id, release_id, release_content_hash, action_id, idempotency_key)",
+      "definition": "CREATE UNIQUE INDEX semantic_operation_receipts_pkey ON platform.semantic_operation_receipts USING btree (tenant_id, environment_id, action_id, idempotency_key)",
       "is_unique": true,
       "is_primary": true,
       "is_exclusion": false,
@@ -13294,7 +13294,7 @@
       "roles": ["north_star_runtime"],
       "command": "a",
       "using_expression": null,
-      "check_expression": "tenant_id = NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text)::uuid AND environment_id = NULLIF(current_setting('north_star.environment_id'::text, true), ''::text)::uuid AND principal_id = NULLIF(current_setting('north_star.principal_id'::text, true), ''::text)::uuid"
+      "check_expression": "tenant_id = NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text)::uuid AND environment_id = NULLIF(current_setting('north_star.environment_id'::text, true), ''::text)::uuid"
     },
     {
       "schema": "platform",
@@ -13303,7 +13303,7 @@
       "permissive": true,
       "roles": ["north_star_runtime"],
       "command": "r",
-      "using_expression": "tenant_id = NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text)::uuid AND environment_id = NULLIF(current_setting('north_star.environment_id'::text, true), ''::text)::uuid AND principal_id = NULLIF(current_setting('north_star.principal_id'::text, true), ''::text)::uuid",
+      "using_expression": "tenant_id = NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text)::uuid AND environment_id = NULLIF(current_setting('north_star.environment_id'::text, true), ''::text)::uuid",
       "check_expression": null
     },
     {

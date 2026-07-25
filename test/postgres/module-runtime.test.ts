@@ -46,6 +46,8 @@ import {
 } from '../../packages/postgres-provider/src/migrations.js';
 import { PostgresImmutableReleaseRepository } from '../../packages/postgres-provider/src/release-repository.js';
 import { PostgresRequestRuntimeViewService } from '../../packages/postgres-provider/src/request-runtime-view-service.js';
+import { withTrustedRequestTransaction } from '../../packages/postgres-provider/src/request-context.js';
+import { TrustEvidenceError } from '../../packages/postgres-provider/src/trust/postgres-trust-service.js';
 import { TrustedActorEnvelopeIssuer } from '../../packages/postgres-provider/src/trust/trusted-actor-envelope.js';
 import {
   AuthenticatedRequestEntryAdapter,
@@ -86,6 +88,7 @@ const localeProbeChild = process.env.PR1_LOCALE_PROBE_CHILD === '1';
 const tenantA = 'a1000000-0000-4000-8000-000000000001';
 const environmentA = 'a2000000-0000-4000-8000-000000000002';
 const principalA = 'a3000000-0000-4000-8000-000000000003';
+const principalASecond = 'a3000000-0000-4000-8000-000000000004';
 const tenantB = 'b1000000-0000-4000-8000-000000000001';
 const environmentB = 'b2000000-0000-4000-8000-000000000002';
 const principalB = 'b3000000-0000-4000-8000-000000000003';
@@ -172,6 +175,7 @@ test('definition-only module is served generically through Q0/O0, trust, RLS, an
       try {
         const contexts = await contextsFor([
           ['a', tenantA, environmentA, principalA],
+          ['a-second', tenantA, environmentA, principalASecond],
           ['b', tenantB, environmentB, principalB],
         ]);
         const releasesA = await persistSequence(runtimePool, contexts.a!, [
@@ -188,6 +192,7 @@ test('definition-only module is served generically through Q0/O0, trust, RLS, an
         await setPointer(pool, tenantB, environmentB, releasesB[0]!);
         await grantExecutorAuthority(pool, [
           [tenantA, principalA],
+          [tenantA, principalASecond],
           [tenantB, principalB],
         ]);
 
@@ -210,9 +215,11 @@ test('definition-only module is served generically through Q0/O0, trust, RLS, an
         const operationGateway = operationGatewayFor(policy, interpreter);
         const entry = runtimeEntry(runtimePool, {
           a: identity(tenantA, environmentA, principalA),
+          'a-second': identity(tenantA, environmentA, principalASecond),
           b: identity(tenantB, environmentB, principalB),
         });
         const viewA1 = await issuedView(entry, 'a');
+        const viewASecond = await issuedView(entry, 'a-second');
         const viewB1 = await issuedView(entry, 'b');
 
         await assertRoleBridge(pool);
@@ -271,7 +278,7 @@ test('definition-only module is served generically through Q0/O0, trust, RLS, an
           `SELECT
              (SELECT count(*)
                 FROM north_star_module.${storageV1.entities[0]!.physicalTableName}
-               WHERE record_id = $1) AS business_rows,
+               WHERE record_id = $1::uuid) AS business_rows,
              (SELECT deduplication_key
                 FROM platform.trust_outbox
                WHERE outbox_id = $2) AS deduplication_key,
@@ -300,57 +307,137 @@ test('definition-only module is served generically through Q0/O0, trust, RLS, an
             FIXTURE_IDS.namespace,
             soloKey,
           ),
-          (error: unknown) =>
-            typeof error === 'object' &&
-            error !== null &&
-            'code' in error &&
-            error.code === 'SEMANTIC_OPERATION_IDEMPOTENCY_CONFLICT',
+          assertIdempotencyConflict,
         );
+        assert.equal(await moduleRecordCount(pool, storageV1, soloId), 1);
+
+        await assert.rejects(
+          operation(
+            operationGateway,
+            viewASecond,
+            'master_create',
+            soloInput,
+            FIXTURE_IDS.namespace,
+            soloKey,
+          ),
+          assertIdempotencyConflict,
+        );
+        assert.equal(await moduleRecordCount(pool, storageV1, soloId), 1);
 
         await setPointer(pool, tenantA, environmentA, releasesA[3]!);
-        const duplicateReleaseView = await issuedView(entry, 'a');
+        const activatedReleaseView = await issuedView(entry, 'a');
         assert.notEqual(
-          duplicateReleaseView.release.releaseId,
+          activatedReleaseView.release.releaseId,
           viewA1.release.releaseId,
         );
         assert.equal(
-          duplicateReleaseView.release.contentHash,
+          activatedReleaseView.release.contentHash,
           viewA1.release.contentHash,
         );
-        const duplicateReleaseRecordId = randomUUID();
-        const duplicateReleaseResult = await operation(
+        const activationFactsBefore = await trustFactCount(
+          pool,
+          tenantA,
+          environmentA,
+        );
+        const activationReplay = await operation(
           operationGateway,
-          duplicateReleaseView,
+          activatedReleaseView,
+          'master_create',
+          soloInput,
+          FIXTURE_IDS.namespace,
+          soloKey,
+        );
+        assert.deepEqual(activationReplay, created);
+        assert.equal(
+          await trustFactCount(pool, tenantA, environmentA),
+          activationFactsBefore,
+        );
+        assert.equal(await moduleRecordCount(pool, storageV1, soloId), 1);
+
+        const activatedReleaseRecordId = randomUUID();
+        const activatedReleaseKey = randomUUID();
+        const activatedReleaseResult = await operation(
+          operationGateway,
+          activatedReleaseView,
           'master_create',
           {
-            recordId: duplicateReleaseRecordId,
+            recordId: activatedReleaseRecordId,
             values: {
-              [FIXTURE_IDS.fieldIds.parentName]: 'Duplicate release scope',
+              [FIXTURE_IDS.fieldIds.parentName]: 'Activated release scope',
               [FIXTURE_IDS.fieldIds.parentNumber]: 'A-RELEASE',
             },
           },
           FIXTURE_IDS.namespace,
-          soloKey,
+          activatedReleaseKey,
         );
-        const duplicateReleaseOutbox = await pool.query<{
+        const activatedReleaseOutbox = await pool.query<{
           deduplication_key: string;
         }>(
           `SELECT deduplication_key
              FROM platform.trust_outbox
             WHERE outbox_id = $1`,
-          [duplicateReleaseResult.trust!.outboxId],
+          [activatedReleaseResult.trust!.outboxId],
         );
         assert.equal(
-          duplicateReleaseOutbox.rows[0]?.deduplication_key,
-          `${principalA}:${duplicateReleaseView.release.contentHash}:${duplicateReleaseView.release.releaseId}:${FIXTURE_IDS.namespace}:operation.master_create:${soloKey}`,
+          activatedReleaseOutbox.rows[0]?.deduplication_key,
+          `${principalA}:${activatedReleaseView.release.contentHash}:${activatedReleaseView.release.releaseId}:${FIXTURE_IDS.namespace}:operation.master_create:${activatedReleaseKey}`,
         );
         await operation(
           operationGateway,
-          duplicateReleaseView,
+          activatedReleaseView,
           'master_archive',
-          { expectedRevision: 1, recordId: duplicateReleaseRecordId },
+          { expectedRevision: 1, recordId: activatedReleaseRecordId },
         );
         await setPointer(pool, tenantA, environmentA, releasesA[1]!);
+
+        const concurrentRecordId = randomUUID();
+        const concurrentKey = randomUUID();
+        const concurrentInput = {
+          recordId: concurrentRecordId,
+          values: {
+            [FIXTURE_IDS.fieldIds.parentName]: 'Concurrent retry',
+            [FIXTURE_IDS.fieldIds.parentNumber]: 'A-CONCURRENT',
+          },
+        };
+        const concurrentResults = await executeConcurrentRetryBehindBarrier(
+          pool,
+          operationGateway,
+          viewA1,
+          concurrentInput,
+          concurrentKey,
+        );
+        assert.deepEqual(concurrentResults[1], concurrentResults[0]);
+        const concurrentPersistence = await pool.query<{
+          business_changes: string;
+          business_rows: string;
+          receipts: string;
+        }>(
+          `SELECT
+             (SELECT count(*)
+                FROM north_star_module.${storageV1.entities[0]!.physicalTableName}
+               WHERE record_id = $1) AS business_rows,
+             (SELECT count(*)
+                FROM platform.trust_business_change_documents
+               WHERE record_id = $1::text) AS business_changes,
+             (SELECT count(*)
+                FROM platform.semantic_operation_receipts
+               WHERE tenant_id = $2
+                 AND environment_id = $3
+                 AND action_id = $4
+                 AND idempotency_key = $5) AS receipts`,
+          [
+            concurrentRecordId,
+            tenantA,
+            environmentA,
+            `${FIXTURE_IDS.namespace}:operation.master_create`,
+            concurrentKey,
+          ],
+        );
+        assert.deepEqual(concurrentPersistence.rows[0], {
+          business_changes: '1',
+          business_rows: '1',
+          receipts: '1',
+        });
 
         for (const [recordId, number] of [
           [acmeOneId, 'A-002'],
@@ -364,13 +451,26 @@ test('definition-only module is served generically through Q0/O0, trust, RLS, an
             },
           });
         }
-        await operation(operationGateway, viewB1, 'master_create', {
-          recordId: tenantBId,
-          values: {
-            [FIXTURE_IDS.fieldIds.parentName]: 'Tenant B',
-            [FIXTURE_IDS.fieldIds.parentNumber]: 'B-001',
+        await operation(
+          operationGateway,
+          viewB1,
+          'master_create',
+          {
+            recordId: tenantBId,
+            values: {
+              [FIXTURE_IDS.fieldIds.parentName]: 'Tenant B',
+              [FIXTURE_IDS.fieldIds.parentNumber]: 'B-001',
+            },
           },
-        });
+          FIXTURE_IDS.namespace,
+          soloKey,
+        );
+        await assertReceiptTenantIsolation(
+          runtimePool,
+          contexts.a!,
+          contexts.b!,
+          soloKey,
+        );
 
         const get = await query(queryGateway, viewA1, 'master_get', {
           recordId: soloId,
@@ -385,7 +485,7 @@ test('definition-only module is served generically through Q0/O0, trust, RLS, an
           limit: 20,
         });
         assert.equal(list.outcome, 'exact');
-        assert.equal(list.records.length, 3);
+        assert.equal(list.records.length, 4);
         assert.equal(
           list.records.some((record) => record.recordId === tenantBId),
           false,
@@ -600,6 +700,26 @@ test('definition-only module is served generically through Q0/O0, trust, RLS, an
         await prepare(materializer, contexts.a!, principalA, releasesA[2]!);
         await setPointer(pool, tenantA, environmentA, releasesA[2]!);
         const viewA2 = await issuedView(entry, 'a');
+        assert.notEqual(viewA2.release.contentHash, viewA1.release.contentHash);
+        const recompileFactsBefore = await trustFactCount(
+          pool,
+          tenantA,
+          environmentA,
+        );
+        const recompileReplay = await operation(
+          operationGateway,
+          viewA2,
+          'master_create',
+          soloInput,
+          FIXTURE_IDS.namespace,
+          soloKey,
+        );
+        assert.deepEqual(recompileReplay, created);
+        assert.equal(
+          await trustFactCount(pool, tenantA, environmentA),
+          recompileFactsBefore,
+        );
+        assert.equal(await moduleRecordCount(pool, storageV1, soloId), 1);
         const v2Update = await operation(
           operationGateway,
           viewA2,
@@ -1504,6 +1624,139 @@ async function operation(
   );
 }
 
+function assertIdempotencyConflict(error: unknown): true {
+  assert.ok(error instanceof TrustEvidenceError);
+  assert.equal(error.code, 'SEMANTIC_OPERATION_IDEMPOTENCY_CONFLICT');
+  assert.equal(Object.hasOwn(error, 'mutationResult'), false);
+  return true;
+}
+
+async function executeConcurrentRetryBehindBarrier(
+  pool: pg.Pool,
+  gateway: SemanticOperationGateway,
+  view: RequestRuntimeView,
+  input: Record<string, unknown>,
+  idempotencyKey: string,
+): Promise<
+  readonly [SemanticOperationResultEnvelope, SemanticOperationResultEnvelope]
+> {
+  const operationId = `${FIXTURE_IDS.namespace}:operation.master_create`;
+  const lockIdentity = [
+    view.tenantId,
+    view.environmentId,
+    operationId,
+    idempotencyKey,
+  ].join('\u001f');
+  const blocker = await pool.connect();
+  let released = false;
+  let attempts:
+    | readonly [
+        Promise<SemanticOperationResultEnvelope>,
+        Promise<SemanticOperationResultEnvelope>,
+      ]
+    | undefined;
+  try {
+    await blocker.query('BEGIN');
+    await blocker.query(
+      'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+      [lockIdentity],
+    );
+    attempts = [
+      operation(
+        gateway,
+        view,
+        'master_create',
+        input,
+        FIXTURE_IDS.namespace,
+        idempotencyKey,
+      ),
+      operation(
+        gateway,
+        view,
+        'master_create',
+        input,
+        FIXTURE_IDS.namespace,
+        idempotencyKey,
+      ),
+    ];
+    await waitForAdvisoryWaiters(pool, 2);
+    await blocker.query('COMMIT');
+    released = true;
+    return await Promise.all(attempts);
+  } catch (error) {
+    if (!released) {
+      await blocker.query('ROLLBACK');
+      released = true;
+    }
+    if (attempts) await Promise.allSettled(attempts);
+    throw error;
+  } finally {
+    if (!released) await blocker.query('ROLLBACK');
+    blocker.release();
+  }
+}
+
+async function waitForAdvisoryWaiters(
+  pool: pg.Pool,
+  expected: number,
+): Promise<void> {
+  const deadline = process.hrtime.bigint() + 10_000_000_000n;
+  while (process.hrtime.bigint() < deadline) {
+    const waiting = await pool.query<{ count: string }>(`
+      SELECT count(*) AS count
+        FROM pg_catalog.pg_stat_activity
+       WHERE datname = current_database()
+         AND wait_event_type = 'Lock'
+         AND wait_event = 'advisory'
+         AND query LIKE 'SELECT pg_advisory_xact_lock(hashtextextended%'
+    `);
+    if (Number(waiting.rows[0]?.count ?? 0) >= expected) return;
+    await new Promise<void>((resolveImmediate) =>
+      setImmediate(resolveImmediate),
+    );
+  }
+  throw new Error(
+    `expected ${expected} provider transactions to wait on one advisory lock`,
+  );
+}
+
+async function assertReceiptTenantIsolation(
+  runtimePool: pg.Pool,
+  contextA: TrustedRequestContext,
+  contextB: TrustedRequestContext,
+  idempotencyKey: string,
+): Promise<void> {
+  const visibleTo = async (context: TrustedRequestContext): Promise<string[]> =>
+    withTrustedRequestTransaction(runtimePool, context, async (client) => {
+      const result = await client.query<{ tenant_id: string }>(
+        `SELECT tenant_id
+           FROM platform.semantic_operation_receipts
+          WHERE action_id = $1
+            AND idempotency_key = $2
+          ORDER BY tenant_id`,
+        [`${FIXTURE_IDS.namespace}:operation.master_create`, idempotencyKey],
+      );
+      return result.rows.map(({ tenant_id }) => tenant_id);
+    });
+
+  assert.deepEqual(await visibleTo(contextA), [tenantA]);
+  assert.deepEqual(await visibleTo(contextB), [tenantB]);
+}
+
+async function moduleRecordCount(
+  pool: pg.Pool,
+  storage: StorageTargetPayloadV1,
+  recordId: string,
+): Promise<number> {
+  const result = await pool.query<{ count: string }>(
+    `SELECT count(*) AS count
+       FROM north_star_module.${storage.entities[0]!.physicalTableName}
+      WHERE record_id = $1`,
+    [recordId],
+  );
+  return Number(result.rows[0]?.count ?? 0);
+}
+
 const operationMediationByGateway = new WeakMap<
   SemanticOperationGateway,
   SemanticOperationMediationAuthority
@@ -1612,8 +1865,8 @@ async function migrateAndSeed(
       client,
       await loadMigrations(migrations),
     );
-    assert.equal(result.applied.length, 9);
-    assert.equal(result.verified.length, 9);
+    assert.equal(result.applied.length, 10);
+    assert.equal(result.verified.length, 10);
     for (const [tenantId, environmentId, slug] of scopes) {
       await client.query(
         'INSERT INTO platform.tenants (id, slug) VALUES ($1,$2)',

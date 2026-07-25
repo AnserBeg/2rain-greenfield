@@ -101,6 +101,7 @@ interface RecordedIdempotencyRow<TMutationResult> {
   invocation_id: string;
   mutation_result: TMutationResult;
   outbox_id: string;
+  principal_id: string;
   recorded_at: Date;
 }
 
@@ -176,6 +177,12 @@ export class PostgresTrustService {
         binding,
       );
       if (existing) {
+        if (existing.principal_id !== context.principalId) {
+          throw new TrustEvidenceError(
+            'SEMANTIC_OPERATION_IDEMPOTENCY_CONFLICT',
+            'idempotency key is already bound to another principal',
+          );
+        }
         if (existing.input_digest !== binding.inputDigest) {
           throw new TrustEvidenceError(
             'SEMANTIC_OPERATION_IDEMPOTENCY_CONFLICT',
@@ -340,9 +347,6 @@ async function lockIdempotencyBinding(
   const lockIdentity = [
     context.tenantId,
     context.environmentId,
-    context.principalId,
-    binding.releaseId,
-    binding.releaseContentHash,
     binding.actionId,
     binding.idempotencyKey,
   ].join('\u001f');
@@ -357,22 +361,16 @@ async function findIdempotencyReceipt<TMutationResult>(
   binding: IdempotentMutationBinding,
 ): Promise<RecordedIdempotencyRow<TMutationResult> | null> {
   const result = await client.query<RecordedIdempotencyRow<TMutationResult>>(
-    `SELECT input_digest, mutation_result, invocation_id, correlation_id,
+    `SELECT principal_id, input_digest, mutation_result, invocation_id, correlation_id,
             change_document_id, domain_event_id, outbox_id, recorded_at
        FROM platform.semantic_operation_receipts
       WHERE tenant_id = $1
         AND environment_id = $2
-        AND principal_id = $3
-        AND release_id = $4
-        AND release_content_hash = $5
-        AND action_id = $6
-        AND idempotency_key = $7`,
+        AND action_id = $3
+        AND idempotency_key = $4`,
     [
       context.tenantId,
       context.environmentId,
-      context.principalId,
-      binding.releaseId,
-      binding.releaseContentHash,
       binding.actionId,
       binding.idempotencyKey,
     ],

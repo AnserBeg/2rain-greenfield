@@ -14,6 +14,7 @@ import {
   POLICY_DECISION_EVIDENCE_VERSION,
   type AcceptedMutationCommand,
   type ActorKind,
+  type IdempotentMutationBinding,
   type NonAcceptedInvocationCommand,
   type ResolvedActorAttribution,
   type TrustedActorEnvelope,
@@ -59,12 +60,12 @@ const identities = new Map<string, AuthenticatedIdentity>([
   ['human-b', identity(tenantB, environmentB, humanB)],
 ]);
 
-test('migrations 0006-0009 upgrade accepted G1 and converge with the checked-in snapshot', async () => {
+test('migrations 0006-0010 upgrade accepted G1 and converge with the checked-in snapshot', async () => {
   await withEphemeralPostgres('trust-upgrade', async ({ pool }) => {
     const migrations = await loadMigrations(checkedInMigrations);
     assert.equal(
       migrations.at(-1)?.name,
-      '0009_semantic_operation_receipts.sql',
+      '0010_semantic_operation_receipt_scope.sql',
     );
     const admin = await pool.connect();
     try {
@@ -85,13 +86,171 @@ test('migrations 0006-0009 upgrade accepted G1 and converge with the checked-in 
         '0007_module_storage_transitions.sql',
         '0008_module_runtime_role_assumption.sql',
         '0009_semantic_operation_receipts.sql',
+        '0010_semantic_operation_receipt_scope.sql',
       ]);
-      assert.equal(upgraded.verified.length, 9);
+      assert.equal(upgraded.verified.length, 10);
       await assertSchemaMatchesSnapshot(admin, checkedInSnapshot);
     } finally {
       admin.release();
     }
   });
+});
+
+test('migration 0010 refuses narrower-key duplicates without removing trust evidence', async () => {
+  await withEphemeralPostgres(
+    'receipt-scope-upgrade',
+    async ({ connection, pool }) => {
+      const migrations = await loadMigrations(checkedInMigrations);
+      const admin = await pool.connect();
+      try {
+        const beforeScopeFix = await runMigrations(
+          admin,
+          migrations.slice(0, 9),
+        );
+        assert.equal(beforeScopeFix.applied.length, 9);
+        await seedReleaseFixtures(admin);
+        await createBusinessMutationFixture(admin);
+      } finally {
+        admin.release();
+      }
+
+      const runtimePool = new pg.Pool({
+        ...connection,
+        max: 2,
+        user: 'north_star_runtime',
+      });
+      try {
+        const contexts = await issueContexts();
+        const envelopes = await issueActorEnvelopes(contexts);
+        const trust = new PostgresTrustService(runtimePool);
+        const binding: IdempotentMutationBinding = Object.freeze({
+          actionId: 'fixture.master:create',
+          idempotencyKey: 'aa100000-0000-4000-8000-000000000001',
+          inputDigest: '1'.repeat(64),
+          releaseContentHash: releaseHashA,
+          releaseId: releaseA,
+        });
+        const firstCommand = acceptedCommand('a', releaseA, releaseHashA);
+        const secondCommand = acceptedCommand('c', releaseA, releaseHashA);
+
+        await trust.executeIdempotentAcceptedMutation(
+          contexts.humanA,
+          envelopes.humanA,
+          binding,
+          async (transaction) => {
+            await insertTrustTestBusinessRecord(
+              transaction,
+              'a9000000-0000-4000-8000-000000000010',
+              'first receipt owner',
+            );
+            return {
+              command: firstCommand,
+              mutationResult: Object.freeze({ owner: humanA }),
+            };
+          },
+        );
+        await trust.executeIdempotentAcceptedMutation(
+          contexts.agentA,
+          envelopes.agentA,
+          binding,
+          async (transaction) => {
+            await insertTrustTestBusinessRecord(
+              transaction,
+              'a9000000-0000-4000-8000-000000000011',
+              'later receipt owner',
+            );
+            return {
+              command: secondCommand,
+              mutationResult: Object.freeze({ owner: agentA }),
+            };
+          },
+        );
+      } finally {
+        await runtimePool.end();
+      }
+
+      const upgrade = await pool.connect();
+      try {
+        const before = await upgrade.query<{
+          invocation_id: string;
+          principal_id: string;
+        }>(
+          `SELECT invocation_id, principal_id
+             FROM platform.semantic_operation_receipts
+            ORDER BY recorded_at, invocation_id, principal_id, release_id,
+                     release_content_hash`,
+        );
+        assert.equal(before.rows.length, 2);
+
+        await assert.rejects(
+          runMigrations(upgrade, migrations),
+          (error: unknown) => {
+            assert.equal(
+              (error as { code?: unknown }).code,
+              '23505',
+              'migration must fail on the primary-key unique constraint',
+            );
+            assert.match(
+              String((error as { detail?: unknown }).detail),
+              /\(tenant_id, environment_id, action_id, idempotency_key\)/,
+            );
+            return true;
+          },
+        );
+
+        const after = await upgrade.query<{
+          invocation_id: string;
+          principal_id: string;
+        }>(
+          `SELECT invocation_id, principal_id
+             FROM platform.semantic_operation_receipts
+            ORDER BY recorded_at, invocation_id, principal_id, release_id,
+                     release_content_hash`,
+        );
+        assert.deepEqual(after.rows, before.rows);
+
+        const history = await upgrade.query<{
+          count: string;
+          latest_name: string;
+        }>(`
+          SELECT count(*) AS count, max(name) AS latest_name
+            FROM north_star_internal.schema_migrations
+        `);
+        assert.deepEqual(history.rows[0], {
+          count: '9',
+          latest_name: '0009_semantic_operation_receipts.sql',
+        });
+
+        const keyColumns = await upgrade.query<{ column_name: string }>(`
+          SELECT attribute.attname AS column_name
+            FROM pg_catalog.pg_constraint AS constraint_record
+            CROSS JOIN LATERAL unnest(constraint_record.conkey)
+              WITH ORDINALITY AS key_column(attribute_number, position)
+            JOIN pg_catalog.pg_attribute AS attribute
+              ON attribute.attrelid = constraint_record.conrelid
+             AND attribute.attnum = key_column.attribute_number
+           WHERE constraint_record.conrelid =
+                 'platform.semantic_operation_receipts'::regclass
+             AND constraint_record.contype = 'p'
+           ORDER BY key_column.position
+        `);
+        assert.deepEqual(
+          keyColumns.rows.map(({ column_name }) => column_name),
+          [
+            'tenant_id',
+            'environment_id',
+            'principal_id',
+            'release_id',
+            'release_content_hash',
+            'action_id',
+            'idempotency_key',
+          ],
+        );
+      } finally {
+        upgrade.release();
+      }
+    },
+  );
 });
 
 test('accepted mutation facts are atomic, attributed, redacted, immutable, and tenant isolated', async () => {
@@ -102,8 +261,8 @@ test('accepted mutation facts are atomic, attributed, redacted, immutable, and t
       const admin = await pool.connect();
       try {
         const emptyPath = await runMigrations(admin, migrations);
-        assert.equal(emptyPath.applied.length, 9);
-        assert.equal(emptyPath.verified.length, 9);
+        assert.equal(emptyPath.applied.length, 10);
+        assert.equal(emptyPath.verified.length, 10);
         await assertSchemaMatchesSnapshot(admin, checkedInSnapshot);
         await seedReleaseFixtures(admin);
         await createBusinessMutationFixture(admin);
@@ -871,6 +1030,23 @@ async function assertConnectionCleared(
 async function resetOutboxWitness(pool: pg.Pool): Promise<void> {
   await pool.query(
     "SELECT setval('platform.trust_test_outbox_insert_witness', 1, false)",
+  );
+}
+
+async function insertTrustTestBusinessRecord(
+  transaction: pg.PoolClient,
+  recordId: string,
+  label: string,
+): Promise<void> {
+  await transaction.query(
+    `INSERT INTO platform.trust_test_business_records (
+       tenant_id,
+       environment_id,
+       id,
+       label,
+       rollback_guard_tenant_id
+     ) VALUES ($1, $2, $3, $4, $1)`,
+    [tenantA, environmentA, recordId, label],
   );
 }
 
