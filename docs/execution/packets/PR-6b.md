@@ -1,6 +1,6 @@
 # PR-6b — Folded-column index mechanics
 
-Status: active — E4 disposition recorded; rebased candidate pending full matrix and Critical review
+Status: evidence_ready — full matrix green; Codex xhigh PASS and Fable max PASS on the identical candidate
 Tier: Critical
 Branch: `packet/pr-6b`
 Requested base: `28aaf3c`; current rebased base: `28c77b0649bc9f70a96454ffe1eb96ef7b0b8839`
@@ -8,7 +8,8 @@ Prior frozen candidates: `b4a0960`, `01ff6c2`, `aefa288`
 Prior execution-oracle candidate: `d03c0f6dbb2a2e213ab296856dab878b3ab3647a`
 Prior E4 catalog candidate: `4683ef8c7cbd954a1f548658bff97b59e63b0eee`
 Pre-disposition prevention candidate: `92c660e563b3b4bd4e357010781fc00cbe8bb932`
-Review: prior Codex REVISE dispositioned; final Critical review pending
+Final reviewed candidate: `0bf70a568ba09fe01254eadc7f02483a11ce63ef`
+Review: Codex xhigh PASS; Fable max PASS on the identical unchanged SHA
 
 ## Authority and outcome
 
@@ -466,10 +467,10 @@ percentiles or error budgets.
   Mapping the observed SQL field explicitly and reading each folded subject
   sequentially returned the focused journey to 3/3 green.
 
-## Full-matrix evidence at the final prevention candidate
+## Full-matrix evidence at the final disposition candidate
 
 The final full matrix ran from a clean tree at exactly
-`92c660e563b3b4bd4e357010781fc00cbe8bb932`:
+`0bf70a568ba09fe01254eadc7f02483a11ce63ef`:
 
 | Gate | Result |
 |---|---|
@@ -477,7 +478,7 @@ The final full matrix ran from a clean tree at exactly
 | format / lint / typecheck | green |
 | architecture boundaries | 94 files scanned |
 | build | green |
-| reachability run | token `e6e3aae9-0a84-4082-9be1-aec7cd9cb104` |
+| reachability run | token `57a233bc-e2fd-4500-8f9c-3646ba0c0d32` |
 | unit | 27/27 |
 | compiler | 52/52 |
 | integration | 42/42 |
@@ -491,7 +492,7 @@ The final full matrix ran from a clean tree at exactly
 | browser | 5/5 |
 | observability inline producer | 5/5 |
 | executed-file reachability | 50/50 files from 9 producer artifacts |
-| security | 251 commits clean; one expected finding in the disposable negative fixture |
+| security | 256 commits clean; one expected finding in the disposable negative fixture |
 | diff / worktree | `git diff --check main...HEAD`, worktree diff, and complete status all clean |
 
 ## Review evidence
@@ -713,6 +714,40 @@ between-materializations operator-DDL interval to the materializer packet.
 Fable was not launched for the pre-disposition candidate because the Critical
 chain requires Codex PASS first; the final disposition receives a fresh chain.
 
+## Final disposition review
+
+The branch was rebased onto accepted `main` at
+`28c77b0649bc9f70a96454ffe1eb96ef7b0b8839`. Candidate
+`0bf70a568ba09fe01254eadc7f02483a11ce63ef` contains the implementation plus
+the orchestrator's final E4 disposition. Its exact full matrix above was green
+before review.
+
+A fresh, naive, read-only Codex `gpt-5.6-sol` xhigh review returned **PASS**
+with no in-scope material findings and no hard-tripwire failure. It confirmed
+that R1/R2 predicates match their emitted stored-fold indexes under forced RLS;
+the oracle requires both an exact expected-index counter delta and a tree-wide
+zero filter-removal sum and genuinely fails under the missing-index control;
+uniqueness semantics and typed-error mapping remain intact; the unused raw
+search btree is retired without claiming substring indexability; R3 and the
+pre-existing-table execution capability remain absent and honestly deferred;
+and the diff stays inside its authorized output blast radius.
+
+Fable max then reviewed the **identical unchanged SHA** and returned **PASS**.
+It independently confirmed the same six bounded questions, including that the
+forced-RLS resolve and unique predicates use the expected stored folded shape,
+the execution-observed oracle runs every milestone and fails closed, the
+missing-index red is genuine, uniqueness and compatibility distinctions remain
+preserved, the retired raw search btree served no interpreter predicate, and no
+PR-7, G2-P5, online-DDL, dependency, hard-delete, or unrelated-output work
+entered the diff. It found no in-scope material finding and did not trigger the
+hard tripwire.
+
+Both reviewers received the binding E4 disposition verbatim: verify-or-fail
+refusal and the generated-column catalog pins remain; claim-DML ordering and
+out-of-band replacement between materializations are recorded materializer
+limitations; neither is a false green because materialization fails. Neither
+reviewer reopened that disposition.
+
 ## Test it yourself
 
 From the repository root, these commands finish in under ten minutes on the
@@ -752,8 +787,8 @@ subjects, zero visible rows, and 10,000 mismatches respectively.
 
 ## Draft ledger row
 
-Do not commit this row. The merge SHA does not exist, and the final Critical
-review chain remains pending:
+Do not commit this row. The merge SHA does not exist; the completed Critical
+review chain applies to the packet candidate, not a future integration SHA:
 
 ```text
 | PR-6b | Folded-column index mechanics | Critical | accepted | <merge-sha> | Stored C-collated generated folds make forced-RLS resolve and unique lookup use their declared indexes; raw search and prefix-only btrees retired; execution-observed index, catalog-shape, uniqueness, and verify-or-fail fold-function prevention green; E4 ordering and operator-DDL residuals routed to the materializer packet; R3 explicitly descoped; full matrix and Critical review chain recorded in docs/execution/packets/PR-6b.md. |
