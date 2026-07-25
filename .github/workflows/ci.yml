@@ -61,6 +61,19 @@ jobs:
         run: corepack pnpm check:demo-release
       - name: Run web surface contracts
         run: corepack pnpm test:contracts
+      - name: Retain quality executed-file evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: reachability-quality-${{ github.sha }}
+          path: |
+            test-results/reachability/unit.json
+            test-results/reachability/compiler.json
+            test-results/reachability/integration.json
+            test-results/reachability/agent.json
+            test-results/reachability/architecture.json
+            test-results/reachability/contracts.json
+          if-no-files-found: error
+          retention-days: 7
       - name: Check patch whitespace and repository cleanliness
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -101,6 +114,13 @@ jobs:
         run: corepack pnpm test:postgres
       - name: Run non-C locale determinism probe
         run: corepack pnpm test:locale
+      - name: Retain PostgreSQL executed-file evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: reachability-postgres-${{ github.sha }}
+          path: test-results/reachability/postgres.json
+          if-no-files-found: error
+          retention-days: 7
 
   browser:
     name: Browser runner
@@ -121,6 +141,13 @@ jobs:
         run: corepack pnpm exec playwright install --with-deps chromium
       - name: Run browser tests
         run: corepack pnpm test:browser
+      - name: Retain browser executed-file evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: reachability-browser-${{ github.sha }}
+          path: test-results/reachability/browser.json
+          if-no-files-found: error
+          retention-days: 7
 
   security:
     name: Dependency and secret scans
@@ -173,13 +200,27 @@ jobs:
       - name: Capture observability evidence
         env:
           OBSERVABILITY_EVIDENCE_DIR: test-results/observability
+          REACHABILITY_COMMAND: node --import tsx --test test/unit/observability.test.ts test/integration/observability-ci-contract.test.ts test/postgres/observability-health.test.ts
+          REACHABILITY_SUITE_ID: observability
         run: |
           mkdir -p test-results/observability
+          node --import tsx test/helpers/prepare-reachability-evidence.ts observability
           node --import tsx --test \
+            --test-reporter=./test/helpers/node-test-evidence-reporter.mjs \
+            --test-reporter-destination=test-results/reachability/observability.json \
+            --test-reporter=tap \
+            --test-reporter-destination=stdout \
             test/unit/observability.test.ts \
             test/integration/observability-ci-contract.test.ts \
             test/postgres/observability-health.test.ts \
             | tee test-results/observability/tests.tap
+      - name: Retain observability executed-file evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: reachability-observability-${{ github.sha }}
+          path: test-results/reachability/observability.json
+          if-no-files-found: error
+          retention-days: 7
       - name: Retain observability evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -188,3 +229,32 @@ jobs:
           path: test-results/observability/
           if-no-files-found: error
           retention-days: 7
+
+  reachability:
+    name: Executed-file reachability
+    needs:
+      - quality
+      - postgres
+      - browser
+      - observability
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Set up pinned Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .node-version
+      - name: Enable Corepack
+        run: corepack enable
+      - name: Install frozen dependencies
+        run: corepack pnpm install --frozen-lockfile --reporter=append-only
+      - name: Download executed-file evidence
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: reachability-*-${{ github.sha }}
+          path: test-results/reachability
+          merge-multiple: true
+      - name: Compare executed files with repository discovery
+        run: corepack pnpm check:reachability

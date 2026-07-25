@@ -227,6 +227,7 @@ test('CI runs every scaffold gate from a frozen install', () => {
     'corepack pnpm test:postgres',
     'corepack pnpm test:locale',
     'corepack pnpm test:browser',
+    'corepack pnpm check:reachability',
   ];
 
   for (const command of requiredCommands) {
