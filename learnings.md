@@ -150,3 +150,8 @@ How to apply: supersedes “Allowlist every selection-bearing configuration surf
 Date: 2026-07-25
 Why: PR-4b round 1 could accept a prior artifact when an aggregate producer was skipped or reordered because evidence proved content but not freshness.
 How to apply: begin one run token, stamp it plus observed argv into every producer artifact, and reject missing, stale, unresolvable, or declaration-mismatched evidence before crediting files. See `docs/execution/packets/PR-4b.md`.
+
+## Refuse migrations that would rewrite immutable trust facts
+Date: 2026-07-25
+Why: PR-5's narrower idempotency key could conflict with receipts admitted by the prior schema, but collapsing them would violate their append-only trust contract.
+How to apply: let the new constraint fail inside the migration transaction, and test that rows, prior constraints, and migration history remain unchanged. See `docs/execution/packets/PR-5.md`.
