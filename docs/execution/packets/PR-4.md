@@ -1,14 +1,13 @@
 # PR-4 — Gate completeness round 2 + coverage audit
 
-Status: evidence_ready — hard-tripwire REVISE surfaced for design adjudication
+Status: active — final user-authorized conservative correction implemented; matrix and review pending
 Tier: Mechanical
 Branch: `packet/pr-4`
 Base: `982d2df01204107f560469f34336da723ae9cd93`
-Prior reviewed candidate: `7d506f54be1be12d0c5ceb5424a3a7c4ff45a365`
-Frozen reviewed candidate: `7711a89758134b942e77a6a2277fcde05e393537`
+Prior reviewed candidate: `7711a89758134b942e77a6a2277fcde05e393537`
+New frozen candidate: pending
 Final evidence commit: post-review record only; reported in the completion block
-Review: REVISE — the Playwright allowlist correction passed, but a fourth
-same-class fail-open surface tripped the user's hard stop; no further fix round
+Review: pending — one final review under the user's post-tripwire design ruling
 
 ## Authority and outcome
 
@@ -18,11 +17,15 @@ that derives every reachable test from CI and package-script declarations. A
 future `*.test.ts` or `*.spec.ts` file outside the declared selectors makes
 `test:architecture` red with the exact unreachable path.
 
-The candidate does not yet close the whole declared-but-unexecuted class. The
-authorized Playwright correction is fail-closed, but the fresh review found
-that the Node parser accepts `--test-name-pattern` while ignoring its selection
-effect. That fourth same-class surface triggered the user's required design
-reconsideration stop.
+The static gate now conservatively credits only files named by unfiltered
+commands. Any Node command carrying a test-selection argument contributes zero
+files; `test:locale` therefore receives no credit, while its file remains
+independently covered by the unfiltered `test:postgres` command.
+
+The honest limitation is narrower than the original claim: this static gate
+proves that a file is named by an unfiltered CI-invoked command, not that any
+test inside the file actually ran. Queued PR-4b replaces inference with dynamic
+executed-file evidence from Node and Playwright reporters and closes that class.
 
 The packet also wires the two hidden compiled-shell guards, removes the dead
 root Playwright scaffold, regenerates the one authorized stale content-addressed
@@ -53,8 +56,9 @@ than `apps/web/release/shell.compiled.json`.
    file-selection root. The permanent script allowlist contains only root
    `test` (developer aggregate) and `check:boundaries` (transitively executed
    by `dependency-boundaries.test.ts`). The aggregate is compared with every
-   CI-invoked `test:*` command plus `check:demo-release`. Known open finding:
-   the accepted Node `--test-name-pattern` option is treated as selection-neutral.
+   CI-invoked `test:*` command plus `check:demo-release`. Node commands carrying
+   `--test-name-pattern`, `--test-only`, `--test-skip-pattern`, sharding, or an
+   equivalent known selection option receive zero reachability credit.
 4. **Orphans made live or removed.** Root passthroughs and quality-job steps now
    invoke `check:demo-release` and `test:contracts`; the hygiene test requires
    both. The unreferenced root `playwright.config.ts` and its skipped
@@ -93,7 +97,7 @@ than `apps/web/release/shell.compiled.json`.
 
 ### (a) Permanent in-suite canaries
 
-`test-reachability.test.ts` ships four focused canaries:
+`test-reachability.test.ts` ships five focused canaries:
 
 - a pure comparison receives `test/orphan-demo/orphan.test.ts` in the synthetic
   discovered set but not the reachable set and returns exactly that path;
@@ -105,9 +109,14 @@ than `apps/web/release/shell.compiled.json`.
   step;
 - the Playwright parser receives a direct `defineConfig` object containing the
   unknown top-level key `futureSelection` and must throw
-  `Unparsed Playwright config key: futureSelection`.
+  `Unparsed Playwright config key: futureSelection`;
+- filtered Node commands using name, only, skip, shard, or rerun selectors must
+  report `test/postgres/module-runtime.test.ts` unreachable when they are its
+  only declared coverage. The real filtered `test:locale` script likewise
+  receives zero credit, while unfiltered `test:postgres` independently covers
+  that same file.
 
-All four ran within the focused green 50-test architecture suite.
+All five ran within the focused green 51-test architecture suite.
 
 ### (b) Real unreachable file, end to end
 
@@ -373,7 +382,7 @@ user-authorized exception charter.
 | 1 | `04e4be76693820df870e14f3c412ba6e055f0e5b` | **REVISE** — the filesystem was both expected set and command comparator, weakening PR-1's fixed unit inventory and allowing a deleted test to shrink both sides. **Fixed** in `1aa5780` by reviewed inventories for all five suites. |
 | 2 | `1aa578087105bd64d195fd3e0dd5ad925f9bd624` | **REVISE** — a valid run-only workflow step (`- run: ...`) did not match the extractor and was silently skipped. **Fixed** in `7d506f5` with optional-list-marker parsing and a permanent workflow-level negative canary. |
 | 3 | `7d506f54be1be12d0c5ceb5424a3a7c4ff45a365` | **REVISE** — Playwright config parsing rejects `projects`, `testIgnore`, and `testMatch`, but not `grep` or `grepInvert`; either option could select no tests from a file while the gate counts every file under `testDir`. **Fixed under the user's deliberate single-finding exception** by replacing the denylist with a TypeScript-parsed top-level allowlist and adding synthetic plus real-red canaries. |
-| 4 | `7711a89758134b942e77a6a2277fcde05e393537` | **REVISE / HARD TRIPWIRE** — the Playwright fix and its demonstrations pass, and original questions 1–2 and 4–9 have no regression. `parseNodeTestCommand()` accepts `--test-name-pattern=...` at `test/architecture/test-reachability.test.ts:428` but ignores its selection effect before marking every expanded file reachable at line 435. An honest globbed suite can therefore skip every test in a nonmatching file while the reachability gate stays green. **Surfaced; not fixed or dismissed.** |
+| 4 | `7711a89758134b942e77a6a2277fcde05e393537` | **REVISE / HARD TRIPWIRE** — the Playwright fix and its demonstrations pass, and original questions 1–2 and 4–9 have no regression. `parseNodeTestCommand()` accepts `--test-name-pattern=...` but ignores its selection effect before marking every expanded file reachable. An honest globbed suite can therefore skip every test in a nonmatching file while the reachability gate stays green. **Resolved by the user's design ruling:** filtered commands now receive zero static credit, and PR-4b owns dynamic executed-file truth. |
 
 Round 3 reported no other in-scope material findings: questions 1–2 and 4–9
 passed, including direct byte comparison of all four archives. The user
@@ -385,6 +394,18 @@ Round 4 was a fresh ephemeral read-only `gpt-5.6-sol` invocation at xhigh
 effort. It returned **REVISE** with exactly the hard-tripwire finding above and
 modified no files. Per the user's explicit instruction, the writer did not
 open another correction round.
+
+### Post-tripwire design ruling
+
+The user ruled that four fail-open surfaces in four rounds demonstrate a
+structural mismatch: a static parser cannot completely model open-ended runner
+selection. PR-4 therefore makes one final conservative change—any recognized
+test-selection argument gives its command zero reachability credit—and records
+the static gate's actual proof boundary. PR-4b is queue row 2 and will replace
+this inference with the union of successful-suite reporter file events before
+comparing against filesystem discovery. The final review is forbidden from
+opening another static-parser hunt; further surfaces are observations owned by
+PR-4b, not PR-4 REVISE findings.
 
 ### Review charter
 

@@ -47,6 +47,13 @@ const playwrightConfigKeyAllowlist = new Set([
   'timeout', // Per-test time budget only; cannot select test files.
   'use', // Browser/context defaults only; cannot select test files.
 ]);
+const nodeTestSelectionFlags = ['--test-only'] as const;
+const nodeTestSelectionOptions = [
+  '--test-name-pattern',
+  '--test-rerun-failures',
+  '--test-shard',
+  '--test-skip-pattern',
+] as const;
 const knownNonTestScriptCommands = new Set([
   'eslint .',
   'node --import tsx scripts/compile-demo-release.ts --check',
@@ -117,6 +124,48 @@ test('Playwright config parser fails closed on an unknown top-level key', () => 
         'synthetic-playwright.config.ts',
       ),
     /Unparsed Playwright config key: futureSelection/u,
+  );
+});
+
+test('filtered Node commands contribute no reachability while postgres covers locale', () => {
+  const catalog = loadScriptCatalog();
+  const localeTestPath = 'test/postgres/module-runtime.test.ts';
+  const filteredCommands = [
+    `node --import tsx --test --test-name-pattern=synthetic ${localeTestPath}`,
+    `node --import tsx --test --test-name-pattern synthetic ${localeTestPath}`,
+    `node --import tsx --test --test-only ${localeTestPath}`,
+    `node --import tsx --test --test-rerun-failures=results.json ${localeTestPath}`,
+    `node --import tsx --test --test-shard=1/2 ${localeTestPath}`,
+    `node --import tsx --test --test-skip-pattern=synthetic ${localeTestPath}`,
+  ];
+
+  for (const command of filteredCommands) {
+    const state = createState(catalog);
+    parseNodeTestCommand(command, '', 'synthetic filtered command', state);
+    assert.deepEqual(
+      findUnreachableTests(new Set([localeTestPath]), state.reachableTests),
+      [localeTestPath],
+      `${command} received reachability credit`,
+    );
+  }
+
+  const localeState = createState(catalog);
+  resolvePackageScript('root', 'test:locale', localeState);
+  assert.deepEqual(
+    findUnreachableTests(new Set([localeTestPath]), localeState.reachableTests),
+    [localeTestPath],
+    'filtered test:locale must receive zero reachability credit',
+  );
+
+  const postgresState = createState(catalog);
+  resolvePackageScript('root', 'test:postgres', postgresState);
+  assert.deepEqual(
+    findUnreachableTests(
+      new Set([localeTestPath]),
+      postgresState.reachableTests,
+    ),
+    [],
+    'unfiltered test:postgres must independently cover the locale test file',
   );
 });
 
@@ -423,9 +472,27 @@ function parseNodeTestCommand(
     failUnparsed(context, command);
   }
 
-  let targetCount = 0;
-  for (const word of words.slice(4)) {
-    if (word.value.startsWith('--test-name-pattern=')) continue;
+  let restrictsTestSelection = false;
+  const selectedPaths: string[] = [];
+  for (let index = 4; index < words.length; index += 1) {
+    const word = words[index];
+    if (!word) continue;
+    if (
+      nodeTestSelectionFlags.some(
+        (flag) => word.value === flag || word.value.startsWith(`${flag}=`),
+      )
+    ) {
+      restrictsTestSelection = true;
+      continue;
+    }
+    const selectionOption = nodeTestSelectionOptions.find(
+      (option) => word.value === option || word.value.startsWith(`${option}=`),
+    );
+    if (selectionOption) {
+      restrictsTestSelection = true;
+      if (word.value === selectionOption && words[index + 1]) index += 1;
+      continue;
+    }
     if (!/\.(?:spec|test)\.ts$/u.test(word.value)) {
       failUnparsed(`${context} argument`, word.value);
     }
@@ -433,11 +500,14 @@ function parseNodeTestCommand(
       failUnparsed(`${context} unquoted glob`, word.value);
     }
     for (const path of resolveTestTarget(word.value, cwd, context)) {
-      state.reachableTests.add(path);
-      targetCount += 1;
+      selectedPaths.push(path);
     }
   }
-  if (targetCount === 0) failUnparsed(context, command);
+  // Static inference cannot prove which tests survive a selection filter.
+  // PR-4b replaces this conservative zero-credit rule with reporter evidence.
+  if (restrictsTestSelection) return;
+  if (selectedPaths.length === 0) failUnparsed(context, command);
+  for (const path of selectedPaths) state.reachableTests.add(path);
 }
 
 function parsePlaywrightCommand(

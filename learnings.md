@@ -140,3 +140,8 @@ How to apply: discover all test files independently, resolve CI and package-scri
 Date: 2026-07-24
 Why: PR-4's first Playwright parser denied three known selection keys but missed `grep`, `grepInvert`, and `shard`, so its claimed fail-closed reachability proof was actually fail-open.
 How to apply: when static configuration parsing stands in for executed-file evidence, parse the supported structure, allow only selection-neutral keys plus explicitly interpreted selectors, and fail on every other key or structural form. Retain both synthetic and real-config negative canaries; see `docs/execution/packets/PR-4.md`.
+
+## Use executed evidence for open-ended test runners
+Date: 2026-07-24
+Why: PR-4 found four fail-open surfaces in four static-parser review rounds; each fix exposed another valid selection mechanism the inference model did not understand.
+How to apply: supersedes “Allowlist every selection-bearing configuration surface” as a completeness mechanism. Keep static inference conservative, but prove actual coverage from runner-reporter file events; PR-4b owns that dynamic gate.
