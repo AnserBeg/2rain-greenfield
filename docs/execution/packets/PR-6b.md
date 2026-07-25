@@ -1,12 +1,12 @@
 # PR-6b — Folded-column index mechanics
 
-Status: blocked — final narrowed review triggered the unchanged hard tripwire
+Status: active — user-specified execution oracle under final review allowance
 Tier: Critical
 Branch: `packet/pr-6b`
 Requested base: `28aaf3c`; actual accepted branch point: `3d394a536668519f1eb978065d63f38eee10674e`
-Prior frozen candidate: `01ff6c2811615eaebbf1a8d7de8d2006d7f116aa`
-Final narrowed candidate: `aefa288f174c0fca05a8744de9b578c0d8fbb5c9`
-Review: REVISE — HARD STOP; Fable not launched
+Prior frozen candidates: `b4a0960`, `01ff6c2`, `aefa288`
+Final execution-oracle candidate: pending
+Review: three REVISE rounds retained below; fresh Codex/Fable chain pending
 
 ## Authority and outcome
 
@@ -109,7 +109,7 @@ packet with PR-2-style semantic-preservation evidence to decide whether search
 input is literal text or a user-visible pattern before any range lowering is
 reintroduced.
 
-## Plan-shape gate and red/green demonstration
+## Execution-observed conformance gate and red/green demonstration
 
 `test/postgres/module-index-conformance.test.ts` exercises the real compiled
 Party module as the forced-RLS `NOBYPASSRLS` runtime role. It covers relation,
@@ -124,17 +124,30 @@ uses its intended index, any later milestone that stops doing so is red. On the
 pinned image all three predicates first choose their intended indexes at **100
 rows** and retain them through 10,000 rows.
 
-The gate walks `EXPLAIN (ANALYZE, FORMAT JSON)` structurally, fails closed on unknown
-envelopes, node types, child collections, index names, and index-condition
-shapes, never disables sequential scans, and requires three independent facts:
-an accepted exact physical index name; the intended folded identifier followed
-by an equality/range operator in `Index Cond`; and `Rows Removed by Filter`
-absent or zero on the qualifying index node. The last fact is execution-observed
-evidence that the one-row predicate was not demoted to a post-filter. It is more
-trustworthy than trying to infer execution from a more elaborate string match.
-Permanent canaries reject a sequential scan, a wrong index, a bare/literal
-identifier mention, a non-zero post-filter removal count, malformed observed
-counts, a missing folded condition, and an unknown node.
+The relation assertion retains PR-6's exact-name structural plan check. Folded
+equality no longer receives credit from `Index Cond` text or from any node-local
+association. It requires two independent execution observations:
+
+1. sum `Rows Removed by Filter` across every node in the validated plan tree and
+   require zero; and
+2. read `pg_stat_user_indexes.idx_scan` for every accepted physical index
+   immediately before and after the probe, call `pg_stat_force_next_flush()`
+   after execution, and require at least one accepted index to increase by one
+   or more.
+
+The counter proves which exact index executed; the tree-wide sum proves the
+folded equality was not demoted to a post-filter, including bitmap plans that
+split the counter onto a heap-scan parent. Neither fact can substitute for the
+other. Before/after counters are read outside the trusted query transaction so
+the forced backend flush is visible after commit; no database-wide statistics
+reset or elevated privilege is used.
+
+The gate still walks `EXPLAIN (ANALYZE, FORMAT JSON)` structurally, fails closed
+on unknown envelopes, node types, child collections, index names, and malformed
+filter counters, and never disables sequential scans. Permanent canaries model
+the exact bitmap parent/child form from review round 3 and a filter-free plan
+with zero index-counter delta; both are red. The original sequential-scan,
+wrong-index, malformed-counter, and unknown-node canaries remain.
 
 The disposable negative-control command was:
 
@@ -157,17 +170,28 @@ database. The decisive verbatim lines were:
 # PR-6b unique planner flip rows=100; analyzed rows=10000
 # Subtest: forced-RLS relation, resolve, and unique predicates use their declared indexes
 not ok 2 - forced-RLS relation, resolve, and unique predicates use their declared indexes
-error: 'resolve predicate did not use expected folded index nsm_i_swxw5hidgwkk4fgmyjyzplq3zpetzcnyqwaivlkdhx7v634tffra; used nsm_k_jbe7q7wxb6o3hmshj2wokbak4dxkhmm2cnzohhhdg7nztdodmf3a'
+error: |-
+  resolve predicate removed 9999 rows by post-filter across the plan tree while expecting index nsm_i_swxw5hidgwkk4fgmyjyzplq3zpetzcnyqwaivlkdhx7v634tffra
+
+  9999 !== 0
 # tests 2
 # pass 1
 # fail 1
 red_exit=1
 ```
 
-The immediate normal rerun returned 2/2, repeated all three 100-row flip lines,
-and reported 10,000 analyzed rows. Each run provisions and destroys its own
-PostgreSQL container, so the dropped index left no database or repository
-residue.
+The immediate normal debug run returned 2/2. At 10 rows, resolve and unique each
+reported non-zero tree filters and counter delta 0. At every milestone from 100
+through 10,000, both reported tree filters 0 and exactly one accepted physical
+index delta 1; the unused alternate unique index stayed 0. Each run provisions
+and destroys its own PostgreSQL container, so the dropped index left no database
+or repository residue.
+
+The orchestrator independently measured the same mechanism at 50,000 rows on
+the pinned image: dropping the folded index yielded **49,999 rows removed**;
+with the index present, its `idx_scan` delta was **1** while the primary-key
+delta was **0**. Those figures specify signal strength; the checked-in journey's
+10,000-row sweep is the executable gate.
 
 ## Pre-existing-table boundary
 
@@ -270,6 +294,13 @@ percentiles or error budgets.
   exposes a plain string ID. Declaring the comparison set as `Set<string>`
   returned typecheck and both focused suites green without changing identity
   semantics.
+- The first counter-delta implementation read both snapshots inside the still
+  open trusted transaction. Plans showed the correct filter transition (9 at 10
+  rows, then 0), but every `idx_scan` delta remained 0 because the backend had
+  not returned to idle to publish its forced flush. Moving both counter reads
+  outside the transaction while leaving `pg_stat_force_next_flush()` between
+  query execution and commit/read produced the expected delta 1 from 100 rows
+  onward.
 
 ## Full-matrix evidence
 
@@ -332,9 +363,10 @@ returned `REVISE` with two in-scope findings:
    in the index qualification.” This is the second review round to find that the
    plan-shape gate can report success without proving the interpreter's intended
    index path, so the binding hard stop fired. Disposition at round 2: frozen and
-   surfaced. Final disposition: fixed only after the orchestrator's narrowed
-   restart, using operator-bound qualification plus observed zero post-filter
-   removals from `EXPLAIN ANALYZE`.
+   surfaced. The orchestrator's first replacement tightened the string and added
+   node-local filter observation; review round 3 then proved that replacement
+   incomplete. Final disposition: superseded by the tree-wide filter sum plus
+   exact index-counter delta specified after round 3.
 2. **Prefix pattern-character semantics diverge.** The reachable inputs `%`,
    `_`, and `\` are literal characters to `foldedPrefixUpperBound()` at
    `packages/postgres-provider/src/module-runtime-interpreter.ts:917`, while
@@ -348,17 +380,17 @@ returned `REVISE` with two in-scope findings:
    descoped to the queued semantic-preservation packet.
 
 No other in-scope material findings were reported. Fable was deliberately not
-launched: Critical review requires Codex PASS first, and the hard-tripwire rule
-forbids another writer fix round.
+launched for that candidate: Critical review requires Codex PASS first, and the
+then-current hard-tripwire rule forbade another writer fix round.
 
-Both reviewers earned their findings. Round 1 forced the probe onto the complete
-runtime SQL shape and every declared milestone; round 2 exposed both a false
-credit oracle and a real escaping-contract decision. The orchestrator's final
-design ruling restarted review only after narrowing the packet: R3 moved to its
-own semantic-preservation packet, while the folded equality oracle now combines
-exact index identity, operator-bound qualification, and observed zero
-post-filter removals. This is the final allowance; any further in-class finding
-stops the packet without another writer fix.
+All three reviewers earned their findings. Round 1 forced the probe onto the
+complete runtime SQL shape and every declared milestone; round 2 exposed both a
+false-credit oracle and a real escaping-contract decision. The orchestrator's
+first narrowed restart moved R3 to its own semantic-preservation packet and
+replaced bare containment with operator-bound, node-local observation. Round 3
+then proved that oracle incomplete for bitmap parent/child plans. The current
+execution-observed replacement is recorded below rather than attributed to the
+already-reviewed candidate.
 
 The fresh narrowed review ran against
 `aefa288f174c0fca05a8744de9b578c0d8fbb5c9` after the full matrix above. Codex
@@ -384,12 +416,37 @@ returned `REVISE — HARD STOP` with one in-scope material finding:
    case-insensitive unique equality. Disposition: **not fixed**. This is another
    instance of the unchanged class “the plan-shape gate cannot fail,” so the
    explicit final hard stop applies. The reviewer reported no other in-scope
-   material finding for questions 1 and 3–6.
+   material finding for questions 1 and 3–6. Disposition at review: not fixed;
+   the writer stopped exactly as required. Final disposition: the orchestrator
+   accepted the finding, identified the node-local specification as its own
+   design error, and authorized the tree-wide/counter-delta replacement now in
+   the candidate.
 
-Fable was not launched. The Critical chain requires Codex PASS first, and the
-user's final allowance expressly forbids another writer fix after any further
-in-class finding. The candidate remains frozen for an orchestrator decision to
-split or shelve the packet.
+Fable was not launched for `aefa288`. The Critical chain requires Codex PASS
+first. The user then reset the design ladder on the orchestrator side because
+the writer had correctly hard-stopped without autonomous patches after every
+finding.
+
+## Oracle lineage and terminus
+
+The two failed folded-index oracles were orchestrator-specified:
+
+1. exact index name plus folded-column text in PostgreSQL's `Index Cond` failed
+   because bare substring occurrence is not structural proof that the column is
+   an index qualification; and
+2. exact index name/operator plus node-local `Rows Removed by Filter = 0` failed
+   because bitmap plans put the filter counter on the heap-scan parent and the
+   index condition on its child.
+
+The replacement observes execution without associating open-ended plan nodes:
+tree-wide filter sum zero plus an exact expected-index counter delta. The
+reviewers earned every finding, and the writer's three hard stops prevented all
+three incomplete designs from being accepted silently.
+
+The terminus is binding: if the fresh review finds another in-class failure in
+this oracle, PR-6b splits. R1/R2 ship only with the plan gate explicitly deferred
+as a limitation, and the gate design moves to its own debate before any new
+packet prompt. No further writer iteration is authorized in that case.
 
 ## Test it yourself
 

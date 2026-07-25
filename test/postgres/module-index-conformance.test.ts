@@ -58,72 +58,40 @@ test('EXPLAIN plan guard rejects sequential and wrong-index scans structurally',
   );
   assert.throws(
     () =>
-      assertFoldedIndexPlan(
+      assertFoldedIndexEvidence(
         {
-          'Index Cond': '(tenant_id = trusted_tenant_id())',
-          'Index Name': 'expected_folded_index',
-          'Node Type': 'Index Scan',
+          indexScanDeltas: new Map([['expected_folded_index', 1n]]),
+          root: {
+            'Node Type': 'Bitmap Heap Scan',
+            Plans: [
+              {
+                'Index Name': 'expected_folded_index',
+                'Node Type': 'Bitmap Index Scan',
+              },
+            ],
+            'Rows Removed by Filter': 3,
+          },
         },
         'resolve',
-        [
-          {
-            foldedColumnName: 'expected_folded_column',
-            indexNames: ['expected_folded_index'],
-          },
-        ],
+        [{ indexNames: ['expected_folded_index'] }],
       ),
-    /resolve predicate index condition omitted folded column expected_folded_column/,
+    /resolve predicate removed 3 rows by post-filter across the plan tree while expecting index expected_folded_index/,
   );
   assert.throws(
     () =>
-      assertFoldedIndexPlan(
+      assertFoldedIndexEvidence(
         {
-          'Index Cond': "(tenant_id = 'expected_folded_column')",
-          'Index Name': 'expected_folded_index',
-          'Node Type': 'Index Scan',
+          indexScanDeltas: new Map([['expected_folded_index', 0n]]),
+          root: { 'Node Type': 'Index Scan' },
         },
         'resolve',
-        [
-          {
-            foldedColumnName: 'expected_folded_column',
-            indexNames: ['expected_folded_index'],
-          },
-        ],
+        [{ indexNames: ['expected_folded_index'] }],
       ),
-    /resolve predicate index condition omitted folded column expected_folded_column/,
-  );
-  assert.throws(
-    () =>
-      assertFoldedIndexPlan(
-        {
-          'Index Cond': '(expected_folded_column = $1)',
-          'Index Name': 'expected_folded_index',
-          'Node Type': 'Index Scan',
-          'Rows Removed by Filter': 3,
-        },
-        'resolve',
-        [
-          {
-            foldedColumnName: 'expected_folded_column',
-            indexNames: ['expected_folded_index'],
-          },
-        ],
-      ),
-    /resolve predicate removed 3 rows by post-filter on expected_folded_index/,
+    /resolve predicate did not increment expected index usage counter expected_folded_index; deltas expected_folded_index=0/,
   );
   assert.throws(
     () =>
       inspectPlan({
-        'Index Cond': 42,
-        'Index Name': 'expected_folded_index',
-        'Node Type': 'Index Scan',
-      }),
-    /unrecognized EXPLAIN index condition: 42/,
-  );
-  assert.throws(
-    () =>
-      inspectPlan({
-        'Index Cond': '(expected_folded_column = $1)',
         'Index Name': 'expected_folded_index',
         'Node Type': 'Index Scan',
         'Rows Removed by Filter': '3',
@@ -154,17 +122,32 @@ test('forced-RLS relation, resolve, and unique predicates use their declared ind
       await runtime.adminPool.query(
         `ANALYZE north_star_module.${quoted(targets.role.physicalTableName)}`,
       );
+      const resolveEvidence = await explainFoldedPredicate(
+        runtime,
+        targets,
+        'resolve',
+      );
+      const uniqueEvidence = await explainFoldedPredicate(
+        runtime,
+        targets,
+        'unique',
+      );
+      if (process.env.PR6B_DEBUG_EVIDENCE === '1') {
+        console.log(
+          `PR-6b evidence rows=${String(rowCount)} resolve=${formatFoldedEvidence(resolveEvidence)} unique=${formatFoldedEvidence(uniqueEvidence)}`,
+        );
+      }
       const milestonePlans = {
         relation: planUsesIndex(
           await explainRelationPredicate(runtime, targets),
           [targets.relationIndex.physicalName],
         ),
-        resolve: planUsesFoldedIndexes(
-          await explainFoldedPredicate(runtime, targets, 'resolve'),
+        resolve: foldedEvidencePasses(
+          resolveEvidence,
           foldedIndexRequirements(targets, 'resolve'),
         ),
-        unique: planUsesFoldedIndexes(
-          await explainFoldedPredicate(runtime, targets, 'unique'),
+        unique: foldedEvidencePasses(
+          uniqueEvidence,
           foldedIndexRequirements(targets, 'unique'),
         ),
       };
@@ -213,12 +196,12 @@ test('forced-RLS relation, resolve, and unique predicates use their declared ind
       await explainRelationPredicate(runtime, targets),
       targets.relationIndex.physicalName,
     );
-    assertFoldedIndexPlan(
+    assertFoldedIndexEvidence(
       await explainFoldedPredicate(runtime, targets, 'resolve'),
       'resolve',
       foldedIndexRequirements(targets, 'resolve'),
     );
-    assertFoldedIndexPlan(
+    assertFoldedIndexEvidence(
       await explainFoldedPredicate(runtime, targets, 'unique'),
       'unique',
       foldedIndexRequirements(targets, 'unique'),
@@ -228,7 +211,6 @@ test('forced-RLS relation, resolve, and unique predicates use their declared ind
 });
 
 interface PlanNode {
-  readonly 'Index Cond'?: unknown;
   readonly 'Index Name'?: unknown;
   readonly 'Node Type'?: unknown;
   readonly Plans?: unknown;
@@ -237,8 +219,12 @@ interface PlanNode {
 }
 
 interface FoldedIndexRequirement {
-  readonly foldedColumnName: string;
   readonly indexNames: readonly string[];
+}
+
+interface FoldedIndexEvidence {
+  readonly indexScanDeltas: ReadonlyMap<string, bigint | null>;
+  readonly root: PlanNode;
 }
 
 interface RelationTargets {
@@ -314,11 +300,9 @@ function foldedIndexRequirements(
   predicate: 'resolve' | 'unique',
 ): readonly FoldedIndexRequirement[] {
   const name = {
-    foldedColumnName: targets.nameFoldedColumn.physicalName,
     indexNames: [targets.nameFoldedIndex.physicalName],
   };
   const number = {
-    foldedColumnName: targets.numberFoldedColumn.physicalName,
     indexNames: targets.numberUniqueIndexNames,
   };
   return predicate === 'resolve' ? [name] : [number];
@@ -439,7 +423,7 @@ async function explainFoldedPredicate(
   runtime: Parameters<Parameters<typeof withRealPartyRuntime>[1]>[0],
   targets: RelationTargets,
   predicate: 'resolve' | 'unique',
-): Promise<PlanNode> {
+): Promise<FoldedIndexEvidence> {
   const columns =
     predicate === 'unique' ? [targets.numberColumn] : [targets.nameColumn];
   const match = buildFoldedMatchPredicate(
@@ -457,13 +441,21 @@ async function explainFoldedPredicate(
     targets.party.archive.archivedAtColumn,
     ...targets.party.columns.map((column) => column.physicalName),
   ];
-  return withTrustedRequestTransaction(
+  const expectedIndexNames = foldedIndexRequirements(
+    targets,
+    predicate,
+  ).flatMap((requirement) => requirement.indexNames);
+  const before = await readIndexScanCounters(
+    runtime.adminPool,
+    expectedIndexNames,
+  );
+  const root = await withTrustedRequestTransaction(
     runtime.runtimePool,
     runtime.contexts.a,
     async (client) => {
       await client.query('SET LOCAL ROLE north_star_module_runtime');
       try {
-        return await explain(
+        const root = await explain(
           client,
           `SELECT ${selectedColumns.map(quoted).join(', ')}
              FROM north_star_module.${quoted(targets.party.physicalTableName)}
@@ -473,10 +465,50 @@ async function explainFoldedPredicate(
             LIMIT $${String(values.length)}`,
           values,
         );
+        await client.query('SELECT pg_stat_force_next_flush()');
+        return root;
       } finally {
         await client.query('RESET ROLE');
       }
     },
+  );
+  const after = await readIndexScanCounters(
+    runtime.adminPool,
+    expectedIndexNames,
+  );
+  return {
+    indexScanDeltas: new Map(
+      expectedIndexNames.map((indexName) => {
+        const beforeCount = before.get(indexName);
+        const afterCount = after.get(indexName);
+        return [
+          indexName,
+          beforeCount === undefined || afterCount === undefined
+            ? null
+            : afterCount - beforeCount,
+        ] as const;
+      }),
+    ),
+    root,
+  };
+}
+
+async function readIndexScanCounters(
+  pool: Pool,
+  indexNames: readonly string[],
+): Promise<ReadonlyMap<string, bigint>> {
+  const result = await pool.query<{
+    index_name: string;
+    scan_count: string;
+  }>(
+    `SELECT indexrelname AS index_name, idx_scan::text AS scan_count
+       FROM pg_stat_user_indexes
+      WHERE schemaname = 'north_star_module'
+        AND indexrelname = ANY($1::text[])`,
+    [indexNames],
+  );
+  return new Map(
+    result.rows.map((row) => [row.index_name, BigInt(row.scan_count)] as const),
   );
 }
 
@@ -557,20 +589,14 @@ const recognizedPlanNodeTypes = new Set([
   'Sort',
 ]);
 
-interface IndexObservation {
-  readonly indexCondition: string | null;
-  readonly indexName: string;
-  readonly rowsRemovedByFilter: number;
-}
-
 function inspectPlan(root: PlanNode): {
-  indexObservations: readonly IndexObservation[];
   indexNames: Set<string>;
   sequentialScan: boolean;
+  totalRowsRemovedByFilter: number;
 } {
-  const indexObservations: IndexObservation[] = [];
   const indexNames = new Set<string>();
   let sequentialScan = false;
+  let totalRowsRemovedByFilter = 0;
   const visit = (node: PlanNode): void => {
     const nodeType = node['Node Type'];
     if (
@@ -590,6 +616,7 @@ function inspectPlan(root: PlanNode): {
         `unrecognized EXPLAIN rows removed by filter: ${String(rowsRemovedByFilter)}`,
       );
     }
+    totalRowsRemovedByFilter += rowsRemovedByFilter ?? 0;
     if (nodeType === 'Seq Scan') sequentialScan = true;
     if (node['Index Name'] !== undefined) {
       if (typeof node['Index Name'] !== 'string') {
@@ -598,22 +625,6 @@ function inspectPlan(root: PlanNode): {
         );
       }
       indexNames.add(node['Index Name']);
-      let indexCondition: string | null = null;
-      if (node['Index Cond'] !== undefined) {
-        if (typeof node['Index Cond'] !== 'string') {
-          throw new Error(
-            `unrecognized EXPLAIN index condition: ${String(node['Index Cond'])}`,
-          );
-        }
-        indexCondition = node['Index Cond'];
-      }
-      indexObservations.push({
-        indexCondition,
-        indexName: node['Index Name'],
-        rowsRemovedByFilter: rowsRemovedByFilter ?? 0,
-      });
-    } else if (node['Index Cond'] !== undefined) {
-      throw new Error('EXPLAIN index condition has no index name');
     }
     if (node.Plans !== undefined) {
       if (!Array.isArray(node.Plans) || !node.Plans.every(isRecord)) {
@@ -623,7 +634,7 @@ function inspectPlan(root: PlanNode): {
     }
   };
   visit(root);
-  return { indexNames, indexObservations, sequentialScan };
+  return { indexNames, sequentialScan, totalRowsRemovedByFilter };
 }
 
 function planUsesIndex(
@@ -634,22 +645,18 @@ function planUsesIndex(
   return expectedIndexNames.some((name) => plan.indexNames.has(name));
 }
 
-function planUsesFoldedIndexes(
-  root: PlanNode,
+function foldedEvidencePasses(
+  evidence: FoldedIndexEvidence,
   requirements: readonly FoldedIndexRequirement[],
 ): boolean {
-  const plan = inspectPlan(root);
-  return requirements.every((requirement) =>
-    plan.indexObservations.some(
-      (observation) =>
-        requirement.indexNames.includes(observation.indexName) &&
-        observation.indexCondition !== null &&
-        conditionUsesFoldedOperator(
-          observation.indexCondition,
-          requirement.foldedColumnName,
-        ) &&
-        observation.rowsRemovedByFilter === 0,
-    ),
+  const plan = inspectPlan(evidence.root);
+  return (
+    plan.totalRowsRemovedByFilter === 0 &&
+    requirements.every((requirement) =>
+      requirement.indexNames.some(
+        (indexName) => (evidence.indexScanDeltas.get(indexName) ?? 0n) >= 1n,
+      ),
+    )
   );
 }
 
@@ -669,56 +676,43 @@ function assertRelationIndexPlan(
   );
 }
 
-function assertFoldedIndexPlan(
-  root: PlanNode,
+function assertFoldedIndexEvidence(
+  evidence: FoldedIndexEvidence,
   predicate: 'resolve' | 'unique',
   requirements: readonly FoldedIndexRequirement[],
 ): void {
-  const plan = inspectPlan(root);
+  const plan = inspectPlan(evidence.root);
+  const expectedIndexNames = requirements.flatMap(
+    (requirement) => requirement.indexNames,
+  );
   assert.equal(
-    plan.sequentialScan,
-    false,
-    `${predicate} predicate used a sequential scan`,
+    plan.totalRowsRemovedByFilter,
+    0,
+    `${predicate} predicate removed ${String(plan.totalRowsRemovedByFilter)} rows by post-filter across the plan tree while expecting index ${expectedIndexNames.join(' or ')}`,
   );
   for (const requirement of requirements) {
-    const usedExpected = requirement.indexNames.filter((name) =>
-      plan.indexNames.has(name),
+    const usedExpected = requirement.indexNames.filter(
+      (indexName) => (evidence.indexScanDeltas.get(indexName) ?? 0n) >= 1n,
     );
     assert.ok(
       usedExpected.length > 0,
-      `${predicate} predicate did not use expected folded index ${requirement.indexNames.join(' or ')}; used ${[...plan.indexNames].join(', ') || 'none'}`,
+      `${predicate} predicate did not increment expected index usage counter ${requirement.indexNames.join(' or ')}; deltas ${requirement.indexNames
+        .map(
+          (indexName) =>
+            `${indexName}=${String(evidence.indexScanDeltas.get(indexName) ?? 'missing')}`,
+        )
+        .join(', ')}`,
     );
-    const qualifying = plan.indexObservations.filter(
-      (observation) =>
-        usedExpected.includes(observation.indexName) &&
-        observation.indexCondition !== null &&
-        conditionUsesFoldedOperator(
-          observation.indexCondition,
-          requirement.foldedColumnName,
-        ),
-    );
-    assert.ok(
-      qualifying.length > 0,
-      `${predicate} predicate index condition omitted folded column ${requirement.foldedColumnName}`,
-    );
-    for (const observation of qualifying) {
-      assert.equal(
-        observation.rowsRemovedByFilter,
-        0,
-        `${predicate} predicate removed ${String(observation.rowsRemovedByFilter)} rows by post-filter on ${observation.indexName}`,
-      );
-    }
   }
 }
 
-function conditionUsesFoldedOperator(
-  condition: string,
-  foldedColumnName: string,
-): boolean {
-  const escapedName = foldedColumnName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return new RegExp(
-    `(?:^|[^a-zA-Z0-9_'])"?${escapedName}"?\\s*(?:=|>=|<)`,
-  ).test(condition);
+function formatFoldedEvidence(evidence: FoldedIndexEvidence): string {
+  const plan = inspectPlan(evidence.root);
+  return `filters=${String(plan.totalRowsRemovedByFilter)},deltas=${[
+    ...evidence.indexScanDeltas,
+  ]
+    .map(([indexName, delta]) => `${indexName}:${String(delta)}`)
+    .join('|')}`;
 }
 
 function quoted(identifier: string): string {

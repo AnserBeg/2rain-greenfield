@@ -172,7 +172,7 @@ Date: 2026-07-25
 Why: forced RLS kept a non-leakproof row-side fold out of index conditions, while a stored C-collated fold column made equality predicates ordinary leakproof comparisons.
 How to apply: compile the generated expression, collation, equality index, runtime predicate, catalog shape, and row-drift probe as one versioned contract; a future fold version mints a new function and column and requires an accounted rewrite. See `docs/execution/packets/PR-6b.md`.
 
-## Observe plan qualification instead of crediting identifier text
+## Observe index execution across the whole plan tree
 Date: 2026-07-25
-Why: PR-6b's second review showed that bare containment in PostgreSQL's `Index Cond` string could credit an unrelated occurrence of the folded column name.
-How to apply: pair the exact index name with an operator-bound folded identifier, then use `EXPLAIN ANALYZE` to require zero rows removed by post-filter on the qualifying node; retain a real missing-index negative control. See `docs/execution/packets/PR-6b.md`.
+Why: PR-6b reviews showed that `Index Cond` text could falsely credit an identifier occurrence, while bitmap plans split the index name onto a child and `Rows Removed by Filter` onto its parent.
+How to apply: require both a before/after `pg_stat_user_indexes.idx_scan` delta on the exact expected index and zero rows removed by filter summed across the entire validated `EXPLAIN ANALYZE` tree. Neither signal is sufficient alone; retain a real missing-index negative control. See `docs/execution/packets/PR-6b.md`.

@@ -28,10 +28,13 @@ new measurements or estimates from PR-6b. PR-6 and PR-6b separately measure the
 incrementally and running `ANALYZE` under the actual runtime role. PR-6 walks
 `EXPLAIN (FORMAT JSON)` for relations. PR-6b walks
 `EXPLAIN (ANALYZE, FORMAT JSON)` for folded equality, never disables sequential
-scans, and requires the declared index name, the folded identifier bound to a
-comparison operator, and zero rows removed by post-filter on the qualifying
-node. An unrelated primary-key plan or a bare identifier mention cannot make
-the folded gate green.
+scans, and requires both zero rows removed by post-filter across the entire plan
+tree and a before/after `pg_stat_user_indexes.idx_scan` increase on the exact
+accepted folded index. `pg_stat_force_next_flush()` makes the execution counter
+observable after the query transaction returns idle. A scope-prefix scan on an
+unrelated primary key cannot make the folded gate green, and an expected-index
+scan whose folded equality is demoted to a post-filter cannot make it green
+either.
 
 The `O(tenant partition)` and tenant-count-invariance statements are plan-shape
 bounds, not latency extrapolations. The orchestrator verified the scope quals as
