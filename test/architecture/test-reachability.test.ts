@@ -237,7 +237,18 @@ test('declared unfiltered producers are wired to CI and their evidence paths', (
 
     const body = loadProducerImplementation(producer, rootScripts, webScripts);
     if (producer.runner === 'node:test') {
-      assert.match(body, /REACHABILITY_SUITE_ID\s*[:=]/u);
+      if (producer.implementation.kind === 'script') {
+        assert.match(
+          body,
+          new RegExp(`REACHABILITY_SUITE_ID=${producer.id}(?:\\s|$)`, 'u'),
+        );
+      } else {
+        assert.match(
+          body,
+          new RegExp(`getReachabilityProducer\\('${producer.id}'\\)`, 'u'),
+        );
+        assert.match(body, /REACHABILITY_SUITE_ID:\s*producer\.id/u);
+      }
       assert.match(body, /node-test-evidence-reporter\.mjs/u);
       assert.ok(
         body.includes(`${producer.id}.json`) ||

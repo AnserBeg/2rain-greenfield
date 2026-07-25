@@ -505,9 +505,20 @@ Pending at the new frozen candidate.
 
 ### Round 2 review evidence
 
-Pending one fresh naive read-only `gpt-5.6-sol` xhigh review against the ruled
-six-question charter. Any further incomplete-current-run false green is an
-immediate hard stop.
+The first fresh naive read-only `gpt-5.6-sol` xhigh review ran against frozen
+candidate `3657533d1aede40fa9afbc46ff7fdc8e8ad781a1` and returned **REVISE**
+with one material question-6 finding. At
+`test/architecture/test-reachability.test.ts:240`, the declaration check had
+regressed from requiring each Node producer's exact suite id to accepting any
+`REACHABILITY_SUITE_ID` assignment. The runtime aggregator still rejected a
+wrong suite id, so the reviewer explicitly classified the finding outside the
+hard-tripwire class and passed questions 1-5 otherwise.
+
+Disposition: **fixed**. Script-backed producers again require the literal
+declared id. The helper-backed observability producer must both resolve its
+exact declared id and assign `producer.id`, retaining the single-source design.
+A fresh re-review is pending at the replacement candidate. Any
+incomplete-current-run false green remains an immediate hard stop.
 
 ### Round 2 test it yourself
 
