@@ -1,13 +1,14 @@
 # PR-4 — Gate completeness round 2 + coverage audit
 
-Status: active — final user-authorized conservative correction implemented; matrix and review pending
+Status: evidence_ready — full matrix green and final scoped review PASS; ready for user acceptance
 Tier: Mechanical
 Branch: `packet/pr-4`
 Base: `982d2df01204107f560469f34336da723ae9cd93`
 Prior reviewed candidate: `7711a89758134b942e77a6a2277fcde05e393537`
-New frozen candidate: pending
+Frozen reviewed candidate: `f7296dcfd3139928f949832f7cdabecae5cf4a5d`
 Final evidence commit: post-review record only; reported in the completion block
-Review: pending — one final review under the user's post-tripwire design ruling
+Review: PASS — one final fresh naive `gpt-5.6-sol` xhigh review under the
+user's post-tripwire design ruling
 
 ## Authority and outcome
 
@@ -92,6 +93,7 @@ than `apps/web/release/shell.compiled.json`.
 | `1aa5780` | Retain independent reviewed inventories for all five filesystem suites |
 | `7d506f5` | Parse run-only workflow steps and add a workflow-level fail-closed canary |
 | `7711a89` | Replace the Playwright selection-key denylist with a parsed top-level allowlist and retain its red/green evidence |
+| `f7296dc` | Give filtered Node commands zero static reachability credit, prove locale remains independently covered, and queue PR-4b |
 
 ## Required demonstrations
 
@@ -336,7 +338,7 @@ No finding was re-dispositioned in `current-plan.md`.
 ## Full-matrix evidence on the frozen candidate
 
 The complete matrix ran serially from a clean tree at exactly
-`7711a89758134b942e77a6a2277fcde05e393537`. Focused development runs did not
+`f7296dcfd3139928f949832f7cdabecae5cf4a5d`. Focused development runs did not
 substitute for it.
 
 | Gate | Result |
@@ -351,23 +353,46 @@ substitute for it.
 | `corepack pnpm test:compiler` | PASS — 49/49 |
 | `corepack pnpm test:integration` | PASS — 42/42 |
 | `corepack pnpm test:agent` | PASS — 1/1 |
-| `corepack pnpm test:architecture` | PASS — 50/50 |
+| `corepack pnpm test:architecture` | PASS — 51/51 |
 | `corepack pnpm test:contracts` | PASS — 6/6 |
 | `corepack pnpm check:demo-release` | PASS |
 | `corepack pnpm check:schema` | PASS — 9 applied, 9 verified, no drift |
 | `corepack pnpm test:postgres` | PASS — 61/61 |
 | `corepack pnpm test:locale` | PASS — 1/1 |
 | `corepack pnpm test:browser` | PASS — 5/5 |
-| Security CI job | PASS — dependency audit; 199-commit clean scan found no leaks; disposable negative fixture found exactly one leak |
+| Security CI job | PASS — dependency audit; 201-commit clean scan found no leaks; disposable negative fixture found exactly one leak |
 | Observability inline CI command | PASS — 5/5 |
 | Patch and tree cleanliness | PASS — `git diff --check main...HEAD`, no tracked or untracked residue |
+
+The first PostgreSQL run at this SHA was retained red at 60/61. The ephemeral
+container used by “a failing callback still removes its ephemeral container”
+logged that PostgreSQL was ready, but its mapped port refused connections until
+the 30-second harness deadline:
+
+```text
+not ok 6 - a failing callback still removes its ephemeral container
+error: |-
+  The input did not match the regular expression /intentional fixture failure/.
+  Input: 'Error: ephemeral PostgreSQL was not ready within 30s:
+  Error: connect ECONNREFUSED 127.0.0.1:49856 ...
+  database system is ready to accept connections'
+# tests 61
+# pass 60
+# fail 1
+```
+
+The failure path removed its container. No repository file changed; a clean
+standalone rerun passed 61/61, after which locale passed 1/1 and browser passed
+5/5. The red is recorded as an environmental development result, not hidden or
+counted as green.
 
 In addition to the retained development reds above, the first two review
 rounds exposed executable omissions before this matrix: removal of the fixed
 unit inventory had weakened deletion detection, and a valid run-only YAML step
 (`- run: ...`) was silently skipped. Those findings were corrected before this
-run. The matrix is green, but the subsequent hard-tripwire review correctly
-shows that green does not settle the parser design.
+run. The hard-tripwire review correctly showed that green did not settle the
+parser design; the user's ruling now assigns dynamic truth to PR-4b and bounds
+this candidate's static claim honestly.
 
 ## Review evidence
 
@@ -375,7 +400,8 @@ Every invocation was a new ephemeral, naive, read-only Codex session using
 `gpt-5.6-sol` at xhigh effort. Each received only the frozen diff, owned paths,
 green-gate counts, and its bounded charter; no session was resumed. Rounds 1–3
 used the original charter below. Round 4 used the separately recorded
-user-authorized exception charter.
+user-authorized exception charter. Round 5 used the post-tripwire ruling
+charter, which explicitly forbade another static-parser hunt.
 
 | Round | Frozen SHA | Verdict and disposition |
 |---|---|---|
@@ -383,6 +409,7 @@ user-authorized exception charter.
 | 2 | `1aa578087105bd64d195fd3e0dd5ad925f9bd624` | **REVISE** — a valid run-only workflow step (`- run: ...`) did not match the extractor and was silently skipped. **Fixed** in `7d506f5` with optional-list-marker parsing and a permanent workflow-level negative canary. |
 | 3 | `7d506f54be1be12d0c5ceb5424a3a7c4ff45a365` | **REVISE** — Playwright config parsing rejects `projects`, `testIgnore`, and `testMatch`, but not `grep` or `grepInvert`; either option could select no tests from a file while the gate counts every file under `testDir`. **Fixed under the user's deliberate single-finding exception** by replacing the denylist with a TypeScript-parsed top-level allowlist and adding synthetic plus real-red canaries. |
 | 4 | `7711a89758134b942e77a6a2277fcde05e393537` | **REVISE / HARD TRIPWIRE** — the Playwright fix and its demonstrations pass, and original questions 1–2 and 4–9 have no regression. `parseNodeTestCommand()` accepts `--test-name-pattern=...` but ignores its selection effect before marking every expanded file reachable. An honest globbed suite can therefore skip every test in a nonmatching file while the reachability gate stays green. **Resolved by the user's design ruling:** filtered commands now receive zero static credit, and PR-4b owns dynamic executed-file truth. |
+| 5 | `f7296dcfd3139928f949832f7cdabecae5cf4a5d` | **PASS** — filtered commands receive zero credit, the permanent canary proves the real filtered locale command leaves its file unreachable until unfiltered PostgreSQL coverage is added, the packet states the static limitation honestly, PR-4b is queue row 2, and original questions 1–2 and 4–9 have no regression. No non-blocking PR-4b observations. |
 
 Round 3 reported no other in-scope material findings: questions 1–2 and 4–9
 passed, including direct byte comparison of all four archives. The user
@@ -406,6 +433,10 @@ this inference with the union of successful-suite reporter file events before
 comparing against filesystem discovery. The final review is forbidden from
 opening another static-parser hunt; further surfaces are observations owned by
 PR-4b, not PR-4 REVISE findings.
+
+Round 5 was a fresh ephemeral read-only `gpt-5.6-sol` invocation at xhigh
+effort. It returned **PASS** with no findings, no PR-4b observations, and no
+file modifications.
 
 ### Review charter
 
@@ -491,6 +522,25 @@ byte-exact demo checking, and a static-to-dynamic redesign unless the hard
 tripwire fired. Verdicts remained PASS / REVISE / BLOCK with concrete failure
 and file:line evidence.
 
+### Final post-tripwire review charter
+
+The fifth reviewer received the exact frozen SHA, owned four-file delta, green
+matrix counts, retained transient PostgreSQL red, and the settled design ruling.
+Its scope was limited to three questions:
+
+1. filtered Node commands must contribute zero reachability without failing
+   merely for being filtered; the permanent canary must report filtered-only
+   coverage unreachable and prove `test:postgres` independently covers the
+   real `test:locale` file;
+2. this record must state the static proof boundary honestly, name reporter-
+   based PR-4b as its closure, and place PR-4b at queue row 2 with the ruled
+   rationale; and
+3. the four-file delta must not regress original questions 1–2 or 4–9.
+
+Further static-parser completeness review and PR-4b implementation were
+explicitly out of scope. Any noticed parser surface could be only a non-blocking
+PR-4b observation and could not change a PASS verdict.
+
 ## Test it yourself
 
 From the repository root, the following takes under ten minutes and directly
@@ -509,24 +559,26 @@ corepack pnpm test:contracts
 ```
 
 The first architecture command must be red and name
-`test/orphan-demo/orphan.test.ts`; the second must be green at 50/50. The two
+`test/orphan-demo/orphan.test.ts`; the second must be green at 51/51. The two
 compiled-shell commands, both red at `main` before PR-4, must be green, with
 contracts at 6/6.
 
 ## Draft ledger row (do not commit to `ledger.md`)
 
 ```markdown
-| PR-4 | Gate completeness round 2 + coverage audit | G2 corrective | Mechanical | evidence_ready | `7711a89758134b942e77a6a2277fcde05e393537` | [packet](packets/PR-4.md); full CI matrix green at the exact frozen SHA; the authorized Playwright allowlist correction and real-red canary passed fresh review, but the same review tripped the design stop because Node `--test-name-pattern` selection is accepted without being modeled. REVISE; not accepted. |
+| PR-4 | Gate completeness round 2 + coverage audit | G2 corrective | Mechanical | evidence_ready | `f7296dcfd3139928f949832f7cdabecae5cf4a5d` | [packet](packets/PR-4.md); full CI matrix green at the exact frozen SHA after one retained transient PostgreSQL red and clean 61/61 rerun; filtered commands receive zero static reachability credit; `test:locale` is independently covered by unfiltered `test:postgres`; static proof is explicitly limited to files named by unfiltered commands; final fresh Codex `gpt-5.6-sol` xhigh PASS; PR-4b owns dynamic executed-file truth. |
 ```
 
 ## Checkpoint
 
-The user-authorized Playwright allowlist correction is implemented, its real
-red/green demonstration is retained, and the exact-SHA full matrix is green.
-The fresh review nevertheless found a fourth same-class fail-open parser
-surface, so the explicit hard tripwire fired. No further fix was attempted. The
-candidate is frozen for the user's design adjudication, including whether the
-structural inference should be replaced by executed-file evidence from a test
-reporter. No program-review trigger fires: PR-4 is a mechanical corrective
-under the still-current G2-P3 whole-app review, with no new correctness domain,
-fan-out, or stage boundary. PR-5 and PR-6 remain unstarted.
+The user's post-tripwire design ruling is implemented: filtered Node commands
+receive zero static credit, the locale file remains independently covered, the
+static limitation is explicit, and PR-4b is queued immediately next. The full
+matrix is green at the frozen SHA and the final scoped review passed with no
+findings or observations. PR-4 is acceptance-ready.
+
+No program-review trigger fires. The dual-model G2-P3 whole-app review is still
+current; this packet is a mechanical gate corrective, introduces no product
+correctness domain or fan-out, and its systemic runner-evidence seam has an
+explicit next packet. PR-4b, PR-5, and PR-6 remain unstarted pending user
+acceptance and selection.
