@@ -1,11 +1,9 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import test from 'node:test';
 
 import type { Pool, PoolClient } from 'pg';
 
 import type { StorageTargetPayloadV1 } from '../../packages/compiler/src/index.js';
-import { MODULE_UNICODE_CASE_FOLD_V1_SOURCE_SHA256 } from '../../packages/postgres-provider/src/module-storage-materializer.js';
 import { buildFoldedMatchPredicate } from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
 import { withTrustedRequestTransaction } from '../../packages/postgres-provider/src/request-context.js';
 import type { TrustedRequestContext } from '../../packages/runtime/src/request-context.js';
@@ -41,13 +39,9 @@ if (
 }
 if (
   demonstrateFoldConformance !== undefined &&
-  ![
-    'function-source',
-    'generation-expression',
-    'row-drift',
-    'subject-absent',
-    'zero-visible-rows',
-  ].includes(demonstrateFoldConformance)
+  !['row-drift', 'subject-absent', 'zero-visible-rows'].includes(
+    demonstrateFoldConformance,
+  )
 ) {
   throw new Error(
     `unsupported PR6B_DEMONSTRATE_FOLD_CONFORMANCE value: ${demonstrateFoldConformance}`,
@@ -119,38 +113,10 @@ test('EXPLAIN plan guard rejects sequential and wrong-index scans structurally',
   );
 });
 
-test('fold conformance rejects absent subjects, altered catalog shape, changed source, and zero-row evidence', () => {
+test('fold row conformance rejects absent subjects, zero-row evidence, and generated-value drift', () => {
   assert.throws(
     () => requireFoldSubjects([]),
-    /fold catalog conformance observed zero folded columns/,
-  );
-  const expected: FoldCatalogExpectation = {
-    columnName: 'value_folded',
-    expression: 'north_star_module.nsm_unicode_case_fold_v1(value)',
-    tableName: 'example',
-  };
-  const actual: FoldCatalogEvidence = {
-    collation: 'C',
-    expression: expected.expression,
-    generatedKind: 's',
-    sourceDigest: MODULE_UNICODE_CASE_FOLD_V1_SOURCE_SHA256,
-  };
-  assert.throws(
-    () =>
-      assertFoldCatalogEvidence(
-        { ...actual, sourceDigest: '0'.repeat(64) },
-        expected,
-      ),
-    /fold function source digest changed/,
-  );
-  assert.throws(
-    () =>
-      assertFoldCatalogEvidence({ ...actual, expression: 'value' }, expected),
-    /fold generation expression changed/,
-  );
-  assert.throws(
-    () => assertFoldCatalogEvidence({ ...actual, generatedKind: '' }, expected),
-    /fold column is not GENERATED ALWAYS AS STORED/,
+    /fold row conformance observed zero folded columns/,
   );
   assert.throws(
     () =>
@@ -276,25 +242,7 @@ test('forced-RLS relation, resolve, and unique predicates use their declared ind
       'unique',
       foldedIndexRequirements(targets, 'unique'),
     );
-    if (demonstrateFoldConformance === 'function-source') {
-      await installIdentityFoldFunction(runtime.adminPool);
-    }
-    if (demonstrateFoldConformance === 'generation-expression') {
-      await runtime.adminPool.query(
-        `DROP INDEX north_star_module.${quoted(targets.nameFoldedIndex.physicalName)};
-         ALTER TABLE north_star_module.${quoted(targets.party.physicalTableName)}
-           DROP COLUMN ${quoted(targets.nameFoldedColumn.physicalName)};
-         ALTER TABLE north_star_module.${quoted(targets.party.physicalTableName)}
-           ADD COLUMN ${quoted(targets.nameFoldedColumn.physicalName)} text COLLATE "C"
-           GENERATED ALWAYS AS (${quoted(targets.nameColumn.physicalName)}::text) STORED`,
-      );
-    }
-
-    await assertGeneratedFoldCatalog(
-      runtime.adminPool,
-      targets,
-      demonstrateFoldConformance === 'subject-absent' ? [] : undefined,
-    );
+    await assertGeneratedFoldCatalog(runtime.adminPool, targets);
     if (demonstrateFoldConformance === 'row-drift') {
       await installIdentityFoldFunction(runtime.adminPool);
     }
@@ -304,6 +252,7 @@ test('forced-RLS relation, resolve, and unique predicates use their declared ind
         ? runtime.contexts.b
         : runtime.contexts.a,
       targets,
+      demonstrateFoldConformance === 'subject-absent' ? [] : undefined,
     );
   });
 });
@@ -613,28 +562,8 @@ async function readIndexScanCounters(
 async function assertGeneratedFoldCatalog(
   pool: Pool,
   targets: RelationTargets,
-  subjectOverride?: readonly FoldSubject[],
 ): Promise<void> {
-  const subjects = requireFoldSubjects(
-    subjectOverride ?? foldedSubjects(targets),
-  );
-  const foldFunction = await pool.query<{ source: string }>(
-    `SELECT routine.prosrc AS source
-       FROM pg_proc AS routine
-       JOIN pg_namespace AS namespace ON namespace.oid = routine.pronamespace
-      WHERE namespace.nspname = 'north_star_module'
-        AND routine.proname = 'nsm_unicode_case_fold_v1'
-        AND pg_get_function_identity_arguments(routine.oid) = 'value text'`,
-  );
-  assert.equal(
-    foldFunction.rows.length,
-    1,
-    'fold catalog conformance requires exactly one referenced fold function',
-  );
-  const sourceDigest = createHash('sha256')
-    .update(foldFunction.rows[0]!.source)
-    .digest('hex');
-  for (const subject of subjects) {
+  for (const subject of requireFoldSubjects(foldedSubjects(targets))) {
     const catalog = await pool.query<{
       collation_name: string | null;
       expression: string | null;
@@ -664,14 +593,20 @@ async function assertGeneratedFoldCatalog(
       `fold catalog conformance missing ${subject.expectation.tableName}.${subject.expectation.columnName}`,
     );
     const observed = catalog.rows[0]!;
-    assertFoldCatalogEvidence(
-      {
-        collation: observed.collation_name,
-        expression: observed.expression,
-        generatedKind: observed.generated_kind,
-        sourceDigest,
-      },
-      subject.expectation,
+    assert.equal(
+      observed.generated_kind,
+      's',
+      `fold column is not GENERATED ALWAYS AS STORED: ${subject.expectation.tableName}.${subject.expectation.columnName}`,
+    );
+    assert.equal(
+      observed.collation_name,
+      'C',
+      `fold column lost C collation: ${subject.expectation.tableName}.${subject.expectation.columnName}`,
+    );
+    assert.equal(
+      normalizeCatalogExpression(observed.expression),
+      normalizeCatalogExpression(subject.expectation.expression),
+      `fold generation expression changed: ${subject.expectation.tableName}.${subject.expectation.columnName}`,
     );
   }
 }
@@ -685,13 +620,6 @@ async function installIdentityFoldFunction(pool: Pool): Promise<void> {
        SET search_path = pg_catalog
        AS $case_fold$ SELECT value $case_fold$`,
   );
-}
-
-interface FoldCatalogEvidence {
-  readonly collation: string | null;
-  readonly expression: string | null;
-  readonly generatedKind: string;
-  readonly sourceDigest: string;
 }
 
 interface FoldCatalogExpectation {
@@ -737,44 +665,20 @@ function requireFoldSubjects(
 ): readonly FoldSubject[] {
   assert.ok(
     subjects.length > 0,
-    'fold catalog conformance observed zero folded columns',
+    'fold row conformance observed zero folded columns',
   );
   return subjects;
-}
-
-function assertFoldCatalogEvidence(
-  evidence: FoldCatalogEvidence,
-  expected: FoldCatalogExpectation,
-): void {
-  const subject = `${expected.tableName}.${expected.columnName}`;
-  assert.equal(
-    evidence.generatedKind,
-    's',
-    `fold column is not GENERATED ALWAYS AS STORED: ${subject}`,
-  );
-  assert.equal(
-    evidence.collation,
-    'C',
-    `fold column lost C collation: ${subject}`,
-  );
-  assert.equal(
-    normalizeCatalogExpression(evidence.expression),
-    normalizeCatalogExpression(expected.expression),
-    `fold generation expression changed: ${subject}`,
-  );
-  assert.equal(
-    evidence.sourceDigest,
-    MODULE_UNICODE_CASE_FOLD_V1_SOURCE_SHA256,
-    `fold function source digest changed: ${subject}`,
-  );
 }
 
 async function assertGeneratedFoldRows(
   pool: Pool,
   context: TrustedRequestContext,
   targets: RelationTargets,
+  subjectOverride?: readonly FoldSubject[],
 ): Promise<void> {
-  const subjects = requireFoldSubjects(foldedSubjects(targets));
+  const subjects = requireFoldSubjects(
+    subjectOverride ?? foldedSubjects(targets),
+  );
   const evidence = await withTrustedRequestTransaction(
     pool,
     context,

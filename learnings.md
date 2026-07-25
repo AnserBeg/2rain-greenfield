@@ -170,9 +170,14 @@ How to apply: prefer observation (counters, artifacts, persisted effects) over i
 ## Move security-sensitive normalization into an accounted stored shape
 Date: 2026-07-25
 Why: forced RLS kept a non-leakproof row-side fold out of index conditions, while a stored C-collated fold column made equality predicates ordinary leakproof comparisons.
-How to apply: compile the generated expression, collation, equality index, and runtime predicate as one versioned contract; pin the generation expression and fold-function source digest in the production catalog check, and run row equality evidence only as the runtime role with a nonzero-visible-row assertion. A future fold version mints a new function and column and requires an accounted rewrite. See `docs/execution/packets/PR-6b.md`.
+How to apply: compile the generated expression, collation, equality index, and runtime predicate as one versioned contract; make each versioned fold function create-once and refuse a different existing body before DDL/DML; and run row equality evidence only as the runtime role with nonzero-subject and nonzero-visible-row assertions. A future fold version mints a new function and column and requires an accounted rewrite. See `docs/execution/packets/PR-6b.md`.
 
 ## Observe index execution across the whole plan tree
 Date: 2026-07-25
 Why: PR-6b reviews showed that `Index Cond` text could falsely credit an identifier occurrence, while bitmap plans split the index name onto a child and `Rows Removed by Filter` onto its parent.
 How to apply: require both a before/after `pg_stat_user_indexes.idx_scan` delta on the exact expected index and zero rows removed by filter summed across the entire validated `EXPLAIN ANALYZE` tree. Neither signal is sufficient alone; retain a real missing-index negative control. See `docs/execution/packets/PR-6b.md`.
+
+## Refuse changes to versioned database functions instead of detecting repaired state
+Date: 2026-07-25
+Why: PR-6b's materializer used `CREATE OR REPLACE FUNCTION` before verifying `pg_proc.prosrc`, so the verifier measured the body it had just restored and could pass while stored generated values remained stale.
+How to apply: for an immutable versioned function, create it only when absent; when present, compare its raw source before any DDL or DML and reject a mismatch with a named error. Never repair the same version in place. Keep data-level evidence outside the production activation path, and route protection from privileged out-of-band DDL to an operator-level witness. See `docs/execution/packets/PR-6b.md`.

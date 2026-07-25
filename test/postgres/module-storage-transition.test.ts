@@ -78,6 +78,17 @@ const environmentB = 'b2000000-0000-4000-8000-000000000002';
 const principalA = 'a3000000-0000-4000-8000-000000000003';
 const principalB = 'b3000000-0000-4000-8000-000000000003';
 const approverA = 'a4000000-0000-4000-8000-000000000004';
+const demonstrateFoldFunctionDrift =
+  process.env.PR6B_DEMONSTRATE_FOLD_FUNCTION_DRIFT;
+
+if (
+  demonstrateFoldFunctionDrift !== undefined &&
+  demonstrateFoldFunctionDrift !== '1'
+) {
+  throw new Error(
+    `unsupported PR6B_DEMONSTRATE_FOLD_FUNCTION_DRIFT value: ${demonstrateFoldFunctionDrift}`,
+  );
+}
 
 test('compiled module materialization is isolated, convergent, and provenance-closed', async (t) => {
   const emptyDefinition = emptyModuleDefinition();
@@ -145,6 +156,11 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
           materializerPool,
           moduleRuntimePool,
         );
+        assert.equal(
+          await readUnicodeCaseFoldFunction(pool),
+          null,
+          'fresh schema must exercise the absent-function creation path',
+        );
         const firstGenerationId = randomUUID();
         const firstPreparationId = randomUUID();
         const first = await materializer.prepare({
@@ -164,6 +180,11 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
         );
         assert.ok(first.preparedSubsetDigest.some((octet) => octet !== 0));
         assert.ok(first.remainingPlanDigest.some((octet) => octet !== 0));
+        const installedFoldFunction = await readUnicodeCaseFoldFunction(pool);
+        assert.ok(
+          installedFoldFunction,
+          'materialization must create the absent versioned fold function',
+        );
         const freshStorage = projectionPayload<StorageTargetPayloadV1>(
           target,
           PROJECTION_FAMILY_IDS.storageTarget,
@@ -1102,8 +1123,50 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
         );
 
         await t.test(
-          'two tenants and two roots converge on shared tables',
+          'versioned fold function refuses replacement and two tenants converge on shared tables',
           async () => {
+            await pool.query(
+              `CREATE OR REPLACE FUNCTION north_star_module.nsm_unicode_case_fold_v1(value text)
+                 RETURNS text
+                 LANGUAGE sql
+                 IMMUTABLE STRICT PARALLEL SAFE
+                 SET search_path = pg_catalog
+                 AS $case_fold$ SELECT value $case_fold$`,
+            );
+            const driftedPreparation = {
+              context: contexts.b,
+              expiresAt: new Date(Date.now() + 60_000).toISOString(),
+              generationId: randomUUID(),
+              initiatedBy: principalB,
+              preparationId: randomUUID(),
+              targetReleaseId: releases.b.target,
+            };
+            if (demonstrateFoldFunctionDrift === '1') {
+              await materializer.prepare(driftedPreparation);
+              assert.fail(
+                'materialization accepted a changed versioned fold body',
+              );
+            }
+            await assert.rejects(
+              materializer.prepare(driftedPreparation),
+              (error: unknown) =>
+                error instanceof ModuleStorageMaterializationError &&
+                error.code === 'CASE_FOLD_FUNCTION_DEFINITION_MISMATCH' &&
+                /versioned fold functions are immutable/.test(error.message),
+            );
+            const rejectedFoldFunction =
+              await readUnicodeCaseFoldFunction(pool);
+            assert.ok(rejectedFoldFunction);
+            assert.notEqual(
+              rejectedFoldFunction.source,
+              installedFoldFunction.source,
+              'rejection must not heal the mismatched function body',
+            );
+
+            await pool.query(installedFoldFunction.definition);
+            const restoredFoldFunction =
+              await readUnicodeCaseFoldFunction(pool);
+            assert.ok(restoredFoldFunction);
             const second = await materializer.prepare({
               context: contexts.b,
               expiresAt: new Date(Date.now() + 60_000).toISOString(),
@@ -1112,6 +1175,20 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
               preparationId: randomUUID(),
               targetReleaseId: releases.b.target,
             });
+            assert.ok(
+              second.diff.elements.some(
+                (element) =>
+                  element.disposition === 'APPLIED' &&
+                  (element.kind === 'createTable' ||
+                    element.kind === 'createIndex'),
+              ),
+              'second materialization must exercise the existing-function path',
+            );
+            assert.deepEqual(
+              await readUnicodeCaseFoldFunction(pool),
+              restoredFoldFunction,
+              'an expected existing function must be verified without replacement DDL',
+            );
             assert.deepEqual(
               second.preparedSubsetDigest,
               first.preparedSubsetDigest,
@@ -1651,34 +1728,6 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
             await pool.query(
               'DROP FUNCTION north_star_module.rogue_function()',
             );
-
-            const foldFunctionDefinition = await pool.query<{
-              definition: string;
-            }>(
-              `SELECT pg_get_functiondef(routine.oid) AS definition
-                 FROM pg_proc AS routine
-                 JOIN pg_namespace AS namespace
-                   ON namespace.oid = routine.pronamespace
-                WHERE namespace.nspname = 'north_star_module'
-                  AND routine.proname = 'nsm_unicode_case_fold_v1'
-                  AND pg_get_function_identity_arguments(routine.oid) =
-                        'value text'`,
-            );
-            assert.equal(foldFunctionDefinition.rows.length, 1);
-            await pool.query(
-              `CREATE OR REPLACE FUNCTION north_star_module.nsm_unicode_case_fold_v1(value text)
-                 RETURNS text
-                 LANGUAGE sql
-                 IMMUTABLE STRICT PARALLEL SAFE
-                 SET search_path = pg_catalog
-                 AS $case_fold$ SELECT value $case_fold$`,
-            );
-            await assertCatalogDrift(
-              materializer,
-              contexts.a,
-              /managed function source digest nsm_unicode_case_fold_v1\(value text\)/,
-            );
-            await pool.query(foldFunctionDefinition.rows[0]!.definition);
 
             await pool.query(
               `CREATE TYPE north_star_module.rogue_type AS ENUM ('rogue')`,
@@ -3065,6 +3114,43 @@ interface PlantedBackfillRows {
   columnName: string;
   recordIds: string[];
   tableName: string;
+}
+
+interface UnicodeCaseFoldFunctionCatalogState {
+  readonly catalogVersion: string;
+  readonly definition: string;
+  readonly source: string;
+}
+
+async function readUnicodeCaseFoldFunction(
+  pool: pg.Pool,
+): Promise<UnicodeCaseFoldFunctionCatalogState | null> {
+  const result = await pool.query<{
+    catalog_version: string;
+    definition: string;
+    source: string;
+  }>(
+    `SELECT routine.xmin::text AS catalog_version,
+            pg_get_functiondef(routine.oid) AS definition,
+            routine.prosrc AS source
+       FROM pg_proc AS routine
+       JOIN pg_namespace AS namespace ON namespace.oid = routine.pronamespace
+      WHERE namespace.nspname = 'north_star_module'
+        AND routine.proname = 'nsm_unicode_case_fold_v1'
+        AND pg_get_function_identity_arguments(routine.oid) = 'value text'`,
+  );
+  assert.ok(
+    result.rows.length <= 1,
+    'versioned fold function identity must be unique',
+  );
+  const row = result.rows[0];
+  return row
+    ? {
+        catalogVersion: row.catalog_version,
+        definition: row.definition,
+        source: row.source,
+      }
+    : null;
 }
 
 async function seedBackfillRows(

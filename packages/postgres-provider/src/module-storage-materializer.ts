@@ -34,8 +34,6 @@ import type { Pool, PoolClient, QueryResultRow } from 'pg';
 const sha256Pattern = /^[0-9a-f]{64}$/;
 const identifierPattern = /^[a-z][a-z0-9_]{0,62}$/;
 const unicodeCaseFoldFunctionName = 'nsm_unicode_case_fold_v1';
-export const MODULE_UNICODE_CASE_FOLD_V1_SOURCE_SHA256 =
-  '64f811a35df63f8ea9c2974c998e181d34b3813cc0d0373c60f2a7ace041323c';
 const allowedTypes = [
   /^boolean$/,
   /^date$/,
@@ -282,6 +280,12 @@ export class PostgresModuleStorageMaterializer {
       assertNonDestructiveStorageStatements(
         transition.elements.map((element) => rendererStatement(element)),
       );
+      if (
+        source.target.entities.length > 0 ||
+        target.target.entities.length > 0
+      ) {
+        await ensureUnicodeCaseFoldFunction(client);
+      }
 
       const prepared = transition.elements.filter(
         (element) =>
@@ -494,6 +498,12 @@ export class PostgresModuleStorageMaterializer {
       ]);
       const transition = requiredTransition(source, target);
       assertTransitionPair(transition, source, target);
+      if (
+        source.target.entities.length > 0 ||
+        target.target.entities.length > 0
+      ) {
+        await ensureUnicodeCaseFoldFunction(client);
+      }
       await client.query(
         `UPDATE north_star_internal.module_storage_generations
             SET state = 'IN_ATTEMPT'
@@ -1096,7 +1106,6 @@ async function applyDdlElement(
     }
     case 'createIndex': {
       const located = locateIndex(target, element);
-      await ensureUnicodeCaseFoldFunction(client);
       const columns = indexColumnExpressions(located.entity, located.index);
       await client.query(
         `CREATE ${located.index.indexKind === 'caseInsensitiveUnique' ? 'UNIQUE ' : ''}INDEX IF NOT EXISTS ${quoted(located.index.physicalName)}
@@ -1168,7 +1177,6 @@ async function createManagedTable(
   target: StorageTargetPayloadV1,
   entity: StorageEntityTarget,
 ): Promise<void> {
-  await ensureUnicodeCaseFoldFunction(client);
   const relationColumns = target.relations
     .filter((relation) => relation.sourceEntityId === entity.entityId)
     .map((relation) => relation.relationColumn);
@@ -1820,7 +1828,6 @@ async function verifyCatalogOnClient(
     parallel_safety: string;
     result_type: string;
     security_definer: boolean;
-    source: string;
     strict: boolean;
     volatility: string;
   }>(
@@ -1830,7 +1837,6 @@ async function verifyCatalogOnClient(
             pg_get_userbyid(routine.proowner) AS owner,
             language.lanname AS language,
             pg_get_function_result(routine.oid) AS result_type,
-            routine.prosrc AS source,
             routine.provolatile AS volatility,
             routine.proisstrict AS strict,
             routine.prosecdef AS security_definer,
@@ -1842,21 +1848,6 @@ async function verifyCatalogOnClient(
       WHERE namespace.nspname = 'north_star_module'
       ORDER BY routine.proname, arguments`,
   );
-  const unicodeCaseFoldFunction = functions.rows.find(
-    (routine) =>
-      routine.name === unicodeCaseFoldFunctionName &&
-      routine.arguments === 'value text',
-  );
-  if (expectedTables.size > 0 && unicodeCaseFoldFunction) {
-    const sourceDigest = createHash('sha256')
-      .update(unicodeCaseFoldFunction.source)
-      .digest('hex');
-    if (sourceDigest !== MODULE_UNICODE_CASE_FOLD_V1_SOURCE_SHA256) {
-      drift.push(
-        `managed function source digest ${unicodeCaseFoldFunctionName}(value text) expected ${MODULE_UNICODE_CASE_FOLD_V1_SOURCE_SHA256} but received ${sourceDigest}`,
-      );
-    }
-  }
   compareCatalogCollection(
     drift,
     'managed function',
@@ -1873,17 +1864,11 @@ async function verifyCatalogOnClient(
             parallel_safety: 's',
             result_type: 'text',
             security_definer: false,
-            source: normalizeSqlExpressionRequired(
-              `SELECT ${unicodeCaseFoldImplementationSql('value')}`,
-            ),
             strict: true,
             volatility: 'i',
           },
         ],
-    functions.rows.map((routine) => ({
-      ...routine,
-      source: normalizeSqlExpressionRequired(routine.source),
-    })),
+    functions.rows,
     (value) => `${value.name}(${value.arguments})`,
   );
 
@@ -2694,19 +2679,49 @@ function unicodeCaseFoldSql(valueExpression: string): string {
 async function ensureUnicodeCaseFoldFunction(
   client: PoolClient,
 ): Promise<void> {
+  const expectedSource = unicodeCaseFoldFunctionSource();
+  const existing = await client.query<{ source: string }>(
+    `SELECT routine.prosrc AS source
+       FROM pg_proc AS routine
+       JOIN pg_namespace AS namespace ON namespace.oid = routine.pronamespace
+      WHERE namespace.nspname = 'north_star_module'
+        AND routine.proname = $1
+        AND pg_get_function_identity_arguments(routine.oid) = 'value text'`,
+    [unicodeCaseFoldFunctionName],
+  );
+  if (existing.rows.length > 1) {
+    throw failure(
+      'CASE_FOLD_FUNCTION_IDENTITY_AMBIGUOUS',
+      `${unicodeCaseFoldFunctionName}(value text) resolved to ${String(existing.rows.length)} catalog entries`,
+    );
+  }
+  const source = existing.rows[0]?.source;
+  if (source !== undefined) {
+    if (source !== expectedSource) {
+      throw failure(
+        'CASE_FOLD_FUNCTION_DEFINITION_MISMATCH',
+        `${unicodeCaseFoldFunctionName}(value text) exists with a different body; versioned fold functions are immutable`,
+      );
+    }
+    return;
+  }
   await client.query(
-    `CREATE OR REPLACE FUNCTION north_star_module.${unicodeCaseFoldFunctionName}(value text)
+    `CREATE FUNCTION north_star_module.${unicodeCaseFoldFunctionName}(value text)
        RETURNS text
        LANGUAGE sql
        IMMUTABLE STRICT PARALLEL SAFE
        SET search_path = pg_catalog
-       AS $case_fold$
-         SELECT ${unicodeCaseFoldImplementationSql('value')}
-       $case_fold$;
+       AS $case_fold$${expectedSource}$case_fold$;
      REVOKE ALL ON FUNCTION north_star_module.${unicodeCaseFoldFunctionName}(text) FROM PUBLIC;
      GRANT EXECUTE ON FUNCTION north_star_module.${unicodeCaseFoldFunctionName}(text)
        TO north_star_module_runtime`,
   );
+}
+
+function unicodeCaseFoldFunctionSource(): string {
+  return `
+         SELECT ${unicodeCaseFoldImplementationSql('value')}
+       `;
 }
 
 function unicodeCaseFoldImplementationSql(valueExpression: string): string {
