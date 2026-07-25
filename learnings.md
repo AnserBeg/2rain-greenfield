@@ -130,3 +130,8 @@ How to apply: verify the value is synthetic, then ignore only its exact commit/f
 Date: 2026-07-24
 Why: PR-3 found that pnpm 11 silently ignored a root `package.json` `pnpm.overrides` entry after emitting only a warning.
 How to apply: declare pnpm 11 dependency overrides under `overrides` in `pnpm-workspace.yaml`, regenerate the lockfile, and verify the resolved graph and audit. See `docs/execution/packets/PR-3.md`.
+
+## Prove every test is reachable from CI
+Date: 2026-07-24
+Why: PR-4 found test commands and a browser scaffold that existed in the repository but were silently unreachable from every CI-invoked command.
+How to apply: discover all test files independently, resolve CI and package-script declarations fail-closed, and retain real-file plus parser canaries. Graduated into AGENTS.md section 6; see `docs/execution/packets/PR-4.md`.

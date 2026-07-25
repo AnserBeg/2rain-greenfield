@@ -84,9 +84,9 @@ are cheapest to decide before inventory exists. Recommended as one focused debat
 | Review | Where | Status |
 |---|---|---|
 | Whole-app program review (dual max-effort, converged) | `docs/execution/program-reviews/2026-07-24-g2-p3-party/` | Archived; produced PR-1/2/3 |
-| External design review — 7 derived-decision problems | request at `/home/rvham/novel-problems-review.md`; findings summarized below | **To archive** |
-| External performance/scaling review — F1–F12 | findings summarized below | **To archive** |
-| External architecture review — 7 findings | to be archived by PR-4 | **To archive** |
+| External design review — 7 derived-decision problems | [request](program-reviews/2026-07-24-external-design-review/request.md); [review](program-reviews/2026-07-24-external-design-review/review.md) | Archived |
+| External performance/scaling review — F1–F12 | [review](program-reviews/2026-07-24-external-performance-scaling/review.md) | Archived |
+| External architecture review — 7 findings | [review](program-reviews/2026-07-24-external-architecture/review.md) | Archived |
 
 ### Findings inventory (dispositioned)
 
@@ -108,11 +108,9 @@ auto-select one layer up (agent packet) · approval-diff renderer treated as a s
 control (G6) · PITR restore must replay materialization to the union of live roots ·
 rollback conformance scenario (the pointer-swap rollback story is currently untold).
 
-**Tracked debt (documentation)** — capability support matrix (`doctrine-coverage.md`
-cites it as existing: dangling reference) · living risk register · SLO ratification beyond
-`compiler-slos.md` · seed skills `no-source-editing` / `create-skill` /
-`erp-architecture-layer-map` · G0 stage-gate evidence doc · runtime config + secret-handling
-contract (pairs with the runnable-app-composition packet).
+**Tracked debt (documentation)** — see the owned
+[documentation-debt register](documentation-debt.md) for the missing artifact, why it
+matters, and the condition that closes each obligation.
 
 ## Standing lessons (why the queue looks like this)
 
