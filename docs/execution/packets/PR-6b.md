@@ -1,11 +1,11 @@
 # PR-6b — Folded-column index mechanics
 
-Status: active — round-1 findings fixed; replacement matrix and Critical review pending
+Status: blocked — second in-class review finding triggered the hard stop
 Tier: Critical
 Branch: `packet/pr-6b`
 Requested base: `28aaf3c`; actual accepted branch point: `3d394a536668519f1eb978065d63f38eee10674e`
-Frozen reviewed candidate: pending
-Review: pending
+Frozen reviewed candidate: `01ff6c2811615eaebbf1a8d7de8d2006d7f116aa`
+Review: REVISE — HARD TRIPWIRE; Fable not launched
 
 ## Authority and outcome
 
@@ -255,7 +255,31 @@ percentiles or error budgets.
 
 ## Full-matrix evidence
 
-Pending the frozen candidate run.
+The full matrix ran from a clean tree at exactly
+`01ff6c2811615eaebbf1a8d7de8d2006d7f116aa`:
+
+| Gate | Result |
+|---|---|
+| frozen install | 13 workspace projects already current; pnpm 11.9.0 |
+| format / lint / typecheck | green |
+| architecture boundaries | 94 files scanned |
+| build | green |
+| reachability run | token `4edfa0f7-8911-4404-a98d-81bb7a207f18` |
+| unit | 27/27 |
+| compiler | 51/51 |
+| integration | 42/42 |
+| agent | 1/1 |
+| architecture | 51/51 |
+| demo release | parse-normalized check green; artifact unchanged |
+| contracts | 6/6 |
+| schema | 10 applied / 10 verified; no drift |
+| PostgreSQL | 67/67 on the first attempt; no WSL retry |
+| locale | 1/1 |
+| browser | 5/5 |
+| observability inline producer | 5/5 |
+| executed-file reachability | 50/50 files from 9 producer artifacts |
+| security | 229 commits clean; one expected finding in the disposable negative fixture |
+| diff / worktree | `git diff --check main...HEAD`, worktree diff, and complete status all clean |
 
 ## Review evidence
 
@@ -274,8 +298,37 @@ Round 1 reviewed `b4a0960639824e3ca386b6bd293884ab03b648a2`. Codex returned
 The first finding is the packet's first hard-tripwire-class finding. The one
 authorized bounded fix has therefore been consumed. Any further finding that an
 emitted index does not serve its intended predicate or that the plan gate cannot
-fail is a hard stop. The fresh replacement Codex review and identical-SHA Fable
-confirmation remain pending.
+fail is a hard stop.
+
+Round 2 reviewed the unchanged replacement candidate
+`01ff6c2811615eaebbf1a8d7de8d2006d7f116aa` after the full matrix above. Codex
+returned `REVISE` with two in-scope findings:
+
+1. **HARD TRIPWIRE — the plan gate can false-green.** The accepted input is
+   PostgreSQL's unparsed `Index Cond` string. Both the milestone predicate at
+   `test/postgres/module-index-conformance.test.ts:700` and the final assertion
+   at `:744` use `condition.includes(expectedFoldedColumnName)`. An unrelated
+   expression or literal containing that physical name can therefore satisfy
+   the folded-column check even when the name is not an index-qualified
+   identifier. The falsely credited fact is “the intended folded column occurs
+   in the index qualification.” This is the second review round to find that the
+   plan-shape gate can report success without proving the interpreter's intended
+   index path, so the binding hard stop fired. Disposition: **not fixed; frozen
+   and surfaced for a design ruling**.
+2. **Prefix pattern-character semantics diverge.** The reachable inputs `%`,
+   `_`, and `\` are literal characters to `foldedPrefixUpperBound()` at
+   `packages/postgres-provider/src/module-runtime-interpreter.ts:917`, while
+   PostgreSQL `LIKE` treats them as pattern/escape syntax. For example, `%`
+   lowers to the literal range `['%', '&')`, whereas the former pattern `LIKE
+   '%%'` matches every string. The provider oracle at
+   `test/postgres/module-index-conformance.test.ts:561` compares with JavaScript
+   `startsWith()` and therefore does not adjudicate whether prefix input is a
+   literal prefix or a SQL-LIKE pattern. Disposition: **not fixed; surfaced with
+   the hard stop for an explicit semantics ruling**.
+
+No other in-scope material findings were reported. Fable was deliberately not
+launched: Critical review requires Codex PASS first, and the hard-tripwire rule
+forbids another writer fix round.
 
 ## Test it yourself
 
