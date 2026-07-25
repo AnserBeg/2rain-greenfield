@@ -1,14 +1,14 @@
 # PR-6b — Folded-column index mechanics
 
-Status: blocked — final E4 prevention review found an approved-attempt ordering defect; terminus reached
+Status: active — E4 disposition recorded; rebased candidate pending full matrix and Critical review
 Tier: Critical
 Branch: `packet/pr-6b`
-Requested base: `28aaf3c`; current rebased base: `1b40706a8155efee580b5184eb6ecb6e99aae7a2`
+Requested base: `28aaf3c`; current rebased base: `28c77b0649bc9f70a96454ffe1eb96ef7b0b8839`
 Prior frozen candidates: `b4a0960`, `01ff6c2`, `aefa288`
 Prior execution-oracle candidate: `d03c0f6dbb2a2e213ab296856dab878b3ab3647a`
 Prior E4 catalog candidate: `4683ef8c7cbd954a1f548658bff97b59e63b0eee`
-Final prevention candidate: `92c660e563b3b4bd4e357010781fc00cbe8bb932`
-Review: Codex REVISE; Fable not launched; E4 terminus requires user disposition
+Pre-disposition prevention candidate: `92c660e563b3b4bd4e357010781fc00cbe8bb932`
+Review: prior Codex REVISE dispositioned; final Critical review pending
 
 ## Authority and outcome
 
@@ -32,10 +32,11 @@ current predicate can use.
 
 The requested base `28aaf3c` remained an ancestor, but accepted `main` advanced
 while this packet was stopped. The branch was first cut from `3d394a5`, then
-rebased as explicitly directed first onto `c8bc021` and finally onto
-`1b40706`. Those rebases admitted the binding observation, per-vacuity negative
-control, and heal-before-measure rules in `AGENTS.md` section 6 and retained
-both independently appended `learnings.md` entries.
+rebased as explicitly directed onto `c8bc021`, `1b40706`, and finally
+`28c77b0`. Those rebases admitted the binding observation, per-vacuity negative
+control, and heal-before-measure rules in `AGENTS.md` section 6, retained both
+independently appended `learnings.md` entries, and routed both dispositioned E4
+residuals to the materializer packet in `current-plan.md`.
 
 ## Freeze F contract evolution
 
@@ -98,9 +99,9 @@ PostgreSQL returns `23505`; both original rows remain, and the failed index is
 absent. The constraint is the guard. No row is deleted or rewritten to conceal
 the conflict.
 
-## E4 final ruling — prevent replacement, do not detect repaired state
+## E4 disposition — verify or fail, with residuals routed
 
-The packet finally rebased onto accepted `main` at `1b40706`, which names
+The packet rebased onto accepted `main` at `1b40706`, which names
 heal-before-measure as a vacuity vector in addition to the observation and
 per-vector negative-control rules admitted at `c8bc021`.
 
@@ -120,9 +121,9 @@ digest result did not prove that rows had always used that body. No later
 measurement can repair this ordering defect because the verifier and repairer
 share the materialization path.
 
-The final ruling removes that drift gate instead of refining it again. Candidate
-`92c660e` attempts to make the versioned `nsm_unicode_case_fold_v1` function
-immutable by construction:
+The final prevention change removes that drift gate instead of refining it
+again. Candidate `92c660e` makes materialization verify or fail for the
+versioned `nsm_unicode_case_fold_v1` function:
 
 - before preparation DDL/DML, an absent function is created;
 - an existing function's raw `pg_proc.prosrc` must equal the original v1 body;
@@ -131,14 +132,19 @@ immutable by construction:
   and
 - production contains no `CREATE OR REPLACE FUNCTION` path for v1.
 
-The fresh review found that this prevention does **not** yet hold on the
-approved-attempt path: the durable-claim `INSERT ... ON CONFLICT DO UPDATE`
-runs before the fold-body check. The ordinary mismatch rolls that transaction
-back, but an existing claim can instead produce `ATTEMPT_CLAIM_MISMATCH` before
-the required named fold-definition refusal. The prepare-path negative control
-does not exercise that ordering. This is an E4 finding, not an R1/R2 oracle
-finding. Under the user's terminus, it is not repaired in this packet and E4
-cannot be claimed by this candidate.
+The fresh review found that the approved-attempt path can execute its claim
+`INSERT ... ON CONFLICT DO UPDATE` before the fold-body check. The ordinary
+mismatch rolls that transaction back; an existing claim can instead return
+`ATTEMPT_CLAIM_MISMATCH` before the named fold-definition error. In either
+case materialization fails. The finding is therefore error-code ordering plus
+missing negative-control coverage on `executeApprovedAttempt()`, not a vacuous
+pass, false green, or mutation accepted under a changed function body.
+
+The E4 terminus dispositions that ordering requirement and its additional
+negative control out of PR-6b. It keeps the verify-or-fail prevention, the
+`attgenerated = 's'` and exact generation-expression catalog checks, and the
+runtime-role row assertion. Accepted main commit `28c77b0` routes the ordering
+residual to the materializer packet rather than reopening verification design.
 
 This is prevention, not detection. PostgreSQL computes a stored generated
 column and rejects direct writes; its exact generation expression names v1;
@@ -223,14 +229,23 @@ operator: 'strictEqual'
 After these reds, the normal focused run was 14/14 green across the plan and
 transition files, with relation, resolve, and unique planner flips at 100 rows.
 
-### Residual operator boundary
+### Recorded residuals
 
 An operator holding materializer or superuser credentials can still replace v1
 between materializations and permit writes under that body until the next
 preparation or attempt refuses it. Completely closing that interval requires
 the superuser-owned DDL event-trigger witness already routed to the
 materializer packet in `current-plan.md`. It is recorded, not fixed here; no
-application role has the required function-DDL authority.
+application role has the required function-DDL authority. The next
+materialization fails rather than passing against that body, so this interval
+is not a false-green gate either.
+
+The same accepted `current-plan.md` row also owns the approved-attempt ordering
+residual: claim DML can fail with `ATTEMPT_CLAIM_MISMATCH` before the fold-body
+check. It remains a failure, so PR-6b does not require a first-error guarantee or
+an `executeApprovedAttempt()` negative control. These are limitations of error
+specificity and continuous operator-DDL enforcement, not defects in R1/R2's
+emitted shapes, runtime predicates, or execution-observed index oracle.
 
 ## R3 descope — search semantics before range lowering
 
@@ -657,7 +672,7 @@ change and its negative control require a new ruling rather than an autonomous
 writer round. Fable was not launched because the Critical chain requires Codex
 PASS first.
 
-## Final E4 prevention review and terminus
+## Final E4 prevention review and disposition
 
 After rebasing onto accepted `main` at
 `1b40706a8155efee580b5184eb6ecb6e99aae7a2`, candidate
@@ -686,12 +701,17 @@ deltas, tree-wide zero filter removals, a genuine missing-index red, every
 milestone, fail-closed structural parsing, and no disabled sequential scans.
 It reported no other in-scope material finding.
 
-Disposition: **not fixed**. This is the failure condition named by the user's
-E4 terminus. The writer did not reinterpret the contract, move the check, add a
-new control, or launch another review. E4 must now be dropped from PR-6b or
-owned by the materializer packet through an explicit user disposition; the
-current candidate cannot claim E4 completion. Fable was not launched because
-the Critical chain requires Codex PASS first.
+Disposition: **recorded limitation, not a PR-6b defect**. The orchestrator's
+terminus ruling observes that both reachable outcomes are failures, not passes:
+the ordinary body mismatch returns
+`CASE_FOLD_FUNCTION_DEFINITION_MISMATCH`, while an earlier claim mismatch can
+return `ATTEMPT_CLAIM_MISMATCH`. It drops any guarantee that the fold mismatch
+must be ordered first and any requirement for an approved-attempt negative
+control. The create-once/verify-or-fail prevention and prepare-path changed-body
+red stay. Accepted main commit `28c77b0` routes the ordering residual and the
+between-materializations operator-DDL interval to the materializer packet.
+Fable was not launched for the pre-disposition candidate because the Critical
+chain requires Codex PASS first; the final disposition receives a fresh chain.
 
 ## Test it yourself
 
@@ -730,13 +750,11 @@ disposable containers. The prevention red reports
 `CASE_FOLD_FUNCTION_DEFINITION_MISMATCH`; the three row controls report zero
 subjects, zero visible rows, and 10,000 mismatches respectively.
 
-## Draft ledger row — suspended
+## Draft ledger row
 
-Do not commit this row. The packet is not acceptance-ready because the fresh
-Codex review did not reach PASS, Fable therefore did not run, and the merge SHA
-does not exist. Retain the text only for a later split or resumed packet that
-completes a valid Critical chain:
+Do not commit this row. The merge SHA does not exist, and the final Critical
+review chain remains pending:
 
 ```text
-| PR-6b | Folded-column index mechanics | Critical | accepted | <merge-sha> | Stored C-collated generated folds make forced-RLS resolve and unique lookup use their declared indexes; raw search and prefix-only btrees retired; execution-observed index, catalog-shape, uniqueness, and <resolved-E4-drift-evidence> proofs green; R3 explicitly descoped; full matrix and Critical review chain recorded in docs/execution/packets/PR-6b.md. |
+| PR-6b | Folded-column index mechanics | Critical | accepted | <merge-sha> | Stored C-collated generated folds make forced-RLS resolve and unique lookup use their declared indexes; raw search and prefix-only btrees retired; execution-observed index, catalog-shape, uniqueness, and verify-or-fail fold-function prevention green; E4 ordering and operator-DDL residuals routed to the materializer packet; R3 explicitly descoped; full matrix and Critical review chain recorded in docs/execution/packets/PR-6b.md. |
 ```
