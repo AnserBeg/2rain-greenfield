@@ -1,12 +1,13 @@
 # PR-6b — Folded-column index mechanics
 
-Status: active — E4 catalog ruling implemented; fresh Critical review pending
+Status: blocked — E4 catalog lifecycle review found a valid verification-healing path; design ruling required
 Tier: Critical
 Branch: `packet/pr-6b`
-Requested base: `28aaf3c`; actual accepted branch point: `3d394a536668519f1eb978065d63f38eee10674e`
+Requested base: `28aaf3c`; current rebased base: `c8bc0216b0f42c52343c7dfaeb519b1caccb8289`
 Prior frozen candidates: `b4a0960`, `01ff6c2`, `aefa288`
 Prior execution-oracle candidate: `d03c0f6dbb2a2e213ab296856dab878b3ab3647a`
-Review: prior Codex REVISE; replacement Codex and Fable pending
+E4 catalog candidate: `4683ef8c7cbd954a1f548658bff97b59e63b0eee`
+Review: fresh Codex REVISE on E4 lifecycle; Fable not launched
 
 ## Authority and outcome
 
@@ -28,11 +29,11 @@ search reads the stored fold but deliberately remains a tenant-partition scan,
 as verdict R4 requires; searchable-only fields do not receive a btree that no
 current predicate can use.
 
-The requested base `28aaf3c` remained an ancestor, but accepted `main` and
-`origin/main` were both `3d394a5` when work began. The sole intervening commit
-only reordered the active documentation queue. Per repository branch doctrine,
-the packet was cut from that current accepted main rather than discarding the
-accepted documentation update.
+The requested base `28aaf3c` remained an ancestor, but accepted `main` advanced
+while this packet was stopped. The branch was first cut from `3d394a5`, then
+rebased as explicitly directed onto `c8bc021`. That rebase admitted the two new
+binding gate rules in `AGENTS.md` section 6 and retained both independently
+appended `learnings.md` entries.
 
 ## Freeze F contract evolution
 
@@ -458,10 +459,10 @@ percentiles or error budgets.
   Mapping the observed SQL field explicitly and reading each folded subject
   sequentially returned the focused journey to 3/3 green.
 
-## Full-matrix evidence
+## Full-matrix evidence at the E4 catalog candidate
 
 The final full matrix ran from a clean tree at exactly
-`d03c0f6dbb2a2e213ab296856dab878b3ab3647a`:
+`4683ef8c7cbd954a1f548658bff97b59e63b0eee`:
 
 | Gate | Result |
 |---|---|
@@ -469,7 +470,7 @@ The final full matrix ran from a clean tree at exactly
 | format / lint / typecheck | green |
 | architecture boundaries | 94 files scanned |
 | build | green |
-| reachability run | token `6ef2d5a0-9e46-4bab-915c-278aa2cfa543` |
+| reachability run | token `c3539a4c-1952-4b11-840a-0febbd4b6085` |
 | unit | 27/27 |
 | compiler | 52/52 |
 | integration | 42/42 |
@@ -478,12 +479,12 @@ The final full matrix ran from a clean tree at exactly
 | demo release | parse-normalized check green; artifact unchanged |
 | contracts | 6/6 |
 | schema | 10 applied / 10 verified; no drift |
-| PostgreSQL | 67/67 on the first attempt; no WSL retry |
+| PostgreSQL | 68/68 on the first attempt; no WSL retry |
 | locale | 1/1 |
 | browser | 5/5 |
 | observability inline producer | 5/5 |
 | executed-file reachability | 50/50 files from 9 producer artifacts |
-| security | 234 commits clean; one expected finding in the disposable negative fixture |
+| security | 246 commits clean; one expected finding in the disposable negative fixture |
 | diff / worktree | `git diff --check main...HEAD`, worktree diff, and complete status all clean |
 
 ## Review evidence
@@ -632,6 +633,38 @@ Fable was not launched. Critical review requires Codex PASS first. The frozen
 candidate and its green evidence remain intact for a design disposition of the
 RLS boundary around the production drift check.
 
+## E4 catalog-lifecycle review
+
+The user ruled that E4 must move from the RLS-hidden business rows to catalog
+facts. Candidate `4683ef8c7cbd954a1f548658bff97b59e63b0eee` implements that
+bounded correction and the four required vacuity controls. Its exact full
+matrix is recorded above. A fresh, naive, read-only Codex `gpt-5.6-sol` xhigh
+review then returned `REVISE` with one material finding:
+
+1. **Question 2 — production verification can heal the fact before observing
+   it.** `prepare()` applies DDL before catalog verification. A table or index
+   creation calls `ensureUnicodeCaseFoldFunction()`, which unconditionally
+   executes `CREATE OR REPLACE FUNCTION`. The reachable sequence is: replace
+   the fold body under the same name, write rows whose generated folds use that
+   body, then prepare any transition that creates a table or index. The DDL
+   restores the pinned function body before the verifier reads `pg_proc.prosrc`,
+   so its source digest passes while the previously generated values remain
+   stale. The concrete path is
+   `packages/postgres-provider/src/module-storage-materializer.ts:342`, `:352`,
+   `:1099`/`:1171`, and `:2698` in the reviewed candidate.
+
+The reviewer explicitly reported no hard-tripwire failure: the tree-wide
+filter-removal sum plus exact expected-index counter delta satisfies the folded
+index oracle. The finding is instead a new E4 lifecycle vacuity vector: the
+gate mutates the subject before measuring it. It also means the current four
+negative controls are not yet exhaustive under the new section 6 doctrine.
+
+Disposition: **not fixed**. The user authorized one bounded E4 fix followed by
+one fresh Codex review; that review did not reach PASS. A further lifecycle
+change and its negative control require a new ruling rather than an autonomous
+writer round. Fable was not launched because the Critical chain requires Codex
+PASS first.
+
 ## Test it yourself
 
 From the repository root, these commands finish in under ten minutes on the
@@ -649,13 +682,21 @@ node --import tsx --test test/postgres/module-index-conformance.test.ts
 node --import tsx --test \
   test/postgres/module-storage-transition.test.ts \
   test/postgres/party-runtime.test.ts
+
+# Red: each replacement E4 vacuity control fails closed in a disposable database.
+for vector in subject-absent function-source generation-expression zero-visible-rows; do
+  PR6B_DEMONSTRATE_FOLD_CONFORMANCE="$vector" \
+    node --import tsx --test test/postgres/module-index-conformance.test.ts || true
+done
 ```
 
 The first command exits 1, names the expected folded index, and reports 9,999
 rows removed across the plan tree. The next commands are green; the plan run
 reports all three planner flips at 100 rows, the transition suite retains the
 `23505` duplicate refusal and exact `CATALOG_DRIFT`, and all databases are
-disposable containers.
+disposable containers. Each E4 negative command prints a named failure; these
+controls prove the replacement checks fail closed but do not cover the newly
+reviewed verify-after-replacement lifecycle path, so the packet remains blocked.
 
 ## Draft ledger row — suspended
 
