@@ -132,7 +132,9 @@ silently.
   vacuously** — one recorded red per vacuity vector, not one red overall. A gate
   never observed failing is not evidence. Vacuity vectors include: the subject
   absent entirely, the check reading zero input, a proxy satisfied while the fact
-  does not hold, and output shapes the parser does not recognize.
+  does not hold, output shapes the parser does not recognize, and **the subject
+  repaired before it is measured** — a verifier must never share a code path with
+  the thing that heals what it verifies.
 - Deadline, expiry, and elapsed-time logic never compares raw wall-clock
   samples. Production elapsed-time decisions use a monotonic source; timing
   tests inject a controlled clock and never sleep-and-measure.
