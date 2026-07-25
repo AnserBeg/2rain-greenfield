@@ -5,7 +5,7 @@ narrative companion to `ledger.md`: the ledger records what each packet *was*, t
 records what we are doing *next* and *why*. Update it whenever the queue changes;
 delete rows once they are accepted and recorded in the ledger.
 
-Last updated: 2026-07-25, at `main` = `ae55a53eb2555258cc0233f0edd677b675120a1c`.
+Last updated: 2026-07-25, at `main` = `55b5e4b4c6e07d933200b35cf338077bea9f25ba`.
 
 ## Operating model
 
@@ -56,13 +56,27 @@ Ordered. Each row names its source and why it holds its slot.
 | # | Packet | Tier | Why here |
 |---|---|---|---|
 | 1 | **PR-6 — index coverage + request-path SLOs** | Critical | Relations get no index; the search index is a raw btree that cannot serve `fold(col) LIKE '%x%'`; advisory resolve keys have no folded index. Every fan-out module inherits these. Adds an **`EXPLAIN` conformance probe** (fail on Seq Scan over a module table) and `runtime-slos.md`. |
-| 2 | G2-P4 — surface-grammar conformance | Behavioral | Roadmap resumes. Narrowed by G2-P3a to the pure conformance suite. |
-| 3 | G2-P5 — shared table behavior + Q0 envelope | Critical | Paging/truncation/cursor, saved filters, shape-specialized SQL. |
-| 4 | `adding-a-module` skill | Mechanical | Written against the proven Freeze G template; the fan-out consumes it. |
-| 5 | Catalog (G2-P6) → Location (G2-P7) | Critical | **Catalog is the factory test: acceptance requires ZERO press changes.** If it needs one, stop and harden before Location. |
-| 6 | PR-7 — provider hot path | Behavioral | Release-load cache (flagged by two independent reviews), relation N+1, round-trip reduction, advisory-lock namespacing. Before G3. |
-| 7 | Policy/identity kernel | Critical | The one kernel seam with **no owner** — see decisions below. After fan-out, before G3. |
-| 8 | G2-P8 import → G2-P9 stage gate | — | Completes G2. |
+| 2 | **PR-6b — folded-column index mechanics** | Critical | Binding output of the [RLS index-access debate](debates/pr6-rls-index-access-verdict.md). Compiler-emitted stored generated folded columns + indexes for unique **and** advisory-resolve keys; retire the raw-column `search` index; prefix lowered to leakproof range quals. **Has a deadline**: adding a stored generated column is a full table rewrite under `ACCESS EXCLUSIVE`, ~free now and an all-tenant write outage once G3 posts movements. |
+| 3 | G2-P4 — surface-grammar conformance | Behavioral | Roadmap resumes. Narrowed by G2-P3a to the pure conformance suite. |
+| 4 | G2-P5 — shared table behavior + Q0 envelope | Critical | Paging/truncation/cursor, saved filters, shape-specialized SQL. |
+| 5 | `adding-a-module` skill | Mechanical | Written against the proven Freeze G template; the fan-out consumes it. |
+| 6 | Catalog (G2-P6) → Location (G2-P7) | Critical | **Catalog is the factory test: acceptance requires ZERO press changes.** If it needs one, stop and harden before Location. |
+| 7 | PR-7 — provider hot path | Behavioral | Release-load cache (flagged by two independent reviews), relation N+1, round-trip reduction, advisory-lock namespacing. Before G3. |
+| 8 | Policy/identity kernel | Critical | The one kernel seam with **no owner** — see decisions below. After fan-out, before G3. |
+| 9 | G2-P8 import → G2-P9 stage gate | — | Completes G2. |
+
+## Settled by debate (2026-07-25)
+
+The [RLS index-access debate](debates/pr6-rls-index-access-verdict.md) is CLOSED and
+binding. Ratified: stored generated folded columns as the index mechanism; advisory
+resolve keys covered, not just unique business keys; prefix search lowered to
+leakproof range quals; unanchored substring stays a bounded partition scan whose cost
+is invariant in tenant count. Rejected: `LEAKPROOF` marking (superuser + silent
+`CREATE OR REPLACE` reversion), schema-per-tenant (measured to die at 1,000-2,000
+tenants), agent-written SQL and SQL-over-emitted-views (ADR-0009 stands). End-state
+topology is pooled pods with whale tenants tiered — **no decision needed now, shard
+count of one is today**. Aggregation is **Q1**, already specified by plan §5.1/§5.9/
+§9.2.2, and it **must exist before G3** because G3's on-hand is itself an aggregate.
 
 ## Plan-level decisions pending before G3
 
@@ -70,10 +84,17 @@ These are **not code work**. They change the storage model or the launch scope, 
 are cheapest to decide before inventory exists. Recommended as one focused debate
 (they are entangled), run by the orchestrator.
 
+0. **Q1 compositional query tier — now schedule-critical.** The gateway today rejects
+   every tier above Q0 and every filter other than literal `true`. G3's correctness
+   contract is `SUM(posted movement.quantity_delta)`, so without Q1 the inventory
+   stage hand-rolls aggregation against ADR-0011's grain. Not a debate — a sequencing
+   decision: where does Q1 land relative to the Catalog/Location fan-out?
 1. **Erasure / data-subject rights.** No-hard-delete + additive-only + append-only trust
    facts + one shared database currently has **no erasure path**. Raised independently by
    two external reviews. Crypto-shredding (per-subject key, delete the key) is the standard
-   answer and changes the storage model. Potential launch blocker in EU jurisdictions.
+   answer and changes the storage model. The debate removed the `DROP SCHEMA` escape:
+   schema-per-tenant relocates only module tables, leaving release, trust, audit,
+   outbox and receipt rows shared. Potential launch blocker in EU jurisdictions.
 2. **Temporal semantics.** Bitemporality/effective-dating (prices, costs, FX, BOM versions,
    as-of reporting) *and* timezone/business-day authority (what "a day" means for a tenant).
    One topic, not two. G3 designs backdated postings and as-of balances against whatever is
