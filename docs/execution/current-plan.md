@@ -5,7 +5,7 @@ narrative companion to `ledger.md`: the ledger records what each packet *was*, t
 records what we are doing *next* and *why*. Update it whenever the queue changes;
 delete rows once they are accepted and recorded in the ledger.
 
-Last updated: 2026-07-25, at `main` = `355b6a6cb6b7f6824c50e4d50ec9c2a9e6def2f3`.
+Last updated: 2026-07-25, at `main` = `ae55a53eb2555258cc0233f0edd677b675120a1c`.
 
 ## Operating model
 
@@ -42,7 +42,10 @@ Two gate-completeness correctives followed, both accepted: `PR-4` (quoted globs,
 two orphaned compiled-shell guards wired, doctrine/debt coverage, external reviews
 archived) · `PR-4b` (**executed-file reachability** — every test file must be observed
 running in the current run, evidence bound to one run token and the reporter's observed
-argv; static CI-selection inference is gone).
+argv; static CI-selection inference is gone) · `PR-5` (**idempotency scope** — durable
+receipt identity narrowed across primary key, lookup, advisory lock, and RLS; a retry
+after an activation, a recompile, or from another principal no longer re-executes, and
+migration 0010 refuses rather than rewriting immutable receipts).
 
 **Not yet started:** the Catalog/Location fan-out, and everything after.
 
@@ -52,15 +55,14 @@ Ordered. Each row names its source and why it holds its slot.
 
 | # | Packet | Tier | Why here |
 |---|---|---|---|
-| 1 | **PR-5 — idempotency scope** | Critical | Correctness defect in accepted PR-3: receipt PK includes `principal_id`/`release_id`, so a retry from another principal or after an activation **re-executes**. Recoverable today; **fatal at G3** (double-post). |
-| 2 | **PR-6 — index coverage + request-path SLOs** | Critical | Relations get no index; the search index is a raw btree that cannot serve `fold(col) LIKE '%x%'`; advisory resolve keys have no folded index. Every fan-out module inherits these. Adds an **`EXPLAIN` conformance probe** (fail on Seq Scan over a module table) and `runtime-slos.md`. |
-| 3 | G2-P4 — surface-grammar conformance | Behavioral | Roadmap resumes. Narrowed by G2-P3a to the pure conformance suite. |
-| 4 | G2-P5 — shared table behavior + Q0 envelope | Critical | Paging/truncation/cursor, saved filters, shape-specialized SQL. |
-| 5 | `adding-a-module` skill | Mechanical | Written against the proven Freeze G template; the fan-out consumes it. |
-| 6 | Catalog (G2-P6) → Location (G2-P7) | Critical | **Catalog is the factory test: acceptance requires ZERO press changes.** If it needs one, stop and harden before Location. |
-| 7 | PR-7 — provider hot path | Behavioral | Release-load cache (flagged by two independent reviews), relation N+1, round-trip reduction, advisory-lock namespacing. Before G3. |
-| 8 | Policy/identity kernel | Critical | The one kernel seam with **no owner** — see decisions below. After fan-out, before G3. |
-| 9 | G2-P8 import → G2-P9 stage gate | — | Completes G2. |
+| 1 | **PR-6 — index coverage + request-path SLOs** | Critical | Relations get no index; the search index is a raw btree that cannot serve `fold(col) LIKE '%x%'`; advisory resolve keys have no folded index. Every fan-out module inherits these. Adds an **`EXPLAIN` conformance probe** (fail on Seq Scan over a module table) and `runtime-slos.md`. |
+| 2 | G2-P4 — surface-grammar conformance | Behavioral | Roadmap resumes. Narrowed by G2-P3a to the pure conformance suite. |
+| 3 | G2-P5 — shared table behavior + Q0 envelope | Critical | Paging/truncation/cursor, saved filters, shape-specialized SQL. |
+| 4 | `adding-a-module` skill | Mechanical | Written against the proven Freeze G template; the fan-out consumes it. |
+| 5 | Catalog (G2-P6) → Location (G2-P7) | Critical | **Catalog is the factory test: acceptance requires ZERO press changes.** If it needs one, stop and harden before Location. |
+| 6 | PR-7 — provider hot path | Behavioral | Release-load cache (flagged by two independent reviews), relation N+1, round-trip reduction, advisory-lock namespacing. Before G3. |
+| 7 | Policy/identity kernel | Critical | The one kernel seam with **no owner** — see decisions below. After fan-out, before G3. |
+| 8 | G2-P8 import → G2-P9 stage gate | — | Completes G2. |
 
 ## Plan-level decisions pending before G3
 
@@ -100,7 +102,8 @@ release-load cache F4 + relation N+1 F5 + round trips F6–F10 + advisory-lock n
 F12 (PR-7) · glob/CI blind spots (PR-4) · identity-policy coverage row (PR-4).
 
 **Routed to owning packets** — RLS policies must be `RESTRICTIVE` with one kernel-owned
-permissive base (policy kernel packet) · movements table partitioned by `(tenant, period)`
+permissive base, plus restoring the `principal_id` `WITH CHECK` that PR-5's migration 0010
+dropped from the receipt INSERT policy where only SELECT needed widening (policy kernel packet) · movements table partitioned by `(tenant, period)`
 **from creation**, TigerBeetle-shaped two-phase reservation, anchor row as *derived cache
 with a proof obligation*, natural-key idempotency `(source_type, source_id, source_line,
 revision, posting_role)` (G3) · coexistence horizon / release lease to make tightening debt
