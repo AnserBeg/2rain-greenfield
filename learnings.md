@@ -143,5 +143,5 @@ How to apply: when static configuration parsing stands in for executed-file evid
 
 ## Use executed evidence for open-ended test runners
 Date: 2026-07-24
-Why: PR-4 found four fail-open surfaces in four static-parser review rounds; each fix exposed another valid selection mechanism the inference model did not understand.
-How to apply: supersedes “Allowlist every selection-bearing configuration surface” as a completeness mechanism. Keep static inference conservative, but prove actual coverage from runner-reporter file events; PR-4b owns that dynamic gate.
+Why: PR-4 found four fail-open static-parser surfaces, and PR-4b found that Node emits a passing file-level event even when a name filter runs no real test in that file.
+How to apply: supersedes “Allowlist every selection-bearing configuration surface” as a completeness mechanism. Accept evidence only from successful declared unfiltered suites and only for real non-skip, non-todo, non-synthetic results; fail on every missing, empty, or unnormalizable artifact. Delivered by `docs/execution/packets/PR-4b.md` and graduated into AGENTS.md section 6.

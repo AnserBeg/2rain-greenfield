@@ -582,3 +582,11 @@ current; this packet is a mechanical gate corrective, introduces no product
 correctness domain or fan-out, and its systemic runner-evidence seam has an
 explicit next packet. PR-4b, PR-5, and PR-6 remain unstarted pending user
 acceptance and selection.
+
+## PR-4b closure note
+
+PR-4b superseded this packet's static selection inference with executed-file
+evidence from successful declared suites. The PR-4 history and review table
+remain the record of why inference was retired; the executable completeness
+claim now belongs to `check:reachability` and
+`docs/execution/packets/PR-4b.md`.

@@ -122,7 +122,7 @@ silently.
   exact integrated SHA — never from a packet-selected subset. Focused tests
   may shorten the development loop but cannot replace the full matrix. The
   packet's ledger row records the integrated SHA and that full-matrix run.
-- Every `*.test.ts` and `*.spec.ts` file must be reachable from a CI-invoked command, as enforced by the architecture gate.
+- Every `*.test.ts` and `*.spec.ts` file must be proven reachable by executed-file evidence from successful CI-invoked suites.
 - Deadline, expiry, and elapsed-time logic never compares raw wall-clock
   samples. Production elapsed-time decisions use a monotonic source; timing
   tests inject a controlled clock and never sleep-and-measure.

@@ -116,7 +116,7 @@ matters, and the condition that closes each obligation.
 
 - Every escaped defect so far was **a declared rule with no executing gate**. The fix is
   always the gate, not the instance: executable verification (PR-2), full-matrix acceptance
-  (PR-1), every-test-reachable (PR-4), `EXPLAIN` coverage (PR-6).
+  (PR-1), executed-file reachability (PR-4b), `EXPLAIN` coverage (PR-6).
 - Reviews are excellent at what their charter points them at and **structurally blind to
   everything else**. Four max-effort passes missed all twelve performance findings because
   no charter ever asked about plan quality. Vary the charter, not just the reviewer.
