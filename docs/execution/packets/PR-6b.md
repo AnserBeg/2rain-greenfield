@@ -1,12 +1,12 @@
 # PR-6b — Folded-column index mechanics
 
-Status: active — user-specified execution oracle under final review allowance
+Status: blocked — final narrowed Codex review found an out-of-tripwire E4 defect
 Tier: Critical
 Branch: `packet/pr-6b`
 Requested base: `28aaf3c`; actual accepted branch point: `3d394a536668519f1eb978065d63f38eee10674e`
 Prior frozen candidates: `b4a0960`, `01ff6c2`, `aefa288`
-Final execution-oracle candidate: pending
-Review: three REVISE rounds retained below; fresh Codex/Fable chain pending
+Final execution-oracle candidate: `d03c0f6dbb2a2e213ab296856dab878b3ab3647a`
+Review: Codex REVISE; Fable not launched because Critical review requires Codex PASS
 
 ## Authority and outcome
 
@@ -305,7 +305,7 @@ percentiles or error budgets.
 ## Full-matrix evidence
 
 The final full matrix ran from a clean tree at exactly
-`aefa288f174c0fca05a8744de9b578c0d8fbb5c9`:
+`d03c0f6dbb2a2e213ab296856dab878b3ab3647a`:
 
 | Gate | Result |
 |---|---|
@@ -313,7 +313,7 @@ The final full matrix ran from a clean tree at exactly
 | format / lint / typecheck | green |
 | architecture boundaries | 94 files scanned |
 | build | green |
-| reachability run | token `631b974a-7282-413f-872b-932fe7b4d99b` |
+| reachability run | token `6ef2d5a0-9e46-4bab-915c-278aa2cfa543` |
 | unit | 27/27 |
 | compiler | 52/52 |
 | integration | 42/42 |
@@ -327,7 +327,7 @@ The final full matrix ran from a clean tree at exactly
 | browser | 5/5 |
 | observability inline producer | 5/5 |
 | executed-file reachability | 50/50 files from 9 producer artifacts |
-| security | 232 commits clean; one expected finding in the disposable negative fixture |
+| security | 234 commits clean; one expected finding in the disposable negative fixture |
 | diff / worktree | `git diff --check main...HEAD`, worktree diff, and complete status all clean |
 
 ## Review evidence
@@ -448,6 +448,34 @@ this oracle, PR-6b splits. R1/R2 ship only with the plan gate explicitly deferre
 as a limitation, and the gate design moves to its own debate before any new
 packet prompt. No further writer iteration is authorized in that case.
 
+## Fresh execution-oracle review
+
+The fresh naive Codex `gpt-5.6-sol` xhigh review ran read-only against exactly
+`d03c0f6dbb2a2e213ab296856dab878b3ab3647a` after the full matrix above. It
+returned `REVISE` with one in-scope material finding:
+
+1. **Question 5 — the production row-drift probe cannot observe business
+   rows.** `verifyCatalogOnClient()` runs as the `NOBYPASSRLS` materializer,
+   while module tables force RLS and their policies name only
+   `north_star_module_runtime`. The query at
+   `packages/postgres-provider/src/module-storage-materializer.ts:1499`
+   therefore sees an empty RLS-visible set and returns zero even if persisted
+   generated folds diverge—for example, after a same-named fold function is
+   replaced while existing stored values remain stale. The admin-only provider
+   test does not make the production verifier fail closed.
+
+The reviewer explicitly classified this as **not** a hard-tripwire finding and
+reported no other in-scope material findings for questions 1–4 or 6–7. In
+particular, the tree-wide filter sum plus exact index-counter delta satisfied
+the narrowed charter. Disposition: **not fixed**. The prior final-allowance
+ruling says that a narrowed packet which does not reach Codex PASS plus Fable
+confirmation is split or shelved by the orchestrator, not given another
+autonomous writer round.
+
+Fable was not launched. Critical review requires Codex PASS first. The frozen
+candidate and its green evidence remain intact for a design disposition of the
+RLS boundary around the production drift check.
+
 ## Test it yourself
 
 From the repository root, these commands finish in under ten minutes on the
@@ -467,17 +495,19 @@ node --import tsx --test \
   test/postgres/party-runtime.test.ts
 ```
 
-The first command exits 1 and names the missing expected folded index. The next
-commands are green; the plan run reports all three planner flips at 100 rows, the
-transition suite retains the `23505` duplicate refusal and exact
-`CATALOG_DRIFT`, and all databases are disposable containers.
+The first command exits 1, names the expected folded index, and reports 9,999
+rows removed across the plan tree. The next commands are green; the plan run
+reports all three planner flips at 100 rows, the transition suite retains the
+`23505` duplicate refusal and exact `CATALOG_DRIFT`, and all databases are
+disposable containers.
 
 ## Draft ledger row — suspended
 
-Do not commit this row. The packet is not acceptance-ready after the final hard
-stop, and the merge SHA does not exist. Retain the text only for a later split
-or resumed packet that completes a valid Critical chain:
+Do not commit this row. The packet is not acceptance-ready because the fresh
+Codex review did not reach PASS, Fable therefore did not run, and the merge SHA
+does not exist. Retain the text only for a later split or resumed packet that
+completes a valid Critical chain:
 
 ```text
-| PR-6b | Folded-column index mechanics | Critical | accepted | <merge-sha> | Stored C-collated generated folds make forced-RLS resolve and unique lookup use their declared indexes; raw search and prefix-only btrees retired; EXPLAIN ANALYZE, catalog, uniqueness, and drift proofs green; R3 explicitly descoped; full matrix and Critical review chain recorded in docs/execution/packets/PR-6b.md. |
+| PR-6b | Folded-column index mechanics | Critical | accepted | <merge-sha> | Stored C-collated generated folds make forced-RLS resolve and unique lookup use their declared indexes; raw search and prefix-only btrees retired; execution-observed index, catalog-shape, uniqueness, and <resolved-E4-drift-evidence> proofs green; R3 explicitly descoped; full matrix and Critical review chain recorded in docs/execution/packets/PR-6b.md. |
 ```
