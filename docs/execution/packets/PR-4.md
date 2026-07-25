@@ -1,13 +1,14 @@
 # PR-4 — Gate completeness round 2 + coverage audit
 
-Status: evidence_ready — third REVISE surfaced for user adjudication
+Status: active — user-authorized bounded exception fix implemented; matrix and review pending
 Tier: Mechanical
 Branch: `packet/pr-4`
 Base: `982d2df01204107f560469f34336da723ae9cd93`
-Frozen reviewed candidate: `7d506f54be1be12d0c5ceb5424a3a7c4ff45a365`
+Prior reviewed candidate: `7d506f54be1be12d0c5ceb5424a3a7c4ff45a365`
+New frozen candidate: pending
 Final evidence commit: post-review record only; reported in the completion block
-Review: REVISE — two findings fixed in bounded fresh-review rounds; the third
-material finding is surfaced unresolved under the convergence cap
+Review: pending — the third material finding received a deliberate, named,
+single-fix exception to the two-REVISE cap; this is not a loop reset
 
 ## Authority and outcome
 
@@ -41,10 +42,12 @@ than `apps/web/release/shell.compiled.json`.
    test targets, expands quoted globs, and resolves Playwright `testDir`. Exact
    recognized non-test commands and the repository-cleanliness block are
    classified explicitly; any other CI command, package-script body, option,
-   target, continuation, mapping, or Playwright selection form throws with the
-   unparsed text. The permanent allowlist contains only root `test` (developer
-   aggregate) and `check:boundaries` (transitively executed by
-   `dependency-boundaries.test.ts`). The aggregate is compared with every
+   target, continuation, or mapping throws with the unparsed text. Playwright
+   configuration is parsed as TypeScript and every top-level key must be in an
+   explicit selection-neutral allowlist; `testDir` is the sole parsed
+   file-selection root. The permanent script allowlist contains only root
+   `test` (developer aggregate) and `check:boundaries` (transitively executed
+   by `dependency-boundaries.test.ts`). The aggregate is compared with every
    CI-invoked `test:*` command plus `check:demo-release`.
 4. **Orphans made live or removed.** Root passthroughs and quality-job steps now
    invoke `check:demo-release` and `test:contracts`; the hygiene test requires
@@ -83,7 +86,7 @@ than `apps/web/release/shell.compiled.json`.
 
 ### (a) Permanent in-suite canaries
 
-`test-reachability.test.ts` ships three focused canaries:
+`test-reachability.test.ts` ships four focused canaries:
 
 - a pure comparison receives `test/orphan-demo/orphan.test.ts` in the synthetic
   discovered set but not the reachable set and returns exactly that path;
@@ -92,9 +95,12 @@ than `apps/web/release/shell.compiled.json`.
 - the workflow parser receives a valid run-only step written as
   `- run: future-test-runner --all` and must throw
   `Unparsed CI command: future-test-runner --all` rather than silently omit the
-  step.
+  step;
+- the Playwright parser receives a direct `defineConfig` object containing the
+  unknown top-level key `futureSelection` and must throw
+  `Unparsed Playwright config key: futureSelection`.
 
-All three ran within the final green 49-test architecture suite.
+All four ran within the focused green 50-test architecture suite.
 
 ### (b) Real unreachable file, end to end
 
@@ -188,6 +194,38 @@ The old form silently dropped all six top-level compiler files and executed
 only the one subdirectory canary. The quoted form executed the real 49-test
 compiler suite plus the canary. The temporary file and directory were removed,
 and the tree was clean before the gate commit.
+
+### (d) Playwright top-level allowlist, in-repository
+
+The prior parser rejected a short denylist of known file-selection keys. The
+authorized correction instead parses the direct `defineConfig({...})` object
+and rejects every top-level key outside the explicit current-config allowlist.
+With temporary `grep: /x/` added to the real
+`apps/web/playwright.config.ts`, the exact retained result was:
+
+```text
+exit_code=1
+not ok 43 - every repository test file is reachable from a CI-invoked command
+  error: 'Unparsed Playwright config key: grep'
+not ok 44 - every root test/check script is CI-invoked or explicitly justified
+  error: 'Unparsed Playwright config key: grep'
+not ok 45 - root test aggregate includes every CI-invoked test command and demo check
+  error: 'Unparsed Playwright config key: grep'
+# tests 50
+# pass 47
+# fail 3
+```
+
+After removing that one temporary line, the same command returned:
+
+```text
+# tests 50
+# pass 50
+# fail 0
+```
+
+`git diff --exit-code -- apps/web/playwright.config.ts` passed afterward; the
+temporary selection key is absent from the candidate.
 
 ### Retained development red
 
@@ -324,12 +362,13 @@ green-gate counts, and the verbatim charter below; no session was resumed.
 |---|---|---|
 | 1 | `04e4be76693820df870e14f3c412ba6e055f0e5b` | **REVISE** — the filesystem was both expected set and command comparator, weakening PR-1's fixed unit inventory and allowing a deleted test to shrink both sides. **Fixed** in `1aa5780` by reviewed inventories for all five suites. |
 | 2 | `1aa578087105bd64d195fd3e0dd5ad925f9bd624` | **REVISE** — a valid run-only workflow step (`- run: ...`) did not match the extractor and was silently skipped. **Fixed** in `7d506f5` with optional-list-marker parsing and a permanent workflow-level negative canary. |
-| 3 | `7d506f54be1be12d0c5ceb5424a3a7c4ff45a365` | **REVISE** — Playwright config parsing rejects `projects`, `testIgnore`, and `testMatch`, but not `grep` or `grepInvert`; either option could select no tests from a file while the gate counts every file under `testDir`. **Surfaced unresolved** under the binding two-REVISE cap; neither fixed nor dismissed. |
+| 3 | `7d506f54be1be12d0c5ceb5424a3a7c4ff45a365` | **REVISE** — Playwright config parsing rejects `projects`, `testIgnore`, and `testMatch`, but not `grep` or `grepInvert`; either option could select no tests from a file while the gate counts every file under `testDir`. **Fixed under the user's deliberate single-finding exception** by replacing the denylist with a TypeScript-parsed top-level allowlist and adding synthetic plus real-red canaries. |
 
 Round 3 reported no other in-scope material findings: questions 1–2 and 4–9
-passed, including direct byte comparison of all four archives. Because the
-remaining question-3 finding is material and in scope, this candidate is
-evidence-ready but not acceptance-ready without user adjudication.
+passed, including direct byte comparison of all four archives. The user
+authorized exactly one bounded correction and one fresh review. Any newly
+identified fail-open reachability-parser surface is a hard stop for design
+reconsideration, not another fix round.
 
 ### Review charter
 
@@ -408,7 +447,7 @@ corepack pnpm test:contracts
 ```
 
 The first architecture command must be red and name
-`test/orphan-demo/orphan.test.ts`; the second must be green at 49/49. The two
+`test/orphan-demo/orphan.test.ts`; the second must be green at 50/50. The two
 compiled-shell commands, both red at `main` before PR-4, must be green, with
 contracts at 6/6.
 
@@ -420,10 +459,9 @@ contracts at 6/6.
 
 ## Checkpoint
 
-The full matrix is green, but the third review's Playwright-selection finding
-remains open by rule. No program-review trigger fires: PR-4 is a mechanical
-corrective under the still-current G2-P3 whole-app review, with no new
-correctness domain, fan-out, or stage boundary. The recommended next selection
-is a bounded PR-4 follow-up that rejects `grep` and `grepInvert` (or explicitly
-parses them), reruns the matrix, and receives a fresh review. PR-5 and PR-6
-remain unstarted and require explicit user selection after PR-4 is accepted.
+The user-authorized Playwright allowlist correction is implemented and its real
+red/green demonstration is retained. The new exact-SHA full matrix and one
+fresh review remain pending. No program-review trigger fires: PR-4 is a
+mechanical corrective under the still-current G2-P3 whole-app review, with no
+new correctness domain, fan-out, or stage boundary. PR-5 and PR-6 remain
+unstarted and require explicit user selection after PR-4 is accepted.

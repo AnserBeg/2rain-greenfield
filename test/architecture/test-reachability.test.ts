@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { existsSync, globSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
+import ts from 'typescript';
 
 interface PackageScripts {
   readonly cwd: string;
@@ -38,6 +39,14 @@ const rootScriptCiAllowlist = {
     'transitively enforced by test/architecture/dependency-boundaries.test.ts',
   test: 'developer aggregate for running the CI test commands locally',
 } as const;
+const playwrightConfigKeyAllowlist = new Set([
+  'expect', // Assertion defaults only; cannot select test files.
+  'fullyParallel', // Scheduling mode only; cannot select test files.
+  'reporter', // Result presentation only; cannot select test files.
+  'testDir', // The sole file-selection root; parsed and expanded below.
+  'timeout', // Per-test time budget only; cannot select test files.
+  'use', // Browser/context defaults only; cannot select test files.
+]);
 const knownNonTestScriptCommands = new Set([
   'eslint .',
   'node --import tsx scripts/compile-demo-release.ts --check',
@@ -91,6 +100,23 @@ test('workflow parser recognizes run-only steps and fails closed on their comman
   assert.throws(
     () => deriveCiReachability(workflow, loadScriptCatalog()),
     /Unparsed CI command: future-test-runner --all/u,
+  );
+});
+
+test('Playwright config parser fails closed on an unknown top-level key', () => {
+  assert.throws(
+    () =>
+      assertPlaywrightConfigKeysAreAllowed(
+        [
+          "import { defineConfig } from '@playwright/test';",
+          'export default defineConfig({',
+          "  testDir: './test/browser',",
+          '  futureSelection: true,',
+          '});',
+        ].join('\n'),
+        'synthetic-playwright.config.ts',
+      ),
+    /Unparsed Playwright config key: futureSelection/u,
   );
 });
 
@@ -432,17 +458,22 @@ function parsePlaywrightCommand(
   }
   const configPath = normalizeRepositoryPath(join(cwd, words[3]));
   const config = readFileSync(configPath, 'utf8');
-  if (/\b(?:projects|testIgnore|testMatch)\s*:/u.test(config)) {
-    failUnparsed('Playwright selection option', configPath);
-  }
-  const testDirectories = [
-    ...config.matchAll(/\btestDir\s*:\s*['"]([^'"]+)['"]/gu),
-  ];
-  if (testDirectories.length !== 1 || !testDirectories[0]?.[1]) {
+  const configObject = assertPlaywrightConfigKeysAreAllowed(config, configPath);
+  const testDirProperties = configObject.properties.filter(
+    (property): property is ts.PropertyAssignment =>
+      ts.isPropertyAssignment(property) &&
+      getPlaywrightPropertyKey(property) === 'testDir',
+  );
+  const testDirProperty = testDirProperties[0];
+  if (
+    testDirProperties.length !== 1 ||
+    !testDirProperty ||
+    !ts.isStringLiteral(testDirProperty.initializer)
+  ) {
     failUnparsed('Playwright testDir', configPath);
   }
   const testRoot = normalizeRepositoryPath(
-    join(dirname(configPath), testDirectories[0][1]),
+    join(dirname(configPath), testDirProperty.initializer.text),
   );
   const selected = [
     ...globSync(`${testRoot}/**/*.test.ts`),
@@ -452,6 +483,70 @@ function parsePlaywrightCommand(
     throw new Error(`Playwright config reaches no tests: ${configPath}`);
   }
   for (const path of selected) state.reachableTests.add(path);
+}
+
+function assertPlaywrightConfigKeysAreAllowed(
+  config: string,
+  configPath: string,
+): ts.ObjectLiteralExpression {
+  const source = ts.createSourceFile(
+    configPath,
+    config,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const parseDiagnostics = (
+    source as ts.SourceFile & {
+      readonly parseDiagnostics: readonly ts.Diagnostic[];
+    }
+  ).parseDiagnostics;
+  if (parseDiagnostics.length > 0) {
+    failUnparsed(
+      'Playwright config syntax',
+      ts.flattenDiagnosticMessageText(
+        parseDiagnostics[0]?.messageText ?? 'unknown syntax error',
+        '\n',
+      ),
+    );
+  }
+
+  const exports = source.statements.filter(ts.isExportAssignment);
+  const exported = exports[0];
+  if (
+    exports.length !== 1 ||
+    !exported ||
+    !ts.isCallExpression(exported.expression) ||
+    !ts.isIdentifier(exported.expression.expression) ||
+    exported.expression.expression.text !== 'defineConfig' ||
+    exported.expression.arguments.length !== 1 ||
+    !exported.expression.arguments[0] ||
+    !ts.isObjectLiteralExpression(exported.expression.arguments[0])
+  ) {
+    failUnparsed('Playwright defineConfig object', configPath);
+  }
+
+  for (const property of exported.expression.arguments[0].properties) {
+    if (!ts.isPropertyAssignment(property)) {
+      failUnparsed('Playwright config property', property.getText(source));
+    }
+    const key = getPlaywrightPropertyKey(property);
+    if (key === undefined) {
+      failUnparsed('Playwright config property', property.name.getText(source));
+    }
+    if (!playwrightConfigKeyAllowlist.has(key)) {
+      failUnparsed('Playwright config key', key);
+    }
+  }
+  return exported.expression.arguments[0];
+}
+
+function getPlaywrightPropertyKey(
+  property: ts.PropertyAssignment,
+): string | undefined {
+  return ts.isIdentifier(property.name) || ts.isStringLiteral(property.name)
+    ? property.name.text
+    : undefined;
 }
 
 function resolveTestTarget(
