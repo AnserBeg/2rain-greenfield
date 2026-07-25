@@ -1,12 +1,12 @@
 # PR-6b — Folded-column index mechanics
 
-Status: active — final narrowed R1/R2 review chain authorized
+Status: blocked — final narrowed review triggered the unchanged hard tripwire
 Tier: Critical
 Branch: `packet/pr-6b`
 Requested base: `28aaf3c`; actual accepted branch point: `3d394a536668519f1eb978065d63f38eee10674e`
 Prior frozen candidate: `01ff6c2811615eaebbf1a8d7de8d2006d7f116aa`
-Final narrowed candidate: pending
-Review: prior rounds retained below; final Codex/Fable chain pending
+Final narrowed candidate: `aefa288f174c0fca05a8744de9b578c0d8fbb5c9`
+Review: REVISE — HARD STOP; Fable not launched
 
 ## Authority and outcome
 
@@ -273,8 +273,8 @@ percentiles or error budgets.
 
 ## Full-matrix evidence
 
-The full matrix ran from a clean tree at exactly
-`01ff6c2811615eaebbf1a8d7de8d2006d7f116aa`:
+The final full matrix ran from a clean tree at exactly
+`aefa288f174c0fca05a8744de9b578c0d8fbb5c9`:
 
 | Gate | Result |
 |---|---|
@@ -282,9 +282,9 @@ The full matrix ran from a clean tree at exactly
 | format / lint / typecheck | green |
 | architecture boundaries | 94 files scanned |
 | build | green |
-| reachability run | token `4edfa0f7-8911-4404-a98d-81bb7a207f18` |
+| reachability run | token `631b974a-7282-413f-872b-932fe7b4d99b` |
 | unit | 27/27 |
-| compiler | 51/51 |
+| compiler | 52/52 |
 | integration | 42/42 |
 | agent | 1/1 |
 | architecture | 51/51 |
@@ -296,7 +296,7 @@ The full matrix ran from a clean tree at exactly
 | browser | 5/5 |
 | observability inline producer | 5/5 |
 | executed-file reachability | 50/50 files from 9 producer artifacts |
-| security | 229 commits clean; one expected finding in the disposable negative fixture |
+| security | 232 commits clean; one expected finding in the disposable negative fixture |
 | diff / worktree | `git diff --check main...HEAD`, worktree diff, and complete status all clean |
 
 ## Review evidence
@@ -360,6 +360,37 @@ exact index identity, operator-bound qualification, and observed zero
 post-filter removals. This is the final allowance; any further in-class finding
 stops the packet without another writer fix.
 
+The fresh narrowed review ran against
+`aefa288f174c0fca05a8744de9b578c0d8fbb5c9` after the full matrix above. Codex
+returned `REVISE — HARD STOP` with one in-scope material finding:
+
+1. **Question 2 / HARD TRIPWIRE — bitmap plans detach the observed filter count
+   from the credited index node.** PostgreSQL places `Index Name` and
+   `Index Cond` on a `Bitmap Index Scan` child, but places
+   `Rows Removed by Filter` on the `Bitmap Heap Scan` parent. `inspectPlan()` at
+   `test/postgres/module-index-conformance.test.ts:613` records removals only on
+   nodes that also carry an index name and defaults the child observation to
+   zero. The assertion at `:691` therefore falsely accepts this plan form:
+
+   ```text
+   Bitmap Heap Scan — Rows Removed by Filter: 3
+     Bitmap Index Scan
+       Index Name: nsm_i_swxw5hidgwkk4fgmyjyzplq3zpetzcnyqwaivlkdhx7v634tffra
+       Index Cond: (<folded-name-column> = fold($1))
+   ```
+
+   The falsely credited fact is that the advisory-resolve predicate reached its
+   qualifying index with no post-filter loss; the same accepted form applies to
+   case-insensitive unique equality. Disposition: **not fixed**. This is another
+   instance of the unchanged class “the plan-shape gate cannot fail,” so the
+   explicit final hard stop applies. The reviewer reported no other in-scope
+   material finding for questions 1 and 3–6.
+
+Fable was not launched. The Critical chain requires Codex PASS first, and the
+user's final allowance expressly forbids another writer fix after any further
+in-class finding. The candidate remains frozen for an orchestrator decision to
+split or shelve the packet.
+
 ## Test it yourself
 
 From the repository root, these commands finish in under ten minutes on the
@@ -384,9 +415,11 @@ commands are green; the plan run reports all three planner flips at 100 rows, th
 transition suite retains the `23505` duplicate refusal and exact
 `CATALOG_DRIFT`, and all databases are disposable containers.
 
-## Draft ledger row
+## Draft ledger row — suspended
 
-Do not commit this row before acceptance; the merge SHA does not yet exist:
+Do not commit this row. The packet is not acceptance-ready after the final hard
+stop, and the merge SHA does not exist. Retain the text only for a later split
+or resumed packet that completes a valid Critical chain:
 
 ```text
 | PR-6b | Folded-column index mechanics | Critical | accepted | <merge-sha> | Stored C-collated generated folds make forced-RLS resolve and unique lookup use their declared indexes; raw search and prefix-only btrees retired; EXPLAIN ANALYZE, catalog, uniqueness, and drift proofs green; R3 explicitly descoped; full matrix and Critical review chain recorded in docs/execution/packets/PR-6b.md. |
