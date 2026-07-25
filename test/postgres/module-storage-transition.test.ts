@@ -19,14 +19,17 @@ import {
 } from '../../packages/canonical-model/src/index.js';
 import {
   DEFAULT_COMPILER_LIMITS,
+  HASH_DOMAINS,
   MODULE_COMPILER_PROFILE,
   PROJECTION_FAMILY_IDS,
   compileApplication,
   expectedActiveReleaseFrom,
   type CompileSuccess,
   type CompilerInput,
+  type ContentAddressedArtifact,
   type ProjectionManifestEnvelope,
   type StorageTargetPayloadV1,
+  type StorageTransitionEnvelope,
 } from '../../packages/compiler/src/index.js';
 import type {
   MintedUuid,
@@ -161,6 +164,15 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
         );
         assert.ok(first.preparedSubsetDigest.some((octet) => octet !== 0));
         assert.ok(first.remainingPlanDigest.some((octet) => octet !== 0));
+        const freshStorage = projectionPayload<StorageTargetPayloadV1>(
+          target,
+          PROJECTION_FAMILY_IDS.storageTarget,
+        );
+        await assertIndexPresence(
+          pool,
+          requiredRelationIndex(freshStorage).physicalName,
+          true,
+        );
 
         await t.test(
           'unicode case-folded unique keys are storage-enforced and match the application fold',
@@ -1817,6 +1829,135 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
   );
 });
 
+test('a pre-existing relation-index upgrade is declared but deferred-online execution is unavailable', async () => {
+  const emptyDefinition = emptyModuleDefinition();
+  const source = mustCompile(moduleInput(emptyDefinition));
+  const currentDefinition = ordinaryModuleV1();
+  const currentBytes = definitionBytes(currentDefinition);
+  const originallyCompiled = mustCompile(
+    moduleInput(currentDefinition, expectedActiveReleaseFrom(source)),
+  );
+  const legacy = withoutRelationIndexes(originallyCompiled);
+  const upgrade = mustCompile(
+    moduleInput(currentDefinition, expectedActiveReleaseFrom(legacy)),
+  );
+  const upgradeStorage = projectionPayload<StorageTargetPayloadV1>(
+    upgrade,
+    PROJECTION_FAMILY_IDS.storageTarget,
+  );
+  const relationIndex = requiredRelationIndex(upgradeStorage);
+  const upgradeTransition = projectionPayload<StorageTransitionEnvelope>(
+    upgrade,
+    PROJECTION_FAMILY_IDS.storageTransition,
+  );
+  assert.ok(
+    upgradeTransition.elements.some(
+      (element) =>
+        element.kind === 'createIndex' &&
+        element.physicalObjectName === relationIndex.physicalName,
+    ),
+  );
+
+  await withEphemeralPostgres(
+    'module-relation-index-upgrade',
+    async ({ connection, pool }) => {
+      const admin = await pool.connect();
+      try {
+        const migrationResult = await runMigrations(
+          admin,
+          await loadMigrations(migrations),
+        );
+        assert.equal(migrationResult.verified.length, 10);
+        await seedScope(admin);
+      } finally {
+        admin.release();
+      }
+
+      const runtimePool = new pg.Pool({
+        ...connection,
+        max: 2,
+        user: 'north_star_runtime',
+      });
+      const materializerPool = new pg.Pool({
+        ...connection,
+        max: 2,
+        user: 'north_star_module_materializer',
+      });
+      const moduleRuntimePool = new pg.Pool({
+        ...connection,
+        max: 1,
+        user: 'north_star_module_runtime',
+      });
+      materializerPool.on('error', () => undefined);
+      moduleRuntimePool.on('error', () => undefined);
+      try {
+        const contexts = await trustedContexts();
+        const releases = await persistPairForBothTenants(
+          runtimePool,
+          contexts,
+          source,
+          definitionBytes(emptyDefinition),
+          legacy,
+          currentBytes,
+        );
+        const next = await persistNextRelease(
+          runtimePool,
+          contexts.a,
+          releases.a.target,
+          upgrade,
+          currentBytes,
+        );
+        await installSourcePointers(pool, releases);
+        await grantExecutorAuthority(pool);
+        const materializer = new PostgresModuleStorageMaterializer(
+          materializerPool,
+          moduleRuntimePool,
+        );
+
+        const legacyGenerationId = randomUUID();
+        const legacyPreparationId = randomUUID();
+        const legacyPreparation = await materializer.prepare({
+          context: contexts.a,
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+          generationId: legacyGenerationId,
+          initiatedBy: principalA,
+          preparationId: legacyPreparationId,
+          targetReleaseId: releases.a.target,
+        });
+        assert.equal(legacyPreparation.schemaState, 'APPLIED');
+        await assertIndexPresence(pool, relationIndex.physicalName, false);
+
+        await setActiveReleasePointer(pool, releases.a.target);
+        const generationId = randomUUID();
+        const preparationId = randomUUID();
+        await assert.rejects(
+          materializer.prepare({
+            context: contexts.a,
+            expiresAt: new Date(Date.now() + 60_000).toISOString(),
+            generationId,
+            initiatedBy: principalA,
+            preparationId,
+            targetReleaseId: next.target,
+          }),
+          (error: unknown) =>
+            error instanceof ModuleStorageMaterializationError &&
+            error.code === 'CATALOG_DRIFT' &&
+            error.message.includes(
+              `missing managed index ${sourceEntityName(upgradeStorage, relationIndex)}.${relationIndex.physicalName}`,
+            ),
+        );
+        await assertIndexPresence(pool, relationIndex.physicalName, false);
+      } finally {
+        await Promise.all([
+          runtimePool.end(),
+          materializerPool.end(),
+          moduleRuntimePool.end(),
+        ]);
+      }
+    },
+  );
+});
+
 function emptyModuleDefinition(): Record<string, unknown> {
   const definition = ordinaryModuleV1();
   for (const family of [
@@ -1880,6 +2021,243 @@ function projectionPayload<T>(compiled: CompileSuccess, familyId: string): T {
   );
   assert.ok(chunk);
   return JSON.parse(new TextDecoder().decode(chunk.canonicalBytes)) as T;
+}
+
+function requiredRelationIndex(
+  storage: StorageTargetPayloadV1,
+): StorageTargetPayloadV1['entities'][number]['indexes'][number] {
+  const relation = storage.relations[0];
+  assert.ok(relation);
+  const source = storage.entities.find(
+    (entity) => entity.entityId === relation.sourceEntityId,
+  );
+  assert.ok(source);
+  const index = source.indexes.find(
+    (candidate) =>
+      candidate.indexKind === 'relation' &&
+      candidate.columnNames.includes(relation.relationColumn.physicalName),
+  );
+  assert.ok(index);
+  return index;
+}
+
+function sourceEntityName(
+  storage: StorageTargetPayloadV1,
+  index: StorageTargetPayloadV1['entities'][number]['indexes'][number],
+): string {
+  const entity = storage.entities.find((candidate) =>
+    candidate.indexes.some(
+      (candidateIndex) => candidateIndex.physicalName === index.physicalName,
+    ),
+  );
+  assert.ok(entity);
+  return entity.physicalTableName;
+}
+
+function withoutRelationIndexes(compiled: CompileSuccess): CompileSuccess {
+  const clone = structuredClone(compiled);
+  const storage = projectionPayload<StorageTargetPayloadV1>(
+    clone,
+    PROJECTION_FAMILY_IDS.storageTarget,
+  );
+  const relationIndexNames = new Set(
+    storage.entities.flatMap((entity) =>
+      entity.indexes
+        .filter((index) => index.indexKind === 'relation')
+        .map((index) => index.physicalName),
+    ),
+  );
+  assert.ok(relationIndexNames.size > 0);
+  for (const entity of storage.entities) {
+    entity.indexes = entity.indexes.filter(
+      (index) => !relationIndexNames.has(index.physicalName),
+    );
+  }
+  storage.physicalMapping.records = storage.physicalMapping.records.filter(
+    (record) => !relationIndexNames.has(record.physicalName),
+  );
+  rewriteProjectionPayload(clone, PROJECTION_FAMILY_IDS.storageTarget, storage);
+
+  const storageReference = clone.bundle.releaseManifest.projections.find(
+    (reference) => reference.familyId === PROJECTION_FAMILY_IDS.storageTarget,
+  );
+  assert.ok(storageReference);
+  const transition = projectionPayload<StorageTransitionEnvelope>(
+    clone,
+    PROJECTION_FAMILY_IDS.storageTransition,
+  );
+  transition.elements = transition.elements.filter(
+    (element) =>
+      element.kind !== 'createIndex' ||
+      !relationIndexNames.has(element.physicalObjectName),
+  );
+  transition.toStorageTargetArtifactRoot = storageReference.artifactRoot;
+  transition.toStorageTargetSemanticDigest = storageReference.semanticDigest;
+  rewriteProjectionPayload(
+    clone,
+    PROJECTION_FAMILY_IDS.storageTransition,
+    transition,
+  );
+  rebuildReleaseRoot(clone);
+  return clone;
+}
+
+function rewriteProjectionPayload(
+  compiled: CompileSuccess,
+  familyId: string,
+  payload: unknown,
+): void {
+  const reference = compiled.bundle.releaseManifest.projections.find(
+    (candidate) => candidate.familyId === familyId,
+  );
+  assert.ok(reference);
+  const priorManifestHash = reference.artifactRoot;
+  const priorManifestArtifact = compiled.bundle.artifacts.find(
+    (artifact) => artifact.contentHash === priorManifestHash,
+  );
+  assert.ok(priorManifestArtifact);
+  const manifest = JSON.parse(
+    new TextDecoder().decode(priorManifestArtifact.canonicalBytes),
+  ) as ProjectionManifestEnvelope;
+  const descriptor = manifest.chunks[0];
+  assert.ok(descriptor);
+  const priorChunkHash = descriptor.contentHash;
+  const payloadBytes = new TextEncoder().encode(canonicalize(payload));
+  const chunkDomain = `${HASH_DOMAINS.projectionChunk}/${familyId}`;
+  const semanticDomain = `${HASH_DOMAINS.projectionSemantic}/${familyId}`;
+  const manifestDomain = `${HASH_DOMAINS.projectionManifest}/${familyId}`;
+  const chunkHash = compilerHash(chunkDomain, payloadBytes);
+  const semanticDigest = compilerHash(semanticDomain, payloadBytes);
+  const chunkArtifact: ContentAddressedArtifact = {
+    artifactKind: 'projectionChunk',
+    canonicalBytes: payloadBytes,
+    contentHash: chunkHash,
+    domainTag: chunkDomain,
+    kind: 'contentAddressedArtifact',
+    mediaType: 'application/vnd.northstar.canonical+json',
+  };
+  descriptor.byteLength = payloadBytes.byteLength;
+  descriptor.contentHash = chunkHash;
+  manifest.semanticDigest = semanticDigest;
+  const manifestBytes = new TextEncoder().encode(canonicalize(manifest));
+  const manifestHash = compilerHash(manifestDomain, manifestBytes);
+  const manifestArtifact: ContentAddressedArtifact = {
+    artifactKind: 'projectionManifest',
+    canonicalBytes: manifestBytes,
+    contentHash: manifestHash,
+    domainTag: manifestDomain,
+    kind: 'contentAddressedArtifact',
+    mediaType: 'application/vnd.northstar.canonical+json',
+  };
+  reference.artifactRoot = manifestHash;
+  reference.semanticDigest = semanticDigest;
+  compiled.bundle.releaseManifest.artifactClosure =
+    compiled.bundle.releaseManifest.artifactClosure
+      .map((hash) => {
+        if (hash === priorChunkHash) return chunkHash;
+        if (hash === priorManifestHash) return manifestHash;
+        return hash;
+      })
+      .toSorted();
+  compiled.bundle.artifacts = replaceArtifacts(
+    compiled.bundle.artifacts,
+    new Map([
+      [priorChunkHash, chunkArtifact],
+      [priorManifestHash, manifestArtifact],
+    ]),
+  );
+  compiled.stagedArtifacts = replaceArtifacts(
+    compiled.stagedArtifacts,
+    new Map([
+      [priorChunkHash, chunkArtifact],
+      [priorManifestHash, manifestArtifact],
+    ]),
+  );
+}
+
+function rebuildReleaseRoot(compiled: CompileSuccess): void {
+  const bytes = new TextEncoder().encode(
+    canonicalize(compiled.bundle.releaseManifest),
+  );
+  const root = compilerHash(HASH_DOMAINS.releaseManifest, bytes);
+  const replacement: ContentAddressedArtifact = {
+    artifactKind: 'releaseManifest',
+    canonicalBytes: bytes,
+    contentHash: root,
+    domainTag: HASH_DOMAINS.releaseManifest,
+    kind: 'contentAddressedArtifact',
+    mediaType: 'application/vnd.northstar.canonical+json',
+  };
+  compiled.bundle.releaseManifestBytes = bytes;
+  compiled.releaseRoot = root;
+  compiled.bundle.artifacts = compiled.bundle.artifacts.map((artifact) =>
+    artifact.artifactKind === 'releaseManifest' ? replacement : artifact,
+  );
+  compiled.stagedArtifacts = compiled.stagedArtifacts.map((artifact) =>
+    artifact.artifactKind === 'releaseManifest' ? replacement : artifact,
+  );
+  compiled.attestation.releaseRoot = root;
+  const body: Record<string, unknown> = { ...compiled.attestation };
+  delete body.attestationDigest;
+  compiled.attestation.attestationDigest = compilerHash(
+    HASH_DOMAINS.compilerAttestation,
+    new TextEncoder().encode(canonicalize(body)),
+  );
+}
+
+function replaceArtifacts(
+  artifacts: ContentAddressedArtifact[],
+  replacements: ReadonlyMap<string, ContentAddressedArtifact>,
+): ContentAddressedArtifact[] {
+  return artifacts.map(
+    (artifact) => replacements.get(artifact.contentHash) ?? artifact,
+  );
+}
+
+function compilerHash(domain: string, bytes: Uint8Array): string {
+  return createHash(CONTENT_HASH_ALGORITHM)
+    .update(domain, 'utf8')
+    .update(Uint8Array.of(0))
+    .update(bytes)
+    .digest('hex');
+}
+
+async function assertIndexPresence(
+  pool: pg.Pool,
+  indexName: string,
+  expected: boolean,
+): Promise<void> {
+  const result = await pool.query<{ present: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1
+         FROM pg_indexes
+        WHERE schemaname = 'north_star_module'
+          AND indexname = $1
+     ) AS present`,
+    [indexName],
+  );
+  assert.equal(result.rows[0]?.present, expected);
+}
+
+async function setActiveReleasePointer(
+  pool: pg.Pool,
+  releaseId: MintedUuid,
+): Promise<void> {
+  await pool.query(
+    'ALTER TABLE platform.active_release_pointers DISABLE TRIGGER active_release_pointer_exact_swap',
+  );
+  try {
+    await pool.query(
+      `UPDATE platform.active_release_pointers
+          SET release_id = $3
+        WHERE tenant_id = $1 AND environment_id = $2`,
+      [tenantA, environmentA, releaseId],
+    );
+  } finally {
+    await pool.query(
+      'ALTER TABLE platform.active_release_pointers ENABLE TRIGGER active_release_pointer_exact_swap',
+    );
+  }
 }
 
 async function insertUniqueKeyRecord(
