@@ -6,9 +6,11 @@ it executable. The point is to guarantee that no binding concern stays merely
 prose — that "binding in the plan" always has a scheduled path to "fails CI if
 violated."
 
-This complements the capability-support matrix (which tracks *product
-capabilities*); this map tracks *doctrine enforcement*. Update it whenever an
-ADR, skill, or plan section adds or promotes a binding rule.
+This will complement the planned capability-support matrix (which will track
+*product capabilities*); that missing document is recorded in
+[`documentation-debt.md`](documentation-debt.md). This map tracks *doctrine
+enforcement*. Update it whenever an ADR, skill, or plan section adds or
+promotes a binding rule.
 
 ## Status legend
 
@@ -70,12 +72,24 @@ The detailed packet map is
 
 ## Open gaps to close (the action list)
 
-As of 2026-07-22, the binding rules not yet backed by a tracked enforcement
+As of 2026-07-24, the binding rules not yet backed by a tracked enforcement
 packet:
 
 1. **Customization boundaries** and **capability support cells** — plan §10,
    §5.5; enforcement lands at G6/per-capability, correctly later, but should be
    confirmed as tracked packets when those stages are cut.
+2. **Identity, roles, and policy decisions** — the deny-capable ports and
+   declared permission IDs have no real evaluator or owning work-package ID;
+   the policy/identity kernel packet is not yet cut (current-plan pending
+   decision 4 and queue row 9).
+3. **Runtime configuration and secret handling** — committed-secret scans do
+   not govern how a deployed instance receives, scopes, or rotates
+   configuration and credentials; the runnable-app-composition packet and
+   contract are not yet cut.
+4. **Retention, purge, and data-subject erasure** — no-hard-delete,
+   additive-only storage, append-only trust facts, and one shared database make
+   erasure unreachable by construction; pending plan-level decision 1 must
+   settle the storage model before G3.
 The G2 surface, responsive, accessibility, storage, trust, lifecycle,
 resolver, channel-parity, and relation-isolation obligations are routed by
 G2-P0. G2-P1 now has an evidence-ready, dual-reviewed Freeze E candidate;
@@ -90,6 +104,7 @@ promoted by their owning packets.
 | Modular monolith + dependency direction | ADR-0002 | G0-P3 boundary checker | G0-P3 boundary checker | enforced |
 | PostgreSQL sole launch provider | ADR-0003 | G0-P3 protected-import scan | G0-P4a provider/migration tests | partially enforced |
 | Trusted tenant/request context | ADR-0004 | G0-P4b authenticated-entry, two-tenant RLS, and pool-reuse tests + G1-P4a forced pointer/approval RLS and trusted createApproval context + G1-P5 issued-context-only same-snapshot view construction, two-tenant pinning, live-policy denial, and explicit child-process deferred context | G0-P4b trusted context; G1-P4a approval substrate; G1-P5 request-view pinning tests | enforced |
+| Runtime configuration and secret handling | plan §11.3 | — | Runnable-app-composition packet plus config/secret-handling contract, not yet cut | prose-only |
 | Drop `@agent-native/core` | ADR-0005 | G0-P3 manifest, lockfile, import, and compatibility-authority scan | G0-P3 boundary checker | enforced |
 | Compiler determinism (round-trip/hash) | ADR-0001 (partial) + plan §5.3 | G1-P2 permutation, schedule, fresh-process, twice-compile, golden leaf/manifest/root/diff, and hermeticity gates | G1-P2 compiler tests | enforced |
 | Complete fail-closed Merkle release output | Freeze B; plan §5.3-5.5 | G1-P2 required-family/cross-projection/no-root tests + G1-P3 required release-envelope shape, domain-hash, manifest/projection/chunk links, payload-derived projection semantic digests, exact closure, attestation, and no-root-on-registration-failure tests | G1-P2 compiler tests; G1-P3 verified `bytea` registration | enforced |
@@ -121,6 +136,7 @@ promoted by their owning packets.
 | Shared-schema transition coexistence | ADR-0006/ADR-0010; compatibility doctrine | G1-P4a reserves transition scope, storage domain, schema generation, and forward-recovery-only classes without executing migrations | G2-P2 transition planning/application and old/new release provider tests | scheduled |
 | Release-pointer invalidation is not request-pinning authority | ADR-0001/ADR-0004 | G1-P4a reserves versioned outbox identities + G1-P4b atomically commits one generation-tagged event and freezes monotonic consumer semantics + G1-P5 consumes that contract, validates every cache use/publication against the authoritative pointer, and proves slow fills cannot survive a newer fence | G1-P4b delivery/fill contract; G1-P5 authoritative request pinning and cache-race tests | enforced |
 | Semantic Query/Operation gateway ownership | ADR-0008; plan §5.9, §9.2 | G0-P3 direct-access/private-registry scan + G1-P6 sole empty gateways, authenticated adapters, issued-view-only pinned catalogs, live policy, typed no-such failures, and no physical/ambient bypass seam | G1-P6 gateway skeleton and tests; G2-P2 registered semantics; G2-P3/G2-P6/G2-P7 channel bindings | enforced |
+| Identity, roles, and policy decisions | ADR-0004/ADR-0008; plan §6.8, §12.12 | — | Policy/identity kernel packet, not yet cut; plan §13 has no work-package ID (current-plan pending decision 4 and queue row 9) | prose-only |
 | Agent tool prohibitions (no raw DB/source; five fixed tools) | ADR-0009; plan §9.2, §9.2.5 | G0-P3 source/model-facing scan + G1-P2 fixed five-tool projection + G1-P6 closed semantic request seam with no DB/SQL/source/admin affordance or added `erp_*` tool | G1-P6 boundary seam; G2-P2 conformance and G2-P6 DTO parity; benchmark G7 | partially enforced |
 | Deterministic resolver outcomes (exact/ambiguous/not-found; never silent weak selection) | plan §5.9, §6.6, §11.5 | — | G2-P3 shared resolver envelope and Party exact/duplicate/weak/empty/cross-tenant tests | scheduled |
 | Human and agent channels consume the same Query DTO and operation read-back | plan §5.8-5.10, §6.9, §9.2.2-9.2.3, §11.5 | G1-P2 projects one agent catalog family and G1-P6 exposes one pinned gateway seam, with no business success path yet | G2-P6 Item create/read-back parity through fixed tools and the same Q0 DTO | partially enforced |
@@ -145,6 +161,7 @@ promoted by their owning packets.
 | Lifecycle / audit / correction / recovery doctrine | ADR-0010; plan §7.3-7.4 | G0-P3 duplicate-authority and hard-delete scan + G1-P4a append-only approval/attempt/phase/history contracts + G1-P4b atomic history/outbox facts, decisive receipt reconciliation, generation-bound verification, no-pointer-move reconciler, and durable statement-time overdue detection + G2-P1 reviewed candidate `a71aa33` for atomic mutation/invocation/change/event/outbox facts, immutable links, attribution, redaction, and write-side outbox | G1-P4b activation recovery; G2-P1 T-01 trust substrate; correction/recovery drills G7 | partially enforced |
 | Authorization audit captures policy/evaluator version, relevant inputs, and decision | ADR-0008/ADR-0010; Freeze B | G1-P2 pins policy references/model version and declares live deny-capable decisions + G2-P1 reviewed candidate `a71aa33` persists versioned policy/evaluator evidence, redacted relevant inputs, decision, actor/delegation envelope, and two-tenant provider proof | G2-P1 T-01 invocation/change evidence and two-tenant provider tests | enforced |
 | No hard delete for business data | ADR-0010; AGENTS.md; plan §7.4 | G0-P3 hard-delete scan + G2-P1 reviewed candidate `a71aa33` exposes archive/restore-only `LifecycleService` through the Semantic Operation Gateway and makes trust facts append-only | G2-P2 module compiler/conformance and Operation-gateway negatives; O0 archive/restore only | partially enforced |
+| Retention, purge, and data-subject erasure | ADR-0010/ADR-0011; plan §7.4 | — | Pending plan-level decision 1 before G3; crypto-shredding would change the storage model. This is in direct tension with the enforced no-hard-delete row above. | prose-only |
 | Cross-tenant relation rejection at service and policy layers | ADR-0004; plan §6.4, §7.2, §11.5 | G0-P4b trusted context/RLS base and G1 issued-view/gateway tenant scope | G2-P3 Party-role validation/service, policy, and forced-RLS/provider tests | partially enforced |
 | Backup / restore / RPO / RTO | ADR-0010; plan §7.5 | authority-map review | G7 recovery drill | scheduled |
 | PITR/restore cannot revive pre-restore activation coordinators | ADR-0006/ADR-0010; G1-P4 debate | — | G7 recovery packet must define isolated restore, logical promotion, and a recovery incarnation that invalidates pre-restore zombies | scheduled |

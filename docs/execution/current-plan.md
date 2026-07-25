@@ -47,15 +47,16 @@ Ordered. Each row names its source and why it holds its slot.
 | # | Packet | Tier | Why here |
 |---|---|---|---|
 | 1 | **PR-4 — gate completeness round 2 + coverage audit** | Mechanical | Four `test:*` scripts still carry the unquoted-glob bug PR-1 fixed in one place; two compiler-artifact staleness guards run in no CI job. Must precede PR-5/PR-6 so their "full matrix" is honest. Adds the structural gate: **every test file must be reachable from a CI command.** |
-| 2 | **PR-5 — idempotency scope** | Critical | Correctness defect in accepted PR-3: receipt PK includes `principal_id`/`release_id`, so a retry from another principal or after an activation **re-executes**. Recoverable today; **fatal at G3** (double-post). |
-| 3 | **PR-6 — index coverage + request-path SLOs** | Critical | Relations get no index; the search index is a raw btree that cannot serve `fold(col) LIKE '%x%'`; advisory resolve keys have no folded index. Every fan-out module inherits these. Adds an **`EXPLAIN` conformance probe** (fail on Seq Scan over a module table) and `runtime-slos.md`. |
-| 4 | G2-P4 — surface-grammar conformance | Behavioral | Roadmap resumes. Narrowed by G2-P3a to the pure conformance suite. |
-| 5 | G2-P5 — shared table behavior + Q0 envelope | Critical | Paging/truncation/cursor, saved filters, shape-specialized SQL. |
-| 6 | `adding-a-module` skill | Mechanical | Written against the proven Freeze G template; the fan-out consumes it. |
-| 7 | Catalog (G2-P6) → Location (G2-P7) | Critical | **Catalog is the factory test: acceptance requires ZERO press changes.** If it needs one, stop and harden before Location. |
-| 8 | PR-7 — provider hot path | Behavioral | Release-load cache (flagged by two independent reviews), relation N+1, round-trip reduction, advisory-lock namespacing. Before G3. |
-| 9 | Policy/identity kernel | Critical | The one kernel seam with **no owner** — see decisions below. After fan-out, before G3. |
-| 10 | G2-P8 import → G2-P9 stage gate | — | Completes G2. |
+| 2 | **PR-4b — executed-file reachability (dynamic)** | Mechanical | Replaces static inference with ground truth from test-reporter output; closes the fail-open class PR-4 hit four times. |
+| 3 | **PR-5 — idempotency scope** | Critical | Correctness defect in accepted PR-3: receipt PK includes `principal_id`/`release_id`, so a retry from another principal or after an activation **re-executes**. Recoverable today; **fatal at G3** (double-post). |
+| 4 | **PR-6 — index coverage + request-path SLOs** | Critical | Relations get no index; the search index is a raw btree that cannot serve `fold(col) LIKE '%x%'`; advisory resolve keys have no folded index. Every fan-out module inherits these. Adds an **`EXPLAIN` conformance probe** (fail on Seq Scan over a module table) and `runtime-slos.md`. |
+| 5 | G2-P4 — surface-grammar conformance | Behavioral | Roadmap resumes. Narrowed by G2-P3a to the pure conformance suite. |
+| 6 | G2-P5 — shared table behavior + Q0 envelope | Critical | Paging/truncation/cursor, saved filters, shape-specialized SQL. |
+| 7 | `adding-a-module` skill | Mechanical | Written against the proven Freeze G template; the fan-out consumes it. |
+| 8 | Catalog (G2-P6) → Location (G2-P7) | Critical | **Catalog is the factory test: acceptance requires ZERO press changes.** If it needs one, stop and harden before Location. |
+| 9 | PR-7 — provider hot path | Behavioral | Release-load cache (flagged by two independent reviews), relation N+1, round-trip reduction, advisory-lock namespacing. Before G3. |
+| 10 | Policy/identity kernel | Critical | The one kernel seam with **no owner** — see decisions below. After fan-out, before G3. |
+| 11 | G2-P8 import → G2-P9 stage gate | — | Completes G2. |
 
 ## Plan-level decisions pending before G3
 
@@ -84,9 +85,9 @@ are cheapest to decide before inventory exists. Recommended as one focused debat
 | Review | Where | Status |
 |---|---|---|
 | Whole-app program review (dual max-effort, converged) | `docs/execution/program-reviews/2026-07-24-g2-p3-party/` | Archived; produced PR-1/2/3 |
-| External design review — 7 derived-decision problems | request at `/home/rvham/novel-problems-review.md`; findings summarized below | **To archive** |
-| External performance/scaling review — F1–F12 | findings summarized below | **To archive** |
-| External architecture review — 7 findings | to be archived by PR-4 | **To archive** |
+| External design review — 7 derived-decision problems | [request](program-reviews/2026-07-24-external-design-review/request.md); [review](program-reviews/2026-07-24-external-design-review/review.md) | Archived |
+| External performance/scaling review — F1–F12 | [review](program-reviews/2026-07-24-external-performance-scaling/review.md) | Archived |
+| External architecture review — 7 findings | [review](program-reviews/2026-07-24-external-architecture/review.md) | Archived |
 
 ### Findings inventory (dispositioned)
 
@@ -108,11 +109,9 @@ auto-select one layer up (agent packet) · approval-diff renderer treated as a s
 control (G6) · PITR restore must replay materialization to the union of live roots ·
 rollback conformance scenario (the pointer-swap rollback story is currently untold).
 
-**Tracked debt (documentation)** — capability support matrix (`doctrine-coverage.md`
-cites it as existing: dangling reference) · living risk register · SLO ratification beyond
-`compiler-slos.md` · seed skills `no-source-editing` / `create-skill` /
-`erp-architecture-layer-map` · G0 stage-gate evidence doc · runtime config + secret-handling
-contract (pairs with the runnable-app-composition packet).
+**Tracked debt (documentation)** — see the owned
+[documentation-debt register](documentation-debt.md) for the missing artifact, why it
+matters, and the condition that closes each obligation.
 
 ## Standing lessons (why the queue looks like this)
 

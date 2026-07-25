@@ -130,3 +130,18 @@ How to apply: verify the value is synthetic, then ignore only its exact commit/f
 Date: 2026-07-24
 Why: PR-3 found that pnpm 11 silently ignored a root `package.json` `pnpm.overrides` entry after emitting only a warning.
 How to apply: declare pnpm 11 dependency overrides under `overrides` in `pnpm-workspace.yaml`, regenerate the lockfile, and verify the resolved graph and audit. See `docs/execution/packets/PR-3.md`.
+
+## Prove every test is reachable from CI
+Date: 2026-07-24
+Why: PR-4 found test commands and a browser scaffold that existed in the repository but were silently unreachable from every CI-invoked command.
+How to apply: discover all test files independently, resolve CI and package-script declarations fail-closed, and retain real-file plus parser canaries. Graduated into AGENTS.md section 6; see `docs/execution/packets/PR-4.md`.
+
+## Allowlist every selection-bearing configuration surface
+Date: 2026-07-24
+Why: PR-4's first Playwright parser denied three known selection keys but missed `grep`, `grepInvert`, and `shard`, so its claimed fail-closed reachability proof was actually fail-open.
+How to apply: when static configuration parsing stands in for executed-file evidence, parse the supported structure, allow only selection-neutral keys plus explicitly interpreted selectors, and fail on every other key or structural form. Retain both synthetic and real-config negative canaries; see `docs/execution/packets/PR-4.md`.
+
+## Use executed evidence for open-ended test runners
+Date: 2026-07-24
+Why: PR-4 found four fail-open surfaces in four static-parser review rounds; each fix exposed another valid selection mechanism the inference model did not understand.
+How to apply: supersedes “Allowlist every selection-bearing configuration surface” as a completeness mechanism. Keep static inference conservative, but prove actual coverage from runner-reporter file events; PR-4b owns that dynamic gate.
