@@ -1180,6 +1180,10 @@ async function createManagedTable(
       (column) =>
         `${quoted(column.physicalName)} ${safeType(column.postgresqlType)}${column.nullable ? '' : ' NOT NULL'}${defaultSql(column.defaultSemantics, column.defaultValue, column.postgresqlType)}`,
     ),
+    ...(entity.foldedColumns ?? []).map(
+      (column) =>
+        `${quoted(column.physicalName)} text COLLATE "C" GENERATED ALWAYS AS (${unicodeCaseFoldSql(quoted(column.sourceColumn))}) STORED`,
+    ),
     ...relationColumns.map(
       (column) =>
         `${quoted(column.physicalName)} ${safeType(column.postgresqlType)}${column.nullable ? '' : ' NOT NULL'}`,
@@ -1437,6 +1441,7 @@ async function verifyCatalogOnClient(
   );
 
   const columns = await client.query<{
+    collation_name: string | null;
     column_default: string | null;
     generated_kind: string;
     identity_kind: string;
@@ -1451,13 +1456,18 @@ async function verifyCatalogOnClient(
             NOT attribute.attnotnull AS is_nullable,
             pg_get_expr(default_value.adbin, default_value.adrelid, true) AS column_default,
             attribute.attidentity AS identity_kind,
-            attribute.attgenerated AS generated_kind
+            attribute.attgenerated AS generated_kind,
+            CASE WHEN attribute.attgenerated = 's'
+              THEN collation_record.collname ELSE NULL
+            END AS collation_name
        FROM pg_class AS relation
        JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
        JOIN pg_attribute AS attribute ON attribute.attrelid = relation.oid
        LEFT JOIN pg_attrdef AS default_value
          ON default_value.adrelid = relation.oid
         AND default_value.adnum = attribute.attnum
+      LEFT JOIN pg_collation AS collation_record
+        ON collation_record.oid = attribute.attcollation
       WHERE namespace.nspname = 'north_star_module'
         AND relation.relkind IN ('r','p','v','m','c','f')
         AND attribute.attnum > 0 AND NOT attribute.attisdropped
@@ -1472,6 +1482,7 @@ async function verifyCatalogOnClient(
     'managed column',
     expectedColumns,
     columns.rows.map((column) => ({
+      collation: column.collation_name,
       defaultExpression: normalizeSqlExpression(column.column_default),
       generatedKind: column.generated_kind,
       identityKind: column.identity_kind,
@@ -1482,6 +1493,23 @@ async function verifyCatalogOnClient(
     })),
     (value) => `${value.tableName}.${value.name}`,
   );
+  if (drift.length === 0) {
+    for (const entity of expectedTables.values()) {
+      for (const foldedColumn of entity.foldedColumns ?? []) {
+        const mismatch = await client.query<{ mismatches: string }>(
+          `SELECT count(*)::text AS mismatches
+             FROM north_star_module.${quoted(entity.physicalTableName)}
+            WHERE ${quoted(foldedColumn.physicalName)} IS DISTINCT FROM
+                  ${unicodeCaseFoldSql(quoted(foldedColumn.sourceColumn))}`,
+        );
+        if (mismatch.rows[0]?.mismatches !== '0') {
+          drift.push(
+            `managed generated fold drift ${entity.physicalTableName}.${foldedColumn.physicalName}: ${mismatch.rows[0]?.mismatches ?? 'unknown'} mismatched rows`,
+          );
+        }
+      }
+    }
+  }
 
   const constraints = await client.query<{
     columns: string[];
@@ -2014,6 +2042,7 @@ async function verifyCatalogOnClient(
 type StorageRelationTarget = StorageTargetPayloadV1['relations'][number];
 
 interface ExpectedColumnShape {
+  collation: string | null;
   defaultExpression: string | null;
   generatedKind: string;
   identityKind: string;
@@ -2349,6 +2378,7 @@ function buildExpectedColumns(
       defaultExpression: string | null = null,
     ) =>
       add({
+        collation: null,
         defaultExpression,
         generatedKind: '',
         identityKind: '',
@@ -2383,6 +2413,29 @@ function buildExpectedColumns(
         ),
       );
     }
+    for (const column of entity.foldedColumns ?? []) {
+      const sourceColumn = entity.columns.find(
+        (candidate) => candidate.physicalName === column.sourceColumn,
+      );
+      if (!sourceColumn) {
+        throw failure(
+          'CASE_FOLD_CONTRACT_MISSING',
+          `stored folded column ${column.physicalName} lacks source ${column.sourceColumn}`,
+        );
+      }
+      add({
+        collation: column.collation,
+        defaultExpression: normalizeSqlExpressionRequired(
+          `north_star_module.${unicodeCaseFoldFunctionName}(${quoted(column.sourceColumn)}${sourceColumn.postgresqlType === 'text' ? '' : '::text'})`,
+        ),
+        generatedKind: 's',
+        identityKind: '',
+        name: column.physicalName,
+        nullable: true,
+        postgresqlType: column.postgresqlType,
+        tableName: entity.physicalTableName,
+      });
+    }
     for (const column of entity.derivedStateFields) {
       base(column.physicalName, column.postgresqlType, true);
     }
@@ -2393,6 +2446,7 @@ function buildExpectedColumns(
       throw failure('ENTITY_TARGET_MISSING', relation.sourceEntityId);
     }
     add({
+      collation: null,
       defaultExpression: null,
       generatedKind: '',
       identityKind: '',
@@ -2612,7 +2666,24 @@ function uniqueKeyColumnExpressions(
   return unique.columns.map((column) =>
     scopeColumns.has(column as (typeof entity.scopeKeyColumns)[number])
       ? quoted(column)
-      : unicodeCaseFoldSql(quoted(column)),
+      : foldedColumnExpression(entity, column),
+  );
+}
+
+function foldedColumnExpression(
+  entity: StorageEntityTarget,
+  sourceColumn: string,
+): string {
+  const foldedColumn = (entity.foldedColumns ?? []).find(
+    (candidate) => candidate.sourceColumn === sourceColumn,
+  );
+  if (foldedColumn) return quoted(foldedColumn.physicalName);
+  if (!Object.hasOwn(entity, 'foldedColumns')) {
+    return unicodeCaseFoldSql(quoted(sourceColumn));
+  }
+  throw failure(
+    'CASE_FOLD_CONTRACT_MISSING',
+    `source column ${sourceColumn} lacks its stored folded companion`,
   );
 }
 
@@ -2808,6 +2879,7 @@ function mergeCompatibleEntity(
       checkConstraints: _checkConstraints,
       consumerWriterRoots: _consumerWriterRoots,
       derivedStateFields: _derivedStateFields,
+      foldedColumns: _foldedColumns,
       indexes: _indexes,
       uniqueKeys: _uniqueKeys,
       ...base
@@ -2816,6 +2888,7 @@ function mergeCompatibleEntity(
     void _checkConstraints;
     void _consumerWriterRoots;
     void _derivedStateFields;
+    void _foldedColumns;
     void _indexes;
     void _uniqueKeys;
     return base;
@@ -2902,6 +2975,11 @@ function mergeCompatibleEntity(
     derivedStateFields: mergeNamed(
       prior.derivedStateFields,
       next.derivedStateFields,
+      (value) => value.physicalName,
+    ),
+    foldedColumns: mergeNamed(
+      prior.foldedColumns ?? [],
+      next.foldedColumns ?? [],
       (value) => value.physicalName,
     ),
     indexes: mergeNamed(

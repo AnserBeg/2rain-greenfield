@@ -1,19 +1,27 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { unicodeCaseFold } from '../../packages/canonical-model/src/index.js';
 import type { Pool, PoolClient } from 'pg';
 
 import type { StorageTargetPayloadV1 } from '../../packages/compiler/src/index.js';
+import {
+  buildFoldedMatchPredicate,
+  foldedPrefixUpperBound,
+} from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
 import { withTrustedRequestTransaction } from '../../packages/postgres-provider/src/request-context.js';
 import { PARTY_IDS } from '../fixtures/g2/party/definition.js';
 import {
   PARTY_TEST_SCOPE,
+  invokePartyQuery,
   withRealPartyRuntime,
 } from '../fixtures/g2/party/runtime-harness.js';
 
 const plannerMilestones = [10, 100, 500, 1_000, 5_000, 10_000] as const;
 const targetRow = 7;
 const demonstrateMissingIndex = process.env.PR6_DEMONSTRATE_MISSING_INDEX;
+const demonstrateMissingFoldedIndex =
+  process.env.PR6B_DEMONSTRATE_MISSING_INDEX;
 
 if (
   demonstrateMissingIndex !== undefined &&
@@ -21,6 +29,14 @@ if (
 ) {
   throw new Error(
     `unsupported PR6_DEMONSTRATE_MISSING_INDEX value: ${demonstrateMissingIndex}`,
+  );
+}
+if (
+  demonstrateMissingFoldedIndex !== undefined &&
+  demonstrateMissingFoldedIndex !== 'resolve'
+) {
+  throw new Error(
+    `unsupported PR6B_DEMONSTRATE_MISSING_INDEX value: ${demonstrateMissingFoldedIndex}`,
   );
 }
 
@@ -45,37 +61,99 @@ test('EXPLAIN plan guard rejects sequential and wrong-index scans structurally',
     () => inspectPlan({ 'Node Type': 'Future Scan' }),
     /unrecognized EXPLAIN node type: Future Scan/,
   );
+  assert.throws(
+    () =>
+      assertFoldedIndexPlan(
+        {
+          'Index Cond': '(tenant_id = trusted_tenant_id())',
+          'Index Name': 'expected_folded_index',
+          'Node Type': 'Index Scan',
+        },
+        'resolve',
+        ['expected_folded_index'],
+        'expected_folded_column',
+      ),
+    /resolve predicate index condition omitted folded column expected_folded_column/,
+  );
+  assert.throws(
+    () =>
+      inspectPlan({
+        'Index Cond': 42,
+        'Index Name': 'expected_folded_index',
+        'Node Type': 'Index Scan',
+      }),
+    /unrecognized EXPLAIN index condition: 42/,
+  );
+  assert.equal(foldedPrefixUpperBound('\u{10ffff}'), null);
+  assert.equal(foldedPrefixUpperBound(`a\u{10ffff}`), 'b');
+  assert.equal(foldedPrefixUpperBound('\ud7ff'), '\ue000');
 });
 
-test('the forced-RLS relation predicate uses its declared relation index', async () => {
+test('forced-RLS relation, resolve, unique, and prefix predicates use their declared indexes', async () => {
   await withRealPartyRuntime('module-index-conformance', async (runtime) => {
     const targets = requiredTargets(runtime.storage);
     let priorRowCount = 0;
-    let plannerFlipRows: number | null = null;
+    const plannerFlipRows: Record<
+      'prefix' | 'relation' | 'resolve' | 'unique',
+      number | null
+    > = {
+      prefix: null,
+      relation: null,
+      resolve: null,
+      unique: null,
+    };
 
     for (const rowCount of plannerMilestones) {
       await seedRows(runtime.adminPool, targets, priorRowCount + 1, rowCount);
       priorRowCount = rowCount;
       await runtime.adminPool.query(
+        `ANALYZE north_star_module.${quoted(targets.party.physicalTableName)}`,
+      );
+      await runtime.adminPool.query(
         `ANALYZE north_star_module.${quoted(targets.role.physicalTableName)}`,
       );
-      const plan = await explainRelationPredicate(runtime, targets);
-      if (
-        inspectPlan(plan).indexNames.has(targets.relationIndex.physicalName)
-      ) {
-        plannerFlipRows = rowCount;
+      plannerFlipRows.relation ??= planUsesIndex(
+        await explainRelationPredicate(runtime, targets),
+        [targets.relationIndex.physicalName],
+      )
+        ? rowCount
+        : null;
+      plannerFlipRows.resolve ??= planUsesFoldedIndex(
+        await explainFoldedPredicate(runtime, targets, 'resolve'),
+        [targets.nameFoldedIndex.physicalName],
+        targets.nameFoldedColumn.physicalName,
+      )
+        ? rowCount
+        : null;
+      plannerFlipRows.unique ??= planUsesFoldedIndex(
+        await explainFoldedPredicate(runtime, targets, 'unique'),
+        targets.numberUniqueIndexNames,
+        targets.numberFoldedColumn.physicalName,
+      )
+        ? rowCount
+        : null;
+      plannerFlipRows.prefix ??= planUsesFoldedIndex(
+        await explainFoldedPredicate(runtime, targets, 'prefix'),
+        [targets.nameFoldedIndex.physicalName],
+        targets.nameFoldedColumn.physicalName,
+      )
+        ? rowCount
+        : null;
+      if (Object.values(plannerFlipRows).every((value) => value !== null)) {
         break;
       }
     }
 
-    assert.notEqual(
-      plannerFlipRows,
-      null,
-      `relation predicate did not use ${targets.relationIndex.physicalName} by ${priorRowCount} analyzed rows`,
-    );
-    console.log(
-      `PR-6 relation planner flip rows=${plannerFlipRows}; analyzed rows=${priorRowCount}`,
-    );
+    for (const [predicate, rowCount] of Object.entries(plannerFlipRows)) {
+      assert.notEqual(
+        rowCount,
+        null,
+        `${predicate} predicate did not use its declared index by ${priorRowCount} analyzed rows`,
+      );
+      console.log(
+        `PR-6b ${predicate} planner flip rows=${String(rowCount)}; analyzed rows=${priorRowCount}`,
+      );
+    }
 
     if (demonstrateMissingIndex === 'relation') {
       await runtime.adminPool.query(
@@ -85,15 +163,44 @@ test('the forced-RLS relation predicate uses its declared relation index', async
         `ANALYZE north_star_module.${quoted(targets.role.physicalTableName)}`,
       );
     }
+    if (demonstrateMissingFoldedIndex === 'resolve') {
+      await runtime.adminPool.query(
+        `DROP INDEX north_star_module.${quoted(targets.nameFoldedIndex.physicalName)}`,
+      );
+      await runtime.adminPool.query(
+        `ANALYZE north_star_module.${quoted(targets.party.physicalTableName)}`,
+      );
+    }
 
     assertRelationIndexPlan(
       await explainRelationPredicate(runtime, targets),
       targets.relationIndex.physicalName,
     );
+    assertFoldedIndexPlan(
+      await explainFoldedPredicate(runtime, targets, 'resolve'),
+      'resolve',
+      [targets.nameFoldedIndex.physicalName],
+      targets.nameFoldedColumn.physicalName,
+    );
+    assertFoldedIndexPlan(
+      await explainFoldedPredicate(runtime, targets, 'unique'),
+      'unique',
+      targets.numberUniqueIndexNames,
+      targets.numberFoldedColumn.physicalName,
+    );
+    assertFoldedIndexPlan(
+      await explainFoldedPredicate(runtime, targets, 'prefix'),
+      'prefix',
+      [targets.nameFoldedIndex.physicalName],
+      targets.nameFoldedColumn.physicalName,
+    );
+    await assertGeneratedFoldCatalog(runtime.adminPool, targets);
+    await assertPrefixSemantics(runtime, targets, priorRowCount);
   });
 });
 
 interface PlanNode {
+  readonly 'Index Cond'?: unknown;
   readonly 'Index Name'?: unknown;
   readonly 'Node Type'?: unknown;
   readonly Plans?: unknown;
@@ -101,8 +208,12 @@ interface PlanNode {
 }
 
 interface RelationTargets {
+  readonly nameFoldedColumn: StorageTargetPayloadV1['entities'][number]['foldedColumns'][number];
+  readonly nameFoldedIndex: StorageTargetPayloadV1['entities'][number]['indexes'][number];
   readonly nameColumn: StorageTargetPayloadV1['entities'][number]['columns'][number];
+  readonly numberFoldedColumn: StorageTargetPayloadV1['entities'][number]['foldedColumns'][number];
   readonly numberColumn: StorageTargetPayloadV1['entities'][number]['columns'][number];
+  readonly numberUniqueIndexNames: readonly string[];
   readonly party: StorageTargetPayloadV1['entities'][number];
   readonly relation: StorageTargetPayloadV1['relations'][number];
   readonly relationIndex: StorageTargetPayloadV1['entities'][number]['indexes'][number];
@@ -124,9 +235,37 @@ function requiredTargets(storage: StorageTargetPayloadV1): RelationTargets {
       candidate.columnNames.includes(relation.relationColumn.physicalName),
   );
   assert.ok(relationIndex);
+  const nameFoldedColumn = requiredFoldedColumn(party, PARTY_IDS.fieldIds.name);
+  const numberFoldedColumn = requiredFoldedColumn(
+    party,
+    PARTY_IDS.fieldIds.number,
+  );
+  const nameFoldedIndex = party.indexes.find(
+    (candidate) =>
+      candidate.indexKind === 'foldedAccess' &&
+      candidate.columnNames.includes(nameFoldedColumn.physicalName),
+  );
+  assert.ok(nameFoldedIndex);
+  const unique = party.uniqueKeys.find((candidate) =>
+    candidate.columns.includes(numberFoldedColumn.sourceColumn),
+  );
+  assert.ok(unique);
+  const numberUniqueIndexes = party.indexes.filter(
+    (candidate) =>
+      candidate.indexKind === 'caseInsensitiveUnique' &&
+      candidate.columnNames.includes(numberFoldedColumn.sourceColumn),
+  );
+  assert.equal(numberUniqueIndexes.length, 1);
   return {
+    nameFoldedColumn,
+    nameFoldedIndex,
     nameColumn: requiredColumn(party, PARTY_IDS.fieldIds.name),
+    numberFoldedColumn,
     numberColumn: requiredColumn(party, PARTY_IDS.fieldIds.number),
+    numberUniqueIndexNames: [
+      unique.physicalName,
+      ...numberUniqueIndexes.map((index) => index.physicalName),
+    ],
     party,
     relation,
     relationIndex,
@@ -134,6 +273,17 @@ function requiredTargets(storage: StorageTargetPayloadV1): RelationTargets {
     roleKindColumn: requiredColumn(role, PARTY_IDS.fieldIds.roleKind),
     roleStatusColumn: requiredColumn(role, PARTY_IDS.fieldIds.roleStatus),
   };
+}
+
+function requiredFoldedColumn(
+  entity: StorageTargetPayloadV1['entities'][number],
+  fieldId: string,
+): StorageTargetPayloadV1['entities'][number]['foldedColumns'][number] {
+  const column = entity.foldedColumns.find(
+    (candidate) => candidate.canonicalFieldId === fieldId,
+  );
+  assert.ok(column);
+  return column;
 }
 
 function requiredEntity(
@@ -236,6 +386,156 @@ async function explainRelationPredicate(
   );
 }
 
+async function explainFoldedPredicate(
+  runtime: Parameters<Parameters<typeof withRealPartyRuntime>[1]>[0],
+  targets: RelationTargets,
+  predicate: 'prefix' | 'resolve' | 'unique',
+): Promise<PlanNode> {
+  const column =
+    predicate === 'unique' ? targets.numberColumn : targets.nameColumn;
+  const match = buildFoldedMatchPredicate(
+    targets.party,
+    [column],
+    predicate === 'unique' ? 'PARTY-00000007' : 'Ordinary party 7',
+    predicate === 'prefix' ? 'prefix' : 'exact',
+  );
+  return withTrustedRequestTransaction(
+    runtime.runtimePool,
+    runtime.contexts.a,
+    async (client) => {
+      await client.query('SET LOCAL ROLE north_star_module_runtime');
+      try {
+        return await explain(
+          client,
+          `SELECT 1
+             FROM north_star_module.${quoted(targets.party.physicalTableName)}
+            WHERE ${match.sql}
+              AND ${quoted(targets.party.archive.archivedAtColumn)} IS NULL
+            LIMIT 1`,
+          match.values,
+        );
+      } finally {
+        await client.query('RESET ROLE');
+      }
+    },
+  );
+}
+
+async function assertGeneratedFoldCatalog(
+  pool: Pool,
+  targets: RelationTargets,
+): Promise<void> {
+  for (const entity of [targets.party, targets.role]) {
+    for (const foldedColumn of entity.foldedColumns) {
+      const catalog = await pool.query<{
+        collation_name: string;
+        expression: string;
+        generated_kind: string;
+      }>(
+        `SELECT attribute.attgenerated AS generated_kind,
+                collation_record.collname AS collation_name,
+                pg_get_expr(definition.adbin, definition.adrelid, true) AS expression
+           FROM pg_attribute AS attribute
+           JOIN pg_class AS relation ON relation.oid = attribute.attrelid
+           JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+           JOIN pg_attrdef AS definition
+             ON definition.adrelid = attribute.attrelid
+            AND definition.adnum = attribute.attnum
+           JOIN pg_collation AS collation_record
+             ON collation_record.oid = attribute.attcollation
+          WHERE namespace.nspname = 'north_star_module'
+            AND relation.relname = $1
+            AND attribute.attname = $2`,
+        [entity.physicalTableName, foldedColumn.physicalName],
+      );
+      assert.equal(catalog.rows.length, 1);
+      assert.equal(catalog.rows[0]?.generated_kind, 's');
+      assert.equal(catalog.rows[0]?.collation_name, 'C');
+      assert.match(
+        catalog.rows[0]?.expression ?? '',
+        new RegExp(`nsm_unicode_case_fold_v1\\(.*${foldedColumn.sourceColumn}`),
+      );
+      const drift = await pool.query<{ mismatches: string }>(
+        `SELECT count(*)::text AS mismatches
+           FROM north_star_module.${quoted(entity.physicalTableName)}
+          WHERE ${quoted(foldedColumn.physicalName)} IS DISTINCT FROM
+                north_star_module.nsm_unicode_case_fold_v1(${quoted(foldedColumn.sourceColumn)}::text)`,
+      );
+      assert.equal(drift.rows[0]?.mismatches, '0');
+    }
+  }
+}
+
+async function assertPrefixSemantics(
+  runtime: Parameters<Parameters<typeof withRealPartyRuntime>[1]>[0],
+  targets: RelationTargets,
+  priorRowCount: number,
+): Promise<void> {
+  const names = [
+    'Straße Alpha',
+    'STRASSE Beta',
+    '\ud7ff boundary',
+    '\ue000 boundary',
+    '\u{10ffff}',
+    '\u{10ffff} tail',
+    '\u{10fffe} neighbor',
+    'Alpha middle token',
+  ] as const;
+  await runtime.adminPool.query(
+    `INSERT INTO north_star_module.${quoted(targets.party.physicalTableName)} (
+       tenant_id, environment_id, record_id,
+       ${quoted(targets.numberColumn.physicalName)},
+       ${quoted(targets.nameColumn.physicalName)}
+     )
+     SELECT $1::uuid, $2::uuid,
+            ('30000000-0000-4000-8000-' || lpad(ordinality::text, 12, '0'))::uuid,
+            'PREFIX-' || lpad(ordinality::text, 8, '0'), value
+       FROM unnest($3::text[]) WITH ORDINALITY AS input(value, ordinality)`,
+    [PARTY_TEST_SCOPE.a.tenantId, PARTY_TEST_SCOPE.a.environmentId, names],
+  );
+
+  for (const prefix of ['straße', '\ud7ff', '\u{10ffff}'] as const) {
+    const expected = names
+      .filter((name) =>
+        unicodeCaseFold(name).startsWith(unicodeCaseFold(prefix)),
+      )
+      .sort();
+    const result = await invokePartyQuery(
+      runtime,
+      runtime.views.a,
+      'party_search',
+      { limit: 100, matchMode: 'prefix', text: prefix },
+    );
+    const actual = result.records
+      .map((record) => String(record.values[PARTY_IDS.fieldIds.name]))
+      .filter((name) => names.includes(name as (typeof names)[number]))
+      .sort();
+    assert.deepEqual(actual, expected, prefix);
+  }
+
+  const substring = await invokePartyQuery(
+    runtime,
+    runtime.views.a,
+    'party_search',
+    { text: 'middle' },
+  );
+  assert.equal(
+    substring.records.some(
+      (record) =>
+        record.values[PARTY_IDS.fieldIds.name] === 'Alpha middle token',
+    ),
+    true,
+  );
+  const prefix = await invokePartyQuery(
+    runtime,
+    runtime.views.a,
+    'party_search',
+    { matchMode: 'prefix', text: 'middle' },
+  );
+  assert.equal(prefix.records.length, 0);
+  assert.ok(priorRowCount >= plannerMilestones[0]);
+}
+
 async function explain(
   client: PoolClient,
   sql: string,
@@ -257,8 +557,10 @@ async function explain(
 }
 
 const recognizedPlanNodeTypes = new Set([
+  'BitmapAnd',
   'Bitmap Heap Scan',
   'Bitmap Index Scan',
+  'BitmapOr',
   'Index Only Scan',
   'Index Scan',
   'Limit',
@@ -266,9 +568,11 @@ const recognizedPlanNodeTypes = new Set([
 ]);
 
 function inspectPlan(root: PlanNode): {
+  indexConditions: Map<string, string[]>;
   indexNames: Set<string>;
   sequentialScan: boolean;
 } {
+  const indexConditions = new Map<string, string[]>();
   const indexNames = new Set<string>();
   let sequentialScan = false;
   const visit = (node: PlanNode): void => {
@@ -287,6 +591,18 @@ function inspectPlan(root: PlanNode): {
         );
       }
       indexNames.add(node['Index Name']);
+      if (node['Index Cond'] !== undefined) {
+        if (typeof node['Index Cond'] !== 'string') {
+          throw new Error(
+            `unrecognized EXPLAIN index condition: ${String(node['Index Cond'])}`,
+          );
+        }
+        const conditions = indexConditions.get(node['Index Name']) ?? [];
+        conditions.push(node['Index Cond']);
+        indexConditions.set(node['Index Name'], conditions);
+      }
+    } else if (node['Index Cond'] !== undefined) {
+      throw new Error('EXPLAIN index condition has no index name');
     }
     if (node.Plans !== undefined) {
       if (!Array.isArray(node.Plans) || !node.Plans.every(isRecord)) {
@@ -296,7 +612,30 @@ function inspectPlan(root: PlanNode): {
     }
   };
   visit(root);
-  return { indexNames, sequentialScan };
+  return { indexConditions, indexNames, sequentialScan };
+}
+
+function planUsesIndex(
+  root: PlanNode,
+  expectedIndexNames: readonly string[],
+): boolean {
+  const plan = inspectPlan(root);
+  return expectedIndexNames.some((name) => plan.indexNames.has(name));
+}
+
+function planUsesFoldedIndex(
+  root: PlanNode,
+  expectedIndexNames: readonly string[],
+  foldedColumnName: string,
+): boolean {
+  const plan = inspectPlan(root);
+  return expectedIndexNames.some(
+    (name) =>
+      plan.indexNames.has(name) &&
+      (plan.indexConditions.get(name) ?? []).some((condition) =>
+        condition.includes(foldedColumnName),
+      ),
+  );
 }
 
 function assertRelationIndexPlan(
@@ -312,6 +651,35 @@ function assertRelationIndexPlan(
   assert.ok(
     plan.indexNames.has(expectedIndexName),
     `relation predicate did not use expected relation index ${expectedIndexName}; used ${[...plan.indexNames].join(', ') || 'none'}`,
+  );
+}
+
+function assertFoldedIndexPlan(
+  root: PlanNode,
+  predicate: 'prefix' | 'resolve' | 'unique',
+  expectedIndexNames: readonly string[],
+  foldedColumnName: string,
+): void {
+  const plan = inspectPlan(root);
+  assert.equal(
+    plan.sequentialScan,
+    false,
+    `${predicate} predicate used a sequential scan`,
+  );
+  const usedExpected = expectedIndexNames.filter((name) =>
+    plan.indexNames.has(name),
+  );
+  assert.ok(
+    usedExpected.length > 0,
+    `${predicate} predicate did not use expected folded index ${expectedIndexNames.join(' or ')}; used ${[...plan.indexNames].join(', ') || 'none'}`,
+  );
+  assert.ok(
+    usedExpected.some((name) =>
+      (plan.indexConditions.get(name) ?? []).some((condition) =>
+        condition.includes(foldedColumnName),
+      ),
+    ),
+    `${predicate} predicate index condition omitted folded column ${foldedColumnName}`,
   );
 }
 

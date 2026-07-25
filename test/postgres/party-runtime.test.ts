@@ -91,6 +91,28 @@ test('Party executes the compiled declared-semantics contract on real PostgreSQL
         ),
     );
     assert.equal(await trustCount(runtime.adminPool), trustBeforeDuplicate + 1);
+    const partyStorage = runtime.storage.entities.find(
+      (entity) => entity.entityId === PARTY_IDS.entityIds.party,
+    );
+    assert.ok(partyStorage);
+    const uniqueNames = [
+      ...partyStorage.uniqueKeys.map((unique) => unique.physicalName),
+      ...partyStorage.indexes
+        .filter((index) => index.indexKind === 'caseInsensitiveUnique')
+        .map((index) => index.physicalName),
+    ];
+    assert.equal(uniqueNames.length, 2);
+    for (const constraint of uniqueNames) {
+      assertTypedError(
+        translateModuleProviderError(
+          { code: '23505', constraint },
+          runtime.storage,
+          PARTY_IDS.entityIds.party,
+        ),
+        'MODULE_UNIQUE_VIOLATION',
+        PARTY_IDS.fieldIds.number,
+      );
+    }
     await assert.rejects(
       invokePartyOperation(runtime, runtime.views.a, 'party_create', {
         recordId: randomUUID(),

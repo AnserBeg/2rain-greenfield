@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 
-import { canonicalize } from '@north-star/canonical-model';
+import { canonicalize, unicodeCaseFold } from '@north-star/canonical-model';
 import {
   PROJECTION_FAMILY_IDS,
   STORAGE_TARGET_PAYLOAD_VERSION,
@@ -699,12 +699,14 @@ async function executeQueryOnClient(
     }
     case 'search': {
       const text = requiredSearchText(args.text);
+      const matchMode = optionalSearchMatchMode(args.matchMode);
       const limit = boundedLimit(args.limit, definition.maximumResultCount);
       records = await matchRecords(
         client,
         entity,
         definition,
         text,
+        matchMode,
         includeArchived,
         limit,
       );
@@ -774,6 +776,7 @@ async function matchRecords(
   entity: StorageEntity,
   definition: RegisteredQueryDefinition,
   text: string,
+  matchMode: 'prefix' | 'substring',
   includeArchived: boolean,
   limit: number,
 ): Promise<RawRecord[]> {
@@ -784,17 +787,10 @@ async function matchRecords(
       column.searchMapping === 'normalizedTextIndex',
   );
   if (columns.length === 0) return [];
-  const values: unknown[] = [];
-  const textParameter = parameter(values, text);
+  const match = buildFoldedMatchPredicate(entity, columns, text, matchMode);
+  const values = [...match.values];
   const predicates = archivePredicate(entity, includeArchived);
-  predicates.push(
-    `(${columns
-      .map(
-        (column) =>
-          `north_star_module.${unicodeCaseFoldFunctionName}(${quoted(column.physicalName)}::text) LIKE ('%' || north_star_module.${unicodeCaseFoldFunctionName}(${textParameter}::text) || '%')`,
-      )
-      .join(' OR ')})`,
-  );
+  predicates.push(match.sql);
   const rows = await client.query<QueryResultRow>(
     selectSql(
       entity,
@@ -888,17 +884,10 @@ async function exactFoldedMatches(
   limit: number,
 ): Promise<RawRecord[]> {
   if (columns.length === 0) return [];
-  const values: unknown[] = [];
-  const textParameter = parameter(values, text);
+  const match = buildFoldedMatchPredicate(entity, columns, text, 'exact');
+  const values = [...match.values];
   const predicates = archivePredicate(entity, includeArchived);
-  predicates.push(
-    `(${columns
-      .map(
-        (column) =>
-          `north_star_module.${unicodeCaseFoldFunctionName}(${quoted(column.physicalName)}::text) = north_star_module.${unicodeCaseFoldFunctionName}(${textParameter}::text)`,
-      )
-      .join(' OR ')})`,
-  );
+  predicates.push(match.sql);
   const rows = await client.query<QueryResultRow>(
     selectSql(
       entity,
@@ -908,6 +897,103 @@ async function exactFoldedMatches(
     values,
   );
   return rows.rows.map((row) => rawRecord(entity, row));
+}
+
+export function buildFoldedMatchPredicate(
+  entity: StorageTargetPayloadV1['entities'][number],
+  columns: readonly StorageTargetPayloadV1['entities'][number]['columns'][number][],
+  text: string,
+  mode: 'exact' | 'prefix' | 'substring',
+): { readonly sql: string; readonly values: readonly unknown[] } {
+  if (columns.length === 0) {
+    throw failure(
+      'MODULE_FOLDED_MATCH_COLUMNS_REQUIRED',
+      'folded matching requires at least one declared column',
+    );
+  }
+  const values: unknown[] = [];
+  const textParameter = parameter(values, text);
+  const foldedParameter = `north_star_module.${unicodeCaseFoldFunctionName}(${textParameter}::text)`;
+  const upperBound =
+    mode === 'prefix' ? foldedPrefixUpperBound(text) : undefined;
+  const upperParameter =
+    upperBound === null || upperBound === undefined
+      ? null
+      : parameter(values, upperBound);
+  const terms = columns.map((column) => {
+    const foldedColumn = foldedColumnSql(entity, column);
+    switch (mode) {
+      case 'exact':
+        return `${foldedColumn} = ${foldedParameter}`;
+      case 'substring':
+        return `${foldedColumn} LIKE ('%' || ${foldedParameter} || '%')`;
+      case 'prefix':
+        return upperParameter === null
+          ? `${foldedColumn} COLLATE "C" >= ${foldedParameter} COLLATE "C"`
+          : `(${foldedColumn} COLLATE "C" >= ${foldedParameter} COLLATE "C" AND ${foldedColumn} COLLATE "C" < ${upperParameter}::text COLLATE "C")`;
+    }
+  });
+  return Object.freeze({
+    sql: `(${terms.join(' OR ')})`,
+    values: Object.freeze(values),
+  });
+}
+
+export function foldedPrefixUpperBound(value: string): string | null {
+  const folded = unicodeCaseFold(value);
+  const codePoints = Array.from(folded, (character) => {
+    const codePoint = character.codePointAt(0)!;
+    if (codePoint >= 0xd800 && codePoint <= 0xdfff) {
+      throw failure(
+        'MODULE_INPUT_MALFORMED',
+        'text must contain only Unicode scalar values',
+      );
+    }
+    return codePoint;
+  });
+  for (let index = codePoints.length - 1; index >= 0; index -= 1) {
+    const codePoint = codePoints[index]!;
+    if (codePoint === 0x10ffff) continue;
+    const successor =
+      codePoint + 1 >= 0xd800 && codePoint + 1 <= 0xdfff
+        ? 0xe000
+        : codePoint + 1;
+    return String.fromCodePoint(...codePoints.slice(0, index), successor);
+  }
+  return null;
+}
+
+function foldedColumnSql(
+  entity: StorageEntity,
+  column: StorageEntity['columns'][number],
+): string {
+  const foldedColumn = (entity.foldedColumns ?? []).find(
+    (candidate) => candidate.canonicalFieldId === column.canonicalFieldId,
+  );
+  if (foldedColumn) {
+    if (
+      foldedColumn.collation !== 'C' ||
+      foldedColumn.foldFunction !==
+        'north_star_module.nsm_unicode_case_fold_v1' ||
+      foldedColumn.sourceColumn !== column.physicalName ||
+      foldedColumn.stored !== true
+    ) {
+      throw failure(
+        'MODULE_FOLDED_COLUMN_CONTRACT_INVALID',
+        `stored folded column contract is invalid for ${column.canonicalFieldId}`,
+        column.canonicalFieldId,
+      );
+    }
+    return quoted(foldedColumn.physicalName);
+  }
+  if (!Object.hasOwn(entity, 'foldedColumns')) {
+    return `north_star_module.${unicodeCaseFoldFunctionName}(${quoted(column.physicalName)}::text)`;
+  }
+  throw failure(
+    'MODULE_FOLDED_COLUMN_CONTRACT_MISSING',
+    `stored folded column is missing for ${column.canonicalFieldId}`,
+    column.canonicalFieldId,
+  );
 }
 
 async function loadRawRecord(
@@ -1719,6 +1805,17 @@ function requiredSearchText(value: ImmutableJsonValue | undefined): string {
   return value;
 }
 
+function optionalSearchMatchMode(
+  value: ImmutableJsonValue | undefined,
+): 'prefix' | 'substring' {
+  if (value === undefined || value === 'substring') return 'substring';
+  if (value === 'prefix') return 'prefix';
+  throw failure(
+    'MODULE_INPUT_MALFORMED',
+    'matchMode must be prefix or substring',
+  );
+}
+
 function optionalUuid(
   value: ImmutableJsonValue | undefined,
   name: string,
@@ -1776,11 +1873,14 @@ export function translateModuleProviderError(
   const code = providerErrorProperty(error, 'code');
   const constraint = providerErrorProperty(error, 'constraint');
   if (code === '23505') {
-    const unique = entity.uniqueKeys.find(
-      (candidate) => candidate.physicalName === constraint,
-    );
-    const subjectId = unique
-      ? canonicalConstraintSubject(storage, unique.physicalName)
+    const uniquePhysicalName = [
+      ...entity.uniqueKeys.map((candidate) => candidate.physicalName),
+      ...entity.indexes
+        .filter((candidate) => candidate.indexKind === 'caseInsensitiveUnique')
+        .map((candidate) => candidate.physicalName),
+    ].find((candidate) => candidate === constraint);
+    const subjectId = uniquePhysicalName
+      ? canonicalUniqueSubject(storage, uniquePhysicalName)
       : entity.entityId;
     return failure(
       'MODULE_UNIQUE_VIOLATION',
@@ -1812,13 +1912,13 @@ export function translateModuleProviderError(
   );
 }
 
-function canonicalConstraintSubject(
+function canonicalUniqueSubject(
   storage: StorageTargetPayloadV1,
   physicalName: string,
 ): string {
   const mapping = storage.physicalMapping.records.find(
     (record) =>
-      record.objectKind === 'constraint' &&
+      (record.objectKind === 'constraint' || record.objectKind === 'index') &&
       record.physicalName === physicalName,
   );
   return mapping?.canonicalId.split('#')[0] ?? 'module:field.unknown';

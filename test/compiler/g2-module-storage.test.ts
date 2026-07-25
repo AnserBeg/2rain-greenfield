@@ -209,6 +209,33 @@ test('physical names, reverse mappings, PostgreSQL types, scope, RLS, and grants
         'environment_id',
       ]);
     }
+    for (const foldedColumn of entity.foldedColumns) {
+      assert.equal(foldedColumn.collation, 'C');
+      assert.equal(
+        foldedColumn.foldFunction,
+        'north_star_module.nsm_unicode_case_fold_v1',
+      );
+      assert.equal(foldedColumn.postgresqlType, 'text');
+      assert.equal(foldedColumn.stored, true);
+      assert.ok(
+        entity.columns.some(
+          (column) => column.physicalName === foldedColumn.sourceColumn,
+        ),
+      );
+      assert.ok(
+        storage.physicalMapping.records.some(
+          (record) =>
+            record.objectKind === 'column' &&
+            record.physicalName === foldedColumn.physicalName &&
+            record.canonicalId ===
+              `${foldedColumn.canonicalFieldId}#unicode-case-fold-v1`,
+        ),
+      );
+    }
+    assert.equal(
+      entity.indexes.some((index) => (index.indexKind as string) === 'search'),
+      false,
+    );
   }
   for (const relation of storage.relations) {
     assert.deepEqual(relation.foreignKey.sourceColumns.slice(0, 2), [
@@ -287,6 +314,76 @@ test('ratified storage targets evolve additively with relation-index elements', 
         element.classification.preparationValidity === 'deferredOnlineFamily' &&
         element.classification.operationalRisk === 'onlineStrategyRequired',
     ),
+  );
+});
+
+test('folded access covers advisory resolve keys and defers populated-table rewrites', () => {
+  const authored = ordinaryModuleV1() as {
+    fields: Array<Record<string, unknown>>;
+  };
+  const advisoryField = authored.fields.find(
+    (field) => field.fieldId === FIXTURE_IDS.fieldIds.parentName,
+  );
+  assert.ok(advisoryField);
+  advisoryField.searchable = false;
+  const packageRevision = normalizeApplicationPackage(authored);
+  const candidate = lowerStorageTargetV1(packageRevision);
+  const entity = candidate.entities.find(
+    (entry) => entry.entityId === FIXTURE_IDS.entityIds.parent,
+  );
+  assert.ok(entity);
+  const foldedColumn = entity.foldedColumns.find(
+    (column) => column.canonicalFieldId === FIXTURE_IDS.fieldIds.parentName,
+  );
+  assert.ok(foldedColumn);
+  const foldedIndex = entity.indexes.find(
+    (index) =>
+      index.indexKind === 'foldedAccess' &&
+      index.columnNames.includes(foldedColumn.physicalName),
+  );
+  assert.ok(foldedIndex);
+
+  const previous = structuredClone(candidate);
+  for (const previousEntity of previous.entities) {
+    previousEntity.foldedColumns = [];
+    previousEntity.indexes = previousEntity.indexes.filter(
+      (index) => index.indexKind !== 'foldedAccess',
+    );
+  }
+  const transition = buildStorageTransitionEnvelope(
+    packageRevision,
+    previous,
+    candidate,
+    transitionBinding(),
+  );
+  assert.equal('diagnostic' in transition, false);
+  if ('diagnostic' in transition) return;
+  const addFoldedColumn = transition.elements.find(
+    (element) =>
+      element.kind === 'addColumn' &&
+      element.physicalObjectName === foldedColumn.physicalName,
+  );
+  assert.ok(addFoldedColumn);
+  assert.deepEqual(addFoldedColumn.classification, {
+    dataEffect: 'rowMutation',
+    operationalRisk: 'onlineStrategyRequired',
+    preparationValidity: 'deferredOnlineFamily',
+    semanticEffect: 'additive',
+  });
+  assert.equal(addFoldedColumn.coexistence.admission, 'deferred');
+  assert.equal(addFoldedColumn.coexistenceImpact, 'requiresReadFallback');
+  const addFoldedIndex = transition.elements.find(
+    (element) =>
+      element.kind === 'createIndex' &&
+      element.physicalObjectName === foldedIndex.physicalName,
+  );
+  assert.ok(addFoldedIndex);
+  assert.deepEqual(addFoldedIndex.declaredDependencyIds, [
+    addFoldedColumn.elementId,
+  ]);
+  assert.equal(
+    addFoldedIndex.classification.preparationValidity,
+    'deferredOnlineFamily',
   );
 });
 

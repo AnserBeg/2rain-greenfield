@@ -233,6 +233,7 @@ export interface StorageEntityTarget {
     stateMachineId: string;
   }>;
   entityId: string;
+  foldedColumns: StorageFoldedColumnTarget[];
   indexes: StorageIndexTarget[];
   lifecycle: string;
   optimisticRevision: {
@@ -268,6 +269,16 @@ export interface StorageColumnTarget {
   requiredAfterTightening: boolean;
   searchMapping: 'none' | 'normalizedTextIndex';
   shapeFingerprint: string;
+}
+
+export interface StorageFoldedColumnTarget {
+  canonicalFieldId: string;
+  collation: 'C';
+  foldFunction: 'north_star_module.nsm_unicode_case_fold_v1';
+  physicalName: string;
+  postgresqlType: 'text';
+  sourceColumn: string;
+  stored: true;
 }
 
 export interface ModuleFieldContract {
@@ -310,7 +321,7 @@ export interface StorageCheckConstraintTarget {
 
 export interface StorageIndexTarget {
   columnNames: string[];
-  indexKind: 'caseInsensitiveUnique' | 'relation' | 'search';
+  indexKind: 'caseInsensitiveUnique' | 'foldedAccess' | 'relation';
   physicalName: string;
 }
 
@@ -457,6 +468,50 @@ export function lowerStorageTargetV1(
           return lowerColumn(field, mappings, deferRequiredTightening);
         },
       );
+      const resolveMatchFieldIds = new Set(
+        (queriesByEntity.get(entity.entityId) ?? []).flatMap((query) =>
+          query.queryType === 'resolve'
+            ? (query.resolveMatchKeys ?? []).map(
+                (matchKey) => matchKey.field.targetId,
+              )
+            : [],
+        ),
+      );
+      const foldedColumns = columns.flatMap(
+        (column): StorageFoldedColumnTarget[] => {
+          const field = (fieldsByEntity.get(entity.entityId) ?? []).find(
+            (candidate) => candidate.fieldId === column.canonicalFieldId,
+          );
+          if (
+            !field ||
+            (field.businessKey !== 'tenantEnvironmentCaseInsensitiveUnique' &&
+              !field.searchable &&
+              !resolveMatchFieldIds.has(field.fieldId))
+          ) {
+            return [];
+          }
+          const folded: StorageFoldedColumnTarget = {
+            canonicalFieldId: field.fieldId,
+            collation: 'C',
+            foldFunction: 'north_star_module.nsm_unicode_case_fold_v1' as const,
+            physicalName: physicalNameFor(
+              'column',
+              `${field.fieldId}/unicode-case-fold-v1`,
+            ),
+            postgresqlType: 'text',
+            sourceColumn: column.physicalName,
+            stored: true,
+          };
+          addMapping(
+            mappings,
+            'column',
+            `${field.fieldId}#unicode-case-fold-v1`,
+            folded.physicalName,
+            folded,
+          );
+          return [folded];
+        },
+      );
       const checkConstraints = (
         fieldsByEntity.get(entity.entityId) ?? []
       ).flatMap((field): StorageCheckConstraintTarget[] => {
@@ -510,6 +565,9 @@ export function lowerStorageTargetV1(
       const uniqueKeys: StorageUniqueKeyTarget[] = [];
       const indexes: StorageIndexTarget[] = [];
       for (const column of columns) {
+        const foldedColumn = foldedColumns.find(
+          (candidate) => candidate.canonicalFieldId === column.canonicalFieldId,
+        );
         if (
           (fieldsByEntity.get(entity.entityId) ?? []).find(
             (field) => field.fieldId === column.canonicalFieldId,
@@ -550,21 +608,30 @@ export function lowerStorageTargetV1(
             index,
           );
         }
-        if (column.searchMapping === 'normalizedTextIndex') {
+        if (
+          foldedColumn &&
+          !uniqueKeys.some((unique) =>
+            unique.columns.includes(column.physicalName),
+          )
+        ) {
           const physicalName = physicalNameFor(
             'index',
-            `${column.canonicalFieldId}/search`,
+            `${column.canonicalFieldId}/tenant-environment-folded-access`,
           );
           const index = {
-            columnNames: ['tenant_id', 'environment_id', column.physicalName],
-            indexKind: 'search' as const,
+            columnNames: [
+              'tenant_id',
+              'environment_id',
+              foldedColumn.physicalName,
+            ],
+            indexKind: 'foldedAccess' as const,
             physicalName,
           };
           indexes.push(index);
           addMapping(
             mappings,
             'index',
-            `${column.canonicalFieldId}#search`,
+            `${column.canonicalFieldId}#tenant-environment-folded-access`,
             physicalName,
             index,
           );
@@ -588,6 +655,9 @@ export function lowerStorageTargetV1(
         },
         derivedStateFields,
         entityId: entity.entityId,
+        foldedColumns: foldedColumns.sort((left, right) =>
+          compare(left.physicalName, right.physicalName),
+        ),
         indexes: indexes.sort((left, right) =>
           compare(left.physicalName, right.physicalName),
         ),
@@ -915,23 +985,6 @@ export function buildStorageTransitionEnvelope(
         elements.push(backfill);
         tightenDependency = backfill;
       }
-      if (field.searchMapping === 'normalizedTextIndex') {
-        const index = entity.indexes.find((candidateIndex) =>
-          candidateIndex.columnNames.includes(field.physicalName),
-        );
-        if (index) {
-          elements.push(
-            element(
-              'createIndex',
-              entity.entityId,
-              fieldId,
-              index.physicalName,
-              [addColumn.elementId],
-              'existing',
-            ),
-          );
-        }
-      }
       if (field.requiredAfterTightening) {
         const tighten = element(
           'tightenNotNull',
@@ -965,6 +1018,43 @@ export function buildStorageTransitionEnvelope(
           'existing',
         ),
       );
+    }
+    const oldFoldedColumnNames = new Set(
+      (oldEntity.foldedColumns ?? []).map((column) => column.physicalName),
+    );
+    for (const foldedColumn of entity.foldedColumns) {
+      if (oldFoldedColumnNames.has(foldedColumn.physicalName)) continue;
+      const addFoldedColumn = deferredGeneratedColumnElement(
+        entity.entityId,
+        foldedColumn.canonicalFieldId,
+        foldedColumn.physicalName,
+      );
+      elements.push(addFoldedColumn);
+      for (const index of entity.indexes.filter(
+        (candidateIndex) =>
+          (candidateIndex.indexKind === 'foldedAccess' &&
+            candidateIndex.columnNames.includes(foldedColumn.physicalName)) ||
+          (candidateIndex.indexKind === 'caseInsensitiveUnique' &&
+            candidateIndex.columnNames.includes(foldedColumn.sourceColumn)),
+      )) {
+        if (
+          oldEntity.indexes.some(
+            (oldIndex) => oldIndex.physicalName === index.physicalName,
+          )
+        ) {
+          continue;
+        }
+        elements.push(
+          element(
+            'createIndex',
+            entity.entityId,
+            foldedColumn.canonicalFieldId,
+            index.physicalName,
+            [addFoldedColumn.elementId],
+            'existing',
+          ),
+        );
+      }
     }
   }
 
@@ -1454,6 +1544,38 @@ function element(
     storageDomain: 'managedModule',
     storageGeneration: 'dedicatedTyped/v1',
     subjectId,
+  };
+}
+
+function deferredGeneratedColumnElement(
+  subjectId: string,
+  fieldId: string,
+  physicalObjectName: string,
+): StorageTransitionElement {
+  const base = element(
+    'addColumn',
+    subjectId,
+    fieldId,
+    physicalObjectName,
+    [],
+    'existing',
+  );
+  return {
+    ...base,
+    classification: {
+      dataEffect: 'rowMutation',
+      operationalRisk: 'onlineStrategyRequired',
+      preparationValidity: 'deferredOnlineFamily',
+      semanticEffect: 'additive',
+    },
+    coexistence: {
+      admission: 'deferred',
+      newRead: 'requiresReadFallback',
+      newWrite: 'compatible',
+      oldRead: 'compatible',
+      oldWrite: 'compatible',
+    },
+    coexistenceImpact: 'requiresReadFallback',
   };
 }
 

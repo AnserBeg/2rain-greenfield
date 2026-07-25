@@ -279,14 +279,31 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
                 ],
               );
               assert.equal(definitions.rows.length, 2);
+              const foldedColumn = entity.foldedColumns.find(
+                (column) => column.sourceColumn === valueColumn,
+              );
+              assert.ok(foldedColumn);
               for (const definition of definitions.rows) {
-                assert.match(definition.indexdef, /nsm_unicode_case_fold_v1/);
+                assert.match(
+                  definition.indexdef,
+                  new RegExp(foldedColumn.physicalName),
+                );
+                assert.doesNotMatch(
+                  definition.indexdef,
+                  /nsm_unicode_case_fold_v1/,
+                );
                 assert.doesNotMatch(definition.indexdef, /\blower\s*\(/i);
               }
             } finally {
               await client.query('ROLLBACK');
               client.release();
             }
+          },
+        );
+        await t.test(
+          'a populated-table folded uniqueness transition refuses duplicates without deleting rows',
+          async () => {
+            await assertPopulatedFoldUniquenessRefusal(pool);
           },
         );
         let firstAttemptId: string | undefined;
@@ -1958,6 +1975,246 @@ test('a pre-existing relation-index upgrade is declared but deferred-online exec
   );
 });
 
+test('a pre-existing folded-column upgrade is declared but remains at the catalog-drift boundary', async () => {
+  const emptyDefinition = emptyModuleDefinition();
+  const source = mustCompile(moduleInput(emptyDefinition));
+  const currentDefinition = ordinaryModuleV1();
+  const currentBytes = definitionBytes(currentDefinition);
+  const originallyCompiled = mustCompile(
+    moduleInput(currentDefinition, expectedActiveReleaseFrom(source)),
+  );
+  const legacy = withoutFoldedAccess(originallyCompiled);
+  const upgrade = mustCompile(
+    moduleInput(currentDefinition, expectedActiveReleaseFrom(legacy)),
+  );
+  const upgradeStorage = projectionPayload<StorageTargetPayloadV1>(
+    upgrade,
+    PROJECTION_FAMILY_IDS.storageTarget,
+  );
+  const parent = upgradeStorage.entities.find(
+    (entity) => entity.entityId === FIXTURE_IDS.entityIds.parent,
+  );
+  assert.ok(parent);
+  const foldedColumn = parent.foldedColumns.find(
+    (column) => column.canonicalFieldId === FIXTURE_IDS.fieldIds.parentName,
+  );
+  assert.ok(foldedColumn);
+  const foldedIndex = parent.indexes.find(
+    (index) =>
+      index.indexKind === 'foldedAccess' &&
+      index.columnNames.includes(foldedColumn.physicalName),
+  );
+  assert.ok(foldedIndex);
+  const upgradeTransition = projectionPayload<StorageTransitionEnvelope>(
+    upgrade,
+    PROJECTION_FAMILY_IDS.storageTransition,
+  );
+  const addColumn = upgradeTransition.elements.find(
+    (element) =>
+      element.kind === 'addColumn' &&
+      element.physicalObjectName === foldedColumn.physicalName,
+  );
+  assert.ok(addColumn);
+  assert.equal(
+    addColumn.classification.preparationValidity,
+    'deferredOnlineFamily',
+  );
+  assert.equal(addColumn.classification.dataEffect, 'rowMutation');
+  assert.ok(
+    upgradeTransition.elements.some(
+      (element) =>
+        element.kind === 'createIndex' &&
+        element.physicalObjectName === foldedIndex.physicalName &&
+        element.declaredDependencyIds.includes(addColumn.elementId),
+    ),
+  );
+
+  await withEphemeralPostgres(
+    'module-folded-column-upgrade',
+    async ({ connection, pool }) => {
+      const admin = await pool.connect();
+      try {
+        const migrationResult = await runMigrations(
+          admin,
+          await loadMigrations(migrations),
+        );
+        assert.equal(migrationResult.verified.length, 10);
+        await seedScope(admin);
+      } finally {
+        admin.release();
+      }
+
+      const runtimePool = new pg.Pool({
+        ...connection,
+        max: 2,
+        user: 'north_star_runtime',
+      });
+      const materializerPool = new pg.Pool({
+        ...connection,
+        max: 2,
+        user: 'north_star_module_materializer',
+      });
+      const moduleRuntimePool = new pg.Pool({
+        ...connection,
+        max: 1,
+        user: 'north_star_module_runtime',
+      });
+      materializerPool.on('error', () => undefined);
+      moduleRuntimePool.on('error', () => undefined);
+      try {
+        const contexts = await trustedContexts();
+        const releases = await persistPairForBothTenants(
+          runtimePool,
+          contexts,
+          source,
+          definitionBytes(emptyDefinition),
+          legacy,
+          currentBytes,
+        );
+        const next = await persistNextRelease(
+          runtimePool,
+          contexts.a,
+          releases.a.target,
+          upgrade,
+          currentBytes,
+        );
+        await installSourcePointers(pool, releases);
+        await grantExecutorAuthority(pool);
+        const materializer = new PostgresModuleStorageMaterializer(
+          materializerPool,
+          moduleRuntimePool,
+        );
+
+        await materializer.prepare({
+          context: contexts.a,
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+          generationId: randomUUID(),
+          initiatedBy: principalA,
+          preparationId: randomUUID(),
+          targetReleaseId: releases.a.target,
+        });
+        await assertManagedColumnPresence(
+          pool,
+          parent.physicalTableName,
+          foldedColumn.physicalName,
+          false,
+        );
+
+        await setActiveReleasePointer(pool, releases.a.target);
+        let boundaryError: unknown;
+        try {
+          await materializer.prepare({
+            context: contexts.a,
+            expiresAt: new Date(Date.now() + 60_000).toISOString(),
+            generationId: randomUUID(),
+            initiatedBy: principalA,
+            preparationId: randomUUID(),
+            targetReleaseId: next.target,
+          });
+        } catch (error) {
+          boundaryError = error;
+        }
+        assert.ok(boundaryError instanceof ModuleStorageMaterializationError);
+        assert.equal(boundaryError.code, 'CATALOG_DRIFT');
+        assert.match(
+          boundaryError.message,
+          new RegExp(
+            `missing managed column ${parent.physicalTableName}\\.${foldedColumn.physicalName}`,
+          ),
+        );
+        console.log(
+          `PR-6b pre-existing folded-column boundary:\nerror: ${boundaryError.message}\ncode: ${boundaryError.code}`,
+        );
+        await assertManagedColumnPresence(
+          pool,
+          parent.physicalTableName,
+          foldedColumn.physicalName,
+          false,
+        );
+      } finally {
+        await Promise.all([
+          runtimePool.end(),
+          materializerPool.end(),
+          moduleRuntimePool.end(),
+        ]);
+      }
+    },
+  );
+});
+
+async function assertPopulatedFoldUniquenessRefusal(pool: pg.Pool) {
+  const client = await pool.connect();
+  try {
+    await client.query(
+      `CREATE TEMPORARY TABLE pr6b_fold_transition_probe (
+         tenant_id uuid NOT NULL,
+         environment_id uuid NOT NULL,
+         value text NOT NULL
+       )`,
+    );
+    await client.query(
+      `INSERT INTO pr6b_fold_transition_probe
+         (tenant_id, environment_id, value)
+       VALUES ($1, $2, 'Straße-001'), ($1, $2, 'STRASSE-001')`,
+      [tenantA, environmentA],
+    );
+    const before = await client.query<{ value: string }>(
+      `SELECT value FROM pr6b_fold_transition_probe ORDER BY value COLLATE "C"`,
+    );
+    await client.query(
+      `ALTER TABLE pr6b_fold_transition_probe
+         ADD COLUMN value_folded text COLLATE "C"
+         GENERATED ALWAYS AS (
+           north_star_module.nsm_unicode_case_fold_v1(value)
+         ) STORED`,
+    );
+    await assert.rejects(
+      client.query(
+        `CREATE UNIQUE INDEX pr6b_fold_transition_probe_unique
+           ON pr6b_fold_transition_probe
+           (tenant_id, environment_id, value_folded)`,
+      ),
+      (error: unknown) =>
+        error instanceof Error &&
+        (error as Error & { code?: string }).code === '23505',
+    );
+    const after = await client.query<{ value: string }>(
+      `SELECT value FROM pr6b_fold_transition_probe ORDER BY value COLLATE "C"`,
+    );
+    assert.deepEqual(after.rows, before.rows);
+    assert.equal(after.rows.length, 2);
+    const index = await client.query<{ present: boolean }>(
+      `SELECT to_regclass('pg_temp.pr6b_fold_transition_probe_unique') IS NOT NULL AS present`,
+    );
+    assert.equal(index.rows[0]?.present, false);
+  } finally {
+    client.release();
+  }
+}
+
+async function assertManagedColumnPresence(
+  pool: pg.Pool,
+  tableName: string,
+  columnName: string,
+  expected: boolean,
+): Promise<void> {
+  const result = await pool.query<{ present: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1
+         FROM pg_attribute AS attribute
+         JOIN pg_class AS relation ON relation.oid = attribute.attrelid
+         JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+        WHERE namespace.nspname = 'north_star_module'
+          AND relation.relname = $1
+          AND attribute.attname = $2
+          AND attribute.attnum > 0
+          AND NOT attribute.attisdropped
+     ) AS present`,
+    [tableName, columnName],
+  );
+  assert.equal(result.rows[0]?.present, expected);
+}
+
 function emptyModuleDefinition(): Record<string, unknown> {
   const definition = ordinaryModuleV1();
   for (const family of [
@@ -2090,6 +2347,54 @@ function withoutRelationIndexes(compiled: CompileSuccess): CompileSuccess {
     (element) =>
       element.kind !== 'createIndex' ||
       !relationIndexNames.has(element.physicalObjectName),
+  );
+  transition.toStorageTargetArtifactRoot = storageReference.artifactRoot;
+  transition.toStorageTargetSemanticDigest = storageReference.semanticDigest;
+  rewriteProjectionPayload(
+    clone,
+    PROJECTION_FAMILY_IDS.storageTransition,
+    transition,
+  );
+  rebuildReleaseRoot(clone);
+  return clone;
+}
+
+function withoutFoldedAccess(compiled: CompileSuccess): CompileSuccess {
+  const clone = structuredClone(compiled);
+  const storage = projectionPayload<StorageTargetPayloadV1>(
+    clone,
+    PROJECTION_FAMILY_IDS.storageTarget,
+  );
+  const removedPhysicalNames = new Set<string>();
+  for (const entity of storage.entities) {
+    for (const column of entity.foldedColumns) {
+      removedPhysicalNames.add(column.physicalName);
+    }
+    for (const index of entity.indexes.filter(
+      (candidate) => candidate.indexKind === 'foldedAccess',
+    )) {
+      removedPhysicalNames.add(index.physicalName);
+    }
+    delete (entity as Partial<typeof entity>).foldedColumns;
+    entity.indexes = entity.indexes.filter(
+      (index) => index.indexKind !== 'foldedAccess',
+    );
+  }
+  storage.physicalMapping.records = storage.physicalMapping.records.filter(
+    (record) => !removedPhysicalNames.has(record.physicalName),
+  );
+  rewriteProjectionPayload(clone, PROJECTION_FAMILY_IDS.storageTarget, storage);
+
+  const storageReference = clone.bundle.releaseManifest.projections.find(
+    (reference) => reference.familyId === PROJECTION_FAMILY_IDS.storageTarget,
+  );
+  assert.ok(storageReference);
+  const transition = projectionPayload<StorageTransitionEnvelope>(
+    clone,
+    PROJECTION_FAMILY_IDS.storageTransition,
+  );
+  transition.elements = transition.elements.filter(
+    (element) => !removedPhysicalNames.has(element.physicalObjectName),
   );
   transition.toStorageTargetArtifactRoot = storageReference.artifactRoot;
   transition.toStorageTargetSemanticDigest = storageReference.semanticDigest;
