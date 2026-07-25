@@ -310,7 +310,7 @@ export interface StorageCheckConstraintTarget {
 
 export interface StorageIndexTarget {
   columnNames: string[];
-  indexKind: 'caseInsensitiveUnique' | 'search';
+  indexKind: 'caseInsensitiveUnique' | 'relation' | 'search';
   physicalName: string;
 }
 
@@ -678,6 +678,25 @@ export function lowerStorageTargetV1(
         physicalName,
         compatibilityShape,
       );
+      const relationIndex = {
+        columnNames: ['tenant_id', 'environment_id', relationColumn],
+        indexKind: 'relation' as const,
+        physicalName: physicalNameFor(
+          'index',
+          `${relation.relationId}/tenant-environment-relation`,
+        ),
+      };
+      source.indexes.push(relationIndex);
+      source.indexes.sort((left, right) =>
+        compare(left.physicalName, right.physicalName),
+      );
+      addMapping(
+        mappings,
+        'index',
+        `${relation.relationId}#tenant-environment-relation`,
+        relationIndex.physicalName,
+        relationIndex,
+      );
       return targetShape;
     },
   );
@@ -974,6 +993,30 @@ export function buildStorageTransitionEnvelope(
           relation.relationId,
         );
       }
+      const source = candidateEntities.get(relation.sourceEntityId)!;
+      const previousSource = previousEntities.get(relation.sourceEntityId)!;
+      const relationIndex = source.indexes.find(
+        (index) =>
+          index.indexKind === 'relation' &&
+          index.columnNames.includes(relation.relationColumn.physicalName),
+      );
+      if (
+        relationIndex &&
+        !previousSource.indexes.some(
+          (index) => index.physicalName === relationIndex.physicalName,
+        )
+      ) {
+        elements.push(
+          element(
+            'createIndex',
+            relation.relationId,
+            null,
+            relationIndex.physicalName,
+            [],
+            'existing',
+          ),
+        );
+      }
       continue;
     }
     const sourceOrigin = previousEntities.has(relation.sourceEntityId)
@@ -990,6 +1033,7 @@ export function buildStorageTransitionEnvelope(
       createdTableElementIds.get(relation.sourceEntityId),
       createdTableElementIds.get(relation.targetEntityId),
     ].filter((entry): entry is string => entry !== undefined);
+    let relationColumnElementId: string | undefined;
     if (sourceOrigin === 'existing') {
       const relationColumn = element(
         'addColumn',
@@ -1001,6 +1045,7 @@ export function buildStorageTransitionEnvelope(
       );
       elements.push(relationColumn);
       dependencies.push(relationColumn.elementId);
+      relationColumnElementId = relationColumn.elementId;
     }
     const entry = element(
       'addForeignKey',
@@ -1011,6 +1056,27 @@ export function buildStorageTransitionEnvelope(
       sourceOrigin,
     );
     elements.push(entry);
+    if (sourceOrigin === 'existing') {
+      const source = candidateEntities.get(relation.sourceEntityId)!;
+      const relationIndex = source.indexes.find(
+        (index) =>
+          index.indexKind === 'relation' &&
+          index.columnNames.includes(relation.relationColumn.physicalName),
+      );
+      if (!relationIndex) {
+        throw new Error('validated relation index is missing');
+      }
+      elements.push(
+        element(
+          'createIndex',
+          relation.relationId,
+          null,
+          relationIndex.physicalName,
+          relationColumnElementId ? [relationColumnElementId] : [],
+          'existing',
+        ),
+      );
+    }
     if (entry.coexistence.admission === 'blockingWhileAffectedWritersLive') {
       debts.push(
         tighteningDebt(

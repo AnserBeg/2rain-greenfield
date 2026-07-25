@@ -221,6 +221,19 @@ test('physical names, reverse mappings, PostgreSQL types, scope, RLS, and grants
     ]);
     assert.equal(relation.foreignKey.onDelete, 'restrict');
     assert.equal(relation.foreignKey.onUpdate, 'restrict');
+    const source = storage.entities.find(
+      (entity) => entity.entityId === relation.sourceEntityId,
+    );
+    const relationIndex = source?.indexes.find(
+      (index) =>
+        index.indexKind === 'relation' &&
+        index.columnNames.includes(relation.relationColumn.physicalName),
+    );
+    assert.deepEqual(relationIndex?.columnNames, [
+      'tenant_id',
+      'environment_id',
+      relation.relationColumn.physicalName,
+    ]);
   }
   const requiredColumns = storage.entities.flatMap((entity) =>
     entity.columns.filter((column) =>
@@ -235,6 +248,44 @@ test('physical names, reverse mappings, PostgreSQL types, scope, RLS, and grants
   assert.ok(
     requiredColumns.every(
       (column) => !column.nullable && column.coexistenceImpact === 'none',
+    ),
+  );
+});
+
+test('ratified storage targets evolve additively with relation-index elements', () => {
+  const packageRevision = normalizeApplicationPackage(ordinaryModuleV1());
+  const candidate = lowerStorageTargetV1(packageRevision);
+  const previous = structuredClone(candidate);
+  for (const entity of previous.entities) {
+    entity.indexes = entity.indexes.filter(
+      (index) => index.indexKind !== 'relation',
+    );
+  }
+  const transition = buildStorageTransitionEnvelope(
+    packageRevision,
+    previous,
+    candidate,
+    transitionBinding(),
+  );
+  assert.equal('diagnostic' in transition, false);
+  if ('diagnostic' in transition) return;
+  const expectedNames = candidate.entities
+    .flatMap((entity) => entity.indexes)
+    .filter((index) => index.indexKind === 'relation')
+    .map((index) => index.physicalName)
+    .sort();
+  const additions = transition.elements.filter(
+    (element) => element.kind === 'createIndex',
+  );
+  assert.deepEqual(
+    additions.map((element) => element.physicalObjectName).sort(),
+    expectedNames,
+  );
+  assert.ok(
+    additions.every(
+      (element) =>
+        element.classification.preparationValidity === 'deferredOnlineFamily' &&
+        element.classification.operationalRisk === 'onlineStrategyRequired',
     ),
   );
 });
