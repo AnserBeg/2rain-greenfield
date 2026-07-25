@@ -5,7 +5,7 @@ narrative companion to `ledger.md`: the ledger records what each packet *was*, t
 records what we are doing *next* and *why*. Update it whenever the queue changes;
 delete rows once they are accepted and recorded in the ledger.
 
-Last updated: 2026-07-24, at `main` = `d1ab76b`.
+Last updated: 2026-07-24, at `main` = `a2526decdd10bfbcbae2dc2e63486b7e5278644d`.
 
 ## Operating model
 
@@ -46,17 +46,16 @@ Ordered. Each row names its source and why it holds its slot.
 
 | # | Packet | Tier | Why here |
 |---|---|---|---|
-| 1 | **PR-4 — gate completeness round 2 + coverage audit** | Mechanical | Four `test:*` scripts still carry the unquoted-glob bug PR-1 fixed in one place; two compiler-artifact staleness guards run in no CI job. Must precede PR-5/PR-6 so their "full matrix" is honest. Adds the structural gate: **every test file must be reachable from a CI command.** |
-| 2 | **PR-4b — executed-file reachability (dynamic)** | Mechanical | Replaces static inference with ground truth from test-reporter output; closes the fail-open class PR-4 hit four times. |
-| 3 | **PR-5 — idempotency scope** | Critical | Correctness defect in accepted PR-3: receipt PK includes `principal_id`/`release_id`, so a retry from another principal or after an activation **re-executes**. Recoverable today; **fatal at G3** (double-post). |
-| 4 | **PR-6 — index coverage + request-path SLOs** | Critical | Relations get no index; the search index is a raw btree that cannot serve `fold(col) LIKE '%x%'`; advisory resolve keys have no folded index. Every fan-out module inherits these. Adds an **`EXPLAIN` conformance probe** (fail on Seq Scan over a module table) and `runtime-slos.md`. |
-| 5 | G2-P4 — surface-grammar conformance | Behavioral | Roadmap resumes. Narrowed by G2-P3a to the pure conformance suite. |
-| 6 | G2-P5 — shared table behavior + Q0 envelope | Critical | Paging/truncation/cursor, saved filters, shape-specialized SQL. |
-| 7 | `adding-a-module` skill | Mechanical | Written against the proven Freeze G template; the fan-out consumes it. |
-| 8 | Catalog (G2-P6) → Location (G2-P7) | Critical | **Catalog is the factory test: acceptance requires ZERO press changes.** If it needs one, stop and harden before Location. |
-| 9 | PR-7 — provider hot path | Behavioral | Release-load cache (flagged by two independent reviews), relation N+1, round-trip reduction, advisory-lock namespacing. Before G3. |
-| 10 | Policy/identity kernel | Critical | The one kernel seam with **no owner** — see decisions below. After fan-out, before G3. |
-| 11 | G2-P8 import → G2-P9 stage gate | — | Completes G2. |
+| 1 | **PR-4b — executed-file reachability (dynamic)** | Mechanical | Replaces static inference with ground truth from test-reporter output; closes the fail-open class PR-4 hit four times. |
+| 2 | **PR-5 — idempotency scope** | Critical | Correctness defect in accepted PR-3: receipt PK includes `principal_id`/`release_id`, so a retry from another principal or after an activation **re-executes**. Recoverable today; **fatal at G3** (double-post). |
+| 3 | **PR-6 — index coverage + request-path SLOs** | Critical | Relations get no index; the search index is a raw btree that cannot serve `fold(col) LIKE '%x%'`; advisory resolve keys have no folded index. Every fan-out module inherits these. Adds an **`EXPLAIN` conformance probe** (fail on Seq Scan over a module table) and `runtime-slos.md`. |
+| 4 | G2-P4 — surface-grammar conformance | Behavioral | Roadmap resumes. Narrowed by G2-P3a to the pure conformance suite. |
+| 5 | G2-P5 — shared table behavior + Q0 envelope | Critical | Paging/truncation/cursor, saved filters, shape-specialized SQL. |
+| 6 | `adding-a-module` skill | Mechanical | Written against the proven Freeze G template; the fan-out consumes it. |
+| 7 | Catalog (G2-P6) → Location (G2-P7) | Critical | **Catalog is the factory test: acceptance requires ZERO press changes.** If it needs one, stop and harden before Location. |
+| 8 | PR-7 — provider hot path | Behavioral | Release-load cache (flagged by two independent reviews), relation N+1, round-trip reduction, advisory-lock namespacing. Before G3. |
+| 9 | Policy/identity kernel | Critical | The one kernel seam with **no owner** — see decisions below. After fan-out, before G3. |
+| 10 | G2-P8 import → G2-P9 stage gate | — | Completes G2. |
 
 ## Plan-level decisions pending before G3
 
