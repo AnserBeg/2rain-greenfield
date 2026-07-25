@@ -1,12 +1,12 @@
 # PR-4b — Executed-file reachability (dynamic ground truth)
 
-Status: active — round 2 implementation and demonstrations complete; full matrix and fresh review pending
+Status: evidence_ready — round 2 current-run binding complete; replacement matrix green and fresh re-review PASS
 Tier: Mechanical
 Branch: `packet/pr-4b`
 Base: `e17da77221772f007c52be74b975e45ba7523759`
-Implementation commits: `8ea8c45f506f3f2a86fdce994fdfda6a0a890e0a`, `ffb6165`, `3925746`, `8e4df3d`
-Frozen reviewed candidate: `3925746b9057f1b071e046ed4359c75e29a19259`
-Review: **REVISE / HARD TRIPWIRE** — one fresh naive `gpt-5.6-sol` xhigh review
+Implementation commits: `8ea8c45f506f3f2a86fdce994fdfda6a0a890e0a`, `ffb6165`, `3925746`, `8e4df3d`, `3657533`, `5893174`
+Frozen reviewed candidate: `5893174a9f461f6bc7a7d958995c5bb6280ed337`
+Review: **PASS** — fresh naive `gpt-5.6-sol` xhigh replacement review after one bounded non-tripwire fix
 
 ## Authority and outcome
 
@@ -80,7 +80,11 @@ product source, golden file, fixture, or persisted digest changes.
 | `8ea8c45` | Replace static inference with reporters, normalized evidence, aggregation, CI artifact topology, and permanent canaries |
 | `ffb6165` | Make the root developer aggregate produce observability evidence through the shared declaration |
 | `3925746` | Record doctrine and the five required demonstrations before the full matrix and review |
-| evidence-only follow-up | Record the green matrix and hard-tripwire review without changing implementation |
+| `6556002` | Record the round-1 green matrix and hard-tripwire review without changing implementation |
+| `8e4df3d` | Bind every producer artifact to the current run and observed runner arguments |
+| `3657533` | Record the round-2 demonstrations and freshness evidence |
+| `5893174` | Restore exact producer-id assertion after the first round-2 review |
+| evidence-only follow-up | Record the replacement green matrix and PASS re-review without changing implementation |
 
 ## Permanent canaries
 
@@ -501,7 +505,38 @@ git_status_after_standalone=
 
 ### Round 2 full-matrix evidence
 
-Pending at the new frozen candidate.
+The complete matrix ran serially from a clean tree at exact SHA
+`5893174a9f461f6bc7a7d958995c5bb6280ed337` under run token
+`6ecc5f6e-b6e1-4530-978a-d293f2aa3b24`:
+
+| Gate | Result |
+|---|---|
+| frozen install | green; 13 workspace projects, pnpm 11.9.0 |
+| format | green |
+| lint | green |
+| typecheck | green |
+| dependency boundaries | green; 93 files checked |
+| build | green |
+| unit | green; 27/27 |
+| compiler | green; 49/49 |
+| integration | green; 42/42 |
+| agent | green; 1/1 |
+| architecture | green; 51/51 |
+| demo-release check | green |
+| contracts | green; 6/6 |
+| schema | green; 9 applied / 9 verified, no drift |
+| PostgreSQL | green on the first attempt; 61/61, no retry |
+| locale | green; 1/1; intentionally contributes no evidence |
+| browser | green; 5/5 |
+| observability helper producer | green through Actions-style `bash -eo pipefail`; 5/5 |
+| executed-file reachability | green; 49/49 files from 9 current-token producer artifacts |
+| security | green; 210 commits scanned with no leak, plus 1 expected disposable-fixture finding |
+| patch and tree cleanliness | green; exact SHA and no tracked or untracked residue |
+
+The evidence union comprised unit 6 files / 27 real results; compiler 6/49;
+integration 9/42; agent 1/1; architecture 12/51; contracts 1/6;
+PostgreSQL 11/61; browser 3/5; and observability 3/5. The PostgreSQL host did
+not flake, so no retry was needed.
 
 ### Round 2 review evidence
 
@@ -517,8 +552,20 @@ hard-tripwire class and passed questions 1-5 otherwise.
 Disposition: **fixed**. Script-backed producers again require the literal
 declared id. The helper-backed observability producer must both resolve its
 exact declared id and assign `producer.id`, retaining the single-source design.
-A fresh re-review is pending at the replacement candidate. Any
-incomplete-current-run false green remains an immediate hard stop.
+
+The required fresh replacement review then inspected exact candidate
+`5893174a9f461f6bc7a7d958995c5bb6280ed337` under the same six-question
+charter: freshness under skipped/reordered/unreached producers; cross-job token
+resolution and fail-closed token handling; observed-argv attestation;
+single-sourced observability; demonstration and standalone-flow authenticity;
+and scope plus round-1 assertion preservation. It returned **PASS** with no
+findings and no hard tripwire. It confirmed that prior-run, missing,
+mismatched, and unresolvable tokens fail closed; one workflow token spans all
+producing jobs; observed Node and Playwright arguments are compared exactly
+with declarations; observability is single-sourced under the common checks;
+all four demonstrations and standalone flows are genuine; round-1 assertions
+remain intact; and the diff contains no product, dependency, golden, fixture,
+or digest change.
 
 ### Round 2 test it yourself
 
@@ -543,3 +590,17 @@ The first red must name stale evidence from the prior token. After the second
 full run, the orphan red must name exactly
 `test/orphan-demo/orphan.test.ts`; deleting it must return aggregation to
 49/49.
+
+### Round 2 draft ledger row (do not commit to `ledger.md`)
+
+```text
+| PR-4b | Executed-file reachability (dynamic ground truth) | G2 corrective | Mechanical | evidence_ready | `5893174a9f461f6bc7a7d958995c5bb6280ed337` | [packet](packets/PR-4b.md); executed-file evidence is bound to one current-run token and observed runner argv; full matrix green with 49/49 discovered files from 9 producer artifacts; fresh Codex `gpt-5.6-sol` xhigh replacement review PASS after one fixed non-tripwire finding; GitHub artifact upload/download remains locally unverifiable because `gh` is unavailable. |
+```
+
+### Round 2 checkpoint
+
+PR-4b is acceptance-ready at the frozen reviewed candidate above. The
+program-review triggers do not fire: this mechanical gate corrective adds no
+product correctness domain or capability tier, reaches no stage boundary, and
+precedes no new fan-out; the dual-model G2-P3 program review remains current.
+No subsequent packet was started.
