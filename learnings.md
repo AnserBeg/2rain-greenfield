@@ -166,3 +166,8 @@ Date: 2026-07-25
 Supersedes, as the generalization of: Prove every test is reachable from CI; Use executed evidence for open-ended test runners; Bind evidence to the run that produced it; Require the intended index in plan-shape gates.
 Why: six consecutive learnings entries were the same defect — a gate that passes without proving anything — and each was recorded as an instance rather than graduated, so every packet rediscovered it. PR-6b alone hit four: substring matching on a plan string, a filter counter read on the wrong bitmap node, and a drift query the schema-owning materializer ran under FORCE RLS with no policy, seeing zero rows and passing trivially.
 How to apply: prefer observation (counters, artifacts, persisted effects) over inference (parsing output, reading declarations); enumerate the vacuity vectors before writing the gate and ship a recorded red for each; treat green on a gate never seen red as unproven. Graduated into AGENTS.md section 6.
+
+## Move security-sensitive normalization into an accounted stored shape
+Date: 2026-07-25
+Why: forced RLS kept a non-leakproof row-side fold out of index conditions, while a stored C-collated fold column made equality and prefix range predicates ordinary leakproof comparisons.
+How to apply: compile the generated expression, collation, index, runtime predicate, catalog shape, and row-drift probe as one versioned contract; a future fold version mints a new function and column and requires an accounted rewrite. See `docs/execution/packets/PR-6b.md`.

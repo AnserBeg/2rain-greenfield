@@ -1,8 +1,8 @@
 # Runtime request-path SLO families
 
 Status: v0 measurement and plan-shape contract
-Owner: PR-6 relation-plan gate; PR-6b folded-column and prefix-range work;
-later platform budgets for percentile/error-budget ratification
+Owner: PR-6 relation-plan gate; PR-6b folded-access plan gates; later platform
+budgets for percentile/error-budget ratification
 
 This document records the runtime request-path bounds the repository can defend
 today. It does not turn one-host measurements into fleet percentiles or claim a
@@ -16,18 +16,19 @@ tables with forced row-level security.
 | Request family | Current executable objective or bound | Measured reference | Next owner |
 |---|---|---|---|
 | Parent-to-children relation read | Every compiled relation has a btree on `(tenant_id, environment_id, relation_column)`, and the forced-RLS predicate must use that exact index by name once the table has 100 analyzed rows. | PR-6's provider probe observes the local planner flip at 100 rows and rejects a sequential scan, the wrong index, or an unknown JSON plan node. It is a plan-shape measurement, not a latency claim. | PR-6; deferred-online installation on pre-existing tables belongs to the next materializer packet. |
-| Exact/advisory resolve | Today: bounded tenant/environment partition scan with the fold evaluated per row; cost is `O(rows in the tenant partition)`, not `O(all tenants)`. | Shipped `fold(name) = fold(const)` measured **4,472 ms** on a 500,000-row partition. PR-6b's ratified stored-folded-column shape measured about **0.33 ms** (**0.24 ms** under a forced generic plan), but that is not shipped capability. | PR-6b before G3. |
-| Unanchored substring search | Today: bounded tenant/environment partition scan with the fold evaluated per row. PostgreSQL's non-leakproof `textlike` prevents any index shape from serving this predicate through forced RLS. | Current fold-per-row search measured **1,005 ms** for a 20-match exit on a 500,000-row partition. The PR-6b stored-fold prototype removes the per-row fold and measured **123 ms** for that case and **188 ms** for a zero-match full-partition scan; it remains a scan. | PR-6b removes per-row folding; a future search projection is trigger-driven only if real partitions exceed the verdict's threshold. |
-| Prefix/typeahead search | Not a current indexed capability. The present `LIKE` form remains non-indexable under forced RLS. | The debate measured **89.7 ms** for the leaky `LIKE` form and **0.31 ms** for PR-6b's ratified explicit leakproof range lowering. The latter is future work, not current behavior. | PR-6b. |
+| Exact/advisory resolve and case-insensitive unique lookup | Every compiled folded equality key uses a stored `COLLATE "C"` fold column and a tenant/environment-leading btree. The forced-RLS predicate must use that folded column in the intended index condition once the table has 100 analyzed rows. | The verdict measured the prior per-row-fold resolve at **4,472 ms** and the shipped stored-column shape at about **0.33 ms** on a 500,000-row partition (**0.24 ms** under a forced generic plan). PR-6b's provider probe independently verifies the current plan shape, not those latency values. | Current in PR-6b for newly materialized tables; deferred-online installation on pre-existing tables belongs to the next materializer packet. |
+| Unanchored substring search | Bounded tenant/environment partition scan over the stored folded column. PostgreSQL's non-leakproof `textlike` prevents any index shape from serving this predicate through forced RLS; cost remains `O(rows in the tenant partition)`, not `O(all tenants)`, but the fold is no longer evaluated per row. | The verdict measured **1,005 ms** for the former fold-per-row 20-match exit. The shipped stored-fold shape measured **123 ms** for that case and **188 ms** for a zero-match full-partition scan on 500,000 rows. | A future search projection is trigger-driven only if real partitions exceed the verdict's threshold. |
+| Prefix/typeahead search | Prefixes lower to explicit leakproof `COLLATE "C"` range quals over the stored fold column. The forced-RLS plan must contain that column in the intended btree's `Index Cond`. | The verdict measured **89.7 ms** for the former leaky `LIKE` form and **0.31 ms** for the shipped explicit range lowering. PR-6b's provider probe verifies the plan and Unicode/C-collation bounds, not latency. | Current in PR-6b for newly materialized tables; deferred-online installation on pre-existing tables belongs to the next materializer packet. |
 
 ## Measurement and extrapolation discipline
 
 All latency figures above are measured values from the pinned-image debate, not
-estimates. PR-6's 100-row relation threshold is separately measured by seeding
-the real compiled Party tables incrementally, running `ANALYZE`, and walking
-`EXPLAIN (FORMAT JSON)` under the actual runtime role. The test never disables
-sequential scans and requires the declared physical index name, so an unrelated
-primary-key plan cannot make it green.
+new measurements or estimates from PR-6b. PR-6 and PR-6b separately measure the
+100-row planner threshold by seeding the real compiled Party tables
+incrementally, running `ANALYZE`, and walking `EXPLAIN (FORMAT JSON)` under the
+actual runtime role. The tests never disable sequential scans and require the
+declared physical index name and intended index condition, so an unrelated
+primary-key plan cannot make them green.
 
 The `O(tenant partition)` and tenant-count-invariance statements are plan-shape
 bounds, not latency extrapolations. The orchestrator verified the scope quals as
@@ -38,10 +39,12 @@ fleet error budget is inferred from these single-host measurements.
 
 ## Known materialization boundary
 
-New module tables receive relation indexes in their same-plan creation. A
-relation index added to an existing table is correctly classified as
-`deferredOnlineFamily`: plain `CREATE INDEX` would block writes, while
-`CREATE INDEX CONCURRENTLY` requires a non-transactional resumable executor and
-`indisvalid` reconciliation that do not exist yet. Party is therefore not
-upgraded by PR-6. The next materializer packet owns that capability; no
-seconds-fast or online-upgrade claim is made here.
+New module tables receive relation indexes, generated folded columns, and folded
+indexes in their same-plan creation. Adding an index or a stored generated
+column to an existing populated table is correctly classified as
+`deferredOnlineFamily`: plain index creation can block writes, and adding the
+stored column rewrites the table. The repository has neither the
+non-transactional resumable executor needed for `CREATE INDEX CONCURRENTLY` nor
+an online stored-column rewrite path. Party is therefore not upgraded by PR-6
+or PR-6b. The next materializer packet owns those capabilities; no seconds-fast
+or online-upgrade claim is made here.
