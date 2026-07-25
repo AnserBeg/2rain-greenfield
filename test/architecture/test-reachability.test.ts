@@ -80,6 +80,20 @@ test('parser canary fails closed on an unknown script body', () => {
   );
 });
 
+test('workflow parser recognizes run-only steps and fails closed on their command', () => {
+  const workflow = [
+    'jobs:',
+    '  synthetic:',
+    '    steps:',
+    '      - run: future-test-runner --all',
+  ].join('\n');
+
+  assert.throws(
+    () => deriveCiReachability(workflow, loadScriptCatalog()),
+    /Unparsed CI command: future-test-runner --all/u,
+  );
+});
+
 test('every repository test file is reachable from a CI-invoked command', () => {
   const discoveredTests = discoverRepositoryTests();
   const { reachableTests } = deriveCiReachability(
@@ -206,11 +220,13 @@ function extractWorkflowRunBodies(workflow: string): string[] {
 
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index] ?? '';
-    const match = /^(\s*)run:\s*(.*)$/u.exec(line);
+    const match = /^(\s*)(-\s+)?run:\s*(.*)$/u.exec(line);
     if (!match) continue;
     const indentation = match[1]?.length ?? 0;
-    const value = match[2] ?? '';
+    const listMarker = match[2];
+    const value = match[3] ?? '';
     if (value === '') {
+      if (listMarker) failUnparsed('CI run mapping', line.trim());
       const nested = lines[index + 1] ?? '';
       const nestedIndentation = /^\s*/u.exec(nested)?.[0].length ?? 0;
       if (nested.trim() !== 'shell: bash' || nestedIndentation <= indentation) {
