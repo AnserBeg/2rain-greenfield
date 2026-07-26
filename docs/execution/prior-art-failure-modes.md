@@ -15,9 +15,15 @@ Verdict vocabulary:
 | **NAMED-NOT-DESIGNED** | The plan acknowledges the risk, but the control is a process or a future proof, not a mechanism |
 | **GAP** | Not addressed anywhere |
 
-Summary: 15 ADDRESSED, 8 PARTIAL, 3 NAMED-NOT-DESIGNED, 2 GAP. The five highest-value
-actions are listed at the end; **B7 is the one that is cheap today and near-impossible to
-retrofit.**
+Summary: 15 ADDRESSED, 8 PARTIAL, 3 NAMED-NOT-DESIGNED, 2 GAP. The highest-value actions
+are listed at the end.
+
+**B7 is RESOLVED (2026-07-26)** and no longer the top open item. Its mechanism is decided
+by [ADR-0013](../decisions/ADR-0013-semantic-patch-lineage.md): persist the semantic patch
+lineage as data-plane, so upgrade is patch re-application rather than outcome merge. The
+earlier extension-points-only recommendation in B7 is retracted in place — see the
+correction note there. E1's status is also now partly scheduled, via L6 in
+`current-plan.md`.
 
 ---
 
@@ -230,16 +236,57 @@ upgrade a fleet event rather than a deploy. So proofs are scheduled and a refere
 pointed at — but no *mechanism* is named. Rebase? Three-way merge of package revisions?
 Extension-points-only? Version-pinned base with opt-in adoption?
 
-**What it means.** This decision constrains the canonical model itself, so it is a compiler
-rule today and a data migration across every tenant later. §10.2's language already leans
-extension-points-only ("declared master and document-header extension points," "declared
-slots," "declared entity/operation extension points") and no `extensionPoint` concept
-exists in code yet — meaning the decision is still free.
+**Correction (2026-07-26): extension-points-only is the wrong import here.** An earlier
+version of this section recommended it. That is the correct answer for the *asymmetric*
+platforms above — in Salesforce, SAP and Dynamics the vendor's modules are a different
+kind of object than a customer's, so forbidding modification of base costs them nothing
+they had. **This platform is symmetric by doctrine #2.** Adopting the restriction would
+manufacture the two-tier world B2 exists to prevent: a tenant could do less to Inventory
+than to a module they authored themselves. It also contradicts the program's own recorded
+direction — `doctrine-coverage.md` already schedules "full package composition/merge and
+tenant three-way rebase" with the G6 stage cut owning the packet.
 
-**What to do.** State the mechanism explicitly in an ADR before the customization canonical
-model is authored, and prove base-version-bump-under-customization at **G6**, not N3. If
-the answer is extension-points-only, then the compiler must reject any customization that
-mutates a base object, from the first customization commit.
+**The collision surface is much smaller here than in the prior art.** What forces a
+mandatory update to a running tenant is correctness, security and regulatory behaviour —
+and in this architecture that behaviour lives in **Tier B domain packs behind versioned
+protocols** (posting, allocation, pricing, tax), which tenants cannot customize anyway.
+What tenants customize is declarative structure, which is what least needs to change under
+them. New capability is opt-in; language evolution is a recompile handled by version
+dispatch. Only structural change to first-party *declarative* definitions genuinely
+collides, and it is rare. The prior art suffers worse because those vendors ship code into
+objects customers have modified. A path must still exist — you cannot design for *never* —
+but it can be narrow and rarely exercised.
+
+**What it means.** The real mechanism is already latent in the plan. §5.6 states that every
+authoring channel — first-party engineering, visual builder, conversational AI — emits the
+same typed **semantic patches**, which "normalize into a complete desired-state revision
+before compilation." So a customization begins life as *declared intent*. If that intent is
+retained, upgrade is not a merge at all: it is **re-applying the tenant's patch to base v2
+and normalizing**. No three-way diff of outcomes, no conflict adjudication. The only
+failure is a patch whose target moved or vanished — enumerable and reportable.
+
+But nothing persists it. §10.1 treats the patch as a pipeline *step*, and G6 item 4
+specifies a "draft service with **revision history**" — outcome history, not patch history.
+Intent cannot be reconstructed from the revision it produced, after the fact, at scale.
+
+**What to do.** Three things, in this order:
+
+1. **Persist the semantic patch lineage, not only the normalized revision.** A schema
+   decision, cheap before the customization canonical model exists and unrecoverable after.
+   This is the whole of B7's cost-of-delay.
+2. **Frame the scheduled G6 merge/rebase packet as patch re-application**, with three-way
+   rebase as the fallback for patches that no longer resolve — not the other way round.
+3. **Register LLM-assisted migration as the proposer for the unresolvable residue.**
+   Patch re-application handles mechanical cases deterministically; what remains is
+   semantic reconciliation, which is judgment. Gated by compile, by the tenant's own
+   approved assertion scenarios as the regression oracle, and by human approval, activating
+   as a release with rollback. Two hard boundaries: it consumes **usage telemetry and
+   metadata only, never tenant business records** (reading business data to author an
+   upgrade crosses a classification boundary nothing in the plan permits), and it is a
+   **proposer only — never auto-activation**, because the migration is non-deterministic
+   and a running business system must not adopt an unreviewed one.
+
+Prove base-version-bump-under-customization at **G6**, not N3.
 
 ---
 
@@ -568,9 +615,13 @@ pool-reuse isolation.
 
 Ranked by cost-of-delay, not by severity.
 
-1. **B7 — name the base-upgrade-under-customization mechanism now.** Almost certainly
-   extension-points-only. It is a compiler rule today and a cross-tenant data migration
-   later. Nothing else in this document has a worse cost curve.
+1. ~~**B7 — name the base-upgrade-under-customization mechanism now.**~~ **DONE, and the
+   original recommendation was wrong.** Extension-points-only is the answer for asymmetric
+   platforms and would have manufactured the two-tier world doctrine #2 forbids. Decided
+   instead by [ADR-0013](../decisions/ADR-0013-semantic-patch-lineage.md): persist the
+   semantic patch lineage, data-plane not canonical, so upgrade re-applies declared intent
+   to the new base. Implementation is owned by the G6 customization stage cut; tracked
+   `prose-only` in `doctrine-coverage.md` until then.
 2. **B5 — split Tier C's envelope from Tier C's implementation.** The envelope is what
    turns the first blocked customer into a governed extension instead of a fork.
 3. **E1 — compiler-derived assertions, author assertions additive only.** One sentence in
@@ -581,7 +632,7 @@ Ranked by cost-of-delay, not by severity.
    per-tenant configuration hours. Both are cheap logging, and both give quarters of warning
    before the trend is otherwise visible.
 
-Items 1–4 are all cheapest *before* the customization canonical model is authored, which
+Items 2–4 are all cheapest *before* the customization canonical model is authored, which
 places them ahead of G6. That is the actionable through-line: this program's remaining
 prior-art exposure is concentrated almost entirely in the customization layer it has not
 built yet.
