@@ -2280,6 +2280,43 @@ test('a pre-existing relation index executes as atomic locking DDL and rejects i
         );
         assert.deepEqual(declaredShape.rows, [{ ready: true, valid: true }]);
 
+        const notReady = await pool.query(
+          `UPDATE pg_index AS index_record
+              SET indisready = false
+             FROM pg_class AS index_relation
+             JOIN pg_namespace AS namespace
+               ON namespace.oid = index_relation.relnamespace
+            WHERE index_record.indexrelid = index_relation.oid
+              AND index_record.indisvalid
+              AND namespace.nspname = 'north_star_module'
+              AND index_relation.relname = $1`,
+          [relationIndex.physicalName],
+        );
+        assert.equal(notReady.rowCount, 1);
+        await assert.rejects(
+          materializer.verifyLiveCatalog(contexts.a),
+          (error: unknown) =>
+            error instanceof ModuleStorageMaterializationError &&
+            error.code === 'CATALOG_DRIFT' &&
+            error.message.includes(
+              `altered managed index ${tableName}.${relationIndex.physicalName}`,
+            ),
+        );
+        const readinessRestored = await pool.query(
+          `UPDATE pg_index AS index_record
+              SET indisready = true
+             FROM pg_class AS index_relation
+             JOIN pg_namespace AS namespace
+               ON namespace.oid = index_relation.relnamespace
+            WHERE index_record.indexrelid = index_relation.oid
+              AND NOT index_record.indisready
+              AND index_record.indisvalid
+              AND namespace.nspname = 'north_star_module'
+              AND index_relation.relname = $1`,
+          [relationIndex.physicalName],
+        );
+        assert.equal(readinessRestored.rowCount, 1);
+
         const invalidated = await pool.query(
           `UPDATE pg_index AS index_record
               SET indisvalid = false

@@ -96,22 +96,33 @@ The successful retry commits the index with exactly the `STARTED` and `APPLIED`
 rows. Backfill checkpointing is unchanged; this atomicity rule concerns the DDL
 step receipt that records a transactional catalog mutation.
 
-## Negative controls and recorded reds
+## Controls and observations
 
-Each control below makes the asserted production check reject the deliberately
+### Executed reds
+
+Each control below makes the asserted production check reject a deliberately
 bad state. The surrounding test catches that expected rejection and then
 observes the persisted state, so a successful test means the inner production
 check went red for the named reason.
 
 | Vacuity vector | Deliberately introduced red | Persisted observation |
 |---|---|---|
-| Deferred classification is dropped | Legacy relation index is absent at preparation, then one deferred element is executed. | Exact index appears in `pg_index`; attempt reports `1`; two step receipts commit. |
+| Index exists but is not ready | Set only the created index's `indisready` to false while `indisvalid` remains true. | `verifyLiveCatalog` rejects with `CATALOG_DRIFT` and names the altered managed index; readiness is restored before the validity control. |
 | Index exists but is invalid | Set the created index's `indisvalid` to false directly in `pg_index`. | `verifyLiveCatalog` rejects with `CATALOG_DRIFT` and names the altered managed index. |
 | Receipt survives failed DDL | Force `CREATE INDEX` to fail with `42501` after `STARTED`. | Zero step rows and no index after rollback. |
 | DDL survives failed receipt | Reject `APPLIED` with `23514` after DDL. | Zero step rows and no index after rollback. |
 | Claim error masks fold drift | Plant a terminal `COMPLETED` claim, drift the fold body, then execute. | `CASE_FOLD_FUNCTION_DEFINITION_MISMATCH` surfaces; the terminal claim remains unchanged. |
 | Out-of-band replacement is accepted | Attempt `CREATE OR REPLACE FUNCTION` with a different body while the witness is enabled. | SQLSTATE `55000`; the complete function catalog state remains unchanged. |
 | Event-trigger guard is silently removed | Drop `module_fold_function_ddl_witness` after a clean snapshot comparison. | `assertSchemaMatchesSnapshot` rejects with `SchemaDriftError`. |
+
+### Positive anti-vacuity observations
+
+These cases prove that the gate read its subject and observed the intended
+persisted outcome. They are positive evidence, not executed reds.
+
+| Vacuity vector | Positive observation | Persisted observation |
+|---|---|---|
+| Deferred classification is dropped | Legacy relation index is absent at preparation, then one deferred element is executed. | Exact index appears in `pg_index`; attempt reports `1`; two step receipts commit. |
 | Deferred-family check reads no subject | Execute a fresh-table attempt containing no deferred elements. | Result reports `0` and prints `PR-6c deferredOnlineFamily elements processed: 0 (fresh-table plan)`. |
 
 The diagnostic-order change is error specificity and negative-control coverage,
