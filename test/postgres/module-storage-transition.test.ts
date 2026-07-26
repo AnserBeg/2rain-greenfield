@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
+import { performance } from 'node:perf_hooks';
 import { resolve } from 'node:path';
 import test from 'node:test';
 
@@ -80,6 +81,9 @@ const principalB = 'b3000000-0000-4000-8000-000000000003';
 const approverA = 'a4000000-0000-4000-8000-000000000004';
 const demonstrateFoldFunctionDrift =
   process.env.PR6B_DEMONSTRATE_FOLD_FUNCTION_DRIFT;
+const pr6cMeasurementRows = Number(
+  process.env.PR6C_MEASUREMENT_ROWS ?? '10000',
+);
 
 if (
   demonstrateFoldFunctionDrift !== undefined &&
@@ -87,6 +91,15 @@ if (
 ) {
   throw new Error(
     `unsupported PR6B_DEMONSTRATE_FOLD_FUNCTION_DRIFT value: ${demonstrateFoldFunctionDrift}`,
+  );
+}
+if (
+  !Number.isInteger(pr6cMeasurementRows) ||
+  pr6cMeasurementRows < 1 ||
+  pr6cMeasurementRows > 500_000
+) {
+  throw new Error(
+    `PR6C_MEASUREMENT_ROWS must be an integer from 1 through 500000; received ${String(process.env.PR6C_MEASUREMENT_ROWS)}`,
   );
 }
 
@@ -115,8 +128,9 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
           '0008_module_runtime_role_assumption.sql',
           '0009_semantic_operation_receipts.sql',
           '0010_semantic_operation_receipt_scope.sql',
+          '0011_module_fold_function_ddl_witness.sql',
         ]);
-        assert.equal(migrationResult.verified.length, 10);
+        assert.equal(migrationResult.verified.length, allMigrations.length);
         await seedScope(admin);
       } finally {
         admin.release();
@@ -377,6 +391,10 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
             });
             assert.equal(executed.disposition, 'READY_TO_SWAP');
             assert.equal(executed.receipt?.state, 'READY_TO_SWAP');
+            assert.equal(executed.deferredOnlineFamilyElementsProcessed, 0);
+            console.log(
+              'PR-6c deferredOnlineFamily elements processed: 0 (fresh-table plan)',
+            );
 
             const beforeSwap = await pool.query<{ release_id: string }>(
               `SELECT release_id FROM platform.active_release_pointers
@@ -1123,16 +1141,17 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
         );
 
         await t.test(
-          'versioned fold function refuses replacement and two tenants converge on shared tables',
+          'DDL witness prevents fold replacement and two tenants converge on shared tables',
           async () => {
-            await pool.query(
-              `CREATE OR REPLACE FUNCTION north_star_module.nsm_unicode_case_fold_v1(value text)
-                 RETURNS text
-                 LANGUAGE sql
-                 IMMUTABLE STRICT PARALLEL SAFE
-                 SET search_path = pg_catalog
-                 AS $case_fold$ SELECT value $case_fold$`,
-            );
+            const replaceFoldFunction = () =>
+              pool.query(
+                `CREATE OR REPLACE FUNCTION north_star_module.nsm_unicode_case_fold_v1(value text)
+                   RETURNS text
+                   LANGUAGE sql
+                   IMMUTABLE STRICT PARALLEL SAFE
+                   SET search_path = pg_catalog
+                   AS $case_fold$ SELECT value $case_fold$`,
+              );
             const driftedPreparation = {
               context: contexts.b,
               expiresAt: new Date(Date.now() + 60_000).toISOString(),
@@ -1142,39 +1161,31 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
               targetReleaseId: releases.b.target,
             };
             if (demonstrateFoldFunctionDrift === '1') {
+              await pool.query(
+                'ALTER EVENT TRIGGER module_fold_function_ddl_witness DISABLE',
+              );
+              await replaceFoldFunction();
+              await pool.query(
+                'ALTER EVENT TRIGGER module_fold_function_ddl_witness ENABLE',
+              );
               await materializer.prepare(driftedPreparation);
               assert.fail(
                 'materialization accepted a changed versioned fold body',
               );
             }
             await assert.rejects(
-              materializer.prepare(driftedPreparation),
+              replaceFoldFunction(),
               (error: unknown) =>
-                error instanceof ModuleStorageMaterializationError &&
-                error.code === 'CASE_FOLD_FUNCTION_DEFINITION_MISMATCH' &&
-                /versioned fold functions are immutable/.test(error.message),
+                error instanceof Error &&
+                (error as Error & { code?: string }).code === '55000' &&
+                /versioned and immutable/.test(error.message),
             );
-            const rejectedFoldFunction =
-              await readUnicodeCaseFoldFunction(pool);
-            assert.ok(rejectedFoldFunction);
-            assert.notEqual(
-              rejectedFoldFunction.source,
-              installedFoldFunction.source,
-              'rejection must not heal the mismatched function body',
+            assert.deepEqual(
+              await readUnicodeCaseFoldFunction(pool),
+              installedFoldFunction,
+              'the event trigger must roll back the replacement itself',
             );
-
-            await pool.query(installedFoldFunction.definition);
-            const restoredFoldFunction =
-              await readUnicodeCaseFoldFunction(pool);
-            assert.ok(restoredFoldFunction);
-            const second = await materializer.prepare({
-              context: contexts.b,
-              expiresAt: new Date(Date.now() + 60_000).toISOString(),
-              generationId: randomUUID(),
-              initiatedBy: principalB,
-              preparationId: randomUUID(),
-              targetReleaseId: releases.b.target,
-            });
+            const second = await materializer.prepare(driftedPreparation);
             assert.ok(
               second.diff.elements.some(
                 (element) =>
@@ -1186,7 +1197,7 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
             );
             assert.deepEqual(
               await readUnicodeCaseFoldFunction(pool),
-              restoredFoldFunction,
+              installedFoldFunction,
               'an expected existing function must be verified without replacement DDL',
             );
             assert.deepEqual(
@@ -1923,7 +1934,138 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
   );
 });
 
-test('a pre-existing relation-index upgrade is declared but deferred-online execution is unavailable', async () => {
+test('fold-function drift surfaces the specific diagnostic before a terminal claim mismatch', async () => {
+  const emptyDefinition = emptyModuleDefinition();
+  const source = mustCompile(moduleInput(emptyDefinition));
+  const currentDefinition = ordinaryModuleV1();
+  const target = mustCompile(
+    moduleInput(currentDefinition, expectedActiveReleaseFrom(source)),
+  );
+
+  await withEphemeralPostgres(
+    'module-fold-diagnostic-precedence',
+    async ({ connection, pool }) => {
+      const admin = await pool.connect();
+      try {
+        const loaded = await loadMigrations(migrations);
+        const migrationResult = await runMigrations(admin, loaded);
+        assert.equal(migrationResult.verified.length, loaded.length);
+        await seedScope(admin);
+      } finally {
+        admin.release();
+      }
+
+      const runtimePool = new pg.Pool({
+        ...connection,
+        max: 2,
+        user: 'north_star_runtime',
+      });
+      const materializerPool = new pg.Pool({
+        ...connection,
+        max: 2,
+        user: 'north_star_module_materializer',
+      });
+      const moduleRuntimePool = new pg.Pool({
+        ...connection,
+        max: 1,
+        user: 'north_star_module_runtime',
+      });
+      materializerPool.on('error', () => undefined);
+      moduleRuntimePool.on('error', () => undefined);
+      try {
+        const contexts = await trustedContexts();
+        const releases = await persistPairForBothTenants(
+          runtimePool,
+          contexts,
+          source,
+          definitionBytes(emptyDefinition),
+          target,
+          definitionBytes(currentDefinition),
+        );
+        await installSourcePointers(pool, releases);
+        await grantExecutorAuthority(pool);
+        const materializer = new PostgresModuleStorageMaterializer(
+          materializerPool,
+          moduleRuntimePool,
+        );
+        const generationId = randomUUID();
+        const preparationId = randomUUID();
+        const prepared = await materializer.prepare({
+          context: contexts.a,
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+          generationId,
+          initiatedBy: principalA,
+          preparationId,
+          targetReleaseId: releases.a.target,
+        });
+        const installedFoldFunction = await readUnicodeCaseFoldFunction(pool);
+        assert.ok(installedFoldFunction);
+        const attemptId = await createV2Approval(
+          runtimePool,
+          pool,
+          contexts,
+          releases.a,
+          target,
+          prepared,
+          preparationId,
+        );
+        await pool.query(
+          `INSERT INTO north_star_internal.module_storage_attempt_claims (
+             tenant_id, environment_id, generation_id,
+             activation_attempt_id, coordinator_id, claim_state
+           ) VALUES ($1,$2,$3,$4,$5,'COMPLETED')`,
+          [tenantA, environmentA, generationId, attemptId, randomUUID()],
+        );
+
+        await pool.query(
+          'ALTER EVENT TRIGGER module_fold_function_ddl_witness DISABLE',
+        );
+        await pool.query(
+          `CREATE OR REPLACE FUNCTION north_star_module.nsm_unicode_case_fold_v1(value text)
+             RETURNS text
+             LANGUAGE sql
+             IMMUTABLE STRICT PARALLEL SAFE
+             SET search_path = pg_catalog
+             AS $case_fold$ SELECT value $case_fold$`,
+        );
+        await pool.query(
+          'ALTER EVENT TRIGGER module_fold_function_ddl_witness ENABLE',
+        );
+        try {
+          await assert.rejects(
+            materializer.executeApprovedAttempt({
+              activationAttemptId: attemptId,
+              context: contexts.a,
+              coordinatorId: randomUUID(),
+              generationId,
+            }),
+            (error: unknown) =>
+              error instanceof ModuleStorageMaterializationError &&
+              error.code === 'CASE_FOLD_FUNCTION_DEFINITION_MISMATCH' &&
+              !error.message.includes('ATTEMPT_CLAIM_MISMATCH'),
+          );
+          const claim = await pool.query<{ claim_state: string }>(
+            `SELECT claim_state
+               FROM north_star_internal.module_storage_attempt_claims
+              WHERE activation_attempt_id = $1`,
+            [attemptId],
+          );
+          assert.deepEqual(claim.rows, [{ claim_state: 'COMPLETED' }]);
+        } finally {
+          await pool.query(installedFoldFunction.definition);
+        }
+      } finally {
+        await Promise.all([
+          runtimePool.end(),
+          materializerPool.end(),
+          moduleRuntimePool.end(),
+        ]);
+      }
+    },
+  );
+});
+
+test('a pre-existing relation index executes as atomic locking DDL and rejects invalid declared shape', async () => {
   const emptyDefinition = emptyModuleDefinition();
   const source = mustCompile(moduleInput(emptyDefinition));
   const currentDefinition = ordinaryModuleV1();
@@ -1944,12 +2086,15 @@ test('a pre-existing relation-index upgrade is declared but deferred-online exec
     upgrade,
     PROJECTION_FAMILY_IDS.storageTransition,
   );
-  assert.ok(
-    upgradeTransition.elements.some(
-      (element) =>
-        element.kind === 'createIndex' &&
-        element.physicalObjectName === relationIndex.physicalName,
-    ),
+  const relationIndexElement = upgradeTransition.elements.find(
+    (element) =>
+      element.kind === 'createIndex' &&
+      element.physicalObjectName === relationIndex.physicalName,
+  );
+  assert.ok(relationIndexElement);
+  assert.equal(
+    relationIndexElement.classification.preparationValidity,
+    'deferredOnlineFamily',
   );
 
   await withEphemeralPostgres(
@@ -1957,11 +2102,9 @@ test('a pre-existing relation-index upgrade is declared but deferred-online exec
     async ({ connection, pool }) => {
       const admin = await pool.connect();
       try {
-        const migrationResult = await runMigrations(
-          admin,
-          await loadMigrations(migrations),
-        );
-        assert.equal(migrationResult.verified.length, 10);
+        const loaded = await loadMigrations(migrations);
+        const migrationResult = await runMigrations(admin, loaded);
+        assert.equal(migrationResult.verified.length, loaded.length);
         await seedScope(admin);
       } finally {
         admin.release();
@@ -2024,23 +2167,140 @@ test('a pre-existing relation-index upgrade is declared but deferred-online exec
         await setActiveReleasePointer(pool, releases.a.target);
         const generationId = randomUUID();
         const preparationId = randomUUID();
+        const prepared = await materializer.prepare({
+          context: contexts.a,
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+          generationId,
+          initiatedBy: principalA,
+          preparationId,
+          targetReleaseId: next.target,
+        });
+        assert.equal(prepared.dataState, 'PENDING_IN_ATTEMPT');
+        assert.equal(
+          prepared.diff.elements.find(
+            (element) => element.elementId === relationIndexElement.elementId,
+          )?.disposition,
+          'PENDING_IN_ATTEMPT',
+        );
+        await assertIndexPresence(pool, relationIndex.physicalName, false);
+
+        const attemptId = await createV2Approval(
+          runtimePool,
+          pool,
+          contexts,
+          next,
+          upgrade,
+          prepared,
+          preparationId,
+        );
+        const tableName = sourceEntityName(upgradeStorage, relationIndex);
+        const readStepApplications = async () =>
+          (
+            await pool.query<{ count: string }>(
+              `SELECT count(*)::text AS count
+                 FROM north_star_internal.module_storage_element_applications
+                WHERE generation_id = $1 AND element_id = $2
+                  AND attempt_id = $3`,
+              [generationId, relationIndexElement.elementId, attemptId],
+            )
+          ).rows[0]?.count;
+
+        await pool.query(
+          `ALTER TABLE north_star_module.${quoteTestIdentifier(tableName)} OWNER TO postgres`,
+        );
         await assert.rejects(
-          materializer.prepare({
+          materializer.executeApprovedAttempt({
+            activationAttemptId: attemptId,
             context: contexts.a,
-            expiresAt: new Date(Date.now() + 60_000).toISOString(),
+            coordinatorId: randomUUID(),
             generationId,
-            initiatedBy: principalA,
-            preparationId,
-            targetReleaseId: next.target,
           }),
+          (error: unknown) =>
+            error instanceof Error &&
+            (error as Error & { code?: string }).code === '42501',
+        );
+        assert.equal(await readStepApplications(), '0');
+        await assertIndexPresence(pool, relationIndex.physicalName, false);
+        await pool.query(
+          `ALTER TABLE north_star_module.${quoteTestIdentifier(tableName)} OWNER TO north_star_module_materializer`,
+        );
+
+        const receiptFailureConstraint = 'pr6c_reject_applied_step_receipt';
+        await pool.query(
+          `ALTER TABLE north_star_internal.module_storage_element_applications
+             ADD CONSTRAINT ${receiptFailureConstraint}
+             CHECK (NOT (
+               generation_id = '${generationId}'::uuid
+               AND element_id = '${relationIndexElement.elementId}'
+               AND application_state = 'APPLIED'
+             ))`,
+        );
+        await assert.rejects(
+          materializer.executeApprovedAttempt({
+            activationAttemptId: attemptId,
+            context: contexts.a,
+            coordinatorId: randomUUID(),
+            generationId,
+          }),
+          (error: unknown) =>
+            error instanceof Error &&
+            (error as Error & { code?: string }).code === '23514',
+        );
+        assert.equal(await readStepApplications(), '0');
+        await assertIndexPresence(pool, relationIndex.physicalName, false);
+        await pool.query(
+          `ALTER TABLE north_star_internal.module_storage_element_applications
+             DROP CONSTRAINT ${receiptFailureConstraint}`,
+        );
+
+        const executed = await materializer.executeApprovedAttempt({
+          activationAttemptId: attemptId,
+          context: contexts.a,
+          coordinatorId: randomUUID(),
+          generationId,
+        });
+        assert.equal(executed.disposition, 'READY_TO_SWAP');
+        assert.equal(executed.deferredOnlineFamilyElementsProcessed, 1);
+        assert.equal(await readStepApplications(), '2');
+        await assertIndexPresence(pool, relationIndex.physicalName, true);
+        const declaredShape = await pool.query<{
+          ready: boolean;
+          valid: boolean;
+        }>(
+          `SELECT index_record.indisready AS ready,
+                  index_record.indisvalid AS valid
+             FROM pg_index AS index_record
+             JOIN pg_class AS index_relation
+               ON index_relation.oid = index_record.indexrelid
+             JOIN pg_namespace AS namespace
+               ON namespace.oid = index_relation.relnamespace
+            WHERE namespace.nspname = 'north_star_module'
+              AND index_relation.relname = $1`,
+          [relationIndex.physicalName],
+        );
+        assert.deepEqual(declaredShape.rows, [{ ready: true, valid: true }]);
+
+        const invalidated = await pool.query(
+          `UPDATE pg_index AS index_record
+              SET indisvalid = false
+             FROM pg_class AS index_relation
+             JOIN pg_namespace AS namespace
+               ON namespace.oid = index_relation.relnamespace
+            WHERE index_record.indexrelid = index_relation.oid
+              AND namespace.nspname = 'north_star_module'
+              AND index_relation.relname = $1`,
+          [relationIndex.physicalName],
+        );
+        assert.equal(invalidated.rowCount, 1);
+        await assert.rejects(
+          materializer.verifyLiveCatalog(contexts.a),
           (error: unknown) =>
             error instanceof ModuleStorageMaterializationError &&
             error.code === 'CATALOG_DRIFT' &&
             error.message.includes(
-              `missing managed index ${sourceEntityName(upgradeStorage, relationIndex)}.${relationIndex.physicalName}`,
+              `altered managed index ${tableName}.${relationIndex.physicalName}`,
             ),
         );
-        await assertIndexPresence(pool, relationIndex.physicalName, false);
       } finally {
         await Promise.all([
           runtimePool.end(),
@@ -2052,15 +2312,25 @@ test('a pre-existing relation-index upgrade is declared but deferred-online exec
   );
 });
 
-test('a pre-existing folded-column upgrade is declared but remains at the catalog-drift boundary', async () => {
+test('a pre-existing generated fold records its measured locking window', async () => {
   const emptyDefinition = emptyModuleDefinition();
   const source = mustCompile(moduleInput(emptyDefinition));
-  const currentDefinition = ordinaryModuleV1();
+  const currentDefinition = ordinaryModuleV2() as {
+    fields: Array<Record<string, unknown>>;
+  } & Record<string, unknown>;
+  const searchableNotes = currentDefinition.fields.find(
+    (field) => field.fieldId === FIXTURE_IDS.fieldIds.parentNotes,
+  );
+  assert.ok(searchableNotes);
+  searchableNotes.searchable = true;
   const currentBytes = definitionBytes(currentDefinition);
   const originallyCompiled = mustCompile(
     moduleInput(currentDefinition, expectedActiveReleaseFrom(source)),
   );
-  const legacy = withoutFoldedAccess(originallyCompiled);
+  const legacy = withoutFoldedColumn(
+    originallyCompiled,
+    FIXTURE_IDS.fieldIds.parentNotes,
+  );
   const upgrade = mustCompile(
     moduleInput(currentDefinition, expectedActiveReleaseFrom(legacy)),
   );
@@ -2073,15 +2343,15 @@ test('a pre-existing folded-column upgrade is declared but remains at the catalo
   );
   assert.ok(parent);
   const foldedColumn = parent.foldedColumns.find(
-    (column) => column.canonicalFieldId === FIXTURE_IDS.fieldIds.parentName,
+    (column) => column.canonicalFieldId === FIXTURE_IDS.fieldIds.parentNotes,
   );
   assert.ok(foldedColumn);
-  const foldedIndex = parent.indexes.find(
-    (index) =>
-      index.indexKind === 'foldedAccess' &&
-      index.columnNames.includes(foldedColumn.physicalName),
+  assert.ok(
+    parent.indexes.every(
+      (index) => !index.columnNames.includes(foldedColumn.physicalName),
+    ),
+    'search-only folded columns must not gain an unused btree',
   );
-  assert.ok(foldedIndex);
   const upgradeTransition = projectionPayload<StorageTransitionEnvelope>(
     upgrade,
     PROJECTION_FAMILY_IDS.storageTransition,
@@ -2097,13 +2367,12 @@ test('a pre-existing folded-column upgrade is declared but remains at the catalo
     'deferredOnlineFamily',
   );
   assert.equal(addColumn.classification.dataEffect, 'rowMutation');
-  assert.ok(
-    upgradeTransition.elements.some(
+  assert.equal(
+    upgradeTransition.elements.filter(
       (element) =>
-        element.kind === 'createIndex' &&
-        element.physicalObjectName === foldedIndex.physicalName &&
-        element.declaredDependencyIds.includes(addColumn.elementId),
-    ),
+        element.classification.preparationValidity === 'deferredOnlineFamily',
+    ).length,
+    1,
   );
 
   await withEphemeralPostgres(
@@ -2111,11 +2380,9 @@ test('a pre-existing folded-column upgrade is declared but remains at the catalo
     async ({ connection, pool }) => {
       const admin = await pool.connect();
       try {
-        const migrationResult = await runMigrations(
-          admin,
-          await loadMigrations(migrations),
-        );
-        assert.equal(migrationResult.verified.length, 10);
+        const loaded = await loadMigrations(migrations);
+        const migrationResult = await runMigrations(admin, loaded);
+        assert.equal(migrationResult.verified.length, loaded.length);
         await seedScope(admin);
       } finally {
         admin.release();
@@ -2128,6 +2395,7 @@ test('a pre-existing folded-column upgrade is declared but remains at the catalo
       });
       const materializerPool = new pg.Pool({
         ...connection,
+        application_name: 'pr6c-materializer',
         max: 2,
         user: 'north_star_module_materializer',
       });
@@ -2177,37 +2445,159 @@ test('a pre-existing folded-column upgrade is declared but remains at the catalo
           false,
         );
 
+        const numberColumn = parent.columns.find(
+          (column) =>
+            column.canonicalFieldId === FIXTURE_IDS.fieldIds.parentNumber,
+        );
+        const nameColumn = parent.columns.find(
+          (column) =>
+            column.canonicalFieldId === FIXTURE_IDS.fieldIds.parentName,
+        );
+        const notesColumn = parent.columns.find(
+          (column) =>
+            column.canonicalFieldId === FIXTURE_IDS.fieldIds.parentNotes,
+        );
+        assert.ok(numberColumn);
+        assert.ok(nameColumn);
+        assert.ok(notesColumn);
+        await pool.query(
+          `INSERT INTO north_star_module.${quoteTestIdentifier(parent.physicalTableName)} (
+             tenant_id, environment_id,
+             ${quoteTestIdentifier(parent.recordIdentity.column)},
+             ${quoteTestIdentifier(numberColumn.physicalName)},
+             ${quoteTestIdentifier(nameColumn.physicalName)},
+             ${quoteTestIdentifier(notesColumn.physicalName)}
+           )
+           SELECT $1, $2,
+                  ('10000000-0000-4000-8000-' || lpad(row_number::text, 12, '0'))::uuid,
+                  'MEASURE-' || row_number::text,
+                  'Measured party ' || row_number::text,
+                  'Measured notes ' || row_number::text
+             FROM generate_series(1, $3::integer) AS row_number`,
+          [tenantA, environmentA, pr6cMeasurementRows],
+        );
+
         await setActiveReleasePointer(pool, releases.a.target);
-        let boundaryError: unknown;
+        const generationId = randomUUID();
+        const preparationId = randomUUID();
+        const prepared = await materializer.prepare({
+          context: contexts.a,
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+          generationId,
+          initiatedBy: principalA,
+          preparationId,
+          targetReleaseId: next.target,
+        });
+        assert.equal(prepared.dataState, 'PENDING_IN_ATTEMPT');
+        assert.equal(
+          prepared.diff.elements.find(
+            (element) => element.elementId === addColumn.elementId,
+          )?.disposition,
+          'PENDING_IN_ATTEMPT',
+        );
+        const attemptId = await createV2Approval(
+          runtimePool,
+          pool,
+          contexts,
+          next,
+          upgrade,
+          prepared,
+          preparationId,
+        );
+
+        const blocker = await pool.connect();
+        const writer = await pool.connect();
         try {
-          await materializer.prepare({
+          await blocker.query('BEGIN');
+          await blocker.query(
+            `LOCK TABLE north_star_module.${quoteTestIdentifier(parent.physicalTableName)} IN ROW EXCLUSIVE MODE`,
+          );
+          const execution = materializer.executeApprovedAttempt({
+            activationAttemptId: attemptId,
             context: contexts.a,
-            expiresAt: new Date(Date.now() + 60_000).toISOString(),
-            generationId: randomUUID(),
-            initiatedBy: principalA,
-            preparationId: randomUUID(),
-            targetReleaseId: next.target,
+            coordinatorId: randomUUID(),
+            generationId,
           });
+          await waitForTableLock(
+            pool,
+            'pr6c-materializer',
+            parent.physicalTableName,
+            'AccessExclusiveLock',
+            false,
+          );
+
+          await writer.query('BEGIN');
+          await writer.query(
+            "SELECT set_config('application_name', 'pr6c-writer', false)",
+          );
+          const writerUpdate = writer
+            .query(
+              `UPDATE north_star_module.${quoteTestIdentifier(parent.physicalTableName)}
+                  SET ${quoteTestIdentifier(parent.archive.archivedAtColumn)} =
+                      ${quoteTestIdentifier(parent.archive.archivedAtColumn)}
+                WHERE tenant_id = $1 AND environment_id = $2
+                  AND ${quoteTestIdentifier(parent.recordIdentity.column)} = $3`,
+              [tenantA, environmentA, '10000000-0000-4000-8000-000000000001'],
+            )
+            .then(async () => writer.query('COMMIT'));
+          await waitForTableLock(
+            pool,
+            'pr6c-writer',
+            parent.physicalTableName,
+            'RowExclusiveLock',
+            false,
+          );
+
+          const blockingStarted = performance.now();
+          await blocker.query('COMMIT');
+          await writerUpdate;
+          const blockingWindowMilliseconds =
+            performance.now() - blockingStarted;
+          const executed = await execution;
+          assert.equal(executed.disposition, 'READY_TO_SWAP');
+          assert.equal(executed.deferredOnlineFamilyElementsProcessed, 1);
+          assert.ok(
+            Number.isFinite(blockingWindowMilliseconds) &&
+              blockingWindowMilliseconds >= 0,
+          );
+          console.log(
+            `PR-6c locking DDL measurement rows=${String(pr6cMeasurementRows)} writer_block_ms=${blockingWindowMilliseconds.toFixed(3)}`,
+          );
         } catch (error) {
-          boundaryError = error;
+          await blocker.query('ROLLBACK').catch(() => undefined);
+          await writer.query('ROLLBACK').catch(() => undefined);
+          throw error;
+        } finally {
+          blocker.release();
+          writer.release();
         }
-        assert.ok(boundaryError instanceof ModuleStorageMaterializationError);
-        assert.equal(boundaryError.code, 'CATALOG_DRIFT');
-        assert.match(
-          boundaryError.message,
-          new RegExp(
-            `missing managed column ${parent.physicalTableName}\\.${foldedColumn.physicalName}`,
-          ),
-        );
-        console.log(
-          `PR-6b pre-existing folded-column boundary:\nerror: ${boundaryError.message}\ncode: ${boundaryError.code}`,
-        );
+
         await assertManagedColumnPresence(
           pool,
           parent.physicalTableName,
           foldedColumn.physicalName,
-          false,
+          true,
         );
+        const generatedValues = await pool.query<{
+          mismatches: string;
+          observed: string;
+        }>(
+          `SELECT count(*)::text AS observed,
+                  count(*) FILTER (
+                    WHERE ${quoteTestIdentifier(foldedColumn.physicalName)}
+                      IS DISTINCT FROM
+                      north_star_module.nsm_unicode_case_fold_v1(
+                        ${quoteTestIdentifier(notesColumn.physicalName)}::text
+                      )
+                  )::text AS mismatches
+             FROM north_star_module.${quoteTestIdentifier(parent.physicalTableName)}
+            WHERE tenant_id = $1 AND environment_id = $2`,
+          [tenantA, environmentA],
+        );
+        assert.deepEqual(generatedValues.rows[0], {
+          mismatches: '0',
+          observed: String(pr6cMeasurementRows),
+        });
       } finally {
         await Promise.all([
           runtimePool.end(),
@@ -2436,7 +2826,10 @@ function withoutRelationIndexes(compiled: CompileSuccess): CompileSuccess {
   return clone;
 }
 
-function withoutFoldedAccess(compiled: CompileSuccess): CompileSuccess {
+function withoutFoldedColumn(
+  compiled: CompileSuccess,
+  canonicalFieldId: string,
+): CompileSuccess {
   const clone = structuredClone(compiled);
   const storage = projectionPayload<StorageTargetPayloadV1>(
     clone,
@@ -2444,19 +2837,28 @@ function withoutFoldedAccess(compiled: CompileSuccess): CompileSuccess {
   );
   const removedPhysicalNames = new Set<string>();
   for (const entity of storage.entities) {
-    for (const column of entity.foldedColumns) {
+    const removedColumns = entity.foldedColumns.filter(
+      (column) => column.canonicalFieldId === canonicalFieldId,
+    );
+    for (const column of removedColumns) {
       removedPhysicalNames.add(column.physicalName);
+      for (const index of entity.indexes.filter((candidate) =>
+        candidate.columnNames.includes(column.physicalName),
+      )) {
+        removedPhysicalNames.add(index.physicalName);
+      }
     }
-    for (const index of entity.indexes.filter(
-      (candidate) => candidate.indexKind === 'foldedAccess',
-    )) {
-      removedPhysicalNames.add(index.physicalName);
-    }
-    delete (entity as Partial<typeof entity>).foldedColumns;
+    entity.foldedColumns = entity.foldedColumns.filter(
+      (column) => column.canonicalFieldId !== canonicalFieldId,
+    );
     entity.indexes = entity.indexes.filter(
-      (index) => index.indexKind !== 'foldedAccess',
+      (index) => !removedPhysicalNames.has(index.physicalName),
     );
   }
+  assert.ok(
+    removedPhysicalNames.size > 0,
+    `compiled storage has no folded column for ${canonicalFieldId}`,
+  );
   storage.physicalMapping.records = storage.physicalMapping.records.filter(
     (record) => !removedPhysicalNames.has(record.physicalName),
   );
@@ -2619,6 +3021,41 @@ async function assertIndexPresence(
     [indexName],
   );
   assert.equal(result.rows[0]?.present, expected);
+}
+
+async function waitForTableLock(
+  pool: pg.Pool,
+  applicationName: string,
+  tableName: string,
+  mode: string,
+  granted: boolean,
+): Promise<void> {
+  const started = performance.now();
+  while (performance.now() - started < 15_000) {
+    const result = await pool.query<{ observed: boolean }>(
+      `SELECT EXISTS (
+         SELECT 1
+           FROM pg_locks AS lock_record
+           JOIN pg_stat_activity AS activity
+             ON activity.pid = lock_record.pid
+           JOIN pg_class AS relation
+             ON relation.oid = lock_record.relation
+           JOIN pg_namespace AS namespace
+             ON namespace.oid = relation.relnamespace
+          WHERE activity.application_name = $1
+            AND namespace.nspname = 'north_star_module'
+            AND relation.relname = $2
+            AND lock_record.mode = $3
+            AND lock_record.granted = $4
+       ) AS observed`,
+      [applicationName, tableName, mode, granted],
+    );
+    if (result.rows[0]?.observed) return;
+    await new Promise<void>((resolveDelay) => setTimeout(resolveDelay, 10));
+  }
+  throw new Error(
+    `did not observe ${applicationName} ${granted ? 'holding' : 'waiting for'} ${mode} on ${tableName}`,
+  );
 }
 
 async function setActiveReleasePointer(

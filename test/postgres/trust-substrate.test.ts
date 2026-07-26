@@ -60,12 +60,12 @@ const identities = new Map<string, AuthenticatedIdentity>([
   ['human-b', identity(tenantB, environmentB, humanB)],
 ]);
 
-test('migrations 0006-0010 upgrade accepted G1 and converge with the checked-in snapshot', async () => {
+test('migrations 0006-0011 upgrade accepted G1 and converge with the checked-in snapshot', async () => {
   await withEphemeralPostgres('trust-upgrade', async ({ pool }) => {
     const migrations = await loadMigrations(checkedInMigrations);
     assert.equal(
       migrations.at(-1)?.name,
-      '0010_semantic_operation_receipt_scope.sql',
+      '0011_module_fold_function_ddl_witness.sql',
     );
     const admin = await pool.connect();
     try {
@@ -87,8 +87,9 @@ test('migrations 0006-0010 upgrade accepted G1 and converge with the checked-in 
         '0008_module_runtime_role_assumption.sql',
         '0009_semantic_operation_receipts.sql',
         '0010_semantic_operation_receipt_scope.sql',
+        '0011_module_fold_function_ddl_witness.sql',
       ]);
-      assert.equal(upgraded.verified.length, 10);
+      assert.equal(upgraded.verified.length, migrations.length);
       await assertSchemaMatchesSnapshot(admin, checkedInSnapshot);
     } finally {
       admin.release();
@@ -261,8 +262,8 @@ test('accepted mutation facts are atomic, attributed, redacted, immutable, and t
       const admin = await pool.connect();
       try {
         const emptyPath = await runMigrations(admin, migrations);
-        assert.equal(emptyPath.applied.length, 10);
-        assert.equal(emptyPath.verified.length, 10);
+        assert.equal(emptyPath.applied.length, migrations.length);
+        assert.equal(emptyPath.verified.length, migrations.length);
         await assertSchemaMatchesSnapshot(admin, checkedInSnapshot);
         await seedReleaseFixtures(admin);
         await createBusinessMutationFixture(admin);

@@ -20,6 +20,7 @@ export interface SchemaSnapshot {
   columnPrivileges: readonly QueryResultRow[];
   constraints: readonly QueryResultRow[];
   defaultPrivileges: readonly QueryResultRow[];
+  eventTriggers: readonly QueryResultRow[];
   indexes: readonly QueryResultRow[];
   policies: readonly QueryResultRow[];
   relations: readonly QueryResultRow[];
@@ -37,7 +38,7 @@ export interface SchemaSnapshot {
   version: typeof SCHEMA_SNAPSHOT_VERSION;
 }
 
-export const SCHEMA_SNAPSHOT_VERSION = 3 as const;
+export const SCHEMA_SNAPSHOT_VERSION = 4 as const;
 
 export class MigrationDriftError extends Error {
   override readonly name = 'MigrationDriftError';
@@ -489,6 +490,29 @@ export async function captureSchemaSnapshot(
                privilege.is_grantable`,
     [sortedSchemas],
   );
+  const eventTriggers = await client.query(
+    `SELECT event_trigger.evtname AS name,
+            pg_catalog.pg_get_userbyid(event_trigger.evtowner) AS owner,
+            event_trigger.evtevent AS event,
+            function_namespace.nspname AS function_schema,
+            function_record.proname AS function_name,
+            pg_catalog.pg_get_function_identity_arguments(function_record.oid)
+              AS function_identity_arguments,
+            event_trigger.evtenabled AS enabled,
+            CASE WHEN event_trigger.evttags IS NULL THEN NULL ELSE ARRAY(
+              SELECT tag
+                FROM unnest(event_trigger.evttags) AS tag
+               ORDER BY tag
+            )::text[] END AS tags
+       FROM pg_catalog.pg_event_trigger AS event_trigger
+       JOIN pg_catalog.pg_proc AS function_record
+         ON function_record.oid = event_trigger.evtfoid
+       JOIN pg_catalog.pg_namespace AS function_namespace
+         ON function_namespace.oid = function_record.pronamespace
+      WHERE function_namespace.nspname = ANY($1::text[])
+      ORDER BY event_trigger.evtname`,
+    [sortedSchemas],
+  );
   const triggers = await client.query(
     `SELECT namespace.nspname AS schema, relation.relname AS relation,
             trigger_record.tgname AS name,
@@ -719,6 +743,7 @@ export async function captureSchemaSnapshot(
     columnPrivileges: columnPrivileges.rows,
     constraints: constraints.rows,
     defaultPrivileges: defaultPrivileges.rows,
+    eventTriggers: eventTriggers.rows,
     indexes: indexes.rows,
     policies: policies.rows,
     relations: relations.rows,

@@ -225,6 +225,39 @@ test('plain physical schema drift fails the checked-in snapshot', async () => {
   });
 });
 
+test('dropping the fold-function DDL witness fails the checked-in snapshot', async () => {
+  await withEphemeralPostgres('event-trigger-drift', async ({ pool }) => {
+    const client = await pool.connect();
+    try {
+      await runMigrations(client, await loadMigrations(checkedInMigrations));
+      await assertSchemaMatchesSnapshot(client, checkedInSnapshot);
+      const witness = await client.query<{
+        enabled: string;
+        event: string;
+        owner: string;
+      }>(
+        `SELECT evtenabled AS enabled, evtevent AS event,
+                pg_get_userbyid(evtowner) AS owner
+           FROM pg_event_trigger
+          WHERE evtname = 'module_fold_function_ddl_witness'`,
+      );
+      assert.deepEqual(witness.rows, [
+        { enabled: 'O', event: 'ddl_command_end', owner: 'postgres' },
+      ]);
+
+      await client.query('DROP EVENT TRIGGER module_fold_function_ddl_witness');
+      await assert.rejects(
+        assertSchemaMatchesSnapshot(client, checkedInSnapshot),
+        (error: unknown) =>
+          error instanceof SchemaDriftError &&
+          /physical schema differs/.test(error.message),
+      );
+    } finally {
+      client.release();
+    }
+  });
+});
+
 test('a failing callback still removes its ephemeral container', async () => {
   let containerName = '';
   await assert.rejects(

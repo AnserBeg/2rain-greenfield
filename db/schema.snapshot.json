@@ -2,6 +2,48 @@
   "columns": [
     {
       "schema": "north_star_internal",
+      "relation": "module_fold_function_ddl_witnesses",
+      "ordinal_position": 1,
+      "column_name": "function_identity",
+      "data_type": "text",
+      "is_nullable": false,
+      "column_default": null,
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "x",
+      "compression": "",
+      "collation": "pg_catalog.default"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_fold_function_ddl_witnesses",
+      "ordinal_position": 2,
+      "column_name": "function_definition",
+      "data_type": "text",
+      "is_nullable": false,
+      "column_default": null,
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "x",
+      "compression": "",
+      "collation": "pg_catalog.default"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_fold_function_ddl_witnesses",
+      "ordinal_position": 3,
+      "column_name": "witnessed_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": false,
+      "column_default": "transaction_timestamp()",
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "p",
+      "compression": "",
+      "collation": null
+    },
+    {
+      "schema": "north_star_internal",
       "relation": "module_storage_attempt_claims",
       "ordinal_position": 1,
       "column_name": "tenant_id",
@@ -7313,6 +7355,34 @@
   "constraints": [
     {
       "schema": "north_star_internal",
+      "relation": "module_fold_function_ddl_witnesses",
+      "domain": null,
+      "name": "module_fold_function_ddl_witnesses_identity",
+      "type": "c",
+      "definition": "CHECK (function_identity = 'north_star_module.nsm_unicode_case_fold_v1(value text)'::text)",
+      "deferrable": false,
+      "initially_deferred": false,
+      "validated": true,
+      "no_inherit": false,
+      "is_local": true,
+      "inheritance_count": 0
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_fold_function_ddl_witnesses",
+      "domain": null,
+      "name": "module_fold_function_ddl_witnesses_pkey",
+      "type": "p",
+      "definition": "PRIMARY KEY (function_identity)",
+      "deferrable": false,
+      "initially_deferred": false,
+      "validated": true,
+      "no_inherit": true,
+      "is_local": true,
+      "inheritance_count": 0
+    },
+    {
+      "schema": "north_star_internal",
       "relation": "module_storage_attempt_claims",
       "domain": null,
       "name": "module_storage_attempt_claims_attempt_fkey",
@@ -11233,7 +11303,38 @@
     }
   ],
   "defaultPrivileges": [],
+  "eventTriggers": [
+    {
+      "name": "module_fold_function_ddl_witness",
+      "owner": "postgres",
+      "event": "ddl_command_end",
+      "function_schema": "north_star_internal",
+      "function_name": "witness_module_fold_function_ddl",
+      "function_identity_arguments": "",
+      "enabled": "O",
+      "tags": ["CREATE FUNCTION"]
+    }
+  ],
   "indexes": [
+    {
+      "schema": "north_star_internal",
+      "relation": "module_fold_function_ddl_witnesses",
+      "name": "module_fold_function_ddl_witnesses_pkey",
+      "owner": "postgres",
+      "access_method": "btree",
+      "definition": "CREATE UNIQUE INDEX module_fold_function_ddl_witnesses_pkey ON north_star_internal.module_fold_function_ddl_witnesses USING btree (function_identity)",
+      "is_unique": true,
+      "is_primary": true,
+      "is_exclusion": false,
+      "is_immediate": true,
+      "is_clustered": false,
+      "is_valid": true,
+      "is_ready": true,
+      "is_live": true,
+      "is_replica_identity": false,
+      "expressions": null,
+      "predicate": null
+    },
     {
       "schema": "north_star_internal",
       "relation": "module_storage_attempt_claims",
@@ -13500,6 +13601,25 @@
   "relations": [
     {
       "schema": "north_star_internal",
+      "relation": "module_fold_function_ddl_witnesses",
+      "kind": "r",
+      "owner": "postgres",
+      "persistence": "p",
+      "row_level_security": false,
+      "force_row_level_security": false,
+      "is_partition": false,
+      "replica_identity": "d",
+      "access_method": "heap",
+      "tablespace": null,
+      "options": [],
+      "partition_key": null,
+      "partition_bound": null,
+      "view_definition": null,
+      "foreign_server": null,
+      "foreign_options": []
+    },
+    {
+      "schema": "north_star_internal",
       "relation": "module_storage_attempt_claims",
       "kind": "r",
       "owner": "postgres",
@@ -14336,6 +14456,62 @@
     }
   ],
   "relationPrivileges": [
+    {
+      "schema": "north_star_internal",
+      "relation": "module_fold_function_ddl_witnesses",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "DELETE",
+      "is_grantable": false
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_fold_function_ddl_witnesses",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "INSERT",
+      "is_grantable": false
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_fold_function_ddl_witnesses",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "REFERENCES",
+      "is_grantable": false
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_fold_function_ddl_witnesses",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_fold_function_ddl_witnesses",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRIGGER",
+      "is_grantable": false
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_fold_function_ddl_witnesses",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRUNCATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "module_fold_function_ddl_witnesses",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "UPDATE",
+      "is_grantable": false
+    },
     {
       "schema": "north_star_internal",
       "relation": "module_storage_attempt_claims",
@@ -17595,6 +17771,25 @@
       "configuration": ["search_path=pg_catalog"]
     },
     {
+      "schema": "north_star_internal",
+      "name": "witness_module_fold_function_ddl",
+      "identity_arguments": "",
+      "kind": "f",
+      "language": "plpgsql",
+      "owner": "postgres",
+      "result_type": "event_trigger",
+      "definition": "CREATE OR REPLACE FUNCTION north_star_internal.witness_module_fold_function_ddl()\n RETURNS event_trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'pg_catalog'\nAS $function$ DECLARE\n  command_record record;\n  current_definition text;\n  witnessed_definition text; BEGIN\n  FOR command_record IN\n    SELECT command.classid, command.objid\n    FROM pg_catalog.pg_event_trigger_ddl_commands() AS command\n  LOOP\n    IF command_record.classid <> 'pg_catalog.pg_proc'::pg_catalog.regclass THEN\n      CONTINUE; END IF;\n\n    SELECT pg_catalog.pg_get_functiondef(routine.oid)\n      INTO current_definition\n      FROM pg_catalog.pg_proc AS routine\n      JOIN pg_catalog.pg_namespace AS namespace\n        ON namespace.oid = routine.pronamespace\n     WHERE routine.oid = command_record.objid\n       AND namespace.nspname = 'north_star_module'\n       AND routine.proname = 'nsm_unicode_case_fold_v1'\n       AND pg_catalog.pg_get_function_identity_arguments(routine.oid) = 'value text';\n\n    IF NOT FOUND THEN\n      CONTINUE; END IF;\n\n    INSERT INTO north_star_internal.module_fold_function_ddl_witnesses (\n      function_identity,\n      function_definition\n    ) VALUES (\n      'north_star_module.nsm_unicode_case_fold_v1(value text)',\n      current_definition\n    )\n    ON CONFLICT (function_identity) DO NOTHING;\n\n    SELECT witness.function_definition\n      INTO STRICT witnessed_definition\n      FROM north_star_internal.module_fold_function_ddl_witnesses AS witness\n     WHERE witness.function_identity =\n       'north_star_module.nsm_unicode_case_fold_v1(value text)';\n\n    IF witnessed_definition IS DISTINCT FROM current_definition THEN\n      RAISE EXCEPTION USING\n        ERRCODE = '55000',\n        MESSAGE =\n          'north_star_module.nsm_unicode_case_fold_v1(value text) is versioned and immutable',\n        HINT = 'Mint a new function name and an accounted storage transition.'; END IF; END LOOP; END;\n$function$\n",
+      "security_definer": true,
+      "leakproof": false,
+      "strict": false,
+      "returns_set": false,
+      "volatility": "v",
+      "parallel_safety": "u",
+      "cost": 100,
+      "estimated_rows": 0,
+      "configuration": ["search_path=pg_catalog"]
+    },
+    {
       "schema": "platform",
       "name": "assign_release_activation_control_policy_version",
       "identity_arguments": "",
@@ -18019,6 +18214,15 @@
     {
       "schema": "north_star_internal",
       "name": "trusted_tenant_id",
+      "identity_arguments": "",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "EXECUTE",
+      "is_grantable": false
+    },
+    {
+      "schema": "north_star_internal",
+      "name": "witness_module_fold_function_ddl",
       "identity_arguments": "",
       "grantor": "postgres",
       "grantee": "postgres",
@@ -18919,5 +19123,5 @@
   ],
   "types": [],
   "typePrivileges": [],
-  "version": 3
+  "version": 4
 }

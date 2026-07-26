@@ -1861,12 +1861,10 @@ async function migrateAndSeed(
 ): Promise<void> {
   const client = await pool.connect();
   try {
-    const result = await runMigrations(
-      client,
-      await loadMigrations(migrations),
-    );
-    assert.equal(result.applied.length, 10);
-    assert.equal(result.verified.length, 10);
+    const loaded = await loadMigrations(migrations);
+    const result = await runMigrations(client, loaded);
+    assert.equal(result.applied.length, loaded.length);
+    assert.equal(result.verified.length, loaded.length);
     for (const [tenantId, environmentId, slug] of scopes) {
       await client.query(
         'INSERT INTO platform.tenants (id, slug) VALUES ($1,$2)',

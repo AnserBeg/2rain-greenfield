@@ -325,12 +325,10 @@ async function trustedContexts(): Promise<
 async function migrateAndSeed(pool: pg.Pool): Promise<void> {
   const client = await pool.connect();
   try {
-    const result = await runMigrations(
-      client,
-      await loadMigrations(migrations),
-    );
-    assert.equal(result.applied.length, 10);
-    assert.equal(result.verified.length, 10);
+    const loaded = await loadMigrations(migrations);
+    const result = await runMigrations(client, loaded);
+    assert.equal(result.applied.length, loaded.length);
+    assert.equal(result.verified.length, loaded.length);
     for (const [scope, slug] of [
       [CATALOG_TEST_SCOPE.a, 'catalog-a'],
       [CATALOG_TEST_SCOPE.b, 'catalog-b'],

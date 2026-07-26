@@ -1,8 +1,9 @@
 # Runtime request-path SLO families
 
 Status: v0 measurement and plan-shape contract
-Owner: PR-6 relation-plan gate; PR-6b folded-access plan gates; later platform
-budgets for percentile/error-budget ratification
+Owner: PR-6 relation-plan gate; PR-6b folded-access plan gates; PR-6c
+existing-table locking-DDL window; later platform budgets for
+percentile/error-budget ratification
 
 This document records the runtime request-path bounds the repository can defend
 today. It does not turn one-host measurements into fleet percentiles or claim a
@@ -43,14 +44,39 @@ tenants). Adding tenants therefore does not add rows to a given tenant's scan;
 adding rows inside that tenant does. No p50/p95/p99, concurrency capacity, or
 fleet error budget is inferred from these single-host measurements.
 
-## Known materialization boundary
+## Existing-table materialization window
 
-New module tables receive relation indexes, generated folded columns, and folded
-indexes in their same-plan creation. Adding an index or a stored generated
-column to an existing populated table is correctly classified as
-`deferredOnlineFamily`: plain index creation can block writes, and adding the
-stored column rewrites the table. The repository has neither the
-non-transactional resumable executor needed for `CREATE INDEX CONCURRENTLY` nor
-an online stored-column rewrite path. Party is therefore not upgraded by PR-6
-or PR-6b. The next materializer packet owns those capabilities; no seconds-fast
-or online-upgrade claim is made here.
+PR-6c processes `deferredOnlineFamily` elements through PostgreSQL's ordinary,
+transactional locking DDL: `CREATE INDEX` and `ALTER TABLE ... ADD COLUMN ...
+GENERATED ... STORED`. It deliberately does not use `CREATE INDEX
+CONCURRENTLY`. A step's `STARTED` and `APPLIED` receipts share the DDL
+transaction, so failure cannot leave either the DDL or its receipt committed by
+itself.
+
+The reproducible generated-column rehearsal runs the pinned PostgreSQL image in
+the repository's 256 MiB disposable container. It seeds the real compiled
+module table, observes the materializer waiting for `AccessExclusiveLock`,
+queues a writer behind that DDL, releases the initial blocker, and measures with
+`performance.now()` until the writer commits. These are single-host blocking
+windows, not fleet percentiles:
+
+| Populated rows | Observed queued-writer blocking window |
+|---:|---:|
+| 10,000 | 1,317.647 ms |
+| 25,000 | 3,502.750 ms |
+
+The promotion trigger is **2,000 ms of rehearsed writer blocking** on the
+largest representative existing table. An in-place upgrade whose pinned-image
+rehearsal reaches or exceeds 2,000 ms requires an online strategy before it is
+approved without a maintenance window. The 25,000-row observation crosses that
+trigger: the locking path is usable only with an explicit window at that scale,
+and is not described as online. Rehearse every populated-table upgrade against
+representative data; row count is not itself the promotion criterion because
+row width, indexes, storage, and hardware all affect rewrite time.
+
+The attempted 100,000-row rehearsal did not yield a timing sample. PostgreSQL
+returned SQLSTATE `53100` while extending the rewritten relation because the
+test helper caps its data directory at 256 MiB. That failure is a harness
+capacity limit, not evidence for a 100,000-row blocking window. Future online
+work must cover both index construction and stored generated-column rewrites;
+adding `CREATE INDEX CONCURRENTLY` alone would not satisfy this boundary.

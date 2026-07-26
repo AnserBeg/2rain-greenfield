@@ -116,6 +116,7 @@ export interface ExecuteModuleStorageAttemptCommand {
 }
 
 export interface ModuleStorageAttemptResult {
+  readonly deferredOnlineFamilyElementsProcessed: number | null;
   readonly disposition: 'READY_TO_SWAP' | 'RECONCILING';
   readonly receipt: ModuleStorageCatalogReceipt | null;
 }
@@ -196,6 +197,11 @@ interface ActualIndexShape {
 interface CatalogVerification {
   digest: Uint8Array;
   drift: readonly string[];
+}
+
+interface AllowedMissingCatalogObjects {
+  readonly columns: ReadonlySet<string>;
+  readonly indexes: ReadonlySet<string>;
 }
 
 type StorageEntityTarget = StorageTargetPayloadV1['entities'][number];
@@ -364,6 +370,7 @@ export class PostgresModuleStorageMaterializer {
             .filter((element) => element.kind === 'addNotValidConstraint')
             .map((element) => element.physicalObjectName),
         ),
+        allowedMissingDeferredOnlineObjects(target.target, remaining),
       );
       if (verification.drift.length > 0) {
         throw failure(
@@ -392,9 +399,8 @@ export class PostgresModuleStorageMaterializer {
       );
       await client.query('COMMIT');
       return Object.freeze({
-        dataState: remaining.some(
-          (element) =>
-            element.classification.preparationValidity === 'inAttemptOnly',
+        dataState: remaining.some((element) =>
+          executesInApprovedAttempt(element),
         )
           ? 'PENDING_IN_ATTEMPT'
           : 'NOT_REQUIRED',
@@ -430,6 +436,7 @@ export class PostgresModuleStorageMaterializer {
     assertUuid(command.generationId, 'generationId');
     const client = await this.materializerPool.connect();
     let generationLockHeld = false;
+    let deferredOnlineFamilyElementsProcessed: number | null = null;
     try {
       await assertMaterializerSession(client);
       await acquireGenerationSessionLock(client, command.generationId);
@@ -437,6 +444,26 @@ export class PostgresModuleStorageMaterializer {
       await beginLocked(client);
       await setMaterializerScope(client, command.context);
       const generation = await loadGeneration(client, command);
+      const [source, target] = await Promise.all([
+        loadVerifiedReleaseStorage(
+          client,
+          command.context.tenantId,
+          command.context.environmentId,
+          generation.source_release_id,
+        ),
+        loadVerifiedReleaseStorage(
+          client,
+          command.context.tenantId,
+          command.context.environmentId,
+          generation.target_release_id,
+        ),
+      ]);
+      const transition = requiredTransition(source, target);
+      assertTransitionPair(transition, source, target);
+      deferredOnlineFamilyElementsProcessed = transition.elements.filter(
+        (element) =>
+          element.classification.preparationValidity === 'deferredOnlineFamily',
+      ).length;
       const completed = await loadCompletedAttemptReceipt(
         client,
         command,
@@ -444,7 +471,11 @@ export class PostgresModuleStorageMaterializer {
       );
       if (completed) {
         await client.query('COMMIT');
-        return { disposition: 'READY_TO_SWAP', receipt: completed };
+        return {
+          deferredOnlineFamilyElementsProcessed,
+          disposition: 'READY_TO_SWAP',
+          receipt: completed,
+        };
       }
       if (generation.state === 'READY_TO_SWAP') {
         throw failure(
@@ -453,6 +484,12 @@ export class PostgresModuleStorageMaterializer {
         );
       }
       await assertApprovedAttempt(client, command, generation.preparation_id);
+      if (
+        source.target.entities.length > 0 ||
+        target.target.entities.length > 0
+      ) {
+        await ensureUnicodeCaseFoldFunction(client);
+      }
       const claim = await client.query<{
         coordinator_id: string;
         generation_id: string;
@@ -482,28 +519,6 @@ export class PostgresModuleStorageMaterializer {
           'attempt claim is terminal or belongs to a different generation',
         );
       }
-      const [source, target] = await Promise.all([
-        loadVerifiedReleaseStorage(
-          client,
-          command.context.tenantId,
-          command.context.environmentId,
-          generation.source_release_id,
-        ),
-        loadVerifiedReleaseStorage(
-          client,
-          command.context.tenantId,
-          command.context.environmentId,
-          generation.target_release_id,
-        ),
-      ]);
-      const transition = requiredTransition(source, target);
-      assertTransitionPair(transition, source, target);
-      if (
-        source.target.entities.length > 0 ||
-        target.target.entities.length > 0
-      ) {
-        await ensureUnicodeCaseFoldFunction(client);
-      }
       await client.query(
         `UPDATE north_star_internal.module_storage_generations
             SET state = 'IN_ATTEMPT'
@@ -514,9 +529,8 @@ export class PostgresModuleStorageMaterializer {
       await client.query('COMMIT');
       await this.faultHooks.afterClaimCommitted?.();
 
-      for (const element of transition.elements.filter(
-        (candidate) =>
-          candidate.classification.preparationValidity === 'inAttemptOnly',
+      for (const element of transition.elements.filter((candidate) =>
+        executesInApprovedAttempt(candidate),
       )) {
         if (element.kind === 'backfill') {
           await this.applyBackfill(
@@ -535,6 +549,13 @@ export class PostgresModuleStorageMaterializer {
         await assertApprovedAttempt(client, command, generation.preparation_id);
         if (!(await hasAppliedAttemptElement(client, command, element))) {
           if (element.kind !== 'backfill') {
+            await appendApplication(
+              client,
+              command,
+              element,
+              'STARTED',
+              command.activationAttemptId,
+            );
             await applyDdlElement(client, target.target, element);
           }
           await appendApplication(
@@ -608,7 +629,11 @@ export class PostgresModuleStorageMaterializer {
         );
       }
       await client.query('COMMIT');
-      return { disposition: 'READY_TO_SWAP', receipt };
+      return {
+        deferredOnlineFamilyElementsProcessed,
+        disposition: 'READY_TO_SWAP',
+        receipt,
+      };
     } catch (error) {
       await rollbackQuietly(client);
       if (isAmbiguousModuleStorageDatabaseError(error)) {
@@ -617,7 +642,11 @@ export class PostgresModuleStorageMaterializer {
         } catch {
           /* unavailable databases retain the durable claim/checkpoint for retry */
         }
-        return { disposition: 'RECONCILING', receipt: null };
+        return {
+          deferredOnlineFamilyElementsProcessed: null,
+          disposition: 'RECONCILING',
+          receipt: null,
+        };
       }
       throw error;
     } finally {
@@ -1095,6 +1124,15 @@ async function applyDdlElement(
       return;
     }
     case 'addColumn': {
+      const folded = locateFoldedColumn(target, element);
+      if (folded) {
+        await client.query(
+          `ALTER TABLE north_star_module.${quoted(folded.entity.physicalTableName)}
+             ADD COLUMN IF NOT EXISTS ${quoted(folded.column.physicalName)} text COLLATE "C"
+             GENERATED ALWAYS AS (${unicodeCaseFoldSql(quoted(folded.column.sourceColumn))}) STORED`,
+        );
+        return;
+      }
       const { column, entity } = locateColumn(target, element);
       if (!column.nullable)
         throw failure('NON_INERT_ADD_COLUMN', element.elementId);
@@ -1314,6 +1352,10 @@ async function verifyCatalogOnClient(
   client: PoolClient,
   targets: readonly StorageTargetPayloadV1[],
   pendingConstraintNames: ReadonlySet<string> = new Set(),
+  allowedMissing: AllowedMissingCatalogObjects = {
+    columns: new Set(),
+    indexes: new Set(),
+  },
 ): Promise<CatalogVerification> {
   const expectedTables = mergeExpectedTables(targets);
   const expectedRelations = mergeExpectedRelations(targets);
@@ -1502,6 +1544,7 @@ async function verifyCatalogOnClient(
       tableName: column.table_name,
     })),
     (value) => `${value.tableName}.${value.name}`,
+    allowedMissing.columns,
   );
 
   const constraints = await client.query<{
@@ -1677,6 +1720,7 @@ async function verifyCatalogOnClient(
     buildExpectedIndexes(expectedTables),
     actualIndexes,
     (value) => `${value.tableName}.${value.name}`,
+    allowedMissing.indexes,
   );
 
   const policies = await client.query<{
@@ -2268,6 +2312,7 @@ function compareCatalogCollection<T>(
   expected: readonly T[],
   actual: readonly T[],
   keyOf: (value: T) => string,
+  allowedMissingKeys: ReadonlySet<string> = new Set(),
 ): void {
   const expectedByKey = uniqueCatalogMap(
     drift,
@@ -2279,7 +2324,9 @@ function compareCatalogCollection<T>(
   for (const [key, expectedValue] of expectedByKey) {
     const actualValue = actualByKey.get(key);
     if (!actualValue) {
-      drift.push(`missing ${label} ${key}`);
+      if (!allowedMissingKeys.has(key)) {
+        drift.push(`missing ${label} ${key}`);
+      }
     } else if (canonicalize(expectedValue) !== canonicalize(actualValue)) {
       drift.push(`altered ${label} ${key}`);
     }
@@ -3574,6 +3621,22 @@ function locateColumn(
   throw failure('ELEMENT_TARGET_MISSING', element.elementId);
 }
 
+function locateFoldedColumn(
+  target: StorageTargetPayloadV1,
+  element: StorageTransitionElement,
+): {
+  column: NonNullable<StorageEntityTarget['foldedColumns']>[number];
+  entity: StorageEntityTarget;
+} | null {
+  for (const entity of target.entities) {
+    const column = (entity.foldedColumns ?? []).find(
+      (candidate) => candidate.physicalName === element.physicalObjectName,
+    );
+    if (column) return { column, entity };
+  }
+  return null;
+}
+
 function locateIndex(
   target: StorageTargetPayloadV1,
   element: StorageTransitionElement,
@@ -3621,10 +3684,9 @@ function renderDiff(
         Object.freeze({
           disposition:
             element.classification.preparationValidity === 'preApprovalInert' ||
-            (phase === 'attempt' &&
-              element.classification.preparationValidity === 'inAttemptOnly')
+            (phase === 'attempt' && executesInApprovedAttempt(element))
               ? ('APPLIED' as const)
-              : element.classification.preparationValidity === 'inAttemptOnly'
+              : executesInApprovedAttempt(element)
                 ? ('PENDING_IN_ATTEMPT' as const)
                 : ('PENDING_DEFERRED' as const),
           elementId: element.elementId,
@@ -3635,6 +3697,51 @@ function renderDiff(
     ),
     version: MODULE_STORAGE_RENDERED_DIFF_VERSION,
   });
+}
+
+function executesInApprovedAttempt(element: StorageTransitionElement): boolean {
+  return (
+    element.classification.preparationValidity === 'inAttemptOnly' ||
+    element.classification.preparationValidity === 'deferredOnlineFamily'
+  );
+}
+
+function allowedMissingDeferredOnlineObjects(
+  target: StorageTargetPayloadV1,
+  elements: readonly StorageTransitionElement[],
+): AllowedMissingCatalogObjects {
+  const columns = new Set<string>();
+  const indexes = new Set<string>();
+  for (const element of elements) {
+    if (element.classification.preparationValidity !== 'deferredOnlineFamily') {
+      continue;
+    }
+    if (element.kind === 'addColumn') {
+      const folded = locateFoldedColumn(target, element);
+      if (!folded) {
+        throw failure(
+          'DEFERRED_ONLINE_KIND_UNSUPPORTED',
+          `deferred addColumn ${element.elementId} is not a generated fold`,
+        );
+      }
+      columns.add(
+        `${folded.entity.physicalTableName}.${folded.column.physicalName}`,
+      );
+      continue;
+    }
+    if (element.kind === 'createIndex') {
+      const located = locateIndex(target, element);
+      indexes.add(
+        `${located.entity.physicalTableName}.${located.index.physicalName}`,
+      );
+      continue;
+    }
+    throw failure(
+      'DEFERRED_ONLINE_KIND_UNSUPPORTED',
+      `${element.kind} cannot execute in the locking DDL family`,
+    );
+  }
+  return { columns, indexes };
 }
 
 function rendererStatement(
