@@ -12,6 +12,7 @@ const suiteDefinitions = [
       'test/unit/canonical-model/diagnostic-ordering.test.ts',
       'test/unit/canonical-model/negative-contracts.test.ts',
       'test/unit/canonical-model/normalization.test.ts',
+      'test/unit/catalog-definition.test.ts',
       'test/unit/observability.test.ts',
       'test/unit/party-definition.test.ts',
       'test/unit/workspace-contract.test.ts',
@@ -33,6 +34,7 @@ const suiteDefinitions = [
   {
     discoveryPattern: 'test/integration/**/*.test.ts',
     expectedFiles: [
+      'test/integration/catalog-runtime.test.ts',
       'test/integration/module-runtime.test.ts',
       'test/integration/module-storage-transition.test.ts',
       'test/integration/observability-ci-contract.test.ts',
@@ -64,8 +66,17 @@ const suiteDefinitions = [
     script: 'test:architecture',
   },
   {
+    discoveryPattern: 'test/agent/**/*.test.ts',
+    expectedFiles: [
+      'test/agent/catalog-discovery.test.ts',
+      'test/agent/party-discovery.test.ts',
+    ],
+    script: 'test:agent',
+  },
+  {
     discoveryPattern: 'test/postgres/**/*.test.ts',
     expectedFiles: [
+      'test/postgres/catalog-runtime.test.ts',
       'test/postgres/migrations.test.ts',
       'test/postgres/module-index-conformance.test.ts',
       'test/postgres/module-runtime.test.ts',
