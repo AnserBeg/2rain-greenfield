@@ -1,6 +1,6 @@
 # PR-6c — Materializer data-affecting DDL on existing tables
 
-Status: evidence_ready — pre-freeze full matrix green; exact frozen-SHA rerun pending
+Status: evidence_ready — full matrix green at the frozen candidate reported in the writer handoff
 Tier: Critical
 Branch: `packet/pr-6c`
 Requested base: `085a041bff2f62428c6f03da411e9ba071a24eef`
@@ -203,11 +203,12 @@ edits.
 
 ## Gate evidence
 
-The complete pre-freeze matrix passed on the final working tree. The writer
-handoff records the candidate SHA and the mandatory repetition at that exact
-commit; a red on that repetition supersedes this table and must be reported.
+The complete matrix passed on the final working tree and was repeated after
+this document was committed. The writer handoff records that exact candidate
+SHA. The frozen-SHA repetition used a fresh reachability run and PostgreSQL
+passed on its first attempt.
 
-| Gate | Pre-freeze result |
+| Gate | Frozen-candidate result |
 |---|---:|
 | frozen install, `format`, `lint`, `typecheck`, `build` | green |
 | `check:boundaries` | 103 files |
