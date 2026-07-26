@@ -23,6 +23,7 @@ import {
 import type { RequestRuntimeView as IssuedRequestRuntimeView } from './request-runtime-view.js';
 import type { SemanticRecordDto } from './semantic-query-gateway.js';
 import {
+  observePredicateReceiptSafely,
   registeredQueryFromPinnedView,
   type RegisteredQueryDefinition,
 } from './semantic-query-gateway.js';
@@ -512,7 +513,10 @@ export class SemanticOperationGateway {
       const preconditionReceipt = inspectPredicateForExecution(
         definition.precondition,
       );
-      this.observePredicateReceipt?.(preconditionReceipt);
+      observePredicateReceiptSafely(
+        this.observePredicateReceipt,
+        preconditionReceipt,
+      );
       if (preconditionReceipt.outcome !== 'accepted') {
         await this.#recordNonAccepted(
           view,
@@ -541,7 +545,10 @@ export class SemanticOperationGateway {
           ? inspectPredicateForExecution(readBackDefinition.filter)
           : null;
       if (readBackPredicateReceipt) {
-        this.observePredicateReceipt?.(readBackPredicateReceipt);
+        observePredicateReceiptSafely(
+          this.observePredicateReceipt,
+          readBackPredicateReceipt,
+        );
       }
       if (
         !readBackDefinition ||

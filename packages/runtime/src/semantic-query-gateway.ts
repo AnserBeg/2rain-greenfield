@@ -189,7 +189,10 @@ export class SemanticQueryGateway {
       return unsupportedQueryResult(request.queryId, 'query-tier-unsupported');
     }
     const predicateReceipt = inspectPredicateForExecution(definition.filter);
-    this.observePredicateReceipt?.(predicateReceipt);
+    observePredicateReceiptSafely(
+      this.observePredicateReceipt,
+      predicateReceipt,
+    );
     if (predicateReceipt.outcome !== 'accepted') {
       return unsupportedQueryResult(
         request.queryId,
@@ -204,6 +207,17 @@ export class SemanticQueryGateway {
         view,
       }),
     );
+  }
+}
+
+export function observePredicateReceiptSafely(
+  observer: ((receipt: PredicateKernelReceipt) => void) | undefined,
+  receipt: PredicateKernelReceipt,
+): void {
+  try {
+    observer?.(receipt);
+  } catch {
+    // Observation is evidence only; it must never become execution authority.
   }
 }
 

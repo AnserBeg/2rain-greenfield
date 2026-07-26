@@ -223,7 +223,7 @@ test('strict predicate receipts route every gateway site and preserve exact outc
     await t.test(`${rejected.label}: query filter`, async () => {
       const policy = new AllowPolicy();
       const executor = new RecordingExecutor();
-      const kernel = new RecordingPredicateKernel();
+      const kernel = new RecordingPredicateKernel(true);
       const view = await issuedView(compiled, policy, (projections) => ({
         ...projections,
         query: mutateCatalog(projections.query, 'queries', (entry) => ({
@@ -251,7 +251,7 @@ test('strict predicate receipts route every gateway site and preserve exact outc
     await t.test(`${rejected.label}: operation precondition`, async () => {
       const policy = new AllowPolicy();
       const executor = new RecordingExecutor();
-      const kernel = new RecordingPredicateKernel();
+      const kernel = new RecordingPredicateKernel(true);
       const mediation = new SemanticOperationMediationAuthority();
       const view = await issuedView(compiled, policy, (projections) => ({
         ...projections,
@@ -288,7 +288,7 @@ test('strict predicate receipts route every gateway site and preserve exact outc
     await t.test(`${rejected.label}: operation read-back`, async () => {
       const policy = new AllowPolicy();
       const executor = new RecordingExecutor();
-      const kernel = new RecordingPredicateKernel();
+      const kernel = new RecordingPredicateKernel(true);
       const mediation = new SemanticOperationMediationAuthority();
       const view = await issuedView(compiled, policy, (projections) => ({
         ...projections,
@@ -320,6 +320,40 @@ test('strict predicate receipts route every gateway site and preserve exact outc
       );
     });
   }
+});
+
+test('predicate receipt observation cannot alter accepted query or operation execution', async () => {
+  const compiled = compileFixture();
+  const policy = new AllowPolicy();
+  const executor = new RecordingExecutor();
+  const kernel = new RecordingPredicateKernel(true);
+  const view = await issuedView(compiled, policy);
+
+  const query = await new SemanticQueryGateway(
+    policy,
+    executor,
+    kernel.observe,
+  ).invoke(view, {
+    arguments: { recordId: 'd6000000-0000-4000-8000-000000000006' },
+    queryId: `${FIXTURE_IDS.namespace}:query.master_get`,
+    schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+  });
+  const mediation = new SemanticOperationMediationAuthority();
+  const operation = await new SemanticOperationGateway(
+    policy,
+    executor,
+    mediation,
+    kernel.observe,
+  ).invoke(view, createRequest(), mediation.issueInvocation(view, 'API'));
+
+  assert.equal(query.outcome, 'exact');
+  assert.equal(operation.outcome, 'succeeded');
+  assert.equal(executor.queryCalls.length, 1);
+  assert.equal(executor.operationCalls.length, 1);
+  assert.deepEqual(
+    kernel.receipts.map((receipt) => receipt.outcome),
+    ['accepted', 'accepted', 'accepted'],
+  );
 });
 
 test('empty catalogs execute zero predicate-kernel inputs explicitly', async () => {
@@ -682,8 +716,14 @@ class RecordingExecutor
 
 class RecordingPredicateKernel {
   readonly receipts: PredicateKernelReceipt[] = [];
+
+  constructor(private readonly throwAfterRecording = false) {}
+
   readonly observe = (receipt: PredicateKernelReceipt): void => {
     this.receipts.push(receipt);
+    if (this.throwAfterRecording) {
+      throw new Error('predicate receipt observer failed');
+    }
   };
 }
 

@@ -200,3 +200,8 @@ How to apply: keep fail-closed runtime requirements, but model supported/preview
 Date: 2026-07-26
 Why: G2-EK1 found three copies of the same predicate fence, including canonical-model's private default check; centralizing any unchanged copy would still have accepted unknown versions and extra authority-bearing properties.
 How to apply: accept `unknown` at persisted/runtime boundaries, close the wire shape, dispatch on the serialized node's own version, and observe every caller routing through the shared entry point. See `docs/decisions/ADR-0012-expression-kernel-ceiling.md`.
+
+## Keep observation hooks non-authoritative
+Date: 2026-07-26
+Why: G2-EK1's first review found that a throwing predicate-receipt observer could block accepted execution or replace an exact unsupported result and its durable failure evidence with a generic execution failure.
+How to apply: route evidence observers through failure isolation, and test them by throwing after recording at every call site; instrumentation may report execution but must never decide or interrupt it.

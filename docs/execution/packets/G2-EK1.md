@@ -284,6 +284,46 @@ zero catalog subjects must be reported as zero kernel inputs
 
 Zero is therefore measured and named, not treated as implicit success.
 
+### Receipt observation cannot become execution authority
+
+The first Codex review found that the optional receipt observer ran
+synchronously without exception isolation. A throwing observer could therefore
+prevent an accepted query or operation from reaching the executor, or replace
+the required unsupported operation result and its recorded failure code with a
+generic execution failure. The observer now runs through a non-authoritative
+isolation helper shared by all three gateway sites.
+
+Permanent tests make the observer record a receipt and then throw at the query
+filter, operation precondition, and operation read-back sites. They assert both
+accepted execution and rejected exact outcomes, including the recorded
+non-accepted rows. Temporarily removing the isolation produced the retained red:
+
+```text
+$ node --import tsx --test --test-name-pattern='strict predicate receipts|predicate receipt observation' test/integration/module-runtime.test.ts
+# Subtest: unknown schemaVersion: query filter
+not ok 1 - unknown schemaVersion: query filter
+error: 'predicate receipt observer failed'
+# Subtest: unknown schemaVersion: operation precondition
+not ok 2 - unknown schemaVersion: operation precondition
+error: 'semantic operation execution failed'
+code: 'SEMANTIC_OPERATION_EXECUTION_FAILED'
+# Subtest: unknown schemaVersion: operation read-back
+not ok 3 - unknown schemaVersion: operation read-back
+error: 'semantic operation execution failed'
+code: 'SEMANTIC_OPERATION_EXECUTION_FAILED'
+...
+# Subtest: predicate receipt observation cannot alter accepted query or operation execution
+not ok 2 - predicate receipt observation cannot alter accepted query or operation execution
+error: 'predicate receipt observer failed'
+# tests 8
+# pass 0
+# fail 8
+```
+
+Restoring isolation returned the same focused command to 8/8 green. This
+negative control observes both failure modes: instrumentation changing a
+rejection outcome and instrumentation blocking accepted execution.
+
 ### Canonical-output boundary
 
 The first combined architecture run was red at 51/52 because
@@ -325,15 +365,27 @@ goldens, and demo-release in under ten minutes.
 
 ## Review evidence
 
-Pending.
+### Round 1 — Codex xhigh on `da40891`
+
+Verdict: **REVISE**, with one in-scope material finding. The optional receipt
+observer at the query, precondition, and read-back sites could throw and alter
+admission/execution, public results, and non-accepted evidence. No other
+material finding was reported across the strict parser, three-site routing,
+normalization unification, architecture proxy, ADR substance, projection-family
+answer, salvage citations, dependency bridge, or output boundary.
+
+Disposition: fixed by isolating observer failures and adding throwing-observer
+tests for accepted and rejected paths at all three sites. A fresh naive review
+on the new candidate is pending; the round-1 review is not reused.
 
 ## Known limits
 
 - Only exact literal `true` executes. ADR-0012 creates no authority for wider
   evaluation.
 - Runtime receipts are returned by the pure canonical entry point. Tests inject
-  a read-only observer, not an alternate parser, so instrumentation cannot widen
-  admission. Durable receipt/explanation formats are deferred as ADR-0012 states.
+  a read-only, failure-isolated observer, not an alternate parser, so
+  instrumentation cannot widen admission or alter execution. Durable
+  receipt/explanation formats are deferred as ADR-0012 states.
 - The architecture source scan is a bounded proxy for the known fork pattern.
 - Formula/rule and capability-disclosure projection families remain absent
   until the single queued v3 language/profile evolution.
