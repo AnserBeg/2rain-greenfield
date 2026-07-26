@@ -53,14 +53,39 @@ description: Branching, commit, push, and tag discipline for this repository.
 
 ## Integrating an accepted packet
 
-- Serial packet (the normal case): fast-forward `main` to the accepted branch
-  tip. This preserves the exact reviewed SHA on `main` and keeps history
-  linear — one readable stretch per packet.
+**First, check whether `main` moved while the packet was in flight**
+(`git log --oneline <base>..main`). A packet prompt names the base it was cut
+from; that base is a starting point, never a claim that `main` will still be
+there at integration. Orchestrator doc commits — ledger, current-plan,
+doctrine-coverage, debate verdicts, ADRs — land on `main` between packets by
+design (see "Branch model"), so a packet of any length should expect this.
+
+- **`main` unmoved (fast-forward possible):** fast-forward `main` to the
+  accepted branch tip. This preserves the exact reviewed SHA on `main` and
+  keeps history linear — one readable stretch per packet.
+- **`main` moved:** rebase the packet branch onto current `main`, or merge it
+  with `git merge --no-ff`. Either way the integrated tip is a **new SHA**, so
+  re-run the **full CI matrix at that integrated SHA** and record both SHAs in
+  the ledger row — the reviewed candidate and the integrated result. This is
+  not extra ceremony: AGENTS.md §6 already requires the full matrix green at
+  the exact integrated SHA, and a rebase or merge *is* the integration it
+  refers to. Prefer `--no-ff` when the reviewed candidate must remain literally
+  retrievable as an ancestor; the ledger's existing rows record exactly this
+  ("accepted by non-squash integration with the reviewed candidate preserved as
+  an ancestor").
 - Parallel packets: use a real merge commit (`git merge --no-ff`), never a
   squash. Squashing an accepted packet detaches `main` from the reviewed SHA
   and breaks the evidence link. Do not squash accepted work.
 - After integrating, delete the fully merged packet branch and
   `git worktree remove` its worktree if one was used.
+
+**Never `reset --hard` `main` to a packet's base or branch tip.** If a
+fast-forward is refused, that refusal is information — `main` has commits the
+packet does not. Forcing it discards them silently. This has cost three
+recoveries in this repository (2026-07-26), twice leaving documents referencing
+files that no longer existed. Rebase or merge; do not reset. The same applies to
+re-running a writer: rebuild on current `main`, never re-reset to the original
+base.
 
 ## Pushing
 

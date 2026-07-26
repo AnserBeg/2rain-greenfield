@@ -51,6 +51,11 @@ A packet must have all of:
 ## Packet-completion block (mandatory, in this order)
 
 1. Frozen candidate SHA (any later fix produces a new SHA and fresh review).
+   The base named in the packet prompt is where the branch was **cut from**, not
+   a promise `main` still points there — orchestrator doc commits land on `main`
+   between packets by design. If `main` moved, integration rebases or merges the
+   branch onto current `main` and the matrix re-runs at that integrated SHA; it
+   never resets `main` back to the packet's base. See `git-workflow`.
 2. Gate results, honest — the **full CI matrix** must be green at the exact
    integrated SHA, never only a packet-selected subset. A red gate is reported
    with output, never hidden or explained away, and the ledger row records the
