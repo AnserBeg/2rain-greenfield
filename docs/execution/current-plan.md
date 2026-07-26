@@ -5,7 +5,7 @@ narrative companion to `ledger.md`: the ledger records what each packet *was*, t
 records what we are doing *next* and *why*. Update it whenever the queue changes;
 delete rows once they are accepted and recorded in the ledger.
 
-Last updated: 2026-07-25, at `main` = `45974b7`.
+Last updated: 2026-07-25, at `main` = `79d38be`.
 
 ## Operating model
 
@@ -49,7 +49,14 @@ receipt identity narrowed across primary key, lookup, advisory lock, and RLS; a 
 after an activation, a recompile, or from another principal no longer re-executes, and
 migration 0010 refuses rather than rewriting immutable receipts).
 
-**Not yet started:** the Catalog/Location fan-out, and everything after.
+**`G2-P6` Catalog is accepted — and it was authored with ZERO press changes.** One
+377-line declarative definition plus test scaffolding produced a complete module: no
+file under `packages/compiler`, `canonical-model`, `postgres-provider`, `runtime`,
+`platform-runtime`, `dev-tooling`, `apps/web/src`, or `db/migrations` was touched.
+This is the first module authored against an already-built platform, and it validates
+the north-star claim that a module is data, not code.
+
+**Not yet started:** Location (G2-P7), and everything after.
 
 ## Active queue
 
@@ -57,16 +64,15 @@ Ordered. Each row names its source and why it holds its slot.
 
 | # | Packet | Tier | Why here |
 |---|---|---|---|
-| 1 | **Catalog (G2-P6)** | Critical | **Selected out of stage-cut order, deliberately.** `G2-P0.md:76` declares G2-P6 depends on G2-P4 and G2-P5; that dependency is about module *completeness*, not *authorability* — Party shipped without either. Eight consecutive corrective packets have shipped with one module in existence, so the factory thesis is unvalidated. **Catalog is the experiment**: acceptance requires ZERO press changes. Scoped to Party's completeness level for a like-for-like test. Any required platform change is a stop-and-report classified as either a press-generality failure (the thesis is dented) or a known-missing G2-P4/G2-P5 capability (it is not) — that distinction is what makes the result interpretable. Location (G2-P7) follows only after Catalog is accepted. |
-| 2 | **Prefix search semantics + range lowering** | Critical | Descoped from PR-6b by orchestrator ruling after its round-2 review. Verdict R3's leakproof range lowering measured 89.7 ms → 0.31 ms and is still wanted, but it surfaced a semantic-preservation question that is a design decision, not an index optimization: substring mode concatenates the parameter **unescaped** (`module-runtime-interpreter.ts:929`), so `%` and `_` are wildcards today, while literal range lowering treats them as characters. Shipping both would leave two search modes with divergent escaping and silently change prefix behaviour on a compiled query contract. Needs PR-2-style semantic-preservation evidence and an explicit decision on whether search input is literal text or a user-visible pattern. |
-| 3 | **Materializer — data-affecting DDL on existing tables** | Critical | PR-6 proved `createIndex` on a pre-existing table classifies as `deferredOnlineFamily`, which the materializer never processes; there is no `CONCURRENTLY` path in the repository. **Not a fan-out blocker** — new modules are born with their indexes and folded columns (`samePlan` → `preApprovalInert`), and every test materializes from scratch. It blocks only in-place upgrade of a *pre-existing deployment*, of which there are none, so it is a pre-launch concern rather than a G2 one. Orchestrator ruling: build the plain locking DDL path with the blocking window recorded and a numeric promotion trigger — `CONCURRENTLY` does not help the `ADD COLUMN … GENERATED … STORED` rewrite anyway, and carving a non-transactional exception into a runner whose transaction ownership is gated is a cost to pay when a customer cannot take a window. Absorbs the two findings already routed here: `indisvalid` in declared shape, and step-receipt in the same transaction as its DDL. **Also absorbs two residuals dispositioned out of PR-6b at its E4 terminus:** (a) in `executeApprovedAttempt()` the claim DML runs before the fold-function body check, so `ATTEMPT_CLAIM_MISMATCH` can surface before `CASE_FOLD_FUNCTION_DEFINITION_MISMATCH` — materialization still fails, so this is error specificity and negative-control coverage, not a false green; (b) an out-of-band `CREATE OR REPLACE` between materializations is detected at the next one but not prevented in the interim, which the superuser-owned DDL event-trigger witness above closes. |
-| 4 | G2-P4 — surface-grammar conformance | Behavioral | Roadmap resumes. Narrowed by G2-P3a to the pure conformance suite. |
-| 5 | G2-P5 — shared table behavior + Q0 envelope | Critical | Paging/truncation/cursor, saved filters, shape-specialized SQL. |
-| 6 | `adding-a-module` skill | Mechanical | Written against the proven Freeze G template; the fan-out consumes it. |
-| 7 | **Q1 compositional query tier** | Critical | **G3-blocking**, per verdict S2: G3's correctness contract is `SUM(posted movement.quantity_delta)`, so without Q1 the inventory stage hand-rolls aggregation against ADR-0011's grain. The plan already specifies the tier (§5.1, §5.9, §9.2.2) — filters, traversal, joins, grouping, aggregates, reports, exports over semantic entities. Today the gateway rejects every tier above Q0 and every filter other than literal `true`. Placed after the fan-out so it is designed against three real modules. Also the answer to "can the agent analyse data" — see verdict R8/R9. |
-| 8 | PR-7 — provider hot path | Behavioral | Release-load cache (flagged by two independent reviews), relation N+1, round-trip reduction, advisory-lock namespacing. Before G3. |
-| 9 | Policy/identity kernel | Critical | The one kernel seam with **no owner** — see decisions below. After fan-out, before G3. |
-| 10 | G2-P8 import → G2-P9 stage gate | — | Completes G2. |
+| 1 | **Prefix search semantics + range lowering** | Critical | Descoped from PR-6b by orchestrator ruling after its round-2 review. Verdict R3's leakproof range lowering measured 89.7 ms → 0.31 ms and is still wanted, but it surfaced a semantic-preservation question that is a design decision, not an index optimization: substring mode concatenates the parameter **unescaped** (`module-runtime-interpreter.ts:929`), so `%` and `_` are wildcards today, while literal range lowering treats them as characters. Shipping both would leave two search modes with divergent escaping and silently change prefix behaviour on a compiled query contract. Needs PR-2-style semantic-preservation evidence and an explicit decision on whether search input is literal text or a user-visible pattern. |
+| 2 | **Materializer — data-affecting DDL on existing tables** | Critical | PR-6 proved `createIndex` on a pre-existing table classifies as `deferredOnlineFamily`, which the materializer never processes; there is no `CONCURRENTLY` path in the repository. **Not a fan-out blocker** — new modules are born with their indexes and folded columns (`samePlan` → `preApprovalInert`), and every test materializes from scratch. It blocks only in-place upgrade of a *pre-existing deployment*, of which there are none, so it is a pre-launch concern rather than a G2 one. Orchestrator ruling: build the plain locking DDL path with the blocking window recorded and a numeric promotion trigger — `CONCURRENTLY` does not help the `ADD COLUMN … GENERATED … STORED` rewrite anyway, and carving a non-transactional exception into a runner whose transaction ownership is gated is a cost to pay when a customer cannot take a window. Absorbs the two findings already routed here: `indisvalid` in declared shape, and step-receipt in the same transaction as its DDL. **Also absorbs two residuals dispositioned out of PR-6b at its E4 terminus:** (a) in `executeApprovedAttempt()` the claim DML runs before the fold-function body check, so `ATTEMPT_CLAIM_MISMATCH` can surface before `CASE_FOLD_FUNCTION_DEFINITION_MISMATCH` — materialization still fails, so this is error specificity and negative-control coverage, not a false green; (b) an out-of-band `CREATE OR REPLACE` between materializations is detected at the next one but not prevented in the interim, which the superuser-owned DDL event-trigger witness above closes. |
+| 3 | G2-P4 — surface-grammar conformance | Behavioral | Roadmap resumes. Narrowed by G2-P3a to the pure conformance suite. |
+| 4 | G2-P5 — shared table behavior + Q0 envelope | Critical | Paging/truncation/cursor, saved filters, shape-specialized SQL. |
+| 5 | `adding-a-module` skill | Mechanical | Written against the proven Freeze G template; the fan-out consumes it. |
+| 6 | **Q1 compositional query tier** | Critical | **G3-blocking**, per verdict S2: G3's correctness contract is `SUM(posted movement.quantity_delta)`, so without Q1 the inventory stage hand-rolls aggregation against ADR-0011's grain. The plan already specifies the tier (§5.1, §5.9, §9.2.2) — filters, traversal, joins, grouping, aggregates, reports, exports over semantic entities. Today the gateway rejects every tier above Q0 and every filter other than literal `true`. Placed after the fan-out so it is designed against three real modules. Also the answer to "can the agent analyse data" — see verdict R8/R9. |
+| 7 | PR-7 — provider hot path | Behavioral | Release-load cache (flagged by two independent reviews), relation N+1, round-trip reduction, advisory-lock namespacing. Before G3. |
+| 8 | Policy/identity kernel | Critical | The one kernel seam with **no owner** — see decisions below. After fan-out, before G3. |
+| 9 | G2-P8 import → G2-P9 stage gate | — | Completes G2. |
 
 ## Settled by debate (2026-07-25)
 
