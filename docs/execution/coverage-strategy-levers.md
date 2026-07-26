@@ -32,7 +32,7 @@ That equation has exactly four exploitable weak points.
 | **1b — the builder negotiates the requirement** | `k` (demand side) | Recorded `prose-only`; G6 builder |
 | **2 — a typed escape at every position** | `p` on the tail | **This document.** `prose-only` |
 | **3 — the realization ladder** (the gap report becomes a downgrade offer) | binary failure | **Written.** `prose-only` |
-| **4 — gap latency as the headline metric** | time, not coverage | Named, not yet written |
+| **4 — gap latency, not coverage** | time | **Written.** `prose-only` |
 
 ---
 
@@ -389,17 +389,84 @@ by remainders being first-class, visible and counted — which is exactly what L
 instrumentation measures. And by the upgrade ratchet, without which remainders become
 permanent, which is [audit B6](prior-art-failure-modes.md) in yet another form.
 
-## Lever 4 — named, not yet written
+## Lever 4 — gap latency, not coverage
 
-**Lever 4 — gap latency as the headline metric.** The felt height of the wall is not
-coverage, it is *how long you wait*. 90% coverage with a three-day gap-closing loop beats
-98% with a nine-month roadmap. §15.7 measures module-building cost, which is the wrong
-number. The ambitious half is **self-hosting**: making capability definitions canonical
-objects compiled into their own support-cell projections, the same way module definitions
-compile into storage, CRUD, surfaces and tests. That is what collapses gap latency from
-quarters to days, and it is where the AI-native bet actually pays. It is also where
-"platform before product" returns through the window, so it must be earned incrementally —
-add three or four capabilities by hand, notice which projections were purely mechanical,
-generate only those.
+### What it is
 
-Both are unwritten here and unscheduled in the coverage map.
+Levers 1 and 1b attack `k`; Lever 2 attacks tail-`p`; Lever 3 attacks binary failure.
+Lever 4 attacks **time**, and it is the one that reaches "rare".
+
+The felt height of the wall is not `p^k` — it is how long you wait when you hit it. A
+platform at 90% coverage with a three-day gap-closing loop beats one at 98% with a
+nine-month roadmap, because at the moment of impact the question is never "what fraction
+of things work" but "when will *this* work". Stop optimising coverage; optimise
+**gap-to-capability cycle time**.
+
+### Half A — measure the right thing
+
+§15.7 measures module-building productivity: median N1 module effort no greater than one
+third of the hand-built baseline. That is a real gate and the wrong number here — it
+measures building a module *from existing capabilities* and says nothing about how fast a
+**missing** capability arrives.
+
+The plan half-notices. §15.7 adds "when a new capability is required, measure its cost
+separately from the module that first consumes it," but only asks for separate
+measurement, never making it a headline or a gate.
+
+Track three things:
+
+- **decision latency** — gap report emitted to capability admitted;
+- **implementation latency** — admitted to shipped *supported* (all ten support cells);
+- **disposition mix** — program rule #5's four buckets (mapped / admitted as capability /
+  routed to the extension tier / deferred), which is [audit B3](prior-art-failure-modes.md)'s
+  instrument and doubles as the wall's leading indicator.
+
+**This can start now.** We are already adding capabilities: PR-6 added a `relation` index
+kind; queue row 4 adds two canonical families. Those are capability additions and their
+cycle time is measurable today, before any tenant exists. A baseline that is not started
+cannot be reconstructed.
+
+### Half B — self-hosting
+
+Adding a capability is slow because doctrine #10 requires projecting it across ten support
+cells. That slowness is deliberate — it is what makes "supported" mean something — so the
+matrix cannot be shortened without gutting the guarantee. Automate the **projection**
+instead.
+
+Projecting one definition across many mechanical targets is exactly what this system
+already does for modules. So: **make capability definitions canonical objects that compile
+into their own support-cell projections.** The platform builds itself the way it builds
+everything else, and gap latency collapses from quarters to days. At a three-day loop, 95%
+coverage *is* a 99% product.
+
+The architecture is unusually well shaped for this. Salesforce could not self-host because
+its own objects were not Force.com objects — the [B2 asymmetry](prior-art-failure-modes.md).
+Doctrine #2 means the machinery here is already symmetric.
+
+**This is also the most dangerous idea in this document.** A capability-compiler is the most
+seductive possible project, produces no direct customer value, and is §16's first risk row —
+platform before product — in a convincing disguise.
+
+It must therefore be **earned, never anticipated**: add three or four capabilities by hand,
+observe which projections were purely mechanical, generate only those. The trigger is
+concrete — *the same projection hand-written three times identically*. Never before that,
+however obvious it looks.
+
+### Where LLMs fit
+
+**Draft the capability packet.** The gap report is machine-readable and names the missing
+semantic dimension; a model drafts the schema change, compiler lowering, projections and
+tests as a packet, gated by the full CI matrix and a fresh naive reviewer. This repository
+is direct evidence the loop works — 45 accepted packets, Critical-tier work, reviews that
+caught real defects. The novel step is pointing it at *product capability* additions rather
+than platform packets.
+
+**Cluster the demand.** The economics depend on knowing which gaps collapse into one
+capability. Judgement over natural-language demand, with no safety surface: a wrong
+clustering costs a prioritisation mistake, not a correctness failure. Feed it the rule-#5
+disposition log.
+
+**What it does not fix:** the support matrix itself — doctrine #10 is a correctness
+requirement, not a speed problem — and §5.11's routing decision between general algebra,
+domain pack, and extension tier, which is judgement with permanent consequences.
+
