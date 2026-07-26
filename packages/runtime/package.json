@@ -7,5 +7,8 @@
     ".": "./src/request-context.ts",
     "./request-context": "./src/request-context.ts",
     "./request-runtime-view": "./src/request-runtime-view.ts"
+  },
+  "dependencies": {
+    "@north-star/canonical-model": "workspace:*"
   }
 }

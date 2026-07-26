@@ -31,7 +31,9 @@ test('Freeze D has one provider-neutral RequestRuntimeView authority and preserv
     manifest.exports['./request-runtime-view'],
     './src/request-runtime-view.ts',
   );
-  assert.deepEqual(manifest.dependencies, undefined);
+  assert.deepEqual(manifest.dependencies, {
+    '@north-star/canonical-model': 'workspace:*',
+  });
   assert.match(requestContext, /class AuthenticatedRequestEntryAdapter/);
   assert.match(requestContext, /issuedContexts = new WeakSet/);
   assert.match(runtime, /class AuthenticatedRequestRuntimeEntryAdapter/);

@@ -30,6 +30,7 @@ import {
   type PredicateExpression,
 } from './schemas.js';
 import { parseStrictJson } from './strict-json.js';
+import { inspectPredicateForExecution } from './predicate-kernel.js';
 
 type CanonicalReference = {
   kind: string;
@@ -284,13 +285,13 @@ export function canonicalAuthoredProjection(
     }
     if (
       object.kind === 'queryDefinition' &&
-      isDefaultPredicate(object.filter)
+      inspectPredicateForExecution(object.filter).outcome === 'accepted'
     ) {
       delete object.filter;
     }
     if (
       object.kind === 'operationDefinition' &&
-      isDefaultPredicate(object.precondition)
+      inspectPredicateForExecution(object.precondition).outcome === 'accepted'
     ) {
       delete object.precondition;
     }
@@ -1446,15 +1447,6 @@ function normalizationProfileFor(
   return languageVersion === PREVIOUS_LANGUAGE_VERSION
     ? PREVIOUS_NORMALIZATION_PROFILE_VERSION
     : NORMALIZATION_PROFILE_VERSION;
-}
-
-function isDefaultPredicate(value: unknown): boolean {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    (value as { kind?: unknown }).kind === 'booleanPredicate' &&
-    (value as { value?: unknown }).value === true
-  );
 }
 
 function enforceFamilyBounds(authored: AuthoredApplicationPackage): void {

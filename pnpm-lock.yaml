@@ -113,7 +113,11 @@ importers:
         specifier: ^8.20.0
         version: 8.20.0
 
-  packages/runtime: {}
+  packages/runtime:
+    dependencies:
+      '@north-star/canonical-model':
+        specifier: workspace:*
+        version: link:../canonical-model
 
   packages/test-contracts: {}
 

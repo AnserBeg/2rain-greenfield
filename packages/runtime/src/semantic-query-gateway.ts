@@ -1,3 +1,8 @@
+import {
+  inspectPredicateForExecution,
+  type PredicateKernelReceipt,
+} from '@north-star/canonical-model';
+
 import type { TrustedRequestContext } from './request-context.js';
 import {
   REQUEST_RUNTIME_PROJECTION_FAMILIES,
@@ -135,6 +140,8 @@ export class SemanticQueryGateway {
   constructor(
     private readonly currentPolicy: CurrentPolicyGateway,
     private readonly executor: SemanticQueryExecutor | undefined = undefined,
+    private readonly observePredicateReceipt:
+      ((receipt: PredicateKernelReceipt) => void) | undefined = undefined,
   ) {}
 
   async invoke(
@@ -181,7 +188,9 @@ export class SemanticQueryGateway {
     if (definition.lifecycle !== 'active' || definition.tier !== 'q0') {
       return unsupportedQueryResult(request.queryId, 'query-tier-unsupported');
     }
-    if (!isAlwaysTruePredicate(definition.filter)) {
+    const predicateReceipt = inspectPredicateForExecution(definition.filter);
+    this.observePredicateReceipt?.(predicateReceipt);
+    if (predicateReceipt.outcome !== 'accepted') {
       return unsupportedQueryResult(
         request.queryId,
         'query-filter-unsupported',
@@ -278,12 +287,6 @@ export function registeredQueryFromPinnedView(
     if (query.queryId === queryId) selected = query;
   }
   return selected;
-}
-
-function isAlwaysTruePredicate(
-  value: Readonly<Record<string, ImmutableJsonValue>>,
-): boolean {
-  return value.kind === 'booleanPredicate' && value.value === true;
 }
 
 function assertQueryDefinition(

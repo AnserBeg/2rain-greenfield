@@ -5,6 +5,11 @@ import {
   timingSafeEqual,
 } from 'node:crypto';
 
+import {
+  inspectPredicateForExecution,
+  type PredicateKernelReceipt,
+} from '@north-star/canonical-model';
+
 import type { TrustedRequestContext } from './request-context.js';
 import {
   REQUEST_RUNTIME_PROJECTION_FAMILIES,
@@ -425,6 +430,8 @@ export class SemanticOperationGateway {
     private readonly executor:
       SemanticOperationExecutor | undefined = undefined,
     private readonly mediation: SemanticOperationMediationAuthority = new SemanticOperationMediationAuthority(),
+    private readonly observePredicateReceipt:
+      ((receipt: PredicateKernelReceipt) => void) | undefined = undefined,
   ) {}
 
   async invoke(
@@ -502,7 +509,11 @@ export class SemanticOperationGateway {
           'operation-tier-unsupported',
         );
       }
-      if (!isAlwaysTruePredicate(definition.precondition)) {
+      const preconditionReceipt = inspectPredicateForExecution(
+        definition.precondition,
+      );
+      this.observePredicateReceipt?.(preconditionReceipt);
+      if (preconditionReceipt.outcome !== 'accepted') {
         await this.#recordNonAccepted(
           view,
           invocation,
@@ -522,6 +533,16 @@ export class SemanticOperationGateway {
         view,
         definition.readBackQueryId,
       );
+      const readBackPredicateReceipt =
+        readBackDefinition?.lifecycle === 'active' &&
+        readBackDefinition.tier === 'q0' &&
+        readBackDefinition.queryType === 'get' &&
+        readBackDefinition.sourceEntityId === definition.effect.entity.targetId
+          ? inspectPredicateForExecution(readBackDefinition.filter)
+          : null;
+      if (readBackPredicateReceipt) {
+        this.observePredicateReceipt?.(readBackPredicateReceipt);
+      }
       if (
         !readBackDefinition ||
         readBackDefinition.lifecycle !== 'active' ||
@@ -529,7 +550,7 @@ export class SemanticOperationGateway {
         readBackDefinition.queryType !== 'get' ||
         readBackDefinition.sourceEntityId !==
           definition.effect.entity.targetId ||
-        !isAlwaysTruePredicate(readBackDefinition.filter)
+        readBackPredicateReceipt?.outcome !== 'accepted'
       ) {
         await this.#recordNonAccepted(
           view,
@@ -602,12 +623,6 @@ export class SemanticOperationGateway {
       }),
     );
   }
-}
-
-function isAlwaysTruePredicate(
-  value: Readonly<Record<string, ImmutableJsonValue>>,
-): boolean {
-  return value.kind === 'booleanPredicate' && value.value === true;
 }
 
 function parseSemanticOperationRequest(

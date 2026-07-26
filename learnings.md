@@ -195,3 +195,8 @@ How to apply: treat a packet outcome as a bounded summary, then inventory the se
 Date: 2026-07-26
 Why: G2-P7 proved that a non-supported capability requirement either blocks compilation or disappears from emitted facts, contradicting plan §5.5's explicit support-state rule.
 How to apply: keep fail-closed runtime requirements, but model supported/preview/planned/unsupported/deprecated/internal product disclosure through a separate compiled declaration seam before claiming the capability.
+
+## Converge wire fences on strict versioned parsing
+Date: 2026-07-26
+Why: G2-EK1 found three copies of the same predicate fence, including canonical-model's private default check; centralizing any unchanged copy would still have accepted unknown versions and extra authority-bearing properties.
+How to apply: accept `unknown` at persisted/runtime boundaries, close the wire shape, dispatch on the serialized node's own version, and observe every caller routing through the shared entry point. See `docs/decisions/ADR-0012-expression-kernel-ceiling.md`.

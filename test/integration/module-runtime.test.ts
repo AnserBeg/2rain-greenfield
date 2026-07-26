@@ -6,6 +6,7 @@ import {
   LANGUAGE_VERSION,
   canonicalize,
   normalizeApplicationPackage,
+  type PredicateKernelReceipt,
 } from '../../packages/canonical-model/src/index.js';
 import {
   DEFAULT_COMPILER_LIMITS,
@@ -191,6 +192,177 @@ test('unsupported compiled predicates fail closed before the generic executor', 
   );
   assert.equal(executor.queryCalls.length, 0);
   assert.equal(executor.operationCalls.length, 0);
+});
+
+test('strict predicate receipts route every gateway site and preserve exact outcomes', async (t) => {
+  const compiled = compileFixture();
+  const rejectedPredicates: readonly {
+    label: string;
+    value: ImmutableJsonValue;
+  }[] = [
+    {
+      label: 'unknown schemaVersion',
+      value: {
+        kind: 'booleanPredicate',
+        schemaVersion: 'unknown',
+        value: true,
+      },
+    },
+    {
+      label: 'unknown property',
+      value: {
+        kind: 'booleanPredicate',
+        schemaVersion: LANGUAGE_VERSION,
+        unexpectedAuthority: 'x',
+        value: true,
+      },
+    },
+  ];
+
+  for (const rejected of rejectedPredicates) {
+    await t.test(`${rejected.label}: query filter`, async () => {
+      const policy = new AllowPolicy();
+      const executor = new RecordingExecutor();
+      const kernel = new RecordingPredicateKernel();
+      const view = await issuedView(compiled, policy, (projections) => ({
+        ...projections,
+        query: mutateCatalog(projections.query, 'queries', (entry) => ({
+          ...entry,
+          filter: rejected.value,
+        })),
+      }));
+      const result = await new SemanticQueryGateway(
+        policy,
+        executor,
+        kernel.observe,
+      ).invoke(view, {
+        arguments: { recordId: 'd6000000-0000-4000-8000-000000000006' },
+        queryId: `${FIXTURE_IDS.namespace}:query.master_get`,
+        schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+      });
+
+      assert.equal(result.outcome, 'unsupported');
+      assert.equal(result.unsupportedReason, 'query-filter-unsupported');
+      assert.equal(executor.queryCalls.length, 0);
+      assert.equal(kernel.receipts.length, 1);
+      assert.equal(kernel.receipts[0]?.outcome, 'rejected');
+    });
+
+    await t.test(`${rejected.label}: operation precondition`, async () => {
+      const policy = new AllowPolicy();
+      const executor = new RecordingExecutor();
+      const kernel = new RecordingPredicateKernel();
+      const mediation = new SemanticOperationMediationAuthority();
+      const view = await issuedView(compiled, policy, (projections) => ({
+        ...projections,
+        operation: mutateCatalog(
+          projections.operation,
+          'operations',
+          (entry) => ({ ...entry, precondition: rejected.value }),
+        ),
+      }));
+      const result = await new SemanticOperationGateway(
+        policy,
+        executor,
+        mediation,
+        kernel.observe,
+      ).invoke(view, createRequest(), mediation.issueInvocation(view, 'API'));
+
+      assert.equal(result.outcome, 'unsupported');
+      assert.equal(
+        result.unsupportedReason,
+        'operation-precondition-unsupported',
+      );
+      assert.deepEqual(executor.persistedNonAcceptedRows, [
+        {
+          failureCode: 'SEMANTIC_OPERATION_PRECONDITION_UNSUPPORTED',
+          operationId: `${FIXTURE_IDS.namespace}:operation.master_create`,
+          outcome: 'FAILED',
+        },
+      ]);
+      assert.equal(executor.operationCalls.length, 0);
+      assert.equal(kernel.receipts.length, 1);
+      assert.equal(kernel.receipts[0]?.outcome, 'rejected');
+    });
+
+    await t.test(`${rejected.label}: operation read-back`, async () => {
+      const policy = new AllowPolicy();
+      const executor = new RecordingExecutor();
+      const kernel = new RecordingPredicateKernel();
+      const mediation = new SemanticOperationMediationAuthority();
+      const view = await issuedView(compiled, policy, (projections) => ({
+        ...projections,
+        query: mutateCatalog(projections.query, 'queries', (entry) => ({
+          ...entry,
+          filter: rejected.value,
+        })),
+      }));
+      const result = await new SemanticOperationGateway(
+        policy,
+        executor,
+        mediation,
+        kernel.observe,
+      ).invoke(view, createRequest(), mediation.issueInvocation(view, 'API'));
+
+      assert.equal(result.outcome, 'unsupported');
+      assert.equal(result.unsupportedReason, 'operation-read-back-unsupported');
+      assert.deepEqual(executor.persistedNonAcceptedRows, [
+        {
+          failureCode: 'SEMANTIC_OPERATION_READ_BACK_UNSUPPORTED',
+          operationId: `${FIXTURE_IDS.namespace}:operation.master_create`,
+          outcome: 'FAILED',
+        },
+      ]);
+      assert.equal(executor.operationCalls.length, 0);
+      assert.deepEqual(
+        kernel.receipts.map((receipt) => receipt.outcome),
+        ['accepted', 'rejected'],
+      );
+    });
+  }
+});
+
+test('empty catalogs execute zero predicate-kernel inputs explicitly', async () => {
+  const fixturePolicy = new AllowPolicy();
+  const kernel = new RecordingPredicateKernel();
+  const compiled = compileFixture();
+  const view = await issuedView(compiled, fixturePolicy, (projections) => ({
+    ...projections,
+    operation: {
+      ...projections.operation,
+      payload: {
+        kind: 'operationCatalogPayload',
+        operations: [],
+        schemaVersion: 'northstar.operation-catalog-payload/v0-provisional',
+      },
+    },
+    query: {
+      ...projections.query,
+      payload: {
+        kind: 'queryCatalogPayload',
+        queries: [],
+        schemaVersion: 'northstar.query-catalog-payload/v0-provisional',
+      },
+    },
+  }));
+
+  await assert.rejects(
+    new SemanticQueryGateway(
+      fixturePolicy,
+      new RecordingExecutor(),
+      kernel.observe,
+    ).invoke(view, {
+      arguments: {},
+      queryId: `${FIXTURE_IDS.namespace}:query.master_get`,
+      schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+    }),
+    /is not registered/,
+  );
+  assert.equal(
+    kernel.receipts.length,
+    0,
+    'zero catalog subjects must be reported as zero kernel inputs',
+  );
 });
 
 test('human-required operations refuse every channel without a matching server grant and stale grants fail', async () => {
@@ -449,6 +621,11 @@ class RecordingExecutor
 {
   readonly nonAcceptedCalls: SemanticOperationNonAcceptedRequest[] = [];
   readonly operationCalls: SemanticOperationExecutionRequest[] = [];
+  readonly persistedNonAcceptedRows: {
+    failureCode: string;
+    operationId: string;
+    outcome: 'DENIED' | 'FAILED';
+  }[] = [];
   readonly queryCalls: SemanticQueryExecutionRequest[] = [];
 
   constructor(private readonly operationFailure: Error | null = null) {}
@@ -457,6 +634,11 @@ class RecordingExecutor
     request: SemanticOperationNonAcceptedRequest,
   ): Promise<void> {
     this.nonAcceptedCalls.push(request);
+    this.persistedNonAcceptedRows.push({
+      failureCode: request.failureCode,
+      operationId: request.operationId,
+      outcome: request.outcome,
+    });
   }
 
   execute(
@@ -496,6 +678,13 @@ class RecordingExecutor
       unsupportedReason: null,
     };
   }
+}
+
+class RecordingPredicateKernel {
+  readonly receipts: PredicateKernelReceipt[] = [];
+  readonly observe = (receipt: PredicateKernelReceipt): void => {
+    this.receipts.push(receipt);
+  };
 }
 
 class AllowPolicy implements CurrentPolicyGateway {

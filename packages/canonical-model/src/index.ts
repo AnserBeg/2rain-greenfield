@@ -44,6 +44,13 @@ export {
   parseAuthoredApplicationPackageJson,
 } from './normalize.js';
 export {
+  PREDICATE_KERNEL_RECEIPT_VERSION,
+  inspectPredicateForExecution,
+  type LiteralTruePredicate,
+  type PredicateKernelEntryPoint,
+  type PredicateKernelReceipt,
+} from './predicate-kernel.js';
+export {
   canonicalize,
   canonicalizeAndHash,
   type CanonicalizedContent,

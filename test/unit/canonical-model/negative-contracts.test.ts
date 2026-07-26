@@ -8,6 +8,7 @@ import {
   CanonicalScalarSchema,
   FieldTypeSchema,
   canonicalAuthoredProjection,
+  inspectPredicateForExecution,
   normalizeApplicationPackage,
   parseAuthoredApplicationPackageJson,
   type AuthoredApplicationPackage,
@@ -87,6 +88,59 @@ test('unknown kinds, versions, properties, slots, and status roles fail closed',
   expectDiagnostic(
     () => normalizeApplicationPackage(unknownStatus),
     'CANON_SURFACE_STATUS_ROLE_UNSUPPORTED',
+  );
+});
+
+test('the runtime predicate fence is strict, version-dispatched, and admits only literal true', () => {
+  for (const schemaVersion of ['v0-experimental', 'v1', 'v2'] as const) {
+    const receipt = inspectPredicateForExecution({
+      kind: 'booleanPredicate',
+      schemaVersion,
+      value: true,
+    });
+    assert.equal(receipt.outcome, 'accepted');
+    assert.deepEqual(receipt.outcome === 'accepted' && receipt.predicate, {
+      kind: 'booleanPredicate',
+      schemaVersion,
+      value: true,
+    });
+    assert.equal(Object.isFrozen(receipt), true);
+    assert.equal(
+      receipt.outcome === 'accepted' && Object.isFrozen(receipt.predicate),
+      true,
+    );
+  }
+
+  assert.deepEqual(
+    inspectPredicateForExecution({
+      kind: 'booleanPredicate',
+      schemaVersion: 'unknown',
+      value: true,
+    }),
+    {
+      kind: 'predicateKernelReceipt',
+      nodeSchemaVersion: 'unknown',
+      outcome: 'rejected',
+      reason: 'unsupported-node-version',
+      schemaVersion: 'northstar.predicate-kernel-receipt/v1',
+    },
+  );
+  assert.equal(
+    inspectPredicateForExecution({
+      kind: 'booleanPredicate',
+      schemaVersion: 'v2',
+      unexpectedAuthority: 'x',
+      value: true,
+    }).reason,
+    'invalid-node-shape',
+  );
+  assert.equal(
+    inspectPredicateForExecution({
+      kind: 'booleanPredicate',
+      schemaVersion: 'v2',
+      value: false,
+    }).reason,
+    'unsupported-literal',
   );
 });
 

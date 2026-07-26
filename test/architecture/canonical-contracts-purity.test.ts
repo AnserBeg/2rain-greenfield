@@ -41,3 +41,45 @@ test('git attributes pin LF and protect golden vectors from text conversion', ()
   assert.match(attributes, /^\*\.golden\.bytes -text$/m);
   assert.match(attributes, /^\*\.golden\.sha256 -text$/m);
 });
+
+test('literal-true predicate dispatch has one canonical owner, with a server-inclusive canary', () => {
+  const productionRoots = [
+    join(process.cwd(), 'packages/canonical-model/src'),
+    join(process.cwd(), 'packages/runtime/src'),
+  ];
+  const sources = productionRoots.flatMap((root) =>
+    readdirSync(root)
+      .filter((file) => file.endsWith('.ts'))
+      .map((file) => ({
+        file: join(root, file),
+        source: readFileSync(join(root, file), 'utf8'),
+      })),
+  );
+
+  assert.deepEqual(findLiteralTrueDispatches(sources), []);
+  assert.deepEqual(
+    findLiteralTrueDispatches([
+      {
+        file: 'packages/runtime/src/future-server-evaluator.ts',
+        source:
+          "return value.kind === 'booleanPredicate' && value.value === true;",
+      },
+    ]),
+    ['packages/runtime/src/future-server-evaluator.ts'],
+  );
+});
+
+function findLiteralTrueDispatches(
+  sources: readonly { file: string; source: string }[],
+): string[] {
+  return sources
+    .filter(
+      ({ file, source }) =>
+        !file.endsWith('/predicate-kernel.ts') &&
+        /\.kind\s*===\s*['"]booleanPredicate['"][\s\S]{0,160}\.value\s*===\s*true/.test(
+          source,
+        ),
+    )
+    .map(({ file }) => file)
+    .sort();
+}
