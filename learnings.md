@@ -191,3 +191,7 @@ How to apply: Freeze the press during the first fan-out module, stop on any requ
 Date: 2026-07-25
 Why: G2-P6's abbreviated outcome named Catalog descriptors without enumerating base unit, while the authoritative domain boundary and G2 walking-slice sections require it; the first review caught the reduced field inventory.
 How to apply: treat a packet outcome as a bounded summary, then inventory the selected entity against every applicable plan requirement before freezing definition tests. Preserve scope by adding missing declarative data, never by quietly reducing completeness or patching the press.
+## Separate runtime requirements from capability disclosure
+Date: 2026-07-26
+Why: G2-P7 proved that a non-supported capability requirement either blocks compilation or disappears from emitted facts, contradicting plan §5.5's explicit support-state rule.
+How to apply: keep fail-closed runtime requirements, but model supported/preview/planned/unsupported/deprecated/internal product disclosure through a separate compiled declaration seam before claiming the capability.
