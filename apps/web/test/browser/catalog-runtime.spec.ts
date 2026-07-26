@@ -22,6 +22,7 @@ test('real Catalog surface creates an item and archives/restores through the gen
     await expect(
       page.getByText('Browser-seeded descriptor', { exact: true }),
     ).toBeVisible();
+    await expect(page.getByText('EA', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Archive' }).click();
     await expect(
       page.getByRole('heading', { name: 'Confirm Archive' }),
@@ -37,6 +38,7 @@ test('real Catalog surface creates an item and archives/restores through the gen
     await page.getByLabel('SKU').fill('SKU-WEB-004');
     await page.getByLabel('Item Name').fill('Browser-created Item');
     await page.getByLabel('Description').fill('Created through generic form');
+    await page.getByLabel('Base Unit').fill('EA');
     await page.getByRole('button', { name: 'Create record' }).click();
     await expect(page.getByRole('status')).toContainText('Create complete');
     await expect(page.getByRole('status')).toContainText(

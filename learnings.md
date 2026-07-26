@@ -186,3 +186,8 @@ How to apply: for an immutable versioned function, create it only when absent; w
 Date: 2026-07-25
 Why: Catalog reproduced Party-level behavior with zero compiler, provider, runtime, UI, or migration changes; changing the press would have made the factory test a false positive.
 How to apply: Freeze the press during the first fan-out module, stop on any required press edit, and classify the missing contract before continuing.
+
+## Reconcile packet shorthand with the authoritative plan
+Date: 2026-07-25
+Why: G2-P6's abbreviated outcome named Catalog descriptors without enumerating base unit, while the authoritative domain boundary and G2 walking-slice sections require it; the first review caught the reduced field inventory.
+How to apply: treat a packet outcome as a bounded summary, then inventory the selected entity against every applicable plan requirement before freezing definition tests. Preserve scope by adding missing declarative data, never by quietly reducing completeness or patching the press.

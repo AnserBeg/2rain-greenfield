@@ -499,6 +499,7 @@ async function runCatalogBrowserFixture(): Promise<void> {
           'SKU-WEB-001',
           'Browser Item',
           'Browser-seeded descriptor',
+          'EA',
         ),
       },
     );
@@ -538,8 +539,10 @@ function catalogItemValues(
   sku: string,
   name: string,
   description: string,
+  baseUnit: string,
 ): Record<string, string> {
   return {
+    [CATALOG_IDS.fieldIds.baseUnit]: baseUnit,
     [CATALOG_IDS.fieldIds.description]: description,
     [CATALOG_IDS.fieldIds.name]: name,
     [CATALOG_IDS.fieldIds.sku]: sku,

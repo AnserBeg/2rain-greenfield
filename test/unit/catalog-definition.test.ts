@@ -34,7 +34,11 @@ test('Catalog definition compiles into every walking-slice projection with lifec
   const definition = catalogModuleDefinition() as {
     assertions: Array<Record<string, unknown>>;
     entities: Array<Record<string, unknown>>;
-    fields: Array<{ fieldId: string; label: string }>;
+    fields: Array<{
+      fieldId: string;
+      label: string;
+      presence: 'optional' | 'required';
+    }>;
     operations: Array<{ effect: { kind: string }; operationId: string }>;
     queries: Array<{
       queryId: string;
@@ -48,7 +52,7 @@ test('Catalog definition compiles into every walking-slice projection with lifec
     surfaces: Array<Record<string, unknown>>;
   };
   assert.equal(definition.entities.length, 1);
-  assert.equal(definition.fields.length, 3);
+  assert.equal(definition.fields.length, 4);
   assert.equal(definition.queries.length, 4);
   assert.equal(definition.operations.length, 4);
   assert.equal(definition.surfaces.length, 3);
@@ -79,8 +83,15 @@ test('Catalog definition compiles into every walking-slice projection with lifec
       CATALOG_IDS.fieldIds.sku,
       CATALOG_IDS.fieldIds.name,
       CATALOG_IDS.fieldIds.description,
+      CATALOG_IDS.fieldIds.baseUnit,
     ],
   );
+  const baseUnit = definition.fields.find(
+    (field) => field.fieldId === CATALOG_IDS.fieldIds.baseUnit,
+  );
+  assert.ok(baseUnit, 'Catalog base-unit descriptor is absent');
+  assert.equal(baseUnit.label, 'Base unit');
+  assert.equal(baseUnit.presence, 'required');
   assert.equal(
     JSON.stringify(definition.fields).match(/on[-_ ]?hand|quantity|stock/giu),
     null,
@@ -139,6 +150,7 @@ test('Catalog projections carry one item DTO field identity to query, surface, a
     CATALOG_IDS.fieldIds.sku,
     CATALOG_IDS.fieldIds.name,
     CATALOG_IDS.fieldIds.description,
+    CATALOG_IDS.fieldIds.baseUnit,
   ];
   const query = projectionPayload<{
     queries: Array<{

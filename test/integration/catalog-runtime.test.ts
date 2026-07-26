@@ -85,6 +85,7 @@ test('Catalog serves one tenant-scoped item DTO to query, agent, surface, and op
           'SKU-100',
           'Galvanized bolt',
           'M8 hex-head fastener',
+          'EA',
         ),
       },
       operationId: `${CATALOG_IDS.namespace}:operation.item_create`,
@@ -211,7 +212,7 @@ class CatalogMemoryExecutor
   seed(tenantId: string, recordId: string, sku: string, name: string): void {
     this.tenantRecords(tenantId).set(
       recordId,
-      dto(recordId, itemValues(sku, name, '')),
+      dto(recordId, itemValues(sku, name, '', 'EA')),
     );
   }
 
@@ -385,8 +386,10 @@ function itemValues(
   sku: string,
   name: string,
   description: string,
+  baseUnit: string,
 ): Record<string, string> {
   return {
+    [CATALOG_IDS.fieldIds.baseUnit]: baseUnit,
     [CATALOG_IDS.fieldIds.description]: description,
     [CATALOG_IDS.fieldIds.name]: name,
     [CATALOG_IDS.fieldIds.sku]: sku,

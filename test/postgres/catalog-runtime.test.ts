@@ -43,6 +43,7 @@ test('Catalog executes tenant SKU, resolver, lifecycle, and DTO contracts on rea
           'SKU-001',
           'Galvanized bolt',
           'M8 hex-head fastener',
+          'EA',
         ),
       },
     );
@@ -50,11 +51,12 @@ test('Catalog executes tenant SKU, resolver, lifecycle, and DTO contracts on rea
     assert.ok(created.trust);
     assert.deepEqual(
       created.readBack?.values,
-      itemValues('SKU-001', 'Galvanized bolt', 'M8 hex-head fastener'),
+      itemValues('SKU-001', 'Galvanized bolt', 'M8 hex-head fastener', 'EA'),
     );
     assert.equal(await persistedItemCount(runtime.adminPool, runtime, 'a'), 1);
     await assertPersistedItem(runtime.adminPool, runtime, itemId, {
       archived: false,
+      baseUnit: 'EA',
       description: 'M8 hex-head fastener',
       name: 'Galvanized bolt',
       revision: 1,
@@ -65,7 +67,7 @@ test('Catalog executes tenant SKU, resolver, lifecycle, and DTO contracts on rea
     const tenantBItemId = randomUUID();
     await invokeCatalogOperation(runtime, runtime.views.b, 'item_create', {
       recordId: tenantBItemId,
-      values: itemValues('SKU-001', 'Tenant B item', 'isolated'),
+      values: itemValues('SKU-001', 'Tenant B item', 'isolated', 'EA'),
     });
     assert.equal(await persistedItemCount(runtime.adminPool, runtime, 'b'), 1);
     assert.equal(
@@ -80,7 +82,12 @@ test('Catalog executes tenant SKU, resolver, lifecycle, and DTO contracts on rea
     await assert.rejects(
       invokeCatalogOperation(runtime, runtime.views.a, 'item_create', {
         recordId: randomUUID(),
-        values: itemValues('sku-001', 'Duplicate SKU', 'must not persist'),
+        values: itemValues(
+          'sku-001',
+          'Duplicate SKU',
+          'must not persist',
+          'EA',
+        ),
       }),
       (error: unknown) =>
         assertTypedError(
@@ -95,6 +102,7 @@ test('Catalog executes tenant SKU, resolver, lifecycle, and DTO contracts on rea
       invokeCatalogOperation(runtime, runtime.views.a, 'item_create', {
         recordId: randomUUID(),
         values: {
+          [CATALOG_IDS.fieldIds.baseUnit]: 'EA',
           [CATALOG_IDS.fieldIds.description]: 'missing required name',
           [CATALOG_IDS.fieldIds.sku]: 'SKU-BAD',
         },
@@ -111,16 +119,16 @@ test('Catalog executes tenant SKU, resolver, lifecycle, and DTO contracts on rea
     for (const sku of ['SKU-002', 'SKU-003']) {
       await invokeCatalogOperation(runtime, runtime.views.a, 'item_create', {
         recordId: randomUUID(),
-        values: itemValues(sku, 'Workshop gloves', 'advisory duplicate'),
+        values: itemValues(sku, 'Workshop gloves', 'advisory duplicate', 'EA'),
       });
     }
     await invokeCatalogOperation(runtime, runtime.views.a, 'item_create', {
       recordId: randomUUID(),
-      values: itemValues('SKU-004', 'Safety glasses', 'eye protection'),
+      values: itemValues('SKU-004', 'Safety glasses', 'eye protection', 'EA'),
     });
     await invokeCatalogOperation(runtime, runtime.views.a, 'item_create', {
       recordId: randomUUID(),
-      values: itemValues('SKU-005', 'SKU-004', 'authority collision'),
+      values: itemValues('SKU-005', 'SKU-004', 'authority collision', 'EA'),
     });
     assert.equal(
       (await resolveItem(runtime, runtime.views.a, 'SKU-001')).outcome,
@@ -191,6 +199,7 @@ test('Catalog executes tenant SKU, resolver, lifecycle, and DTO contracts on rea
     );
     await assertPersistedItem(runtime.adminPool, runtime, itemId, {
       archived: true,
+      baseUnit: 'EA',
       description: 'M8 galvanized hex-head bolt',
       name: 'Galvanized bolt',
       revision: 3,
@@ -229,6 +238,7 @@ test('Catalog executes tenant SKU, resolver, lifecycle, and DTO contracts on rea
     assert.deepEqual(agentDto, queryDto);
     await assertPersistedItem(runtime.adminPool, runtime, itemId, {
       archived: false,
+      baseUnit: 'EA',
       description: 'M8 galvanized hex-head bolt',
       name: 'Galvanized bolt',
       revision: 4,
@@ -259,8 +269,10 @@ function itemValues(
   sku: string,
   name: string,
   description: string,
+  baseUnit: string,
 ): Record<string, string> {
   return {
+    [CATALOG_IDS.fieldIds.baseUnit]: baseUnit,
     [CATALOG_IDS.fieldIds.description]: description,
     [CATALOG_IDS.fieldIds.name]: name,
     [CATALOG_IDS.fieldIds.sku]: sku,
@@ -291,6 +303,7 @@ async function assertPersistedItem(
   recordId: string,
   expected: {
     archived: boolean;
+    baseUnit: string;
     description: string;
     name: string;
     revision: number;
@@ -307,12 +320,14 @@ async function assertPersistedItem(
   };
   const result = await pool.query<{
     archived: boolean;
+    baseUnit: string;
     description: string;
     name: string;
     revision: number;
     sku: string;
   }>(
     `SELECT ${quoted(entity.archive.archivedAtColumn)} IS NOT NULL AS archived,
+            ${quoted(fieldColumn(CATALOG_IDS.fieldIds.baseUnit))} AS "baseUnit",
             ${quoted(fieldColumn(CATALOG_IDS.fieldIds.description))} AS description,
             ${quoted(fieldColumn(CATALOG_IDS.fieldIds.name))} AS name,
             ${quoted(entity.optimisticRevision.column)} AS revision,

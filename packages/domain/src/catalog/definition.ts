@@ -17,6 +17,7 @@ const entityIds = {
 } as const;
 
 const fieldIds = {
+  baseUnit: `${CATALOG_NAMESPACE}:field.item_base_unit`,
   description: `${CATALOG_NAMESPACE}:field.item_description`,
   name: `${CATALOG_NAMESPACE}:field.item_name`,
   sku: `${CATALOG_NAMESPACE}:field.item_sku`,
@@ -28,7 +29,12 @@ const fieldIds = {
  * discovery, reporting, policy, verification, and runtime execution.
  */
 export function catalogModuleDefinition(): Record<string, unknown> {
-  const itemFields = [fieldIds.sku, fieldIds.name, fieldIds.description];
+  const itemFields = [
+    fieldIds.sku,
+    fieldIds.name,
+    fieldIds.description,
+    fieldIds.baseUnit,
+  ];
   return {
     assertions: [
       conformanceAssertion('item', `${CATALOG_NAMESPACE}:query.item_get`),
@@ -83,6 +89,15 @@ export function catalogModuleDefinition(): Record<string, unknown> {
         orderKey: 30,
         presence: 'optional',
         searchable: true,
+      }),
+      textField({
+        entityId: entityIds.item,
+        fieldId: fieldIds.baseUnit,
+        label: 'Base unit',
+        maximumLength: 32,
+        orderKey: 40,
+        presence: 'required',
+        searchable: false,
       }),
     ],
     hashAlgorithm: 'sha256',
