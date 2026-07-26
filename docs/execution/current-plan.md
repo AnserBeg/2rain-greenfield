@@ -5,7 +5,9 @@ narrative companion to `ledger.md`: the ledger records what each packet *was*, t
 records what we are doing *next* and *why*. Update it whenever the queue changes;
 delete rows once they are accepted and recorded in the ledger.
 
-Last updated: 2026-07-26, at `main` = `70df4b8`.
+Last updated: 2026-07-26. Most recent change: the **domain-model one-way doors** ruling
+(ADR-0015 – ADR-0018) and section G of the prior-art audit — see below, ahead of the queue,
+because it constrains G3 rather than the current slot.
 
 ## Operating model
 
@@ -84,6 +86,7 @@ Ordered. Each row names its source and why it holds its slot.
 | 9 | Policy/identity kernel | Critical | The one kernel seam with **no owner** — see decisions below. After fan-out, before G3. **Bound by the accepted G2-EK1 expression kernel:** `PolicyDefinition` carries "narrowing conditions" (plan line 643) and §12.2 line 2338 claims policy narrowing for the Formula family, so the kernel's jurisdiction ruling applies here — otherwise a second condition format is born in the trust layer, the most expensive place to unify later. Narrowing may only restrict a live ALLOW and must fail closed; it can never grant, nor override the mandatory kernel predicates (archive exclusion, tenant/environment RLS, record identity, optimistic revision, authorization). |
 | 10 | G2-P8 import → G2-P9 stage gate | — | Completes G2. |
 | 11 | Capability cycle-time baseline | Mechanical | **[Lever 4](coverage-strategy-levers.md) Half A, and the only part with a real cost of delay.** §15.7 measures module-building effort from *existing* capabilities — the wrong axis. Record, for each capability we add, the decision latency (gap identified → admitted) and implementation latency (admitted → shipped supported across all ten cells). **Startable now, before any tenant:** PR-6's `relation` index kind and row 3's two canonical families are capability additions whose cycle time is measurable today, and a baseline not started cannot be reconstructed. Small and order-independent — **take it any time; it does not displace Critical work.** |
+| 12 | **Publish-path breadth envelope** | Mechanical | **[ADR-0020](../decisions/ADR-0020-publish-path-budget-and-verification-integrity.md)'s only decaying obligation.** Today's gated ≤5,000 ms budget measures one module at the maximum field count; publish cost scales with a tenant's *whole* application, so the envelope that matters is a curve across N modules. Record it as a curve artifact, not a pass/fail assertion, until G6 sets an objective. Pairs directly with row 11 — both exist so a later decision has data instead of an argument, and "incremental compile, triggered by measured need" is unactionable without one. **Startable now, order-independent; take it any time and it does not displace Critical work.** |
 
 ## Settled by debate (2026-07-25)
 
@@ -177,11 +180,69 @@ ordering, fold parity and literal-versus-pattern search input. Those are frozen 
 immutable language, so a model may enumerate options and consequences but ratification
 is human.
 
-## Plan-level decisions pending before G3
+## Domain-model one-way doors — RULED 2026-07-26
+
+An independent re-derivation of the prior art (recorded as **section G** of
+[`prior-art-failure-modes.md`](prior-art-failure-modes.md)) found eleven failure modes the
+audit's sections A-F did not cover. Sections A-F are almost entirely about *customization
+architecture*; section G is about the **domain model, the operational envelope, and the
+business**, and that is where the remaining exposure now sits.
+
+Four of them are one-way doors that close permanently when the first inventory movement is
+posted. They are ruled, user-authorized, and carried by four ADRs:
+
+| Audit | Decision | ADR |
+|---|---|---|
+| G2 | `legalEntityId` on every business record from creation, as a **business** dimension — deliberately **not** a second tenancy axis, so ABI leading keys and RLS predicates are untouched and cross-entity consolidated reporting stays reachable | [ADR-0015](../decisions/ADR-0015-legal-entity-business-dimension.md) |
+| G1 | Stock identity is a declared versioned dimension set; every movement stamps its version; `unspecified` is a member, not a null; extension is governed with a re-baseline operation; base unit is immutable once a movement exists | [ADR-0016](../decisions/ADR-0016-stock-identity-dimension-set.md) |
+| G3 | Capture the inputs, compute nothing: receipt lines record actual cost or an **explicit absence**; movements carry no amount; `inventory.value` is `unsupported` | [ADR-0017](../decisions/ADR-0017-cost-capture-without-valuation.md) |
+| G6 | Distinct effective/recorded time with recorded time never editable and **never discarded by any projection**; tenant-declared zone and business day; per-entity period lock enforced inside the posting transaction | [ADR-0018](../decisions/ADR-0018-temporal-authority.md) |
+
+Two more section-G findings were closed the same day. Their deadlines are softer — nothing
+becomes impossible on a given day — but each carries one piece that decays:
+
+| Audit | Decision | ADR |
+|---|---|---|
+| G4 | **Tenant completeness manifest** (every table in every plane classified exactly once, verifier fails closed) plus three named recovery tiers — R1 in-band logical, R2 governed PITR reconciliation under a write freeze, R3 reconstruction into a fresh environment — and the binding rule that **no recovery path writes business rows into a live tenant by direct DML** | [ADR-0019](../decisions/ADR-0019-tenant-completeness-and-single-tenant-recovery.md) |
+| G7 | The budgeted unit is the **publish path**, not the compiler; **platform exclusion imposed on other tenants** is a second axis with a different remedy; a **breadth envelope** across N modules replaces the single-maximal-module point; and **verification scope narrows only by recorded impact analysis** | [ADR-0020](../decisions/ADR-0020-publish-path-budget-and-verification-integrity.md) |
+
+**What decays in those two:** the manifest is cheap at roughly ten tables and an archaeology
+project at a hundred (G3 cut, item 7); the breadth envelope is a curve that cannot be
+reconstructed if it is never started (startable now — see queue row 12). Everything else in
+ADR-0019/ADR-0020 is scheduled at G7 and G6 respectively.
+
+**Two connections worth carrying forward.** ADR-0020's verification-integrity clause shares its
+root with audit **E1**: Salesforce's 75%-coverage ritual and its documented
+disable-synchronous-compile guidance are the same failure at two ends — verification that
+exists to be satisfied rather than to be true. And ADR-0020's second axis promotes PR-6c's
+platform-wide advisory-key finding from a recorded note into a budgeted quantity, which is what
+eventually lets the procedural 2,000 ms trigger become a coded admission input.
+
+**The deadline is real and it is not a date.** The four one-way doors close when G3 posts its
+first movement,
+not on a calendar. Plan §11.6 now carries them as **binding prerequisites** ahead of the
+build list, the G3 gate proves each one with negative controls, plan §17 makes each a stop
+rule, and ledger rows `G3-P0`/`G4-P0` are seeded with their obligation lists in
+[`stage-cut-inputs.md`](stage-cut-inputs.md) §G3 and §G4. The G3 cut may not disposition any
+of them as a deferral past the posting service.
+
+**Two rulings worth carrying forward, because they were the non-obvious part:**
+
+- Legal entity is a *business* dimension, not a tenancy axis. Modelling it as tenancy would
+  have made cross-entity consolidated reporting — an ordinary authorized requirement —
+  unreachable by construction, and would have forced an ABI change reopening Freeze F, the
+  PR-6 relation indexes and the PR-6b folded columns. The physical-column-reservation
+  alternative for stock dimensions was offered and rejected for the same reason in reverse:
+  the version stamp achieves governed extension without carrying four unused columns through
+  every index from G3 to N3.
+- The general form is: **excluding a capability never authorizes discarding what that
+  capability will need.** Plan §2.3 now says so, for stock dimensions, unit conversion,
+  valuation and bitemporal reporting alike.
+
+## Plan-level decisions still pending before G3
 
 These are **not code work**. They change the storage model or the launch scope, so they
-are cheapest to decide before inventory exists. Recommended as one focused debate
-(they are entangled), run by the orchestrator.
+are cheapest to decide before inventory exists.
 
 1. **Erasure / data-subject rights.** No-hard-delete + additive-only + append-only trust
    facts + one shared database currently has **no erasure path**. Raised independently by
@@ -189,17 +250,30 @@ are cheapest to decide before inventory exists. Recommended as one focused debat
    answer and changes the storage model. The debate removed the `DROP SCHEMA` escape:
    schema-per-tenant relocates only module tables, leaving release, trust, audit,
    outbox and receipt rows shared. Potential launch blocker in EU jurisdictions.
-2. **Temporal semantics.** Bitemporality/effective-dating (prices, costs, FX, BOM versions,
-   as-of reporting) *and* timezone/business-day authority (what "a day" means for a tenant).
-   One topic, not two. G3 designs backdated postings and as-of balances against whatever is
-   decided; deciding late means rewriting inventory read models.
-3. **Inventory valuation + accounting handoff.** "What is my stock worth" is currently
-   unanswerable until N3. Adjacent to accounting, not identical. Pairs with defining the
-   accounting export/handoff contract before pilots.
-4. **Identity/policy kernel ownership.** `CurrentPolicyGateway` and `AuthenticateRequest`
+   Now also [audit G5](prior-art-failure-modes.md); it is a binary jurisdictional gate, not
+   a cost curve, which is why it is not ranked against the engineering items.
+2. **Identity/policy kernel ownership.** `CurrentPolicyGateway` and `AuthenticateRequest`
    are well-designed deny-capable ports whose only implementations are allow-all stubs.
    Every module declares `permissionId`s that nothing evaluates. Plan §13 has no work-package
    ID for identity/roles/policy, and it had no `doctrine-coverage.md` row until PR-4.
+   Now also [audit G8](prior-art-failure-modes.md), which records the consequence for this
+   document's other verdicts: F3 and F6 are graded on *structure*, and the structure is
+   right, but the gateway those paths consult currently says yes to everything. ADR-0015's
+   entity narrowing depends on the same kernel.
+**Closed 2026-07-26:** the former decision 3, single-tenant restore, is now
+[ADR-0019](../decisions/ADR-0019-tenant-completeness-and-single-tenant-recovery.md). The
+*mechanism* is decided; what remains at G7 is the **commercial** question of whether it is a
+published promise with an RTO/RPO or an operator capability with a best-effort target, and
+ADR-0019 recommends the latter for R2 because its tenant write freeze makes a hard RTO
+dishonest.
+
+### Section G items that are not plan decisions
+
+Recorded so they are not silently dropped: **G9** distribution and channel economics (belongs
+in the tracked risk register, and no architectural work retires it); **G10** agent cost per
+completed journey (add the field to §15.6's existing evidence artifact — now carried by
+[`stage-cut-inputs.md`](stage-cut-inputs.md) §G7 item 4); **G11** symmetry and the late Tier C
+escape hatch compounding, which promotes audit B5 to the highest-ranked genuinely open item.
 
 ## Review sources feeding this queue
 

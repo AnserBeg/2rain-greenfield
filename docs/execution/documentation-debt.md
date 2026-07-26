@@ -22,8 +22,24 @@ design exists or authorize its implementation in an unrelated packet.
   triggers, and current disposition.
 - **Why it matters:** risks now live across plans, ADRs, packet records, and
   reviews, so ownership and changes in exposure are difficult to audit.
+- **Seed rows already identified.** Section G of
+  [`prior-art-failure-modes.md`](prior-art-failure-modes.md) produced three findings that
+  belong in the register rather than in plan §16, because no architectural work retires
+  them and no existing instrument can see them:
+  - **G9 — distribution and channel economics.** The most common cause of death for a new
+    ERP vendor, and structurally invisible to every instrument in this repository, all of
+    which measure engineering. Compiere had this architecture in 1999 and died of a
+    licensing and governance dispute.
+  - **G10 — agent cost per completed journey.** §15.6 measures tool round trips, which is a
+    proxy for latency, not for spend. Cheapest fix: one more field in an evidence artifact
+    that already exists, recorded from the first agent packet.
+  - ~~**G7 — compile-and-verify latency envelope.**~~ **Closed 2026-07-26** by
+    [ADR-0020](../decisions/ADR-0020-publish-path-budget-and-verification-integrity.md); the
+    breadth envelope is now `current-plan.md` queue row 12, so it is tracked work rather than
+    an unowned risk.
 - **Closes when:** a selected documentation packet establishes the register,
-  its update cadence, ownership, and links from execution authority.
+  its update cadence, ownership, and links from execution authority, and dispositions the
+  three seed rows above.
 
 ## Remaining SLO and error-budget ratification
 

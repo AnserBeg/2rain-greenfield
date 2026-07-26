@@ -1,8 +1,9 @@
 # Prior-art failure modes and our controls
 
 Status: analysis, not authority. Nothing here overrides the plan or an accepted ADR.
-Date: 2026-07-25
-Position in program: G2 active (Party accepted, PR-1..PR-6 correctives accepted, PR-6b in flight)
+Date: 2026-07-25; **section G added 2026-07-26**
+Position in program: G2 active (Party/Catalog/Location accepted, PR-1..PR-6b correctives
+accepted, G2-EK1 accepted)
 Purpose: enumerate every recurring failure mode of prior metadata-driven / model-driven
 ERP platforms, and state honestly whether this program addresses it, how, or what to do.
 
@@ -14,9 +15,32 @@ Verdict vocabulary:
 | **PARTIAL** | A mechanism exists but has a known hole, or is designed and not yet proven |
 | **NAMED-NOT-DESIGNED** | The plan acknowledges the risk, but the control is a process or a future proof, not a mechanism |
 | **GAP** | Not addressed anywhere |
+| **NOT-DIRECTLY-ADDRESSABLE** | No mechanism can close it; only indirect mitigation and a watched signal (E4 only) |
 
-Summary: 15 ADDRESSED, 8 PARTIAL, 3 NAMED-NOT-DESIGNED, 2 GAP. The highest-value actions
-are listed at the end.
+Qualifiers on a verdict — `IN DESIGN, UNPROVEN`, `BY CONSTRUCTION`, `AT THE META LEVEL`,
+`UNPROVEN AT BREADTH` — narrow the claim and are part of it. `ADDRESSED IN DESIGN, UNPROVEN`
+in particular means a named mechanism exists on paper and no gate executes it yet.
+
+Summary over **45 failure modes**: 27 ADDRESSED, 8 PARTIAL, 5 NAMED-NOT-DESIGNED, 4 GAP,
+1 NOT-DIRECTLY-ADDRESSABLE. The highest-value actions are listed at the end.
+
+**Read the ADDRESSED column carefully: 7 of the 27 are `ADDRESSED IN DESIGN, UNPROVEN`** —
+a mechanism is decided and written down, and nothing executes yet. Those are ADR-0015 through
+ADR-0020 plus C5, all of which get their first real test at G3 or later. Collapsing them into
+the same bucket as B1 (banned in five places, enforced today) would overstate the position.
+
+*Count corrected 2026-07-26.* The previous header read "15 ADDRESSED, 8 PARTIAL, 3
+NAMED-NOT-DESIGNED, 2 GAP" — 28 items against 34 sections in A-F alone, so it had never
+reconciled. The tally above is derived from the verdict line of every section. No verdict
+changed as a result; only the arithmetic did.
+
+**Section G was added 2026-07-26** after an independent re-derivation of the prior art found
+eleven failure modes sections A-F do not cover. Sections A-F are almost entirely about
+*customization architecture*, which is where this program's thinking has been concentrated;
+section G is about the **domain model, the operational envelope, and the business**, and
+that is where the remaining exposure now sits. Six of the eleven are closed by ADR-0015
+through ADR-0020, all ruled the same day: G1, G2, G3 and G6 (the domain-model one-way doors),
+then G4 (single-tenant recovery) and G7 (publish-path latency).
 
 **B7 is RESOLVED (2026-07-26)** and no longer the top open item. Its mechanism is decided
 by [ADR-0013](../decisions/ADR-0013-semantic-patch-lineage.md): persist the semantic patch
@@ -611,6 +635,273 @@ pool-reuse isolation.
 
 ---
 
+---
+
+## G. Domain model, operational envelope, and business (added 2026-07-26)
+
+Sections A-F ask "will the customization architecture survive contact with customers." Section
+G asks three different questions: is the **business model** shaped so it can grow, can the
+**operational envelope** survive a real incident, and is there a **company** around the
+product. Prior art dies of all three at least as often as it dies of overlay resolution.
+
+### G1. The ledger grain is a one-way door
+
+**What happened.** Every inventory system eventually adds lot, serial, expiry, bin or
+quality status. Each one is a new member of the key that names a bucket of stock. Systems
+that hardcoded `(item, location)` into their balance logic discovered that adding a
+dimension meant either a history rewrite they could not perform or a permanent untracked
+era that every report, recall and audit had to special-case forever. The same trap catches
+unit of measure: change an item's base unit after postings exist and every historical
+quantity silently changes meaning.
+
+This is not an exotic failure. It is the normal way a v1 inventory system becomes
+unextendable, and it is invisible until the extension is attempted.
+
+**Verdict: ADDRESSED IN DESIGN, UNPROVEN.** [ADR-0016](../decisions/ADR-0016-stock-identity-dimension-set.md)
+makes stock identity a declared versioned dimension set, stamps every posted movement with
+the version it was posted under, makes `unspecified` a first-class member rather than a null,
+and requires a named re-baseline operation for extension. Base-unit immutability once any
+movement exists is a compiler rule plus a provider constraint. Plan §6.3, §6.4 invariants
+16-17, §11.6 prerequisites and gate, §12.6, §14.3, §16 and §17 carry it.
+
+**What remains.** It is design. G3 must land it *before* the first posted movement, and the
+gate's replay property — adding a dimension reproduces byte-identical prior balances — is
+the proof.
+
+### G2. No legal-entity dimension
+
+**What happened.** Almost every business that outgrows one company runs two, and every ERP
+that shipped with a single implicit company had to retrofit an organizational dimension into
+a schema whose keys were already frozen. Compiere/iDempiere carried `AD_Client`/`AD_Org` from
+the start and could grow; systems that did not, could not.
+
+Before this ruling the words "legal entity" and "company" appeared **zero times** in the plan.
+Tenant and environment were the only scoping axes.
+
+**Verdict: ADDRESSED IN DESIGN, UNPROVEN.** [ADR-0015](../decisions/ADR-0015-legal-entity-business-dimension.md)
+puts `legalEntityId` on every business record from creation as a compiler-derived system
+column. The load-bearing ruling is that it is a **business** dimension, not a second tenancy
+axis: it does not enter `northstar.postgresql-module-provider-abi/v1`'s leading key columns
+or the RLS predicate, because cross-entity consolidated reporting is an ordinary authorized
+requirement that an isolation boundary would forbid by construction. Freeze F, the PR-6
+relation indexes and the PR-6b folded columns are untouched.
+
+**What remains.** Enforcement by entity is policy narrowing, which depends on the
+identity/policy kernel — presently an allow-all stub (queue row 9). Until that lands, entity
+is recorded and queryable but not enforceable, and the ADR says so rather than implying
+otherwise.
+
+### G3. Discarding the inputs to valuation
+
+**What happened.** The distinction between "we do not compute stock value" and "we do not
+retain the inputs to stock value" is one that plans routinely fail to make. Perpetual
+valuation needs the actual cost at which each receipt entered stock; the purchase-order price
+is not a substitute, because partial receipts, substitutions, price corrections and supplier
+credits all move it. A receipt that posts without capturing actual cost destroys the input
+permanently.
+
+The consequence is **E4 in its most predictable form**. "What is my stock worth" is among the
+first questions an owner asks. An unanswerable question becomes a spreadsheet, and the
+spreadsheet becomes the peer source of truth doctrine #4 exists to prevent. The audit
+previously treated E4 as unaddressable in general while the plan itself created the specific
+trigger.
+
+**Verdict: ADDRESSED IN DESIGN, UNPROVEN.** [ADR-0017](../decisions/ADR-0017-cost-capture-without-valuation.md):
+capture the inputs, compute nothing. Receipt lines carry actual received unit cost or an
+**explicit absence** — never zero, never null-as-unknown — so a coverage gap is a queryable
+row list. Movements carry no monetary amount; cost is reached through the source-document
+lineage ADR-0007 already guarantees. `inventory.value` resolves to `unsupported` and the agent
+surfaces it as a capability gap rather than approximating it.
+
+**What remains.** The obligation sits at G4, where goods receipt lives. G3 must not invent a
+costed movement in the meantime.
+
+### G4. Per-tenant point-in-time restore in a shared database
+
+**What happened.** Shared-schema multi-tenancy makes single-tenant recovery nearly impossible,
+and every vendor discovers this during a real customer incident rather than in design.
+Salesforce retired its Data Recovery Service on 31 July 2020 — $10,000, six-plus weeks, and
+results that were not reliably complete — then reversed course and replaced it with a
+product. ServiceNow customers hit the same wall.
+
+**Verdict: ADDRESSED IN DESIGN, UNPROVEN** (was GAP; closed 2026-07-26 by
+[ADR-0019](../decisions/ADR-0019-tenant-completeness-and-single-tenant-recovery.md)).
+
+Plan §7.5's original list — encrypted backups, PITR, isolated-environment restore, tenant
+export, read-model and search-index reconstruction, outbox replay, release-pointer
+restoration, measured RTO/RPO — was entirely whole-cluster. The topology made the obvious fix
+unavailable: pooled shared tables plus no-hard-delete plus append-only trust facts mean a
+restore cannot be expressed as delete-and-replay.
+
+ADR-0019 answers in two parts. The **tenant completeness manifest** classifies every table in
+every plane exactly once as tenant-scoped or tenant-independent, with a verifier that fails
+closed — the same shape as ADR-0011's accounted additive closure, applied to tenancy. Cheap at
+ten tables, an archaeology project at a hundred, and the shared prerequisite for tenant export,
+single-tenant recovery, and whatever G5's erasure debate decides. **Three named recovery
+tiers** follow: R1 in-band logical recovery through the ordinary operation algebra, which
+serves most incidents; R2 governed point-in-time reconciliation via isolated PITR and
+compensating operations under a write freeze; and R3 reconstruction into a fresh environment.
+
+The binding prohibition is that **no recovery path writes business rows into a live tenant by
+direct DML**, which removes the "except during recovery" reading of §17 that would otherwise
+be discovered under incident pressure.
+
+**What remains.** It is design; the G7 recovery drill proves it. Two limits are recorded rather
+than papered over: R2 requires a tenant write freeze, so a hard RTO for it would be dishonest;
+and because posted facts cannot be edited, R2 is forward motion — the customer's bad Tuesday
+and its correction both stay in history forever. Whether single-tenant recovery is a published
+product promise remains a G7/G8 commercial decision.
+
+### G5. Erasure versus append-only
+
+**What happened.** Append-only trust substrates and data-subject erasure rights are in direct
+tension, and the tension is not resolvable by policy. Crypto-shredding — per-subject key,
+delete the key — is the industry's standard answer and it changes the storage model.
+
+**Verdict: NAMED-NOT-DESIGNED.** Tracked as `prose-only` in
+[`doctrine-coverage.md`](doctrine-coverage.md) and as pending plan-level decision 1, raised
+independently by two external reviews, with the `DROP SCHEMA` escape already eliminated by
+debate. It was absent from this audit until now, which understated the program's real
+exposure: it is a potential launch blocker in EU jurisdictions, not a hygiene item.
+
+### G6. Temporal ambiguity
+
+**What happened.** Four questions hide inside "closed periods if enabled": what backdating may
+do, what "a day" means for a tenant spanning time zones, what enforces a period close and
+whether it can be reopened, and whether the system can ever reproduce what a report said last
+Tuesday. The last is the trap — read models keyed only on effective time make every prior
+report unexplainable the moment a backdated posting lands, and the information needed to
+recover that ability was never stored.
+
+**Verdict: ADDRESSED IN DESIGN, UNPROVEN.** [ADR-0018](../decisions/ADR-0018-temporal-authority.md)
+separates `effectiveAt` from `recordedAt` with recorded time sourced from trusted context and
+never editable, requires the tenant to declare a time zone and business-day boundary, makes
+the period lock an enforced posting precondition inside the transaction with distinct advance
+and reopen operations, and — the actual cost-of-delay item — forbids any read model,
+projection, index, export or reconciliation from discarding recorded time, so the ledger stays
+bitemporally reconstructible even though launch ships as-of-effective reads only.
+
+**What remains.** The no-discard rule binds every read-model author from G3 onward, including
+projections written for performance. It is a real constraint on materialization work.
+
+### G7. Compile-and-verify latency as customization accumulates
+
+**What happened.** D5 correctly claims request-time interpretation is solved by construction.
+The other half of the prior art's pain is *publish* time: Dynamics 365 F&O full builds run for
+hours; Salesforce deploys are throttled by mandatory synchronous compile and test execution,
+to the point that the documented workaround is to disable synchronous compile and accept
+runtime errors instead. Slow publish throttles the customization loop, which is the product.
+
+**Verdict: ADDRESSED IN DESIGN, UNPROVEN** (was PARTIAL; closed 2026-07-26 by
+[ADR-0020](../decisions/ADR-0020-publish-path-budget-and-verification-integrity.md)).
+
+The architecture carries the same mechanism — normalize the whole desired state, compile
+atomically, run generated assertions and provider conformance before activation — so cost
+scales with total application size rather than with the change.
+[`compiler-slos.md`](../operations/compiler-slos.md) had a real, gated ≤5,000 ms cold full
+compile, but at the Freeze A maximum-field envelope under **one** module, entity and storage
+mapping, with incremental compile reserved and cold-only and preview untargeted.
+
+ADR-0020 makes three rulings. **The budgeted unit is the publish path, not the compiler** —
+accepted draft through compile, verification, preparation and activation, with human wait
+reported and excluded, because optimizing compile to five seconds while the path takes minutes
+is exactly the prior art's mistake. **A second axis is budgeted separately**: PR-6c established
+that a deferred-family transaction holds the platform-wide materializer key for the whole
+rewrite, so one tenant's publish can fail every other tenant's `prepare` with
+`MIGRATION_LOCK_TIMEOUT` — a quantity whose remedy is online DDL strategy, never a faster
+compiler. And **the breadth envelope** — a curve across N modules rather than one maximal
+module — is startable now, because "triggered by measured need" requires a trend and a baseline
+never started cannot be reconstructed.
+
+**The load-bearing clause is verification integrity.** Scope narrows only by a sound impact
+analysis derived from the compiled diff, recorded with the candidate; never by sampling,
+time-boxing, author selection, a skip flag, or deferral past activation. A budget miss is
+remedied by incremental compile, memoization, or an honestly slower budget — never by weakening
+verification. This is **E1's root at the other end**: Salesforce's 75% coverage ritual and its
+disable-synchronous-compile guidance are the same failure, verification that exists to be
+satisfied rather than to be true.
+
+**What remains.** The breadth envelope is a recorded curve, not yet a gate; G6 sets the numeric
+objective when a preview and a real authoring flow exist to measure. The 2,000 ms exclusion
+trigger is still procedural — `runtime-slos.md` records that nothing in the activation path
+consumes rehearsal evidence — and should become a coded admission input when the
+online-strategy packet lands.
+
+### G8. The policy kernel is a stub while every module declares permissions
+
+**What happened.** Not a prior-art failure so much as a live inconsistency worth naming here,
+because several verdicts in sections D-F lean on it.
+
+**Verdict: NAMED-NOT-DESIGNED.** `CurrentPolicyGateway` and `AuthenticateRequest` are
+well-designed deny-capable ports whose only implementations are allow-all stubs; every module
+declares `permissionId`s that nothing evaluates; plan §13 has no work-package ID for
+identity/roles/policy. Tracked as `prose-only` in `doctrine-coverage.md`, pending decision 4,
+and queue row 9.
+
+**What it means for this audit.** F3 (agent over-authority) and F6 (confused deputy) are graded
+ADDRESSED on the strength of doctrine, ADR-0009 and PR-3's server-issued bound confirmation —
+all real — but the policy gateway those paths consult currently says yes to everything. The
+verdicts are about *structure*, and the structure is right; they are not yet claims about
+runtime behaviour. G2's entity-narrowing depends on the same kernel.
+
+### G9. Distribution, not architecture, is what usually kills the vendor
+
+**What happened.** The most common cause of death for a new ERP vendor is not a design defect.
+ERP is bought on references, vertical fit and channel, with long cycles, and the consistent
+finding across post-mortems is that selection turns on how many companies of the buyer's size
+and operational profile the vendor has already implemented. Compiere had this architecture in
+1999 and died of a licensing and community-governance dispute that forked it twice. NetSuite
+survived a decade of losses because Larry Ellison funded it personally. Odoo and ERPNext
+survived on open-source distribution rather than product superiority.
+
+**Verdict: GAP — and structurally invisible to this document.** Every instrument in this
+repository measures engineering. Nothing measures whether anyone will buy it.
+
+**What to do.** Nothing in the plan; this is not a plan concern. But the tracked
+[documentation-debt](documentation-debt.md) "living risk register" is the right home, and this
+belongs in it as a first-class row alongside the architectural risks. A2's structural advantage
+buys nothing if the company does not reach a second customer.
+
+### G10. Agent unit economics
+
+**What happened.** The newest failure mode, and too new for post-mortems: an agent-first product
+whose marginal inference cost per business transaction exceeds its marginal revenue per seat.
+Gartner's projection that over 40% of agentic AI projects will be scrapped by 2027 is largely
+an operationalization and ROI finding, not a capability one.
+
+**Verdict: GAP.** Section F grades the agent's *architecture* thoroughly — five fixed tools,
+constant context with module count, bounded discovery, numeric gates at G1/G3/N1. All of that
+bounds context *size*. Nothing anywhere bounds or measures **cost per completed operation**,
+and §15.6's comparative benchmark measures tool round trips, which is a proxy for latency, not
+for spend.
+
+**What to do.** §15.6 already instruments runs. Record cost per completed journey alongside
+round trips in the same evidence, from the first agent packet. It is one more field in an
+artifact that already exists, and it is the number that decides whether the agent is a feature
+or the product.
+
+### G11. Symmetry and a late escape hatch compound
+
+**What happened.** Sections B2 and B5 are graded separately, and the interaction between them
+is the thing that actually bit the symmetric prior art.
+
+Symmetry (doctrine #2) means the platform's expressiveness ceiling **is the product's
+ceiling** — you cannot ship a first-party feature the platform cannot express. That is exactly
+the discipline that makes symmetry valuable, and it is why B2 is graded ADDRESSED. But it also
+means every capability gap is load-bearing for the vendor's own roadmap, not just for
+customers, and the only relief valve is Tier B/C. Tier C is scheduled at **N7**, after
+N2-N6 of accumulating pressure.
+
+Odoo and ERPNext are the symmetric existence proofs, and both stayed mid-market. B2 notes they
+are "smaller" without asking why. This is a substantial part of why.
+
+**Verdict: PARTIAL — the components are graded, the interaction is not.** B5's recommendation —
+split the Tier C **envelope** from its implementation and build the envelope early — is the
+correct mitigation and this makes it more urgent, not less: under symmetry the first blocked
+party is the vendor's own team, which arrives well before the first blocked customer.
+
+---
+
 ## The five things worth acting on
 
 Ranked by cost-of-delay, not by severity.
@@ -633,6 +924,39 @@ Ranked by cost-of-delay, not by severity.
    before the trend is otherwise visible.
 
 Items 2–4 are all cheapest *before* the customization canonical model is authored, which
-places them ahead of G6. That is the actionable through-line: this program's remaining
-prior-art exposure is concentrated almost entirely in the customization layer it has not
-built yet.
+places them ahead of G6.
+
+### Revised through-line (2026-07-26)
+
+The original closing claim — that remaining exposure is "concentrated almost entirely in the
+customization layer" — **was wrong, because sections A-F only looked there.** Section G
+relocates it. The current ranking by cost-of-delay is:
+
+1. ~~**G1, G2, G3, G6 — the one-way doors in the domain model.**~~ **CLOSED 2026-07-26** by
+   ADR-0015 through ADR-0018. All four shut permanently the moment the first movement is
+   posted, which makes them the only items on this page with a hard deadline rather than a
+   rising cost. G3's stage cut owns landing them *before* the posting service, and
+   [`stage-cut-inputs.md`](stage-cut-inputs.md) §G3 carries the obligations.
+2. ~~**G4 — single-tenant recovery.**~~ **CLOSED 2026-07-26** by ADR-0019. The mechanism and
+   its honest limits are decided; the **tenant completeness manifest** is the part with a real
+   cost of delay and belongs to the G3 cut, not to G7, because it is cheap at ten tables and
+   an archaeology project at a hundred. The commercial promise decision stays at G7/G8.
+3. ~~**G7 — publish-path latency.**~~ **CLOSED 2026-07-26** by ADR-0020, with one live
+   obligation: the **breadth envelope** is startable now and is the only piece that decays,
+   since "triggered by measured need" requires a curve nobody is yet recording.
+4. **B5 / G11 — the Tier C envelope.** Promoted by G11: under symmetry the first blocked
+   party is our own team, so this arrives earlier than "the first blocked customer" implies.
+   This is now the highest-ranked genuinely open item.
+5. **E1, D2 — compiler-derived assertions and "explain this outcome",** both cheapest before
+   the customization model is authored. E1 shares its root with G7's verification-integrity
+   clause: verification that exists to be satisfied rather than to be true.
+6. **G10, B3, A3 — the three cheap instruments.** Agent cost per completed journey,
+   rule-#5 disposition rates, per-tenant configuration hours. All three are logging, and all
+   three give quarters of warning.
+
+**G5 (erasure) is not ranked here** because it is not an engineering cost curve — it is a
+binary jurisdictional gate that either blocks an EU launch or does not. It belongs to the
+pending plan-level decision, not to this ordering.
+
+**G9 (distribution) belongs in the risk register, not here.** No amount of architectural work
+retires it, and this document has no instrument that can see it.

@@ -67,6 +67,24 @@ was written, each with its source.
     a gap, presenting the alternative *together with its difference*. Extends plan §12.13,
     which covers discovery and disambiguation only.
 
+### From the publish-path budget
+
+16. **The `publishPath` family gets its numeric objective**, both axes — publisher latency and
+    platform exclusion imposed on other tenants — measured against the breadth envelope rather
+    than the single-maximal-module point. The envelope itself is startable before G6 and should
+    already be a curve by the time this cut runs.
+    ([ADR-0020](../decisions/ADR-0020-publish-path-budget-and-verification-integrity.md);
+    [audit G7](prior-art-failure-modes.md))
+17. **Verification integrity is enforced, not asserted.** Scope narrows only by a sound impact
+    analysis derived from the compiled diff, recorded with the candidate. Structural test plus
+    a negative control for each of the five forbidden narrowings — sampling, time-boxing,
+    author/tenant selection, a skip flag, deferral past activation. This is the same root as
+    item 12 below, at the other end: verification that exists to be satisfied rather than to be
+    true. (ADR-0020)
+18. **Incremental compile, if it ships, is byte-identical to a cold compile**, proven by a
+    negative control that perturbs the incremental path. A nearly-identical second path is a
+    second compiler. (ADR-0020; doctrine #1; plan §5.7)
+
 ### From verification
 
 12. **Compiler-derived assertions gate customization candidates**; author-supplied scenarios
@@ -85,6 +103,86 @@ was written, each with its source.
     be retired safely. ([audit B6](prior-art-failure-modes.md))
 
 ---
+
+## G3 — inventory truth alpha (not yet seeded)
+
+**These are hard-deadline obligations, not a backlog.** Each one closes permanently when the
+first movement is posted, because ADR-0007 and plan §7.4 forbid rewriting a posted fact. A G3
+packet that posts a movement without them does not create debt; it creates an unrecoverable
+condition. Plan §11.6 now carries them as binding prerequisites and the G3 gate proves them.
+
+1. **The `legalEntityId` dimension exists on every business record**, as a compiler-derived
+   system column, with the `legal_entity` master authored declaratively in Party and every
+   tenant provisioned with exactly one entity. It is a business dimension, **not** a tenancy
+   axis: it does not enter the provider ABI's leading key columns or the RLS predicate.
+   Requires a `northstar.storage-target-payload` version bump.
+   ([ADR-0015](../decisions/ADR-0015-legal-entity-business-dimension.md); [audit G2](prior-art-failure-modes.md))
+2. **The versioned stock-dimension set exists**, every movement stamps the version it was
+   posted under, `unspecified` is a first-class member rather than a null, extension is a
+   governed versioned event with a named re-baseline operation, and removal is unsupported.
+   ([ADR-0016](../decisions/ADR-0016-stock-identity-dimension-set.md); [audit G1](prior-art-failure-modes.md))
+3. **Base unit is immutable once any posted movement references the item**, enforced by
+   compiler rule and provider constraint, with the diagnostic naming the binding movement.
+   (ADR-0016)
+4. **The temporal contract holds**: distinct `effectiveAt`/`recordedAt` with recorded time
+   from trusted context and no update path; a tenant-declared IANA zone and business-day
+   boundary with no silent UTC default; a per-entity `closedThrough` lock enforced inside the
+   posting transaction; and advance and reopen as separate permissioned audited operations.
+   ([ADR-0018](../decisions/ADR-0018-temporal-authority.md); [audit G6](prior-art-failure-modes.md))
+5. **No read model, projection, index, export or reconciliation discards recorded time**, so
+   the ledger stays bitemporally reconstructible. This binds every read-model author from G3
+   onward, including projections written for performance. (ADR-0018)
+6. **Movements carry no monetary amount**, and no compiled artifact derives one from a
+   movement. G3 must not invent a costed movement ahead of G4's receipt-cost capture.
+   ([ADR-0017](../decisions/ADR-0017-cost-capture-without-valuation.md); [audit G3](prior-art-failure-modes.md))
+7. **The tenant completeness manifest exists** — every table in every plane classified
+   exactly once as tenant-scoped, naming its tenant column, or tenant-independent with a
+   recorded reason, with a verifier that fails closed on an unclassified table and reuses
+   ADR-0011's accounted-additive-closure object enumeration. **Not a posting-deadline item**,
+   but placed here because it is cheap at roughly ten tables and an archaeology project at a
+   hundred, it turns §7.5's promised tenant export from a claim into a provable operation, and
+   it is the hardest prerequisite for whichever answer the erasure decision reaches.
+   ([ADR-0019](../decisions/ADR-0019-tenant-completeness-and-single-tenant-recovery.md);
+   [audit G4](prior-art-failure-modes.md))
+8. **Already routed here by earlier reviews, and re-stated so the cut sees one list:**
+   movements table partitioned by `(tenant, period)` **from creation**; TigerBeetle-shaped
+   two-phase reservation; anchor row as a *derived cache with a proof obligation*; natural-key
+   idempotency `(source_type, source_id, source_line, revision, posting_role)`. Note that
+   `period` in the partition key is now defined by ADR-0018's tenant business day rather than
+   left implicit.
+
+## G4 — purchasing and receiving alpha (not yet seeded)
+
+1. **Goods receipt lines capture actual received unit cost and currency, or an explicit
+   absence** — never zero, never null-as-unknown — so a coverage gap is an exact queryable row
+   list and N3 valuation is a derivation rather than an archaeology project.
+   ([ADR-0017](../decisions/ADR-0017-cost-capture-without-valuation.md); [audit G3](prior-art-failure-modes.md))
+2. **`inventory.value` and costed-balance query IDs resolve to `unsupported`** with a named
+   required capability, and the agent surfaces the gap as a first-class capability card rather
+   than approximating an answer. (ADR-0017; plan §5.5)
+
+## G7 — integrated pilot and release candidate (ledger row `G7-P0`, seeded `planned`)
+
+1. **The three recovery tiers are rehearsed with measured times** — R1 in-band logical
+   recovery, R2 governed point-in-time reconciliation, R3 reconstruction into a fresh
+   environment — with R2 proven idempotent under interruption and resumption, and the tenant
+   completeness manifest verified.
+   ([ADR-0019](../decisions/ADR-0019-tenant-completeness-and-single-tenant-recovery.md);
+   plan §7.5, §11.10 item 6)
+2. **No recovery path writes business rows into a live tenant by direct DML**, proven
+   structurally rather than by review, so the "except during recovery" reading of plan §17
+   cannot be discovered under incident pressure. (ADR-0019)
+3. **The commercial decision on single-tenant recovery**: a published product promise with an
+   RTO/RPO, or an operator capability with a best-effort target. R2's tenant write freeze makes
+   a hard RTO for it dishonest, so this is a real choice with a recommendation attached, not a
+   formality. (ADR-0019)
+4. **Agent cost per completed journey** joins §15.6's existing evidence artifact alongside tool
+   round trips. Plan §11.10 item 3 already requires agent "latency/cost budgets"; this names the
+   unit so the budget is about spend rather than only latency.
+   ([audit G10](prior-art-failure-modes.md))
+5. **Re-examine X-01's replay fidelity** before the G7 gate depends on it. G0-P6b was accepted
+   "with red replay limitations," and the G7 gate requires a ≥50% reduction in median tool round
+   trips *against that baseline*. ([audit F4](prior-art-failure-modes.md))
 
 ## N1 — prove whole-module generation (not yet seeded)
 

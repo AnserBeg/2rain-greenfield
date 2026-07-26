@@ -61,7 +61,10 @@ Authority in the new product is:
 | Deployable application definition | Immutable `TenantRelease`                                                         |
 | Active application version        | CAS pointer keyed by trusted tenant and environment                               |
 | Business records                  | PostgreSQL domain tables or registered generated-record storage                   |
+| Business scoping within a tenant  | Compiled `legalEntityId` dimension on every business record (ADR-0015)            |
 | Inventory truth                   | Append-only posted inventory movements plus active reservation facts              |
+| Inventory stock identity          | The versioned stock-dimension set (ADR-0016)                                      |
+| Business time                     | Distinct `effectiveAt`/`recordedAt` under the tenant-declared business day (ADR-0018) |
 | Current access                    | Identity and Policy gateways using trusted current context                        |
 | Normal application reads          | Semantic Query Gateway over registered read models                                |
 | Business writes and effects       | Semantic Operation Gateway over generated or registered handlers                  |
@@ -211,14 +214,22 @@ AI operations agent.
 Launch includes:
 
 - tenants, environments, users, roles, and permissions;
+- one legal entity per tenant, with the entity dimension present on every business
+  record from creation so multi-entity operation is a later capability rather than a
+  schema event (ADR-0015);
+- a tenant-declared time zone and business-day boundary (ADR-0018);
 - parties with supplier and customer roles;
 - stock items/SKUs and locations;
 - inventory movement history, balances, availability, adjustments, transfers,
   and counts sufficient for ordinary small-business operation;
 - purchase orders, lines, receiving, receipt correction, and supplier history;
+- actual received unit cost captured on goods receipt lines as an immutable operational
+  fact, with explicitly-absent recorded where unknown — captured, never computed with
+  (ADR-0017);
 - sales orders, lines, reservation/release, shipping, shipment correction, and
   customer history;
-- exact quantities and one declared base unit per item;
+- exact quantities and one declared base unit per item, immutable once any movement
+  references the item (ADR-0016);
 - list, detail, create, edit, and operational surfaces;
 - server-derived on-hand, reserved, available, open-to-receive, and
   open-to-ship values;
@@ -238,7 +249,9 @@ Do not put these on the initial launch critical path:
 - advanced pricing, promotions, multi-currency, landed cost, or revenue
   recognition;
 - lot/serial/expiry tracking, regulated chain of custody, manufacturing,
-  bills of material, warehouse waves, route optimization, or forecasting;
+  bills of material, warehouse waves, route optimization, or forecasting — all of
+  which arrive as members of the versioned stock-dimension set (ADR-0016), never as a
+  ledger rewrite;
 - arbitrary code, raw SQL, arbitrary HTTP, tenant-authored DDL, raw CSS/HTML,
   server WASM, or isolated UI extensions;
 - a connector marketplace or general workflow provider;
@@ -247,6 +260,12 @@ Do not put these on the initial launch critical path:
 - multi-provider storage abstraction beyond one tested PostgreSQL adapter.
 
 These are future capability cells, not rejected product directions.
+
+Four of them are excluded from *computation* while their *inputs* are retained from the
+first day, because the inputs are unrecoverable afterwards and the computation is not:
+stock dimensions beyond entity/item/location (ADR-0016), unit conversion (ADR-0016),
+inventory valuation (ADR-0017), and bitemporal reporting (ADR-0018). Excluding a
+capability never authorizes discarding what that capability will need.
 
 ## 3. Non-negotiable architecture doctrine
 
@@ -438,8 +457,15 @@ Reserve stable identity, versioning, dependency, and serialization seams for:
 - connector and secret references;
 - domain-pack bindings;
 - generated Tier-A entity storage promotion;
-- server WASM and isolated UI extensions; and
-- accounting-event and posting-intent references.
+- server WASM and isolated UI extensions;
+- accounting-event and posting-intent references;
+- multi-entity operations — intercompany movement and cross-entity consolidation — over
+  the `legalEntityId` dimension that exists from launch (ADR-0015);
+- stock-dimension-set extension and its re-baseline operation (ADR-0016);
+- unit conversion at the document boundary, which never restates the ledger (ADR-0016);
+- inventory valuation over retained receipt cost (ADR-0017); and
+- bitemporal query and reporting over the `effectiveAt`/`recordedAt` pair that the ledger
+  retains from launch (ADR-0018).
 
 Only a stage that consumes one of these may implement it. Reserved variants
 emit no runtime artifact and remain `planned` or `unsupported`.
@@ -784,9 +810,13 @@ ERP module without becoming an unsafe generic database editor.
 
 Use five initial domain packages:
 
+The `legal_entity` master record is owned by Party. Every domain package carries the
+`legalEntityId` dimension on its business records but none of them owns the entity master
+(ADR-0015).
+
 | Domain package | Owns                                                                                                        | Does not own                                         |
 | -------------- | ----------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| Party          | Party identity, supplier/customer roles, names, contact/address facts needed by launch records              | Inventory quantities, orders, communication delivery |
+| Party          | Legal-entity master, party identity, supplier/customer roles, names, contact/address facts needed by launch records | Inventory quantities, orders, communication delivery |
 | Catalog        | Stock item/SKU identity, description, base unit, active/archive state                                       | Balances, purchasing state, sales state              |
 | Inventory      | Locations, inventory transactions, posted movements, reservations, counts, balance/availability read models | Purchase/sales document lifecycle                    |
 | Purchasing     | Purchase orders/lines, receipts/lines, supplier-facing status and receiving effects                         | Inventory truth after effects post                   |
@@ -799,22 +829,26 @@ contract names both authorities and whose tests prove atomicity.
 
 ### 6.2 Launch entity catalog
 
+Every entity below additionally carries the compiler-derived `legalEntityId` dimension
+(ADR-0015). It is not repeated per row.
+
 | Entity                       | Important fields/relations                                                                                                 | Lifecycle/source-of-truth notes                                             |
 | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `legal_entity`               | stable id, entity code, name, status, tenant-default flag, `closedThrough` period lock                                     | Archive/restore master record; every tenant is provisioned with exactly one  |
 | `party`                      | stable id, party number, name, status, contact summary                                                                     | Archive/restore master record                                               |
 | `party_role`                 | party id, role `supplier` or `customer`, role status                                                                       | Parent-scoped; one party may hold both roles                                |
-| `item`                       | SKU, name, description, base unit, active state, optional base-currency purchase/sale price                                | Master record; price does not imply accounting                              |
+| `item`                       | SKU, name, description, base unit, active state, optional base-currency purchase/sale price                                | Master record; price does not imply accounting; base unit is immutable once any movement references the item |
 | `location`                   | code, name, type, active state                                                                                             | Master record; archived locations cannot accept new movements               |
 | `inventory_transaction`      | number, type, state, reason, source, effective date                                                                        | Human-facing header for opening, adjustment, transfer, and count correction |
 | `inventory_transaction_line` | transaction id, item, from/to location, quantity, base unit                                                                | Parent-scoped; posting emits movements                                      |
-| `inventory_movement`         | item, location, signed quantity delta, movement type, source document/line, effective time, idempotency key, reversal link | Append-only posted fact; never patched, archived, or deleted                |
+| `inventory_movement`         | stock-dimension-set version, item, location, signed quantity delta, movement type, source document/line, effective time, recorded time, idempotency key, reversal link | Append-only posted fact; never patched, archived, or deleted; carries no monetary amount |
 | `reservation`                | item, location, sales-order line, quantity, state, expiry, expected versions                                               | Scarce-resource fact with concurrency and release/consume lifecycle         |
 | `stock_count`                | number, location, state, counted-at                                                                                        | Operational document; posting produces correction transaction               |
 | `stock_count_line`           | count id, item, expected quantity, counted quantity, variance                                                              | Parent-scoped; expected quantity is a snapshot, not truth                   |
 | `purchase_order`             | number, supplier party, state, order date, expected date, currency, notes                                                  | Draft editable; release/receive/cancel through domain transitions           |
 | `purchase_order_line`        | PO id, item, ordered quantity, received quantity read model, optional unit price                                           | Parent-scoped; received quantity derived from posted receipts               |
 | `goods_receipt`              | number, PO, location, state, received date, external reference                                                             | Posting is externally meaningful; correct through reversal/correction       |
-| `goods_receipt_line`         | receipt id, PO line, item, quantity                                                                                        | Parent-scoped; posting emits positive movements                             |
+| `goods_receipt_line`         | receipt id, PO line, item, quantity, actual received unit cost and currency or explicit absence                            | Parent-scoped; posting emits positive movements; captured cost is operational, never accounting truth |
 | `sales_order`                | number, customer party, state, order date, requested date, currency, notes                                                 | Draft editable; confirm/reserve/ship/cancel through domain transitions      |
 | `sales_order_line`           | SO id, item, ordered quantity, reserved/shipped read models, optional unit price                                           | Parent-scoped; derived quantities never independently patched               |
 | `shipment`                   | number, SO, location, state, shipped date, external reference                                                              | Posting is externally meaningful; correct through reversal/correction       |
@@ -825,18 +859,29 @@ events, resolvers, support status, audit/lifecycle, and verification paths.
 
 ### 6.3 Inventory truth model
 
-Inventory truth is:
+Inventory truth is keyed by a declared, versioned **stock-dimension set**, never by an
+implicit tuple hardcoded into read models (ADR-0016):
 
 ```text
-onHand(item, location, atTime)
+northstar.stock-dimension-set/v1 = (legalEntityId, itemId, locationId)
+
+onHand(stockIdentity, atTime)
   = SUM(posted inventory_movement.quantity_delta up to atTime)
 
-reserved(item, location, atTime)
+reserved(stockIdentity, atTime)
   = SUM(active reservation remaining quantity atTime)
 
-available(item, location, atTime)
+available(stockIdentity, atTime)
   = onHand - reserved
 ```
+
+Every posted movement stamps the dimension-set version it was posted under. A dimension
+present in the current set but absent from a movement's version resolves to that
+dimension's declared `unspecified` member — a first-class groupable, filterable value,
+never `NULL`. Adding a dimension therefore cannot change any existing answer, and the
+boundary between tracked and untracked history is a queryable fact rather than tribal
+knowledge. Extension is a governed versioned event with a named re-baseline operation
+that appends; removal is unsupported.
 
 A cached or materialized balance is a registered read-model projection only. It
 must be recomputable from movements/reservations, marked system/read-only, and
@@ -846,13 +891,19 @@ Movement posting requirements:
 
 - exact decimal quantity in the item's declared base unit;
 - trusted tenant and actor;
+- a resolved owning legal entity; posting never defaults it silently;
+- the stock-dimension-set version the movement is posted under;
 - stable source document, source line, and effect identity;
 - unique idempotency key/effect key;
 - transactionally consistent source state, movement rows, change document, and
   outbox;
 - no update/delete path;
 - corrections reference and compensate the prior fact;
-- effective and recorded timestamps remain distinct; and
+- effective and recorded timestamps remain distinct, with recorded time taken from
+  trusted request context and never editable;
+- an `effectiveAt` at or before the entity's `closedThrough` period lock fails closed
+  inside the posting transaction;
+- no monetary amount; cost is reached through source-document lineage; and
 - reason/source types are registered, not free-form authority.
 
 ### 6.4 Core business invariants
@@ -876,6 +927,16 @@ Movement posting requirements:
 13. Currency, price, and totals are exact decimal/base-currency operational
     facts only; they do not create invoices, tax, or ledger postings.
 14. Every meaningful operation returns read-back or a reconciliation state.
+15. Every business record carries a resolved owning legal entity, immutable after
+    create; moving a record between entities is a named correcting operation.
+16. An item's base unit cannot change once any posted movement references it.
+17. Adding a stock dimension cannot change any previously computed balance.
+18. Recorded time is never edited, including by correction; a correction appends a
+    new fact with its own recorded time.
+19. No read model, projection, index, export, or reconciliation discards recorded
+    time, so the ledger stays bitemporally reconstructible.
+20. Posting into a closed period fails closed; reopening is a separate named,
+    permissioned, audited operation.
 
 ### 6.5 State machines
 
@@ -1052,12 +1113,31 @@ Before launch, the team must prove:
 
 - encrypted automated backups and point-in-time recovery;
 - restore into an isolated environment;
-- tenant export and documented retention behavior;
+- a **tenant completeness manifest** — every table in every plane classified exactly
+  once as tenant-scoped, naming its tenant column, or tenant-independent with a
+  recorded reason, with a verifier that fails closed on an unclassified table
+  (ADR-0019);
+- tenant export and documented retention behavior, provable against that manifest;
 - reconstruction of derived read models and search indexes;
 - replay or reconciliation of outbox deliveries;
 - restoration of the active release pointer and immutable package revisions;
   and
 - recovery-time and recovery-point objectives measured in a drill.
+
+Recovery has three named tiers, and the earliest one that can serve a request does
+(ADR-0019):
+
+| Tier | Mechanism | Touches a live tenant |
+| ---- | --------- | --------------------- |
+| R1 — in-band logical recovery | archive/restore, named correction/reversal, release rollback through the ordinary operation algebra | yes, through normal operations |
+| R2 — governed tenant point-in-time reconciliation | cluster PITR into an isolated environment, tenant-scoped extract at time `T`, then approved compensating operations through the Semantic Operation Gateway under a tenant write freeze | yes, only through the gateway |
+| R3 — tenant reconstruction | PITR plus isolated restore plus full import into a fresh tenant/environment | no |
+
+**No recovery path writes business rows into a live tenant by direct DML** — not the
+recovery service, an operator script, a support tool, or a migration. Because posted
+facts cannot be edited and business data cannot be hard-deleted, R2 is forward motion:
+it brings current state into agreement with target state by appending corrections, and
+the divergence remains a permanent auditable fact.
 
 ## 8. Surface and interaction architecture
 
@@ -1877,13 +1957,21 @@ G2 passes only when:
 **Goal:** deliver a genuinely useful standalone inventory product before
 purchasing and sales breadth.
 
+**Binding prerequisites.** Four decisions are one-way doors that close the moment the
+first movement is posted. G3 lands them before, not alongside, the posting service:
+the `legalEntityId` dimension and its master record (ADR-0015); the versioned
+stock-dimension set and base-unit immutability (ADR-0016); the temporal contract —
+distinct effective/recorded time, tenant business day, period lock (ADR-0018); and the
+prohibition on movement-carried monetary amounts (ADR-0017). A G3 packet that posts a
+movement without them is not a scheduling problem; it is an unrecoverable one.
+
 Build:
 
 1. Inventory transaction header/lines for adjustment, transfer, and count
    correction.
-2. Immutable inventory movements with item, location, signed quantity, unit,
-   effective time, posting time, source type/id/line, reason, actor, and
-   idempotency identity.
+2. Immutable inventory movements with legal entity, stock-dimension-set version, item,
+   location, signed quantity, unit, effective time, recorded time, source type/id/line,
+   reason, actor, and idempotency identity — and no monetary amount.
 3. Posting service that validates the whole command and writes header,
    movements, audit, and outbox atomically.
 4. Transfer posting that creates balanced source/destination movements in one
@@ -1891,9 +1979,11 @@ Build:
 5. Stock count sessions and lines; posting creates explicit variance
    corrections and never overwrites a balance.
 6. Registered balance, availability, movement-history, as-of, and low-stock
-   read models. At this phase reserved is zero but remains a separate concept.
-7. Policies for negative stock, backdated postings, closed periods if enabled,
-   reason requirements, thresholds, and approval/confirmation.
+   read models, keyed on the declared stock-dimension set and retaining recorded
+   time. At this phase reserved is zero but remains a separate concept.
+7. Policies for negative stock, backdated postings, reason requirements,
+   thresholds, and approval/confirmation; plus the enforced per-entity period
+   lock with its distinct advance and reopen operations.
 8. UI for stock overview, item/location balance, movement history, adjustment,
    transfer, counts, exception cards, and operation history.
 9. Agent support for balance questions, movement explanations, adjustment,
@@ -1934,6 +2024,16 @@ only when:
 - negative-stock policy is enforced at posting time;
 - count corrections preserve counted, expected, and variance evidence;
 - backdated behavior is explicit and tested;
+- posting into a closed period is rejected inside the transaction, with a recorded
+  negative control;
+- a prior balance is reproducible at a stated recorded-time horizon, and a recorded
+  negative control proves the reconstruction fails when recorded time is discarded;
+- balances are entity-keyed, and a two-entity fixture exists alongside the
+  two-tenant fixture;
+- adding a dimension to a fixture dimension set and replaying the same event history
+  reproduces byte-identical prior balances;
+- an attempt to change an item's base unit after any movement exists fails closed;
+- no compiled artifact derives a monetary amount from a movement;
 - UI, agent, export, and reporting return the same balances;
 - every mutation has actor, reason, release, source, and verification evidence;
 - restoring a backup and rebuilding read models reproduces the same balances;
@@ -2207,7 +2307,13 @@ Build and prove:
 6. **Reliability**
    - load tests, concurrency tests, long-running job recovery, zero/low-downtime
      additive migration rehearsal, backup restore, point-in-time recovery, and
-     read-model rebuild.
+     read-model rebuild;
+   - the R1/R2/R3 recovery tiers each rehearsed with measured times, R2 proven
+     idempotent under interruption and resumption, and the tenant completeness
+     manifest verified (§7.5, ADR-0019);
+   - the commercial decision on whether single-tenant recovery is a published
+     product promise, with its RTO/RPO, or an operator capability with a
+     best-effort target.
 7. **Experience**
    - warehouse-device testing, accessibility audit, keyboard workflows,
      localization/time-zone/quantity/money formatting, empty/error state
@@ -2447,7 +2553,16 @@ changes, and recovery without duplicate external delivery.
 
 ### 12.6 N3 - Inventory and commercial depth
 
-Add depth as independently versioned domain capabilities:
+Add depth as independently versioned domain capabilities.
+
+Every capability below that adds a member to stock identity — lot/batch, serial,
+expiry, quarantine/quality status, bins — arrives through ADR-0016's versioned
+stock-dimension set with its `unspecified` member and its re-baseline operation. None
+of them is a ledger migration, and none may reinterpret a posted movement. Unit
+conversion converts at the document boundary and still posts in the item's immutable
+base unit. Valuation derives from receipt cost retained since G4 under ADR-0017.
+Multi-entity operations compose over the `legalEntityId` dimension present since G3
+under ADR-0015.
 
 - units and conversions with explicit rounding policy;
 - lot/batch and serial tracking;
@@ -2955,7 +3070,11 @@ The inventory domain receives a permanent high-value property suite:
 - no valid interleaving violates receipt, reservation, shipment, or negative
   stock limits;
 - rebuilding projections does not change answers;
-- archive or release change does not rewrite historical meaning; and
+- archive or release change does not rewrite historical meaning;
+- extending the stock-dimension set does not change any previously computed balance;
+- a balance is reconstructible for any `(effective, recorded)` pair in the history;
+- posting is rejected for any effective instant at or before the entity's period lock;
+- every derived quantity is attributable to exactly one legal entity; and
 - every derived exception can identify its source facts.
 
 Property generators should produce partial documents, corrections, duplicate
@@ -3034,6 +3153,7 @@ starting targets for launch are:
 | Agent operations           | visible progress, bounded tool/latency budget, and eval success threshold per journey    |
 | Recovery point             | no more than 5 minutes for primary business data, subject to provider capability         |
 | Recovery time              | no more than 60 minutes for the initial service, proven in drill                         |
+| Publish path               | budgeted end to end from accepted draft to activation read-back, with human approval wait reported and excluded, and platform exclusion imposed on other tenants budgeted separately (ADR-0020) |
 
 Integrity and tenant isolation are correctness objectives, not error-budget
 tradeoffs. If the chosen infrastructure cannot support the draft recovery
@@ -3091,6 +3211,19 @@ from weakening business checks.
 
 - Compilation occurs before activation; requests consume immutable prepared
   artifacts.
+- Moving interpretation off the request path moves cost onto the **publish** path,
+  which is budgeted end to end rather than at the compiler alone, on a breadth
+  envelope of many modules rather than one maximal module (ADR-0020).
+- Publish cost has a second axis: exclusion imposed on other tenants while a
+  transition holds the platform-wide materializer lock. It is budgeted separately,
+  because its remedy is online DDL strategy rather than a faster compiler.
+- Verification scope narrows only by a sound impact analysis derived from the
+  compiled diff, recorded with the candidate — never by sampling, time-boxing,
+  author selection, a skip flag, or deferral past activation. A publish-budget miss
+  is remedied by incremental compile, memoization, or an honestly slower budget,
+  never by weakening verification.
+- An incremental compile is byte-identical to a cold compile or it does not ship; a
+  nearly-identical second path is a second compiler.
 - Release artifacts, catalog summaries, validated contracts, and policy-free
   plans cache by content hash while current authorization/state remain live.
 - The five model-facing tool schemas are constant and prefix-cache friendly.
@@ -3220,6 +3353,11 @@ re-ratifies the target before promotion.
 | Irreversible customization   | release rollback loses or corrupts data                           | compatibility classification, migration simulation, forward-fix plan |
 | Provider coupling            | canonical packages depend on PostgreSQL/routes/vendor APIs        | compiler/storage/connector ports and canonical IDs                   |
 | Scope creep into accounting  | inventory prices become unaudited financial truth                 | explicit launch boundary and separate ledger program                 |
+| Undeclared ledger dimension  | lot/serial/entity added later leaves a permanent untracked era    | versioned stock-dimension set, `unspecified` member, re-baseline (ADR-0016) |
+| Discarded cost inputs        | stock value is unanswerable, so a spreadsheet becomes peer truth  | receipt cost captured at posting and never computed with (ADR-0017)  |
+| Temporal ambiguity           | past reports unreproducible; periods never close; day is undefined| distinct effective/recorded time, tenant business day, enforced period lock (ADR-0018) |
+| No single-tenant recovery    | one tenant's bad day can only be fixed by restoring everyone      | tenant completeness manifest, R1/R2/R3 tiers, no live-tenant DML (ADR-0019) |
+| Slow publish path            | the customization loop stalls, and verification is traded for speed | end-to-end publish budget on a breadth envelope, verification narrowed only by recorded impact analysis (ADR-0020) |
 | Customer forks               | short-term delivery destroys composability                        | support-cell/gap process and reusable capability funding             |
 | Unsafe escape hatch          | arbitrary code bypasses tenant/policy/release controls            | constrained signed extensions with explicit grants and revocation    |
 | False gate confidence        | implementer-approved tests miss real behavior                     | evidence packets, independent review, real-model and recovery drills |
@@ -3250,6 +3388,18 @@ Stop or revise the current phase when any of these occurs:
 - a binding productivity/performance gate is missed without an accepted revise
   decision;
 - a pinned test/ADR/gate is weakened to accommodate implementation;
+- a posted fact is written without its owning legal entity, its stock-dimension-set
+  version, or its recorded time;
+- a read model, projection, index, export, or reconciliation discards recorded time;
+- a movement carries a monetary amount, or a compiled artifact derives one from a
+  movement;
+- an item's base unit changes after a posted movement references it;
+- a stock dimension is added without a versioned set and a re-baseline operation;
+- a table in either plane carries no tenancy classification, or a recovery path
+  writes business rows into a live tenant by direct DML;
+- candidate verification is narrowed by sampling, time-boxing, author selection, a
+  skip flag, or deferral past activation, rather than by a recorded impact analysis;
+- an incremental compile produces bytes that differ from a cold compile;
 - the system cannot restore and reproduce inventory truth; or
 - the team cannot state which immutable release governed an observed behavior.
 
