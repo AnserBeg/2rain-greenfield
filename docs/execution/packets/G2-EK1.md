@@ -1,11 +1,11 @@
 # G2-EK1 — Expression kernel ceiling and strict runtime fence
 
-Status: active — implementation and development evidence complete; full matrix and Critical review pending
+Status: evidence_ready — full matrix and Critical review chain green
 Tier: Critical
 Branch: `packet/g2-ek1`
 Base: `b0f9fb001404e0a95a8252fab55e9b5a07caef8a`
-Frozen reviewed candidate: pending
-Review: pending — fresh naive Codex xhigh, then Fable max on the identical SHA
+Frozen reviewed candidate: `d1dd9824193f8ca384e66d5bb0d2560c2918e9e3`
+Review: PASS — fresh naive Codex xhigh, then Fable max on the identical SHA
 
 ## Outcome
 
@@ -355,13 +355,72 @@ No golden or compiled shell file is present in the packet diff.
 
 ## Full-matrix evidence
 
-Pending at the frozen candidate.
+The full matrix ran from the isolated clean worktree at exact candidate
+`d1dd9824193f8ca384e66d5bb0d2560c2918e9e3` after the review fix:
+
+| Gate | Result |
+|---|---|
+| frozen install | PASS — pnpm 11.9.0; 13 workspaces current |
+| format / lint / typecheck / build | PASS |
+| dependency boundaries | PASS — 102 files scanned |
+| unit | PASS — 36/36 |
+| compiler | PASS — 52/52 |
+| integration | PASS — 55/55 |
+| agent | PASS — 3/3 |
+| architecture | PASS — 52/52 |
+| contracts | PASS — 6/6 |
+| schema | PASS — 10 applied / 10 verified; no drift |
+| PostgreSQL | PASS — 70/70, first attempt |
+| locale | PASS — 1/1 |
+| browser | PASS — 7/7 |
+| observability | PASS — 5/5 |
+| executed-file reachability | PASS — 60/60 files from 9 producer artifacts |
+| demo release | PASS — checked-in release root unchanged |
+| security | PASS — 277 commits clean; the disposable negative fixture produced its one expected finding |
+| diff / worktree / output boundary | PASS — clean; no golden bytes/hash or compiled shell movement |
+
+During the first candidate run, an independent process twice committed
+documentation into the shared checkout. Those mixed-SHA runs were discarded,
+the unrelated histories were preserved on separate local branches, and the
+packet was rebuilt from `b0f9fb0` in an independent worktree. No foreign commit
+or unowned file appears in the frozen candidate.
 
 ## Test it yourself
 
-Pending final frozen SHA. The focused falsification flow will run the strict
-kernel unit, all three gateway routes, the duplicate-dispatch proxy, compiler
-goldens, and demo-release in under ten minutes.
+From the candidate checkout, these commands finish in under ten minutes:
+
+```bash
+# The wire parser accepts exactly literal true for each supported node version,
+# and rejects unknown versions, unknown properties, and false.
+node --import tsx --test \
+  --test-name-pattern='runtime predicate fence' \
+  test/unit/canonical-model/negative-contracts.test.ts
+
+# All three gateway sites reject malformed predicates with their exact outcomes;
+# the observer deliberately throws, yet accepted query/operation execution and
+# rejected persistence evidence remain unchanged.
+node --import tsx --test \
+  --test-name-pattern='strict predicate receipts|predicate receipt observation|empty catalogs execute zero' \
+  test/integration/module-runtime.test.ts
+
+# The bounded proxy owns the known literal-true dispatch spelling and includes
+# its synthetic server canary.
+node --import tsx --test \
+  --test-name-pattern='literal-true predicate dispatch' \
+  test/architecture/canonical-contracts-purity.test.ts
+
+# The hard boundary remains intact: compiler goldens and the demo root are green,
+# and none of their tracked bytes occur in the packet diff.
+corepack pnpm test:compiler
+corepack pnpm check:demo-release
+git diff --exit-code b0f9fb0...d1dd982 -- \
+  'test/**/*.golden.bytes' 'test/**/*.golden.sha256' \
+  apps/web/release/shell.compiled.json
+```
+
+Expected: 1/1 strict unit test, 9/9 focused integration results, 1/1
+architecture proxy, compiler 52/52, demo-release green, and the final diff
+command silent with exit code zero.
 
 ## Review evidence
 
@@ -375,8 +434,26 @@ normalization unification, architecture proxy, ADR substance, projection-family
 answer, salvage citations, dependency bridge, or output boundary.
 
 Disposition: fixed by isolating observer failures and adding throwing-observer
-tests for accepted and rejected paths at all three sites. A fresh naive review
-on the new candidate is pending; the round-1 review is not reused.
+tests for accepted and rejected paths at all three sites. The round-1 review was
+not reused.
+
+### Round 2 — fresh Codex xhigh on `d1dd982`
+
+Verdict: **PASS**. All seven bounded questions passed: strict wire/version
+parsing, all three routes, observer isolation, negative controls, normalization
+unification, the honestly bounded architecture proxy, ADR substance, the
+projection-family decision, quarry grounding, and scope discipline. No material
+finding remained.
+
+### Critical confirmation — Fable max on unchanged `d1dd982`
+
+Verdict: **PASS**. Fable independently confirmed all seven questions and the
+unchanged output/dependency boundary. It recorded two non-blocking hardening
+observations: rejected-receipt freezing is implemented but lacks its own unit
+assertion, and the source-scan proxy is non-recursive. The first is defense in
+depth under the honest-runtime threat model; the second is already explicitly
+bounded as a proxy and both scanned production roots are flat. Neither is a
+material packet finding, and neither changes the PASS disposition.
 
 ## Known limits
 
