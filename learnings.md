@@ -181,3 +181,8 @@ How to apply: require both a before/after `pg_stat_user_indexes.idx_scan` delta 
 Date: 2026-07-25
 Why: PR-6b's materializer used `CREATE OR REPLACE FUNCTION` before verifying `pg_proc.prosrc`, so the verifier measured the body it had just restored and could pass while stored generated values remained stale.
 How to apply: for an immutable versioned function, create it only when absent; when present, compare its raw source before any DDL or DML and reject a mismatch with a named error. Never repair the same version in place. Keep data-level evidence outside the production activation path, and route protection from privileged out-of-band DDL to an operator-level witness. See `docs/execution/packets/PR-6b.md`.
+
+## Test a factory with a second definition, not a patched press
+Date: 2026-07-25
+Why: Catalog reproduced Party-level behavior with zero compiler, provider, runtime, UI, or migration changes; changing the press would have made the factory test a false positive.
+How to apply: Freeze the press during the first fan-out module, stop on any required press edit, and classify the missing contract before continuing.
