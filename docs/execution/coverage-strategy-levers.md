@@ -31,7 +31,7 @@ That equation has exactly four exploitable weak points.
 | **1 — one expression kernel, many binding positions** | `k` (supply side) | **Done and ratified.** See the [expression-kernel verdict](debates/expression-kernel-verdict.md), ADR-0012, and queue rows 1/3/4/6/8/10 |
 | **1b — the builder negotiates the requirement** | `k` (demand side) | Recorded `prose-only`; G6 builder |
 | **2 — a typed escape at every position** | `p` on the tail | **This document.** `prose-only` |
-| **3 — the gap report becomes a downgrade offer** | binary failure | Named, not yet written |
+| **3 — the realization ladder** (the gap report becomes a downgrade offer) | binary failure | **Written.** `prose-only` |
 | **4 — gap latency as the headline metric** | time, not coverage | Named, not yet written |
 
 ---
@@ -261,17 +261,135 @@ ships costs a canonical change.
 
 ---
 
-## Levers 3 and 4 — named, not yet written
+## Lever 3 — the realization ladder
 
-**Lever 3 — the gap report becomes a downgrade offer.** Today a requirement needing one
-unsupported thing is blocked entirely. But most of the last 20% is not "the system cannot
-store this," it is "the system cannot *automate* this." A module that is 95% expressible
-could ship at 95% with the remainder degrading honestly to a required manual attestation,
-audited, reported, and flagged for automatic upgrade when the capability lands. The
-compiler already produces exact gap diagnostics; today they are a stop sign. Requires a
-carefully drafted boundary against §10.2's rule that partial support is reported as a gap
-and never approximated — the platform never claims a capability it lacks, but a tenant may
-knowingly ship a requirement whose remainder is manual and recorded as manual.
+### What it is
+
+Today a requirement is binary: it compiles, or it produces a gap report. Plan §12.13's four
+outcomes are directly composable, pack-composable, extension-composable, or *not yet
+supported*.
+
+But most of the last 20% is not "the system cannot store this" — it is "the system cannot
+**automate** this." Goods receipt inspection compiles entirely except one rule: *if the
+supplier is on probation, require two signatures unless the PO is under $500 and the buyer
+is the plant manager.* Ninety-five percent expressible, zero percent shipped.
+
+Lever 3 says ship it at 95%, with the remainder degrading **honestly** — visible, audited,
+attributed, and flagged for automatic upgrade when the capability lands. Unlike new
+primitives, each of which unlocks a fraction of a percent, this works on every blocked
+requirement at once.
+
+### The ladder — Levers 2 and 3 are rungs of one thing
+
+| # | Realization | Deterministic? | Requires |
+|---|---|---|---|
+| 1 | Compiles declaratively | Yes | — |
+| 2 | **Escape body, agent-authored** | Yes — a sandbox runs it | Sandbox ([Lever 2](#lever-2--a-typed-escape-at-every-position)) |
+| 3 | **Agent-assisted manual step** | Human decides; agent surfaces, pre-fills, routes, batches | Nothing new — ADR-0009 already permits it |
+| 4 | Bare manual attestation | Human decides unaided | Nothing new |
+| 5 | Blocked | — | Today's only non-success outcome |
+
+**The platform has rungs 1 and 5. Everything between is unbuilt.**
+
+Rung 2 is the answer to "automate it instead of making it manual": the tenant describes the
+rule, the agent **authors** the escape body at compile time, scenarios verify it, a human
+approves the scenarios, and thereafter a deterministic sandbox evaluates it on every
+request. The agent's involvement ends before activation; nothing model-shaped is in the
+request path.
+
+**Rung 3 is the cheapest and should probably be built first.** It needs no sandbox and no
+new canonical structure. The step remains a compiled, audited operation requiring human
+confirmation — PR-3 already shipped server-issued fully bound confirmation — while the
+agent surfaces the case, attaches the evidence ("supplier X is on probation, PO is $640,
+buyer is not the plant manager"), routes it to the second approver, and works the queue.
+"Someone remembers to tick a box" becomes "the system asks a specific question with the
+reasoning attached." That is legitimate under ADR-0009 today.
+
+### The forbidden rung, stated so it is not reinvented
+
+**The agent must never evaluate the rule at runtime.** This looks like the obvious
+shortcut and it is ruled out by the [expression-kernel verdict](debates/expression-kernel-verdict.md):
+a model may author at compile time, operate by selecting registered operations, and
+critique offline — never evaluate a business rule at request time. Concretely it breaks
+four things: determinism (§14.3 requires replay to yield the same result), auditability
+("why was this blocked?" answered by "the model decided"), release pinning (every request
+pins one release; a model is not pinned, so a provider update silently changes business
+behaviour with no approval and no rollback), and §15.5 ("a slow or unavailable model cannot
+prevent authorized users from operating normal paths").
+
+The generalized line, which Lever 3 makes load-bearing:
+
+> The agent may evaluate anything whose output **has no authority** — triage,
+> prioritisation, suggestion, drafting, explanation. It may never evaluate anything whose
+> output **is the decision** — blocking, posting, authorising, or computing a stored value.
+
+Flagging receipts that look unusual is safe: miss one and nothing is wrong, a human still
+decides. Deciding whether a receipt posts is not.
+
+### The §10.2 boundary, exactly
+
+Plan §10.2 says "partial support is reported as a capability gap, **not approximated**."
+Lever 3 must not become the hole that rule exists to close.
+
+- **Forbidden:** the platform advertises a capability as supported when it is 70%
+  supported. That is the *vendor* misrepresenting capability.
+- **Allowed:** the *tenant* knowingly ships a module whose remainder is manual, and the
+  system records it **as** manual.
+
+The test is whether the platform's own capability claim moved. Under Lever 3 it does not —
+the support matrix still says unsupported and the gap report is still exact. What changes
+is that a tenant may proceed with a declared, visible remainder instead of being blocked.
+
+Different actor, different knowledge, different artifact. Framed this way it *strengthens*
+§10.2, because the alternative to an honest recorded remainder is not purity — it is the
+customer doing that step in a spreadsheet where nobody can see it, which is
+[audit E4](prior-art-failure-modes.md) and strictly worse.
+
+### The floor — non-negotiable
+
+Not everything is downgradeable. **Never degrade** anything protecting inventory truth,
+tenant isolation, authorization, or audit completeness. Those fail closed, always, with no
+offer presented.
+
+Without a written floor, "ship it with a manual step" drifts toward "post the movement
+manually and reconcile later," and doctrine #4 is gone.
+
+### Mechanism, and a pattern worth noticing
+
+A manual attestation needs no new execution machinery — it is an ordinary
+confirmation-with-note operation. The only new thing is a **provenance link**: *this step
+exists because capability X is unsupported.*
+
+That is the third appearance of the same primitive:
+
+- [ADR-0013](../decisions/ADR-0013-semantic-patch-lineage.md) patch lineage — what the
+  tenant *meant*
+- Lever 2 escape-body provenance — which formula this body replaced
+- Lever 3 remainder link — which capability this manual step substitutes for
+
+All three are *a link from a substitute back to the thing it substitutes for*; all three
+are cheap at creation and unrecoverable afterwards; all three enable the same upgrade
+ratchet. They may be one mechanism rather than three, and that is worth deciding before the
+second one is built.
+
+### Where LLMs fit
+
+**Propose the downgrade** — given a machine-readable gap, what is the honest degraded
+realization? Model proposes, compiler validates expressibility, human accepts.
+**Explain the trade in business terms** — "this becomes a checkbox someone ticks about
+twelve times a month, based on your last quarter," which is Lever 2's shadow-over-history
+reused. **Detect upgrade eligibility** — finding now-automatable remainders is mechanical;
+judging whether the new capability truly covers the original intent is judgement, so the
+model proposes and the tenant confirms through scenarios.
+
+### Risks
+
+Accumulation: it becomes easy to ship half-built modules and never finish them. Mitigated
+by remainders being first-class, visible and counted — which is exactly what Lever 4's
+instrumentation measures. And by the upgrade ratchet, without which remainders become
+permanent, which is [audit B6](prior-art-failure-modes.md) in yet another form.
+
+## Lever 4 — named, not yet written
 
 **Lever 4 — gap latency as the headline metric.** The felt height of the wall is not
 coverage, it is *how long you wait*. 90% coverage with a three-day gap-closing loop beats
