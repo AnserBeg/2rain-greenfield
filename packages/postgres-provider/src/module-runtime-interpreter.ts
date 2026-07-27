@@ -1019,7 +1019,7 @@ function listOrderBy(
     const column = selectedById.get(sort.fieldId);
     const relation = relationsById.get(sort.fieldId);
     const expression = column
-      ? visibleFieldExpression(column, sourceAlias)
+      ? listSortExpression(column, sourceAlias)
       : relation
         ? visibleFieldExpression(relation.labelColumn, relation.tableAlias)
         : null;
@@ -1034,6 +1034,20 @@ function listOrderBy(
   });
   order.push(`${qualified(sourceAlias, entity.recordIdentity.column)} ASC`);
   return order.join(', ');
+}
+
+function listSortExpression(
+  column: StorageEntity['columns'][number],
+  tableAlias: string,
+): string {
+  switch (column.fieldContract.fieldKind) {
+    case 'booleanFieldType':
+    case 'enumFieldType':
+    case 'textFieldType':
+      return visibleFieldExpression(column, tableAlias);
+    default:
+      return qualified(tableAlias, column.physicalName);
+  }
 }
 
 function toListDto(

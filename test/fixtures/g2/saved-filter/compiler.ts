@@ -1,83 +1,48 @@
 import {
   canonicalize,
   normalizeApplicationPackage,
-} from '../../../../packages/canonical-model/src/index';
+} from '../../../../packages/canonical-model/src/index.js';
 import {
   DEFAULT_COMPILER_LIMITS,
   MODULE_COMPILER_PROFILE,
-  PROJECTION_FAMILY_IDS,
   compileApplication,
-  expectedActiveReleaseFrom,
   type CompileSuccess,
   type CompilerInput,
   type ContentAddressedArtifact,
   type ProjectionFamilyId,
-  type StorageTargetPayloadV1,
-} from '../../../../packages/compiler/src/index';
+} from '../../../../packages/compiler/src/index.js';
+import { platformModuleDefinition } from '../../../../packages/domain/src/platform/index.js';
 import type {
   ImmutableJsonValue,
   LoadedRequestRuntimeDefinition,
   RequestRuntimeProjectionFamily,
   RuntimeProjection,
-} from '../../../../packages/runtime/src/request-runtime-view';
+} from '../../../../packages/runtime/src/request-runtime-view.js';
 
-import { partyModuleDefinition } from './definition';
-
-export interface CompiledPartyFixture {
+export interface CompiledPlatformFixture {
   readonly compiled: CompileSuccess;
   readonly definition: Record<string, unknown>;
-  readonly empty: CompileSuccess;
-  readonly emptyDefinition: Record<string, unknown>;
 }
 
-export function compilePartyFixture(
-  definition: Record<string, unknown> = partyModuleDefinition(),
-): CompiledPartyFixture {
-  const emptyDefinition = emptyPartyDefinition(definition);
-  const empty = mustCompile(partyCompilerInput(emptyDefinition));
-  const compiled = mustCompile(
-    partyCompilerInput(definition, expectedActiveReleaseFrom(empty)),
-  );
-  return { compiled, definition, empty, emptyDefinition };
+export function compilePlatformFixture(): CompiledPlatformFixture {
+  const definition = platformModuleDefinition();
+  const compiled = mustCompile(platformCompilerInput(definition));
+  return { compiled, definition };
 }
 
-export function emptyPartyDefinition(
-  source: Record<string, unknown> = partyModuleDefinition(),
-): Record<string, unknown> {
-  const definition = structuredClone(source);
-  for (const family of [
-    'assertions',
-    'entities',
-    'fields',
-    'operations',
-    'permissions',
-    'queries',
-    'relations',
-    'stateMachines',
-    'storageMappings',
-    'surfaces',
-  ]) {
-    definition[family] = [];
-  }
-  return definition;
-}
-
-export function partyDefinitionBytes(definition: unknown): Uint8Array {
+export function platformDefinitionBytes(definition: unknown): Uint8Array {
   return new TextEncoder().encode(
     canonicalize(normalizeApplicationPackage(definition)),
   );
 }
 
-export function partyCompilerInput(
-  definition: unknown,
-  expectedActiveRelease: CompilerInput['expectedActiveRelease'] = null,
-): CompilerInput {
+export function platformCompilerInput(definition: unknown): CompilerInput {
   return {
     dependencies: [],
-    expectedActiveRelease,
+    expectedActiveRelease: null,
     kind: 'compilerInput',
     limits: { ...DEFAULT_COMPILER_LIMITS },
-    normalizedDefinitionBytes: partyDefinitionBytes(definition),
+    normalizedDefinitionBytes: platformDefinitionBytes(definition),
     profile: { ...MODULE_COMPILER_PROFILE },
   };
 }
@@ -90,35 +55,7 @@ export function mustCompile(input: CompilerInput): CompileSuccess {
   return result;
 }
 
-export function projectionPayload<T>(
-  compiled: CompileSuccess,
-  familyId: ProjectionFamilyId,
-): T {
-  const reference = compiled.bundle.releaseManifest.projections.find(
-    (candidate) => candidate.familyId === familyId,
-  );
-  if (!reference) throw new Error(`missing projection ${familyId}`);
-  const manifest = decode(artifact(compiled, reference.artifactRoot));
-  if (!isRecord(manifest) || !Array.isArray(manifest.chunks)) {
-    throw new Error(`invalid projection manifest ${familyId}`);
-  }
-  const descriptor = manifest.chunks[0];
-  if (!isRecord(descriptor) || typeof descriptor.contentHash !== 'string') {
-    throw new Error(`invalid projection chunk ${familyId}`);
-  }
-  return decode(artifact(compiled, descriptor.contentHash)) as T;
-}
-
-export function partyStorageTarget(
-  compiled: CompileSuccess,
-): StorageTargetPayloadV1 {
-  return projectionPayload<StorageTargetPayloadV1>(
-    compiled,
-    PROJECTION_FAMILY_IDS.storageTarget,
-  );
-}
-
-export function partyRuntimeProjections(
+export function platformRuntimeProjections(
   compiled: CompileSuccess,
 ): LoadedRequestRuntimeDefinition['projections'] {
   return {
@@ -161,6 +98,25 @@ function runtimeProjection<TFamily extends RequestRuntimeProjectionFamily>(
     payloadSchemaVersion: reference.payloadSchemaVersion,
     semanticDigest: reference.semanticDigest,
   };
+}
+
+function projectionPayload<T>(
+  compiled: CompileSuccess,
+  familyId: ProjectionFamilyId,
+): T {
+  const reference = compiled.bundle.releaseManifest.projections.find(
+    (candidate) => candidate.familyId === familyId,
+  );
+  if (!reference) throw new Error(`missing projection ${familyId}`);
+  const manifest = decode(artifact(compiled, reference.artifactRoot));
+  if (!isRecord(manifest) || !Array.isArray(manifest.chunks)) {
+    throw new Error(`invalid projection manifest ${familyId}`);
+  }
+  const descriptor = manifest.chunks[0];
+  if (!isRecord(descriptor) || typeof descriptor.contentHash !== 'string') {
+    throw new Error(`invalid projection chunk ${familyId}`);
+  }
+  return decode(artifact(compiled, descriptor.contentHash)) as T;
 }
 
 function artifact(

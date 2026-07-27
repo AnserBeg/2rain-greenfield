@@ -10,38 +10,38 @@ import {
   LANGUAGE_VERSION,
   NORMALIZATION_PROFILE_VERSION,
   canonicalizeAndHash,
-} from '../../../../packages/canonical-model/src/index';
-import type { CompileSuccess } from '../../../../packages/compiler/src/index';
+} from '../../../../packages/canonical-model/src/index.js';
+import type { CompileSuccess } from '../../../../packages/compiler/src/index.js';
+import { PLATFORM_IDS } from '../../../../packages/domain/src/platform/index.js';
 import type {
   MintedUuid,
   RegisterTenantReleaseCommand,
   StoreAppPackageRevisionCommand,
-} from '../../../../packages/platform-runtime/src/index';
-import { PostgresModuleRuntimeInterpreter } from '../../../../packages/postgres-provider/src/module-runtime-interpreter';
-import { PostgresModuleStorageMaterializer } from '../../../../packages/postgres-provider/src/module-storage-materializer';
+} from '../../../../packages/platform-runtime/src/index.js';
+import { PostgresSavedFilterExecutor } from '../../../../packages/postgres-provider/src/saved-filter-executor.js';
 import {
   loadMigrations,
   runMigrations,
-} from '../../../../packages/postgres-provider/src/migrations';
-import { PostgresImmutableReleaseRepository } from '../../../../packages/postgres-provider/src/release-repository';
-import { PostgresRequestRuntimeViewService } from '../../../../packages/postgres-provider/src/request-runtime-view-service';
-import { TrustedActorEnvelopeIssuer } from '../../../../packages/postgres-provider/src/trust/trusted-actor-envelope';
+} from '../../../../packages/postgres-provider/src/migrations.js';
+import { PostgresImmutableReleaseRepository } from '../../../../packages/postgres-provider/src/release-repository.js';
+import { PostgresRequestRuntimeViewService } from '../../../../packages/postgres-provider/src/request-runtime-view-service.js';
+import { TrustedActorEnvelopeIssuer } from '../../../../packages/postgres-provider/src/trust/trusted-actor-envelope.js';
 import {
   AuthenticatedRequestEntryAdapter,
   type AuthenticatedIdentity,
   type TrustedRequestContext,
-} from '../../../../packages/runtime/src/request-context';
+} from '../../../../packages/runtime/src/request-context.js';
 import {
   SEMANTIC_OPERATION_REQUEST_VERSION,
   SemanticOperationGateway,
   SemanticOperationMediationAuthority,
   type SemanticOperationResultEnvelope,
-} from '../../../../packages/runtime/src/semantic-operation-gateway';
+} from '../../../../packages/runtime/src/semantic-operation-gateway.js';
 import {
   SEMANTIC_QUERY_REQUEST_VERSION,
   SemanticQueryGateway,
   type SemanticQueryResultEnvelope,
-} from '../../../../packages/runtime/src/semantic-query-gateway';
+} from '../../../../packages/runtime/src/semantic-query-gateway.js';
 import {
   AuthenticatedRequestRuntimeEntryAdapter,
   CURRENT_POLICY_DECISION_VERSION,
@@ -50,50 +50,63 @@ import {
   type CurrentPolicySubject,
   type ImmutableJsonValue,
   type RequestRuntimeView,
-} from '../../../../packages/runtime/src/request-runtime-view';
-import { withEphemeralPostgres } from '../../../helpers/postgres';
+} from '../../../../packages/runtime/src/request-runtime-view.js';
+import { withEphemeralPostgres } from '../../../helpers/postgres.js';
 
-import { PARTY_IDS } from './definition';
-import {
-  compilePartyFixture,
-  partyDefinitionBytes,
-  partyStorageTarget,
-} from './compiler';
+import { compilePlatformFixture, platformDefinitionBytes } from './compiler.js';
 
 const migrations = resolve('db/migrations');
 
-export const PARTY_TEST_SCOPE = Object.freeze({
+export const SAVED_FILTER_TEST_SCOPE = Object.freeze({
   a: {
-    environmentId: '91100000-0000-4000-8000-000000000001',
-    principalId: '91200000-0000-4000-8000-000000000002',
-    tenantId: '91300000-0000-4000-8000-000000000003',
+    environmentId: 'd1100000-0000-4000-8000-000000000001',
+    principalId: 'd1200000-0000-4000-8000-000000000002',
+    tenantId: 'd1300000-0000-4000-8000-000000000003',
+  },
+  alternatePrincipal: {
+    environmentId: 'd1100000-0000-4000-8000-000000000001',
+    principalId: 'd1200000-0000-4000-8000-000000000004',
+    tenantId: 'd1300000-0000-4000-8000-000000000003',
+  },
+  alternateEnvironment: {
+    environmentId: 'd1100000-0000-4000-8000-000000000005',
+    principalId: 'd1200000-0000-4000-8000-000000000002',
+    tenantId: 'd1300000-0000-4000-8000-000000000003',
   },
   b: {
-    environmentId: '92100000-0000-4000-8000-000000000001',
-    principalId: '92200000-0000-4000-8000-000000000002',
-    tenantId: '92300000-0000-4000-8000-000000000003',
+    environmentId: 'd2100000-0000-4000-8000-000000000001',
+    principalId: 'd2200000-0000-4000-8000-000000000002',
+    tenantId: 'd2300000-0000-4000-8000-000000000003',
   },
 });
 
-export interface RealPartyRuntime {
+export interface SavedFilterRuntime {
   readonly adminPool: pg.Pool;
-  readonly compiled: CompileSuccess;
-  readonly contexts: Readonly<Record<'a' | 'b', TrustedRequestContext>>;
+  readonly contexts: Readonly<
+    Record<
+      'a' | 'alternateEnvironment' | 'alternatePrincipal' | 'b',
+      TrustedRequestContext
+    >
+  >;
   readonly entry: AuthenticatedRequestRuntimeEntryAdapter;
   readonly operationGateway: SemanticOperationGateway;
   readonly operationMediation: SemanticOperationMediationAuthority;
   readonly queryGateway: SemanticQueryGateway;
   readonly runtimePool: pg.Pool;
-  readonly storage: ReturnType<typeof partyStorageTarget>;
-  readonly views: Readonly<Record<'a' | 'b', RequestRuntimeView>>;
+  readonly supersedeA: () => Promise<RequestRuntimeView>;
+  readonly views: Readonly<
+    Record<
+      'a' | 'alternateEnvironment' | 'alternatePrincipal' | 'b',
+      RequestRuntimeView
+    >
+  >;
 }
 
-export async function withRealPartyRuntime<T>(
+export async function withSavedFilterRuntime<T>(
   label: string,
-  run: (runtime: RealPartyRuntime) => Promise<T>,
-  definition?: Record<string, unknown>,
+  run: (runtime: SavedFilterRuntime) => Promise<T>,
 ): Promise<T> {
-  const fixture = compilePartyFixture(definition);
+  const fixture = compilePlatformFixture();
   return withEphemeralPostgres(label, async ({ connection, pool }) => {
     await migrateAndSeed(pool);
     const runtimePool = new pg.Pool({
@@ -101,115 +114,106 @@ export async function withRealPartyRuntime<T>(
       max: 4,
       user: 'north_star_runtime',
     });
-    const materializerPool = new pg.Pool({
-      ...connection,
-      max: 2,
-      user: 'north_star_module_materializer',
-    });
-    const modulePool = new pg.Pool({
-      ...connection,
-      max: 2,
-      user: 'north_star_module_runtime',
-    });
-    materializerPool.on('error', () => undefined);
-    modulePool.on('error', () => undefined);
+    runtimePool.on('error', () => undefined);
     try {
       const contexts = await trustedContexts();
-      const releasesA = await persistSequence(runtimePool, contexts.a, [
-        [fixture.empty, fixture.emptyDefinition],
-        [fixture.compiled, fixture.definition],
-      ]);
-      const releasesB = await persistSequence(runtimePool, contexts.b, [
-        [fixture.empty, fixture.emptyDefinition],
-        [fixture.compiled, fixture.definition],
-      ]);
-      await setPointer(
-        pool,
-        PARTY_TEST_SCOPE.a.tenantId,
-        PARTY_TEST_SCOPE.a.environmentId,
-        releasesA[0]!,
+      const releaseA = await persistRelease(
+        runtimePool,
+        contexts.a,
+        fixture.compiled,
+        fixture.definition,
+      );
+      const releaseB = await persistRelease(
+        runtimePool,
+        contexts.b,
+        fixture.compiled,
+        fixture.definition,
+      );
+      const releaseAlternateEnvironment = await persistRelease(
+        runtimePool,
+        contexts.alternateEnvironment,
+        fixture.compiled,
+        fixture.definition,
       );
       await setPointer(
         pool,
-        PARTY_TEST_SCOPE.b.tenantId,
-        PARTY_TEST_SCOPE.b.environmentId,
-        releasesB[0]!,
+        SAVED_FILTER_TEST_SCOPE.alternateEnvironment.tenantId,
+        SAVED_FILTER_TEST_SCOPE.alternateEnvironment.environmentId,
+        releaseAlternateEnvironment,
+      );
+      await setPointer(
+        pool,
+        SAVED_FILTER_TEST_SCOPE.a.tenantId,
+        SAVED_FILTER_TEST_SCOPE.a.environmentId,
+        releaseA,
+      );
+      await setPointer(
+        pool,
+        SAVED_FILTER_TEST_SCOPE.b.tenantId,
+        SAVED_FILTER_TEST_SCOPE.b.environmentId,
+        releaseB,
       );
       await grantExecutorAuthority(pool);
-      const materializer = new PostgresModuleStorageMaterializer(
-        materializerPool,
-        modulePool,
-      );
-      await prepare(materializer, contexts.a, releasesA[1]!);
-      await prepare(materializer, contexts.b, releasesB[1]!);
-      await setPointer(
-        pool,
-        PARTY_TEST_SCOPE.a.tenantId,
-        PARTY_TEST_SCOPE.a.environmentId,
-        releasesA[1]!,
-      );
-      await setPointer(
-        pool,
-        PARTY_TEST_SCOPE.b.tenantId,
-        PARTY_TEST_SCOPE.b.environmentId,
-        releasesB[1]!,
-      );
 
       const policy = new AllowPolicy();
-      const interpreter = new PostgresModuleRuntimeInterpreter(
+      const executor = new PostgresSavedFilterExecutor(
         runtimePool,
         humanActorIssuer(),
+        PLATFORM_IDS,
       );
-      const queryGateway = new SemanticQueryGateway(policy, interpreter);
+      const queryGateway = new SemanticQueryGateway(policy, executor);
       const operationMediation = new SemanticOperationMediationAuthority();
       const operationGateway = new SemanticOperationGateway(
         policy,
-        interpreter,
+        executor,
         operationMediation,
       );
       const entry = runtimeEntry(runtimePool, policy);
       const views = {
         a: await issuedView(entry, 'a'),
+        alternateEnvironment: await issuedView(entry, 'alternateEnvironment'),
+        alternatePrincipal: await issuedView(entry, 'alternatePrincipal'),
         b: await issuedView(entry, 'b'),
       };
       return await run({
         adminPool: pool,
-        compiled: fixture.compiled,
         contexts,
         entry,
         operationGateway,
         operationMediation,
         queryGateway,
         runtimePool,
-        storage: partyStorageTarget(fixture.compiled),
+        supersedeA: async () => {
+          const release = await persistRelease(
+            runtimePool,
+            contexts.a,
+            fixture.compiled,
+            fixture.definition,
+          );
+          await setPointer(
+            pool,
+            SAVED_FILTER_TEST_SCOPE.a.tenantId,
+            SAVED_FILTER_TEST_SCOPE.a.environmentId,
+            release,
+          );
+          return issuedView(entry, 'a');
+        },
         views,
       });
     } finally {
-      await Promise.all([
-        runtimePool.end(),
-        materializerPool.end(),
-        modulePool.end(),
-      ]);
+      await runtimePool.end();
     }
   });
 }
 
-export function invokePartyOperation(
-  runtime: RealPartyRuntime,
+export function invokeSavedFilterOperation(
+  runtime: SavedFilterRuntime,
   view: RequestRuntimeView,
-  localId: string,
+  action: keyof typeof PLATFORM_IDS.operationIds,
   input: Record<string, unknown>,
 ): Promise<SemanticOperationResultEnvelope> {
-  const operationId = `${PARTY_IDS.namespace}:operation.${localId}`;
-  const confirmationRequired = (
-    view.projections.operation.payload as {
-      operations: Array<{ confirmation: string; operationId: string }>;
-    }
-  ).operations.some(
-    (operation) =>
-      operation.operationId === operationId &&
-      operation.confirmation === 'humanRequired',
-  );
+  const operationId = PLATFORM_IDS.operationIds[action];
+  const confirmationRequired = action === 'archive';
   return runtime.operationGateway.invoke(
     view,
     {
@@ -225,19 +229,19 @@ export function invokePartyOperation(
       operationId,
       schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
     },
-    runtime.operationMediation.issueInvocation(view, 'API'),
+    runtime.operationMediation.issueInvocation(view, 'UI'),
   );
 }
 
-export function invokePartyQuery(
-  runtime: RealPartyRuntime,
+export function invokeSavedFilterQuery(
+  runtime: SavedFilterRuntime,
   view: RequestRuntimeView,
-  localId: string,
+  query: keyof typeof PLATFORM_IDS.queryIds,
   arguments_: Record<string, unknown>,
 ): Promise<SemanticQueryResultEnvelope> {
   return runtime.queryGateway.invoke(view, {
     arguments: arguments_,
-    queryId: `${PARTY_IDS.namespace}:query.${localId}`,
+    queryId: PLATFORM_IDS.queryIds[query],
     schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
   });
 }
@@ -250,13 +254,13 @@ class AllowPolicy implements CurrentPolicyGateway {
     return {
       decision: 'ALLOW' as const,
       decisionVersion: CURRENT_POLICY_DECISION_VERSION,
-      policyVersion: 'party-runtime-policy/v1',
+      policyVersion: 'saved-filter-policy/v1',
     };
   }
 
   async readCurrentVersion(_subject: CurrentPolicySubject) {
     void _subject;
-    return { policyVersion: 'party-runtime-policy/v1' };
+    return { policyVersion: 'saved-filter-policy/v1' };
   }
 }
 
@@ -265,8 +269,10 @@ function runtimeEntry(
   policy: CurrentPolicyGateway,
 ): AuthenticatedRequestRuntimeEntryAdapter {
   const identities: Record<string, AuthenticatedIdentity> = {
-    a: PARTY_TEST_SCOPE.a,
-    b: PARTY_TEST_SCOPE.b,
+    a: SAVED_FILTER_TEST_SCOPE.a,
+    alternateEnvironment: SAVED_FILTER_TEST_SCOPE.alternateEnvironment,
+    alternatePrincipal: SAVED_FILTER_TEST_SCOPE.alternatePrincipal,
+    b: SAVED_FILTER_TEST_SCOPE.b,
   };
   return new AuthenticatedRequestRuntimeEntryAdapter(
     new AuthenticatedRequestEntryAdapter(async (request) => {
@@ -303,18 +309,29 @@ function humanActorIssuer(): TrustedActorEnvelopeIssuer {
 }
 
 async function trustedContexts(): Promise<
-  Record<'a' | 'b', TrustedRequestContext>
+  Record<
+    'a' | 'alternateEnvironment' | 'alternatePrincipal' | 'b',
+    TrustedRequestContext
+  >
 > {
+  const identities: Record<string, AuthenticatedIdentity> = {
+    a: SAVED_FILTER_TEST_SCOPE.a,
+    alternateEnvironment: SAVED_FILTER_TEST_SCOPE.alternateEnvironment,
+    alternatePrincipal: SAVED_FILTER_TEST_SCOPE.alternatePrincipal,
+    b: SAVED_FILTER_TEST_SCOPE.b,
+  };
   const entry = new AuthenticatedRequestEntryAdapter(async (request) => {
     const token = request.headers?.authorization;
-    return token === 'a'
-      ? PARTY_TEST_SCOPE.a
-      : token === 'b'
-        ? PARTY_TEST_SCOPE.b
-        : null;
+    return typeof token === 'string' ? (identities[token] ?? null) : null;
   });
   return {
     a: await entry.enter({ headers: { authorization: 'a' } }),
+    alternateEnvironment: await entry.enter({
+      headers: { authorization: 'alternateEnvironment' },
+    }),
+    alternatePrincipal: await entry.enter({
+      headers: { authorization: 'alternatePrincipal' },
+    }),
     b: await entry.enter({ headers: { authorization: 'b' } }),
   };
 }
@@ -327,17 +344,23 @@ async function migrateAndSeed(pool: pg.Pool): Promise<void> {
     assert.equal(result.applied.length, loaded.length);
     assert.equal(result.verified.length, loaded.length);
     for (const [scope, slug] of [
-      [PARTY_TEST_SCOPE.a, 'party-a'],
-      [PARTY_TEST_SCOPE.b, 'party-b'],
+      [SAVED_FILTER_TEST_SCOPE.a, 'saved-filter-a'],
+      [SAVED_FILTER_TEST_SCOPE.b, 'saved-filter-b'],
     ] as const) {
       await client.query(
         'INSERT INTO platform.tenants (id, slug) VALUES ($1,$2)',
         [scope.tenantId, slug],
       );
+    }
+    for (const [scope, slug] of [
+      [SAVED_FILTER_TEST_SCOPE.a, 'production'],
+      [SAVED_FILTER_TEST_SCOPE.alternateEnvironment, 'preview'],
+      [SAVED_FILTER_TEST_SCOPE.b, 'production'],
+    ] as const) {
       await client.query(
         `INSERT INTO platform.environments (tenant_id, id, slug)
-         VALUES ($1,$2,'production')`,
-        [scope.tenantId, scope.environmentId],
+         VALUES ($1,$2,$3)`,
+        [scope.tenantId, scope.environmentId, slug],
       );
     }
   } finally {
@@ -345,28 +368,25 @@ async function migrateAndSeed(pool: pg.Pool): Promise<void> {
   }
 }
 
-async function persistSequence(
+async function persistRelease(
   runtimePool: pg.Pool,
   context: TrustedRequestContext,
-  entries: ReadonlyArray<readonly [CompileSuccess, Record<string, unknown>]>,
-): Promise<MintedUuid[]> {
+  compiled: CompileSuccess,
+  definition: Record<string, unknown>,
+): Promise<MintedUuid> {
   const repository = new PostgresImmutableReleaseRepository(runtimePool);
-  const releases: MintedUuid[] = [];
-  for (const [compiled, definition] of entries) {
-    const revisionId = minted(randomUUID());
-    const releaseId = minted(randomUUID());
-    const desiredState = partyDefinitionBytes(definition);
-    await repository.storeAppPackageRevision(
-      context,
-      revisionCommand(context, revisionId, desiredState),
-    );
-    await repository.registerTenantRelease(
-      context,
-      releaseCommand(context, releaseId, revisionId, compiled),
-    );
-    releases.push(releaseId);
-  }
-  return releases;
+  const revisionId = minted(randomUUID());
+  const releaseId = minted(randomUUID());
+  const desiredState = platformDefinitionBytes(definition);
+  await repository.storeAppPackageRevision(
+    context,
+    revisionCommand(context, revisionId, desiredState),
+  );
+  await repository.registerTenantRelease(
+    context,
+    releaseCommand(context, releaseId, revisionId, compiled),
+  );
+  return releaseId;
 }
 
 function revisionCommand(
@@ -435,28 +455,16 @@ async function setPointer(
 }
 
 async function grantExecutorAuthority(pool: pg.Pool): Promise<void> {
-  for (const scope of [PARTY_TEST_SCOPE.a, PARTY_TEST_SCOPE.b]) {
+  const granted = new Set<string>();
+  for (const scope of Object.values(SAVED_FILTER_TEST_SCOPE)) {
+    const key = `${scope.tenantId}:${scope.principalId}`;
+    if (granted.has(key)) continue;
+    granted.add(key);
     await pool.query(
       'SELECT platform.set_release_executor_authority($1,$2,true,$2,$3)',
       [scope.tenantId, scope.principalId, randomUUID()],
     );
   }
-}
-
-async function prepare(
-  materializer: PostgresModuleStorageMaterializer,
-  context: TrustedRequestContext,
-  releaseId: MintedUuid,
-): Promise<void> {
-  const prepared = await materializer.prepare({
-    context,
-    expiresAt: new Date(Date.now() + 120_000).toISOString(),
-    generationId: randomUUID(),
-    initiatedBy: context.principalId,
-    preparationId: randomUUID(),
-    targetReleaseId: releaseId,
-  });
-  assert.equal(prepared.schemaState, 'APPLIED');
 }
 
 function minted(value: string): MintedUuid {
