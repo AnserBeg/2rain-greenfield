@@ -1,9 +1,4 @@
-export interface ProductSurfaceGrammarBaselineEntry {
-  readonly moduleId: string;
-  readonly packageId: string;
-  readonly sourceDirectory: string;
-  readonly violationCount: number;
-}
+import type { ProductSurfaceGrammarBaselineEntry } from '../../packages/dev-tooling/src/surface-grammar-conformance/index.js';
 
 /**
  * Deliberately reviewed debt for compiled production modules. A count change in

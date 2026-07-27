@@ -67,15 +67,23 @@ existed in that measurement: Party 64 + Catalog 33 + Location 33. The Platform
 saved-filter package landed afterward and contributes another 33. This packet
 records the current product truth rather than preserving the older total.
 
-The checked-in artifact lives beside its owner at
-`packages/dev-tooling/src/surface-grammar-conformance/product-baseline.ts`.
-That location keeps deliberate debt with the ratchet logic, not under
-`test/fixtures`, and prevents the synthetic conformance package from becoming
-the apparent product authority. Each entry pins source directory, canonical
-package ID, canonical module ID, and violation count. The architecture test
-also discovers every direct `packages/domain/src/*/definition.ts` directory,
-so a new ordinary module cannot be omitted merely by forgetting to add it to
-the compile registry.
+The checked-in artifact lives at
+`test/architecture/surface-grammar-conformance.baseline.ts`, beside the gate
+that owns the admitted debt but outside `test/fixtures`. Keeping product IDs in
+architecture evidence also preserves the factory invariant that the generic
+production press has no Catalog or Location branch. Each entry pins source
+directory, canonical package ID, canonical module ID, and violation count. The
+architecture test also discovers every direct
+`packages/domain/src/*/definition.ts` directory, so a new ordinary module
+cannot be omitted merely by forgetting to add it to the compile registry.
+
+The first committed candidate run at `3cee830` was honestly red: static gates
+were green, but `test:unit` was 34/36 because the initial baseline location
+under `packages/dev-tooling` put literal Catalog and Location identities into
+the generic production press. Their zero-press-change guards correctly
+rejected that placement. Moving the data-only baseline to architecture
+evidence restored both unit controls to 36/36 without weakening or editing
+them.
 
 ## Quantifier ruling
 

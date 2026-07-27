@@ -19,7 +19,6 @@ import {
   type ConformanceSurface,
   type ProductSurfaceGrammarObservation,
 } from '../../packages/dev-tooling/src/surface-grammar-conformance/index.js';
-import { PRODUCT_SURFACE_GRAMMAR_BASELINE } from '../../packages/dev-tooling/src/surface-grammar-conformance/product-baseline.js';
 import {
   checkSurfaceRuntimeSeam,
   checkUxGrammarPin,
@@ -40,6 +39,7 @@ import {
   partyModuleDefinition,
   platformModuleDefinition,
 } from '../../packages/domain/src/index.js';
+import { PRODUCT_SURFACE_GRAMMAR_BASELINE } from './surface-grammar-conformance.baseline.js';
 import {
   compiledSurfaceGrammarSurfaces,
   compileSurfaceGrammarFixture,
