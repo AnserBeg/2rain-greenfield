@@ -31,6 +31,14 @@ import type {
 } from '../../runtime/src/semantic-query-gateway.js';
 import { SEMANTIC_QUERY_RESULT_VERSION } from '../../runtime/src/semantic-query-gateway.js';
 import type { ImmutableJsonValue } from '../../runtime/src/request-runtime-view.js';
+import {
+  encodeSharedListCursor,
+  SHARED_LIST_RESULT_VERSION,
+  SharedListContractError,
+  type AuthorizedSharedListRelationLabel,
+  type AuthorizedSharedListRequest,
+  type SharedListCoverage,
+} from '../../runtime/src/list-behavior/index.js';
 import type { Pool, PoolClient, QueryResultRow } from 'pg';
 
 import { withTrustedRequestTransaction } from './request-context.js';
@@ -165,6 +173,7 @@ export class PostgresModuleRuntimeInterpreter
               storage,
               request.definition,
               request.arguments,
+              request.list,
             ),
           );
         },
@@ -650,6 +659,7 @@ async function executeQueryOnClient(
   storage: StorageTargetPayloadV1,
   definition: RegisteredQueryDefinition,
   argumentValue: ImmutableJsonValue,
+  list: AuthorizedSharedListRequest | null,
 ): Promise<SemanticQueryResultEnvelope> {
   if (!definition.infrastructure) {
     return queryResult(
@@ -681,6 +691,9 @@ async function executeQueryOnClient(
       );
     }
     case 'list': {
+      if (list) {
+        return listSharedRecords(client, storage, entity, definition, list);
+      }
       const limit = boundedLimit(args.limit, definition.maximumResultCount);
       const afterRecordId = optionalUuid(args.afterRecordId, 'afterRecordId');
       records = await listRecords(
@@ -769,6 +782,339 @@ async function listRecords(
     values,
   );
   return rows.rows.map((row) => rawRecord(entity, row));
+}
+
+interface ListRelationPlan {
+  readonly authorization: AuthorizedSharedListRelationLabel;
+  readonly labelColumn: StorageEntity['columns'][number];
+  readonly labelAlias: string;
+  readonly recordAlias: string;
+  readonly relation: StorageTargetPayloadV1['relations'][number];
+  readonly tableAlias: string;
+  readonly target: StorageEntity;
+}
+
+async function listSharedRecords(
+  client: PoolClient,
+  storage: StorageTargetPayloadV1,
+  entity: StorageEntity,
+  definition: RegisteredQueryDefinition,
+  list: AuthorizedSharedListRequest,
+): Promise<SemanticQueryResultEnvelope> {
+  const sourceAlias = 'table_source';
+  const selectedColumns = definition.selections.map((selection) => {
+    const column = entity.columns.find(
+      (candidate) => candidate.canonicalFieldId === selection.fieldId,
+    );
+    if (!column) {
+      throw failure(
+        'MODULE_LIST_PROJECTION_INVALID',
+        'selected list field has no compiled storage column',
+        selection.fieldId,
+      );
+    }
+    return column;
+  });
+  const relationPlans = list.relationLabels.map((authorization, index) =>
+    listRelationPlan(storage, entity, authorization, index),
+  );
+  const fromSql = listFromSql(entity, sourceAlias, relationPlans);
+  const values: unknown[] = [];
+  const predicates = listArchivePredicates(
+    entity,
+    sourceAlias,
+    list.query.includeArchived,
+  );
+  const searchExpressions = [
+    ...selectedColumns.map((column) =>
+      foldedVisibleFieldExpression(entity, column, sourceAlias),
+    ),
+    ...relationPlans.map((plan) =>
+      foldedVisibleFieldExpression(
+        plan.target,
+        plan.labelColumn,
+        plan.tableAlias,
+      ),
+    ),
+  ];
+  if (list.query.search.trim() !== '') {
+    const match = buildFoldedExpressionMatchPredicate(
+      searchExpressions,
+      list.query.search,
+      list.query.matchMode,
+    );
+    values.push(...match.values);
+    predicates.push(match.sql);
+  }
+  const whereSql = predicates.length > 0 ? predicates.join(' AND ') : 'true';
+  const count = await client.query<{ total_count: string }>(
+    `SELECT count(*)::text AS total_count ${fromSql} WHERE ${whereSql}`,
+    values,
+  );
+  const totalCount = Number(count.rows[0]?.total_count ?? '0');
+  if (!Number.isSafeInteger(totalCount) || totalCount < 0) {
+    throw failure(
+      'MODULE_LIST_RESULT_INVALID',
+      'list count is not a non-negative safe integer',
+    );
+  }
+  const pageValues = [...values];
+  const limitSql = parameter(pageValues, list.query.effectivePageSize + 1);
+  const offsetSql = parameter(pageValues, list.query.pageOffset);
+  const rows = await client.query<QueryResultRow>(
+    `SELECT ${listSelectList(entity, sourceAlias, selectedColumns, relationPlans)}
+       ${fromSql}
+      WHERE ${whereSql}
+      ORDER BY ${listOrderBy(
+        entity,
+        sourceAlias,
+        selectedColumns,
+        relationPlans,
+        list,
+      )}
+      LIMIT ${limitSql} OFFSET ${offsetSql}`,
+    pageValues,
+  );
+  const hasMore = rows.rows.length > list.query.effectivePageSize;
+  const pageRows = rows.rows.slice(0, list.query.effectivePageSize);
+  const records = pageRows.map((row) =>
+    toListDto(entity, row, selectedColumns, relationPlans),
+  );
+  const nextOffset = list.query.pageOffset + records.length;
+  const listCoverage: SharedListCoverage = Object.freeze({
+    effectivePageSize: list.query.effectivePageSize,
+    hasMore,
+    includeArchived: list.query.includeArchived,
+    matchMode: list.query.matchMode,
+    nextCursor: hasMore
+      ? encodeSharedListCursor(definition.queryId, list.query, nextOffset)
+      : null,
+    pageOffset: list.query.pageOffset,
+    projectedSearchValueCount:
+      list.query.search.trim() === '' ? 0 : searchExpressions.length,
+    requestedPageSize: list.query.requestedPageSize,
+    returnedCount: records.length,
+    schemaVersion: SHARED_LIST_RESULT_VERSION,
+    search: list.query.search,
+    sort: list.query.sort,
+    totalCount,
+    truncatedByMaximum: list.query.truncatedByMaximum,
+  });
+  return Object.freeze({
+    kind: 'semanticQueryResult',
+    outcome: 'exact',
+    queryId: definition.queryId,
+    records: Object.freeze(records),
+    schemaVersion: SEMANTIC_QUERY_RESULT_VERSION,
+    listCoverage,
+    unsupportedReason: null,
+  });
+}
+
+function listRelationPlan(
+  storage: StorageTargetPayloadV1,
+  source: StorageEntity,
+  authorization: AuthorizedSharedListRelationLabel,
+  index: number,
+): ListRelationPlan {
+  const relation = storage.relations.find(
+    (candidate) =>
+      candidate.relationId === authorization.relationId &&
+      candidate.sourceEntityId === source.entityId &&
+      candidate.targetEntityId === authorization.targetEntityId,
+  );
+  if (!relation) {
+    throw new SharedListContractError(
+      'LIST_FIELD_NOT_AUTHORIZED',
+      'authorized relation label does not match the compiled storage relation',
+      authorization.relationId,
+    );
+  }
+  const target = requiredEntity(storage, relation.targetEntityId);
+  const labelColumn = target.columns.find(
+    (candidate) => candidate.canonicalFieldId === authorization.fieldId,
+  );
+  if (!labelColumn) {
+    throw new SharedListContractError(
+      'LIST_FIELD_NOT_AUTHORIZED',
+      'authorized relation label field has no compiled target column',
+      authorization.fieldId,
+    );
+  }
+  return Object.freeze({
+    authorization,
+    labelAlias: `nsm_table_relation_${String(index)}_label`,
+    labelColumn,
+    recordAlias: `nsm_table_relation_${String(index)}_record`,
+    relation,
+    tableAlias: `table_relation_${String(index)}`,
+    target,
+  });
+}
+
+function listFromSql(
+  entity: StorageEntity,
+  sourceAlias: string,
+  relations: readonly ListRelationPlan[],
+): string {
+  return [
+    `FROM north_star_module.${quoted(entity.physicalTableName)} AS ${quoted(sourceAlias)}`,
+    ...relations.map(
+      (plan) =>
+        `LEFT JOIN north_star_module.${quoted(plan.target.physicalTableName)} AS ${quoted(plan.tableAlias)}
+           ON ${qualified(plan.tableAlias, 'tenant_id')} = ${qualified(sourceAlias, 'tenant_id')}
+          AND ${qualified(plan.tableAlias, 'environment_id')} = ${qualified(sourceAlias, 'environment_id')}
+          AND ${qualified(plan.tableAlias, plan.target.recordIdentity.column)} = ${qualified(sourceAlias, plan.relation.relationColumn.physicalName)}`,
+    ),
+  ].join('\n');
+}
+
+function listArchivePredicates(
+  entity: StorageEntity,
+  sourceAlias: string,
+  includeArchived: boolean,
+): string[] {
+  return includeArchived
+    ? []
+    : [qualified(sourceAlias, entity.archive.archivedAtColumn) + ' IS NULL'];
+}
+
+function listSelectList(
+  entity: StorageEntity,
+  sourceAlias: string,
+  selectedColumns: readonly StorageEntity['columns'][number][],
+  relations: readonly ListRelationPlan[],
+): string {
+  const rawColumns = [
+    entity.recordIdentity.column,
+    entity.optimisticRevision.column,
+    entity.archive.archivedAtColumn,
+    ...entity.columns.map((column) => column.physicalName),
+  ].map((column) => `${qualified(sourceAlias, column)} AS ${quoted(column)}`);
+  const displays = selectedColumns.map(
+    (column, index) =>
+      `${visibleFieldExpression(column, sourceAlias)} AS ${quoted(`nsm_table_display_${String(index)}`)}`,
+  );
+  const relationValues = relations.flatMap((plan) => [
+    `${qualified(sourceAlias, plan.relation.relationColumn.physicalName)} AS ${quoted(plan.recordAlias)}`,
+    `${visibleFieldExpression(plan.labelColumn, plan.tableAlias)} AS ${quoted(plan.labelAlias)}`,
+  ]);
+  return [...rawColumns, ...displays, ...relationValues].join(', ');
+}
+
+function listOrderBy(
+  entity: StorageEntity,
+  sourceAlias: string,
+  selectedColumns: readonly StorageEntity['columns'][number][],
+  relations: readonly ListRelationPlan[],
+  list: AuthorizedSharedListRequest,
+): string {
+  const selectedById = new Map(
+    selectedColumns.map((column) => [column.canonicalFieldId, column] as const),
+  );
+  const relationsById = new Map(
+    relations.map((plan) => [plan.authorization.relationId, plan] as const),
+  );
+  const order = list.query.sort.map((sort) => {
+    const column = selectedById.get(sort.fieldId);
+    const relation = relationsById.get(sort.fieldId);
+    const expression = column
+      ? visibleFieldExpression(column, sourceAlias)
+      : relation
+        ? visibleFieldExpression(relation.labelColumn, relation.tableAlias)
+        : null;
+    if (!expression) {
+      throw new SharedListContractError(
+        'LIST_FIELD_NOT_AUTHORIZED',
+        'list sort field is not present in the authorized projection',
+        sort.fieldId,
+      );
+    }
+    return `${expression} ${sort.direction === 'descending' ? 'DESC' : 'ASC'} NULLS LAST`;
+  });
+  order.push(`${qualified(sourceAlias, entity.recordIdentity.column)} ASC`);
+  return order.join(', ');
+}
+
+function toListDto(
+  entity: StorageEntity,
+  row: QueryResultRow,
+  selectedColumns: readonly StorageEntity['columns'][number][],
+  relations: readonly ListRelationPlan[],
+): SemanticRecordDto {
+  const base = toDto(
+    entity,
+    rawRecord(entity, row),
+    selectedColumns.map((column) => ({ fieldId: column.canonicalFieldId })),
+  );
+  const displayValues = Object.freeze(
+    Object.fromEntries(
+      selectedColumns.map((column, index) => [
+        column.canonicalFieldId,
+        nullableDisplayValue(row[`nsm_table_display_${String(index)}`]),
+      ]),
+    ),
+  );
+  const relationLabels = Object.freeze(
+    Object.fromEntries(
+      relations.map((plan) => [
+        plan.authorization.relationId,
+        Object.freeze({
+          label: nullableDisplayValue(row[plan.labelAlias]),
+          recordId: nullableUuid(row[plan.recordAlias]),
+        }),
+      ]),
+    ),
+  );
+  return Object.freeze({ ...base, displayValues, relationLabels });
+}
+
+function visibleFieldExpression(
+  column: StorageEntity['columns'][number],
+  tableAlias: string,
+): string {
+  const value = qualified(tableAlias, column.physicalName);
+  switch (column.fieldContract.fieldKind) {
+    case 'booleanFieldType':
+      return `CASE WHEN ${value} IS NULL THEN NULL WHEN ${value} THEN 'Yes' ELSE 'No' END`;
+    case 'enumFieldType':
+      return `initcap(replace(regexp_replace(${value}::text, '^.*[.:]', ''), '_', ' '))`;
+    default:
+      return `${value}::text`;
+  }
+}
+
+function foldedVisibleFieldExpression(
+  entity: StorageEntity,
+  column: StorageEntity['columns'][number],
+  tableAlias: string,
+): string {
+  if (
+    column.fieldContract.fieldKind === 'textFieldType' &&
+    (entity.foldedColumns ?? []).some(
+      (candidate) => candidate.canonicalFieldId === column.canonicalFieldId,
+    )
+  ) {
+    return foldedColumnSql(entity, column, tableAlias);
+  }
+  return `north_star_module.${unicodeCaseFoldFunctionName}(${visibleFieldExpression(column, tableAlias)})`;
+}
+
+function nullableDisplayValue(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== 'string') {
+    throw failure(
+      'MODULE_LIST_RESULT_INVALID',
+      'formatted list value is not text',
+    );
+  }
+  return value;
+}
+
+function nullableUuid(value: unknown): string | null {
+  return value === null || value === undefined
+    ? null
+    : requiredUuid(value, 'relation recordId');
 }
 
 async function matchRecords(
@@ -911,6 +1257,24 @@ export function buildFoldedMatchPredicate(
       'folded matching requires at least one declared column',
     );
   }
+  return buildFoldedExpressionMatchPredicate(
+    columns.map((column) => foldedColumnSql(entity, column)),
+    text,
+    mode,
+  );
+}
+
+function buildFoldedExpressionMatchPredicate(
+  foldedExpressions: readonly string[],
+  text: string,
+  mode: 'exact' | 'prefix' | 'substring',
+): { readonly sql: string; readonly values: readonly unknown[] } {
+  if (foldedExpressions.length === 0) {
+    throw failure(
+      'MODULE_FOLDED_MATCH_COLUMNS_REQUIRED',
+      'folded matching requires at least one declared expression',
+    );
+  }
   const values: unknown[] = [];
   const textParameter = parameter(values, text);
   const foldedParameter = `north_star_module.${unicodeCaseFoldFunctionName}(${textParameter}::text)`;
@@ -921,8 +1285,7 @@ export function buildFoldedMatchPredicate(
     upperBound === null || upperBound === undefined
       ? null
       : parameter(values, upperBound);
-  const terms = columns.map((column) => {
-    const foldedColumn = foldedColumnSql(entity, column);
+  const terms = foldedExpressions.map((foldedColumn) => {
     switch (mode) {
       case 'exact':
         return `${foldedColumn} = ${foldedParameter}`;
@@ -967,6 +1330,7 @@ export function foldedPrefixUpperBound(value: string): string | null {
 function foldedColumnSql(
   entity: StorageEntity,
   column: StorageEntity['columns'][number],
+  tableAlias?: string,
 ): string {
   const foldedColumn = (entity.foldedColumns ?? []).find(
     (candidate) => candidate.canonicalFieldId === column.canonicalFieldId,
@@ -985,10 +1349,15 @@ function foldedColumnSql(
         column.canonicalFieldId,
       );
     }
-    return quoted(foldedColumn.physicalName);
+    return tableAlias
+      ? qualified(tableAlias, foldedColumn.physicalName)
+      : quoted(foldedColumn.physicalName);
   }
   if (!Object.hasOwn(entity, 'foldedColumns')) {
-    return `north_star_module.${unicodeCaseFoldFunctionName}(${quoted(column.physicalName)}::text)`;
+    const source = tableAlias
+      ? qualified(tableAlias, column.physicalName)
+      : quoted(column.physicalName);
+    return `north_star_module.${unicodeCaseFoldFunctionName}(${source}::text)`;
   }
   throw failure(
     'MODULE_FOLDED_COLUMN_CONTRACT_MISSING',
@@ -1836,6 +2205,10 @@ function quoted(identifier: string): string {
   return `"${identifier}"`;
 }
 
+function qualified(tableAlias: string, identifier: string): string {
+  return `${quoted(tableAlias)}.${quoted(identifier)}`;
+}
+
 function safeIdentifier(identifier: string): void {
   if (!identifierPattern.test(identifier)) {
     throw failure(
@@ -1937,8 +2310,9 @@ function providerErrorProperty(
 function providerBoundaryFailure(
   error: unknown,
   subjectId: string,
-): ModuleRuntimeInterpreterError {
-  return error instanceof ModuleRuntimeInterpreterError
+): ModuleRuntimeInterpreterError | SharedListContractError {
+  return error instanceof ModuleRuntimeInterpreterError ||
+    error instanceof SharedListContractError
     ? error
     : failure(
         'MODULE_PROVIDER_FAILURE',

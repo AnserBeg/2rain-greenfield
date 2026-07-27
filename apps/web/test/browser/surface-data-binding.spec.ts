@@ -155,17 +155,26 @@ class BrowserFixtureExecutor
               (record) => record.recordId === args.recordId,
             )
           : [...this.records.values()];
-      return {
+      const projectedRecords = request.list
+        ? records.map((entry) => projectedListRecord(request, entry))
+        : records;
+      const result: SemanticQueryResultEnvelope = {
         kind: 'semanticQueryResult',
         outcome:
           records.length > 0 || request.definition.queryType === 'list'
             ? 'exact'
             : 'not-found',
         queryId: request.definition.queryId,
-        records,
+        records: projectedRecords,
         schemaVersion: SEMANTIC_QUERY_RESULT_VERSION,
         unsupportedReason: null,
       };
+      return request.list
+        ? {
+            ...result,
+            listCoverage: listCoverage(request, projectedRecords.length),
+          }
+        : result;
     }
 
     const input = recordValue(request.input);
@@ -243,6 +252,55 @@ function dto(recordId: string, name: string): SemanticRecordDto {
     recordId,
     revision: 1,
     values: Object.freeze({ [FIXTURE_IDS.fieldIds.parentName]: name }),
+  });
+}
+
+function projectedListRecord(
+  request: SemanticQueryExecutionRequest,
+  record: SemanticRecordDto,
+): SemanticRecordDto {
+  return Object.freeze({
+    ...record,
+    displayValues: Object.freeze(
+      Object.fromEntries(
+        request.definition.selections.map(({ fieldId }) => [
+          fieldId,
+          displayValue(record.values[fieldId]),
+        ]),
+      ),
+    ),
+    relationLabels: Object.freeze({}),
+  });
+}
+
+function displayValue(value: ImmutableJsonValue | undefined): string | null {
+  if (value === null || value === undefined) return null;
+  return typeof value === 'string' ? value : JSON.stringify(value);
+}
+
+function listCoverage(
+  request: SemanticQueryExecutionRequest,
+  returnedCount: number,
+): NonNullable<SemanticQueryResultEnvelope['listCoverage']> {
+  assert.ok(request.list);
+  return Object.freeze({
+    effectivePageSize: request.list.query.effectivePageSize,
+    hasMore: false,
+    includeArchived: request.list.query.includeArchived,
+    matchMode: request.list.query.matchMode,
+    nextCursor: null,
+    pageOffset: request.list.query.pageOffset,
+    projectedSearchValueCount:
+      request.list.query.search.length === 0
+        ? 0
+        : request.definition.selections.length,
+    requestedPageSize: request.list.query.requestedPageSize,
+    returnedCount,
+    schemaVersion: 'northstar.shared-list-result/v1',
+    search: request.list.query.search,
+    sort: request.list.query.sort,
+    totalCount: request.list.query.pageOffset + returnedCount,
+    truncatedByMaximum: request.list.query.truncatedByMaximum,
   });
 }
 

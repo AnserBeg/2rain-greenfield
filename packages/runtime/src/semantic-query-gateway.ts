@@ -13,6 +13,14 @@ import {
   type ImmutableJsonValue,
 } from './request-runtime-view.js';
 import type { RequestRuntimeView as IssuedRequestRuntimeView } from './request-runtime-view.js';
+import {
+  authorizeSharedListFields,
+  parseSharedListArguments,
+  requireSharedListResult,
+  SharedListContractError,
+  type AuthorizedSharedListRequest,
+  type SharedListCoverage,
+} from './list-behavior/index.js';
 
 export const SEMANTIC_QUERY_REQUEST_VERSION =
   'northstar.semantic-query-request/v1' as const;
@@ -36,8 +44,18 @@ export interface SemanticQueryRequestEnvelope {
 
 export interface SemanticRecordDto {
   readonly archived: boolean;
+  readonly displayValues?: Readonly<Record<string, string | null>>;
   readonly entityId: string;
   readonly recordId: string;
+  readonly relationLabels?: Readonly<
+    Record<
+      string,
+      Readonly<{
+        label: string | null;
+        recordId: string | null;
+      }>
+    >
+  >;
   readonly revision: number;
   readonly values: Readonly<Record<string, ImmutableJsonValue>>;
 }
@@ -48,6 +66,7 @@ export interface SemanticQueryResultEnvelope {
   readonly queryId: string;
   readonly records: readonly SemanticRecordDto[];
   readonly schemaVersion: typeof SEMANTIC_QUERY_RESULT_VERSION;
+  readonly listCoverage?: SharedListCoverage;
   readonly unsupportedReason: string | null;
 }
 
@@ -82,6 +101,7 @@ export interface SemanticQueryExecutionRequest {
   readonly arguments: ImmutableJsonValue;
   readonly context: TrustedRequestContext;
   readonly definition: RegisteredQueryDefinition;
+  readonly list: AuthorizedSharedListRequest | null;
   readonly view: IssuedRequestRuntimeView;
 }
 
@@ -199,15 +219,114 @@ export class SemanticQueryGateway {
         'query-filter-unsupported',
       );
     }
-    return this.executor.execute(
+    const listQuery = parseSharedListArguments(request.arguments, {
+      maximumResultCount: definition.maximumResultCount,
+      queryId: definition.queryId,
+    });
+    if (listQuery && definition.queryType !== 'list') {
+      throw new SharedListContractError(
+        'LIST_INPUT_MALFORMED',
+        'shared list arguments belong only to a registered list query',
+        definition.queryId,
+      );
+    }
+    const list = listQuery
+      ? await authorizeSharedListProjection(
+          this.currentPolicy,
+          view,
+          definition,
+          listQuery,
+          this.observePredicateReceipt,
+        )
+      : null;
+    if (listQuery && !list) {
+      return unsupportedQueryResult(
+        request.queryId,
+        'query-filter-unsupported',
+      );
+    }
+    const result = await this.executor.execute(
       Object.freeze({
         arguments: request.arguments,
         context: trustedContextForRequestRuntimeView(view),
         definition,
+        list,
         view,
       }),
     );
+    if (list) requireSharedListResult(result);
+    return result;
   }
+}
+
+async function authorizeSharedListProjection(
+  currentPolicy: CurrentPolicyGateway,
+  view: IssuedRequestRuntimeView,
+  sourceDefinition: RegisteredQueryDefinition,
+  query: NonNullable<ReturnType<typeof parseSharedListArguments>>,
+  observePredicateReceipt:
+    ((receipt: PredicateKernelReceipt) => void) | undefined,
+): Promise<AuthorizedSharedListRequest | null> {
+  authorizeSharedListFields(query, {
+    selectedFieldIds: new Set(
+      sourceDefinition.selections.map((selection) => selection.fieldId),
+    ),
+  });
+  const relationLabels = [];
+  for (const relation of query.relationLabels) {
+    const targetDefinition = registeredQueryFromPinnedView(
+      view,
+      relation.queryId,
+    );
+    if (
+      !targetDefinition ||
+      targetDefinition.lifecycle !== 'active' ||
+      targetDefinition.tier !== 'q0' ||
+      targetDefinition.queryType !== 'list' ||
+      !targetDefinition.selections.some(
+        (selection) => selection.fieldId === relation.fieldId,
+      )
+    ) {
+      throw new SharedListContractError(
+        'LIST_FIELD_NOT_AUTHORIZED',
+        'relation label must use a selected field from an active pinned list query',
+        relation.fieldId,
+      );
+    }
+    const decision = await authorizeCurrentPolicy(
+      currentPolicy,
+      view,
+      targetDefinition.permissionId,
+      Object.freeze({
+        arguments: Object.freeze({
+          fieldId: relation.fieldId,
+          relationId: relation.relationId,
+        }),
+        kind: 'registeredSemanticListRelationPolicyInput',
+        queryId: targetDefinition.queryId,
+        requestId: view.requestId,
+        schemaVersion: QUERY_POLICY_INPUT_VERSION,
+      }),
+    );
+    if (decision.decision === 'DENY') {
+      throw new SemanticQueryPolicyDeniedError(targetDefinition.queryId, view);
+    }
+    const predicateReceipt = inspectPredicateForExecution(
+      targetDefinition.filter,
+    );
+    observePredicateReceiptSafely(observePredicateReceipt, predicateReceipt);
+    if (predicateReceipt.outcome !== 'accepted') return null;
+    relationLabels.push(
+      Object.freeze({
+        ...relation,
+        targetEntityId: targetDefinition.sourceEntityId,
+      }),
+    );
+  }
+  return Object.freeze({
+    query,
+    relationLabels: Object.freeze(relationLabels),
+  });
 }
 
 export function observePredicateReceiptSafely(

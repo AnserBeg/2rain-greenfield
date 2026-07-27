@@ -15,12 +15,14 @@ test('real Party surface renders roles, creates, and archives/restores through t
     await page.setExtraHTTPHeaders({ authorization: 'a' });
 
     await page.goto(surfaceUrl(fixture.baseUrl, 'party_role_list'));
-    await expect(
-      page.getByRole('cell', { name: `${namespace}:option.supplier` }),
-    ).toBeVisible();
-    await expect(
-      page.getByRole('cell', { name: `${namespace}:option.customer` }),
-    ).toBeVisible();
+    await expect(page.getByRole('cell', { name: 'Supplier' })).toBeVisible();
+    await expect(page.getByRole('cell', { name: 'Customer' })).toBeVisible();
+    await expect(page.locator('body')).not.toContainText(
+      `${namespace}:option.supplier`,
+    );
+    await expect(page.locator('body')).not.toContainText(
+      `${namespace}:option.customer`,
+    );
 
     await page.goto(
       `${surfaceUrl(fixture.baseUrl, 'party_detail')}&record=${encodeURIComponent(fixture.partyId)}`,
