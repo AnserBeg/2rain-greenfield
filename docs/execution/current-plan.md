@@ -87,7 +87,9 @@ The trigger was a human operating the app and noticing the list and record pages
 
 Rows 1-3 are the response, in that order: ratchet so nothing new can be added, burn down the anatomy, then write the skill that codifies the template — because writing the skill first would make the defect doctrine.
 
-**Open decision before G2-P9 is cut:** there is no composed application. `pnpm dev` serves a shell with four `home` surfaces and no domain module, so every "test it yourself" checkpoint so far has exercised a per-module harness rather than the product. A stage gate run today certifies the harnesses. Either G2 ships a composed shell, or G2-P9 states plainly what it does and does not certify — a scope call, not a packet call.
+**SCOPE RULING 2026-07-27 — G2 must be demonstrable.** The user has ruled that G2 ships something a person can open and use, not a set of per-module harnesses. That makes the **composed application G2 scope**, not deferred: one shell carrying the real modules, records reachable, the anatomy present enough that create/save/navigate work, and no error page or `UNSUPPORTED_COMPONENT` panel as the first thing a visitor sees. G2-P9 cannot certify the stage until that is true. This is a constraint on the remaining packets, not an open question.
+
+**Superseded — the earlier framing of this decision:** there is no composed application. `pnpm dev` serves a shell with four `home` surfaces and no domain module, so every "test it yourself" checkpoint so far has exercised a per-module harness rather than the product. A stage gate run today certifies the harnesses. Either G2 ships a composed shell, or G2-P9 states plainly what it does and does not certify — a scope call, not a packet call.
 
 **Not yet started:** G2-P8 import, and everything after.
 
