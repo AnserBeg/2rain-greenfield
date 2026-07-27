@@ -61,6 +61,7 @@ const suiteDefinitions = [
       'test/architecture/repository-hygiene.test.ts',
       'test/architecture/request-runtime-view-boundary.test.ts',
       'test/architecture/surface-data-binding.test.ts',
+      'test/architecture/surface-grammar-conformance.test.ts',
       'test/architecture/surface-runtime-seam.test.ts',
       'test/architecture/test-reachability.test.ts',
       'test/architecture/ux-grammar-skill.test.ts',
