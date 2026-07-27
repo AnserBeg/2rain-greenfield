@@ -166,6 +166,7 @@ incident.
 - SQL is shape-specialized per query definition (`module-runtime-interpreter.ts:931`), not
   universal-with-optional-predicates. That's the thing most interpreter designs get wrong.
 - Pagination is keyset, not OFFSET (`module-runtime-interpreter.ts:747`). Correct at any table
+  > **Superseded 2026-07-27 for the shared List path.** G2-P5a's reusable list behaviour uses **offset** pagination with a separate count statement, both under read-committed. This bullet remains true for the direct single-query path it described, and is **false for the shared list path every module now inherits.** See the G2-P5a ledger row for the recorded consequences and the missing numeric trigger.
   size.
 - The case-fold function is `IMMUTABLE STRICT PARALLEL SAFE` with a pinned `search_path` —
   indexable and safe.
