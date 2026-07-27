@@ -134,6 +134,12 @@ are exactly `{queryId}`, so the gateway's shared-list argument parser produces
 no shared List request or coverage metadata. This packet bounds that custom
 result without inventing a third cursor, truncation, or coverage contract.
 
+The round-two Fable confirm found that a revoked row still entered that custom
+List and failed validation, so archiving one filter blinded all of its active
+siblings. The List query now selects only `lifecycle = 'active'` before applying
+the compiled bound. `validateStoredEnvelope` remains unchanged and validates
+every selected active row as the content and release backstop.
+
 ## Canonical criteria and validation
 
 The runtime entry-point budgets are numeric and apply before recursive schema
@@ -214,6 +220,7 @@ not claims that the final suite remains red.
 | tenant scope leaks | tenant B gets tenant A's filter ID | `SAVED_FILTER_NOT_VISIBLE`; executor reads zero visible rows |
 | superseded release is accepted | activate a new release ID for the same tenant/environment, then read the old filter | `SAVED_FILTER_RELEASE_MISMATCH`; criteria are not returned |
 | declared List bound is ignored | create 101 filters against the compiled bound of 100, then execute the former no-`LIMIT` query | the former query returns 101 and an at-most-100 assertion throws; the production registered List returns exactly 100 and omits the 101st ordered ID |
+| archived sibling still enters the List | create two filters, archive one, and run the actual executor through a test pool that removes only the lifecycle predicate | the former path executes against ephemeral PostgreSQL and throws `SAVED_FILTER_LIFECYCLE_REVOKED` at `$.lifecycle`; the production List returns only the active ID |
 
 ## Positive anti-vacuity observations
 
@@ -230,6 +237,7 @@ not claims that the final suite remains red.
 | honest unsupported surface | the factory-required saved-filter search query returns `unsupported` with `saved-filter-query-unsupported`, not a false exact-empty success |
 | no failed-write residue | after all deliberately rejected creates, exactly the one accepted filter row exists |
 | compiled List authority | the over-limit fixture reads `maximumResultCount` from the pinned query projection, then observes that exact count from the registered List |
+| archive directory semantics | after one of two siblings is archived, the registered List returns exactly the active sibling and explicitly excludes the archived ID |
 
 ## Known limits and what the gates cannot prove
 
@@ -239,12 +247,35 @@ not claims that the final suite remains red.
   criteria, create a second evaluator, or return unfiltered rows as a fallback.
 - Saved-filter search and resolve are explicitly unsupported. Get/list,
   persistence, scope, lifecycle, and validation are the delivered read surface.
+- **Decision — stale or corrupt active siblings fail the entire List.** This is
+  deliberate: silently omitting an active row would present a partial directory
+  as complete and conceal broken criteria. The consequence is that one stale
+  sibling can blind post-activation recovery even after other filters are
+  healed. A follow-on needs an explicit recovery/diagnostic surface; this
+  packet does not silently skip the row or weaken fail-closed validation.
 - The saved-filter List is bounded by its compiled query definition but its
   custom `{queryId}` argument shape carries no P5a cursor or coverage metadata,
   so callers cannot distinguish an exactly-full result from truncation. A
   create-side cap on how many filters a principal may own is a separate product
   decision; this packet does not add one, so durable accumulation remains
   possible even though each read is bounded.
+- The first-party platform package is a reusable pattern, not yet an
+  established cross-package vehicle. Its fixture compiles standalone with
+  `dependencies: []`, package composition is explicitly unsupported, and the
+  tests can therefore save criteria only against the platform package's own
+  List rather than Party's. Its declared `dedicatedTable` mapping also does not
+  create the real persistence path: migration 0012 authors that table and the
+  custom executor bypasses the generic module interpreter. A composed
+  platform-plus-Party release remains unproven follow-on work.
+- RLS is the sole scope fence for update and archive: their row locks and
+  updates identify `filter_id` without repeating tenant, environment, and
+  principal columns. A hardening follow-on should include the trusted context
+  scope columns in the `lockRow` and `UPDATE` predicates; this packet does not
+  alter those reviewed write paths.
+- A stale issued view can create a filter after its pinned release ceases to be
+  the active pointer, leaving the new filter orphaned at birth. Creation does
+  not currently recheck the active pointer; this requires separate lifecycle
+  policy rather than a change to the archive-list fix.
 - The provider proves that its public saved-filter module exposes no direct
   repository function and that an ordinary raw runtime-pool insert fails RLS.
   It cannot make deliberately malicious trusted provider code harmless if that
@@ -275,12 +306,14 @@ corepack pnpm check:schema
 corepack pnpm test:architecture
 ```
 
-Expected observations are 3/3 focused PostgreSQL tests, 12/12 migrations, and
+Expected observations are 4/4 focused PostgreSQL tests, 12/12 migrations, and
 68/68 architecture tests. The first focused test prints the numeric-order
 journey through its assertions; the second executes every saved-filter red and
 then observes exactly one accepted durable row. The third creates 101 filters,
 observes all 101 through the former unbounded query shape, and observes exactly
-the compiled bound of 100 through the registered List.
+the compiled bound of 100 through the registered List. The fourth archives one
+of two filters, observes the former executor throw, and then observes only the
+active sibling through the production List.
 
 ## Full-matrix evidence
 
@@ -301,13 +334,14 @@ node --import tsx --test test/postgres/saved-filter.test.ts
 corepack pnpm check:schema
 ```
 
-Expect 3/3 and 12 applied / 12 verified. Every durable create uses the
+Expect 4/4 and 12 applied / 12 verified. Every durable create uses the
 registered operation. The round-trip case rereads byte-identical criteria,
 observes the trust record, rejects cross-principal/cross-tenant/stale-release
 reads, rejects stale and corrupt criteria, and leaves exactly one accepted row.
 The suite also proves numeric ordering while the former text expression
 demonstrably puts `10` before `9`, and that a 101-row saved-filter fixture is
-capped at the compiled 100-row List contract.
+capped at the compiled 100-row List contract. The lifecycle case proves an
+archived sibling is absent without preventing its active sibling from listing.
 
 ## Program-review trigger assessment
 

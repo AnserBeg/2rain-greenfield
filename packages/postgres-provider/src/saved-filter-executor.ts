@@ -289,7 +289,7 @@ async function readRows(
     const queryId = requiredCanonicalId(input.queryId, '$.arguments.queryId');
     requireTargetListQuery(request.view, queryId);
     const result = await client.query<SavedFilterRow>(
-      `${savedFilterSelect()} WHERE query_id = $1 ORDER BY filter_id LIMIT $2`,
+      `${savedFilterSelect()} WHERE query_id = $1 AND lifecycle = 'active' ORDER BY filter_id LIMIT $2`,
       [queryId, request.definition.maximumResultCount],
     );
     return result.rows;

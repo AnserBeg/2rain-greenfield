@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import type { Pool } from 'pg';
+
 import { canonicalize } from '../../packages/canonical-model/src/index.js';
 import {
   PLATFORM_IDS,
@@ -11,6 +13,7 @@ import {
   SavedFilterContractError,
 } from '../../packages/platform-runtime/src/saved-filter-contracts.js';
 import * as savedFilterProvider from '../../packages/postgres-provider/src/saved-filter-executor.js';
+import type { RegisteredQueryDefinition } from '../../packages/runtime/src/semantic-query-gateway.js';
 import { PARTY_IDS } from '../fixtures/g2/party/definition.js';
 import {
   invokePartyOperation,
@@ -553,19 +556,135 @@ test('saved-filter List enforces its compiled maximum result count', async () =>
   );
 });
 
-function compiledQueryBound(payload: unknown, queryId: string): number {
-  assert.ok(isRecord(payload));
-  assert.ok(Array.isArray(payload.queries));
-  const definition = payload.queries.find(
-    (candidate) => isRecord(candidate) && candidate.queryId === queryId,
+test('saved-filter List excludes archived siblings without weakening envelope validation', async () => {
+  await withSavedFilterRuntime(
+    'g2-p5b-saved-filter-list-lifecycle',
+    async (runtime) => {
+      const targetQueryId = PLATFORM_IDS.queryIds.list;
+      const archivedFilterId = 'f3300000-0000-4000-8000-000000000001';
+      const activeFilterId = 'f3300000-0000-4000-8000-000000000002';
+      const criteria = canonicalize({
+        kind: 'booleanPredicate',
+        schemaVersion: 'v2',
+        value: true,
+      });
+      for (const filterId of [archivedFilterId, activeFilterId]) {
+        const created = await invokeSavedFilterOperation(
+          runtime,
+          runtime.views.a,
+          'create',
+          createInput(filterId, targetQueryId, criteria),
+        );
+        assert.equal(created.outcome, 'succeeded');
+      }
+      const archived = await invokeSavedFilterOperation(
+        runtime,
+        runtime.views.a,
+        'archive',
+        { expectedRevision: 1, recordId: archivedFilterId },
+      );
+      assert.equal(archived.readBack?.archived, true);
+
+      const legacy = legacyUnfilteredPool(runtime.runtimePool);
+      const legacyExecutor =
+        new savedFilterProvider.PostgresSavedFilterExecutor(
+          legacy.pool,
+          undefined as never,
+          PLATFORM_IDS,
+        );
+      await assertSavedFilterError(
+        legacyExecutor.execute({
+          arguments: { queryId: targetQueryId },
+          context: runtime.contexts.a,
+          definition: compiledQueryDefinition(
+            runtime.views.a.projections.query.payload,
+            PLATFORM_IDS.queryIds.list,
+          ),
+          list: null,
+          view: runtime.views.a,
+        }),
+        'SAVED_FILTER_LIFECYCLE_REVOKED',
+        '$.lifecycle',
+      );
+      assert.equal(legacy.rewriteCount(), 1);
+
+      const listed = await invokeSavedFilterQuery(
+        runtime,
+        runtime.views.a,
+        'list',
+        { queryId: targetQueryId },
+      );
+      assert.deepEqual(
+        listed.records.map((record) => record.recordId),
+        [activeFilterId],
+      );
+      assert.equal(
+        listed.records.some((record) => record.recordId === archivedFilterId),
+        false,
+      );
+    },
   );
-  assert.ok(definition);
+});
+
+function compiledQueryBound(payload: unknown, queryId: string): number {
+  const definition = compiledQueryDefinition(payload, queryId);
   assert.equal(typeof definition.maximumResultCount, 'number');
   assert.ok(
     Number.isSafeInteger(definition.maximumResultCount) &&
       definition.maximumResultCount > 0,
   );
   return definition.maximumResultCount;
+}
+
+function compiledQueryDefinition(
+  payload: unknown,
+  queryId: string,
+): RegisteredQueryDefinition {
+  assert.ok(isRecord(payload));
+  assert.ok(Array.isArray(payload.queries));
+  const definition = payload.queries.find(
+    (candidate) => isRecord(candidate) && candidate.queryId === queryId,
+  );
+  assert.ok(definition);
+  return definition as unknown as RegisteredQueryDefinition;
+}
+
+function legacyUnfilteredPool(pool: Pool): {
+  readonly pool: Pool;
+  readonly rewriteCount: () => number;
+} {
+  let rewriteCount = 0;
+  const legacyPool = new Proxy(pool, {
+    get(target, property) {
+      if (property !== 'connect') {
+        const value = Reflect.get(target, property, target) as unknown;
+        return typeof value === 'function' ? value.bind(target) : value;
+      }
+      return async () => {
+        const client = await target.connect();
+        return new Proxy(client, {
+          get(clientTarget, clientProperty) {
+            if (clientProperty !== 'query') {
+              const value = Reflect.get(
+                clientTarget,
+                clientProperty,
+                clientTarget,
+              ) as unknown;
+              return typeof value === 'function'
+                ? value.bind(clientTarget)
+                : value;
+            }
+            return (text: string, values?: unknown[]) => {
+              const rewritten = text.replace(" AND lifecycle = 'active'", '');
+              if (rewritten !== text) rewriteCount += 1;
+              return clientTarget.query(rewritten, values as never);
+            };
+          },
+        });
+      };
+    },
+  });
+  return { pool: legacyPool, rewriteCount: () => rewriteCount };
 }
 
 function boundedFilterId(index: number): string {
