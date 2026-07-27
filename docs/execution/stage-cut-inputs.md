@@ -125,27 +125,32 @@ was written, each with its source.
 
 ### From gap routing and authoring
 
-22. **The R1-R5 cascade exists as a mechanism**, evaluated in order and stopping at the
-    first match, with the **R2 domain-capability** disposition restored — program rule #5 and
-    §5.11 both require it, and a single bounded-work test routes tax determination,
-    available-to-promise and period-lock enforcement into the expression language. Step 2's
-    trigger is a lookup, not an adjective: *does the requirement invoke, alter, or produce a
-    declared authoritative input or output of a Tier B capability?* That obliges every Tier B
-    contract to **publish its authoritative input/output set**. Step 1 must also distinguish a
-    pure position body (R4) from service, connector, and workflow realizations, which a
-    position body cannot perform. Every R4 and R5 carries its provenance link.
-    (Plan §5.13; [ADR-0014](../decisions/ADR-0014-provenance-records.md))
-23. **R2 and R3 latency are instrumented as the headline capability metric** — gap report to
-    admitted, admitted to shipped-supported — superseding coverage percentage as the number
-    the program steers by. Pairs with the Lever 4 cycle-time baseline. (Plan §5.13 rule 5)
+22. **The realization cascade exists as a mechanism** — EXPRESSED / CAPABILITY / LANGUAGE /
+    CONNECTED / EXTENSION / REMAINDER, **named rather than lettered** because ADR-0019 owns
+    R1/R2/R3 for recovery tiers. Demand is decomposed into atomic obligations first, then
+    each obligation is routed and the results composed; routing a whole request by its first
+    matching property sends a composite like "tax through an external provider" wholly to one
+    realization. Step 1 is the **family test** (plan §5.9.1's declared list) *before* the
+    published-set lookup, and it outranks the network test — several families are themselves
+    network-shaped, so a network-first order would fragment communication delivery into
+    per-tenant adapters. Step 1's second clause obliges every Tier B contract to **publish
+    its authoritative input/output set**. Demand in no listed family that is nonetheless
+    specialized and reusable is a **new-family commissioning** outcome, never a fall-through.
+    Every CONNECTED, EXTENSION and REMAINDER carries its provenance link.
+    (Plan §5.13, §5.9.1; [ADR-0014](../decisions/ADR-0014-provenance-records.md))
+23. **CAPABILITY and LANGUAGE latency are instrumented as the headline capability metric** —
+    gap report to admitted, admitted to shipped-supported — superseding coverage percentage
+    as the number the program steers by. Pairs with the Lever 4 cycle-time baseline. Note
+    this file's §G7 uses R1/R2/R3 for ADR-0019 *recovery* tiers; the two namespaces are
+    deliberately disjoint. (Plan §5.13 rule 5)
 24. **Body density is recorded from the first escape body.** It is the only metric that
     distinguishes a floor-plus-escape system from an escape-only system, since both produce
     the same coverage number. ([Lever 5](coverage-strategy-levers.md))
 25. **The evaluator and parity harness is built before the primitives that need it.** A node
     kind is ~20 lines across four files; the harness that proves the server evaluator and
-    the SQL lowering agree is the one-time fixed cost, and it is what makes R2 cheap
-    thereafter. Sequence it ahead of F2-F6 rather than alongside. (Lever 5; ADR-0012 parity
-    corpus obligations)
+    the SQL lowering agree is the one-time fixed cost, and it is what makes **LANGUAGE**
+    additions cheap thereafter. Sequence it ahead of F2-F6 rather than alongside. (Lever 5;
+    ADR-0012 parity corpus obligations)
 26. **The parity corpus derives from human-decided semantics, never from the model's
     implementation.** A model authoring both its lowering and its own tests produces two
     artifacts that agree and are wrong together. Same spec/implementation/oracle separation
@@ -182,11 +187,16 @@ first movement is posted, because ADR-0007 and plan §7.4 forbid rewriting a pos
 packet that posts a movement without them does not create debt; it creates an unrecoverable
 condition. Plan §11.6 now carries them as binding prerequisites and the G3 gate proves them.
 
-1. **The `legalEntityId` dimension exists on every business record**, as a compiler-derived
-   system column, with the `legal_entity` master authored declaratively in Party and every
-   tenant provisioned with exactly one entity. It is a business dimension, **not** a tenancy
-   axis: it does not enter the provider ABI's leading key columns or the RLS predicate.
-   Requires a `northstar.storage-target-payload` version bump.
+1. **Every entity family is classified `entityOwned` or `tenantShared`, and `entityOwned`
+   families carry a non-null compiler-derived `legalEntityId`.** **The cut rules the
+   per-family assignment and the default** — a shared customer or item master across two
+   entities is ordinary, so a blanket "every record" reading would force duplicated masters.
+   The `legal_entity` master is authored declaratively in Party and every tenant is
+   provisioned with exactly one entity. It is a business dimension, **not** a tenancy axis:
+   it does not enter the provider ABI's leading key columns or the RLS predicate. Relations
+   additionally declare `sameEntity` or `crossEntityAllowed`, because carrying the column on
+   both rows does not by itself prevent a cross-entity reference. Requires a
+   `northstar.storage-target-payload` version bump.
    ([ADR-0015](../decisions/ADR-0015-legal-entity-business-dimension.md); [audit G2](prior-art-failure-modes.md))
 2. **The versioned stock-dimension set exists**, every movement stamps the version it was
    posted under, `unspecified` is a first-class member rather than a null, extension is a

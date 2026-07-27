@@ -508,7 +508,7 @@ The defensible argument for the same ordering is mechanical rather than predicti
 > customer — or forces its repeal. **Floor-first is the only order in which that stop rule is
 > cheap to honour.**
 
-Retain the ordering; retain floor gaps as gaps despite R4 substitutes; gate dependent G6
+Retain the ordering; retain floor gaps as gaps despite EXTENSION substitutes; gate dependent G6
 capability claims on the floor; and record body density and substitution provenance from
 the first body.
 
@@ -538,7 +538,7 @@ program and cheap primitives permanently.
 | Stage | Owner | Why |
 |---|---|---|
 | Translate intent into the existing language | **model** | Compiler is the oracle; closed loop |
-| Classify the failure (§5.13's R1-R5 cascade) | **mostly mechanical** | A structured gap report names the missing operation; step 2 is a lookup against published Tier B authoritative inputs/outputs, and only step 4's "genuinely singular" retains judgement |
+| Classify the failure (§5.13's named cascade) | **mostly mechanical** | Demand decomposes into atomic obligations first; step 1 is a lookup against §5.9.1's declared families and published Tier B authoritative inputs/outputs, and only step 5's "genuinely singular" retains judgement |
 | Decide the new primitive's semantics | **human** | Empty-fold identity, absent propagation, precision, cardinality bound. A model answers confidently and does not flag that it was a choice |
 | Author node schema, normalization, fence | **model** | Pattern-following, compiler-checked |
 | Author the evaluator | **model** | Small total function |

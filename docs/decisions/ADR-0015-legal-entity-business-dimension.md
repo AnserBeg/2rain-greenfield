@@ -24,9 +24,16 @@ The prior-art audit did not name this failure mode. It is recorded as **G2** in
 
 ## Decision
 
-**Every tenant-owned business record carries an owning legal-entity identifier from
-creation.** The dimension is structural at launch. Multi-entity *operations* — intercompany
-movement, cross-entity consolidation — are not launch scope.
+**Every entity family declares itself `entityOwned` or `tenantShared`. Every business record
+of an `entityOwned` family carries a non-null owning legal-entity identifier from creation;
+records of a `tenantShared` family carry no entity column.** The dimension is structural at
+launch. Multi-entity *operations* — intercompany movement, cross-entity consolidation — are
+not launch scope.
+
+The per-family assignment and the default are the G3 cut's ruling, not this ADR's. What this
+ADR fixes is that the declaration exists, is explicit, and is made before the first movement
+posts — a shared customer or item master across two entities is an ordinary requirement, and
+a design admitting only `entityOwned` would force duplicated masters.
 
 ### The dimension is business, not tenancy
 
@@ -65,14 +72,16 @@ answer unreachable only after the schema was frozen.
 
 `legalEntityId` is a **compiler-derived system column**, in the same class as record
 identity, optimistic revision, and archive representation under ADR-0011's "Canonical
-storage and representability". Package authors do not declare it and cannot omit,
-rename, retype, or suppress it. Emitting it changes
+storage and representability". Package authors declare only their family's `entityOwned` or
+`tenantShared` classification; within an `entityOwned` family they cannot rename, retype, or
+suppress the column, and `tenantShared` is an explicit declared classification rather than
+per-record omission. Emitting it changes
 `northstar.storage-target-payload/v1` to **v2** under that ADR's own evolution rule; it
 is not a canonical-language event, because nothing in the authored surface changes.
 
-The column is `uuid`, `NOT NULL`, and references a first-party `legal_entity` master
-record. It participates in tenant/environment-qualified uniqueness wherever a business
-key is entity-scoped.
+On an `entityOwned` family the column is `uuid`, `NOT NULL`, and references a first-party
+`legal_entity` master record. It participates in tenant/environment-qualified uniqueness
+wherever a business key is entity-scoped. A `tenantShared` family emits no such column.
 
 ### The master record
 
@@ -126,14 +135,11 @@ altitudes and must be read together.
   exist later. Both are future topology and capability decisions, deliberately not taken
   here. What this ADR fixes is that entity restriction is authorization, evaluated by the
   policy kernel, rather than isolation baked into the ABI.
-- **Entity ownership per entity family is not decided here and must be — and it narrows
-  this ADR's own Decision.** As written above, *every* tenant-owned business record carries
-  a non-null entity. That cannot survive a `tenantShared` ruling, and a shared customer or
-  item master across two entities is an ordinary requirement, not an edge case. **The
-  Decision yields to this consequence:** entity definitions declare `entityOwned` or
-  `tenantShared`, the column is emitted and non-null only on the former, and the marker is
-  an explicit declared property — never the silent sentinel the Enforcement section bans.
-  The G3 cut owns the ruling and must amend the Decision text when it makes it.
+- **Entity ownership per family is declared, and the per-family assignment is G3's.** An
+  earlier draft of this ADR required a non-null entity on *every* business record and then
+  recorded a consequence contradicting it; the Decision text above now carries the
+  `entityOwned`/`tenantShared` classification directly, so no reader has to reconcile two
+  operative rules. G3 rules the assignment and the default, not the sentence.
 - **Relations need declared cross-entity semantics.** Generated foreign keys constrain
   tenant, environment, and record identity only; carrying `legal_entity_id` on both rows
   does not prevent an entity-A document referencing an entity-B record. Each relation
@@ -152,11 +158,12 @@ altitudes and must be read together.
 
 ## Enforcement
 
-- Compiler: every applicable active entity emits `legalEntityId`; a package that declares,
-  suppresses, or retypes it fails a stable diagnostic. Storage-target payload version is
-  asserted in the golden artifacts.
-- Provider: `NOT NULL` and foreign-key constraints; a movement or business row without a
-  resolvable entity fails closed at posting, never defaults silently to a sentinel.
+- Compiler: every active entity in an `entityOwned` family emits `legalEntityId`; a package
+  that omits its family classification, or that renames or retypes the column, fails a
+  stable diagnostic. Storage-target payload version is asserted in the golden artifacts.
+- Provider: `NOT NULL` and foreign-key constraints on `entityOwned` families; a row of such
+  a family without a resolvable entity fails closed at posting, never defaulting silently to
+  a sentinel. `tenantShared` rows have no entity column and the check does not apply.
 - Structural test: no RLS policy and no ABI-frozen key includes `legalEntityId`, so the
   business-versus-tenancy distinction is executable rather than prose.
 - G3 gate: balances, availability, and movement history are entity-keyed, and a two-entity

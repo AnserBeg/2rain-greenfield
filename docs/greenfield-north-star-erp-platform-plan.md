@@ -842,7 +842,7 @@ item however common it is; that is what the extension tier exists for.
 | F4 | To-one relation traversal | Read a field across declared `manyToOne`/`oneToOne` relations. A finite path bounded by the existing depth ceiling of 24, lowering to a join. Parent-scoped children make "child rule depends on parent state" structurally common |
 | F5 | Bounded aggregation over a declared to-many relation | `sum`, `count`, `min`, `max` over a declared child collection. **A candidate, not an admitted capability** — see the F5 contract obligations below |
 | F6 | Exact-decimal arithmetic: add, subtract, multiply | With declared precision and scale propagation, and compile-time rejection of currency mixing. Division is **not** on the floor: it is not total and it needs a declared rounding policy, so it goes through section 5.11 as its own design |
-| F7 | Uniqueness scope that can exclude archived rows | A storage primitive, not an expression one. Today the compiler emits an unconditional unique key, so an archived record permanently reserves its business key. **Three shipped modules are affected** — Party's number, Catalog's SKU, Location's code. The failure surfaces on *reuse*, not on archive, and the colliding row is invisible because reads mandatorily exclude archived records. See the F7 contract obligations below |
+| F7 | Uniqueness scope that can exclude archived rows | A storage primitive, not an expression one. Today the compiler emits an unconditional unique key, so an archived record permanently reserves its business key. **Three shipped modules are affected** — Party's number, Catalog's SKU, Location's code. The failure surfaces on *reuse*, not on archive, and the colliding row is invisible by default because reads exclude archived records unless the caller opts in. See the F7 contract obligations below |
 
 **The F5 contract.** F5 is the only floor item that changes the *kind* of work an expression
 does: every other construct is bounded by expression depth, and a fold is bounded by data.
@@ -876,7 +876,13 @@ The section 5.11 contract for F5 must therefore decide, before any slice ships:
   and error behaviour;
 - **aggregate shape.** Whether the aggregand may be an expression, whether a filter is
   admitted, whether traversal through a junction is allowed, and whether nested or
-  correlated aggregates are rejected; and
+  correlated aggregates are rejected;
+- **trigger topology.** Whether a rule containing a fold is evaluated only when its own
+  operation runs, or re-evaluated whenever a child mutates. Check-on-operation and
+  maintained-invariant are different products with different costs and different failure
+  modes, and the contract picks one rather than leaving it to the first implementation;
+- **position admission and read staleness.** Which binding positions admit a fold at all,
+  and what staleness a read-position fold may tolerate; and
 - **write-time execution and a named concurrency protocol.** The fold uses the
   transaction-bound target. **"Re-read against locked state" is not sufficient** — locking
   the existing child rows does not prevent a concurrent *insert*, which is the phantom that
@@ -923,6 +929,16 @@ Three implementation facts bind this contract:
 - **Uniqueness is authored as a property of a single field, not as a named key object.**
   Per-key archive scope and any future compound key require a first-class unique-key
   definition carrying equality columns, folded source, archive scope, and physical name.
+  **This is an authored-surface change and therefore a canonical-language event**, unlike
+  ADR-0015's system column, which is compiler-derived precisely because the authored surface
+  does not move. Three shipped modules carry the per-field form today, so the contract rules
+  whether the two forms coexist or the old one migrates, and accounts for package-hash and
+  golden-artifact churn.
+- **The transition grammar has no drop or replace operation for an index.** Emitting a
+  partial index under the existing name is a no-op against an existing object, so the
+  unconditional indexes would survive. The contract names the replacement element, its
+  ordering against the old objects, coexistence during preparation, rollback, and the
+  physical-name policy for the replacement.
 
 Archive scope is a **per-key declared property**, never a blanket default: serial numbers
 and document numbers must stay reserved after archive, while location codes and SKUs should
@@ -997,18 +1013,24 @@ does is bounded work over held data, so that test alone routes tax determination
 available-to-promise, and period-lock enforcement into the expression language — the exact
 places section 10.6 and ADR-0018 forbid them to live.
 
-1. **Does it require network or external-system access?** → **CONNECTED.** An
-   EXTENSION body receives values and cannot fetch; carrier rating, EDI, and e-invoicing are
-   head-sized demand and belong to section 12.10's isolated services and signed connectors,
-   not to a position body.
-2. **Does it require ambient state, unknown-depth recursion, or durable iteration?** →
-   EXTENSION, or a workflow where the work is durable.
-3. **Does it belong to one of section 5.9's declared domain-capability families** —
-   availability, pricing, tax, costing, scheduling, posting, allocation, communication
-   delivery, ledger posting — **or invoke, alter, or produce a declared authoritative input
-   or output of an existing Tier B capability?** → **CAPABILITY.**
+**Decompose first.** The cascade routes an *obligation*, not a request. "Calculate tax
+through an external provider" is two obligations — tax semantics and a provider adapter —
+and routing the whole request by its first matching property would send both to whichever
+step fires first. Split a requirement into atomic obligations, route each, then compose.
 
-   The family enumeration is load-bearing and is deliberately listed *before* the
+1. **Does the obligation belong to a declared domain-capability family** (section 5.9.1 —
+   availability, pricing, tax, costing, scheduling, inventory posting, allocation and
+   reservation, ledger posting, communication delivery),
+   **or invoke, alter, or produce a declared authoritative input or output of an existing
+   Tier B capability?** → **CAPABILITY.**
+
+   The family test ranks first deliberately. Several families are themselves network-shaped
+   — communication delivery above all — and a network test placed above this one would route
+   "email the customer when the shipment posts" to a one-tenant mechanism, fragmenting demand
+   that section 5.12's head/tail rule requires to be answered once. A family-owned capability
+   binds its own connectors internally.
+
+   The family enumeration is load-bearing and is deliberately consulted *before* the
    published-set lookup. A lookup alone matches only capabilities that already exist, so a
    novel tax requirement arriving before any tax capability exists would find no published
    set, fall through to the language test, and be admitted as a primitive — the precise
@@ -1018,14 +1040,54 @@ places section 10.6 and ADR-0018 forbid them to live.
    Note the verbs: *invoke, alter, or produce*. A validation that merely **reads** a
    posting field does not become a domain capability; if it did, every cross-record
    validation would route here.
+2. **Does the obligation itself require network or external-system access?** → **CONNECTED**,
+   section 12.10's isolated services and signed connector adapters. An EXTENSION body
+   receives values and cannot fetch. This step fires only for adapter obligations that no
+   step-1 family owns.
+3. **Does it require ambient state, or durable or unknown-depth iteration?** → **CONNECTED**
+   for stateful behaviour, which section 12.10 assigns to an isolated service rather than a
+   body; a **workflow** for durable iteration; and for unknown-depth recursion a declared
+   capability gap plus commissioning, per section 5.14 — **not** EXTENSION, which section
+   5.14 states cannot resolve it because a body cannot fetch rows.
 4. **Is it bounded, general, and does it satisfy section 5.12's four-part membership
    test?** → LANGUAGE.
 5. **Is it a genuinely tenant-singular pure computation?** → EXTENSION.
 6. **Otherwise** — pending, or uneconomic to automate → REMAINDER.
 
 Steps 4 and 5 are the case a bounded-work test decides well. Steps 1 through 3 are the hard
-ones, and they are decided by section 5.9's family list, section 10.6, and section 12.10
-rather than by fresh judgement.
+ones, and they are decided by the declared family list below, section 10.6, and section
+12.10 rather than by fresh judgement.
+
+### 5.9.1 Declared domain-capability families
+
+Section 5.9's Q2 and O2 descriptions give *examples* ("such as"), and their two lists
+differ. A router cannot key on examples, so the closed list lives here, is versioned, and is
+amended only under section 5.11:
+
+| Family | Tier |
+| ------ | ---- |
+| availability | Q2 |
+| pricing | Q2 |
+| tax | Q2/O2 |
+| costing | Q2/O2 |
+| scheduling | Q2 |
+| inventory posting | O2 |
+| allocation and reservation | O2 |
+| ledger posting | O2 |
+| communication delivery | O2 |
+
+**Two rules govern the boundary**, because a closed list reopens the very hole the family
+test was added to close if demand can fall outside it silently:
+
+1. Demand that is specialized, invariant-preserving, and reusable but belongs to **no listed
+   family** is a **new-family commissioning** outcome — routed to CAPABILITY with an explicit
+   record that the family itself is being admitted, never allowed to fall through to
+   LANGUAGE or REMAINDER. Credit exposure is the standing example.
+2. Demand belonging to a **platform-substrate family** — documents, workflow, integration,
+   schedule (section 12.2) — is recorded against that substrate family so section 15.7's
+   demand measurement accrues to the stage that will absorb it. Substrate demand and
+   genuinely novel demand are otherwise indistinguishable, which is exactly the distinction
+   section 5.15 exists to preserve.
 
 Binding rules:
 
@@ -1120,8 +1182,10 @@ The distinction needs a mechanism, because prose alone will not hold it: after t
 incident where an implementer skipped an `always ask` consideration, pressure converts
 "must be asked" into "must be satisfied". So each consideration resolves to a typed
 disposition — `accepted`, `notApplicable`, or `deferred` — carrying rationale **and the
-deciding actor**, because without attribution an authoring model can auto-fill `deferred`
-and satisfy presence vacuously.
+deciding actor**, which must be a principal holding a named authority and distinct from the
+authoring system. Attribution alone does not make vacuous auto-fill impossible; it makes it
+**visible and attributable**, and constraining who may be a deciding actor is what stops an
+authoring model dispositioning on a human's behalf.
 
 "Structurally incapable of gating" means a **projection**, not a promise. Handing the
 compiler the full disposition records and asking it not to branch on them is a convention
@@ -1142,7 +1206,10 @@ intended landing zone: the argument becomes a recorded decision by a named actor
 than an ambiguity about the corpus's standing. And **`deferred` would otherwise satisfy
 presence forever**, because version pinning re-offers on corpus *change*, not on deferral
 *age*; a deferred disposition is therefore re-presented on the next authoring touch of that
-capability.
+capability. That re-offer lives in the builder surface, is **non-blocking**, and re-deferral
+is a valid outcome — otherwise the re-offer would itself become a gate that branches on
+disposition content, rebuilding inside the authoring path exactly what the certificate
+projection removes from the admission path.
 
 **Deterministic at authoring time.** The corpus is curated, reviewed, and versioned.
 Authoring reads only the pinned corpus. Live retrieval — internet search, untrusted
@@ -2088,16 +2155,43 @@ compatibility surface.
 
 Alongside its configuration contract, every capability version publishes its
 **authoritative input/output dependency set** — the stored facts it consumes and produces.
-That set is what section 5.13 step 3 looks up and what makes the field-default carve-out
-above compiler-decidable. It must be **exhaustive by construction**: the capability runtime
-reads and writes only through its declared set, so an omission breaks the capability loudly
-rather than silently converting an authoritative input into tenant-defaultable territory.
+That set is what section 5.13 step 1 looks up and what makes the field-default carve-out
+above compiler-decidable.
 
-**Tenant narrowing does not apply to recovery-class operations.** ADR-0019's in-band R1
+It must be **exhaustive by construction**, which is a mechanism and not an aspiration:
+capability code lives in its own package whose only storage access is a facade built from
+the published set and failing closed on undeclared facts; a structural test bans the
+connection pool, the interpreter, and raw SQL from capability packages, reusing the scan
+that already enforces this for `packages/domain`; the set is a versioned protocol artifact;
+and reads arriving through composed queries or relation traversal validate against the set
+too, because a facade guarding only direct column access is a sieve.
+
+**The mechanism guards under-declaration only, and the residual risk inverts.**
+Over-declaration breaks nothing and is not loud: a capability that claims more facts than it
+uses silently annexes territory the field-default carve-out would otherwise leave to
+tenants. Nothing above requires the set to be minimal, so minimality is a review obligation
+on each capability version rather than a property the compiler can check.
+
+**Tenant narrowing does not apply to recovery-class invocations.** ADR-0019's in-band R1
 recovery runs through the ordinary operation algebra, so an unqualified right to narrow
-would let a broken tenant guard veto the fix for its own incident and force escalation to
-point-in-time reconciliation. Recovery-class operations evaluate tenant guards
-report-only.
+would let a broken tenant rule veto the fix for its own incident and force escalation to
+point-in-time reconciliation. The carve-out is defined on three axes, because leaving any
+of them implicit produces two incompatible implementations:
+
+- **Membership** — recovery class is a declared property of an *operation*: correction,
+  reversal, restore, and the named re-baseline operations. It is not a property a caller
+  asserts about an arbitrary operation.
+- **Trigger** — it is an **invocation mode**, not a blanket property of the operation, so
+  the same correction invoked in ordinary business use still evaluates tenant rules
+  normally. The mode is authorized by an explicit recovery permission, is recorded on the
+  invocation, and appears in the change document.
+- **Scope** — *all* tenant-authored narrowing positions become report-only under the mode:
+  guards, validations, and permission narrowing alike. A broken tenant validation vetoes a
+  recovery exactly as effectively as a broken guard, so naming only guards would leave the
+  hole open.
+
+Report-only means the rule is evaluated and its outcome recorded, never enforced. Platform
+invariants — isolation, posting rules, audit — are unaffected and continue to fail closed.
 
 **Changing a setting mid-history is a governed event, not a preference change.** This is
 the trap the configuration surface itself creates: a tenant who flips negative-stock
@@ -3868,7 +3962,8 @@ Stop or revise the current phase when any of these occurs:
 - the authoring path performs live retrieval, or reads reference material that is not
   pinned and reviewed;
 - reference-corpus content is treated as a requirement rather than as a question;
-- a tenant-authored expression determines a stored figure that other figures derive from;
+- a tenant-authored rule produces or mutates a stored fact declared as an authoritative
+  input or output of a Tier B capability;
 - a Tier B capability ships without a declared typed configuration surface;
 - a table in either plane carries no tenancy classification, or a recovery path
   writes business rows into a live tenant by direct DML;
