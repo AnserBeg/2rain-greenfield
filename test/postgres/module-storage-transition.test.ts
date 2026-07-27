@@ -47,6 +47,7 @@ import {
 } from '../../packages/platform-runtime/src/index.js';
 import { PostgresReleaseActivationService } from '../../packages/postgres-provider/src/release-activation-service.js';
 import { PostgresReleaseApprovalService } from '../../packages/postgres-provider/src/release-approval-service.js';
+import { buildFoldedMatchPredicate } from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
 import {
   ModuleStorageMaterializationError,
   PostgresModuleStorageMaterializer,
@@ -81,6 +82,8 @@ const principalB = 'b3000000-0000-4000-8000-000000000003';
 const approverA = 'a4000000-0000-4000-8000-000000000004';
 const demonstrateFoldFunctionDrift =
   process.env.PR6B_DEMONSTRATE_FOLD_FUNCTION_DRIFT;
+const demonstrateMissingSearchOnlyIndex =
+  process.env.PR6D_DEMONSTRATE_MISSING_SEARCH_ONLY_INDEX;
 const pr6cMeasurementRows = Number(
   process.env.PR6C_MEASUREMENT_ROWS ?? '10000',
 );
@@ -91,6 +94,14 @@ if (
 ) {
   throw new Error(
     `unsupported PR6B_DEMONSTRATE_FOLD_FUNCTION_DRIFT value: ${demonstrateFoldFunctionDrift}`,
+  );
+}
+if (
+  demonstrateMissingSearchOnlyIndex !== undefined &&
+  demonstrateMissingSearchOnlyIndex !== 'search-only'
+) {
+  throw new Error(
+    `unsupported PR6D_DEMONSTRATE_MISSING_SEARCH_ONLY_INDEX value: ${demonstrateMissingSearchOnlyIndex}`,
   );
 }
 if (
@@ -2354,12 +2365,27 @@ test('a pre-existing generated fold and prefix index record their measured locki
   const source = mustCompile(moduleInput(emptyDefinition));
   const currentDefinition = ordinaryModuleV2() as {
     fields: Array<Record<string, unknown>>;
+    queries: Array<{
+      resolveMatchKeys?: Array<{
+        field?: { targetId?: unknown };
+      }>;
+    }>;
   } & Record<string, unknown>;
   const searchableNotes = currentDefinition.fields.find(
     (field) => field.fieldId === FIXTURE_IDS.fieldIds.parentNotes,
   );
   assert.ok(searchableNotes);
   searchableNotes.searchable = true;
+  assert.equal('businessKey' in searchableNotes, false);
+  assert.equal(
+    currentDefinition.queries.some((query) =>
+      query.resolveMatchKeys?.some(
+        (key) => key.field?.targetId === FIXTURE_IDS.fieldIds.parentNotes,
+      ),
+    ),
+    false,
+    'the notes fixture must remain outside resolve-match authority',
+  );
   const currentBytes = definitionBytes(currentDefinition);
   const originallyCompiled = mustCompile(
     moduleInput(currentDefinition, expectedActiveReleaseFrom(source)),
@@ -2505,6 +2531,14 @@ test('a pre-existing generated fold and prefix index record their measured locki
         assert.ok(numberColumn);
         assert.ok(nameColumn);
         assert.ok(notesColumn);
+        assert.equal(notesColumn.searchMapping, 'normalizedTextIndex');
+        assert.equal(
+          parent.uniqueKeys.some((uniqueKey) =>
+            uniqueKey.columns.includes(notesColumn.physicalName),
+          ),
+          false,
+          'the notes fixture must remain outside unique-key authority',
+        );
         await pool.query(
           `INSERT INTO north_star_module.${quoteTestIdentifier(parent.physicalTableName)} (
              tenant_id, environment_id,
@@ -2649,6 +2683,26 @@ test('a pre-existing generated fold and prefix index record their measured locki
         assert.deepEqual(generatedValues.rows[0], {
           mismatches: '0',
           observed: String(pr6cMeasurementRows),
+        });
+        await pool.query(
+          `ANALYZE north_star_module.${quoteTestIdentifier(parent.physicalTableName)}`,
+        );
+        if (demonstrateMissingSearchOnlyIndex === 'search-only') {
+          await pool.query(
+            `DROP INDEX north_star_module.${quoteTestIdentifier(foldedIndex.physicalName)}`,
+          );
+          await pool.query(
+            `ANALYZE north_star_module.${quoteTestIdentifier(parent.physicalTableName)}`,
+          );
+        }
+        await assertSearchOnlyPrefixIndexExecution({
+          context: contexts.a,
+          entity: parent,
+          expectedIndexName: foldedIndex.physicalName,
+          pool,
+          runtimePool,
+          searchColumns: [nameColumn, notesColumn],
+          text: `Measured notes ${String(Math.min(7_000, pr6cMeasurementRows))}`,
         });
       } finally {
         await Promise.all([
@@ -3073,6 +3127,125 @@ async function assertIndexPresence(
     [indexName],
   );
   assert.equal(result.rows[0]?.present, expected);
+}
+
+interface SearchOnlyPlanNode {
+  readonly 'Index Name'?: unknown;
+  readonly 'Node Type'?: unknown;
+  readonly Plans?: unknown;
+  readonly 'Rows Removed by Filter'?: unknown;
+}
+
+async function assertSearchOnlyPrefixIndexExecution(input: {
+  context: TrustedRequestContext;
+  entity: StorageTargetPayloadV1['entities'][number];
+  expectedIndexName: string;
+  pool: pg.Pool;
+  runtimePool: pg.Pool;
+  searchColumns: readonly StorageTargetPayloadV1['entities'][number]['columns'][number][];
+  text: string;
+}): Promise<void> {
+  const before = await readIndexScanCount(input.pool, input.expectedIndexName);
+  const match = buildFoldedMatchPredicate(
+    input.entity,
+    input.searchColumns,
+    input.text,
+    'prefix',
+  );
+  const values = [...match.values, 100];
+  const selectedColumns = [
+    input.entity.recordIdentity.column,
+    input.entity.optimisticRevision.column,
+    input.entity.archive.archivedAtColumn,
+    ...input.entity.columns.map((column) => column.physicalName),
+  ];
+  const root = await withTrustedRequestTransaction(
+    input.runtimePool,
+    input.context,
+    async (client) => {
+      await client.query('SET LOCAL ROLE north_star_module_runtime');
+      try {
+        const explained = await client.query<{ 'QUERY PLAN': unknown }>(
+          `EXPLAIN (ANALYZE, FORMAT JSON)
+           SELECT ${selectedColumns.map(quoteTestIdentifier).join(', ')}
+             FROM north_star_module.${quoteTestIdentifier(input.entity.physicalTableName)}
+            WHERE ${quoteTestIdentifier(input.entity.archive.archivedAtColumn)} IS NULL
+              AND ${match.sql}
+            ORDER BY ${quoteTestIdentifier(input.entity.recordIdentity.column)}
+            LIMIT $${String(values.length)}`,
+          values,
+        );
+        await client.query('SELECT pg_stat_force_next_flush()');
+        const envelope = explained.rows[0]?.['QUERY PLAN'];
+        assert.ok(Array.isArray(envelope) && envelope.length === 1);
+        const entry = envelope[0];
+        assert.ok(
+          isSearchOnlyPlanRecord(entry) && isSearchOnlyPlanRecord(entry.Plan),
+        );
+        return entry.Plan as SearchOnlyPlanNode;
+      } finally {
+        await client.query('RESET ROLE');
+      }
+    },
+  );
+  const after = await readIndexScanCount(input.pool, input.expectedIndexName);
+  const scanDelta = before === null || after === null ? null : after - before;
+  const rowsRemovedByFilter = totalRowsRemovedByFilter(root);
+  assert.equal(
+    rowsRemovedByFilter,
+    0,
+    `search-only prefix predicate removed ${String(rowsRemovedByFilter)} rows by post-filter while expecting index ${input.expectedIndexName}`,
+  );
+  assert.ok(
+    scanDelta !== null && scanDelta >= 1n,
+    `search-only prefix predicate did not increment expected index usage counter ${input.expectedIndexName}; delta ${String(scanDelta ?? 'missing')}`,
+  );
+  console.log(
+    `PR-6d search-only prefix index=${input.expectedIndexName} idx_scan_delta=${String(scanDelta)} rows_removed_by_filter=${String(rowsRemovedByFilter)}`,
+  );
+}
+
+async function readIndexScanCount(
+  pool: pg.Pool,
+  indexName: string,
+): Promise<bigint | null> {
+  const result = await pool.query<{ scan_count: string }>(
+    `SELECT idx_scan::text AS scan_count
+       FROM pg_stat_user_indexes
+      WHERE schemaname = 'north_star_module'
+        AND indexrelname = $1`,
+    [indexName],
+  );
+  return result.rows[0] ? BigInt(result.rows[0].scan_count) : null;
+}
+
+function totalRowsRemovedByFilter(root: SearchOnlyPlanNode): number {
+  let total = 0;
+  const visit = (node: SearchOnlyPlanNode): void => {
+    const rowsRemoved = node['Rows Removed by Filter'];
+    assert.ok(
+      rowsRemoved === undefined ||
+        (typeof rowsRemoved === 'number' &&
+          Number.isFinite(rowsRemoved) &&
+          rowsRemoved >= 0),
+      `unrecognized EXPLAIN rows removed by filter: ${String(rowsRemoved)}`,
+    );
+    total += rowsRemoved ?? 0;
+    if (node.Plans === undefined) return;
+    assert.ok(
+      Array.isArray(node.Plans) && node.Plans.every(isSearchOnlyPlanRecord),
+      'unrecognized EXPLAIN child plan collection',
+    );
+    for (const child of node.Plans) visit(child as SearchOnlyPlanNode);
+  };
+  visit(root);
+  return total;
+}
+
+function isSearchOnlyPlanRecord(
+  value: unknown,
+): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 async function waitForTableLock(

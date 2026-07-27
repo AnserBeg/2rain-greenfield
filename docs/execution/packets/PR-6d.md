@@ -132,6 +132,7 @@ and requires the bytes to be equal.
 | `%` remains a wildcard | Run the new literal assertion before changing the interpreter. | The `50%` subtest returned both deterministic rows and failed with the extra `500` record ID. |
 | `_` remains a wildcard | The same pre-fix run used an independent nested subtest. | The `a_b` subtest returned both deterministic rows and failed with the extra `axb` record ID. |
 | Prefix gate credits another index or a post-filter | Drop only the exact compiled name-folded index after seeding and `ANALYZE`. | The production-shaped probe fails: `prefix predicate removed 9999 rows by post-filter`, while naming the remaining expected indexes. |
+| Newly declared search-only index is write amplification only | Drop only the exact compiled notes-folded index after it is materialized on the populated search-only fixture. | The production-shaped forced-RLS probe fails with 9,999 rows removed by post-filter while naming the missing notes index. |
 | Multi-column prefix oracle checks only one branch | Feed the oracle a number-index delta of 1 and a name-index delta of 0. | Its permanent canary rejects the missing exact name-index increment. |
 | Missing search input passes without a subject | Invoke the actual compiled search query with no `text`. | Production rejects with `MODULE_INPUT_MALFORMED: text must be non-blank` and the test prints `PR-6d search terms lowered: 0 (missing term rejected)`. |
 
@@ -146,6 +147,7 @@ database or repository state.
 | Literal special characters | Both gateway modes return the literal row and exclude the wildcard-shaped competitor for `%`, `_`, `\`, and `!`. |
 | C-bound semantics | Real PostgreSQL results equal the owned fold evaluator for expansion folding, the surrogate boundary, and U+10FFFF. |
 | Exact prefix index access | At every milestone from the first planner flip through 10,000 rows, each compiled folded index records an `idx_scan` increase and the entire plan tree records zero filter removals. |
+| Search-only index is executable | The populated `parentNotes` fixture is searchable but neither resolve-match nor unique. Its exact compiled index records an `idx_scan` increase under the module runtime role, while the complete plan tree records zero filter removals. |
 | Substring stays bounded | Former and escaped substring predicates have byte-identical node-type/index-name plan trees; both use the exact tenant-leading primary index. The escaped probe observes delta 1, 9,999 post-filter removals, and zero folded-index deltas. |
 | Nothing else moved | Complete ordinary-term semantic records are canonical-byte-identical; exact resolve and uniqueness keep their existing predicate and index controls. |
 | Generic search-only shape | Compiler lowering observes a `foldedAccess` btree for a searchable field that is neither unique nor a resolve key. |
@@ -158,9 +160,21 @@ analyzed rows for one tenant, the actual forced-RLS runtime role, and
 PostgreSQL 16.14 container. PostgreSQL root `Actual Total Time` is recorded; no
 JavaScript wall clock or planner forcing is involved.
 
+The packet and runtime-SLO record use the focused normal 11/11 provider-file
+run as the authoritative local comparison:
+
 ```text
 PR-6d prefix measurement rows=10000 legacy_like_ms=4.474 range_ms=0.569
 ```
+
+The subsequent full matrix at the prior frozen candidate
+`eb1c2f0e8da7d391f957306148d8c16fb5f8a6a2`, reachability run
+`be499f5d-ae8b-409e-90c7-b77c0a2eb1c0`, independently observed
+`5.692 ms → 0.240 ms`. That was a separate warm execution under the same
+methodology, not a replacement measurement. Frozen-matrix timing remains
+validation telemetry because local scheduler and cache state vary; the named
+focused run is the reproducible number carried by this packet, and the binding
+verdict's 89.7 ms → 0.31 ms remains the design measurement.
 
 This is one warm local observation, not a percentile or a pass/fail latency
 budget. The binding verdict's larger experiment remains the primary design
@@ -254,6 +268,15 @@ PR6D_DEMONSTRATE_MISSING_PREFIX_INDEX=prefix \
   node --import tsx --test --test-name-pattern='forced-RLS relation' \
   test/postgres/module-index-conformance.test.ts
 
+# Genuine red: drop only the newly declared search-only notes index.
+PR6D_DEMONSTRATE_MISSING_SEARCH_ONLY_INDEX=search-only \
+  node --import tsx --test --test-name-pattern='pre-existing generated fold' \
+  test/postgres/module-storage-transition.test.ts
+
+# Green: materialize and execute the search-only notes index.
+node --import tsx --test --test-name-pattern='pre-existing generated fold' \
+  test/postgres/module-storage-transition.test.ts
+
 # Green: literal semantics, preservation corpus, both plan modes, and timing.
 node --import tsx --test test/postgres/module-index-conformance.test.ts
 
@@ -262,8 +285,10 @@ node --import tsx --test --test-name-pattern='search-only fields' \
   test/compiler/g2-module-storage.test.ts
 ```
 
-The first command exits nonzero with 9,999 rows removed by post-filter after the
-exact name-folded index is dropped. The second reports 11/11, both planner modes,
+The first two commands exit nonzero with 9,999 rows removed by post-filter
+after their exact compiled indexes are dropped. The normal transition command
+reports 1/1 plus the exact search-only index name, a delta of 1, and zero rows
+removed. The normal index-conformance file reports 11/11, both planner modes,
 zero lowered terms for the rejected missing input, the prefix before/after
 measurement, and the bounded substring observation. The compiler command
 reports 1/1. Every PostgreSQL command uses a disposable container.
