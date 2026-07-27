@@ -125,6 +125,15 @@ return the explicit `saved-filter-query-unsupported` result; they never claim
 an exact empty result. Adding a saved-filter search UI or a second text-search
 lowering is not hidden inside this packet.
 
+The round-one review found that the custom saved-filter List declared a
+`maximumResultCount` but did not apply it. The executor now reads that bound
+from the request's compiled query definition and uses it as the SQL `LIMIT`;
+there is no duplicate hard-coded limit. P5a's shared cursor and coverage
+semantics are not reachable for this query because its registered arguments
+are exactly `{queryId}`, so the gateway's shared-list argument parser produces
+no shared List request or coverage metadata. This packet bounds that custom
+result without inventing a third cursor, truncation, or coverage contract.
+
 ## Canonical criteria and validation
 
 The runtime entry-point budgets are numeric and apply before recursive schema
@@ -204,6 +213,7 @@ not claims that the final suite remains red.
 | environment scope leaks | principal A uses a second environment in tenant A to get the production filter ID | `SAVED_FILTER_NOT_VISIBLE`; executor reads zero visible rows |
 | tenant scope leaks | tenant B gets tenant A's filter ID | `SAVED_FILTER_NOT_VISIBLE`; executor reads zero visible rows |
 | superseded release is accepted | activate a new release ID for the same tenant/environment, then read the old filter | `SAVED_FILTER_RELEASE_MISMATCH`; criteria are not returned |
+| declared List bound is ignored | create 101 filters against the compiled bound of 100, then execute the former no-`LIMIT` query | the former query returns 101 and an at-most-100 assertion throws; the production registered List returns exactly 100 and omits the 101st ordered ID |
 
 ## Positive anti-vacuity observations
 
@@ -219,6 +229,7 @@ not claims that the final suite remains red.
 | factory generality | the new first-party platform definition compiles to nine projections without a press edit or new canonical family |
 | honest unsupported surface | the factory-required saved-filter search query returns `unsupported` with `saved-filter-query-unsupported`, not a false exact-empty success |
 | no failed-write residue | after all deliberately rejected creates, exactly the one accepted filter row exists |
+| compiled List authority | the over-limit fixture reads `maximumResultCount` from the pinned query projection, then observes that exact count from the registered List |
 
 ## Known limits and what the gates cannot prove
 
@@ -228,6 +239,12 @@ not claims that the final suite remains red.
   criteria, create a second evaluator, or return unfiltered rows as a fallback.
 - Saved-filter search and resolve are explicitly unsupported. Get/list,
   persistence, scope, lifecycle, and validation are the delivered read surface.
+- The saved-filter List is bounded by its compiled query definition but its
+  custom `{queryId}` argument shape carries no P5a cursor or coverage metadata,
+  so callers cannot distinguish an exactly-full result from truncation. A
+  create-side cap on how many filters a principal may own is a separate product
+  decision; this packet does not add one, so durable accumulation remains
+  possible even though each read is bounded.
 - The provider proves that its public saved-filter module exposes no direct
   repository function and that an ordinary raw runtime-pool insert fails RLS.
   It cannot make deliberately malicious trusted provider code harmless if that
@@ -258,10 +275,12 @@ corepack pnpm check:schema
 corepack pnpm test:architecture
 ```
 
-Expected observations are 2/2 focused PostgreSQL tests, 12/12 migrations, and
+Expected observations are 3/3 focused PostgreSQL tests, 12/12 migrations, and
 68/68 architecture tests. The first focused test prints the numeric-order
 journey through its assertions; the second executes every saved-filter red and
-then observes exactly one accepted durable row.
+then observes exactly one accepted durable row. The third creates 101 filters,
+observes all 101 through the former unbounded query shape, and observes exactly
+the compiled bound of 100 through the registered List.
 
 ## Full-matrix evidence
 
@@ -282,12 +301,13 @@ node --import tsx --test test/postgres/saved-filter.test.ts
 corepack pnpm check:schema
 ```
 
-Expect 2/2 and 12 applied / 12 verified. The test creates a filter only through
-the registered operation, rereads byte-identical criteria, observes the trust
-record, rejects cross-principal/cross-tenant/stale-release reads, rejects stale
-and corrupt criteria, and leaves exactly one accepted row. It also proves that
-the same production List sorts `-10, -3, 9, 10` numerically while the former
-text expression demonstrably yields `-10, -3, 10, 9`.
+Expect 3/3 and 12 applied / 12 verified. Every durable create uses the
+registered operation. The round-trip case rereads byte-identical criteria,
+observes the trust record, rejects cross-principal/cross-tenant/stale-release
+reads, rejects stale and corrupt criteria, and leaves exactly one accepted row.
+The suite also proves numeric ordering while the former text expression
+demonstrably puts `10` before `9`, and that a 101-row saved-filter fixture is
+capped at the compiled 100-row List contract.
 
 ## Program-review trigger assessment
 

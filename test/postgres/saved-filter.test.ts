@@ -484,6 +484,98 @@ test('saved filters round-trip canonical predicates through registered gateways 
   });
 });
 
+test('saved-filter List enforces its compiled maximum result count', async () => {
+  await withSavedFilterRuntime(
+    'g2-p5b-saved-filter-list-bound',
+    async (runtime) => {
+      const targetQueryId = PLATFORM_IDS.queryIds.list;
+      const maximumResultCount = compiledQueryBound(
+        runtime.views.a.projections.query.payload,
+        PLATFORM_IDS.queryIds.list,
+      );
+      const criteria = canonicalize({
+        kind: 'booleanPredicate',
+        schemaVersion: 'v2',
+        value: true,
+      });
+
+      for (let index = 1; index <= maximumResultCount + 1; index += 1) {
+        const created = await invokeSavedFilterOperation(
+          runtime,
+          runtime.views.a,
+          'create',
+          createInput(boundedFilterId(index), targetQueryId, criteria),
+        );
+        assert.equal(created.outcome, 'succeeded');
+      }
+
+      const formerUnboundedResult = await runtime.adminPool.query<{
+        filter_id: string;
+      }>(
+        `SELECT filter_id
+         FROM platform.saved_master_filters
+        WHERE tenant_id = $1
+          AND environment_id = $2
+          AND owner_principal_id = $3
+          AND query_id = $4
+        ORDER BY filter_id`,
+        [
+          SAVED_FILTER_TEST_SCOPE.a.tenantId,
+          SAVED_FILTER_TEST_SCOPE.a.environmentId,
+          SAVED_FILTER_TEST_SCOPE.a.principalId,
+          targetQueryId,
+        ],
+      );
+      assert.equal(formerUnboundedResult.rows.length, maximumResultCount + 1);
+      assert.throws(() =>
+        assert.ok(formerUnboundedResult.rows.length <= maximumResultCount),
+      );
+
+      const bounded = await invokeSavedFilterQuery(
+        runtime,
+        runtime.views.a,
+        'list',
+        { queryId: targetQueryId },
+      );
+      assert.equal(bounded.records.length, maximumResultCount);
+      assert.equal(
+        bounded.records.at(-1)?.recordId,
+        boundedFilterId(maximumResultCount),
+      );
+      assert.equal(
+        bounded.records.some(
+          (record) =>
+            record.recordId === boundedFilterId(maximumResultCount + 1),
+        ),
+        false,
+      );
+    },
+  );
+});
+
+function compiledQueryBound(payload: unknown, queryId: string): number {
+  assert.ok(isRecord(payload));
+  assert.ok(Array.isArray(payload.queries));
+  const definition = payload.queries.find(
+    (candidate) => isRecord(candidate) && candidate.queryId === queryId,
+  );
+  assert.ok(definition);
+  assert.equal(typeof definition.maximumResultCount, 'number');
+  assert.ok(
+    Number.isSafeInteger(definition.maximumResultCount) &&
+      definition.maximumResultCount > 0,
+  );
+  return definition.maximumResultCount;
+}
+
+function boundedFilterId(index: number): string {
+  return `f2200000-0000-4000-8000-${String(index).padStart(12, '0')}`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 function createInput(
   filterId: string,
   queryId: string,
