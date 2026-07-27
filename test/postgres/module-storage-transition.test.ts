@@ -2349,7 +2349,7 @@ test('a pre-existing relation index executes as atomic locking DDL and rejects i
   );
 });
 
-test('a pre-existing generated fold records its measured locking window', async () => {
+test('a pre-existing generated fold and prefix index record their measured locking window', async () => {
   const emptyDefinition = emptyModuleDefinition();
   const source = mustCompile(moduleInput(emptyDefinition));
   const currentDefinition = ordinaryModuleV2() as {
@@ -2383,12 +2383,12 @@ test('a pre-existing generated fold records its measured locking window', async 
     (column) => column.canonicalFieldId === FIXTURE_IDS.fieldIds.parentNotes,
   );
   assert.ok(foldedColumn);
-  assert.ok(
-    parent.indexes.every(
-      (index) => !index.columnNames.includes(foldedColumn.physicalName),
-    ),
-    'search-only folded columns must not gain an unused btree',
+  const foldedIndex = parent.indexes.find(
+    (index) =>
+      index.indexKind === 'foldedAccess' &&
+      index.columnNames.includes(foldedColumn.physicalName),
   );
+  assert.ok(foldedIndex, 'search-only folded columns require a prefix btree');
   const upgradeTransition = projectionPayload<StorageTransitionEnvelope>(
     upgrade,
     PROJECTION_FAMILY_IDS.storageTransition,
@@ -2399,6 +2399,13 @@ test('a pre-existing generated fold records its measured locking window', async 
       element.physicalObjectName === foldedColumn.physicalName,
   );
   assert.ok(addColumn);
+  const addIndex = upgradeTransition.elements.find(
+    (element) =>
+      element.kind === 'createIndex' &&
+      element.physicalObjectName === foldedIndex.physicalName,
+  );
+  assert.ok(addIndex);
+  assert.deepEqual(addIndex.declaredDependencyIds, [addColumn.elementId]);
   assert.equal(
     addColumn.classification.preparationValidity,
     'deferredOnlineFamily',
@@ -2409,7 +2416,7 @@ test('a pre-existing generated fold records its measured locking window', async 
       (element) =>
         element.classification.preparationValidity === 'deferredOnlineFamily',
     ).length,
-    1,
+    2,
   );
 
   await withEphemeralPostgres(
@@ -2481,6 +2488,7 @@ test('a pre-existing generated fold records its measured locking window', async 
           foldedColumn.physicalName,
           false,
         );
+        await assertIndexPresence(pool, foldedIndex.physicalName, false);
 
         const numberColumn = parent.columns.find(
           (column) =>
@@ -2529,6 +2537,12 @@ test('a pre-existing generated fold records its measured locking window', async 
         assert.equal(
           prepared.diff.elements.find(
             (element) => element.elementId === addColumn.elementId,
+          )?.disposition,
+          'PENDING_IN_ATTEMPT',
+        );
+        assert.equal(
+          prepared.diff.elements.find(
+            (element) => element.elementId === addIndex.elementId,
           )?.disposition,
           'PENDING_IN_ATTEMPT',
         );
@@ -2592,7 +2606,7 @@ test('a pre-existing generated fold records its measured locking window', async 
             performance.now() - blockingStarted;
           const executed = await execution;
           assert.equal(executed.disposition, 'READY_TO_SWAP');
-          assert.equal(executed.deferredOnlineFamilyElementsProcessed, 1);
+          assert.equal(executed.deferredOnlineFamilyElementsProcessed, 2);
           assert.ok(
             Number.isFinite(blockingWindowMilliseconds) &&
               blockingWindowMilliseconds >= 0,
@@ -2615,6 +2629,7 @@ test('a pre-existing generated fold records its measured locking window', async 
           foldedColumn.physicalName,
           true,
         );
+        await assertIndexPresence(pool, foldedIndex.physicalName, true);
         const generatedValues = await pool.query<{
           mismatches: string;
           observed: string;
