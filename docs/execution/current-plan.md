@@ -77,7 +77,19 @@ access.
 
 **`G2-P5a` Shared List behaviour is accepted** — bounded paging with coverage, stable sort, authorized pre-page search over relation labels and formatted values, archive visibility, bound cursors, and one shared result consumed identically by UI, Semantic Query and agent. **Freeze I.** Three risks recorded and routed on its ledger row: numeric sort is silently lexicographic (routed to P5b), the count/page coverage race under read-committed, and search that cannot use folded indexes for enum or relation-label arms.
 
-**Not yet started:** G2-P5b saved filters, G2-P5c derived navigation, G2-P8 import, and everything after.
+**`G2-P5b` Saved filters is accepted** — canonical predicate envelopes, release-pinned validation failing closed, Semantic Operation writes, and the **first first-party platform package**, which compiled through the unchanged press: the third zero-press-change result and the first for a *platform* module.
+
+## UX conformance — found 2026-07-27, and it re-sequenced the queue
+
+An independent review compiled the three real modules and ran G2-P4's own conformance checker against them. **Party fails 64, Catalog 33, Location 33 — 130 violations — while the architecture suite reports 68/68**, because the suite's only input is a synthetic fixture. `checkSurfaceGrammarConformance` has two call sites: its definition and that fixture test. **No real module has ever reached it.**
+
+The trigger was a human operating the app and noticing the list and record pages were disconnected. That symptom is one of fifteen missing slots on Party alone. The systemic cause is that **every layer is gated against inputs shaped to its own scope and nothing gates the composition** — and the module template replicates it, so Catalog and Location inherited the defect verbatim from the "zero press changes" result we twice celebrated.
+
+Rows 1-3 are the response, in that order: ratchet so nothing new can be added, burn down the anatomy, then write the skill that codifies the template — because writing the skill first would make the defect doctrine.
+
+**Open decision before G2-P9 is cut:** there is no composed application. `pnpm dev` serves a shell with four `home` surfaces and no domain module, so every "test it yourself" checkpoint so far has exercised a per-module harness rather than the product. A stage gate run today certifies the harnesses. Either G2 ships a composed shell, or G2-P9 states plainly what it does and does not certify — a scope call, not a packet call.
+
+**Not yet started:** G2-P8 import, and everything after.
 
 ## Active queue
 
