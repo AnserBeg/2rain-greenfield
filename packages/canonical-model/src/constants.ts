@@ -90,6 +90,12 @@ export const SURFACE_ARCHETYPES = [
   'builder',
 ] as const;
 
+/**
+ * Exact per-archetype anatomy: every listed slot is allowed and required
+ * exactly once. Canonical normalization currently enforces only the
+ * closed/at-most-once half; the product conformance ratchet observes the
+ * required floor until G2-P5d burns down the admitted module debt.
+ */
 export const SURFACE_SLOTS = Object.freeze({
   home: ['exceptions', 'setupChecklist'],
   list: ['title', 'savedViews', 'dataGrid', 'bulkActions'],

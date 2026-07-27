@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { resolve } from 'node:path';
 import test from 'node:test';
 
 import {
@@ -11,9 +12,14 @@ import {
 import {
   checkSurfaceAccessibility,
   checkSurfaceGrammarConformance,
+  checkProductSurfaceGrammarRatchet,
+  formatProductSurfaceGrammarRatchet,
   formatSurfaceGrammarResult,
   projectCompactSurfaces,
+  type ConformanceSurface,
+  type ProductSurfaceGrammarObservation,
 } from '../../packages/dev-tooling/src/surface-grammar-conformance/index.js';
+import { PRODUCT_SURFACE_GRAMMAR_BASELINE } from '../../packages/dev-tooling/src/surface-grammar-conformance/product-baseline.js';
 import {
   checkSurfaceRuntimeSeam,
   checkUxGrammarPin,
@@ -21,8 +27,19 @@ import {
 import {
   DEFAULT_COMPILER_LIMITS,
   DEFAULT_COMPILER_PROFILE,
+  MODULE_COMPILER_PROFILE,
+  PROJECTION_FAMILY_IDS,
   compileApplication,
+  type CompileSuccess,
+  type ContentAddressedArtifact,
+  type ProjectionManifestEnvelope,
 } from '../../packages/compiler/src/index.js';
+import {
+  catalogModuleDefinition,
+  locationModuleDefinition,
+  partyModuleDefinition,
+  platformModuleDefinition,
+} from '../../packages/domain/src/index.js';
 import {
   compiledSurfaceGrammarSurfaces,
   compileSurfaceGrammarFixture,
@@ -42,6 +59,127 @@ const seamPaths = [
   'apps/web/src/component-registry.ts',
   'apps/web/src/surface-runtime.ts',
 ] as const;
+
+const productModuleDefinitions = [
+  { create: catalogModuleDefinition, sourceDirectory: 'catalog' },
+  { create: locationModuleDefinition, sourceDirectory: 'location' },
+  { create: partyModuleDefinition, sourceDirectory: 'party' },
+  { create: platformModuleDefinition, sourceDirectory: 'platform' },
+] as const;
+
+test('compiled production modules match the reviewed surface-grammar debt baseline', () => {
+  assert.deepEqual(
+    discoveredDomainModuleDirectories(),
+    PRODUCT_SURFACE_GRAMMAR_BASELINE.map(
+      (entry) => entry.sourceDirectory,
+    ).toSorted(),
+  );
+
+  const result = checkProductSurfaceGrammarRatchet(
+    compileProductSurfaceGrammarObservations(),
+    PRODUCT_SURFACE_GRAMMAR_BASELINE,
+  );
+
+  console.log(formatProductSurfaceGrammarRatchet(result));
+  assert.equal(result.modulesRead, 4);
+  assert.deepEqual(
+    result.observations.map((observation) => ({
+      moduleId: observation.moduleId,
+      packageId: observation.packageId,
+      sourceDirectory: observation.sourceDirectory,
+      violationCount: observation.observedViolationCount,
+    })),
+    PRODUCT_SURFACE_GRAMMAR_BASELINE,
+  );
+  assert.deepEqual(result.violations, []);
+});
+
+test('product ratchet red: substituting the conformant synthetic fixture cannot satisfy product identity', () => {
+  const observations = compileProductSurfaceGrammarObservations();
+  const authoredFixture = authoredSurfaceGrammarFixture();
+  const fixtureIdentity = definitionIdentity(authoredFixture);
+  const fixtureObservation: ProductSurfaceGrammarObservation = {
+    ...fixtureIdentity,
+    result: checkSurfaceGrammarConformance(
+      compiledSurfaceGrammarSurfaces(compileSurfaceGrammarFixture()),
+    ),
+    // Even relabelling the input as Catalog cannot hide the package/module IDs.
+    sourceDirectory: 'catalog',
+  };
+  const substituted = observations.map((observation) =>
+    observation.sourceDirectory === 'catalog'
+      ? fixtureObservation
+      : observation,
+  );
+
+  const result = checkProductSurfaceGrammarRatchet(
+    substituted,
+    PRODUCT_SURFACE_GRAMMAR_BASELINE,
+  );
+  assert.ok(
+    result.violations.some(
+      (violation) =>
+        violation.ruleId === 'SGR002_PRODUCT_MODULE_SET' &&
+        violation.subjectId === fixtureIdentity.packageId,
+    ),
+  );
+});
+
+test('product ratchet red: an increase in a real compiled module count fails', () => {
+  const observations = compileProductSurfaceGrammarObservations();
+  const catalog = observations[0]!;
+  observations[0] = {
+    ...catalog,
+    result: {
+      ...catalog.result,
+      violations: [
+        ...catalog.result.violations,
+        {
+          message: 'induced additional real-module violation',
+          ruleId: 'SG003_REQUIRED_SLOT',
+          subjectId: catalog.moduleId,
+        },
+      ],
+    },
+  };
+
+  const result = checkProductSurfaceGrammarRatchet(
+    observations,
+    PRODUCT_SURFACE_GRAMMAR_BASELINE,
+  );
+  assert.deepEqual(ratchetRuleIds(result), ['SGR003_VIOLATION_INCREASE']);
+});
+
+test('product ratchet red: an unrecorded decrease in a real compiled module count fails', () => {
+  const observations = compileProductSurfaceGrammarObservations();
+  const catalog = observations[0]!;
+  observations[0] = {
+    ...catalog,
+    result: {
+      ...catalog.result,
+      violations: catalog.result.violations.slice(1),
+    },
+  };
+
+  const result = checkProductSurfaceGrammarRatchet(
+    observations,
+    PRODUCT_SURFACE_GRAMMAR_BASELINE,
+  );
+  assert.deepEqual(ratchetRuleIds(result), ['SGR004_UNRECORDED_DECREASE']);
+});
+
+test('product ratchet red: zero compiled modules reports the observed zero', () => {
+  const result = checkProductSurfaceGrammarRatchet(
+    [],
+    PRODUCT_SURFACE_GRAMMAR_BASELINE,
+  );
+  assert.equal(result.modulesRead, 0);
+  assert.ok(ratchetRuleIds(result).includes('SGR001_NO_PRODUCT_MODULES'));
+  assert.match(
+    formatProductSurfaceGrammarRatchet(result),
+    /^product surface grammar ratchet: FAIL \(0 compiled product modules read;/,
+  );
+});
 
 test('compiler-produced fixtures cover all five archetypes, required slots, focus order, roles, and compact projection', () => {
   const compiled = compileSurfaceGrammarFixture();
@@ -262,6 +400,105 @@ interface MutableCompiledSurface {
   slots: Array<{ orderKey: number; slot: string; slotId: string }>;
   statusRoles: string[];
   surfaceId: string;
+}
+
+function compileProductSurfaceGrammarObservations(): ProductSurfaceGrammarObservation[] {
+  return productModuleDefinitions.map(({ create, sourceDirectory }) => {
+    const definition = create();
+    const normalized = normalizeApplicationPackage(definition);
+    const compiled = compileApplication({
+      dependencies: [],
+      expectedActiveRelease: null,
+      kind: 'compilerInput',
+      limits: { ...DEFAULT_COMPILER_LIMITS },
+      normalizedDefinitionBytes: new TextEncoder().encode(
+        canonicalize(normalized),
+      ),
+      profile: { ...MODULE_COMPILER_PROFILE },
+    });
+    assert.equal(compiled.status, 'compiled');
+    const identity = definitionIdentity(normalized);
+    const surfaces = compiledSurfaceManifest(compiled);
+    return {
+      ...identity,
+      result: checkSurfaceGrammarConformance(surfaces),
+      sourceDirectory,
+    };
+  });
+}
+
+function compiledSurfaceManifest(
+  compiled: CompileSuccess,
+): readonly ConformanceSurface[] {
+  const reference = compiled.bundle.releaseManifest.projections.find(
+    (candidate) => candidate.familyId === PROJECTION_FAMILY_IDS.surfaceManifest,
+  );
+  assert.ok(reference);
+  const manifest = decodeArtifact<ProjectionManifestEnvelope>(
+    artifact(compiled, reference.artifactRoot),
+  );
+  const chunkHash = manifest.chunks[0]?.contentHash;
+  assert.ok(chunkHash);
+  const payload = decodeArtifact<{ surfaces: ConformanceSurface[] }>(
+    artifact(compiled, chunkHash),
+  );
+  return payload.surfaces;
+}
+
+function artifact(
+  compiled: CompileSuccess,
+  contentHash: string,
+): ContentAddressedArtifact {
+  const value = compiled.bundle.artifacts.find(
+    (candidate) => candidate.contentHash === contentHash,
+  );
+  assert.ok(value);
+  return value;
+}
+
+function decodeArtifact<T>(artifactValue: ContentAddressedArtifact): T {
+  return JSON.parse(
+    new TextDecoder().decode(artifactValue.canonicalBytes),
+  ) as T;
+}
+
+function definitionIdentity(definition: unknown): {
+  moduleId: string;
+  packageId: string;
+} {
+  assert.ok(definition && typeof definition === 'object');
+  const value = definition as {
+    modules?: readonly { moduleId?: unknown }[];
+    package?: { packageId?: unknown };
+  };
+  const packageDefinition = value.package as
+    { packageId?: unknown } | undefined;
+  const modules = value.modules as
+    readonly { moduleId?: unknown }[] | undefined;
+  const packageId = packageDefinition?.packageId;
+  if (typeof packageId !== 'string') throw new Error('missing packageId');
+  assert.equal(modules?.length, 1);
+  const moduleId = modules[0]?.moduleId;
+  if (typeof moduleId !== 'string') throw new Error('missing moduleId');
+  return { moduleId, packageId };
+}
+
+function discoveredDomainModuleDirectories(): string[] {
+  const root = resolve(process.cwd(), 'packages/domain/src');
+  return readdirSync(root, { withFileTypes: true })
+    .filter(
+      (entry) =>
+        entry.isDirectory() &&
+        existsSync(resolve(root, entry.name, 'definition.ts')),
+    )
+    .map((entry) => entry.name)
+    .toSorted();
+}
+
+function ratchetRuleIds(result: {
+  readonly violations: readonly { readonly ruleId: string }[];
+}): string[] {
+  return result.violations.map((violation) => violation.ruleId).sort();
 }
 
 function compilationDiagnosticCodes(

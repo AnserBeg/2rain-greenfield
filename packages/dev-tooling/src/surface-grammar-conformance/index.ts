@@ -58,6 +58,44 @@ export interface SurfaceGrammarCheckResult {
   readonly violations: readonly SurfaceGrammarViolation[];
 }
 
+export type ProductSurfaceGrammarRatchetRuleId =
+  | 'SGR001_NO_PRODUCT_MODULES'
+  | 'SGR002_PRODUCT_MODULE_SET'
+  | 'SGR003_VIOLATION_INCREASE'
+  | 'SGR004_UNRECORDED_DECREASE';
+
+export interface ProductSurfaceGrammarBaselineEntry {
+  readonly moduleId: string;
+  readonly packageId: string;
+  readonly sourceDirectory: string;
+  readonly violationCount: number;
+}
+
+export interface ProductSurfaceGrammarObservation {
+  readonly moduleId: string;
+  readonly packageId: string;
+  readonly result: SurfaceGrammarCheckResult;
+  readonly sourceDirectory: string;
+}
+
+export interface ProductSurfaceGrammarRatchetViolation {
+  readonly message: string;
+  readonly ruleId: ProductSurfaceGrammarRatchetRuleId;
+  readonly subjectId: string;
+}
+
+export interface ProductSurfaceGrammarRatchetResult {
+  readonly modulesRead: number;
+  readonly observations: readonly {
+    readonly baselineViolationCount: number | null;
+    readonly moduleId: string;
+    readonly observedViolationCount: number;
+    readonly packageId: string;
+    readonly sourceDirectory: string;
+  }[];
+  readonly violations: readonly ProductSurfaceGrammarRatchetViolation[];
+}
+
 export interface ContrastPair {
   readonly background: string;
   readonly foreground: string;
@@ -135,6 +173,9 @@ export function checkSurfaceGrammarConformance(
       continue;
     }
     const seen = new Set<string>();
+    // SURFACE_SLOTS is exact anatomy. The compiler currently enforces its
+    // closed/unique ceiling; conformance owns the required floor until G2-P5d
+    // can close the compile-time gap without making the debt unburnable.
     const expectedSlots = SURFACE_SLOTS[surface.archetype];
     for (const requiredSlot of expectedSlots) {
       if (!surface.slots.some((slot) => slot.slot === requiredSlot)) {
@@ -220,6 +261,114 @@ export function checkSurfaceGrammarConformance(
   });
 }
 
+export function checkProductSurfaceGrammarRatchet(
+  observations: readonly ProductSurfaceGrammarObservation[],
+  baseline: readonly ProductSurfaceGrammarBaselineEntry[],
+): ProductSurfaceGrammarRatchetResult {
+  const violations: ProductSurfaceGrammarRatchetViolation[] = [];
+  if (observations.length === 0) {
+    addRatchet(
+      violations,
+      'SGR001_NO_PRODUCT_MODULES',
+      'product',
+      'surface grammar ratchet read zero compiled product modules',
+    );
+  }
+  if (observations.length !== baseline.length) {
+    addRatchet(
+      violations,
+      'SGR002_PRODUCT_MODULE_SET',
+      'product',
+      `expected ${baseline.length} compiled product modules; observed ${observations.length}`,
+    );
+  }
+
+  const baselineByPackageId = new Map(
+    baseline.map((entry) => [entry.packageId, entry]),
+  );
+  const observedByPackageId = new Map(
+    observations.map((entry) => [entry.packageId, entry]),
+  );
+
+  for (const expected of baseline) {
+    const observed = observedByPackageId.get(expected.packageId);
+    if (
+      !observed ||
+      observed.moduleId !== expected.moduleId ||
+      observed.sourceDirectory !== expected.sourceDirectory
+    ) {
+      addRatchet(
+        violations,
+        'SGR002_PRODUCT_MODULE_SET',
+        expected.packageId,
+        `expected compiled product module ${expected.moduleId} from packages/domain/src/${expected.sourceDirectory}`,
+      );
+      continue;
+    }
+
+    const count = observed.result.violations.length;
+    if (count > expected.violationCount) {
+      addRatchet(
+        violations,
+        'SGR003_VIOLATION_INCREASE',
+        expected.moduleId,
+        `surface grammar violations increased from ${expected.violationCount} to ${count}`,
+      );
+    } else if (count < expected.violationCount) {
+      addRatchet(
+        violations,
+        'SGR004_UNRECORDED_DECREASE',
+        expected.moduleId,
+        `surface grammar violations decreased from ${expected.violationCount} to ${count} without a baseline update`,
+      );
+    }
+  }
+
+  for (const observed of observations) {
+    if (!baselineByPackageId.has(observed.packageId)) {
+      addRatchet(
+        violations,
+        'SGR002_PRODUCT_MODULE_SET',
+        observed.packageId,
+        `compiled module ${observed.moduleId} from ${observed.sourceDirectory} is absent from the reviewed baseline`,
+      );
+    }
+  }
+
+  return Object.freeze({
+    modulesRead: observations.length,
+    observations: Object.freeze(
+      observations.map((observation) =>
+        Object.freeze({
+          baselineViolationCount:
+            baselineByPackageId.get(observation.packageId)?.violationCount ??
+            null,
+          moduleId: observation.moduleId,
+          observedViolationCount: observation.result.violations.length,
+          packageId: observation.packageId,
+          sourceDirectory: observation.sourceDirectory,
+        }),
+      ),
+    ),
+    violations: Object.freeze(violations),
+  });
+}
+
+export function formatProductSurfaceGrammarRatchet(
+  result: ProductSurfaceGrammarRatchetResult,
+): string {
+  const counts = result.observations
+    .map(
+      (observation) =>
+        `${observation.sourceDirectory}=${observation.observedViolationCount}/${observation.baselineViolationCount ?? 'unrecorded'}`,
+    )
+    .join(', ');
+  const observation = `${result.modulesRead} compiled product modules read${counts.length > 0 ? `; ${counts}` : ''}`;
+  return result.violations.length === 0
+    ? `product surface grammar ratchet: PASS (${observation})`
+    : `product surface grammar ratchet: FAIL (${observation}; ${result.violations.length} ratchet violations)`;
+}
+
 export function checkSurfaceAccessibility(
   contrastPairs: readonly ContrastPair[],
   targets: readonly TargetMeasurement[],
@@ -296,6 +445,15 @@ function isArchetype(value: string): value is SurfaceArchetype {
 function add(
   violations: SurfaceGrammarViolation[],
   ruleId: SurfaceGrammarRuleId,
+  subjectId: string,
+  message: string,
+): void {
+  violations.push(Object.freeze({ message, ruleId, subjectId }));
+}
+
+function addRatchet(
+  violations: ProductSurfaceGrammarRatchetViolation[],
+  ruleId: ProductSurfaceGrammarRatchetRuleId,
   subjectId: string,
   message: string,
 ): void {
