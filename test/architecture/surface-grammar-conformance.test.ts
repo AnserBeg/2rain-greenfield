@@ -128,18 +128,12 @@ test('product ratchet red: substituting the conformant synthetic fixture cannot 
 test('product ratchet red: an increase in a real compiled module count fails', () => {
   const observations = compileProductSurfaceGrammarObservations();
   const catalog = observations[0]!;
+  const baselineCount = baselineViolationCount(catalog.packageId);
   observations[0] = {
     ...catalog,
     result: {
       ...catalog.result,
-      violations: [
-        ...catalog.result.violations,
-        {
-          message: 'induced additional real-module violation',
-          ruleId: 'SG003_REQUIRED_SLOT',
-          subjectId: catalog.moduleId,
-        },
-      ],
+      violations: violationsAtCount(catalog, baselineCount + 1),
     },
   };
 
@@ -153,11 +147,12 @@ test('product ratchet red: an increase in a real compiled module count fails', (
 test('product ratchet red: an unrecorded decrease in a real compiled module count fails', () => {
   const observations = compileProductSurfaceGrammarObservations();
   const catalog = observations[0]!;
+  const baselineCount = baselineViolationCount(catalog.packageId);
   observations[0] = {
     ...catalog,
     result: {
       ...catalog.result,
-      violations: catalog.result.violations.slice(1),
+      violations: violationsAtCount(catalog, baselineCount - 1),
     },
   };
 
@@ -500,6 +495,34 @@ function ratchetRuleIds(result: {
 }): string[] {
   return result.violations.map((violation) => violation.ruleId).sort();
 }
+
+function baselineViolationCount(packageId: string): number {
+  const baseline = PRODUCT_SURFACE_GRAMMAR_BASELINE.find(
+    (entry) => entry.packageId === packageId,
+  );
+  assert.ok(baseline);
+  return baseline.violationCount;
+}
+
+function violationsAtCount(
+  observation: ProductSurfaceGrammarObservation,
+  count: number,
+): ConformanceSurfaceGrammarViolations {
+  const seed = observation.result.violations[0];
+  assert.ok(seed);
+  return Array.from({ length: count }, (_, index) =>
+    observation.result.violations[index]
+      ? observation.result.violations[index]!
+      : {
+          ...seed,
+          message: 'induced additional real-module violation',
+          subjectId: `${observation.moduleId}:induced-${String(index)}`,
+        },
+  );
+}
+
+type ConformanceSurfaceGrammarViolations =
+  ProductSurfaceGrammarObservation['result']['violations'];
 
 function compilationDiagnosticCodes(
   mutate: (surfaces: MutableAuthoredSurface[]) => void,
