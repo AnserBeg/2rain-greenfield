@@ -47,6 +47,41 @@ full base matrix was green on its first attempt.
 The base reachability run token was
 `99c0e57e-f542-43c6-83a3-2180f8eb84f3`.
 
+## Candidate evidence before the final evidence commit
+
+At committed SHA `3f5c603c0a2ddd8a2237062ef9c26ba0c1c70721`, the static
+gates and the complete aggregate were green with these observed counts:
+
+| Gate | Observed candidate result |
+|---|---|
+| `format`, `build`, `lint`, `typecheck`, `check:demo-release` | PASS |
+| `check:boundaries` | PASS — 113 production files |
+| `check:schema` | PASS — 12/12 migrations, clean drift |
+| `test:unit` | PASS — 36/36 |
+| `test:compiler` | PASS — 52/52 |
+| `test:integration` | PASS — 59/59 |
+| `test:agent` | PASS — 3/3 |
+| `test:architecture` | PASS — 73/73 |
+| `test:contracts` | PASS — 6/6 |
+| `test:postgres` | PASS — 85/85 |
+| `test:locale` | PASS — 1/1 |
+| `test:browser` | PASS — 14/14 |
+| observability producer | PASS — 5/5 |
+| `check:reachability` | PASS — 66/66 test files, 9 producer artifacts |
+
+The green reachability run token was
+`9414a9c2-d02c-4dd8-bd19-00dae6019c07`. The first aggregate at
+the same SHA was honestly red at PostgreSQL 84/85: the unchanged `health stays
+live while readiness turns red when PostgreSQL stops` test completed its
+assertions, then its ephemeral helper reported `docker rm failed` while
+cleaning up a `--rm` container it had already stopped. The complete aggregate
+was rerun rather than carrying partial suites; the named test passed in both
+the PostgreSQL suite and the later observability producer on the green run.
+
+Canonical golden bytes/hashes and the checked-in shell release are unchanged.
+The observed shell release root remains
+`0a5362906943d62c7397db835958153a85457356224eb227a05d53c4e143259f`.
+
 ## Reviewed product-debt baseline
 
 The architecture test imports all four production factories from
