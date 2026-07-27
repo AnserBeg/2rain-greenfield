@@ -1,9 +1,13 @@
 import { randomUUID } from 'node:crypto';
 
 import type * as RuntimeViewContract from '@north-star/runtime/request-runtime-view';
-import type { SemanticRecordDto } from '../../../packages/runtime/src/semantic-query-gateway.js';
+import type {
+  SemanticQueryResultEnvelope,
+  SemanticRecordDto,
+} from '../../../packages/runtime/src/semantic-query-gateway.js';
 
 import { escapeHtml, shortIdentity } from './html.js';
+import { sharedListView } from './list-runtime.js';
 import type {
   CompiledSurfaceDefinition,
   CompiledSurfaceOperationBinding,
@@ -28,6 +32,7 @@ export type SurfaceDataRenderState =
   | { readonly status: 'UNBOUND' }
   | {
       readonly records: readonly SemanticRecordDto[];
+      readonly result?: SemanticQueryResultEnvelope;
       readonly status: 'READY';
     }
   | { readonly status: 'EMPTY' }
@@ -135,7 +140,7 @@ export function renderSurfaceDataComponent({
       ? `${feedbackHtml}${renderRecordSurface(surface, operations, record)}`
       : `${feedbackHtml}${dataDiagnostic('QUERY_NOT_FOUND')}`;
   }
-  return `${feedbackHtml}${renderListSurface(surface, records)}`;
+  return `${feedbackHtml}${renderListSurface(surface, records, data.status === 'READY' ? data.result : undefined)}`;
 }
 
 function renderReleaseSummary({
@@ -186,11 +191,61 @@ function renderBoundaryProbe(): string {
 function renderListSurface(
   surface: CompiledSurfaceDefinition,
   records: readonly SemanticRecordDto[],
+  result: SemanticQueryResultEnvelope | undefined,
 ): string {
+  if (result?.listCoverage) return renderSharedListSurface(surface, result);
   if (records.length === 0) {
     return `<section class="panel data-empty" data-data-state="empty"><p class="eyebrow">Live semantic data</p><h2>No records yet</h2><p class="lede">This view has no visible records for the current tenant, environment, and principal.</p></section>`;
   }
   return `<section class="panel data-panel" data-data-state="exact"><div class="panel__heading"><div><p class="eyebrow">Live semantic data</p><h2>${escapeHtml(surface.label)}</h2></div><span class="status-pill">${records.length} visible</span></div><div class="data-table-wrap"><table><thead><tr><th scope="col">Record</th>${surface.fieldIds.map((fieldId) => `<th scope="col">${escapeHtml(fieldLabel(fieldId))}</th>`).join('')}<th scope="col">Status</th></tr></thead><tbody>${records.map((record) => `<tr data-record-id="${escapeHtml(record.recordId)}"><td><code>${escapeHtml(shortIdentity(record.recordId))}</code></td>${surface.fieldIds.map((fieldId) => `<td data-field-id="${escapeHtml(fieldId)}">${renderValue(record.values[fieldId])}</td>`).join('')}<td>${record.archived ? 'Archived' : 'Active'}</td></tr>`).join('')}</tbody></table></div></section>`;
+}
+
+function renderSharedListSurface(
+  surface: CompiledSurfaceDefinition,
+  result: SemanticQueryResultEnvelope,
+): string {
+  const view = sharedListView(result);
+  const firstVisible =
+    view.listCoverage.returnedCount === 0
+      ? 0
+      : view.listCoverage.pageOffset + 1;
+  const lastVisible =
+    view.listCoverage.pageOffset + view.listCoverage.returnedCount;
+  const coverage = `${firstVisible}–${lastVisible} of ${view.listCoverage.totalCount}`;
+  const columns =
+    view.columns.length > 0
+      ? view.columns
+      : surface.fieldIds.map((columnId) => ({
+          columnId,
+          kind: 'field' as const,
+        }));
+  const coverageRole =
+    view.listCoverage.hasMore || view.listCoverage.truncatedByMaximum
+      ? 'attention'
+      : 'success';
+  const body =
+    view.rows.length === 0
+      ? `<div class="data-empty" data-data-state="empty" data-list-zero-input="true"><h3>No records yet</h3><p>This search has zero visible records for the current tenant, environment, and principal.</p></div>`
+      : `<div class="data-table-wrap"><table><thead><tr><th scope="col">Record</th>${columns.map((column) => `<th scope="col">${escapeHtml(fieldLabel(column.columnId))}</th>`).join('')}<th scope="col">Status</th></tr></thead><tbody>${view.rows.map((row) => `<tr data-record-id="${escapeHtml(row.record.recordId)}"><td><code>${escapeHtml(shortIdentity(row.record.recordId))}</code></td>${columns.map((column) => `<td ${column.kind === 'relation' ? 'data-relation-id' : 'data-field-id'}="${escapeHtml(column.columnId)}">${renderValue(row.cells[column.columnId])}</td>`).join('')}<td><span class="status-pill" data-status-role="${row.archived ? 'attention' : 'success'}">${row.archived ? 'Archived' : 'Active'}</span></td></tr>`).join('')}</tbody></table></div>`;
+  const next = view.listCoverage.nextCursor
+    ? `<a class="list-page-link" href="${escapeHtml(nextPageHref(surface, view.listCoverage.nextCursor, view.listCoverage.search, view.listCoverage.includeArchived))}">Next page</a>`
+    : '';
+  return `<section class="panel data-panel" data-data-state="exact" data-list-result="${escapeHtml(view.listCoverage.schemaVersion)}"><div class="panel__heading"><div><p class="eyebrow">Live semantic data</p><h2>${escapeHtml(surface.label)}</h2></div><span class="status-pill" data-status-role="${coverageRole}" data-list-coverage="${escapeHtml(coverage)}">${escapeHtml(coverage)} visible</span></div>${body}<nav class="list-pagination" aria-label="List pages">${next}</nav></section>`;
+}
+
+function nextPageHref(
+  surface: CompiledSurfaceDefinition,
+  cursor: string,
+  search: string,
+  includeArchived: boolean,
+): string {
+  const parameters = new URLSearchParams({
+    cursor,
+    surface: surface.surfaceId,
+  });
+  if (search.length > 0) parameters.set('q', search);
+  if (includeArchived) parameters.set('archived', 'yes');
+  return `/?${parameters.toString()}`;
 }
 
 function renderRecordSurface(
