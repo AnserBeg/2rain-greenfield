@@ -2,8 +2,8 @@
 
 Status: v0 measurement and plan-shape contract
 Owner: PR-6 relation-plan gate; PR-6b folded-access plan gates; PR-6c
-existing-table locking-DDL window; later platform budgets for
-percentile/error-budget ratification
+existing-table locking-DDL window; PR-6d literal search and prefix-range
+gates; later platform budgets for percentile/error-budget ratification
 
 This document records the runtime request-path bounds the repository can defend
 today. It does not turn one-host measurements into fleet percentiles or claim a
@@ -18,14 +18,15 @@ tables with forced row-level security.
 |---|---|---|---|
 | Parent-to-children relation read | Every compiled relation has a btree on `(tenant_id, environment_id, relation_column)`, and the forced-RLS predicate must use that exact index by name once the table has 100 analyzed rows. | PR-6's provider probe observes the local planner flip at 100 rows and rejects a sequential scan, the wrong index, or an unknown JSON plan node. It is a plan-shape measurement, not a latency claim. | PR-6; deferred-online installation on pre-existing tables belongs to the next materializer packet. |
 | Exact/advisory resolve and case-insensitive unique lookup | Every compiled folded equality key uses a stored `COLLATE "C"` fold column and a tenant/environment-leading btree. The forced-RLS predicate must use that folded column in the intended index condition once the table has 100 analyzed rows. | The verdict measured the prior per-row-fold resolve at **4,472 ms** and the shipped stored-column shape at about **0.33 ms** on a 500,000-row partition (**0.24 ms** under a forced generic plan). PR-6b's provider probe independently verifies the current plan shape, not those latency values. | Current in PR-6b for newly materialized tables; deferred-online installation on pre-existing tables belongs to the next materializer packet. |
-| Unanchored substring search | Bounded tenant/environment partition scan over the stored folded column. PostgreSQL's non-leakproof `textlike` prevents any index shape from serving this predicate through forced RLS; cost remains `O(rows in the tenant partition)`, not `O(all tenants)`, but the fold is no longer evaluated per row. | The verdict measured **1,005 ms** for the former fold-per-row 20-match exit. The shipped stored-fold shape measured **123 ms** for that case and **188 ms** for a zero-match full-partition scan on 500,000 rows. | A future search projection is trigger-driven only if real partitions exceed the verdict's threshold. |
-| Prefix/typeahead search | Not a current compiled query mode. PR-6b's literal range prototype was removed because the existing substring input treats `%`, `_`, and `\` as SQL `LIKE` pattern syntax; shipping literal prefix bounds beside it would create two incompatible escaping contracts. | The verdict's **89.7 ms** leaky-`LIKE` and **0.31 ms** range figures remain measured design evidence, not current capability. | The queued prefix-semantics packet decides literal text versus user-visible pattern semantics before range lowering returns. |
+| Unanchored substring search | Bounded tenant/environment partition scan over the stored folded column. Search input is literal: substring lowering escapes `!`, `%`, and `_` before an explicit `ESCAPE '!'`, while `\` is ordinary text. PostgreSQL's non-leakproof `textlike` prevents any index shape from serving this predicate through forced RLS; cost remains `O(rows in the tenant partition)`, not `O(all tenants)`. | The verdict measured **1,005 ms** for the former fold-per-row 20-match exit. The shipped stored-fold shape measured **123 ms** for that case and **188 ms** for a zero-match full-partition scan on 500,000 rows. PR-6d's 10,000-row probe observed the same tenant-primary-key plan before and after escaping, with 9,999 rows removed by the bounded post-filter and an exact primary-index `idx_scan` delta of 1. | A future search projection is trigger-driven only if real partitions exceed the verdict's threshold. |
+| Prefix/typeahead search | Current on compiled Q0 search through `matchMode: 'prefix'`. Each searchable stored fold is `COLLATE "C"`; lowering emits leakproof `>= folded_parameter` and, when one exists, `< exclusive_successor` range predicates. Every searchable non-unique fold receives a tenant/environment-leading `foldedAccess` btree; existing unique folded indexes serve unique fields. | The binding verdict measured **89.7 ms** for prefix `LIKE` and **0.31 ms** for explicit range lowering. PR-6d's local 10,000-row forced-RLS comparison observed **4.474 ms → 0.569 ms** with the complete compiled Party search shape; its exact-name execution oracle flipped at 100 analyzed rows and retained both zero tree-wide filter removals and expected-index counter deltas through 10,000 rows. | Re-measure at representative partition sizes and PostgreSQL upgrades; latency is recorded evidence, while exact-name access is the executable gate. |
 
 ## Measurement and extrapolation discipline
 
-All latency figures above are measured values from the pinned-image debate, not
-new measurements or estimates from PR-6b. PR-6 and PR-6b separately measure the
-100-row planner threshold by seeding the real compiled Party tables
+The verdict latency figures above are measured values from the pinned-image
+debate, not estimates from PR-6b. PR-6d adds one local before/after measurement,
+described below; it is not a fleet percentile. PR-6 and PR-6b separately measure
+the 100-row planner threshold by seeding the real compiled Party tables
 incrementally and running `ANALYZE` under the actual runtime role. PR-6 walks
 `EXPLAIN (FORMAT JSON)` for relations. PR-6b walks
 `EXPLAIN (ANALYZE, FORMAT JSON)` for folded equality, never disables sequential
@@ -36,6 +37,17 @@ observable after the query transaction returns idle. A scope-prefix scan on an
 unrelated primary key cannot make the folded gate green, and an expected-index
 scan whose folded equality is demoted to a post-filter cannot make it green
 either.
+
+PR-6d uses the same real compiled Party query shape, forced-RLS runtime role,
+10,000 analyzed tenant rows, and `EXPLAIN (ANALYZE, FORMAT JSON)` for both sides
+of its local comparison. The before side is the former prefix
+`folded_column LIKE (folded_parameter || '%')`; the after side is the literal
+C-collated range. PostgreSQL's root `Actual Total Time` supplies the recorded
+4.474 ms and 0.569 ms observations. No latency threshold is asserted. The
+executable prefix gate instead requires an `idx_scan` increase for every exact
+compiled index name and zero `Rows Removed by Filter` across the entire plan
+tree. Dropping only the declared name-folded index makes that gate red with
+9,999 rows removed, even though another folded index remains available.
 
 The `O(tenant partition)` and tenant-count-invariance statements are plan-shape
 bounds, not latency extrapolations. The orchestrator verified the scope quals as

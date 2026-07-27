@@ -387,7 +387,7 @@ test('folded access covers advisory resolve keys and defers populated-table rewr
   );
 });
 
-test('search-only fields retain stored folds without an unused prefix index', () => {
+test('search-only fields receive stored folds and prefix indexes', () => {
   const authored = ordinaryModuleV2() as {
     fields: Array<Record<string, unknown>>;
   };
@@ -411,7 +411,7 @@ test('search-only fields retain stored folds without an unused prefix index', ()
         index.indexKind === 'foldedAccess' &&
         index.columnNames.includes(foldedColumn.physicalName),
     ),
-    false,
+    true,
   );
 });
 
