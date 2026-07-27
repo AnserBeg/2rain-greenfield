@@ -610,7 +610,6 @@ export function lowerStorageTargetV1(
         }
         if (
           foldedColumn &&
-          resolveMatchFieldIds.has(column.canonicalFieldId) &&
           !uniqueKeys.some((unique) =>
             unique.columns.includes(column.physicalName),
           )

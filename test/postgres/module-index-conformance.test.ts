@@ -1,15 +1,24 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import {
+  canonicalize,
+  unicodeCaseFold,
+} from '../../packages/canonical-model/src/index.js';
 import type { Pool, PoolClient } from 'pg';
 
 import type { StorageTargetPayloadV1 } from '../../packages/compiler/src/index.js';
-import { buildFoldedMatchPredicate } from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
+import {
+  buildFoldedMatchPredicate,
+  foldedPrefixUpperBound,
+  ModuleRuntimeInterpreterError,
+} from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
 import { withTrustedRequestTransaction } from '../../packages/postgres-provider/src/request-context.js';
 import type { TrustedRequestContext } from '../../packages/runtime/src/request-context.js';
 import { PARTY_IDS } from '../fixtures/g2/party/definition.js';
 import {
   PARTY_TEST_SCOPE,
+  invokePartyQuery,
   withRealPartyRuntime,
 } from '../fixtures/g2/party/runtime-harness.js';
 
@@ -18,6 +27,8 @@ const targetRow = 7;
 const demonstrateMissingIndex = process.env.PR6_DEMONSTRATE_MISSING_INDEX;
 const demonstrateMissingFoldedIndex =
   process.env.PR6B_DEMONSTRATE_MISSING_INDEX;
+const demonstrateMissingPrefixIndex =
+  process.env.PR6D_DEMONSTRATE_MISSING_PREFIX_INDEX;
 const demonstrateFoldConformance =
   process.env.PR6B_DEMONSTRATE_FOLD_CONFORMANCE;
 
@@ -35,6 +46,14 @@ if (
 ) {
   throw new Error(
     `unsupported PR6B_DEMONSTRATE_MISSING_INDEX value: ${demonstrateMissingFoldedIndex}`,
+  );
+}
+if (
+  demonstrateMissingPrefixIndex !== undefined &&
+  demonstrateMissingPrefixIndex !== 'prefix'
+) {
+  throw new Error(
+    `unsupported PR6D_DEMONSTRATE_MISSING_PREFIX_INDEX value: ${demonstrateMissingPrefixIndex}`,
   );
 }
 if (
@@ -104,6 +123,24 @@ test('EXPLAIN plan guard rejects sequential and wrong-index scans structurally',
   );
   assert.throws(
     () =>
+      assertFoldedIndexEvidence(
+        {
+          indexScanDeltas: new Map([
+            ['expected_number_index', 1n],
+            ['expected_name_index', 0n],
+          ]),
+          root: { 'Node Type': 'Index Scan' },
+        },
+        'prefix',
+        [
+          { indexNames: ['expected_number_index'] },
+          { indexNames: ['expected_name_index'] },
+        ],
+      ),
+    /prefix predicate did not increment expected index usage counter expected_name_index/,
+  );
+  assert.throws(
+    () =>
       inspectPlan({
         'Index Name': 'expected_folded_index',
         'Node Type': 'Index Scan',
@@ -111,6 +148,9 @@ test('EXPLAIN plan guard rejects sequential and wrong-index scans structurally',
       }),
     /unrecognized EXPLAIN rows removed by filter: 3/,
   );
+  assert.equal(foldedPrefixUpperBound('\u{10ffff}'), null);
+  assert.equal(foldedPrefixUpperBound(`a\u{10ffff}`), 'b');
+  assert.equal(foldedPrefixUpperBound('\ud7ff'), '\ue000');
 });
 
 test('fold row conformance rejects absent subjects, zero-row evidence, and generated-value drift', () => {
@@ -136,14 +176,229 @@ test('fold row conformance rejects absent subjects, zero-row evidence, and gener
   );
 });
 
-test('forced-RLS relation, resolve, and unique predicates use their declared indexes', async () => {
+test('literal search semantics preserve ordinary results across substring and prefix modes', async (context) => {
+  await withRealPartyRuntime(
+    'module-search-literal-semantics',
+    async (runtime) => {
+      const targets = requiredTargets(runtime.storage);
+      const rows = [
+        {
+          id: '40000000-0000-4000-8000-000000000001',
+          name: '50% literal',
+          number: 'LITERAL-0001',
+        },
+        {
+          id: '40000000-0000-4000-8000-000000000002',
+          name: '500 wildcard',
+          number: 'LITERAL-0002',
+        },
+        {
+          id: '40000000-0000-4000-8000-000000000003',
+          name: 'a_b literal',
+          number: 'LITERAL-0003',
+        },
+        {
+          id: '40000000-0000-4000-8000-000000000004',
+          name: 'axb wildcard',
+          number: 'LITERAL-0004',
+        },
+        {
+          id: '40000000-0000-4000-8000-000000000005',
+          name: 'bang!mark literal',
+          number: 'LITERAL-0005',
+        },
+        {
+          id: '40000000-0000-4000-8000-000000000006',
+          name: 'bangmark wildcard',
+          number: 'LITERAL-0006',
+        },
+        {
+          id: '40000000-0000-4000-8000-000000000007',
+          name: 'Ordinary Alpha',
+          number: 'LITERAL-0007',
+        },
+        {
+          id: '40000000-0000-4000-8000-000000000008',
+          name: 'Ordinary Beta',
+          number: 'LITERAL-0008',
+        },
+        {
+          id: '40000000-0000-4000-8000-000000000009',
+          name: 'Middle ordinary token',
+          number: 'LITERAL-0009',
+        },
+        {
+          id: '40000000-0000-4000-8000-000000000010',
+          name: 'Straße Alpha',
+          number: 'LITERAL-0010',
+        },
+        {
+          id: '40000000-0000-4000-8000-000000000011',
+          name: 'STRASSE Beta',
+          number: 'LITERAL-0011',
+        },
+        {
+          id: '40000000-0000-4000-8000-000000000012',
+          name: '\ud7ff boundary',
+          number: 'LITERAL-0012',
+        },
+        {
+          id: '40000000-0000-4000-8000-000000000013',
+          name: '\ue000 boundary',
+          number: 'LITERAL-0013',
+        },
+        {
+          id: '40000000-0000-4000-8000-000000000014',
+          name: '\u{10ffff}',
+          number: 'LITERAL-0014',
+        },
+        {
+          id: '40000000-0000-4000-8000-000000000015',
+          name: '\u{10ffff} tail',
+          number: 'LITERAL-0015',
+        },
+        {
+          id: '40000000-0000-4000-8000-000000000016',
+          name: '\u{10fffe} neighbor',
+          number: 'LITERAL-0016',
+        },
+        {
+          id: '40000000-0000-4000-8000-000000000017',
+          name: 'slash\\mark literal',
+          number: 'LITERAL-0017',
+        },
+        {
+          id: '40000000-0000-4000-8000-000000000018',
+          name: 'slashmark wildcard',
+          number: 'LITERAL-0018',
+        },
+      ] as const;
+      await insertSearchRows(runtime.adminPool, targets, rows);
+      const rowIds = new Set<string>(rows.map((row) => row.id));
+
+      for (const [term, expectedId, legacyIds] of [
+        ['50%', rows[0].id, [rows[0].id, rows[1].id]],
+        ['a_b', rows[2].id, [rows[2].id, rows[3].id]],
+        ['slash\\mark', rows[16].id, [rows[17].id]],
+      ] as const) {
+        await context.test(`${term} is not a wildcard`, async () => {
+          assert.deepEqual(
+            (await legacyUnescapedSubstring(runtime, targets, term))
+              .map((record) => record.recordId)
+              .filter((recordId) => rowIds.has(recordId)),
+            legacyIds,
+            `the pre-fix LIKE contract must demonstrate its wrong ${term} match`,
+          );
+          for (const matchMode of ['substring', 'prefix'] as const) {
+            const result = await invokePartyQuery(
+              runtime,
+              runtime.views.a,
+              'party_search',
+              { matchMode, text: term },
+            );
+            assert.deepEqual(
+              result.records
+                .map((record) => record.recordId)
+                .filter((recordId) => rowIds.has(recordId)),
+              [expectedId],
+              `${matchMode}:${term}`,
+            );
+          }
+        });
+      }
+
+      await context.test('the escape character is literal', async () => {
+        for (const matchMode of ['substring', 'prefix'] as const) {
+          const result = await invokePartyQuery(
+            runtime,
+            runtime.views.a,
+            'party_search',
+            { matchMode, text: 'bang!mark' },
+          );
+          assert.deepEqual(
+            result.records
+              .map((record) => record.recordId)
+              .filter((recordId) => rowIds.has(recordId)),
+            [rows[4].id],
+            matchMode,
+          );
+        }
+      });
+
+      await context.test(
+        'C-collated bounds preserve pinned Unicode folding',
+        async () => {
+          for (const prefix of ['straße', '\ud7ff', '\u{10ffff}'] as const) {
+            const expected = rows
+              .filter((row) =>
+                unicodeCaseFold(row.name).startsWith(unicodeCaseFold(prefix)),
+              )
+              .map((row) => row.id);
+            const result = await invokePartyQuery(
+              runtime,
+              runtime.views.a,
+              'party_search',
+              { matchMode: 'prefix', text: prefix },
+            );
+            assert.deepEqual(
+              result.records
+                .map((record) => record.recordId)
+                .filter((recordId) => rowIds.has(recordId)),
+              expected,
+              prefix,
+            );
+          }
+        },
+      );
+
+      await context.test(
+        'ordinary substring results are byte-identical',
+        async () => {
+          for (const term of ['ordinary', 'alpha', 'middle token'] as const) {
+            const before = canonicalize(
+              await legacyUnescapedSubstring(runtime, targets, term),
+            );
+            const after = canonicalize(
+              (
+                await invokePartyQuery(
+                  runtime,
+                  runtime.views.a,
+                  'party_search',
+                  { matchMode: 'substring', text: term },
+                )
+              ).records,
+            );
+            assert.equal(after, before, term);
+          }
+        },
+      );
+
+      await context.test(
+        'a missing search term fails before lowering zero terms',
+        async () => {
+          await assert.rejects(
+            invokePartyQuery(runtime, runtime.views.a, 'party_search', {}),
+            (error: unknown) =>
+              error instanceof ModuleRuntimeInterpreterError &&
+              error.code === 'MODULE_INPUT_MALFORMED' &&
+              error.message === 'text must be non-blank',
+          );
+          console.log('PR-6d search terms lowered: 0 (missing term rejected)');
+        },
+      );
+    },
+  );
+});
+
+test('forced-RLS relation, resolve, unique, and prefix predicates use their declared indexes', async () => {
   await withRealPartyRuntime('module-index-conformance', async (runtime) => {
     const targets = requiredTargets(runtime.storage);
     let priorRowCount = 0;
     const plannerFlipRows: Record<
-      'relation' | 'resolve' | 'unique',
+      'prefix' | 'relation' | 'resolve' | 'unique',
       number | null
     > = {
+      prefix: null,
       relation: null,
       resolve: null,
       unique: null,
@@ -168,12 +423,21 @@ test('forced-RLS relation, resolve, and unique predicates use their declared ind
         targets,
         'unique',
       );
+      const prefixEvidence = await explainFoldedPredicate(
+        runtime,
+        targets,
+        'prefix',
+      );
       if (process.env.PR6B_DEBUG_EVIDENCE === '1') {
         console.log(
-          `PR-6b evidence rows=${String(rowCount)} resolve=${formatFoldedEvidence(resolveEvidence)} unique=${formatFoldedEvidence(uniqueEvidence)}`,
+          `PR-6b/PR-6d evidence rows=${String(rowCount)} resolve=${formatFoldedEvidence(resolveEvidence)} unique=${formatFoldedEvidence(uniqueEvidence)} prefix=${formatFoldedEvidence(prefixEvidence)}`,
         );
       }
       const milestonePlans = {
+        prefix: foldedEvidencePasses(
+          prefixEvidence,
+          foldedIndexRequirements(targets, 'prefix'),
+        ),
         relation: planUsesIndex(
           await explainRelationPredicate(runtime, targets),
           [targets.relationIndex.physicalName],
@@ -207,7 +471,7 @@ test('forced-RLS relation, resolve, and unique predicates use their declared ind
         `${predicate} predicate did not use its declared index by ${priorRowCount} analyzed rows`,
       );
       console.log(
-        `PR-6b ${predicate} planner flip rows=${String(rowCount)}; analyzed rows=${priorRowCount}`,
+        `${predicate === 'prefix' ? 'PR-6d' : 'PR-6b'} ${predicate} planner flip rows=${String(rowCount)}; analyzed rows=${priorRowCount}`,
       );
     }
 
@@ -241,6 +505,49 @@ test('forced-RLS relation, resolve, and unique predicates use their declared ind
       await explainFoldedPredicate(runtime, targets, 'unique'),
       'unique',
       foldedIndexRequirements(targets, 'unique'),
+    );
+    const legacyPrefix = await explainLegacyPrefixPredicate(runtime, targets);
+    let prefixEvidence = await explainFoldedPredicate(
+      runtime,
+      targets,
+      'prefix',
+    );
+    console.log(
+      `PR-6d prefix measurement rows=${String(priorRowCount)} legacy_like_ms=${formatMilliseconds(actualTotalTime(legacyPrefix))} range_ms=${formatMilliseconds(actualTotalTime(prefixEvidence.root))}`,
+    );
+    const legacySubstring = await explainLegacyLikePredicate(
+      runtime,
+      targets,
+      'substring',
+    );
+    const literalSubstring = await explainFoldedPredicate(
+      runtime,
+      targets,
+      'substring',
+    );
+    assertSubstringBoundedEvidence(legacySubstring, targets);
+    assertSubstringBoundedEvidence(literalSubstring, targets);
+    assert.deepEqual(
+      observedPlanShape(literalSubstring.root),
+      observedPlanShape(legacySubstring.root),
+      'literal escaping changed the tenant-bounded substring plan shape',
+    );
+    console.log(
+      `PR-6d substring bounded rows=${String(priorRowCount)} removed_by_filter=${String(inspectPlan(literalSubstring.root).totalRowsRemovedByFilter)} tenant_index_delta=${String(literalSubstring.indexScanDeltas.get(targets.party.primaryKey.physicalName) ?? 'missing')}`,
+    );
+    if (demonstrateMissingPrefixIndex === 'prefix') {
+      await runtime.adminPool.query(
+        `DROP INDEX north_star_module.${quoted(targets.nameFoldedIndex.physicalName)}`,
+      );
+      await runtime.adminPool.query(
+        `ANALYZE north_star_module.${quoted(targets.party.physicalTableName)}`,
+      );
+      prefixEvidence = await explainFoldedPredicate(runtime, targets, 'prefix');
+    }
+    assertFoldedIndexEvidence(
+      prefixEvidence,
+      'prefix',
+      foldedIndexRequirements(targets, 'prefix'),
     );
     await assertGeneratedFoldCatalog(runtime.adminPool, targets);
     if (demonstrateFoldConformance === 'row-drift') {
@@ -344,7 +651,7 @@ function requiredTargets(storage: StorageTargetPayloadV1): RelationTargets {
 
 function foldedIndexRequirements(
   targets: RelationTargets,
-  predicate: 'resolve' | 'unique',
+  predicate: 'prefix' | 'resolve' | 'unique',
 ): readonly FoldedIndexRequirement[] {
   const name = {
     indexNames: [targets.nameFoldedIndex.physicalName],
@@ -352,7 +659,11 @@ function foldedIndexRequirements(
   const number = {
     indexNames: targets.numberUniqueIndexNames,
   };
-  return predicate === 'resolve' ? [name] : [number];
+  return predicate === 'prefix'
+    ? [number, name]
+    : predicate === 'resolve'
+      ? [name]
+      : [number];
 }
 
 function requiredFoldedColumn(
@@ -386,6 +697,99 @@ function requiredColumn(
   );
   assert.ok(column);
   return column;
+}
+
+async function insertSearchRows(
+  pool: Pool,
+  targets: RelationTargets,
+  rows: readonly {
+    readonly id: string;
+    readonly name: string;
+    readonly number: string;
+  }[],
+): Promise<void> {
+  await pool.query(
+    `INSERT INTO north_star_module.${quoted(targets.party.physicalTableName)} (
+       tenant_id, environment_id, record_id,
+       ${quoted(targets.numberColumn.physicalName)},
+       ${quoted(targets.nameColumn.physicalName)}
+     )
+     SELECT $1::uuid, $2::uuid, input.record_id::uuid, input.number, input.name
+       FROM jsonb_to_recordset($3::jsonb)
+         AS input(record_id text, number text, name text)`,
+    [
+      PARTY_TEST_SCOPE.a.tenantId,
+      PARTY_TEST_SCOPE.a.environmentId,
+      JSON.stringify(
+        rows.map((row) => ({
+          name: row.name,
+          number: row.number,
+          record_id: row.id,
+        })),
+      ),
+    ],
+  );
+}
+
+async function legacyUnescapedSubstring(
+  runtime: Parameters<Parameters<typeof withRealPartyRuntime>[1]>[0],
+  targets: RelationTargets,
+  text: string,
+): Promise<
+  readonly {
+    readonly archived: boolean;
+    readonly entityId: string;
+    readonly recordId: string;
+    readonly revision: number;
+    readonly values: Readonly<Record<string, unknown>>;
+  }[]
+> {
+  const selectedColumns = [
+    targets.party.recordIdentity.column,
+    targets.party.optimisticRevision.column,
+    targets.party.archive.archivedAtColumn,
+    ...targets.party.columns.map((column) => column.physicalName),
+  ];
+  const foldedParameter =
+    'north_star_module.nsm_unicode_case_fold_v1($1::text)';
+  const legacyPredicate = [targets.numberFoldedColumn, targets.nameFoldedColumn]
+    .map(
+      (column) =>
+        `${quoted(column.physicalName)} LIKE ('%' || ${foldedParameter} || '%')`,
+    )
+    .join(' OR ');
+  return withTrustedRequestTransaction(
+    runtime.runtimePool,
+    runtime.contexts.a,
+    async (client) => {
+      await client.query('SET LOCAL ROLE north_star_module_runtime');
+      try {
+        const result = await client.query(
+          `SELECT ${selectedColumns.map(quoted).join(', ')}
+             FROM north_star_module.${quoted(targets.party.physicalTableName)}
+            WHERE (${legacyPredicate})
+              AND ${quoted(targets.party.archive.archivedAtColumn)} IS NULL
+            ORDER BY ${quoted(targets.party.recordIdentity.column)}
+            LIMIT 100`,
+          [text],
+        );
+        return result.rows.map((row) => ({
+          archived: row[targets.party.archive.archivedAtColumn] !== null,
+          entityId: targets.party.entityId,
+          recordId: String(row[targets.party.recordIdentity.column]),
+          revision: Number(row[targets.party.optimisticRevision.column]),
+          values: Object.fromEntries(
+            targets.party.columns.map((column) => [
+              column.canonicalFieldId,
+              row[column.physicalName],
+            ]),
+          ),
+        }));
+      } finally {
+        await client.query('RESET ROLE');
+      }
+    },
+  );
 }
 
 async function seedRows(
@@ -469,15 +873,29 @@ async function explainRelationPredicate(
 async function explainFoldedPredicate(
   runtime: Parameters<Parameters<typeof withRealPartyRuntime>[1]>[0],
   targets: RelationTargets,
-  predicate: 'resolve' | 'unique',
+  predicate: 'prefix' | 'resolve' | 'substring' | 'unique',
 ): Promise<FoldedIndexEvidence> {
   const columns =
-    predicate === 'unique' ? [targets.numberColumn] : [targets.nameColumn];
+    predicate === 'resolve'
+      ? [targets.nameColumn]
+      : predicate === 'unique'
+        ? [targets.numberColumn]
+        : [targets.numberColumn, targets.nameColumn];
   const match = buildFoldedMatchPredicate(
     targets.party,
     columns,
-    predicate === 'unique' ? 'PARTY-00000007' : 'Ordinary party 7',
-    'exact',
+    predicate === 'unique'
+      ? 'PARTY-00000007'
+      : predicate === 'prefix'
+        ? 'Ordinary party 7000'
+        : predicate === 'substring'
+          ? 'party 9999'
+          : 'Ordinary party 7',
+    predicate === 'prefix'
+      ? 'prefix'
+      : predicate === 'substring'
+        ? 'substring'
+        : 'exact',
   );
   // Mirror matchRecords/exactFoldedMatches: full selection, archive filter,
   // record-id ordering, runtime limit, and every selected searchable column.
@@ -488,10 +906,16 @@ async function explainFoldedPredicate(
     targets.party.archive.archivedAtColumn,
     ...targets.party.columns.map((column) => column.physicalName),
   ];
-  const expectedIndexNames = foldedIndexRequirements(
-    targets,
-    predicate,
-  ).flatMap((requirement) => requirement.indexNames);
+  const expectedIndexNames =
+    predicate === 'substring'
+      ? [
+          targets.party.primaryKey.physicalName,
+          targets.nameFoldedIndex.physicalName,
+          ...targets.numberUniqueIndexNames,
+        ]
+      : foldedIndexRequirements(targets, predicate).flatMap(
+          (requirement) => requirement.indexNames,
+        );
   const before = await readIndexScanCounters(
     runtime.adminPool,
     expectedIndexNames,
@@ -511,6 +935,86 @@ async function explainFoldedPredicate(
             ORDER BY ${quoted(targets.party.recordIdentity.column)}
             LIMIT $${String(values.length)}`,
           values,
+        );
+        await client.query('SELECT pg_stat_force_next_flush()');
+        return root;
+      } finally {
+        await client.query('RESET ROLE');
+      }
+    },
+  );
+  const after = await readIndexScanCounters(
+    runtime.adminPool,
+    expectedIndexNames,
+  );
+  return {
+    indexScanDeltas: new Map(
+      expectedIndexNames.map((indexName) => {
+        const beforeCount = before.get(indexName);
+        const afterCount = after.get(indexName);
+        return [
+          indexName,
+          beforeCount === undefined || afterCount === undefined
+            ? null
+            : afterCount - beforeCount,
+        ] as const;
+      }),
+    ),
+    root,
+  };
+}
+
+async function explainLegacyPrefixPredicate(
+  runtime: Parameters<Parameters<typeof withRealPartyRuntime>[1]>[0],
+  targets: RelationTargets,
+): Promise<PlanNode> {
+  return (await explainLegacyLikePredicate(runtime, targets, 'prefix')).root;
+}
+
+async function explainLegacyLikePredicate(
+  runtime: Parameters<Parameters<typeof withRealPartyRuntime>[1]>[0],
+  targets: RelationTargets,
+  mode: 'prefix' | 'substring',
+): Promise<FoldedIndexEvidence> {
+  const selectedColumns = [
+    targets.party.recordIdentity.column,
+    targets.party.optimisticRevision.column,
+    targets.party.archive.archivedAtColumn,
+    ...targets.party.columns.map((column) => column.physicalName),
+  ];
+  const foldedParameter =
+    'north_star_module.nsm_unicode_case_fold_v1($1::text)';
+  const legacyPredicate = [targets.numberFoldedColumn, targets.nameFoldedColumn]
+    .map((column) =>
+      mode === 'prefix'
+        ? `${quoted(column.physicalName)} LIKE (${foldedParameter} || '%')`
+        : `${quoted(column.physicalName)} LIKE ('%' || ${foldedParameter} || '%')`,
+    )
+    .join(' OR ');
+  const expectedIndexNames = [
+    targets.party.primaryKey.physicalName,
+    targets.nameFoldedIndex.physicalName,
+    ...targets.numberUniqueIndexNames,
+  ];
+  const before = await readIndexScanCounters(
+    runtime.adminPool,
+    expectedIndexNames,
+  );
+  const root = await withTrustedRequestTransaction(
+    runtime.runtimePool,
+    runtime.contexts.a,
+    async (client) => {
+      await client.query('SET LOCAL ROLE north_star_module_runtime');
+      try {
+        const root = await explain(
+          client,
+          `SELECT ${selectedColumns.map(quoted).join(', ')}
+             FROM north_star_module.${quoted(targets.party.physicalTableName)}
+            WHERE (${legacyPredicate})
+              AND ${quoted(targets.party.archive.archivedAtColumn)} IS NULL
+            ORDER BY ${quoted(targets.party.recordIdentity.column)}
+            LIMIT $2`,
+          [mode === 'prefix' ? 'Ordinary party 7000' : 'party 9999', 100],
         );
         await client.query('SELECT pg_stat_force_next_flush()');
         return root;
@@ -837,6 +1341,19 @@ function inspectPlan(root: PlanNode): {
   return { indexNames, sequentialScan, totalRowsRemovedByFilter };
 }
 
+function observedPlanShape(root: PlanNode): unknown {
+  inspectPlan(root);
+  const shape = (node: PlanNode): unknown => ({
+    indexName:
+      typeof node['Index Name'] === 'string' ? node['Index Name'] : null,
+    nodeType: node['Node Type'],
+    plans: Array.isArray(node.Plans)
+      ? node.Plans.map((child) => shape(child as PlanNode))
+      : [],
+  });
+  return shape(root);
+}
+
 function planUsesIndex(
   root: PlanNode,
   expectedIndexNames: readonly string[],
@@ -878,7 +1395,7 @@ function assertRelationIndexPlan(
 
 function assertFoldedIndexEvidence(
   evidence: FoldedIndexEvidence,
-  predicate: 'resolve' | 'unique',
+  predicate: 'prefix' | 'resolve' | 'unique',
   requirements: readonly FoldedIndexRequirement[],
 ): void {
   const plan = inspectPlan(evidence.root);
@@ -904,6 +1421,54 @@ function assertFoldedIndexEvidence(
         .join(', ')}`,
     );
   }
+}
+
+function assertSubstringBoundedEvidence(
+  evidence: FoldedIndexEvidence,
+  targets: RelationTargets,
+): void {
+  const plan = inspectPlan(evidence.root);
+  const primaryKey = targets.party.primaryKey.physicalName;
+  assert.equal(
+    plan.sequentialScan,
+    false,
+    'substring predicate escaped the tenant/environment index bound',
+  );
+  assert.ok(
+    plan.indexNames.has(primaryKey),
+    `substring predicate did not use tenant-bounding index ${primaryKey}; used ${[...plan.indexNames].join(', ') || 'none'}`,
+  );
+  assert.ok(
+    (evidence.indexScanDeltas.get(primaryKey) ?? 0n) >= 1n,
+    `substring predicate did not increment tenant-bounding index ${primaryKey}`,
+  );
+  assert.ok(
+    plan.totalRowsRemovedByFilter > 0,
+    'substring predicate did not observe its expected bounded post-filter',
+  );
+  for (const foldedIndex of [
+    targets.nameFoldedIndex.physicalName,
+    ...targets.numberUniqueIndexNames,
+  ]) {
+    assert.equal(
+      evidence.indexScanDeltas.get(foldedIndex) ?? 0n,
+      0n,
+      `unanchored substring unexpectedly used folded index ${foldedIndex}`,
+    );
+  }
+}
+
+function actualTotalTime(root: PlanNode): number {
+  const value = root['Actual Total Time'];
+  if (typeof value !== 'number') {
+    assert.fail('EXPLAIN omitted Actual Total Time');
+  }
+  assert.ok(Number.isFinite(value) && value >= 0, 'EXPLAIN time is invalid');
+  return value;
+}
+
+function formatMilliseconds(value: number): string {
+  return value.toFixed(3);
 }
 
 function formatFoldedEvidence(evidence: FoldedIndexEvidence): string {
