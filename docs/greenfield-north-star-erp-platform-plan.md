@@ -804,6 +804,366 @@ When a desired module cannot be expressed:
 This is how the platform becomes capable of building almost any conventional
 ERP module without becoming an unsafe generic database editor.
 
+### 5.12 The required primitive floor
+
+Section 5.11 governs how a primitive is *added*. This section names the ones
+already decided as required, and the rule that keeps the list from growing by
+argument.
+
+**The head/tail rule.** Escapes, downgrades, and domain packs exist to serve the
+**tail** of demand — requirements that are rare, each unlocking a fraction of a
+percent. They are the wrong instrument for the **head**: behaviour nearly every
+module needs. Routing a head requirement to an escape means many tenants
+independently authoring near-identical opaque bodies for the same thing, which
+surrenders analyzability at scale to avoid building one primitive. A head
+primitive belongs in the language.
+
+**Membership test.** A primitive is on the floor only when all four hold:
+
+1. **Ubiquity** — it appears in ordinary modules across unrelated domains,
+   including first-party ones.
+2. **No substitute** — it cannot be expressed by composing existing primitives.
+   A clumsy composition is a substitute; an impossible one is not.
+3. **Escape-inappropriate** — supplying it through a body would mean many
+   tenants writing near-identical bodies.
+4. **Ceiling-compatible** — it can be added while the language stays total,
+   terminating, loop-free, and depth-bounded per ADR-0012.
+
+The fourth test is the discriminator. A candidate that fails it is not a floor
+item however common it is; that is what the extension tier exists for.
+
+**The floor.**
+
+| ID | Primitive | Obligation it carries |
+| --- | --------- | --------------------- |
+| F1 | Absent-value semantics for every binding position | A ruling, not a node. Optional fields already exist, so comparisons against them already have undefined behaviour, and `not(a < b)` diverges from `a >= b` the moment either operand is absent. Required **before the first non-trivial filter is lowered to SQL**, not at G6, because that is when the IR and PostgreSQL three-valued logic can first disagree silently |
+| F2 | Field-to-field comparison | Today a field comparison admits only a literal on the right, so `shippedQuantity > orderedQuantity` and `endDate > startDate` are inexpressible. Lowers within one row |
+| F3 | Ordering completeness (`>=`, `<=`) | Substitutable by negation under two-valued logic and **not** substitutable under F1. A correctness item once F1 lands, not a convenience |
+| F4 | To-one relation traversal | Read a field across declared `manyToOne`/`oneToOne` relations. A finite path bounded by the existing depth ceiling of 24, lowering to a join. Parent-scoped children make "child rule depends on parent state" structurally common |
+| F5 | Bounded aggregation over a declared to-many relation | `sum`, `count`, `min`, `max` over a declared child collection. **A candidate, not an admitted capability** — see the F5 contract obligations below |
+| F6 | Exact-decimal arithmetic: add, subtract, multiply | With declared precision and scale propagation, and compile-time rejection of currency mixing. Division is **not** on the floor: it is not total and it needs a declared rounding policy, so it goes through section 5.11 as its own design |
+| F7 | Uniqueness scope that can exclude archived rows | A storage primitive, not an expression one. Today the compiler emits an unconditional unique key, so an archived record permanently reserves its business key. **Three shipped modules are affected** — Party's number, Catalog's SKU, Location's code. The failure surfaces on *reuse*, not on archive, and the colliding row is invisible because reads mandatorily exclude archived records. See the F7 contract obligations below |
+
+**The F5 contract.** F5 is the only floor item that changes the *kind* of work an expression
+does: every other construct is bounded by expression depth, and a fold is bounded by data.
+It is admissible under ADR-0012's ceiling, which forbids *unbounded* collection traversal
+and already admits a data-dependent cost class in a request path (`tenantBoundedScan`). It
+is **not** already ratified — ADR-0012 rules no aggregation semantics, and its Evidence
+section quotes a salvaged prior-repository checklist naming "bounded aggregate planning"
+only to record that the position profiles account for the category *without building it*.
+Citing that as admission would launder REFERENCE-mode salvage into a ruling.
+
+The section 5.11 contract for F5 must therefore decide, before any slice ships:
+
+- **declared cardinality and resource admission.** "The table currently holds finitely many
+  rows" is not a bound; a `oneToMany` relation declares no row limit. Without a declared
+  bound every database traversal satisfies the ceiling, which empties it;
+- **empty-collection semantics per operator.** `sum` and `count` have identity elements;
+  `min` and `max` do not, and require a declared absent result;
+- **absent-element semantics** — the F1 cross-term. PostgreSQL's `SUM` silently skips
+  nulls; the IR must either match that exactly or reject aggregation over optional fields.
+  This is precisely the IR-versus-SQL divergence F1 exists to prevent, one level below any
+  binding-position ruling;
+- **visibility, lifecycle, and snapshot authority.** Whether a fold sees all tenant rows,
+  principal-visible rows, or capability-authorized rows; whether it sees **archived**
+  children, which is a separate axis from principal scope and reproduces F7's invisible-row
+  failure one level down if left implicit; and under which snapshot. Left undecided, the
+  same rule returns different answers by principal — a correctness and disclosure defect,
+  not a preference; and
+- **types, units, and error behaviour.** Admissible aggregands, result type, decimal
+  precision/scale and overflow, currency and unit compatibility, and whether `count` counts
+  rows or present values. ADR-0012 already requires every position to declare result type
+  and error behaviour;
+- **aggregate shape.** Whether the aggregand may be an expression, whether a filter is
+  admitted, whether traversal through a junction is allowed, and whether nested or
+  correlated aggregates are rejected; and
+- **write-time execution and a named concurrency protocol.** The fold uses the
+  transaction-bound target. **"Re-read against locked state" is not sufficient** — locking
+  the existing child rows does not prevent a concurrent *insert*, which is the phantom that
+  changes the aggregate. The contract names either a shared parent or aggregate lock that
+  every child mutation must acquire, or serializable execution with declared retry
+  behaviour. A preflight-only aggregate is a TOCTOU defect in the section 16 concurrency
+  class.
+
+Declared cardinality means a **hard, write-enforced maximum** with defined behaviour when it
+is exceeded and defined evolution semantics in **both** directions — not merely a number
+recorded in a definition. Raising a bound is the common case, because data grows, and it
+silently re-prices the cost envelope of every fold already admitted against the old bound.
+
+**Until this contract is ratified, F5 is not available to depend on.** Section 10.2's
+validation and action-guard rows and section 5.14's "check every line" example both name F5
+as though it were admitted; they are conditional on it. If the contract resolves negatively,
+the competing answer is a platform-accumulated field or a registered read model with F2 and
+F4 doing the comparison — and section 17's stop rule on answering a floor primitive with a
+read model does **not** bind a candidate that has been contracted and rejected.
+
+**The F7 contract.** Three uncommitted decisions now converge on one unique-index emitter:
+this archive scope, `legalEntityId` participation in entity-scoped keys (ADR-0015), and the
+existing case-folded columns. The composed target shape is decided once, not by whichever
+packet arrives first:
+
+```text
+UNIQUE (tenant_id, environment_id [, legal_entity_id], folded_key_column)
+  WHERE archived_at IS NULL
+```
+
+The equality columns are named explicitly and the folded column is the stored C-collated
+column, not a `fold()` call — the materializer folds every unique-key column outside the
+tenant/environment scope set, so an unqualified `legal_entity_id` would be routed through
+folded-column lookup as though it were text.
+
+Three implementation facts bind this contract:
+
+- **One business key currently produces two physical unique indexes** — a semantic unique
+  key and a `caseInsensitiveUnique` index — and the provider test asserts exactly two. An
+  archive predicate applied to only one leaves the other reserving archived keys.
+- **Neither storage target type carries an index predicate today**, and drift verification
+  expects `predicate: null`. Both must gain the concept together, or drift detection will
+  either reject the new shape or silently accept a missing predicate.
+- **Uniqueness is authored as a property of a single field, not as a named key object.**
+  Per-key archive scope and any future compound key require a first-class unique-key
+  definition carrying equality columns, folded source, archive scope, and physical name.
+
+Archive scope is a **per-key declared property**, never a blanket default: serial numbers
+and document numbers must stay reserved after archive, while location codes and SKUs should
+not. The split falls *within* a single module, so a module-level default is as wrong as a
+global one. Restore declares a typed outcome — the record stays archived and the operation
+fails atomically with a distinct conflict error naming the canonical key, rather than
+surfacing a generic uniqueness violation. Reuse then requires archiving or rekeying the
+live record, or a named rekey-and-restore operation.
+
+Two consequences the F7 packet must carry rather than rediscover: under a partial index
+several *archived* rows may legitimately share a key, so the section 5.9 deterministic
+resolver needs a declared exact-versus-ambiguous ruling for archived-inclusive reads; and
+swapping unique indexes on the three already-populated modules is a locking-DDL event
+inside the online-strategy window, not a free change.
+
+**Deliberately not on the floor**, recorded so the list does not grow by
+argument:
+
+- **Set membership (`in`)** — substitutable by an any-predicate. Worth adding
+  for legibility and SQL quality; not a coverage hole.
+- **Text predicates in rule positions** — search owns the head use of text
+  matching and has its own settled semantics. Rule-position matching is tail.
+- **Many-to-many cardinality** — a junction entity modelled as a parent-scoped
+  child is the correct relational answer and carries the attributes that real
+  many-to-many relationships almost always need. What is required is that F4 and
+  F5 traverse *through* a junction and that a relation declares its traversable
+  direction — not a new cardinality.
+- **Polymorphic relations** — reserved for the N2 document and communication
+  substrate, where the demand actually lives.
+- **Conditional presence ("required when…")** — falls out of F1, F2, and
+  validations. Making it a schema property would duplicate the rule language.
+- **Compound `EffectGraph` nodes beyond the current effect set** — required
+  before N1 proves whole-module generation, not before G6, because none of
+  section 10.2's launch customization capabilities needs a compound effect.
+
+**Sequencing.** F1 lands before Q1 lowers its first non-trivial filter. F2
+through F6 are contracted under section 5.11 step 3 — the full semantic space
+designed before any slice — and ride the formula/rule projection family. F7
+lands with the storage work that owns uniqueness.
+
+The floor is a floor, not a roadmap. Reaching it does not make the language
+sufficient; it makes the language *usable*, so that escapes and domain packs are
+spent on the tail they were designed for.
+
+### 5.13 Gap routing: the realization cascade
+
+Program rule #5 already requires every demand to be mapped, admitted as a
+capability/domain-pack addition, routed to the extension tier, or explicitly deferred, and
+section 5.11 step 2 names the same three destinations. This section gives that routing an
+**ordered cascade** so the common cases are decided by rule rather than by precedent, and
+replaces bare deferral with a shipped remainder.
+
+Authoring is a translation from stated intent into the canonical language. When
+translation fails, the failure is classified and routed:
+
+Realizations are **named, not lettered**: ADR-0019 already uses R1/R2/R3 for recovery
+tiers, and "R2 latency" would be ambiguous between a domain-capability metric and a
+disaster-recovery tier for the life of the program.
+
+| Realization | Meaning | Who benefits | Typical latency |
+| ----------- | ------- | ------------ | --------------- |
+| **EXPRESSED** | translation succeeds against the existing language | — | minutes |
+| **CAPABILITY** | a versioned Tier B protocol with a configuration contract | every tenant needing that domain | weeks to months |
+| **LANGUAGE** | the missing primitive is contracted under section 5.11 and admitted | **every tenant** | days |
+| **CONNECTED** | an isolated service or signed connector adapter (section 12.10) | one tenant, reusable if promoted | days to weeks |
+| **EXTENSION** | an opaque body inside its position's envelope | one tenant | hours |
+| **REMAINDER** | the residue ships as a declared manual or agent-assisted step | one tenant, temporarily | minutes |
+
+**The cascade.** Evaluate in order and stop at the first match. A single "bounded work over
+held data" test is *not* sufficient and must not be used alone: nearly everything an ERP
+does is bounded work over held data, so that test alone routes tax determination,
+available-to-promise, and period-lock enforcement into the expression language — the exact
+places section 10.6 and ADR-0018 forbid them to live.
+
+1. **Does it require network or external-system access?** → **CONNECTED.** An
+   EXTENSION body receives values and cannot fetch; carrier rating, EDI, and e-invoicing are
+   head-sized demand and belong to section 12.10's isolated services and signed connectors,
+   not to a position body.
+2. **Does it require ambient state, unknown-depth recursion, or durable iteration?** →
+   EXTENSION, or a workflow where the work is durable.
+3. **Does it belong to one of section 5.9's declared domain-capability families** —
+   availability, pricing, tax, costing, scheduling, posting, allocation, communication
+   delivery, ledger posting — **or invoke, alter, or produce a declared authoritative input
+   or output of an existing Tier B capability?** → **CAPABILITY.**
+
+   The family enumeration is load-bearing and is deliberately listed *before* the
+   published-set lookup. A lookup alone matches only capabilities that already exist, so a
+   novel tax requirement arriving before any tax capability exists would find no published
+   set, fall through to the language test, and be admitted as a primitive — the precise
+   outcome this section's preamble forbids. Membership of a named family routes to
+   **CAPABILITY-as-commissioning**, whether or not anything is built yet.
+
+   Note the verbs: *invoke, alter, or produce*. A validation that merely **reads** a
+   posting field does not become a domain capability; if it did, every cross-record
+   validation would route here.
+4. **Is it bounded, general, and does it satisfy section 5.12's four-part membership
+   test?** → LANGUAGE.
+5. **Is it a genuinely tenant-singular pure computation?** → EXTENSION.
+6. **Otherwise** — pending, or uneconomic to automate → REMAINDER.
+
+Steps 4 and 5 are the case a bounded-work test decides well. Steps 1 through 3 are the hard
+ones, and they are decided by section 5.9's family list, section 10.6, and section 12.10
+rather than by fresh judgement.
+
+Binding rules:
+
+1. **EXPRESSED is the target and its width is the primitive floor.** Section 5.12 exists to make
+   EXPRESSED the common case. A capability that ought to be EXPRESSED and is answered by EXTENSION is a floor
+   violation, not a successful escape.
+2. **LANGUAGE clusters before it builds.** Repeated demands are grouped into one primitive.
+   Building per request produces an incoherent language, which is unrecoverable once
+   releases are pinned.
+3. **REMAINDER never moves the platform's capability claim.** The support matrix still reports
+   the capability as unsupported and the gap report stays exact. What changes is that a
+   tenant may proceed with a declared, visible, attributed remainder instead of being
+   blocked. Section 10.2's "partial support is reported as a capability gap, not
+   approximated" governs the vendor's claim; REMAINDER governs the tenant's choice.
+4. **Every EXTENSION, CONNECTED and REMAINDER carries a provenance link** to the capability it substitutes for, so
+   the upgrade ratchet can retire it when CAPABILITY or LANGUAGE lands.
+5. **CAPABILITY and LANGUAGE latency is the program's headline capability metric.** Not coverage. A
+   platform with a short gap-closing loop beats a higher-coverage platform with a long one,
+   because at the moment of impact the question is never "what fraction works" but "when
+   will mine".
+6. **Translation is checked for meaning, not only for well-formedness.** The compiler proves
+   an expression is valid; it cannot prove it is what the requester meant. Every translated
+   rule is accepted only against independently derived, human-approved behaviour scenarios.
+
+### 5.14 Iteration and execution contexts
+
+Section 5.12 and ADR-0012 forbid loops in the expression language. That prohibition is
+narrow and is frequently misread as a platform-wide limit, so the boundary is stated
+here once.
+
+| Context | Runs | May iterate | Iteration form |
+| ------- | ---- | ----------- | -------------- |
+| Expression | inside a user request | **no** | bounded folds and quantifiers over a declared relation |
+| Bulk operation | worker, durable job | yes | platform-owned, checkpointed, per-target idempotent |
+| Workflow (N2) | worker, durable engine | yes | declared control structures with checkpoints and compensation |
+
+The governing principle is not "loops are unsafe". It is:
+
+> **Anything evaluated while a caller waits must be provably finite. Anything that may
+> take unbounded time runs durably in the worker, checkpointed and resumable.**
+
+Consequences:
+
+- "check every line" is a fold, not a loop, and is expressible under section 5.12's F5;
+- "apply this operation to two hundred targets" is section 9.2.4's bulk protocol, whose
+  iteration lives in platform code and is constant in model interaction count; and
+- "for each line, create a task" is a workflow, which may iterate because it is durable.
+
+**One genuine limitation is recorded rather than worked around.** Recursive traversal of
+unknown depth — ancestor chains, descendant rollups, bills of material — is not
+expressible in a provably-finite expression language, and no escape body resolves it
+either, because a body receives values and cannot fetch rows. G2-P7 descoped Location's
+hierarchy on exactly this boundary.
+
+The intended answer is **materialized ancestry**: declaring a self-referencing parent
+relation makes the compiler maintain each record's ancestor path and lower descendant
+queries to a prefix match, so traversal becomes an indexed lookup rather than an iteration.
+
+That is a **candidate capability, not a supported one.** Under section 5.11 it requires a
+versioned full-space contract first, deciding at minimum cycle rejection, reparenting and
+subtree rewrite cost, a maximum path depth, concurrent-move behaviour, what archiving an
+interior node means for its descendants, and migration for existing rows. Until that
+contract exists and a slice ships, hierarchy is an explicit capability gap and is reported
+as one.
+
+### 5.15 Domain reference corpus
+
+Expressibility and safety do not make a customization *correct for its domain*. A stock
+adjustment that compiles, runs, and is fully audited is still wrong if it has no reason
+code, no approval threshold, no reversal path, and no period check — and the requesting
+user will not ask for those, because they are describing a problem rather than specifying
+a system.
+
+The corpus is the control for that failure.
+
+**Shape.** Entries attach to **capabilities**, never to primitives. A primitive is a
+language word and has no domain standard; a capability is the unit that does. Each entry
+carries tiered considerations (`always ask`, `ask if relevant`, `note only`), the reason
+each consideration exists and when it does not apply, and prior-art notes naming how
+established systems treat it. Domain invariants attach to domains, and vocabulary
+mappings attach to concepts so a user's inherited terminology resolves to canonical
+identity.
+
+**Procedural authority, never substantive authority.** The corpus may require that a
+consideration be *dispositioned*; it may never prescribe the disposition. "Too small to
+need this" is a first-class recorded answer. Nothing in the corpus can make a capability
+supported — section 5.5 governs that, and prose never confers support. A corpus treated as
+substantive authority imports the complexity of whatever it documents, which is the failure
+it exists to prevent.
+
+The distinction needs a mechanism, because prose alone will not hold it: after the first
+incident where an implementer skipped an `always ask` consideration, pressure converts
+"must be asked" into "must be satisfied". So each consideration resolves to a typed
+disposition — `accepted`, `notApplicable`, or `deferred` — carrying rationale **and the
+deciding actor**, because without attribution an authoring model can auto-fill `deferred`
+and satisfy presence vacuously.
+
+"Structurally incapable of gating" means a **projection**, not a promise. Handing the
+compiler the full disposition records and asking it not to branch on them is a convention
+that erodes. Instead the full records feed a completeness projector that emits a
+**coverage certificate** carrying the corpus version, the capability, and the exact set of
+considerations dispositioned — and no disposition values. The admission gate imports only
+the certificate type, so branching on *which* answer was given is unrepresentable rather
+than merely forbidden. The full records remain available to audit and to the builder UI.
+
+"Never content" means never *semantic* content: schema validation may still check that a
+tag is recognized and that rationale and actor are present. Promoting a consideration into
+a binding invariant requires a plan or ADR change, never a corpus edit.
+
+Two residuals are named rather than papered over. **The ratchet relocates to humans** —
+approval and the builder UI see full records, so post-incident pressure will express itself
+as a reviewer refusing to accept `notApplicable`. No mechanism prevents that, and it is the
+intended landing zone: the argument becomes a recorded decision by a named actor rather
+than an ambiguity about the corpus's standing. And **`deferred` would otherwise satisfy
+presence forever**, because version pinning re-offers on corpus *change*, not on deferral
+*age*; a deferred disposition is therefore re-presented on the next authoring touch of that
+capability.
+
+**Deterministic at authoring time.** The corpus is curated, reviewed, and versioned.
+Authoring reads only the pinned corpus. Live retrieval — internet search, untrusted
+document ingestion — is prohibited in the authoring path: it is irreproducible,
+unauditable, quality-uncontrolled, unavailable under failure, and an injection surface
+into a context that writes business rules. Research including public sources is how
+entries are *written*, offline and reviewed, exactly as section 1.2's REFERENCE mode
+governs prior-repository material.
+
+**Pinned like everything else.** A customization records the corpus version it was
+authored against. Improving an entry never retroactively invalidates prior work, and the
+version delta is what lets the platform later offer "we have learned three more
+considerations for this capability — review them?".
+
+**Earned, not anticipated.** Entries are commissioned from measured demand: a
+customization authored with no entry is logged, and repetition triggers authorship. A
+missing entry is itself a signal and is recorded as one, distinguishing "our corpus has a
+gap in a standard capability" from "this tenant is doing something genuinely
+distinctive". Those two are indistinguishable today, and only the second is a product
+differentiator.
+
 ## 6. Inventory-first domain architecture
 
 ### 6.1 Domain boundaries
@@ -1607,6 +1967,15 @@ migration, policy, UI, query, operation, agent context, reporting, read-back,
 rollback, and tests all agree. Partial support is reported as a capability gap,
 not approximated.
 
+Three rows depend on the section 5.12 primitive floor and cannot be called
+supported ahead of it. **Validation** and **action guard** need field-to-field
+comparison (F2), to-one traversal (F4), and bounded aggregation (F5), because
+the ordinary business rule is cross-record — "not more than ordered", "not
+before the start date", "not past the credit limit". **Derived display field**
+needs arithmetic (F6) for the same reason. Shipping these rows against a
+literal-only comparison language would advertise a capability whose common case
+does not work.
+
 ### 10.3 Explicit launch boundary
 
 Launch does **not** promise arbitrary new entities, arbitrary state machines,
@@ -1652,6 +2021,101 @@ The pass criterion is that the first-party inventory packages do not add
 inspection-specific routes, tables, service branches, operation branches, or
 React branches. The module is a package revision built from generally reusable
 capabilities.
+
+### 10.6 The customization authority boundary
+
+Sections 10.2 and 10.4 enumerate *what* a tenant may customize. This section states *why*
+the line falls where it does, so future additions are decided by a principle rather than
+by precedent.
+
+> **Tenant rules may narrow whether an operation proceeds, and may compute non-persisted
+> display values. They may not produce or mutate a stored fact declared as an authoritative
+> input or output of a Tier B capability. Each capability version publishes that dependency
+> set.**
+
+Two earlier formulations are recorded as rejected so they are not reintroduced.
+
+"**Loud versus silent failure**" is useful intuition and a false rule: a tenant-authored
+default writes a wrong stored value into every record created for a quarter and fails
+silently, while platform-owned reservation algebra fails loudly by blocking picks the same
+afternoon.
+
+"**Not in the write path**" is also wrong, because validations and action guards sit in a
+write path by definition and are legitimately tenant-owned — they *narrow* whether a fact is
+written without *producing* its value. The operative distinction is narrowing versus
+producing, and the operative boundary is the published dependency set, which is what makes
+the field-default carve-out below compiler-decidable rather than a judgement call.
+
+| Tenant-owned | Platform-owned |
+| ------------ | -------------- |
+| validation, guard, visibility | inventory valuation and cost relief |
+| derived display value, recomputed on read | tax determination |
+| relation filter, option narrowing | accounting posting and ledger effects |
+| permission narrowing | allocation and reservation algebra — placed here for concurrency integrity, not for silence |
+| view, column, saved filter | |
+| **field default** — tenant-owned, except where the field appears in a declared Tier B dependency set | |
+
+A third rejected formulation, for completeness: the catch-all in
+an earlier draft — "any stored figure other figures derive from" — over-matched: every
+*entered* field is a stored figure a metric card may consume, and read literally it would
+make ordinary data entry platform-owned. What is platform-owned is the **computation** that
+creates or changes an authoritative fact consumed by another authoritative operation, never
+the entry of a value.
+
+The right-hand column is the Tier B domain-capability set (section 5.9). It is versioned
+and pinned, so every posted fact records which capability version produced it and history
+stays interpretable. A tenant-edited rule carries no such discipline: changing it either
+silently restates history — which section 7.4 forbids — or leaves one ledger holding two
+incompatible meanings of the same figure with no marker distinguishing them.
+
+**Sealed does not mean rigid, and this is the part that must be designed rather than
+assumed.** Businesses do not want novel costing algorithms; there are few, they are
+standardized, and a tenant wants to *select* one. What genuinely varies between
+businesses sits *inside* the method: which components enter landed cost, how a rebate
+spreads across receipts, how returns are costed, rounding and who absorbs the fractional
+unit, same-day tie-breaking, and negative-stock behaviour.
+
+Every Tier B capability therefore declares a **typed configuration contract** — named,
+validated, compiler-checked settings with declared defaults — as part of its versioned
+protocol. Configuration is data the platform validates, never a body and never a formula.
+An active configuration is recorded with the release, so "FIFO v3, freight and duty
+included, half-up rounding" is a precise auditable statement.
+
+The contract is mandatory; **being non-empty is not.** A capability with no legitimate
+variation declares an explicitly closed contract. Requiring dials everywhere would
+manufacture configuration where none belongs, and every setting is a permanent
+compatibility surface.
+
+Alongside its configuration contract, every capability version publishes its
+**authoritative input/output dependency set** — the stored facts it consumes and produces.
+That set is what section 5.13 step 3 looks up and what makes the field-default carve-out
+above compiler-decidable. It must be **exhaustive by construction**: the capability runtime
+reads and writes only through its declared set, so an omission breaks the capability loudly
+rather than silently converting an authoritative input into tenant-defaultable territory.
+
+**Tenant narrowing does not apply to recovery-class operations.** ADR-0019's in-band R1
+recovery runs through the ordinary operation algebra, so an unqualified right to narrow
+would let a broken tenant guard veto the fix for its own incident and force escalation to
+point-in-time reconciliation. Recovery-class operations evaluate tenant guards
+report-only.
+
+**Changing a setting mid-history is a governed event, not a preference change.** This is
+the trap the configuration surface itself creates: a tenant who flips negative-stock
+behaviour or a rounding rule after postings exist produces exactly the "one ledger holding
+two incompatible meanings" outcome this section exists to prevent. Every capability's
+contract therefore declares, per setting, whether it is:
+
+- **fixed after first use** — changeable only through a governed re-baseline;
+- **effective-dated** — recorded with an effective instant, with prior facts remaining
+  interpretable under the setting that produced them; or
+- **freely changeable** — permitted only where no posted fact depends on it.
+
+A capability shipped without a declared configuration contract is not finished: it will
+meet its first genuine variation as a request for a source change, which is the
+customer-fork failure in section 16.
+
+Genuinely bespoke algorithms remain a controlled-extension concern (section 12.10), not a
+customization capability.
 
 ## 11. Step-by-step delivery plan
 
@@ -2751,7 +3215,7 @@ runtime route, support-cell process, and proof suite exist.
 | Semantic Operation O3                          | reserved G1     | N7                   | controlled signed extension operations with narrow grants and revocation                                |
 | Policy, audit, lifecycle, correction, recovery | G0-G3           | G7                   | shared transactional trust substrate, retention, restore/reversal, drills                               |
 | Surface/component runtime                      | G1-G2           | N4                   | registered accessible components; list/detail/form/table/dashboard then board/calendar/inbox/process UI |
-| Formula and rule IR                            | G6              | N2                   | typed deterministic evaluator for defaults, derivation, validation, guards, routing, explanation        |
+| Formula and rule IR                            | G6              | N2                   | typed deterministic evaluator for defaults, derivation, validation, guards, routing, explanation; the §5.12 floor (F1-F6) is its admission condition, and F1 is due earlier, with Q1 |
 | Event/outbox/effect delivery                   | G1-G3           | N2                   | transactional events, idempotent delivery, retry/dead-letter/reconciliation                             |
 | Durable import/export/bulk jobs                | G2-G3           | G7                   | server-side materialization, checkpointing, result artifacts, recovery and scale envelopes              |
 | Custom fields/forms/views/metrics              | G6              | G6                   | compiled package revision, typed storage, parity, shadow verification, activation/rollback              |
@@ -3358,6 +3822,10 @@ re-ratifies the target before promotion.
 | Temporal ambiguity           | past reports unreproducible; periods never close; day is undefined| distinct effective/recorded time, tenant business day, enforced period lock (ADR-0018) |
 | No single-tenant recovery    | one tenant's bad day can only be fixed by restoring everyone      | tenant completeness manifest, R1/R2/R3 tiers, no live-tenant DML (ADR-0019) |
 | Slow publish path            | the customization loop stalls, and verification is traded for speed | end-to-end publish budget on a breadth envelope, verification narrowed only by recorded impact analysis (ADR-0020) |
+| Escapes substituting for primitives | opaque bodies answer head demand; logic stops being analyzable, SQL-lowerable, reportable, upgradeable, and agent-visible | the §5.12 floor, §5.13's classification test, and tracked body density |
+| Domain-blind customization   | a change compiles, runs, is audited — and is missing the reason code, threshold, reversal, and period check every competent system has | the §5.15 reference corpus, tiered and pinned |
+| Sealed domain packs with no dials | a legitimate configuration variation arrives as a request for a source change | §10.6's mandatory typed configuration surface on every Tier B capability |
+| Unowned hierarchy            | ancestor and descendant questions are met by ad-hoc traversal or silent descope | §5.14's materialized ancestry, reported as a capability gap until admitted |
 | Customer forks               | short-term delivery destroys composability                        | support-cell/gap process and reusable capability funding             |
 | Unsafe escape hatch          | arbitrary code bypasses tenant/policy/release controls            | constrained signed extensions with explicit grants and revocation    |
 | False gate confidence        | implementer-approved tests miss real behavior                     | evidence packets, independent review, real-model and recovery drills |
@@ -3395,11 +3863,23 @@ Stop or revise the current phase when any of these occurs:
   movement;
 - an item's base unit changes after a posted movement references it;
 - a stock dimension is added without a versioned set and a re-baseline operation;
+- an expression position acquires a loop, or durable iteration is lifted into a
+  request-path evaluator;
+- the authoring path performs live retrieval, or reads reference material that is not
+  pinned and reviewed;
+- reference-corpus content is treated as a requirement rather than as a question;
+- a tenant-authored expression determines a stored figure that other figures derive from;
+- a Tier B capability ships without a declared typed configuration surface;
 - a table in either plane carries no tenancy classification, or a recovery path
   writes business rows into a live tenant by direct DML;
 - candidate verification is narrowed by sampling, time-boxing, author selection, a
   skip flag, or deferral past activation, rather than by a recorded impact analysis;
 - an incremental compile produces bytes that differ from a cold compile;
+- a §5.12 floor primitive that has been admitted is answered by an escape body or a
+  registered read model instead of being built into the language;
+- a non-trivial filter is lowered to SQL before absent-value semantics (F1) are ruled;
+- a write-time aggregate runs without the lock authority or serializable execution its
+  contract names, an insert-phantom being unprevented by locking existing rows;
 - the system cannot restore and reproduce inventory truth; or
 - the team cannot state which immutable release governed an observed behavior.
 

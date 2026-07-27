@@ -51,10 +51,15 @@ is unchanged by this ADR, and Freeze F, the PR-6 relation indexes, and the PR-6b
 columns are unaffected.
 
 The reason is not cost. Cross-entity consolidated reporting is an ordinary, authorized
-business requirement; an RLS isolation boundary forbids it by construction. Modelling a
-business dimension as a tenancy axis would make the correct answer unreachable and would
-be discovered only after the schema was frozen — which is the failure this ADR exists to
-prevent, one level up.
+business requirement, and **within this ABI's trust model** an entity predicate in RLS
+forbids it by construction: ADR-0011 freezes a template of conjunctive *scalar* predicates
+over trusted context, so entity-in-RLS means `legal_entity_id = <one value>`. A set-valued
+grant would permit consolidation — but a set-valued grant is authorization, not isolation,
+and authorization is the policy kernel's concern. Tenant and environment are per-request
+scalar constants from authenticated context; a legal entity is resolved from operation
+input or a declared default, and one authorized session legitimately spans several. They
+are different kinds of thing, and modelling the second as the first would make the correct
+answer unreachable only after the schema was frozen.
 
 ### Where the column comes from
 
@@ -106,10 +111,33 @@ altitudes and must be read together.
 - The G3 stage cut inherits a hard sequencing constraint: **the dimension must exist
   before the first movement is posted.** After that, this ADR is unimplementable as
   written and only a governed re-baseline remains.
-- Policy narrowing by entity is a dependency on the identity/policy kernel
-  (`current-plan.md` queue row 9), which is presently an allow-all stub. Until it lands,
-  entity is recorded and queryable but not enforceable, and that limit is stated rather
-  than implied.
+- Policy narrowing by entity is a dependency on the identity/policy kernel, which is
+  presently an allow-all stub returning only `ALLOW`/`DENY` with no row-scope predicate or
+  allowed-entity set. Until it gains one, entity is recorded and queryable but **not
+  enforceable**, and the boundary this ADR draws is therefore incomplete rather than
+  merely unimplemented. Multi-entity narrowing must not be offered to a tenant before that
+  contract exists.
+- **ABI v1 provides no database-enforced legal-entity boundary inside one tenant.**
+  Separate tenants give database-enforced row isolation but cannot use current Q0/Q1 for
+  consolidation. Neither option provides *physical* storage separation — the settled
+  topology is pooled shared tables — and neither foreclosure is logical rather than
+  contingent: a set-valued entity predicate could enforce row authorization while
+  permitting a privileged consolidator, and a governed cross-tenant reporting plane could
+  exist later. Both are future topology and capability decisions, deliberately not taken
+  here. What this ADR fixes is that entity restriction is authorization, evaluated by the
+  policy kernel, rather than isolation baked into the ABI.
+- **Entity ownership per entity family is not decided here and must be — and it narrows
+  this ADR's own Decision.** As written above, *every* tenant-owned business record carries
+  a non-null entity. That cannot survive a `tenantShared` ruling, and a shared customer or
+  item master across two entities is an ordinary requirement, not an edge case. **The
+  Decision yields to this consequence:** entity definitions declare `entityOwned` or
+  `tenantShared`, the column is emitted and non-null only on the former, and the marker is
+  an explicit declared property — never the silent sentinel the Enforcement section bans.
+  The G3 cut owns the ruling and must amend the Decision text when it makes it.
+- **Relations need declared cross-entity semantics.** Generated foreign keys constrain
+  tenant, environment, and record identity only; carrying `legal_entity_id` on both rows
+  does not prevent an entity-A document referencing an entity-B record. Each relation
+  declares `sameEntity` or `crossEntityAllowed`, enforced at write.
 
 ## Evidence
 

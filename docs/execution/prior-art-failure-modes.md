@@ -169,6 +169,17 @@ hit the wall first; and §2.3's exclusions function as a *variance budget* — t
 position depends on domain variance far more than on platform sophistication, so narrowing
 the domain moves it further than adding primitives ever will.
 
+**Correction (2026-07-26).** This verdict, and the levers document built on it, both assumed
+`p` was already high in the **head** of the distribution and that only the tail remained. A
+source-level review of the canonical language found otherwise: the predicate vocabulary is a
+boolean literal, `field OPERATOR literal-scalar` over four operators, and and/or/not. No
+field-to-field comparison, no arithmetic, no traversal, no aggregation — so
+`shippedQuantity > orderedQuantity` is inexpressible, and cross-record validation is the
+most common escape reason in the prior art. Those are head items, and Tier B/C are the wrong
+instrument for them. Plan **§5.12** now fixes the required floor (F1-F7) with a membership
+test, and §17 stops on a floor primitive answered by an escape. The mitigations below remain
+correct; they apply *after* the floor, not instead of it.
+
 **What to do.** Program rule #5 already forces every demand into one of four dispositions
 (mapped / admitted as capability / routed to Tier C / deferred). Log the disposition with a
 date. Deferral rate over time *is* the wall, quantified, with quarters of lead time. No

@@ -95,7 +95,7 @@ Ordered. Each row names its source and why it holds its slot.
 | 8 | Capability cycle-time baseline | Mechanical | **[Lever 4](coverage-strategy-levers.md) Half A, and the only part with a real cost of delay.** §15.7 measures module-building effort from *existing* capabilities — the wrong axis. Record, for each capability we add, the decision latency (gap identified → admitted) and implementation latency (admitted → shipped supported across all ten cells). **Startable now, before any tenant:** PR-6's `relation` index kind and row 3's two canonical families are capability additions whose cycle time is measurable today, and a baseline not started cannot be reconstructed. Small and order-independent — **take it any time; it does not displace Critical work.** |
 | 9 | **Publish-path breadth envelope** | Mechanical | **PROMOTED by the PR-6d Fable confirm — take it next among the order-independent rows.** ADR-0020 §3 says the envelope curve is the only part with a real cost of delay, because a baseline not started cannot be reconstructed, and its enforcement expects `compiler-slos.md` to carry the `publishPath` family — that file carries neither. **PR-6d then grew exactly the quantity the curve exists to track:** it widened physical emission to one folded btree per search-mapped non-unique field, adding a deferred-family element and a maintained index per opted field, with no numeric record of index-count-versus-breadth anywhere. Fable's ruling: this violates no gate — ADR-0020 says "startable now" and changes no current gate — but the next emission-widening packet should land on a baseline rather than an argument. Record **searchable-field count** and **per-entity index count** as curve dimensions. Note also that runtime *write* amplification is budgeted nowhere: `runtime-slos.md` is read-path only and ADR-0020 budgets publish latency and exclusion, not INSERT cost. **[ADR-0020](../decisions/ADR-0020-publish-path-budget-and-verification-integrity.md)'s only decaying obligation.** Today's gated ≤5,000 ms budget measures one module at the maximum field count; publish cost scales with a tenant's *whole* application, so the envelope that matters is a curve across N modules. Record it as a curve artifact, not a pass/fail assertion, until G6 sets an objective. Pairs directly with row 10 — both exist so a later decision has data instead of an argument, and "incremental compile, triggered by measured need" is unactionable without one. **Startable now, order-independent; take it any time and it does not displace Critical work.** |
 | 10 | **Online DDL strategy for populated tables** | Critical | **Earned by measurement, not argument.** PR-6c built the transactional locking path under an orchestrator ruling that required the blocking window be measured and a numeric promotion trigger recorded — then its own rehearsal crossed that trigger: 10k rows 1,317.647 ms, **25k rows 3,502.750 ms against a 2,000 ms trigger**, with the 100k rehearsal hitting the container's 256 MiB limit and yielding no sample at realistic scale. Must absorb both PR-6c review findings. (a) **The window is platform-wide, not table-local** — a rewrite holds the single advisory key shared with kernel migrations for its full duration, so every other tenant's materialization fails `MIGRATION_LOCK_TIMEOUT`, and sooner than configured because `maximumRetries: 5` at ~50 ms trips near 300 ms while `timeoutMilliseconds: 5_000` is unreachable. (b) **The trigger is procedural, not mechanical** — nothing in the activation path consumes rehearsal evidence, so it holds only if an operator runs it. This packet makes it a **coded admission input**, which is also what [ADR-0020](../decisions/ADR-0020-publish-path-budget-and-verification-integrity.md) needs to budget platform exclusion as a real quantity. **Pre-launch, not pre-G3** — no populated deployment exists, so it blocks first in-place upgrade rather than G3. |
-| 11 | **Archive-aware uniqueness (floor item F7)** | Critical | **A live defect in accepted modules, not a future concern.** The compiler emits `UNIQUE (tenant_id, environment_id, column)` with no archive predicate (`packages/compiler/src/storage.ts:578`), while Catalog and Location both declare `tenantEnvironmentCaseInsensitiveUnique` and both ship archive/restore. Archiving a location coded `WH-A` therefore reserves that code permanently, and the same holds for any retired SKU — a business that retires and reuses codes cannot, and the failure surfaces as an opaque unique violation on create. Plan §5.12 F7. A **storage** primitive, not an expression one: a declared uniqueness scope that excludes archived rows, which PostgreSQL partial unique indexes make cheap. Touches Freeze F's uniqueness contract and the drift verifier (which already reads `indpred`), so Critical rather than Mechanical. **Sequencing is your call** — it is small, but it is a correctness defect in shipped modules, so it arguably outranks several rows above it. |
+| 11 | **Archive-aware uniqueness (floor item F7)** | Critical | **A live defect in accepted modules, not a future concern.** The compiler emits `UNIQUE (tenant_id, environment_id, column)` with no archive predicate (`packages/compiler/src/storage.ts:578`), while Party, Catalog and Location all declare `tenantEnvironmentCaseInsensitiveUnique` and all ship archive/restore. Archiving a location coded `WH-A` therefore reserves that code permanently, and the same holds for any retired SKU — a business that retires and reuses codes cannot, and the failure surfaces as an opaque unique violation on create. Plan §5.12 F7. A **storage** primitive, not an expression one: a declared uniqueness scope that excludes archived rows, which PostgreSQL partial unique indexes make cheap. Touches Freeze F's uniqueness contract and the drift verifier (which already reads `indpred`), so Critical rather than Mechanical. **Sequencing is your call** — it is small, but it is a correctness defect in shipped modules, so it arguably outranks several rows above it. |
 
 ## Settled by debate (2026-07-25)
 
@@ -247,6 +247,46 @@ of them as a deferral past the posting service.
 - The general form is: **excluding a capability never authorizes discarding what that
   capability will need.** Plan §2.3 now says so, for stock dimensions, unit conversion,
   valuation and bitemporal reporting alike.
+
+## Authoring architecture — recorded 2026-07-27
+
+A working session on primitive coverage produced four plan sections and one new strategy
+lever. Nothing here is a scheduling change; it is doctrine that was being assumed rather
+than written.
+
+| Plan | What it fixes |
+|---|---|
+| **§5.12** the primitive floor (F1-F7) | Head-of-distribution holes: the predicate language admits only `field OPERATOR literal`, so `shippedQuantity > orderedQuantity` is inexpressible. Escapes are the wrong instrument for that |
+| **§5.13** the realization cascade | An ordered cascade over program rule #5's dispositions, restoring the **CAPABILITY** (Tier B) route and adding **CONNECTED** for network-shaped demand, which no position body can serve. Realizations are named rather than lettered, because ADR-0019 already owns R1/R2/R3 for recovery tiers. A single "bounded work over held data" test routed tax determination and period-lock enforcement into the expression language; the cascade instead keys on §5.9's **declared capability families** first — so a novel tax requirement routes to CAPABILITY even before any tax capability exists — then on whether the requirement *invokes, alters, or produces* a published authoritative input/output. Merely **reading** such a field does not route there, or every cross-record validation would. **REMAINDER** replaces bare deferral |
+| **§5.14** iteration contexts | The no-loops rule binds *expressions only*. Bulk and workflow iterate durably. The governing principle is "anything evaluated while a caller waits must be provably finite" |
+| **§5.15** domain reference corpus | Expressibility and safety do not make a change *correct for its domain*. Capability-attached, tiered, reference-never-authority, pinned, no live retrieval in the authoring path |
+| **§10.6** authority boundary | Tenants own decisions; the platform owns figures that accumulate. Plus: every Tier B pack must declare a typed configuration surface |
+
+[Lever 5](coverage-strategy-levers.md) carries the reasoning: **AI as translator makes
+verbosity free**, which removes the ergonomic pressure that historically capped declarative
+languages and produced audit B4's ratchet. It also records why "just build the sandbox"
+fails despite producing an identical coverage number — bodies cannot lower to SQL, cannot
+be filtered or aggregated on, cannot be re-applied on upgrade, and are opaque to our own
+operations agent.
+
+**Three measured findings worth carrying forward:**
+
+- A predicate node kind touches **four files, ~20 lines**, all in `canonical-model`. Primitives
+  are not expensive; the **evaluator-plus-parity harness** is the one-time fixed cost, and it
+  is the highest-leverage unbuilt thing — ahead of both more primitives and the sandbox.
+- **Body density**, not coverage, is what distinguishes a floor-plus-escape system from an
+  escape-only one. Both reach the same coverage number. Nothing measures it.
+- **Recursive hierarchy is a genuine, unowned gap.** G2-P7 descoped Location's hierarchy on
+  exactly this boundary. No loop or escape body resolves it — a body cannot fetch rows. The
+  answer is compiler-maintained ancestry paths lowering descendant queries to a prefix match.
+
+**The sequencing argument, corrected.** An earlier draft claimed that shipping the sandbox
+before the floor means the floor never ships. That is retracted as unfalsifiable, and audit
+B4 leans against it — escape-first vendors extended their declarative layers for a decade
+afterward. The defensible form is mechanical: shipping escapes first puts the §17 stop rule
+in immediate tension with real demand, so every head-shaped request either trips the rule or
+forces its repeal. **Floor-first is the only order in which that stop rule is cheap to
+honour.**
 
 ## Plan-level decisions still pending before G3
 

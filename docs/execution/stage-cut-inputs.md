@@ -67,24 +67,6 @@ was written, each with its source.
     a gap, presenting the alternative *together with its difference*. Extends plan §12.13,
     which covers discovery and disambiguation only.
 
-### From the publish-path budget
-
-16. **The `publishPath` family gets its numeric objective**, both axes — publisher latency and
-    platform exclusion imposed on other tenants — measured against the breadth envelope rather
-    than the single-maximal-module point. The envelope itself is startable before G6 and should
-    already be a curve by the time this cut runs.
-    ([ADR-0020](../decisions/ADR-0020-publish-path-budget-and-verification-integrity.md);
-    [audit G7](prior-art-failure-modes.md))
-17. **Verification integrity is enforced, not asserted.** Scope narrows only by a sound impact
-    analysis derived from the compiled diff, recorded with the candidate. Structural test plus
-    a negative control for each of the five forbidden narrowings — sampling, time-boxing,
-    author/tenant selection, a skip flag, deferral past activation. This is the same root as
-    item 12 below, at the other end: verification that exists to be satisfied rather than to be
-    true. (ADR-0020)
-18. **Incremental compile, if it ships, is byte-identical to a cold compile**, proven by a
-    negative control that perturbs the incremental path. A nearly-identical second path is a
-    second compiler. (ADR-0020; doctrine #1; plan §5.7)
-
 ### From verification
 
 12. **Compiler-derived assertions gate customization candidates**; author-supplied scenarios
@@ -102,7 +84,96 @@ was written, each with its source.
     `deprecated` state in the customization capability set, so accumulated customization can
     be retired safely. ([audit B6](prior-art-failure-modes.md))
 
----
+### From the publish-path budget
+
+16. **The `publishPath` family gets its numeric objective**, both axes — publisher latency and
+    platform exclusion imposed on other tenants — measured against the breadth envelope rather
+    than the single-maximal-module point. The envelope itself is startable before G6 and should
+    already be a curve by the time this cut runs.
+    ([ADR-0020](../decisions/ADR-0020-publish-path-budget-and-verification-integrity.md);
+    [audit G7](prior-art-failure-modes.md))
+17. **Verification integrity is enforced, not asserted.** Scope narrows only by a sound impact
+    analysis derived from the compiled diff, recorded with the candidate. Structural test plus
+    a negative control for each of the five forbidden narrowings — sampling, time-boxing,
+    author/tenant selection, a skip flag, deferral past activation. This is the same root as
+    item 12 above, at the other end: verification that exists to be satisfied rather than to be
+    true. (ADR-0020)
+18. **Incremental compile, if it ships, is byte-identical to a cold compile**, proven by a
+    negative control that perturbs the incremental path. A nearly-identical second path is a
+    second compiler. (ADR-0020; doctrine #1; plan §5.7)
+
+### From the primitive floor
+
+19. **Floor items F2-F6 ship before the customization capabilities that depend on them** —
+    field-to-field comparison, ordering completeness, to-one relation traversal, bounded
+    aggregation over a declared to-many relation, and exact-decimal add/subtract/multiply.
+    Plan §10.2's **validation**, **action guard**, and **derived display field** rows cannot
+    be called supported without them, because the ordinary business rule is cross-record:
+    "not more than ordered", "not before the start date", "not past the credit limit".
+    Contract the full semantic space under plan §5.11 step 3 before shipping any slice.
+    (Plan §5.12)
+20. **Bounded aggregation in a write-time position uses the transaction-bound execution
+    target with a *named concurrency protocol*.** "Re-read against locked state" is
+    explicitly insufficient — locking the existing child rows does not prevent a concurrent
+    insert, which is the phantom that changes the aggregate. The contract names either a
+    shared parent/aggregate lock every child mutation must acquire, or serializable
+    execution with declared retry behaviour. A preflight-only aggregate is a TOCTOU defect
+    in the section 16 concurrency class. (Plan §5.12 F5; ADR-0012 execution targets)
+21. **Division stays off the floor** and enters, if at all, through plan §5.11 with a
+    declared rounding policy and a total answer for division by zero. Recorded here so it is
+    not added as an obvious companion to F6. (Plan §5.12)
+
+### From gap routing and authoring
+
+22. **The R1-R5 cascade exists as a mechanism**, evaluated in order and stopping at the
+    first match, with the **R2 domain-capability** disposition restored — program rule #5 and
+    §5.11 both require it, and a single bounded-work test routes tax determination,
+    available-to-promise and period-lock enforcement into the expression language. Step 2's
+    trigger is a lookup, not an adjective: *does the requirement invoke, alter, or produce a
+    declared authoritative input or output of a Tier B capability?* That obliges every Tier B
+    contract to **publish its authoritative input/output set**. Step 1 must also distinguish a
+    pure position body (R4) from service, connector, and workflow realizations, which a
+    position body cannot perform. Every R4 and R5 carries its provenance link.
+    (Plan §5.13; [ADR-0014](../decisions/ADR-0014-provenance-records.md))
+23. **R2 and R3 latency are instrumented as the headline capability metric** — gap report to
+    admitted, admitted to shipped-supported — superseding coverage percentage as the number
+    the program steers by. Pairs with the Lever 4 cycle-time baseline. (Plan §5.13 rule 5)
+24. **Body density is recorded from the first escape body.** It is the only metric that
+    distinguishes a floor-plus-escape system from an escape-only system, since both produce
+    the same coverage number. ([Lever 5](coverage-strategy-levers.md))
+25. **The evaluator and parity harness is built before the primitives that need it.** A node
+    kind is ~20 lines across four files; the harness that proves the server evaluator and
+    the SQL lowering agree is the one-time fixed cost, and it is what makes R2 cheap
+    thereafter. Sequence it ahead of F2-F6 rather than alongside. (Lever 5; ADR-0012 parity
+    corpus obligations)
+26. **The parity corpus derives from human-decided semantics, never from the model's
+    implementation.** A model authoring both its lowering and its own tests produces two
+    artifacts that agree and are wrong together. Same spec/implementation/oracle separation
+    as scenario approval, one level down. (Lever 5)
+27. **The domain reference corpus exists, capability-attached and pinned**, with tiered
+    considerations, recorded rationale, prior-art notes, and vocabulary mappings. Reference
+    never authority: an entry raises a question and cannot create a requirement or confer
+    support. Seed from the quarry's `docs/purchasing-inventory-plan.md` §10-11 under §1.2
+    REFERENCE mode. (Plan §5.15)
+28. **The authoring path performs no live retrieval**, and a missing corpus entry is
+    recorded as a signal — distinguishing a corpus gap in a standard capability from a
+    genuinely distinctive tenant requirement. (Plan §5.15)
+
+### From the customization authority boundary
+
+29. **A tenant-authored rule may not produce or mutate a stored fact declared as an
+    authoritative input or output of a Tier B capability.** Narrowing whether an operation
+    proceeds, and computing non-persisted display values, remain tenant territory — so
+    validations and action guards stay tenant-owned even though they sit in a write path.
+    This requires each capability version to **publish its dependency set**, which is what
+    makes a tenant-authored field default compiler-decidable rather than a judgement call.
+    The earlier "loud versus silent failure" formulation is rejected in place: tenant
+    defaults fail silently and platform reservation fails loudly. (Plan §10.6)
+30. **Every Tier B domain capability declares a typed configuration contract** — named,
+    validated, compiler-checked settings with defaults, recorded with the release. A pack
+    without dials meets its first legitimate variation as a request for a source change,
+    which is §16's customer-fork row. **Owned earlier than G6:** the first Tier B capability
+    is G3 inventory posting. (Plan §10.6)
 
 ## G3 — inventory truth alpha (not yet seeded)
 
@@ -135,7 +206,20 @@ condition. Plan §11.6 now carries them as binding prerequisites and the G3 gate
 6. **Movements carry no monetary amount**, and no compiled artifact derives one from a
    movement. G3 must not invent a costed movement ahead of G4's receipt-cost capture.
    ([ADR-0017](../decisions/ADR-0017-cost-capture-without-valuation.md); [audit G3](prior-art-failure-modes.md))
-7. **The tenant completeness manifest exists** — every table in every plane classified
+7. **Inventory posting publishes its authoritative input/output dependency set** — the
+   artifact plan §5.13 step 3 looks up and §10.6's field-default carve-out resolves against.
+   It is load-bearing for gap routing, the customization boundary, and §17 enforcement, and
+   it has no other owner. Exhaustive by construction: the capability reads and writes only
+   through its declared set. Retrofitting it after protocol v1 ships is a version event.
+   (Plan §5.13, §10.6)
+8. **Inventory posting declares a typed configuration contract** — the first Tier B domain
+   capability, and therefore the first test of plan §10.6. Named, validated, compiler-checked
+   settings with declared defaults, recorded with the release, covering at minimum
+   negative-stock behaviour, reason requirements, approval thresholds, and same-instant
+   tie-breaking. Configuration is data the platform validates, never a body and never a
+   formula. A capability shipped without dials meets its first legitimate variation as a
+   request for a source change. (Plan §10.6)
+9. **The tenant completeness manifest exists** — every table in every plane classified
    exactly once as tenant-scoped, naming its tenant column, or tenant-independent with a
    recorded reason, with a verifier that fails closed on an unclassified table and reuses
    ADR-0011's accounted-additive-closure object enumeration. **Not a posting-deadline item**,
@@ -144,7 +228,7 @@ condition. Plan §11.6 now carries them as binding prerequisites and the G3 gate
    it is the hardest prerequisite for whichever answer the erasure decision reaches.
    ([ADR-0019](../decisions/ADR-0019-tenant-completeness-and-single-tenant-recovery.md);
    [audit G4](prior-art-failure-modes.md))
-8. **Already routed here by earlier reviews, and re-stated so the cut sees one list:**
+10. **Already routed here by earlier reviews, and re-stated so the cut sees one list:**
    movements table partitioned by `(tenant, period)` **from creation**; TigerBeetle-shaped
    two-phase reservation; anchor row as a *derived cache with a proof obligation*; natural-key
    idempotency `(source_type, source_id, source_line, revision, posting_role)`. Note that
