@@ -22,6 +22,7 @@ import {
   CURRENT_POLICY_DECISION_VERSION,
   type CurrentPolicyDecisionRequest,
   type CurrentPolicyGateway,
+  type ImmutableJsonValue,
   type LoadedRequestRuntimeDefinition,
   type RequestRuntimeView,
 } from '../../packages/runtime/src/request-runtime-view.js';
@@ -125,6 +126,30 @@ test('relation-label search fails closed before execution when its field query i
     requestId: view.requestId,
     schemaVersion: 'northstar.semantic-query-policy-input/v1',
   });
+});
+
+test('relation-label target predicates pass through the kernel before execution', async () => {
+  const policy = new SelectivePolicy();
+  const executor = new ObservedListExecutor();
+  const { view } = await issuedPartyView(policy, (projections) =>
+    withQueryFilter(projections, `${PARTY_IDS.namespace}:query.party_list`, {
+      kind: 'booleanPredicate',
+      schemaVersion: 'v2',
+      value: false,
+    }),
+  );
+  const predicateOutcomes: string[] = [];
+
+  const result = await new SemanticQueryGateway(policy, executor, (receipt) =>
+    predicateOutcomes.push(receipt.outcome),
+  ).invoke(view, request(`${PARTY_IDS.namespace}:query.party_role_list`));
+
+  assert.deepEqual(
+    { outcome: result.outcome, reason: result.unsupportedReason },
+    { outcome: 'unsupported', reason: 'query-filter-unsupported' },
+  );
+  assert.deepEqual(predicateOutcomes, ['accepted', 'rejected']);
+  assert.equal(executor.executions, 0);
 });
 
 test('list result coverage cannot pass when the executor omits it', async () => {
@@ -235,6 +260,10 @@ class SelectivePolicy implements CurrentPolicyGateway {
 
 async function issuedPartyView(
   policy: CurrentPolicyGateway,
+  transform: (
+    projections: LoadedRequestRuntimeDefinition['projections'],
+  ) => LoadedRequestRuntimeDefinition['projections'] = (projections) =>
+    projections,
 ): Promise<{ readonly view: RequestRuntimeView }> {
   const compiled = compilePartyFixture().compiled;
   const entry = new AuthenticatedRequestRuntimeEntryAdapter(
@@ -247,7 +276,7 @@ async function issuedPartyView(
             fence: 1,
             pointerId: 'c1000000-0000-4000-8000-000000000006',
           },
-          projections: partyRuntimeProjections(compiled),
+          projections: transform(partyRuntimeProjections(compiled)),
           release: {
             contentHash: compiled.releaseRoot,
             releaseId: 'c1000000-0000-4000-8000-000000000007',
@@ -259,6 +288,38 @@ async function issuedPartyView(
     policy,
   );
   return entry.run({}, (view) => ({ view }));
+}
+
+function withQueryFilter(
+  projections: LoadedRequestRuntimeDefinition['projections'],
+  queryId: string,
+  filter: ImmutableJsonValue,
+): LoadedRequestRuntimeDefinition['projections'] {
+  const payload = projections.query.payload;
+  assert.ok(isRecord(payload));
+  const queries = payload.queries;
+  assert.ok(Array.isArray(queries));
+  let matched = 0;
+  const updated = queries.map((query) => {
+    assert.ok(isRecord(query));
+    if (query.queryId !== queryId) return query;
+    matched += 1;
+    return { ...query, filter };
+  });
+  assert.equal(matched, 1);
+  return {
+    ...projections,
+    query: {
+      ...projections.query,
+      payload: { ...payload, queries: updated },
+    },
+  };
+}
+
+function isRecord(
+  value: ImmutableJsonValue,
+): value is Readonly<Record<string, ImmutableJsonValue>> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function request(queryId: string): Record<string, unknown> {

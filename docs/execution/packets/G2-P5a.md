@@ -121,6 +121,16 @@ not copied.
   first would create a second expression language; the second filters after
   truncation; the third can return unfiltered rows and is a data-exposure bug.
 
+## Round 1 review revision
+
+The first Critical review returned REVISE and voided candidate `745a5a5`. It
+found that relation-label target Lists did not enter the same predicate kernel
+as directly invoked queries, and that source-field search exclusion was only
+structurally apparent. The revision routes every authorized label target
+through `inspectPredicateForExecution` before provider execution and adds the
+two-sided real-PostgreSQL source-field control below. No other reviewed behavior
+was changed.
+
 ## Executed reds
 
 These are deliberately invalid requests/results asserted inside passing tests;
@@ -128,8 +138,10 @@ they are not claims that CI was left red.
 
 | Vacuity vector | Deliberately executed case | Observed red |
 |---|---|---|
-| unauthorized source field | sort the Party-role list by Party `name`, which is neither a selected role field nor an authorized relation ID | `LIST_FIELD_NOT_AUTHORIZED`, with the exact field ID; provider execution does not occur |
+| unauthorized source sort field | sort the Party-role list by Party `name`, which is neither a selected role field nor an authorized relation ID | `LIST_FIELD_NOT_AUTHORIZED`, with the exact field ID; provider execution does not occur |
+| unselected source-field search | place `source-only-sentinel` only in Party `contactSummary`, issue a List projection that excludes that field, and search for it | coverage is `0` and records are empty; after one update removes the sentinel from `contactSummary` and puts it in selected `name`, the identical search returns exactly that record |
 | denied relation-label field | current policy denies the pinned Party label query while the role list requests its relation label | `SemanticQueryPolicyDeniedError` names `party_list`; executor count remains zero |
+| rejected relation-label target predicate | reach an active Q0 Party label List with `filter: false` through the Party-role source List | source result is `query-filter-unsupported`, predicate receipts are `accepted` then `rejected`, and executor count remains zero |
 | cursor detached from its query | reuse page one's cursor after changing the search term | `LIST_CURSOR_INVALID` |
 | result coverage absent | executor returns an exact list result but omits `listCoverage` | `LIST_RESULT_MALFORMED` |
 | G2-P4 bypass | place rendering markup in the list adapter outside the compiled component path | `SURF001_RUNTIME_BYPASS` |
@@ -181,6 +193,10 @@ without an edit after `table` was renamed to `list`.
 - RLS and tenant/environment scope remain owned by the existing runtime role
   and provider transaction. These tests add no cross-tenant bypass and do not
   replace the existing isolation suite.
+- Agent discovery supplies the query ID used for the parity journey, but
+  `agentResult` is a direct alias of the Semantic Query result. The identity
+  assertions prove one shared object and avoid a second filtering path; they do
+  not independently exercise an agent transport.
 - Saved filters, stale-reference diagnostics, predicate resource bounds, and
   durable preference scope belong to G2-P5b and are intentionally absent.
 
@@ -196,7 +212,7 @@ corepack pnpm test:architecture
 corepack pnpm test:browser
 ```
 
-Expected focused results are 3/3 shared-result integration checks, 1/1 real
+Expected focused results are 4/4 shared-result integration checks, 1/1 real
 PostgreSQL journey, 68/68 architecture checks, and 14/14 unfiltered Chromium
 journeys. A filename-filtered Playwright run executes during development but is
 correctly rejected as evidence by the reachability reporter; use the unfiltered
@@ -204,10 +220,10 @@ command above for recorded evidence.
 
 ## Full-matrix evidence
 
-The complete matrix passed before the freeze commit with reachability run token
-`63e8a1db-62b6-477f-9c5b-e4d4a7365d7a`. The identical matrix is rerun at the
-resulting frozen SHA and reported in the writer handoff; a commit cannot contain
-evidence produced after its own SHA is created.
+The round-1 replacement matrix passed before its freeze commit with reachability
+run token `1806ca82-6fc9-4ef3-aab0-9fff4dfa5f6f`. The identical matrix is rerun
+at the resulting frozen SHA and reported in the writer handoff; a commit cannot
+contain evidence produced after its own SHA is created.
 
 | Gate | Pre-freeze observation |
 |---|---:|
@@ -217,7 +233,7 @@ evidence produced after its own SHA is created.
 | `check:demo-release` | green; canonical release root unchanged |
 | `test:unit` | 36 / 36 |
 | `test:compiler` | 52 / 52 |
-| `test:integration` | 58 / 58 |
+| `test:integration` | 59 / 59 |
 | `test:agent` | 3 / 3 |
 | `test:architecture` | 68 / 68 |
 | `test:contracts` | 6 / 6 |
@@ -243,7 +259,7 @@ node --import tsx --test test/postgres/table-behavior.test.ts
 corepack pnpm test:browser
 ```
 
-Expect 3/3, 1/1, and 14/14. In the browser output, the
+Expect 4/4, 1/1, and 14/14. In the browser output, the
 `table-behavior.spec.ts` journey observes `1–100 of 102`, clicks **Next page**,
 finds **Page Two Needle**, searches it back onto a one-row first page, confirms
 archived-default-hidden/explicitly-included behavior, and renders **Supplier**

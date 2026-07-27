@@ -2,10 +2,20 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { SharedListContractError } from '../../packages/runtime/src/list-behavior/index.js';
+import { AuthenticatedRequestEntryAdapter } from '../../packages/runtime/src/request-context.js';
+import {
+  AuthenticatedRequestRuntimeEntryAdapter,
+  CURRENT_POLICY_DECISION_VERSION,
+  type CurrentPolicyGateway,
+  type ImmutableJsonValue,
+  type LoadedRequestRuntimeDefinition,
+  type RequestRuntimeView,
+} from '../../packages/runtime/src/request-runtime-view.js';
 import { PARTY_IDS } from '../fixtures/g2/party/definition.js';
 import {
   invokePartyOperation,
   invokePartyQuery,
+  type RealPartyRuntime,
   withRealPartyRuntime,
 } from '../fixtures/g2/party/runtime-harness.js';
 
@@ -17,6 +27,7 @@ const roleIds = Array.from(
   { length: 6 },
   (_, index) => `b1000000-0000-4000-8000-00000000000${String(index + 1)}`,
 );
+const unselectedSourceSentinel = 'source-only-sentinel';
 
 test('shared list SQL searches authorized display values before stable covered paging', async () => {
   await withRealPartyRuntime('g2-p5a-list-behavior', async (runtime) => {
@@ -25,7 +36,9 @@ test('shared list SQL searches authorized display values before stable covered p
         recordId: parentId,
         values: {
           [PARTY_IDS.fieldIds.contactSummary]:
-            `not-visible-${String(index + 1)}`,
+            index === 5
+              ? unselectedSourceSentinel
+              : `not-visible-${String(index + 1)}`,
           [PARTY_IDS.fieldIds.name]:
             index === 4 ? 'Page Three Needle' : `Relation ${String(index + 1)}`,
           [PARTY_IDS.fieldIds.number]: `P-LIST-${String(index + 1)}`,
@@ -148,6 +161,51 @@ test('shared list SQL searches authorized display values before stable covered p
       visibleUnindexedSearch.records.map((record) => record.recordId),
       [parentIds[2]],
     );
+
+    const viewWithoutContactSummary = await issueListViewWithoutField(
+      runtime,
+      'party_list',
+      PARTY_IDS.fieldIds.contactSummary,
+    );
+    const hiddenSourceField = await invokePartyQuery(
+      runtime,
+      viewWithoutContactSummary,
+      'party_list',
+      listArguments({
+        includeRelationLabel: false,
+        pageSize: 2,
+        search: unselectedSourceSentinel,
+        sortFieldId: PARTY_IDS.fieldIds.name,
+      }),
+    );
+    assert.equal(hiddenSourceField.listCoverage?.totalCount, 0);
+    assert.deepEqual(hiddenSourceField.records, []);
+
+    await invokePartyOperation(runtime, runtime.views.a, 'party_update', {
+      expectedRevision: 1,
+      patch: {
+        [PARTY_IDS.fieldIds.contactSummary]: 'sentinel moved',
+        [PARTY_IDS.fieldIds.name]: unselectedSourceSentinel,
+      },
+      recordId: parentIds[5],
+    });
+    const selectedSourceField = await invokePartyQuery(
+      runtime,
+      viewWithoutContactSummary,
+      'party_list',
+      listArguments({
+        includeRelationLabel: false,
+        pageSize: 2,
+        search: unselectedSourceSentinel,
+        sortFieldId: PARTY_IDS.fieldIds.name,
+      }),
+    );
+    assert.deepEqual(
+      selectedSourceField.records.map((record) => record.recordId),
+      [parentIds[5]],
+    );
+    assert.equal(selectedSourceField.listCoverage?.totalCount, 1);
+
     const unrequestedTargetField = await invokePartyQuery(
       runtime,
       runtime.views.a,
@@ -229,6 +287,83 @@ test('shared list SQL searches authorized display values before stable covered p
     );
   });
 });
+
+async function issueListViewWithoutField(
+  runtime: RealPartyRuntime,
+  localQueryId: string,
+  fieldId: string,
+): Promise<RequestRuntimeView> {
+  const source = runtime.views.a;
+  const payload = source.projections.query.payload;
+  assert.ok(isRecord(payload));
+  assert.ok(Array.isArray(payload.queries));
+  let matchedQueries = 0;
+  let removedSelections = 0;
+  const queries = payload.queries.map((query) => {
+    assert.ok(isRecord(query));
+    if (query.queryId !== `${PARTY_IDS.namespace}:query.${localQueryId}`) {
+      return query;
+    }
+    matchedQueries += 1;
+    assert.ok(Array.isArray(query.selections));
+    return {
+      ...query,
+      selections: query.selections.filter((selection) => {
+        assert.ok(isRecord(selection));
+        const keep = selection.fieldId !== fieldId;
+        if (!keep) removedSelections += 1;
+        return keep;
+      }),
+    };
+  });
+  assert.equal(matchedQueries, 1);
+  assert.equal(removedSelections, 1);
+  const projections: LoadedRequestRuntimeDefinition['projections'] = {
+    ...source.projections,
+    query: {
+      ...source.projections.query,
+      payload: { ...payload, queries },
+    },
+  };
+  const policy: CurrentPolicyGateway = {
+    async authorize() {
+      return {
+        decision: 'ALLOW',
+        decisionVersion: CURRENT_POLICY_DECISION_VERSION,
+        policyVersion: source.entryPolicyVersion,
+      };
+    },
+    async readCurrentVersion() {
+      return { policyVersion: source.entryPolicyVersion };
+    },
+  };
+  const entry = new AuthenticatedRequestRuntimeEntryAdapter(
+    new AuthenticatedRequestEntryAdapter(async () => ({
+      environmentId: source.environmentId,
+      principalId: source.principalId,
+      tenantId: source.tenantId,
+    })),
+    {
+      async load(): Promise<LoadedRequestRuntimeDefinition> {
+        return {
+          environmentId: source.environmentId,
+          pointer: source.pointer,
+          projections,
+          release: source.release,
+          tenantId: source.tenantId,
+        };
+      },
+    },
+    policy,
+  );
+  return entry.run({}, (view) => view);
+}
+
+function isRecord(
+  value: ImmutableJsonValue,
+): value is Readonly<Record<string, ImmutableJsonValue>> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
 
 function listArguments(input: {
   cursor?: string | null;

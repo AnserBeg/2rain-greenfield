@@ -236,8 +236,15 @@ export class SemanticQueryGateway {
           view,
           definition,
           listQuery,
+          this.observePredicateReceipt,
         )
       : null;
+    if (listQuery && !list) {
+      return unsupportedQueryResult(
+        request.queryId,
+        'query-filter-unsupported',
+      );
+    }
     const result = await this.executor.execute(
       Object.freeze({
         arguments: request.arguments,
@@ -257,7 +264,9 @@ async function authorizeSharedListProjection(
   view: IssuedRequestRuntimeView,
   sourceDefinition: RegisteredQueryDefinition,
   query: NonNullable<ReturnType<typeof parseSharedListArguments>>,
-): Promise<AuthorizedSharedListRequest> {
+  observePredicateReceipt:
+    ((receipt: PredicateKernelReceipt) => void) | undefined,
+): Promise<AuthorizedSharedListRequest | null> {
   authorizeSharedListFields(query, {
     selectedFieldIds: new Set(
       sourceDefinition.selections.map((selection) => selection.fieldId),
@@ -302,6 +311,11 @@ async function authorizeSharedListProjection(
     if (decision.decision === 'DENY') {
       throw new SemanticQueryPolicyDeniedError(targetDefinition.queryId, view);
     }
+    const predicateReceipt = inspectPredicateForExecution(
+      targetDefinition.filter,
+    );
+    observePredicateReceiptSafely(observePredicateReceipt, predicateReceipt);
+    if (predicateReceipt.outcome !== 'accepted') return null;
     relationLabels.push(
       Object.freeze({
         ...relation,
