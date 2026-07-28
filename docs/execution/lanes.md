@@ -13,7 +13,7 @@ writer is holding those paths right now.
 
 | Lane | Theme | Current packet | Base | Status |
 |---|---|---|---|---|
-| **KERNEL** | Canonical language and the query tier | `Q1-P3a` — rule the aggregate contract (ruling only) | `ba1f83b` | active |
+| **KERNEL** | Canonical language and the query tier | `4a` — v3 version and profile dispatch | `7f1edfc` | active |
 | **DEPLOY** | Release lifecycle and runtime infrastructure | `1b` — release-admission verification integrity | `07ce6de` | active |
 | **FIX** | Correctness defects in shipped code | `1e` — press-guard consolidation | `37a4107` | active |
 
@@ -30,6 +30,7 @@ the query tier both live there.
 |---|---|
 | `packages/canonical-model/src/**` | KERNEL |
 | `packages/compiler/src/predicate-lowering.ts` | KERNEL |
+| `packages/compiler/src/compiler.ts` | KERNEL *(granted 2026-07-28 for packet 4a — profile dispatch only; FIX is on a test-only packet)* |
 | `packages/runtime/src/semantic-query-gateway.ts` | KERNEL |
 | `packages/compiler/src/storage.ts` | **FIX** |
 | `packages/compiler/src/projections.ts` | **FIX** |
