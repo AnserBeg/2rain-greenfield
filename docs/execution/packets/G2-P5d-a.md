@@ -28,7 +28,8 @@ a working data panel mounted below a failed component:
   existing semantic-operation form as sections;
 - New, row-to-record, Edit, Save, archive, and restore are derived from compiled
   surfaces that share the same query source entity—there is no module-specific
-  route or renderer; and
+  route or renderer, and lifecycle actions remain behind the command overflow;
+  and
 - startup seeds four plausible Parties, four Items, and four Locations through
   the Semantic Operation gateway. Their deterministic idempotency keys make
   restart safe, and the database retains both the records and linked trust facts.
@@ -99,9 +100,13 @@ one form renderer, not a new implementation beside the old one.
 
 Compiler-valid older fixtures can still carry only `record:sections` or
 `record:keyFacts`. When `titleStatus` is absent, those same slot renderers keep the
-operation feedback or lifecycle token inside the declared content slot. This is a
+operation feedback or lifecycle token inside the declared content slot. When
+`commandBar` is absent, `sections` retains its Save control and `keyFacts` retains
+the same overflow-contained lifecycle action. A browser journey compiles and uses
+the unmodified one-slot fixture rather than rewriting its slots. This is a
 backward-compatibility projection for a pinned release, not a second sibling panel;
-current product surfaces take the title/status path and do not duplicate it.
+current product surfaces take the title/status and command-bar paths and do not
+duplicate them.
 
 Compact and full layouts are explicitly alternative renderings of the same slot
 set and must never be mounted together. This packet records that contract but does
@@ -164,6 +169,8 @@ mutations.
 | product pages still tolerate an unregistered component | remove only the `list:dataGrid` slot-renderer entry | the explicit absence assertion failed: `Expected: 0`, `Received: 1` for `[data-diagnostic-code="UNSUPPORTED_COMPONENT"]` |
 | the conformance numbers were edited rather than observed | run the real product ratchet after adding slots but before updating its baseline | `FAIL (4 compiled product modules read; catalog=19/33, location=19/33, party=36/64, platform=33/33; 3 ratchet violations)` and architecture was 70 / 73 |
 | seed rows could be direct writes with no operation trust lineage | replace one returned seed outbox ID with a non-existent UUID and run the composed journey | the PostgreSQL join assertion failed with `Expected: "1"`, `Received: "0"` |
+| the one-slot compatibility path could still be display-only | remove only the conditional Save fallback and run the unmodified one-slot browser journey | Playwright timed out waiting for `getByRole('button', { name: 'Save' })` at `surface-data-binding.spec.ts:158`; 1 failed |
+| Archive could remain a directly exposed command | replace only the command-bar overflow wrapper with the lifecycle form and run the enriched fixture journey | Playwright failed because `[data-platform-slot="record:commandBar"] details.action-overflow` was absent; 1 failed |
 
 Positive observations complement those reds: product pages for Party, Item, and
 Location each contain no `UNSUPPORTED_COMPONENT`; all twelve seed receipts have one
@@ -183,7 +190,7 @@ corepack pnpm check:app-release
 ```
 
 The architecture suite reports 73 / 73 and prints the four real product counts.
-The browser suite reports 15 / 15; its composed journey exercises seeded lists,
+The browser suite reports 16 / 16; its composed journey exercises seeded lists,
 New, Save, row-to-record, breadcrumb, Edit, update, reload, full server restart,
 and persisted trust linkage. The final full-matrix observations are recorded in
 the writer handoff after integration with current `main`.
@@ -196,6 +203,13 @@ slot the old release did not declare. The compatibility projection above restore
 that pinned-release observation without restoring the hardwired SurfaceRuntime
 panel; the focused integration rerun is 59 / 59.
 
+The first browser rerun after the review fix was honestly red at 13 / 16. The
+Party, Catalog, and Location journeys still clicked Archive and Restore as direct
+commands and therefore timed out after those consequential actions moved behind
+the required overflow. Their expectations now open **More actions** before each
+lifecycle transition, making the old consumers observe the new grammar rather than
+weakening it.
+
 ## Test it yourself
 
 From a clean checkout with Docker running, start an isolated persistent demo:
@@ -207,8 +221,9 @@ NORTH_STAR_DATABASE_CONTAINER=north-star-g2-p5da-check NORTH_STAR_DATABASE_PORT=
 Open <http://127.0.0.1:4175>. You should see populated Party, Item, and Location
 lists. On Party list, click **New**, enter a number, name, and contact summary,
 then click **Save**. Return through the **Party list** breadcrumb or navigation,
-click the new row's record link, and use **Edit** to change it. No composed product
-page should show `UNSUPPORTED_COMPONENT`.
+click the new row's record link, and use **Edit** to change it. The consequential
+**Archive** action is under **More actions**, not presented as a primary command.
+No composed product page should show `UNSUPPORTED_COMPONENT`.
 
 Press Ctrl-C and run the same command again. Refresh the browser: the created
 record and seeded records remain because the named Docker volume is persistent,
@@ -243,6 +258,13 @@ data.
 
 ## Review evidence
 
-Behavioral review is a fresh naive Codex xhigh pass over the frozen candidate,
-under the bounded charter in the writer handoff. Its verdict and any disposition
-are recorded after the full matrix freezes the SHA.
+The first fresh naive Codex xhigh review at
+`773682a538ca5aff76d03644b3d4fbe212a2f602` returned `REVISE`. It confirmed the
+slot dispatch, generic navigation derivation, seed gateway lineage, trust evidence,
+ratchet, diagnostic controls, and scope boundaries, then found two reachable
+in-scope defects: compiler-valid one-slot Record surfaces had lost their action
+controls, and Archive was directly exposed instead of living behind command-bar
+overflow. The conditional fallbacks, generic overflow, browser journeys, and two
+executed reds above are the bounded disposition. A fresh review result over the new
+frozen SHA is reported in the writer handoff so review metadata does not recursively
+change the reviewed commit.

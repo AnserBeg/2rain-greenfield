@@ -121,8 +121,81 @@ test('fixture list and form render live DTOs and reflect a semantic create', asy
   await expect(
     page.getByRole('cell', { name: 'Browser-created master' }),
   ).toBeVisible();
+  const createdRow = page.locator('tr', { hasText: 'Browser-created master' });
+  await createdRow.getByRole('link').click();
+  const overflow = page.locator(
+    '[data-platform-slot="record:commandBar"] details.action-overflow',
+  );
+  const archive = page.getByRole('button', { name: 'Archive' });
+  await expect(overflow).toBeVisible();
+  await expect(archive).toBeHidden();
+  await overflow.locator('summary').click();
+  await expect(archive).toBeVisible();
   await expect(page.locator('body')).not.toContainText('north_star_module');
   await expect(page.locator('body')).not.toContainText('storageClass');
+});
+
+test('compiler-valid one-slot Record surfaces retain fallback actions and feedback', async ({
+  page,
+}) => {
+  const compiled = compileFixture(false);
+  const policy = allowPolicy();
+  const executor = new BrowserFixtureExecutor();
+  const operationMediation = new SemanticOperationMediationAuthority();
+  const legacyServer = createSurfaceRuntimeServer(
+    runtimeEntry(compiled, policy),
+    {
+      operationGateway: new SemanticOperationGateway(
+        policy,
+        executor,
+        operationMediation,
+      ),
+      operationMediation,
+      queryGateway: new SemanticQueryGateway(policy, executor),
+    },
+  );
+  const legacyBaseUrl = await listen(legacyServer);
+
+  try {
+    await page.setExtraHTTPHeaders({ authorization: 'fixture-user' });
+    await page.goto(
+      `${legacyBaseUrl}/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_form`)}`,
+    );
+    await expect(
+      page.locator('[data-platform-slot="record:commandBar"]'),
+    ).toHaveCount(0);
+    await page.getByLabel('Master Name').fill('Legacy one-slot master');
+    await page.getByRole('button', { name: 'Save' }).click();
+    await expect(page.getByRole('status')).toContainText('Create complete');
+
+    await page
+      .getByRole('navigation', { name: 'Release navigation' })
+      .getByRole('link', { name: 'master list' })
+      .click();
+    const row = page.locator('tr', { hasText: 'Legacy one-slot master' });
+    await row.getByRole('link').click();
+    await expect(
+      page.locator('[data-platform-slot="record:keyFacts"]'),
+    ).toBeVisible();
+    await expect(
+      page.locator('[data-platform-slot="record:commandBar"]'),
+    ).toHaveCount(0);
+
+    const overflow = page.locator('details.action-overflow');
+    const archive = page.getByRole('button', { name: 'Archive' });
+    await expect(overflow).toBeVisible();
+    await expect(archive).toBeHidden();
+    await overflow.locator('summary').click();
+    await expect(archive).toBeVisible();
+    await archive.click();
+    await page.getByRole('button', { name: 'Confirm Archive' }).click();
+    await expect(page.getByRole('status')).toContainText('Archive complete');
+    await expect(page.getByText('Archived · revision 2')).toBeVisible();
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      legacyServer.close((error) => (error ? reject(error) : resolve()));
+    });
+  }
 });
 
 class BrowserFixtureExecutor
@@ -181,18 +254,31 @@ class BrowserFixtureExecutor
     }
 
     const input = recordValue(request.input);
-    const values = recordValue(input.values ?? {});
+    const values = recordValue(input.values ?? input.patch ?? {});
     const recordId = String(input.recordId);
-    const created = dto(
+    const previous = this.records.get(recordId);
+    const effect = request.definition.effect.kind;
+    const stored: SemanticRecordDto = Object.freeze({
+      archived:
+        effect === 'archiveRecordEffect'
+          ? true
+          : effect === 'restoreRecordEffect'
+            ? false
+            : (previous?.archived ?? false),
+      entityId: request.definition.effect.entity.targetId,
       recordId,
-      String(values[FIXTURE_IDS.fieldIds.parentName] ?? ''),
-    );
-    this.records.set(recordId, created);
+      revision: (previous?.revision ?? 0) + 1,
+      values: Object.freeze({
+        ...(previous?.values ?? {}),
+        ...values,
+      }) as Readonly<Record<string, ImmutableJsonValue>>,
+    });
+    this.records.set(recordId, stored);
     return {
       kind: 'semanticOperationResult',
       operationId: request.definition.operationId,
       outcome: 'succeeded',
-      readBack: created,
+      readBack: stored,
       schemaVersion: SEMANTIC_OPERATION_RESULT_VERSION,
       trust: {
         changeDocumentId: randomUUID(),
@@ -367,25 +453,27 @@ function decode(value: ContentAddressedArtifact): Record<string, unknown> {
   return decoded;
 }
 
-function compileFixture(): CompileSuccess {
+function compileFixture(withPartialAnatomy = true): CompileSuccess {
   const authored = ordinaryModuleV1();
-  const surfaces = authored.surfaces as Array<Record<string, unknown>>;
-  for (const surface of surfaces) {
-    const surfaceId = String(surface.surfaceId);
-    const existingSlots = surface.slots as Array<Record<string, unknown>>;
-    const requiredSlots = surfaceId.endsWith('_list')
-      ? ['title', 'dataGrid']
-      : surfaceId.endsWith('_form')
-        ? ['breadcrumb', 'titleStatus', 'commandBar', 'sections']
-        : ['breadcrumb', 'titleStatus', 'commandBar', 'keyFacts'];
-    const exemplar = existingSlots[0];
-    assert.ok(exemplar);
-    surface.slots = requiredSlots.map((slot, index) => ({
-      ...exemplar,
-      orderKey: (index + 1) * 10,
-      slot,
-      slotId: `${surfaceId.replace(':surface.', ':slot.')}_${slot.replace(/[A-Z]/g, (character) => `_${character.toLowerCase()}`)}`,
-    }));
+  if (withPartialAnatomy) {
+    const surfaces = authored.surfaces as Array<Record<string, unknown>>;
+    for (const surface of surfaces) {
+      const surfaceId = String(surface.surfaceId);
+      const existingSlots = surface.slots as Array<Record<string, unknown>>;
+      const requiredSlots = surfaceId.endsWith('_list')
+        ? ['title', 'dataGrid']
+        : surfaceId.endsWith('_form')
+          ? ['breadcrumb', 'titleStatus', 'commandBar', 'sections']
+          : ['breadcrumb', 'titleStatus', 'commandBar', 'keyFacts'];
+      const exemplar = existingSlots[0];
+      assert.ok(exemplar);
+      surface.slots = requiredSlots.map((slot, index) => ({
+        ...exemplar,
+        orderKey: (index + 1) * 10,
+        slot,
+        slotId: `${surfaceId.replace(':surface.', ':slot.')}_${slot.replace(/[A-Z]/g, (character) => `_${character.toLowerCase()}`)}`,
+      }));
+    }
   }
   const normalized = normalizeApplicationPackage(authored);
   const result = compileApplication({

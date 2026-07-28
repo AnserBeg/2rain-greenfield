@@ -124,6 +124,14 @@ async function productJourney(page: Page, baseUrl: string): Promise<void> {
   await expect(
     page.getByText('P-BROWSER-REAL-001', { exact: true }),
   ).toBeVisible();
+  const overflow = page.locator(
+    '[data-platform-slot="record:commandBar"] details.action-overflow',
+  );
+  const archive = page.getByRole('button', { name: 'Archive' });
+  await expect(overflow).toBeVisible();
+  await expect(archive).toBeHidden();
+  await overflow.locator('summary').click();
+  await expect(archive).toBeVisible();
   await page.getByRole('link', { name: 'Edit', exact: true }).click();
   await expect(
     page.getByRole('heading', { level: 1, name: 'Edit Party' }),

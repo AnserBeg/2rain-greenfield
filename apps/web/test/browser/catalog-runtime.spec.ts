@@ -23,6 +23,7 @@ test('real Catalog surface creates an item and archives/restores through the gen
       page.getByText('Browser-seeded descriptor', { exact: true }),
     ).toBeVisible();
     await expect(page.getByText('EA', { exact: true })).toBeVisible();
+    await page.locator('details.action-overflow summary').click();
     await page.getByRole('button', { name: 'Archive' }).click();
     await expect(
       page.getByRole('heading', { name: 'Confirm Archive' }),
@@ -30,6 +31,7 @@ test('real Catalog surface creates an item and archives/restores through the gen
     await page.getByRole('button', { name: 'Confirm Archive' }).click();
     await expect(page.getByRole('status')).toContainText('Archive complete');
     await expect(page.getByText(/Archived · revision 2/)).toBeVisible();
+    await page.locator('details.action-overflow summary').click();
     await page.getByRole('button', { name: 'Restore' }).click();
     await expect(page.getByRole('status')).toContainText('Restore complete');
     await expect(page.getByText(/Active · revision 3/)).toBeVisible();

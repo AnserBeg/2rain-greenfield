@@ -249,7 +249,7 @@ function renderCommandBar(context: SurfaceComponentContext): string {
     form
       ? `<a class="secondary-action" href="${escapeHtml(surfaceHref(form))}">New</a>`
       : '',
-    record ? renderLifecycleForm(context, record) : '',
+    record ? renderLifecycleOverflow(context, record) : '',
   ].join('');
   return slotPanel(
     context,
@@ -271,10 +271,17 @@ function renderKeyFacts(context: SurfaceComponentContext): string {
     record && !hasSurfaceSlot(context, 'titleStatus')
       ? `<span class="status-pill" data-status-role="${record.archived ? 'attention' : 'success'}">${record.archived ? 'Archived' : 'Active'} · revision ${record.revision}</span>`
       : '';
+  const compatibilityFeedback = hasSurfaceSlot(context, 'titleStatus')
+    ? ''
+    : feedbackHtml(context.feedback);
+  const compatibilityActions =
+    record && !hasSurfaceSlot(context, 'commandBar')
+      ? renderLifecycleOverflow(context, record)
+      : '';
   return slotPanel(
     context,
     record
-      ? `<section class="panel data-panel" data-data-state="exact" data-record-id="${escapeHtml(record.recordId)}"><div class="panel__heading"><div><p class="eyebrow">Key facts</p><h2>${escapeHtml(entityLabel(context.surface))}</h2></div>${compatibilityStatus}</div><dl class="record-fields">${context.surface.fieldIds.map((fieldId) => `<div data-field-id="${escapeHtml(fieldId)}"><dt>${escapeHtml(fieldLabel(fieldId))}</dt><dd>${renderValue(record.values[fieldId])}</dd></div>`).join('')}</dl></section>`
+      ? `${compatibilityFeedback}<section class="panel data-panel" data-data-state="exact" data-record-id="${escapeHtml(record.recordId)}"><div class="panel__heading"><div><p class="eyebrow">Key facts</p><h2>${escapeHtml(entityLabel(context.surface))}</h2></div>${compatibilityStatus}</div><dl class="record-fields">${context.surface.fieldIds.map((fieldId) => `<div data-field-id="${escapeHtml(fieldId)}"><dt>${escapeHtml(fieldLabel(fieldId))}</dt><dd>${renderValue(record.values[fieldId])}</dd></div>`).join('')}</dl>${compatibilityActions}</section>`
       : dataDiagnostic('QUERY_NOT_FOUND'),
     'key-facts-slot',
   );
@@ -304,9 +311,12 @@ function renderSections(context: SurfaceComponentContext): string {
   const compatibilityFeedback = hasSurfaceSlot(context, 'titleStatus')
     ? ''
     : feedbackHtml(context.feedback);
+  const compatibilityCommand = hasSurfaceSlot(context, 'commandBar')
+    ? ''
+    : '<button type="submit">Save</button>';
   return slotPanel(
     context,
-    `${compatibilityFeedback}<section class="panel data-panel" data-data-state="${record ? 'exact' : 'empty'}"><div class="panel__heading"><div><p class="eyebrow">Details</p><h2>${record ? 'Update the record' : 'Create a record'}</h2></div></div><form id="surface-record-form" method="post" action="/?surface=${encodeURIComponent(context.surface.surfaceId)}"><input type="hidden" name="intent" value="${intent}"><input type="hidden" name="idempotencyKey" value="${randomUUID()}"><input type="hidden" name="recordId" value="${escapeHtml(recordId)}">${record ? `<input type="hidden" name="expectedRevision" value="${record.revision}">` : ''}<div class="form-fields">${context.surface.fieldIds.map((fieldId) => `<label><span>${escapeHtml(fieldLabel(fieldId))}</span><input name="value:${escapeHtml(fieldId)}" value="${record ? renderInputValue(record.values[fieldId]) : ''}" autocomplete="off"></label>`).join('')}</div></form></section>`,
+    `${compatibilityFeedback}<section class="panel data-panel" data-data-state="${record ? 'exact' : 'empty'}"><div class="panel__heading"><div><p class="eyebrow">Details</p><h2>${record ? 'Update the record' : 'Create a record'}</h2></div></div><form id="surface-record-form" method="post" action="/?surface=${encodeURIComponent(context.surface.surfaceId)}"><input type="hidden" name="intent" value="${intent}"><input type="hidden" name="idempotencyKey" value="${randomUUID()}"><input type="hidden" name="recordId" value="${escapeHtml(recordId)}">${record ? `<input type="hidden" name="expectedRevision" value="${record.revision}">` : ''}<div class="form-fields">${context.surface.fieldIds.map((fieldId) => `<label><span>${escapeHtml(fieldLabel(fieldId))}</span><input name="value:${escapeHtml(fieldId)}" value="${record ? renderInputValue(record.values[fieldId]) : ''}" autocomplete="off"></label>`).join('')}</div>${compatibilityCommand}</form></section>`,
     'sections-slot',
   );
 }
@@ -430,6 +440,16 @@ function renderLifecycleForm(
   );
   return operation
     ? `<form class="lifecycle-action" method="post" action="/?surface=${encodeURIComponent(context.surface.surfaceId)}"><input type="hidden" name="intent" value="${operation.intent}"><input type="hidden" name="idempotencyKey" value="${randomUUID()}"><input type="hidden" name="recordId" value="${escapeHtml(record.recordId)}"><input type="hidden" name="expectedRevision" value="${record.revision}"><button class="secondary-action" type="submit">${escapeHtml(operationLabel(operation.intent))}</button></form>`
+    : '';
+}
+
+function renderLifecycleOverflow(
+  context: SurfaceComponentContext,
+  record: SemanticRecordDto,
+): string {
+  const lifecycleForm = renderLifecycleForm(context, record);
+  return lifecycleForm
+    ? `<details class="action-overflow"><summary>More actions</summary>${lifecycleForm}</details>`
     : '';
 }
 
