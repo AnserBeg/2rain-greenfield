@@ -39,6 +39,9 @@ the query tier both live there.
 | `packages/postgres-provider/src/composed-application-runtime.ts` | DEPLOY |
 | `packages/postgres-provider/src/release-*.ts` | DEPLOY |
 | `packages/compiler/src/verification.ts` | DEPLOY *(assigned 2026-07-28 for packet 1b)* |
+| `db/schema.snapshot.json` | DEPLOY *(granted 2026-07-28 for 1b — migration 0013 moves it)* |
+| `test/architecture/release-persistence-boundary.test.ts` | DEPLOY *(granted for 1b — hardcodes the migration inventory through 0012)* |
+| `test/fixtures/g2/*/runtime-harness.ts` | DEPLOY *(granted for 1b — all four mint `randomUUID()` evidence and must produce genuine evidence instead; **no test-only bypass**)* |
 | `db/migrations/**` · `packages/postgres-provider/src/migrations.ts` | **DEPLOY while 1b runs** — reassigned from FIX, whose current packet (1e press guards) needs no migration. Reverts to FIX when 1b lands. |
 | `packages/postgres-provider/src/module-runtime-interpreter.ts` | KERNEL |
 | `apps/web/**` · `packages/domain/**` | **none — frozen while three lanes run** |
