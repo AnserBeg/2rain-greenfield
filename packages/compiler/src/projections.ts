@@ -4,6 +4,7 @@ import {
 } from '@north-star/canonical-model';
 
 import { hashCanonical } from './hash.js';
+import { lowerQueryPredicate } from './predicate-lowering.js';
 import {
   lowerStorageTargetV1,
   type StorageTargetPayloadV1,
@@ -109,6 +110,9 @@ export function lowerBaseProjectionPayloads(
   );
 
   const isModuleV1 = packageRevision.languageVersion === LANGUAGE_VERSION;
+  const currentStorageTarget = isModuleV1
+    ? lowerStorageTargetV1(packageRevision, previousStorageTarget)
+    : null;
   const plans = [
     plan(
       PROJECTION_FAMILY_IDS.semanticModel,
@@ -120,16 +124,14 @@ export function lowerBaseProjectionPayloads(
       PROJECTION_FAMILY_IDS.storageTarget,
       namespace,
       packageScope,
-      isModuleV1
-        ? lowerStorageTargetV1(packageRevision, previousStorageTarget)
-        : storageTargetPayload(packageRevision),
+      currentStorageTarget ?? storageTargetPayload(packageRevision),
       isModuleV1 ? STORAGE_TARGET_PAYLOAD_VERSION : undefined,
     ),
     plan(
       PROJECTION_FAMILY_IDS.queryCatalog,
       namespace,
       packageScope,
-      queryCatalogPayload(packageRevision),
+      queryCatalogPayload(packageRevision, currentStorageTarget),
     ),
     plan(
       PROJECTION_FAMILY_IDS.operationCatalog,
@@ -321,11 +323,22 @@ function storageTargetPayload(
 
 function queryCatalogPayload(
   packageRevision: NormalizedApplicationPackage,
+  storage: StorageTargetPayloadV1 | null,
 ): unknown {
   return {
     kind: 'queryCatalogPayload',
     queries: packageRevision.queries.map((query) => ({
       filter: query.filter,
+      ...(query.tier === 'q1' && storage
+        ? {
+            filterPlan: lowerQueryPredicate(
+              query.filter,
+              query.sourceEntity.targetId,
+              packageRevision,
+              storage,
+            ),
+          }
+        : {}),
       lifecycle: query.lifecycle,
       maximumResultCount: query.maximumResultCount,
       permissionId: query.permission.targetId,

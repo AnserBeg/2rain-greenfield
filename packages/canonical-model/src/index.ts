@@ -45,6 +45,7 @@ export {
 } from './normalize.js';
 export {
   PREDICATE_KERNEL_RECEIPT_VERSION,
+  PREDICATE_LOWERING_PLAN_VERSION,
   PREDICATE_POSITION_PROFILES,
   PREDICATE_POSITION_PROFILE_VERSION,
   inspectPredicateForExecution,
@@ -55,6 +56,10 @@ export {
   type PredicateFalseDisposition,
   type PredicateKernelEntryPoint,
   type PredicateKernelReceipt,
+  type PredicateCostClass,
+  type PredicateLoweringNode,
+  type PredicateLoweringPlan,
+  type PredicateLoweringRowId,
   type PredicatePositionProfile,
 } from './predicate-kernel.js';
 export {

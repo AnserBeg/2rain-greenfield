@@ -1,6 +1,14 @@
 import { createHash, randomUUID } from 'node:crypto';
 
-import { canonicalize, unicodeCaseFold } from '@north-star/canonical-model';
+import {
+  PREDICATE_LOWERING_PLAN_VERSION,
+  PREDICATE_POSITION_PROFILE_VERSION,
+  canonicalize,
+  unicodeCaseFold,
+  type CanonicalScalar,
+  type PredicateLoweringNode,
+  type PredicateLoweringPlan,
+} from '@north-star/canonical-model';
 import {
   PROJECTION_FAMILY_IDS,
   STORAGE_TARGET_PAYLOAD_VERSION,
@@ -96,7 +104,7 @@ export class ModuleRuntimeInterpreterError extends Error {
 }
 
 /**
- * The only PostgreSQL interpreter for compiled Q0/O0 module projections.
+ * The only PostgreSQL interpreter for compiled Q0/Q1/O0 module projections.
  * Canonical registration stays data: no module name or handler appears here.
  */
 export class PostgresModuleRuntimeInterpreter
@@ -174,6 +182,7 @@ export class PostgresModuleRuntimeInterpreter
               request.definition,
               request.arguments,
               request.list,
+              request.filterPlans,
             ),
           );
         },
@@ -274,7 +283,7 @@ async function prepareMutation(
       recordId: input.recordId,
     };
   }
-  const prior = await loadRawRecord(client, entity, input.recordId, true);
+  const prior = await loadRawRecord(client, entity, input.recordId, true, []);
   if (!prior) {
     throw failure('MODULE_RECORD_NOT_FOUND', 'module record was not found');
   }
@@ -382,7 +391,7 @@ async function executeMutationOnClient(
       await setArchiveState(client, storage, entity, input, false);
       break;
   }
-  const record = await loadRawRecord(client, entity, input.recordId, true);
+  const record = await loadRawRecord(client, entity, input.recordId, true, []);
   if (!record) {
     throw failure(
       'MODULE_MUTATION_READ_BACK_MISSING',
@@ -660,6 +669,7 @@ async function executeQueryOnClient(
   definition: RegisteredQueryDefinition,
   argumentValue: ImmutableJsonValue,
   list: AuthorizedSharedListRequest | null,
+  filterPlans: readonly PredicateLoweringPlan[],
 ): Promise<SemanticQueryResultEnvelope> {
   if (!definition.infrastructure) {
     return queryResult(
@@ -681,6 +691,7 @@ async function executeQueryOnClient(
         entity,
         recordId,
         includeArchived,
+        filterPlans,
       );
       records = record ? [record] : [];
       return queryResult(
@@ -692,7 +703,14 @@ async function executeQueryOnClient(
     }
     case 'list': {
       if (list) {
-        return listSharedRecords(client, storage, entity, definition, list);
+        return listSharedRecords(
+          client,
+          storage,
+          entity,
+          definition,
+          list,
+          filterPlans,
+        );
       }
       const limit = boundedLimit(args.limit, definition.maximumResultCount);
       const afterRecordId = optionalUuid(args.afterRecordId, 'afterRecordId');
@@ -702,6 +720,7 @@ async function executeQueryOnClient(
         includeArchived,
         limit,
         afterRecordId,
+        filterPlans,
       );
       return queryResult(
         definition.queryId,
@@ -722,6 +741,7 @@ async function executeQueryOnClient(
         matchMode,
         includeArchived,
         limit,
+        filterPlans,
       );
       return queryResult(
         definition.queryId,
@@ -739,6 +759,7 @@ async function executeQueryOnClient(
         text,
         includeArchived,
         Math.max(2, definition.maximumResultCount),
+        filterPlans,
       );
       const outcome =
         matches.records.length === 0
@@ -765,6 +786,7 @@ async function listRecords(
   includeArchived: boolean,
   limit: number,
   afterRecordId: string | null,
+  filterPlans: readonly PredicateLoweringPlan[],
 ): Promise<RawRecord[]> {
   const values: unknown[] = [];
   const predicates = archivePredicate(entity, includeArchived);
@@ -773,6 +795,7 @@ async function listRecords(
       `${quoted(entity.recordIdentity.column)} > ${parameter(values, afterRecordId)}`,
     );
   }
+  appendQueryFilterPredicates(entity, filterPlans, values, predicates);
   const rows = await client.query<QueryResultRow>(
     selectSql(
       entity,
@@ -800,6 +823,7 @@ async function listSharedRecords(
   entity: StorageEntity,
   definition: RegisteredQueryDefinition,
   list: AuthorizedSharedListRequest,
+  filterPlans: readonly PredicateLoweringPlan[],
 ): Promise<SemanticQueryResultEnvelope> {
   const sourceAlias = 'table_source';
   const selectedColumns = definition.selections.map((selection) => {
@@ -846,6 +870,13 @@ async function listSharedRecords(
     values.push(...match.values);
     predicates.push(match.sql);
   }
+  appendQueryFilterPredicates(
+    entity,
+    filterPlans,
+    values,
+    predicates,
+    sourceAlias,
+  );
   const whereSql = predicates.length > 0 ? predicates.join(' AND ') : 'true';
   const count = await client.query<{ total_count: string }>(
     `SELECT count(*)::text AS total_count ${fromSql} WHERE ${whereSql}`,
@@ -1139,6 +1170,7 @@ async function matchRecords(
   matchMode: 'prefix' | 'substring',
   includeArchived: boolean,
   limit: number,
+  filterPlans: readonly PredicateLoweringPlan[],
 ): Promise<RawRecord[]> {
   const selected = new Set(definition.selections.map((item) => item.fieldId));
   const columns = entity.columns.filter(
@@ -1151,6 +1183,7 @@ async function matchRecords(
   const values = [...match.values];
   const predicates = archivePredicate(entity, includeArchived);
   predicates.push(match.sql);
+  appendQueryFilterPredicates(entity, filterPlans, values, predicates);
   const rows = await client.query<QueryResultRow>(
     selectSql(
       entity,
@@ -1169,6 +1202,7 @@ async function matchResolveRecords(
   text: string,
   includeArchived: boolean,
   limit: number,
+  filterPlans: readonly PredicateLoweringPlan[],
 ): Promise<{
   advisoryMatchCount: number;
   identifierMatchCount: number;
@@ -1207,6 +1241,7 @@ async function matchResolveRecords(
     text,
     includeArchived,
     limit,
+    filterPlans,
   );
   const advisoryMatches = await exactFoldedMatches(
     client,
@@ -1215,6 +1250,7 @@ async function matchResolveRecords(
     text,
     includeArchived,
     limit,
+    filterPlans,
   );
   const recordsById = new Map<string, RawRecord>();
   for (const record of [...identifierMatches, ...advisoryMatches]) {
@@ -1242,12 +1278,14 @@ async function exactFoldedMatches(
   text: string,
   includeArchived: boolean,
   limit: number,
+  filterPlans: readonly PredicateLoweringPlan[],
 ): Promise<RawRecord[]> {
   if (columns.length === 0) return [];
   const match = buildFoldedMatchPredicate(entity, columns, text, 'exact');
   const values = [...match.values];
   const predicates = archivePredicate(entity, includeArchived);
   predicates.push(match.sql);
+  appendQueryFilterPredicates(entity, filterPlans, values, predicates);
   const rows = await client.query<QueryResultRow>(
     selectSql(
       entity,
@@ -1380,17 +1418,223 @@ function foldedColumnSql(
   );
 }
 
+export function buildQueryFilterPredicate(
+  entity: StorageTargetPayloadV1['entities'][number],
+  plans: readonly PredicateLoweringPlan[],
+  tableAlias?: string,
+): { readonly sql: string; readonly values: readonly unknown[] } {
+  const values: unknown[] = [];
+  const terms = plans.map((plan) =>
+    renderQueryFilterPlan(entity, plan, values, tableAlias),
+  );
+  return Object.freeze({
+    sql: terms.length === 0 ? 'TRUE' : `(${terms.join(' AND ')})`,
+    values: Object.freeze(values),
+  });
+}
+
+function appendQueryFilterPredicates(
+  entity: StorageEntity,
+  plans: readonly PredicateLoweringPlan[],
+  values: unknown[],
+  predicates: string[],
+  tableAlias?: string,
+): void {
+  for (const plan of plans) {
+    predicates.push(renderQueryFilterPlan(entity, plan, values, tableAlias));
+  }
+}
+
+function renderQueryFilterPlan(
+  entity: StorageEntity,
+  plan: PredicateLoweringPlan,
+  values: unknown[],
+  tableAlias?: string,
+): string {
+  if (
+    plan.kind !== 'predicateLoweringPlan' ||
+    plan.schemaVersion !== PREDICATE_LOWERING_PLAN_VERSION ||
+    plan.positionProfileVersion !== PREDICATE_POSITION_PROFILE_VERSION
+  ) {
+    throw failure(
+      'MODULE_QUERY_FILTER_PLAN_INVALID',
+      'query filter plan identity is invalid',
+    );
+  }
+  return renderQueryFilterNode(entity, plan.root, values, tableAlias);
+}
+
+function renderQueryFilterNode(
+  entity: StorageEntity,
+  node: PredicateLoweringNode,
+  values: unknown[],
+  tableAlias?: string,
+): string {
+  switch (node.kind) {
+    case 'booleanPredicate':
+      return node.value ? 'TRUE' : 'FALSE';
+    case 'notPredicate':
+      return `(NOT ${renderQueryFilterNode(entity, node.term, values, tableAlias)})`;
+    case 'allPredicate':
+    case 'anyPredicate': {
+      if (node.terms.length === 0) {
+        return node.kind === 'allPredicate' ? 'TRUE' : 'FALSE';
+      }
+      const joiner = node.kind === 'allPredicate' ? ' AND ' : ' OR ';
+      return `(${node.terms
+        .map((term) => renderQueryFilterNode(entity, term, values, tableAlias))
+        .join(joiner)})`;
+    }
+    case 'fieldComparisonPredicate': {
+      const column = entity.columns.find(
+        (candidate) => candidate.canonicalFieldId === node.fieldId,
+      );
+      if (!column || !scalarMatchesField(node.value, column.fieldContract)) {
+        throw failure(
+          'MODULE_QUERY_FILTER_PLAN_INVALID',
+          'query filter comparison does not match a compiled field',
+          node.fieldId,
+        );
+      }
+      const expectedMode =
+        column.fieldContract.fieldKind === 'textFieldType' &&
+        column.collation === 'unicodeCaseInsensitive'
+          ? 'unicodeCaseFold'
+          : 'binary';
+      if (node.comparisonMode !== expectedMode) {
+        throw failure(
+          'MODULE_QUERY_FILTER_PLAN_INVALID',
+          'query filter comparison mode does not match the field contract',
+          node.fieldId,
+        );
+      }
+      const indexedFolded =
+        node.loweringRowId ===
+        'northstar.predicate-lowering/folded-equality-v1';
+      if (
+        indexedFolded !==
+          (node.operator === 'equals' &&
+            node.comparisonMode === 'unicodeCaseFold' &&
+            hasQueryFoldedIndex(entity, column)) ||
+        node.costClass !==
+          (indexedFolded ? 'indexedFoldedEquality' : 'tenantBoundedScan')
+      ) {
+        throw failure(
+          'MODULE_QUERY_FILTER_PLAN_INVALID',
+          'query filter lowering row does not match physical access',
+          node.fieldId,
+        );
+      }
+      const left =
+        node.comparisonMode === 'unicodeCaseFold'
+          ? foldedComparisonExpression(entity, column, tableAlias)
+          : tableAlias
+            ? qualified(tableAlias, column.physicalName)
+            : quoted(column.physicalName);
+      const valueParameter = parameter(values, scalarDatabaseValue(node.value));
+      const right =
+        node.comparisonMode === 'unicodeCaseFold'
+          ? `north_star_module.${unicodeCaseFoldFunctionName}(${valueParameter}::text) COLLATE "C"`
+          : valueParameter;
+      const operator = {
+        equals: '=',
+        greaterThan: '>',
+        lessThan: '<',
+        notEquals: '<>',
+      }[node.operator];
+      return `(${left} IS NOT NULL AND ${left} ${operator} ${right})`;
+    }
+  }
+}
+
+function foldedComparisonExpression(
+  entity: StorageEntity,
+  column: StorageEntity['columns'][number],
+  tableAlias?: string,
+): string {
+  const folded = entity.foldedColumns.find(
+    (candidate) => candidate.canonicalFieldId === column.canonicalFieldId,
+  );
+  if (folded) {
+    return `${
+      tableAlias
+        ? qualified(tableAlias, folded.physicalName)
+        : quoted(folded.physicalName)
+    } COLLATE "C"`;
+  }
+  const value = tableAlias
+    ? qualified(tableAlias, column.physicalName)
+    : quoted(column.physicalName);
+  return `north_star_module.${unicodeCaseFoldFunctionName}(${value}::text) COLLATE "C"`;
+}
+
+function hasQueryFoldedIndex(
+  entity: StorageEntity,
+  column: StorageEntity['columns'][number],
+): boolean {
+  const folded = entity.foldedColumns.find(
+    (candidate) => candidate.canonicalFieldId === column.canonicalFieldId,
+  );
+  return (
+    folded !== undefined &&
+    entity.indexes.some(
+      (index) =>
+        (index.indexKind === 'foldedAccess' &&
+          index.columnNames.includes(folded.physicalName)) ||
+        (index.indexKind === 'caseInsensitiveUnique' &&
+          index.columnNames.includes(column.physicalName)),
+    )
+  );
+}
+
+function scalarMatchesField(
+  scalar: Readonly<CanonicalScalar>,
+  field: StorageEntity['columns'][number]['fieldContract'],
+): boolean {
+  const expected: Record<typeof field.fieldKind, CanonicalScalar['kind']> = {
+    booleanFieldType: 'booleanValue',
+    dateFieldType: 'dateValue',
+    dateTimeFieldType: 'dateTimeValue',
+    enumFieldType: 'textValue',
+    exactDecimalFieldType: 'exactDecimalValue',
+    integerFieldType: 'integerValue',
+    moneyFieldType: 'moneyValue',
+    quantityFieldType: 'quantityValue',
+    textFieldType: 'textValue',
+    timeFieldType: 'timeValue',
+  };
+  return scalar.kind === expected[field.fieldKind];
+}
+
+function scalarDatabaseValue(scalar: Readonly<CanonicalScalar>): unknown {
+  switch (scalar.kind) {
+    case 'booleanValue':
+      return scalar.value;
+    case 'dateTimeValue':
+    case 'dateValue':
+    case 'exactDecimalValue':
+    case 'integerValue':
+    case 'moneyValue':
+    case 'quantityValue':
+    case 'textValue':
+    case 'timeValue':
+      return scalar.value;
+  }
+}
+
 async function loadRawRecord(
   client: PoolClient,
   entity: StorageEntity,
   recordId: string,
   includeArchived: boolean,
+  filterPlans: readonly PredicateLoweringPlan[],
 ): Promise<RawRecord | null> {
   const values: unknown[] = [];
   const predicates = archivePredicate(entity, includeArchived);
   predicates.push(
     `${quoted(entity.recordIdentity.column)} = ${parameter(values, recordId)}`,
   );
+  appendQueryFilterPredicates(entity, filterPlans, values, predicates);
   const result = await client.query<QueryResultRow>(
     selectSql(entity, predicates, 'LIMIT 1'),
     values,

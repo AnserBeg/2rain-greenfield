@@ -600,6 +600,7 @@ test('saved-filter List excludes archived siblings without weakening envelope va
             runtime.views.a.projections.query.payload,
             PLATFORM_IDS.queryIds.list,
           ),
+          filterPlans: [],
           list: null,
           view: runtime.views.a,
         }),

@@ -1,6 +1,12 @@
 import {
+  PREDICATE_LOWERING_PLAN_VERSION,
+  PREDICATE_POSITION_PROFILE_VERSION,
+  STRUCTURAL_LIMITS_V0,
+  canonicalizeAndHash,
   inspectPredicateForExecution,
+  type PredicateCostClass,
   type PredicateKernelReceipt,
+  type PredicateLoweringPlan,
 } from '@north-star/canonical-model';
 
 import type { TrustedRequestContext } from './request-context.js';
@@ -72,6 +78,7 @@ export interface SemanticQueryResultEnvelope {
 
 export interface RegisteredQueryDefinition {
   readonly filter: Readonly<Record<string, ImmutableJsonValue>>;
+  readonly filterPlan?: PredicateLoweringPlan;
   readonly infrastructure?: {
     readonly archive: 'nullableArchivedAt';
     readonly optimisticRevision: 'requiredOnMutation';
@@ -101,8 +108,20 @@ export interface SemanticQueryExecutionRequest {
   readonly arguments: ImmutableJsonValue;
   readonly context: TrustedRequestContext;
   readonly definition: RegisteredQueryDefinition;
+  readonly filterPlans: readonly PredicateLoweringPlan[];
   readonly list: AuthorizedSharedListRequest | null;
   readonly view: IssuedRequestRuntimeView;
+}
+
+export interface QueryPolicyNarrowingRequest {
+  readonly arguments: ImmutableJsonValue;
+  readonly definition: RegisteredQueryDefinition;
+  readonly view: IssuedRequestRuntimeView;
+}
+
+/** A future policy authority may contribute only another validated narrowing. */
+export interface QueryPolicyNarrowingGateway {
+  narrow(request: QueryPolicyNarrowingRequest): Promise<unknown>;
 }
 
 export interface SemanticQueryExecutor {
@@ -119,6 +138,11 @@ export class MalformedSemanticQueryRequestError extends Error {
 export class MalformedPinnedQueryCatalogError extends Error {
   readonly code = 'MALFORMED_PINNED_QUERY_CATALOG' as const;
   override readonly name = 'MalformedPinnedQueryCatalogError';
+}
+
+export class MalformedQueryPolicyNarrowingError extends Error {
+  readonly code = 'MALFORMED_QUERY_POLICY_NARROWING' as const;
+  override readonly name = 'MalformedQueryPolicyNarrowingError';
 }
 
 export class SemanticQueryPolicyDeniedError extends Error {
@@ -162,6 +186,8 @@ export class SemanticQueryGateway {
     private readonly executor: SemanticQueryExecutor | undefined = undefined,
     private readonly observePredicateReceipt:
       ((receipt: PredicateKernelReceipt) => void) | undefined = undefined,
+    private readonly policyNarrowing:
+      QueryPolicyNarrowingGateway | undefined = undefined,
   ) {}
 
   async invoke(
@@ -205,19 +231,40 @@ export class SemanticQueryGateway {
     if (queryDecision.decision === 'DENY') {
       throw new SemanticQueryPolicyDeniedError(request.queryId, view);
     }
-    if (definition.lifecycle !== 'active' || definition.tier !== 'q0') {
+    if (definition.lifecycle !== 'active') {
       return unsupportedQueryResult(request.queryId, 'query-tier-unsupported');
     }
-    const predicateReceipt = inspectPredicateForExecution(definition.filter);
-    observePredicateReceiptSafely(
-      this.observePredicateReceipt,
-      predicateReceipt,
-    );
-    if (predicateReceipt.outcome !== 'accepted') {
-      return unsupportedQueryResult(
-        request.queryId,
-        'query-filter-unsupported',
+    const filterPlans: PredicateLoweringPlan[] = [];
+    if (definition.tier === 'q0') {
+      const predicateReceipt = inspectPredicateForExecution(definition.filter);
+      observePredicateReceiptSafely(
+        this.observePredicateReceipt,
+        predicateReceipt,
       );
+      if (predicateReceipt.outcome !== 'accepted') {
+        return unsupportedQueryResult(
+          request.queryId,
+          'query-filter-unsupported',
+        );
+      }
+    } else {
+      if (!definition.filterPlan) {
+        return unsupportedQueryResult(
+          request.queryId,
+          'query-filter-unsupported',
+        );
+      }
+      filterPlans.push(definition.filterPlan);
+    }
+    if (this.policyNarrowing) {
+      const contributed = await this.policyNarrowing.narrow(
+        Object.freeze({
+          arguments: request.arguments,
+          definition,
+          view,
+        }),
+      );
+      filterPlans.push(parsePolicyNarrowing(contributed));
     }
     const listQuery = parseSharedListArguments(request.arguments, {
       maximumResultCount: definition.maximumResultCount,
@@ -250,6 +297,7 @@ export class SemanticQueryGateway {
         arguments: request.arguments,
         context: trustedContextForRequestRuntimeView(view),
         definition,
+        filterPlans: Object.freeze(filterPlans),
         list,
         view,
       }),
@@ -441,12 +489,14 @@ function assertQueryDefinition(
     'sourceEntityId',
     'tier',
   ];
+  const hasFilterPlan = Object.hasOwn(value, 'filterPlan');
   const hasInfrastructure = Object.hasOwn(value, 'infrastructure');
   const hasResolveMatchKeys = Object.hasOwn(value, 'resolveMatchKeys');
   assertExactKeys(
     value,
     [
       ...expectedKeys,
+      ...(hasFilterPlan ? ['filterPlan'] : []),
       ...(hasInfrastructure ? ['infrastructure'] : []),
       ...(hasResolveMatchKeys ? ['resolveMatchKeys'] : []),
     ],
@@ -469,6 +519,14 @@ function assertQueryDefinition(
     (hasResolveMatchKeys && !Array.isArray(value.resolveMatchKeys))
   ) {
     throw invalid('pinned query definition has an invalid shape');
+  }
+  if (value.tier === 'q1') {
+    if (!hasFilterPlan) {
+      throw invalid('q1 query requires a predicate lowering plan');
+    }
+    assertPredicateLoweringPlan(value.filterPlan, value.filter, invalid);
+  } else if (hasFilterPlan) {
+    throw invalid('q0 query cannot carry a predicate lowering plan');
   }
   if (value.queryType === 'search' && !hasInfrastructure) {
     throw invalid('search requires the v1 infrastructure contract');
@@ -551,6 +609,211 @@ function assertQueryDefinition(
     }
     matchKeyIds.add(matchKey.matchKeyId);
     matchFieldIds.add(matchKey.fieldId);
+  }
+}
+
+function parsePolicyNarrowing(value: unknown): PredicateLoweringPlan {
+  const invalid = (message: string): MalformedQueryPolicyNarrowingError =>
+    new MalformedQueryPolicyNarrowingError(message);
+  const cloned = cloneImmutableJson(value, '$.policyNarrowing', invalid);
+  if (!isRecord(cloned)) {
+    throw invalid('policy narrowing must be an object');
+  }
+  assertExactKeys(cloned, ['filter', 'filterPlan'], invalid);
+  if (!isRecord(cloned.filter)) {
+    throw invalid('policy narrowing filter must be an object');
+  }
+  assertPredicateLoweringPlan(cloned.filterPlan, cloned.filter, invalid);
+  return cloned.filterPlan as unknown as PredicateLoweringPlan;
+}
+
+function assertPredicateLoweringPlan(
+  value: unknown,
+  predicate: Readonly<Record<string, unknown>>,
+  error: (message: string) => Error,
+): asserts value is PredicateLoweringPlan {
+  if (!isRecord(value)) {
+    throw error('predicate lowering plan must be an object');
+  }
+  assertExactKeys(
+    value,
+    [
+      'costClass',
+      'kind',
+      'positionProfileVersion',
+      'predicateDigest',
+      'root',
+      'schemaVersion',
+    ],
+    error,
+  );
+  if (
+    value.kind !== 'predicateLoweringPlan' ||
+    value.schemaVersion !== PREDICATE_LOWERING_PLAN_VERSION ||
+    value.positionProfileVersion !== PREDICATE_POSITION_PROFILE_VERSION ||
+    typeof value.predicateDigest !== 'string' ||
+    !/^[0-9a-f]{64}$/.test(value.predicateDigest) ||
+    value.predicateDigest !== canonicalizeAndHash(predicate).contentHash
+  ) {
+    throw error('predicate lowering plan identity is invalid');
+  }
+  const predicateReceipt = inspectPredicateForExecution(predicate, {
+    bindingPosition: 'queryFilter',
+    resolveComparison: () => ({ presence: 'absent' }),
+  });
+  if (predicateReceipt.outcome !== 'evaluated') {
+    throw error('predicate lowering plan source is invalid');
+  }
+  const observed = inspectLoweringNode(value.root, 1, error);
+  assertLoweringMatchesPredicate(value.root, predicate, error);
+  const expectedCost =
+    isRecord(value.root) &&
+    value.root.kind === 'fieldComparisonPredicate' &&
+    observed.comparisonCosts.length > 0 &&
+    observed.comparisonCosts.every(
+      (costClass) => costClass === 'indexedFoldedEquality',
+    )
+      ? 'indexedFoldedEquality'
+      : 'tenantBoundedScan';
+  if (value.costClass !== expectedCost) {
+    throw error('predicate lowering plan cost class is invalid');
+  }
+}
+
+function assertLoweringMatchesPredicate(
+  value: unknown,
+  predicate: unknown,
+  error: (message: string) => Error,
+): void {
+  if (
+    !isRecord(value) ||
+    !isRecord(predicate) ||
+    value.kind !== predicate.kind
+  ) {
+    throw error('predicate lowering plan does not match its source');
+  }
+  switch (predicate.kind) {
+    case 'booleanPredicate':
+      if (value.value !== predicate.value) {
+        throw error('predicate Boolean lowering does not match its source');
+      }
+      return;
+    case 'fieldComparisonPredicate':
+      if (
+        !isRecord(predicate.field) ||
+        !isRecord(predicate.value) ||
+        value.fieldId !== predicate.field.targetId ||
+        value.operator !== predicate.operator ||
+        !isRecord(value.value) ||
+        canonicalizeAndHash(value.value).contentHash !==
+          canonicalizeAndHash(predicate.value).contentHash
+      ) {
+        throw error('predicate comparison lowering does not match its source');
+      }
+      return;
+    case 'notPredicate':
+      assertLoweringMatchesPredicate(value.term, predicate.term, error);
+      return;
+    case 'allPredicate':
+    case 'anyPredicate':
+      if (
+        !Array.isArray(value.terms) ||
+        !Array.isArray(predicate.terms) ||
+        value.terms.length !== predicate.terms.length
+      ) {
+        throw error('predicate Boolean lowering does not match its source');
+      }
+      for (let index = 0; index < predicate.terms.length; index += 1) {
+        assertLoweringMatchesPredicate(
+          value.terms[index],
+          predicate.terms[index]!,
+          error,
+        );
+      }
+  }
+}
+
+function inspectLoweringNode(
+  value: unknown,
+  depth: number,
+  error: (message: string) => Error,
+): Readonly<{
+  comparisonCosts: PredicateCostClass[];
+}> {
+  if (depth > STRUCTURAL_LIMITS_V0.maximumExpressionDepth) {
+    throw error('predicate lowering plan exceeds the expression depth limit');
+  }
+  if (!isRecord(value)) {
+    throw error('predicate lowering node must be an object');
+  }
+  switch (value.kind) {
+    case 'booleanPredicate':
+      assertExactKeys(value, ['kind', 'value'], error);
+      if (typeof value.value !== 'boolean') {
+        throw error('predicate Boolean lowering is invalid');
+      }
+      return { comparisonCosts: [] };
+    case 'fieldComparisonPredicate': {
+      assertExactKeys(
+        value,
+        [
+          'comparisonMode',
+          'costClass',
+          'fieldId',
+          'kind',
+          'loweringRowId',
+          'operator',
+          'value',
+        ],
+        error,
+      );
+      assertCanonicalId(value.fieldId, 'fieldId', error);
+      if (
+        !isRecord(value.value) ||
+        !['equals', 'notEquals', 'lessThan', 'greaterThan'].includes(
+          String(value.operator),
+        )
+      ) {
+        throw error('predicate comparison lowering is invalid');
+      }
+      const folded =
+        value.loweringRowId ===
+          'northstar.predicate-lowering/folded-equality-v1' &&
+        value.comparisonMode === 'unicodeCaseFold' &&
+        value.operator === 'equals' &&
+        value.costClass === 'indexedFoldedEquality';
+      const bounded =
+        value.loweringRowId ===
+          'northstar.predicate-lowering/tenant-scan-comparison-v1' &&
+        (value.comparisonMode === 'binary' ||
+          value.comparisonMode === 'unicodeCaseFold') &&
+        value.costClass === 'tenantBoundedScan';
+      if (!folded && !bounded) {
+        throw error('predicate comparison lowering row is not admitted');
+      }
+      return {
+        comparisonCosts: [value.costClass as PredicateCostClass],
+      };
+    }
+    case 'notPredicate': {
+      assertExactKeys(value, ['kind', 'term'], error);
+      return inspectLoweringNode(value.term, depth + 1, error);
+    }
+    case 'allPredicate':
+    case 'anyPredicate': {
+      assertExactKeys(value, ['kind', 'terms'], error);
+      if (!Array.isArray(value.terms)) {
+        throw error('predicate Boolean terms must be an array');
+      }
+      const terms = value.terms.map((term) =>
+        inspectLoweringNode(term, depth + 1, error),
+      );
+      return {
+        comparisonCosts: terms.flatMap((term) => term.comparisonCosts),
+      };
+    }
+    default:
+      throw error('predicate lowering node kind is not admitted');
   }
 }
 

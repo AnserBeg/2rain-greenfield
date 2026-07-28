@@ -8,6 +8,7 @@ import {
 import {
   CanonicalReferenceSchema,
   CanonicalScalarSchema,
+  type CanonicalScalar,
   type PredicateExpression,
 } from './schemas.js';
 
@@ -16,6 +17,51 @@ export const PREDICATE_KERNEL_RECEIPT_VERSION =
 
 export const PREDICATE_POSITION_PROFILE_VERSION =
   'northstar.predicate-position-profile/v1' as const;
+
+export const PREDICATE_LOWERING_PLAN_VERSION =
+  'northstar.predicate-lowering-plan/postgres-row-v1' as const;
+
+export type PredicateCostClass =
+  | 'indexedEquality'
+  | 'indexedFoldedEquality'
+  | 'indexedPrefixRange'
+  | 'tenantBoundedScan';
+
+export type PredicateLoweringRowId =
+  | 'northstar.predicate-lowering/folded-equality-v1'
+  | 'northstar.predicate-lowering/tenant-scan-comparison-v1';
+
+export type PredicateLoweringNode =
+  | Readonly<{
+      kind: 'booleanPredicate';
+      value: boolean;
+    }>
+  | Readonly<{
+      comparisonMode: 'binary' | 'unicodeCaseFold';
+      costClass: PredicateCostClass;
+      fieldId: string;
+      kind: 'fieldComparisonPredicate';
+      loweringRowId: PredicateLoweringRowId;
+      operator: FieldComparisonPredicate['operator'];
+      value: Readonly<CanonicalScalar>;
+    }>
+  | Readonly<{
+      kind: 'allPredicate' | 'anyPredicate';
+      terms: readonly PredicateLoweringNode[];
+    }>
+  | Readonly<{
+      kind: 'notPredicate';
+      term: PredicateLoweringNode;
+    }>;
+
+export interface PredicateLoweringPlan {
+  readonly costClass: PredicateCostClass;
+  readonly kind: 'predicateLoweringPlan';
+  readonly positionProfileVersion: typeof PREDICATE_POSITION_PROFILE_VERSION;
+  readonly predicateDigest: string;
+  readonly root: PredicateLoweringNode;
+  readonly schemaVersion: typeof PREDICATE_LOWERING_PLAN_VERSION;
+}
 
 export type PredicateBindingPosition =
   | 'derivation'
@@ -133,7 +179,7 @@ export const inspectPredicateForExecution: PredicateKernelEntryPoint = (
   evaluation,
 ) => {
   if (evaluation !== undefined) {
-    const parsed = parsePredicate(value, 0);
+    const parsed = parsePredicate(value, 1);
     if (parsed.outcome === 'rejected') return parsed;
     return evaluatePredicate(parsed.predicate, evaluation);
   }
@@ -271,13 +317,18 @@ function evaluatePredicate(
   predicate: Readonly<PredicateExpression>,
   evaluation: PredicateEvaluationOptions,
 ): PredicateKernelReceipt {
+  if (
+    !Object.hasOwn(
+      PREDICATE_POSITION_PROFILES,
+      evaluation.bindingPosition as string,
+    )
+  ) {
+    return rejected(predicate.schemaVersion, 'invalid-binding-position');
+  }
+  const profile = PREDICATE_POSITION_PROFILES[evaluation.bindingPosition];
   const result = evaluateNode(predicate, evaluation.resolveComparison);
   if (result === null) {
     return rejected(predicate.schemaVersion, 'invalid-comparison-resolution');
-  }
-  const profile = PREDICATE_POSITION_PROFILES[evaluation.bindingPosition];
-  if (profile === undefined) {
-    return rejected(predicate.schemaVersion, 'invalid-binding-position');
   }
   return Object.freeze({
     falseDisposition: profile.falseDisposition,

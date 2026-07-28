@@ -252,6 +252,74 @@ test('absent comparisons are total at every predicate binding position', () => {
   assert.equal(emptyAny.outcome === 'evaluated' && emptyAny.result, false);
 });
 
+test('predicate evaluation starts at normalization root depth', () => {
+  let maximumDepthPredicate: Record<string, unknown> = {
+    field: {
+      kind: 'fieldReference',
+      schemaVersion: 'v2',
+      targetId: 'northstar.inventory:field.item_quantity',
+    },
+    kind: 'fieldComparisonPredicate',
+    operator: 'lessThan',
+    schemaVersion: 'v2',
+    value: {
+      kind: 'integerValue',
+      schemaVersion: 'v2',
+      value: '5',
+    },
+  };
+  for (let depth = 0; depth < 24; depth += 1) {
+    maximumDepthPredicate = {
+      kind: 'notPredicate',
+      schemaVersion: 'v2',
+      term: maximumDepthPredicate,
+    };
+  }
+  const depthReceipt = inspectPredicateForExecution(maximumDepthPredicate, {
+    bindingPosition: 'queryFilter',
+    resolveComparison: () => ({ presence: 'absent' }),
+  });
+  assert.equal(depthReceipt.outcome, 'rejected');
+  assert.equal(
+    depthReceipt.outcome === 'rejected' && depthReceipt.reason,
+    'expression-depth-exceeded',
+  );
+});
+
+test('predicate evaluation rejects inherited binding-position names', () => {
+  let comparisons = 0;
+  const inheritedPosition = inspectPredicateForExecution(
+    {
+      field: {
+        kind: 'fieldReference',
+        schemaVersion: 'v2',
+        targetId: 'northstar.inventory:field.item_quantity',
+      },
+      kind: 'fieldComparisonPredicate',
+      operator: 'lessThan',
+      schemaVersion: 'v2',
+      value: {
+        kind: 'integerValue',
+        schemaVersion: 'v2',
+        value: '5',
+      },
+    },
+    {
+      bindingPosition: 'toString' as never,
+      resolveComparison: () => {
+        comparisons += 1;
+        return { presence: 'absent' };
+      },
+    },
+  );
+  assert.equal(inheritedPosition.outcome, 'rejected');
+  assert.equal(
+    inheritedPosition.outcome === 'rejected' && inheritedPosition.reason,
+    'invalid-binding-position',
+  );
+  assert.equal(comparisons, 0);
+});
+
 test('F3 operators and optional aggregation stay compile-time rejected', () => {
   for (const operator of ['greaterThanOrEqual', 'lessThanOrEqual']) {
     const authored = structuredClone(fixture()) as unknown as {

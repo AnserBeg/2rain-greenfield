@@ -7,6 +7,11 @@ export {
 } from './compiler.js';
 export { COMPILER_DIAGNOSTIC_COPY } from './diagnostics.js';
 export { diffCompiledReleases } from './diff.js';
+export {
+  PREDICATE_LOWERING_TABLE,
+  lowerQueryPredicate,
+  type PredicateLoweringTableRow,
+} from './predicate-lowering.js';
 export { requiredProjectionFamily } from './projections.js';
 export {
   executeVerificationPlan,

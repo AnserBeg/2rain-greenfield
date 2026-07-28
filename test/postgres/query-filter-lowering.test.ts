@@ -1,0 +1,871 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+
+import {
+  inspectPredicateForExecution,
+  type PredicateExpression,
+  type PredicateLoweringPlan,
+} from '../../packages/canonical-model/src/index.js';
+import {
+  PREDICATE_LOWERING_TABLE,
+  type StorageTargetPayloadV1,
+} from '../../packages/compiler/src/index.js';
+import { partyModuleDefinition } from '../../packages/domain/src/party/index.js';
+import {
+  buildQueryFilterPredicate,
+  PostgresModuleRuntimeInterpreter,
+} from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
+import { withTrustedRequestTransaction } from '../../packages/postgres-provider/src/request-context.js';
+import { TrustedActorEnvelopeIssuer } from '../../packages/postgres-provider/src/trust/trusted-actor-envelope.js';
+import {
+  MalformedQueryPolicyNarrowingError,
+  SEMANTIC_QUERY_REQUEST_VERSION,
+  SemanticQueryGateway,
+  type QueryPolicyNarrowingGateway,
+} from '../../packages/runtime/src/semantic-query-gateway.js';
+import {
+  CURRENT_POLICY_DECISION_VERSION,
+  type CurrentPolicyGateway,
+  type ImmutableJsonValue,
+} from '../../packages/runtime/src/request-runtime-view.js';
+import type { Pool, PoolClient } from 'pg';
+
+import { PARTY_IDS } from '../fixtures/g2/party/definition.js';
+import {
+  invokePartyOperation,
+  invokePartyQuery,
+  PARTY_TEST_SCOPE,
+  withRealPartyRuntime,
+} from '../fixtures/g2/party/runtime-harness.js';
+
+const demonstrateMissingIndex =
+  process.env.Q1P1_DEMONSTRATE_MISSING_INDEX === 'foldedEquality';
+const demonstrateUnboundedScan =
+  process.env.Q1P1_DEMONSTRATE_UNBOUNDED_SCAN === 'tenant';
+const demonstrateRawTotalization =
+  process.env.Q1P1_DEMONSTRATE_RAW_TOTALIZATION === '1';
+const demonstrateMissingPolicy =
+  process.env.Q1P1_DEMONSTRATE_MISSING_POLICY === '1';
+const demonstrateMissingTenantRls =
+  process.env.Q1P1_DEMONSTRATE_MISSING_TENANT_RLS === '1';
+
+const differentialRows = [
+  {
+    contact: null,
+    id: 'd1000000-0000-4000-8000-000000000001',
+    name: 'Absent contact',
+    number: 'Q1-DIFF-1',
+  },
+  {
+    contact: 'Alpha',
+    id: 'd1000000-0000-4000-8000-000000000002',
+    name: 'Low contact',
+    number: 'Q1-DIFF-2',
+  },
+  {
+    contact: 'm',
+    id: 'd1000000-0000-4000-8000-000000000003',
+    name: 'Equal contact',
+    number: 'Q1-DIFF-3',
+  },
+  {
+    contact: 'zulu',
+    id: 'd1000000-0000-4000-8000-000000000004',
+    name: 'High contact',
+    number: 'Q1-DIFF-4',
+  },
+] as const;
+
+test('q1 filters preserve total semantics, cost classes, policy narrowing, and provider conjunctions', async () => {
+  const definition = q1PartyDefinition();
+  await withRealPartyRuntime(
+    'q1-p1-query-filter-lowering',
+    async (runtime) => {
+      const party = runtime.storage.entities.find(
+        (entity) => entity.entityId === PARTY_IDS.entityIds.party,
+      );
+      assert.ok(party);
+      const nameColumn = requiredColumn(party, PARTY_IDS.fieldIds.name);
+      const contactColumn = requiredColumn(
+        party,
+        PARTY_IDS.fieldIds.contactSummary,
+      );
+      const nameFolded = party.foldedColumns.find(
+        (column) => column.canonicalFieldId === PARTY_IDS.fieldIds.name,
+      );
+      assert.ok(nameFolded);
+      const nameIndex = party.indexes.find(
+        (index) =>
+          index.indexKind === 'foldedAccess' &&
+          index.columnNames.includes(nameFolded.physicalName),
+      );
+      assert.ok(nameIndex);
+      const tenantScopeIndex = party.indexes.find(
+        (index) => index.indexKind === 'caseInsensitiveUnique',
+      );
+      assert.ok(tenantScopeIndex);
+
+      for (const row of differentialRows) {
+        await invokePartyOperation(runtime, runtime.views.a, 'party_create', {
+          recordId: row.id,
+          values: {
+            ...(row.contact === null
+              ? {}
+              : { [PARTY_IDS.fieldIds.contactSummary]: row.contact }),
+            [PARTY_IDS.fieldIds.name]: row.name,
+            [PARTY_IDS.fieldIds.number]: row.number,
+          },
+        });
+      }
+
+      const queryCases = [
+        'q1_equals',
+        'q1_not_equals',
+        'q1_less',
+        'q1_greater',
+        'q1_not_less',
+        'q1_all',
+        'q1_any',
+        'q1_false',
+        'q1_true',
+      ] as const;
+      for (const localId of queryCases) {
+        const compiled = compiledQuery(runtime.views.a, localId);
+        const actual = await invokePartyQuery(
+          runtime,
+          runtime.views.a,
+          `party_${localId}`,
+          { limit: 100 },
+        );
+        const expected = differentialRows
+          .filter((row) => evaluate(compiled.filter, row.contact))
+          .map((row) => row.id)
+          .sort();
+        assert.deepEqual(
+          actual.records
+            .map((record) => record.recordId)
+            .filter((recordId) =>
+              differentialRows.some((row) => row.id === recordId),
+            )
+            .sort(),
+          expected,
+          localId,
+        );
+      }
+
+      const totalized = await invokePartyQuery(
+        runtime,
+        runtime.views.a,
+        'party_q1_not_less',
+        { limit: 100 },
+      );
+      const rawIds = await rawNegatedLessThan(
+        runtime.runtimePool,
+        runtime.contexts.a,
+        party,
+        contactColumn.physicalName,
+        'm',
+      );
+      const totalizedIds = totalized.records
+        .map((record) => record.recordId)
+        .filter((recordId) =>
+          differentialRows.some((row) => row.id === recordId),
+        )
+        .sort();
+      assert.equal(rawIds.includes(differentialRows[0].id), false);
+      assert.equal(totalizedIds.includes(differentialRows[0].id), true);
+      assert.notDeepEqual(rawIds, totalizedIds);
+      if (demonstrateRawTotalization) {
+        assert.deepEqual(rawIds, totalizedIds);
+      }
+
+      await invokePartyOperation(runtime, runtime.views.a, 'party_create', {
+        recordId: 'd1000000-0000-4000-8000-000000000005',
+        values: {
+          [PARTY_IDS.fieldIds.contactSummary]: 'zulu',
+          [PARTY_IDS.fieldIds.name]: 'Index Probe',
+          [PARTY_IDS.fieldIds.number]: 'Q1-INDEX-1',
+        },
+      });
+      const indexedResult = await invokePartyQuery(
+        runtime,
+        runtime.views.a,
+        'party_q1_indexed',
+        { limit: 100 },
+      );
+      assert.deepEqual(
+        indexedResult.records.map((record) => record.recordId),
+        ['d1000000-0000-4000-8000-000000000005'],
+      );
+      await insertPlannerRows(
+        runtime.adminPool,
+        party,
+        nameColumn.physicalName,
+        contactColumn.physicalName,
+      );
+      await runtime.adminPool.query(
+        `ANALYZE north_star_module.${quoted(party.physicalTableName)}`,
+      );
+
+      const observedProbeIds = new Set<string>();
+      const indexedPlan = compiledQuery(
+        runtime.views.a,
+        'q1_indexed',
+      ).filterPlan;
+      assert.ok(indexedPlan);
+      if (demonstrateMissingIndex) {
+        await runtime.adminPool.query(
+          `DROP INDEX north_star_module.${quoted(nameIndex.physicalName)}`,
+        );
+        await runtime.adminPool.query(
+          `ANALYZE north_star_module.${quoted(party.physicalTableName)}`,
+        );
+      }
+      const indexedEvidence = await explainPlans(
+        runtime.runtimePool,
+        runtime.adminPool,
+        runtime.contexts.a,
+        party,
+        [indexedPlan],
+        [nameIndex.physicalName],
+      );
+      assert.equal(indexedEvidence.indexDeltas.get(nameIndex.physicalName), 1n);
+      assert.equal(indexedEvidence.plan.rowsRemoved, 0);
+      assert.ok(indexedEvidence.plan.indexNames.has(nameIndex.physicalName));
+      observedProbeIds.add('Q1-P1/indexed-folded-equality');
+
+      const boundedPlan = compiledQuery(runtime.views.a, 'q1_scan').filterPlan;
+      assert.ok(boundedPlan);
+      const boundedEvidence = await explainPlans(
+        runtime.runtimePool,
+        runtime.adminPool,
+        runtime.contexts.a,
+        party,
+        [boundedPlan],
+        [tenantScopeIndex.physicalName],
+        demonstrateUnboundedScan,
+      );
+      console.log(
+        `Q1-P1 tenant probe index=${tenantScopeIndex.physicalName} observed=${[...boundedEvidence.plan.indexNames].join(',')} sequential=${String(boundedEvidence.plan.sequentialScan)} removed=${String(boundedEvidence.plan.rowsRemoved)} delta=${String(boundedEvidence.indexDeltas.get(tenantScopeIndex.physicalName))}`,
+      );
+      assert.equal(
+        boundedEvidence.indexDeltas.get(tenantScopeIndex.physicalName),
+        1n,
+      );
+      assert.deepEqual(
+        [...boundedEvidence.plan.indexNames],
+        [tenantScopeIndex.physicalName],
+      );
+      assert.equal(boundedEvidence.plan.sequentialScan, false);
+      assert.ok(boundedEvidence.plan.rowsRemoved > 0);
+      observedProbeIds.add('Q1-P1/tenant-bounded-scan');
+      assert.deepEqual(
+        [...observedProbeIds].sort(),
+        PREDICATE_LOWERING_TABLE.map((row) => row.providerProbeId).sort(),
+      );
+
+      const policyAllowed = 'e1000000-0000-4000-8000-000000000001';
+      const policyBlocked = 'e1000000-0000-4000-8000-000000000002';
+      const archived = 'e1000000-0000-4000-8000-000000000003';
+      const otherTenant = 'e1000000-0000-4000-8000-000000000004';
+      const otherEnvironment = 'e1000000-0000-4000-8000-000000000005';
+      for (const [view, recordId, number, name, contact] of [
+        [
+          runtime.views.a,
+          policyAllowed,
+          'Q1-POLICY-1',
+          'Policy Needle',
+          'allowed',
+        ],
+        [
+          runtime.views.a,
+          policyBlocked,
+          'Q1-POLICY-2',
+          'Policy Needle',
+          'blocked',
+        ],
+        [
+          runtime.views.a,
+          archived,
+          'Q1-ARCHIVE-1',
+          'Mandatory Needle',
+          'allowed',
+        ],
+        [
+          runtime.views.b,
+          otherTenant,
+          'Q1-TENANT-1',
+          'Mandatory Needle',
+          'allowed',
+        ],
+      ] as const) {
+        await invokePartyOperation(runtime, view, 'party_create', {
+          recordId,
+          values: {
+            [PARTY_IDS.fieldIds.contactSummary]: contact,
+            [PARTY_IDS.fieldIds.name]: name,
+            [PARTY_IDS.fieldIds.number]: number,
+          },
+        });
+      }
+      await insertCrossEnvironmentRow(
+        runtime.adminPool,
+        party,
+        nameColumn.physicalName,
+        contactColumn.physicalName,
+        otherEnvironment,
+      );
+      await invokePartyOperation(runtime, runtime.views.a, 'party_archive', {
+        expectedRevision: 1,
+        recordId: archived,
+      });
+      if (demonstrateMissingTenantRls) {
+        await runtime.adminPool.query(
+          `ALTER TABLE north_star_module.${quoted(party.physicalTableName)} DISABLE ROW LEVEL SECURITY`,
+        );
+      }
+
+      const mandatoryDefault = await invokePartyQuery(
+        runtime,
+        runtime.views.a,
+        'party_q1_mandatory',
+        { limit: 100 },
+      );
+      assert.deepEqual(mandatoryDefault.records, []);
+      const mandatoryExplicit = await invokePartyQuery(
+        runtime,
+        runtime.views.a,
+        'party_q1_mandatory',
+        { includeArchived: true, limit: 100 },
+      );
+      assert.deepEqual(
+        mandatoryExplicit.records.map((record) => record.recordId),
+        [archived],
+      );
+
+      const base = await invokePartyQuery(
+        runtime,
+        runtime.views.a,
+        'party_q1_policy_base',
+        { limit: 100 },
+      );
+      assert.deepEqual(
+        base.records.map((record) => record.recordId).sort(),
+        [policyAllowed, policyBlocked].sort(),
+      );
+      const contribution = compiledQuery(
+        runtime.views.a,
+        'q1_policy_contribution',
+      );
+      const policyGateway: QueryPolicyNarrowingGateway = {
+        async narrow() {
+          return {
+            filter: contribution.filter,
+            filterPlan: contribution.filterPlan,
+          };
+        },
+      };
+      assert.ok(contribution.filterPlan);
+      assert.equal(
+        contribution.filterPlan.root.kind,
+        'fieldComparisonPredicate',
+      );
+      if (contribution.filterPlan.root.kind !== 'fieldComparisonPredicate') {
+        assert.fail('policy contribution must compile to a comparison');
+      }
+      const mismatchedPlan: PredicateLoweringPlan = {
+        ...contribution.filterPlan,
+        root: {
+          ...contribution.filterPlan.root,
+          value: {
+            kind: 'textValue',
+            schemaVersion: 'v2',
+            value: 'blocked',
+          },
+        },
+      };
+      let malformedExecutorCount = 0;
+      const malformedGateway = new SemanticQueryGateway(
+        new AllowPolicy(),
+        {
+          async execute() {
+            malformedExecutorCount += 1;
+            throw new Error('malformed policy plan reached the provider');
+          },
+        },
+        undefined,
+        {
+          async narrow() {
+            return {
+              filter: contribution.filter,
+              filterPlan: mismatchedPlan,
+            };
+          },
+        },
+      );
+      await assert.rejects(
+        () =>
+          malformedGateway.invoke(runtime.views.a, {
+            arguments: { limit: 100 },
+            queryId: `${PARTY_IDS.namespace}:query.party_q1_policy_base`,
+            schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+          }),
+        (error: unknown) => error instanceof MalformedQueryPolicyNarrowingError,
+      );
+      assert.equal(malformedExecutorCount, 0);
+      const narrowedGateway = new SemanticQueryGateway(
+        new AllowPolicy(),
+        new PostgresModuleRuntimeInterpreter(
+          runtime.runtimePool,
+          actorIssuer(),
+        ),
+        undefined,
+        demonstrateMissingPolicy ? undefined : policyGateway,
+      );
+      const narrowed = await narrowedGateway.invoke(runtime.views.a, {
+        arguments: { limit: 100 },
+        queryId: `${PARTY_IDS.namespace}:query.party_q1_policy_base`,
+        schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+      });
+      assert.deepEqual(
+        narrowed.records.map((record) => record.recordId),
+        [policyAllowed],
+      );
+      const basePlan = compiledQuery(
+        runtime.views.a,
+        'q1_policy_base',
+      ).filterPlan;
+      assert.ok(basePlan);
+      assert.ok(contribution.filterPlan);
+      const policyEvidence = await explainPlans(
+        runtime.runtimePool,
+        runtime.adminPool,
+        runtime.contexts.a,
+        party,
+        [basePlan, contribution.filterPlan],
+        [nameIndex.physicalName],
+      );
+      assert.ok(policyEvidence.plan.indexNames.has(nameIndex.physicalName));
+      assert.equal(policyEvidence.plan.rowsRemoved, 1);
+
+      console.log(
+        `Q1-P1 provider probes: indexed=${nameIndex.physicalName} delta=${String(indexedEvidence.indexDeltas.get(nameIndex.physicalName))} removed=${String(indexedEvidence.plan.rowsRemoved)} tenant=${tenantScopeIndex.physicalName} delta=${String(boundedEvidence.indexDeltas.get(tenantScopeIndex.physicalName))} removed=${String(boundedEvidence.plan.rowsRemoved)} policy_removed=${String(policyEvidence.plan.rowsRemoved)} raw_absent=${String(rawIds.includes(differentialRows[0].id))} total_absent=${String(totalizedIds.includes(differentialRows[0].id))}`,
+      );
+    },
+    definition,
+  );
+});
+
+function q1PartyDefinition(): Record<string, unknown> {
+  const definition = structuredClone(partyModuleDefinition()) as {
+    fields: Array<Record<string, unknown>>;
+    queries: Array<Record<string, unknown>>;
+  } & Record<string, unknown>;
+  const contactField = definition.fields.find(
+    (field) => field.fieldId === PARTY_IDS.fieldIds.contactSummary,
+  );
+  assert.ok(contactField);
+  contactField.collation = 'binary';
+  const template = definition.queries.find(
+    (query) => query.queryId === `${PARTY_IDS.namespace}:query.party_list`,
+  );
+  assert.ok(template);
+  const filters: Readonly<Record<string, unknown>> = {
+    q1_all: {
+      kind: 'allPredicate',
+      schemaVersion: 'v2',
+      terms: [comparison('greaterThan', 'a'), comparison('lessThan', 'z')],
+    },
+    q1_any: {
+      kind: 'anyPredicate',
+      schemaVersion: 'v2',
+      terms: [comparison('equals', 'alpha'), comparison('equals', 'zulu')],
+    },
+    q1_equals: comparison('equals', 'm'),
+    q1_false: { kind: 'booleanPredicate', schemaVersion: 'v2', value: false },
+    q1_greater: comparison('greaterThan', 'm'),
+    q1_indexed: comparison('equals', 'index probe', PARTY_IDS.fieldIds.name),
+    q1_less: comparison('lessThan', 'm'),
+    q1_mandatory: comparison(
+      'equals',
+      'Mandatory Needle',
+      PARTY_IDS.fieldIds.name,
+    ),
+    q1_not_equals: comparison('notEquals', 'm'),
+    q1_not_less: {
+      kind: 'notPredicate',
+      schemaVersion: 'v2',
+      term: comparison('lessThan', 'm'),
+    },
+    q1_policy_base: comparison(
+      'equals',
+      'Policy Needle',
+      PARTY_IDS.fieldIds.name,
+    ),
+    q1_policy_contribution: comparison('equals', 'allowed'),
+    q1_scan: comparison('notEquals', 'alpha'),
+    q1_true: { kind: 'booleanPredicate', schemaVersion: 'v2', value: true },
+  };
+  for (const [localId, filter] of Object.entries(filters)) {
+    const query = structuredClone(template);
+    query.queryId = `${PARTY_IDS.namespace}:query.party_${localId}`;
+    query.tier = 'q1';
+    query.filter = filter;
+    query.selections = (query.selections as Array<Record<string, unknown>>).map(
+      (selection, index) => ({
+        ...selection,
+        selectionId: `${PARTY_IDS.namespace}:selection.party_${localId}_${String(index + 1)}`,
+      }),
+    );
+    definition.queries.push(query);
+  }
+  return definition;
+}
+
+function comparison(
+  operator: 'equals' | 'greaterThan' | 'lessThan' | 'notEquals',
+  value: string,
+  fieldId: string = PARTY_IDS.fieldIds.contactSummary,
+): Record<string, unknown> {
+  return {
+    field: { kind: 'fieldReference', schemaVersion: 'v2', targetId: fieldId },
+    kind: 'fieldComparisonPredicate',
+    operator,
+    schemaVersion: 'v2',
+    value: { kind: 'textValue', schemaVersion: 'v2', value },
+  };
+}
+
+interface CompiledQuery {
+  readonly filter: PredicateExpression;
+  readonly filterPlan: PredicateLoweringPlan;
+}
+
+function compiledQuery(
+  view: Parameters<typeof invokePartyQuery>[1],
+  localId: string,
+): CompiledQuery {
+  const payload = view.projections.query.payload;
+  assert.ok(isRecord(payload));
+  assert.ok(Array.isArray(payload.queries));
+  const query = payload.queries.find(
+    (candidate) =>
+      isRecord(candidate) &&
+      candidate.queryId === `${PARTY_IDS.namespace}:query.party_${localId}`,
+  );
+  assert.ok(isRecord(query));
+  assert.ok(isRecord(query.filter));
+  assert.ok(isRecord(query.filterPlan));
+  return query as unknown as CompiledQuery;
+}
+
+function evaluate(
+  predicate: PredicateExpression,
+  contact: string | null,
+): boolean {
+  const receipt = inspectPredicateForExecution(predicate, {
+    bindingPosition: 'queryFilter',
+    resolveComparison(comparison_) {
+      if (contact === null) return { presence: 'absent' };
+      assert.equal(comparison_.value.kind, 'textValue');
+      const left = contact;
+      const right = comparison_.value.value;
+      const result = {
+        equals: left === right,
+        greaterThan: left > right,
+        lessThan: left < right,
+        notEquals: left !== right,
+      }[comparison_.operator];
+      return { presence: 'present', result };
+    },
+  });
+  assert.equal(receipt.outcome, 'evaluated');
+  return receipt.outcome === 'evaluated' && receipt.result;
+}
+
+async function insertPlannerRows(
+  pool: Pool,
+  entity: Parameters<typeof requiredColumn>[0],
+  nameColumn: string,
+  contactColumn: string,
+): Promise<void> {
+  const numberColumn = requiredColumn(
+    entity,
+    PARTY_IDS.fieldIds.number,
+  ).physicalName;
+  await pool.query(
+    `INSERT INTO north_star_module.${quoted(entity.physicalTableName)}
+       (tenant_id, environment_id, record_id, revision,
+        ${quoted(numberColumn)}, ${quoted(nameColumn)}, ${quoted(contactColumn)})
+     SELECT $1::uuid,
+            $2::uuid,
+            ('f1000000-0000-4000-8000-' || lpad(row_number::text, 12, '0'))::uuid,
+            1,
+            'Q1-BULK-' || lpad(row_number::text, 5, '0'),
+            'Planner row ' || lpad(row_number::text, 5, '0'),
+            CASE WHEN row_number % 2 = 0 THEN 'alpha' ELSE 'zulu' END
+       FROM generate_series(1, 10000) AS row_number`,
+    [PARTY_TEST_SCOPE.a.tenantId, PARTY_TEST_SCOPE.a.environmentId],
+  );
+  await pool.query(
+    `INSERT INTO north_star_module.${quoted(entity.physicalTableName)}
+       (tenant_id, environment_id, record_id, revision,
+        ${quoted(numberColumn)}, ${quoted(nameColumn)}, ${quoted(contactColumn)})
+     SELECT ('f2000000-0000-4000-8000-' || lpad(((row_number - 1) % 90 + 1)::text, 12, '0'))::uuid,
+            $1::uuid,
+            ('f3000000-0000-4000-8000-' || lpad(row_number::text, 12, '0'))::uuid,
+            1,
+            'Q1-OTHER-' || lpad(row_number::text, 5, '0'),
+            'Other tenant row ' || lpad(row_number::text, 5, '0'),
+            'other'
+       FROM generate_series(1, 30000) AS row_number`,
+    [PARTY_TEST_SCOPE.a.environmentId],
+  );
+}
+
+async function insertCrossEnvironmentRow(
+  pool: Pool,
+  entity: Parameters<typeof requiredColumn>[0],
+  nameColumn: string,
+  contactColumn: string,
+  recordId: string,
+): Promise<void> {
+  const numberColumn = requiredColumn(
+    entity,
+    PARTY_IDS.fieldIds.number,
+  ).physicalName;
+  await pool.query(
+    `INSERT INTO north_star_module.${quoted(entity.physicalTableName)}
+       (tenant_id, environment_id, record_id, revision,
+        ${quoted(numberColumn)}, ${quoted(nameColumn)}, ${quoted(contactColumn)})
+     VALUES ($1::uuid, $2::uuid, $3::uuid, 1, 'Q1-ENV-1', 'Mandatory Needle', 'allowed')`,
+    [PARTY_TEST_SCOPE.a.tenantId, PARTY_TEST_SCOPE.b.environmentId, recordId],
+  );
+}
+
+interface PlanNode {
+  readonly 'Index Name'?: unknown;
+  readonly 'Node Type'?: unknown;
+  readonly Plans?: unknown;
+  readonly 'Rows Removed by Filter'?: unknown;
+  readonly [key: string]: unknown;
+}
+
+async function explainPlans(
+  runtimePool: Pool,
+  adminPool: Pool,
+  context: Parameters<typeof withTrustedRequestTransaction>[1],
+  entity: Parameters<typeof requiredColumn>[0],
+  plans: readonly PredicateLoweringPlan[],
+  expectedIndexes: readonly string[],
+  perturb = false,
+): Promise<{
+  indexDeltas: ReadonlyMap<string, bigint>;
+  plan: ReturnType<typeof inspectPlan>;
+}> {
+  const predicate = buildQueryFilterPredicate(entity, plans, 'q1_source');
+  const before = await readIndexCounters(adminPool, expectedIndexes);
+  const root = await withTrustedRequestTransaction(
+    runtimePool,
+    context,
+    async (client) => {
+      await client.query('SET LOCAL ROLE north_star_module_runtime');
+      try {
+        await client.query('SET LOCAL max_parallel_workers_per_gather = 0');
+        if (perturb) {
+          await client.query('SET LOCAL enable_indexscan = off');
+          await client.query('SET LOCAL enable_bitmapscan = off');
+        }
+        const explained = await explain(
+          client,
+          `SELECT ${qualified('q1_source', entity.recordIdentity.column)}
+             FROM north_star_module.${quoted(entity.physicalTableName)} AS ${quoted('q1_source')}
+            WHERE ${qualified('q1_source', entity.archive.archivedAtColumn)} IS NULL
+              AND ${predicate.sql}`,
+          predicate.values,
+        );
+        await client.query('SELECT pg_stat_force_next_flush()');
+        return explained;
+      } finally {
+        await client.query('RESET ROLE');
+      }
+    },
+  );
+  const after = await readIndexCounters(adminPool, expectedIndexes);
+  return {
+    indexDeltas: new Map(
+      expectedIndexes.map((name) => [
+        name,
+        (after.get(name) ?? 0n) - (before.get(name) ?? 0n),
+      ]),
+    ),
+    plan: inspectPlan(root),
+  };
+}
+
+async function rawNegatedLessThan(
+  pool: Pool,
+  context: Parameters<typeof withTrustedRequestTransaction>[1],
+  entity: Parameters<typeof requiredColumn>[0],
+  physicalColumn: string,
+  value: string,
+): Promise<string[]> {
+  return withTrustedRequestTransaction(pool, context, async (client) => {
+    await client.query('SET LOCAL ROLE north_star_module_runtime');
+    try {
+      const result = await client.query<{ record_id: string }>(
+        `SELECT ${quoted(entity.recordIdentity.column)} AS record_id
+           FROM north_star_module.${quoted(entity.physicalTableName)}
+          WHERE ${quoted(entity.archive.archivedAtColumn)} IS NULL
+            AND NOT (
+              north_star_module.nsm_unicode_case_fold_v1(${quoted(physicalColumn)}::text) COLLATE "C"
+              < north_star_module.nsm_unicode_case_fold_v1($1::text) COLLATE "C"
+            )
+          ORDER BY ${quoted(entity.recordIdentity.column)}`,
+        [value],
+      );
+      return result.rows
+        .map((row) => row.record_id)
+        .filter((recordId) =>
+          differentialRows.some((row) => row.id === recordId),
+        );
+    } finally {
+      await client.query('RESET ROLE');
+    }
+  });
+}
+
+async function explain(
+  client: PoolClient,
+  statement: string,
+  values: readonly unknown[],
+): Promise<PlanNode> {
+  const result = await client.query<{ 'QUERY PLAN': unknown }>(
+    `EXPLAIN (ANALYZE, FORMAT JSON) ${statement}`,
+    [...values],
+  );
+  const envelope = result.rows[0]?.['QUERY PLAN'];
+  assert.ok(Array.isArray(envelope));
+  assert.equal(envelope.length, 1);
+  const root = envelope[0];
+  assert.ok(isRecord(root));
+  assert.ok(isRecord(root.Plan));
+  return root.Plan;
+}
+
+function inspectPlan(root: PlanNode): {
+  indexNames: Set<string>;
+  rowsRemoved: number;
+  sequentialScan: boolean;
+} {
+  const indexNames = new Set<string>();
+  let rowsRemoved = 0;
+  let sequentialScan = false;
+  const recognized = new Set([
+    'BitmapAnd',
+    'Bitmap Heap Scan',
+    'Bitmap Index Scan',
+    'BitmapOr',
+    'Index Only Scan',
+    'Index Scan',
+    'Result',
+    'Seq Scan',
+  ]);
+  const visit = (node: PlanNode): void => {
+    assert.equal(typeof node['Node Type'], 'string');
+    assert.ok(
+      recognized.has(String(node['Node Type'])),
+      `unrecognized executed plan node ${String(node['Node Type'])}`,
+    );
+    if (node['Node Type'] === 'Seq Scan') sequentialScan = true;
+    if (node['Index Name'] !== undefined) {
+      assert.equal(typeof node['Index Name'], 'string');
+      indexNames.add(String(node['Index Name']));
+    }
+    if (node['Rows Removed by Filter'] !== undefined) {
+      assert.equal(typeof node['Rows Removed by Filter'], 'number');
+      rowsRemoved += Number(node['Rows Removed by Filter']);
+    }
+    if (node.Plans !== undefined) {
+      assert.ok(Array.isArray(node.Plans));
+      for (const child of node.Plans) {
+        assert.ok(isRecord(child));
+        visit(child);
+      }
+    }
+  };
+  visit(root);
+  return { indexNames, rowsRemoved, sequentialScan };
+}
+
+async function readIndexCounters(
+  pool: Pool,
+  names: readonly string[],
+): Promise<ReadonlyMap<string, bigint>> {
+  const result = await pool.query<{ index_name: string; scan_count: string }>(
+    `SELECT indexrelname AS index_name, idx_scan::text AS scan_count
+       FROM pg_stat_user_indexes
+      WHERE schemaname = 'north_star_module'
+        AND indexrelname = ANY($1::text[])`,
+    [names],
+  );
+  return new Map(
+    result.rows.map((row) => [row.index_name, BigInt(row.scan_count)]),
+  );
+}
+
+class AllowPolicy implements CurrentPolicyGateway {
+  async authorize() {
+    return {
+      decision: 'ALLOW' as const,
+      decisionVersion: CURRENT_POLICY_DECISION_VERSION,
+      policyVersion: 'q1-p1-policy/v1',
+    };
+  }
+
+  async readCurrentVersion() {
+    return { policyVersion: 'q1-p1-policy/v1' };
+  }
+}
+
+function actorIssuer(): TrustedActorEnvelopeIssuer {
+  return new TrustedActorEnvelopeIssuer({
+    async resolve(context) {
+      return {
+        approvingHumanId: null,
+        delegation: null,
+        executionPrincipal: {
+          kind: 'HUMAN',
+          principalId: context.principalId,
+        },
+        initiatingHumanId: context.principalId,
+        subject: null,
+      };
+    },
+  });
+}
+
+function requiredColumn(
+  entity: StorageTargetPayloadV1['entities'][number],
+  fieldId: string,
+) {
+  const column = entity.columns.find(
+    (candidate) => candidate.canonicalFieldId === fieldId,
+  );
+  assert.ok(column);
+  return column;
+}
+
+function quoted(value: string): string {
+  return `"${value.replaceAll('"', '""')}"`;
+}
+
+function qualified(alias: string, column: string): string {
+  return `${quoted(alias)}.${quoted(column)}`;
+}
+
+function isRecord(
+  value: unknown,
+): value is Record<string, ImmutableJsonValue | unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
