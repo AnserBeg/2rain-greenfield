@@ -1,10 +1,11 @@
 # Q1-P3a — Rule the query-level aggregate contract
 
-Status: evidence in progress
+Status: evidence ready; Critical review pending
 Tier: Critical
 Lane: KERNEL
 Initial base: `a76d18f2df89c12317022e56519f2abfbc532575`
 Integrated working base after lane merge: `ba1f83bdb8b3f3f44c2c3396d238599b9c4d9e0d`
+Final integrated `main` parent: `37a41078f291d5ff10d22a4951fa3af339d4520f`
 
 ## Outcome
 
@@ -267,8 +268,28 @@ The first-attempt baseline at `a76d18f2df89c12317022e56519f2abfbc532575` was gre
 | Observability | 5/5 |
 | Reachability | 72/72 from 9 producer artifacts |
 
-Final exact-SHA results are recorded after the lane's current `main` is integrated and the full
-matrix is rerun.
+The full matrix then passed on its first attempt at the integrated candidate. No retry was used:
+
+| Gate | Integrated-candidate observation |
+| --- | --- |
+| `format`, `build`, `lint`, `typecheck` | PASS |
+| `check:boundaries` | PASS — 125 production files |
+| `check:schema` | PASS — 12 applied / 12 verified plus drift |
+| `check:demo-release`, `check:app-release` | PASS; canonical demo/app artifacts unchanged |
+| Unit | 43/43 |
+| Compiler | 54/54; canonical bytes and release-root goldens unchanged |
+| Integration | 59/59 |
+| Agent | 3/3 |
+| Architecture | 75/75 |
+| Contracts | 6/6 |
+| PostgreSQL | 91/91 |
+| Locale | 1/1 |
+| Browser | 17/17 |
+| Observability | 5/5 |
+| Reachability | 73/73 from 9 producer artifacts; `query-aggregate-semantics.test.ts` executed |
+
+The final documentation-only candidate reruns the same full matrix so the frozen SHA, packet
+record, and executed evidence remain identical.
 
 ## Review evidence
 
