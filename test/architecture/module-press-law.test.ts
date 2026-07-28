@@ -42,6 +42,10 @@ test('one auto-discovered guard covers every definition-backed product module', 
     'platform',
   ]);
   assert.equal(result.modulesRead, 4);
+  assert.ok(
+    result.productionFilesRead > 0,
+    'press-law guard read zero production files',
+  );
   assert.ok(result.scannedFiles > 0, 'press-law guard read zero files');
   assert.deepEqual(result.violations, routedPlatformDebt);
 });
@@ -73,6 +77,75 @@ test('consolidated guard red: an absent module corpus cannot pass vacuously', ()
       checkModulePressLaw(root).violations.map((violation) => violation.ruleId),
       ['PRESS001_NO_MODULES'],
     );
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});
+
+test('consolidated guard red: an absent production press cannot pass vacuously', () => {
+  const root = createArchitectureFixture({
+    'packages/domain/src/widget/definition.ts':
+      "export const WIDGET_NAMESPACE = 'northstar.widget';\n",
+  });
+  try {
+    const result = checkModulePressLaw(root);
+    assert.equal(result.modulesRead, 1);
+    assert.equal(result.productionFilesRead, 0);
+    assert.deepEqual(
+      result.violations.map((violation) => violation.ruleId),
+      ['PRESS009_NO_PRODUCTION_PRESS'],
+    );
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});
+
+test('consolidated guard derives generated query and operation local IDs', () => {
+  const root = createArchitectureFixture({
+    'apps/api/src/generic.ts': "export const queryId = 'widget_list';\n",
+    'packages/domain/src/widget/definition.ts': [
+      "export const WIDGET_NAMESPACE = 'northstar.widget';",
+      'const entityId = `${WIDGET_NAMESPACE}:entity.widget`;',
+    ].join('\n'),
+  });
+  try {
+    assert.deepEqual(checkModulePressLaw(root).violations, [
+      {
+        file: 'apps/api/src/generic.ts',
+        line: 1,
+        message: 'generic press references widget identity widget_list',
+        moduleDirectory: 'widget',
+        ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+      },
+    ]);
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});
+
+test('consolidated guard rejects a structurally copied module assertion', () => {
+  const root = createArchitectureFixture({
+    'apps/api/src/generic.ts': 'export const generic = true;\n',
+    'packages/domain/src/widget/definition.ts': [
+      "export const WIDGET_NAMESPACE = 'northstar.widget';",
+      'const entityId = `${WIDGET_NAMESPACE}:entity.widget`;',
+    ].join('\n'),
+    'test/unit/widget.test.ts': [
+      "import assert from 'node:assert/strict';",
+      'assert.doesNotMatch(source, /northstar\\.widget|widget_(?:get|list|create)/);',
+    ].join('\n'),
+  });
+  try {
+    assert.deepEqual(checkModulePressLaw(root).violations, [
+      {
+        file: 'test/unit/widget.test.ts',
+        line: 2,
+        message:
+          'module press law is reimplemented outside the consolidated guard',
+        moduleDirectory: null,
+        ruleId: 'PRESS008_COPIED_MODULE_GUARD',
+      },
+    ]);
   } finally {
     removeArchitectureFixture(root);
   }

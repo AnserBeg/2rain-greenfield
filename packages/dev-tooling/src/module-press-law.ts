@@ -9,7 +9,8 @@ export type ModulePressLawRuleId =
   | 'PRESS005_DOMAIN_GLUE'
   | 'PRESS006_MODULE_ID_IN_PRESS'
   | 'PRESS007_MODULE_GLUE_IN_PRESS'
-  | 'PRESS008_COPIED_MODULE_GUARD';
+  | 'PRESS008_COPIED_MODULE_GUARD'
+  | 'PRESS009_NO_PRODUCTION_PRESS';
 
 export interface ModulePressLawViolation {
   readonly file: string;
@@ -22,6 +23,7 @@ export interface ModulePressLawViolation {
 export interface ModulePressLawResult {
   readonly moduleDirectories: readonly string[];
   readonly modulesRead: number;
+  readonly productionFilesRead: number;
   readonly scannedFiles: number;
   readonly violations: readonly ModulePressLawViolation[];
 }
@@ -64,7 +66,7 @@ const domainSql =
   /\b(?:SELECT|INSERT\s+INTO|UPDATE\s+.+\s+SET|DELETE\s+FROM|CREATE\s+TABLE|ALTER\s+TABLE|DROP\s+TABLE|TRUNCATE)\b/iu;
 const domainGlue =
   /(?:class|function)\s+\w*(?:Handler|Executor|Gateway|Repository|Service)\b|React|route\s*\(/u;
-const copiedGuard =
+const copiedGuardProse =
   /generic production press has no .+ branch|production press sources are absent|contains module glue/u;
 
 export function checkModulePressLaw(
@@ -90,7 +92,19 @@ export function checkModulePressLaw(
     checkDomainSources(root, module, violations, scanned);
   }
 
-  for (const file of productionPressFiles(root)) {
+  const productionFiles = productionPressFiles(root);
+  if (productionFiles.length === 0) {
+    add(
+      violations,
+      '.',
+      1,
+      'PRESS009_NO_PRODUCTION_PRESS',
+      null,
+      'no generic production press files were discovered',
+    );
+  }
+
+  for (const file of productionFiles) {
     scanned.add(file);
     const source = readFileSync(file, 'utf8');
     const repoPath = normalizePath(relative(root, file));
@@ -124,7 +138,7 @@ export function checkModulePressLaw(
   for (const file of testSourceFiles(root)) {
     scanned.add(file);
     const source = readFileSync(file, 'utf8');
-    const match = copiedGuard.exec(source);
+    const match = copiedModuleGuardMatch(source, modules);
     if (!match) continue;
     add(
       violations,
@@ -141,6 +155,7 @@ export function checkModulePressLaw(
       modules.map((module) => module.directory).toSorted(),
     ),
     modulesRead: modules.length,
+    productionFilesRead: productionFiles.length,
     scannedFiles: scanned.size,
     violations: Object.freeze(
       violations.toSorted((left, right) =>
@@ -208,6 +223,20 @@ function discoverModules(
     ]
       .map((match) => match[1])
       .filter((value): value is string => value !== undefined);
+    for (const canonicalName of canonicalNames) {
+      for (const suffix of [
+        'get',
+        'list',
+        'search',
+        'resolve',
+        'create',
+        'update',
+        'archive',
+        'restore',
+      ]) {
+        localIds.push(`${canonicalName}_${suffix}`);
+      }
+    }
     modules.push({
       directory: entry.name,
       glueNames: unique([
@@ -335,6 +364,38 @@ function moduleGlueMatch(
         .includes(`${name.toLocaleLowerCase('en-US')}executor`)
     ) {
       return { index: 0, value: repoPath };
+    }
+  }
+  return undefined;
+}
+
+function copiedModuleGuardMatch(
+  source: string,
+  modules: readonly ModuleDescriptor[],
+): { index: number } | undefined {
+  const proseMatch = copiedGuardProse.exec(source);
+  if (proseMatch) return { index: proseMatch.index };
+
+  for (const assertion of source.matchAll(
+    /\b(?:assert\.)?doesNotMatch\s*\(/gu,
+  )) {
+    const index = assertion.index;
+    const callEnd = source.indexOf(');', index);
+    const call = source
+      .slice(index, callEnd === -1 ? index + 2_000 : callEnd + 2)
+      .replaceAll('\\', '');
+    if (!/doesNotMatch\s*\(\s*(?:source|genericPress)\s*,/u.test(call)) {
+      continue;
+    }
+    for (const module of modules) {
+      if (moduleIdentityMatch(call, module)) return { index };
+      if (
+        module.glueNames.some((name) =>
+          new RegExp(`\\b${escapeRegExp(name)}_`, 'iu').test(call),
+        )
+      ) {
+        return { index };
+      }
     }
   }
   return undefined;
