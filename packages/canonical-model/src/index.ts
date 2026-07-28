@@ -45,10 +45,17 @@ export {
 } from './normalize.js';
 export {
   PREDICATE_KERNEL_RECEIPT_VERSION,
+  PREDICATE_POSITION_PROFILES,
+  PREDICATE_POSITION_PROFILE_VERSION,
   inspectPredicateForExecution,
   type LiteralTruePredicate,
+  type PredicateBindingPosition,
+  type PredicateComparisonResolution,
+  type PredicateEvaluationOptions,
+  type PredicateFalseDisposition,
   type PredicateKernelEntryPoint,
   type PredicateKernelReceipt,
+  type PredicatePositionProfile,
 } from './predicate-kernel.js';
 export {
   canonicalize,

@@ -144,6 +144,167 @@ test('the runtime predicate fence is strict, version-dispatched, and admits only
   );
 });
 
+test('absent comparisons are total at every predicate binding position', () => {
+  const comparison = {
+    field: {
+      kind: 'fieldReference',
+      schemaVersion: 'v2',
+      targetId: 'northstar.inventory:field.item_quantity',
+    },
+    kind: 'fieldComparisonPredicate',
+    operator: 'lessThan',
+    schemaVersion: 'v2',
+    value: {
+      kind: 'integerValue',
+      schemaVersion: 'v2',
+      value: '5',
+    },
+  };
+  const expectedDispositions = {
+    derivation: 'derive-false',
+    guard: 'disable-guarded-path',
+    operationPrecondition: 'reject-operation',
+    queryFilter: 'exclude-row',
+    validation: 'reject-value',
+    visibilityCondition: 'hide-content',
+  } as const;
+
+  for (const [bindingPosition, falseDisposition] of Object.entries(
+    expectedDispositions,
+  )) {
+    const receipt = inspectPredicateForExecution(comparison, {
+      bindingPosition: bindingPosition as keyof typeof expectedDispositions,
+      resolveComparison: () => ({ presence: 'absent' }),
+    });
+    assert.equal(receipt.outcome, 'evaluated');
+    assert.equal(receipt.outcome === 'evaluated' && receipt.result, false);
+    assert.equal(
+      receipt.outcome === 'evaluated' && receipt.falseDisposition,
+      falseDisposition,
+    );
+  }
+
+  const negated = inspectPredicateForExecution(
+    { kind: 'notPredicate', schemaVersion: 'v2', term: comparison },
+    {
+      bindingPosition: 'queryFilter',
+      resolveComparison: () => ({ presence: 'absent' }),
+    },
+  );
+  assert.equal(negated.outcome, 'evaluated');
+  assert.equal(negated.outcome === 'evaluated' && negated.result, true);
+
+  const undefinedResolution = inspectPredicateForExecution(comparison, {
+    bindingPosition: 'queryFilter',
+    resolveComparison: () => undefined as never,
+  });
+  assert.equal(undefinedResolution.outcome, 'rejected');
+  assert.equal(
+    undefinedResolution.outcome === 'rejected' && undefinedResolution.reason,
+    'invalid-comparison-resolution',
+  );
+
+  for (const schemaVersion of ['v0-experimental', 'v1', 'v2'] as const) {
+    const versioned = structuredClone(comparison);
+    versioned.schemaVersion = schemaVersion;
+    versioned.field.schemaVersion = schemaVersion;
+    versioned.value.schemaVersion = schemaVersion;
+    const receipt = inspectPredicateForExecution(versioned, {
+      bindingPosition: 'queryFilter',
+      resolveComparison: () => ({ presence: 'absent' }),
+    });
+    assert.equal(receipt.outcome, 'evaluated');
+    assert.equal(receipt.outcome === 'evaluated' && receipt.result, false);
+  }
+
+  const unknownNestedVersion = inspectPredicateForExecution(
+    {
+      kind: 'notPredicate',
+      schemaVersion: 'v2',
+      term: { ...comparison, schemaVersion: 'unknown' },
+    },
+    {
+      bindingPosition: 'queryFilter',
+      resolveComparison: () => ({ presence: 'absent' }),
+    },
+  );
+  assert.equal(unknownNestedVersion.outcome, 'rejected');
+  assert.equal(
+    unknownNestedVersion.outcome === 'rejected' && unknownNestedVersion.reason,
+    'unsupported-node-version',
+  );
+
+  const emptyAll = inspectPredicateForExecution(
+    { kind: 'allPredicate', schemaVersion: 'v2', terms: [] },
+    {
+      bindingPosition: 'queryFilter',
+      resolveComparison: () => ({ presence: 'absent' }),
+    },
+  );
+  const emptyAny = inspectPredicateForExecution(
+    { kind: 'anyPredicate', schemaVersion: 'v2', terms: [] },
+    {
+      bindingPosition: 'queryFilter',
+      resolveComparison: () => ({ presence: 'absent' }),
+    },
+  );
+  assert.equal(emptyAll.outcome === 'evaluated' && emptyAll.result, true);
+  assert.equal(emptyAny.outcome === 'evaluated' && emptyAny.result, false);
+});
+
+test('F3 operators and optional aggregation stay compile-time rejected', () => {
+  for (const operator of ['greaterThanOrEqual', 'lessThanOrEqual']) {
+    const authored = structuredClone(fixture()) as unknown as {
+      queries: Array<Record<string, unknown>>;
+    };
+    authored.queries[0]!.filter = {
+      field: {
+        kind: 'fieldReference',
+        schemaVersion: 'v0-experimental',
+        targetId: 'northstar.inventory:field.item_name',
+      },
+      kind: 'fieldComparisonPredicate',
+      operator,
+      schemaVersion: 'v0-experimental',
+      value: {
+        kind: 'textValue',
+        schemaVersion: 'v0-experimental',
+        value: 'M',
+      },
+    };
+    expectDiagnostic(
+      () => normalizeApplicationPackage(authored),
+      'CANON_SCHEMA_INVALID',
+    );
+  }
+
+  const optionalSum = structuredClone(fixture()) as unknown as {
+    fields: Array<{ fieldId: string; presence?: string }>;
+    queries: Array<Record<string, unknown>>;
+  };
+  const quantity = optionalSum.fields.find(
+    (field) => field.fieldId === 'northstar.inventory:field.item_quantity',
+  );
+  assert.ok(quantity);
+  assert.equal(quantity.presence ?? 'optional', 'optional');
+  optionalSum.queries[0]!.aggregates = [
+    {
+      field: {
+        kind: 'fieldReference',
+        schemaVersion: 'v0-experimental',
+        targetId: quantity.fieldId,
+      },
+      function: 'sum',
+      kind: 'aggregateSelection',
+      schemaVersion: 'v0-experimental',
+    },
+  ];
+  expectDiagnostic(
+    () => normalizeApplicationPackage(optionalSum),
+    'CANON_SCHEMA_INVALID',
+  );
+});
+
 test('unresolved and wrong-kind references fail with structured diagnostics', () => {
   const unresolved = structuredClone(fixture());
   unresolved.queries[0]!.sourceEntity.targetId =
