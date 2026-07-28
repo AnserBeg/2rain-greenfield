@@ -1,11 +1,27 @@
 import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import test from 'node:test';
+import { promisify } from 'node:util';
 
 import pg from 'pg';
 
+import {
+  canonicalize,
+  normalizeApplicationPackage,
+} from '../../packages/canonical-model/src/index.js';
+import {
+  DEFAULT_COMPILER_LIMITS,
+  MODULE_COMPILER_PROFILE,
+  PROJECTION_FAMILY_IDS,
+  compileApplication,
+  expectedActiveReleaseFrom,
+  type CompileSuccess,
+  type StorageTargetPayloadV1,
+} from '../../packages/compiler/src/index.js';
 import {
   APPLICATION_IDS,
   composedApplicationDefinition,
@@ -40,7 +56,9 @@ import { withEphemeralPostgres } from '../helpers/postgres.js';
 
 const compiledArtifactPath = resolve('apps/web/release/app.compiled.json');
 const authoredArtifactPath = resolve('apps/web/release/app.authored.json');
+const compileScriptPath = resolve('apps/web/scripts/compile-app-release.ts');
 const migrationsDirectory = resolve('db/migrations');
+const execFileAsync = promisify(execFile);
 
 test(
   'composed product activates through the kernel and persists tenant-scoped gateway data',
@@ -139,6 +157,130 @@ test(
             tenantA.close(),
             tenantB?.close() ?? Promise.resolve(),
           ]);
+        }
+      },
+    );
+  },
+);
+
+test(
+  'composed product advances an existing deployment to an exact compiled successor',
+  { timeout: 120_000 },
+  async () => {
+    await withEphemeralPostgres(
+      'g2-1g-release-advancement',
+      async ({ connection, pool }) => {
+        const compiledApplication = JSON.parse(
+          await readFile(compiledArtifactPath, 'utf8'),
+        ) as unknown;
+        const authoredApplication = JSON.parse(
+          await readFile(authoredArtifactPath, 'utf8'),
+        ) as Record<string, unknown>;
+        const databaseUrl = connectionUrl(connection);
+        let runtime = await createRuntime(
+          compiledApplication,
+          databaseUrl,
+          'advancing-tenant',
+        );
+        try {
+          await assertExactSwapTriggerEnabled(pool);
+          const sourceReleaseId = runtime.activeReleaseId;
+          const recordId = randomUUID();
+          const created = await createParty(runtime, recordId, 'P-UPGRADE-001');
+          assert.equal(created.outcome, 'succeeded');
+          const before = await partyRowSnapshot(
+            pool,
+            runtime,
+            compiledApplication,
+            recordId,
+          );
+          const candidate = await compileCandidateEnvelope(
+            compiledApplication,
+            authoredApplication,
+          );
+          const mismatched = compileMismatchedEnvelope(
+            compiledApplication,
+            authoredApplication,
+          );
+          await runtime.close();
+
+          await assert.rejects(
+            createRuntime(mismatched, databaseUrl, 'advancing-tenant'),
+            /transition does not match its declared previous release/,
+          );
+          assert.equal(
+            await activeReleaseId(pool, runtime.identity),
+            sourceReleaseId,
+          );
+
+          await pool.query(
+            `ALTER TABLE platform.active_release_pointers
+               DISABLE TRIGGER active_release_pointer_exact_swap`,
+          );
+          try {
+            await assert.rejects(
+              createRuntime(candidate, databaseUrl, 'advancing-tenant'),
+              /active_release_pointer_exact_swap is not enabled/,
+            );
+          } finally {
+            await pool.query(
+              `ALTER TABLE platform.active_release_pointers
+                 ENABLE TRIGGER active_release_pointer_exact_swap`,
+            );
+          }
+          await assertExactSwapTriggerEnabled(pool);
+          assert.equal(
+            await activeReleaseId(pool, runtime.identity),
+            sourceReleaseId,
+          );
+
+          await assertApprovalRequiredForAdvancement(
+            runtime,
+            candidate,
+            connection,
+            pool,
+          );
+          assert.equal(
+            await activeReleaseId(pool, runtime.identity),
+            sourceReleaseId,
+          );
+          await assertExactSwapTriggerEnabled(pool);
+
+          runtime = await createRuntime(
+            candidate,
+            databaseUrl,
+            'advancing-tenant',
+          );
+          await assertExactSwapTriggerEnabled(pool);
+          assert.notEqual(
+            runtime.releaseRoot,
+            parseCompiledApplication(compiledApplication).application.compiled
+              .releaseRoot,
+          );
+          const after = await partyRowSnapshot(
+            pool,
+            runtime,
+            candidate,
+            recordId,
+          );
+          assert.deepEqual(
+            after,
+            before,
+            'the persisted PostgreSQL tuple identity and contents are unchanged by a no-storage release advancement',
+          );
+          const listed = await listParty(runtime);
+          assert.deepEqual(
+            listed.records.map((record) => record.recordId),
+            [recordId],
+            'the row written under release A is readable under release B',
+          );
+          await assertApprovedActivationRecorded(
+            pool,
+            runtime,
+            sourceReleaseId,
+          );
+        } finally {
+          await runtime.close();
         }
       },
     );
@@ -285,6 +427,103 @@ async function assertApprovalEnforcementAndApprovedActivation(
       candidateReleaseId,
     );
     await assertExactSwapTriggerEnabled(adminPool);
+  } finally {
+    await runtimePool.end();
+  }
+}
+
+async function assertApprovalRequiredForAdvancement(
+  runtime: ComposedApplicationRuntime,
+  compiledApplication: unknown,
+  connection: pg.PoolConfig,
+  adminPool: pg.Pool,
+): Promise<void> {
+  const runtimePool = new pg.Pool({
+    ...connection,
+    max: 2,
+    user: 'north_star_runtime',
+  });
+  runtimePool.on('error', () => undefined);
+  try {
+    const context = await new AuthenticatedRequestEntryAdapter(
+      async () => runtime.identity,
+    ).enter({});
+    const application =
+      parseCompiledApplication(compiledApplication).application;
+    const candidate = await adminPool.query<{
+      release_id: MintedUuid;
+      verification_evidence_id: MintedUuid;
+    }>(
+      `SELECT release_id, verification_evidence_id
+         FROM platform.tenant_releases
+        WHERE tenant_id = $1
+          AND environment_id = $2
+          AND content_hash = $3`,
+      [
+        context.tenantId,
+        context.environmentId,
+        application.compiled.releaseRoot,
+      ],
+    );
+    const target = candidate.rows[0];
+    assert.ok(
+      target,
+      'the trigger-negative startup registered the real candidate',
+    );
+    const approverPrincipalId = await currentApproverPrincipal(
+      adminPool,
+      context.tenantId,
+    );
+    const approverContext = await new AuthenticatedRequestEntryAdapter(
+      async () => ({
+        environmentId: context.environmentId,
+        principalId: approverPrincipalId,
+        tenantId: context.tenantId,
+      }),
+    ).enter({});
+    const rejectedAttemptId = await prepareAndApproveCandidate(
+      runtimePool,
+      context,
+      approverContext,
+      {
+        compiled: application.compiled,
+        evidenceId: target.verification_evidence_id,
+        releaseId: target.release_id,
+      },
+    );
+    await assertAttemptTargetsCandidate(
+      adminPool,
+      rejectedAttemptId,
+      target.release_id,
+    );
+    await setApproverEligibility(
+      adminPool,
+      context.tenantId,
+      approverPrincipalId,
+      false,
+    );
+    const systemContext = await new AuthenticatedRequestEntryAdapter(
+      async () => ({
+        environmentId: context.environmentId,
+        principalId: SYSTEM_EXECUTION_PRINCIPAL.principalId,
+        tenantId: context.tenantId,
+      }),
+    ).enter({});
+    const rejected = await new PostgresReleaseActivationService(
+      runtimePool,
+    ).activate(systemContext, {
+      activationAttemptId: rejectedAttemptId,
+    });
+    assert.equal(rejected.decisiveOutcomeCode, 'APPROVER_REVOCATION');
+    assert.equal(rejected.status, 'NO_SWAP_TERMINAL');
+    assert.equal(rejected.releaseId, null);
+    await assertExactSwapTriggerEnabled(adminPool);
+    await setApproverEligibility(
+      adminPool,
+      context.tenantId,
+      approverPrincipalId,
+      true,
+    );
   } finally {
     await runtimePool.end();
   }
@@ -539,6 +778,127 @@ function listParty(runtime: ComposedApplicationRuntime) {
   );
 }
 
+function createParty(
+  runtime: ComposedApplicationRuntime,
+  recordId: string,
+  number: string,
+) {
+  return runtime.entry.run({ headers: { authorization: 'local' } }, (view) =>
+    runtime.operationGateway.invoke(
+      view,
+      {
+        confirmationGrant: null,
+        idempotencyKey: randomUUID(),
+        input: {
+          recordId,
+          values: {
+            [APPLICATION_IDS.party.fieldIds.contactSummary]:
+              'upgrade@example.test',
+            [APPLICATION_IDS.party.fieldIds.name]: 'Upgrade-safe Party',
+            [APPLICATION_IDS.party.fieldIds.number]: number,
+          },
+        },
+        operationId: APPLICATION_IDS.party.createOperationId,
+        schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
+      },
+      runtime.operationMediation.issueInvocation(view, 'UI'),
+    ),
+  );
+}
+
+async function partyRowSnapshot(
+  pool: pg.Pool,
+  runtime: ComposedApplicationRuntime,
+  compiledApplication: unknown,
+  recordId: string,
+): Promise<unknown> {
+  const storage = storageTarget(
+    parseCompiledApplication(compiledApplication).application.compiled,
+  );
+  const party = storage.entities.find(
+    (entity) => entity.entityId === 'northstar.app:entity.party',
+  );
+  assert.ok(party);
+  assert.match(party.physicalTableName, /^nsm_t_[a-z2-7]+$/);
+  const result = await pool.query<{
+    ctid: string;
+    row: unknown;
+    xmin: string;
+  }>(
+    `SELECT ctid::text AS ctid,
+            to_jsonb(stored_row) AS row,
+            xmin::text AS xmin
+       FROM north_star_module.${party.physicalTableName} AS stored_row
+      WHERE tenant_id = $1 AND environment_id = $2 AND record_id = $3`,
+    [runtime.identity.tenantId, runtime.identity.environmentId, recordId],
+  );
+  const snapshot = result.rows[0];
+  assert.ok(snapshot);
+  return snapshot;
+}
+
+function storageTarget(compiled: CompileSuccess): StorageTargetPayloadV1 {
+  const reference = compiled.bundle.releaseManifest.projections.find(
+    (projection) => projection.familyId === PROJECTION_FAMILY_IDS.storageTarget,
+  );
+  assert.ok(reference);
+  const manifestArtifact = compiled.bundle.artifacts.find(
+    (artifact) =>
+      artifact.artifactKind === 'projectionManifest' &&
+      artifact.contentHash === reference.artifactRoot,
+  );
+  assert.ok(manifestArtifact);
+  const manifest = JSON.parse(
+    new TextDecoder().decode(manifestArtifact.canonicalBytes),
+  ) as { chunks: readonly { contentHash: string }[] };
+  assert.equal(manifest.chunks.length, 1);
+  const chunk = compiled.bundle.artifacts.find(
+    (artifact) =>
+      artifact.artifactKind === 'projectionChunk' &&
+      artifact.contentHash === manifest.chunks[0]?.contentHash,
+  );
+  assert.ok(chunk);
+  return JSON.parse(
+    new TextDecoder().decode(chunk.canonicalBytes),
+  ) as StorageTargetPayloadV1;
+}
+
+async function assertApprovedActivationRecorded(
+  pool: pg.Pool,
+  runtime: ComposedApplicationRuntime,
+  sourceReleaseId: MintedUuid,
+): Promise<void> {
+  const result = await pool.query<{ count: string }>(
+    `SELECT count(*)::text AS count
+       FROM platform.release_activation_attempts AS attempt
+       JOIN platform.release_approvals AS approval
+         ON approval.tenant_id = attempt.tenant_id
+        AND approval.environment_id = attempt.environment_id
+        AND approval.approval_id = attempt.approval_id
+        AND approval.activation_attempt_id = attempt.activation_attempt_id
+       JOIN platform.release_activation_attempt_outcomes AS outcome
+         ON outcome.tenant_id = attempt.tenant_id
+        AND outcome.environment_id = attempt.environment_id
+        AND outcome.activation_attempt_id = attempt.activation_attempt_id
+      WHERE approval.tenant_id = $1
+        AND approval.environment_id = $2
+        AND approval.expected_release_id = $3
+        AND approval.target_release_id = $4
+        AND outcome.outcome_code = 'SWAPPED'`,
+    [
+      runtime.identity.tenantId,
+      runtime.identity.environmentId,
+      sourceReleaseId,
+      runtime.activeReleaseId,
+    ],
+  );
+  assert.equal(
+    result.rows[0]?.count,
+    '1',
+    'the successful advancement is bound to a persisted human approval',
+  );
+}
+
 async function assertExactSwapTriggerEnabled(pool: pg.Pool): Promise<void> {
   const trigger = await pool.query<{ enabled: string }>(
     `SELECT tgenabled AS enabled
@@ -565,4 +925,143 @@ function createRuntime(
 
 function connectionUrl(connection: pg.PoolConfig): string {
   return `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`;
+}
+
+async function compileCandidateEnvelope(
+  compiledApplication: unknown,
+  authoredApplication: Record<string, unknown>,
+): Promise<unknown> {
+  const candidateDefinition = structuredClone(authoredApplication);
+  const packageDefinition = candidateDefinition.package as Record<
+    string,
+    unknown
+  >;
+  packageDefinition.version = '1.0.1';
+  const directory = await mkdtemp(
+    resolve(tmpdir(), 'northstar-app-release-advancement-'),
+  );
+  const authoredPath = resolve(directory, 'app.authored.json');
+  const compiledPath = resolve(directory, 'app.compiled.json');
+  try {
+    await Promise.all([
+      writeFile(authoredPath, JSON.stringify(candidateDefinition)),
+      writeFile(compiledPath, JSON.stringify(compiledApplication)),
+    ]);
+    const environment = {
+      ...process.env,
+      NORTH_STAR_APP_AUTHORED_PATH: authoredPath,
+      NORTH_STAR_APP_COMPILED_PATH: compiledPath,
+    };
+    for (const arguments_ of [
+      ['--import', 'tsx', compileScriptPath],
+      ['--import', 'tsx', compileScriptPath, '--check'],
+    ]) {
+      await execFileAsync(process.execPath, arguments_, {
+        cwd: resolve('.'),
+        encoding: 'utf8',
+        env: environment,
+        maxBuffer: 2 * 1024 * 1024,
+        timeout: 30_000,
+      });
+    }
+    const candidate = JSON.parse(
+      await readFile(compiledPath, 'utf8'),
+    ) as unknown;
+    const previous = parseCompiledApplication(compiledApplication);
+    assert.equal(
+      parseCompiledApplication(candidate).applications.length,
+      previous.applications.length + 1,
+      'the rebuild appends one immutable successor to the compiled lineage',
+    );
+    return candidate;
+  } finally {
+    await rm(directory, { force: true, recursive: true });
+  }
+}
+
+function compileMismatchedEnvelope(
+  compiledApplication: unknown,
+  authoredApplication: Record<string, unknown>,
+): unknown {
+  const previous = parseCompiledApplication(compiledApplication);
+  const decoyBytes = normalizedDefinitionVersion(authoredApplication, '1.0.8');
+  const decoy = compileSuccessor(previous.application.compiled, decoyBytes);
+  const mismatchedBytes = normalizedDefinitionVersion(
+    authoredApplication,
+    '1.0.9',
+  );
+  const mismatched = compileSuccessor(decoy, mismatchedBytes);
+  return {
+    applications: [
+      ...previous.applications.map((release) =>
+        serializedRelease(release.normalizedDefinitionBytes, release.compiled),
+      ),
+      serializedRelease(mismatchedBytes, mismatched),
+    ],
+    bootstrap: serializedRelease(
+      previous.bootstrap.normalizedDefinitionBytes,
+      previous.bootstrap.compiled,
+    ),
+    schemaVersion: 'northstar.web:compiled-application-release/v2',
+  };
+}
+
+function normalizedDefinitionVersion(
+  authoredApplication: Record<string, unknown>,
+  version: string,
+): Uint8Array {
+  const candidateDefinition = structuredClone(authoredApplication);
+  const packageDefinition = candidateDefinition.package as Record<
+    string,
+    unknown
+  >;
+  packageDefinition.version = version;
+  return new TextEncoder().encode(
+    canonicalize(normalizeApplicationPackage(candidateDefinition)),
+  );
+}
+
+function compileSuccessor(
+  previous: CompileSuccess,
+  normalizedDefinitionBytes: Uint8Array,
+): CompileSuccess {
+  const result = compileApplication({
+    dependencies: [],
+    expectedActiveRelease: expectedActiveReleaseFrom(previous),
+    kind: 'compilerInput',
+    limits: { ...DEFAULT_COMPILER_LIMITS },
+    normalizedDefinitionBytes,
+    profile: { ...MODULE_COMPILER_PROFILE },
+  });
+  assert.equal(result.status, 'compiled');
+  return result as CompileSuccess;
+}
+
+function serializedRelease(
+  normalizedDefinitionBytes: Uint8Array,
+  compiled: CompileSuccess,
+): unknown {
+  return {
+    attestation: compiled.attestation,
+    artifacts: compiled.bundle.artifacts.map((artifact) => ({
+      ...artifact,
+      canonicalBytesBase64: Buffer.from(artifact.canonicalBytes).toString(
+        'base64',
+      ),
+      canonicalBytes: undefined,
+    })),
+    nodeContracts: compiled.bundle.nodeContracts,
+    normalizedDefinitionBytesBase64: Buffer.from(
+      normalizedDefinitionBytes,
+    ).toString('base64'),
+    outputProtocolVersion: compiled.bundle.outputProtocolVersion,
+    releaseManifest: compiled.bundle.releaseManifest,
+    releaseManifestBytesBase64: Buffer.from(
+      compiled.bundle.releaseManifestBytes,
+    ).toString('base64'),
+    releaseRoot: compiled.releaseRoot,
+    stagedArtifactHashes: compiled.stagedArtifacts.map(
+      (artifact) => artifact.contentHash,
+    ),
+  };
 }

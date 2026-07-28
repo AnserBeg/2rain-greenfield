@@ -13,9 +13,9 @@ writer is holding those paths right now.
 
 | Lane | Theme | Current packet | Base | Status |
 |---|---|---|---|---|
-| **KERNEL** | Canonical language and the query tier | `Q1-P3a` — rule the aggregate contract | `fd63229` | active |
-| **DEPLOY** | Release lifecycle and runtime infrastructure | `1g` — release advancement | `fd63229` | active |
-| **FIX** | Correctness defects in shipped code | `1d` — F7 archive-aware uniqueness | `fd63229` | active |
+| **KERNEL** | Canonical language and the query tier | `Q1-P3a` — rule the aggregate contract (ruling only) | `ba1f83b` | active |
+| **DEPLOY** | Release lifecycle and runtime infrastructure | `1b` — release-admission verification integrity | `07ce6de` | active |
+| **FIX** | Correctness defects in shipped code | `1e` — press-guard consolidation | `37a4107` | active |
 
 Lane identity is stable across packets. When a lane's packet is accepted, the
 next packet inherits the lane and its partition.
@@ -34,10 +34,11 @@ the query tier both live there.
 | `packages/compiler/src/storage.ts` | **FIX** |
 | `packages/compiler/src/projections.ts` | **FIX** |
 | `packages/postgres-provider/src/module-storage-materializer.ts` | FIX |
-| `packages/postgres-provider/src/migrations.ts` · `db/migrations/**` | FIX |
 | `apps/api/**` | DEPLOY |
 | `packages/postgres-provider/src/composed-application-runtime.ts` | DEPLOY |
 | `packages/postgres-provider/src/release-*.ts` | DEPLOY |
+| `packages/compiler/src/verification.ts` | DEPLOY *(assigned 2026-07-28 for packet 1b)* |
+| `db/migrations/**` · `packages/postgres-provider/src/migrations.ts` | **DEPLOY while 1b runs** — reassigned from FIX, whose current packet (1e press guards) needs no migration. Reverts to FIX when 1b lands. |
 | `packages/postgres-provider/src/module-runtime-interpreter.ts` | KERNEL |
 | `apps/web/**` · `packages/domain/**` | **none — frozen while three lanes run** |
 
