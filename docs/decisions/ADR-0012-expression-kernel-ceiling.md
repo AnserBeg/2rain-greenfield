@@ -1,7 +1,9 @@
 # ADR-0012: Expression kernel ceiling and execution ownership
 
 Date: 2026-07-26
-Status: proposed — ratification completes when G2-EK1 is accepted
+Status: ratified 2026-07-27 — G2-EK1 is accepted, completing the condition this
+ADR set for itself. (Status corrected by the 2026-07-27 G2-composition program
+review, which found the condition met and the text stale.)
 Tier: Critical (review per `review-tiers`)
 
 ## Context
