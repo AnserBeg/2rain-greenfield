@@ -15,7 +15,7 @@ writer is holding those paths right now.
 |---|---|---|---|---|
 | **KERNEL** | Canonical language and the query tier | `4a` — v3 version and profile dispatch | `7f1edfc` | active |
 | **DEPLOY** | Release lifecycle and runtime infrastructure | `1b` — release-admission verification integrity | `07ce6de` | active |
-| **FIX** | Correctness defects in shipped code → **stage cutting** | `G3-P0` — the G3 stage cut (documents only) | `332b435` | active |
+| **FIX** | Correctness defects → stage cutting → **inventory build** | *awaiting selection — `G3-P1` is unblocked and needs no aggregate lowering* | — | **idle** |
 
 Lane identity is stable across packets. When a lane's packet is accepted, the
 next packet inherits the lane and its partition.
