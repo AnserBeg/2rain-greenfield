@@ -436,10 +436,20 @@ function entitySurfaces(
   label: string,
 ): Array<Record<string, unknown>> {
   return [
-    ['list', 'list', 'dataGrid', 'list'],
-    ['detail', 'record', 'keyFacts', 'record'],
-    ['form', 'record', 'sections', 'form'],
-  ].map(([suffix, archetype, slot, surfaceRole], index) => ({
+    ['list', 'list', ['title', 'dataGrid'], 'list'],
+    [
+      'detail',
+      'record',
+      ['breadcrumb', 'titleStatus', 'commandBar', 'keyFacts'],
+      'record',
+    ],
+    [
+      'form',
+      'record',
+      ['breadcrumb', 'titleStatus', 'commandBar', 'sections'],
+      'form',
+    ],
+  ].map(([suffix, archetype, slots, surfaceRole]) => ({
     archetype,
     dataSource: reference(
       'queryReference',
@@ -449,19 +459,17 @@ function entitySurfaces(
     label: `${label} ${suffix}`,
     module: reference('moduleReference', ids.moduleId),
     schemaVersion: version,
-    slots: [
-      {
-        content: reference(
-          'opaqueSurfaceContentReference',
-          ids.contentCapabilityId,
-        ),
-        kind: 'surfaceSlot',
-        orderKey: 10,
-        schemaVersion: version,
-        slot,
-        slotId: `${ids.namespace}:slot.${local}_${suffix}_${String(index + 1)}`,
-      },
-    ],
+    slots: (slots as string[]).map((slot, index) => ({
+      content: reference(
+        'opaqueSurfaceContentReference',
+        ids.contentCapabilityId,
+      ),
+      kind: 'surfaceSlot',
+      orderKey: (index + 1) * 10,
+      schemaVersion: version,
+      slot,
+      slotId: `${ids.namespace}:slot.${local}_${suffix}_${slot.replace(/[A-Z]/g, (character) => `_${character.toLowerCase()}`)}`,
+    })),
     statusRoles: [],
     surfaceId: `${ids.namespace}:surface.${local}_${suffix}`,
     surfaceRole,

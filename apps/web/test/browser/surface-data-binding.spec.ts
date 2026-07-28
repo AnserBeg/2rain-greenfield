@@ -101,10 +101,10 @@ test('fixture list and form render live DTOs and reflect a semantic create', asy
 
   await page.getByRole('link', { name: 'master form' }).click();
   await expect(
-    page.getByRole('heading', { name: 'Create master form' }),
+    page.getByRole('heading', { level: 1, name: 'New master' }),
   ).toBeVisible();
   await page.getByLabel('Master Name').fill('Browser-created master');
-  await page.getByRole('button', { name: 'Create record' }).click();
+  await page.getByRole('button', { name: 'Save' }).click();
 
   await expect(page.getByRole('status')).toContainText('Create complete');
   await expect(page.getByRole('status')).toContainText(
@@ -114,7 +114,10 @@ test('fixture list and form render live DTOs and reflect a semantic create', asy
     'Browser-created master',
   );
 
-  await page.getByRole('link', { name: 'master list' }).click();
+  await page
+    .getByRole('navigation', { name: 'Release navigation' })
+    .getByRole('link', { name: 'master list' })
+    .click();
   await expect(
     page.getByRole('cell', { name: 'Browser-created master' }),
   ).toBeVisible();
@@ -365,7 +368,26 @@ function decode(value: ContentAddressedArtifact): Record<string, unknown> {
 }
 
 function compileFixture(): CompileSuccess {
-  const normalized = normalizeApplicationPackage(ordinaryModuleV1());
+  const authored = ordinaryModuleV1();
+  const surfaces = authored.surfaces as Array<Record<string, unknown>>;
+  for (const surface of surfaces) {
+    const surfaceId = String(surface.surfaceId);
+    const existingSlots = surface.slots as Array<Record<string, unknown>>;
+    const requiredSlots = surfaceId.endsWith('_list')
+      ? ['title', 'dataGrid']
+      : surfaceId.endsWith('_form')
+        ? ['breadcrumb', 'titleStatus', 'commandBar', 'sections']
+        : ['breadcrumb', 'titleStatus', 'commandBar', 'keyFacts'];
+    const exemplar = existingSlots[0];
+    assert.ok(exemplar);
+    surface.slots = requiredSlots.map((slot, index) => ({
+      ...exemplar,
+      orderKey: (index + 1) * 10,
+      slot,
+      slotId: `${surfaceId.replace(':surface.', ':slot.')}_${slot.replace(/[A-Z]/g, (character) => `_${character.toLowerCase()}`)}`,
+    }));
+  }
+  const normalized = normalizeApplicationPackage(authored);
   const result = compileApplication({
     dependencies: [],
     expectedActiveRelease: null,

@@ -39,7 +39,7 @@ test('real Location surface creates a location and archives/restores through the
     await page.getByLabel('Location Code').fill('LOC-WEB-004');
     await page.getByLabel('Location Name').fill('Browser-created Location');
     await page.getByLabel('Location Type').fill(`${namespace}:option.store`);
-    await page.getByRole('button', { name: 'Create record' }).click();
+    await page.getByRole('button', { name: 'Save' }).click();
     await expect(page.getByRole('status')).toContainText('Create complete');
     await expect(page.getByRole('status')).toContainText(
       'trust evidence is linked',

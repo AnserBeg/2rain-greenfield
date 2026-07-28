@@ -68,6 +68,12 @@ promise to render every archetype completely.
 ```
 <!-- ux-grammar-contract:end -->
 
+SurfaceRuntime dispatches grammar-owned content by the pair `(archetype, slot)`;
+the closed component registry separately dispatches shell-owned opaque content by
+its `contentReferenceId`. Module-local content references therefore remain legal
+package data while the platform-owned slot vocabulary controls ordinary List and
+Record rendering.
+
 ## The five archetypes
 
 | Archetype | Fixed anatomy (slots) |

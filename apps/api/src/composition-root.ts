@@ -17,8 +17,20 @@ export interface ComposedApplicationServerOptions {
 export interface RunningComposedApplication {
   readonly baseUrl: string;
   readonly runtime: ComposedApplicationRuntime;
+  readonly seededRecords: readonly ComposedApplicationSeedReceipt[];
   readonly server: Server;
   close(): Promise<void>;
+}
+
+export interface ComposedApplicationSeedReceipt {
+  readonly operationId: string;
+  readonly recordId: string;
+  readonly trust: {
+    readonly changeDocumentId: string;
+    readonly domainEventId: string;
+    readonly invocationId: string;
+    readonly outboxId: string;
+  };
 }
 
 /** Thin transport root: provider assembly owns persistence and runtime wiring. */
@@ -38,6 +50,7 @@ export async function startComposedApplication(
       .pathname,
     tenantSlug: options.tenantSlug ?? 'local-composed-application',
   });
+  const seededRecords = await seedComposedApplication(runtime);
   const server = createSurfaceRuntimeServer(runtime.entry, {
     operationGateway: runtime.operationGateway,
     operationMediation: runtime.operationMediation,
@@ -68,6 +81,136 @@ export async function startComposedApplication(
       await runtime.close();
     },
     runtime,
+    seededRecords,
     server,
+  });
+}
+
+const applicationNamespace = 'northstar.app';
+
+const demoSeed = Object.freeze([
+  seedEntry('party', 1, {
+    party_contact_summary: 'Purchasing · ap@alpine.example',
+    party_name: 'Alpine Office Supply',
+    party_number: 'P-1001',
+  }),
+  seedEntry('party', 2, {
+    party_contact_summary: 'Wholesale · orders@northwind.example',
+    party_name: 'Northwind Goods',
+    party_number: 'P-1002',
+  }),
+  seedEntry('party', 3, {
+    party_contact_summary: 'Local delivery · hello@prairie.example',
+    party_name: 'Prairie Paper Co.',
+    party_number: 'P-1003',
+  }),
+  seedEntry('party', 4, {
+    party_contact_summary: 'Preferred supplier · team@summit.example',
+    party_name: 'Summit Industrial',
+    party_number: 'P-1004',
+  }),
+  seedEntry('item', 11, {
+    item_base_unit: 'EA',
+    item_description: 'Recycled ruled notebook, 80 pages',
+    item_name: 'Field notebook',
+    item_sku: 'OFF-100',
+  }),
+  seedEntry('item', 12, {
+    item_base_unit: 'BOX',
+    item_description: 'Black fine-point pens, pack of twelve',
+    item_name: 'Fine-point pen set',
+    item_sku: 'OFF-120',
+  }),
+  seedEntry('item', 13, {
+    item_base_unit: 'EA',
+    item_description: 'Adjustable task lamp, forest green',
+    item_name: 'Task lamp',
+    item_sku: 'OFF-210',
+  }),
+  seedEntry('item', 14, {
+    item_base_unit: 'PACK',
+    item_description: 'Compostable shipping labels, pack of 100',
+    item_name: 'Shipping labels',
+    item_sku: 'OPS-310',
+  }),
+  seedEntry('location', 21, {
+    location_code: 'CAL-WH',
+    location_name: 'Calgary warehouse',
+    location_type: `${applicationNamespace}:option.warehouse`,
+  }),
+  seedEntry('location', 22, {
+    location_code: 'EDM-ST',
+    location_name: 'Edmonton store',
+    location_type: `${applicationNamespace}:option.store`,
+  }),
+  seedEntry('location', 23, {
+    location_code: 'VAN-WH',
+    location_name: 'Vancouver warehouse',
+    location_type: `${applicationNamespace}:option.warehouse`,
+  }),
+  seedEntry('location', 24, {
+    location_code: 'YYC-ST',
+    location_name: 'Beltline store',
+    location_type: `${applicationNamespace}:option.store`,
+  }),
+]);
+
+async function seedComposedApplication(
+  runtime: ComposedApplicationRuntime,
+): Promise<readonly ComposedApplicationSeedReceipt[]> {
+  return runtime.entry.run(
+    { headers: { authorization: 'local-demo-seed' } },
+    async (view) => {
+      const receipts: ComposedApplicationSeedReceipt[] = [];
+      for (const seed of demoSeed) {
+        const result = await runtime.operationGateway.invoke(
+          view,
+          {
+            confirmationGrant: null,
+            idempotencyKey: seed.idempotencyKey,
+            input: { recordId: seed.recordId, values: seed.values },
+            operationId: seed.operationId,
+            schemaVersion: 'northstar.semantic-operation-request/v1',
+          },
+          runtime.operationMediation.issueInvocation(view, 'UI'),
+        );
+        if (
+          result.outcome !== 'succeeded' ||
+          !result.readBack ||
+          !result.trust
+        ) {
+          throw new Error(`demo seed operation failed: ${seed.operationId}`);
+        }
+        receipts.push(
+          Object.freeze({
+            operationId: seed.operationId,
+            recordId: result.readBack.recordId,
+            trust: result.trust,
+          }),
+        );
+      }
+      return Object.freeze(receipts);
+    },
+  );
+}
+
+function seedEntry(
+  localEntity: 'item' | 'location' | 'party',
+  ordinal: number,
+  values: Readonly<Record<string, string>>,
+) {
+  const suffix = String(ordinal).padStart(12, '0');
+  return Object.freeze({
+    idempotencyKey: `72000000-0000-4000-8000-${suffix}`,
+    operationId: `${applicationNamespace}:operation.${localEntity}_create`,
+    recordId: `71000000-0000-4000-8000-${suffix}`,
+    values: Object.freeze(
+      Object.fromEntries(
+        Object.entries(values).map(([localField, value]) => [
+          `${applicationNamespace}:field.${localField}`,
+          value,
+        ]),
+      ),
+    ),
   });
 }

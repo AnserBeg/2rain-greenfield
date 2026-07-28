@@ -47,7 +47,7 @@ test('real Party surface renders roles, creates, and archives/restores through t
     await page.getByLabel('Party Number').fill('P-WEB-004');
     await page.getByLabel('Party Name').fill('Browser-created Party');
     await page.getByLabel('Party Contact Summary').fill('created@example.test');
-    await page.getByRole('button', { name: 'Create record' }).click();
+    await page.getByRole('button', { name: 'Save' }).click();
     await expect(page.getByRole('status')).toContainText('Create complete');
     await expect(page.getByRole('status')).toContainText(
       'trust evidence is linked',
