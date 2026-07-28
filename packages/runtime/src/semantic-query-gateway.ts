@@ -662,7 +662,7 @@ function assertPredicateLoweringPlan(
     resolveComparison: () => ({ presence: 'absent' }),
   });
   if (predicateReceipt.outcome !== 'evaluated') {
-    throw error('predicate lowering plan source is invalid');
+    throw error('predicate lowering input is invalid');
   }
   const observed = inspectLoweringNode(value.root, 1, error);
   assertLoweringMatchesPredicate(value.root, predicate, error);
@@ -690,12 +690,12 @@ function assertLoweringMatchesPredicate(
     !isRecord(predicate) ||
     value.kind !== predicate.kind
   ) {
-    throw error('predicate lowering plan does not match its source');
+    throw error('predicate lowering plan does not match its predicate');
   }
   switch (predicate.kind) {
     case 'booleanPredicate':
       if (value.value !== predicate.value) {
-        throw error('predicate Boolean lowering does not match its source');
+        throw error('predicate Boolean lowering does not match its predicate');
       }
       return;
     case 'fieldComparisonPredicate':
@@ -708,7 +708,9 @@ function assertLoweringMatchesPredicate(
         canonicalizeAndHash(value.value).contentHash !==
           canonicalizeAndHash(predicate.value).contentHash
       ) {
-        throw error('predicate comparison lowering does not match its source');
+        throw error(
+          'predicate comparison lowering does not match its predicate',
+        );
       }
       return;
     case 'notPredicate':
@@ -721,7 +723,7 @@ function assertLoweringMatchesPredicate(
         !Array.isArray(predicate.terms) ||
         value.terms.length !== predicate.terms.length
       ) {
-        throw error('predicate Boolean lowering does not match its source');
+        throw error('predicate Boolean lowering does not match its predicate');
       }
       for (let index = 0; index < predicate.terms.length; index += 1) {
         assertLoweringMatchesPredicate(
