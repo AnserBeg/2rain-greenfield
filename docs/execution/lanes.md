@@ -13,7 +13,7 @@ writer is holding those paths right now.
 
 | Lane | Theme | Current packet | Base | Status |
 |---|---|---|---|---|
-| **KERNEL** | Canonical language and the query tier | `4a` — v3 version and profile dispatch | `7f1edfc` | active |
+| **KERNEL** | Canonical language and the query tier | *awaiting selection — `4b` is next and moves no artifacts* | — | **idle** |
 | **DEPLOY** | Release lifecycle and runtime infrastructure | `1b` — release-admission verification integrity | `07ce6de` | active |
 | **FIX** | Correctness defects → stage cutting → **inventory build** | *awaiting selection — `G3-P1` is unblocked and needs no aggregate lowering* | — | **idle** |
 
