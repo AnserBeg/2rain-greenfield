@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync } from 'node:fs';
+import { globSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
+
+import { checkPredicateDispatchTripwire } from '../../packages/dev-tooling/src/predicate-dispatch-tripwire/index.js';
 
 const contractsRoot = join(process.cwd(), 'packages/canonical-model/src');
 
@@ -82,4 +84,69 @@ function findLiteralTrueDispatches(
     )
     .map(({ file }) => file)
     .sort();
+}
+
+test('predicate dispatch inventory flags a quarry-shaped second evaluator', () => {
+  const tripwirePath =
+    'packages/dev-tooling/src/predicate-dispatch-tripwire/index.ts';
+  const productionSources: Array<{ path: string; source: string }> = globSync([
+    'apps/*/src/**/*.ts',
+    'packages/*/src/**/*.ts',
+  ])
+    .filter((path) => path !== tripwirePath)
+    .sort()
+    .map((path) => ({ path, source: readFileSync(path, 'utf8') }));
+  if (process.env.Q1P2_DEMONSTRATE_TRIPWIRE === '1') {
+    productionSources.push(quarryMetricFork());
+  }
+  assert.deepEqual(
+    checkPredicateDispatchTripwire(productionSources, {
+      requireCompleteInventory: true,
+    }),
+    [],
+  );
+
+  const quarryShapedFork = checkPredicateDispatchTripwire([quarryMetricFork()]);
+  assert.deepEqual(
+    quarryShapedFork.map(({ code, path }) => ({ code, path })),
+    [
+      {
+        code: 'PREDICATE_DISPATCH_UNREGISTERED',
+        path: 'packages/runtime/src/runtime-metric-service.ts',
+      },
+    ],
+  );
+
+  const kernelPath = 'packages/canonical-model/src/predicate-kernel.ts';
+  assert.deepEqual(
+    checkPredicateDispatchTripwire([
+      { path: kernelPath, source: readFileSync(kernelPath, 'utf8') },
+    ]),
+    [],
+  );
+  assert.ok(
+    checkPredicateDispatchTripwire([], { requireCompleteInventory: true })
+      .length > 0,
+    'zero production input must not pass the dispatch inventory',
+  );
+  console.log(
+    `Q1-P2 dispatch tripwire synthetic=${quarryShapedFork[0]?.code ?? 'missing'} production=0 legitimate_kernel=0`,
+  );
+});
+
+function quarryMetricFork(): { path: string; source: string } {
+  return {
+    path: 'packages/runtime/src/runtime-metric-service.ts',
+    source: `
+      function metricValue(condition) {
+        switch (condition.kind) {
+          case 'booleanPredicate': return condition.value;
+          case 'fieldComparisonPredicate': return compare(condition);
+          case 'notPredicate': return !metricValue(condition.term);
+          case 'allPredicate': return condition.terms.every(metricValue);
+          case 'anyPredicate': return condition.terms.some(metricValue);
+        }
+      }
+    `,
+  };
 }

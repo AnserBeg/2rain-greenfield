@@ -1,0 +1,56 @@
+{
+  "authoring": {
+    "approvalSubject": "behavior-not-implementation",
+    "generator": "model-assisted",
+    "judgement": "deterministic-kernel-evaluation",
+    "runtimeUse": "forbidden"
+  },
+  "scenarios": [
+    {
+      "caseId": "absent_not_less_decimal_zero",
+      "expected": true,
+      "given": "an optional decimal operand is absent",
+      "rowId": "c2000000-0000-4000-8000-000000000001",
+      "scenarioId": "absence_is_total_before_negation",
+      "then": "the atomic comparison is false and its explicit negation is true",
+      "when": "the rule evaluates NOT(value < 0)"
+    },
+    {
+      "caseId": "binary_not_equals_m",
+      "expected": false,
+      "given": "an optional binary-text operand is absent",
+      "rowId": "c2000000-0000-4000-8000-000000000001",
+      "scenarioId": "absence_does_not_mean_not_equal",
+      "then": "the atomic not-equal comparison is false",
+      "when": "the rule evaluates value != m"
+    },
+    {
+      "caseId": "folded_equals_german_sharp_s",
+      "expected": true,
+      "given": "the stored value is Straße",
+      "rowId": "c2000000-0000-4000-8000-000000000006",
+      "scenarioId": "unicode_fold_expands_sharp_s",
+      "then": "the folded equality is true",
+      "when": "the rule compares it with STRASSE"
+    },
+    {
+      "caseId": "decimal_less_than_ten",
+      "expected": true,
+      "given": "the exact decimal is 9",
+      "rowId": "c2000000-0000-4000-8000-000000000004",
+      "scenarioId": "decimal_order_is_numeric",
+      "then": "the comparison is true",
+      "when": "the rule compares it numerically with 10"
+    },
+    {
+      "caseId": "decimal_equals_tenth",
+      "expected": true,
+      "given": "the exact decimal is encoded as canonical 0.1",
+      "rowId": "c2000000-0000-4000-8000-000000000007",
+      "scenarioId": "decimal_equality_is_numeric",
+      "then": "numeric equality is true",
+      "when": "the rule compares it with 0.1"
+    }
+  ],
+  "schemaVersion": "northstar.q1-predicate-scenarios/v1"
+}

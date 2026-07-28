@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
@@ -13,6 +14,11 @@ import {
   parseAuthoredApplicationPackageJson,
   type AuthoredApplicationPackage,
 } from '../../../packages/canonical-model/src/index.js';
+import {
+  evaluatePredicateCase,
+  loadPredicateParityCorpus,
+  loadPredicateScenarios,
+} from '../../helpers/q1-predicate-corpus.js';
 
 function fixture(): AuthoredApplicationPackage {
   return parseAuthoredApplicationPackageJson(
@@ -813,5 +819,51 @@ test('family, collection, and authored-byte bounds fail with stable codes', () =
   expectDiagnostic(
     () => parseAuthoredApplicationPackageJson(padded),
     'CANON_LIMIT_PACKAGE_BYTES',
+  );
+});
+
+test('model-authored predicate scenarios are judged by the deterministic kernel', () => {
+  const corpus = loadPredicateParityCorpus();
+  const artifact = loadPredicateScenarios();
+  const cases = new Map(
+    corpus.cases.map((candidate) => [candidate.caseId, candidate] as const),
+  );
+  const rows = new Map(
+    corpus.rows.map((candidate) => [candidate.recordId, candidate] as const),
+  );
+  for (const scenario of artifact.scenarios) {
+    const candidate = cases.get(scenario.caseId);
+    const row = rows.get(scenario.rowId);
+    assert.ok(candidate, `unknown scenario case ${scenario.caseId}`);
+    assert.ok(row, `unknown scenario row ${scenario.rowId}`);
+    assert.equal(
+      evaluatePredicateCase(candidate, row),
+      scenario.expected,
+      `${scenario.scenarioId}: GIVEN ${scenario.given}; WHEN ${scenario.when}; THEN ${scenario.then}`,
+    );
+  }
+  console.log(
+    `Q1-P2 scenarios=${String(artifact.scenarios.length)} approval=behavior-not-implementation deterministic=kernel`,
+  );
+});
+
+test('the committed parity corpus has a deterministic offline IR receipt', () => {
+  const corpus = loadPredicateParityCorpus();
+  const verdicts = corpus.cases.map((candidate) => [
+    candidate.caseId,
+    corpus.rows.map((row) => [
+      row.recordId,
+      evaluatePredicateCase(candidate, row),
+    ]),
+  ]);
+  const digest = createHash('sha256')
+    .update(JSON.stringify(verdicts))
+    .digest('hex');
+  assert.equal(
+    digest,
+    'fb68943504912eead0e68bb486fba0a6cd86e3fef43d3093825be05f18dca3a8',
+  );
+  console.log(
+    `Q1-P2 offline corpus receipt cases=${String(corpus.cases.length)} rows=${String(corpus.rows.length)} sha256=${digest}`,
   );
 });

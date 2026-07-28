@@ -1,0 +1,521 @@
+{
+  "authoring": {
+    "generator": "model-assisted",
+    "judgement": "deterministic-ir-versus-postgresql",
+    "runtimeUse": "forbidden"
+  },
+  "cases": [
+    {
+      "axis": "absentValues",
+      "caseId": "binary_equals_alpha",
+      "predicate": {
+        "field": {
+          "kind": "fieldReference",
+          "schemaVersion": "v2",
+          "targetId": "northstar.party:field.party_contact_summary"
+        },
+        "kind": "fieldComparisonPredicate",
+        "operator": "equals",
+        "schemaVersion": "v2",
+        "value": {
+          "kind": "textValue",
+          "schemaVersion": "v2",
+          "value": "Alpha"
+        }
+      }
+    },
+    {
+      "axis": "absentValues",
+      "caseId": "binary_not_equals_m",
+      "predicate": {
+        "field": {
+          "kind": "fieldReference",
+          "schemaVersion": "v2",
+          "targetId": "northstar.party:field.party_contact_summary"
+        },
+        "kind": "fieldComparisonPredicate",
+        "operator": "notEquals",
+        "schemaVersion": "v2",
+        "value": {
+          "kind": "textValue",
+          "schemaVersion": "v2",
+          "value": "m"
+        }
+      }
+    },
+    {
+      "axis": "absentValues",
+      "caseId": "binary_less_than_m",
+      "predicate": {
+        "field": {
+          "kind": "fieldReference",
+          "schemaVersion": "v2",
+          "targetId": "northstar.party:field.party_contact_summary"
+        },
+        "kind": "fieldComparisonPredicate",
+        "operator": "lessThan",
+        "schemaVersion": "v2",
+        "value": {
+          "kind": "textValue",
+          "schemaVersion": "v2",
+          "value": "m"
+        }
+      }
+    },
+    {
+      "axis": "absentValues",
+      "caseId": "binary_greater_than_m",
+      "predicate": {
+        "field": {
+          "kind": "fieldReference",
+          "schemaVersion": "v2",
+          "targetId": "northstar.party:field.party_contact_summary"
+        },
+        "kind": "fieldComparisonPredicate",
+        "operator": "greaterThan",
+        "schemaVersion": "v2",
+        "value": {
+          "kind": "textValue",
+          "schemaVersion": "v2",
+          "value": "m"
+        }
+      }
+    },
+    {
+      "axis": "absentValues",
+      "caseId": "absent_not_less_binary_m",
+      "predicate": {
+        "kind": "notPredicate",
+        "schemaVersion": "v2",
+        "term": {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v2",
+            "targetId": "northstar.party:field.party_contact_summary"
+          },
+          "kind": "fieldComparisonPredicate",
+          "operator": "lessThan",
+          "schemaVersion": "v2",
+          "value": {
+            "kind": "textValue",
+            "schemaVersion": "v2",
+            "value": "m"
+          }
+        }
+      }
+    },
+    {
+      "axis": "absentValues",
+      "caseId": "binary_all_open_interval",
+      "predicate": {
+        "kind": "allPredicate",
+        "schemaVersion": "v2",
+        "terms": [
+          {
+            "field": {
+              "kind": "fieldReference",
+              "schemaVersion": "v2",
+              "targetId": "northstar.party:field.party_contact_summary"
+            },
+            "kind": "fieldComparisonPredicate",
+            "operator": "greaterThan",
+            "schemaVersion": "v2",
+            "value": {
+              "kind": "textValue",
+              "schemaVersion": "v2",
+              "value": "a"
+            }
+          },
+          {
+            "field": {
+              "kind": "fieldReference",
+              "schemaVersion": "v2",
+              "targetId": "northstar.party:field.party_contact_summary"
+            },
+            "kind": "fieldComparisonPredicate",
+            "operator": "lessThan",
+            "schemaVersion": "v2",
+            "value": {
+              "kind": "textValue",
+              "schemaVersion": "v2",
+              "value": "z"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "axis": "absentValues",
+      "caseId": "binary_any_edge_values",
+      "predicate": {
+        "kind": "anyPredicate",
+        "schemaVersion": "v2",
+        "terms": [
+          {
+            "field": {
+              "kind": "fieldReference",
+              "schemaVersion": "v2",
+              "targetId": "northstar.party:field.party_contact_summary"
+            },
+            "kind": "fieldComparisonPredicate",
+            "operator": "equals",
+            "schemaVersion": "v2",
+            "value": {
+              "kind": "textValue",
+              "schemaVersion": "v2",
+              "value": "Alpha"
+            }
+          },
+          {
+            "field": {
+              "kind": "fieldReference",
+              "schemaVersion": "v2",
+              "targetId": "northstar.party:field.party_contact_summary"
+            },
+            "kind": "fieldComparisonPredicate",
+            "operator": "equals",
+            "schemaVersion": "v2",
+            "value": {
+              "kind": "textValue",
+              "schemaVersion": "v2",
+              "value": "zulu"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "axis": "unicodeCaseFold",
+      "caseId": "folded_equals_german_sharp_s",
+      "predicate": {
+        "field": {
+          "kind": "fieldReference",
+          "schemaVersion": "v2",
+          "targetId": "northstar.party:field.party_q1_folded"
+        },
+        "kind": "fieldComparisonPredicate",
+        "operator": "equals",
+        "schemaVersion": "v2",
+        "value": {
+          "kind": "textValue",
+          "schemaVersion": "v2",
+          "value": "STRASSE"
+        }
+      }
+    },
+    {
+      "axis": "unicodeCaseFold",
+      "caseId": "folded_equals_kelvin_sign",
+      "predicate": {
+        "field": {
+          "kind": "fieldReference",
+          "schemaVersion": "v2",
+          "targetId": "northstar.party:field.party_q1_folded"
+        },
+        "kind": "fieldComparisonPredicate",
+        "operator": "equals",
+        "schemaVersion": "v2",
+        "value": {
+          "kind": "textValue",
+          "schemaVersion": "v2",
+          "value": "kelvin"
+        }
+      }
+    },
+    {
+      "axis": "unicodeCaseFold",
+      "caseId": "folded_equals_dotted_i",
+      "predicate": {
+        "field": {
+          "kind": "fieldReference",
+          "schemaVersion": "v2",
+          "targetId": "northstar.party:field.party_q1_folded"
+        },
+        "kind": "fieldComparisonPredicate",
+        "operator": "equals",
+        "schemaVersion": "v2",
+        "value": {
+          "kind": "textValue",
+          "schemaVersion": "v2",
+          "value": "i̇"
+        }
+      }
+    },
+    {
+      "axis": "unicodeCaseFold",
+      "caseId": "folded_equals_ligature",
+      "predicate": {
+        "field": {
+          "kind": "fieldReference",
+          "schemaVersion": "v2",
+          "targetId": "northstar.party:field.party_q1_folded"
+        },
+        "kind": "fieldComparisonPredicate",
+        "operator": "equals",
+        "schemaVersion": "v2",
+        "value": {
+          "kind": "textValue",
+          "schemaVersion": "v2",
+          "value": "ffi"
+        }
+      }
+    },
+    {
+      "axis": "unicodeCaseFold",
+      "caseId": "folded_equals_final_sigma",
+      "predicate": {
+        "field": {
+          "kind": "fieldReference",
+          "schemaVersion": "v2",
+          "targetId": "northstar.party:field.party_q1_folded"
+        },
+        "kind": "fieldComparisonPredicate",
+        "operator": "equals",
+        "schemaVersion": "v2",
+        "value": {
+          "kind": "textValue",
+          "schemaVersion": "v2",
+          "value": "οσ"
+        }
+      }
+    },
+    {
+      "axis": "unicodeCaseFold",
+      "caseId": "folded_less_than_m",
+      "predicate": {
+        "field": {
+          "kind": "fieldReference",
+          "schemaVersion": "v2",
+          "targetId": "northstar.party:field.party_q1_folded"
+        },
+        "kind": "fieldComparisonPredicate",
+        "operator": "lessThan",
+        "schemaVersion": "v2",
+        "value": {
+          "kind": "textValue",
+          "schemaVersion": "v2",
+          "value": "m"
+        }
+      }
+    },
+    {
+      "axis": "exactDecimalOrdering",
+      "caseId": "decimal_less_than_ten",
+      "predicate": {
+        "field": {
+          "kind": "fieldReference",
+          "schemaVersion": "v2",
+          "targetId": "northstar.party:field.party_q1_decimal"
+        },
+        "kind": "fieldComparisonPredicate",
+        "operator": "lessThan",
+        "schemaVersion": "v2",
+        "value": {
+          "kind": "exactDecimalValue",
+          "schemaVersion": "v2",
+          "value": "10"
+        }
+      }
+    },
+    {
+      "axis": "exactDecimalOrdering",
+      "caseId": "decimal_greater_than_negative_three",
+      "predicate": {
+        "field": {
+          "kind": "fieldReference",
+          "schemaVersion": "v2",
+          "targetId": "northstar.party:field.party_q1_decimal"
+        },
+        "kind": "fieldComparisonPredicate",
+        "operator": "greaterThan",
+        "schemaVersion": "v2",
+        "value": {
+          "kind": "exactDecimalValue",
+          "schemaVersion": "v2",
+          "value": "-3"
+        }
+      }
+    },
+    {
+      "axis": "exactDecimalOrdering",
+      "caseId": "decimal_equals_tenth",
+      "predicate": {
+        "field": {
+          "kind": "fieldReference",
+          "schemaVersion": "v2",
+          "targetId": "northstar.party:field.party_q1_decimal"
+        },
+        "kind": "fieldComparisonPredicate",
+        "operator": "equals",
+        "schemaVersion": "v2",
+        "value": {
+          "kind": "exactDecimalValue",
+          "schemaVersion": "v2",
+          "value": "0.1"
+        }
+      }
+    },
+    {
+      "axis": "exactDecimalOrdering",
+      "caseId": "decimal_not_equals_tenth",
+      "predicate": {
+        "field": {
+          "kind": "fieldReference",
+          "schemaVersion": "v2",
+          "targetId": "northstar.party:field.party_q1_decimal"
+        },
+        "kind": "fieldComparisonPredicate",
+        "operator": "notEquals",
+        "schemaVersion": "v2",
+        "value": {
+          "kind": "exactDecimalValue",
+          "schemaVersion": "v2",
+          "value": "0.1"
+        }
+      }
+    },
+    {
+      "axis": "exactDecimalOrdering",
+      "caseId": "absent_not_less_decimal_zero",
+      "predicate": {
+        "kind": "notPredicate",
+        "schemaVersion": "v2",
+        "term": {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v2",
+            "targetId": "northstar.party:field.party_q1_decimal"
+          },
+          "kind": "fieldComparisonPredicate",
+          "operator": "lessThan",
+          "schemaVersion": "v2",
+          "value": {
+            "kind": "exactDecimalValue",
+            "schemaVersion": "v2",
+            "value": "0"
+          }
+        }
+      }
+    }
+  ],
+  "rows": [
+    {
+      "label": "all optional operands absent",
+      "recordId": "c2000000-0000-4000-8000-000000000001",
+      "values": {}
+    },
+    {
+      "label": "negative ten",
+      "recordId": "c2000000-0000-4000-8000-000000000002",
+      "values": {
+        "northstar.party:field.party_contact_summary": "Alpha",
+        "northstar.party:field.party_q1_decimal": "-10",
+        "northstar.party:field.party_q1_folded": "Alpha"
+      }
+    },
+    {
+      "label": "negative three",
+      "recordId": "c2000000-0000-4000-8000-000000000003",
+      "values": {
+        "northstar.party:field.party_contact_summary": "m",
+        "northstar.party:field.party_q1_decimal": "-3",
+        "northstar.party:field.party_q1_folded": "m"
+      }
+    },
+    {
+      "label": "positive nine",
+      "recordId": "c2000000-0000-4000-8000-000000000004",
+      "values": {
+        "northstar.party:field.party_contact_summary": "zulu",
+        "northstar.party:field.party_q1_decimal": "9",
+        "northstar.party:field.party_q1_folded": "zulu"
+      }
+    },
+    {
+      "label": "positive ten",
+      "recordId": "c2000000-0000-4000-8000-000000000005",
+      "values": {
+        "northstar.party:field.party_contact_summary": "10",
+        "northstar.party:field.party_q1_decimal": "10",
+        "northstar.party:field.party_q1_folded": "ten"
+      }
+    },
+    {
+      "label": "canonical tenth",
+      "recordId": "c2000000-0000-4000-8000-000000000006",
+      "values": {
+        "northstar.party:field.party_contact_summary": "street lower",
+        "northstar.party:field.party_q1_decimal": "0.1",
+        "northstar.party:field.party_q1_folded": "Straße"
+      }
+    },
+    {
+      "label": "second canonical tenth",
+      "recordId": "c2000000-0000-4000-8000-000000000007",
+      "values": {
+        "northstar.party:field.party_contact_summary": "street upper",
+        "northstar.party:field.party_q1_decimal": "0.1",
+        "northstar.party:field.party_q1_folded": "STRASSE"
+      }
+    },
+    {
+      "label": "kelvin sign",
+      "recordId": "c2000000-0000-4000-8000-000000000008",
+      "values": {
+        "northstar.party:field.party_q1_decimal": "1000000000000.000001",
+        "northstar.party:field.party_q1_folded": "Kelvin"
+      }
+    },
+    {
+      "label": "kelvin ascii",
+      "recordId": "c2000000-0000-4000-8000-000000000009",
+      "values": {
+        "northstar.party:field.party_q1_decimal": "-1.01",
+        "northstar.party:field.party_q1_folded": "kelvin"
+      }
+    },
+    {
+      "label": "dotted uppercase i",
+      "recordId": "c2000000-0000-4000-8000-000000000010",
+      "values": {
+        "northstar.party:field.party_q1_folded": "İ"
+      }
+    },
+    {
+      "label": "dotted decomposed i",
+      "recordId": "c2000000-0000-4000-8000-000000000011",
+      "values": {
+        "northstar.party:field.party_q1_folded": "i̇"
+      }
+    },
+    {
+      "label": "ffi ligature",
+      "recordId": "c2000000-0000-4000-8000-000000000012",
+      "values": {
+        "northstar.party:field.party_q1_folded": "ﬃ"
+      }
+    },
+    {
+      "label": "ffi ascii",
+      "recordId": "c2000000-0000-4000-8000-000000000013",
+      "values": {
+        "northstar.party:field.party_q1_folded": "ffi"
+      }
+    },
+    {
+      "label": "uppercase sigma",
+      "recordId": "c2000000-0000-4000-8000-000000000014",
+      "values": {
+        "northstar.party:field.party_q1_folded": "ΟΣ"
+      }
+    },
+    {
+      "label": "final sigma",
+      "recordId": "c2000000-0000-4000-8000-000000000015",
+      "values": {
+        "northstar.party:field.party_q1_folded": "ος"
+      }
+    }
+  ],
+  "schemaVersion": "northstar.q1-predicate-parity-corpus/v1"
+}
