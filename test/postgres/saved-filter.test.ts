@@ -3,7 +3,13 @@ import test from 'node:test';
 
 import type { Pool } from 'pg';
 
-import { canonicalize } from '../../packages/canonical-model/src/index.js';
+import {
+  PREDICATE_LOWERING_PLAN_VERSION,
+  PREDICATE_POSITION_PROFILE_VERSION,
+  canonicalize,
+  canonicalizeAndHash,
+  type PredicateLoweringPlan,
+} from '../../packages/canonical-model/src/index.js';
 import {
   PLATFORM_IDS,
   platformModuleDefinition,
@@ -13,7 +19,17 @@ import {
   SavedFilterContractError,
 } from '../../packages/platform-runtime/src/saved-filter-contracts.js';
 import * as savedFilterProvider from '../../packages/postgres-provider/src/saved-filter-executor.js';
-import type { RegisteredQueryDefinition } from '../../packages/runtime/src/semantic-query-gateway.js';
+import {
+  SEMANTIC_QUERY_REQUEST_VERSION,
+  SemanticQueryGateway,
+  type RegisteredQueryDefinition,
+} from '../../packages/runtime/src/semantic-query-gateway.js';
+import {
+  CURRENT_POLICY_DECISION_VERSION,
+  type CurrentPolicyDecisionRequest,
+  type CurrentPolicyGateway,
+  type CurrentPolicySubject,
+} from '../../packages/runtime/src/request-runtime-view.js';
 import { PARTY_IDS } from '../fixtures/g2/party/definition.js';
 import {
   invokePartyOperation,
@@ -627,6 +643,64 @@ test('saved-filter List excludes archived siblings without weakening envelope va
   );
 });
 
+test('saved-filter queries fail closed when policy contributes an unsupported filter plan', async () => {
+  await withSavedFilterRuntime(
+    'q1-p1-saved-filter-policy-refusal',
+    async (runtime) => {
+      const targetQueryId = PLATFORM_IDS.queryIds.list;
+      const filterId = 'f3400000-0000-4000-8000-000000000001';
+      const criteria = canonicalize({
+        kind: 'booleanPredicate',
+        schemaVersion: 'v2',
+        value: true,
+      });
+      const created = await invokeSavedFilterOperation(
+        runtime,
+        runtime.views.a,
+        'create',
+        createInput(filterId, targetQueryId, criteria),
+      );
+      assert.equal(created.outcome, 'succeeded');
+
+      const visibleWithoutNarrowing = await invokeSavedFilterQuery(
+        runtime,
+        runtime.views.a,
+        'list',
+        { queryId: targetQueryId },
+      );
+      assert.deepEqual(
+        visibleWithoutNarrowing.records.map((record) => record.recordId),
+        [filterId],
+      );
+
+      const narrowing = booleanPolicyNarrowing(false);
+      const narrowedGateway = new SemanticQueryGateway(
+        new AllowCurrentPolicy(),
+        new savedFilterProvider.PostgresSavedFilterExecutor(
+          runtime.runtimePool,
+          undefined as never,
+          PLATFORM_IDS,
+        ),
+        undefined,
+        {
+          async narrow() {
+            return narrowing;
+          },
+        },
+      );
+      await assertSavedFilterError(
+        narrowedGateway.invoke(runtime.views.a, {
+          arguments: { queryId: targetQueryId },
+          queryId: PLATFORM_IDS.queryIds.list,
+          schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+        }),
+        'SAVED_FILTER_QUERY_INADMISSIBLE',
+        '$.filterPlans',
+      );
+    },
+  );
+});
+
 function compiledQueryBound(payload: unknown, queryId: string): number {
   const definition = compiledQueryDefinition(payload, queryId);
   assert.equal(typeof definition.maximumResultCount, 'number');
@@ -690,6 +764,44 @@ function legacyUnfilteredPool(pool: Pool): {
 
 function boundedFilterId(index: number): string {
   return `f2200000-0000-4000-8000-${String(index).padStart(12, '0')}`;
+}
+
+function booleanPolicyNarrowing(value: boolean): Readonly<{
+  filter: Readonly<Record<string, unknown>>;
+  filterPlan: PredicateLoweringPlan;
+}> {
+  const filter = Object.freeze({
+    kind: 'booleanPredicate',
+    schemaVersion: 'v2',
+    value,
+  });
+  return Object.freeze({
+    filter,
+    filterPlan: Object.freeze({
+      costClass: 'tenantBoundedScan',
+      kind: 'predicateLoweringPlan',
+      positionProfileVersion: PREDICATE_POSITION_PROFILE_VERSION,
+      predicateDigest: canonicalizeAndHash(filter).contentHash,
+      root: Object.freeze({ kind: 'booleanPredicate', value }),
+      schemaVersion: PREDICATE_LOWERING_PLAN_VERSION,
+    }),
+  });
+}
+
+class AllowCurrentPolicy implements CurrentPolicyGateway {
+  async authorize(request: CurrentPolicyDecisionRequest) {
+    void request;
+    return {
+      decision: 'ALLOW' as const,
+      decisionVersion: CURRENT_POLICY_DECISION_VERSION,
+      policyVersion: 'q1-p1-saved-filter-policy/v1',
+    };
+  }
+
+  async readCurrentVersion(subject: CurrentPolicySubject) {
+    void subject;
+    return { policyVersion: 'q1-p1-saved-filter-policy/v1' };
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

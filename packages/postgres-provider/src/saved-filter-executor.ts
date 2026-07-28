@@ -170,6 +170,13 @@ export class PostgresSavedFilterExecutor
   async #executeQuery(
     request: SemanticQueryExecutionRequest,
   ): Promise<SemanticQueryResultEnvelope> {
+    if (request.filterPlans.length > 0) {
+      throw new SavedFilterContractError(
+        'SAVED_FILTER_QUERY_INADMISSIBLE',
+        'saved-filter queries cannot execute a predicate lowering plan',
+        '$.filterPlans',
+      );
+    }
     if (
       request.definition.queryId !== this.registration.queryIds.get &&
       request.definition.queryId !== this.registration.queryIds.list
