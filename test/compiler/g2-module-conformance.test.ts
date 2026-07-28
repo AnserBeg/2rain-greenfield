@@ -5,6 +5,8 @@ import test from 'node:test';
 import {
   CanonicalModelError,
   LANGUAGE_VERSION,
+  LANGUAGE_VERSIONS,
+  NORMALIZATION_PROFILE_VERSIONS,
   NORMALIZATION_PROFILE_VERSION,
   PREVIOUS_LANGUAGE_VERSION,
   PREVIOUS_NORMALIZATION_PROFILE_VERSION,
@@ -485,6 +487,56 @@ test('resolver authority is explicit language v2 evolution while v1 remains prof
   );
 });
 
+test('v3 compiles through explicit profile dispatch with the complete v2 projection structure', () => {
+  const v2 = mustCompile(input(ordinaryModuleV1()));
+  const authoredV3 = replaceVersion(
+    ordinaryModuleV1(),
+    LANGUAGE_VERSION,
+    LANGUAGE_VERSIONS.v3,
+  ) as Record<string, unknown>;
+  authoredV3.normalizationProfileVersion = NORMALIZATION_PROFILE_VERSIONS.v3;
+  const normalizedV3 = normalizeApplicationPackage(authoredV3);
+  const v3Input = inputNormalized(normalizedV3);
+  v3Input.profile = {
+    ...MODULE_COMPILER_PROFILE,
+    languageVersion: LANGUAGE_VERSIONS.v3,
+    normalizationProfileVersion: NORMALIZATION_PROFILE_VERSIONS.v3,
+  };
+  const v3 = mustCompile(v3Input);
+
+  assert.deepEqual(
+    v3.bundle.releaseManifest.projections.map((entry) => entry.familyId),
+    v2.bundle.releaseManifest.projections.map((entry) => entry.familyId),
+  );
+  for (const projection of v2.bundle.releaseManifest.projections) {
+    assert.deepEqual(
+      structuralShape(projectionPayload(v3, projection.familyId)),
+      structuralShape(projectionPayload(v2, projection.familyId)),
+      projection.familyId,
+    );
+  }
+  assert.equal(v3.bundle.releaseManifest.languageVersion, LANGUAGE_VERSIONS.v3);
+  assert.equal(
+    v3.bundle.releaseManifest.normalizationProfileVersion,
+    NORMALIZATION_PROFILE_VERSIONS.v3,
+  );
+
+  const invalidV3 = structuredClone(normalizedV3);
+  invalidV3.queries.find(
+    (query) => query.queryType === 'resolve',
+  )!.resolveMatchKeys = [];
+  const invalidInput = inputNormalized(invalidV3);
+  invalidInput.profile = { ...v3Input.profile };
+  const rejected = compileApplication(invalidInput);
+  assert.equal(rejected.status, 'failed');
+  assert.ok(
+    rejected.diagnostics.some(
+      (diagnostic) =>
+        diagnostic.code === 'COMPILER_RESOLVE_MATCH_AUTHORITY_REQUIRED',
+    ),
+  );
+});
+
 test('compiler rejects a v2 resolve query with no declared match authority', () => {
   const normalized = structuredClone(
     normalizeApplicationPackage(ordinaryModuleV1()),
@@ -827,4 +879,25 @@ function replaceVersion(value: unknown, from: string, to: string): unknown {
     );
   }
   return value;
+}
+
+function structuralShape(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(structuralShape).sort((left, right) => {
+      const leftShape = JSON.stringify(left);
+      const rightShape = JSON.stringify(right);
+      return leftShape < rightShape ? -1 : leftShape > rightShape ? 1 : 0;
+    });
+  }
+  if (typeof value === 'object' && value !== null) {
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((key) => [
+          key,
+          structuralShape((value as Record<string, unknown>)[key]),
+        ]),
+    );
+  }
+  return typeof value;
 }
