@@ -9,26 +9,40 @@ const reference = (kind: string, targetId: string) => ({
   targetId,
 });
 
-const moduleId = `${CATALOG_NAMESPACE}:module.catalog`;
-const contentCapabilityId = `${CATALOG_NAMESPACE}:capability.standard_surface_content`;
+function ids(namespace: string) {
+  return {
+    contentCapabilityId: `${namespace}:capability.standard_surface_content`,
+    entityIds: {
+      item: `${namespace}:entity.item`,
+    },
+    fieldIds: {
+      baseUnit: `${namespace}:field.item_base_unit`,
+      description: `${namespace}:field.item_description`,
+      name: `${namespace}:field.item_name`,
+      sku: `${namespace}:field.item_sku`,
+    },
+    moduleId: `${namespace}:module.catalog`,
+    namespace,
+    packageId: `${namespace}:package.catalog`,
+  } as const;
+}
 
-const entityIds = {
-  item: `${CATALOG_NAMESPACE}:entity.item`,
-} as const;
+type CatalogIds = ReturnType<typeof ids>;
 
-const fieldIds = {
-  baseUnit: `${CATALOG_NAMESPACE}:field.item_base_unit`,
-  description: `${CATALOG_NAMESPACE}:field.item_description`,
-  name: `${CATALOG_NAMESPACE}:field.item_name`,
-  sku: `${CATALOG_NAMESPACE}:field.item_sku`,
-} as const;
+const { contentCapabilityId, entityIds, fieldIds, moduleId } =
+  ids(CATALOG_NAMESPACE);
 
 /**
  * The complete Catalog module is definition data. Compiler projections and the
  * generic platform press own storage, queries, operations, surfaces, agent
  * discovery, reporting, policy, verification, and runtime execution.
  */
-export function catalogModuleDefinition(): Record<string, unknown> {
+export function catalogModuleDefinition(
+  namespace: string = CATALOG_NAMESPACE,
+): Record<string, unknown> {
+  const definitionIds = ids(namespace);
+  const { contentCapabilityId, entityIds, fieldIds, moduleId, packageId } =
+    definitionIds;
   const itemFields = [
     fieldIds.sku,
     fieldIds.name,
@@ -37,7 +51,11 @@ export function catalogModuleDefinition(): Record<string, unknown> {
   ];
   return {
     assertions: [
-      conformanceAssertion('item', `${CATALOG_NAMESPACE}:query.item_get`),
+      conformanceAssertion(
+        definitionIds,
+        'item',
+        `${namespace}:query.item_get`,
+      ),
     ],
     capabilityRequirements: [
       {
@@ -59,7 +77,7 @@ export function catalogModuleDefinition(): Record<string, unknown> {
         supportStatus: 'supported',
       },
     ],
-    entities: [entity('item', 'Item', entityIds.item, 10)],
+    entities: [entity(definitionIds, 'item', 'Item', entityIds.item, 10)],
     fields: [
       textField({
         businessKey: 'tenantEnvironmentCaseInsensitiveUnique',
@@ -114,23 +132,23 @@ export function catalogModuleDefinition(): Record<string, unknown> {
         label: 'Catalog',
         moduleId,
         orderKey: 10,
-        ownerPackageId: `${CATALOG_NAMESPACE}:package.catalog`,
+        ownerPackageId: packageId,
         schemaVersion: version,
       },
     ],
     normalizationProfileVersion,
-    operations: entityOperations('item', entityIds.item),
+    operations: entityOperations(definitionIds, 'item', entityIds.item),
     package: {
       kind: 'packageDefinition',
-      namespace: CATALOG_NAMESPACE,
-      packageId: `${CATALOG_NAMESPACE}:package.catalog`,
+      namespace,
+      packageId,
       provenance: 'firstParty',
       schemaVersion: version,
       version: '1.0.0',
     },
-    permissions: entityPermissions('item', entityIds.item),
+    permissions: entityPermissions(definitionIds, 'item', entityIds.item),
     queries: [
-      ...entityQueries('item', entityIds.item, itemFields, [
+      ...entityQueries(definitionIds, 'item', entityIds.item, itemFields, [
         {
           authority: 'identifier',
           fieldId: fieldIds.sku,
@@ -142,8 +160,8 @@ export function catalogModuleDefinition(): Record<string, unknown> {
     relations: [],
     schemaVersion: version,
     stateMachines: [],
-    storageMappings: [storageMapping('item', entityIds.item)],
-    surfaces: entitySurfaces('item', 'Item'),
+    storageMappings: [storageMapping(definitionIds, 'item', entityIds.item)],
+    surfaces: entitySurfaces(definitionIds, 'item', 'Item'),
   };
 }
 
@@ -156,6 +174,7 @@ export const CATALOG_IDS = Object.freeze({
 });
 
 function entity(
+  ids: CatalogIds,
   local: string,
   label: string,
   entityId: string,
@@ -165,12 +184,12 @@ function entity(
     entityId,
     kind: 'entityDefinition',
     label,
-    module: reference('moduleReference', moduleId),
+    module: reference('moduleReference', ids.moduleId),
     orderKey,
     schemaVersion: version,
     storage: reference(
       'storageMappingReference',
-      `${CATALOG_NAMESPACE}:storage.${local}`,
+      `${ids.namespace}:storage.${local}`,
     ),
   };
 }
@@ -209,6 +228,7 @@ function textField(input: {
 }
 
 function entityQueries(
+  ids: CatalogIds,
   local: string,
   entityId: string,
   selectedFieldIds: readonly string[],
@@ -221,12 +241,12 @@ function entityQueries(
   return ['get', 'list', 'search', 'resolve'].map((queryType) => ({
     kind: 'queryDefinition',
     maximumResultCount: queryType === 'get' ? 1 : 100,
-    module: reference('moduleReference', moduleId),
+    module: reference('moduleReference', ids.moduleId),
     permission: reference(
       'permissionReference',
-      `${CATALOG_NAMESPACE}:permission.${local}_read`,
+      `${ids.namespace}:permission.${local}_read`,
     ),
-    queryId: `${CATALOG_NAMESPACE}:query.${local}_${queryType}`,
+    queryId: `${ids.namespace}:query.${local}_${queryType}`,
     queryType,
     ...(queryType === 'resolve'
       ? {
@@ -234,7 +254,7 @@ function entityQueries(
             authority: key.authority,
             field: reference('fieldReference', key.fieldId),
             kind: 'resolveMatchKey',
-            matchKeyId: `${CATALOG_NAMESPACE}:resolve-key.${local}_${key.localId}`,
+            matchKeyId: `${ids.namespace}:resolve-key.${local}_${key.localId}`,
             orderKey: (index + 1) * 10,
             schemaVersion: version,
           })),
@@ -246,7 +266,7 @@ function entityQueries(
       kind: 'querySelection',
       orderKey: (index + 1) * 10,
       schemaVersion: version,
-      selectionId: `${CATALOG_NAMESPACE}:selection.${local}_${queryType}_${String(index + 1)}`,
+      selectionId: `${ids.namespace}:selection.${local}_${queryType}_${String(index + 1)}`,
     })),
     sourceEntity: reference('entityReference', entityId),
     tier: 'q0',
@@ -254,6 +274,7 @@ function entityQueries(
 }
 
 function entityOperations(
+  ids: CatalogIds,
   local: string,
   entityId: string,
 ): Array<Record<string, unknown>> {
@@ -271,15 +292,15 @@ function entityOperations(
       schemaVersion: version,
     },
     kind: 'operationDefinition',
-    module: reference('moduleReference', moduleId),
-    operationId: `${CATALOG_NAMESPACE}:operation.${local}_${action}`,
+    module: reference('moduleReference', ids.moduleId),
+    operationId: `${ids.namespace}:operation.${local}_${action}`,
     permission: reference(
       'permissionReference',
-      `${CATALOG_NAMESPACE}:permission.${local}_${action}`,
+      `${ids.namespace}:permission.${local}_${action}`,
     ),
     readBack: reference(
       'queryReference',
-      `${CATALOG_NAMESPACE}:query.${local}_get`,
+      `${ids.namespace}:query.${local}_get`,
     ),
     schemaVersion: version,
     tier: 'o0',
@@ -287,6 +308,7 @@ function entityOperations(
 }
 
 function entityPermissions(
+  ids: CatalogIds,
   local: string,
   entityId: string,
 ): Array<Record<string, unknown>> {
@@ -294,13 +316,14 @@ function entityPermissions(
     action,
     kind: 'permissionDefinition',
     label: `${local} ${action}`,
-    permissionId: `${CATALOG_NAMESPACE}:permission.${local}_${action}`,
+    permissionId: `${ids.namespace}:permission.${local}_${action}`,
     resource: reference('entityReference', entityId),
     schemaVersion: version,
   }));
 }
 
 function entitySurfaces(
+  ids: CatalogIds,
   local: string,
   label: string,
 ): Array<Record<string, unknown>> {
@@ -312,32 +335,33 @@ function entitySurfaces(
     archetype,
     dataSource: reference(
       'queryReference',
-      `${CATALOG_NAMESPACE}:query.${local}_${surfaceRole === 'list' ? 'list' : 'get'}`,
+      `${ids.namespace}:query.${local}_${surfaceRole === 'list' ? 'list' : 'get'}`,
     ),
     kind: 'surfaceDefinition',
     label: `${label} ${suffix}`,
-    module: reference('moduleReference', moduleId),
+    module: reference('moduleReference', ids.moduleId),
     schemaVersion: version,
     slots: [
       {
         content: reference(
           'opaqueSurfaceContentReference',
-          contentCapabilityId,
+          ids.contentCapabilityId,
         ),
         kind: 'surfaceSlot',
         orderKey: 10,
         schemaVersion: version,
         slot,
-        slotId: `${CATALOG_NAMESPACE}:slot.${local}_${suffix}_${String(index + 1)}`,
+        slotId: `${ids.namespace}:slot.${local}_${suffix}_${String(index + 1)}`,
       },
     ],
     statusRoles: [],
-    surfaceId: `${CATALOG_NAMESPACE}:surface.${local}_${suffix}`,
+    surfaceId: `${ids.namespace}:surface.${local}_${suffix}`,
     surfaceRole,
   }));
 }
 
 function storageMapping(
+  ids: CatalogIds,
   local: string,
   entityId: string,
 ): Record<string, unknown> {
@@ -346,16 +370,17 @@ function storageMapping(
     kind: 'storageMappingDefinition',
     schemaVersion: version,
     storageClass: 'dedicatedTable',
-    storageMappingId: `${CATALOG_NAMESPACE}:storage.${local}`,
+    storageMappingId: `${ids.namespace}:storage.${local}`,
   };
 }
 
 function conformanceAssertion(
+  ids: CatalogIds,
   local: string,
   queryId: string,
 ): Record<string, unknown> {
   return {
-    assertionId: `${CATALOG_NAMESPACE}:assertion.${local}_walking_slice`,
+    assertionId: `${ids.namespace}:assertion.${local}_walking_slice`,
     evidenceKinds: [
       'structure',
       'provider',

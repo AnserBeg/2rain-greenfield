@@ -1,5 +1,13 @@
 {
   "name": "@north-star/api",
   "private": true,
-  "version": "0.0.0"
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node --import tsx src/main.ts"
+  },
+  "dependencies": {
+    "@north-star/postgres-provider": "workspace:*",
+    "@north-star/web": "workspace:*"
+  }
 }

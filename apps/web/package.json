@@ -3,7 +3,11 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "exports": {
+    "./app-server": "./src/app-server.ts"
+  },
   "scripts": {
+    "build:app-release": "node --import tsx scripts/compile-app-release.ts",
     "build:demo-release": "node --import tsx scripts/compile-demo-release.ts",
     "check:demo-release": "node --import tsx scripts/compile-demo-release.ts --check",
     "dev": "node --import tsx src/demo-server.ts",

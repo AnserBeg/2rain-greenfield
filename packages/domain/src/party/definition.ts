@@ -9,40 +9,64 @@ const reference = (kind: string, targetId: string) => ({
   targetId,
 });
 
-const moduleId = `${PARTY_NAMESPACE}:module.party`;
-const contentCapabilityId = `${PARTY_NAMESPACE}:capability.standard_surface_content`;
+function ids(namespace: string) {
+  return {
+    contentCapabilityId: `${namespace}:capability.standard_surface_content`,
+    entityIds: {
+      party: `${namespace}:entity.party`,
+      role: `${namespace}:entity.party_role`,
+    },
+    fieldIds: {
+      contactSummary: `${namespace}:field.party_contact_summary`,
+      name: `${namespace}:field.party_name`,
+      number: `${namespace}:field.party_number`,
+      roleKind: `${namespace}:field.party_role_kind`,
+      roleStatus: `${namespace}:field.party_role_status`,
+    },
+    moduleId: `${namespace}:module.party`,
+    namespace,
+    packageId: `${namespace}:package.party`,
+    relationIds: {
+      roleParty: `${namespace}:relation.party_role_party`,
+    },
+  } as const;
+}
 
-const entityIds = {
-  party: `${PARTY_NAMESPACE}:entity.party`,
-  role: `${PARTY_NAMESPACE}:entity.party_role`,
-} as const;
+type PartyIds = ReturnType<typeof ids>;
 
-const fieldIds = {
-  contactSummary: `${PARTY_NAMESPACE}:field.party_contact_summary`,
-  name: `${PARTY_NAMESPACE}:field.party_name`,
-  number: `${PARTY_NAMESPACE}:field.party_number`,
-  roleKind: `${PARTY_NAMESPACE}:field.party_role_kind`,
-  roleStatus: `${PARTY_NAMESPACE}:field.party_role_status`,
-} as const;
-
-const relationIds = {
-  roleParty: `${PARTY_NAMESPACE}:relation.party_role_party`,
-} as const;
+const { contentCapabilityId, entityIds, fieldIds, moduleId, relationIds } =
+  ids(PARTY_NAMESPACE);
 
 /**
  * The complete Party module is definition data. Compiler projections and the
  * generic platform press own storage, queries, operations, surfaces, agent
  * discovery, reporting, policy, verification, and runtime execution.
  */
-export function partyModuleDefinition(): Record<string, unknown> {
+export function partyModuleDefinition(
+  namespace: string = PARTY_NAMESPACE,
+): Record<string, unknown> {
+  const definitionIds = ids(namespace);
+  const {
+    contentCapabilityId,
+    entityIds,
+    fieldIds,
+    moduleId,
+    packageId,
+    relationIds,
+  } = definitionIds;
   const partyFields = [fieldIds.number, fieldIds.name, fieldIds.contactSummary];
   const roleFields = [fieldIds.roleKind, fieldIds.roleStatus];
   return {
     assertions: [
-      conformanceAssertion('party', `${PARTY_NAMESPACE}:query.party_get`),
       conformanceAssertion(
+        definitionIds,
+        'party',
+        `${namespace}:query.party_get`,
+      ),
+      conformanceAssertion(
+        definitionIds,
         'party_role',
-        `${PARTY_NAMESPACE}:query.party_role_get`,
+        `${namespace}:query.party_role_get`,
       ),
     ],
     capabilityRequirements: [
@@ -66,8 +90,8 @@ export function partyModuleDefinition(): Record<string, unknown> {
       },
     ],
     entities: [
-      entity('party', 'Party', entityIds.party, 10),
-      entity('party_role', 'Party role', entityIds.role, 20),
+      entity(definitionIds, 'party', 'Party', entityIds.party, 10),
+      entity(definitionIds, 'party_role', 'Party role', entityIds.role, 20),
     ],
     fields: [
       textField({
@@ -99,14 +123,28 @@ export function partyModuleDefinition(): Record<string, unknown> {
         presence: 'optional',
         searchable: false,
       }),
-      enumField(entityIds.role, fieldIds.roleKind, 'Party role', 10, [
-        ['supplier', 'Supplier'],
-        ['customer', 'Customer'],
-      ]),
-      enumField(entityIds.role, fieldIds.roleStatus, 'Role status', 20, [
-        ['active', 'Active'],
-        ['inactive', 'Inactive'],
-      ]),
+      enumField(
+        definitionIds,
+        entityIds.role,
+        fieldIds.roleKind,
+        'Party role',
+        10,
+        [
+          ['supplier', 'Supplier'],
+          ['customer', 'Customer'],
+        ],
+      ),
+      enumField(
+        definitionIds,
+        entityIds.role,
+        fieldIds.roleStatus,
+        'Role status',
+        20,
+        [
+          ['active', 'Active'],
+          ['inactive', 'Inactive'],
+        ],
+      ),
     ],
     hashAlgorithm: 'sha256',
     kind: 'applicationPackageRevision',
@@ -122,29 +160,29 @@ export function partyModuleDefinition(): Record<string, unknown> {
         label: 'Party',
         moduleId,
         orderKey: 10,
-        ownerPackageId: `${PARTY_NAMESPACE}:package.party`,
+        ownerPackageId: packageId,
         schemaVersion: version,
       },
     ],
     normalizationProfileVersion,
     operations: [
-      ...entityOperations('party', entityIds.party),
-      ...entityOperations('party_role', entityIds.role),
+      ...entityOperations(definitionIds, 'party', entityIds.party),
+      ...entityOperations(definitionIds, 'party_role', entityIds.role),
     ],
     package: {
       kind: 'packageDefinition',
-      namespace: PARTY_NAMESPACE,
-      packageId: `${PARTY_NAMESPACE}:package.party`,
+      namespace,
+      packageId,
       provenance: 'firstParty',
       schemaVersion: version,
       version: '1.0.0',
     },
     permissions: [
-      ...entityPermissions('party', entityIds.party),
-      ...entityPermissions('party_role', entityIds.role),
+      ...entityPermissions(definitionIds, 'party', entityIds.party),
+      ...entityPermissions(definitionIds, 'party_role', entityIds.role),
     ],
     queries: [
-      ...entityQueries('party', entityIds.party, partyFields, [
+      ...entityQueries(definitionIds, 'party', entityIds.party, partyFields, [
         {
           authority: 'identifier',
           fieldId: fieldIds.number,
@@ -152,13 +190,19 @@ export function partyModuleDefinition(): Record<string, unknown> {
         },
         { authority: 'advisory', fieldId: fieldIds.name, localId: 'name' },
       ]),
-      ...entityQueries('party_role', entityIds.role, roleFields, [
-        {
-          authority: 'advisory',
-          fieldId: fieldIds.roleKind,
-          localId: 'role_kind',
-        },
-      ]),
+      ...entityQueries(
+        definitionIds,
+        'party_role',
+        entityIds.role,
+        roleFields,
+        [
+          {
+            authority: 'advisory',
+            fieldId: fieldIds.roleKind,
+            localId: 'role_kind',
+          },
+        ],
+      ),
     ],
     relations: [
       {
@@ -183,12 +227,12 @@ export function partyModuleDefinition(): Record<string, unknown> {
     schemaVersion: version,
     stateMachines: [],
     storageMappings: [
-      storageMapping('party', entityIds.party),
-      storageMapping('party_role', entityIds.role),
+      storageMapping(definitionIds, 'party', entityIds.party),
+      storageMapping(definitionIds, 'party_role', entityIds.role),
     ],
     surfaces: [
-      ...entitySurfaces('party', 'Party'),
-      ...entitySurfaces('party_role', 'Party role'),
+      ...entitySurfaces(definitionIds, 'party', 'Party'),
+      ...entitySurfaces(definitionIds, 'party_role', 'Party role'),
     ],
   };
 }
@@ -203,6 +247,7 @@ export const PARTY_IDS = Object.freeze({
 });
 
 function entity(
+  ids: PartyIds,
   local: string,
   label: string,
   entityId: string,
@@ -212,12 +257,12 @@ function entity(
     entityId,
     kind: 'entityDefinition',
     label,
-    module: reference('moduleReference', moduleId),
+    module: reference('moduleReference', ids.moduleId),
     orderKey,
     schemaVersion: version,
     storage: reference(
       'storageMappingReference',
-      `${PARTY_NAMESPACE}:storage.${local}`,
+      `${ids.namespace}:storage.${local}`,
     ),
   };
 }
@@ -256,6 +301,7 @@ function textField(input: {
 }
 
 function enumField(
+  ids: PartyIds,
   entityId: string,
   fieldId: string,
   label: string,
@@ -273,7 +319,7 @@ function enumField(
       options: options.map(([local, optionLabel], index) => ({
         kind: 'enumOption',
         label: optionLabel,
-        optionId: `${PARTY_NAMESPACE}:option.${local}`,
+        optionId: `${ids.namespace}:option.${local}`,
         orderKey: (index + 1) * 10,
         schemaVersion: version,
       })),
@@ -290,6 +336,7 @@ function enumField(
 }
 
 function entityQueries(
+  ids: PartyIds,
   local: string,
   entityId: string,
   selectedFieldIds: readonly string[],
@@ -302,12 +349,12 @@ function entityQueries(
   return ['get', 'list', 'search', 'resolve'].map((queryType) => ({
     kind: 'queryDefinition',
     maximumResultCount: queryType === 'get' ? 1 : 100,
-    module: reference('moduleReference', moduleId),
+    module: reference('moduleReference', ids.moduleId),
     permission: reference(
       'permissionReference',
-      `${PARTY_NAMESPACE}:permission.${local}_read`,
+      `${ids.namespace}:permission.${local}_read`,
     ),
-    queryId: `${PARTY_NAMESPACE}:query.${local}_${queryType}`,
+    queryId: `${ids.namespace}:query.${local}_${queryType}`,
     queryType,
     ...(queryType === 'resolve'
       ? {
@@ -315,7 +362,7 @@ function entityQueries(
             authority: key.authority,
             field: reference('fieldReference', key.fieldId),
             kind: 'resolveMatchKey',
-            matchKeyId: `${PARTY_NAMESPACE}:resolve-key.${local}_${key.localId}`,
+            matchKeyId: `${ids.namespace}:resolve-key.${local}_${key.localId}`,
             orderKey: (index + 1) * 10,
             schemaVersion: version,
           })),
@@ -327,7 +374,7 @@ function entityQueries(
       kind: 'querySelection',
       orderKey: (index + 1) * 10,
       schemaVersion: version,
-      selectionId: `${PARTY_NAMESPACE}:selection.${local}_${queryType}_${String(index + 1)}`,
+      selectionId: `${ids.namespace}:selection.${local}_${queryType}_${String(index + 1)}`,
     })),
     sourceEntity: reference('entityReference', entityId),
     tier: 'q0',
@@ -335,6 +382,7 @@ function entityQueries(
 }
 
 function entityOperations(
+  ids: PartyIds,
   local: string,
   entityId: string,
 ): Array<Record<string, unknown>> {
@@ -352,15 +400,15 @@ function entityOperations(
       schemaVersion: version,
     },
     kind: 'operationDefinition',
-    module: reference('moduleReference', moduleId),
-    operationId: `${PARTY_NAMESPACE}:operation.${local}_${action}`,
+    module: reference('moduleReference', ids.moduleId),
+    operationId: `${ids.namespace}:operation.${local}_${action}`,
     permission: reference(
       'permissionReference',
-      `${PARTY_NAMESPACE}:permission.${local}_${action}`,
+      `${ids.namespace}:permission.${local}_${action}`,
     ),
     readBack: reference(
       'queryReference',
-      `${PARTY_NAMESPACE}:query.${local}_get`,
+      `${ids.namespace}:query.${local}_get`,
     ),
     schemaVersion: version,
     tier: 'o0',
@@ -368,6 +416,7 @@ function entityOperations(
 }
 
 function entityPermissions(
+  ids: PartyIds,
   local: string,
   entityId: string,
 ): Array<Record<string, unknown>> {
@@ -375,13 +424,14 @@ function entityPermissions(
     action,
     kind: 'permissionDefinition',
     label: `${local} ${action}`,
-    permissionId: `${PARTY_NAMESPACE}:permission.${local}_${action}`,
+    permissionId: `${ids.namespace}:permission.${local}_${action}`,
     resource: reference('entityReference', entityId),
     schemaVersion: version,
   }));
 }
 
 function entitySurfaces(
+  ids: PartyIds,
   local: string,
   label: string,
 ): Array<Record<string, unknown>> {
@@ -393,32 +443,33 @@ function entitySurfaces(
     archetype,
     dataSource: reference(
       'queryReference',
-      `${PARTY_NAMESPACE}:query.${local}_${surfaceRole === 'list' ? 'list' : 'get'}`,
+      `${ids.namespace}:query.${local}_${surfaceRole === 'list' ? 'list' : 'get'}`,
     ),
     kind: 'surfaceDefinition',
     label: `${label} ${suffix}`,
-    module: reference('moduleReference', moduleId),
+    module: reference('moduleReference', ids.moduleId),
     schemaVersion: version,
     slots: [
       {
         content: reference(
           'opaqueSurfaceContentReference',
-          contentCapabilityId,
+          ids.contentCapabilityId,
         ),
         kind: 'surfaceSlot',
         orderKey: 10,
         schemaVersion: version,
         slot,
-        slotId: `${PARTY_NAMESPACE}:slot.${local}_${suffix}_${String(index + 1)}`,
+        slotId: `${ids.namespace}:slot.${local}_${suffix}_${String(index + 1)}`,
       },
     ],
     statusRoles: [],
-    surfaceId: `${PARTY_NAMESPACE}:surface.${local}_${suffix}`,
+    surfaceId: `${ids.namespace}:surface.${local}_${suffix}`,
     surfaceRole,
   }));
 }
 
 function storageMapping(
+  ids: PartyIds,
   local: string,
   entityId: string,
 ): Record<string, unknown> {
@@ -427,16 +478,17 @@ function storageMapping(
     kind: 'storageMappingDefinition',
     schemaVersion: version,
     storageClass: 'dedicatedTable',
-    storageMappingId: `${PARTY_NAMESPACE}:storage.${local}`,
+    storageMappingId: `${ids.namespace}:storage.${local}`,
   };
 }
 
 function conformanceAssertion(
+  ids: PartyIds,
   local: string,
   queryId: string,
 ): Record<string, unknown> {
   return {
-    assertionId: `${PARTY_NAMESPACE}:assertion.${local}_walking_slice`,
+    assertionId: `${ids.namespace}:assertion.${local}_walking_slice`,
     evidenceKinds: [
       'structure',
       'provider',

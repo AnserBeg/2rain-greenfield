@@ -48,7 +48,14 @@ importers:
         specifier: ^8.42.0
         version: 8.65.0(eslint@9.39.5)(typescript@5.9.3)
 
-  apps/api: {}
+  apps/api:
+    dependencies:
+      '@north-star/postgres-provider':
+        specifier: workspace:*
+        version: link:../../packages/postgres-provider
+      '@north-star/web':
+        specifier: workspace:*
+        version: link:../web
 
   apps/web:
     dependencies:

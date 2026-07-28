@@ -9,31 +9,46 @@ const reference = (kind: string, targetId: string) => ({
   targetId,
 });
 
-const moduleId = `${LOCATION_NAMESPACE}:module.location`;
-const contentCapabilityId = `${LOCATION_NAMESPACE}:capability.standard_surface_content`;
+function ids(namespace: string) {
+  return {
+    contentCapabilityId: `${namespace}:capability.standard_surface_content`,
+    entityIds: {
+      location: `${namespace}:entity.location`,
+    },
+    fieldIds: {
+      code: `${namespace}:field.location_code`,
+      locationType: `${namespace}:field.location_type`,
+      name: `${namespace}:field.location_name`,
+    },
+    moduleId: `${namespace}:module.location`,
+    namespace,
+    packageId: `${namespace}:package.location`,
+  } as const;
+}
 
-const entityIds = {
-  location: `${LOCATION_NAMESPACE}:entity.location`,
-} as const;
+type LocationIds = ReturnType<typeof ids>;
 
-const fieldIds = {
-  locationType: `${LOCATION_NAMESPACE}:field.location_type`,
-  name: `${LOCATION_NAMESPACE}:field.location_name`,
-  code: `${LOCATION_NAMESPACE}:field.location_code`,
-} as const;
+const { contentCapabilityId, entityIds, fieldIds, moduleId } =
+  ids(LOCATION_NAMESPACE);
 
 /**
  * The complete Location module is definition data. Compiler projections and the
  * generic platform press own storage, queries, operations, surfaces, agent
  * discovery, reporting, policy, verification, and runtime execution.
  */
-export function locationModuleDefinition(): Record<string, unknown> {
+export function locationModuleDefinition(
+  namespace: string = LOCATION_NAMESPACE,
+): Record<string, unknown> {
+  const definitionIds = ids(namespace);
+  const { contentCapabilityId, entityIds, fieldIds, moduleId, packageId } =
+    definitionIds;
   const locationFields = [fieldIds.code, fieldIds.name, fieldIds.locationType];
   return {
     assertions: [
       conformanceAssertion(
+        definitionIds,
         'location',
-        `${LOCATION_NAMESPACE}:query.location_get`,
+        `${namespace}:query.location_get`,
       ),
     ],
     capabilityRequirements: [
@@ -56,7 +71,9 @@ export function locationModuleDefinition(): Record<string, unknown> {
         supportStatus: 'supported',
       },
     ],
-    entities: [entity('location', 'Location', entityIds.location, 10)],
+    entities: [
+      entity(definitionIds, 'location', 'Location', entityIds.location, 10),
+    ],
     fields: [
       textField({
         businessKey: 'tenantEnvironmentCaseInsensitiveUnique',
@@ -78,6 +95,7 @@ export function locationModuleDefinition(): Record<string, unknown> {
         searchable: true,
       }),
       enumField(
+        definitionIds,
         entityIds.location,
         fieldIds.locationType,
         'Location type',
@@ -102,36 +120,48 @@ export function locationModuleDefinition(): Record<string, unknown> {
         label: 'Location',
         moduleId,
         orderKey: 10,
-        ownerPackageId: `${LOCATION_NAMESPACE}:package.location`,
+        ownerPackageId: packageId,
         schemaVersion: version,
       },
     ],
     normalizationProfileVersion,
-    operations: entityOperations('location', entityIds.location),
+    operations: entityOperations(definitionIds, 'location', entityIds.location),
     package: {
       kind: 'packageDefinition',
-      namespace: LOCATION_NAMESPACE,
-      packageId: `${LOCATION_NAMESPACE}:package.location`,
+      namespace,
+      packageId,
       provenance: 'firstParty',
       schemaVersion: version,
       version: '1.0.0',
     },
-    permissions: entityPermissions('location', entityIds.location),
+    permissions: entityPermissions(
+      definitionIds,
+      'location',
+      entityIds.location,
+    ),
     queries: [
-      ...entityQueries('location', entityIds.location, locationFields, [
-        {
-          authority: 'identifier',
-          fieldId: fieldIds.code,
-          localId: 'code',
-        },
-        { authority: 'advisory', fieldId: fieldIds.name, localId: 'name' },
-      ]),
+      ...entityQueries(
+        definitionIds,
+        'location',
+        entityIds.location,
+        locationFields,
+        [
+          {
+            authority: 'identifier',
+            fieldId: fieldIds.code,
+            localId: 'code',
+          },
+          { authority: 'advisory', fieldId: fieldIds.name, localId: 'name' },
+        ],
+      ),
     ],
     relations: [],
     schemaVersion: version,
     stateMachines: [],
-    storageMappings: [storageMapping('location', entityIds.location)],
-    surfaces: entitySurfaces('location', 'Location'),
+    storageMappings: [
+      storageMapping(definitionIds, 'location', entityIds.location),
+    ],
+    surfaces: entitySurfaces(definitionIds, 'location', 'Location'),
   };
 }
 
@@ -144,6 +174,7 @@ export const LOCATION_IDS = Object.freeze({
 });
 
 function entity(
+  ids: LocationIds,
   local: string,
   label: string,
   entityId: string,
@@ -153,12 +184,12 @@ function entity(
     entityId,
     kind: 'entityDefinition',
     label,
-    module: reference('moduleReference', moduleId),
+    module: reference('moduleReference', ids.moduleId),
     orderKey,
     schemaVersion: version,
     storage: reference(
       'storageMappingReference',
-      `${LOCATION_NAMESPACE}:storage.${local}`,
+      `${ids.namespace}:storage.${local}`,
     ),
   };
 }
@@ -197,6 +228,7 @@ function textField(input: {
 }
 
 function enumField(
+  ids: LocationIds,
   entityId: string,
   fieldId: string,
   label: string,
@@ -214,7 +246,7 @@ function enumField(
       options: options.map(([local, optionLabel], index) => ({
         kind: 'enumOption',
         label: optionLabel,
-        optionId: `${LOCATION_NAMESPACE}:option.${local}`,
+        optionId: `${ids.namespace}:option.${local}`,
         orderKey: (index + 1) * 10,
         schemaVersion: version,
       })),
@@ -231,6 +263,7 @@ function enumField(
 }
 
 function entityQueries(
+  ids: LocationIds,
   local: string,
   entityId: string,
   selectedFieldIds: readonly string[],
@@ -243,12 +276,12 @@ function entityQueries(
   return ['get', 'list', 'search', 'resolve'].map((queryType) => ({
     kind: 'queryDefinition',
     maximumResultCount: queryType === 'get' ? 1 : 100,
-    module: reference('moduleReference', moduleId),
+    module: reference('moduleReference', ids.moduleId),
     permission: reference(
       'permissionReference',
-      `${LOCATION_NAMESPACE}:permission.${local}_read`,
+      `${ids.namespace}:permission.${local}_read`,
     ),
-    queryId: `${LOCATION_NAMESPACE}:query.${local}_${queryType}`,
+    queryId: `${ids.namespace}:query.${local}_${queryType}`,
     queryType,
     ...(queryType === 'resolve'
       ? {
@@ -256,7 +289,7 @@ function entityQueries(
             authority: key.authority,
             field: reference('fieldReference', key.fieldId),
             kind: 'resolveMatchKey',
-            matchKeyId: `${LOCATION_NAMESPACE}:resolve-key.${local}_${key.localId}`,
+            matchKeyId: `${ids.namespace}:resolve-key.${local}_${key.localId}`,
             orderKey: (index + 1) * 10,
             schemaVersion: version,
           })),
@@ -268,7 +301,7 @@ function entityQueries(
       kind: 'querySelection',
       orderKey: (index + 1) * 10,
       schemaVersion: version,
-      selectionId: `${LOCATION_NAMESPACE}:selection.${local}_${queryType}_${String(index + 1)}`,
+      selectionId: `${ids.namespace}:selection.${local}_${queryType}_${String(index + 1)}`,
     })),
     sourceEntity: reference('entityReference', entityId),
     tier: 'q0',
@@ -276,6 +309,7 @@ function entityQueries(
 }
 
 function entityOperations(
+  ids: LocationIds,
   local: string,
   entityId: string,
 ): Array<Record<string, unknown>> {
@@ -293,15 +327,15 @@ function entityOperations(
       schemaVersion: version,
     },
     kind: 'operationDefinition',
-    module: reference('moduleReference', moduleId),
-    operationId: `${LOCATION_NAMESPACE}:operation.${local}_${action}`,
+    module: reference('moduleReference', ids.moduleId),
+    operationId: `${ids.namespace}:operation.${local}_${action}`,
     permission: reference(
       'permissionReference',
-      `${LOCATION_NAMESPACE}:permission.${local}_${action}`,
+      `${ids.namespace}:permission.${local}_${action}`,
     ),
     readBack: reference(
       'queryReference',
-      `${LOCATION_NAMESPACE}:query.${local}_get`,
+      `${ids.namespace}:query.${local}_get`,
     ),
     schemaVersion: version,
     tier: 'o0',
@@ -309,6 +343,7 @@ function entityOperations(
 }
 
 function entityPermissions(
+  ids: LocationIds,
   local: string,
   entityId: string,
 ): Array<Record<string, unknown>> {
@@ -316,13 +351,14 @@ function entityPermissions(
     action,
     kind: 'permissionDefinition',
     label: `${local} ${action}`,
-    permissionId: `${LOCATION_NAMESPACE}:permission.${local}_${action}`,
+    permissionId: `${ids.namespace}:permission.${local}_${action}`,
     resource: reference('entityReference', entityId),
     schemaVersion: version,
   }));
 }
 
 function entitySurfaces(
+  ids: LocationIds,
   local: string,
   label: string,
 ): Array<Record<string, unknown>> {
@@ -334,32 +370,33 @@ function entitySurfaces(
     archetype,
     dataSource: reference(
       'queryReference',
-      `${LOCATION_NAMESPACE}:query.${local}_${surfaceRole === 'list' ? 'list' : 'get'}`,
+      `${ids.namespace}:query.${local}_${surfaceRole === 'list' ? 'list' : 'get'}`,
     ),
     kind: 'surfaceDefinition',
     label: `${label} ${suffix}`,
-    module: reference('moduleReference', moduleId),
+    module: reference('moduleReference', ids.moduleId),
     schemaVersion: version,
     slots: [
       {
         content: reference(
           'opaqueSurfaceContentReference',
-          contentCapabilityId,
+          ids.contentCapabilityId,
         ),
         kind: 'surfaceSlot',
         orderKey: 10,
         schemaVersion: version,
         slot,
-        slotId: `${LOCATION_NAMESPACE}:slot.${local}_${suffix}_${String(index + 1)}`,
+        slotId: `${ids.namespace}:slot.${local}_${suffix}_${String(index + 1)}`,
       },
     ],
     statusRoles: [],
-    surfaceId: `${LOCATION_NAMESPACE}:surface.${local}_${suffix}`,
+    surfaceId: `${ids.namespace}:surface.${local}_${suffix}`,
     surfaceRole,
   }));
 }
 
 function storageMapping(
+  ids: LocationIds,
   local: string,
   entityId: string,
 ): Record<string, unknown> {
@@ -368,16 +405,17 @@ function storageMapping(
     kind: 'storageMappingDefinition',
     schemaVersion: version,
     storageClass: 'dedicatedTable',
-    storageMappingId: `${LOCATION_NAMESPACE}:storage.${local}`,
+    storageMappingId: `${ids.namespace}:storage.${local}`,
   };
 }
 
 function conformanceAssertion(
+  ids: LocationIds,
   local: string,
   queryId: string,
 ): Record<string, unknown> {
   return {
-    assertionId: `${LOCATION_NAMESPACE}:assertion.${local}_walking_slice`,
+    assertionId: `${ids.namespace}:assertion.${local}_walking_slice`,
     evidenceKinds: [
       'structure',
       'provider',

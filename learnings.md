@@ -205,3 +205,13 @@ How to apply: accept `unknown` at persisted/runtime boundaries, close the wire s
 Date: 2026-07-26
 Why: G2-EK1's first review found that a throwing predicate-receipt observer could block accepted execution or replace an exact unsupported result and its durable failure evidence with a generic execution failure.
 How to apply: route evidence observers through failure isolation, and test them by throwing after recording at every call site; instrumentation may report execution but must never decide or interrupt it.
+
+## Put the intended PostgreSQL role in the connection URL
+Date: 2026-07-27
+Why: G2-P5e found that node-postgres retained the username embedded in `DATABASE_URL` instead of a separate pool `user`; the trusted-transaction fence failed closed with `UnsafeDatabaseRoleError` before any privileged request ran.
+How to apply: derive a role-specific connection URL for each least-privilege pool and keep the exact-role assertion as the first trusted-transaction fence. See `docs/execution/packets/G2-P5e.md`.
+
+## Distinguish migration verification from newly applied work
+Date: 2026-07-27
+Why: G2-P5e's first persistent restart exposed a fresh-database harness assumption: zero migrations were newly applied even though every migration verified successfully.
+How to apply: persistent startup must require the complete ordered migration set to verify and may report zero newly applied; keep fresh-database assertions in fresh-database harnesses. The shared runner already has this shape, so the fix belongs in its composition-root caller. See `docs/execution/packets/G2-P5e.md`.
