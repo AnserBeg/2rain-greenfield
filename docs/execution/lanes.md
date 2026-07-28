@@ -15,7 +15,7 @@ writer is holding those paths right now.
 |---|---|---|---|---|
 | **KERNEL** | Canonical language and the query tier | `4a` — v3 version and profile dispatch | `7f1edfc` | active |
 | **DEPLOY** | Release lifecycle and runtime infrastructure | `1b` — release-admission verification integrity | `07ce6de` | active |
-| **FIX** | Correctness defects in shipped code | `1e` — press-guard consolidation | `37a4107` | active |
+| **FIX** | Correctness defects in shipped code | *awaiting selection* | — | **idle** |
 
 Lane identity is stable across packets. When a lane's packet is accepted, the
 next packet inherits the lane and its partition.
