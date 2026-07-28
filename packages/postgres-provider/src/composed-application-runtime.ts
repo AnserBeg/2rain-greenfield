@@ -10,6 +10,11 @@ import {
 import type {
   CompileSuccess,
   ContentAddressedArtifact,
+  StorageTransitionEnvelope,
+} from '@north-star/compiler';
+import {
+  PROJECTION_FAMILY_IDS,
+  STORAGE_TRANSITION_ENVELOPE_VERSION,
 } from '@north-star/compiler';
 import {
   COMPILER_TRANSITION_FACTS_VERSION,
@@ -55,6 +60,8 @@ import { TrustedActorEnvelopeIssuer } from './trust/trusted-actor-envelope.js';
 
 const compiledApplicationVersion =
   'northstar.web:compiled-application-release/v1' as const;
+const compiledApplicationLineageVersion =
+  'northstar.web:compiled-application-release/v2' as const;
 const verificationEvidenceVersion =
   'northstar.verification-evidence/v1' as const;
 const capabilitySupportVersion = 'northstar.capability-support/v1' as const;
@@ -83,6 +90,7 @@ export interface ComposedApplicationRuntime {
 
 interface ParsedApplicationRelease {
   readonly application: ParsedRelease;
+  readonly applications: readonly ParsedRelease[];
   readonly bootstrap: ParsedRelease;
 }
 
@@ -122,6 +130,13 @@ export async function createComposedApplicationRuntime(
     throw new TypeError('tenantSlug must not be blank');
   }
   const releases = parseCompiledApplication(options.compiledApplication);
+  const releaseLineage = releasesForLineage(releases);
+  for (let index = 1; index < releaseLineage.length; index += 1) {
+    assertExactCompiledTransition(
+      releaseLineage[index - 1]!,
+      releaseLineage[index]!,
+    );
+  }
   const adminPool = new pg.Pool({
     connectionString: options.databaseUrl,
     max: 2,
@@ -157,12 +172,18 @@ export async function createComposedApplicationRuntime(
       releases.bootstrap,
       null,
     );
-    const applicationIdentity = await ensurePersistedRelease(
-      runtimePool,
-      runtimeContext,
-      releases.application,
-      bootstrapIdentity.revisionId,
-    );
+    const applicationIdentities: PersistedReleaseIdentity[] = [];
+    let parentRevisionId = bootstrapIdentity.revisionId;
+    for (const application of releases.applications) {
+      const identity = await ensurePersistedRelease(
+        runtimePool,
+        runtimeContext,
+        application,
+        parentRevisionId,
+      );
+      applicationIdentities.push(identity);
+      parentRevisionId = identity.revisionId;
+    }
 
     const activation = new PostgresReleaseActivationService(runtimePool);
     let pointer = await readPointer(runtimePool, runtimeContext);
@@ -176,9 +197,12 @@ export async function createComposedApplicationRuntime(
         bootstrapIdentity,
         releases.bootstrap.compiled,
       );
-      const activated = await activation.activate(systemContext, {
-        activationAttemptId: attemptId,
-      });
+      const activated = await activateWithExactSwapTrigger(
+        adminPool,
+        activation,
+        systemContext,
+        attemptId,
+      );
       if (activated.status !== 'SWAPPED_VERIFIED') {
         throw new Error(
           `bootstrap activation did not verify: ${activated.status}`,
@@ -187,60 +211,93 @@ export async function createComposedApplicationRuntime(
       pointer = await readPointer(runtimePool, runtimeContext);
     }
 
-    if (pointer.releaseId === bootstrapIdentity.releaseId) {
-      const materializer = new PostgresModuleStorageMaterializer(
-        materializerPool,
-        modulePool,
+    const lineage = [bootstrapIdentity, ...applicationIdentities];
+    const activeLineageIndex = lineage.findIndex(
+      (identity) => identity.releaseId === pointer.releaseId,
+    );
+    if (activeLineageIndex < 0) {
+      throw new Error(
+        'the active pointer names a release outside this composed application lineage',
       );
+    }
+    const materializer = new PostgresModuleStorageMaterializer(
+      materializerPool,
+      modulePool,
+    );
+    for (
+      let targetIndex = activeLineageIndex + 1;
+      targetIndex < lineage.length;
+      targetIndex += 1
+    ) {
+      const source = releaseLineage[targetIndex - 1]!;
+      const target = releaseLineage[targetIndex]!;
+      const targetIdentity = lineage[targetIndex]!;
+      const transition = assertExactCompiledTransition(source, target);
+      await assertExactSwapTriggerEnabled(adminPool);
       const generationId = minted(randomUUID());
       const preparationId = minted(randomUUID());
-      const prepared = await materializer.prepare({
-        context: runtimeContext,
-        expiresAt: new Date(Date.now() + 5 * 60_000).toISOString(),
-        generationId,
-        initiatedBy: runtimeContext.principalId,
-        preparationId,
-        targetReleaseId: applicationIdentity.releaseId,
-      });
-      const attemptId = await approveModuleRelease(
-        runtimePool,
-        runtimeContext,
-        approverContext,
-        pointer,
-        applicationIdentity,
-        releases.application.compiled,
-        prepared,
-        preparationId,
-      );
-      const executed = await materializer.executeApprovedAttempt({
-        activationAttemptId: attemptId,
-        context: runtimeContext,
-        coordinatorId: minted(randomUUID()),
-        generationId,
-      });
-      if (executed.disposition !== 'READY_TO_SWAP') {
-        throw new Error(
-          `module materialization did not become ready: ${executed.disposition}`,
+      let attemptId: MintedUuid;
+      if (transition.elements.length === 0) {
+        attemptId = await approveReleaseWithoutStorageTransition(
+          runtimePool,
+          runtimeContext,
+          approverContext,
+          pointer,
+          source,
+          targetIdentity,
+          target.compiled,
         );
+      } else {
+        const prepared = await materializer.prepare({
+          context: runtimeContext,
+          expiresAt: new Date(Date.now() + 5 * 60_000).toISOString(),
+          generationId,
+          initiatedBy: runtimeContext.principalId,
+          preparationId,
+          targetReleaseId: targetIdentity.releaseId,
+        });
+        attemptId = await approveModuleRelease(
+          runtimePool,
+          runtimeContext,
+          approverContext,
+          pointer,
+          targetIdentity,
+          target.compiled,
+          prepared,
+          preparationId,
+        );
+        const executed = await materializer.executeApprovedAttempt({
+          activationAttemptId: attemptId,
+          context: runtimeContext,
+          coordinatorId: minted(randomUUID()),
+          generationId,
+        });
+        if (executed.disposition !== 'READY_TO_SWAP') {
+          throw new Error(
+            `module materialization did not become ready: ${executed.disposition}`,
+          );
+        }
       }
-      await assertExactSwapTriggerEnabled(adminPool);
-      const activated = await activation.activate(systemContext, {
-        activationAttemptId: attemptId,
-      });
+      const activated = await activateWithExactSwapTrigger(
+        adminPool,
+        activation,
+        systemContext,
+        attemptId,
+      );
       if (activated.status !== 'SWAPPED_VERIFIED') {
         throw new Error(
           `composed release activation did not verify: ${activated.status}`,
         );
       }
       pointer = await readPointer(runtimePool, runtimeContext);
-    }
-
-    if (pointer.releaseId !== applicationIdentity.releaseId) {
-      throw new Error(
-        'the active pointer names a release outside this composed application',
-      );
+      if (pointer.releaseId !== targetIdentity.releaseId) {
+        throw new Error(
+          'composed release activation selected the wrong target',
+        );
+      }
     }
     await assertExactSwapTriggerEnabled(adminPool);
+    const applicationIdentity = applicationIdentities.at(-1)!;
 
     const policy = new AllowAllLocalPolicy();
     const interpreter = new PostgresModuleRuntimeInterpreter(
@@ -290,11 +347,32 @@ export async function createComposedApplicationRuntime(
 export function parseCompiledApplication(
   input: unknown,
 ): ParsedApplicationRelease {
-  if (!isRecord(input) || input.schemaVersion !== compiledApplicationVersion) {
+  if (!isRecord(input)) {
     throw new TypeError('compiled application envelope is invalid');
   }
+  if (input.schemaVersion === compiledApplicationVersion) {
+    const application = parseRelease(input.application, 'application');
+    return Object.freeze({
+      application,
+      applications: Object.freeze([application]),
+      bootstrap: parseRelease(input.bootstrap, 'bootstrap'),
+    });
+  }
+  if (
+    input.schemaVersion !== compiledApplicationLineageVersion ||
+    !Array.isArray(input.applications) ||
+    input.applications.length === 0
+  ) {
+    throw new TypeError('compiled application envelope is invalid');
+  }
+  const applications = Object.freeze(
+    input.applications.map((release, index) =>
+      parseRelease(release, `applications[${String(index)}]`),
+    ),
+  );
   return Object.freeze({
-    application: parseRelease(input.application, 'application'),
+    application: applications.at(-1)!,
+    applications,
     bootstrap: parseRelease(input.bootstrap, 'bootstrap'),
   });
 }
@@ -366,6 +444,104 @@ function parseRelease(value: unknown, label: string): ParsedRelease {
     status: 'compiled',
   } as unknown as CompileSuccess;
   return Object.freeze({ compiled, normalizedDefinitionBytes });
+}
+
+function releasesForLineage(
+  releases: ParsedApplicationRelease,
+): readonly ParsedRelease[] {
+  return Object.freeze([releases.bootstrap, ...releases.applications]);
+}
+
+function assertExactCompiledTransition(
+  source: ParsedRelease,
+  target: ParsedRelease,
+): StorageTransitionEnvelope {
+  const transition = projectionPayload(
+    target.compiled,
+    PROJECTION_FAMILY_IDS.storageTransition,
+  );
+  if (
+    !isRecord(transition) ||
+    transition.kind !== 'storageTransitionEnvelope' ||
+    transition.schemaVersion !== STORAGE_TRANSITION_ENVELOPE_VERSION ||
+    !Array.isArray(transition.elements)
+  ) {
+    throw new Error(
+      'compiled application successor has no valid storage transition',
+    );
+  }
+  const sourceStorage = requiredProjection(
+    source.compiled,
+    PROJECTION_FAMILY_IDS.storageTarget,
+  );
+  const targetStorage = requiredProjection(
+    target.compiled,
+    PROJECTION_FAMILY_IDS.storageTarget,
+  );
+  if (
+    transition.fromReleaseRoot !== source.compiled.releaseRoot ||
+    transition.fromNormalizedDefinitionDigest !==
+      source.compiled.bundle.releaseManifest.normalizedDefinitionDigest ||
+    transition.fromStorageTargetArtifactRoot !== sourceStorage.artifactRoot ||
+    transition.fromStorageTargetSemanticDigest !==
+      sourceStorage.semanticDigest ||
+    transition.toNormalizedDefinitionDigest !==
+      target.compiled.bundle.releaseManifest.normalizedDefinitionDigest ||
+    transition.toStorageTargetArtifactRoot !== targetStorage.artifactRoot ||
+    transition.toStorageTargetSemanticDigest !== targetStorage.semanticDigest
+  ) {
+    throw new Error(
+      'compiled application transition does not match its declared previous release',
+    );
+  }
+  return transition as unknown as StorageTransitionEnvelope;
+}
+
+function projectionPayload(
+  compiled: CompileSuccess,
+  familyId: string,
+): unknown {
+  const reference = requiredProjection(compiled, familyId);
+  const manifestArtifact = compiled.bundle.artifacts.find(
+    (artifact) =>
+      artifact.artifactKind === 'projectionManifest' &&
+      artifact.contentHash === reference.artifactRoot,
+  );
+  if (!manifestArtifact) {
+    throw new Error(`compiled release is missing ${familyId} manifest bytes`);
+  }
+  const manifest = JSON.parse(
+    new TextDecoder().decode(manifestArtifact.canonicalBytes),
+  ) as unknown;
+  const chunks = isRecord(manifest) ? manifest.chunks : null;
+  if (
+    !Array.isArray(chunks) ||
+    chunks.length !== 1 ||
+    !isRecord(chunks[0]) ||
+    typeof chunks[0].contentHash !== 'string'
+  ) {
+    throw new Error(`compiled release has invalid ${familyId} manifest bytes`);
+  }
+  const chunkHash = chunks[0].contentHash;
+  const chunk = compiled.bundle.artifacts.find(
+    (artifact) =>
+      artifact.artifactKind === 'projectionChunk' &&
+      artifact.contentHash === chunkHash,
+  );
+  if (!chunk) {
+    throw new Error(`compiled release is missing ${familyId} payload bytes`);
+  }
+  return JSON.parse(new TextDecoder().decode(chunk.canonicalBytes)) as unknown;
+}
+
+function requiredProjection(compiled: CompileSuccess, familyId: string) {
+  const reference = compiled.bundle.releaseManifest.projections.find(
+    (projection) => projection.familyId === familyId,
+  );
+  if (!reference) {
+    throw new Error(`compiled release is missing ${familyId}`);
+  }
+  return reference;
 }
 
 function parseArtifact(value: unknown, path: string): ContentAddressedArtifact {
@@ -738,6 +914,87 @@ async function approveModuleRelease(
   );
 }
 
+async function approveReleaseWithoutStorageTransition(
+  pool: pg.Pool,
+  context: TrustedRequestContext,
+  approverContext: TrustedRequestContext,
+  pointer: PointerState,
+  source: ParsedRelease,
+  target: PersistedReleaseIdentity,
+  compiled: CompileSuccess,
+): Promise<MintedUuid> {
+  if (pointer.releaseId === null) {
+    throw new Error('release advancement requires an active source release');
+  }
+  const receiptId = minted(randomUUID());
+  const preparationId = minted(randomUUID());
+  const sourceRoot = Buffer.from(source.compiled.releaseRoot, 'hex');
+  const targetRoot = Buffer.from(compiled.releaseRoot, 'hex');
+  await withTrustedRequestTransaction(pool, context, async (client) => {
+    await client.query(
+      `INSERT INTO platform.transition_preparation_receipts (
+         tenant_id, environment_id, receipt_id, receipt_version,
+         source_release_id, source_manifest_root, target_release_id,
+         target_manifest_root, transition_scope, storage_domain_id,
+         schema_generation, compiler_facts_version, compiler_facts_digest,
+         compiler_transition_class, compiler_static_compatibility,
+         compiler_exact_pair, executor_evidence_version,
+         executor_evidence_digest, executor_applied_state, executor_exact_pair,
+         compatibility_policy_version, compatibility_policy_verdict,
+         recovery_mode
+       ) VALUES (
+         $1,$2,$3,$4,$5,$6,$7,$8,'tenantLocal','tenant-primary-storage',$9,
+         $10,$11,'NO_STORAGE_TRANSITION','SATISFIED',true,$12,$13,
+         'NOT_REQUIRED',true,$14,'ALLOW','NO_STORAGE_RECOVERY_REQUIRED'
+       )`,
+      [
+        context.tenantId,
+        context.environmentId,
+        receiptId,
+        TRANSITION_PREPARATION_RECEIPT_VERSION,
+        pointer.releaseId,
+        sourceRoot,
+        target.releaseId,
+        targetRoot,
+        pointer.fence,
+        COMPILER_TRANSITION_FACTS_VERSION,
+        digest(
+          'no-storage-compiler-facts',
+          source.compiled.releaseRoot,
+          compiled.releaseRoot,
+        ),
+        EXECUTOR_APPLIED_STATE_EVIDENCE_VERSION,
+        digest(
+          'no-storage-executor-evidence',
+          source.compiled.releaseRoot,
+          compiled.releaseRoot,
+        ),
+        TRANSITION_COMPATIBILITY_POLICY_VERSION,
+      ],
+    );
+    await insertReleasePreparation(client, {
+      bindingKind: 'RELEASE_DIFF',
+      bindingVersion: RELEASE_DIFF_BINDING_VERSION,
+      compiled,
+      context,
+      evidenceId: target.evidenceId,
+      pointer,
+      preparationId,
+      receiptId,
+      sourceRoot,
+      targetReleaseId: target.releaseId,
+      transitionPlanDigest: null,
+    });
+  });
+  return createApproval(
+    pool,
+    context,
+    approverContext,
+    preparationId,
+    target.releaseId,
+  );
+}
+
 async function insertReleasePreparation(
   client: pg.PoolClient,
   input: {
@@ -865,6 +1122,20 @@ async function readPointer(
       releaseId: row.release_id,
     });
   });
+}
+
+async function activateWithExactSwapTrigger(
+  adminPool: pg.Pool,
+  activation: PostgresReleaseActivationService,
+  systemContext: TrustedRequestContext,
+  activationAttemptId: MintedUuid,
+) {
+  await assertExactSwapTriggerEnabled(adminPool);
+  try {
+    return await activation.activate(systemContext, { activationAttemptId });
+  } finally {
+    await assertExactSwapTriggerEnabled(adminPool);
+  }
 }
 
 async function assertExactSwapTriggerEnabled(pool: pg.Pool): Promise<void> {
