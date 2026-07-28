@@ -68,6 +68,13 @@ const domainGlue =
   /(?:class|function)\s+\w*(?:Handler|Executor|Gateway|Repository|Service)\b|React|route\s*\(/u;
 const copiedGuardProse =
   /generic production press has no .+ branch|production press sources are absent|contains module glue/u;
+const glueRoles = [
+  'Handler',
+  'Executor',
+  'Gateway',
+  'Repository',
+  'Service',
+] as const;
 
 export function checkModulePressLaw(
   rootDirectory: string,
@@ -348,22 +355,26 @@ function moduleGlueMatch(
 ): { index: number; value: string } | undefined {
   const names = module.glueNames.filter(Boolean).map(escapeRegExp);
   if (names.length === 0) return undefined;
-  const role = '(?:Handler|Executor|Gateway|Repository|Service)';
+  const role = `(?:${glueRoles.join('|')})`;
   const pattern = new RegExp(
     `\\b(?:\\w*(?:${names.join('|')})${role}|\\w*${role}(?:${names.join('|')}))\\b`,
-    'u',
+    'iu',
   );
   const sourceMatch = pattern.exec(source);
   if (sourceMatch) return { index: sourceMatch.index, value: sourceMatch[0] };
 
   const normalizedPath = repoPath.replaceAll('-', '').replaceAll('_', '');
   for (const name of module.glueNames) {
-    if (
-      normalizedPath
-        .toLocaleLowerCase('en-US')
-        .includes(`${name.toLocaleLowerCase('en-US')}executor`)
-    ) {
-      return { index: 0, value: repoPath };
+    for (const glueRole of glueRoles) {
+      if (
+        normalizedPath
+          .toLocaleLowerCase('en-US')
+          .includes(
+            `${name.toLocaleLowerCase('en-US')}${glueRole.toLocaleLowerCase('en-US')}`,
+          )
+      ) {
+        return { index: 0, value: repoPath };
+      }
     }
   }
   return undefined;

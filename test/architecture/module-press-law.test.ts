@@ -150,3 +150,54 @@ test('consolidated guard rejects a structurally copied module assertion', () => 
     removeArchitectureFixture(root);
   }
 });
+
+test('consolidated guard detects every module-specific glue role in identifiers and filenames', () => {
+  const files: Record<string, string> = {
+    'packages/domain/src/widget/definition.ts': [
+      "export const WIDGET_NAMESPACE = 'northstar.widget';",
+      'const entityId = `${WIDGET_NAMESPACE}:entity.widget`;',
+    ].join('\n'),
+  };
+  for (const role of [
+    'Handler',
+    'Executor',
+    'Gateway',
+    'Repository',
+    'Service',
+  ]) {
+    files[`apps/api/src/identifier-${role.toLowerCase()}.ts`] =
+      `export const widget${role} = true;\n`;
+    files[`scripts/widget-${role.toLowerCase()}.ts`] =
+      'export const generic = true;\n';
+  }
+  const root = createArchitectureFixture(files);
+  try {
+    const result = checkModulePressLaw(root);
+    assert.equal(result.violations.length, 10);
+    assert.deepEqual(
+      result.violations.map((violation) => violation.ruleId),
+      Array.from({ length: 10 }, () => 'PRESS007_MODULE_GLUE_IN_PRESS'),
+    );
+    for (const role of [
+      'handler',
+      'executor',
+      'gateway',
+      'repository',
+      'service',
+    ]) {
+      assert.ok(
+        result.violations.some(
+          (violation) =>
+            violation.file === `apps/api/src/identifier-${role}.ts`,
+        ),
+      );
+      assert.ok(
+        result.violations.some(
+          (violation) => violation.file === `scripts/widget-${role}.ts`,
+        ),
+      );
+    }
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});
