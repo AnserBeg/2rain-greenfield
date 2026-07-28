@@ -9,6 +9,7 @@
   },
   "scripts": {
     "build": "tsc --project tsconfig.build.json",
+    "check:app-release": "node --import tsx apps/web/scripts/compile-app-release.ts --check",
     "check:boundaries": "node --import tsx packages/dev-tooling/src/check-boundaries.ts",
     "check:demo-release": "corepack pnpm --filter @north-star/web check:demo-release",
     "check:reachability": "node --import tsx test/helpers/check-reachability.ts",
@@ -19,7 +20,7 @@
     "format:write": "prettier --write .",
     "lint": "eslint .",
     "typecheck": "tsc --project tsconfig.json --noEmit",
-    "test": "node --import tsx test/helpers/begin-reachability-run.ts && corepack pnpm check:demo-release && corepack pnpm test:unit && corepack pnpm test:compiler && corepack pnpm test:integration && corepack pnpm test:agent && corepack pnpm test:architecture && corepack pnpm test:contracts && corepack pnpm test:postgres && corepack pnpm test:locale && corepack pnpm test:browser && node --import tsx test/helpers/run-observability-producer.ts && corepack pnpm check:reachability",
+    "test": "node --import tsx test/helpers/begin-reachability-run.ts && corepack pnpm check:demo-release && corepack pnpm check:app-release && corepack pnpm test:unit && corepack pnpm test:compiler && corepack pnpm test:integration && corepack pnpm test:agent && corepack pnpm test:architecture && corepack pnpm test:contracts && corepack pnpm test:postgres && corepack pnpm test:locale && corepack pnpm test:browser && node --import tsx test/helpers/run-observability-producer.ts && corepack pnpm check:reachability",
     "test:agent": "node --import tsx test/helpers/prepare-reachability-evidence.ts agent && REACHABILITY_SUITE_ID=agent node --import tsx --test --test-reporter=./test/helpers/node-test-evidence-reporter.mjs --test-reporter-destination=test-results/reachability/agent.json --test-reporter=tap --test-reporter-destination=stdout test/agent/catalog-discovery.test.ts test/agent/location-discovery.test.ts test/agent/party-discovery.test.ts",
     "test:architecture": "node --import tsx test/helpers/prepare-reachability-evidence.ts architecture && REACHABILITY_SUITE_ID=architecture node --import tsx --test --test-reporter=./test/helpers/node-test-evidence-reporter.mjs --test-reporter-destination=test-results/reachability/architecture.json --test-reporter=tap --test-reporter-destination=stdout \"test/architecture/**/*.test.ts\"",
     "test:compiler": "node --import tsx test/helpers/prepare-reachability-evidence.ts compiler && REACHABILITY_SUITE_ID=compiler node --import tsx --test --test-reporter=./test/helpers/node-test-evidence-reporter.mjs --test-reporter-destination=test-results/reachability/compiler.json --test-reporter=tap --test-reporter-destination=stdout \"test/compiler/**/*.test.ts\"",

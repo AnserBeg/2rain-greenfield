@@ -62,6 +62,8 @@ jobs:
         run: corepack pnpm test:architecture
       - name: Check compiled demo release freshness
         run: corepack pnpm check:demo-release
+      - name: Check compiled application release freshness
+        run: corepack pnpm check:app-release
       - name: Run web surface contracts
         run: corepack pnpm test:contracts
       - name: Retain quality executed-file evidence

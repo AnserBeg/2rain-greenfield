@@ -65,9 +65,10 @@ first attempt:
 The baseline reachability token was
 `947f3292-cb1e-4ef0-8872-e401fde10a4c`.
 
-`main` advanced during the packet. The packet branch is rebased onto current
-`main` before its final frozen run; `main` itself is never reset or moved by the
-writer.
+`main` advanced during the packet and again during round-one review. Current
+`main` is merged into the packet branch before its final frozen run so the
+reviewed candidate remains an ancestor; `main` itself is never reset or moved
+by the writer.
 
 ## One definition source, one application package
 
@@ -100,7 +101,23 @@ The generated application artifact records:
 
 `apps/web/scripts/compile-app-release.ts --check` reconstructs both normalized
 definitions and both compiler results and rejects a stale generated artifact.
-The demo release root and canonical shell artifacts do not move.
+The root `check:app-release` command invokes that verifier from both the
+aggregate `test` chain and its own CI step beside `check:demo-release`. The demo
+release root and canonical shell artifacts do not move.
+
+There is no dedicated in-tree generator for `app.authored.json`. It is
+regenerated from the application builder with this explicit serialization,
+then the compiled envelope is regenerated separately:
+
+```bash
+node --import tsx --input-type=module -e "import {writeFile} from 'node:fs/promises'; import {format} from 'prettier'; import app from './packages/domain/src/app/builder.ts'; await writeFile('apps/web/release/app.authored.json', await format(JSON.stringify(app.composedApplicationDefinition()), {parser:'json'}));"
+corepack pnpm --filter @north-star/web build:app-release
+```
+
+The PostgreSQL test independently requires the authored bytes to deep-equal
+the same builder output. A dedicated authored-artifact generator remains a
+mechanical follow-on rather than being hidden inside the compiled-artifact
+reader in this review fix.
 
 ## Real persistence, preparation, approval and activation
 
@@ -178,6 +195,15 @@ file is now named `builder.ts`; the ratchet and its baselines were not weakened
 or updated, because the application builder is not another independently
 conforming module.
 
+### Lease deviation during the original writer round
+
+The bridge granted `apps/web/package.json` for an exports map **only**, while
+the original writer also added the genuinely required `build:app-release`
+script without requesting the one-line lease extension. The review caught the
+deviation and the orchestrator granted it retroactively. The script remains,
+but the process failure is explicit: a harmless-looking necessary edit is not
+permission to bend an exact lease, and the correct action was a bridge request.
+
 ## Executed negative controls
 
 These are deliberately executed failures or isolation observations. They do
@@ -186,13 +212,21 @@ not mean the final suite remains red.
 | Vacuity vector | Executed control | Observed result |
 |---|---|---|
 | the browser is still serving a three-module fixture by accident | temporarily remove Location from the composed builder, regenerate the authored and compiled product artifacts, then run the real Playwright journey | red at `getByRole('link', { name: 'Location list', exact: true })`: `element(s) not found`; source and generated artifacts were then restored |
-| an unapproved registered release can enter activation | register a second candidate but create no approval or prebound attempt for it, require both candidate admission counts to be zero, call the activation service with its reserved attempt ID, and inspect the pointer | `ReleaseActivationError` with `CANONICAL_RECORD_NOT_FOUND`; the pointer remains on the approved application release, not the candidate; the exact-swap trigger is `O` before and after |
+| activation can ignore whether its bound approval is still live | create a real preparation, approval and prebound attempt joined to the candidate; revoke that approver's live eligibility; call `activate()` with the persisted attempt | decisive outcome `APPROVER_REVOCATION`, status `NO_SWAP_TERMINAL`, and no release ID; this is not `CANONICAL_RECORD_NOT_FOUND`; the pointer remains unchanged and `pg_trigger.tgenabled` is `O` before and after |
+| the compiled product can drift because its verifier is not executed | change the first nibble of the application attestation's release root in `app.compiled.json`, then run the new root command | `corepack pnpm check:app-release` exits 1 with `Error: compiled application release is stale; run pnpm --filter @north-star/web build:app-release`; the artifact was restored and the same gate then passed |
 | the created row comes from an in-process fixture or cache | create through the Semantic Operation gateway, read through a separate request/transaction, close every application pool, reconstruct the provider/runtime against the same PostgreSQL database, and read again | the exact generated record ID is returned both before and after reconstruction |
 | the Playwright journey would also pass against the old demo shell | start the unchanged demo shell and point the composed journey at it through `COMPOSED_APPLICATION_BASE_URL` | red at `getByRole('link', { name: 'Party list', exact: true })`: `element(s) not found` |
 | one tenant can read another tenant's module row | after tenant A creates and rereads the Party, create a complete independently activated runtime for tenant B against the same database and issue the same List query | tenant B observes `listCoverage.totalCount = 0` and `records = []`, while tenant A observes the persisted record ID |
 
 The permanent PostgreSQL control also directly reads `pg_trigger`; a boolean
 returned by the composition factory alone is not credited as trigger evidence.
+An attempt row with no approval row cannot exist under the current contract:
+`release_activation_attempts` has an immediate foreign key to
+`release_approvals`, and activation loads them with an inner join. The executed
+red therefore removes the live approval authority from a genuine persisted
+attempt and requires the kernel's approval-specific `APPROVER_REVOCATION`, not
+a not-found failure. The green side restores that authority and exercises the
+same activation service against the same candidate release.
 
 ## Positive product observations
 
@@ -205,6 +239,7 @@ returned by the composition factory alone is not credited as trigger evidence.
 | real navigation | Playwright follows the compiled Party, Item and Location navigation links |
 | honest unsupported state | the product renders `UNSUPPORTED_COMPONENT` for `standard_surface_content`, rather than hiding or substituting it |
 | diagnostic shell preserved | `check:demo-release` passes and both `apps/web/release/shell.*` files have zero diff |
+| approval-positive side | after approver eligibility is restored, a fresh preparation and approval for the same candidate makes the same `activate()` method return `SWAPPED` / `SWAPPED_VERIFIED`; the candidate becomes the active pointer and the exact-swap trigger remains `O` |
 
 ## Gate evidence
 
@@ -222,14 +257,20 @@ tree was unchanged. One honest aggregate retry passed PostgreSQL 86/86,
 browser 15/15, and reachability 68/68 from 9 producer artifacts. The first
 attempt remains recorded rather than disappearing into the green retry.
 
-After rebasing the packet commit onto current `main`, the complete matrix was
-green on its first attempt. The same matrix is run once more after this evidence
-record is committed so the writer handoff refers to the exact frozen SHA. The
-observed suite inventory after adding the two permanent files is:
+The first focused review-fix architecture run was also honestly red at 72/73.
+Its exact aggregate-command inventory had not yet admitted the newly required
+`check:app-release` command. Bridge ruling 5 granted the single explicit
+recognition clause; no allowlist or exemption changed, and the focused rerun
+passed 73/73.
+
+The prior reviewed candidate's complete matrix was green after its integration
+with then-current `main`. After the review-fix commit and the merge from current
+`main`, the complete matrix is run again at the exact new frozen SHA. The
+observed final suite inventory after adding the two permanent files is:
 
 | Gate | Candidate observation |
 |---|---:|
-| `format`, `build`, `lint`, `typecheck`, `check:demo-release` | green |
+| `format`, `build`, `lint`, `typecheck`, `check:demo-release`, `check:app-release` | green |
 | `check:boundaries` | 122 files |
 | `check:schema` | 12 applied / 12 verified |
 | `test:unit` | 36 / 36 |
@@ -245,11 +286,11 @@ observed suite inventory after adding the two permanent files is:
 | `check:reachability` | 68 / 68 files from 9 producer artifacts |
 
 Both new test files are reached by their unfiltered CI-invoked suites and by
-the successful reachability artifact. The application compiler freshness
-check also passes:
+the successful reachability artifact. The CI-invoked application compiler
+freshness check also passes:
 
 ```bash
-node --import tsx apps/web/scripts/compile-app-release.ts --check
+corepack pnpm check:app-release
 ```
 
 ## Test it yourself
@@ -295,6 +336,15 @@ entrypoint as a production security configuration.
   preparation records required by the existing approval service. It uses the
   real approval and activation services, but there is not yet a higher-level
   production preparation service.
+- Startup can bootstrap an empty pointer and can converge when its exact
+  compiled release is already active, but it cannot advance a persistent
+  deployment from an older application release to newly compiled bytes. In
+  that state startup fails closed because the active release is neither the
+  generated bootstrap nor the new candidate. Iterating the local demo across
+  a changed compiled revision therefore requires dropping its named PostgreSQL
+  volume and losing that local demo data. The routed release-advancement packet
+  must carry an exact previous-to-candidate compiled transition instead of
+  teaching this bootstrapper to guess.
 - Surface anatomy remains the existing one-slot-per-surface definition and its
   declared component is unavailable. The product is navigable and its current
   generic form/List data path is usable, but row G2-P5d owns unifying slot
@@ -318,7 +368,17 @@ gate, when the application plus the anatomy work can be judged as one product.
 
 ## Review evidence
 
-Writer evidence is complete at the candidate reported in the handoff. Per the
-Critical tier, acceptance still requires a fresh naive Codex xhigh review to
-PASS and then a Fable max confirmation of the identical unchanged SHA. No
-review is claimed by this writer packet document.
+Round one ran a fresh naive Codex xhigh review and a Fable max confirm against
+`582d2a8f2b3a8f2d59b518d9839d2127502b63a2`; both returned REVISE. The
+orchestrator adjudicated two in-scope findings: the activation negative stopped
+at a nonexistent attempt, and the application freshness verifier had no CI or
+aggregate caller. This revision replaces the first with a real persisted
+attempt plus approval-revocation red and same-candidate successful activation,
+and wires `check:app-release` into both execution paths with its own stale-file
+red. The package-manifest lease deviation is recorded above; release
+advancement, the Party race flake, and deep runtime imports are routed rather
+than expanded here.
+
+Per the review ruling, Codex need not re-review these two bounded fixes. Fable
+must reconfirm the new frozen SHA. No acceptance is claimed by this writer
+packet document.
