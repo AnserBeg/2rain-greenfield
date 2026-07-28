@@ -1,15 +1,12 @@
 export const PREDICATE_DISPATCH_TRIPWIRE_VERSION =
   'northstar.predicate-dispatch-tripwire/v1' as const;
 
-const predicateKinds = [
-  'allPredicate',
-  'anyPredicate',
-  'booleanPredicate',
-  'fieldComparisonPredicate',
-  'notPredicate',
-] as const;
-
-type PredicateKind = (typeof predicateKinds)[number];
+type PredicateKind =
+  | 'allPredicate'
+  | 'anyPredicate'
+  | 'booleanPredicate'
+  | 'fieldComparisonPredicate'
+  | 'notPredicate';
 
 export interface PredicateDispatchSource {
   readonly path: string;
