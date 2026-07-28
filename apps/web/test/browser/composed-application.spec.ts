@@ -114,6 +114,8 @@ async function productJourney(page: Page, baseUrl: string): Promise<void> {
     page.getByRole('cell', { name: 'P-BROWSER-REAL-001' }),
   ).toBeVisible();
   const createdRow = page.locator('tr', { hasText: 'Browser-persisted Party' });
+  const createdRecordId = await createdRow.getAttribute('data-record-id');
+  expect(createdRecordId).not.toBeNull();
   await createdRow.getByRole('link').click();
   await expect(
     page.getByRole('heading', { level: 1, name: 'Party' }),
@@ -141,6 +143,48 @@ async function productJourney(page: Page, baseUrl: string): Promise<void> {
     .fill('updated-after-navigation@example.test');
   await page.getByRole('button', { name: 'Save' }).click();
   await expect(page.getByRole('status')).toContainText('Update complete');
+
+  const detailUrl = `${surfaceUrl(baseUrl, 'party_detail')}&record=${encodeURIComponent(createdRecordId ?? '')}`;
+  await page.goto(detailUrl);
+  const archiveOverflow = page.locator(
+    '[data-platform-slot="record:commandBar"] details.action-overflow',
+  );
+  await archiveOverflow.locator('summary').click();
+  await page.getByRole('button', { name: 'Archive' }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Confirm Archive' }),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Confirm Archive' }).click();
+  await expect(page.getByRole('status')).toContainText('Archive complete');
+  await expect(page.getByText(/Archived · revision 3/)).toBeVisible();
+
+  await page.goto(detailUrl);
+  await expect(
+    page.locator('[data-diagnostic-code="QUERY_NOT_FOUND"]'),
+  ).toBeVisible();
+
+  await page.goto(`${surfaceUrl(baseUrl, 'party_list')}&archived=yes`);
+  const archivedRow = page.locator('tr', {
+    hasText: 'Browser-persisted Party',
+  });
+  await expect(
+    archivedRow.getByText('Archived', { exact: true }),
+  ).toBeVisible();
+  await archivedRow.getByRole('link').click();
+  await expect(page).toHaveURL(/(?:\?|&)archived=yes(?:&|$)/);
+  await expect(page.getByText(/Archived · revision 3/)).toBeVisible();
+  const restoreOverflow = page.locator(
+    '[data-platform-slot="record:commandBar"] details.action-overflow',
+  );
+  await restoreOverflow.locator('summary').click();
+  await page.getByRole('button', { name: 'Restore' }).click();
+  await expect(page.getByRole('status')).toContainText('Restore complete');
+
+  await page.goto(detailUrl);
+  await expect(page.getByText(/Active · revision 4/)).toBeVisible();
+  await expect(
+    page.getByText('updated-after-navigation@example.test', { exact: true }),
+  ).toBeVisible();
 }
 
 function surfaceUrl(baseUrl: string, localSurface: string): string {

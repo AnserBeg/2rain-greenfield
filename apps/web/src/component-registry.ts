@@ -378,7 +378,7 @@ function renderListSurfaceContent(
   if (records.length === 0) {
     return emptyDataPanel();
   }
-  return `<section class="panel data-panel" data-data-state="exact"><div class="panel__heading"><div><p class="eyebrow">Records</p><h2>${escapeHtml(surface.label)}</h2></div><span class="status-pill">${records.length} visible</span></div><div class="data-table-wrap"><table><thead><tr><th scope="col">Record</th>${surface.fieldIds.map((fieldId) => `<th scope="col">${escapeHtml(fieldLabel(fieldId))}</th>`).join('')}<th scope="col">Status</th></tr></thead><tbody>${records.map((record) => `<tr data-record-id="${escapeHtml(record.recordId)}"><td>${detail ? `<a class="record-link" href="${escapeHtml(surfaceHref(detail, record.recordId))}" aria-label="Open ${escapeHtml(entityLabel(surface))} ${escapeHtml(shortIdentity(record.recordId))}"><code>${escapeHtml(shortIdentity(record.recordId))}</code></a>` : `<code>${escapeHtml(shortIdentity(record.recordId))}</code>`}</td>${surface.fieldIds.map((fieldId) => `<td data-field-id="${escapeHtml(fieldId)}">${renderValue(record.values[fieldId])}</td>`).join('')}<td>${record.archived ? 'Archived' : 'Active'}</td></tr>`).join('')}</tbody></table></div></section>`;
+  return `<section class="panel data-panel" data-data-state="exact"><div class="panel__heading"><div><p class="eyebrow">Records</p><h2>${escapeHtml(surface.label)}</h2></div><span class="status-pill">${records.length} visible</span></div><div class="data-table-wrap"><table><thead><tr><th scope="col">Record</th>${surface.fieldIds.map((fieldId) => `<th scope="col">${escapeHtml(fieldLabel(fieldId))}</th>`).join('')}<th scope="col">Status</th></tr></thead><tbody>${records.map((record) => `<tr data-record-id="${escapeHtml(record.recordId)}"><td>${detail ? `<a class="record-link" href="${escapeHtml(surfaceHref(detail, record.recordId, record.archived))}" aria-label="Open ${escapeHtml(entityLabel(surface))} ${escapeHtml(shortIdentity(record.recordId))}"><code>${escapeHtml(shortIdentity(record.recordId))}</code></a>` : `<code>${escapeHtml(shortIdentity(record.recordId))}</code>`}</td>${surface.fieldIds.map((fieldId) => `<td data-field-id="${escapeHtml(fieldId)}">${renderValue(record.values[fieldId])}</td>`).join('')}<td>${record.archived ? 'Archived' : 'Active'}</td></tr>`).join('')}</tbody></table></div></section>`;
 }
 
 function renderSharedListSurface(
@@ -408,7 +408,7 @@ function renderSharedListSurface(
   const body =
     view.rows.length === 0
       ? `<div class="data-empty" data-data-state="empty" data-list-zero-input="true"><h3>No records yet</h3><p>This search has zero visible records for the current tenant, environment, and principal.</p></div>`
-      : `<div class="data-table-wrap"><table><thead><tr><th scope="col">Record</th>${columns.map((column) => `<th scope="col">${escapeHtml(fieldLabel(column.columnId))}</th>`).join('')}<th scope="col">Status</th></tr></thead><tbody>${view.rows.map((row) => `<tr data-record-id="${escapeHtml(row.record.recordId)}"><td>${detail ? `<a class="record-link" href="${escapeHtml(surfaceHref(detail, row.record.recordId))}" aria-label="Open ${escapeHtml(entityLabel(surface))} ${escapeHtml(shortIdentity(row.record.recordId))}"><code>${escapeHtml(shortIdentity(row.record.recordId))}</code></a>` : `<code>${escapeHtml(shortIdentity(row.record.recordId))}</code>`}</td>${columns.map((column) => `<td ${column.kind === 'relation' ? 'data-relation-id' : 'data-field-id'}="${escapeHtml(column.columnId)}">${renderValue(row.cells[column.columnId])}</td>`).join('')}<td><span class="status-pill" data-status-role="${row.archived ? 'attention' : 'success'}">${row.archived ? 'Archived' : 'Active'}</span></td></tr>`).join('')}</tbody></table></div>`;
+      : `<div class="data-table-wrap"><table><thead><tr><th scope="col">Record</th>${columns.map((column) => `<th scope="col">${escapeHtml(fieldLabel(column.columnId))}</th>`).join('')}<th scope="col">Status</th></tr></thead><tbody>${view.rows.map((row) => `<tr data-record-id="${escapeHtml(row.record.recordId)}"><td>${detail ? `<a class="record-link" href="${escapeHtml(surfaceHref(detail, row.record.recordId, row.archived))}" aria-label="Open ${escapeHtml(entityLabel(surface))} ${escapeHtml(shortIdentity(row.record.recordId))}"><code>${escapeHtml(shortIdentity(row.record.recordId))}</code></a>` : `<code>${escapeHtml(shortIdentity(row.record.recordId))}</code>`}</td>${columns.map((column) => `<td ${column.kind === 'relation' ? 'data-relation-id' : 'data-field-id'}="${escapeHtml(column.columnId)}">${renderValue(row.cells[column.columnId])}</td>`).join('')}<td><span class="status-pill" data-status-role="${row.archived ? 'attention' : 'success'}">${row.archived ? 'Archived' : 'Active'}</span></td></tr>`).join('')}</tbody></table></div>`;
   const next = view.listCoverage.nextCursor
     ? `<a class="list-page-link" href="${escapeHtml(nextPageHref(surface, view.listCoverage.nextCursor, view.listCoverage.search, view.listCoverage.includeArchived))}">Next page</a>`
     : '';
@@ -554,9 +554,11 @@ function relatedSurface(
 function surfaceHref(
   surface: CompiledSurfaceDefinition,
   recordId?: string,
+  includeArchived = false,
 ): string {
   const parameters = new URLSearchParams({ surface: surface.surfaceId });
   if (recordId) parameters.set('record', recordId);
+  if (includeArchived) parameters.set('archived', 'yes');
   return `/?${parameters.toString()}`;
 }
 
