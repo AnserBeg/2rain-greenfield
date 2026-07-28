@@ -92,6 +92,24 @@ A lane that reports a candidate built on a base `main` has since passed is not
 rejected — it merges and re-runs. Q1-P1 did exactly this and it cost one matrix
 run.
 
+### Exception: an orchestrator docs-only advance does not force a re-run
+
+**If the only difference between the lane's merge base and current `main` is
+under `docs/` or `.agents/`, the lane does NOT re-merge and does NOT re-run.**
+The orchestrator merges those at acceptance. The tested code and the integrated
+code are byte-identical, so a re-run would observe nothing new.
+
+This exists because the orchestrator commits rulings, ledger rows and queue
+updates continuously while lanes work — without this rule a lane chases doc
+commits indefinitely and never reaches a stable integrated SHA. Added 2026-07-28
+after exactly that happened to KERNEL twice in one packet.
+
+**The exception is narrow and the orchestrator verifies it, not the lane.** Any
+file outside `docs/` or `.agents/` — product code, test, config, migration,
+lockfile, generated artifact — voids it and the full merge-and-re-run applies.
+When in doubt, re-run: a wasted matrix costs minutes, an untested integration
+costs the rule PR-1 exists to enforce.
+
 ## Report header — mandatory
 
 Every report back to the orchestrator opens with one line, so a paste is
