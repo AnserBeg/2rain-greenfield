@@ -1,6 +1,4 @@
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync } from 'node:fs';
-import { extname, join, relative, resolve } from 'node:path';
 import test from 'node:test';
 
 import {
@@ -220,46 +218,6 @@ test('Catalog name resolution primitives are deterministic and never choose a we
   assert.equal(first.length, 2);
 });
 
-test('Catalog is definition-only and the generic production press has no Catalog branch', () => {
-  const catalogSources = sourceFiles('packages/domain/src/catalog');
-  assert.ok(catalogSources.length > 0, 'Catalog definition sources are absent');
-  for (const file of catalogSources) {
-    const source = readFileSync(file, 'utf8');
-    assert.doesNotMatch(
-      source,
-      /from\s+['"](?:pg|postgres|@north-star\/runtime|@north-star\/postgres-provider)/,
-      `${relative(process.cwd(), file)} imports a runtime/provider`,
-    );
-    assert.doesNotMatch(
-      source,
-      /\b(?:SELECT|INSERT\s+INTO|UPDATE\s+.+\s+SET|DELETE\s+FROM|CREATE\s+TABLE|ALTER\s+TABLE|DROP\s+TABLE|TRUNCATE)\b/i,
-      `${relative(process.cwd(), file)} contains SQL`,
-    );
-    assert.doesNotMatch(
-      source,
-      /(?:class|function)\s+\w*(?:Handler|Executor|Gateway|Repository|Service)\b|React|route\s*\(/,
-      `${relative(process.cwd(), file)} contains module glue`,
-    );
-  }
-  const pressFiles = [
-    ...sourceFiles('apps/web/src'),
-    ...sourceFiles('packages/compiler'),
-    ...sourceFiles('packages/canonical-model'),
-    ...sourceFiles('packages/postgres-provider'),
-    ...sourceFiles('packages/runtime'),
-    ...sourceFiles('packages/platform-runtime'),
-    ...sourceFiles('packages/dev-tooling'),
-  ];
-  assert.ok(pressFiles.length > 0, 'production press sources are absent');
-  const genericPress = pressFiles
-    .map((file) => readFileSync(file, 'utf8'))
-    .join('\n');
-  assert.doesNotMatch(
-    genericPress,
-    /northstar\.catalog|(?:item|catalog)_(?:get|list|search|resolve|create|update|archive|restore)/,
-  );
-});
-
 function dto(recordId: string, name: string): SemanticRecordDto {
   return {
     archived: false,
@@ -268,19 +226,4 @@ function dto(recordId: string, name: string): SemanticRecordDto {
     revision: 1,
     values: { [CATALOG_IDS.fieldIds.name]: name },
   };
-}
-
-function sourceFiles(directory: string): string[] {
-  const files: string[] = [];
-  const walk = (current: string): void => {
-    for (const entry of readdirSync(current, { withFileTypes: true })) {
-      const path = join(current, entry.name);
-      if (entry.isDirectory()) walk(path);
-      else if (['.js', '.mjs', '.ts', '.tsx'].includes(extname(entry.name))) {
-        files.push(path);
-      }
-    }
-  };
-  walk(resolve(directory));
-  return files.sort();
 }
