@@ -6,6 +6,15 @@ import test from 'node:test';
 import { getEncoding } from 'js-tiktoken';
 
 import {
+  CanonicalModelError,
+  LANGUAGE_VERSION,
+  LANGUAGE_VERSIONS,
+  LATEST_LANGUAGE_VERSION,
+  LATEST_NORMALIZATION_PROFILE_VERSION,
+  NORMALIZATION_PROFILE_VERSION,
+  NORMALIZATION_PROFILE_VERSIONS,
+  SUPPORTED_LANGUAGE_VERSIONS,
+  SUPPORTED_NORMALIZATION_PROFILE_VERSIONS,
   canonicalAuthoredProjection,
   canonicalize,
   canonicalizeAndHash,
@@ -53,6 +62,130 @@ test('representative normalized package has the pinned content hash', () => {
     'utf8',
   ).trim();
   assert.equal(canonicalizeAndHash(normalized).contentHash, expectedHash);
+});
+
+test('v0, v1, and v2 readers retain their exact normalized bytes', () => {
+  const authored = parseAuthoredApplicationPackageJson(
+    readFileSync(fixturePath),
+  );
+  const expected = new Map([
+    [
+      'v0-experimental',
+      {
+        digest:
+          '00444e2e40aedea745ea23cc89ac5f2f01f9234dcae2473481b39134f3f036ba',
+        profile: 'northstar.normalization/v0-experimental',
+      },
+    ],
+    [
+      'v1',
+      {
+        digest:
+          '7126210813d43a1b8097f8500c8d3ece3ef5966dfdbe27bbfe988f035bcd0231',
+        profile: 'northstar.normalization/v1',
+      },
+    ],
+    [
+      'v2',
+      {
+        digest:
+          '538ed9deca0fed3f2c2340ce05ce65213fbacb02f153544b1d58cc9844d5048a',
+        profile: 'northstar.normalization/v2',
+      },
+    ],
+  ]);
+
+  for (const [languageVersion, receipt] of expected) {
+    const candidate = replaceVersion(
+      authored,
+      'v0-experimental',
+      languageVersion,
+    ) as typeof authored;
+    candidate.normalizationProfileVersion = receipt.profile as never;
+    assert.equal(
+      canonicalizeAndHash(normalizeApplicationPackage(candidate)).contentHash,
+      receipt.digest,
+      languageVersion,
+    );
+  }
+});
+
+test('v3 selects its profile, rejects mixed nodes, and leaves adopted v2 explicit', () => {
+  assert.equal(LANGUAGE_VERSION, LANGUAGE_VERSIONS.v2);
+  assert.equal(
+    NORMALIZATION_PROFILE_VERSION,
+    NORMALIZATION_PROFILE_VERSIONS.v2,
+  );
+  assert.equal(LATEST_LANGUAGE_VERSION, LANGUAGE_VERSIONS.v3);
+  assert.equal(
+    LATEST_NORMALIZATION_PROFILE_VERSION,
+    NORMALIZATION_PROFILE_VERSIONS.v3,
+  );
+  assert.deepEqual(SUPPORTED_LANGUAGE_VERSIONS, [
+    LANGUAGE_VERSIONS.experimentalV0,
+    LANGUAGE_VERSIONS.v1,
+    LANGUAGE_VERSIONS.v2,
+    LANGUAGE_VERSIONS.v3,
+  ]);
+  assert.deepEqual(SUPPORTED_NORMALIZATION_PROFILE_VERSIONS, [
+    NORMALIZATION_PROFILE_VERSIONS.experimentalV0,
+    NORMALIZATION_PROFILE_VERSIONS.v1,
+    NORMALIZATION_PROFILE_VERSIONS.v2,
+    NORMALIZATION_PROFILE_VERSIONS.v3,
+  ]);
+
+  const authored = parseAuthoredApplicationPackageJson(
+    readFileSync(fixturePath),
+  );
+  const v3 = replaceVersion(
+    authored,
+    'v0-experimental',
+    'v3',
+  ) as typeof authored;
+  v3.normalizationProfileVersion = NORMALIZATION_PROFILE_VERSIONS.v3;
+  const normalized = normalizeApplicationPackage(v3);
+  assert.equal(normalized.languageVersion, LANGUAGE_VERSIONS.v3);
+  assert.equal(
+    normalized.normalizationProfileVersion,
+    NORMALIZATION_PROFILE_VERSIONS.v3,
+  );
+  assert.equal(
+    canonicalize(
+      normalizeApplicationPackage(canonicalAuthoredProjection(normalized)),
+    ),
+    canonicalize(normalized),
+  );
+
+  const mixed = structuredClone(v3);
+  mixed.fields[0]!.schemaVersion = LANGUAGE_VERSION;
+  assert.throws(
+    () => normalizeApplicationPackage(mixed),
+    (error: unknown) =>
+      error instanceof CanonicalModelError &&
+      error.diagnostics.some(
+        (diagnostic) => diagnostic.code === 'CANON_VERSION_MIXED',
+      ),
+  );
+
+  // Structural proxy for the append-only design: a future entry extends the
+  // catalog without changing any stable existing binding.
+  const hypotheticalV4 = { ...LANGUAGE_VERSIONS, v4: 'v4' as const };
+  const hypotheticalProfileV4 = {
+    ...NORMALIZATION_PROFILE_VERSIONS,
+    v4: 'northstar.normalization/v4' as const,
+  };
+  assert.deepEqual(
+    Object.fromEntries(
+      Object.entries(hypotheticalV4).filter(([name]) => name !== 'v4'),
+    ),
+    LANGUAGE_VERSIONS,
+  );
+  assert.deepEqual(
+    Object.fromEntries(
+      Object.entries(hypotheticalProfileV4).filter(([name]) => name !== 'v4'),
+    ),
+    NORMALIZATION_PROFILE_VERSIONS,
+  );
 });
 
 test('canonical byte and domain-separated hash vectors are stable', () => {
@@ -185,3 +318,19 @@ test('representative token counts are pinned telemetry, not a correctness gate',
     normalizedTokens: 2_721,
   });
 });
+
+function replaceVersion(value: unknown, from: string, to: string): unknown {
+  if (typeof value === 'string') return value === from ? to : value;
+  if (Array.isArray(value)) {
+    return value.map((entry) => replaceVersion(entry, from, to));
+  }
+  if (typeof value === 'object' && value !== null) {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [
+        key,
+        replaceVersion(entry, from, to),
+      ]),
+    );
+  }
+  return value;
+}

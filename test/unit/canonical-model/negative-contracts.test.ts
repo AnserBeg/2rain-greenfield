@@ -69,7 +69,7 @@ test('unknown kinds, versions, properties, slots, and status roles fail closed',
   const unknownVersion = structuredClone(fixture()) as unknown as {
     modules: Array<Record<string, unknown>>;
   };
-  unknownVersion.modules[0]!.schemaVersion = 'v3';
+  unknownVersion.modules[0]!.schemaVersion = 'v4';
   expectDiagnostic(
     () => normalizeApplicationPackage(unknownVersion),
     'CANON_VERSION_UNSUPPORTED',
@@ -104,7 +104,7 @@ test('unknown kinds, versions, properties, slots, and status roles fail closed',
 });
 
 test('the runtime predicate fence is strict, version-dispatched, and admits only literal true', () => {
-  for (const schemaVersion of ['v0-experimental', 'v1', 'v2'] as const) {
+  for (const schemaVersion of ['v0-experimental', 'v1', 'v2', 'v3'] as const) {
     const receipt = inspectPredicateForExecution({
       kind: 'booleanPredicate',
       schemaVersion,
@@ -216,7 +216,7 @@ test('absent comparisons are total at every predicate binding position', () => {
     'invalid-comparison-resolution',
   );
 
-  for (const schemaVersion of ['v0-experimental', 'v1', 'v2'] as const) {
+  for (const schemaVersion of ['v0-experimental', 'v1', 'v2', 'v3'] as const) {
     const versioned = structuredClone(comparison);
     versioned.schemaVersion = schemaVersion;
     versioned.field.schemaVersion = schemaVersion;

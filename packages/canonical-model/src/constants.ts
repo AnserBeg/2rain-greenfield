@@ -1,25 +1,89 @@
-export const LEGACY_LANGUAGE_VERSION = 'v0-experimental' as const;
-export const PREVIOUS_LANGUAGE_VERSION = 'v1' as const;
-export const LANGUAGE_VERSION = 'v2' as const;
+/**
+ * Stable, append-only language identifiers. Adding a reader appends a named
+ * entry and a supported-list member; it never renames an existing version.
+ */
+export const LANGUAGE_VERSIONS = Object.freeze({
+  experimentalV0: 'v0-experimental',
+  v1: 'v1',
+  v2: 'v2',
+  v3: 'v3',
+} as const);
+
+export const LEGACY_LANGUAGE_VERSION = LANGUAGE_VERSIONS.experimentalV0;
+export const PREVIOUS_LANGUAGE_VERSION = LANGUAGE_VERSIONS.v1;
+// Compatibility authority for packages already authored at v2. From v3 on,
+// this name is stable and does not mean "latest supported".
+export const LANGUAGE_VERSION = LANGUAGE_VERSIONS.v2;
+export const LATEST_LANGUAGE_VERSION = LANGUAGE_VERSIONS.v3;
 export const SUPPORTED_LANGUAGE_VERSIONS = Object.freeze([
   LEGACY_LANGUAGE_VERSION,
   PREVIOUS_LANGUAGE_VERSION,
   LANGUAGE_VERSION,
+  LANGUAGE_VERSIONS.v3,
 ] as const);
 export type CanonicalLanguageVersion =
   (typeof SUPPORTED_LANGUAGE_VERSIONS)[number];
 
+/** Stable, append-only normalization-profile identifiers. */
+export const NORMALIZATION_PROFILE_VERSIONS = Object.freeze({
+  experimentalV0: 'northstar.normalization/v0-experimental',
+  v1: 'northstar.normalization/v1',
+  v2: 'northstar.normalization/v2',
+  v3: 'northstar.normalization/v3',
+} as const);
+
 export const LEGACY_NORMALIZATION_PROFILE_VERSION =
-  'northstar.normalization/v0-experimental' as const;
+  NORMALIZATION_PROFILE_VERSIONS.experimentalV0;
 export const PREVIOUS_NORMALIZATION_PROFILE_VERSION =
-  'northstar.normalization/v1' as const;
-export const NORMALIZATION_PROFILE_VERSION =
-  'northstar.normalization/v2' as const;
+  NORMALIZATION_PROFILE_VERSIONS.v1;
+// Compatibility authority paired with LANGUAGE_VERSION; not the latest reader.
+export const NORMALIZATION_PROFILE_VERSION = NORMALIZATION_PROFILE_VERSIONS.v2;
+export const LATEST_NORMALIZATION_PROFILE_VERSION =
+  NORMALIZATION_PROFILE_VERSIONS.v3;
 export const SUPPORTED_NORMALIZATION_PROFILE_VERSIONS = Object.freeze([
   LEGACY_NORMALIZATION_PROFILE_VERSION,
   PREVIOUS_NORMALIZATION_PROFILE_VERSION,
   NORMALIZATION_PROFILE_VERSION,
+  NORMALIZATION_PROFILE_VERSIONS.v3,
 ] as const);
+export type CanonicalNormalizationProfileVersion =
+  (typeof SUPPORTED_NORMALIZATION_PROFILE_VERSIONS)[number];
+
+export interface CanonicalLanguageProfile {
+  readonly featureLevel: 'v0-experimental' | 'v1' | 'v2';
+  readonly normalizationProfileVersion: CanonicalNormalizationProfileVersion;
+}
+
+/**
+ * Strict language/profile dispatch. v3 deliberately has the v2 feature level
+ * until packet 4b defines its additional families and node shapes.
+ */
+export const CANONICAL_LANGUAGE_PROFILES: Readonly<
+  Record<CanonicalLanguageVersion, CanonicalLanguageProfile>
+> = Object.freeze({
+  [LEGACY_LANGUAGE_VERSION]: Object.freeze({
+    featureLevel: 'v0-experimental',
+    normalizationProfileVersion: LEGACY_NORMALIZATION_PROFILE_VERSION,
+  }),
+  [PREVIOUS_LANGUAGE_VERSION]: Object.freeze({
+    featureLevel: 'v1',
+    normalizationProfileVersion: PREVIOUS_NORMALIZATION_PROFILE_VERSION,
+  }),
+  [LANGUAGE_VERSION]: Object.freeze({
+    featureLevel: 'v2',
+    normalizationProfileVersion: NORMALIZATION_PROFILE_VERSION,
+  }),
+  [LANGUAGE_VERSIONS.v3]: Object.freeze({
+    featureLevel: 'v2',
+    normalizationProfileVersion: NORMALIZATION_PROFILE_VERSIONS.v3,
+  }),
+});
+
+export function canonicalLanguageProfileFor(
+  languageVersion: CanonicalLanguageVersion,
+): CanonicalLanguageProfile {
+  return CANONICAL_LANGUAGE_PROFILES[languageVersion];
+}
 export const CANONICALIZATION_PROFILE_VERSION =
   'northstar.canonical-json/v0-experimental' as const;
 export const CONTENT_HASH_ALGORITHM = 'sha256' as const;

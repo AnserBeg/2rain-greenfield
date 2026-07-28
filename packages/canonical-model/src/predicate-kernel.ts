@@ -1,5 +1,6 @@
 import {
   LANGUAGE_VERSION,
+  LANGUAGE_VERSIONS,
   LEGACY_LANGUAGE_VERSION,
   PREVIOUS_LANGUAGE_VERSION,
   STRUCTURAL_LIMITS_V0,
@@ -201,6 +202,8 @@ export const inspectPredicateForExecution: PredicateKernelEntryPoint = (
       return inspectLiteralForVersion(value, PREVIOUS_LANGUAGE_VERSION);
     case LANGUAGE_VERSION:
       return inspectLiteralForVersion(value, LANGUAGE_VERSION);
+    case LANGUAGE_VERSIONS.v3:
+      return inspectLiteralForVersion(value, LANGUAGE_VERSIONS.v3);
     default:
       return rejected(nodeSchemaVersion, 'unsupported-node-version');
   }
@@ -390,6 +393,8 @@ function supportedNodeVersion(value: unknown): CanonicalLanguageVersion | null {
       return PREVIOUS_LANGUAGE_VERSION;
     case LANGUAGE_VERSION:
       return LANGUAGE_VERSION;
+    case LANGUAGE_VERSIONS.v3:
+      return LANGUAGE_VERSIONS.v3;
     default:
       return null;
   }
