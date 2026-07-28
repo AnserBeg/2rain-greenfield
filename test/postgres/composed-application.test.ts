@@ -266,7 +266,7 @@ test(
           assert.deepEqual(
             after,
             before,
-            'the persisted PostgreSQL row is byte-for-byte unchanged by a no-storage release advancement',
+            'the persisted PostgreSQL tuple identity and contents are unchanged by a no-storage release advancement',
           );
           const listed = await listParty(runtime);
           assert.deepEqual(
@@ -820,15 +820,21 @@ async function partyRowSnapshot(
   );
   assert.ok(party);
   assert.match(party.physicalTableName, /^nsm_t_[a-z2-7]+$/);
-  const result = await pool.query<{ row: unknown }>(
-    `SELECT to_jsonb(stored_row) AS row
+  const result = await pool.query<{
+    ctid: string;
+    row: unknown;
+    xmin: string;
+  }>(
+    `SELECT ctid::text AS ctid,
+            to_jsonb(stored_row) AS row,
+            xmin::text AS xmin
        FROM north_star_module.${party.physicalTableName} AS stored_row
       WHERE tenant_id = $1 AND environment_id = $2 AND record_id = $3`,
     [runtime.identity.tenantId, runtime.identity.environmentId, recordId],
   );
-  const row = result.rows[0]?.row;
-  assert.ok(row);
-  return row;
+  const snapshot = result.rows[0];
+  assert.ok(snapshot);
+  return snapshot;
 }
 
 function storageTarget(compiled: CompileSuccess): StorageTargetPayloadV1 {
