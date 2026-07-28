@@ -17,6 +17,8 @@ current slot.
 
 ## Operating model
 
+**THREE PARALLEL LANES ARE ACTIVE (2026-07-28).** See [lanes.md](lanes.md) for the binding path partition, the shared-file protocol, the serial-integration rule, and the mandatory report header. Writers cannot see each other, so that file is the only shared state — read it before starting or resuming any packet.
+
 - The user drives Codex `gpt-5.6-sol` sessions and pastes their reports back.
 - The assistant is **orchestrator + adjudicator**: it hands the user self-contained
   packet prompts, adjudicates review findings and lease-bridge requests by reading the
