@@ -4,6 +4,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
 
+import { preProcessFile } from 'typescript';
+
 import { checkArchitecture } from '../../packages/dev-tooling/src/architecture-boundaries.js';
 import {
   createArchitectureFixture,
@@ -123,6 +125,47 @@ test('plain gateway, inventory, and hard-delete violations fail', () => {
   }
 });
 
+test('inventory append ownership follows the consolidated domain module path', () => {
+  const root = createArchitectureFixture({
+    'package.json': packageManifest('fixture'),
+    'packages/domain/package.json': packageManifest('@north-star/domain'),
+    'packages/domain/src/inventory/post.ts':
+      "export const sql = 'INSERT INTO inventory_movement VALUES (1)';",
+    'packages/domain/src/inventory/rewrite.ts':
+      "export const sql = 'UPDATE inventory_movement SET quantity = 0';",
+    'packages/domain/src/sales/post.ts':
+      "export const sql = 'INSERT INTO inventory_movement VALUES (1)';",
+  });
+
+  try {
+    const violations = checkArchitecture(root).violations;
+    assert.equal(
+      violations.some(
+        (violation) =>
+          violation.file.endsWith('packages/domain/src/inventory/post.ts') &&
+          violation.ruleId === 'AUTH003_GATEWAY_BYPASS',
+      ),
+      false,
+    );
+    assert.ok(
+      violations.some(
+        (violation) =>
+          violation.file.endsWith('packages/domain/src/inventory/rewrite.ts') &&
+          violation.ruleId === 'AUTH004_INVENTORY_PEER',
+      ),
+    );
+    assert.ok(
+      violations.some(
+        (violation) =>
+          violation.file.endsWith('packages/domain/src/sales/post.ts') &&
+          violation.ruleId === 'AUTH003_GATEWAY_BYPASS',
+      ),
+    );
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});
+
 test('plain raw, sixth, and wrong-count agent tool catalogs fail', () => {
   const root = createArchitectureFixture({
     'package.json': packageManifest('fixture'),
@@ -205,4 +248,33 @@ test('the root test command includes the architecture gate', () => {
     scripts: Record<string, string>;
   };
   assert.match(packageJson.scripts.test ?? '', /test:architecture/);
+});
+
+test('the PostgreSQL provider has no misleading root export or bare consumers', () => {
+  const manifest = JSON.parse(
+    readFileSync(
+      join(process.cwd(), 'packages/postgres-provider/package.json'),
+      'utf8',
+    ),
+  ) as { exports: Record<string, string> };
+  assert.equal(manifest.exports['.'], undefined);
+
+  const tracked = spawnSync('git', ['ls-files', '-z'], {
+    cwd: process.cwd(),
+    encoding: 'utf8',
+  });
+  assert.equal(tracked.status, 0, tracked.stderr);
+  const bareConsumers = tracked.stdout
+    .split('\0')
+    .filter((path) => /\.(?:[cm]?[jt]sx?)$/.test(path))
+    .flatMap((path) => {
+      const source = readFileSync(join(process.cwd(), path), 'utf8');
+      return preProcessFile(source, true, true)
+        .importedFiles.filter(
+          (importedFile) =>
+            importedFile.fileName === '@north-star/postgres-provider',
+        )
+        .map(() => path);
+    });
+  assert.deepEqual(bareConsumers, []);
 });

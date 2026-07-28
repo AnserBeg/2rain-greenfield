@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { performance } from 'node:perf_hooks';
 import { promisify } from 'node:util';
 
 import pg from 'pg';
@@ -32,7 +31,6 @@ export async function withEphemeralPostgres<T>(
     await docker([
       'run',
       '--detach',
-      '--rm',
       '--name',
       containerName,
       '--publish',
@@ -77,10 +75,9 @@ async function waitUntilReady(
   connection: pg.PoolConfig,
   containerName: string,
 ): Promise<void> {
-  const startedAt = performance.now();
   let lastError: unknown;
 
-  while (performance.now() - startedAt < 30_000) {
+  while (true) {
     const client = new pg.Client({
       ...connection,
       connectionTimeoutMillis: 500,
@@ -93,14 +90,27 @@ async function waitUntilReady(
     } catch (error) {
       lastError = error;
       await client.end().catch(() => undefined);
-      await new Promise((resolveDelay) => setTimeout(resolveDelay, 100));
     }
-  }
 
-  const { stdout, stderr } = await docker(['logs', containerName], true);
-  throw new Error(
-    `ephemeral PostgreSQL was not ready within 30s: ${String(lastError)}\n${stdout}${stderr}`,
-  );
+    const state = await containerState(containerName);
+    if (state !== 'running') {
+      const { stdout, stderr } = await docker(['logs', containerName], true);
+      throw new Error(
+        `ephemeral PostgreSQL stopped before it was ready (${state}): ${String(lastError)}\n${stdout}${stderr}`,
+      );
+    }
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 100));
+  }
+}
+
+async function containerState(containerName: string): Promise<string> {
+  const { stdout } = await docker([
+    'inspect',
+    '--format',
+    '{{.State.Status}}',
+    containerName,
+  ]);
+  return stdout.trim();
 }
 
 async function docker(
@@ -111,7 +121,6 @@ async function docker(
     return await execFileAsync('docker', [...arguments_], {
       encoding: 'utf8',
       maxBuffer: 2 * 1024 * 1024,
-      timeout: 45_000,
     });
   } catch (error) {
     if (tolerateFailure) return { stderr: '', stdout: '' };

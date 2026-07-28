@@ -286,13 +286,14 @@ test('Party executes the compiled declared-semantics contract on real PostgreSQL
       recordId: racingPartyId,
       values: partyValues('P-RACE', 'Archive race', ''),
     });
+    const racingRoleId = randomUUID();
     const archiveCreateRace = await Promise.allSettled([
       invokePartyOperation(runtime, runtime.views.a, 'party_archive', {
         expectedRevision: 1,
         recordId: racingPartyId,
       }),
       invokePartyOperation(runtime, runtime.views.a, 'party_role_create', {
-        recordId: randomUUID(),
+        recordId: racingRoleId,
         relations: {
           [PARTY_IDS.relationIds.roleParty]: racingPartyId,
         },
@@ -324,6 +325,15 @@ test('Party executes the compiled declared-semantics contract on real PostgreSQL
       PARTY_IDS.relationIds.roleParty,
     );
     assertNoPhysicalDetails(rejectedRace.reason);
+    if (archiveCreateRace[1]?.status === 'fulfilled') {
+      const archivedRacingRole = await invokePartyOperation(
+        runtime,
+        runtime.views.a,
+        'party_role_archive',
+        { expectedRevision: 1, recordId: racingRoleId },
+      );
+      assert.equal(archivedRacingRole.readBack?.archived, true);
+    }
 
     const supplierRoleId = randomUUID();
     const customerRoleId = randomUUID();
