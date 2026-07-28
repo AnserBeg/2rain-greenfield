@@ -67,8 +67,12 @@ test('committed Q1 parity cases agree through independent IR and PostgreSQL exec
           }
         }
 
+        await runtime.runtimePool.query('SELECT pg_stat_force_next_flush()');
+        const scansBefore = await readTableScanCount(
+          runtime.adminPool,
+          party.physicalTableName,
+        );
         let irExecutionCount = 0;
-        let postgresExecutionCount = 0;
         const firstPass = new Map<string, readonly string[]>();
         for (let replay = 0; replay < 2; replay += 1) {
           for (const candidate of corpus.cases) {
@@ -86,7 +90,6 @@ test('committed Q1 parity cases agree through independent IR and PostgreSQL exec
               perturbTotalization &&
               candidate.caseId === 'absent_not_less_decimal_zero'
             ) {
-              postgresExecutionCount += 1;
               postgresIds = await rawNotLessThanZero(
                 runtime.runtimePool,
                 runtime.contexts.a,
@@ -95,7 +98,6 @@ test('committed Q1 parity cases agree through independent IR and PostgreSQL exec
                 corpus.rows.map((row) => row.recordId),
               );
             } else {
-              postgresExecutionCount += 1;
               const result = await invokePartyQuery(
                 runtime,
                 runtime.views.a,
@@ -126,10 +128,15 @@ test('committed Q1 parity cases agree through independent IR and PostgreSQL exec
           }
         }
 
-        assert.equal(
-          postgresExecutionCount,
-          corpus.cases.length * 2,
-          'every verdict must come from PostgreSQL rather than the IR oracle',
+        await runtime.runtimePool.query('SELECT pg_stat_force_next_flush()');
+        const postgresScanCount =
+          (await readTableScanCount(
+            runtime.adminPool,
+            party.physicalTableName,
+          )) - scansBefore;
+        assert.ok(
+          postgresScanCount >= BigInt(corpus.cases.length * 2),
+          `every corpus verdict must be backed by an observed PostgreSQL table scan; observed ${String(postgresScanCount)}`,
         );
         assert.equal(
           irExecutionCount,
@@ -152,7 +159,7 @@ test('committed Q1 parity cases agree through independent IR and PostgreSQL exec
         assert.equal(modelFetchCount, 0);
 
         console.log(
-          `Q1-P2 corpus cases=${String(corpus.cases.length)} rows=${String(corpus.rows.length)} ir=${String(irExecutionCount)} postgres=${String(postgresExecutionCount)} axes=${[...new Set(corpus.cases.map((candidate) => candidate.axis))].sort().join(',')} raw_absent=${String(rawIds.includes(absentId))} total_absent=${String(totalizedIds.includes(absentId))} model_fetches=${String(modelFetchCount)}`,
+          `Q1-P2 corpus cases=${String(corpus.cases.length)} rows=${String(corpus.rows.length)} ir=${String(irExecutionCount)} postgres_scans=${String(postgresScanCount)} axes=${[...new Set(corpus.cases.map((candidate) => candidate.axis))].sort().join(',')} raw_absent=${String(rawIds.includes(absentId))} total_absent=${String(totalizedIds.includes(absentId))} model_fetches=${String(modelFetchCount)}`,
         );
       },
       definition,
@@ -161,6 +168,21 @@ test('committed Q1 parity cases agree through independent IR and PostgreSQL exec
     globalThis.fetch = originalFetch;
   }
 });
+
+async function readTableScanCount(
+  pool: Pool,
+  tableName: string,
+): Promise<bigint> {
+  const result = await pool.query<{ scan_count: string }>(
+    `SELECT (seq_scan + idx_scan)::text AS scan_count
+       FROM pg_stat_user_tables
+      WHERE schemaname = 'north_star_module'
+        AND relname = $1`,
+    [tableName],
+  );
+  assert.equal(result.rowCount, 1);
+  return BigInt(result.rows[0]!.scan_count);
+}
 
 function corpusPartyDefinition(
   cases: ReturnType<typeof loadPredicateParityCorpus>['cases'],
