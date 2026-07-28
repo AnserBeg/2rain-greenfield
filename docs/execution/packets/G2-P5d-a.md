@@ -97,6 +97,12 @@ The exported list helper remains as a compatibility projection for non-browser
 consumers, but SurfaceRuntime does not invoke it. There is one table renderer and
 one form renderer, not a new implementation beside the old one.
 
+Compiler-valid older fixtures can still carry only `record:sections` or
+`record:keyFacts`. When `titleStatus` is absent, those same slot renderers keep the
+operation feedback or lifecycle token inside the declared content slot. This is a
+backward-compatibility projection for a pinned release, not a second sibling panel;
+current product surfaces take the title/status path and do not duplicate it.
+
 Compact and full layouts are explicitly alternative renderings of the same slot
 set and must never be mounted together. This packet records that contract but does
 not implement the deferred responsive projection.
@@ -181,6 +187,14 @@ The browser suite reports 15 / 15; its composed journey exercises seeded lists,
 New, Save, row-to-record, breadcrumb, Edit, update, reload, full server restart,
 and persisted trust linkage. The final full-matrix observations are recorded in
 the writer handoff after integration with current `main`.
+
+The first post-integration aggregate at `ed53ab7e5454d65444846fa99db4f09d2e61b614`
+was honestly red at integration 58 / 59 and stopped before later suites. The
+unchanged one-slot v2 fixture's successful create no longer rendered
+`data-operation-intent="create"`, because feedback had moved to a `titleStatus`
+slot the old release did not declare. The compatibility projection above restores
+that pinned-release observation without restoring the hardwired SurfaceRuntime
+panel; the focused integration rerun is 59 / 59.
 
 ## Test it yourself
 
