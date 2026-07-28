@@ -142,7 +142,20 @@ async function requireCompactJourney(
   });
   await expect(navigation).toHaveCount(1);
   const links = navigation.getByRole('link');
-  await expect(links).toHaveCount(5);
+  const expectedNavigation = surfaces
+    .filter(
+      (candidate) =>
+        candidate.archetype === 'home' || candidate.archetype === 'list',
+    )
+    .map((candidate) =>
+      candidate.archetype === 'list'
+        ? candidate.label.replace(/\s+list$/i, '')
+        : candidate.label,
+    );
+  await expect(links).toHaveCount(expectedNavigation.length);
+  await expect(navigation.locator('a > span:nth-child(2)')).toHaveText(
+    expectedNavigation,
+  );
   await expect(page.locator('.app-shell')).toHaveCSS('display', 'block');
   await expect(navigation.locator('ul')).toHaveCSS('display', 'flex');
 
@@ -182,7 +195,7 @@ async function requireCompactJourney(
   );
   const accessibility = observeAccessibility(contrastPairs, targets);
   assert.ok(accessibility.contrastPairsRead > 0);
-  assert.equal(accessibility.targetsRead, 5);
+  assert.equal(accessibility.targetsRead, expectedNavigation.length);
   assert.deepEqual(accessibility.violations, []);
 
   await page.keyboard.press('Tab');

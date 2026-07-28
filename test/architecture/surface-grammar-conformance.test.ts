@@ -35,6 +35,7 @@ import {
 } from '../../packages/compiler/src/index.js';
 import {
   catalogModuleDefinition,
+  composedApplicationDefinition,
   locationModuleDefinition,
   partyModuleDefinition,
   platformModuleDefinition,
@@ -200,6 +201,59 @@ test('compiler-produced fixtures cover all five archetypes, required slots, focu
   );
 });
 
+test('entity-scoped navigation observes the composed application and rejects an over-budget application', () => {
+  const normalized = normalizeApplicationPackage(
+    composedApplicationDefinition(),
+  );
+  const compiled = compileApplication({
+    dependencies: [],
+    expectedActiveRelease: null,
+    kind: 'compilerInput',
+    limits: { ...DEFAULT_COMPILER_LIMITS },
+    normalizedDefinitionBytes: new TextEncoder().encode(
+      canonicalize(normalized),
+    ),
+    profile: { ...MODULE_COMPILER_PROFILE },
+  });
+  assert.equal(compiled.status, 'compiled');
+  const surfaces = compiledSurfaceManifest(compiled);
+  const compact = projectCompactSurfaces(surfaces);
+  const expectedListSurfaceIds = surfaces
+    .filter(
+      (surface) =>
+        surface.lifecycle === 'active' && surface.surfaceRole === 'list',
+    )
+    .map((surface) => surface.surfaceId);
+
+  assert.equal(surfaces.length, 12);
+  assert.deepEqual(compact.navigationSurfaceIds, expectedListSurfaceIds);
+  assert.equal(compact.navigationSurfaceIds.length, 4);
+  assert.deepEqual(
+    navigationRuleIds(checkSurfaceGrammarConformance(surfaces, compact)),
+    [],
+  );
+
+  const exemplar = surfaces.find((surface) => surface.surfaceRole === 'list');
+  assert.ok(exemplar);
+  const overBudget = [
+    ...surfaces,
+    ...Array.from({ length: 4 }, (_, index) => ({
+      ...structuredClone(exemplar),
+      surfaceId: `${exemplar.surfaceId}_over_budget_${String(index + 1)}`,
+    })),
+  ];
+  const overBudgetRuleIds = navigationRuleIds(
+    checkSurfaceGrammarConformance(overBudget),
+  );
+  console.log(
+    `G2-P5d-nav composed navigation: ${String(compact.navigationSurfaceIds.length)}/7; synthetic navigation: 8/7 -> ${overBudgetRuleIds.join(',')}`,
+  );
+  assert.deepEqual(overBudgetRuleIds, [
+    'SG007_DESKTOP_NAVIGATION_BUDGET',
+    'SG008_COMPACT_NAVIGATION_BUDGET',
+  ]);
+});
+
 test('compiler vocabulary red: unknown archetype is rejected', () => {
   const codes = compilationDiagnosticCodes((surfaces) => {
     surfaces[0]!.archetype = 'dashboard';
@@ -253,15 +307,15 @@ test('focus-order red: equal adjacent order keys fail conformance', () => {
   ]);
 });
 
-test('compact navigation budget red: a sixth active item fails the five-item budget', () => {
-  const surfaces = addClonedSurfaces(mutableCompiledSurfaces(), 1);
+test('compact navigation budget red: a sixth navigation item fails the five-item budget', () => {
+  const surfaces = addClonedSurfaces(mutableCompiledSurfaces(), 4);
   assert.deepEqual(ruleIds(checkSurfaceGrammarConformance(surfaces)), [
     'SG008_COMPACT_NAVIGATION_BUDGET',
   ]);
 });
 
-test('desktop navigation budget red: an eighth active item fails the seven-item budget', () => {
-  const surfaces = addClonedSurfaces(mutableCompiledSurfaces(), 3);
+test('desktop navigation budget red: an eighth navigation item fails the seven-item budget', () => {
+  const surfaces = addClonedSurfaces(mutableCompiledSurfaces(), 6);
   const projected = projectCompactSurfaces(surfaces);
   const compact = {
     navigationSurfaceIds: projected.navigationSurfaceIds.slice(0, 5),
@@ -395,6 +449,7 @@ interface MutableCompiledSurface {
   slots: Array<{ orderKey: number; slot: string; slotId: string }>;
   statusRoles: string[];
   surfaceId: string;
+  surfaceRole?: string | null;
 }
 
 function compileProductSurfaceGrammarObservations(): ProductSurfaceGrammarObservation[] {
@@ -573,7 +628,7 @@ function addClonedSurfaces(
   count: number,
 ): MutableCompiledSurface[] {
   for (let index = 0; index < count; index += 1) {
-    const clone = structuredClone(surfaceFor(surfaces, 'home'));
+    const clone = structuredClone(surfaceFor(surfaces, 'list'));
     clone.surfaceId = `${clone.surfaceId}_extra_${index}`;
     surfaces.push(clone);
   }
@@ -584,4 +639,14 @@ function ruleIds(result: {
   readonly violations: readonly { readonly ruleId: string }[];
 }): string[] {
   return result.violations.map((violation) => violation.ruleId).sort();
+}
+
+function navigationRuleIds(result: {
+  readonly violations: readonly { readonly ruleId: string }[];
+}): string[] {
+  return ruleIds(result).filter(
+    (ruleId) =>
+      ruleId === 'SG007_DESKTOP_NAVIGATION_BUDGET' ||
+      ruleId === 'SG008_COMPACT_NAVIGATION_BUDGET',
+  );
 }

@@ -166,9 +166,10 @@ function renderComponent(
 
 function renderListTitle(context: SurfaceComponentContext): string {
   const form = relatedSurface(context, 'form');
+  const archiveToggle = renderArchiveToggle(context);
   return slotPanel(
     context,
-    `<header class="surface-heading surface-heading--slot"><div><p class="eyebrow">List · compiled workspace</p><h1>${escapeHtml(context.surface.label)}</h1></div><div class="surface-heading__actions">${declaredStatusRoles(context.surface)}${form ? `<a class="primary-action" href="${escapeHtml(surfaceHref(form))}">New</a>` : ''}</div></header>`,
+    `<header class="surface-heading surface-heading--slot"><div><p class="eyebrow">List · compiled workspace</p><h1>${escapeHtml(context.surface.label)}</h1></div><div class="surface-heading__actions">${declaredStatusRoles(context.surface)}${archiveToggle}${form ? `<a class="primary-action" href="${escapeHtml(surfaceHref(form))}">New</a>` : ''}</div></header>`,
     'surface-title-slot',
   );
 }
@@ -217,7 +218,9 @@ function renderTitleStatus(context: SurfaceComponentContext): string {
   const form = context.surface.surfaceRole === 'form';
   const title = form
     ? `${record ? 'Edit' : 'New'} ${entityLabel(context.surface)}`
-    : entityLabel(context.surface);
+    : record
+      ? recordTitle(context, record)
+      : entityLabel(context.surface);
   const status =
     context.surface.statusRoles.length > 0
       ? declaredStatusRoles(context.surface)
@@ -229,6 +232,38 @@ function renderTitleStatus(context: SurfaceComponentContext): string {
     `<header class="surface-heading surface-heading--slot"><div><p class="eyebrow">${form ? 'Record form' : 'Record detail'} · compiled workspace</p><h1>${escapeHtml(title)}</h1></div>${status}</header>${feedbackHtml(context.feedback)}`,
     'title-status-slot',
   );
+}
+
+function renderArchiveToggle(context: SurfaceComponentContext): string {
+  const coverage =
+    context.data?.status === 'READY'
+      ? context.data.result?.listCoverage
+      : undefined;
+  const includeArchived = coverage?.includeArchived ?? false;
+  const parameters = new URLSearchParams({
+    surface: context.surface.surfaceId,
+  });
+  if ((coverage?.search ?? '').length > 0) {
+    parameters.set('q', coverage?.search ?? '');
+  }
+  if (!includeArchived) parameters.set('archived', 'yes');
+  return `<a class="secondary-action" data-archive-view="${includeArchived ? 'shown' : 'hidden'}" href="/?${escapeHtml(parameters.toString())}">${includeArchived ? 'Hide archived' : 'Show archived'}</a>`;
+}
+
+function recordTitle(
+  context: SurfaceComponentContext,
+  record: SemanticRecordDto,
+): string {
+  const displayFieldId = readCompiledSurfaceDataBinding(
+    context.view,
+    context.surface,
+  ).displayFieldId;
+  const displayValue = displayFieldId
+    ? (record.displayValues?.[displayFieldId] ?? record.values[displayFieldId])
+    : undefined;
+  return typeof displayValue === 'string' && displayValue.trim().length > 0
+    ? displayValue
+    : shortIdentity(record.recordId);
 }
 
 function renderCommandBar(context: SurfaceComponentContext): string {

@@ -17,7 +17,12 @@ test('real Catalog surface creates an item and archives/restores through the gen
     await page.goto(
       `${surfaceUrl(fixture.baseUrl, 'item_detail')}&record=${encodeURIComponent(fixture.itemId)}`,
     );
-    await expect(page.getByText('Browser Item', { exact: true })).toBeVisible();
+    await expect(
+      page.getByRole('heading', { level: 1, name: 'Browser Item' }),
+    ).toBeVisible();
+    await expect(
+      page.locator('dd').getByText('Browser Item', { exact: true }),
+    ).toBeVisible();
     await expect(page.getByText('SKU-WEB-001', { exact: true })).toBeVisible();
     await expect(
       page.getByText('Browser-seeded descriptor', { exact: true }),

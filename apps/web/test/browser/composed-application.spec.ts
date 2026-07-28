@@ -48,14 +48,26 @@ test('composed Party, Catalog, and Location product creates and persists a real 
 
 async function productJourney(page: Page, baseUrl: string): Promise<void> {
   await page.goto(surfaceUrl(baseUrl, 'party_list'));
+  const navigation = page.getByRole('navigation', {
+    name: 'Release navigation',
+  });
+  await expect(navigation.locator('a > span:nth-child(2)')).toHaveText([
+    'Item',
+    'Location',
+    'Party',
+    'Party role',
+  ]);
   await expect(
-    page.getByRole('link', { name: 'Party list', exact: true }),
+    navigation.getByRole('link', { name: /detail|form/i }),
+  ).toHaveCount(0);
+  await expect(
+    navigation.getByRole('link', { name: 'Party', exact: true }),
   ).toBeVisible();
   await expect(
-    page.getByRole('link', { name: 'Item list', exact: true }),
+    navigation.getByRole('link', { name: 'Item', exact: true }),
   ).toBeVisible();
   await expect(
-    page.getByRole('link', { name: 'Location list', exact: true }),
+    navigation.getByRole('link', { name: 'Location', exact: true }),
   ).toBeVisible();
   await expect(
     page.locator('[data-diagnostic-code="UNSUPPORTED_COMPONENT"]'),
@@ -68,7 +80,7 @@ async function productJourney(page: Page, baseUrl: string): Promise<void> {
     page.getByRole('cell', { name: 'Alpine Office Supply' }),
   ).toBeVisible();
 
-  await page.getByRole('link', { name: 'Item list', exact: true }).click();
+  await navigation.getByRole('link', { name: 'Item', exact: true }).click();
   await expect(
     page.getByRole('heading', { level: 1, name: 'Item list' }),
   ).toBeVisible();
@@ -78,7 +90,7 @@ async function productJourney(page: Page, baseUrl: string): Promise<void> {
   await expect(
     page.locator('[data-diagnostic-code="UNSUPPORTED_COMPONENT"]'),
   ).toHaveCount(0);
-  await page.getByRole('link', { name: 'Location list', exact: true }).click();
+  await navigation.getByRole('link', { name: 'Location', exact: true }).click();
   await expect(
     page.getByRole('heading', { level: 1, name: 'Location list' }),
   ).toBeVisible();
@@ -118,7 +130,10 @@ async function productJourney(page: Page, baseUrl: string): Promise<void> {
   expect(createdRecordId).not.toBeNull();
   await createdRow.getByRole('link').click();
   await expect(
-    page.getByRole('heading', { level: 1, name: 'Party' }),
+    page.getByRole('heading', {
+      level: 1,
+      name: 'Browser-persisted Party',
+    }),
   ).toBeVisible();
   await expect(
     page.getByRole('navigation', { name: 'Breadcrumb' }),
@@ -163,13 +178,28 @@ async function productJourney(page: Page, baseUrl: string): Promise<void> {
     page.locator('[data-diagnostic-code="QUERY_NOT_FOUND"]'),
   ).toBeVisible();
 
-  await page.goto(`${surfaceUrl(baseUrl, 'party_list')}&archived=yes`);
+  await page.goto(surfaceUrl(baseUrl, 'party_list'));
+  await expect(
+    page.locator('tr', { hasText: 'Browser-persisted Party' }),
+  ).toHaveCount(0);
+  const showArchived = page.getByRole('link', { name: 'Show archived' });
+  await expect(showArchived).toBeVisible();
+  await showArchived.click();
   const archivedRow = page.locator('tr', {
     hasText: 'Browser-persisted Party',
   });
   await expect(
     archivedRow.getByText('Archived', { exact: true }),
   ).toBeVisible();
+  const hideArchived = page.getByRole('link', { name: 'Hide archived' });
+  await expect(hideArchived).toBeVisible();
+  await hideArchived.click();
+  await expect(
+    page.locator('tr', { hasText: 'Browser-persisted Party' }),
+  ).toHaveCount(0);
+  await expect(showArchived).toBeVisible();
+  await showArchived.click();
+  await expect(archivedRow).toBeVisible();
   await archivedRow.getByRole('link').click();
   await expect(page).toHaveURL(/(?:\?|&)archived=yes(?:&|$)/);
   await expect(page.getByText(/Archived · revision 3/)).toBeVisible();

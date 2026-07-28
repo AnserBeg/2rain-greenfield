@@ -21,7 +21,7 @@ export const PRODUCT_SURFACE_GRAMMAR_BASELINE = Object.freeze([
     moduleId: 'northstar.party:module.party',
     packageId: 'northstar.party:package.party',
     sourceDirectory: 'party',
-    violationCount: 36,
+    violationCount: 35,
   }),
   Object.freeze({
     moduleId: 'northstar.platform:module.saved_filters',

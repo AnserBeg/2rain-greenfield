@@ -59,13 +59,16 @@ const pointerId = 'd5000000-0000-4000-8000-000000000005';
 
 let server: Server;
 let baseUrl: string;
+let executor: BrowserFixtureExecutor;
+let missingDisplayRecordId: string;
 
 test.beforeAll(async () => {
   const compiled = compileFixture();
   const policy = allowPolicy();
-  const executor = new BrowserFixtureExecutor();
+  executor = new BrowserFixtureExecutor();
   const operationMediation = new SemanticOperationMediationAuthority();
   executor.createSeed('Existing live master');
+  missingDisplayRecordId = executor.createSeed();
   server = createSurfaceRuntimeServer(runtimeEntry(compiled, policy), {
     operationGateway: new SemanticOperationGateway(
       policy,
@@ -76,6 +79,22 @@ test.beforeAll(async () => {
     queryGateway: new SemanticQueryGateway(policy, executor),
   });
   baseUrl = await listen(server);
+});
+
+test('record title falls back to short identity when its compiled display value is absent', async ({
+  page,
+}) => {
+  await page.setExtraHTTPHeaders({ authorization: 'fixture-user' });
+  await page.goto(
+    `${baseUrl}/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_record`)}&record=${encodeURIComponent(missingDisplayRecordId)}`,
+  );
+  const expectedTitle = `${missingDisplayRecordId.slice(0, 8)}…${missingDisplayRecordId.slice(-4)}`;
+  await expect(
+    page.getByRole('heading', { level: 1, name: expectedTitle }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'master' }),
+  ).toHaveCount(0);
 });
 
 test.afterAll(async () => {
@@ -99,7 +118,7 @@ test('fixture list and form render live DTOs and reflect a semantic create', asy
   ).toBeVisible();
   await expect(page.locator('[data-data-state="exact"]')).toBeVisible();
 
-  await page.getByRole('link', { name: 'master form' }).click();
+  await page.getByRole('link', { name: 'New', exact: true }).click();
   await expect(
     page.getByRole('heading', { level: 1, name: 'New master' }),
   ).toBeVisible();
@@ -116,13 +135,18 @@ test('fixture list and form render live DTOs and reflect a semantic create', asy
 
   await page
     .getByRole('navigation', { name: 'Release navigation' })
-    .getByRole('link', { name: 'master list' })
+    .getByRole('link', { name: 'master', exact: true })
     .click();
   await expect(
     page.getByRole('cell', { name: 'Browser-created master' }),
   ).toBeVisible();
   const createdRow = page.locator('tr', { hasText: 'Browser-created master' });
+  const createdRecordId = await createdRow.getAttribute('data-record-id');
+  assert.ok(createdRecordId);
   await createdRow.getByRole('link').click();
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'Browser-created master' }),
+  ).toBeVisible();
   const overflow = page.locator(
     '[data-platform-slot="record:commandBar"] details.action-overflow',
   );
@@ -170,7 +194,7 @@ test('compiler-valid one-slot Record surfaces retain fallback actions and feedba
 
     await page
       .getByRole('navigation', { name: 'Release navigation' })
-      .getByRole('link', { name: 'master list' })
+      .getByRole('link', { name: 'master', exact: true })
       .click();
     const row = page.locator('tr', { hasText: 'Legacy one-slot master' });
     await row.getByRole('link').click();
@@ -203,9 +227,10 @@ class BrowserFixtureExecutor
 {
   private readonly records = new Map<string, SemanticRecordDto>();
 
-  createSeed(name: string): void {
+  createSeed(name?: string): string {
     const recordId = randomUUID();
     this.records.set(recordId, dto(recordId, name));
+    return recordId;
   }
 
   async recordNonAccepted(
@@ -334,13 +359,15 @@ function runtimeEntry(
   );
 }
 
-function dto(recordId: string, name: string): SemanticRecordDto {
+function dto(recordId: string, name?: string): SemanticRecordDto {
   return Object.freeze({
     archived: false,
     entityId: FIXTURE_IDS.entityIds.parent,
     recordId,
     revision: 1,
-    values: Object.freeze({ [FIXTURE_IDS.fieldIds.parentName]: name }),
+    values: Object.freeze(
+      name === undefined ? {} : { [FIXTURE_IDS.fieldIds.parentName]: name },
+    ),
   });
 }
 

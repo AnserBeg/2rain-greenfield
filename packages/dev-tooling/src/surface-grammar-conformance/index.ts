@@ -42,6 +42,7 @@ export interface ConformanceSurface {
   }[];
   readonly statusRoles: readonly string[];
   readonly surfaceId: string;
+  readonly surfaceRole?: string | null;
 }
 
 export interface CompactSurfaceProjection {
@@ -120,7 +121,7 @@ export function projectCompactSurfaces(
   const active = surfaces.filter((surface) => surface.lifecycle === 'active');
   return Object.freeze({
     navigationSurfaceIds: Object.freeze(
-      active.map((surface) => surface.surfaceId),
+      active.filter(isNavigationSurface).map((surface) => surface.surfaceId),
     ),
     surfaces: Object.freeze(
       active.map((surface) =>
@@ -234,12 +235,13 @@ export function checkSurfaceGrammarConformance(
     }
   }
 
-  if (active.length > SURFACE_GRAMMAR_LIMITS.desktopNavigationItems) {
+  const desktopNavigationItems = active.filter(isNavigationSurface).length;
+  if (desktopNavigationItems > SURFACE_GRAMMAR_LIMITS.desktopNavigationItems) {
     add(
       violations,
       'SG007_DESKTOP_NAVIGATION_BUDGET',
       'navigation',
-      `desktop navigation observed ${active.length} items; maximum is ${SURFACE_GRAMMAR_LIMITS.desktopNavigationItems}`,
+      `desktop navigation observed ${desktopNavigationItems} items; maximum is ${SURFACE_GRAMMAR_LIMITS.desktopNavigationItems}`,
     );
   }
   if (
@@ -259,6 +261,17 @@ export function checkSurfaceGrammarConformance(
     surfacesRead: active.length,
     violations: Object.freeze(violations),
   });
+}
+
+function isNavigationSurface(surface: ConformanceSurface): boolean {
+  // Product navigation is entity-scoped: List is the entry and its Record and
+  // form siblings stay reachable from within it. Home remains a shell entry so
+  // diagnostic and future application-home surfaces cannot disappear.
+  return (
+    surface.surfaceRole === 'list' ||
+    (surface.archetype === 'list' && surface.surfaceRole == null) ||
+    (surface.archetype === 'home' && surface.surfaceRole == null)
+  );
 }
 
 export function checkProductSurfaceGrammarRatchet(

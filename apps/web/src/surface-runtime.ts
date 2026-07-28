@@ -527,6 +527,7 @@ function shellDocument(
   body: string,
 ): string {
   const title = selected?.label ?? 'Release diagnostic';
+  const navigation = navigationSurfaces(surfaces);
   return `<!doctype html>
 <html lang="en">
   <head>
@@ -544,7 +545,7 @@ function shellDocument(
         <div class="brand"><span class="brand__mark" aria-hidden="true">2</span><span><strong>2rain</strong><small>Compiled workspace</small></span></div>
         <nav aria-label="Release navigation">
           <p class="nav-label">Application</p>
-          <ul>${surfaces.map((surface) => navigationItem(surface, selected)).join('')}</ul>
+          <ul>${navigation.map((surface) => navigationItem(view, surface, selected)).join('')}</ul>
         </nav>
         <div class="release-card">
           <span class="release-card__pulse" aria-hidden="true"></span>
@@ -564,11 +565,46 @@ function shellDocument(
 }
 
 function navigationItem(
+  view: RuntimeViewContract.RequestRuntimeView,
   surface: CompiledSurfaceDefinition,
   selected: CompiledSurfaceDefinition | null,
 ): string {
-  const current = surface.surfaceId === selected?.surfaceId;
-  return `<li><a href="/?surface=${encodeURIComponent(surface.surfaceId)}"${current ? ' aria-current="page"' : ''}><span class="nav-icon" aria-hidden="true">${escapeHtml(surface.label.slice(0, 1).toUpperCase())}</span><span>${escapeHtml(surface.label)}</span><span class="nav-arrow" aria-hidden="true">›</span></a></li>`;
+  const current = selected
+    ? surface.surfaceId === selected.surfaceId ||
+      sharesSurfaceEntity(view, surface, selected)
+    : false;
+  const label =
+    surface.surfaceRole === 'list'
+      ? surface.label.replace(/\s+list$/i, '')
+      : surface.label;
+  return `<li><a href="/?surface=${encodeURIComponent(surface.surfaceId)}"${current ? ' aria-current="page"' : ''}><span class="nav-icon" aria-hidden="true">${escapeHtml(label.slice(0, 1).toUpperCase())}</span><span>${escapeHtml(label)}</span><span class="nav-arrow" aria-hidden="true">›</span></a></li>`;
+}
+
+function navigationSurfaces(
+  surfaces: readonly CompiledSurfaceDefinition[],
+): readonly CompiledSurfaceDefinition[] {
+  return surfaces.filter(
+    (surface) =>
+      surface.surfaceRole === 'list' ||
+      (surface.archetype === 'list' && surface.surfaceRole === null) ||
+      (surface.archetype === 'home' && surface.surfaceRole === null),
+  );
+}
+
+function sharesSurfaceEntity(
+  view: RuntimeViewContract.RequestRuntimeView,
+  navigation: CompiledSurfaceDefinition,
+  selected: CompiledSurfaceDefinition,
+): boolean {
+  if (navigation.surfaceRole !== 'list') return false;
+  try {
+    return (
+      readCompiledSurfaceDataBinding(view, navigation).query.sourceEntityId ===
+      readCompiledSurfaceDataBinding(view, selected).query.sourceEntityId
+    );
+  } catch {
+    return false;
+  }
 }
 
 const styles = `

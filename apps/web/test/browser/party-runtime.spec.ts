@@ -28,7 +28,10 @@ test('real Party surface renders roles, creates, and archives/restores through t
       `${surfaceUrl(fixture.baseUrl, 'party_detail')}&record=${encodeURIComponent(fixture.partyId)}`,
     );
     await expect(
-      page.getByText('Browser Party', { exact: true }),
+      page.getByRole('heading', { level: 1, name: 'Browser Party' }),
+    ).toBeVisible();
+    await expect(
+      page.locator('dd').getByText('Browser Party', { exact: true }),
     ).toBeVisible();
     await expect(page.getByText('P-WEB-001', { exact: true })).toBeVisible();
     await page.locator('details.action-overflow summary').click();

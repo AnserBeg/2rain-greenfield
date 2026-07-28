@@ -18,7 +18,10 @@ test('real Location surface creates a location and archives/restores through the
       `${surfaceUrl(fixture.baseUrl, 'location_detail')}&record=${encodeURIComponent(fixture.locationId)}`,
     );
     await expect(
-      page.getByText('Browser Location', { exact: true }),
+      page.getByRole('heading', { level: 1, name: 'Browser Location' }),
+    ).toBeVisible();
+    await expect(
+      page.locator('dd').getByText('Browser Location', { exact: true }),
     ).toBeVisible();
     await expect(page.getByText('LOC-WEB-001', { exact: true })).toBeVisible();
     await expect(

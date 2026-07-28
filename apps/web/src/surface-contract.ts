@@ -69,6 +69,7 @@ export interface CompiledSurfaceOperationBinding {
 }
 
 export interface CompiledSurfaceDataBinding {
+  readonly displayFieldId: string | null;
   readonly operations: readonly CompiledSurfaceOperationBinding[];
   readonly query: RegisteredQueryDefinition;
 }
@@ -167,6 +168,7 @@ export function readCompiledSurfaceDataBinding(
   }
 
   return Object.freeze({
+    displayFieldId: displayFieldIdFromPinnedQueries(view, query),
     operations: Object.freeze(
       [...byIntent.values()].sort((left, right) =>
         left.intent.localeCompare(right.intent),
@@ -174,6 +176,50 @@ export function readCompiledSurfaceDataBinding(
     ),
     query,
   });
+}
+
+function displayFieldIdFromPinnedQueries(
+  view: RuntimeViewContract.RequestRuntimeView,
+  boundQuery: RegisteredQueryDefinition,
+): string | null {
+  const payload = view.projections.query.payload;
+  if (!isRecord(payload) || !Array.isArray(payload.queries)) {
+    throw invalidBinding('pinned query catalog has an invalid envelope');
+  }
+
+  // registeredQueryFromPinnedView validated every entry before returning the
+  // bound query above. Reuse those validated definitions to select the
+  // entity's declared resolve/display authority without module-specific IDs.
+  const resolveQueries = (
+    payload.queries as unknown as readonly RegisteredQueryDefinition[]
+  ).filter(
+    (candidate) =>
+      candidate.lifecycle === 'active' &&
+      candidate.queryType === 'resolve' &&
+      candidate.sourceEntityId === boundQuery.sourceEntityId &&
+      candidate.tier === 'q0',
+  );
+  if (resolveQueries.length > 1) {
+    throw invalidBinding(
+      'surface entity has more than one active Q0 resolve query',
+    );
+  }
+  const resolve = resolveQueries[0];
+  if (!resolve) return null;
+  const selectedFieldIds = new Set(
+    boundQuery.selections.map((selection) => selection.fieldId),
+  );
+  const keys = [...(resolve.resolveMatchKeys ?? [])]
+    .filter((key) => selectedFieldIds.has(key.fieldId))
+    .sort(
+      (left, right) =>
+        (left.authority === right.authority
+          ? 0
+          : left.authority === 'advisory'
+            ? -1
+            : 1) || left.orderKey - right.orderKey,
+    );
+  return keys[0]?.fieldId ?? null;
 }
 
 function surfaceRoleAcceptsQuery(
