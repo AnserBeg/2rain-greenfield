@@ -131,9 +131,21 @@ Confirmed on every leg, and it is worse than the queue's row 1 records:
   **nowhere**. So all four modules render their declared slot as an
   `UNSUPPORTED_COMPONENT` diagnostic **today** — not "would", as row 1 says.
 - A slot's capability must declare `supportStatus: 'supported'` or compilation
-  fails (`compiler.ts:716-729`). The shipped `shell.authored.json` therefore
-  carries a **live false claim**: `northstar.shell:component.future_insights ->
-  supported`, with no such component registered.
+  fails (`compiler.ts:716-729`), so `shell.authored.json` declares
+  `northstar.shell:component.future_insights -> supported` with no such
+  component registered.
+
+  **Adjudicator correction — Fable overstated this one.** It called that a
+  "live false claim in a served artifact." It is not a defect: `future_insights`
+  is referenced only by `northstar.shell:surface.c_unsupported`, labelled
+  *"Unsupported component"*, whose browser spec asserts it renders
+  `UNSUPPORTED_COMPONENT`. It is a **deliberate negative control**. The narrower
+  real point survives: the language cannot express *"declared, intentionally
+  unregistered,"* so a negative control is forced to declare itself supported to
+  compile at all. That is an expressiveness gap owned by queue row 4's v3
+  disclosure family — not a shipped falsehood. **The rest of A2 is unaffected**
+  and independently confirmed: the module surfaces' `standard_surface_content`
+  is a real product path, registered nowhere, in all four modules.
 
 This changes G2-P5d's shape: it is not "declare slots, grow the registry." Slot
 dispatch and data rendering must be **unified**, and until the v3 disclosure
