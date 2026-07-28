@@ -52,6 +52,44 @@ export interface PredicateScenarioArtifact {
   readonly schemaVersion: 'northstar.q1-predicate-scenarios/v1';
 }
 
+export interface QueryAggregateParityCase {
+  readonly caseId: string;
+  readonly elements: readonly string[];
+  readonly expected: string;
+  readonly field: Readonly<{
+    fieldId: string;
+    kind: 'exactDecimalFieldType' | 'quantityFieldType';
+    precision: number;
+    scale: number;
+  }>;
+}
+
+export const Q1_AGGREGATE_PARITY_CASES: readonly QueryAggregateParityCase[] =
+  Object.freeze([
+    Object.freeze({
+      caseId: 'required-exact-decimal-non-empty',
+      elements: Object.freeze(['1.25', '-0.25', '999999999999999999.000001']),
+      expected: '1000000000000000000.000001',
+      field: Object.freeze({
+        fieldId: 'northstar.q1:field.aggregate_exact_decimal',
+        kind: 'exactDecimalFieldType' as const,
+        precision: 24,
+        scale: 6,
+      }),
+    }),
+    Object.freeze({
+      caseId: 'required-quantity-empty',
+      elements: Object.freeze([]),
+      expected: '0',
+      field: Object.freeze({
+        fieldId: 'northstar.q1:field.aggregate_quantity',
+        kind: 'quantityFieldType' as const,
+        precision: 20,
+        scale: 6,
+      }),
+    }),
+  ]);
+
 const corpusPath = resolve('test/fixtures/q1/predicate-parity-corpus.v1.json');
 const scenariosPath = resolve('test/fixtures/q1/predicate-scenarios.v1.json');
 

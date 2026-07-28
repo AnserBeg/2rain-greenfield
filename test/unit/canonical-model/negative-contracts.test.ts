@@ -8,17 +8,23 @@ import {
   CanonicalModelError,
   CanonicalScalarSchema,
   FieldTypeSchema,
+  QUERY_AGGREGATE_PROFILE_VERSION,
   canonicalAuthoredProjection,
+  evaluateQueryAggregateSemantics,
   inspectPredicateForExecution,
   normalizeApplicationPackage,
   parseAuthoredApplicationPackageJson,
   type AuthoredApplicationPackage,
 } from '../../../packages/canonical-model/src/index.js';
 import {
+  Q1_AGGREGATE_PARITY_CASES,
   evaluatePredicateCase,
   loadPredicateParityCorpus,
   loadPredicateScenarios,
 } from '../../helpers/q1-predicate-corpus.js';
+
+const demonstrateUnsupportedAggregate =
+  process.env.Q1P3A_DEMONSTRATE_UNSUPPORTED_AGGREGATE === '1';
 
 function fixture(): AuthoredApplicationPackage {
   return parseAuthoredApplicationPackageJson(
@@ -326,7 +332,7 @@ test('predicate evaluation rejects inherited binding-position names', () => {
   assert.equal(comparisons, 0);
 });
 
-test('F3 operators and optional aggregation stay compile-time rejected', () => {
+test('F3 operators and the complete v2 aggregate spelling stay compile-time rejected', () => {
   for (const operator of ['greaterThanOrEqual', 'lessThanOrEqual']) {
     const authored = structuredClone(fixture()) as unknown as {
       queries: Array<Record<string, unknown>>;
@@ -352,31 +358,204 @@ test('F3 operators and optional aggregation stay compile-time rejected', () => {
     );
   }
 
-  const optionalSum = structuredClone(fixture()) as unknown as {
-    fields: Array<{ fieldId: string; presence?: string }>;
+  for (const presence of ['optional', 'required'] as const) {
+    for (const operator of ['sum', 'count', 'min', 'max'] as const) {
+      const aggregate = structuredClone(fixture()) as unknown as {
+        fields: Array<{ fieldId: string; presence?: string }>;
+        queries: Array<Record<string, unknown>>;
+      };
+      const quantity = aggregate.fields.find(
+        (field) => field.fieldId === 'northstar.inventory:field.item_quantity',
+      );
+      assert.ok(quantity);
+      quantity.presence = presence;
+      aggregate.queries[0]!.aggregates = [
+        {
+          field: {
+            kind: 'fieldReference',
+            schemaVersion: 'v0-experimental',
+            targetId: quantity.fieldId,
+          },
+          function: operator,
+          kind: 'aggregateSelection',
+          schemaVersion: 'v0-experimental',
+        },
+      ];
+      if (
+        process.env.Q1P3A_DEMONSTRATE_V2_AGGREGATE_ADMISSION === '1' &&
+        presence === 'required' &&
+        operator === 'sum'
+      ) {
+        normalizeApplicationPackage(aggregate);
+      } else {
+        expectDiagnostic(
+          () => normalizeApplicationPackage(aggregate),
+          'CANON_SCHEMA_INVALID',
+        );
+      }
+    }
+  }
+
+  const ruledSingularShape = structuredClone(fixture()) as unknown as {
     queries: Array<Record<string, unknown>>;
   };
-  const quantity = optionalSum.fields.find(
-    (field) => field.fieldId === 'northstar.inventory:field.item_quantity',
-  );
-  assert.ok(quantity);
-  assert.equal(quantity.presence ?? 'optional', 'optional');
-  optionalSum.queries[0]!.aggregates = [
-    {
-      field: {
-        kind: 'fieldReference',
-        schemaVersion: 'v0-experimental',
-        targetId: quantity.fieldId,
-      },
-      function: 'sum',
-      kind: 'aggregateSelection',
+  ruledSingularShape.queries[0]!.aggregate = {
+    field: {
+      kind: 'fieldReference',
       schemaVersion: 'v0-experimental',
+      targetId: 'northstar.inventory:field.item_quantity',
     },
-  ];
+    kind: 'queryAggregateSelection',
+    operator: 'sum',
+    schemaVersion: 'v0-experimental',
+    selectionId: 'northstar.inventory:selection.item_quantity_sum',
+  };
+  ruledSingularShape.queries[0]!.queryType = 'aggregate';
   expectDiagnostic(
-    () => normalizeApplicationPackage(optionalSum),
+    () => normalizeApplicationPackage(ruledSingularShape),
     'CANON_SCHEMA_INVALID',
   );
+});
+
+test('query aggregate semantics are total, exact, strict, and sum-only', () => {
+  assert.equal(
+    CanonicalScalarSchema.safeParse({
+      kind: 'exactDecimalValue',
+      schemaVersion: 'v2',
+      value: '-0.25',
+    }).success,
+    false,
+    'v2 cannot represent the negative sub-unit value that v3 must admit',
+  );
+  for (const candidate of Q1_AGGREGATE_PARITY_CASES) {
+    const receipt = evaluateQueryAggregateSemantics({
+      elements: candidate.elements.map((value) => ({
+        presence: 'present',
+        value,
+      })),
+      field:
+        candidate.field.kind === 'quantityFieldType'
+          ? {
+              ...candidate.field,
+              baseUnitId: 'northstar.inventory:unit.each',
+              presence: 'required',
+            }
+          : { ...candidate.field, presence: 'required' },
+      operator: 'sum',
+      profileVersion: QUERY_AGGREGATE_PROFILE_VERSION,
+    });
+    assert.equal(receipt.outcome, 'evaluated', candidate.caseId);
+    assert.equal(
+      receipt.outcome === 'evaluated' && receipt.result.value,
+      candidate.expected,
+    );
+    assert.equal(
+      receipt.outcome === 'evaluated' && receipt.result.precision,
+      38,
+    );
+    assert.equal(
+      receipt.outcome === 'evaluated' && receipt.costClass,
+      'tenantBoundedScan',
+    );
+    if (candidate.field.kind === 'quantityFieldType') {
+      assert.equal(
+        receipt.outcome === 'evaluated' && receipt.result.kind,
+        'quantityResult',
+      );
+      assert.equal(
+        receipt.outcome === 'evaluated' &&
+          receipt.result.kind === 'quantityResult' &&
+          receipt.result.baseUnitId,
+        'northstar.inventory:unit.each',
+      );
+    }
+  }
+
+  const field = {
+    fieldId: 'northstar.q1:field.aggregate_exact_decimal',
+    kind: 'exactDecimalFieldType',
+    precision: 38,
+    presence: 'required',
+    scale: 0,
+  } as const;
+  const rejectedCases = [
+    {
+      expected: 'optional-aggregand',
+      value: { field: { ...field, presence: 'optional' } },
+    },
+    {
+      expected: 'required-element-absent',
+      value: { elements: [{ presence: 'absent' }] },
+    },
+    {
+      expected: 'numeric-overflow',
+      value: {
+        elements: [
+          {
+            presence: 'present',
+            value: '99999999999999999999999999999999999999',
+          },
+          { presence: 'present', value: '1' },
+        ],
+      },
+    },
+    {
+      expected: 'unsupported-profile-version',
+      value: { profileVersion: 'northstar.query-aggregate-profile/v2' },
+    },
+    {
+      expected: 'invalid-request-shape',
+      value: { repairBeforeMeasurement: true },
+    },
+    {
+      expected: 'invalid-element-shape',
+      value: { elements: [{ presence: 'present', value: '-0' }] },
+    },
+    {
+      expected: 'unsupported-field-type',
+      value: { field: { ...field, kind: 'integerFieldType' } },
+    },
+  ] as const;
+  const request = {
+    elements: [{ presence: 'present', value: '1' }],
+    field,
+    operator: 'sum',
+    profileVersion: QUERY_AGGREGATE_PROFILE_VERSION,
+  };
+  assert.equal(Object.isFrozen(request.field), false);
+  evaluateQueryAggregateSemantics(request);
+  assert.equal(
+    Object.isFrozen(request.field),
+    false,
+    'the pure evaluator must not freeze or mutate caller-owned input',
+  );
+  for (const candidate of rejectedCases) {
+    const receipt = evaluateQueryAggregateSemantics({
+      ...request,
+      ...candidate.value,
+    });
+    assert.deepEqual(receipt, {
+      kind: 'queryAggregateKernelReceipt',
+      outcome: 'rejected',
+      reason: candidate.expected,
+      schemaVersion: 'northstar.query-aggregate-kernel-receipt/v1',
+    });
+  }
+  for (const operator of ['count', 'min', 'max']) {
+    const receipt = evaluateQueryAggregateSemantics({
+      ...request,
+      operator,
+    });
+    if (demonstrateUnsupportedAggregate && operator === 'count') {
+      assert.equal(receipt.outcome, 'evaluated');
+      continue;
+    }
+    assert.equal(receipt.outcome, 'rejected');
+    assert.equal(
+      receipt.outcome === 'rejected' && receipt.reason,
+      'unsupported-operator',
+    );
+  }
 });
 
 test('unresolved and wrong-kind references fail with structured diagnostics', () => {
