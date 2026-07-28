@@ -31,6 +31,7 @@ export async function withEphemeralPostgres<T>(
     await docker([
       'run',
       '--detach',
+      '--rm',
       '--name',
       containerName,
       '--publish',
@@ -66,7 +67,7 @@ export async function withEphemeralPostgres<T>(
   } finally {
     if (pool) await pool.end();
     if (started) {
-      await docker(['rm', '--force', containerName]);
+      await docker(['rm', '--force', containerName], true);
     }
   }
 }
@@ -104,13 +105,11 @@ async function waitUntilReady(
 }
 
 async function containerState(containerName: string): Promise<string> {
-  const { stdout } = await docker([
-    'inspect',
-    '--format',
-    '{{.State.Status}}',
-    containerName,
-  ]);
-  return stdout.trim();
+  const { stdout } = await docker(
+    ['inspect', '--format', '{{.State.Status}}', containerName],
+    true,
+  );
+  return stdout.trim() || 'removed';
 }
 
 async function docker(
