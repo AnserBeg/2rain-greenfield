@@ -101,6 +101,8 @@ Rows 1-3 are the response, in that order: ratchet so nothing new can be added, b
 
 **Not yet started:** G2-P8 import, and everything after.
 
+**G3 ONE-WAY DOORS SETTLED 2026-07-28** — see the [converged record](debates/g3-one-way-doors-verdict.md). Both arms ran independently and reconciled. **Legal-entity classification is ruled with no default** (an undeclared family is a compile-time failure); Party, Party role, Item and Location are `tenantShared`, movements and their kin `entityOwned` — Location decided by the ratified stock tuple, which carries entity *independently of* location and therefore already encodes that location does not determine ownership. **The stock-dimension set was never open** (ratified verbatim at ADR-0016:36); the charter asking it was an orchestrator error. **`negativeStock` defaults to `reject`, evaluated inside the posting transaction**, not as a preflight. **And the deadline list changed shape:** the anchor row as a balance *cache* is addable later, but the **per-stock-identity serialization protocol is required at first posting** — without it a posted fact can violate the negative-stock invariant, and posted facts are immutable. Two items travel to G3-P0 still open: the dial scoping (per tenant or per legal entity), and the concrete concurrency mechanism.
+
 ## Active queue
 
 Ordered. Each row names its source and why it holds its slot.
