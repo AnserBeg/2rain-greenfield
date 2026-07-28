@@ -13,7 +13,7 @@ writer is holding those paths right now.
 
 | Lane | Theme | Current packet | Base | Status |
 |---|---|---|---|---|
-| **KERNEL** | Canonical language and the query tier | `Q1-P3a` — rule the aggregate contract (ruling only) | `ba1f83b` | active |
+| **KERNEL** | Canonical language and the query tier | `4a` — v3 version and profile dispatch | `7f1edfc` | active |
 | **DEPLOY** | Release lifecycle and runtime infrastructure | `1b` — release-admission verification integrity | `07ce6de` | active |
 | **FIX** | Correctness defects in shipped code | `1e` — press-guard consolidation | `37a4107` | active |
 
@@ -30,6 +30,7 @@ the query tier both live there.
 |---|---|
 | `packages/canonical-model/src/**` | KERNEL |
 | `packages/compiler/src/predicate-lowering.ts` | KERNEL |
+| `packages/compiler/src/compiler.ts` | KERNEL *(granted 2026-07-28 for packet 4a — profile dispatch only; FIX is on a test-only packet)* |
 | `packages/runtime/src/semantic-query-gateway.ts` | KERNEL |
 | `packages/compiler/src/storage.ts` | **FIX** |
 | `packages/compiler/src/projections.ts` | **FIX** |
@@ -38,6 +39,9 @@ the query tier both live there.
 | `packages/postgres-provider/src/composed-application-runtime.ts` | DEPLOY |
 | `packages/postgres-provider/src/release-*.ts` | DEPLOY |
 | `packages/compiler/src/verification.ts` | DEPLOY *(assigned 2026-07-28 for packet 1b)* |
+| `db/schema.snapshot.json` | DEPLOY *(granted 2026-07-28 for 1b — migration 0013 moves it)* |
+| `test/architecture/release-persistence-boundary.test.ts` | DEPLOY *(granted for 1b — hardcodes the migration inventory through 0012)* |
+| `test/fixtures/g2/*/runtime-harness.ts` | DEPLOY *(granted for 1b — all four mint `randomUUID()` evidence and must produce genuine evidence instead; **no test-only bypass**)* |
 | `db/migrations/**` · `packages/postgres-provider/src/migrations.ts` | **DEPLOY while 1b runs** — reassigned from FIX, whose current packet (1e press guards) needs no migration. Reverts to FIX when 1b lands. |
 | `packages/postgres-provider/src/module-runtime-interpreter.ts` | KERNEL |
 | `apps/web/**` · `packages/domain/**` | **none — frozen while three lanes run** |
@@ -91,6 +95,24 @@ the **full CI matrix must be green at the exact integrated SHA**.
 A lane that reports a candidate built on a base `main` has since passed is not
 rejected — it merges and re-runs. Q1-P1 did exactly this and it cost one matrix
 run.
+
+### Exception: an orchestrator docs-only advance does not force a re-run
+
+**If the only difference between the lane's merge base and current `main` is
+under `docs/` or `.agents/`, the lane does NOT re-merge and does NOT re-run.**
+The orchestrator merges those at acceptance. The tested code and the integrated
+code are byte-identical, so a re-run would observe nothing new.
+
+This exists because the orchestrator commits rulings, ledger rows and queue
+updates continuously while lanes work — without this rule a lane chases doc
+commits indefinitely and never reaches a stable integrated SHA. Added 2026-07-28
+after exactly that happened to KERNEL twice in one packet.
+
+**The exception is narrow and the orchestrator verifies it, not the lane.** Any
+file outside `docs/` or `.agents/` — product code, test, config, migration,
+lockfile, generated artifact — voids it and the full merge-and-re-run applies.
+When in doubt, re-run: a wasted matrix costs minutes, an untested integration
+costs the rule PR-1 exists to enforce.
 
 ## Report header — mandatory
 

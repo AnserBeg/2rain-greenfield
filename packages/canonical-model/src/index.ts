@@ -63,6 +63,16 @@ export {
   type PredicatePositionProfile,
 } from './predicate-kernel.js';
 export {
+  QUERY_AGGREGATE_CONTRACT_V1,
+  QUERY_AGGREGATE_KERNEL_RECEIPT_VERSION,
+  QUERY_AGGREGATE_PROFILE_VERSION,
+  evaluateQueryAggregateSemantics,
+  type QueryAggregateElement,
+  type QueryAggregateEvaluationRequest,
+  type QueryAggregateFieldContract,
+  type QueryAggregateKernelReceipt,
+} from './query-aggregate-kernel.js';
+export {
   canonicalize,
   canonicalizeAndHash,
   type CanonicalizedContent,
