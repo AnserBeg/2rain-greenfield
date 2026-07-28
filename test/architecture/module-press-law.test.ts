@@ -201,3 +201,50 @@ test('consolidated guard detects every module-specific glue role in identifiers 
     removeArchitectureFixture(root);
   }
 });
+
+test('consolidated guard detects underscore-separated source glue', () => {
+  const root = createArchitectureFixture({
+    'apps/api/src/glue.ts': 'export const widget_handler = true;\n',
+    'packages/domain/src/widget/definition.ts': [
+      "export const WIDGET_NAMESPACE = 'northstar.widget';",
+      'const entityId = `${WIDGET_NAMESPACE}:entity.widget`;',
+    ].join('\n'),
+  });
+  try {
+    assert.deepEqual(checkModulePressLaw(root).violations, [
+      {
+        file: 'apps/api/src/glue.ts',
+        line: 1,
+        message: 'generic press contains widget-specific widget_handler',
+        moduleDirectory: 'widget',
+        ruleId: 'PRESS007_MODULE_GLUE_IN_PRESS',
+      },
+    ]);
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});
+
+test('consolidated guard detects role-first module glue filenames', () => {
+  const root = createArchitectureFixture({
+    'packages/domain/src/widget/definition.ts': [
+      "export const WIDGET_NAMESPACE = 'northstar.widget';",
+      'const entityId = `${WIDGET_NAMESPACE}:entity.widget`;',
+    ].join('\n'),
+    'scripts/handler-widget.ts': 'export const generic = true;\n',
+  });
+  try {
+    assert.deepEqual(checkModulePressLaw(root).violations, [
+      {
+        file: 'scripts/handler-widget.ts',
+        line: 1,
+        message:
+          'generic press contains widget-specific scripts/handler-widget.ts',
+        moduleDirectory: 'widget',
+        ruleId: 'PRESS007_MODULE_GLUE_IN_PRESS',
+      },
+    ]);
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});

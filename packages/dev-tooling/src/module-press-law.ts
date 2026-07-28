@@ -357,7 +357,7 @@ function moduleGlueMatch(
   if (names.length === 0) return undefined;
   const role = `(?:${glueRoles.join('|')})`;
   const pattern = new RegExp(
-    `\\b(?:\\w*(?:${names.join('|')})${role}|\\w*${role}(?:${names.join('|')}))\\b`,
+    `\\b(?:\\w*(?:${names.join('|')})[-_]?${role}|\\w*${role}[-_]?(?:${names.join('|')}))\\b`,
     'iu',
   );
   const sourceMatch = pattern.exec(source);
@@ -371,6 +371,11 @@ function moduleGlueMatch(
           .toLocaleLowerCase('en-US')
           .includes(
             `${name.toLocaleLowerCase('en-US')}${glueRole.toLocaleLowerCase('en-US')}`,
+          ) ||
+        normalizedPath
+          .toLocaleLowerCase('en-US')
+          .includes(
+            `${glueRole.toLocaleLowerCase('en-US')}${name.toLocaleLowerCase('en-US')}`,
           )
       ) {
         return { index: 0, value: repoPath };
