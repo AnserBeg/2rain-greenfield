@@ -79,6 +79,24 @@ Never hand-merge an inventory; that is how a silently-missing entry gets shipped
 Never add to an exemption or allowlist under any circumstances without a bridge —
 `rootScriptCiAllowlist` is the live example.
 
+## Artifact-moving packets may run concurrently — corrected 2026-07-28
+
+Release artifacts (`*.golden.sha256`, `app.compiled.json`, `shell.compiled.json`,
+release roots) are **generated** — deterministic functions of source. Two lanes
+changing different definitions each regenerate; at integration the merged source
+regenerates once more and the result is correct.
+
+**So "this packet moves release roots" does NOT mean it must run alone.** Source
+disjointness is the requirement; generated-artifact conflicts are re-derived, per
+the shared-files rule below.
+
+**The one exception:** a packet whose *proof* is that artifacts did not move —
+`4a` and `4b` — cannot run beside one that moves them, because its baseline
+would shift under it. That exception ends when `4b` lands.
+
+The orchestrator enforced the stronger constraint until 2026-07-28 and it cost
+sequencing that was never required.
+
 ## Integration is serial even though work is parallel
 
 Work in parallel; integrate one at a time. This is forced by PR-1's rule that
