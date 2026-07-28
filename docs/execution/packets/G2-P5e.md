@@ -222,14 +222,15 @@ tree was unchanged. One honest aggregate retry passed PostgreSQL 86/86,
 browser 15/15, and reachability 68/68 from 9 producer artifacts. The first
 attempt remains recorded rather than disappearing into the green retry.
 
-The authoritative full matrix is rerun after the packet commit is rebased onto
-current `main`. Exact frozen-SHA results are reported in the writer handoff;
-the expected suite inventory after adding the two permanent files is:
+After rebasing the packet commit onto current `main`, the complete matrix was
+green on its first attempt. The same matrix is run once more after this evidence
+record is committed so the writer handoff refers to the exact frozen SHA. The
+observed suite inventory after adding the two permanent files is:
 
 | Gate | Candidate observation |
 |---|---:|
 | `format`, `build`, `lint`, `typecheck`, `check:demo-release` | green |
-| `check:boundaries` | reported in writer handoff |
+| `check:boundaries` | 122 files |
 | `check:schema` | 12 applied / 12 verified |
 | `test:unit` | 36 / 36 |
 | `test:compiler` | 52 / 52 |
