@@ -43,6 +43,7 @@ import {
 import { PostgresReleaseActivationService } from '../../packages/postgres-provider/src/release-activation-service.js';
 import { PostgresReleaseApprovalService } from '../../packages/postgres-provider/src/release-approval-service.js';
 import { PostgresImmutableReleaseRepository } from '../../packages/postgres-provider/src/release-repository.js';
+import { PostgresReleaseVerificationService } from '../../packages/postgres-provider/src/release-verification-service.js';
 import { withTrustedRequestTransaction } from '../../packages/postgres-provider/src/request-context.js';
 import {
   AuthenticatedRequestEntryAdapter,
@@ -59,6 +60,14 @@ const authoredArtifactPath = resolve('apps/web/release/app.authored.json');
 const compileScriptPath = resolve('apps/web/scripts/compile-app-release.ts');
 const migrationsDirectory = resolve('db/migrations');
 const execFileAsync = promisify(execFile);
+
+test('composed product does not invent a verification evidence identity', async () => {
+  const source = await readFile(
+    resolve('packages/postgres-provider/src/composed-application-runtime.ts'),
+    'utf8',
+  );
+  assert.doesNotMatch(source, /evidenceId\s*=\s*minted\(randomUUID\(\)\)/u);
+});
 
 test(
   'composed product activates through the kernel and persists tenant-scoped gateway data',
@@ -89,6 +98,7 @@ test(
           assert.equal(tenantA.triggerEnabledDuringActivation, true);
           await assertExactSwapTriggerEnabled(pool);
           await assertRealProductDefinition(tenantA);
+          await assertDurableProductEvidence(pool, tenantA);
 
           const recordId = randomUUID();
           const created = await tenantA.entry.run(
@@ -328,19 +338,33 @@ async function assertApprovalEnforcementAndApprovedActivation(
     const revisionId = revision.rows[0]?.revision_id;
     assert.ok(revisionId);
     const candidateReleaseId = randomUUID() as MintedUuid;
-    const candidateEvidenceId = randomUUID() as MintedUuid;
     const application =
       parseCompiledApplication(compiledApplication).application;
-    await new PostgresImmutableReleaseRepository(
-      runtimePool,
-    ).registerTenantRelease(context, {
+    const repository = new PostgresImmutableReleaseRepository(runtimePool);
+    const staged = await repository.stageTenantReleaseCandidate(context, {
       appPackageRevisionId: revisionId,
       compiledRelease: application.compiled,
       createdBy: context.principalId,
       environmentId: context.environmentId,
       releaseId: candidateReleaseId,
       tenantId: context.tenantId,
-      verificationEvidenceId: candidateEvidenceId,
+    });
+    await new PostgresReleaseVerificationService(
+      runtimePool,
+    ).executeSemanticCandidateAndPersist(context, {
+      compiledRelease: application.compiled,
+      evidenceId: staged.verificationEvidenceId,
+      providerRunId: 'composed-approval-enforcement-candidate',
+      releaseId: candidateReleaseId,
+    });
+    await repository.registerTenantRelease(context, {
+      appPackageRevisionId: revisionId,
+      compiledRelease: application.compiled,
+      createdBy: context.principalId,
+      environmentId: context.environmentId,
+      releaseId: candidateReleaseId,
+      tenantId: context.tenantId,
+      verificationEvidenceId: staged.verificationEvidenceId,
     });
     const approverPrincipalId = await currentApproverPrincipal(
       adminPool,
@@ -355,7 +379,7 @@ async function assertApprovalEnforcementAndApprovedActivation(
     ).enter({});
     const target = {
       compiled: application.compiled,
-      evidenceId: candidateEvidenceId,
+      evidenceId: staged.verificationEvidenceId,
       releaseId: candidateReleaseId,
     };
     const rejectedAttemptId = await prepareAndApproveCandidate(
@@ -451,10 +475,11 @@ async function assertApprovalRequiredForAdvancement(
     const application =
       parseCompiledApplication(compiledApplication).application;
     const candidate = await adminPool.query<{
+      app_package_revision_id: MintedUuid;
       release_id: MintedUuid;
       verification_evidence_id: MintedUuid;
     }>(
-      `SELECT release_id, verification_evidence_id
+      `SELECT app_package_revision_id, release_id, verification_evidence_id
          FROM platform.tenant_releases
         WHERE tenant_id = $1
           AND environment_id = $2
@@ -466,10 +491,27 @@ async function assertApprovalRequiredForAdvancement(
       ],
     );
     const target = candidate.rows[0];
-    assert.ok(
-      target,
-      'the trigger-negative startup registered the real candidate',
-    );
+    assert.ok(target, 'the trigger-negative startup staged the real candidate');
+    const repository = new PostgresImmutableReleaseRepository(runtimePool);
+    if (!(await repository.getTenantRelease(context, target.release_id))) {
+      await new PostgresReleaseVerificationService(
+        runtimePool,
+      ).executeSemanticCandidateAndPersist(context, {
+        compiledRelease: application.compiled,
+        evidenceId: target.verification_evidence_id,
+        providerRunId: 'composed-approval-required-candidate',
+        releaseId: target.release_id,
+      });
+      await repository.registerTenantRelease(context, {
+        appPackageRevisionId: target.app_package_revision_id,
+        compiledRelease: application.compiled,
+        createdBy: context.principalId,
+        environmentId: context.environmentId,
+        releaseId: target.release_id,
+        tenantId: context.tenantId,
+        verificationEvidenceId: target.verification_evidence_id,
+      });
+    }
     const approverPrincipalId = await currentApproverPrincipal(
       adminPool,
       context.tenantId,
@@ -574,6 +616,17 @@ async function prepareAndApproveCandidate(
   const targetRoot = Buffer.from(target.compiled.releaseRoot, 'hex');
 
   await withTrustedRequestTransaction(pool, context, async (client) => {
+    const evidence = await client.query<{
+      evidence_version: string;
+      result_set_digest: string;
+    }>(
+      `SELECT evidence_version, result_set_digest
+         FROM platform.release_verification_evidence
+        WHERE verification_evidence_id = $1`,
+      [target.evidenceId],
+    );
+    const verified = evidence.rows[0];
+    assert.ok(verified);
     await client.query(
       `INSERT INTO platform.transition_preparation_receipts (
          tenant_id, environment_id, receipt_id, receipt_version,
@@ -625,10 +678,10 @@ async function prepareAndApproveCandidate(
          $1,$2,$3,'northstar.release-activation-preparation/v1',$4,$5,$6,$7,$8,
          $9,'RELEASE_DIFF',$10,'northstar.release-diff/v0-experimental',
          'northstar.release-diff-algorithm/v1',$11,NULL,$12,$13,$14,$15,$16,
-         'northstar.verification-evidence/v1',$17,
-         'northstar.capability-support/v1',$18,'SUPPORTED',
+         $17,$18,
+         'northstar.capability-support/v1',$19,'SUPPORTED',
          'northstar.release-diff-renderer/v1','northstar.release-diff-view/v1',
-         $19,$20
+         $20,$21
        )`,
       [
         context.tenantId,
@@ -647,7 +700,8 @@ async function prepareAndApproveCandidate(
         target.compiled.bundle.releaseManifest.compilerSemanticProfileVersion,
         target.compiled.bundle.releaseManifest.outputProtocolVersion,
         target.evidenceId,
-        digest('candidate-verification-evidence', target.evidenceId),
+        verified.evidence_version,
+        Buffer.from(verified.result_set_digest, 'hex'),
         digest('candidate-capability-support', target.releaseId),
         digest('candidate-rendered-diff', target.releaseId),
         receiptId,
@@ -908,6 +962,64 @@ async function assertExactSwapTriggerEnabled(pool: pg.Pool): Promise<void> {
         AND NOT tgisinternal`,
   );
   assert.equal(trigger.rows[0]?.enabled, 'O');
+}
+
+async function assertDurableProductEvidence(
+  pool: pg.Pool,
+  runtime: ComposedApplicationRuntime,
+): Promise<void> {
+  const result = await pool.query<{
+    executed_environment_id: string;
+    executed_evidence_id: string;
+    executed_tenant_id: string;
+    release_root: string;
+    result_count: string;
+    result_rows: string;
+    verification_evidence_id: string;
+  }>(
+    `SELECT evidence.verification_evidence_id,
+            evidence.release_root,
+            evidence.executed_tenant_id,
+            evidence.executed_environment_id,
+            evidence.executed_evidence_id,
+            evidence.result_count::text,
+            count(result.scenario_id)::text AS result_rows
+       FROM platform.tenant_release_admissions AS admission
+       JOIN platform.release_verification_evidence AS evidence
+         ON evidence.tenant_id = admission.tenant_id
+        AND evidence.environment_id = admission.environment_id
+        AND evidence.verification_evidence_id =
+            admission.verification_evidence_id
+       LEFT JOIN platform.release_verification_results AS result
+         ON result.tenant_id = evidence.tenant_id
+        AND result.environment_id = evidence.environment_id
+        AND result.verification_evidence_id =
+            evidence.verification_evidence_id
+      WHERE admission.tenant_id = $1
+        AND admission.environment_id = $2
+        AND admission.release_id = $3
+      GROUP BY evidence.tenant_id, evidence.environment_id,
+               evidence.verification_evidence_id`,
+    [
+      runtime.identity.tenantId,
+      runtime.identity.environmentId,
+      runtime.activeReleaseId,
+    ],
+  );
+  const evidence = result.rows[0];
+  assert.ok(evidence, 'the active product release has a durable admission');
+  assert.equal(evidence.release_root, runtime.releaseRoot);
+  assert.equal(evidence.executed_tenant_id, runtime.identity.tenantId);
+  assert.equal(
+    evidence.executed_environment_id,
+    runtime.identity.environmentId,
+  );
+  assert.equal(
+    evidence.executed_evidence_id,
+    evidence.verification_evidence_id,
+  );
+  assert.ok(Number(evidence.result_count) > 0);
+  assert.equal(evidence.result_rows, evidence.result_count);
 }
 
 function createRuntime(

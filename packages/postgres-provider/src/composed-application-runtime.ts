@@ -54,6 +54,7 @@ import { PostgresModuleStorageMaterializer } from './module-storage-materializer
 import { PostgresReleaseActivationService } from './release-activation-service.js';
 import { PostgresReleaseApprovalService } from './release-approval-service.js';
 import { PostgresImmutableReleaseRepository } from './release-repository.js';
+import { PostgresReleaseVerificationService } from './release-verification-service.js';
 import { PostgresRequestRuntimeViewService } from './request-runtime-view-service.js';
 import { withTrustedRequestTransaction } from './request-context.js';
 import { TrustedActorEnvelopeIssuer } from './trust/trusted-actor-envelope.js';
@@ -62,8 +63,6 @@ const compiledApplicationVersion =
   'northstar.web:compiled-application-release/v1' as const;
 const compiledApplicationLineageVersion =
   'northstar.web:compiled-application-release/v2' as const;
-const verificationEvidenceVersion =
-  'northstar.verification-evidence/v1' as const;
 const capabilitySupportVersion = 'northstar.capability-support/v1' as const;
 const rendererVersion = 'northstar.release-diff-renderer/v1' as const;
 const viewSchemaVersion = 'northstar.release-diff-view/v1' as const;
@@ -188,6 +187,13 @@ export async function createComposedApplicationRuntime(
     const activation = new PostgresReleaseActivationService(runtimePool);
     let pointer = await readPointer(runtimePool, runtimeContext);
     if (pointer.releaseId === null) {
+      await ensureReleaseAdmitted(
+        runtimePool,
+        runtimeContext,
+        bootstrapIdentity,
+        releases.bootstrap,
+        'composed-application:bootstrap',
+      );
       await assertExactSwapTriggerEnabled(adminPool);
       const attemptId = await approveInitialRelease(
         runtimePool,
@@ -220,6 +226,13 @@ export async function createComposedApplicationRuntime(
         'the active pointer names a release outside this composed application lineage',
       );
     }
+    await ensureReleaseAdmitted(
+      runtimePool,
+      runtimeContext,
+      lineage[activeLineageIndex]!,
+      releaseLineage[activeLineageIndex]!,
+      `composed-application:active:${String(activeLineageIndex)}`,
+    );
     const materializer = new PostgresModuleStorageMaterializer(
       materializerPool,
       modulePool,
@@ -238,6 +251,13 @@ export async function createComposedApplicationRuntime(
       const preparationId = minted(randomUUID());
       let attemptId: MintedUuid;
       if (transition.elements.length === 0) {
+        await ensureReleaseAdmitted(
+          runtimePool,
+          runtimeContext,
+          targetIdentity,
+          target,
+          `composed-application:candidate:${String(targetIndex)}`,
+        );
         attemptId = await approveReleaseWithoutStorageTransition(
           runtimePool,
           runtimeContext,
@@ -256,6 +276,13 @@ export async function createComposedApplicationRuntime(
           preparationId,
           targetReleaseId: targetIdentity.releaseId,
         });
+        await ensureReleaseAdmitted(
+          runtimePool,
+          runtimeContext,
+          targetIdentity,
+          target,
+          `composed-application:candidate:${String(targetIndex)}`,
+        );
         attemptId = await approveModuleRelease(
           runtimePool,
           runtimeContext,
@@ -761,18 +788,45 @@ async function ensurePersistedRelease(
   let evidenceId = existingRelease.rows[0]?.verification_evidence_id;
   if (!releaseId || !evidenceId) {
     releaseId = minted(randomUUID());
-    evidenceId = minted(randomUUID());
-    await repository.registerTenantRelease(context, {
+    const staged = await repository.stageTenantReleaseCandidate(context, {
       appPackageRevisionId: revisionId,
       compiledRelease: release.compiled,
       createdBy: context.principalId,
       environmentId: context.environmentId,
       releaseId,
       tenantId: context.tenantId,
-      verificationEvidenceId: evidenceId,
     });
+    evidenceId = staged.verificationEvidenceId;
   }
   return Object.freeze({ evidenceId, releaseId, revisionId });
+}
+
+async function ensureReleaseAdmitted(
+  pool: pg.Pool,
+  context: TrustedRequestContext,
+  identity: PersistedReleaseIdentity,
+  release: ParsedRelease,
+  providerRunId: string,
+): Promise<void> {
+  const repository = new PostgresImmutableReleaseRepository(pool);
+  if (await repository.getTenantRelease(context, identity.releaseId)) return;
+  await new PostgresReleaseVerificationService(
+    pool,
+  ).executeSemanticCandidateAndPersist(context, {
+    compiledRelease: release.compiled,
+    evidenceId: identity.evidenceId,
+    providerRunId,
+    releaseId: identity.releaseId,
+  });
+  await repository.registerTenantRelease(context, {
+    appPackageRevisionId: identity.revisionId,
+    compiledRelease: release.compiled,
+    createdBy: context.principalId,
+    environmentId: context.environmentId,
+    releaseId: identity.releaseId,
+    tenantId: context.tenantId,
+    verificationEvidenceId: identity.evidenceId,
+  });
 }
 
 async function approveInitialRelease(
@@ -1012,6 +1066,29 @@ async function insertReleasePreparation(
   },
 ): Promise<void> {
   const targetRoot = Buffer.from(input.compiled.releaseRoot, 'hex');
+  const evidence = await client.query<{
+    evidence_version: string;
+    result_set_digest: string;
+  }>(
+    `SELECT evidence_version, result_set_digest
+       FROM platform.release_verification_evidence
+      WHERE tenant_id = $1
+        AND environment_id = $2
+        AND verification_evidence_id = $3
+        AND release_root = $4`,
+    [
+      input.context.tenantId,
+      input.context.environmentId,
+      input.evidenceId,
+      input.compiled.releaseRoot,
+    ],
+  );
+  const verified = evidence.rows[0];
+  if (!verified) {
+    throw new Error(
+      'canonical release preparation requires durable verification evidence',
+    );
+  }
   await client.query(
     `INSERT INTO platform.release_activation_preparations (
        tenant_id, environment_id, preparation_id, preparation_version,
@@ -1060,12 +1137,8 @@ async function insertReleasePreparation(
       input.compiled.bundle.releaseManifest.compilerSemanticProfileVersion,
       input.compiled.bundle.releaseManifest.outputProtocolVersion,
       input.evidenceId,
-      verificationEvidenceVersion,
-      digest(
-        'verification-evidence',
-        input.evidenceId,
-        input.compiled.releaseRoot,
-      ),
+      verified.evidence_version,
+      Buffer.from(verified.result_set_digest, 'hex'),
       capabilitySupportVersion,
       digest('capability-support', input.compiled.releaseRoot),
       rendererVersion,

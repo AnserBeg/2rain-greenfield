@@ -36,6 +36,7 @@ import {
 import { PostgresReleaseActivationService } from '../../packages/postgres-provider/src/release-activation-service.js';
 import { PostgresReleaseApprovalService } from '../../packages/postgres-provider/src/release-approval-service.js';
 import { PostgresImmutableReleaseRepository } from '../../packages/postgres-provider/src/release-repository.js';
+import { verificationEvidenceIdForCandidate } from '../../packages/postgres-provider/src/release-verification-service.js';
 import {
   loadMigrations,
   runMigrations,
@@ -66,6 +67,10 @@ import {
 } from '../../packages/runtime/src/request-runtime-view.js';
 import { compilerInput, fixtureBytes } from '../compiler/helpers.js';
 import { withEphemeralPostgres } from '../helpers/postgres.js';
+import {
+  admitEmptyPlanRelease,
+  definitionWithoutAssertions,
+} from './release-verification-fixture.js';
 
 const execFileAsync = promisify(execFile);
 const checkedInMigrations = resolve('db/migrations');
@@ -102,7 +107,7 @@ interface PointerFixture {
 
 test('G1-P5 pins one immutable release while policy and pointer authority remain current', async (t) => {
   const bootstrapBytes = fixtureBytes('bootstrap');
-  const verticalBytes = fixtureBytes('vertical-v1');
+  const verticalBytes = definitionWithoutAssertions(bootstrapBytes, '1.0.1');
   const bootstrap = mustCompile(bootstrapBytes);
   const vertical = mustCompile(verticalBytes);
 
@@ -602,12 +607,18 @@ async function seedReleases(
   for (const [bytes, compiled] of sources) {
     const revisionId = minted(randomUUID());
     const releaseId = minted(randomUUID());
-    const evidenceId = minted(randomUUID());
+    const evidenceId = verificationEvidenceIdForCandidate(
+      context,
+      releaseId,
+      compiled.releaseRoot,
+    );
     await repository.storeAppPackageRevision(
       context,
       revisionCommand(context, revisionId, bytes),
     );
-    await repository.registerTenantRelease(
+    await admitEmptyPlanRelease(
+      pool,
+      repository,
       context,
       releaseCommand(context, releaseId, revisionId, evidenceId, compiled),
     );

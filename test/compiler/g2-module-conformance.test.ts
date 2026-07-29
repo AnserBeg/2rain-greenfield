@@ -19,6 +19,7 @@ import {
   PROJECTION_FAMILY_IDS,
   compileApplication,
   diffCompiledReleases,
+  executeVerificationPlan,
   expectedActiveReleaseFrom,
   requiredProjectionFamily,
   validateExecutedVerificationPlan,
@@ -144,40 +145,126 @@ test('compiler-derived conformance names the entity and missing family', () => {
   ]);
 });
 
-test('executable conformance rejects declarations and fabricated linked results', () => {
+test('executable conformance survives serialization and rejects missing or tampered results', async () => {
   const compiled = mustCompile(input(ordinaryModuleV1()));
   const plan = projectionPayload<VerificationPlanPayloadV1>(
     compiled,
     PROJECTION_FAMILY_IDS.verificationPlan,
   );
-  const labelsOnly = validateExecutedVerificationPlan(plan, []);
-  assert.equal(labelsOnly.status, 'failed');
-  assert.equal(labelsOnly.diagnostics.length, plan.scenarios.length);
-
-  const fabricated = plan.scenarios.map(
-    (scenario): ExecutedVerificationResult => ({
-      negativeProbeDigest:
-        scenario.probePolarity === 'positiveAndNegative'
-          ? '0'.repeat(64)
-          : null,
-      positiveProbeDigest: '1'.repeat(64),
-      provider: 'realPostgresql',
-      providerRunId: 'fabricated',
-      scenarioFingerprint: scenario.scenarioFingerprint,
-      scenarioId: scenario.scenarioId,
-      schemaVersion: 'northstar.verification-result/v1',
-    }),
+  const binding = {
+    artifactClosureDigest: 'a'.repeat(64),
+    providerRunId: 'compiler-durable-round-trip',
+    releaseRoot: 'b'.repeat(64),
+    verificationPlanArtifactRoot: 'c'.repeat(64),
+    verificationPlanSemanticDigest: 'd'.repeat(64),
+  };
+  const executed = await executeVerificationPlan(plan, binding, (scenario) => ({
+    negativeProbe:
+      scenario.probePolarity === 'positiveAndNegative'
+        ? { observed: 'negative', scenarioId: scenario.scenarioId }
+        : undefined,
+    positiveProbe: { observed: 'positive', scenarioId: scenario.scenarioId },
+  }));
+  const serialized = JSON.parse(JSON.stringify(executed)) as typeof executed;
+  const expectedBinding = {
+    artifactClosureDigest: binding.artifactClosureDigest,
+    releaseRoot: binding.releaseRoot,
+    verificationPlanArtifactRoot: binding.verificationPlanArtifactRoot,
+    verificationPlanSemanticDigest: binding.verificationPlanSemanticDigest,
+  };
+  assert.deepEqual(
+    validateExecutedVerificationPlan(plan, serialized, expectedBinding),
+    { diagnostics: [], status: 'passed' },
   );
-  const fabricatedResult = validateExecutedVerificationPlan(plan, fabricated);
-  assert.equal(fabricatedResult.status, 'failed');
-  assert.equal(fabricatedResult.diagnostics.length, plan.scenarios.length);
+
+  const differentlyRooted = validateExecutedVerificationPlan(plan, serialized, {
+    ...expectedBinding,
+    releaseRoot: 'e'.repeat(64),
+  });
+  assert.equal(differentlyRooted.status, 'failed');
   assert.equal(
-    fabricatedResult.diagnostics.every(
-      (diagnostic) =>
-        diagnostic.code === 'VERIFICATION_EXECUTED_RESULT_INVALID',
+    differentlyRooted.diagnostics.some(
+      (diagnostic) => diagnostic.code === 'VERIFICATION_RESULT_SET_INVALID',
     ),
     true,
   );
+
+  const next = mustCompile(
+    input(ordinaryModuleV2(), expectedActiveReleaseFrom(compiled)),
+  );
+  const nextPlan = projectionPayload<VerificationPlanPayloadV1>(
+    next,
+    PROJECTION_FAMILY_IDS.verificationPlan,
+  );
+  const stale = validateExecutedVerificationPlan(nextPlan, serialized);
+  assert.equal(stale.status, 'failed');
+  assert.ok(
+    stale.diagnostics.some(
+      (diagnostic) =>
+        diagnostic.code === 'VERIFICATION_RESULT_SET_INVALID' ||
+        diagnostic.code === 'VERIFICATION_EXECUTED_RESULT_MISSING' ||
+        diagnostic.code === 'VERIFICATION_EXECUTED_RESULT_UNDECLARED',
+    ),
+  );
+
+  const labelsOnly = validateExecutedVerificationPlan(plan, {
+    ...serialized,
+    resultSetDigest: '0'.repeat(64),
+    results: [],
+  });
+  assert.equal(labelsOnly.status, 'failed');
+  assert.equal(
+    labelsOnly.diagnostics.filter(
+      (diagnostic) =>
+        diagnostic.code === 'VERIFICATION_EXECUTED_RESULT_MISSING',
+    ).length,
+    plan.scenarios.length,
+  );
+
+  const partial = validateExecutedVerificationPlan(plan, {
+    ...serialized,
+    results: serialized.results.slice(1),
+  });
+  assert.equal(partial.status, 'failed');
+  assert.equal(
+    partial.diagnostics.filter(
+      (diagnostic) =>
+        diagnostic.code === 'VERIFICATION_EXECUTED_RESULT_MISSING',
+    ).length,
+    1,
+  );
+
+  const tamperedResult = validateExecutedVerificationPlan(plan, {
+    ...serialized,
+    results: serialized.results.map((result, index) =>
+      index === 0
+        ? ({
+            ...result,
+            positiveProbeDigest: '1'.repeat(64),
+          } satisfies ExecutedVerificationResult)
+        : result,
+    ),
+  });
+  assert.equal(tamperedResult.status, 'failed');
+  assert.equal(
+    tamperedResult.diagnostics.some(
+      (diagnostic) => diagnostic.code === 'VERIFICATION_RESULT_SET_INVALID',
+    ),
+    true,
+  );
+
+  for (const forbidden of [
+    { skipVerification: true },
+    { sampleSize: 1 },
+    { timeBoxMs: 1 },
+  ]) {
+    await assert.rejects(
+      executeVerificationPlan(plan, { ...binding, ...forbidden }, () => ({
+        positiveProbe: true,
+      })),
+      /command is closed/,
+    );
+  }
 });
 
 test('parent-scoped children receive the complete Q0/O0 and surface quartet', () => {

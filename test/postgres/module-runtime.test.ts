@@ -41,6 +41,10 @@ import {
 } from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
 import { PostgresModuleStorageMaterializer } from '../../packages/postgres-provider/src/module-storage-materializer.js';
 import {
+  PostgresReleaseVerificationService,
+  releaseVerificationBinding,
+} from '../../packages/postgres-provider/src/release-verification-service.js';
+import {
   loadMigrations,
   runMigrations,
 } from '../../packages/postgres-provider/src/migrations.js';
@@ -203,6 +207,9 @@ test('definition-only module is served generically through Q0/O0, trust, RLS, an
         await prepare(materializer, contexts.a!, principalA, releasesA[1]!);
         await prepare(materializer, contexts.a!, principalA, releasesA[3]!);
         await prepare(materializer, contexts.b!, principalB, releasesB[1]!);
+        await admitCandidate(runtimePool, contexts.a!, releasesA[1]!, v1);
+        await admitCandidate(runtimePool, contexts.a!, releasesA[3]!, v1);
+        await admitCandidate(runtimePool, contexts.b!, releasesB[1]!, v1);
         await setPointer(pool, tenantA, environmentA, releasesA[1]!);
         await setPointer(pool, tenantB, environmentB, releasesB[1]!);
 
@@ -698,6 +705,7 @@ test('definition-only module is served generically through Q0/O0, trust, RLS, an
         ]);
 
         await prepare(materializer, contexts.a!, principalA, releasesA[2]!);
+        await admitCandidate(runtimePool, contexts.a!, releasesA[2]!, v2);
         await setPointer(pool, tenantA, environmentA, releasesA[2]!);
         const viewA2 = await issuedView(entry, 'a');
         assert.notEqual(viewA2.release.contentHash, viewA1.release.contentHash);
@@ -830,6 +838,7 @@ test('metamorphic random namespace executes the compiled declared-semantics cont
           modulePool,
         );
         await prepare(materializer, context, principal, releases[1]!);
+        await admitCandidate(runtimePool, context, releases[1]!, compiled);
         await setPointer(pool, tenant, environment, releases[1]!);
 
         const policy = new AllowPolicy();
@@ -1199,9 +1208,18 @@ test('metamorphic random namespace executes the compiled declared-semantics cont
             ],
           );
         }
+        const verificationBinding = releaseVerificationBinding(compiled);
         const results = await executeVerificationPlan(
           verificationPlan,
-          'module-metamorphic',
+          {
+            artifactClosureDigest: verificationBinding.artifactClosureDigest,
+            providerRunId: 'module-metamorphic',
+            releaseRoot: verificationBinding.releaseRoot,
+            verificationPlanArtifactRoot:
+              verificationBinding.verificationPlanArtifactRoot,
+            verificationPlanSemanticDigest:
+              verificationBinding.verificationPlanSemanticDigest,
+          },
           async (scenario) => {
             const parent = scenario.entityId === `${namespace}:entity.master`;
             const localEntity = parent ? 'master' : 'master_role';
@@ -1896,19 +1914,83 @@ async function persistSequence(
       context,
       revisionCommand(context, revisionId, bytes),
     );
-    await repository.registerTenantRelease(
-      context,
-      releaseCommand(
-        context,
+    const staged = await repository.stageTenantReleaseCandidate(context, {
+      appPackageRevisionId: revisionId,
+      compiledRelease: compiled,
+      createdBy: context.principalId,
+      environmentId: context.environmentId,
+      releaseId,
+      tenantId: context.tenantId,
+    });
+    if (releaseVerificationBinding(compiled).plan.scenarios.length === 0) {
+      await new PostgresReleaseVerificationService(
+        runtimePool,
+      ).executeSemanticCandidateAndPersist(context, {
+        compiledRelease: compiled,
+        evidenceId: staged.verificationEvidenceId,
+        providerRunId: `module-runtime-bootstrap:${releaseId}`,
         releaseId,
-        revisionId,
-        minted(randomUUID()),
-        compiled,
-      ),
-    );
+      });
+      await repository.registerTenantRelease(
+        context,
+        releaseCommand(
+          context,
+          releaseId,
+          revisionId,
+          staged.verificationEvidenceId,
+          compiled,
+        ),
+      );
+    }
     releases.push(releaseId);
   }
   return releases;
+}
+
+async function admitCandidate(
+  runtimePool: pg.Pool,
+  context: TrustedRequestContext,
+  releaseId: MintedUuid,
+  compiled: CompileSuccess,
+): Promise<void> {
+  const repository = new PostgresImmutableReleaseRepository(runtimePool);
+  if (await repository.getTenantRelease(context, releaseId)) return;
+  const staged = await withTrustedRequestTransaction(
+    runtimePool,
+    context,
+    async (client) => {
+      const result = await client.query<{
+        app_package_revision_id: MintedUuid;
+        verification_evidence_id: MintedUuid;
+      }>(
+        `SELECT app_package_revision_id, verification_evidence_id
+           FROM platform.tenant_releases
+          WHERE tenant_id = $1 AND environment_id = $2 AND release_id = $3`,
+        [context.tenantId, context.environmentId, releaseId],
+      );
+      const row = result.rows[0];
+      if (!row) throw new Error('staged module candidate is missing');
+      return row;
+    },
+  );
+  await new PostgresReleaseVerificationService(
+    runtimePool,
+  ).executeSemanticCandidateAndPersist(context, {
+    compiledRelease: compiled,
+    evidenceId: staged.verification_evidence_id,
+    providerRunId: `module-runtime-candidate:${releaseId}`,
+    releaseId,
+  });
+  await repository.registerTenantRelease(
+    context,
+    releaseCommand(
+      context,
+      releaseId,
+      staged.app_package_revision_id,
+      staged.verification_evidence_id,
+      compiled,
+    ),
+  );
 }
 
 function revisionCommand(
@@ -2335,6 +2417,7 @@ async function persistedLocaleOrderingChanges(): Promise<string> {
           modulePool,
         );
         await prepare(materializer, context, principal, releases[1]!);
+        await admitCandidate(runtimePool, context, releases[1]!, compiled);
         await setPointer(pool, tenant, environment, releases[1]!);
 
         const policy = new AllowPolicy();

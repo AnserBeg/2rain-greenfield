@@ -36,6 +36,10 @@ import {
   ReleasePersistenceIntegrityError,
 } from '../../packages/postgres-provider/src/release-repository.js';
 import {
+  PostgresReleaseVerificationService,
+  verificationEvidenceIdForCandidate,
+} from '../../packages/postgres-provider/src/release-verification-service.js';
+import {
   loadMigrations,
   runMigrations,
 } from '../../packages/postgres-provider/src/migrations.js';
@@ -63,10 +67,6 @@ const verticalRevisionA = minted('a3000000-0000-4000-8000-000000000004');
 const releaseA = minted('a4000000-0000-4000-8000-000000000004');
 const releaseB = minted('b4000000-0000-4000-8000-000000000004');
 const verticalReleaseA = minted('a4000000-0000-4000-8000-000000000005');
-const evidenceA = minted('a5000000-0000-4000-8000-000000000005');
-const evidenceB = minted('b5000000-0000-4000-8000-000000000005');
-const verticalEvidenceA = minted('a5000000-0000-4000-8000-000000000006');
-
 const identities = new Map<string, AuthenticatedIdentity>([
   [
     'session-a',
@@ -94,11 +94,145 @@ const identities = new Map<string, AuthenticatedIdentity>([
   ],
 ]);
 
+test('release admission rejects a staged candidate with missing executed results', async () => {
+  const bootstrapBytes = fixtureBytes('bootstrap');
+  const bootstrap = mustCompile(bootstrapBytes);
+
+  await withEphemeralPostgres(
+    'release-verification-missing-results-red',
+    async ({ connection, pool }) => {
+      const admin = await pool.connect();
+      try {
+        await runMigrations(admin, await loadMigrations(checkedInMigrations));
+        await seedTenants(admin);
+      } finally {
+        admin.release();
+      }
+
+      const runtimePool = new pg.Pool({
+        ...connection,
+        max: 1,
+        user: 'north_star_runtime',
+      });
+      try {
+        const repository = new PostgresImmutableReleaseRepository(runtimePool);
+        const context = await contextFor(requestEntry(), 'session-a');
+        const revisionId = minted('a3000000-0000-4000-8000-000000000097');
+        const releaseId = minted('a4000000-0000-4000-8000-000000000097');
+        await repository.storeAppPackageRevision(
+          context,
+          revisionCommand(context, revisionId, bootstrapBytes),
+        );
+        const staged = await repository.stageTenantReleaseCandidate(context, {
+          appPackageRevisionId: revisionId,
+          compiledRelease: bootstrap,
+          createdBy: context.principalId,
+          environmentId: context.environmentId,
+          releaseId,
+          tenantId: context.tenantId,
+        });
+
+        await assert.rejects(
+          repository.registerTenantRelease(
+            context,
+            releaseCommand(
+              context,
+              releaseId,
+              revisionId,
+              staged.verificationEvidenceId,
+              bootstrap,
+            ),
+          ),
+          (error: unknown) => {
+            assert.ok(error instanceof ReleasePersistenceIntegrityError);
+            assert.equal(error.code, 'VERIFICATION_EVIDENCE_NOT_FOUND');
+            return true;
+          },
+        );
+      } finally {
+        await runtimePool.end();
+      }
+    },
+  );
+});
+
+test('release admission rejects a fabricated verification evidence identity', async () => {
+  const bootstrapBytes = fixtureBytes('bootstrap');
+  const bootstrap = mustCompile(bootstrapBytes);
+
+  await withEphemeralPostgres(
+    'release-verification-fabricated-red',
+    async ({ connection, pool }) => {
+      const admin = await pool.connect();
+      try {
+        await runMigrations(admin, await loadMigrations(checkedInMigrations));
+        await seedTenants(admin);
+      } finally {
+        admin.release();
+      }
+
+      const runtimePool = new pg.Pool({
+        ...connection,
+        max: 1,
+        user: 'north_star_runtime',
+      });
+      try {
+        const repository = new PostgresImmutableReleaseRepository(runtimePool);
+        const context = await contextFor(requestEntry(), 'session-a');
+        const revisionId = minted('a3000000-0000-4000-8000-000000000098');
+        const releaseId = minted('a4000000-0000-4000-8000-000000000098');
+        const fabricatedEvidenceId = minted(
+          'a5000000-0000-4000-8000-000000000098',
+        );
+        await repository.storeAppPackageRevision(
+          context,
+          revisionCommand(context, revisionId, bootstrapBytes),
+        );
+
+        await assert.rejects(
+          repository.registerTenantRelease(
+            context,
+            releaseCommand(
+              context,
+              releaseId,
+              revisionId,
+              fabricatedEvidenceId,
+              bootstrap,
+            ),
+          ),
+          (error: unknown) => {
+            assert.ok(error instanceof ReleasePersistenceIntegrityError);
+            assert.equal(error.code, 'VERIFICATION_EVIDENCE_NOT_FOUND');
+            return true;
+          },
+        );
+      } finally {
+        await runtimePool.end();
+      }
+    },
+  );
+});
+
 test('immutable release persistence verifies bytes, identities, links, RLS, and deduplication', async (t) => {
   const bootstrapBytes = fixtureBytes('bootstrap');
-  const verticalBytes = fixtureBytes('vertical-v1');
+  const verticalBytes = emptyRevisionBytes(bootstrapBytes, '1.0.1');
   const bootstrap = mustCompile(bootstrapBytes);
   const vertical = mustCompile(verticalBytes);
+  const evidenceA = verificationEvidenceIdForCandidate(
+    { environmentId: environmentA, tenantId: tenantA },
+    releaseA,
+    bootstrap.releaseRoot,
+  );
+  const evidenceB = verificationEvidenceIdForCandidate(
+    { environmentId: environmentB, tenantId: tenantB },
+    releaseB,
+    bootstrap.releaseRoot,
+  );
+  const verticalEvidenceA = verificationEvidenceIdForCandidate(
+    { environmentId: environmentA, tenantId: tenantA },
+    verticalReleaseA,
+    vertical.releaseRoot,
+  );
 
   await withEphemeralPostgres(
     'release-persistence',
@@ -139,7 +273,9 @@ test('immutable release persistence verifies bytes, identities, links, RLS, and 
               revisionCommand(contextA, verticalRevisionA, verticalBytes),
             );
 
-            const storedA = await repository.registerTenantRelease(
+            const storedA = await admitEmptyRelease(
+              runtimePool,
+              repository,
               contextA,
               releaseCommand(
                 contextA,
@@ -149,7 +285,9 @@ test('immutable release persistence verifies bytes, identities, links, RLS, and 
                 bootstrap,
               ),
             );
-            const storedB = await repository.registerTenantRelease(
+            const storedB = await admitEmptyRelease(
+              runtimePool,
+              repository,
               contextB,
               releaseCommand(
                 contextB,
@@ -159,7 +297,9 @@ test('immutable release persistence verifies bytes, identities, links, RLS, and 
                 bootstrap,
               ),
             );
-            const storedVertical = await repository.registerTenantRelease(
+            const storedVertical = await admitEmptyRelease(
+              runtimePool,
+              repository,
               contextA,
               releaseCommand(
                 contextA,
@@ -739,6 +879,46 @@ function mustCompile(bytes: Uint8Array): CompileSuccess {
     throw new Error(JSON.stringify(compiled.diagnostics));
   }
   return compiled;
+}
+
+async function admitEmptyRelease(
+  pool: pg.Pool,
+  repository: PostgresImmutableReleaseRepository,
+  context: TrustedRequestContext,
+  command: RegisterTenantReleaseCommand<CompileSuccess>,
+) {
+  const staged = await repository.stageTenantReleaseCandidate(context, {
+    appPackageRevisionId: command.appPackageRevisionId,
+    compiledRelease: command.compiledRelease,
+    createdBy: command.createdBy,
+    environmentId: command.environmentId,
+    releaseId: command.releaseId,
+    tenantId: command.tenantId,
+  });
+  assert.equal(staged.verificationEvidenceId, command.verificationEvidenceId);
+  await new PostgresReleaseVerificationService(
+    pool,
+  ).executeSemanticCandidateAndPersist(context, {
+    compiledRelease: command.compiledRelease,
+    evidenceId: staged.verificationEvidenceId,
+    providerRunId: `release-persistence:${command.releaseId}`,
+    releaseId: command.releaseId,
+  });
+  return repository.registerTenantRelease(context, command);
+}
+
+function emptyRevisionBytes(
+  bootstrapBytes: Uint8Array,
+  version: string,
+): Uint8Array {
+  const definition = JSON.parse(
+    new TextDecoder().decode(bootstrapBytes),
+  ) as Record<string, unknown>;
+  assert.ok(
+    typeof definition.package === 'object' && definition.package !== null,
+  );
+  (definition.package as Record<string, unknown>).version = version;
+  return new TextEncoder().encode(canonicalize(definition));
 }
 
 function assertReleaseBytes(

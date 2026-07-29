@@ -1630,6 +1630,12 @@ async function loadAttemptRecord(
          ON target.tenant_id = approval.tenant_id
         AND target.environment_id = approval.environment_id
         AND target.release_id = approval.target_release_id
+       JOIN platform.tenant_release_admissions AS target_admission
+         ON target_admission.tenant_id = target.tenant_id
+        AND target_admission.environment_id = target.environment_id
+        AND target_admission.release_id = target.release_id
+        AND target_admission.verification_evidence_id =
+            target.verification_evidence_id
        LEFT JOIN north_star_internal.module_storage_generations AS generation
          ON generation.tenant_id = receipt.tenant_id
         AND generation.environment_id = receipt.environment_id

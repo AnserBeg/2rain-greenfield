@@ -24,6 +24,11 @@ import {
   runMigrations,
 } from '../../../../packages/postgres-provider/src/migrations';
 import { PostgresImmutableReleaseRepository } from '../../../../packages/postgres-provider/src/release-repository';
+import {
+  PostgresReleaseVerificationFederationService,
+  PostgresReleaseVerificationService,
+  releaseVerificationBinding,
+} from '../../../../packages/postgres-provider/src/release-verification-service';
 import { PostgresRequestRuntimeViewService } from '../../../../packages/postgres-provider/src/request-runtime-view-service';
 import { TrustedActorEnvelopeIssuer } from '../../../../packages/postgres-provider/src/trust/trusted-actor-envelope';
 import {
@@ -75,6 +80,12 @@ export const PARTY_TEST_SCOPE = Object.freeze({
   },
 });
 
+const partyVerificationScope = Object.freeze({
+  environmentId: '91100000-0000-4000-8000-000000000099',
+  principalId: PARTY_TEST_SCOPE.a.principalId,
+  tenantId: PARTY_TEST_SCOPE.a.tenantId,
+});
+
 export interface RealPartyRuntime {
   readonly adminPool: pg.Pool;
   readonly compiled: CompileSuccess;
@@ -123,36 +134,76 @@ export async function withRealPartyRuntime<T>(
         [fixture.empty, fixture.emptyDefinition],
         [fixture.compiled, fixture.definition],
       ]);
+      const verificationReleases = await persistSequence(
+        runtimePool,
+        contexts.verification,
+        [
+          [fixture.empty, fixture.emptyDefinition],
+          [fixture.compiled, fixture.definition],
+        ],
+      );
       await setPointer(
         pool,
         PARTY_TEST_SCOPE.a.tenantId,
         PARTY_TEST_SCOPE.a.environmentId,
-        releasesA[0]!,
+        releasesA[0]!.releaseId,
       );
       await setPointer(
         pool,
         PARTY_TEST_SCOPE.b.tenantId,
         PARTY_TEST_SCOPE.b.environmentId,
-        releasesB[0]!,
+        releasesB[0]!.releaseId,
+      );
+      await setPointer(
+        pool,
+        partyVerificationScope.tenantId,
+        partyVerificationScope.environmentId,
+        verificationReleases[0]!.releaseId,
       );
       await grantExecutorAuthority(pool);
       const materializer = new PostgresModuleStorageMaterializer(
         materializerPool,
         modulePool,
       );
-      await prepare(materializer, contexts.a, releasesA[1]!);
-      await prepare(materializer, contexts.b, releasesB[1]!);
+      await prepare(
+        materializer,
+        contexts.verification,
+        verificationReleases[1]!.releaseId,
+      );
+      await admitCandidate(
+        runtimePool,
+        contexts.verification,
+        verificationReleases[1]!,
+      );
+      await federateCandidate(
+        pool,
+        runtimePool,
+        contexts.verification,
+        verificationReleases[1]!,
+        contexts.a,
+        releasesA[1]!,
+      );
+      await federateCandidate(
+        pool,
+        runtimePool,
+        contexts.verification,
+        verificationReleases[1]!,
+        contexts.b,
+        releasesB[1]!,
+      );
+      await prepare(materializer, contexts.a, releasesA[1]!.releaseId);
+      await prepare(materializer, contexts.b, releasesB[1]!.releaseId);
       await setPointer(
         pool,
         PARTY_TEST_SCOPE.a.tenantId,
         PARTY_TEST_SCOPE.a.environmentId,
-        releasesA[1]!,
+        releasesA[1]!.releaseId,
       );
       await setPointer(
         pool,
         PARTY_TEST_SCOPE.b.tenantId,
         PARTY_TEST_SCOPE.b.environmentId,
-        releasesB[1]!,
+        releasesB[1]!.releaseId,
       );
 
       const policy = new AllowPolicy();
@@ -303,7 +354,7 @@ function humanActorIssuer(): TrustedActorEnvelopeIssuer {
 }
 
 async function trustedContexts(): Promise<
-  Record<'a' | 'b', TrustedRequestContext>
+  Record<'a' | 'b' | 'verification', TrustedRequestContext>
 > {
   const entry = new AuthenticatedRequestEntryAdapter(async (request) => {
     const token = request.headers?.authorization;
@@ -311,11 +362,16 @@ async function trustedContexts(): Promise<
       ? PARTY_TEST_SCOPE.a
       : token === 'b'
         ? PARTY_TEST_SCOPE.b
-        : null;
+        : token === 'verification'
+          ? partyVerificationScope
+          : null;
   });
   return {
     a: await entry.enter({ headers: { authorization: 'a' } }),
     b: await entry.enter({ headers: { authorization: 'b' } }),
+    verification: await entry.enter({
+      headers: { authorization: 'verification' },
+    }),
   };
 }
 
@@ -340,6 +396,11 @@ async function migrateAndSeed(pool: pg.Pool): Promise<void> {
         [scope.tenantId, scope.environmentId],
       );
     }
+    await client.query(
+      `INSERT INTO platform.environments (tenant_id, id, slug)
+       VALUES ($1,$2,'verification')`,
+      [partyVerificationScope.tenantId, partyVerificationScope.environmentId],
+    );
   } finally {
     client.release();
   }
@@ -349,9 +410,10 @@ async function persistSequence(
   runtimePool: pg.Pool,
   context: TrustedRequestContext,
   entries: ReadonlyArray<readonly [CompileSuccess, Record<string, unknown>]>,
-): Promise<MintedUuid[]> {
+): Promise<StagedRelease[]> {
   const repository = new PostgresImmutableReleaseRepository(runtimePool);
-  const releases: MintedUuid[] = [];
+  const verification = new PostgresReleaseVerificationService(runtimePool);
+  const releases: StagedRelease[] = [];
   for (const [compiled, definition] of entries) {
     const revisionId = minted(randomUUID());
     const releaseId = minted(randomUUID());
@@ -360,13 +422,90 @@ async function persistSequence(
       context,
       revisionCommand(context, revisionId, desiredState),
     );
-    await repository.registerTenantRelease(
+    const stageCommand = {
+      appPackageRevisionId: revisionId,
+      compiledRelease: compiled,
+      createdBy: context.principalId,
+      environmentId: context.environmentId,
+      releaseId,
+      tenantId: context.tenantId,
+    };
+    const staged = await repository.stageTenantReleaseCandidate(
       context,
-      releaseCommand(context, releaseId, revisionId, compiled),
+      stageCommand,
     );
-    releases.push(releaseId);
+    const command = releaseCommand(
+      context,
+      releaseId,
+      revisionId,
+      compiled,
+      staged.verificationEvidenceId,
+    );
+    const release = Object.freeze({
+      command: {
+        ...command,
+        verificationEvidenceId: staged.verificationEvidenceId,
+      },
+      compiled,
+      releaseId,
+    });
+    releases.push(release);
+    if (releaseVerificationBinding(compiled).plan.scenarios.length === 0) {
+      await verification.executeSemanticCandidateAndPersist(context, {
+        compiledRelease: compiled,
+        evidenceId: staged.verificationEvidenceId,
+        providerRunId: `party-harness-bootstrap:${context.tenantId}`,
+        releaseId,
+      });
+      await repository.registerTenantRelease(context, release.command);
+    }
   }
   return releases;
+}
+
+interface StagedRelease {
+  readonly command: RegisterTenantReleaseCommand<CompileSuccess>;
+  readonly compiled: CompileSuccess;
+  readonly releaseId: MintedUuid;
+}
+
+async function admitCandidate(
+  runtimePool: pg.Pool,
+  context: TrustedRequestContext,
+  release: StagedRelease,
+): Promise<void> {
+  const verification = new PostgresReleaseVerificationService(runtimePool);
+  await verification.executeSemanticCandidateAndPersist(context, {
+    compiledRelease: release.compiled,
+    evidenceId: release.command.verificationEvidenceId,
+    providerRunId: `party-harness-candidate:${context.tenantId}`,
+    releaseId: release.releaseId,
+  });
+  await new PostgresImmutableReleaseRepository(
+    runtimePool,
+  ).registerTenantRelease(context, release.command);
+}
+
+async function federateCandidate(
+  adminPool: pg.Pool,
+  runtimePool: pg.Pool,
+  sourceContext: TrustedRequestContext,
+  source: StagedRelease,
+  targetContext: TrustedRequestContext,
+  target: StagedRelease,
+): Promise<void> {
+  await new PostgresReleaseVerificationFederationService(adminPool).federate({
+    compiledRelease: target.compiled,
+    sourceEnvironmentId: sourceContext.environmentId,
+    sourceEvidenceId: source.command.verificationEvidenceId,
+    sourceTenantId: sourceContext.tenantId,
+    targetContext,
+    targetEvidenceId: target.command.verificationEvidenceId,
+    targetReleaseId: target.releaseId,
+  });
+  await new PostgresImmutableReleaseRepository(
+    runtimePool,
+  ).registerTenantRelease(targetContext, target.command);
 }
 
 function revisionCommand(
@@ -398,6 +537,7 @@ function releaseCommand(
   releaseId: MintedUuid,
   revisionId: MintedUuid,
   compiledRelease: CompileSuccess,
+  verificationEvidenceId: MintedUuid,
 ): RegisterTenantReleaseCommand<CompileSuccess> {
   return {
     appPackageRevisionId: revisionId,
@@ -406,7 +546,7 @@ function releaseCommand(
     environmentId: context.environmentId,
     releaseId,
     tenantId: context.tenantId,
-    verificationEvidenceId: minted(randomUUID()),
+    verificationEvidenceId,
   };
 }
 
