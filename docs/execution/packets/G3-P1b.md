@@ -1,6 +1,6 @@
 # G3-P1b — legal-entity family map and key participation
 
-Status: implementation evidence ready; integration matrix and Critical review pending
+Status: post-packet-9 review candidate; serialized integration matrix pending
 Tier: Critical
 Lane: FIX
 Initial base: `0722ac43204331e13819f8039aaace272108b997`
@@ -124,9 +124,9 @@ silently implement a partial provider path.
   and relation maps are now part of that contract:
   `f653a6365199f02186832bdab4e55e6009ba914a41fe2a6b3bb9c21e5c8579d5`
   -> `c65517349623a30f3ddce75e57dca0af404646e82f27e73ce0b6586b4c1d17fb`.
-- No canonical-language byte moves. No application release root moves. The
-  final integrated-base comparison is repeated after 4c merges, because 4c's
-  independently authorized version event integrates before this packet.
+- No canonical-language byte moves. No application release root moves. If a
+  later product-code advance reaches `main` before this packet's matrix slot,
+  the candidate is re-integrated and all SHA-bound evidence is repeated.
 
 ## Executed negative controls
 
@@ -148,6 +148,113 @@ These controls separately observe the no-default decisions, both physical key
 paths, the cross-layer manifest agreement, the v1 preservation constraint, and
 the compiler-family bridge that prevents a latent legacy-shape mismatch.
 
+Exact failure excerpts, in the table's order:
+
+1. Governed-family fallback:
+
+   ```text
+   Expected values to be strictly deep-equal:
+   + actual - expected
+
+   + []
+   - [
+   -   {
+   -     code: 'INVENTORY_LEGAL_ENTITY_FAMILY_UNDECLARED',
+   -     path: '$.entities.entityId',
+   -     subjectId: 'northstar.party:entity.undeclared_role'
+   -   }
+   - ]
+   ```
+
+2. Relation fallback:
+
+   ```text
+   Expected values to be strictly equal:
+   + actual - expected
+
+   + 'compiled'
+   - 'failed'
+   ```
+
+3. Missing derived column:
+
+   ```text
+   Expected values to be strictly deep-equal:
+   + actual - expected
+
+   + undefined
+   - {
+   -   column: 'legal_entity_id',
+   -   familyClassification: 'entityOwned',
+   -   immutableAfterCreate: true,
+   -   nullable: false,
+   -   postgresqlType: 'uuid',
+   -   referencedFamilyId: 'legal_entity'
+   - }
+   ```
+
+4. Semantic unique key without entity participation:
+
+   ```text
+   Expected values to be strictly deep-equal:
+   + actual - expected
+
+     [
+       'tenant_id',
+       'environment_id',
+   +   'nsm_c_gdlzi3mw5bv2flq4acmlvtovk23irtoky4yqcijkzecqqlqoflvq'
+   -   'legal_entity_id'
+     ]
+   ```
+
+5. Case-insensitive physical index without entity participation:
+
+   ```text
+   Expected values to be strictly deep-equal:
+   + actual - expected
+
+     [
+       'tenant_id',
+       'environment_id',
+   -   'legal_entity_id',
+       'nsm_c_gdlzi3mw5bv2flq4acmlvtovk23irtoky4yqcijkzecqqlqoflvq'
+     ]
+   ```
+
+6. Stale manifest version:
+
+   ```text
+   Expected values to be strictly equal:
+   + actual - expected
+
+   + 'northstar.storage-target-payload/v1'
+   - 'northstar.storage-target-payload/v2'
+                                        ^
+   ```
+
+7. Tenant-shared target forced to v2:
+
+   ```text
+   Expected values to be strictly equal:
+   + actual - expected
+
+   + 'northstar.storage-target-payload/v2'
+   - 'northstar.storage-target-payload/v1'
+                                        ^
+   ```
+
+8. Compiler v2 recognizer removed:
+
+   ```text
+   error: 'entity.fields is not iterable'
+   code: 'ERR_TEST_FAILURE'
+   name: 'TypeError'
+   stack: |-
+     collectStorageFields (/tmp/2rain-greenfield-g3-p1b/packages/compiler/src/compiler.ts:1778:32)
+     verifyCompleteness (/tmp/2rain-greenfield-g3-p1b/packages/compiler/src/compiler.ts:1492:11)
+     compileApplication (/tmp/2rain-greenfield-g3-p1b/packages/compiler/src/compiler.ts:297:35)
+   ```
+
 ## Gate evidence
 
 Focused development evidence on the authored tree:
@@ -165,16 +272,22 @@ Focused development evidence on the authored tree:
 - `corepack pnpm check:boundaries` — PASS, 131 files scanned.
 - `git diff --check` — PASS.
 
-The full serialized CI matrix has not started. Per the active lanes ruling, this
-packet waits behind BUILD G3-P2a and KERNEL 4c; 4c integrates first. After that
-advance, this branch takes main's version/profile dispatch and test version
-stamps, re-derives only G3-P1b's payload-family and storage assertions, compares
-existing module bytes to the integrated base, and runs the full matrix once at
-the frozen SHA.
+Accepted `main` through `8a2d320` was merged without conflict. This brings in
+packet 9's publish-path breadth test/inventory and the orchestrator's lease
+records; none overlaps G3-P1b's implementation or assertions. The resulting
+merge was `fbc139e9323550d92c205b328f6855d83215d222`; the review candidate adds
+only this completed evidence record on top.
+
+The full serialized CI matrix has not started. KERNEL 4c still holds that slot;
+starting another matrix would invalidate both lanes' evidence. Partial
+clearance freezes and reviews this post-packet-9 candidate now. Once the slot is
+released, the full matrix runs once at the unchanged reviewed SHA. If `main`
+instead advances with product code first, lanes.md requires a new integration
+SHA, repeated byte comparison and matrix, and fresh SHA-bound reviews.
 
 ## Test it yourself
 
-Run the three focused observations (under two minutes on the packet worktree):
+Run the four focused observations (under two minutes on the packet worktree):
 
 ```bash
 cd /tmp/2rain-greenfield-g3-p1b
@@ -198,10 +311,11 @@ present.
 
 ## Review, ledger, and checkpoint
 
-Critical review remains pending until the integrated full matrix is green. The
-frozen SHA then receives one fresh naive Codex xhigh review to PASS and Fable
-max confirmation on the identical unchanged SHA. Any correction invalidates
-both and produces a new candidate.
+Under the orchestrator's partial clearance, Critical review begins before the
+serialized full-matrix slot is available. The frozen SHA receives one fresh
+naive Codex xhigh review to PASS and Fable max confirmation on the identical
+unchanged SHA. Any correction invalidates both and produces a new candidate.
+The full matrix remains mandatory at that same SHA before acceptance.
 
 `docs/execution/ledger.md`, `current-plan.md`, and `lanes.md` remain
 orchestrator-only. At acceptance the orchestrator records the final SHA, full
