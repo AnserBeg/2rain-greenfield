@@ -50,13 +50,13 @@ export type CanonicalNormalizationProfileVersion =
   (typeof SUPPORTED_NORMALIZATION_PROFILE_VERSIONS)[number];
 
 export interface CanonicalLanguageProfile {
-  readonly featureLevel: 'v0-experimental' | 'v1' | 'v2';
+  readonly featureLevel: 'v0-experimental' | 'v1' | 'v2' | 'v3';
   readonly normalizationProfileVersion: CanonicalNormalizationProfileVersion;
 }
 
 /**
- * Strict language/profile dispatch. v3 deliberately has the v2 feature level
- * until packet 4b defines its additional families and node shapes.
+ * Strict language/profile dispatch. v3 adds version-gated canonical families
+ * and query nodes while retaining every prior reader unchanged.
  */
 export const CANONICAL_LANGUAGE_PROFILES: Readonly<
   Record<CanonicalLanguageVersion, CanonicalLanguageProfile>
@@ -74,7 +74,7 @@ export const CANONICAL_LANGUAGE_PROFILES: Readonly<
     normalizationProfileVersion: NORMALIZATION_PROFILE_VERSION,
   }),
   [LANGUAGE_VERSIONS.v3]: Object.freeze({
-    featureLevel: 'v2',
+    featureLevel: 'v3',
     normalizationProfileVersion: NORMALIZATION_PROFILE_VERSIONS.v3,
   }),
 });
@@ -143,8 +143,11 @@ export const STRUCTURAL_LIMITS_V0 = Object.freeze({
     assertions: 4_096,
     storageMappings: 256,
     capabilityRequirements: 512,
+    impactAnalyses: 4_096,
   }),
 });
+
+export const QUERY_PARAMETER_LIMIT_V3 = 64 as const;
 
 export const SURFACE_ARCHETYPES = [
   'home',
