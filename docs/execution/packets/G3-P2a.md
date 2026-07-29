@@ -135,6 +135,14 @@ inserted into a verifier fixture list.
 | More than one classification still resolves | append a second classification for the fold witness | `TENANT_CLASSIFICATION_DUPLICATE: north_star_internal.module_fold_function_ddl_witnesses has more than one tenancy classification` |
 | Zero input passes vacuously | verify the manifest against no tables | `TENANT_ENUMERATION_EMPTY: cannot verify tenant completeness against zero tables` |
 | An unknown enumerated kind is silently skipped | replace one observed relation kind with `?` | `TENANT_ENUMERATION_OBJECT_KIND_UNKNOWN: unknown relation kind ? for north_star_internal.module_fold_function_ddl_witnesses` |
+| A removed table leaves an accepted stale declaration | add a classification for absent `platform.removed_business_records` | `TENANT_CLASSIFICATION_STALE: platform.removed_business_records is classified but was not enumerated` |
+| Any required UUID can impersonate tenant authority | name the real `environment_id` UUID on `platform.saved_master_filters` | `TENANT_COLUMN_INVALID: platform.saved_master_filters.environment_id must be a required uuid trusted tenant identifier` |
+| Tenant column nullability is not checked | make the observed `tenant_id` nullable | `nullable: TENANT_COLUMN_INVALID: platform.saved_master_filters.tenant_id must be a required uuid trusted tenant identifier` |
+| Tenant column type is not checked | make the observed `tenant_id` text | `non-uuid: TENANT_COLUMN_INVALID: platform.saved_master_filters.tenant_id must be a required uuid trusted tenant identifier` |
+| Partitioned tables disappear from closure | add an unclassified `relkind=p` relation | `TENANT_TABLE_UNCLASSIFIED: g3_p2a_relation_kinds.unclassified_partitioned_records has no tenant-completeness classification` |
+| Foreign tables disappear from closure | add an unclassified `relkind=f` relation | `TENANT_TABLE_UNCLASSIFIED: g3_p2a_relation_kinds.unclassified_foreign_records has no tenant-completeness classification` |
+| Managed-module business data can claim independence when its tenant column is missing | classify `north_star_module.managed_business_records` as a shared catalog | `TENANT_INDEPENDENT_BUSINESS_TABLE: north_star_module.managed_business_records is a business or tenant-bearing table and cannot be tenant-independent` |
+| The tenant registry can claim independence because its tenant column is named `id` | classify `platform.tenants` as a shared catalog | `TENANT_INDEPENDENT_BUSINESS_TABLE: platform.tenants is a business or tenant-bearing table and cannot be tenant-independent` |
 
 Positive count evidence observed 46 live migrated tables before either DDL
 probe, equal to the 46-entry checked manifest. The checked-snapshot listing
@@ -156,8 +164,8 @@ independently reports the same 39/7 split.
 
 Focused evidence before the frozen candidate:
 
-- tenant-completeness test: 5/5 PASS, including live PostgreSQL enumeration;
-- architecture suite: 92/92 PASS after adding the fifth focused test;
+- tenant-completeness test: 7/7 PASS, including live PostgreSQL enumeration;
+- architecture suite: 94/94 PASS with the final controls;
 - architecture boundaries: PASS;
 - typecheck and lint: PASS; and
 - the deliberate user-facing unclassified-table command exits 1 with
@@ -167,6 +175,17 @@ Exact final full-matrix and review evidence is reported with the frozen
 candidate SHA so this document does not change the SHA whose evidence it names.
 This packet changes no canonical bytes, compiled release artifact, golden root,
 or release digest.
+
+## Review evidence
+
+The first fresh Critical-tier Codex xhigh review of `fb135d1` returned
+`REVISE` with two in-scope findings. It found that the implementation's stale,
+untrusted-column, partitioned/foreign, managed-module, and tenant-root branches
+were not all directly exercised, and that the packet record attributed the
+last focused test to an earlier complete-suite run. The successor adds direct
+controls for each named branch, records their emitted diagnostics above, and
+corrects the gate chronology. Any successor SHA receives a fresh naive review;
+the `fb135d1` verdict is not acceptance evidence.
 
 ## Test it yourself
 

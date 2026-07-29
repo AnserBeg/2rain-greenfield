@@ -9,6 +9,7 @@ import {
   enumerateTenantTablesFromSnapshot,
   parseTenantCompletenessManifest,
   TenantCompletenessError,
+  type EnumeratedTenantTable,
   type TenantCompletenessManifest,
   type TenantTableClassification,
   verifyTenantCompleteness,
@@ -138,6 +139,157 @@ test('absence of a tenant column is not an independence reason', (context) => {
   context.diagnostic(error.message);
 });
 
+test('stale and untrusted tenant-column declarations fail closed', (context) => {
+  const manifest = loadManifest();
+  const tables = enumerateTenantTablesFromSnapshot(loadSnapshot());
+  const stale = expectDiagnostic(
+    () =>
+      verifyTenantCompleteness(
+        {
+          ...manifest,
+          expectedTableCount: manifest.expectedTableCount + 1,
+          tables: [
+            ...manifest.tables,
+            {
+              classification: 'tenant-scoped',
+              schema: 'platform',
+              table: 'removed_business_records',
+              tenantColumn: 'tenant_id',
+            },
+          ],
+        },
+        tables,
+      ),
+    'TENANT_CLASSIFICATION_STALE',
+  );
+  context.diagnostic(stale.message);
+
+  const wrongUuid = mutateClassification(
+    manifest,
+    'platform.saved_master_filters',
+    {
+      classification: 'tenant-scoped',
+      schema: 'platform',
+      table: 'saved_master_filters',
+      tenantColumn: 'environment_id',
+    },
+  );
+  const wrongUuidError = expectDiagnostic(
+    () => verifyTenantCompleteness(wrongUuid, tables),
+    'TENANT_COLUMN_INVALID',
+  );
+  context.diagnostic(wrongUuidError.message);
+
+  for (const [label, column] of [
+    ['nullable', { dataType: 'uuid', isNullable: true, name: 'tenant_id' }],
+    ['non-uuid', { dataType: 'text', isNullable: false, name: 'tenant_id' }],
+  ] as const) {
+    const invalidTables = mutateEnumeratedColumn(
+      tables,
+      'platform.saved_master_filters',
+      'tenant_id',
+      column,
+    );
+    const error = expectDiagnostic(
+      () => verifyTenantCompleteness(manifest, invalidTables),
+      'TENANT_COLUMN_INVALID',
+    );
+    assert.match(error.message, /platform\.saved_master_filters\.tenant_id/u);
+    context.diagnostic(`${label}: ${error.message}`);
+  }
+});
+
+test('partitioned, foreign, managed-module, and tenant-root branches fail closed', (context) => {
+  const manifest = loadManifest();
+  const snapshot = loadSnapshot();
+  for (const [kind, expectedKind, table] of [
+    ['p', 'partitioned-table', 'unclassified_partitioned_records'],
+    ['f', 'foreign-table', 'unclassified_foreign_records'],
+  ] as const) {
+    const enumerated = enumerateTenantTablesFromSnapshot({
+      ...snapshot,
+      columns: [
+        ...snapshot.columns,
+        {
+          column_name: 'tenant_id',
+          data_type: 'uuid',
+          is_nullable: false,
+          relation: table,
+          schema: 'g3_p2a_relation_kinds',
+        },
+      ],
+      relations: [
+        ...snapshot.relations,
+        {
+          kind,
+          relation: table,
+          schema: 'g3_p2a_relation_kinds',
+        },
+      ],
+    });
+    assert.equal(
+      enumerated.find(
+        (entry) =>
+          entry.schema === 'g3_p2a_relation_kinds' && entry.table === table,
+      )?.kind,
+      expectedKind,
+    );
+    const error = expectDiagnostic(
+      () => verifyTenantCompleteness(manifest, enumerated),
+      'TENANT_TABLE_UNCLASSIFIED',
+    );
+    context.diagnostic(error.message);
+  }
+
+  const managedModule: EnumeratedTenantTable = {
+    columns: [{ dataType: 'uuid', isNullable: false, name: 'record_id' }],
+    kind: 'table',
+    schema: 'north_star_module',
+    table: 'managed_business_records',
+  };
+  const managedError = expectDiagnostic(
+    () =>
+      verifyTenantCompleteness(
+        {
+          ...manifest,
+          expectedTableCount: manifest.expectedTableCount + 1,
+          tables: [
+            ...manifest.tables,
+            {
+              classification: 'tenant-independent',
+              reason:
+                'This deliberately invalid managed-module declaration claims a shared catalog identity for business records.',
+              reasonCode: 'shared-immutable-catalog',
+              schema: managedModule.schema,
+              table: managedModule.table,
+            },
+          ],
+        },
+        [...enumerateTenantTablesFromSnapshot(snapshot), managedModule],
+      ),
+    'TENANT_INDEPENDENT_BUSINESS_TABLE',
+  );
+  context.diagnostic(managedError.message);
+
+  const rootIndependent = mutateClassification(manifest, 'platform.tenants', {
+    classification: 'tenant-independent',
+    reason:
+      'This deliberately invalid declaration treats the global tenant identity registry as a shared immutable catalog.',
+    reasonCode: 'shared-immutable-catalog',
+    schema: 'platform',
+    table: 'tenants',
+  });
+  const rootError = expectDiagnostic(
+    () =>
+      verifyTenantCompleteness(
+        rootIndependent,
+        enumerateTenantTablesFromSnapshot(snapshot),
+      ),
+    'TENANT_INDEPENDENT_BUSINESS_TABLE',
+  );
+  context.diagnostic(rootError.message);
+});
+
 test('ADR-0011 enumeration discovers unclassified tables in known and new schemas', async (context) => {
   const manifest = loadManifest();
   await withEphemeralPostgres('tenant-completeness', async ({ pool }) => {
@@ -227,6 +379,24 @@ function mutateClassification(
         : classification,
     ),
   };
+}
+
+function mutateEnumeratedColumn(
+  tables: readonly EnumeratedTenantTable[],
+  key: string,
+  columnName: string,
+  replacement: EnumeratedTenantTable['columns'][number],
+): readonly EnumeratedTenantTable[] {
+  return tables.map((table) =>
+    `${table.schema}.${table.table}` === key
+      ? {
+          ...table,
+          columns: table.columns.map((column) =>
+            column.name === columnName ? replacement : column,
+          ),
+        }
+      : table,
+  );
 }
 
 function expectDiagnostic(
