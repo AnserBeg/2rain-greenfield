@@ -5,7 +5,10 @@ import {
 } from '@north-star/canonical-model';
 
 import { compilerDiagnostic } from './diagnostics.js';
-import type { CompilerDiagnostic } from './protocol.js';
+import {
+  COMPILER_DIAGNOSTIC_VERSION,
+  type CompilerDiagnostic,
+} from './protocol.js';
 
 const REQUIRED_QUERY_TYPES = Object.freeze([
   'get',
@@ -32,6 +35,49 @@ const INVENTORY_CONTRACT_RELEASE_VERSION =
 const STOCK_DIMENSION_SET_ID = 'northstar.stock-dimension-set/v1' as const;
 const INVENTORY_POSTING_DEPENDENCY_SET_ROOT =
   '7ef50e86732818a0ec4ec2a03a001066ac59408ea260c65bf018646e4377a63d' as const;
+const LEGAL_ENTITY_FAMILY_CONTRACT_VERSION =
+  'northstar.legal-entity-family-contract/v1' as const;
+const LEGAL_ENTITY_FAMILY_RULES = Object.freeze([
+  { classification: 'tenantShared', familyId: 'legal_entity' },
+  { classification: 'tenantShared', familyId: 'party' },
+  { classification: 'tenantShared', familyId: 'party_role' },
+  { classification: 'tenantShared', familyId: 'item' },
+  { classification: 'tenantShared', familyId: 'location' },
+  { classification: 'entityOwned', familyId: 'inventory_movement' },
+  { classification: 'entityOwned', familyId: 'inventory_transaction' },
+  { classification: 'entityOwned', familyId: 'inventory_transaction_line' },
+  { classification: 'entityOwned', familyId: 'reservation' },
+  { classification: 'entityOwned', familyId: 'stock_count' },
+  { classification: 'entityOwned', familyId: 'stock_count_line' },
+] as const);
+const LEGAL_ENTITY_RELATION_RULES = Object.freeze([
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'inventory_movement',
+    targetFamilyId: 'location',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'inventory_movement',
+    targetFamilyId: 'inventory_transaction',
+  },
+  {
+    semantics: 'crossEntityAllowed',
+    sourceFamilyId: 'inventory_movement',
+    targetFamilyId: 'item',
+  },
+  {
+    semantics: 'crossEntityAllowed',
+    sourceFamilyId: 'party_role',
+    targetFamilyId: 'party',
+  },
+] as const);
+const LEGAL_ENTITY_GOVERNED_PACKAGES = Object.freeze([
+  'catalog',
+  'inventory',
+  'location',
+  'party',
+] as const);
 const INVENTORY_POSTING_ROLES = Object.freeze([
   'adjustment',
   'transfer',
@@ -66,6 +112,8 @@ const INVENTORY_MOVEMENT_CANDIDATE_FIELDS = Object.freeze([
 ] as const);
 
 type InventoryPostingRole = (typeof INVENTORY_POSTING_ROLES)[number];
+export type LegalEntityFamilyClassification = 'entityOwned' | 'tenantShared';
+export type LegalEntityRelationSemantics = 'sameEntity' | 'crossEntityAllowed';
 type NegativeStockMode = (typeof NEGATIVE_STOCK_MODES)[number];
 type ReasonRequirement = (typeof REASON_REQUIREMENTS)[number];
 
@@ -75,9 +123,11 @@ export type InventoryContractDiagnosticCode =
   | 'INVENTORY_CONFIGURATION_OUT_OF_RANGE'
   | 'INVENTORY_CONFIGURATION_REQUIRED'
   | 'INVENTORY_CONTRACT_INVALID'
+  | 'INVENTORY_LEGAL_ENTITY_FAMILY_UNDECLARED'
   | 'INVENTORY_MOVEMENT_MONEY_FORBIDDEN'
   | 'INVENTORY_MOVEMENT_VALUE_DERIVATION_FORBIDDEN'
   | 'INVENTORY_POSTING_DEPENDENCY_UNDECLARED'
+  | 'INVENTORY_RELATION_ENTITY_SEMANTICS_UNDECLARED'
   | 'INVENTORY_STOCK_DIMENSION_MEMBER_REQUIRED'
   | 'INVENTORY_STOCK_DIMENSION_UNSPECIFIED_FORBIDDEN'
   | 'INVENTORY_STOCK_DIMENSION_VERSION_REQUIRED'
@@ -151,6 +201,56 @@ export interface InventoryBaseUnitChangeAttemptV1 {
 export type InventoryConformanceResult =
   | { diagnostics: []; status: 'accepted' }
   | { diagnostics: InventoryContractDiagnostic[]; status: 'rejected' };
+
+export type PinnedLegalEntityFamilyResolution =
+  | {
+      classification: LegalEntityFamilyClassification;
+      familyId: string;
+      status: 'classified';
+    }
+  | { familyId: string; status: 'undeclared' }
+  | { familyId: string | null; status: 'outsidePinnedContract' };
+
+/**
+ * The G3 family map is a pinned domain contract, not canonical syntax. Known
+ * family IDs are derived from canonical entity IDs; an unknown family in a
+ * governed package is an error rather than an ownership default. Other module
+ * families remain outside this G3-only contract until the G6 generalization.
+ */
+export function resolvePinnedLegalEntityFamily(
+  packageId: string,
+  entityId: string,
+): PinnedLegalEntityFamilyResolution {
+  const familyId = canonicalFamilyId(entityId);
+  const rule = LEGAL_ENTITY_FAMILY_RULES.find(
+    (candidate) => candidate.familyId === familyId,
+  );
+  if (rule) {
+    return {
+      classification: rule.classification,
+      familyId: rule.familyId,
+      status: 'classified',
+    };
+  }
+  if (isLegalEntityGovernedPackage(packageId)) {
+    return { familyId: familyId ?? entityId, status: 'undeclared' };
+  }
+  return { familyId, status: 'outsidePinnedContract' };
+}
+
+export function resolvePinnedLegalEntityRelationSemantics(
+  sourceFamilyId: string,
+  targetFamilyId: string,
+): LegalEntityRelationSemantics | null {
+  return (
+    LEGAL_ENTITY_RELATION_RULES.find(
+      (rule) =>
+        rule.sourceFamilyId === sourceFamilyId &&
+        rule.targetFamilyId === targetFamilyId,
+    )?.semantics ?? null
+  );
+}
+
 export function validateModuleConformance(
   packageRevision: NormalizedApplicationPackage,
 ): CompilerDiagnostic[] {
@@ -287,6 +387,19 @@ export function validateModuleConformance(
   for (const entity of packageRevision.entities.filter(
     (entry) => entry.lifecycle === 'active',
   )) {
+    const family = resolvePinnedLegalEntityFamily(
+      packageRevision.package.packageId,
+      entity.entityId,
+    );
+    if (family.status === 'undeclared') {
+      diagnostics.push(
+        inventoryModuleDiagnostic(
+          'INVENTORY_LEGAL_ENTITY_FAMILY_UNDECLARED',
+          '$.entities.entityId',
+          entity.entityId,
+        ),
+      );
+    }
     const mapping = storageById.get(entity.storage.targetId);
     if (!mapping || mapping.lifecycle !== 'active') {
       missing(diagnostics, entity.entityId, 'storage');
@@ -346,6 +459,41 @@ export function validateModuleConformance(
 
     if (!assertedEntities.has(entity.entityId)) {
       missing(diagnostics, entity.entityId, 'verification.executableScenario');
+    }
+  }
+  for (const relation of packageRevision.relations) {
+    const source = resolvePinnedLegalEntityFamily(
+      packageRevision.package.packageId,
+      relation.sourceEntity.targetId,
+    );
+    const target = resolvePinnedLegalEntityFamily(
+      packageRevision.package.packageId,
+      relation.targetEntity.targetId,
+    );
+    if (source.status === 'undeclared' || target.status === 'undeclared') {
+      continue;
+    }
+    if (
+      source.status === 'outsidePinnedContract' &&
+      target.status === 'outsidePinnedContract'
+    ) {
+      continue;
+    }
+    if (
+      source.status !== 'classified' ||
+      target.status !== 'classified' ||
+      resolvePinnedLegalEntityRelationSemantics(
+        source.familyId,
+        target.familyId,
+      ) === null
+    ) {
+      diagnostics.push(
+        inventoryModuleDiagnostic(
+          'INVENTORY_RELATION_ENTITY_SEMANTICS_UNDECLARED',
+          '$.relations',
+          relation.relationId,
+        ),
+      );
     }
   }
   return diagnostics;
@@ -628,6 +776,7 @@ function validateInventoryContractDefinition(
   );
   expectInventoryLiteral(diagnostics, definition, ['capabilityVersion'], 1);
 
+  validateLegalEntityContract(diagnostics, definition);
   validateStockDimensionSet(diagnostics, definition);
   validateMovementContract(diagnostics, definition);
   validateBaseUnitContract(diagnostics, definition);
@@ -639,6 +788,257 @@ function validateInventoryContractDefinition(
   validateV2DecimalLimit(diagnostics, definition);
 
   return sortInventoryDiagnostics(diagnostics);
+}
+
+function validateLegalEntityContract(
+  diagnostics: InventoryContractDiagnostic[],
+  definition: Record<string, unknown>,
+): void {
+  expectInventoryLiteral(
+    diagnostics,
+    definition,
+    ['legalEntity', 'version'],
+    LEGAL_ENTITY_FAMILY_CONTRACT_VERSION,
+  );
+  expectInventoryLiteral(
+    diagnostics,
+    definition,
+    ['legalEntity', 'undeclaredFamily', 'diagnosticCode'],
+    'INVENTORY_LEGAL_ENTITY_FAMILY_UNDECLARED',
+  );
+  expectInventoryLiteral(
+    diagnostics,
+    definition,
+    ['legalEntity', 'undeclaredFamily', 'disposition'],
+    'compileFailure',
+  );
+  expectInventoryLiteral(
+    diagnostics,
+    definition,
+    ['legalEntity', 'undeclaredRelation', 'diagnosticCode'],
+    'INVENTORY_RELATION_ENTITY_SEMANTICS_UNDECLARED',
+  );
+  expectInventoryLiteral(
+    diagnostics,
+    definition,
+    ['legalEntity', 'undeclaredRelation', 'disposition'],
+    'compileFailure',
+  );
+
+  const legalEntity = nestedRecord(definition, ['legalEntity']);
+  if (
+    !legalEntity ||
+    !hasExactKeys(legalEntity, [
+      'families',
+      'relations',
+      'undeclaredFamily',
+      'undeclaredRelation',
+      'version',
+    ])
+  ) {
+    diagnostics.push(
+      inventoryDiagnostic(
+        'INVENTORY_CONTRACT_INVALID',
+        '$.legalEntity',
+        'legalEntity',
+      ),
+    );
+  }
+  for (const key of ['undeclaredFamily', 'undeclaredRelation'] as const) {
+    const declaration = legalEntity ? nestedRecord(legalEntity, [key]) : null;
+    if (
+      !declaration ||
+      !hasExactKeys(declaration, ['diagnosticCode', 'disposition'])
+    ) {
+      diagnostics.push(
+        inventoryDiagnostic(
+          'INVENTORY_CONTRACT_INVALID',
+          `$.legalEntity.${key}`,
+          key,
+        ),
+      );
+    }
+  }
+  const families = legalEntity?.families;
+  if (!Array.isArray(families)) {
+    diagnostics.push(
+      inventoryDiagnostic(
+        'INVENTORY_LEGAL_ENTITY_FAMILY_UNDECLARED',
+        '$.legalEntity.families',
+        null,
+      ),
+    );
+  } else {
+    const observed = new Set<string>();
+    for (const rule of families) {
+      if (
+        !isRecord(rule) ||
+        !hasExactKeys(rule, ['classification', 'familyId']) ||
+        typeof rule.familyId !== 'string' ||
+        !['entityOwned', 'tenantShared'].includes(
+          typeof rule.classification === 'string' ? rule.classification : '',
+        ) ||
+        observed.has(rule.familyId)
+      ) {
+        diagnostics.push(
+          inventoryDiagnostic(
+            'INVENTORY_CONTRACT_INVALID',
+            '$.legalEntity.families',
+            isRecord(rule) && typeof rule.familyId === 'string'
+              ? rule.familyId
+              : null,
+          ),
+        );
+        continue;
+      }
+      observed.add(rule.familyId);
+    }
+    for (const expected of LEGAL_ENTITY_FAMILY_RULES) {
+      const rule = families.find(
+        (candidate) =>
+          isRecord(candidate) && candidate.familyId === expected.familyId,
+      );
+      if (!rule) {
+        diagnostics.push(
+          inventoryDiagnostic(
+            'INVENTORY_LEGAL_ENTITY_FAMILY_UNDECLARED',
+            `$.legalEntity.families.${expected.familyId}`,
+            expected.familyId,
+          ),
+        );
+      } else if (rule.classification !== expected.classification) {
+        diagnostics.push(
+          inventoryDiagnostic(
+            'INVENTORY_CONTRACT_INVALID',
+            `$.legalEntity.families.${expected.familyId}.classification`,
+            expected.familyId,
+          ),
+        );
+      }
+    }
+    for (const familyId of observed) {
+      if (
+        !LEGAL_ENTITY_FAMILY_RULES.some((rule) => rule.familyId === familyId)
+      ) {
+        diagnostics.push(
+          inventoryDiagnostic(
+            'INVENTORY_CONTRACT_INVALID',
+            `$.legalEntity.families.${familyId}`,
+            familyId,
+          ),
+        );
+      }
+    }
+    if (
+      families.length === LEGAL_ENTITY_FAMILY_RULES.length &&
+      !families.every(
+        (rule, index) =>
+          isRecord(rule) &&
+          rule.familyId === LEGAL_ENTITY_FAMILY_RULES[index]?.familyId &&
+          rule.classification ===
+            LEGAL_ENTITY_FAMILY_RULES[index]?.classification,
+      )
+    ) {
+      diagnostics.push(
+        inventoryDiagnostic(
+          'INVENTORY_CONTRACT_INVALID',
+          '$.legalEntity.families',
+          'order',
+        ),
+      );
+    }
+  }
+
+  const relations = legalEntity?.relations;
+  if (!Array.isArray(relations)) {
+    diagnostics.push(
+      inventoryDiagnostic(
+        'INVENTORY_RELATION_ENTITY_SEMANTICS_UNDECLARED',
+        '$.legalEntity.relations',
+        null,
+      ),
+    );
+    return;
+  }
+  const observedRelations = new Set<string>();
+  for (const rule of relations) {
+    const key = legalEntityRelationKey(rule);
+    if (
+      key === null ||
+      !isRecord(rule) ||
+      !hasExactKeys(rule, ['semantics', 'sourceFamilyId', 'targetFamilyId']) ||
+      observedRelations.has(key)
+    ) {
+      diagnostics.push(
+        inventoryDiagnostic(
+          'INVENTORY_CONTRACT_INVALID',
+          '$.legalEntity.relations',
+          key,
+        ),
+      );
+      continue;
+    }
+    observedRelations.add(key);
+  }
+  for (const expected of LEGAL_ENTITY_RELATION_RULES) {
+    const key = `${expected.sourceFamilyId}->${expected.targetFamilyId}`;
+    const rule = relations.find(
+      (candidate) => legalEntityRelationKey(candidate) === key,
+    );
+    if (!rule) {
+      diagnostics.push(
+        inventoryDiagnostic(
+          'INVENTORY_RELATION_ENTITY_SEMANTICS_UNDECLARED',
+          `$.legalEntity.relations.${key}`,
+          key,
+        ),
+      );
+    } else if (isRecord(rule) && rule.semantics !== expected.semantics) {
+      diagnostics.push(
+        inventoryDiagnostic(
+          'INVENTORY_CONTRACT_INVALID',
+          `$.legalEntity.relations.${key}.semantics`,
+          key,
+        ),
+      );
+    }
+  }
+  for (const key of observedRelations) {
+    if (
+      !LEGAL_ENTITY_RELATION_RULES.some(
+        (rule) => `${rule.sourceFamilyId}->${rule.targetFamilyId}` === key,
+      )
+    ) {
+      diagnostics.push(
+        inventoryDiagnostic(
+          'INVENTORY_CONTRACT_INVALID',
+          `$.legalEntity.relations.${key}`,
+          key,
+        ),
+      );
+    }
+  }
+  if (
+    relations.length === LEGAL_ENTITY_RELATION_RULES.length &&
+    !relations.every((rule, index) => {
+      const expected = LEGAL_ENTITY_RELATION_RULES[index];
+      return (
+        expected !== undefined &&
+        isRecord(rule) &&
+        rule.sourceFamilyId === expected.sourceFamilyId &&
+        rule.targetFamilyId === expected.targetFamilyId &&
+        rule.semantics === expected.semantics
+      );
+    })
+  ) {
+    diagnostics.push(
+      inventoryDiagnostic(
+        'INVENTORY_CONTRACT_INVALID',
+        '$.legalEntity.relations',
+        'order',
+      ),
+    );
+  }
 }
 
 function validateStockDimensionSet(
@@ -1647,6 +2047,33 @@ function inventoryDependencyKey(value: unknown): string | null {
   return `${value.access}\0${value.authority}\0${value.dependencyId}`;
 }
 
+function canonicalFamilyId(entityId: string): string | null {
+  const marker = ':entity.';
+  const offset = entityId.lastIndexOf(marker);
+  if (offset < 1) return null;
+  const familyId = entityId.slice(offset + marker.length);
+  return familyId.length > 0 ? familyId : null;
+}
+
+function isLegalEntityGovernedPackage(packageId: string): boolean {
+  return LEGAL_ENTITY_GOVERNED_PACKAGES.some((packageFamily) =>
+    packageId.endsWith(`:package.${packageFamily}`),
+  );
+}
+
+function legalEntityRelationKey(value: unknown): string | null {
+  if (
+    !isRecord(value) ||
+    typeof value.sourceFamilyId !== 'string' ||
+    typeof value.targetFamilyId !== 'string' ||
+    (value.semantics !== 'sameEntity' &&
+      value.semantics !== 'crossEntityAllowed')
+  ) {
+    return null;
+  }
+  return `${value.sourceFamilyId}->${value.targetFamilyId}`;
+}
+
 function inventoryCanonicalRoot(value: unknown): string | null {
   try {
     return canonicalizeAndHash(value).contentHash;
@@ -1697,12 +2124,16 @@ const INVENTORY_DIAGNOSTIC_RULES: Readonly<
     'every required inventory posting dial declares its type and release-recorded default',
   INVENTORY_CONTRACT_INVALID:
     'the inventory posting capability compiles only its frozen v1 declaration shape',
+  INVENTORY_LEGAL_ENTITY_FAMILY_UNDECLARED:
+    'every governed family has one explicit entityOwned or tenantShared classification and no default',
   INVENTORY_MOVEMENT_MONEY_FORBIDDEN:
     'an inventory movement is a quantity-only fact and carries no monetary field',
   INVENTORY_MOVEMENT_VALUE_DERIVATION_FORBIDDEN:
     'no compiled artifact derives a monetary value from inventory movement facts',
   INVENTORY_POSTING_DEPENDENCY_UNDECLARED:
     'inventory posting reads and writes only through its published authoritative dependency set',
+  INVENTORY_RELATION_ENTITY_SEMANTICS_UNDECLARED:
+    'every governed relation endpoint pair has one pinned sameEntity or crossEntityAllowed semantic',
   INVENTORY_STOCK_DIMENSION_MEMBER_REQUIRED:
     'every v1 stock dimension has a real required value at posting',
   INVENTORY_STOCK_DIMENSION_UNSPECIFIED_FORBIDDEN:
@@ -1712,6 +2143,29 @@ const INVENTORY_DIAGNOSTIC_RULES: Readonly<
   INVENTORY_STOCK_DIMENSION_VERSION_UNKNOWN:
     'an inventory movement uses only a known released stock-dimension-set version',
 });
+
+function inventoryModuleDiagnostic(
+  code:
+    | 'INVENTORY_LEGAL_ENTITY_FAMILY_UNDECLARED'
+    | 'INVENTORY_RELATION_ENTITY_SEMANTICS_UNDECLARED',
+  path: string,
+  subjectId: string | null,
+): CompilerDiagnostic {
+  return {
+    acceptedAlternative:
+      code === 'INVENTORY_LEGAL_ENTITY_FAMILY_UNDECLARED'
+        ? 'add the family to the pinned inventory legal-entity map before compiling it; no ownership default exists'
+        : 'add the canonical endpoint pair to the pinned inventory relation-semantics contract before compiling it',
+    code,
+    diagnosticVersion: COMPILER_DIAGNOSTIC_VERSION,
+    occurrenceIndex: 0,
+    path,
+    phase: 'wholeModelValidation',
+    rule: INVENTORY_DIAGNOSTIC_RULES[code],
+    severity: 'error',
+    subjectId,
+  };
+}
 
 function inventoryDiagnostic(
   code: InventoryContractDiagnosticCode,

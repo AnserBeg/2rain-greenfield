@@ -16,7 +16,7 @@ writer is holding those paths right now.
 |---|---|---|---|
 | **KERNEL** | Canonical language and the query tier | `4c` **accepted** 2026-07-28 — **`Q1-P3b` is next and now unblocked** | **idle** |
 | **DEPLOY** | Release lifecycle and runtime infrastructure | `9` **accepted** 2026-07-28 (breadth-envelope curve) — *awaiting selection; `1c-b` when compiler/domain leases release* | **idle** |
-| **FIX** | Correctness defects → stage cutting → inventory build | `G3-P1b` — legal-entity family map and key participation | **active** |
+| **FIX** | Correctness defects → stage cutting → inventory build | `G3-P1b` **accepted** 2026-07-29 — **`G3-P2b-1` (storage half) is next** | **idle** |
 | **BUILD** | Inventory contracts | `G3-P2a` — tenant-completeness manifest | **active** |
 
 Lane identity is stable across packets. When a lane's packet is accepted, the
@@ -66,7 +66,8 @@ the query tier both live there.
 |---|---|
 | `packages/canonical-model/src/**` | KERNEL |
 | `packages/compiler/src/predicate-lowering.ts` | KERNEL |
-| `packages/compiler/src/compiler.ts` | **KERNEL (4c) and FIX (G3-P1b) — split by concern, granted 2026-07-28.** KERNEL owns language/profile dispatch; FIX owns **storage-target payload v1/v2 family recognition only** (the import near line 54 and the guard near line 1764). Verified disjoint before granting: 4c's hunks sit at ~1-11, 73-109, 789-836 and 990-1022, and 4c touches `STORAGE_TARGET_PAYLOAD_VERSION` **zero** times. 4c integrates first, so FIX merges and takes main's side on dispatch. *(Supersedes the 4a-era note "FIX is on a test-only packet" — no longer true.)* |
+| `test/compiler/{predicate-lowering,g2-module-conformance}.test.ts` | **KERNEL** *(granted 2026-07-29 for `Q1-P3b` — observe the extended lowering table and emitted aggregate plan. Verified FIX touches neither.)* |
+| `packages/compiler/src/compiler.ts` | **KERNEL (4c) and FIX (G3-P1b) — split by concern, granted 2026-07-28.** KERNEL owns language/profile dispatch **and (granted 2026-07-29 for `Q1-P3b`) the v3 aggregate catalog decoration**; FIX owns **storage-target payload v1/v2 family recognition only**. Re-verified 2026-07-29 against FIX's frozen `0b84594`: its only hunks are line 56 (an import) and 1803-1816 (`parseStorageTarget`), disjoint from the aggregate-catalog region. Verified disjoint before granting: 4c's hunks sit at ~1-11, 73-109, 789-836 and 990-1022, and 4c touches `STORAGE_TARGET_PAYLOAD_VERSION` **zero** times. 4c integrates first, so FIX merges and takes main's side on dispatch. *(Supersedes the 4a-era note "FIX is on a test-only packet" — no longer true.)* |
 | `packages/runtime/src/semantic-query-gateway.ts` | KERNEL |
 | `packages/compiler/src/storage.ts` | **FIX** |
 | `packages/compiler/src/projections.ts` | **FIX** |
