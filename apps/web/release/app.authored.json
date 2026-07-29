@@ -2445,6 +2445,18 @@
           "schemaVersion": "v3",
           "slot": "dataGrid",
           "slotId": "northstar.app:slot.party_list_data_grid"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v3",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 30,
+          "schemaVersion": "v3",
+          "slot": "bulkActions",
+          "slotId": "northstar.app:slot.party_list_bulk_actions"
         }
       ],
       "statusRoles": [],
@@ -2514,6 +2526,18 @@
           "schemaVersion": "v3",
           "slot": "keyFacts",
           "slotId": "northstar.app:slot.party_detail_key_facts"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v3",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 50,
+          "schemaVersion": "v3",
+          "slot": "sections",
+          "slotId": "northstar.app:slot.party_detail_sections"
         }
       ],
       "statusRoles": [],
@@ -2581,6 +2605,18 @@
           "kind": "surfaceSlot",
           "orderKey": 40,
           "schemaVersion": "v3",
+          "slot": "keyFacts",
+          "slotId": "northstar.app:slot.party_form_key_facts"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v3",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 50,
+          "schemaVersion": "v3",
           "slot": "sections",
           "slotId": "northstar.app:slot.party_form_sections"
         }
@@ -2628,6 +2664,18 @@
           "schemaVersion": "v3",
           "slot": "dataGrid",
           "slotId": "northstar.app:slot.party_role_list_data_grid"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v3",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 30,
+          "schemaVersion": "v3",
+          "slot": "bulkActions",
+          "slotId": "northstar.app:slot.party_role_list_bulk_actions"
         }
       ],
       "statusRoles": [],
@@ -2697,6 +2745,18 @@
           "schemaVersion": "v3",
           "slot": "keyFacts",
           "slotId": "northstar.app:slot.party_role_detail_key_facts"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v3",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 50,
+          "schemaVersion": "v3",
+          "slot": "sections",
+          "slotId": "northstar.app:slot.party_role_detail_sections"
         }
       ],
       "statusRoles": [],
@@ -2764,6 +2824,18 @@
           "kind": "surfaceSlot",
           "orderKey": 40,
           "schemaVersion": "v3",
+          "slot": "keyFacts",
+          "slotId": "northstar.app:slot.party_role_form_key_facts"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v3",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 50,
+          "schemaVersion": "v3",
           "slot": "sections",
           "slotId": "northstar.app:slot.party_role_form_sections"
         }
@@ -2811,6 +2883,18 @@
           "schemaVersion": "v3",
           "slot": "dataGrid",
           "slotId": "northstar.app:slot.item_list_data_grid"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v3",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 30,
+          "schemaVersion": "v3",
+          "slot": "bulkActions",
+          "slotId": "northstar.app:slot.item_list_bulk_actions"
         }
       ],
       "statusRoles": [],
@@ -2880,6 +2964,18 @@
           "schemaVersion": "v3",
           "slot": "keyFacts",
           "slotId": "northstar.app:slot.item_detail_key_facts"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v3",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 50,
+          "schemaVersion": "v3",
+          "slot": "sections",
+          "slotId": "northstar.app:slot.item_detail_sections"
         }
       ],
       "statusRoles": [],
@@ -2947,6 +3043,18 @@
           "kind": "surfaceSlot",
           "orderKey": 40,
           "schemaVersion": "v3",
+          "slot": "keyFacts",
+          "slotId": "northstar.app:slot.item_form_key_facts"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v3",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 50,
+          "schemaVersion": "v3",
           "slot": "sections",
           "slotId": "northstar.app:slot.item_form_sections"
         }
@@ -2994,6 +3102,18 @@
           "schemaVersion": "v3",
           "slot": "dataGrid",
           "slotId": "northstar.app:slot.location_list_data_grid"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v3",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 30,
+          "schemaVersion": "v3",
+          "slot": "bulkActions",
+          "slotId": "northstar.app:slot.location_list_bulk_actions"
         }
       ],
       "statusRoles": [],
@@ -3063,6 +3183,18 @@
           "schemaVersion": "v3",
           "slot": "keyFacts",
           "slotId": "northstar.app:slot.location_detail_key_facts"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v3",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 50,
+          "schemaVersion": "v3",
+          "slot": "sections",
+          "slotId": "northstar.app:slot.location_detail_sections"
         }
       ],
       "statusRoles": [],
@@ -3129,6 +3261,18 @@
           },
           "kind": "surfaceSlot",
           "orderKey": 40,
+          "schemaVersion": "v3",
+          "slot": "keyFacts",
+          "slotId": "northstar.app:slot.location_form_key_facts"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v3",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 50,
           "schemaVersion": "v3",
           "slot": "sections",
           "slotId": "northstar.app:slot.location_form_sections"

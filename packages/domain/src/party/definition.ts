@@ -437,17 +437,17 @@ function entitySurfaces(
   label: string,
 ): Array<Record<string, unknown>> {
   return [
-    ['list', 'list', ['title', 'dataGrid'], 'list'],
+    ['list', 'list', ['title', 'dataGrid', 'bulkActions'], 'list'],
     [
       'detail',
       'record',
-      ['breadcrumb', 'titleStatus', 'commandBar', 'keyFacts'],
+      ['breadcrumb', 'titleStatus', 'commandBar', 'keyFacts', 'sections'],
       'record',
     ],
     [
       'form',
       'record',
-      ['breadcrumb', 'titleStatus', 'commandBar', 'sections'],
+      ['breadcrumb', 'titleStatus', 'commandBar', 'keyFacts', 'sections'],
       'form',
     ],
   ].map(([suffix, archetype, slots, surfaceRole]) => ({
