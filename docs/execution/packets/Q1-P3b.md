@@ -106,7 +106,7 @@ then executes the aggregate through `SemanticQueryGateway.invokeAggregate` and
 `PostgresModuleRuntimeInterpreter` under forced RLS. PostgreSQL printed:
 
 ```text
-Q1-P3b aggregate probe index=nsm_i_lepgpjussjyql6b3ldh4rwxrj4j57lv75uua4rhg2odbv7kpc7gq delta=1 rows_removed=3 empty=0 base=10.750002 policy=0.750002 archive_removed=100.750002 signed_subunit=-0.25 boundary_scale=0.000001 tenant_other=4000 environment_other=8000 forced_rls=true
+Q1-P3b aggregate probe index=nsm_i_lepgpjussjyql6b3ldh4rwxrj4j57lv75uua4rhg2odbv7kpc7gq delta=1 rows_removed=3 empty=0 base=10.750002 policy=0.750002 archive_removed=100.750002 signed_subunit=-0.25 boundary_scale=0.000001 tenant_other=4000 environment_other=8000 forced_rls=true malformed_temporal=5 malformed_result=4
 ```
 
 This observes:
@@ -184,8 +184,21 @@ guards the quarry failure it was designed around.
 | Policy seam is decorative | `Q1P3B_DEMONSTRATE_MISSING_POLICY=1` omits the compiled contribution | **RED:** actual `10.750002`, expected canonical/policy result `0.750002`. |
 | Archive exclusion is not load-bearing | `Q1P3B_DEMONSTRATE_MISSING_ARCHIVE=1` requires the archive-free total to equal the production total | **RED:** actual archive-free `100.750002`, expected production `0.750002`. |
 | Typed arguments reach the provider malformed | supply Boolean `atTime` | Executed rejection: `MalformedSemanticQueryRequestError`; aggregate executor count exactly zero. |
+| Temporal argument validation accepts syntax but not the declared value domain | temporarily reinstate the former regex/`Date.parse` check and supply nonexistent `2026-02-30T00:00:00.000Z` | **RED:** `malformed parameter reached the provider`; the assertion expected `MalformedSemanticQueryRequestError`. The restored check also rejects hour 24, offset input for `utcInstant`, and missing milliseconds for a millisecond declaration before provider execution. |
+| Provider result shape accepts any string as exact decimal | temporarily remove the precision/scale/canonical-decimal validation and return `NaN` | **RED:** `Missing expected rejection.` The restored check independently rejects `NaN`, `1e3`, scale 7 against scale 6, and a 33-integer-digit value against precision 38/scale 6. |
 | Signed sub-unit literal is declaration-only | temporarily reinstate the former provider decimal validator, then execute the O0 write and compiled `amount >= -0.25` term | **RED:** `MODULE_FIELD_VALUE_INVALID`; with the fix, the gateway total includes `-0.25` and equals the IR evaluator. |
 | Tenant/environment restriction is replaceable | same stock identity and time exist in both foreign scopes | real gateway result remains the same; forced RLS and policy catalog are observed |
+
+## Review round 1
+
+The first fresh Codex review of `622308b8157c762b695c9bd832a2d1502bc11109`
+returned REVISE on two gateway-boundary gaps. Both were material: the temporal
+argument check admitted values outside the compiled temporal domain, and the
+aggregate result check trusted any string despite its exact-decimal contract.
+The fixes are deliberately at the gateway boundary: untrusted request arguments
+are rejected before provider execution, while untrusted executor results are
+rejected before a semantic result is returned. The two independent former-code
+reds above prove each check is load-bearing.
 
 ## Focused gates so far
 

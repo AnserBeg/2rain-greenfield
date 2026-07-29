@@ -24,7 +24,9 @@ import { withTrustedRequestTransaction } from '../../packages/postgres-provider/
 import { TrustedActorEnvelopeIssuer } from '../../packages/postgres-provider/src/trust/trusted-actor-envelope.js';
 import {
   MalformedSemanticQueryRequestError,
+  MalformedPinnedQueryCatalogError,
   MalformedQueryPolicyNarrowingError,
+  SEMANTIC_AGGREGATE_RESULT_VERSION,
   SEMANTIC_QUERY_REQUEST_VERSION,
   SemanticQueryGateway,
   type QueryPolicyNarrowingGateway,
@@ -659,19 +661,69 @@ test('q1 required sum executes through the real gateway with typed parameters an
           throw new Error('malformed parameter reached the provider');
         },
       });
-      await assert.rejects(
-        () =>
-          malformedGateway.invokeAggregate(runtime.views.a, {
-            arguments: {
-              ...arguments_,
-              [aggregateIds.atTimeParameter]: false,
-            },
-            queryId: aggregateIds.query,
-            schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
-          }),
-        (error: unknown) => error instanceof MalformedSemanticQueryRequestError,
-      );
+      for (const malformedAtTime of [
+        false,
+        '2026-02-30T00:00:00.000Z',
+        '2026-01-01T24:00:00.000Z',
+        '2026-01-01T00:00:00.000+00:00',
+        '2026-01-01T00:00:00Z',
+      ]) {
+        await assert.rejects(
+          () =>
+            malformedGateway.invokeAggregate(runtime.views.a, {
+              arguments: {
+                ...arguments_,
+                [aggregateIds.atTimeParameter]: malformedAtTime,
+              },
+              queryId: aggregateIds.query,
+              schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+            }),
+          (error: unknown) =>
+            error instanceof MalformedSemanticQueryRequestError,
+        );
+      }
       assert.equal(malformedExecutorCount, 0);
+
+      const malformedResultValues = [
+        'NaN',
+        '1e3',
+        '0.0000001',
+        '999999999999999999999999999999999',
+      ] as const;
+      for (const malformedValue of malformedResultValues) {
+        const malformedResultGateway = new SemanticQueryGateway(
+          new AllowPolicy(),
+          {
+            async execute() {
+              throw new Error('record executor must not receive an aggregate');
+            },
+            async executeAggregate(request) {
+              return Object.freeze({
+                kind: 'semanticAggregateResult' as const,
+                outcome: 'exact' as const,
+                queryId: request.definition.queryId,
+                schemaVersion: SEMANTIC_AGGREGATE_RESULT_VERSION,
+                value: Object.freeze({
+                  kind: 'exactDecimalResult' as const,
+                  precision: 38 as const,
+                  scale: 6,
+                  selectionId: request.definition.aggregate.selectionId,
+                  value: malformedValue,
+                }),
+              });
+            },
+          },
+        );
+        await assert.rejects(
+          () =>
+            malformedResultGateway.invokeAggregate(runtime.views.a, {
+              arguments: arguments_,
+              queryId: aggregateIds.query,
+              schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+            }),
+          (error: unknown) => error instanceof MalformedPinnedQueryCatalogError,
+        );
+      }
 
       const base = await runtime.queryGateway.invokeAggregate(runtime.views.a, {
         arguments: arguments_,
@@ -773,7 +825,7 @@ test('q1 required sum executes through the real gateway with typed parameters an
           .sort(),
       );
       console.log(
-        `Q1-P3b aggregate probe index=${stockIndex.physicalName} delta=${String(indexDelta)} rows_removed=${String(policyEvidence.rowsRemoved)} empty=0 base=${aggregateValue(base)} policy=${aggregateValue(narrowed)} archive_removed=${archivedIncluded} signed_subunit=-0.25 boundary_scale=0.000001 tenant_other=4000 environment_other=8000 forced_rls=true`,
+        `Q1-P3b aggregate probe index=${stockIndex.physicalName} delta=${String(indexDelta)} rows_removed=${String(policyEvidence.rowsRemoved)} empty=0 base=${aggregateValue(base)} policy=${aggregateValue(narrowed)} archive_removed=${archivedIncluded} signed_subunit=-0.25 boundary_scale=0.000001 tenant_other=4000 environment_other=8000 forced_rls=true malformed_temporal=5 malformed_result=4`,
       );
     },
     definition,

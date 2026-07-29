@@ -1295,21 +1295,81 @@ function queryParameterValueMatches(
         decimalArgumentFits(value, type.precision, type.scale)
       );
     case 'dateFieldType':
-      return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/u.test(value);
+      return typeof value === 'string' && isoDateArgumentFits(value);
     case 'timeFieldType':
       return (
-        typeof value === 'string' &&
-        /^\d{2}:\d{2}:\d{2}(?:\.\d{3})?$/u.test(value)
+        typeof value === 'string' && isoTimeArgumentFits(value, type.precision)
       );
     case 'dateTimeFieldType':
       return (
         typeof value === 'string' &&
-        /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/u.test(value) &&
-        Number.isNaN(Date.parse(value)) === false
+        isoDateTimeArgumentFits(value, type.precision, type.timezoneSemantics)
       );
     default:
       return false;
   }
+}
+
+function isoDateArgumentFits(value: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(value);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (month < 1 || month > 12 || day < 1) return false;
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return day <= days[month - 1]!;
+}
+
+function isoTimeArgumentFits(
+  value: string,
+  precision: ImmutableJsonValue | undefined,
+): boolean {
+  if (precision !== 'second' && precision !== 'millisecond') return false;
+  const fraction = precision === 'millisecond' ? '\\.\\d{3}' : '';
+  const match = new RegExp(`^(\\d{2}):(\\d{2}):(\\d{2})${fraction}$`, 'u').exec(
+    value,
+  );
+  return (
+    match !== null &&
+    Number(match[1]) < 24 &&
+    Number(match[2]) < 60 &&
+    Number(match[3]) < 60
+  );
+}
+
+function isoDateTimeArgumentFits(
+  value: string,
+  precision: ImmutableJsonValue | undefined,
+  timezoneSemantics: ImmutableJsonValue | undefined,
+): boolean {
+  if (
+    (precision !== 'second' && precision !== 'millisecond') ||
+    (timezoneSemantics !== 'utcInstant' &&
+      timezoneSemantics !== 'offsetDateTime')
+  ) {
+    return false;
+  }
+  const fraction = precision === 'millisecond' ? '(\\.\\d{3})' : '';
+  const zone =
+    timezoneSemantics === 'utcInstant' ? '(Z)' : '([+-](\\d{2}):(\\d{2}))';
+  const match = new RegExp(
+    `^(\\d{4}-\\d{2}-\\d{2})T(\\d{2}:\\d{2}:\\d{2})${fraction}${zone}$`,
+    'u',
+  ).exec(value);
+  if (!match || !isoDateArgumentFits(match[1]!)) return false;
+  const time = `${match[2]}${precision === 'millisecond' ? match[3] : ''}`;
+  if (!isoTimeArgumentFits(time, precision)) return false;
+  if (timezoneSemantics === 'utcInstant') return true;
+  const zoneValue = match.at(-3);
+  const offsetHour = Number(match.at(-2));
+  const offsetMinute = Number(match.at(-1));
+  if (zoneValue === '-00:00') return false;
+  return (
+    offsetMinute < 60 &&
+    (offsetHour < 14 || (offsetHour === 14 && offsetMinute === 0))
+  );
 }
 
 function decimalArgumentFits(
@@ -1369,7 +1429,8 @@ function requireSemanticAggregateResult(
     result.value.precision !== 38 ||
     result.value.scale !== expected.scale ||
     result.value.selectionId !== definition.aggregate.selectionId ||
-    typeof result.value.value !== 'string'
+    typeof result.value.value !== 'string' ||
+    !decimalArgumentFits(result.value.value, 38, expected.scale)
   ) {
     throw new MalformedPinnedQueryCatalogError(
       'aggregate executor result does not match the compiled contract',
