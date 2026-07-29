@@ -205,9 +205,14 @@ async function productJourney(page: Page, baseUrl: string): Promise<void> {
   await compactSectionSummary.focus();
   await page.keyboard.press('Enter');
   await expect(compactSections).not.toHaveAttribute('open', '');
+  await page.setViewportSize({ height: 720, width: 1280 });
+  await expect(compactSectionSummary).toBeVisible();
+  await compactSectionSummary.focus();
   await page.keyboard.press('Enter');
   await expect(compactSections).toHaveAttribute('open', '');
-  await page.setViewportSize({ height: 720, width: 1280 });
+  await expect(
+    compactSections.getByText('browser-persisted@example.test'),
+  ).toBeVisible();
   const overflow = page.locator(
     '[data-platform-slot="record:commandBar"] details.action-overflow',
   );
