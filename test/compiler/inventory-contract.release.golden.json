@@ -1,0 +1,97 @@
+{
+  "configuration": {
+    "approvalThresholds": {
+      "adjustment": null,
+      "correction": null,
+      "count": null,
+      "reBaseline": null,
+      "transfer": null
+    },
+    "maximumBackdateDays": 0,
+    "negativeStock": "reject",
+    "reasonRequirements": {
+      "adjustment": "codeAndNarrative",
+      "correction": "codeAndNarrative",
+      "count": "codeAndNarrative",
+      "reBaseline": "codeAndNarrative",
+      "transfer": "codeOnly"
+    }
+  },
+  "configurationScope": "legalEntity",
+  "dependencySet": [
+    "read:northstar.context:tenant_id",
+    "read:northstar.context:environment_id",
+    "read:northstar.context:actor_id",
+    "read:northstar.context:recorded_at",
+    "read:northstar.context:release_id",
+    "read:northstar.inventory-input:stock_identity",
+    "read:northstar.inventory-input:stock_dimension_set_version",
+    "read:northstar.inventory-input:quantity_delta",
+    "read:northstar.inventory-input:unit_id",
+    "read:northstar.inventory-input:effective_at",
+    "read:northstar.inventory-input:source_identity",
+    "read:northstar.inventory-input:posting_role",
+    "read:northstar.inventory-input:reason",
+    "read:northstar.inventory-input:approval",
+    "read:northstar.catalog:item.base_unit",
+    "read:northstar.catalog:item.lifecycle",
+    "read:northstar.location:location.lifecycle",
+    "read:northstar.party:legal_entity.lifecycle",
+    "read:northstar.inventory:period_lock.closed_through",
+    "read:northstar.inventory:posting_configuration",
+    "read:northstar.inventory:movement.quantity_delta",
+    "transition:northstar.inventory:transaction.state",
+    "append:northstar.inventory:movement",
+    "append:northstar.trust:operation_invocation",
+    "append:northstar.trust:business_change_document",
+    "append:northstar.trust:audit_event",
+    "append:northstar.trust:outbox_event"
+  ],
+  "movement": {
+    "fields": [
+      {
+        "fieldId": "movementId",
+        "semantic": "identifier"
+      },
+      {
+        "fieldId": "stockDimensionSetVersion",
+        "semantic": "stockDimensionSetVersion"
+      },
+      {
+        "fieldId": "quantityDelta",
+        "semantic": "quantity"
+      },
+      {
+        "fieldId": "unitId",
+        "semantic": "unit"
+      },
+      {
+        "fieldId": "effectiveAt",
+        "semantic": "instant"
+      },
+      {
+        "fieldId": "recordedAt",
+        "semantic": "instant"
+      },
+      {
+        "fieldId": "sourceType",
+        "semantic": "sourceType"
+      },
+      {
+        "fieldId": "sourceId",
+        "semantic": "identifier"
+      },
+      {
+        "fieldId": "sourceLine",
+        "semantic": "sourceLine"
+      },
+      {
+        "fieldId": "postingRole",
+        "semantic": "postingRole"
+      }
+    ],
+    "kind": "quantityOnlyMovement"
+  },
+  "releaseRoot": "6c1c81c0a72575b518fc3fcc33bcd1b1430ff11abef5f9a1bc7dcf90c12684e1",
+  "stockDimensions": ["legalEntityId", "itemId", "locationId"]
+}
