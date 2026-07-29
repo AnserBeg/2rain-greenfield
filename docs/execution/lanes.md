@@ -41,8 +41,20 @@ most the dependency graph allows.
 
 Reconsider the moment 4c integrates: `1c` is the stronger candidate — 1b's gate
 now refuses the platform package, so saved filters are non-releasable and the
-row is a red test rather than an argument. It needs a scoping pass first, since
-its Tier-B branch likely needs a canonical concept that does not exist.
+row is a red test rather than an argument.
+
+**The scoping pass is already done, and it inverted the prediction.** An earlier
+draft of this section said the Tier-B branch likely needs a canonical concept
+that does not exist. **It does not** — `schemas.ts:947-950` declares
+`storageClass` as `.nullable().optional()`, so an entity carrying no compiled
+storage class is expressible at v2 today; the `normalize.ts:773-779` rule that
+would refuse it is gated on `LEGACY_LANGUAGE_VERSION` and binds v0-experimental
+packages only. What refuses the shape is two **compiler** rules outside
+`canonical-model`: `conformance.ts:169-177` and `storage.ts:433`. **Branch (a) is
+the one needing a canonical concept** — migration 0012 scopes saved-filter RLS on
+`owner_principal_id`, and no per-principal row-ownership primitive exists
+anywhere in the compiled path. Full finding, with the discriminator answer, is in
+`current-plan.md` row 1c. **Do not re-derive it from this file; read that row.**
 
 ## Path partition — binding
 
