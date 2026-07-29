@@ -15,7 +15,7 @@ writer is holding those paths right now.
 | Lane | Theme | Current packet | Status |
 |---|---|---|---|
 | **KERNEL** | Canonical language and the query tier | `4c` — packages adopt v3 (the artifact event) | **active** |
-| **DEPLOY** | Release lifecycle and runtime infrastructure | *awaiting selection — `1c` recommended, or `1g2`* | **idle** |
+| **DEPLOY** | Release lifecycle and runtime infrastructure | `1c-a` **accepted** 2026-07-28 (ADR-0023) — *awaiting selection* | **idle** |
 | **FIX** | Correctness defects → stage cutting → inventory build | `1d` — the unique-index emitter | **active** |
 | **BUILD** | Inventory contracts | `G3-P2a` — tenant-completeness manifest | **active** |
 
