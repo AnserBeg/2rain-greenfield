@@ -118,6 +118,7 @@ export function parseNormalizedApplicationPackageJson(
   enforceFamilyBounds(normalized);
   validateSemantics(normalized);
   enforceValueBounds(normalized);
+  validateNormalizedDerivation(normalized);
   return deepFreeze(normalized);
 }
 
@@ -452,6 +453,25 @@ export function canonicalAuthoredProjection(
     }
   });
   return parseAuthoredValue(projected);
+}
+
+function validateNormalizedDerivation(
+  normalized: VersionedNormalizedApplicationPackage,
+): void {
+  const renormalized =
+    normalized.languageVersion === LANGUAGE_VERSIONS.v3
+      ? normalizeApplicationPackage(canonicalAuthoredProjection(normalized))
+      : normalizeApplicationPackage(canonicalAuthoredProjection(normalized));
+  if (canonicalize(renormalized) === canonicalize(normalized)) return;
+  throw new CanonicalModelError([
+    diagnostic(
+      'CANON_NORMALIZED_DERIVED_MISMATCH',
+      '$',
+      'normalized authority must equal the deterministic normalization of its canonical authored projection',
+      'derive normalized metadata through normalizeApplicationPackage',
+      normalized.package.packageId,
+    ),
+  ]);
 }
 
 function parseAuthoredValue(

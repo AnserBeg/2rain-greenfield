@@ -563,6 +563,20 @@ test('query aggregate semantics are total, exact, strict, and sum-only', () => {
 });
 
 test('v3 aggregate admission rejects optional, unused, and unsupported shapes', () => {
+  const missingReservation = v3AggregateModule();
+  delete missingReservation.impactAnalyses;
+  expectDiagnostic(
+    () => normalizeApplicationPackage(missingReservation),
+    'CANON_SCHEMA_INVALID',
+  );
+
+  const populatedReservation = v3AggregateModule();
+  populatedReservation.impactAnalyses = [{}];
+  expectDiagnostic(
+    () => normalizeApplicationPackage(populatedReservation),
+    'CANON_SCHEMA_INVALID',
+  );
+
   const optional = v3AggregateModule() as {
     fields: Array<Record<string, unknown>>;
   };
@@ -651,6 +665,41 @@ test('v3 aggregate admission rejects optional, unused, and unsupported shapes', 
   expectDiagnostic(
     () => normalizeApplicationPackage(crossEntity),
     'CANON_QUERY_AGGREGATE_FIELD_LOCALITY',
+    { objectId: V3_AGGREGATE_IDS.aggregateQuery },
+  );
+
+  const wrongSourceType = v3AggregateModule() as {
+    queries: Array<Record<string, unknown>>;
+  };
+  const wrongSourceQuery = wrongSourceType.queries.find(
+    (query) => query.queryId === V3_AGGREGATE_IDS.aggregateQuery,
+  )!;
+  (
+    (wrongSourceQuery.aggregate as Record<string, unknown>).field as Record<
+      string,
+      unknown
+    >
+  ).targetId = 'northstar.modulefixture:field.master_number';
+  expectDiagnostic(
+    () => normalizeApplicationPackage(wrongSourceType),
+    'CANON_QUERY_AGGREGATE_TYPE_UNSUPPORTED',
+    { objectId: V3_AGGREGATE_IDS.aggregateQuery },
+  );
+
+  const unresolvedParameter = v3AggregateModule() as {
+    queries: Array<Record<string, unknown>>;
+  };
+  const unresolvedQuery = unresolvedParameter.queries.find(
+    (query) => query.queryId === V3_AGGREGATE_IDS.aggregateQuery,
+  )!;
+  const unresolvedTerms = (
+    unresolvedQuery.filter as { terms: Array<Record<string, unknown>> }
+  ).terms;
+  (unresolvedTerms[0]!.value as Record<string, unknown>).parameterId =
+    'northstar.modulefixture:parameter.missing';
+  expectDiagnostic(
+    () => normalizeApplicationPackage(unresolvedParameter),
+    'CANON_QUERY_PARAMETER_UNRESOLVED',
     { objectId: V3_AGGREGATE_IDS.aggregateQuery },
   );
 

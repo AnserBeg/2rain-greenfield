@@ -497,6 +497,14 @@ test('v3 compiles through explicit profile dispatch with the complete v2 project
   ) as Record<string, unknown>;
   authoredV3.impactAnalyses = [];
   authoredV3.normalizationProfileVersion = NORMALIZATION_PROFILE_VERSIONS.v3;
+  const authoredOperation = (
+    authoredV3.operations as Array<Record<string, unknown>>
+  )[0]!;
+  authoredOperation.precondition = {
+    kind: 'booleanPredicate',
+    schemaVersion: LANGUAGE_VERSIONS.v3,
+    value: false,
+  };
   const normalizedV3 = normalizeApplicationPackage(authoredV3);
   const v3Input = inputNormalized(normalizedV3);
   v3Input.profile = {
@@ -521,6 +529,23 @@ test('v3 compiles through explicit profile dispatch with the complete v2 project
   assert.equal(
     v3.bundle.releaseManifest.normalizationProfileVersion,
     NORMALIZATION_PROFILE_VERSIONS.v3,
+  );
+  const operationCatalog = projectionPayload<{
+    operations: Array<{ operationId: string; precondition: unknown }>;
+  }>(v3, PROJECTION_FAMILY_IDS.operationCatalog);
+  const normalizedPrecondition = normalizedV3.operations.find(
+    (operation) => operation.operationId === authoredOperation.operationId,
+  )?.precondition;
+  assert.deepEqual(normalizedPrecondition, {
+    kind: 'booleanPredicate',
+    schemaVersion: LANGUAGE_VERSIONS.v3,
+    value: false,
+  });
+  assert.deepEqual(
+    operationCatalog.operations.find(
+      (operation) => operation.operationId === authoredOperation.operationId,
+    )?.precondition,
+    normalizedPrecondition,
   );
 
   const invalidV3 = structuredClone(normalizedV3);
@@ -640,6 +665,41 @@ test('v3 aggregate catalog metadata is derived from one canonical source', () =>
         : left.subjectId > right.subjectId
           ? 1
           : 0,
+    ),
+  );
+
+  const tamperedResultType = structuredClone(normalized) as unknown as {
+    queries: Array<Record<string, unknown>>;
+  };
+  const tamperedAggregate = tamperedResultType.queries.find(
+    (query) => query.queryId === V3_AGGREGATE_IDS.aggregateQuery,
+  )!.aggregate as { resultType: Record<string, unknown> };
+  tamperedAggregate.resultType.scale = 3;
+  const tamperedResultInput = inputNormalized(tamperedResultType);
+  tamperedResultInput.profile = { ...compilerInput.profile };
+  const tamperedResult = compileApplication(tamperedResultInput);
+  assert.equal(tamperedResult.status, 'failed');
+  assert.ok(
+    tamperedResult.diagnostics.some(
+      (diagnostic) => diagnostic.code === 'CANON_NORMALIZED_DERIVED_MISMATCH',
+    ),
+  );
+
+  const tamperedParameter = structuredClone(normalized) as unknown as {
+    queries: Array<Record<string, unknown>>;
+  };
+  const tamperedFilter = tamperedParameter.queries.find(
+    (query) => query.queryId === V3_AGGREGATE_IDS.aggregateQuery,
+  )!.filter as { terms: Array<Record<string, unknown>> };
+  (tamperedFilter.terms[0]!.value as Record<string, unknown>).parameterId =
+    'northstar.modulefixture:parameter.missing';
+  const tamperedParameterInput = inputNormalized(tamperedParameter);
+  tamperedParameterInput.profile = { ...compilerInput.profile };
+  const unresolvedParameter = compileApplication(tamperedParameterInput);
+  assert.equal(unresolvedParameter.status, 'failed');
+  assert.ok(
+    unresolvedParameter.diagnostics.some(
+      (diagnostic) => diagnostic.code === 'CANON_QUERY_PARAMETER_UNRESOLVED',
     ),
   );
 });

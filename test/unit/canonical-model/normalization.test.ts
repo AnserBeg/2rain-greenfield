@@ -307,6 +307,27 @@ test('v3 gates aggregate nodes, typed parameters, signed decimals, and the D2 re
     }).success,
     false,
   );
+
+  const defaulted = v3AggregateModule() as {
+    fields: Array<Record<string, unknown>>;
+  };
+  const amount = defaulted.fields.find(
+    (field) => field.fieldId === 'northstar.modulefixture:field.master_amount',
+  )!;
+  amount.defaultSemantics = 'declaredDefault';
+  amount.defaultValue = {
+    kind: 'exactDecimalValue',
+    schemaVersion: 'v3',
+    value: '-0.25',
+  };
+  const normalizedDefault = normalizeApplicationPackage(defaulted);
+  assert.deepEqual(
+    normalizedDefault.fields.find(
+      (field) =>
+        field.fieldId === 'northstar.modulefixture:field.master_amount',
+    )?.defaultValue,
+    amount.defaultValue,
+  );
 });
 
 test('legacy envelopes reject every v3-only collection and query spelling', () => {

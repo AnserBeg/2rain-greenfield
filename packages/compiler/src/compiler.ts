@@ -909,6 +909,29 @@ function decorateV3ProjectionPlans(
         },
       };
     }
+    if (plan.familyId === PROJECTION_FAMILY_IDS.operationCatalog) {
+      const payload = plan.payload as {
+        kind: string;
+        operations: Array<Record<string, unknown>>;
+        schemaVersion: string;
+      };
+      const preconditions = new Map<string, unknown>(
+        packageRevision.operations.map((operation) => [
+          String(operation.operationId),
+          operation.precondition,
+        ]),
+      );
+      return {
+        ...plan,
+        payload: {
+          ...payload,
+          operations: payload.operations.map((operation) => ({
+            ...operation,
+            precondition: preconditions.get(String(operation.operationId))!,
+          })),
+        },
+      };
+    }
     if (plan.familyId === PROJECTION_FAMILY_IDS.semanticModel) {
       const payload = plan.payload as {
         constructs: Array<{

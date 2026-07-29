@@ -560,6 +560,15 @@ const authoredFieldDefinition = normalizedFieldDefinition.extend({
   reportable: z.boolean().optional(),
   searchable: z.boolean().optional(),
 });
+const normalizedV3FieldDefinition = normalizedFieldDefinition.extend({
+  defaultValue: v3CanonicalScalarSchema.optional(),
+});
+const authoredV3FieldDefinition = normalizedV3FieldDefinition.extend({
+  lifecycle: z.enum(['active', 'retired']).optional(),
+  presence: z.enum(['optional', 'required']).optional(),
+  reportable: z.boolean().optional(),
+  searchable: z.boolean().optional(),
+});
 
 const normalizedRelationDefinition = z.strictObject({
   archiveBehavior: z.enum(['restrict', 'retainReference']),
@@ -999,6 +1008,7 @@ const legacyNormalizedShape = {
 
 const v3NormalizedShape = {
   ...legacyNormalizedShape,
+  fields: z.array(normalizedV3FieldDefinition),
   // The collection is the v3 closed-set reservation. Row 4d owns its element
   // spelling, so 4b deliberately admits no impact-analysis content.
   impactAnalyses: z.tuple([]),
@@ -1050,6 +1060,7 @@ const legacyAuthoredShape = {
 
 const v3AuthoredShape = {
   ...legacyAuthoredShape,
+  fields: z.array(authoredV3FieldDefinition),
   impactAnalyses: z.tuple([]),
   languageVersion: v3NodeVersion,
   operations: z.array(authoredV3OperationDefinition),
