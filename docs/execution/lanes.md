@@ -51,6 +51,8 @@ the query tier both live there.
 | `packages/domain/src/inventory/**` | BUILD *(G3-P1a creates it)* — KERNEL may migrate its **version strings only**, and only if it exists at 4c's integration time |
 | `test/helpers/postgres.ts` | DEPLOY *(granted 2026-07-28 for 1b — readiness-race fix only; a 1f regression blocking its gate)* |
 | `test/helpers/node-reporter-core.mjs` · `test/architecture/test-reachability.test.ts` | DEPLOY *(granted 2026-07-28 for 1b — admit `--test-concurrency=<positive int>` to PR-4b's closed argv grammar; filtering arguments must still be rejected)* |
+| `apps/web/release/**` (generated artifacts) | FIX *(granted 2026-07-28 for 1d — regenerate stale lineage after storage roots moved; re-derived at integration, so concurrent regeneration by 4c is expected)* |
+| `learnings.md` | FIX *(granted 2026-07-28 for 1d — add-only, one entry)* |
 | `apps/web/scripts/compile-app-release.ts` | KERNEL *(granted 2026-07-28 for 4c — per-artifact compiler-profile selection when verifying persisted lineage)* |
 | `apps/web/**` (rest) · rest of `packages/domain/**` | **none — frozen while lanes run** |
 
