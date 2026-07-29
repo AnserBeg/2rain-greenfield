@@ -50,6 +50,85 @@
     "append:northstar.trust:outbox_event",
     "append:northstar.trust:semantic_operation_receipt"
   ],
+  "legalEntity": {
+    "families": [
+      {
+        "classification": "tenantShared",
+        "familyId": "legal_entity"
+      },
+      {
+        "classification": "tenantShared",
+        "familyId": "party"
+      },
+      {
+        "classification": "tenantShared",
+        "familyId": "party_role"
+      },
+      {
+        "classification": "tenantShared",
+        "familyId": "item"
+      },
+      {
+        "classification": "tenantShared",
+        "familyId": "location"
+      },
+      {
+        "classification": "entityOwned",
+        "familyId": "inventory_movement"
+      },
+      {
+        "classification": "entityOwned",
+        "familyId": "inventory_transaction"
+      },
+      {
+        "classification": "entityOwned",
+        "familyId": "inventory_transaction_line"
+      },
+      {
+        "classification": "entityOwned",
+        "familyId": "reservation"
+      },
+      {
+        "classification": "entityOwned",
+        "familyId": "stock_count"
+      },
+      {
+        "classification": "entityOwned",
+        "familyId": "stock_count_line"
+      }
+    ],
+    "relations": [
+      {
+        "semantics": "sameEntity",
+        "sourceFamilyId": "inventory_movement",
+        "targetFamilyId": "location"
+      },
+      {
+        "semantics": "sameEntity",
+        "sourceFamilyId": "inventory_movement",
+        "targetFamilyId": "inventory_transaction"
+      },
+      {
+        "semantics": "crossEntityAllowed",
+        "sourceFamilyId": "inventory_movement",
+        "targetFamilyId": "item"
+      },
+      {
+        "semantics": "crossEntityAllowed",
+        "sourceFamilyId": "party_role",
+        "targetFamilyId": "party"
+      }
+    ],
+    "undeclaredFamily": {
+      "diagnosticCode": "INVENTORY_LEGAL_ENTITY_FAMILY_UNDECLARED",
+      "disposition": "compileFailure"
+    },
+    "undeclaredRelation": {
+      "diagnosticCode": "INVENTORY_RELATION_ENTITY_SEMANTICS_UNDECLARED",
+      "disposition": "compileFailure"
+    },
+    "version": "northstar.legal-entity-family-contract/v1"
+  },
   "movement": {
     "fields": [
       {
@@ -95,6 +174,10 @@
     ],
     "kind": "quantityOnlyMovement"
   },
-  "releaseRoot": "f653a6365199f02186832bdab4e55e6009ba914a41fe2a6b3bb9c21e5c8579d5",
+  "releaseRoot": "c65517349623a30f3ddce75e57dca0af404646e82f27e73ce0b6586b4c1d17fb",
+  "storageTargetPayloadVersions": {
+    "entityOwned": "northstar.storage-target-payload/v2",
+    "tenantShared": "northstar.storage-target-payload/v1"
+  },
   "stockDimensions": ["legalEntityId", "itemId", "locationId"]
 }

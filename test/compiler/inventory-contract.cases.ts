@@ -2,6 +2,18 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 import {
+  canonicalize,
+  normalizeApplicationPackage,
+} from '../../packages/canonical-model/src/index.js';
+import {
+  DEFAULT_COMPILER_LIMITS,
+  MODULE_COMPILER_PROFILE,
+  PROJECTION_FAMILY_IDS,
+  compileApplication,
+  type CompileSuccess,
+  type CompilerInput,
+} from '../../packages/compiler/src/index.js';
+import {
   compileInventoryContract,
   validateInventoryBaseUnitChange,
   validateInventoryMovementCandidate,
@@ -9,7 +21,16 @@ import {
   type InventoryContractDiagnostic,
   type InventoryMovementCandidateV1,
 } from '../../packages/compiler/src/conformance.js';
-import { INVENTORY_CONTRACT_V1 } from '../../packages/domain/src/inventory/index.js';
+import {
+  INVENTORY_CONTRACT_V1,
+  LEGAL_ENTITY_FAMILY_MAP_V1,
+  LEGAL_ENTITY_RELATION_SEMANTICS_V1,
+} from '../../packages/domain/src/inventory/index.js';
+import { partyModuleDefinition } from '../../packages/domain/src/party/definition.js';
+import {
+  FIXTURE_IDS,
+  ordinaryModuleV2,
+} from '../fixtures/g2/module-conformance/definitions.js';
 
 interface MutableInventoryContract {
   authoritativeDependencies: {
@@ -19,6 +40,10 @@ interface MutableInventoryContract {
   compiledArtifacts: Array<Record<string, unknown>>;
   configuration: {
     dials: Record<string, unknown>;
+  };
+  legalEntity: {
+    families: Array<Record<string, unknown>>;
+    relations: Array<Record<string, unknown>>;
   };
   movement: {
     fields: Array<Record<string, unknown>>;
@@ -107,6 +132,7 @@ export function registerInventoryContractCases(
       assert.equal(dependencies.exhaustiveByConstruction, true);
       assert.equal(dependencies.undeclaredAccess, 'compileFailure');
       assert.equal(dependencies.dependencies.length, 30);
+      assert.deepEqual(contract.legalEntity, INVENTORY_CONTRACT_V1.legalEntity);
 
       const golden = JSON.parse(
         readFileSync(
@@ -115,6 +141,163 @@ export function registerInventoryContractCases(
         ),
       ) as unknown;
       assert.deepEqual(releaseSummary(first), golden);
+    },
+  );
+
+  register(
+    'legal-entity families and relation endpoint semantics have no default',
+    () => {
+      const compiled = mustCompile();
+      const legalEntity = compiled.release.contract.legalEntity as {
+        families: unknown[];
+        relations: unknown[];
+      };
+      assert.deepEqual(legalEntity.families, LEGAL_ENTITY_FAMILY_MAP_V1);
+      assert.deepEqual(
+        legalEntity.relations,
+        LEGAL_ENTITY_RELATION_SEMANTICS_V1,
+      );
+
+      const missingFamily = mutableContract();
+      missingFamily.legalEntity.families =
+        missingFamily.legalEntity.families.filter(
+          (rule) => rule.familyId !== 'inventory_movement',
+        );
+      const missingFamilyResult = compileInventoryContract(missingFamily);
+      assert.equal(missingFamilyResult.status, 'failed');
+      assertHasDiagnostic(
+        missingFamilyResult.diagnostics,
+        'INVENTORY_LEGAL_ENTITY_FAMILY_UNDECLARED',
+        '$.legalEntity.families.inventory_movement',
+        'inventory_movement',
+      );
+
+      const missingRelation = mutableContract();
+      missingRelation.legalEntity.relations =
+        missingRelation.legalEntity.relations.filter(
+          (rule) =>
+            !(
+              rule.sourceFamilyId === 'inventory_movement' &&
+              rule.targetFamilyId === 'location'
+            ),
+        );
+      const missingRelationResult = compileInventoryContract(missingRelation);
+      assert.equal(missingRelationResult.status, 'failed');
+      assertHasDiagnostic(
+        missingRelationResult.diagnostics,
+        'INVENTORY_RELATION_ENTITY_SEMANTICS_UNDECLARED',
+        '$.legalEntity.relations.inventory_movement->location',
+        'inventory_movement->location',
+      );
+
+      const reclassified = mutableContract();
+      const movement = reclassified.legalEntity.families.find(
+        (rule) => rule.familyId === 'inventory_movement',
+      );
+      assert.ok(movement);
+      movement.classification = 'tenantShared';
+      const reclassifiedResult = compileInventoryContract(reclassified);
+      assert.equal(reclassifiedResult.status, 'failed');
+      assertHasDiagnostic(
+        reclassifiedResult.diagnostics,
+        'INVENTORY_CONTRACT_INVALID',
+        '$.legalEntity.families.inventory_movement.classification',
+        'inventory_movement',
+      );
+
+      const hiddenDefault = mutableContract() as MutableInventoryContract & {
+        legalEntity: Record<string, unknown>;
+      };
+      hiddenDefault.legalEntity.defaultClassification = 'tenantShared';
+      const hiddenDefaultResult = compileInventoryContract(hiddenDefault);
+      assert.equal(hiddenDefaultResult.status, 'failed');
+      assertHasDiagnostic(
+        hiddenDefaultResult.diagnostics,
+        'INVENTORY_CONTRACT_INVALID',
+        '$.legalEntity',
+        'legalEntity',
+      );
+
+      const reordered = mutableContract();
+      reordered.legalEntity.families.reverse();
+      const reorderedResult = compileInventoryContract(reordered);
+      assert.equal(reorderedResult.status, 'failed');
+      assertHasDiagnostic(
+        reorderedResult.diagnostics,
+        'INVENTORY_CONTRACT_INVALID',
+        '$.legalEntity.families',
+        'order',
+      );
+    },
+  );
+
+  register(
+    'canonical relation endpoints derive pinned entity semantics at compilation',
+    () => {
+      const accepted = compileApplication(moduleInput(partyModuleDefinition()));
+      assert.equal(
+        accepted.status,
+        'compiled',
+        accepted.status === 'failed'
+          ? JSON.stringify(accepted.diagnostics)
+          : undefined,
+      );
+
+      const undeclaredFamily = replaceExactString(
+        partyModuleDefinition(),
+        'northstar.party:entity.party_role',
+        'northstar.party:entity.undeclared_role',
+      );
+      const familyResult = compileApplication(moduleInput(undeclaredFamily));
+      assert.equal(familyResult.status, 'failed');
+      assert.deepEqual(
+        familyResult.diagnostics
+          .filter(
+            (diagnostic) =>
+              diagnostic.code === 'INVENTORY_LEGAL_ENTITY_FAMILY_UNDECLARED',
+          )
+          .map(({ code, path, subjectId }) => ({ code, path, subjectId })),
+        [
+          {
+            code: 'INVENTORY_LEGAL_ENTITY_FAMILY_UNDECLARED',
+            path: '$.entities.entityId',
+            subjectId: 'northstar.party:entity.undeclared_role',
+          },
+        ],
+      );
+
+      const undeclaredRelation = partyModuleDefinition() as {
+        relations: Array<{
+          ownership: string;
+          sourceEntity: { targetId: string };
+          targetEntity: { targetId: string };
+        }>;
+      };
+      undeclaredRelation.relations[0]!.ownership = 'reference';
+      undeclaredRelation.relations[0]!.sourceEntity.targetId =
+        'northstar.party:entity.party';
+      undeclaredRelation.relations[0]!.targetEntity.targetId =
+        'northstar.party:entity.party_role';
+      const relationResult = compileApplication(
+        moduleInput(undeclaredRelation),
+      );
+      assert.equal(relationResult.status, 'failed');
+      assert.deepEqual(
+        relationResult.diagnostics
+          .filter(
+            (diagnostic) =>
+              diagnostic.code ===
+              'INVENTORY_RELATION_ENTITY_SEMANTICS_UNDECLARED',
+          )
+          .map(({ code, path, subjectId }) => ({ code, path, subjectId })),
+        [
+          {
+            code: 'INVENTORY_RELATION_ENTITY_SEMANTICS_UNDECLARED',
+            path: '$.relations',
+            subjectId: 'northstar.party:relation.party_role_party',
+          },
+        ],
+      );
     },
   );
 
@@ -566,6 +749,66 @@ function validMovementCandidate(): InventoryMovementCandidateV1 {
   };
 }
 
+function moduleInput(definition: unknown): CompilerInput {
+  return {
+    dependencies: [],
+    expectedActiveRelease: null,
+    kind: 'compilerInput',
+    limits: { ...DEFAULT_COMPILER_LIMITS },
+    normalizedDefinitionBytes: new TextEncoder().encode(
+      canonicalize(normalizeApplicationPackage(definition)),
+    ),
+    profile: { ...MODULE_COMPILER_PROFILE },
+  };
+}
+
+function mustCompileModule(definition: unknown): CompileSuccess {
+  const result = compileApplication(moduleInput(definition));
+  assert.equal(
+    result.status,
+    'compiled',
+    result.status === 'failed' ? JSON.stringify(result.diagnostics) : undefined,
+  );
+  return result as CompileSuccess;
+}
+
+function storageTargetPayloadVersion(definition: unknown): string {
+  const compiled = mustCompileModule(definition);
+  const reference = compiled.bundle.releaseManifest.projections.find(
+    (projection) => projection.familyId === PROJECTION_FAMILY_IDS.storageTarget,
+  );
+  assert.ok(reference);
+  return reference.payloadSchemaVersion;
+}
+
+function entityOwnedStorageDefinition(): unknown {
+  return replaceExactString(
+    replaceExactString(
+      ordinaryModuleV2(),
+      FIXTURE_IDS.entityIds.parent,
+      `${FIXTURE_IDS.namespace}:entity.location`,
+    ),
+    FIXTURE_IDS.entityIds.child,
+    `${FIXTURE_IDS.namespace}:entity.inventory_movement`,
+  );
+}
+
+function replaceExactString(value: unknown, from: string, to: string): unknown {
+  if (value === from) return to;
+  if (Array.isArray(value)) {
+    return value.map((entry) => replaceExactString(entry, from, to));
+  }
+  if (typeof value === 'object' && value !== null) {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [
+        key,
+        replaceExactString(entry, from, to),
+      ]),
+    );
+  }
+  return value;
+}
+
 function diagnosticView(diagnostics: InventoryContractDiagnostic[]): unknown {
   return diagnostics.map(({ bindingMovementId, code, path, subjectId }) => ({
     bindingMovementId,
@@ -608,6 +851,7 @@ function releaseSummary(compiled: CompiledInventoryContractV1): unknown {
     dependencySet: dependencies.dependencies.map(
       (entry) => `${entry.access}:${entry.dependencyId}`,
     ),
+    legalEntity: contract.legalEntity,
     movement: {
       fields: movement.fields.map((field) => ({
         fieldId: field.fieldId,
@@ -616,6 +860,10 @@ function releaseSummary(compiled: CompiledInventoryContractV1): unknown {
       kind: movement.kind,
     },
     releaseRoot: compiled.releaseRoot,
+    storageTargetPayloadVersions: {
+      entityOwned: storageTargetPayloadVersion(entityOwnedStorageDefinition()),
+      tenantShared: storageTargetPayloadVersion(partyModuleDefinition()),
+    },
     stockDimensions: (contract.stockDimensionSet as { dimensions: string[] })
       .dimensions,
   };
