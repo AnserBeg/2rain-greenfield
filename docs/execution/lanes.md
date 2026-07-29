@@ -16,7 +16,7 @@ writer is holding those paths right now.
 |---|---|---|---|
 | **KERNEL** | Canonical language and the query tier | `4c` **accepted** 2026-07-28 — **`Q1-P3b` is next and now unblocked** | **idle** |
 | **DEPLOY** | Release lifecycle and runtime infrastructure | `9` **accepted** 2026-07-28 (breadth-envelope curve) — *awaiting selection; `1c-b` when compiler/domain leases release* | **idle** |
-| **FIX** | Correctness defects → stage cutting → inventory build | `G3-P1b` — legal-entity family map and key participation | **active** |
+| **FIX** | Correctness defects → stage cutting → inventory build | `G3-P1b` **accepted** 2026-07-29 — **`G3-P2b-1` (storage half) is next** | **idle** |
 | **BUILD** | Inventory contracts | `G3-P2a` — tenant-completeness manifest | **active** |
 
 Lane identity is stable across packets. When a lane's packet is accepted, the
