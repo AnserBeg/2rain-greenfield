@@ -12,12 +12,12 @@ writer is holding those paths right now.
 
 ## The lanes
 
-| Lane | Theme | Current packet | Base | Status |
-|---|---|---|---|---|
-| **KERNEL** | Canonical language and the query tier | *awaiting selection — `4c` next; artifact window now OPEN* | — | **idle** |
-| **DEPLOY** | Release lifecycle and runtime infrastructure | `1b` — release-admission verification integrity | `07ce6de` | active |
-| **FIX** | Correctness defects → stage cutting → inventory build | *awaiting selection — `1d` is now unblocked* | — | **idle** |
-| **BUILD** | Inventory contracts *(fourth lane, opened 2026-07-28)* | *awaiting selection — `G3-P1b` after `1d`; `G3-P2` after both* | — | **idle** |
+| Lane | Theme | Current packet | Status |
+|---|---|---|---|
+| **KERNEL** | Canonical language and the query tier | `4c` — packages adopt v3 (the artifact event) | **active** |
+| **DEPLOY** | Release lifecycle and runtime infrastructure | *awaiting selection — `1c` recommended, or `1g2`* | **idle** |
+| **FIX** | Correctness defects → stage cutting → inventory build | `1d` — the unique-index emitter | **active** |
+| **BUILD** | Inventory contracts | `G3-P2a` — tenant-completeness manifest | **active** |
 
 Lane identity is stable across packets. When a lane's packet is accepted, the
 next packet inherits the lane and its partition.
@@ -38,18 +38,21 @@ the query tier both live there.
 | `packages/compiler/src/projections.ts` | **FIX** |
 | `packages/postgres-provider/src/module-storage-materializer.ts` | FIX |
 | `apps/api/**` | DEPLOY |
-| `packages/postgres-provider/src/composed-application-runtime.ts` | DEPLOY |
-| `packages/postgres-provider/src/release-*.ts` | DEPLOY |
+| `packages/postgres-provider/src/composed-application-runtime.ts` | **KERNEL** *(released from DEPLOY 2026-07-28 on 1b's integration, for 4c)* |
+| `packages/postgres-provider/src/release-*.ts` | **KERNEL** *(released from DEPLOY 2026-07-28 on 1b's integration, for 4c)* |
 | `packages/compiler/src/verification.ts` | DEPLOY *(assigned 2026-07-28 for packet 1b)* |
 | `db/schema.snapshot.json` | DEPLOY *(granted 2026-07-28 for 1b — migration 0013 moves it)* |
 | `test/architecture/release-persistence-boundary.test.ts` | DEPLOY *(granted for 1b — hardcodes the migration inventory through 0012)* |
-| `test/fixtures/g2/*/runtime-harness.ts` | DEPLOY *(granted for 1b — all four mint `randomUUID()` evidence and must produce genuine evidence instead; **no test-only bypass**)* |
-| `db/migrations/**` · `packages/postgres-provider/src/migrations.ts` | **DEPLOY while 1b runs** — reassigned from FIX, whose current packet (1e press guards) needs no migration. Reverts to FIX when 1b lands. |
+| `test/fixtures/g2/*/runtime-harness.ts` | **KERNEL** *(released from DEPLOY 2026-07-28 on 1b's integration, for 4c's version-stamp fix)* |
+| `db/migrations/**` · `packages/postgres-provider/src/migrations.ts` | **FIX** *(reverted from DEPLOY 2026-07-28 on 1b's integration; `0013` is taken, so 1d's migration is `0014`)* |
 | `packages/postgres-provider/src/module-runtime-interpreter.ts` | KERNEL |
 | `docs/execution/packets/**` · `docs/execution/stage-cut-inputs.md` | FIX *(granted 2026-07-28 for G3-P0; each lane still owns its own packet doc)* |
 | `packages/domain/src/{party,catalog,location,platform}/definition.ts` · `app/builder.ts` | KERNEL *(granted 2026-07-28 for 4c — **version/profile strings and the empty `impactAnalyses` root only**; no definition semantics)* |
 | `packages/domain/src/inventory/**` | BUILD *(G3-P1a creates it)* — KERNEL may migrate its **version strings only**, and only if it exists at 4c's integration time |
 | `test/helpers/postgres.ts` | DEPLOY *(granted 2026-07-28 for 1b — readiness-race fix only; a 1f regression blocking its gate)* |
+| `test/helpers/node-reporter-core.mjs` · `test/architecture/test-reachability.test.ts` | DEPLOY *(granted 2026-07-28 for 1b — admit `--test-concurrency=<positive int>` to PR-4b's closed argv grammar; filtering arguments must still be rejected)* |
+| `apps/web/release/**` (generated artifacts) | FIX *(granted 2026-07-28 for 1d — regenerate stale lineage after storage roots moved; re-derived at integration, so concurrent regeneration by 4c is expected)* |
+| `learnings.md` | FIX *(granted 2026-07-28 for 1d — add-only, one entry)* |
 | `apps/web/scripts/compile-app-release.ts` | KERNEL *(granted 2026-07-28 for 4c — per-artifact compiler-profile selection when verifying persisted lineage)* |
 | `apps/web/**` (rest) · rest of `packages/domain/**` | **none — frozen while lanes run** |
 
@@ -103,6 +106,22 @@ files at integration.
 
 The orchestrator enforced the stronger constraint until 2026-07-28 and it cost
 sequencing that was never required.
+
+## The PostgreSQL suite runs serially — found 2026-07-28 by packet 1b
+
+`test:postgres` carried no `--test-concurrency` flag, so Node defaulted to
+CPU-count concurrency across **21 files**, each spinning Docker containers. The
+heaviest test (`composed product activates through the kernel`) blew its 120 s
+bound under sibling load while passing in **45.2 s** alone.
+
+**A gate whose verdict depends on machine load is not observing the fact it
+asserts** — it is observing the fact plus the scheduler. The script now pins
+`--test-concurrency=1`, which is what every writer had already been doing by
+hand: 1f's, G3-P1a's and 1b's own test-it-yourself commands all pass it.
+
+This class of phantom failure cost three packets real time before it was
+diagnosed. **Do not raise a timeout to make a loaded run pass** — that widens
+what starvation is allowed to look like instead of removing it.
 
 ## Full-matrix runs must NOT overlap — found 2026-07-28 by packet 1f
 

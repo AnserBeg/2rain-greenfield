@@ -121,6 +121,53 @@ test('filtered commands cannot produce evidence', () => {
   );
 });
 
+test('node reachability accepts positive scheduling concurrency without accepting filters', () => {
+  const producer = getReachabilityProducer('unit');
+  const context = {
+    suiteId: producer.id,
+    workingDirectory: process.cwd(),
+    reporterPath: resolve('test/helpers/node-test-evidence-reporter.mjs'),
+    repositoryRoot: process.cwd(),
+  };
+  const argumentsWith = (...additionalArguments: string[]) => [
+    '--import',
+    'tsx',
+    '--test',
+    ...additionalArguments,
+    '--test-reporter=./test/helpers/node-test-evidence-reporter.mjs',
+    '--test-reporter-destination=test-results/reachability/unit.json',
+    '--test-reporter=tap',
+    '--test-reporter-destination=stdout',
+  ];
+
+  assert.doesNotThrow(() =>
+    assertUnfilteredNodeArguments(
+      argumentsWith('--test-concurrency=1'),
+      context,
+    ),
+  );
+  for (const invalid of [
+    '--test-concurrency',
+    '--test-concurrency=0',
+    '--test-concurrency=-1',
+    '--test-concurrency=all',
+    '--test-concurrency=1x',
+  ]) {
+    assert.throws(
+      () => assertUnfilteredNodeArguments(argumentsWith(invalid), context),
+      new RegExp(`Filtered or unrecognized node:test argument: ${invalid}`),
+    );
+  }
+  assert.throws(
+    () =>
+      assertUnfilteredNodeArguments(
+        argumentsWith('--test-concurrency=1', '--test-name-pattern=x'),
+        context,
+      ),
+    /Filtered or unrecognized node:test argument: --test-name-pattern=x/u,
+  );
+});
+
 test('comparison canary reports exactly an unreachable synthetic test', () => {
   const unreachable = findUnreachableTests(
     new Set(['test/reachable.test.ts', 'test/orphan-demo/orphan.test.ts']),

@@ -9,3 +9,4 @@ Read `AGENTS.md` — it is the single operating doctrine for this repository.
   with a "Test it yourself" checkpoint. Never continue autonomously to the
   next packet (see the `mission-cadence` skill).
 - Prior repository (salvage quarry, read-only): `/home/rvham/2rain_erp`.
+- **New orchestrator session?** Start at `docs/execution/orchestrator-handoff.md`.

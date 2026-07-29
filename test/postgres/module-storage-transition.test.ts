@@ -59,6 +59,7 @@ import {
   SchemaDriftError,
 } from '../../packages/postgres-provider/src/migrations.js';
 import { PostgresImmutableReleaseRepository } from '../../packages/postgres-provider/src/release-repository.js';
+import { PostgresReleaseVerificationService } from '../../packages/postgres-provider/src/release-verification-service.js';
 import { withTrustedRequestTransaction } from '../../packages/postgres-provider/src/request-context.js';
 import {
   AuthenticatedRequestEntryAdapter,
@@ -141,6 +142,7 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
           '0010_semantic_operation_receipt_scope.sql',
           '0011_module_fold_function_ddl_witness.sql',
           '0012_saved_master_filters.sql',
+          '0013_release_verification_evidence.sql',
         ]);
         assert.equal(migrationResult.verified.length, allMigrations.length);
         await seedScope(admin);
@@ -404,6 +406,7 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
             assert.equal(executed.disposition, 'READY_TO_SWAP');
             assert.equal(executed.receipt?.state, 'READY_TO_SWAP');
             assert.equal(executed.deferredOnlineFamilyElementsProcessed, 0);
+            await admitPreparedTarget(runtimePool, contexts.a, releases.a);
             console.log(
               'PR-6c deferredOnlineFamily elements processed: 0 (fresh-table plan)',
             );
@@ -533,10 +536,11 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
                 generationId: scenario.generationId,
               });
               assert.equal(resumed.disposition, 'READY_TO_SWAP');
+              await admitPreparedTarget(runtimePool, contexts.a, next);
               await assertBackfillCheckpoint(
                 pool,
                 scenario.generationId,
-                125,
+                planted.expectedBackfillRows,
                 planted,
               );
               const compiledStorage = projectionPayload<StorageTargetPayloadV1>(
@@ -642,7 +646,7 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
               await assertBackfillCheckpoint(
                 pool,
                 scenario.generationId,
-                250,
+                planted.expectedBackfillRows,
                 planted,
               );
             }
@@ -681,7 +685,7 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
               await assertBackfillCheckpoint(
                 pool,
                 scenario.generationId,
-                225,
+                planted.expectedBackfillRows,
                 planted,
               );
               const evidence = await pool.query<{ count: string }>(
@@ -762,7 +766,7 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
               await assertBackfillCheckpoint(
                 pool,
                 scenario.generationId,
-                125,
+                planted.expectedBackfillRows,
                 planted,
               );
             }
@@ -817,7 +821,7 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
               await assertBackfillCheckpoint(
                 pool,
                 scenario.generationId,
-                1,
+                planted.expectedBackfillRows,
                 planted,
               );
             }
@@ -3422,7 +3426,6 @@ async function persistPairForBothTenants(
     const targetRevision = minted(randomUUID());
     const sourceRelease = minted(randomUUID());
     const targetRelease = minted(randomUUID());
-    const targetEvidence = minted(randomUUID());
     await repository.storeAppPackageRevision(
       context,
       revisionCommand(context, sourceRevision, sourceBytes),
@@ -3431,27 +3434,46 @@ async function persistPairForBothTenants(
       context,
       revisionCommand(context, targetRevision, targetBytes),
     );
+    const stagedSource = await repository.stageTenantReleaseCandidate(context, {
+      appPackageRevisionId: sourceRevision,
+      compiledRelease: source,
+      createdBy: context.principalId,
+      environmentId: context.environmentId,
+      releaseId: sourceRelease,
+      tenantId: context.tenantId,
+    });
+    await new PostgresReleaseVerificationService(
+      runtimePool,
+    ).executeSemanticCandidateAndPersist(context, {
+      compiledRelease: source,
+      evidenceId: stagedSource.verificationEvidenceId,
+      releaseId: sourceRelease,
+    });
     await repository.registerTenantRelease(
       context,
       releaseCommand(
         context,
         sourceRelease,
         sourceRevision,
-        minted(randomUUID()),
+        stagedSource.verificationEvidenceId,
         source,
       ),
     );
-    await repository.registerTenantRelease(
-      context,
-      releaseCommand(
-        context,
-        targetRelease,
-        targetRevision,
-        targetEvidence,
-        target,
-      ),
-    );
-    return { source: sourceRelease, target: targetRelease, targetEvidence };
+    const stagedTarget = await repository.stageTenantReleaseCandidate(context, {
+      appPackageRevisionId: targetRevision,
+      compiledRelease: target,
+      createdBy: context.principalId,
+      environmentId: context.environmentId,
+      releaseId: targetRelease,
+      tenantId: context.tenantId,
+    });
+    return {
+      compiled: target,
+      revisionId: targetRevision,
+      source: sourceRelease,
+      target: targetRelease,
+      targetEvidence: stagedTarget.verificationEvidenceId,
+    };
   };
   return { a: await persist(contexts.a), b: await persist(contexts.b) };
 }
@@ -3466,19 +3488,30 @@ async function persistNextRelease(
   const repository = new PostgresImmutableReleaseRepository(runtimePool);
   const revision = minted(randomUUID());
   const target = minted(randomUUID());
-  const targetEvidence = minted(randomUUID());
   await repository.storeAppPackageRevision(
     context,
     revisionCommand(context, revision, bytes),
   );
-  await repository.registerTenantRelease(
-    context,
-    releaseCommand(context, target, revision, targetEvidence, compiled),
-  );
-  return { source: sourceRelease, target, targetEvidence };
+  const staged = await repository.stageTenantReleaseCandidate(context, {
+    appPackageRevisionId: revision,
+    compiledRelease: compiled,
+    createdBy: context.principalId,
+    environmentId: context.environmentId,
+    releaseId: target,
+    tenantId: context.tenantId,
+  });
+  return {
+    compiled,
+    revisionId: revision,
+    source: sourceRelease,
+    target,
+    targetEvidence: staged.verificationEvidenceId,
+  };
 }
 
 interface ReleasePair {
+  compiled: CompileSuccess;
+  revisionId: MintedUuid;
   source: MintedUuid;
   target: MintedUuid;
   targetEvidence: MintedUuid;
@@ -3580,6 +3613,7 @@ async function createV2Approval(
   prepared: Awaited<ReturnType<PostgresModuleStorageMaterializer['prepare']>>,
   preparationId: string,
 ): Promise<string> {
+  assert.equal(target.releaseRoot, releases.compiled.releaseRoot);
   const pointer = await adminPool.query<{
     fence: string;
     pointer_id: MintedUuid;
@@ -3695,6 +3729,32 @@ async function createV2Approval(
   return approval.attempt.activationAttemptId;
 }
 
+async function admitPreparedTarget(
+  runtimePool: pg.Pool,
+  context: TrustedRequestContext,
+  release: ReleasePair,
+): Promise<void> {
+  const repository = new PostgresImmutableReleaseRepository(runtimePool);
+  if (await repository.getTenantRelease(context, release.target)) return;
+  await new PostgresReleaseVerificationService(
+    runtimePool,
+  ).executeSemanticCandidateAndPersist(context, {
+    compiledRelease: release.compiled,
+    evidenceId: release.targetEvidence,
+    releaseId: release.target,
+  });
+  await repository.registerTenantRelease(
+    context,
+    releaseCommand(
+      context,
+      release.target,
+      release.revisionId,
+      release.targetEvidence,
+      release.compiled,
+    ),
+  );
+}
+
 async function createAdditionalV2Approval(
   runtimePool: pg.Pool,
   contexts: { approver: TrustedRequestContext },
@@ -3775,6 +3835,7 @@ async function readKernelLiveRoots(
 
 interface PlantedBackfillRows {
   columnName: string;
+  expectedBackfillRows: number;
   recordIds: string[];
   tableName: string;
 }
@@ -3840,6 +3901,11 @@ async function seedBackfillRows(
   );
   const located = target.rows[0];
   assert.ok(located, 'compiled backfill target must be visible');
+  const existing = await pool.query<{ count: string }>(
+    `SELECT count(*)::text AS count
+       FROM north_star_module.${quoteTestIdentifier(located.table_name)}
+      WHERE ${quoteTestIdentifier(located.column_name)} IS NULL`,
+  );
   const columns = await pool.query<{
     column_name: string;
     data_type: string;
@@ -3883,6 +3949,7 @@ async function seedBackfillRows(
   );
   return {
     columnName: located.column_name,
+    expectedBackfillRows: Number(existing.rows[0]?.count ?? '0') + count,
     recordIds,
     tableName: located.table_name,
   };
@@ -3917,8 +3984,8 @@ async function assertBackfillCheckpoint(
     [planted.recordIds],
   );
   assert.deepEqual(rows.rows[0], {
-    completed: String(expectedRows),
-    total: String(expectedRows),
+    completed: String(planted.recordIds.length),
+    total: String(planted.recordIds.length),
   });
 }
 
