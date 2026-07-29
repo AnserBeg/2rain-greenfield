@@ -10,6 +10,7 @@ import {
   CanonicalReferenceSchema,
   VersionedCanonicalScalarSchema,
   type CanonicalScalar,
+  type FieldType,
   type PredicateExpression,
   type QueryParameterReference,
 } from './schemas.js';
@@ -107,6 +108,7 @@ export type ParameterizedPredicateLoweringNode =
         | FieldComparisonPredicate['operator']
         | 'greaterThanOrEqual'
         | 'lessThanOrEqual';
+      sourceFieldType: Readonly<FieldType>;
       value: Readonly<CanonicalScalar | QueryParameterReference>;
     }>
   | Readonly<{
@@ -140,6 +142,7 @@ export interface QueryAggregateLoweringPlan {
   readonly loweringRowId: 'northstar.query-aggregate-lowering/required-sum-v1';
   readonly providerProbeId: 'Q1-P3b/required-sum-tenant-bounded-scan';
   readonly schemaVersion: typeof QUERY_AGGREGATE_LOWERING_PLAN_VERSION;
+  readonly sourceFieldType: Readonly<FieldType>;
 }
 
 export type PredicateBindingPosition =

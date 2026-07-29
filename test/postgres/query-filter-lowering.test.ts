@@ -18,6 +18,7 @@ import {
 import { partyModuleDefinition } from '../../packages/domain/src/party/index.js';
 import {
   buildQueryFilterPredicate,
+  ModuleRuntimeInterpreterError,
   PostgresModuleRuntimeInterpreter,
 } from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
 import { withTrustedRequestTransaction } from '../../packages/postgres-provider/src/request-context.js';
@@ -31,10 +32,13 @@ import {
   SemanticQueryGateway,
   type QueryPolicyNarrowingGateway,
 } from '../../packages/runtime/src/semantic-query-gateway.js';
+import { AuthenticatedRequestEntryAdapter } from '../../packages/runtime/src/request-context.js';
 import {
+  AuthenticatedRequestRuntimeEntryAdapter,
   CURRENT_POLICY_DECISION_VERSION,
   type CurrentPolicyGateway,
   type ImmutableJsonValue,
+  type RequestRuntimeView,
 } from '../../packages/runtime/src/request-runtime-view.js';
 import type { Pool, PoolClient } from 'pg';
 
@@ -461,6 +465,7 @@ test('q1 filters preserve total semantics, cost classes, policy narrowing, and p
         (error: unknown) => error instanceof MalformedQueryPolicyNarrowingError,
       );
       assert.equal(malformedExecutorCount, 0);
+
       const narrowedGateway = new SemanticQueryGateway(
         new AllowPolicy(),
         new PostgresModuleRuntimeInterpreter(
@@ -684,6 +689,160 @@ test('q1 required sum executes through the real gateway with typed parameters an
       }
       assert.equal(malformedExecutorCount, 0);
 
+      let malformedCatalogExecutorCount = 0;
+      const malformedCatalogGateway = new SemanticQueryGateway(
+        new AllowPolicy(),
+        {
+          async execute() {
+            throw new Error('record executor must not receive an aggregate');
+          },
+          async executeAggregate() {
+            malformedCatalogExecutorCount += 1;
+            throw new Error('malformed aggregate catalog reached the provider');
+          },
+        },
+      );
+      const mismatchedParameterView = await issuedViewWithMutatedAggregateQuery(
+        runtime.views.a,
+        aggregateIds.query,
+        (query) => {
+          assert.ok(Array.isArray(query.parameters));
+          const parameter = query.parameters.find(
+            (candidate) =>
+              isRecord(candidate) &&
+              candidate.parameterId === aggregateIds.atTimeParameter,
+          );
+          assert.ok(isRecord(parameter));
+          parameter.parameterType = {
+            kind: 'textFieldType',
+            maximumLength: 40,
+            schemaVersion: 'v3',
+          };
+        },
+      );
+      await assert.rejects(
+        () =>
+          malformedCatalogGateway.invokeAggregate(mismatchedParameterView, {
+            arguments: {
+              ...arguments_,
+              [aggregateIds.atTimeParameter]: 'infinity',
+            },
+            queryId: aggregateIds.query,
+            schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+          }),
+        (error: unknown) => error instanceof MalformedPinnedQueryCatalogError,
+      );
+
+      const mismatchedResultView = await issuedViewWithMutatedAggregateQuery(
+        runtime.views.a,
+        aggregateIds.query,
+        (query) => {
+          assert.ok(isRecord(query.aggregate));
+          query.aggregate.resultType = {
+            baseUnit: {
+              kind: 'unitReference',
+              schemaVersion: 'v3',
+              targetId: `${PARTY_IDS.namespace}:unit.review_mismatch`,
+            },
+            kind: 'quantityAggregateResultType',
+            precision: 38,
+            scale: 6,
+            schemaVersion: 'v3',
+          };
+        },
+      );
+      await assert.rejects(
+        () =>
+          malformedCatalogGateway.invokeAggregate(mismatchedResultView, {
+            arguments: arguments_,
+            queryId: aggregateIds.query,
+            schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+          }),
+        (error: unknown) => error instanceof MalformedPinnedQueryCatalogError,
+      );
+      assert.equal(malformedCatalogExecutorCount, 0);
+
+      const physicalParameterMismatchView =
+        await issuedViewWithMutatedAggregateQuery(
+          runtime.views.a,
+          aggregateIds.query,
+          (query) => {
+            assert.ok(Array.isArray(query.parameters));
+            const parameter = query.parameters.find(
+              (candidate) =>
+                isRecord(candidate) &&
+                candidate.parameterId === aggregateIds.atTimeParameter,
+            );
+            assert.ok(isRecord(parameter));
+            const textType = {
+              kind: 'textFieldType',
+              maximumLength: 40,
+              schemaVersion: 'v3',
+            };
+            parameter.parameterType = textType;
+            const comparison = requiredAggregatePlanComparison(
+              query,
+              aggregateIds.effectiveAtField,
+            );
+            comparison.sourceFieldType = textType;
+          },
+        );
+      await assert.rejects(
+        () =>
+          runtime.queryGateway.invokeAggregate(physicalParameterMismatchView, {
+            arguments: {
+              ...arguments_,
+              [aggregateIds.atTimeParameter]: 'infinity',
+            },
+            queryId: aggregateIds.query,
+            schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+          }),
+        (error: unknown) =>
+          error instanceof ModuleRuntimeInterpreterError &&
+          error.code === 'MODULE_QUERY_FILTER_PLAN_INVALID',
+      );
+
+      const physicalResultMismatchView =
+        await issuedViewWithMutatedAggregateQuery(
+          runtime.views.a,
+          aggregateIds.query,
+          (query) => {
+            const baseUnit = {
+              kind: 'unitReference',
+              schemaVersion: 'v3',
+              targetId: `${PARTY_IDS.namespace}:unit.review_mismatch`,
+            };
+            assert.ok(isRecord(query.aggregate));
+            query.aggregate.resultType = {
+              baseUnit,
+              kind: 'quantityAggregateResultType',
+              precision: 38,
+              scale: 6,
+              schemaVersion: 'v3',
+            };
+            assert.ok(isRecord(query.aggregatePlan));
+            query.aggregatePlan.sourceFieldType = {
+              baseUnit,
+              kind: 'quantityFieldType',
+              precision: 20,
+              representation: 'canonicalString',
+              scale: 6,
+              schemaVersion: 'v3',
+            };
+          },
+        );
+      await assert.rejects(
+        () =>
+          runtime.queryGateway.invokeAggregate(physicalResultMismatchView, {
+            arguments: arguments_,
+            queryId: aggregateIds.query,
+            schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+          }),
+        (error: unknown) =>
+          error instanceof ModuleRuntimeInterpreterError &&
+          error.code === 'MODULE_AGGREGATE_CONTRACT_INVALID',
+      );
+
       const malformedResultValues = [
         'NaN',
         '1e3',
@@ -724,6 +883,40 @@ test('q1 required sum executes through the real gateway with typed parameters an
           (error: unknown) => error instanceof MalformedPinnedQueryCatalogError,
         );
       }
+
+      const unexpectedEnvelopeGateway = new SemanticQueryGateway(
+        new AllowPolicy(),
+        {
+          async execute() {
+            throw new Error('record executor must not receive an aggregate');
+          },
+          async executeAggregate(request) {
+            return Object.freeze({
+              kind: 'semanticAggregateResult' as const,
+              outcome: 'exact' as const,
+              queryId: request.definition.queryId,
+              schemaVersion: SEMANTIC_AGGREGATE_RESULT_VERSION,
+              unintendedProviderData: 'must-not-escape',
+              value: Object.freeze({
+                kind: 'exactDecimalResult' as const,
+                precision: 38 as const,
+                scale: 6,
+                selectionId: request.definition.aggregate.selectionId,
+                value: '0',
+              }),
+            });
+          },
+        },
+      );
+      await assert.rejects(
+        () =>
+          unexpectedEnvelopeGateway.invokeAggregate(runtime.views.a, {
+            arguments: arguments_,
+            queryId: aggregateIds.query,
+            schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+          }),
+        (error: unknown) => error instanceof MalformedPinnedQueryCatalogError,
+      );
 
       const base = await runtime.queryGateway.invokeAggregate(runtime.views.a, {
         arguments: arguments_,
@@ -825,7 +1018,7 @@ test('q1 required sum executes through the real gateway with typed parameters an
           .sort(),
       );
       console.log(
-        `Q1-P3b aggregate probe index=${stockIndex.physicalName} delta=${String(indexDelta)} rows_removed=${String(policyEvidence.rowsRemoved)} empty=0 base=${aggregateValue(base)} policy=${aggregateValue(narrowed)} archive_removed=${archivedIncluded} signed_subunit=-0.25 boundary_scale=0.000001 tenant_other=4000 environment_other=8000 forced_rls=true malformed_temporal=5 malformed_result=4`,
+        `Q1-P3b aggregate probe index=${stockIndex.physicalName} delta=${String(indexDelta)} rows_removed=${String(policyEvidence.rowsRemoved)} empty=0 base=${aggregateValue(base)} policy=${aggregateValue(narrowed)} archive_removed=${archivedIncluded} signed_subunit=-0.25 boundary_scale=0.000001 tenant_other=4000 environment_other=8000 forced_rls=true malformed_temporal=5 malformed_catalog=2 physical_catalog=2 malformed_result=4 malformed_envelope=1`,
       );
     },
     definition,
@@ -1007,6 +1200,57 @@ interface CompiledAggregateQuery {
   readonly aggregatePlan: QueryAggregateLoweringPlan;
   readonly filter: Readonly<Record<string, ImmutableJsonValue>>;
   readonly filterPlan: ParameterizedPredicateLoweringPlan;
+}
+
+async function issuedViewWithMutatedAggregateQuery(
+  source: RequestRuntimeView,
+  queryId: string,
+  mutate: (query: Record<string, unknown>) => void,
+): Promise<RequestRuntimeView> {
+  const payload = structuredClone(source.projections.query.payload);
+  assert.ok(isRecord(payload));
+  assert.ok(Array.isArray(payload.queries));
+  const query = payload.queries.find(
+    (candidate) => isRecord(candidate) && candidate.queryId === queryId,
+  );
+  assert.ok(isRecord(query));
+  mutate(query);
+  const entry = new AuthenticatedRequestRuntimeEntryAdapter(
+    new AuthenticatedRequestEntryAdapter(async () => PARTY_TEST_SCOPE.a),
+    {
+      async load() {
+        return {
+          environmentId: source.environmentId,
+          pointer: source.pointer,
+          projections: {
+            ...source.projections,
+            query: {
+              ...source.projections.query,
+              payload: payload as ImmutableJsonValue,
+            },
+          },
+          release: source.release,
+          tenantId: source.tenantId,
+        };
+      },
+    },
+    new AllowPolicy(),
+  );
+  return entry.run({}, (view) => view);
+}
+
+function requiredAggregatePlanComparison(
+  query: Record<string, unknown>,
+  fieldId: string,
+): Record<string, unknown> {
+  assert.ok(isRecord(query.filterPlan));
+  assert.ok(isRecord(query.filterPlan.root));
+  assert.ok(Array.isArray(query.filterPlan.root.terms));
+  const comparison = query.filterPlan.root.terms.find(
+    (candidate) => isRecord(candidate) && candidate.fieldId === fieldId,
+  );
+  assert.ok(isRecord(comparison));
+  return comparison;
 }
 
 function compiledAggregateQuery(

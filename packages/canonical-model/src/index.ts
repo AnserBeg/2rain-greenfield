@@ -49,6 +49,7 @@ export {
   type AuthoredApplicationPackage,
   type CanonicalId,
   type CanonicalScalar,
+  type FieldType,
   type NormalizedApplicationPackage,
   type PredicateExpression,
   type PredicateExpressionV3,

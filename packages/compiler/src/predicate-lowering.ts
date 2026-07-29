@@ -149,6 +149,10 @@ export function lowerQueryAggregate(
     (candidate) => candidate.match === 'requiredSum',
   );
   if (!row) throw new Error('aggregate lowering table row is missing');
+  const aggregateField = fields.get(query.aggregate.field.targetId);
+  if (!aggregateField) {
+    throw new Error('aggregate source field has no canonical definition');
+  }
   return Object.freeze({
     aggregatePlan: Object.freeze({
       costClass: 'tenantBoundedScan',
@@ -158,6 +162,7 @@ export function lowerQueryAggregate(
       providerProbeId:
         row.providerProbeId as QueryAggregateLoweringPlan['providerProbeId'],
       schemaVersion: QUERY_AGGREGATE_LOWERING_PLAN_VERSION,
+      sourceFieldType: Object.freeze(structuredClone(aggregateField.fieldType)),
     }),
     filterPlan: Object.freeze({
       costClass: costClassFor(root),
@@ -215,14 +220,19 @@ function lowerVersionedNode(
         kind: predicate.kind,
         loweringRowId: row.loweringRowId as ParameterizedPredicateLoweringRowId,
         operator: predicate.operator,
+        ...(parameterized
+          ? {
+              sourceFieldType: Object.freeze(structuredClone(field.fieldType)),
+            }
+          : {}),
         value: Object.freeze(structuredClone(predicate.value)),
-      });
+      }) as ParameterizedPredicateLoweringNode | PredicateLoweringNode;
     }
     case 'notPredicate':
       return Object.freeze({
         kind: predicate.kind,
         term: lowerVersionedNode(predicate.term, fields, entity, parameterized),
-      });
+      }) as ParameterizedPredicateLoweringNode | PredicateLoweringNode;
     case 'allPredicate':
     case 'anyPredicate':
       return Object.freeze({
@@ -232,7 +242,7 @@ function lowerVersionedNode(
             lowerVersionedNode(term, fields, entity, parameterized),
           ),
         ),
-      });
+      }) as ParameterizedPredicateLoweringNode | PredicateLoweringNode;
   }
 }
 

@@ -886,7 +886,7 @@ function decorateV3ProjectionPlans(
             .map((query) =>
               query.queryType === 'aggregate'
                 ? {
-                    ...lowerQueryAggregate(query, dispatchRevision, storage),
+                    ...lowerQueryAggregate(query, packageRevision, storage),
                     aggregate: {
                       fieldId: query.aggregate.field.targetId,
                       operator: query.aggregate.operator,

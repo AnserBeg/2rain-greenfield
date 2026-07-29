@@ -832,7 +832,14 @@ function assertAggregateQueryDefinition(
   assertAggregateResultType(value.aggregate.resultType, invalid);
   assertExactKeys(
     value.aggregatePlan,
-    ['costClass', 'kind', 'loweringRowId', 'providerProbeId', 'schemaVersion'],
+    [
+      'costClass',
+      'kind',
+      'loweringRowId',
+      'providerProbeId',
+      'schemaVersion',
+      'sourceFieldType',
+    ],
     invalid,
   );
   if (
@@ -842,10 +849,19 @@ function assertAggregateQueryDefinition(
       'northstar.query-aggregate-lowering/required-sum-v1' ||
     value.aggregatePlan.providerProbeId !==
       'Q1-P3b/required-sum-tenant-bounded-scan' ||
-    value.aggregatePlan.schemaVersion !== QUERY_AGGREGATE_LOWERING_PLAN_VERSION
+    value.aggregatePlan.schemaVersion !==
+      QUERY_AGGREGATE_LOWERING_PLAN_VERSION ||
+    FieldTypeSchema.safeParse(value.aggregatePlan.sourceFieldType).success ===
+      false ||
+    !isRecord(value.aggregatePlan.sourceFieldType)
   ) {
     throw invalid('aggregate query lowering plan is invalid');
   }
+  assertAggregateSourceMatchesResult(
+    value.aggregatePlan.sourceFieldType,
+    value.aggregate.resultType,
+    invalid,
+  );
   assertExactKeys(
     value.resultContract,
     ['kind', 'outcome', 'schemaVersion'],
@@ -858,7 +874,7 @@ function assertAggregateQueryDefinition(
   ) {
     throw invalid('aggregate result contract is invalid');
   }
-  const parameterIds = new Set<string>();
+  const parameterTypes = new Map<string, Record<string, unknown>>();
   for (const parameter of value.parameters) {
     if (!isRecord(parameter)) {
       throw invalid('aggregate query parameter must be an object');
@@ -873,14 +889,40 @@ function assertAggregateQueryDefinition(
       !Number.isSafeInteger(parameter.orderKey) ||
       Number(parameter.orderKey) < 0 ||
       Number(parameter.orderKey) > 1_000_000 ||
-      parameterIds.has(parameter.parameterId as string) ||
-      FieldTypeSchema.safeParse(parameter.parameterType).success === false
+      parameterTypes.has(parameter.parameterId as string) ||
+      FieldTypeSchema.safeParse(parameter.parameterType).success === false ||
+      !isRecord(parameter.parameterType)
     ) {
       throw invalid('aggregate query parameter contract is invalid');
     }
-    parameterIds.add(parameter.parameterId as string);
+    parameterTypes.set(
+      parameter.parameterId as string,
+      parameter.parameterType,
+    );
   }
-  assertParameterizedPlanReferences(value.filterPlan, parameterIds, invalid);
+  assertParameterizedPlanReferences(value.filterPlan, parameterTypes, invalid);
+}
+
+function assertAggregateSourceMatchesResult(
+  sourceFieldType: Record<string, unknown>,
+  resultType: Record<string, unknown>,
+  invalid: (message: string) => Error,
+): void {
+  const quantity = sourceFieldType.kind === 'quantityFieldType';
+  if (
+    (sourceFieldType.kind !== 'exactDecimalFieldType' && !quantity) ||
+    sourceFieldType.schemaVersion !== 'v3' ||
+    sourceFieldType.scale !== resultType.scale ||
+    (quantity
+      ? resultType.kind !== 'quantityAggregateResultType' ||
+        !isRecord(sourceFieldType.baseUnit) ||
+        !isRecord(resultType.baseUnit) ||
+        canonicalizeAndHash(sourceFieldType.baseUnit).contentHash !==
+          canonicalizeAndHash(resultType.baseUnit).contentHash
+      : resultType.kind !== 'exactDecimalAggregateResultType')
+  ) {
+    throw invalid('aggregate result type does not match its source field');
+  }
 }
 
 function assertAggregateResultType(
@@ -1078,7 +1120,7 @@ function inspectLoweringNode(
   depth: number,
   error: (message: string) => Error,
   parameterized: boolean,
-  parameterIds?: Set<string>,
+  parameterTypes?: Map<string, Record<string, unknown>>,
 ): Readonly<{
   comparisonCosts: PredicateCostClass[];
 }> {
@@ -1105,6 +1147,7 @@ function inspectLoweringNode(
           'kind',
           'loweringRowId',
           'operator',
+          ...(parameterized ? ['sourceFieldType'] : []),
           'value',
         ],
         error,
@@ -1112,6 +1155,11 @@ function inspectLoweringNode(
       assertCanonicalId(value.fieldId, 'fieldId', error);
       if (
         !isRecord(value.value) ||
+        (parameterized &&
+          (!isRecord(value.sourceFieldType) ||
+            FieldTypeSchema.safeParse(value.sourceFieldType).success ===
+              false ||
+            value.sourceFieldType.schemaVersion !== 'v3')) ||
         !(
           parameterized
             ? [
@@ -1137,7 +1185,22 @@ function inspectLoweringNode(
         if (value.value.schemaVersion !== 'v3') {
           throw error('aggregate lowering parameter reference is invalid');
         }
-        parameterIds?.add(value.value.parameterId);
+        const parameterId = value.value.parameterId as string;
+        const sourceFieldType = value.sourceFieldType as Record<
+          string,
+          unknown
+        >;
+        const prior = parameterTypes?.get(parameterId);
+        if (
+          prior &&
+          canonicalizeAndHash(prior).contentHash !==
+            canonicalizeAndHash(sourceFieldType).contentHash
+        ) {
+          throw error(
+            'aggregate lowering uses one parameter with incompatible source types',
+          );
+        }
+        parameterTypes?.set(parameterId, sourceFieldType);
       }
       const folded =
         value.loweringRowId ===
@@ -1180,7 +1243,7 @@ function inspectLoweringNode(
         depth + 1,
         error,
         parameterized,
-        parameterIds,
+        parameterTypes,
       );
     }
     case 'allPredicate':
@@ -1195,7 +1258,7 @@ function inspectLoweringNode(
           depth + 1,
           error,
           parameterized,
-          parameterIds,
+          parameterTypes,
         ),
       );
       return {
@@ -1209,23 +1272,28 @@ function inspectLoweringNode(
 
 function assertParameterizedPlanReferences(
   plan: unknown,
-  declaredParameterIds: ReadonlySet<string>,
+  declaredParameterTypes: ReadonlyMap<string, Record<string, unknown>>,
   error: (message: string) => Error,
 ): void {
   if (!isRecord(plan) || !isRecord(plan.root)) {
     throw error('aggregate parameterized lowering plan is invalid');
   }
-  const observed = new Set<string>();
+  const observed = new Map<string, Record<string, unknown>>();
   inspectLoweringNode(plan.root, 1, error, true, observed);
   if (
-    observed.size !== declaredParameterIds.size ||
-    [...declaredParameterIds].some(
-      (parameterId) => !observed.has(parameterId),
+    observed.size !== declaredParameterTypes.size ||
+    [...declaredParameterTypes].some(
+      ([parameterId, parameterType]) =>
+        !observed.has(parameterId) ||
+        canonicalizeAndHash(observed.get(parameterId)!).contentHash !==
+          canonicalizeAndHash(parameterType).contentHash,
     ) ||
-    [...observed].some((parameterId) => !declaredParameterIds.has(parameterId))
+    [...observed].some(
+      ([parameterId]) => !declaredParameterTypes.has(parameterId),
+    )
   ) {
     throw error(
-      'aggregate lowering does not use exactly the declared parameters',
+      'aggregate lowering does not use exactly the declared parameter types',
     );
   }
 }
@@ -1398,6 +1466,16 @@ function requireSemanticAggregateResult(
   definition: RegisteredAggregateQueryDefinition,
   result: SemanticAggregateResultEnvelope | SemanticQueryResultEnvelope,
 ): asserts result is SemanticAggregateResultEnvelope {
+  const malformed = (message: string): MalformedPinnedQueryCatalogError =>
+    new MalformedPinnedQueryCatalogError(message);
+  if (!isRecord(result)) {
+    throw malformed('aggregate executor returned a malformed result');
+  }
+  assertExactKeys(
+    result,
+    ['kind', 'outcome', 'queryId', 'schemaVersion', 'value'],
+    malformed,
+  );
   if (
     result.kind !== 'semanticAggregateResult' ||
     result.schemaVersion !== SEMANTIC_AGGREGATE_RESULT_VERSION ||
@@ -1417,7 +1495,7 @@ function requireSemanticAggregateResult(
     quantity
       ? ['baseUnitId', 'kind', 'precision', 'scale', 'selectionId', 'value']
       : ['kind', 'precision', 'scale', 'selectionId', 'value'],
-    (message) => new MalformedPinnedQueryCatalogError(message),
+    malformed,
   );
   const valueShapeMatches =
     quantity && result.value.kind === 'quantityResult'

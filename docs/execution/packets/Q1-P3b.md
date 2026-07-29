@@ -22,7 +22,8 @@ record-and-coverage List contract.
 
 This packet does not admit another operator, optional aggregands, grouping,
 traversal, joins, reports, exports, or a UI aggregate surface. It does not change
-the canonical wire grammar: `schemas.ts` is unchanged.
+the canonical wire grammar. The only `schemas.ts` change exports a TypeScript
+alias for the already-existing `FieldTypeSchema`; no serialized spelling moves.
 
 ## One lowering authority
 
@@ -35,7 +36,7 @@ The repair is shared, versioned internal IR:
 - `northstar.predicate-lowering-plan/postgres-parameterized-v1` carries v3
   filter structure and scalar-or-parameter operands;
 - `northstar.query-aggregate-lowering-plan/postgres-v1` carries the ruled sum
-  row and its required provider probe;
+  row, its compiler-derived source field type, and its required provider probe;
 - the compiler owns construction; the gateway owns validation and binding; the
   PostgreSQL interpreter owns execution.
 
@@ -72,9 +73,18 @@ qualifying set; that does not turn the aggregate itself into point access.
 The gateway validates exact catalog keys, plan versions, predicate digests,
 structural equality, lowering-row/cost pairs, declared parameter use, parameter
 types, result shape, and the fixed ADR-0022 aggregate identity before provider
-execution. Arguments are untrusted JSON; the request must name exactly every
-declared canonical parameter ID and each value must satisfy the compiler-derived
-field type.
+execution. Each parameter type is byte-semantically matched to the source field
+type carried by its compiler-owned plan node. The aggregate result kind, scale,
+and quantity base unit are likewise matched to its compiler-owned source type.
+Arguments are untrusted JSON; the request must name exactly every declared
+canonical parameter ID and each value must satisfy that matched type.
+
+The PostgreSQL interpreter independently matches each plan source type against
+the compiled physical field contract before binding a parameter or summing a
+column. Catalog metadata therefore cannot relabel an `atTime` timestamp as text
+to admit PostgreSQL's `infinity`, or relabel an exact-decimal measure as a
+quantity with an invented unit. Executor output is also a closed envelope:
+unknown top-level keys are rejected rather than returned to a semantic caller.
 
 The provider appends all validated query and policy plans after its mandatory
 archive predicate. Tenant and environment remain forced-RLS session predicates.
@@ -106,7 +116,7 @@ then executes the aggregate through `SemanticQueryGateway.invokeAggregate` and
 `PostgresModuleRuntimeInterpreter` under forced RLS. PostgreSQL printed:
 
 ```text
-Q1-P3b aggregate probe index=nsm_i_lepgpjussjyql6b3ldh4rwxrj4j57lv75uua4rhg2odbv7kpc7gq delta=1 rows_removed=3 empty=0 base=10.750002 policy=0.750002 archive_removed=100.750002 signed_subunit=-0.25 boundary_scale=0.000001 tenant_other=4000 environment_other=8000 forced_rls=true malformed_temporal=5 malformed_result=4
+Q1-P3b aggregate probe index=nsm_i_lepgpjussjyql6b3ldh4rwxrj4j57lv75uua4rhg2odbv7kpc7gq delta=1 rows_removed=3 empty=0 base=10.750002 policy=0.750002 archive_removed=100.750002 signed_subunit=-0.25 boundary_scale=0.000001 tenant_other=4000 environment_other=8000 forced_rls=true malformed_temporal=5 malformed_catalog=2 physical_catalog=2 malformed_result=4 malformed_envelope=1
 ```
 
 This observes:
@@ -186,6 +196,9 @@ guards the quarry failure it was designed around.
 | Typed arguments reach the provider malformed | supply Boolean `atTime` | Executed rejection: `MalformedSemanticQueryRequestError`; aggregate executor count exactly zero. |
 | Temporal argument validation accepts syntax but not the declared value domain | temporarily reinstate the former regex/`Date.parse` check and supply nonexistent `2026-02-30T00:00:00.000Z` | **RED:** `malformed parameter reached the provider`; the assertion expected `MalformedSemanticQueryRequestError`. The restored check also rejects hour 24, offset input for `utcInstant`, and missing milliseconds for a millisecond declaration before provider execution. |
 | Provider result shape accepts any string as exact decimal | temporarily remove the precision/scale/canonical-decimal validation and return `NaN` | **RED:** `Missing expected rejection.` The restored check independently rejects `NaN`, `1e3`, scale 7 against scale 6, and a 33-integer-digit value against precision 38/scale 6. |
+| Parameter metadata can be relabelled independently of its compared field | change only `atTime.parameterType` to valid text and submit PostgreSQL-specific `infinity` | Executed rejection: `MalformedPinnedQueryCatalogError`; executor count exactly zero. Changing both catalog copies to text reaches the independent physical check and rejects with `MODULE_QUERY_FILTER_PLAN_INVALID`. |
+| Aggregate result metadata can be relabelled independently of its measure | change exact-decimal result metadata to quantity with an invented base unit | Executed rejection: `MalformedPinnedQueryCatalogError`; executor count exactly zero. Coordinating both catalog copies still reaches the physical check and rejects with `MODULE_AGGREGATE_CONTRACT_INVALID`. |
+| Executor envelope accepts undeclared provider data | return a valid aggregate result plus `unintendedProviderData` | Executed rejection: `MalformedPinnedQueryCatalogError`; removing the exact-key check makes this control red with `Missing expected rejection.` |
 | Signed sub-unit literal is declaration-only | temporarily reinstate the former provider decimal validator, then execute the O0 write and compiled `amount >= -0.25` term | **RED:** `MODULE_FIELD_VALUE_INVALID`; with the fix, the gateway total includes `-0.25` and equals the IR evaluator. |
 | Tenant/environment restriction is replaceable | same stock identity and time exist in both foreign scopes | real gateway result remains the same; forced RLS and policy catalog are observed |
 
@@ -199,6 +212,23 @@ The fixes are deliberately at the gateway boundary: untrusted request arguments
 are rejected before provider execution, while untrusted executor results are
 rejected before a semantic result is returned. The two independent former-code
 reds above prove each check is load-bearing.
+
+## Review round 2
+
+The next fresh Codex review of
+`f98a5ad290ea2a253f3e69811c0248c76d30f951` returned REVISE on three
+cross-contract gaps: catalog parameter types were not bound to the physical
+fields they compared; aggregate result kind/base unit were not bound to the
+source measure; and the executor envelope itself allowed extra top-level keys.
+
+The correction does not add another evaluator. The compiler enriches the same
+versioned plans with the source `FieldType` already used during lowering; the
+gateway's existing single traversal validates declared types against those
+plan receipts; and the provider validates those receipts against storage. The
+three executed controls above cover catalog-only drift, coordinated catalog
+drift reaching physical storage, and undeclared executor output separately.
+This is the second and final writer fix round under the Critical convergence
+cap; the next fresh Codex review must PASS or the packet stops for re-scoping.
 
 ## Focused gates so far
 

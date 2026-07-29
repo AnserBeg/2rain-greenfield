@@ -724,6 +724,13 @@ test('v3 aggregate catalog metadata is derived from one canonical source', () =>
       loweringRowId: 'northstar.query-aggregate-lowering/required-sum-v1',
       providerProbeId: 'Q1-P3b/required-sum-tenant-bounded-scan',
       schemaVersion: 'northstar.query-aggregate-lowering-plan/postgres-v1',
+      sourceFieldType: {
+        kind: 'exactDecimalFieldType',
+        precision: 5,
+        representation: 'canonicalString',
+        scale: 2,
+        schemaVersion: LANGUAGE_VERSIONS.v3,
+      },
     },
     filter: (
       normalized.queries.find(
@@ -746,6 +753,11 @@ test('v3 aggregate catalog metadata is derived from one canonical source', () =>
             kind: 'fieldComparisonPredicate',
             loweringRowId: 'northstar.predicate-lowering/folded-equality-v1',
             operator: 'equals',
+            sourceFieldType: {
+              kind: 'textFieldType',
+              maximumLength: 40,
+              schemaVersion: LANGUAGE_VERSIONS.v3,
+            },
             value: {
               kind: 'queryParameterReference',
               parameterId: V3_AGGREGATE_IDS.stockParameter,
@@ -760,6 +772,12 @@ test('v3 aggregate catalog metadata is derived from one canonical source', () =>
             loweringRowId:
               'northstar.predicate-lowering/parameterized-comparison-v1',
             operator: 'lessThanOrEqual',
+            sourceFieldType: {
+              kind: 'dateTimeFieldType',
+              precision: 'millisecond',
+              schemaVersion: LANGUAGE_VERSIONS.v3,
+              timezoneSemantics: 'utcInstant',
+            },
             value: {
               kind: 'queryParameterReference',
               parameterId: V3_AGGREGATE_IDS.atTimeParameter,

@@ -846,10 +846,16 @@ async function executeAggregateQuery(
     (candidate) => candidate.canonicalFieldId === aggregate.fieldId,
   );
   const scale = Number(aggregate.resultType.scale);
+  const sourceFieldType = definition.aggregatePlan.sourceFieldType;
+  const quantitySource = sourceFieldType.kind === 'quantityFieldType';
+  const quantityResult =
+    aggregate.resultType.kind === 'quantityAggregateResultType';
   if (
     !column ||
     (column.fieldContract.fieldKind !== 'exactDecimalFieldType' &&
       column.fieldContract.fieldKind !== 'quantityFieldType') ||
+    !fieldTypeMatchesPhysicalContract(sourceFieldType, column.fieldContract) ||
+    quantitySource !== quantityResult ||
     column.nullable ||
     column.fieldContract.bounds.scale !== scale ||
     !Number.isInteger(scale) ||
@@ -1693,8 +1699,15 @@ function renderQueryFilterNode(
       const scalarValue = parameterReference
         ? null
         : (node.value as Readonly<CanonicalScalar>);
+      const sourceFieldType =
+        'sourceFieldType' in node ? node.sourceFieldType : null;
       if (
         !column ||
+        (sourceFieldType !== null &&
+          !fieldTypeMatchesPhysicalContract(
+            sourceFieldType,
+            column.fieldContract,
+          )) ||
         (scalarValue !== null &&
           !scalarMatchesField(scalarValue, column.fieldContract))
       ) {
@@ -1839,6 +1852,50 @@ function scalarMatchesField(
     timeFieldType: 'timeValue',
   };
   return scalar.kind === expected[field.fieldKind];
+}
+
+function fieldTypeMatchesPhysicalContract(
+  type: unknown,
+  field: StorageEntity['columns'][number]['fieldContract'],
+): boolean {
+  if (!isRecord(type) || type.kind !== field.fieldKind) return false;
+  switch (field.fieldKind) {
+    case 'textFieldType':
+      return type.maximumLength === field.bounds.maximumLength;
+    case 'enumFieldType': {
+      if (!Array.isArray(type.options)) return false;
+      const optionIds = type.options
+        .map((option) => (isRecord(option) ? option.optionId : null))
+        .filter((optionId): optionId is string => typeof optionId === 'string')
+        .sort();
+      return (
+        optionIds.length === type.options.length &&
+        optionIds.join('\0') === field.enumOptionIds.join('\0')
+      );
+    }
+    case 'exactDecimalFieldType':
+    case 'moneyFieldType':
+    case 'quantityFieldType':
+      return (
+        type.precision === field.bounds.precision &&
+        type.scale === field.bounds.scale
+      );
+    case 'dateFieldType':
+      return field.temporal.timezoneSemantics === 'calendarDate';
+    case 'timeFieldType':
+      return (
+        type.precision === field.temporal.precision &&
+        field.temporal.timezoneSemantics === 'localWallTime'
+      );
+    case 'dateTimeFieldType':
+      return (
+        type.precision === field.temporal.precision &&
+        type.timezoneSemantics === field.temporal.timezoneSemantics
+      );
+    case 'booleanFieldType':
+    case 'integerFieldType':
+      return true;
+  }
 }
 
 function scalarDatabaseValue(scalar: Readonly<CanonicalScalar>): unknown {
