@@ -3,7 +3,8 @@
 **Read this before starting or resuming any packet while more than one lane is
 active.** `mission-cadence` permits parallel packets only when the user
 explicitly selects them and their owned paths are disjoint. The user selected
-three lanes on 2026-07-28 to compress the inventory timeline.
+three lanes on 2026-07-28 to compress the inventory timeline, and a fourth
+(BUILD) once G3-P1a proved startable without the artifact window.
 
 The writers cannot see each other. Every session reconstructs state from disk,
 so the shared state lives here. If this file says a lane is active, assume a
@@ -13,9 +14,10 @@ writer is holding those paths right now.
 
 | Lane | Theme | Current packet | Base | Status |
 |---|---|---|---|---|
-| **KERNEL** | Canonical language and the query tier | *awaiting selection — `4b` is next and moves no artifacts* | — | **idle** |
+| **KERNEL** | Canonical language and the query tier | `4b` — v3 families and node shapes | `d9a21ae` | active |
 | **DEPLOY** | Release lifecycle and runtime infrastructure | `1b` — release-admission verification integrity | `07ce6de` | active |
-| **FIX** | Correctness defects → stage cutting → **inventory build** | *awaiting selection — `G3-P1` is unblocked and needs no aggregate lowering* | — | **idle** |
+| **FIX** | Correctness defects → stage cutting → inventory build | `1f` — record and repo hygiene | `fc62a51` | active |
+| **BUILD** | Inventory contracts *(fourth lane, opened 2026-07-28)* | `G3-P1a` — the non-key inventory freeze | `9027a53` | active |
 
 Lane identity is stable across packets. When a lane's packet is accepted, the
 next packet inherits the lane and its partition.
