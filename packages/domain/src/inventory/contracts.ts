@@ -6,6 +6,8 @@ export const STOCK_DIMENSION_SET_ID =
   'northstar.stock-dimension-set/v1' as const;
 export const INVENTORY_POSTING_DEPENDENCY_SET_ROOT =
   '7ef50e86732818a0ec4ec2a03a001066ac59408ea260c65bf018646e4377a63d' as const;
+export const LEGAL_ENTITY_FAMILY_CONTRACT_VERSION =
+  'northstar.legal-entity-family-contract/v1' as const;
 
 export const INVENTORY_POSTING_ROLES = Object.freeze([
   'adjustment',
@@ -16,8 +18,58 @@ export const INVENTORY_POSTING_ROLES = Object.freeze([
 ] as const);
 
 export type InventoryPostingRole = (typeof INVENTORY_POSTING_ROLES)[number];
+export type LegalEntityFamilyClassification = 'entityOwned' | 'tenantShared';
+export type LegalEntityRelationSemantics = 'sameEntity' | 'crossEntityAllowed';
 export type NegativeStockMode = 'reject' | 'allowWithFlag' | 'allow';
 export type ReasonRequirement = 'codeOnly' | 'codeAndNarrative';
+
+export interface LegalEntityFamilyRuleV1 {
+  readonly classification: LegalEntityFamilyClassification;
+  readonly familyId: string;
+}
+
+export interface LegalEntityRelationRuleV1 {
+  readonly semantics: LegalEntityRelationSemantics;
+  readonly sourceFamilyId: string;
+  readonly targetFamilyId: string;
+}
+
+export const LEGAL_ENTITY_FAMILY_MAP_V1 = Object.freeze([
+  { classification: 'tenantShared', familyId: 'legal_entity' },
+  { classification: 'tenantShared', familyId: 'party' },
+  { classification: 'tenantShared', familyId: 'party_role' },
+  { classification: 'tenantShared', familyId: 'item' },
+  { classification: 'tenantShared', familyId: 'location' },
+  { classification: 'entityOwned', familyId: 'inventory_movement' },
+  { classification: 'entityOwned', familyId: 'inventory_transaction' },
+  { classification: 'entityOwned', familyId: 'inventory_transaction_line' },
+  { classification: 'entityOwned', familyId: 'reservation' },
+  { classification: 'entityOwned', familyId: 'stock_count' },
+  { classification: 'entityOwned', familyId: 'stock_count_line' },
+] as const satisfies readonly LegalEntityFamilyRuleV1[]);
+
+export const LEGAL_ENTITY_RELATION_SEMANTICS_V1 = Object.freeze([
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'inventory_movement',
+    targetFamilyId: 'location',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'inventory_movement',
+    targetFamilyId: 'inventory_transaction',
+  },
+  {
+    semantics: 'crossEntityAllowed',
+    sourceFamilyId: 'inventory_movement',
+    targetFamilyId: 'item',
+  },
+  {
+    semantics: 'crossEntityAllowed',
+    sourceFamilyId: 'party_role',
+    targetFamilyId: 'party',
+  },
+] as const satisfies readonly LegalEntityRelationRuleV1[]);
 
 export interface InventoryAuthoritativeDependencyV1 {
   readonly access: 'read' | 'append' | 'transition';
@@ -58,6 +110,19 @@ export interface InventoryContractDefinitionV1 {
     readonly outputSemantic: 'fact' | 'quantity' | 'time' | 'text';
     readonly source: 'inventoryMovement';
   }[];
+  readonly legalEntity: {
+    readonly families: typeof LEGAL_ENTITY_FAMILY_MAP_V1;
+    readonly relations: typeof LEGAL_ENTITY_RELATION_SEMANTICS_V1;
+    readonly undeclaredFamily: {
+      readonly diagnosticCode: 'INVENTORY_LEGAL_ENTITY_FAMILY_UNDECLARED';
+      readonly disposition: 'compileFailure';
+    };
+    readonly undeclaredRelation: {
+      readonly diagnosticCode: 'INVENTORY_RELATION_ENTITY_SEMANTICS_UNDECLARED';
+      readonly disposition: 'compileFailure';
+    };
+    readonly version: typeof LEGAL_ENTITY_FAMILY_CONTRACT_VERSION;
+  };
   readonly configuration: {
     readonly dials: {
       readonly approvalThresholds: {
@@ -335,6 +400,19 @@ export const INVENTORY_CONTRACT_V1 = Object.freeze({
       source: 'inventoryMovement',
     },
   ],
+  legalEntity: {
+    families: LEGAL_ENTITY_FAMILY_MAP_V1,
+    relations: LEGAL_ENTITY_RELATION_SEMANTICS_V1,
+    undeclaredFamily: {
+      diagnosticCode: 'INVENTORY_LEGAL_ENTITY_FAMILY_UNDECLARED',
+      disposition: 'compileFailure',
+    },
+    undeclaredRelation: {
+      diagnosticCode: 'INVENTORY_RELATION_ENTITY_SEMANTICS_UNDECLARED',
+      disposition: 'compileFailure',
+    },
+    version: LEGAL_ENTITY_FAMILY_CONTRACT_VERSION,
+  },
   configuration: {
     dials: {
       approvalThresholds: {
