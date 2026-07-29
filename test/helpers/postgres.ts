@@ -99,29 +99,56 @@ async function waitUntilReady(
   let lastError: unknown;
 
   while (true) {
-    const client = new pg.Client({
-      ...connection,
-      connectionTimeoutMillis: 500,
-    });
-    try {
-      await client.connect();
-      await client.query('SELECT 1');
-      await client.end();
-      return;
-    } catch (error) {
-      lastError = error;
-      await client.end().catch(() => undefined);
-    }
+    lastError = await probePublishedPostgres(connection);
+    if (lastError === undefined) return;
 
     const state = await inspectEphemeralPostgresContainer(containerName);
     if (classifyEphemeralPostgresContainerState(state) === 'terminal') {
+      await throwStoppedBeforeReady(containerName, state, lastError);
+    }
+
+    if (
+      state === 'running' &&
+      (await isEphemeralPostgresReadyInsideContainer(containerName))
+    ) {
+      const finalError = await probePublishedPostgres(connection);
+      if (finalError === undefined) return;
       const { stdout, stderr } = await containerLogs(containerName);
       throw new Error(
-        `ephemeral PostgreSQL stopped before it was ready (${state}): ${String(lastError)}\n${stdout}${stderr}`,
+        `ephemeral PostgreSQL is ready inside its container but its published endpoint is unavailable: ${String(finalError)}\n${stdout}${stderr}`,
       );
     }
     await new Promise((resolveDelay) => setTimeout(resolveDelay, 100));
   }
+}
+
+async function probePublishedPostgres(
+  connection: pg.PoolConfig,
+): Promise<unknown | undefined> {
+  const client = new pg.Client({
+    ...connection,
+    connectionTimeoutMillis: 500,
+  });
+  try {
+    await client.connect();
+    await client.query('SELECT 1');
+    await client.end();
+    return undefined;
+  } catch (error) {
+    await client.end().catch(() => undefined);
+    return error;
+  }
+}
+
+async function throwStoppedBeforeReady(
+  containerName: string,
+  state: string,
+  lastError: unknown,
+): Promise<never> {
+  const { stdout, stderr } = await containerLogs(containerName);
+  throw new Error(
+    `ephemeral PostgreSQL stopped before it was ready (${state}): ${String(lastError)}\n${stdout}${stderr}`,
+  );
 }
 
 export function classifyEphemeralPostgresContainerState(
@@ -146,6 +173,31 @@ export async function inspectEphemeralPostgresContainer(
     return stdout.trim();
   } catch (error) {
     if (isMissingDockerContainerError(error, containerName)) return 'removed';
+    throw error;
+  }
+}
+
+export async function isEphemeralPostgresReadyInsideContainer(
+  containerName: string,
+  runDocker: DockerRunner = docker,
+): Promise<boolean> {
+  try {
+    await runDocker([
+      'exec',
+      containerName,
+      'pg_isready',
+      '--host',
+      '127.0.0.1',
+      '--port',
+      '5432',
+      '--username',
+      'postgres',
+      '--dbname',
+      'postgres',
+    ]);
+    return true;
+  } catch (error) {
+    if (isPgIsReadyWaitingResult(error)) return false;
     throw error;
   }
 }
@@ -185,6 +237,17 @@ function isMissingDockerContainerError(
     typeof stderr === 'string' &&
     (stderr.includes(`No such container: ${containerName}`) ||
       stderr.includes(`No such object: ${containerName}`))
+  );
+}
+
+function isPgIsReadyWaitingResult(error: unknown): boolean {
+  const cause = error instanceof Error ? error.cause : undefined;
+  if (typeof cause !== 'object' || cause === null) return false;
+  const code = 'code' in cause ? cause.code : undefined;
+  const stderr = 'stderr' in cause ? cause.stderr : undefined;
+  return (
+    (code === 1 || code === 2) &&
+    (stderr === '' || (Buffer.isBuffer(stderr) && stderr.length === 0))
   );
 }
 

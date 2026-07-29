@@ -15,6 +15,7 @@ import {
 import {
   classifyEphemeralPostgresContainerState,
   inspectEphemeralPostgresContainer,
+  isEphemeralPostgresReadyInsideContainer,
   removeEphemeralPostgresContainer,
 } from '../helpers/postgres.js';
 
@@ -215,6 +216,28 @@ test('ephemeral PostgreSQL readiness observes terminal states and Docker failure
   const unavailableRunner = async (): Promise<never> => {
     throw daemonUnavailable;
   };
+  const notReady = new Error('docker exec failed', {
+    cause: { code: 2, stderr: '', stdout: '127.0.0.1:5432 - no response' },
+  });
+  const notReadyRunner = async (): Promise<never> => {
+    throw notReady;
+  };
+  const readyRunner = async (arguments_: readonly string[]) => {
+    assert.deepEqual(arguments_, [
+      'exec',
+      containerName,
+      'pg_isready',
+      '--host',
+      '127.0.0.1',
+      '--port',
+      '5432',
+      '--username',
+      'postgres',
+      '--dbname',
+      'postgres',
+    ]);
+    return { stderr: '', stdout: '127.0.0.1:5432 - accepting connections' };
+  };
 
   assert.equal(
     await inspectEphemeralPostgresContainer(containerName, missingRunner),
@@ -227,6 +250,21 @@ test('ephemeral PostgreSQL readiness observes terminal states and Docker failure
   );
   await assert.rejects(
     removeEphemeralPostgresContainer(containerName, unavailableRunner),
+    (error: unknown) => error === daemonUnavailable,
+  );
+  assert.equal(
+    await isEphemeralPostgresReadyInsideContainer(
+      containerName,
+      notReadyRunner,
+    ),
+    false,
+  );
+  assert.equal(
+    await isEphemeralPostgresReadyInsideContainer(containerName, readyRunner),
+    true,
+  );
+  await assert.rejects(
+    isEphemeralPostgresReadyInsideContainer(containerName, unavailableRunner),
     (error: unknown) => error === daemonUnavailable,
   );
 });
