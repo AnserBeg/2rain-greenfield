@@ -17,6 +17,7 @@ import {
   inspectEphemeralPostgresContainer,
   isEphemeralPostgresReadyInsideContainer,
   removeEphemeralPostgresContainer,
+  waitUntilReady,
 } from '../helpers/postgres.js';
 
 test('the greenfield repository satisfies executable architecture boundaries', () => {
@@ -267,6 +268,80 @@ test('ephemeral PostgreSQL readiness observes terminal states and Docker failure
     isEphemeralPostgresReadyInsideContainer(containerName, unavailableRunner),
     (error: unknown) => error === daemonUnavailable,
   );
+});
+
+test('ephemeral PostgreSQL readiness retries a refused published endpoint after internal readiness', async () => {
+  const refused = new Error('connect ECONNREFUSED 127.0.0.1:5432');
+  let now = 0;
+  let pauseCount = 0;
+  let probeCount = 0;
+  let logReadCount = 0;
+
+  await waitUntilReady({}, 'north-star-race-control', {
+    deadlineMilliseconds: 1_000,
+    inspectContainer: async () => 'running',
+    isReadyInsideContainer: async () => true,
+    now: () => now,
+    pause: async (milliseconds) => {
+      pauseCount += 1;
+      now += milliseconds;
+    },
+    probePublished: async () => {
+      probeCount += 1;
+      return probeCount < 3 ? refused : undefined;
+    },
+    readContainerLogs: async () => {
+      logReadCount += 1;
+      return { stderr: 'stderr control', stdout: 'stdout control' };
+    },
+  });
+
+  assert.equal(probeCount, 3);
+  assert.equal(pauseCount, 1);
+  assert.equal(logReadCount, 0);
+});
+
+test('ephemeral PostgreSQL readiness reports a persistently refused endpoint only at its deadline', async () => {
+  const refused = new Error('connect ECONNREFUSED 127.0.0.1:5432');
+  let now = 0;
+  let pauseCount = 0;
+  let probeCount = 0;
+  let logReadCount = 0;
+
+  await assert.rejects(
+    waitUntilReady({}, 'north-star-deadline-control', {
+      deadlineMilliseconds: 250,
+      inspectContainer: async () => 'running',
+      isReadyInsideContainer: async () => true,
+      now: () => now,
+      pause: async (milliseconds) => {
+        pauseCount += 1;
+        now += milliseconds;
+      },
+      probePublished: async () => {
+        probeCount += 1;
+        return refused;
+      },
+      readContainerLogs: async () => {
+        logReadCount += 1;
+        return { stderr: 'stderr control', stdout: 'stdout control' };
+      },
+    }),
+    (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.match(
+        error.message,
+        /ready inside its container but its published endpoint is unavailable/,
+      );
+      assert.match(error.message, /ECONNREFUSED/);
+      assert.match(error.message, /stdout controlstderr control/);
+      return true;
+    },
+  );
+
+  assert.equal(probeCount, 6);
+  assert.equal(pauseCount, 3);
+  assert.equal(logReadCount, 1);
 });
 
 test('plain raw, sixth, and wrong-count agent tool catalogs fail', () => {
