@@ -9,7 +9,6 @@ import pg from 'pg';
 import {
   CANONICALIZATION_PROFILE_VERSION,
   CONTENT_HASH_ALGORITHM,
-  LANGUAGE_VERSION,
   UNICODE_CASE_FOLD_EXPANSIONS,
   UNICODE_CASE_FOLD_SIMPLE_SOURCES,
   canonicalize,
@@ -447,7 +446,9 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
           async () => {
             const admissible = ordinaryModuleV2() as {
               fields: Array<Record<string, unknown>>;
+              languageVersion: unknown;
             };
+            const schemaVersion = String(admissible.languageVersion);
             const field = admissible.fields.find(
               (candidate) =>
                 candidate.fieldId === FIXTURE_IDS.fieldIds.parentNotes,
@@ -455,13 +456,13 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
             field.defaultSemantics = 'coalesceAtRead';
             field.defaultValue = {
               kind: 'textValue',
-              schemaVersion: LANGUAGE_VERSION,
+              schemaVersion,
               value: '',
             };
             field.storageEvolution = {
               kind: 'backfillEvolution',
               residualReadSemantics: 'coalesceAtRead',
-              schemaVersion: LANGUAGE_VERSION,
+              schemaVersion,
             };
             const compiled = mustCompile(
               moduleInput(admissible, expectedActiveReleaseFrom(target)),
