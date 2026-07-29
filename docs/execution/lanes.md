@@ -70,6 +70,7 @@ the query tier both live there.
 | `packages/runtime/src/semantic-query-gateway.ts` | KERNEL |
 | `packages/compiler/src/storage.ts` | **FIX** |
 | `packages/compiler/src/projections.ts` | **FIX** |
+| `packages/compiler/src/protocol.ts` | **FIX** *(granted 2026-07-28 for `G3-P1b` — declare `northstar.storage-target-payload/v2` only. This is a ratified **Freeze F** artifact, but [ADR-0015](../decisions/ADR-0015-legal-entity-business-dimension.md):79 and :116 explicitly authorize this bump "under that ADR's own evolution rule" and name it as an accepted cost, so it is anticipated evolution rather than a freeze violation. Tenant-shared targets stay v1 and byte-identical.)* |
 | `packages/postgres-provider/src/module-storage-materializer.ts` | FIX |
 | `apps/api/**` | DEPLOY |
 | `packages/postgres-provider/src/composed-application-runtime.ts` | **KERNEL** *(released from DEPLOY 2026-07-28 on 1b's integration, for 4c)* |
