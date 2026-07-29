@@ -58,6 +58,7 @@ const suiteDefinitions = [
       'test/architecture/compiler-hermeticity.test.ts',
       'test/architecture/dependency-boundaries.test.ts',
       'test/architecture/module-conformance-runtime.test.ts',
+      'test/architecture/module-press-law.test.ts',
       'test/architecture/release-activation-boundary.test.ts',
       'test/architecture/release-persistence-boundary.test.ts',
       'test/architecture/repository-hygiene.test.ts',

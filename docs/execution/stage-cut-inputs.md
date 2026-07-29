@@ -180,7 +180,12 @@ was written, each with its source.
     which is §16's customer-fork row. **Owned earlier than G6:** the first Tier B capability
     is G3 inventory posting. (Plan §10.6)
 
-## G3 — inventory truth alpha (not yet seeded)
+## G3 — inventory truth alpha (dispositioned by G3-P0)
+
+All ten inputs below are assigned to named packets, with first-posting deadline
+classifications, in [`packets/G3-P0.md`](packets/G3-P0.md). This source list is
+retained so the cut's completeness can be checked against the obligations as
+received.
 
 **These are hard-deadline obligations, not a backlog.** Each one closes permanently when the
 first movement is posted, because ADR-0007 and plan §7.4 forbid rewriting a posted fact. A G3

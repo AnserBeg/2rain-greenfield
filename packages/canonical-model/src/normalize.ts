@@ -5,15 +5,14 @@ import {
   CANONICALIZATION_PROFILE_VERSION,
   CONTENT_HASH_ALGORITHM,
   IMMUTABLE_DEFAULTS_V0,
+  LATEST_LANGUAGE_VERSION,
   LEGACY_LANGUAGE_VERSION,
-  LEGACY_NORMALIZATION_PROFILE_VERSION,
   LANGUAGE_VERSION,
-  NORMALIZATION_PROFILE_VERSION,
-  PREVIOUS_LANGUAGE_VERSION,
-  PREVIOUS_NORMALIZATION_PROFILE_VERSION,
   STRUCTURAL_LIMITS_V0,
   SURFACE_SLOTS,
+  canonicalLanguageProfileFor,
   type CanonicalLanguageVersion,
+  type CanonicalNormalizationProfileVersion,
 } from './constants.js';
 import {
   CanonicalModelError,
@@ -146,7 +145,7 @@ export function normalizeApplicationPackage(
       ),
       lifecycle: entry.lifecycle ?? IMMUTABLE_DEFAULTS_V0.lifecycle,
       ...(entry.resolveMatchKeys !== undefined ||
-      authored.languageVersion === LANGUAGE_VERSION
+      languageHasV2Features(authored.languageVersion)
         ? {
             resolveMatchKeys: sortByOrderAndId(
               entry.resolveMatchKeys ?? [],
@@ -332,7 +331,7 @@ function schemaError(error: ZodError, input: unknown): CanonicalModelError {
     return diagnostic(
       code,
       path,
-      `value must satisfy the closed ${LANGUAGE_VERSION} schema`,
+      `value must satisfy a closed supported schema through ${LATEST_LANGUAGE_VERSION}`,
       acceptedAlternativeFor(code),
       findObjectId(input, issue.path),
     );
@@ -406,7 +405,7 @@ function validateSemantics(
       );
     }
     if (
-      packageRevision.languageVersion !== LANGUAGE_VERSION &&
+      !languageHasV2Features(packageRevision.languageVersion) &&
       (query.resolveMatchKeys?.length ?? 0) > 0
     ) {
       diagnostics.push(
@@ -1437,16 +1436,15 @@ function defaultPredicate(
 
 function normalizationProfileFor(
   languageVersion: CanonicalLanguageVersion,
-):
-  | typeof LEGACY_NORMALIZATION_PROFILE_VERSION
-  | typeof PREVIOUS_NORMALIZATION_PROFILE_VERSION
-  | typeof NORMALIZATION_PROFILE_VERSION {
-  if (languageVersion === LEGACY_LANGUAGE_VERSION) {
-    return LEGACY_NORMALIZATION_PROFILE_VERSION;
-  }
-  return languageVersion === PREVIOUS_LANGUAGE_VERSION
-    ? PREVIOUS_NORMALIZATION_PROFILE_VERSION
-    : NORMALIZATION_PROFILE_VERSION;
+): CanonicalNormalizationProfileVersion {
+  return canonicalLanguageProfileFor(languageVersion)
+    .normalizationProfileVersion;
+}
+
+function languageHasV2Features(
+  languageVersion: CanonicalLanguageVersion,
+): boolean {
+  return canonicalLanguageProfileFor(languageVersion).featureLevel === 'v2';
 }
 
 function enforceFamilyBounds(authored: AuthoredApplicationPackage): void {
@@ -1670,7 +1668,7 @@ function acceptedAlternativeFor(code: string): string {
       'use a named slot declared by the selected archetype',
     CANON_SURFACE_STATUS_ROLE_UNSUPPORTED:
       'use success, attention, blocked, or inProgress',
-    CANON_VERSION_UNSUPPORTED: `use ${LANGUAGE_VERSION}`,
+    CANON_VERSION_UNSUPPORTED: `use a supported version through ${LATEST_LANGUAGE_VERSION}`,
   };
   return alternatives[code] ?? alternatives.CANON_SCHEMA_INVALID!;
 }

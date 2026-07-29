@@ -3,8 +3,11 @@ import {
   LEGACY_LANGUAGE_VERSION,
   LEGACY_NORMALIZATION_PROFILE_VERSION,
   LANGUAGE_VERSION,
+  LANGUAGE_VERSIONS,
+  NORMALIZATION_PROFILE_VERSIONS,
   NORMALIZATION_PROFILE_VERSION,
   CanonicalModelError,
+  canonicalLanguageProfileFor,
   canonicalizeAndHash,
   normalizeApplicationPackage,
   parseAuthoredApplicationPackageJson,
@@ -86,6 +89,12 @@ export const MODULE_COMPILER_PROFILE: CompilerSemanticProfile = Object.freeze({
   ...DEFAULT_COMPILER_PROFILE,
   languageVersion: LANGUAGE_VERSION,
   normalizationProfileVersion: NORMALIZATION_PROFILE_VERSION,
+});
+
+const V3_COMPILER_PROFILE: CompilerSemanticProfile = Object.freeze({
+  ...MODULE_COMPILER_PROFILE,
+  languageVersion: LANGUAGE_VERSIONS.v3,
+  normalizationProfileVersion: NORMALIZATION_PROFILE_VERSIONS.v3,
 });
 
 export const DEFAULT_COMPILER_LIMITS: CompilerLimits = Object.freeze({
@@ -215,7 +224,7 @@ export function compileApplication(
       )
     : null;
   const basePlans = lowerBaseProjectionPayloads(
-    packageRevision,
+    projectionDispatchRevision(packageRevision),
     isStorageTargetV1(previousStorageTarget) ? previousStorageTarget : null,
   );
   const emittedBase = emitScheduledProjections(
@@ -244,7 +253,7 @@ export function compileApplication(
     );
   }
   if (
-    packageRevision.languageVersion === LANGUAGE_VERSION &&
+    languageUsesModuleProjectionShape(packageRevision.languageVersion) &&
     isStorageTargetV1(storageProjection.payload)
   ) {
     const mappingDiagnostics = validatePhysicalMappingRecords(
@@ -327,10 +336,16 @@ export function compileApplication(
     dependencyClosureDigest,
     hashAlgorithm: HASH_ALGORITHM,
     kind: 'releaseManifest',
-    languageVersion: LANGUAGE_VERSION,
+    languageVersion:
+      packageRevision.languageVersion === LANGUAGE_VERSIONS.v3
+        ? LANGUAGE_VERSIONS.v3
+        : LANGUAGE_VERSION,
     limitsDigest,
     manifestVersion: RELEASE_MANIFEST_VERSION,
-    normalizationProfileVersion: NORMALIZATION_PROFILE_VERSION,
+    normalizationProfileVersion:
+      packageRevision.languageVersion === LANGUAGE_VERSIONS.v3
+        ? NORMALIZATION_PROFILE_VERSIONS.v3
+        : NORMALIZATION_PROFILE_VERSION,
     normalizedDefinitionDigest,
     outputProtocolVersion: OUTPUT_PROTOCOL_VERSION,
     policyDecisionDependency: 'liveCurrentDenyCapable',
@@ -729,15 +744,37 @@ function validateWholeModel(
       );
     }
   });
-  diagnostics.push(...validateModuleConformance(packageRevision));
+  diagnostics.push(
+    ...validateModuleConformance(projectionDispatchRevision(packageRevision)),
+  );
   return diagnostics;
+}
+
+function languageUsesModuleProjectionShape(
+  languageVersion: NormalizedApplicationPackage['languageVersion'],
+): boolean {
+  return canonicalLanguageProfileFor(languageVersion).featureLevel === 'v2';
+}
+
+/**
+ * The v3 reader deliberately reuses the existing v2 projection shape until 4b
+ * defines v3 content. The shallow dispatch alias changes no nested canonical
+ * node and is never hashed as the normalized definition.
+ */
+function projectionDispatchRevision(
+  packageRevision: NormalizedApplicationPackage,
+): NormalizedApplicationPackage {
+  return packageRevision.languageVersion === LANGUAGE_VERSIONS.v3
+    ? { ...packageRevision, languageVersion: LANGUAGE_VERSION }
+    : packageRevision;
 }
 
 function validateProfile(
   profile: CompilerSemanticProfile,
 ): CompilerDiagnostic[] {
   return equalObjects(profile, DEFAULT_COMPILER_PROFILE) ||
-    equalObjects(profile, MODULE_COMPILER_PROFILE)
+    equalObjects(profile, MODULE_COMPILER_PROFILE) ||
+    equalObjects(profile, V3_COMPILER_PROFILE)
     ? []
     : [
         compilerDiagnostic(
@@ -1187,10 +1224,11 @@ function verifyCompleteness(
 ): CompilerDiagnostic[] {
   const diagnostics: CompilerDiagnostic[] = [];
   const families = new Set(emitted.map((entry) => entry.reference.familyId));
-  const requiredFamilies =
-    packageRevision.languageVersion === LANGUAGE_VERSION
-      ? REQUIRED_MODULE_PROJECTION_FAMILIES
-      : REQUIRED_BASE_PROJECTION_FAMILIES;
+  const requiredFamilies = languageUsesModuleProjectionShape(
+    packageRevision.languageVersion,
+  )
+    ? REQUIRED_MODULE_PROJECTION_FAMILIES
+    : REQUIRED_BASE_PROJECTION_FAMILIES;
   for (const familyId of requiredFamilies) {
     if (!families.has(familyId)) {
       diagnostics.push(
@@ -1295,7 +1333,7 @@ function verifyCompleteness(
       );
     }
   }
-  if (packageRevision.languageVersion === LANGUAGE_VERSION) {
+  if (languageUsesModuleProjectionShape(packageRevision.languageVersion)) {
     const reporting = byFamily.get(PROJECTION_FAMILY_IDS.reporting) as {
       entities?: Array<{ entityId: string }>;
     };

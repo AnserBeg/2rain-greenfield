@@ -13,9 +13,9 @@ writer is holding those paths right now.
 
 | Lane | Theme | Current packet | Base | Status |
 |---|---|---|---|---|
-| **KERNEL** | Canonical language and the query tier | `4a` — v3 version and profile dispatch | `7f1edfc` | active |
+| **KERNEL** | Canonical language and the query tier | *awaiting selection — `4b` is next and moves no artifacts* | — | **idle** |
 | **DEPLOY** | Release lifecycle and runtime infrastructure | `1b` — release-admission verification integrity | `07ce6de` | active |
-| **FIX** | Correctness defects in shipped code | `1e` — press-guard consolidation | `37a4107` | active |
+| **FIX** | Correctness defects → stage cutting → **inventory build** | *awaiting selection — `G3-P1` is unblocked and needs no aggregate lowering* | — | **idle** |
 
 Lane identity is stable across packets. When a lane's packet is accepted, the
 next packet inherits the lane and its partition.
@@ -44,6 +44,7 @@ the query tier both live there.
 | `test/fixtures/g2/*/runtime-harness.ts` | DEPLOY *(granted for 1b — all four mint `randomUUID()` evidence and must produce genuine evidence instead; **no test-only bypass**)* |
 | `db/migrations/**` · `packages/postgres-provider/src/migrations.ts` | **DEPLOY while 1b runs** — reassigned from FIX, whose current packet (1e press guards) needs no migration. Reverts to FIX when 1b lands. |
 | `packages/postgres-provider/src/module-runtime-interpreter.ts` | KERNEL |
+| `docs/execution/packets/**` · `docs/execution/stage-cut-inputs.md` | FIX *(granted 2026-07-28 for G3-P0; each lane still owns its own packet doc)* |
 | `apps/web/**` · `packages/domain/**` | **none — frozen while three lanes run** |
 
 A lane needing a path outside its column files a **bridge request naming its
@@ -77,6 +78,24 @@ Never hand-merge an inventory; that is how a silently-missing entry gets shipped
 
 Never add to an exemption or allowlist under any circumstances without a bridge —
 `rootScriptCiAllowlist` is the live example.
+
+## Artifact-moving packets may run concurrently — corrected 2026-07-28
+
+Release artifacts (`*.golden.sha256`, `app.compiled.json`, `shell.compiled.json`,
+release roots) are **generated** — deterministic functions of source. Two lanes
+changing different definitions each regenerate; at integration the merged source
+regenerates once more and the result is correct.
+
+**So "this packet moves release roots" does NOT mean it must run alone.** Source
+disjointness is the requirement; generated-artifact conflicts are re-derived, per
+the shared-files rule below.
+
+**The one exception:** a packet whose *proof* is that artifacts did not move —
+`4a` and `4b` — cannot run beside one that moves them, because its baseline
+would shift under it. That exception ends when `4b` lands.
+
+The orchestrator enforced the stronger constraint until 2026-07-28 and it cost
+sequencing that was never required.
 
 ## Integration is serial even though work is parallel
 
