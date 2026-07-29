@@ -62,12 +62,16 @@ substituted as the tenant authority.
 
 ## Honest count and full classification
 
-The current checked schema contains **46 tables: 39 tenant-scoped and 7
+The current checked schema contains **49 tables: 42 tenant-scoped and 7
 tenant-independent**. The packet input's count of 45 was accurate immediately
 before accepted commit `dc39ec7`; that commit added
-`platform.saved_master_filters`, which explains the one-table difference. All
-46 current relations have PostgreSQL kind `r`; the verifier also defines
-fail-closed treatment for partitioned and foreign tables when they appear.
+`platform.saved_master_filters`. While this packet ran, accepted 1b migration
+0013 added `platform.release_verification_evidence`,
+`platform.release_verification_results`, and
+`platform.tenant_release_admissions`. The integrated snapshot therefore has
+four more tables than the prompt's baseline. All 49 current relations have
+PostgreSQL kind `r`; the verifier also defines fail-closed treatment for
+partitioned and foreign tables when they appear.
 
 | Table | Classification | Tenant column or independent reason |
 |---|---|---|
@@ -103,9 +107,12 @@ fail-closed treatment for partitioned and foreign tables when they appear.
 | `platform.release_approver_eligibility_events` | tenant-scoped | `tenant_id` |
 | `platform.release_artifact_blobs` | tenant-independent | shared immutable content: content-addressed canonical bytes are shared; tenant reachability lives in tenant-release links |
 | `platform.release_executor_authority_events` | tenant-scoped | `tenant_id` |
+| `platform.release_verification_evidence` | tenant-scoped | `tenant_id` |
+| `platform.release_verification_results` | tenant-scoped | `tenant_id` |
 | `platform.saved_master_filters` | tenant-scoped | `tenant_id` |
 | `platform.semantic_operation_receipts` | tenant-scoped | `tenant_id` |
 | `platform.tenant_fixture_records` | tenant-scoped | `tenant_id` |
+| `platform.tenant_release_admissions` | tenant-scoped | `tenant_id` |
 | `platform.tenant_release_artifact_links` | tenant-scoped | `tenant_id` |
 | `platform.tenant_release_chunk_links` | tenant-scoped | `tenant_id` |
 | `platform.tenant_release_projection_links` | tenant-scoped | `tenant_id` |
@@ -128,6 +135,7 @@ inserted into a verifier fixture list.
 | Vacuity vector | Deliberately executed case | Real output |
 |---|---|---|
 | An unclassified table is ignored | create `platform.g3_p2a_unclassified_probe` after migrations | `TENANT_TABLE_UNCLASSIFIED: platform.g3_p2a_unclassified_probe has no tenant-completeness classification` |
+| A concurrently integrated migration silently widens the schema | merge accepted 1b migration 0013 before updating this manifest | `TENANT_TABLE_UNCLASSIFIED: platform.release_verification_evidence has no tenant-completeness classification` |
 | Enumeration is bounded by known schemas or a hand list | create schema `g3_p2a_unlisted_plane` and table `shadow_business_records` | `TENANT_TABLE_UNCLASSIFIED: g3_p2a_unlisted_plane.shadow_business_records has no tenant-completeness classification` |
 | A business table can claim independence | replace `platform.tenant_fixture_records` with a shared-catalog declaration | `TENANT_INDEPENDENT_BUSINESS_TABLE: platform.tenant_fixture_records is a business or tenant-bearing table and cannot be tenant-independent` |
 | A scoped declaration need not name a real column | name `missing_tenant_id` on `platform.saved_master_filters` | `TENANT_COLUMN_MISSING: platform.saved_master_filters names missing tenant column missing_tenant_id` |
@@ -144,9 +152,9 @@ inserted into a verifier fixture list.
 | Managed-module business data can claim independence when its tenant column is missing | classify `north_star_module.managed_business_records` as a shared catalog | `TENANT_INDEPENDENT_BUSINESS_TABLE: north_star_module.managed_business_records is a business or tenant-bearing table and cannot be tenant-independent` |
 | The tenant registry can claim independence because its tenant column is named `id` | classify `platform.tenants` as a shared catalog | `TENANT_INDEPENDENT_BUSINESS_TABLE: platform.tenants is a business or tenant-bearing table and cannot be tenant-independent` |
 
-Positive count evidence observed 46 live migrated tables before either DDL
-probe, equal to the 46-entry checked manifest. The checked-snapshot listing
-independently reports the same 39/7 split.
+Positive count evidence observes 49 live migrated tables before either DDL
+probe, equal to the 49-entry checked manifest. The checked-snapshot listing
+independently reports the same 42/7 split.
 
 ## Gates
 
@@ -165,11 +173,22 @@ independently reports the same 39/7 split.
 Focused evidence before the frozen candidate:
 
 - tenant-completeness test: 7/7 PASS, including live PostgreSQL enumeration;
-- architecture suite: 94/94 PASS with the final controls;
+- complete architecture suite: PASS with the final controls;
 - architecture boundaries: PASS;
 - typecheck and lint: PASS; and
 - the deliberate user-facing unclassified-table command exits 1 with
   `TENANT_TABLE_UNCLASSIFIED`.
+
+Two infrastructure reds occurred on the superseded pre-integration candidate
+`692d997` and were reported rather than hidden. The first PostgreSQL invocation
+used an unsupported direct Node flag and exited 7 with
+`Filtered or unrecognized node:test argument: --test-concurrency=1`; the
+unchanged package suite was then constrained to one available CPU and passed
+92/92. The first browser invocation passed 16/17 but its Catalog fixture timed
+out while reaching an ephemeral PostgreSQL endpoint; the unchanged candidate's
+retry passed 17/17. Accepted 1b subsequently integrated the repository's
+serial-test and readiness fixes, as well as three new tables, so all evidence
+for `692d997` is historical rather than final-candidate evidence.
 
 Exact final full-matrix and review evidence is reported with the frozen
 candidate SHA so this document does not change the SHA whose evidence it names.
@@ -184,13 +203,15 @@ untrusted-column, partitioned/foreign, managed-module, and tenant-root branches
 were not all directly exercised, and that the packet record attributed the
 last focused test to an earlier complete-suite run. The successor adds direct
 controls for each named branch, records their emitted diagnostics above, and
-corrects the gate chronology. Any successor SHA receives a fresh naive review;
-the `fb135d1` verdict is not acceptance evidence.
+corrects the gate chronology. Fresh Codex xhigh and Fable max reviews both
+passed successor `692d997`, but accepted 1b then changed the integrated schema.
+Those verdicts are therefore invalidated. Any final successor SHA receives the
+entire fresh review chain; no earlier verdict is acceptance evidence.
 
 ## Test it yourself
 
 There is no runtime surface. Read the checked manifest and verifier, then list
-all 46 classifications:
+all 49 classifications:
 
 ```bash
 cd /home/rvham/2rain-greenfield-g3p2a
@@ -200,7 +221,7 @@ node --import tsx packages/dev-tooling/src/check-tenant-completeness.ts --list
 Expected first line:
 
 ```text
-tenant-completeness: PASS (46 tables; 39 tenant-scoped; 7 tenant-independent)
+tenant-completeness: PASS (49 tables; 42 tenant-scoped; 7 tenant-independent)
 ```
 
 Then create a real unclassified table in disposable PostgreSQL and observe the
