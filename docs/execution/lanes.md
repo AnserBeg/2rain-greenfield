@@ -15,8 +15,8 @@ writer is holding those paths right now.
 | Lane | Theme | Current packet | Status |
 |---|---|---|---|
 | **KERNEL** | Canonical language and the query tier | `4c` — packages adopt v3 (the artifact event) | **active** |
-| **DEPLOY** | Release lifecycle and runtime infrastructure | `1c-a` **accepted** 2026-07-28 (ADR-0023) — *awaiting selection* | **idle** |
-| **FIX** | Correctness defects → stage cutting → inventory build | `1d` **accepted** 2026-07-28 — **`G3-P1b` is next and now unblocked** | **idle** |
+| **DEPLOY** | Release lifecycle and runtime infrastructure | `9` **accepted** 2026-07-28 (breadth-envelope curve) — *awaiting selection; `1c-b` when compiler/domain leases release* | **idle** |
+| **FIX** | Correctness defects → stage cutting → inventory build | `G3-P1b` — legal-entity family map and key participation | **active** |
 | **BUILD** | Inventory contracts | `G3-P2a` — tenant-completeness manifest | **active** |
 
 Lane identity is stable across packets. When a lane's packet is accepted, the
@@ -66,10 +66,11 @@ the query tier both live there.
 |---|---|
 | `packages/canonical-model/src/**` | KERNEL |
 | `packages/compiler/src/predicate-lowering.ts` | KERNEL |
-| `packages/compiler/src/compiler.ts` | KERNEL *(granted 2026-07-28 for packet 4a — profile dispatch only; FIX is on a test-only packet)* |
+| `packages/compiler/src/compiler.ts` | **KERNEL (4c) and FIX (G3-P1b) — split by concern, granted 2026-07-28.** KERNEL owns language/profile dispatch; FIX owns **storage-target payload v1/v2 family recognition only** (the import near line 54 and the guard near line 1764). Verified disjoint before granting: 4c's hunks sit at ~1-11, 73-109, 789-836 and 990-1022, and 4c touches `STORAGE_TARGET_PAYLOAD_VERSION` **zero** times. 4c integrates first, so FIX merges and takes main's side on dispatch. *(Supersedes the 4a-era note "FIX is on a test-only packet" — no longer true.)* |
 | `packages/runtime/src/semantic-query-gateway.ts` | KERNEL |
 | `packages/compiler/src/storage.ts` | **FIX** |
 | `packages/compiler/src/projections.ts` | **FIX** |
+| `packages/compiler/src/protocol.ts` | **FIX** *(granted 2026-07-28 for `G3-P1b` — declare `northstar.storage-target-payload/v2` only. This is a ratified **Freeze F** artifact, but [ADR-0015](../decisions/ADR-0015-legal-entity-business-dimension.md):79 and :116 explicitly authorize this bump "under that ADR's own evolution rule" and name it as an accepted cost, so it is anticipated evolution rather than a freeze violation. Tenant-shared targets stay v1 and byte-identical.)* |
 | `packages/postgres-provider/src/module-storage-materializer.ts` | FIX |
 | `apps/api/**` | DEPLOY |
 | `packages/postgres-provider/src/composed-application-runtime.ts` | **KERNEL** *(released from DEPLOY 2026-07-28 on 1b's integration, for 4c)* |
@@ -82,7 +83,12 @@ the query tier both live there.
 | `packages/postgres-provider/src/module-runtime-interpreter.ts` | KERNEL |
 | `test/postgres/{module-runtime,release-activation,release-approval,releases,request-runtime-view}.test.ts` | **KERNEL** *(granted 2026-07-28 for 4c — artifact-owned revision-envelope versions ONLY; the version-hardcode sweep's fourth-instance batch)* |
 | `test/postgres/module-storage-transition.test.ts` | **FIX (1d) and KERNEL (4c) — split by concern, granted 2026-07-28.** FIX owns the archive-excluding unique-index assertions (migration `0014`, index predicates, drift acceptance); KERNEL owns the version-stamping paths only. Verified disjoint before granting: 1d's diff to this file contains **zero** `LANGUAGE_VERSION`/`NORMALIZATION_PROFILE_VERSION` references. Neither lane may touch the other's concern. |
-| `test/postgres/**` (rest) | unassigned — bridge before touching |
+| `test/postgres/**` (rest) | unassigned — bridge before touching, EXCEPT the version-derivation class below |
+| **Hardcoded-v2-node derivation — CLASS GRANT to KERNEL, 2026-07-28, for 4c** | **KERNEL**, for **version derivation only**. The earlier profile-selection class grant covered compilers choosing a profile; this is the same defect one layer down — tests that *construct* canonical nodes with a literal `'v2'` or `LANGUAGE_VERSION` and insert them into a now-v3 definition, producing `CANON_VERSION_MIXED`/`CANON_SCHEMA_INVALID`. Covers every file under `test/**` and `apps/web/test/**` still doing so, including the two 4c requested (`test/postgres/{predicate-parity-corpus,query-filter-lowering}.test.ts`) and `test/postgres/predicate-absent-semantics.test.ts`, `test/integration/{module-runtime,table-behavior}.test.ts`, `test/unit/canonical-model/*`, `test/unit/location-definition.test.ts`. **Granted as a class after a red matrix** (PostgreSQL 90/94) rather than file by file, because enumerating found 23 candidates and one-at-a-time bridging would cost a stop each. **Bounded: derive the version from the artifact and change nothing else** — no assertion, expectation or behavior change. `test/compiler/g2-module-storage.test.ts` stays split with FIX per its own row. |
+| `test/compiler/inventory-contract.{cases.ts,release.golden.json}` | **FIX** *(granted 2026-07-28 for `G3-P1b`)* |
+| `test/compiler/g2-module-storage.test.ts` | **KERNEL (4c) and FIX (G3-P1b) — split by concern, granted 2026-07-28.** KERNEL owns version stamping (`LANGUAGE_VERSION` → `LATEST_LANGUAGE_VERSION`) only; FIX owns `legal_entity_id` emission and uniqueness-participation assertions. Verified disjoint. 4c integrates first, so FIX merges and takes main's side on version stamps. |
+| `packages/postgres-provider/src/saved-filter-executor.ts` | **KERNEL** *(granted 2026-07-28 for 4c — swap the legacy-only `NormalizedApplicationPackageSchema` persisted reader at `:5,:918` for the versioned one; it rejects a valid v3 Platform definition as corrupt. Unheld; `1c-b` will later strip or rewrite this file per ADR-0023, and supersedes rather than conflicts.)* |
+| `test/postgres/query-filter-lowering.test.ts` — **stats-flush extension** | **KERNEL** *(granted 2026-07-28 for 4c, BEYOND the version-derivation class: force a PostgreSQL statistics flush before reading the baseline counters. v3 verification now runs five Q1 probes ahead of the measured probe and their pending stats understate the baseline, so the observed delta reads `6n`. **The `=== 1n` assertion at `:239` MUST NOT change** — this corrects the measurement, not the bar. Relaxing the delta would be exactly the "raise a bound to make a run pass" failure the lane protocol forbids.)* |
 | `packages/dev-tooling/src/**` · `test/architecture/tenant-completeness*` | BUILD *(taken 2026-07-28 by G3-P2a; recorded here retroactively — the partition table had no `dev-tooling` row at all, the second such gap found today)* |
 | `packages/compiler/src/conformance.ts` | **FIX** *(granted 2026-07-28 for `G3-P1b` — the legal-entity family map and relation-entity rules extend the existing 298-line inventory contract enforcement here; previously unassigned)*. Prior note: **unassigned — bridge before touching** *(gap found 2026-07-28 by the 1c scoping pass: G3-P1a edited this file under its own lease and it now holds the inventory contract constants alongside the four-query completeness rule, so BUILD and any 1c branch both have a live claim on it. It is in no lane's column. Do not let a lane take it silently.)* |
 | `docs/execution/packets/**` · `docs/execution/stage-cut-inputs.md` | FIX *(granted 2026-07-28 for G3-P0; each lane still owns its own packet doc)* |
