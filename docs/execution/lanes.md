@@ -22,6 +22,28 @@ writer is holding those paths right now.
 Lane identity is stable across packets. When a lane's packet is accepted, the
 next packet inherits the lane and its partition.
 
+## DEPLOY stays idle until 4c lands — decided 2026-07-28
+
+Both candidate packets for the free DEPLOY lane currently collide with KERNEL's
+`4c` leases:
+
+  - **`1c`** (platform classification) needs
+    `packages/domain/src/platform/definition.ts` — held by KERNEL for 4c's
+    version migration.
+  - **`1g2`** (reverse-transition policy) needs
+    `packages/postgres-provider/src/release-*.ts` and
+    `composed-application-runtime.ts` — both released to KERNEL for 4c.
+
+**Leaving a lane idle is a legitimate decision.** Starting a fourth packet that
+must serialize against 4c creates exactly the contention this file exists to
+prevent, and 4c is the inventory critical path. Three lanes on it is already the
+most the dependency graph allows.
+
+Reconsider the moment 4c integrates: `1c` is the stronger candidate — 1b's gate
+now refuses the platform package, so saved filters are non-releasable and the
+row is a red test rather than an argument. It needs a scoping pass first, since
+its Tier-B branch likely needs a canonical concept that does not exist.
+
 ## Path partition — binding
 
 Disjointness is enforced at prompt time by the orchestrator, not discovered at
