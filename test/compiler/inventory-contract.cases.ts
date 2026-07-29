@@ -348,6 +348,98 @@ export function registerInventoryContractCases(
   );
 
   register(
+    'the compiled movement entity is bound to the quantity-only movement contract',
+    () => {
+      const withMoney = structuredClone(inventoryModuleDefinition()) as {
+        fields: Array<Record<string, unknown>>;
+      };
+      const quantity = withMoney.fields.find((field) =>
+        String(field.fieldId).endsWith(
+          ':field.inventory_movement_quantity_delta',
+        ),
+      );
+      assert.ok(quantity);
+      withMoney.fields.push({
+        ...structuredClone(quantity),
+        fieldId: 'northstar.inventory:field.inventory_movement_unit_cost',
+        label: 'Unit cost',
+        orderKey: 170,
+      });
+      const moneyResult = compileApplication(moduleInput(withMoney));
+      assert.equal(moneyResult.status, 'failed');
+      assert.equal(
+        moneyResult.diagnostics.some(
+          ({ code, subjectId }) =>
+            code === 'INVENTORY_MOVEMENT_MONEY_FORBIDDEN' &&
+            subjectId ===
+              'northstar.inventory:field.inventory_movement_unit_cost',
+        ),
+        true,
+      );
+
+      const withoutQuantity = inventoryDefinitionWithoutMovementField(
+        'inventory_movement_quantity_delta',
+      );
+      const quantityResult = compileApplication(moduleInput(withoutQuantity));
+      assert.equal(quantityResult.status, 'failed');
+      assert.equal(
+        quantityResult.diagnostics.some(
+          ({ code, subjectId }) =>
+            code === 'INVENTORY_CONTRACT_INVALID' &&
+            subjectId ===
+              'northstar.inventory:field.inventory_movement_quantity_delta',
+        ),
+        true,
+      );
+
+      const withoutVersion = inventoryDefinitionWithoutMovementField(
+        'inventory_movement_stock_dimension_set_version',
+      );
+      const versionResult = compileApplication(moduleInput(withoutVersion));
+      assert.equal(versionResult.status, 'failed');
+      assert.equal(
+        versionResult.diagnostics.some(
+          ({ code, subjectId }) =>
+            code === 'INVENTORY_STOCK_DIMENSION_VERSION_REQUIRED' &&
+            subjectId ===
+              'northstar.inventory:field.inventory_movement_stock_dimension_set_version',
+        ),
+        true,
+      );
+
+      const withRenamedVersion = structuredClone(
+        inventoryModuleDefinition(),
+      ) as {
+        fields: Array<{
+          fieldId: string;
+          fieldType: { options?: Array<{ optionId: string }> };
+        }>;
+      };
+      const versionField = withRenamedVersion.fields.find((field) =>
+        field.fieldId.endsWith(
+          ':field.inventory_movement_stock_dimension_set_version',
+        ),
+      );
+      assert.ok(versionField?.fieldType.options?.[0]);
+      versionField.fieldType.options[0].optionId =
+        'northstar.inventory:option.stock_dimension_set_version_v2';
+      const renamedVersionResult = compileApplication(
+        moduleInput(withRenamedVersion),
+      );
+      assert.equal(renamedVersionResult.status, 'failed');
+      assert.equal(
+        renamedVersionResult.diagnostics.some(
+          ({ code, subjectId }) =>
+            code === 'INVENTORY_STOCK_DIMENSION_VERSION_REQUIRED' &&
+            subjectId ===
+              'northstar.inventory:field.inventory_movement_stock_dimension_set_version',
+        ),
+        true,
+      );
+    },
+  );
+
+  register(
     'period locks expose only the named advance and reopen mutation authority',
     () => {
       const definition = structuredClone(inventoryModuleDefinition()) as Record<
@@ -1083,6 +1175,27 @@ function projectionPayload<T>(compiled: CompileSuccess, familyId: string): T {
 
 function entityOwnedStorageDefinition(): unknown {
   return inventoryModuleDefinition();
+}
+
+function inventoryDefinitionWithoutMovementField(
+  fieldLocalId: string,
+): Record<string, unknown> {
+  const definition = structuredClone(inventoryModuleDefinition()) as {
+    fields: Array<{ fieldId: string }>;
+    queries: Array<{
+      selections: Array<{ field: { targetId: string } }>;
+    }>;
+  };
+  const suffix = `:field.${fieldLocalId}`;
+  definition.fields = definition.fields.filter(
+    (field) => !field.fieldId.endsWith(suffix),
+  );
+  for (const query of definition.queries) {
+    query.selections = query.selections.filter(
+      (selection) => !selection.field.targetId.endsWith(suffix),
+    );
+  }
+  return definition;
 }
 
 function replaceExactString(value: unknown, from: string, to: string): unknown {

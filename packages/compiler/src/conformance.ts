@@ -176,6 +176,133 @@ const REASON_REQUIREMENTS = Object.freeze([
 const CANONICAL_DECIMAL_V2 = /^(?:0|-[1-9]\d*|[1-9]\d*)(?:\.\d*[1-9])?$/;
 const MOVEMENT_MONEY_TOKEN =
   /(?:amount|money|monetary|value|cost|price|currency)/iu;
+type InventoryMovementModuleFieldShape =
+  | { kind: 'dateTime'; precision: 'millisecond'; timezone: 'utcInstant' }
+  | { kind: 'decimal'; precision: 38; scale: 18 }
+  | {
+      kind: 'enum';
+      options: readonly { label: string; optionLocalId: string }[];
+    }
+  | { kind: 'integer' }
+  | { kind: 'text'; maximumLength: number };
+interface InventoryMovementModuleFieldRule {
+  fieldLocalId: string;
+  presence: 'optional' | 'required';
+  shape: InventoryMovementModuleFieldShape;
+}
+const INVENTORY_MOVEMENT_MODULE_FIELD_RULES = Object.freeze([
+  {
+    fieldLocalId: 'inventory_movement_stock_dimension_set_version',
+    presence: 'required',
+    shape: {
+      kind: 'enum',
+      options: [
+        { label: 'v1', optionLocalId: 'stock_dimension_set_version_v1' },
+      ],
+    },
+  },
+  {
+    fieldLocalId: 'inventory_movement_item_id',
+    presence: 'required',
+    shape: { kind: 'text', maximumLength: 80 },
+  },
+  {
+    fieldLocalId: 'inventory_movement_location_id',
+    presence: 'required',
+    shape: { kind: 'text', maximumLength: 80 },
+  },
+  {
+    fieldLocalId: 'inventory_movement_quantity_delta',
+    presence: 'required',
+    shape: { kind: 'decimal', precision: 38, scale: 18 },
+  },
+  {
+    fieldLocalId: 'inventory_movement_unit_id',
+    presence: 'required',
+    shape: { kind: 'text', maximumLength: 32 },
+  },
+  {
+    fieldLocalId: 'inventory_movement_effective_at',
+    presence: 'required',
+    shape: {
+      kind: 'dateTime',
+      precision: 'millisecond',
+      timezone: 'utcInstant',
+    },
+  },
+  {
+    fieldLocalId: 'inventory_movement_recorded_at',
+    presence: 'required',
+    shape: {
+      kind: 'dateTime',
+      precision: 'millisecond',
+      timezone: 'utcInstant',
+    },
+  },
+  {
+    fieldLocalId: 'inventory_movement_source_type',
+    presence: 'required',
+    shape: { kind: 'text', maximumLength: 80 },
+  },
+  {
+    fieldLocalId: 'inventory_movement_source_id',
+    presence: 'required',
+    shape: { kind: 'text', maximumLength: 80 },
+  },
+  {
+    fieldLocalId: 'inventory_movement_source_line',
+    presence: 'required',
+    shape: { kind: 'text', maximumLength: 80 },
+  },
+  {
+    fieldLocalId: 'inventory_movement_source_revision',
+    presence: 'required',
+    shape: { kind: 'integer' },
+  },
+  {
+    fieldLocalId: 'inventory_movement_posting_role',
+    presence: 'required',
+    shape: {
+      kind: 'enum',
+      options: [
+        {
+          label: 'adjustment',
+          optionLocalId: 'inventory_posting_role_adjustment',
+        },
+        { label: 'transfer', optionLocalId: 'inventory_posting_role_transfer' },
+        { label: 'count', optionLocalId: 'inventory_posting_role_count' },
+        {
+          label: 'correction',
+          optionLocalId: 'inventory_posting_role_correction',
+        },
+        {
+          label: 'reBaseline',
+          optionLocalId: 'inventory_posting_role_re_baseline',
+        },
+      ],
+    },
+  },
+  {
+    fieldLocalId: 'inventory_movement_reason_code',
+    presence: 'optional',
+    shape: { kind: 'text', maximumLength: 80 },
+  },
+  {
+    fieldLocalId: 'inventory_movement_reason_narrative',
+    presence: 'optional',
+    shape: { kind: 'text', maximumLength: 1000 },
+  },
+  {
+    fieldLocalId: 'inventory_movement_actor_id',
+    presence: 'required',
+    shape: { kind: 'text', maximumLength: 80 },
+  },
+  {
+    fieldLocalId: 'inventory_movement_reversal_of_movement_id',
+    presence: 'optional',
+    shape: { kind: 'text', maximumLength: 80 },
+  },
+] as const satisfies readonly InventoryMovementModuleFieldRule[]);
 const INVENTORY_MOVEMENT_CANDIDATE_FIELDS = Object.freeze([
   'movementId',
   'stockDimensionSetVersion',
@@ -407,6 +534,118 @@ export function isPinnedInventoryBaseUnitField(
     return false;
   }
   return fieldId.endsWith(':field.item_base_unit');
+}
+
+function inventoryMovementFieldShapeMatches(
+  field: NormalizedApplicationPackage['fields'][number],
+  rule: InventoryMovementModuleFieldRule,
+  namespace: string,
+): boolean {
+  if (field.presence !== rule.presence) return false;
+  const fieldType = field.fieldType;
+  switch (rule.shape.kind) {
+    case 'dateTime':
+      return (
+        fieldType.kind === 'dateTimeFieldType' &&
+        fieldType.precision === rule.shape.precision &&
+        fieldType.timezoneSemantics === rule.shape.timezone
+      );
+    case 'decimal':
+      return (
+        fieldType.kind === 'exactDecimalFieldType' &&
+        fieldType.precision === rule.shape.precision &&
+        fieldType.scale === rule.shape.scale &&
+        fieldType.representation === 'canonicalString'
+      );
+    case 'enum':
+      return (
+        fieldType.kind === 'enumFieldType' &&
+        sameStringArray(
+          fieldType.options.map(
+            (option) => `${option.label}|${option.optionId}`,
+          ),
+          rule.shape.options.map(
+            (option) =>
+              `${option.label}|${namespace}:option.${option.optionLocalId}`,
+          ),
+        )
+      );
+    case 'integer':
+      return (
+        fieldType.kind === 'integerFieldType' &&
+        fieldType.representation === 'canonicalString'
+      );
+    case 'text':
+      return (
+        fieldType.kind === 'textFieldType' &&
+        fieldType.maximumLength === rule.shape.maximumLength
+      );
+  }
+}
+
+function validatePinnedInventoryMovementEntity(
+  packageRevision: NormalizedApplicationPackage,
+  entityId: string,
+  diagnostics: CompilerDiagnostic[],
+): void {
+  const fields = packageRevision.fields.filter(
+    (field) =>
+      field.lifecycle === 'active' && field.entity.targetId === entityId,
+  );
+  const rules = new Map<string, InventoryMovementModuleFieldRule>(
+    INVENTORY_MOVEMENT_MODULE_FIELD_RULES.map((rule) => [
+      rule.fieldLocalId,
+      rule,
+    ]),
+  );
+  const observed = new Set<string>();
+  for (const field of fields) {
+    const localId = canonicalFieldLocalId(field.fieldId);
+    const rule = localId ? rules.get(localId) : undefined;
+    if (!rule) {
+      diagnostics.push(
+        inventoryModuleDiagnostic(
+          MOVEMENT_MONEY_TOKEN.test(field.fieldId)
+            ? 'INVENTORY_MOVEMENT_MONEY_FORBIDDEN'
+            : 'INVENTORY_CONTRACT_INVALID',
+          `$.fields.${localId ?? field.fieldId}`,
+          field.fieldId,
+        ),
+      );
+      continue;
+    }
+    observed.add(rule.fieldLocalId);
+    if (
+      !inventoryMovementFieldShapeMatches(
+        field,
+        rule,
+        packageRevision.package.namespace,
+      )
+    ) {
+      diagnostics.push(
+        inventoryModuleDiagnostic(
+          rule.fieldLocalId === 'inventory_movement_stock_dimension_set_version'
+            ? 'INVENTORY_STOCK_DIMENSION_VERSION_REQUIRED'
+            : 'INVENTORY_CONTRACT_INVALID',
+          `$.fields.${rule.fieldLocalId}`,
+          field.fieldId,
+        ),
+      );
+    }
+  }
+  for (const rule of INVENTORY_MOVEMENT_MODULE_FIELD_RULES) {
+    if (observed.has(rule.fieldLocalId)) continue;
+    const fieldId = `${packageRevision.package.namespace}:field.${rule.fieldLocalId}`;
+    diagnostics.push(
+      inventoryModuleDiagnostic(
+        rule.fieldLocalId === 'inventory_movement_stock_dimension_set_version'
+          ? 'INVENTORY_STOCK_DIMENSION_VERSION_REQUIRED'
+          : 'INVENTORY_CONTRACT_INVALID',
+        `$.fields.${rule.fieldLocalId}`,
+        fieldId,
+      ),
+    );
+  }
 }
 
 export type LegalEntityMasterFieldRole =
@@ -733,6 +972,13 @@ export function validateModuleConformance(
             `field.inventoryReference.${rule.fieldLocalId}`,
           );
         }
+      }
+      if (family.familyId === 'inventory_movement') {
+        validatePinnedInventoryMovementEntity(
+          packageRevision,
+          entity.entityId,
+          diagnostics,
+        );
       }
     }
   }
@@ -2429,16 +2675,29 @@ const INVENTORY_DIAGNOSTIC_RULES: Readonly<
 
 function inventoryModuleDiagnostic(
   code:
+    | 'INVENTORY_CONTRACT_INVALID'
     | 'INVENTORY_LEGAL_ENTITY_FAMILY_UNDECLARED'
-    | 'INVENTORY_RELATION_ENTITY_SEMANTICS_UNDECLARED',
+    | 'INVENTORY_MOVEMENT_MONEY_FORBIDDEN'
+    | 'INVENTORY_RELATION_ENTITY_SEMANTICS_UNDECLARED'
+    | 'INVENTORY_STOCK_DIMENSION_VERSION_REQUIRED',
   path: string,
   subjectId: string | null,
 ): CompilerDiagnostic {
+  const acceptedAlternative: Readonly<Record<typeof code, string>> =
+    Object.freeze({
+      INVENTORY_CONTRACT_INVALID:
+        'make the compiled inventory movement entity match the pinned quantity-only movement declaration exactly',
+      INVENTORY_LEGAL_ENTITY_FAMILY_UNDECLARED:
+        'add the family to the pinned inventory legal-entity map before compiling it; no ownership default exists',
+      INVENTORY_MOVEMENT_MONEY_FORBIDDEN:
+        'keep inventory movement facts quantity-only and derive financial value in its separately governed accounting authority',
+      INVENTORY_RELATION_ENTITY_SEMANTICS_UNDECLARED:
+        'add the canonical endpoint pair to the pinned inventory relation-semantics contract before compiling it',
+      INVENTORY_STOCK_DIMENSION_VERSION_REQUIRED:
+        'declare the required exactly-v1 stock-dimension-set version field on every inventory movement',
+    });
   return {
-    acceptedAlternative:
-      code === 'INVENTORY_LEGAL_ENTITY_FAMILY_UNDECLARED'
-        ? 'add the family to the pinned inventory legal-entity map before compiling it; no ownership default exists'
-        : 'add the canonical endpoint pair to the pinned inventory relation-semantics contract before compiling it',
+    acceptedAlternative: acceptedAlternative[code],
     code,
     diagnosticVersion: COMPILER_DIAGNOSTIC_VERSION,
     occurrenceIndex: 0,

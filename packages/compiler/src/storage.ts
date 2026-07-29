@@ -1057,12 +1057,14 @@ export function lowerStorageTargetV1(
     relationId: string;
     semantics: 'crossEntityAllowed' | 'sameEntity' | null;
     source: StorageEntityTarget;
-    target: StorageEntityTarget;
+    targetEntityId: string;
+    targetLegalEntityScoped: boolean;
+    targetRecordIdentityColumn: string;
   }): void => {
     const entityScoped =
       input.semantics === 'sameEntity' &&
       input.source.legalEntity !== undefined &&
-      input.target.legalEntity !== undefined;
+      input.targetLegalEntityScoped;
     const sourceColumns = [
       'tenant_id',
       'environment_id',
@@ -1073,7 +1075,7 @@ export function lowerStorageTargetV1(
       'tenant_id',
       'environment_id',
       ...(entityScoped ? ['legal_entity_id'] : []),
-      input.target.recordIdentity.column,
+      input.targetRecordIdentityColumn,
     ];
     const physicalName = physicalNameFor(
       'constraint',
@@ -1097,7 +1099,7 @@ export function lowerStorageTargetV1(
       },
       relationId: input.relationId,
       sourceEntityId: input.source.entityId,
-      targetEntityId: input.target.entityId,
+      targetEntityId: input.targetEntityId,
     };
     const compatibilityShape = {
       archiveBehavior: targetShape.archiveBehavior,
@@ -1185,7 +1187,9 @@ export function lowerStorageTargetV1(
       relationId: relation.relationId,
       semantics,
       source,
-      target,
+      targetEntityId: target.entityId,
+      targetLegalEntityScoped: target.legalEntity !== undefined,
+      targetRecordIdentityColumn: target.recordIdentity.column,
     });
   }
 
@@ -1206,7 +1210,6 @@ export function lowerStorageTargetV1(
           family.familyId === rule.targetFamilyId
         );
       });
-      if (!target) continue;
       registerRelation({
         archiveBehavior: 'restrict',
         nullable: !rule.required,
@@ -1216,7 +1219,12 @@ export function lowerStorageTargetV1(
         relationId: `${column.canonicalFieldId}#inventory-reference`,
         semantics: rule.semantics,
         source,
-        target,
+        targetEntityId:
+          target?.entityId ??
+          `${packageRevision.package.namespace}:entity.${rule.targetFamilyId}`,
+        targetLegalEntityScoped: target?.legalEntity !== undefined,
+        targetRecordIdentityColumn:
+          target?.recordIdentity.column ?? 'record_id',
       });
     }
   }

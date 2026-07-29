@@ -2000,6 +2000,119 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
   );
 });
 
+test('standalone inventory materialization fails closed when Item and Location targets are absent', async () => {
+  const legalEntityA = randomUUID();
+  const legalEntityB = randomUUID();
+  const emptyDefinition = emptyModuleDefinition();
+  const source = mustCompile(moduleInput(emptyDefinition));
+  const targetDefinition = inventoryModuleDefinition();
+  const target = mustCompile(
+    moduleInput(targetDefinition, expectedActiveReleaseFrom(source)),
+  );
+  const storage = projectionPayload<StorageTargetPayloadV1>(
+    target,
+    PROJECTION_FAMILY_IDS.storageTarget,
+  );
+
+  await withEphemeralPostgres(
+    'module-storage-inventory-missing-references',
+    async ({ connection, pool }) => {
+      const admin = await pool.connect();
+      try {
+        await runMigrations(admin, await loadMigrations(migrations));
+        await seedScope(admin);
+        await admin.query(
+          `SELECT platform.provision_inventory_scope(
+             $1, $2, $3, 'LE-A', 'Legal Entity A', 'America/Edmonton',
+             '06:00:00', $4, 1::smallint, 'reject', 0,
+             'codeAndNarrative', 'codeOnly', 'codeAndNarrative',
+             'codeAndNarrative', 'codeAndNarrative',
+             NULL, NULL, NULL, NULL, NULL
+           )`,
+          [tenantA, environmentA, legalEntityA, inventoryContractReleaseRoot],
+        );
+        await admin.query(
+          `SELECT platform.provision_inventory_scope(
+             $1, $2, $3, 'LE-B', 'Legal Entity B', 'America/Toronto',
+             '04:00:00', $4, 1::smallint, 'reject', 0,
+             'codeAndNarrative', 'codeOnly', 'codeAndNarrative',
+             'codeAndNarrative', 'codeAndNarrative',
+             NULL, NULL, NULL, NULL, NULL
+           )`,
+          [tenantB, environmentB, legalEntityB, inventoryContractReleaseRoot],
+        );
+      } finally {
+        admin.release();
+      }
+      const runtimePool = new pg.Pool({
+        ...connection,
+        max: 2,
+        user: 'north_star_runtime',
+      });
+      const materializerPool = new pg.Pool({
+        ...connection,
+        max: 2,
+        user: 'north_star_module_materializer',
+      });
+      const moduleRuntimePool = new pg.Pool({
+        ...connection,
+        max: 1,
+        user: 'north_star_module_runtime',
+      });
+      materializerPool.on('error', () => undefined);
+      moduleRuntimePool.on('error', () => undefined);
+      try {
+        const contexts = await trustedContexts();
+        const releases = await persistPairForBothTenants(
+          runtimePool,
+          contexts,
+          source,
+          definitionBytes(emptyDefinition),
+          target,
+          definitionBytes(targetDefinition),
+        );
+        await installSourcePointers(pool, releases);
+        await grantExecutorAuthority(pool);
+        const materializer = new PostgresModuleStorageMaterializer(
+          materializerPool,
+          moduleRuntimePool,
+        );
+        await assert.rejects(
+          materializer.prepare({
+            context: contexts.a,
+            expiresAt: new Date(Date.now() + 60_000).toISOString(),
+            generationId: randomUUID(),
+            initiatedBy: principalA,
+            preparationId: randomUUID(),
+            targetReleaseId: releases.a.target,
+          }),
+          (error: unknown) =>
+            error instanceof ModuleStorageMaterializationError &&
+            error.code === 'ENTITY_TARGET_MISSING',
+        );
+      } finally {
+        await Promise.all([
+          runtimePool.end(),
+          materializerPool.end(),
+          moduleRuntimePool.end(),
+        ]);
+      }
+    },
+  );
+
+  const externalTargets = storage.relations
+    .filter((relation) => relation.relationColumn.origin === 'field')
+    .map((relation) => relation.targetEntityId)
+    .toSorted();
+  assert.deepEqual(externalTargets, [
+    'northstar.inventory:entity.item',
+    'northstar.inventory:entity.item',
+    'northstar.inventory:entity.location',
+    'northstar.inventory:entity.location',
+    'northstar.inventory:entity.location',
+  ]);
+});
+
 test('inventory v3 targets materialize the compiled legal master, fact partitions, and base-unit binding', async () => {
   const legalEntityId = randomUUID();
   const legalEntityB = randomUUID();
