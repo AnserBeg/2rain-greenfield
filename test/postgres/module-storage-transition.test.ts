@@ -142,6 +142,7 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
           '0011_module_fold_function_ddl_witness.sql',
           '0012_saved_master_filters.sql',
           '0013_release_verification_evidence.sql',
+          '0014_archive_excluding_module_uniqueness.sql',
         ]);
         assert.equal(migrationResult.verified.length, allMigrations.length);
         await seedScope(admin);
@@ -336,6 +337,10 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
                   definition.indexdef,
                   new RegExp(foldedColumn.physicalName),
                 );
+                assert.match(
+                  definition.indexdef,
+                  /WHERE \(?archived_at IS NULL\)?$/,
+                );
                 assert.doesNotMatch(
                   definition.indexdef,
                   /nsm_unicode_case_fold_v1/,
@@ -438,6 +443,41 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
               verification_version:
                 'northstar.release-activation-verification/v2',
             });
+
+            assert.deepEqual(
+              (await materializer.verifyLiveCatalog(contexts.a)).drift,
+              [],
+              'the drift verifier must accept archive-excluding indexes',
+            );
+            const parent = freshStorage.entities.find(
+              (entity) => entity.entityId === FIXTURE_IDS.entityIds.parent,
+            );
+            assert.ok(parent);
+            const managedUnique = parent.uniqueKeys[0];
+            assert.ok(managedUnique);
+            const declaredIndex = await pool.query<{ indexdef: string }>(
+              `SELECT indexdef
+                 FROM pg_indexes
+                WHERE schemaname = 'north_star_module'
+                  AND indexname = $1`,
+              [managedUnique.physicalName],
+            );
+            assert.equal(declaredIndex.rowCount, 1);
+            await pool.query(
+              `DROP INDEX north_star_module.${quoteTestIdentifier(managedUnique.physicalName)}`,
+            );
+            await assertCatalogDrift(
+              materializer,
+              contexts.a,
+              new RegExp(
+                `missing managed index ${parent.physicalTableName}\\.${managedUnique.physicalName}`,
+              ),
+            );
+            await pool.query(declaredIndex.rows[0]!.indexdef);
+            assert.deepEqual(
+              (await materializer.verifyLiveCatalog(contexts.a)).drift,
+              [],
+            );
           },
         );
 

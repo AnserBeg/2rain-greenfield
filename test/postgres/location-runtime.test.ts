@@ -256,6 +256,103 @@ test('Location executes tenant code, resolver, lifecycle, and DTO contracts on r
   });
 });
 
+test('Location reuses an archived code while active uniqueness and restore conflicts stay closed', async () => {
+  await withRealLocationRuntime(
+    'location-archive-key-reuse',
+    async (runtime) => {
+      const archivedLocationId = randomUUID();
+      await invokeLocationOperation(
+        runtime,
+        runtime.views.a,
+        'location_create',
+        {
+          recordId: archivedLocationId,
+          values: locationValues('WH-A', 'Original warehouse', warehouseType),
+        },
+      );
+
+      await assert.rejects(
+        invokeLocationOperation(runtime, runtime.views.a, 'location_create', {
+          recordId: randomUUID(),
+          values: locationValues('wh-a', 'Active duplicate', warehouseType),
+        }),
+        (error: unknown) =>
+          assertTypedError(
+            error,
+            'MODULE_UNIQUE_VIOLATION',
+            LOCATION_IDS.fieldIds.code,
+          ),
+      );
+
+      await invokeLocationOperation(
+        runtime,
+        runtime.views.a,
+        'location_archive',
+        {
+          expectedRevision: 1,
+          recordId: archivedLocationId,
+        },
+      );
+      const replacementLocationId = randomUUID();
+      const replacement = await invokeLocationOperation(
+        runtime,
+        runtime.views.a,
+        'location_create',
+        {
+          recordId: replacementLocationId,
+          values: locationValues(
+            'wh-a',
+            'Replacement warehouse',
+            warehouseType,
+          ),
+        },
+      );
+      assert.equal(replacement.outcome, 'succeeded');
+      assert.equal(
+        await persistedLocationCount(runtime.adminPool, runtime, 'a'),
+        2,
+      );
+
+      await assert.rejects(
+        invokeLocationOperation(runtime, runtime.views.a, 'location_restore', {
+          expectedRevision: 2,
+          recordId: archivedLocationId,
+        }),
+        (error: unknown) =>
+          assertTypedError(
+            error,
+            'MODULE_UNIQUE_VIOLATION',
+            LOCATION_IDS.fieldIds.code,
+          ),
+      );
+      await assertPersistedLocation(
+        runtime.adminPool,
+        runtime,
+        archivedLocationId,
+        {
+          archived: true,
+          locationType: warehouseType,
+          name: 'Original warehouse',
+          revision: 2,
+          code: 'WH-A',
+        },
+      );
+      await assertPersistedLocation(
+        runtime.adminPool,
+        runtime,
+        replacementLocationId,
+        {
+          archived: false,
+          locationType: warehouseType,
+          name: 'Replacement warehouse',
+          revision: 1,
+          code: 'wh-a',
+        },
+      );
+    },
+  );
+});
+
 function resolveLocation(
   runtime: RealLocationRuntime,
   view: RequestRuntimeView,

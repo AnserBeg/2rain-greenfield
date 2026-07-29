@@ -12,15 +12,49 @@ writer is holding those paths right now.
 
 ## The lanes
 
-| Lane | Theme | Current packet | Base | Status |
-|---|---|---|---|---|
-| **KERNEL** | Canonical language and the query tier | *awaiting selection — `4c` next; artifact window now OPEN* | — | **idle** |
-| **DEPLOY** | Release lifecycle and runtime infrastructure | *awaiting selection — `1g2` reverse-transition, or `1c` platform classification* | — | **idle** |
-| **FIX** | Correctness defects → stage cutting → inventory build | *awaiting selection — `1d` is now unblocked* | — | **idle** |
-| **BUILD** | Inventory contracts *(fourth lane, opened 2026-07-28)* | *awaiting selection — `G3-P1b` after `1d`; `G3-P2` after both* | — | **idle** |
+| Lane | Theme | Current packet | Status |
+|---|---|---|---|
+| **KERNEL** | Canonical language and the query tier | `4c` — packages adopt v3 (the artifact event) | **active** |
+| **DEPLOY** | Release lifecycle and runtime infrastructure | `1c-a` **accepted** 2026-07-28 (ADR-0023) — *awaiting selection* | **idle** |
+| **FIX** | Correctness defects → stage cutting → inventory build | `1d` **accepted** 2026-07-28 — **`G3-P1b` is next and now unblocked** | **idle** |
+| **BUILD** | Inventory contracts | `G3-P2a` — tenant-completeness manifest | **active** |
 
 Lane identity is stable across packets. When a lane's packet is accepted, the
 next packet inherits the lane and its partition.
+
+## DEPLOY stays idle until 4c lands — decided 2026-07-28
+
+Both candidate packets for the free DEPLOY lane currently collide with KERNEL's
+`4c` leases:
+
+  - **`1c`** (platform classification) needs
+    `packages/domain/src/platform/definition.ts` — held by KERNEL for 4c's
+    version migration.
+  - **`1g2`** (reverse-transition policy) needs
+    `packages/postgres-provider/src/release-*.ts` and
+    `composed-application-runtime.ts` — both released to KERNEL for 4c.
+
+**Leaving a lane idle is a legitimate decision.** Starting a fourth packet that
+must serialize against 4c creates exactly the contention this file exists to
+prevent, and 4c is the inventory critical path. Three lanes on it is already the
+most the dependency graph allows.
+
+Reconsider the moment 4c integrates: `1c` is the stronger candidate — 1b's gate
+now refuses the platform package, so saved filters are non-releasable and the
+row is a red test rather than an argument.
+
+**The scoping pass is already done, and it inverted the prediction.** An earlier
+draft of this section said the Tier-B branch likely needs a canonical concept
+that does not exist. **It does not** — `schemas.ts:947-950` declares
+`storageClass` as `.nullable().optional()`, so an entity carrying no compiled
+storage class is expressible at v2 today; the `normalize.ts:773-779` rule that
+would refuse it is gated on `LEGACY_LANGUAGE_VERSION` and binds v0-experimental
+packages only. What refuses the shape is two **compiler** rules outside
+`canonical-model`: `conformance.ts:169-177` and `storage.ts:433`. **Branch (a) is
+the one needing a canonical concept** — migration 0012 scopes saved-filter RLS on
+`owner_principal_id`, and no per-principal row-ownership primitive exists
+anywhere in the compiled path. Full finding, with the discriminator answer, is in
+`current-plan.md` row 1c. **Do not re-derive it from this file; read that row.**
 
 ## Path partition — binding
 
@@ -46,14 +80,21 @@ the query tier both live there.
 | `test/fixtures/g2/*/runtime-harness.ts` | **KERNEL** *(released from DEPLOY 2026-07-28 on 1b's integration, for 4c's version-stamp fix)* |
 | `db/migrations/**` · `packages/postgres-provider/src/migrations.ts` | **FIX** *(reverted from DEPLOY 2026-07-28 on 1b's integration; `0013` is taken, so 1d's migration is `0014`)* |
 | `packages/postgres-provider/src/module-runtime-interpreter.ts` | KERNEL |
+| `test/postgres/{module-runtime,release-activation,release-approval,releases,request-runtime-view}.test.ts` | **KERNEL** *(granted 2026-07-28 for 4c — artifact-owned revision-envelope versions ONLY; the version-hardcode sweep's fourth-instance batch)* |
+| `test/postgres/module-storage-transition.test.ts` | **FIX (1d) and KERNEL (4c) — split by concern, granted 2026-07-28.** FIX owns the archive-excluding unique-index assertions (migration `0014`, index predicates, drift acceptance); KERNEL owns the version-stamping paths only. Verified disjoint before granting: 1d's diff to this file contains **zero** `LANGUAGE_VERSION`/`NORMALIZATION_PROFILE_VERSION` references. Neither lane may touch the other's concern. |
+| `test/postgres/**` (rest) | unassigned — bridge before touching |
+| `packages/dev-tooling/src/**` · `test/architecture/tenant-completeness*` | BUILD *(taken 2026-07-28 by G3-P2a; recorded here retroactively — the partition table had no `dev-tooling` row at all, the second such gap found today)* |
+| `packages/compiler/src/conformance.ts` | **unassigned — bridge before touching** *(gap found 2026-07-28 by the 1c scoping pass: G3-P1a edited this file under its own lease and it now holds the inventory contract constants alongside the four-query completeness rule, so BUILD and any 1c branch both have a live claim on it. It is in no lane's column. Do not let a lane take it silently.)* |
 | `docs/execution/packets/**` · `docs/execution/stage-cut-inputs.md` | FIX *(granted 2026-07-28 for G3-P0; each lane still owns its own packet doc)* |
 | `packages/domain/src/{party,catalog,location,platform}/definition.ts` · `app/builder.ts` | KERNEL *(granted 2026-07-28 for 4c — **version/profile strings and the empty `impactAnalyses` root only**; no definition semantics)* |
 | `packages/domain/src/inventory/**` | BUILD *(G3-P1a creates it)* — KERNEL may migrate its **version strings only**, and only if it exists at 4c's integration time |
 | `test/helpers/postgres.ts` | DEPLOY *(granted 2026-07-28 for 1b — readiness-race fix only; a 1f regression blocking its gate)* |
 | `test/helpers/node-reporter-core.mjs` · `test/architecture/test-reachability.test.ts` | DEPLOY *(granted 2026-07-28 for 1b — admit `--test-concurrency=<positive int>` to PR-4b's closed argv grammar; filtering arguments must still be rejected)* |
 | `apps/web/release/**` (generated artifacts) | FIX *(granted 2026-07-28 for 1d — regenerate stale lineage after storage roots moved; re-derived at integration, so concurrent regeneration by 4c is expected)* |
-| `learnings.md` | FIX *(granted 2026-07-28 for 1d — add-only, one entry)* |
+| `learnings.md` | FIX *(granted 2026-07-28 for 1d — add-only, one entry, appended at the end of file)* · **KERNEL also granted 2026-07-28 for 4c — the `Derive persisted envelope versions from canonical authority` block ONLY (currently lines 114-117), to supersede it. The two grants are provably disjoint: 1d appends past line 215, 4c edits 114-117. Neither may touch the other's region.** |
 | `apps/web/scripts/compile-app-release.ts` | KERNEL *(granted 2026-07-28 for 4c — per-artifact compiler-profile selection when verifying persisted lineage)* |
+| `apps/web/scripts/compile-demo-release.ts` | KERNEL *(granted 2026-07-28 for 4c — **caught by the orchestrator, not requested**: the lane was editing it under the `compile-app-release.ts` grant, which names a different file. Granted because it is a direct consequence of the orchestrator's own ruling that the demo shell stays `v0-experimental` while the app moves to v3, so the demo compile path must select its profile per artifact. No other lane holds it.)* |
+| **Per-artifact compiler-profile selection — CLASS GRANT to KERNEL, 2026-07-28, for 4c** | **KERNEL**, for **profile selection only**. Covers every consumer of `DEFAULT_COMPILER_PROFILE` / `MODULE_COMPILER_PROFILE` outside `packages/compiler/src/` that compiles a fixture whose declared language version differs from the constant: `apps/web/test/browser/{surface-grammar,surface-data-binding}.spec.ts`, `test/fixtures/g2/{party,catalog,location}/compiler.ts`, `test/fixtures/g2/surface-grammar/compiled.ts`, `test/compiler/subprocess-compile.ts`, `test/architecture/surface-grammar-conformance.test.ts`. **Granted as a class after the third individual request** — the lane had already been granted `compile-app-release.ts` and `compile-demo-release.ts` for the identical defect, and enumerating showed eight more consumers, so one-at-a-time bridging would have cost a stop per file. **Verified no other lane holds any of them** (BUILD's `test/architecture` claim is limited to `tenant-completeness*` and shared `repository-hygiene`). **Strictly bounded: derive the profile from the artifact's own declared version and change nothing else** — no assertion, expectation, fixture content, or behavior change. Anything beyond profile derivation is a fresh stop-and-report. |
 | `apps/web/**` (rest) · rest of `packages/domain/**` | **none — frozen while lanes run** |
 
 A lane needing a path outside its column files a **bridge request naming its
@@ -169,7 +210,8 @@ run.
 ### Exception: an orchestrator docs-only advance does not force a re-run
 
 **If the only difference between the lane's merge base and current `main` is
-under `docs/` or `.agents/`, the lane does NOT re-merge and does NOT re-run.**
+under `docs/`, `.agents/`, or the root narrative files `CLAUDE.md` and
+`AGENTS.md`, the lane does NOT re-merge and does NOT re-run.**
 The orchestrator merges those at acceptance. The tested code and the integrated
 code are byte-identical, so a re-run would observe nothing new.
 
@@ -179,8 +221,20 @@ commits indefinitely and never reaches a stable integrated SHA. Added 2026-07-28
 after exactly that happened to KERNEL twice in one packet.
 
 **The exception is narrow and the orchestrator verifies it, not the lane.** Any
-file outside `docs/` or `.agents/` — product code, test, config, migration,
-lockfile, generated artifact — voids it and the full merge-and-re-run applies.
+file outside those paths — product code, test, config, migration, lockfile,
+generated artifact — voids it and the full merge-and-re-run applies.
+
+**Widened 2026-07-28 to name `CLAUDE.md` and `AGENTS.md`.** The original wording
+listed only `docs/` and `.agents/`, and 4c's second bridge hit the gap: `main`
+had gained exactly one line in `CLAUDE.md` — a pointer to the orchestrator
+handoff — which by the letter voided the exception and would have forced a full
+matrix re-run to observe a documentation sentence. Those two root files are
+narrative in the same class as `docs/`: not code, not test, not config, not a
+generated artifact, and never executed. The exception's stated purpose is that
+"the tested code and the integrated code are byte-identical", and that holds
+exactly. This is the standing lesson applied to the rule itself — *every gate
+built for one situation needs widening the first time a second appears* — and
+widening it explicitly is the alternative to stretching it silently each time.
 When in doubt, re-run: a wasted matrix costs minutes, an untested integration
 costs the rule PR-1 exists to enforce.
 

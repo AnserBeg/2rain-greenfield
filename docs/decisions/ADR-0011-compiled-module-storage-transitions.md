@@ -4,6 +4,21 @@ Date: 2026-07-22
 Status: ratified — Freeze F ratification is recorded by the G2-P2 completion in `docs/execution/ledger.md`
 Tier: Critical (review per `review-tiers`)
 
+> **AMENDED 2026-07-28 by [ADR-0023](ADR-0023-storageless-platform-capability-tier.md).**
+> The clause below at "No module-specific Q0/O0 handler, SQL, route, tool, kernel branch, or
+> registry is emitted or admitted" is **narrowed, not repealed**. ADR-0023 admits one
+> **storage-less Tier-B platform capability** — saved filters, and only saved filters —
+> selected structurally (no storage projection required, storage class absent or null, no
+> managed DDL emitted, and a versioned provider registration executing the exact declared
+> surface), never by provenance or namespace. Everything in this ADR continues to bind
+> **Tier-A managed entities without exception**, and the generic interpreter remains
+> exclusive for them. Read ADR-0023 before relying on the clause below.
+>
+> Pointer added by the orchestrator at 1c-a's integration: `docs/decisions/**` is
+> orchestrator-owned apart from a packet's own new ADR, so the writer could not add it. A
+> ratified ADR amended with no back-reference leaves every reader on the unamended rule —
+> the same stale-pin failure this program hit three times on 2026-07-28 alone.
+
 ## Context
 
 The canonical package is the sole application desired-state authority, while
