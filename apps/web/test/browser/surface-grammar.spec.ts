@@ -158,7 +158,9 @@ async function requireCompactJourney(
     expectedNavigation,
   );
   await expect(page.locator('.app-shell')).toHaveCSS('display', 'block');
-  await expect(navigation.locator('ul')).toHaveCSS('display', 'flex');
+  await expect(page.locator('.sidebar')).toHaveCSS('position', 'fixed');
+  await expect(page.locator('.sidebar')).toHaveCSS('bottom', '0px');
+  await expect(navigation.locator('ul')).toHaveCSS('display', 'grid');
 
   const roles = await page
     .locator('[data-status-role]')

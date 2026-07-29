@@ -98,6 +98,7 @@ const componentRegistry: Readonly<Record<string, SurfaceComponentRenderer>> =
 
 const surfaceSlotRegistry: Readonly<Record<string, SurfaceComponentRenderer>> =
   Object.freeze({
+    'list:bulkActions': renderBulkActions,
     'list:dataGrid': renderDataGrid,
     'list:title': renderListTitle,
     'record:breadcrumb': renderBreadcrumb,
@@ -203,6 +204,19 @@ function renderDataGrid(context: SurfaceComponentContext): string {
   );
 }
 
+function renderBulkActions(context: SurfaceComponentContext): string {
+  const data = context.data ?? { status: 'UNBOUND' as const };
+  if (data.status === 'UNBOUND' || data.status === 'DIAGNOSTIC') {
+    return slotPanel(context, '', 'bulk-actions-slot');
+  }
+  const formId = bulkSelectionFormId(context.surface);
+  return slotPanel(
+    context,
+    `<form class="bulk-bar" id="${escapeHtml(formId)}" data-bulk-selection-form><div><p class="eyebrow">Bulk actions</p><strong class="bulk-empty">Select records to begin</strong><strong class="bulk-ready">Selection ready</strong><p>This release keeps business actions record-scoped.</p></div><button class="secondary-action bulk-ready" type="reset">Clear selection</button></form>`,
+    'bulk-actions-slot',
+  );
+}
+
 function renderBreadcrumb(context: SurfaceComponentContext): string {
   const list = relatedSurface(context, 'list');
   const label = entityLabel(context.surface);
@@ -302,6 +316,13 @@ function renderKeyFacts(context: SurfaceComponentContext): string {
     return slotPanel(context, dataDiagnostic(data.code), 'key-facts-slot');
   }
   const record = recordFrom(data);
+  if (!record && context.surface.surfaceRole === 'form') {
+    return slotPanel(
+      context,
+      `<section class="panel key-facts-panel" data-data-state="empty"><div class="panel__heading"><div><p class="eyebrow">Key facts</p><h2>New ${escapeHtml(entityLabel(context.surface))}</h2></div></div><dl class="key-fact-grid"><div><dt>Mode</dt><dd>New record</dd></div><div><dt>Fields</dt><dd>${String(context.surface.fieldIds.length)} declared</dd></div><div><dt>State</dt><dd><span class="status-pill" data-status-role="inProgress">Draft</span></dd></div></dl></section>`,
+      'key-facts-slot',
+    );
+  }
   const compatibilityStatus =
     record && !hasSurfaceSlot(context, 'titleStatus')
       ? `<span class="status-pill" data-status-role="${record.archived ? 'attention' : 'success'}">${record.archived ? 'Archived' : 'Active'} · revision ${record.revision}</span>`
@@ -316,7 +337,7 @@ function renderKeyFacts(context: SurfaceComponentContext): string {
   return slotPanel(
     context,
     record
-      ? `${compatibilityFeedback}<section class="panel data-panel" data-data-state="exact" data-record-id="${escapeHtml(record.recordId)}"><div class="panel__heading"><div><p class="eyebrow">Key facts</p><h2>${escapeHtml(entityLabel(context.surface))}</h2></div>${compatibilityStatus}</div><dl class="record-fields">${context.surface.fieldIds.map((fieldId) => `<div data-field-id="${escapeHtml(fieldId)}"><dt>${escapeHtml(fieldLabel(fieldId))}</dt><dd>${renderValue(record.values[fieldId])}</dd></div>`).join('')}</dl>${compatibilityActions}</section>`
+      ? `${compatibilityFeedback}<section class="panel key-facts-panel" data-data-state="exact" data-record-id="${escapeHtml(record.recordId)}"><div class="panel__heading"><div><p class="eyebrow">Key facts</p><h2>${escapeHtml(recordTitle(context, record))}</h2></div>${compatibilityStatus}</div><dl class="key-fact-grid"><div><dt>Record</dt><dd><code>${escapeHtml(shortIdentity(record.recordId))}</code></dd></div><div><dt>State</dt><dd>${record.archived ? 'Archived' : 'Active'}</dd></div><div><dt>Revision</dt><dd>${String(record.revision)}</dd></div></dl>${compatibilityActions}</section>`
       : dataDiagnostic('QUERY_NOT_FOUND'),
     'key-facts-slot',
   );
@@ -331,6 +352,15 @@ function renderSections(context: SurfaceComponentContext): string {
     return slotPanel(context, dataDiagnostic(data.code), 'sections-slot');
   }
   const record = recordFrom(data);
+  if (context.surface.surfaceRole === 'record') {
+    return slotPanel(
+      context,
+      record
+        ? `<section class="panel data-panel" data-data-state="exact"><div class="panel__heading"><div><p class="eyebrow">Details</p><h2>${escapeHtml(entityLabel(context.surface))} information</h2></div></div><details class="record-section-group" open><summary>${escapeHtml(entityLabel(context.surface))} fields</summary><dl class="record-fields">${context.surface.fieldIds.map((fieldId) => `<div data-field-id="${escapeHtml(fieldId)}"><dt>${escapeHtml(fieldLabel(fieldId))}</dt><dd>${renderValue(record.values[fieldId])}</dd></div>`).join('')}</dl></details></section>`
+        : dataDiagnostic('QUERY_NOT_FOUND'),
+      'sections-slot',
+    );
+  }
   const intent = record ? 'update' : 'create';
   const operation = (context.operations ?? []).find(
     (binding) => binding.intent === intent,
@@ -413,7 +443,9 @@ function renderListSurfaceContent(
   if (records.length === 0) {
     return emptyDataPanel();
   }
-  return `<section class="panel data-panel" data-data-state="exact"><div class="panel__heading"><div><p class="eyebrow">Records</p><h2>${escapeHtml(surface.label)}</h2></div><span class="status-pill">${records.length} visible</span></div><div class="data-table-wrap"><table><thead><tr><th scope="col">Record</th>${surface.fieldIds.map((fieldId) => `<th scope="col">${escapeHtml(fieldLabel(fieldId))}</th>`).join('')}<th scope="col">Status</th></tr></thead><tbody>${records.map((record) => `<tr data-record-id="${escapeHtml(record.recordId)}"><td>${detail ? `<a class="record-link" href="${escapeHtml(surfaceHref(detail, record.recordId, record.archived))}" aria-label="Open ${escapeHtml(entityLabel(surface))} ${escapeHtml(shortIdentity(record.recordId))}"><code>${escapeHtml(shortIdentity(record.recordId))}</code></a>` : `<code>${escapeHtml(shortIdentity(record.recordId))}</code>`}</td>${surface.fieldIds.map((fieldId) => `<td data-field-id="${escapeHtml(fieldId)}">${renderValue(record.values[fieldId])}</td>`).join('')}<td>${record.archived ? 'Archived' : 'Active'}</td></tr>`).join('')}</tbody></table></div></section>`;
+  const selectable = hasNamedSlot(surface, 'bulkActions');
+  const formId = bulkSelectionFormId(surface);
+  return `<section class="panel data-panel" data-data-state="exact"><div class="panel__heading"><div><p class="eyebrow">Records</p><h2>${escapeHtml(surface.label)}</h2></div><span class="status-pill">${records.length} visible</span></div><div class="data-table-wrap" data-list-rendering="responsive-single"><table><thead><tr>${selectable ? '<th scope="col">Select</th>' : ''}<th scope="col">Record</th>${surface.fieldIds.map((fieldId) => `<th scope="col">${escapeHtml(fieldLabel(fieldId))}</th>`).join('')}<th scope="col">Status</th></tr></thead><tbody>${records.map((record) => `<tr data-compact-card="true" data-record-id="${escapeHtml(record.recordId)}">${selectable ? selectionCell(formId, record) : ''}<td data-column-label="Record" data-column-priority="0">${detail ? `<a class="record-link" href="${escapeHtml(surfaceHref(detail, record.recordId, record.archived))}" aria-label="Open ${escapeHtml(entityLabel(surface))} ${escapeHtml(shortIdentity(record.recordId))}"><code>${escapeHtml(shortIdentity(record.recordId))}</code></a>` : `<code>${escapeHtml(shortIdentity(record.recordId))}</code>`}</td>${surface.fieldIds.map((fieldId, index) => `<td data-column-label="${escapeHtml(fieldLabel(fieldId))}" data-column-priority="${String(index + 1)}" data-field-id="${escapeHtml(fieldId)}">${renderValue(record.values[fieldId])}</td>`).join('')}<td data-column-label="Status" data-column-priority="${String(surface.fieldIds.length + 1)}">${record.archived ? 'Archived' : 'Active'}</td></tr>`).join('')}</tbody></table></div></section>`;
 }
 
 function renderSharedListSurface(
@@ -440,10 +472,12 @@ function renderSharedListSurface(
     view.listCoverage.hasMore || view.listCoverage.truncatedByMaximum
       ? 'attention'
       : 'success';
+  const selectable = hasNamedSlot(surface, 'bulkActions');
+  const formId = bulkSelectionFormId(surface);
   const body =
     view.rows.length === 0
       ? `<div class="data-empty" data-data-state="empty" data-list-zero-input="true"><h3>No records yet</h3><p>This search has zero visible records for the current tenant, environment, and principal.</p></div>`
-      : `<div class="data-table-wrap"><table><thead><tr><th scope="col">Record</th>${columns.map((column) => `<th scope="col">${escapeHtml(fieldLabel(column.columnId))}</th>`).join('')}<th scope="col">Status</th></tr></thead><tbody>${view.rows.map((row) => `<tr data-record-id="${escapeHtml(row.record.recordId)}"><td>${detail ? `<a class="record-link" href="${escapeHtml(surfaceHref(detail, row.record.recordId, row.archived))}" aria-label="Open ${escapeHtml(entityLabel(surface))} ${escapeHtml(shortIdentity(row.record.recordId))}"><code>${escapeHtml(shortIdentity(row.record.recordId))}</code></a>` : `<code>${escapeHtml(shortIdentity(row.record.recordId))}</code>`}</td>${columns.map((column) => `<td ${column.kind === 'relation' ? 'data-relation-id' : 'data-field-id'}="${escapeHtml(column.columnId)}">${renderValue(row.cells[column.columnId])}</td>`).join('')}<td><span class="status-pill" data-status-role="${row.archived ? 'attention' : 'success'}">${row.archived ? 'Archived' : 'Active'}</span></td></tr>`).join('')}</tbody></table></div>`;
+      : `<div class="data-table-wrap" data-list-rendering="responsive-single"><table><thead><tr>${selectable ? '<th scope="col">Select</th>' : ''}<th scope="col">Record</th>${columns.map((column) => `<th scope="col">${escapeHtml(fieldLabel(column.columnId))}</th>`).join('')}<th scope="col">Status</th></tr></thead><tbody>${view.rows.map((row) => `<tr data-compact-card="true" data-record-id="${escapeHtml(row.record.recordId)}">${selectable ? selectionCell(formId, row.record) : ''}<td data-column-label="Record" data-column-priority="0">${detail ? `<a class="record-link" href="${escapeHtml(surfaceHref(detail, row.record.recordId, row.archived))}" aria-label="Open ${escapeHtml(entityLabel(surface))} ${escapeHtml(shortIdentity(row.record.recordId))}"><code>${escapeHtml(shortIdentity(row.record.recordId))}</code></a>` : `<code>${escapeHtml(shortIdentity(row.record.recordId))}</code>`}</td>${columns.map((column, index) => `<td data-column-label="${escapeHtml(fieldLabel(column.columnId))}" data-column-priority="${String(index + 1)}" ${column.kind === 'relation' ? 'data-relation-id' : 'data-field-id'}="${escapeHtml(column.columnId)}">${renderValue(row.cells[column.columnId])}</td>`).join('')}<td data-column-label="Status" data-column-priority="${String(columns.length + 1)}"><span class="status-pill" data-status-role="${row.archived ? 'attention' : 'success'}">${row.archived ? 'Archived' : 'Active'}</span></td></tr>`).join('')}</tbody></table></div>`;
   const next = view.listCoverage.nextCursor
     ? `<a class="list-page-link" href="${escapeHtml(nextPageHref(surface, view.listCoverage.nextCursor, view.listCoverage.search, view.listCoverage.includeArchived))}">Next page</a>`
     : '';
@@ -606,6 +640,21 @@ function hasSurfaceSlot(
   slot: string,
 ): boolean {
   return context.surface.slots.some((candidate) => candidate.slot === slot);
+}
+
+function hasNamedSlot(
+  surface: CompiledSurfaceDefinition,
+  slot: string,
+): boolean {
+  return surface.slots.some((candidate) => candidate.slot === slot);
+}
+
+function bulkSelectionFormId(surface: CompiledSurfaceDefinition): string {
+  return `bulk-selection-${surface.surfaceId}`;
+}
+
+function selectionCell(formId: string, record: SemanticRecordDto): string {
+  return `<td class="selection-cell" data-column-label="Select"><label class="record-selector"><span class="sr-only">Select ${escapeHtml(shortIdentity(record.recordId))}</span><input aria-label="Select ${escapeHtml(shortIdentity(record.recordId))}" class="record-selector__input" form="${escapeHtml(formId)}" name="recordId" type="checkbox" value="${escapeHtml(record.recordId)}"></label></td>`;
 }
 
 function declaredStatusRoles(surface: CompiledSurfaceDefinition): string {

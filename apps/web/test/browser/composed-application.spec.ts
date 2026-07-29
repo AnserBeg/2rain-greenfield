@@ -79,6 +79,46 @@ async function productJourney(page: Page, baseUrl: string): Promise<void> {
   await expect(
     page.getByRole('cell', { name: 'Alpine Office Supply' }),
   ).toBeVisible();
+  const responsiveList = page.locator(
+    '[data-list-rendering="responsive-single"]',
+  );
+  const firstResponsiveRow = responsiveList
+    .locator('tr[data-compact-card="true"]')
+    .first();
+  await expect(responsiveList).toHaveCount(1);
+  await expect(firstResponsiveRow).toHaveCSS('display', 'table-row');
+  const priorities = await firstResponsiveRow
+    .locator('[data-column-priority]')
+    .evaluateAll((cells) =>
+      cells.map((cell) => Number(cell.getAttribute('data-column-priority'))),
+    );
+  expect(priorities).toEqual(
+    [...priorities].sort((left, right) => left - right),
+  );
+
+  const bulkBar = page.locator(
+    '[data-platform-slot="list:bulkActions"] [data-bulk-selection-form]',
+  );
+  const firstSelector = firstResponsiveRow.getByRole('checkbox');
+  await expect(bulkBar.getByText('Select records to begin')).toBeVisible();
+  await expect(bulkBar.getByText('Selection ready')).toBeHidden();
+  await firstSelector.check();
+  await expect(bulkBar.getByText('Selection ready')).toBeVisible();
+  await bulkBar.getByRole('button', { name: 'Clear selection' }).click();
+  await expect(firstSelector).not.toBeChecked();
+
+  await page.setViewportSize({ height: 844, width: 390 });
+  await expect(responsiveList).toHaveCount(1);
+  await expect(firstResponsiveRow).toHaveCSS('display', 'grid');
+  await expect(page.locator('.sidebar')).toHaveCSS('position', 'fixed');
+  await expect(page.locator('.sidebar')).toHaveCSS('bottom', '0px');
+  expect(await navigation.getByRole('link').count()).toBeLessThanOrEqual(5);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
+  await page.setViewportSize({ height: 720, width: 1280 });
 
   await navigation.getByRole('link', { name: 'Item', exact: true }).click();
   await expect(
@@ -105,6 +145,12 @@ async function productJourney(page: Page, baseUrl: string): Promise<void> {
   await page.getByRole('link', { name: 'New', exact: true }).click();
   await expect(
     page.getByRole('heading', { level: 1, name: 'New Party' }),
+  ).toBeVisible();
+  await expect(
+    page.locator('[data-platform-slot="record:keyFacts"]'),
+  ).toContainText('New record');
+  await expect(
+    page.locator('[data-platform-slot="record:sections"]'),
   ).toBeVisible();
   await page.getByLabel('Party Number').fill('P-BROWSER-REAL-001');
   await page.getByLabel('Party Name').fill('Browser-persisted Party');
@@ -141,6 +187,27 @@ async function productJourney(page: Page, baseUrl: string): Promise<void> {
   await expect(
     page.getByText('P-BROWSER-REAL-001', { exact: true }),
   ).toBeVisible();
+  await expect(
+    page.locator('[data-platform-slot="record:keyFacts"]'),
+  ).toContainText('Revision');
+  await expect(
+    page.locator('[data-platform-slot="record:sections"]'),
+  ).toContainText('browser-persisted@example.test');
+  await page.setViewportSize({ height: 844, width: 390 });
+  const compactSections = page.locator(
+    '[data-platform-slot="record:sections"] details.record-section-group',
+  );
+  await expect(compactSections).toHaveAttribute('open', '');
+  await expect(
+    page.locator('[data-platform-slot="record:commandBar"] .command-bar'),
+  ).toHaveCSS('position', 'sticky');
+  const compactSectionSummary = compactSections.locator('summary');
+  await compactSectionSummary.focus();
+  await page.keyboard.press('Enter');
+  await expect(compactSections).not.toHaveAttribute('open', '');
+  await page.keyboard.press('Enter');
+  await expect(compactSections).toHaveAttribute('open', '');
+  await page.setViewportSize({ height: 720, width: 1280 });
   const overflow = page.locator(
     '[data-platform-slot="record:commandBar"] details.action-overflow',
   );
@@ -176,7 +243,8 @@ async function productJourney(page: Page, baseUrl: string): Promise<void> {
   await page.goto(detailUrl);
   await expect(
     page.locator('[data-diagnostic-code="QUERY_NOT_FOUND"]'),
-  ).toBeVisible();
+  ).toHaveCount(1);
+  await expect(page.locator('[data-platform-slot^="record:"]')).toHaveCount(0);
 
   await page.goto(surfaceUrl(baseUrl, 'party_list'));
   await expect(
