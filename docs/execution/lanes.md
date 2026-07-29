@@ -15,8 +15,8 @@ writer is holding those paths right now.
 | Lane | Theme | Current packet | Status |
 |---|---|---|---|
 | **KERNEL** | Canonical language and the query tier | `4c` — packages adopt v3 (the artifact event) | **active** |
-| **DEPLOY** | Release lifecycle and runtime infrastructure | `1c-a` **accepted** 2026-07-28 (ADR-0023) — *awaiting selection* | **idle** |
-| **FIX** | Correctness defects → stage cutting → inventory build | `1d` **accepted** 2026-07-28 — **`G3-P1b` is next and now unblocked** | **idle** |
+| **DEPLOY** | Release lifecycle and runtime infrastructure | `9` **accepted** 2026-07-28 (breadth-envelope curve) — *awaiting selection; `1c-b` when compiler/domain leases release* | **idle** |
+| **FIX** | Correctness defects → stage cutting → inventory build | `G3-P1b` — legal-entity family map and key participation | **active** |
 | **BUILD** | Inventory contracts | `G3-P2a` — tenant-completeness manifest | **active** |
 
 Lane identity is stable across packets. When a lane's packet is accepted, the
@@ -84,10 +84,10 @@ the query tier both live there.
 | `test/postgres/module-storage-transition.test.ts` | **FIX (1d) and KERNEL (4c) — split by concern, granted 2026-07-28.** FIX owns the archive-excluding unique-index assertions (migration `0014`, index predicates, drift acceptance); KERNEL owns the version-stamping paths only. Verified disjoint before granting: 1d's diff to this file contains **zero** `LANGUAGE_VERSION`/`NORMALIZATION_PROFILE_VERSION` references. Neither lane may touch the other's concern. |
 | `test/postgres/**` (rest) | unassigned — bridge before touching |
 | `packages/dev-tooling/src/**` · `test/architecture/tenant-completeness*` | BUILD *(taken 2026-07-28 by G3-P2a; recorded here retroactively — the partition table had no `dev-tooling` row at all, the second such gap found today)* |
-| `packages/compiler/src/conformance.ts` | **unassigned — bridge before touching** *(gap found 2026-07-28 by the 1c scoping pass: G3-P1a edited this file under its own lease and it now holds the inventory contract constants alongside the four-query completeness rule, so BUILD and any 1c branch both have a live claim on it. It is in no lane's column. Do not let a lane take it silently.)* |
+| `packages/compiler/src/conformance.ts` | **FIX** *(granted 2026-07-28 for `G3-P1b` — the legal-entity family map and relation-entity rules extend the existing 298-line inventory contract enforcement here; previously unassigned)*. Prior note: **unassigned — bridge before touching** *(gap found 2026-07-28 by the 1c scoping pass: G3-P1a edited this file under its own lease and it now holds the inventory contract constants alongside the four-query completeness rule, so BUILD and any 1c branch both have a live claim on it. It is in no lane's column. Do not let a lane take it silently.)* |
 | `docs/execution/packets/**` · `docs/execution/stage-cut-inputs.md` | FIX *(granted 2026-07-28 for G3-P0; each lane still owns its own packet doc)* |
 | `packages/domain/src/{party,catalog,location,platform}/definition.ts` · `app/builder.ts` | KERNEL *(granted 2026-07-28 for 4c — **version/profile strings and the empty `impactAnalyses` root only**; no definition semantics)* |
-| `packages/domain/src/inventory/**` | BUILD *(G3-P1a creates it)* — KERNEL may migrate its **version strings only**, and only if it exists at 4c's integration time |
+| `packages/domain/src/inventory/**` | **FIX** *(reassigned from BUILD 2026-07-28 for `G3-P1b`; BUILD is on `G3-P2a`, which touches dev-tooling only, and its next inventory packet `G3-P2b` depends on G3-P1b anyway)* — KERNEL may still migrate its **version strings only**, split by concern, and only if it exists at 4c's integration time |
 | `test/helpers/postgres.ts` | DEPLOY *(granted 2026-07-28 for 1b — readiness-race fix only; a 1f regression blocking its gate)* |
 | `test/helpers/node-reporter-core.mjs` · `test/architecture/test-reachability.test.ts` | DEPLOY *(granted 2026-07-28 for 1b — admit `--test-concurrency=<positive int>` to PR-4b's closed argv grammar; filtering arguments must still be rejected)* |
 | `apps/web/release/**` (generated artifacts) | FIX *(granted 2026-07-28 for 1d — regenerate stale lineage after storage roots moved; re-derived at integration, so concurrent regeneration by 4c is expected)* |
