@@ -99,6 +99,31 @@ would shift under it. That exception ends when `4b` lands.
 The orchestrator enforced the stronger constraint until 2026-07-28 and it cost
 sequencing that was never required.
 
+## Full-matrix runs must NOT overlap — found 2026-07-28 by packet 1f
+
+Authoring runs in parallel. **Matrix runs do not.** Packet 1f recorded two
+concurrent-lane corruptions of its own gate evidence:
+
+  - `Superseded PostgreSQL run: 89/90 after another worktree's concurrent
+    matrix sent SIGTERM.`
+  - `First final-candidate matrix during a later 4b lane collision: 90/92;
+    release-activation.test.ts:611 reported false !== true. The isolated rerun
+    was 92/92 and the serial final matrix was fully green.`
+
+Container names are unique per process (`north-star-<label>-<pid>-<uuid>`), so
+this is not a naming collision. It is CPU/IO contention, and the second failure
+is the serious one: `release-activation` is **timing-sensitive**, not
+readiness-sensitive, so a loaded machine produces a *wrong verdict* rather than
+an obvious timeout.
+
+**A green matrix produced while another lane's matrix was running is not
+evidence.** Before running the full matrix, check that no other lane is running
+one; if one is, wait. A lane may keep authoring and running focused suites
+throughout — only the full matrix serializes.
+
+This is a real cost of parallelism and it caps useful lane count: past roughly
+four lanes, matrix queueing dominates and additional lanes buy nothing.
+
 ## Integration is serial even though work is parallel
 
 Work in parallel; integrate one at a time. This is forced by PR-1's rule that
