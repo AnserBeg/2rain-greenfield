@@ -457,20 +457,21 @@ function scanPlainAuthorityViolations(
     );
   }
 
-  scanPlainCrossDomainWrites(repoPath, source, owner, violations);
+  scanPlainCrossDomainWrites(repoPath, source, violations);
 }
 
 function scanPlainCrossDomainWrites(
   repoPath: string,
   source: string,
-  owner: WorkspacePackage | undefined,
   violations: BoundaryViolation[],
 ): void {
   const writes = /\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+([a-z][a-z0-9_]*)/gi;
   for (const match of source.matchAll(writes)) {
     const table = (match[2] ?? '').toLowerCase();
     if (!/(?:inventory|movement|reservation|stock)/.test(table)) continue;
-    const inventoryOwner = owner?.directory === 'packages/domain-inventory';
+    const inventoryOwner = repoPath.startsWith(
+      'packages/domain/src/inventory/',
+    );
     const appendOnlyMutation =
       /(?:movement|reservation)/.test(table) &&
       (match[1] ?? '').toUpperCase() !== 'INSERT INTO';

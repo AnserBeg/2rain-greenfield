@@ -4,12 +4,20 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
 
+import { preProcessFile } from 'typescript';
+
 import { checkArchitecture } from '../../packages/dev-tooling/src/architecture-boundaries.js';
 import {
   createArchitectureFixture,
   packageManifest,
   removeArchitectureFixture,
 } from '../helpers/architecture-fixture.js';
+import {
+  classifyEphemeralPostgresContainerState,
+  inspectEphemeralPostgresContainer,
+  isEphemeralPostgresReadyInsideContainer,
+  removeEphemeralPostgresContainer,
+} from '../helpers/postgres.js';
 
 test('the greenfield repository satisfies executable architecture boundaries', () => {
   assert.deepEqual(checkArchitecture(process.cwd()).violations, []);
@@ -123,6 +131,144 @@ test('plain gateway, inventory, and hard-delete violations fail', () => {
   }
 });
 
+test('inventory append ownership follows the consolidated domain module path', () => {
+  const root = createArchitectureFixture({
+    'package.json': packageManifest('fixture'),
+    'packages/domain/package.json': packageManifest('@north-star/domain'),
+    'packages/domain/src/inventory/append.ts': [
+      "export const movement = 'INSERT INTO inventory_movement VALUES (1)';",
+      "export const reservation = 'INSERT INTO inventory_reservation VALUES (1)';",
+    ].join('\n'),
+    'packages/domain/src/inventory/balance.ts':
+      "export const sql = 'INSERT INTO inventory_balance VALUES (1)';",
+    'packages/domain/src/inventory/delete.ts':
+      "export const sql = 'DELETE FROM inventory_movement';",
+    'packages/domain/src/inventory/quantity.ts':
+      "export const sql = 'INSERT INTO inventory_quantity VALUES (1)';",
+    'packages/domain/src/inventory/rewrite.ts':
+      "export const sql = `UPDATE inventory_movement SET memo = 'changed'`;",
+    'packages/domain/src/inventory/stock.ts':
+      "export const sql = 'INSERT INTO inventory_stock VALUES (1)';",
+    'packages/domain/src/sales/post.ts':
+      "export const sql = 'INSERT INTO inventory_movement VALUES (1)';",
+    'packages/domain-inventory/package.json': packageManifest(
+      '@north-star/domain-inventory',
+    ),
+    'packages/domain-inventory/src/post.ts':
+      "export const sql = 'INSERT INTO inventory_movement VALUES (1)';",
+  });
+
+  try {
+    const violations = checkArchitecture(root).violations;
+    const rulesFor = (path: string) =>
+      violations
+        .filter((violation) => violation.file.endsWith(path))
+        .map((violation) => violation.ruleId)
+        .sort();
+    assert.deepEqual(rulesFor('packages/domain/src/inventory/append.ts'), []);
+    assert.deepEqual(rulesFor('packages/domain/src/inventory/rewrite.ts'), [
+      'AUTH004_INVENTORY_PEER',
+    ]);
+    assert.deepEqual(rulesFor('packages/domain/src/inventory/delete.ts'), [
+      'AUTH004_INVENTORY_PEER',
+      'AUTH006_HARD_DELETE',
+    ]);
+    for (const path of ['balance.ts', 'quantity.ts', 'stock.ts']) {
+      assert.deepEqual(rulesFor(`packages/domain/src/inventory/${path}`), [
+        'AUTH004_INVENTORY_PEER',
+      ]);
+    }
+    assert.deepEqual(rulesFor('packages/domain/src/sales/post.ts'), [
+      'AUTH003_GATEWAY_BYPASS',
+    ]);
+    assert.deepEqual(rulesFor('packages/domain-inventory/src/post.ts'), [
+      'AUTH003_GATEWAY_BYPASS',
+    ]);
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});
+
+test('ephemeral PostgreSQL readiness observes terminal states and Docker failures exactly', async () => {
+  for (const state of ['created', 'paused', 'restarting', 'running']) {
+    assert.equal(classifyEphemeralPostgresContainerState(state), 'waiting');
+  }
+  for (const state of ['dead', 'exited', 'removed', 'removing']) {
+    assert.equal(classifyEphemeralPostgresContainerState(state), 'terminal');
+  }
+  assert.throws(
+    () => classifyEphemeralPostgresContainerState('unknown'),
+    /unexpected container state/,
+  );
+
+  const containerName = 'north-star-control';
+  const missing = new Error('docker inspect failed', {
+    cause: {
+      stderr: `Error response from daemon: No such container: ${containerName}`,
+    },
+  });
+  const daemonUnavailable = new Error('docker inspect failed', {
+    cause: { stderr: 'Cannot connect to the Docker daemon' },
+  });
+  const missingRunner = async (): Promise<never> => {
+    throw missing;
+  };
+  const unavailableRunner = async (): Promise<never> => {
+    throw daemonUnavailable;
+  };
+  const notReady = new Error('docker exec failed', {
+    cause: { code: 2, stderr: '', stdout: '127.0.0.1:5432 - no response' },
+  });
+  const notReadyRunner = async (): Promise<never> => {
+    throw notReady;
+  };
+  const readyRunner = async (arguments_: readonly string[]) => {
+    assert.deepEqual(arguments_, [
+      'exec',
+      containerName,
+      'pg_isready',
+      '--host',
+      '127.0.0.1',
+      '--port',
+      '5432',
+      '--username',
+      'postgres',
+      '--dbname',
+      'postgres',
+    ]);
+    return { stderr: '', stdout: '127.0.0.1:5432 - accepting connections' };
+  };
+
+  assert.equal(
+    await inspectEphemeralPostgresContainer(containerName, missingRunner),
+    'removed',
+  );
+  await removeEphemeralPostgresContainer(containerName, missingRunner);
+  await assert.rejects(
+    inspectEphemeralPostgresContainer(containerName, unavailableRunner),
+    (error: unknown) => error === daemonUnavailable,
+  );
+  await assert.rejects(
+    removeEphemeralPostgresContainer(containerName, unavailableRunner),
+    (error: unknown) => error === daemonUnavailable,
+  );
+  assert.equal(
+    await isEphemeralPostgresReadyInsideContainer(
+      containerName,
+      notReadyRunner,
+    ),
+    false,
+  );
+  assert.equal(
+    await isEphemeralPostgresReadyInsideContainer(containerName, readyRunner),
+    true,
+  );
+  await assert.rejects(
+    isEphemeralPostgresReadyInsideContainer(containerName, unavailableRunner),
+    (error: unknown) => error === daemonUnavailable,
+  );
+});
+
 test('plain raw, sixth, and wrong-count agent tool catalogs fail', () => {
   const root = createArchitectureFixture({
     'package.json': packageManifest('fixture'),
@@ -205,4 +351,33 @@ test('the root test command includes the architecture gate', () => {
     scripts: Record<string, string>;
   };
   assert.match(packageJson.scripts.test ?? '', /test:architecture/);
+});
+
+test('the PostgreSQL provider has no misleading root export or bare consumers', () => {
+  const manifest = JSON.parse(
+    readFileSync(
+      join(process.cwd(), 'packages/postgres-provider/package.json'),
+      'utf8',
+    ),
+  ) as { exports: Record<string, string> };
+  assert.equal(manifest.exports['.'], undefined);
+
+  const tracked = spawnSync('git', ['ls-files', '-z'], {
+    cwd: process.cwd(),
+    encoding: 'utf8',
+  });
+  assert.equal(tracked.status, 0, tracked.stderr);
+  const bareConsumers = tracked.stdout
+    .split('\0')
+    .filter((path) => /\.(?:[cm]?[jt]sx?)$/.test(path))
+    .flatMap((path) => {
+      const source = readFileSync(join(process.cwd(), path), 'utf8');
+      return preProcessFile(source, true, true)
+        .importedFiles.filter(
+          (importedFile) =>
+            importedFile.fileName === '@north-star/postgres-provider',
+        )
+        .map(() => path);
+    });
+  assert.deepEqual(bareConsumers, []);
 });
