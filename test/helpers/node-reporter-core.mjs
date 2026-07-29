@@ -47,6 +47,9 @@ export function assertUnfilteredNodeArguments(arguments_, context) {
       sawTest = true;
       continue;
     }
+    if (/^--test-concurrency=[1-9][0-9]*$/u.test(argument ?? '')) {
+      continue;
+    }
     if (argument?.startsWith('--test-reporter=')) {
       const value = argument.slice('--test-reporter='.length);
       if (value === 'tap') sawTapReporter = true;

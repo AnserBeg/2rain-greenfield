@@ -15,6 +15,7 @@ import {
   ModuleRuntimeInterpreterError,
   translateModuleProviderError,
 } from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
+import { releaseVerificationBinding } from '../../packages/postgres-provider/src/release-verification-service.js';
 import { PARTY_IDS } from '../fixtures/g2/party/definition.js';
 import { projectionPayload } from '../fixtures/g2/party/compiler.js';
 import {
@@ -607,9 +608,18 @@ test('Party executes the compiled declared-semantics contract on real PostgreSQL
         ],
       );
     }
+    const verificationBinding = releaseVerificationBinding(runtime.compiled);
     const executedResults = await executeVerificationPlan(
       verificationPlan,
-      'party-walking-slice',
+      {
+        artifactClosureDigest: verificationBinding.artifactClosureDigest,
+        providerRunId: 'party-walking-slice',
+        releaseRoot: verificationBinding.releaseRoot,
+        verificationPlanArtifactRoot:
+          verificationBinding.verificationPlanArtifactRoot,
+        verificationPlanSemanticDigest:
+          verificationBinding.verificationPlanSemanticDigest,
+      },
       async (scenario) => {
         const party = scenario.entityId === PARTY_IDS.entityIds.party;
         const localEntity = party ? 'party' : 'party_role';
