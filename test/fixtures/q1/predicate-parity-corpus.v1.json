@@ -11,15 +11,15 @@
       "predicate": {
         "field": {
           "kind": "fieldReference",
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "targetId": "northstar.party:field.party_contact_summary"
         },
         "kind": "fieldComparisonPredicate",
         "operator": "equals",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "value": {
           "kind": "textValue",
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "value": "Alpha"
         }
       }
@@ -30,15 +30,15 @@
       "predicate": {
         "field": {
           "kind": "fieldReference",
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "targetId": "northstar.party:field.party_contact_summary"
         },
         "kind": "fieldComparisonPredicate",
         "operator": "notEquals",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "value": {
           "kind": "textValue",
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "value": "m"
         }
       }
@@ -49,15 +49,15 @@
       "predicate": {
         "field": {
           "kind": "fieldReference",
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "targetId": "northstar.party:field.party_contact_summary"
         },
         "kind": "fieldComparisonPredicate",
         "operator": "lessThan",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "value": {
           "kind": "textValue",
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "value": "m"
         }
       }
@@ -68,15 +68,15 @@
       "predicate": {
         "field": {
           "kind": "fieldReference",
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "targetId": "northstar.party:field.party_contact_summary"
         },
         "kind": "fieldComparisonPredicate",
         "operator": "greaterThan",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "value": {
           "kind": "textValue",
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "value": "m"
         }
       }
@@ -86,19 +86,19 @@
       "caseId": "absent_not_less_binary_m",
       "predicate": {
         "kind": "notPredicate",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "term": {
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.party:field.party_contact_summary"
           },
           "kind": "fieldComparisonPredicate",
           "operator": "lessThan",
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "value": {
             "kind": "textValue",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "value": "m"
           }
         }
@@ -109,35 +109,35 @@
       "caseId": "binary_all_open_interval",
       "predicate": {
         "kind": "allPredicate",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "terms": [
           {
             "field": {
               "kind": "fieldReference",
-              "schemaVersion": "v2",
+              "schemaVersion": "v3",
               "targetId": "northstar.party:field.party_contact_summary"
             },
             "kind": "fieldComparisonPredicate",
             "operator": "greaterThan",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "value": {
               "kind": "textValue",
-              "schemaVersion": "v2",
+              "schemaVersion": "v3",
               "value": "a"
             }
           },
           {
             "field": {
               "kind": "fieldReference",
-              "schemaVersion": "v2",
+              "schemaVersion": "v3",
               "targetId": "northstar.party:field.party_contact_summary"
             },
             "kind": "fieldComparisonPredicate",
             "operator": "lessThan",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "value": {
               "kind": "textValue",
-              "schemaVersion": "v2",
+              "schemaVersion": "v3",
               "value": "z"
             }
           }
@@ -149,35 +149,35 @@
       "caseId": "binary_any_edge_values",
       "predicate": {
         "kind": "anyPredicate",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "terms": [
           {
             "field": {
               "kind": "fieldReference",
-              "schemaVersion": "v2",
+              "schemaVersion": "v3",
               "targetId": "northstar.party:field.party_contact_summary"
             },
             "kind": "fieldComparisonPredicate",
             "operator": "equals",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "value": {
               "kind": "textValue",
-              "schemaVersion": "v2",
+              "schemaVersion": "v3",
               "value": "Alpha"
             }
           },
           {
             "field": {
               "kind": "fieldReference",
-              "schemaVersion": "v2",
+              "schemaVersion": "v3",
               "targetId": "northstar.party:field.party_contact_summary"
             },
             "kind": "fieldComparisonPredicate",
             "operator": "equals",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "value": {
               "kind": "textValue",
-              "schemaVersion": "v2",
+              "schemaVersion": "v3",
               "value": "zulu"
             }
           }
@@ -190,15 +190,15 @@
       "predicate": {
         "field": {
           "kind": "fieldReference",
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "targetId": "northstar.party:field.party_q1_folded"
         },
         "kind": "fieldComparisonPredicate",
         "operator": "equals",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "value": {
           "kind": "textValue",
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "value": "STRASSE"
         }
       }
@@ -209,15 +209,15 @@
       "predicate": {
         "field": {
           "kind": "fieldReference",
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "targetId": "northstar.party:field.party_q1_folded"
         },
         "kind": "fieldComparisonPredicate",
         "operator": "equals",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "value": {
           "kind": "textValue",
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "value": "kelvin"
         }
       }
@@ -228,15 +228,15 @@
       "predicate": {
         "field": {
           "kind": "fieldReference",
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "targetId": "northstar.party:field.party_q1_folded"
         },
         "kind": "fieldComparisonPredicate",
         "operator": "equals",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "value": {
           "kind": "textValue",
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "value": "i̇"
         }
       }
@@ -247,15 +247,15 @@
       "predicate": {
         "field": {
           "kind": "fieldReference",
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "targetId": "northstar.party:field.party_q1_folded"
         },
         "kind": "fieldComparisonPredicate",
         "operator": "equals",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "value": {
           "kind": "textValue",
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "value": "ffi"
         }
       }
@@ -266,15 +266,15 @@
       "predicate": {
         "field": {
           "kind": "fieldReference",
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "targetId": "northstar.party:field.party_q1_folded"
         },
         "kind": "fieldComparisonPredicate",
         "operator": "equals",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "value": {
           "kind": "textValue",
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "value": "οσ"
         }
       }
@@ -285,15 +285,15 @@
       "predicate": {
         "field": {
           "kind": "fieldReference",
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "targetId": "northstar.party:field.party_q1_folded"
         },
         "kind": "fieldComparisonPredicate",
         "operator": "lessThan",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "value": {
           "kind": "textValue",
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "value": "m"
         }
       }
@@ -304,15 +304,15 @@
       "predicate": {
         "field": {
           "kind": "fieldReference",
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "targetId": "northstar.party:field.party_q1_decimal"
         },
         "kind": "fieldComparisonPredicate",
         "operator": "lessThan",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "value": {
           "kind": "exactDecimalValue",
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "value": "10"
         }
       }
@@ -323,15 +323,15 @@
       "predicate": {
         "field": {
           "kind": "fieldReference",
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "targetId": "northstar.party:field.party_q1_decimal"
         },
         "kind": "fieldComparisonPredicate",
         "operator": "greaterThan",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "value": {
           "kind": "exactDecimalValue",
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "value": "-3"
         }
       }
@@ -342,15 +342,15 @@
       "predicate": {
         "field": {
           "kind": "fieldReference",
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "targetId": "northstar.party:field.party_q1_decimal"
         },
         "kind": "fieldComparisonPredicate",
         "operator": "equals",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "value": {
           "kind": "exactDecimalValue",
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "value": "0.1"
         }
       }
@@ -361,15 +361,15 @@
       "predicate": {
         "field": {
           "kind": "fieldReference",
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "targetId": "northstar.party:field.party_q1_decimal"
         },
         "kind": "fieldComparisonPredicate",
         "operator": "notEquals",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "value": {
           "kind": "exactDecimalValue",
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "value": "0.1"
         }
       }
@@ -379,19 +379,19 @@
       "caseId": "absent_not_less_decimal_zero",
       "predicate": {
         "kind": "notPredicate",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "term": {
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.party:field.party_q1_decimal"
           },
           "kind": "fieldComparisonPredicate",
           "operator": "lessThan",
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "value": {
             "kind": "exactDecimalValue",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "value": "0"
           }
         }

@@ -1,5 +1,5 @@
-const version = 'v2' as const;
-const normalizationProfileVersion = 'northstar.normalization/v2' as const;
+const version = 'v3' as const;
+const normalizationProfileVersion = 'northstar.normalization/v3' as const;
 
 export const PARTY_NAMESPACE = 'northstar.party' as const;
 
@@ -147,6 +147,7 @@ export function partyModuleDefinition(
       ),
     ],
     hashAlgorithm: 'sha256',
+    impactAnalyses: [],
     kind: 'applicationPackageRevision',
     languageVersion: version,
     modules: [

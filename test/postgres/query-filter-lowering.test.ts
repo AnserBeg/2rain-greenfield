@@ -398,7 +398,7 @@ test('q1 filters preserve total semantics, cost classes, policy narrowing, and p
           ...contribution.filterPlan.root,
           value: {
             kind: 'textValue',
-            schemaVersion: 'v2',
+            schemaVersion: contribution.filterPlan.root.value.schemaVersion,
             value: 'blocked',
           },
         },
@@ -478,8 +478,15 @@ test('q1 filters preserve total semantics, cost classes, policy narrowing, and p
 function q1PartyDefinition(): Record<string, unknown> {
   const definition = structuredClone(partyModuleDefinition()) as {
     fields: Array<Record<string, unknown>>;
+    languageVersion: string;
     queries: Array<Record<string, unknown>>;
   } & Record<string, unknown>;
+  const schemaVersion = definition.languageVersion;
+  const compare = (
+    operator: 'equals' | 'greaterThan' | 'lessThan' | 'notEquals',
+    value: string,
+    fieldId: string = PARTY_IDS.fieldIds.contactSummary,
+  ) => comparison(operator, value, fieldId, schemaVersion);
   const contactField = definition.fields.find(
     (field) => field.fieldId === PARTY_IDS.fieldIds.contactSummary,
   );
@@ -492,38 +499,34 @@ function q1PartyDefinition(): Record<string, unknown> {
   const filters: Readonly<Record<string, unknown>> = {
     q1_all: {
       kind: 'allPredicate',
-      schemaVersion: 'v2',
-      terms: [comparison('greaterThan', 'a'), comparison('lessThan', 'z')],
+      schemaVersion,
+      terms: [compare('greaterThan', 'a'), compare('lessThan', 'z')],
     },
     q1_any: {
       kind: 'anyPredicate',
-      schemaVersion: 'v2',
-      terms: [comparison('equals', 'alpha'), comparison('equals', 'zulu')],
+      schemaVersion,
+      terms: [compare('equals', 'alpha'), compare('equals', 'zulu')],
     },
-    q1_equals: comparison('equals', 'm'),
-    q1_false: { kind: 'booleanPredicate', schemaVersion: 'v2', value: false },
-    q1_greater: comparison('greaterThan', 'm'),
-    q1_indexed: comparison('equals', 'index probe', PARTY_IDS.fieldIds.name),
-    q1_less: comparison('lessThan', 'm'),
-    q1_mandatory: comparison(
+    q1_equals: compare('equals', 'm'),
+    q1_false: { kind: 'booleanPredicate', schemaVersion, value: false },
+    q1_greater: compare('greaterThan', 'm'),
+    q1_indexed: compare('equals', 'index probe', PARTY_IDS.fieldIds.name),
+    q1_less: compare('lessThan', 'm'),
+    q1_mandatory: compare(
       'equals',
       'Mandatory Needle',
       PARTY_IDS.fieldIds.name,
     ),
-    q1_not_equals: comparison('notEquals', 'm'),
+    q1_not_equals: compare('notEquals', 'm'),
     q1_not_less: {
       kind: 'notPredicate',
-      schemaVersion: 'v2',
-      term: comparison('lessThan', 'm'),
+      schemaVersion,
+      term: compare('lessThan', 'm'),
     },
-    q1_policy_base: comparison(
-      'equals',
-      'Policy Needle',
-      PARTY_IDS.fieldIds.name,
-    ),
-    q1_policy_contribution: comparison('equals', 'allowed'),
-    q1_scan: comparison('notEquals', 'alpha'),
-    q1_true: { kind: 'booleanPredicate', schemaVersion: 'v2', value: true },
+    q1_policy_base: compare('equals', 'Policy Needle', PARTY_IDS.fieldIds.name),
+    q1_policy_contribution: compare('equals', 'allowed'),
+    q1_scan: compare('notEquals', 'alpha'),
+    q1_true: { kind: 'booleanPredicate', schemaVersion, value: true },
   };
   for (const [localId, filter] of Object.entries(filters)) {
     const query = structuredClone(template);
@@ -544,14 +547,15 @@ function q1PartyDefinition(): Record<string, unknown> {
 function comparison(
   operator: 'equals' | 'greaterThan' | 'lessThan' | 'notEquals',
   value: string,
-  fieldId: string = PARTY_IDS.fieldIds.contactSummary,
+  fieldId: string,
+  schemaVersion: string,
 ): Record<string, unknown> {
   return {
-    field: { kind: 'fieldReference', schemaVersion: 'v2', targetId: fieldId },
+    field: { kind: 'fieldReference', schemaVersion, targetId: fieldId },
     kind: 'fieldComparisonPredicate',
     operator,
-    schemaVersion: 'v2',
-    value: { kind: 'textValue', schemaVersion: 'v2', value },
+    schemaVersion,
+    value: { kind: 'textValue', schemaVersion, value },
   };
 }
 
@@ -683,6 +687,7 @@ async function explainPlans(
   plan: ReturnType<typeof inspectPlan>;
 }> {
   const predicate = buildQueryFilterPredicate(entity, plans, 'q1_source');
+  await runtimePool.query('SELECT pg_stat_force_next_flush()');
   const before = await readIndexCounters(adminPool, expectedIndexes);
   const root = await withTrustedRequestTransaction(
     runtimePool,

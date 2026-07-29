@@ -14,7 +14,7 @@ import {
   inspectPredicateForExecution,
   normalizeApplicationPackage,
   parseAuthoredApplicationPackageJson,
-  type AuthoredApplicationPackage,
+  type VersionedAuthoredApplicationPackage,
 } from '../../../packages/canonical-model/src/index.js';
 import {
   V3_AGGREGATE_IDS,
@@ -30,7 +30,7 @@ import {
 const demonstrateUnsupportedAggregate =
   process.env.Q1P3A_DEMONSTRATE_UNSUPPORTED_AGGREGATE === '1';
 
-function fixture(): AuthoredApplicationPackage {
+function fixture(): VersionedAuthoredApplicationPackage {
   return parseAuthoredApplicationPackageJson(
     readFileSync('test/fixtures/canonical-model/representative.authored.json'),
   );
@@ -857,13 +857,13 @@ test('duplicate order keys and expression depth exceedance fail deterministicall
   const tooDeep = structuredClone(fixture());
   let predicate: Record<string, unknown> = {
     kind: 'booleanPredicate',
-    schemaVersion: 'v0-experimental',
+    schemaVersion: 'v3',
     value: true,
   };
   for (let index = 0; index < 25; index += 1) {
     predicate = {
       kind: 'notPredicate',
-      schemaVersion: 'v0-experimental',
+      schemaVersion: 'v3',
       term: predicate,
     };
   }
@@ -922,7 +922,7 @@ test('parent scope, assertion diagnostics, and reference locality are closed', (
   crossModuleParent.modules.push({
     composition: {
       kind: 'compositionSeam',
-      schemaVersion: 'v0-experimental',
+      schemaVersion: 'v3',
       status: 'unsupported',
     },
     kind: 'moduleDefinition',
@@ -930,7 +930,7 @@ test('parent scope, assertion diagnostics, and reference locality are closed', (
     moduleId: 'northstar.inventory:module.aliases' as never,
     orderKey: 20,
     ownerPackageId: 'northstar.inventory:package.launch' as never,
-    schemaVersion: 'v0-experimental',
+    schemaVersion: 'v3',
   });
   crossModuleParent.entities[1]!.module.targetId =
     'northstar.inventory:module.aliases' as never;
@@ -957,7 +957,11 @@ test('parent scope, assertion diagnostics, and reference locality are closed', (
     'CANON_SCHEMA_INVALID',
   );
 
-  const selection = structuredClone(fixture());
+  const selection = structuredClone(fixture()) as unknown as {
+    queries: Array<{
+      selections: Array<{ field: { targetId: string } }>;
+    }>;
+  };
   selection.queries[0]!.selections[0]!.field.targetId =
     'northstar.inventory:field.item_alias_value' as never;
   expectDiagnostic(
@@ -970,15 +974,15 @@ test('parent scope, assertion diagnostics, and reference locality are closed', (
   filter.queries[0]!.filter = {
     field: {
       kind: 'fieldReference',
-      schemaVersion: 'v0-experimental',
+      schemaVersion: 'v3',
       targetId: 'northstar.inventory:field.item_alias_value' as never,
     },
     kind: 'fieldComparisonPredicate',
     operator: 'equals',
-    schemaVersion: 'v0-experimental',
+    schemaVersion: 'v3',
     value: {
       kind: 'textValue',
-      schemaVersion: 'v0-experimental',
+      schemaVersion: 'v3',
       value: 'alias',
     },
   };
@@ -995,7 +999,7 @@ test('state storage is derived and authored state-field authority rejects', () =
   assert.deepEqual(normalized.stateMachines[0]!.stateField, {
     fieldId: 'northstar.inventory:derived_state_field.machine.item_lifecycle',
     kind: 'derivedStateField',
-    schemaVersion: 'v0-experimental',
+    schemaVersion: 'v3',
     valueKind: 'stateId',
   });
   assert.equal(
@@ -1007,7 +1011,7 @@ test('state storage is derived and authored state-field authority rejects', () =
   selected.stateMachines[0]!.stateField = {
     fieldId: 'northstar.inventory:derived_state_field.author_selected' as never,
     kind: 'derivedStateField',
-    schemaVersion: 'v0-experimental',
+    schemaVersion: 'v3',
     valueKind: 'stateId',
   };
   expectDiagnostic(
@@ -1022,20 +1026,20 @@ test('decimal predicate bounds reserve the declared fractional scale', () => {
   authored.queries[0]!.filter = {
     field: {
       kind: 'fieldReference',
-      schemaVersion: 'v0-experimental',
+      schemaVersion: 'v3',
       targetId: 'northstar.inventory:field.item_quantity' as never,
     },
     kind: 'fieldComparisonPredicate',
     operator: 'equals',
-    schemaVersion: 'v0-experimental',
+    schemaVersion: 'v3',
     value: {
       baseUnit: {
         kind: 'unitReference',
-        schemaVersion: 'v0-experimental',
+        schemaVersion: 'v3',
         targetId: 'northstar.inventory:capability.unit_each' as never,
       },
       kind: 'quantityValue',
-      schemaVersion: 'v0-experimental',
+      schemaVersion: 'v3',
       value: '123456789012345',
     },
   };
@@ -1175,10 +1179,10 @@ test('family, collection, and authored-byte bounds fail with stable codes', () =
   const tooManyTerms = structuredClone(fixture());
   tooManyTerms.operations[0]!.precondition = {
     kind: 'allPredicate',
-    schemaVersion: 'v0-experimental',
+    schemaVersion: 'v3',
     terms: Array.from({ length: 4_097 }, () => ({
       kind: 'booleanPredicate' as const,
-      schemaVersion: 'v0-experimental' as const,
+      schemaVersion: 'v3' as const,
       value: true,
     })),
   };

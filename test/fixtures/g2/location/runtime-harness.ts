@@ -10,9 +10,8 @@ import { createSurfaceRuntimeServer } from '../../../../apps/web/src/app-server.
 import {
   CANONICALIZATION_PROFILE_VERSION,
   CONTENT_HASH_ALGORITHM,
-  LANGUAGE_VERSION,
-  NORMALIZATION_PROFILE_VERSION,
   canonicalizeAndHash,
+  parseNormalizedApplicationPackageJson,
 } from '../../../../packages/canonical-model/src/index';
 import type { CompileSuccess } from '../../../../packages/compiler/src/index';
 import type {
@@ -512,21 +511,22 @@ function revisionCommand(
   revisionId: MintedUuid,
   desiredState: Uint8Array,
 ): StoreAppPackageRevisionCommand {
-  const digest = canonicalizeAndHash(
-    JSON.parse(new TextDecoder().decode(desiredState)) as unknown,
-  );
+  const normalizedDefinition =
+    parseNormalizedApplicationPackageJson(desiredState);
+  const digest = canonicalizeAndHash(normalizedDefinition);
   return {
     canonicalizationProfileVersion: CANONICALIZATION_PROFILE_VERSION,
     contentHash: digest.contentHash,
     createdBy: context.principalId,
     desiredState,
     hashAlgorithm: CONTENT_HASH_ALGORITHM,
-    languageVersion: LANGUAGE_VERSION,
-    normalizationProfileVersion: NORMALIZATION_PROFILE_VERSION,
+    languageVersion: normalizedDefinition.languageVersion,
+    normalizationProfileVersion:
+      normalizedDefinition.normalizationProfileVersion,
     parentRevisionId: null,
     provenance: 'firstParty',
     revisionId,
-    schemaVersion: LANGUAGE_VERSION,
+    schemaVersion: normalizedDefinition.schemaVersion,
     tenantId: context.tenantId,
   };
 }

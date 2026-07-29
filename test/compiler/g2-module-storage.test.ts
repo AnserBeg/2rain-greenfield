@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import {
-  LANGUAGE_VERSION,
+  LATEST_LANGUAGE_VERSION,
   canonicalize,
   normalizeApplicationPackage,
 } from '../../packages/canonical-model/src/index.js';
@@ -739,7 +739,7 @@ test('required fields added to existing tables stay nullable until deferred tigh
   added.defaultSemantics = 'coalesceAtRead';
   added.defaultValue = {
     kind: 'textValue',
-    schemaVersion: LANGUAGE_VERSION,
+    schemaVersion: LATEST_LANGUAGE_VERSION,
     value: '',
   };
 
@@ -968,13 +968,13 @@ test('backfill completeness cannot become load-bearing', () => {
   admissibleField.defaultSemantics = 'coalesceAtRead';
   admissibleField.defaultValue = {
     kind: 'textValue',
-    schemaVersion: LANGUAGE_VERSION,
+    schemaVersion: LATEST_LANGUAGE_VERSION,
     value: '',
   };
   admissibleField.storageEvolution = {
     kind: 'backfillEvolution',
     residualReadSemantics: 'coalesceAtRead',
-    schemaVersion: LANGUAGE_VERSION,
+    schemaVersion: LATEST_LANGUAGE_VERSION,
   };
   const admissibleResult = mustCompile(
     input(admissible, expectedActiveReleaseFrom(first)),
@@ -1003,7 +1003,7 @@ test('backfill completeness cannot become load-bearing', () => {
   added.storageEvolution = {
     kind: 'backfillEvolution',
     residualReadSemantics: 'requiresCompleteness',
-    schemaVersion: LANGUAGE_VERSION,
+    schemaVersion: LATEST_LANGUAGE_VERSION,
   };
   const result = compileApplication(
     input(candidate, expectedActiveReleaseFrom(first)),
@@ -1133,7 +1133,7 @@ function secondaryParentRelation(required: boolean): Record<string, unknown> {
     foreignKeyActions: {
       onDelete: 'restrict',
       onUpdate: 'restrict',
-      schemaVersion: LANGUAGE_VERSION,
+      schemaVersion: LATEST_LANGUAGE_VERSION,
     },
     joinEligibility: 'query',
     kind: 'relationDefinition',
@@ -1141,15 +1141,15 @@ function secondaryParentRelation(required: boolean): Record<string, unknown> {
     ownership: 'reference',
     relationId: `${FIXTURE_IDS.namespace}:relation.master_role_secondary_parent`,
     required,
-    schemaVersion: LANGUAGE_VERSION,
+    schemaVersion: LATEST_LANGUAGE_VERSION,
     sourceEntity: {
       kind: 'entityReference',
-      schemaVersion: LANGUAGE_VERSION,
+      schemaVersion: LATEST_LANGUAGE_VERSION,
       targetId: FIXTURE_IDS.entityIds.child,
     },
     targetEntity: {
       kind: 'entityReference',
-      schemaVersion: LANGUAGE_VERSION,
+      schemaVersion: LATEST_LANGUAGE_VERSION,
       targetId: FIXTURE_IDS.entityIds.parent,
     },
   };

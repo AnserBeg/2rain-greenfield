@@ -4,12 +4,9 @@ import {
   CANONICALIZATION_PROFILE_VERSION,
   CONTENT_HASH_ALGORITHM,
   CONTENT_HASH_DOMAIN,
-  LANGUAGE_VERSION,
-  NORMALIZATION_PROFILE_VERSION,
   canonicalize,
   canonicalizeAndHash,
-  normalizeApplicationPackage,
-  parseAuthoredApplicationPackageJson,
+  parseNormalizedApplicationPackageJson,
 } from '@north-star/canonical-model';
 import {
   CHUNK_DESCRIPTOR_VERSION,
@@ -408,9 +405,6 @@ function assertReleaseIdentity(
 
 function verifyRevisionCommand(command: StoreAppPackageRevisionCommand): void {
   if (
-    command.schemaVersion !== LANGUAGE_VERSION ||
-    command.languageVersion !== LANGUAGE_VERSION ||
-    command.normalizationProfileVersion !== NORMALIZATION_PROFILE_VERSION ||
     command.canonicalizationProfileVersion !==
       CANONICALIZATION_PROFILE_VERSION ||
     command.hashAlgorithm !== CONTENT_HASH_ALGORITHM
@@ -427,8 +421,20 @@ function verifyRevisionCommand(command: StoreAppPackageRevisionCommand): void {
     );
   }
   try {
-    const authored = parseAuthoredApplicationPackageJson(command.desiredState);
-    const normalized = normalizeApplicationPackage(authored);
+    const normalized = parseNormalizedApplicationPackageJson(
+      command.desiredState,
+    );
+    if (
+      command.schemaVersion !== normalized.schemaVersion ||
+      command.languageVersion !== normalized.languageVersion ||
+      command.normalizationProfileVersion !==
+        normalized.normalizationProfileVersion
+    ) {
+      throw integrity(
+        'REVISION_ENVELOPE_MISMATCH',
+        'revision envelope profiles must match the normalized desired state',
+      );
+    }
     const canonical = canonicalizeAndHash(normalized);
     if (!equalBytes(canonical.bytes, command.desiredState)) {
       throw integrity(

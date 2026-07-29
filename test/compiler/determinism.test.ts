@@ -23,7 +23,20 @@ test('authored collection permutations converge before compilation', () => {
   if (expected.status !== 'compiled') return;
 
   for (let seed = 1; seed <= 12; seed += 1) {
-    const candidate = structuredClone(authored);
+    const candidate = structuredClone(authored) as unknown as {
+      capabilityRequirements: Array<{ requiredProjections: unknown[] }>;
+      entities: unknown[];
+      fields: unknown[];
+      modules: unknown[];
+      operations: unknown[];
+      permissions: unknown[];
+      queries: Array<{
+        resolveMatchKeys?: unknown[];
+        selections: unknown[];
+      }>;
+      storageMappings: unknown[];
+      surfaces: unknown[];
+    };
     candidate.modules = permute(candidate.modules, seed);
     candidate.entities = permute(candidate.entities, seed);
     candidate.fields = permute(candidate.fields, seed);

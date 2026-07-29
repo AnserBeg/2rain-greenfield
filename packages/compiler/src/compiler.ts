@@ -1,11 +1,11 @@
 import {
   CANONICALIZATION_PROFILE_VERSION,
-  LEGACY_LANGUAGE_VERSION,
-  LEGACY_NORMALIZATION_PROFILE_VERSION,
   LANGUAGE_VERSION,
   LANGUAGE_VERSIONS,
+  LATEST_LANGUAGE_VERSION,
   NORMALIZATION_PROFILE_VERSIONS,
   NORMALIZATION_PROFILE_VERSION,
+  SUPPORTED_LANGUAGE_VERSIONS,
   CanonicalModelError,
   canonicalLanguageProfileFor,
   canonicalizeAndHash,
@@ -29,6 +29,10 @@ import {
   requiredProjectionFamily,
   type ProjectionPayloadPlan,
 } from './projections.js';
+import {
+  isPredicateLoweringAdmitted,
+  lowerQueryPredicate,
+} from './predicate-lowering.js';
 import {
   buildStorageTransitionEnvelope,
   buildStorageTransitionEnvelopeFromLegacyTargets,
@@ -74,29 +78,36 @@ import {
   type StorageTransitionEnvelope,
 } from './protocol.js';
 
-export const DEFAULT_COMPILER_PROFILE: CompilerSemanticProfile = Object.freeze({
+const compilerProfileBase = Object.freeze({
   canonicalizationProfileVersion: CANONICALIZATION_PROFILE_VERSION,
   chunkingSchemeVersion: CHUNKING_SCHEME_VERSION,
   compilerSemanticProfileVersion: COMPILER_SEMANTIC_PROFILE_VERSION,
   compilerVersion: COMPILER_VERSION,
   hashAlgorithm: HASH_ALGORITHM,
-  languageVersion: LEGACY_LANGUAGE_VERSION,
-  normalizationProfileVersion: LEGACY_NORMALIZATION_PROFILE_VERSION,
   outputProtocolVersion: OUTPUT_PROTOCOL_VERSION,
   policyModelVersion: POLICY_MODEL_VERSION,
 });
 
-export const MODULE_COMPILER_PROFILE: CompilerSemanticProfile = Object.freeze({
-  ...DEFAULT_COMPILER_PROFILE,
-  languageVersion: LANGUAGE_VERSION,
-  normalizationProfileVersion: NORMALIZATION_PROFILE_VERSION,
-});
+const supportedCompilerProfiles: readonly CompilerSemanticProfile[] =
+  Object.freeze(
+    SUPPORTED_LANGUAGE_VERSIONS.map((languageVersion) =>
+      Object.freeze({
+        ...compilerProfileBase,
+        languageVersion,
+        normalizationProfileVersion:
+          canonicalLanguageProfileFor(languageVersion)
+            .normalizationProfileVersion,
+      }),
+    ),
+  );
 
-const V3_COMPILER_PROFILE: CompilerSemanticProfile = Object.freeze({
-  ...MODULE_COMPILER_PROFILE,
-  languageVersion: LANGUAGE_VERSIONS.v3,
-  normalizationProfileVersion: NORMALIZATION_PROFILE_VERSIONS.v3,
-});
+export const DEFAULT_COMPILER_PROFILE: CompilerSemanticProfile =
+  supportedCompilerProfiles.find(
+    (profile) => profile.languageVersion === LATEST_LANGUAGE_VERSION,
+  )!;
+
+export const MODULE_COMPILER_PROFILE: CompilerSemanticProfile =
+  DEFAULT_COMPILER_PROFILE;
 
 export const DEFAULT_COMPILER_LIMITS: CompilerLimits = Object.freeze({
   maximumChunksPerProjection: 4_096,
@@ -790,9 +801,11 @@ function languageUsesModuleProjectionShape(
 }
 
 /**
- * The v3 reader deliberately reuses the existing v2 projection shape until 4b
- * defines v3 content. The shallow dispatch alias changes no nested canonical
- * node and is never hashed as the normalized definition.
+ * Existing projection families retain their v2 physical interpretation at v3.
+ * Canonical node-version markers are projected back to v2 before those
+ * families calculate physical fingerprints; v3-only metadata is added later
+ * by decorateV3ProjectionPlans. This alias is never hashed as the normalized
+ * definition.
  */
 function projectionDispatchRevision(
   packageRevision: VersionedNormalizedApplicationPackage,
@@ -808,6 +821,20 @@ function projectionDispatchRevision(
   >;
   return {
     ...common,
+    fields: packageRevision.fields.map((field) => ({
+      ...field,
+      fieldType:
+        field.fieldType.kind === 'enumFieldType'
+          ? {
+              ...field.fieldType,
+              options: field.fieldType.options.map((option) => ({
+                ...option,
+                schemaVersion: LANGUAGE_VERSION,
+              })),
+              schemaVersion: LANGUAGE_VERSION,
+            }
+          : { ...field.fieldType, schemaVersion: LANGUAGE_VERSION },
+    })),
     languageVersion: LANGUAGE_VERSION,
     operations: packageRevision.operations.map((operation) => ({
       ...operation,
@@ -835,6 +862,14 @@ function decorateV3ProjectionPlans(
   packageRevision: VersionedNormalizedApplicationPackage,
 ): ProjectionPayloadPlan[] {
   if (packageRevision.languageVersion !== LANGUAGE_VERSIONS.v3) return plans;
+  const dispatchRevision = projectionDispatchRevision(packageRevision);
+  const storagePlan = plans.find(
+    (plan) => plan.familyId === PROJECTION_FAMILY_IDS.storageTarget,
+  );
+  if (!storagePlan || !isStorageTargetV1(storagePlan.payload)) {
+    throw new TypeError('v3 projection decoration requires a storage target');
+  }
+  const storage = storagePlan.payload;
   return plans.map((plan) => {
     if (plan.familyId === PROJECTION_FAMILY_IDS.queryCatalog) {
       const payload = plan.payload as {
@@ -877,6 +912,17 @@ function decorateV3ProjectionPlans(
                   }
                 : {
                     filter: query.filter,
+                    ...(query.tier === 'q1' &&
+                    isPredicateLoweringAdmitted(query.filter)
+                      ? {
+                          filterPlan: lowerQueryPredicate(
+                            query.filter,
+                            query.sourceEntity.targetId,
+                            dispatchRevision,
+                            storage,
+                          ),
+                        }
+                      : {}),
                     infrastructure: {
                       archive: 'nullableArchivedAt',
                       optimisticRevision: 'requiredOnMutation',
@@ -991,9 +1037,9 @@ function decorateV3ProjectionPlans(
 function validateProfile(
   profile: CompilerSemanticProfile,
 ): CompilerDiagnostic[] {
-  return equalObjects(profile, DEFAULT_COMPILER_PROFILE) ||
-    equalObjects(profile, MODULE_COMPILER_PROFILE) ||
-    equalObjects(profile, V3_COMPILER_PROFILE)
+  return supportedCompilerProfiles.some((candidate) =>
+    equalObjects(profile, candidate),
+  )
     ? []
     : [
         compilerDiagnostic(

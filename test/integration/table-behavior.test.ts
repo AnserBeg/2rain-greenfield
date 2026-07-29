@@ -134,7 +134,10 @@ test('relation-label target predicates pass through the kernel before execution'
   const { view } = await issuedPartyView(policy, (projections) =>
     withQueryFilter(projections, `${PARTY_IDS.namespace}:query.party_list`, {
       kind: 'booleanPredicate',
-      schemaVersion: 'v2',
+      schemaVersion: queryFilterVersion(
+        projections,
+        `${PARTY_IDS.namespace}:query.party_list`,
+      ),
       value: false,
     }),
   );
@@ -314,6 +317,28 @@ function withQueryFilter(
       payload: { ...payload, queries: updated },
     },
   };
+}
+
+function queryFilterVersion(
+  projections: LoadedRequestRuntimeDefinition['projections'],
+  queryId: string,
+): string {
+  const payload = projections.query.payload;
+  assert.ok(isRecord(payload));
+  const queries = payload.queries;
+  assert.ok(Array.isArray(queries));
+  const query = queries.find(
+    (candidate) => isRecord(candidate) && candidate.queryId === queryId,
+  );
+  assert.ok(isRecord(query));
+  const filter = query.filter;
+  if (filter === undefined) assert.fail('query filter is absent');
+  assert.ok(isRecord(filter));
+  const schemaVersion = filter.schemaVersion;
+  if (typeof schemaVersion !== 'string') {
+    assert.fail('query filter schemaVersion is absent');
+  }
+  return schemaVersion;
 }
 
 function isRecord(
