@@ -49,7 +49,7 @@ export async function startComposedApplication(
     databaseUrl: options.databaseUrl,
     migrationsDirectory: new URL('../../../db/migrations/', import.meta.url)
       .pathname,
-    ...(options.rollbackReleaseRoot
+    ...(options.rollbackReleaseRoot !== undefined
       ? {
           releaseSelection: {
             kind: 'rollback' as const,

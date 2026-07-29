@@ -9,6 +9,7 @@ import { promisify } from 'node:util';
 
 import pg from 'pg';
 
+import { startComposedApplication } from '../../apps/api/src/composition-root.js';
 import {
   canonicalize,
   normalizeApplicationPackage,
@@ -396,6 +397,11 @@ test(
             runtime,
             candidateReleaseId,
           );
+          await assertEmptyRollbackSelectorFailsClosed(
+            runtime,
+            databaseUrl,
+            pool,
+          );
 
           await runtime.close();
           runtime = await createRuntime(
@@ -422,6 +428,78 @@ test(
     );
   },
 );
+
+async function assertEmptyRollbackSelectorFailsClosed(
+  runtime: ComposedApplicationRuntime,
+  databaseUrl: string,
+  adminPool: pg.Pool,
+): Promise<void> {
+  const pointerBefore = await activePointerSnapshot(adminPool, runtime);
+  const approvalCountBefore = await totalApprovalCount(adminPool, runtime);
+  let unexpectedlyStarted:
+    Awaited<ReturnType<typeof startComposedApplication>> | undefined;
+  try {
+    await assert.rejects(
+      async () => {
+        unexpectedlyStarted = await startComposedApplication({
+          databaseUrl,
+          host: '127.0.0.1',
+          port: 0,
+          rollbackReleaseRoot: '',
+          tenantSlug: 'advancing-tenant',
+        });
+      },
+      (error: unknown) => {
+        assert.ok(error instanceof ReleaseReverseTransitionRefusal);
+        assert.equal(error.code, 'ROLLBACK_TARGET_NOT_IMMEDIATE_PREDECESSOR');
+        return true;
+      },
+    );
+  } finally {
+    await unexpectedlyStarted?.close();
+  }
+  assert.deepEqual(
+    await activePointerSnapshot(adminPool, runtime),
+    pointerBefore,
+    'an explicitly empty rollback selector leaves the persisted pointer unchanged',
+  );
+  assert.equal(
+    await totalApprovalCount(adminPool, runtime),
+    approvalCountBefore,
+    'an explicitly empty rollback selector creates no approval',
+  );
+}
+
+async function activePointerSnapshot(
+  pool: pg.Pool,
+  runtime: ComposedApplicationRuntime,
+): Promise<Readonly<{ fence: string; releaseId: MintedUuid }>> {
+  const result = await pool.query<{
+    fence: string;
+    release_id: MintedUuid;
+  }>(
+    `SELECT fence::text AS fence, release_id
+       FROM platform.active_release_pointers
+      WHERE tenant_id = $1 AND environment_id = $2`,
+    [runtime.identity.tenantId, runtime.identity.environmentId],
+  );
+  const row = result.rows[0];
+  assert.ok(row);
+  return Object.freeze({ fence: row.fence, releaseId: row.release_id });
+}
+
+async function totalApprovalCount(
+  pool: pg.Pool,
+  runtime: ComposedApplicationRuntime,
+): Promise<number> {
+  const result = await pool.query<{ count: string }>(
+    `SELECT count(*)::text AS count
+       FROM platform.release_approvals
+      WHERE tenant_id = $1 AND environment_id = $2`,
+    [runtime.identity.tenantId, runtime.identity.environmentId],
+  );
+  return Number(result.rows[0]?.count ?? '0');
+}
 
 async function assertRealProductDefinition(
   runtime: ComposedApplicationRuntime,
