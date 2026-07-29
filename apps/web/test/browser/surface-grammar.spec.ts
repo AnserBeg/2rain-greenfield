@@ -35,8 +35,10 @@ type SurfaceArchetype = (typeof SURFACE_ARCHETYPES)[number];
 
 let baseUrl: string;
 let incompleteBaseUrl: string;
+let navigationBudgetBaseUrl: string;
 let server: Server;
 let incompleteServer: Server;
+let navigationBudgetServer: Server;
 let fixtureDirectory: string;
 let surfaces: readonly FixtureCompiledSurface[];
 
@@ -46,6 +48,10 @@ test.beforeAll(async () => {
   const incompleteFixturePath = join(
     fixtureDirectory,
     'compiled-incomplete.json',
+  );
+  const navigationBudgetFixturePath = join(
+    fixtureDirectory,
+    'compiled-navigation-budget.json',
   );
   writeFileSync(
     fixturePath,
@@ -61,19 +67,31 @@ test.beforeAll(async () => {
       2,
     )}\n`,
   );
+  writeFileSync(
+    navigationBudgetFixturePath,
+    `${JSON.stringify(sixNavigationSurfaceRuntimeFixture(), null, 2)}\n`,
+  );
   surfaces = compiledSurfaceGrammarSurfaces();
   server = createSurfaceRuntimeServer(demoEntry(fixturePath));
   incompleteServer = createSurfaceRuntimeServer(
     demoEntry(incompleteFixturePath),
   );
-  [baseUrl, incompleteBaseUrl] = await Promise.all([
+  navigationBudgetServer = createSurfaceRuntimeServer(
+    demoEntry(navigationBudgetFixturePath),
+  );
+  [baseUrl, incompleteBaseUrl, navigationBudgetBaseUrl] = await Promise.all([
     listen(server),
     listen(incompleteServer),
+    listen(navigationBudgetServer),
   ]);
 });
 
 test.afterAll(async () => {
-  await Promise.all([close(server), close(incompleteServer)]);
+  await Promise.all([
+    close(server),
+    close(incompleteServer),
+    close(navigationBudgetServer),
+  ]);
   rmSync(fixtureDirectory, { force: true, recursive: true });
 });
 
@@ -118,6 +136,21 @@ test('compact journey red: a compiler-produced list missing bulkActions is obser
   );
 });
 
+test('compact navigation renders at most five entries while desktop preserves all six', async ({
+  page,
+}) => {
+  await page.setViewportSize({ height: 844, width: 390 });
+  await page.goto(navigationBudgetBaseUrl);
+  const navigation = page.getByRole('navigation', {
+    name: 'Release navigation',
+  });
+  await expect(navigation.locator('a')).toHaveCount(6);
+  await expect(navigation.getByRole('link')).toHaveCount(5);
+
+  await page.setViewportSize({ height: 720, width: 1280 });
+  await expect(navigation.getByRole('link')).toHaveCount(6);
+});
+
 async function requireCompactJourney(
   page: Page,
   surface: FixtureCompiledSurface,
@@ -158,7 +191,9 @@ async function requireCompactJourney(
     expectedNavigation,
   );
   await expect(page.locator('.app-shell')).toHaveCSS('display', 'block');
-  await expect(navigation.locator('ul')).toHaveCSS('display', 'flex');
+  await expect(page.locator('.sidebar')).toHaveCSS('position', 'fixed');
+  await expect(page.locator('.sidebar')).toHaveCSS('bottom', '0px');
+  await expect(navigation.locator('ul')).toHaveCSS('display', 'grid');
 
   const roles = await page
     .locator('[data-status-role]')
@@ -363,6 +398,29 @@ function surfaceGrammarRuntimeFixture(
     releaseRoot: compiled.releaseRoot,
     schemaVersion: 'northstar.web:compiled-shell-fixture/v1',
   });
+}
+
+function sixNavigationSurfaceRuntimeFixture(): Readonly<
+  Record<string, unknown>
+> {
+  const fixture = structuredClone(surfaceGrammarRuntimeFixture()) as Record<
+    string,
+    unknown
+  >;
+  const projections = fixture.projections as Record<string, unknown>;
+  const surfaceProjection = projections.surface as Record<string, unknown>;
+  const payload = surfaceProjection.payload as Record<string, unknown>;
+  const compiledSurfaces = payload.surfaces as Array<Record<string, unknown>>;
+  const listSurface = compiledSurfaces.find(
+    (surface) => surface.archetype === 'list',
+  );
+  assert.ok(listSurface);
+  payload.surfaces = Array.from({ length: 6 }, (_, index) => ({
+    ...structuredClone(listSurface),
+    label: `Budget item ${index + 1} list`,
+    surfaceId: `${String(listSurface.surfaceId)}.budget_${index + 1}`,
+  }));
+  return fixture;
 }
 
 function runtimeProjection(

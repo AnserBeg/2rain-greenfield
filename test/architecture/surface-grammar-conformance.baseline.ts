@@ -9,19 +9,25 @@ export const PRODUCT_SURFACE_GRAMMAR_BASELINE = Object.freeze([
     moduleId: 'northstar.catalog:module.catalog',
     packageId: 'northstar.catalog:package.catalog',
     sourceDirectory: 'catalog',
-    violationCount: 19,
+    violationCount: 13,
+  }),
+  Object.freeze({
+    moduleId: 'northstar.inventory:module.inventory',
+    packageId: 'northstar.inventory:package.inventory',
+    sourceDirectory: 'inventory',
+    violationCount: 71,
   }),
   Object.freeze({
     moduleId: 'northstar.location:module.location',
     packageId: 'northstar.location:package.location',
     sourceDirectory: 'location',
-    violationCount: 19,
+    violationCount: 13,
   }),
   Object.freeze({
     moduleId: 'northstar.party:module.party',
     packageId: 'northstar.party:package.party',
     sourceDirectory: 'party',
-    violationCount: 35,
+    violationCount: 23,
   }),
   Object.freeze({
     moduleId: 'northstar.platform:module.saved_filters',

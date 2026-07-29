@@ -25,6 +25,8 @@ export const STORAGE_TARGET_PAYLOAD_VERSION =
   'northstar.storage-target-payload/v1' as const;
 export const STORAGE_TARGET_PAYLOAD_V2_VERSION =
   'northstar.storage-target-payload/v2' as const;
+export const STORAGE_TARGET_PAYLOAD_V3_VERSION =
+  'northstar.storage-target-payload/v3' as const;
 export const MODULE_FIELD_CONTRACT_VERSION =
   'northstar.module-field-contract/v1' as const;
 export const MODULE_INPUT_CONTRACT_VERSION =
@@ -169,6 +171,10 @@ export type StorageTransitionElementKind =
   | 'addNotValidConstraint'
   | 'backfill'
   | 'createIndex'
+  | 'createPartition'
+  | 'createCompanionTable'
+  | 'createRejectMutationTrigger'
+  | 'addAbiFunctionCheck'
   | 'createTable'
   | 'duplicateScan'
   | 'tightenNotNull'
@@ -256,14 +262,23 @@ export interface StorageTransitionEnvelope {
 export interface PhysicalMappingRecord {
   canonicalId: string;
   mappingVersion: typeof PHYSICAL_MAPPING_VERSION;
-  objectKind: 'column' | 'constraint' | 'index' | 'table';
+  objectKind: 'column' | 'constraint' | 'index' | 'table' | 'trigger';
   physicalName: string;
   shapeFingerprint: string;
   storageDomain: 'managedModule';
 }
 
 export type StorageRendererStatement =
-  | { kind: 'addColumn' | 'createIndex' | 'createTable' }
+  | {
+      kind:
+        | 'addAbiFunctionCheck'
+        | 'addColumn'
+        | 'createCompanionTable'
+        | 'createIndex'
+        | 'createPartition'
+        | 'createRejectMutationTrigger'
+        | 'createTable';
+    }
   | { kind: 'addForeignKey'; onDelete: 'restrict'; onUpdate: 'restrict' }
   | { kind: 'addNotValidConstraint' | 'validateConstraint' }
   | { kind: 'onDeleteCascade' }

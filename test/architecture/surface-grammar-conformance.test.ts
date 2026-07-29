@@ -41,6 +41,7 @@ import {
   partyModuleDefinition,
   platformModuleDefinition,
 } from '../../packages/domain/src/index.js';
+import { inventoryModuleDefinition } from '../../packages/domain/src/inventory/index.js';
 import { PRODUCT_SURFACE_GRAMMAR_BASELINE } from './surface-grammar-conformance.baseline.js';
 import {
   compiledSurfaceGrammarSurfaces,
@@ -64,6 +65,7 @@ const seamPaths = [
 
 const productModuleDefinitions = [
   { create: catalogModuleDefinition, sourceDirectory: 'catalog' },
+  { create: inventoryModuleDefinition, sourceDirectory: 'inventory' },
   { create: locationModuleDefinition, sourceDirectory: 'location' },
   { create: partyModuleDefinition, sourceDirectory: 'party' },
   { create: platformModuleDefinition, sourceDirectory: 'platform' },
@@ -83,7 +85,7 @@ test('compiled production modules match the reviewed surface-grammar debt baseli
   );
 
   console.log(formatProductSurfaceGrammarRatchet(result));
-  assert.equal(result.modulesRead, 4);
+  assert.equal(result.modulesRead, 5);
   assert.deepEqual(
     result.observations.map((observation) => ({
       moduleId: observation.moduleId,

@@ -11,6 +11,7 @@ export interface ComposedApplicationServerOptions {
   readonly databaseUrl: string;
   readonly host?: string;
   readonly port?: number;
+  readonly rollbackReleaseRoot?: string;
   readonly tenantSlug?: string;
 }
 
@@ -48,6 +49,14 @@ export async function startComposedApplication(
     databaseUrl: options.databaseUrl,
     migrationsDirectory: new URL('../../../db/migrations/', import.meta.url)
       .pathname,
+    ...(options.rollbackReleaseRoot !== undefined
+      ? {
+          releaseSelection: {
+            kind: 'rollback' as const,
+            targetReleaseRoot: options.rollbackReleaseRoot,
+          },
+        }
+      : {}),
     tenantSlug: options.tenantSlug ?? 'local-composed-application',
   });
   const seededRecords = await seedComposedApplication(runtime);
