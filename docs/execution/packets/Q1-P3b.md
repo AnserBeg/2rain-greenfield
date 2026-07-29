@@ -5,6 +5,11 @@ Tier: Critical
 Base: `c768eb1c6c529c84e3180cc7a7b078a126d33b55`
 Branch: `packet/q1-p3b`
 
+The branch merged accepted G3-P1b from `main` at `d376d09` before provider
+execution. Its compiler/storage changes are disjoint from Q1-P3b's aggregate
+catalog decoration; the merged focused compiler suite is the count recorded
+below.
+
 ## Outcome
 
 Q1-P3b implements ADR-0022's one admitted query aggregate: scalar `sum` over a
@@ -143,13 +148,13 @@ serialized matrix slot.
 | `lint` | PASS |
 | `check:boundaries` | PASS, 131 files scanned |
 | Unit | 45/45 |
-| Compiler | 74/74 |
+| Compiler | 78/78 after merging accepted G3-P1b |
 | Integration | 59/59 |
 | Architecture | 90/90 |
 
-The untouched base compiler suite was 74/74. Q1-P3b adds no new test file, so no
-repository-hygiene or reachability inventory entry is required; the modified
-PostgreSQL file remains in the existing CI-discovered glob.
+The untouched base compiler suite was 74/74. Q1-P3b adds no new test file, so
+no repository-hygiene or reachability inventory entry is required; the
+modified PostgreSQL file remains in the existing CI-discovered glob.
 
 ## Known limits and what the gates cannot prove
 
