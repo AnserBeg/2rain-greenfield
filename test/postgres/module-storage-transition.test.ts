@@ -3709,26 +3709,6 @@ function hasPostgresErrorCode(code: string): (error: unknown) => boolean {
     (error as Error & { code?: string }).code === code;
 }
 
-function replaceExactDefinitionString(
-  value: unknown,
-  from: string,
-  to: string,
-): unknown {
-  if (value === from) return to;
-  if (Array.isArray(value)) {
-    return value.map((entry) => replaceExactDefinitionString(entry, from, to));
-  }
-  if (typeof value === 'object' && value !== null) {
-    return Object.fromEntries(
-      Object.entries(value).map(([key, entry]) => [
-        key,
-        replaceExactDefinitionString(entry, from, to),
-      ]),
-    );
-  }
-  return value;
-}
-
 function definitionBytes(definition: unknown): Uint8Array {
   return new TextEncoder().encode(
     canonicalize(normalizeApplicationPackage(definition)),

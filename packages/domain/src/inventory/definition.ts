@@ -118,10 +118,8 @@ export function inventoryModuleDefinition(
 
   return {
     assertions: [
-      ...standardEntities.map(([local, , entityId]) =>
-        assertion(definitionIds, local, entityId),
-      ),
-      assertion(definitionIds, 'inventory_movement', entityIds.movement),
+      ...standardEntities.map(([local]) => assertion(definitionIds, local)),
+      assertion(definitionIds, 'inventory_movement'),
     ],
     capabilityRequirements: [
       {
@@ -886,11 +884,7 @@ function storageMapping(
   };
 }
 
-function assertion(
-  ids: InventoryIds,
-  local: string,
-  _entityId: string,
-): Record<string, unknown> {
+function assertion(ids: InventoryIds, local: string): Record<string, unknown> {
   return {
     assertionId: `${ids.namespace}:assertion.${local}_walking_slice`,
     evidenceKinds: [
