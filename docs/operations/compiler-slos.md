@@ -50,12 +50,27 @@ of one family.
 A second measurement runs alongside it: a declared realistic tenant shape of N modules
 totalling M fields, recorded as a **curve across N** rather than a single point.
 
+The first recorded curve is
+[`publish-path-breadth-envelope.json`](publish-path-breadth-envelope.json). Its test coordinator
+composes the real Party, Catalog and Location definitions under one application namespace and
+measures N = 1, 2 and 3 in that order. Each point reports normalized field and searchable-field
+counts, index counts from each emitted storage-target entity, and the median of five complete
+cold compiles timed only around `compileApplication` with `process.hrtime.bigint()`. The test
+asserts curve shape, not values or a threshold, and prints fresh telemetry on every
+`test:compiler` run. A later source revision appends another run whose points name that SHA;
+it does not rewrite the earlier baseline.
+
 It is a recorded measurement producing a curve artifact, **not a pass/fail assertion**, until
 G6 sets an objective against it. It is startable now, order-independent, and does not displace
 other work — and it is the only part of this document with a real cost of delay, because the
 incremental-compile family is gated on "measured need" and a baseline that was never started
 cannot be reconstructed. Pair it with the tracked capability cycle-time baseline; both exist to
 give a later decision data instead of an argument.
+
+This curve is not an end-to-end publish-path measurement and the three first-party packages
+are not a real tenant-authored application. It cannot establish publisher latency, verification
+cost, preparation/activation cost, or platform exclusion. Its values are revision-bound and
+will move when compiler or definition work such as packets 4c and 1d integrates.
 
 ## Verification integrity
 
