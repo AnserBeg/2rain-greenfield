@@ -323,6 +323,7 @@ export interface StorageIndexTarget {
   columnNames: string[];
   indexKind: 'caseInsensitiveUnique' | 'foldedAccess' | 'relation';
   physicalName: string;
+  predicate: string | null;
 }
 
 export interface StorageUniqueKeyTarget {
@@ -330,6 +331,7 @@ export interface StorageUniqueKeyTarget {
   columns: string[];
   normalization: 'unicodeCaseFold';
   physicalName: string;
+  predicate: string;
 }
 
 export interface StorageRelationTarget {
@@ -564,6 +566,7 @@ export function lowerStorageTargetV1(
         .sort((left, right) => compare(left.fieldId, right.fieldId));
       const uniqueKeys: StorageUniqueKeyTarget[] = [];
       const indexes: StorageIndexTarget[] = [];
+      const archiveExcludingPredicate = 'archived_at IS NULL';
       for (const column of columns) {
         const foldedColumn = foldedColumns.find(
           (candidate) => candidate.canonicalFieldId === column.canonicalFieldId,
@@ -582,6 +585,7 @@ export function lowerStorageTargetV1(
             columns: ['tenant_id', 'environment_id', column.physicalName],
             normalization: 'unicodeCaseFold' as const,
             physicalName,
+            predicate: archiveExcludingPredicate,
           };
           uniqueKeys.push(unique);
           addMapping(
@@ -598,6 +602,7 @@ export function lowerStorageTargetV1(
               'index',
               `${column.canonicalFieldId}/tenant-environment-unique`,
             ),
+            predicate: archiveExcludingPredicate,
           };
           indexes.push(index);
           addMapping(
@@ -626,6 +631,7 @@ export function lowerStorageTargetV1(
             ],
             indexKind: 'foldedAccess' as const,
             physicalName,
+            predicate: null,
           };
           indexes.push(index);
           addMapping(
@@ -755,6 +761,7 @@ export function lowerStorageTargetV1(
           'index',
           `${relation.relationId}/tenant-environment-relation`,
         ),
+        predicate: null,
       };
       source.indexes.push(relationIndex);
       source.indexes.sort((left, right) =>

@@ -13,6 +13,6 @@
     "northstar.compiler:projection-family.surface-manifest",
     "northstar.compiler:projection-family.verification-plan"
   ],
-  "v1ReleaseRoot": "b50bf3f196143e73c51a13d82c6402df677b179c0c74948261f4868425370457",
-  "v2ReleaseRoot": "55ad2a56f54579b695207ba6bcfb74bf1038c6fca7516d69407cba7cf50c4e41"
+  "v1ReleaseRoot": "22f17dd50e5e28a9818e768bef6a1b84c1fa86c9f507c59104d9a5f1b1d0b051",
+  "v2ReleaseRoot": "f1af0c7cb0306272ac23ff2c6f6d45888d67212eb6062fa04904d76e5989bb70"
 }

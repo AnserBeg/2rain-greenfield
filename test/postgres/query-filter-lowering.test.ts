@@ -100,10 +100,17 @@ test('q1 filters preserve total semantics, cost classes, policy narrowing, and p
           index.columnNames.includes(nameFolded.physicalName),
       );
       assert.ok(nameIndex);
-      const tenantScopeIndex = party.indexes.find(
-        (index) => index.indexKind === 'caseInsensitiveUnique',
+      const tenantScopeIndexNames = [
+        ...party.uniqueKeys.map((unique) => unique.physicalName),
+        ...party.indexes
+          .filter((index) => index.indexKind === 'caseInsensitiveUnique')
+          .map((index) => index.physicalName),
+      ];
+      assert.equal(
+        tenantScopeIndexNames.length,
+        2,
+        'the business key must expose both physical uniqueness enforcers',
       );
-      assert.ok(tenantScopeIndex);
 
       for (const row of differentialRows) {
         await invokePartyOperation(runtime, runtime.views.a, 'party_create', {
@@ -242,20 +249,32 @@ test('q1 filters preserve total semantics, cost classes, policy narrowing, and p
         runtime.contexts.a,
         party,
         [boundedPlan],
-        [tenantScopeIndex.physicalName],
+        tenantScopeIndexNames,
         demonstrateUnboundedScan,
       );
+      const usedTenantScopeIndexes = tenantScopeIndexNames.filter(
+        (indexName) =>
+          boundedEvidence.plan.indexNames.has(indexName) &&
+          boundedEvidence.indexDeltas.get(indexName) === 1n,
+      );
       console.log(
-        `Q1-P1 tenant probe index=${tenantScopeIndex.physicalName} observed=${[...boundedEvidence.plan.indexNames].join(',')} sequential=${String(boundedEvidence.plan.sequentialScan)} removed=${String(boundedEvidence.plan.rowsRemoved)} delta=${String(boundedEvidence.indexDeltas.get(tenantScopeIndex.physicalName))}`,
+        `Q1-P1 tenant probe candidates=${tenantScopeIndexNames.join(',')} observed=${[...boundedEvidence.plan.indexNames].join(',')} sequential=${String(boundedEvidence.plan.sequentialScan)} removed=${String(boundedEvidence.plan.rowsRemoved)} deltas=${tenantScopeIndexNames.map((indexName) => `${indexName}:${String(boundedEvidence.indexDeltas.get(indexName))}`).join(',')}`,
       );
       assert.equal(
-        boundedEvidence.indexDeltas.get(tenantScopeIndex.physicalName),
-        1n,
+        usedTenantScopeIndexes.length,
+        1,
+        'exactly one physical business-key index must execute as the tenant bound',
       );
       assert.deepEqual(
         [...boundedEvidence.plan.indexNames],
-        [tenantScopeIndex.physicalName],
+        usedTenantScopeIndexes,
       );
+      for (const indexName of tenantScopeIndexNames) {
+        assert.equal(
+          boundedEvidence.indexDeltas.get(indexName),
+          usedTenantScopeIndexes.includes(indexName) ? 1n : 0n,
+        );
+      }
       assert.equal(boundedEvidence.plan.sequentialScan, false);
       assert.ok(boundedEvidence.plan.rowsRemoved > 0);
       observedProbeIds.add('Q1-P1/tenant-bounded-scan');
@@ -449,7 +468,7 @@ test('q1 filters preserve total semantics, cost classes, policy narrowing, and p
       assert.equal(policyEvidence.plan.rowsRemoved, 1);
 
       console.log(
-        `Q1-P1 provider probes: indexed=${nameIndex.physicalName} delta=${String(indexedEvidence.indexDeltas.get(nameIndex.physicalName))} removed=${String(indexedEvidence.plan.rowsRemoved)} tenant=${tenantScopeIndex.physicalName} delta=${String(boundedEvidence.indexDeltas.get(tenantScopeIndex.physicalName))} removed=${String(boundedEvidence.plan.rowsRemoved)} policy_removed=${String(policyEvidence.plan.rowsRemoved)} raw_absent=${String(rawIds.includes(differentialRows[0].id))} total_absent=${String(totalizedIds.includes(differentialRows[0].id))}`,
+        `Q1-P1 provider probes: indexed=${nameIndex.physicalName} delta=${String(indexedEvidence.indexDeltas.get(nameIndex.physicalName))} removed=${String(indexedEvidence.plan.rowsRemoved)} tenant=${usedTenantScopeIndexes[0]} delta=1 removed=${String(boundedEvidence.plan.rowsRemoved)} policy_removed=${String(policyEvidence.plan.rowsRemoved)} raw_absent=${String(rawIds.includes(differentialRows[0].id))} total_absent=${String(totalizedIds.includes(differentialRows[0].id))}`,
       );
     },
     definition,

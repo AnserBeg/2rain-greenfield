@@ -1145,10 +1145,11 @@ async function applyDdlElement(
     case 'createIndex': {
       const located = locateIndex(target, element);
       const columns = indexColumnExpressions(located.entity, located.index);
+      const predicate = indexPredicateSql(located.entity, located.index);
       await client.query(
         `CREATE ${located.index.indexKind === 'caseInsensitiveUnique' ? 'UNIQUE ' : ''}INDEX IF NOT EXISTS ${quoted(located.index.physicalName)}
            ON north_star_module.${quoted(located.entity.physicalTableName)}
-           (${columns.join(', ')})`,
+           (${columns.join(', ')})${predicate ? ` WHERE ${predicate}` : ''}`,
       );
       return;
     }
@@ -1252,10 +1253,11 @@ async function createManagedTable(
   }
   for (const unique of entity.uniqueKeys) {
     const columns = uniqueKeyColumnExpressions(entity, unique);
+    const predicate = uniqueKeyPredicateSql(entity, unique);
     await client.query(
       `CREATE UNIQUE INDEX IF NOT EXISTS ${quoted(unique.physicalName)}
          ON north_star_module.${quoted(entity.physicalTableName)}
-         (${columns.join(', ')})`,
+         (${columns.join(', ')}) WHERE ${predicate}`,
     );
   }
   await client.query(
@@ -2598,6 +2600,7 @@ function buildExpectedIndexes(
     });
     for (const unique of entity.uniqueKeys) {
       const columns = uniqueKeyColumnExpressions(entity, unique);
+      const predicate = uniqueKeyPredicateSql(entity, unique);
       result.push({
         columns: columns.map(normalizeSqlExpressionRequired),
         constraintName: null,
@@ -2606,10 +2609,11 @@ function buildExpectedIndexes(
           unique.physicalName,
           columns,
           true,
+          predicate,
         ),
         name: unique.physicalName,
         owner: 'north_star_module_materializer',
-        predicate: null,
+        predicate: normalizeSqlExpressionRequired(predicate),
         primary: false,
         ready: true,
         tableName: entity.physicalTableName,
@@ -2619,6 +2623,7 @@ function buildExpectedIndexes(
     }
     for (const index of entity.indexes) {
       const columns = indexColumnExpressions(entity, index);
+      const predicate = indexPredicateSql(entity, index);
       result.push({
         columns: columns.map(normalizeSqlExpressionRequired),
         constraintName: null,
@@ -2627,10 +2632,11 @@ function buildExpectedIndexes(
           index.physicalName,
           columns,
           index.indexKind === 'caseInsensitiveUnique',
+          predicate,
         ),
         name: index.physicalName,
         owner: 'north_star_module_materializer',
-        predicate: null,
+        predicate: normalizeSqlExpression(predicate),
         primary: false,
         ready: true,
         tableName: entity.physicalTableName,
@@ -2651,10 +2657,11 @@ function expectedIndexDefinition(
   indexName: string,
   columns: readonly string[],
   unique: boolean,
+  predicate: string | null = null,
 ): string {
   return normalizeSqlExpressionRequired(
     `CREATE ${unique ? 'UNIQUE ' : ''}INDEX ${indexName}
-       ON north_star_module.${tableName} USING btree (${columns.join(', ')})`,
+       ON north_star_module.${tableName} USING btree (${columns.join(', ')})${predicate ? ` WHERE ${predicate}` : ''}`,
   );
 }
 
@@ -2700,6 +2707,43 @@ function uniqueKeyColumnExpressions(
       ? quoted(column)
       : foldedColumnExpression(entity, column),
   );
+}
+
+function uniqueKeyPredicateSql(
+  entity: StorageEntityTarget,
+  unique: StorageEntityTarget['uniqueKeys'][number],
+): string {
+  return archiveExcludingPredicateSql(entity, unique.predicate);
+}
+
+function indexPredicateSql(
+  entity: StorageEntityTarget,
+  index: StorageEntityTarget['indexes'][number],
+): string | null {
+  if (index.indexKind === 'caseInsensitiveUnique') {
+    return archiveExcludingPredicateSql(entity, index.predicate);
+  }
+  if (index.predicate !== null && index.predicate !== undefined) {
+    throw failure(
+      'INDEX_PREDICATE_UNSUPPORTED',
+      `non-unique index ${index.physicalName} declares an unsupported predicate`,
+    );
+  }
+  return null;
+}
+
+function archiveExcludingPredicateSql(
+  entity: StorageEntityTarget,
+  declaredPredicate: string | null | undefined,
+): string {
+  const expected = `${entity.archive.archivedAtColumn} IS NULL`;
+  if (declaredPredicate !== undefined && declaredPredicate !== expected) {
+    throw failure(
+      'INDEX_PREDICATE_UNSUPPORTED',
+      `unique index predicate must be ${expected}`,
+    );
+  }
+  return `${quoted(entity.archive.archivedAtColumn)} IS NULL`;
 }
 
 function foldedColumnExpression(
@@ -3026,6 +3070,69 @@ function mergeCompatibleEntity(
           : 0,
     );
   };
+  const mergeIndexes = (): StorageEntityTarget['indexes'] => {
+    const values = new Map(
+      prior.indexes.map((index) => [index.physicalName, index]),
+    );
+    for (const index of next.indexes) {
+      const existing = values.get(index.physicalName);
+      if (!existing) {
+        values.set(index.physicalName, index);
+        continue;
+      }
+      const effective = (value: typeof index) => ({
+        ...value,
+        predicate:
+          value.indexKind === 'caseInsensitiveUnique'
+            ? (value.predicate ?? `${next.archive.archivedAtColumn} IS NULL`)
+            : (value.predicate ?? null),
+      });
+      if (
+        canonicalize(effective(existing)) !== canonicalize(effective(index))
+      ) {
+        throw failure(
+          'LIVE_SET_SHAPE_CONFLICT',
+          `conflicting live roots claim ${next.physicalTableName}.${index.physicalName}`,
+        );
+      }
+      if (Object.hasOwn(index, 'predicate'))
+        values.set(index.physicalName, index);
+    }
+    return [...values.values()].toSorted((left, right) =>
+      left.physicalName.localeCompare(right.physicalName),
+    );
+  };
+  const mergeUniqueKeys = (): StorageEntityTarget['uniqueKeys'] => {
+    const values = new Map(
+      prior.uniqueKeys.map((unique) => [unique.physicalName, unique]),
+    );
+    for (const unique of next.uniqueKeys) {
+      const existing = values.get(unique.physicalName);
+      if (!existing) {
+        values.set(unique.physicalName, unique);
+        continue;
+      }
+      const effective = (value: typeof unique) => ({
+        ...value,
+        predicate:
+          value.predicate ?? `${next.archive.archivedAtColumn} IS NULL`,
+      });
+      if (
+        canonicalize(effective(existing)) !== canonicalize(effective(unique))
+      ) {
+        throw failure(
+          'LIVE_SET_SHAPE_CONFLICT',
+          `conflicting live roots claim ${next.physicalTableName}.${unique.physicalName}`,
+        );
+      }
+      if (Object.hasOwn(unique, 'predicate')) {
+        values.set(unique.physicalName, unique);
+      }
+    }
+    return [...values.values()].toSorted((left, right) =>
+      left.physicalName.localeCompare(right.physicalName),
+    );
+  };
   return {
     ...next,
     checkConstraints: mergeNamed(
@@ -3044,16 +3151,8 @@ function mergeCompatibleEntity(
       next.foldedColumns ?? [],
       (value) => value.physicalName,
     ),
-    indexes: mergeNamed(
-      prior.indexes,
-      next.indexes,
-      (value) => value.physicalName,
-    ),
-    uniqueKeys: mergeNamed(
-      prior.uniqueKeys,
-      next.uniqueKeys,
-      (value) => value.physicalName,
-    ),
+    indexes: mergeIndexes(),
+    uniqueKeys: mergeUniqueKeys(),
   };
 }
 
