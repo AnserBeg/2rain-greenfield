@@ -80,6 +80,9 @@ the query tier both live there.
 | `test/fixtures/g2/*/runtime-harness.ts` | **KERNEL** *(released from DEPLOY 2026-07-28 on 1b's integration, for 4c's version-stamp fix)* |
 | `db/migrations/**` · `packages/postgres-provider/src/migrations.ts` | **FIX** *(reverted from DEPLOY 2026-07-28 on 1b's integration; `0013` is taken, so 1d's migration is `0014`)* |
 | `packages/postgres-provider/src/module-runtime-interpreter.ts` | KERNEL |
+| `test/postgres/{module-runtime,release-activation,release-approval,releases,request-runtime-view}.test.ts` | **KERNEL** *(granted 2026-07-28 for 4c — artifact-owned revision-envelope versions ONLY; the version-hardcode sweep's fourth-instance batch)* |
+| `test/postgres/module-storage-transition.test.ts` | **FIX (1d) and KERNEL (4c) — split by concern, granted 2026-07-28.** FIX owns the archive-excluding unique-index assertions (migration `0014`, index predicates, drift acceptance); KERNEL owns the version-stamping paths only. Verified disjoint before granting: 1d's diff to this file contains **zero** `LANGUAGE_VERSION`/`NORMALIZATION_PROFILE_VERSION` references. Neither lane may touch the other's concern. |
+| `test/postgres/**` (rest) | unassigned — bridge before touching |
 | `packages/dev-tooling/src/**` · `test/architecture/tenant-completeness*` | BUILD *(taken 2026-07-28 by G3-P2a; recorded here retroactively — the partition table had no `dev-tooling` row at all, the second such gap found today)* |
 | `packages/compiler/src/conformance.ts` | **unassigned — bridge before touching** *(gap found 2026-07-28 by the 1c scoping pass: G3-P1a edited this file under its own lease and it now holds the inventory contract constants alongside the four-query completeness rule, so BUILD and any 1c branch both have a live claim on it. It is in no lane's column. Do not let a lane take it silently.)* |
 | `docs/execution/packets/**` · `docs/execution/stage-cut-inputs.md` | FIX *(granted 2026-07-28 for G3-P0; each lane still owns its own packet doc)* |
@@ -206,7 +209,8 @@ run.
 ### Exception: an orchestrator docs-only advance does not force a re-run
 
 **If the only difference between the lane's merge base and current `main` is
-under `docs/` or `.agents/`, the lane does NOT re-merge and does NOT re-run.**
+under `docs/`, `.agents/`, or the root narrative files `CLAUDE.md` and
+`AGENTS.md`, the lane does NOT re-merge and does NOT re-run.**
 The orchestrator merges those at acceptance. The tested code and the integrated
 code are byte-identical, so a re-run would observe nothing new.
 
@@ -216,8 +220,20 @@ commits indefinitely and never reaches a stable integrated SHA. Added 2026-07-28
 after exactly that happened to KERNEL twice in one packet.
 
 **The exception is narrow and the orchestrator verifies it, not the lane.** Any
-file outside `docs/` or `.agents/` — product code, test, config, migration,
-lockfile, generated artifact — voids it and the full merge-and-re-run applies.
+file outside those paths — product code, test, config, migration, lockfile,
+generated artifact — voids it and the full merge-and-re-run applies.
+
+**Widened 2026-07-28 to name `CLAUDE.md` and `AGENTS.md`.** The original wording
+listed only `docs/` and `.agents/`, and 4c's second bridge hit the gap: `main`
+had gained exactly one line in `CLAUDE.md` — a pointer to the orchestrator
+handoff — which by the letter voided the exception and would have forced a full
+matrix re-run to observe a documentation sentence. Those two root files are
+narrative in the same class as `docs/`: not code, not test, not config, not a
+generated artifact, and never executed. The exception's stated purpose is that
+"the tested code and the integrated code are byte-identical", and that holds
+exactly. This is the standing lesson applied to the rule itself — *every gate
+built for one situation needs widening the first time a second appears* — and
+widening it explicitly is the alternative to stretching it silently each time.
 When in doubt, re-run: a wasted matrix costs minutes, an untested integration
 costs the rule PR-1 exists to enforce.
 
