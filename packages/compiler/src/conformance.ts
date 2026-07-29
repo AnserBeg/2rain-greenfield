@@ -738,11 +738,23 @@ function validateBaseUnitContract(
     [['baseUnit', 'changeWhenBound'], 'reject'],
     [['baseUnit', 'diagnostic', 'bindingMovementField'], 'movementId'],
     [['baseUnit', 'diagnostic', 'code'], 'INVENTORY_BASE_UNIT_IMMUTABLE'],
-    [['baseUnit', 'itemFieldId'], 'northstar.catalog:field.item_base_unit'],
     [['baseUnit', 'operationContract'], 'namedBaseUnitChange'],
   ];
   for (const [path, value] of expectations) {
     expectInventoryLiteral(diagnostics, definition, path, value);
+  }
+  const itemFieldId = nestedValue(definition, ['baseUnit', 'itemFieldId']);
+  if (
+    typeof itemFieldId !== 'string' ||
+    !itemFieldId.endsWith(':field.item_base_unit')
+  ) {
+    diagnostics.push(
+      inventoryDiagnostic(
+        'INVENTORY_CONTRACT_INVALID',
+        '$.baseUnit.itemFieldId',
+        typeof itemFieldId === 'string' ? itemFieldId : null,
+      ),
+    );
   }
 }
 
@@ -1464,10 +1476,14 @@ function sortInventoryDiagnostics(
 ): InventoryContractDiagnostic[] {
   return diagnostics.sort(
     (left, right) =>
-      left.path.localeCompare(right.path) ||
-      left.code.localeCompare(right.code) ||
-      (left.subjectId ?? '').localeCompare(right.subjectId ?? ''),
+      compareInventoryCodeUnits(left.path, right.path) ||
+      compareInventoryCodeUnits(left.code, right.code) ||
+      compareInventoryCodeUnits(left.subjectId ?? '', right.subjectId ?? ''),
   );
+}
+
+function compareInventoryCodeUnits(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 function failedInventoryContract(
