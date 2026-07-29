@@ -107,9 +107,10 @@ test('v0, v1, and v2 readers retain their exact normalized bytes', () => {
   for (const [languageVersion, receipt] of expected) {
     const candidate = replaceVersion(
       authored,
-      'v0-experimental',
+      'v3',
       languageVersion,
     ) as typeof authored;
+    delete (candidate as { impactAnalyses?: [] }).impactAnalyses;
     candidate.normalizationProfileVersion = receipt.profile as never;
     assert.equal(
       canonicalizeAndHash(normalizeApplicationPackage(candidate)).contentHash,
@@ -331,7 +332,12 @@ test('v3 gates aggregate nodes, typed parameters, signed decimals, and the D2 re
 });
 
 test('legacy envelopes reject every v3-only collection and query spelling', () => {
-  const legacy = parseAuthoredApplicationPackageJson(readFileSync(fixturePath));
+  const current = parseAuthoredApplicationPackageJson(
+    readFileSync(fixturePath),
+  );
+  const legacy = replaceVersion(current, 'v3', 'v2') as typeof current;
+  delete (legacy as { impactAnalyses?: [] }).impactAnalyses;
+  legacy.normalizationProfileVersion = 'northstar.normalization/v2';
   const withImpact = {
     ...legacy,
     impactAnalyses: [],
@@ -353,12 +359,12 @@ test('legacy envelopes reject every v3-only collection and query spelling', () =
     aggregate: {
       field: {
         kind: 'fieldReference',
-        schemaVersion: 'v0-experimental',
+        schemaVersion: 'v2',
         targetId: 'northstar.inventory:field.item_quantity',
       },
       kind: 'queryAggregateSelection',
       operator: 'sum',
-      schemaVersion: 'v0-experimental',
+      schemaVersion: 'v2',
       selectionId: 'northstar.inventory:selection.item_quantity_sum',
     },
     parameters: [],
@@ -427,15 +433,15 @@ test('explicit sibling order and equivalent UTC datetime spellings normalize can
     candidate.queries[0]!.filter = {
       field: {
         kind: 'fieldReference',
-        schemaVersion: 'v0-experimental',
+        schemaVersion: 'v3',
         targetId: 'northstar.inventory:field.item_counted_at' as never,
       },
       kind: 'fieldComparisonPredicate',
       operator: 'equals',
-      schemaVersion: 'v0-experimental',
+      schemaVersion: 'v3',
       value: {
         kind: 'dateTimeValue',
-        schemaVersion: 'v0-experimental',
+        schemaVersion: 'v3',
         value,
       },
     };
@@ -466,7 +472,7 @@ test('fresh pinned-Node processes ignore timezone and locale inputs', () => {
     "import {readFileSync} from 'node:fs';",
     "import {canonicalizeAndHash,normalizeApplicationPackage,parseAuthoredApplicationPackageJson} from './packages/canonical-model/src/index.ts';",
     "const authored=parseAuthoredApplicationPackageJson(readFileSync('./test/fixtures/canonical-model/representative.authored.json'));",
-    "authored.queries[0].filter={field:{kind:'fieldReference',schemaVersion:'v0-experimental',targetId:'northstar.inventory:field.item_counted_at'},kind:'fieldComparisonPredicate',operator:'equals',schemaVersion:'v0-experimental',value:{kind:'dateTimeValue',schemaVersion:'v0-experimental',value:'2026-07-21T23:30:00-07:00'}};",
+    "authored.queries[0].filter={field:{kind:'fieldReference',schemaVersion:'v3',targetId:'northstar.inventory:field.item_counted_at'},kind:'fieldComparisonPredicate',operator:'equals',schemaVersion:'v3',value:{kind:'dateTimeValue',schemaVersion:'v3',value:'2026-07-21T23:30:00-07:00'}};",
     'const result=canonicalizeAndHash(normalizeApplicationPackage(authored));',
     'process.stdout.write(`${result.contentHash}:${result.bytes.length}`);',
   ].join('');
@@ -501,8 +507,8 @@ test('representative token counts are pinned telemetry, not a correctness gate',
   };
   assert.deepEqual(telemetry, {
     tokenizer: 'js-tiktoken@1.0.21/cl100k_base',
-    authoredTokens: 3_785,
-    normalizedTokens: 2_721,
+    authoredTokens: 3_651,
+    normalizedTokens: 2_567,
   });
 });
 

@@ -1,10 +1,11 @@
 {
   "kind": "applicationPackageRevision",
-  "schemaVersion": "v0-experimental",
-  "languageVersion": "v0-experimental",
+  "schemaVersion": "v3",
+  "languageVersion": "v3",
+  "impactAnalyses": [],
   "package": {
     "kind": "packageDefinition",
-    "schemaVersion": "v0-experimental",
+    "schemaVersion": "v3",
     "packageId": "northstar.partial:package.fixture",
     "namespace": "northstar.partial",
     "version": "0.1.0",
@@ -24,12 +25,13 @@
   "capabilityRequirements": [
     {
       "kind": "capabilityRequirement",
-      "schemaVersion": "v0-experimental",
+      "schemaVersion": "v3",
       "capabilityId": "northstar.partial:capability.reporting",
       "capabilityVersion": 1,
-      "supportStatus": "supported",
+      "supportStatus": "planned",
       "declaredEffects": ["read"],
       "requiredProjections": ["reporting"]
     }
-  ]
+  ],
+  "normalizationProfileVersion": "northstar.normalization/v3"
 }

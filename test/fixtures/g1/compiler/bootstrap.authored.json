@@ -1,10 +1,11 @@
 {
   "kind": "applicationPackageRevision",
-  "schemaVersion": "v0-experimental",
-  "languageVersion": "v0-experimental",
+  "schemaVersion": "v3",
+  "languageVersion": "v3",
+  "impactAnalyses": [],
   "package": {
     "kind": "packageDefinition",
-    "schemaVersion": "v0-experimental",
+    "schemaVersion": "v3",
     "packageId": "northstar.bootstrap:package.empty",
     "namespace": "northstar.bootstrap",
     "version": "0.1.0",
@@ -21,5 +22,6 @@
   "permissions": [],
   "assertions": [],
   "storageMappings": [],
-  "capabilityRequirements": []
+  "capabilityRequirements": [],
+  "normalizationProfileVersion": "northstar.normalization/v3"
 }

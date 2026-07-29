@@ -1,9 +1,9 @@
 import {
-  LANGUAGE_VERSION,
-  NORMALIZATION_PROFILE_VERSION,
+  LATEST_LANGUAGE_VERSION,
+  LATEST_NORMALIZATION_PROFILE_VERSION,
 } from '@north-star/canonical-model';
 
-const version = LANGUAGE_VERSION;
+const version = LATEST_LANGUAGE_VERSION;
 const namespace = 'northstar.modulefixture';
 
 const reference = (kind: string, targetId: string) => ({
@@ -178,6 +178,7 @@ export function ordinaryModuleV1(): Record<string, unknown> {
       },
     ],
     hashAlgorithm: 'sha256',
+    impactAnalyses: [],
     kind: 'applicationPackageRevision',
     languageVersion: version,
     modules: [
@@ -195,7 +196,7 @@ export function ordinaryModuleV1(): Record<string, unknown> {
         schemaVersion: version,
       },
     ],
-    normalizationProfileVersion: NORMALIZATION_PROFILE_VERSION,
+    normalizationProfileVersion: LATEST_NORMALIZATION_PROFILE_VERSION,
     operations,
     package: {
       kind: 'packageDefinition',

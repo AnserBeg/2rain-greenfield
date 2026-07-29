@@ -5,7 +5,7 @@ const namespace = 'northstar.shell';
 const moduleId = `${namespace}:module.workspace`;
 const queryId = `${namespace}:query.workspace_get`;
 const componentId = 'northstar.shell:component.setup_checklist';
-const languageVersion = 'v0-experimental';
+const languageVersion = 'v3';
 const archetypes = ['home', 'list', 'record', 'task', 'builder'] as const;
 const slotsByArchetype = Object.freeze({
   builder: [

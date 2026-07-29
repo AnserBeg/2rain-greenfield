@@ -1,10 +1,11 @@
 {
   "kind": "applicationPackageRevision",
-  "schemaVersion": "v0-experimental",
-  "languageVersion": "v0-experimental",
+  "schemaVersion": "v3",
+  "languageVersion": "v3",
+  "impactAnalyses": [],
   "package": {
     "kind": "packageDefinition",
-    "schemaVersion": "v0-experimental",
+    "schemaVersion": "v3",
     "packageId": "northstar.bootstrap:package.vertical",
     "namespace": "northstar.bootstrap",
     "version": "0.1.0",
@@ -13,14 +14,14 @@
   "modules": [
     {
       "kind": "moduleDefinition",
-      "schemaVersion": "v0-experimental",
+      "schemaVersion": "v3",
       "moduleId": "northstar.bootstrap:module.catalog",
       "ownerPackageId": "northstar.bootstrap:package.vertical",
       "label": "Catalog",
       "orderKey": 10,
       "composition": {
         "kind": "compositionSeam",
-        "schemaVersion": "v0-experimental",
+        "schemaVersion": "v3",
         "status": "unsupported"
       }
     }
@@ -28,18 +29,18 @@
   "entities": [
     {
       "kind": "entityDefinition",
-      "schemaVersion": "v0-experimental",
+      "schemaVersion": "v3",
       "entityId": "northstar.bootstrap:entity.item",
       "module": {
         "kind": "moduleReference",
-        "schemaVersion": "v0-experimental",
+        "schemaVersion": "v3",
         "targetId": "northstar.bootstrap:module.catalog"
       },
       "label": "Item",
       "orderKey": 10,
       "storage": {
         "kind": "storageMappingReference",
-        "schemaVersion": "v0-experimental",
+        "schemaVersion": "v3",
         "targetId": "northstar.bootstrap:storage.item"
       }
     }
@@ -47,11 +48,11 @@
   "fields": [
     {
       "kind": "fieldDefinition",
-      "schemaVersion": "v0-experimental",
+      "schemaVersion": "v3",
       "fieldId": "northstar.bootstrap:field.item_name",
       "entity": {
         "kind": "entityReference",
-        "schemaVersion": "v0-experimental",
+        "schemaVersion": "v3",
         "targetId": "northstar.bootstrap:entity.item"
       },
       "label": "Name",
@@ -59,7 +60,7 @@
       "classification": "internal",
       "fieldType": {
         "kind": "textFieldType",
-        "schemaVersion": "v0-experimental",
+        "schemaVersion": "v3",
         "maximumLength": 240
       },
       "searchable": true
@@ -70,30 +71,145 @@
   "surfaces": [
     {
       "kind": "surfaceDefinition",
-      "schemaVersion": "v0-experimental",
-      "surfaceId": "northstar.bootstrap:surface.item_form",
+      "schemaVersion": "v3",
+      "surfaceId": "northstar.bootstrap:surface.item_list",
       "module": {
         "kind": "moduleReference",
-        "schemaVersion": "v0-experimental",
+        "schemaVersion": "v3",
         "targetId": "northstar.bootstrap:module.catalog"
       },
-      "label": "Item form",
-      "archetype": "record",
+      "label": "Item list",
+      "archetype": "list",
+      "surfaceRole": "list",
       "dataSource": {
         "kind": "queryReference",
-        "schemaVersion": "v0-experimental",
+        "schemaVersion": "v3",
+        "targetId": "northstar.bootstrap:query.item_list"
+      },
+      "slots": [
+        {
+          "kind": "surfaceSlot",
+          "schemaVersion": "v3",
+          "slotId": "northstar.bootstrap:slot.item_list_title",
+          "slot": "title",
+          "orderKey": 10,
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v3",
+            "targetId": "northstar.bootstrap:capability.auto_form"
+          }
+        },
+        {
+          "kind": "surfaceSlot",
+          "schemaVersion": "v3",
+          "slotId": "northstar.bootstrap:slot.item_list_data_grid",
+          "slot": "dataGrid",
+          "orderKey": 20,
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v3",
+            "targetId": "northstar.bootstrap:capability.auto_form"
+          }
+        }
+      ],
+      "statusRoles": []
+    },
+    {
+      "kind": "surfaceDefinition",
+      "schemaVersion": "v3",
+      "surfaceId": "northstar.bootstrap:surface.item_detail",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v3",
+        "targetId": "northstar.bootstrap:module.catalog"
+      },
+      "label": "Item detail",
+      "archetype": "record",
+      "surfaceRole": "record",
+      "dataSource": {
+        "kind": "queryReference",
+        "schemaVersion": "v3",
         "targetId": "northstar.bootstrap:query.item_get"
       },
       "slots": [
         {
           "kind": "surfaceSlot",
-          "schemaVersion": "v0-experimental",
+          "schemaVersion": "v3",
+          "slotId": "northstar.bootstrap:slot.item_detail_breadcrumb",
+          "slot": "breadcrumb",
+          "orderKey": 10,
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v3",
+            "targetId": "northstar.bootstrap:capability.auto_form"
+          }
+        },
+        {
+          "kind": "surfaceSlot",
+          "schemaVersion": "v3",
+          "slotId": "northstar.bootstrap:slot.item_detail_title_status",
+          "slot": "titleStatus",
+          "orderKey": 20,
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v3",
+            "targetId": "northstar.bootstrap:capability.auto_form"
+          }
+        },
+        {
+          "kind": "surfaceSlot",
+          "schemaVersion": "v3",
+          "slotId": "northstar.bootstrap:slot.item_detail_command_bar",
+          "slot": "commandBar",
+          "orderKey": 30,
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v3",
+            "targetId": "northstar.bootstrap:capability.auto_form"
+          }
+        },
+        {
+          "kind": "surfaceSlot",
+          "schemaVersion": "v3",
+          "slotId": "northstar.bootstrap:slot.item_detail_key_facts",
+          "slot": "keyFacts",
+          "orderKey": 40,
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v3",
+            "targetId": "northstar.bootstrap:capability.auto_form"
+          }
+        }
+      ],
+      "statusRoles": []
+    },
+    {
+      "kind": "surfaceDefinition",
+      "schemaVersion": "v3",
+      "surfaceId": "northstar.bootstrap:surface.item_form",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v3",
+        "targetId": "northstar.bootstrap:module.catalog"
+      },
+      "label": "Item form",
+      "archetype": "record",
+      "surfaceRole": "form",
+      "dataSource": {
+        "kind": "queryReference",
+        "schemaVersion": "v3",
+        "targetId": "northstar.bootstrap:query.item_get"
+      },
+      "slots": [
+        {
+          "kind": "surfaceSlot",
+          "schemaVersion": "v3",
           "slotId": "northstar.bootstrap:slot.item_key_facts",
           "slot": "keyFacts",
           "orderKey": 10,
           "content": {
             "kind": "opaqueSurfaceContentReference",
-            "schemaVersion": "v0-experimental",
+            "schemaVersion": "v3",
             "targetId": "northstar.bootstrap:capability.auto_form"
           }
         }
@@ -104,21 +220,21 @@
   "queries": [
     {
       "kind": "queryDefinition",
-      "schemaVersion": "v0-experimental",
+      "schemaVersion": "v3",
       "queryId": "northstar.bootstrap:query.item_get",
       "module": {
         "kind": "moduleReference",
-        "schemaVersion": "v0-experimental",
+        "schemaVersion": "v3",
         "targetId": "northstar.bootstrap:module.catalog"
       },
       "sourceEntity": {
         "kind": "entityReference",
-        "schemaVersion": "v0-experimental",
+        "schemaVersion": "v3",
         "targetId": "northstar.bootstrap:entity.item"
       },
       "permission": {
         "kind": "permissionReference",
-        "schemaVersion": "v0-experimental",
+        "schemaVersion": "v3",
         "targetId": "northstar.bootstrap:permission.item_read"
       },
       "queryType": "get",
@@ -127,11 +243,133 @@
       "selections": [
         {
           "kind": "querySelection",
-          "schemaVersion": "v0-experimental",
-          "selectionId": "northstar.bootstrap:selection.item_name",
+          "schemaVersion": "v3",
+          "selectionId": "northstar.bootstrap:selection.item_get_1",
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v0-experimental",
+            "schemaVersion": "v3",
+            "targetId": "northstar.bootstrap:field.item_name"
+          },
+          "orderKey": 10
+        }
+      ]
+    },
+    {
+      "kind": "queryDefinition",
+      "schemaVersion": "v3",
+      "queryId": "northstar.bootstrap:query.item_list",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v3",
+        "targetId": "northstar.bootstrap:module.catalog"
+      },
+      "sourceEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v3",
+        "targetId": "northstar.bootstrap:entity.item"
+      },
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v3",
+        "targetId": "northstar.bootstrap:permission.item_read"
+      },
+      "queryType": "list",
+      "tier": "q0",
+      "maximumResultCount": 100,
+      "selections": [
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v3",
+          "selectionId": "northstar.bootstrap:selection.item_list_1",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v3",
+            "targetId": "northstar.bootstrap:field.item_name"
+          },
+          "orderKey": 10
+        }
+      ]
+    },
+    {
+      "kind": "queryDefinition",
+      "schemaVersion": "v3",
+      "queryId": "northstar.bootstrap:query.item_search",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v3",
+        "targetId": "northstar.bootstrap:module.catalog"
+      },
+      "sourceEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v3",
+        "targetId": "northstar.bootstrap:entity.item"
+      },
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v3",
+        "targetId": "northstar.bootstrap:permission.item_read"
+      },
+      "queryType": "search",
+      "tier": "q0",
+      "maximumResultCount": 100,
+      "selections": [
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v3",
+          "selectionId": "northstar.bootstrap:selection.item_search_1",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v3",
+            "targetId": "northstar.bootstrap:field.item_name"
+          },
+          "orderKey": 10
+        }
+      ]
+    },
+    {
+      "kind": "queryDefinition",
+      "schemaVersion": "v3",
+      "queryId": "northstar.bootstrap:query.item_resolve",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v3",
+        "targetId": "northstar.bootstrap:module.catalog"
+      },
+      "sourceEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v3",
+        "targetId": "northstar.bootstrap:entity.item"
+      },
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v3",
+        "targetId": "northstar.bootstrap:permission.item_read"
+      },
+      "queryType": "resolve",
+      "tier": "q0",
+      "maximumResultCount": 100,
+      "resolveMatchKeys": [
+        {
+          "kind": "resolveMatchKey",
+          "schemaVersion": "v3",
+          "matchKeyId": "northstar.bootstrap:resolve-key.item_name",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v3",
+            "targetId": "northstar.bootstrap:field.item_name"
+          },
+          "authority": "identifier",
+          "orderKey": 10
+        }
+      ],
+      "selections": [
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v3",
+          "selectionId": "northstar.bootstrap:selection.item_resolve_1",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v3",
             "targetId": "northstar.bootstrap:field.item_name"
           },
           "orderKey": 10
@@ -142,32 +380,125 @@
   "operations": [
     {
       "kind": "operationDefinition",
-      "schemaVersion": "v0-experimental",
+      "schemaVersion": "v3",
       "operationId": "northstar.bootstrap:operation.item_create",
       "module": {
         "kind": "moduleReference",
-        "schemaVersion": "v0-experimental",
+        "schemaVersion": "v3",
         "targetId": "northstar.bootstrap:module.catalog"
       },
       "permission": {
         "kind": "permissionReference",
-        "schemaVersion": "v0-experimental",
+        "schemaVersion": "v3",
         "targetId": "northstar.bootstrap:permission.item_create"
       },
       "tier": "o0",
       "confirmation": "none",
       "effect": {
         "kind": "createRecordEffect",
-        "schemaVersion": "v0-experimental",
+        "schemaVersion": "v3",
         "entity": {
           "kind": "entityReference",
-          "schemaVersion": "v0-experimental",
+          "schemaVersion": "v3",
           "targetId": "northstar.bootstrap:entity.item"
         }
       },
       "readBack": {
         "kind": "queryReference",
-        "schemaVersion": "v0-experimental",
+        "schemaVersion": "v3",
+        "targetId": "northstar.bootstrap:query.item_get"
+      }
+    },
+    {
+      "kind": "operationDefinition",
+      "schemaVersion": "v3",
+      "operationId": "northstar.bootstrap:operation.item_update",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v3",
+        "targetId": "northstar.bootstrap:module.catalog"
+      },
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v3",
+        "targetId": "northstar.bootstrap:permission.item_update"
+      },
+      "tier": "o0",
+      "confirmation": "none",
+      "effect": {
+        "kind": "updateRecordEffect",
+        "schemaVersion": "v3",
+        "entity": {
+          "kind": "entityReference",
+          "schemaVersion": "v3",
+          "targetId": "northstar.bootstrap:entity.item"
+        }
+      },
+      "readBack": {
+        "kind": "queryReference",
+        "schemaVersion": "v3",
+        "targetId": "northstar.bootstrap:query.item_get"
+      }
+    },
+    {
+      "kind": "operationDefinition",
+      "schemaVersion": "v3",
+      "operationId": "northstar.bootstrap:operation.item_archive",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v3",
+        "targetId": "northstar.bootstrap:module.catalog"
+      },
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v3",
+        "targetId": "northstar.bootstrap:permission.item_archive"
+      },
+      "tier": "o0",
+      "confirmation": "humanRequired",
+      "effect": {
+        "kind": "archiveRecordEffect",
+        "schemaVersion": "v3",
+        "entity": {
+          "kind": "entityReference",
+          "schemaVersion": "v3",
+          "targetId": "northstar.bootstrap:entity.item"
+        }
+      },
+      "readBack": {
+        "kind": "queryReference",
+        "schemaVersion": "v3",
+        "targetId": "northstar.bootstrap:query.item_get"
+      }
+    },
+    {
+      "kind": "operationDefinition",
+      "schemaVersion": "v3",
+      "operationId": "northstar.bootstrap:operation.item_restore",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v3",
+        "targetId": "northstar.bootstrap:module.catalog"
+      },
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v3",
+        "targetId": "northstar.bootstrap:permission.item_restore"
+      },
+      "tier": "o0",
+      "confirmation": "none",
+      "effect": {
+        "kind": "restoreRecordEffect",
+        "schemaVersion": "v3",
+        "entity": {
+          "kind": "entityReference",
+          "schemaVersion": "v3",
+          "targetId": "northstar.bootstrap:entity.item"
+        }
+      },
+      "readBack": {
+        "kind": "queryReference",
+        "schemaVersion": "v3",
         "targetId": "northstar.bootstrap:query.item_get"
       }
     }
@@ -175,52 +506,114 @@
   "permissions": [
     {
       "kind": "permissionDefinition",
-      "schemaVersion": "v0-experimental",
+      "schemaVersion": "v3",
       "permissionId": "northstar.bootstrap:permission.item_create",
-      "label": "Create item",
+      "label": "Item create",
       "action": "create",
       "resource": {
         "kind": "entityReference",
-        "schemaVersion": "v0-experimental",
+        "schemaVersion": "v3",
         "targetId": "northstar.bootstrap:entity.item"
       }
     },
     {
       "kind": "permissionDefinition",
-      "schemaVersion": "v0-experimental",
+      "schemaVersion": "v3",
       "permissionId": "northstar.bootstrap:permission.item_read",
-      "label": "Read item",
+      "label": "Item read",
       "action": "read",
       "resource": {
         "kind": "entityReference",
-        "schemaVersion": "v0-experimental",
+        "schemaVersion": "v3",
+        "targetId": "northstar.bootstrap:entity.item"
+      }
+    },
+    {
+      "kind": "permissionDefinition",
+      "schemaVersion": "v3",
+      "permissionId": "northstar.bootstrap:permission.item_update",
+      "label": "Item update",
+      "action": "update",
+      "resource": {
+        "kind": "entityReference",
+        "schemaVersion": "v3",
+        "targetId": "northstar.bootstrap:entity.item"
+      }
+    },
+    {
+      "kind": "permissionDefinition",
+      "schemaVersion": "v3",
+      "permissionId": "northstar.bootstrap:permission.item_archive",
+      "label": "Item archive",
+      "action": "archive",
+      "resource": {
+        "kind": "entityReference",
+        "schemaVersion": "v3",
+        "targetId": "northstar.bootstrap:entity.item"
+      }
+    },
+    {
+      "kind": "permissionDefinition",
+      "schemaVersion": "v3",
+      "permissionId": "northstar.bootstrap:permission.item_restore",
+      "label": "Item restore",
+      "action": "restore",
+      "resource": {
+        "kind": "entityReference",
+        "schemaVersion": "v3",
         "targetId": "northstar.bootstrap:entity.item"
       }
     }
   ],
-  "assertions": [],
+  "assertions": [
+    {
+      "kind": "assertionDefinition",
+      "schemaVersion": "v3",
+      "assertionId": "northstar.bootstrap:assertion.item_walking_slice",
+      "invocation": {
+        "kind": "queryInvocation",
+        "schemaVersion": "v3",
+        "query": {
+          "kind": "queryReference",
+          "schemaVersion": "v3",
+          "targetId": "northstar.bootstrap:query.item_get"
+        }
+      },
+      "expectedOutcome": "succeeds",
+      "expectedDiagnosticCode": null,
+      "evidenceKinds": [
+        "structure",
+        "provider",
+        "userInterface",
+        "agent",
+        "migration",
+        "recovery"
+      ]
+    }
+  ],
   "storageMappings": [
     {
       "kind": "storageMappingDefinition",
-      "schemaVersion": "v0-experimental",
+      "schemaVersion": "v3",
       "storageMappingId": "northstar.bootstrap:storage.item",
       "entity": {
         "kind": "entityReference",
-        "schemaVersion": "v0-experimental",
+        "schemaVersion": "v3",
         "targetId": "northstar.bootstrap:entity.item"
       },
-      "storageClass": "generatedTyped"
+      "storageClass": "dedicatedTable"
     }
   ],
   "capabilityRequirements": [
     {
       "kind": "capabilityRequirement",
-      "schemaVersion": "v0-experimental",
+      "schemaVersion": "v3",
       "capabilityId": "northstar.bootstrap:capability.auto_form",
       "capabilityVersion": 1,
       "supportStatus": "supported",
       "declaredEffects": ["read"],
       "requiredProjections": ["surface"]
     }
-  ]
+  ],
+  "normalizationProfileVersion": "northstar.normalization/v3"
 }
