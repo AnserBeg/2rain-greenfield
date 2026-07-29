@@ -43,6 +43,7 @@ import {
 import { PostgresReleaseActivationService } from '../../packages/postgres-provider/src/release-activation-service.js';
 import { PostgresReleaseApprovalService } from '../../packages/postgres-provider/src/release-approval-service.js';
 import { PostgresImmutableReleaseRepository } from '../../packages/postgres-provider/src/release-repository.js';
+import { ReleaseReverseTransitionRefusal } from '../../packages/postgres-provider/src/release-reverse-transition-policy.js';
 import { PostgresReleaseVerificationService } from '../../packages/postgres-provider/src/release-verification-service.js';
 import { withTrustedRequestTransaction } from '../../packages/postgres-provider/src/request-context.js';
 import {
@@ -60,6 +61,7 @@ const authoredArtifactPath = resolve('apps/web/release/app.authored.json');
 const compileScriptPath = resolve('apps/web/scripts/compile-app-release.ts');
 const migrationsDirectory = resolve('db/migrations');
 const execFileAsync = promisify(execFile);
+const rollbackFieldId = 'northstar.app:field.party_rollback_note';
 
 test('composed product does not invent a verification evidence identity', async () => {
   const source = await readFile(
@@ -204,9 +206,15 @@ test(
             compiledApplication,
             recordId,
           );
+          const approvalCandidate = await compileCandidateEnvelope(
+            compiledApplication,
+            authoredApplication,
+            false,
+          );
           const candidate = await compileCandidateEnvelope(
             compiledApplication,
             authoredApplication,
+            true,
           );
           const mismatched = compileMismatchedEnvelope(
             compiledApplication,
@@ -229,7 +237,7 @@ test(
           );
           try {
             await assert.rejects(
-              createRuntime(candidate, databaseUrl, 'advancing-tenant'),
+              createRuntime(approvalCandidate, databaseUrl, 'advancing-tenant'),
               /active_release_pointer_exact_swap is not enabled/,
             );
           } finally {
@@ -246,7 +254,7 @@ test(
 
           await assertApprovalRequiredForAdvancement(
             runtime,
-            candidate,
+            approvalCandidate,
             connection,
             pool,
           );
@@ -274,10 +282,13 @@ test(
             recordId,
           );
           assert.deepEqual(
-            after,
-            before,
-            'the persisted PostgreSQL tuple identity and contents are unchanged by a no-storage release advancement',
+            { ctid: after.ctid, xmin: after.xmin },
+            { ctid: before.ctid, xmin: before.xmin },
+            'the storage-changing forward transition does not rewrite the existing tuple',
           );
+          assertRowRetainsPriorValues(before.row, after.row);
+          const rollbackColumn = partyFieldColumn(candidate, rollbackFieldId);
+          assert.equal(after.row[rollbackColumn], null);
           const listed = await listParty(runtime);
           assert.deepEqual(
             listed.records.map((record) => record.recordId),
@@ -288,6 +299,113 @@ test(
             pool,
             runtime,
             sourceReleaseId,
+          );
+          const candidateReleaseId = runtime.activeReleaseId;
+          await assertMaterializedReversibleForwardTransition(
+            pool,
+            sourceReleaseId,
+            candidateReleaseId,
+          );
+          await runtime.close();
+          await setLatestForwardTransitionRecoveryMode(
+            pool,
+            sourceReleaseId,
+            candidateReleaseId,
+            'forwardOnly',
+          );
+          try {
+            await assert.rejects(
+              createRuntime(candidate, databaseUrl, 'advancing-tenant', {
+                kind: 'rollback',
+                targetReleaseRoot:
+                  parseCompiledApplication(compiledApplication).application
+                    .compiled.releaseRoot,
+              }),
+              (error: unknown) => {
+                assert.ok(error instanceof ReleaseReverseTransitionRefusal);
+                assert.equal(
+                  error.code,
+                  'ROLLBACK_FORWARD_TRANSITION_NOT_REVERSIBLE',
+                );
+                return true;
+              },
+            );
+          } finally {
+            await setLatestForwardTransitionRecoveryMode(
+              pool,
+              sourceReleaseId,
+              candidateReleaseId,
+              'reversible',
+            );
+          }
+          assert.equal(
+            await activeReleaseId(pool, runtime.identity),
+            candidateReleaseId,
+          );
+          await assertNoReverseApprovalRecorded(
+            pool,
+            runtime,
+            candidateReleaseId,
+            sourceReleaseId,
+          );
+          await assertExactSwapTriggerEnabled(pool);
+          runtime = await createRuntime(
+            candidate,
+            databaseUrl,
+            'advancing-tenant',
+            {
+              kind: 'rollback',
+              targetReleaseRoot:
+                parseCompiledApplication(compiledApplication).application
+                  .compiled.releaseRoot,
+            },
+          );
+          assert.equal(
+            runtime.releaseRoot,
+            parseCompiledApplication(compiledApplication).application.compiled
+              .releaseRoot,
+            'an explicit reverse transition selects the prior immutable release',
+          );
+          await assertExactSwapTriggerEnabled(pool);
+          const afterRollback = await partyRowSnapshot(
+            pool,
+            runtime,
+            candidate,
+            recordId,
+          );
+          assert.deepEqual(
+            afterRollback,
+            after,
+            'rollback leaves the physical tuple and additive storage unchanged',
+          );
+          assert.deepEqual(
+            (await listParty(runtime)).records.map((record) => record.recordId),
+            [recordId],
+            'release A reads its original row after reversal',
+          );
+          await assertApprovedReverseActivationRecorded(
+            pool,
+            runtime,
+            candidateReleaseId,
+          );
+
+          await runtime.close();
+          runtime = await createRuntime(
+            candidate,
+            databaseUrl,
+            'advancing-tenant',
+          );
+          assert.equal(
+            runtime.releaseRoot,
+            parseCompiledApplication(candidate).application.compiled
+              .releaseRoot,
+            'the unchanged v2 lineage replays A -> B after rollback',
+          );
+          await assertExactSwapTriggerEnabled(pool);
+          assert.deepEqual(
+            await partyRowSnapshot(pool, runtime, candidate, recordId),
+            after,
+            'fresh v2 replay converges without rewriting the physical tuple',
           );
         } finally {
           await runtime.close();
@@ -863,7 +981,9 @@ async function partyRowSnapshot(
   runtime: ComposedApplicationRuntime,
   compiledApplication: unknown,
   recordId: string,
-): Promise<unknown> {
+): Promise<
+  Readonly<{ ctid: string; row: Record<string, unknown>; xmin: string }>
+> {
   const storage = storageTarget(
     parseCompiledApplication(compiledApplication).application.compiled,
   );
@@ -874,7 +994,7 @@ async function partyRowSnapshot(
   assert.match(party.physicalTableName, /^nsm_t_[a-z2-7]+$/);
   const result = await pool.query<{
     ctid: string;
-    row: unknown;
+    row: Record<string, unknown>;
     xmin: string;
   }>(
     `SELECT ctid::text AS ctid,
@@ -887,6 +1007,32 @@ async function partyRowSnapshot(
   const snapshot = result.rows[0];
   assert.ok(snapshot);
   return snapshot;
+}
+
+function assertRowRetainsPriorValues(
+  before: Readonly<Record<string, unknown>>,
+  after: Readonly<Record<string, unknown>>,
+): void {
+  assert.deepEqual(
+    Object.fromEntries(Object.keys(before).map((key) => [key, after[key]])),
+    before,
+    'every pre-transition physical column retains its exact value',
+  );
+}
+
+function partyFieldColumn(
+  compiledApplication: unknown,
+  fieldId: string,
+): string {
+  const party = storageTarget(
+    parseCompiledApplication(compiledApplication).application.compiled,
+  ).entities.find((entity) => entity.entityId === 'northstar.app:entity.party');
+  assert.ok(party);
+  const column = party.columns.find(
+    (candidate) => candidate.canonicalFieldId === fieldId,
+  );
+  assert.ok(column);
+  return column.physicalName;
 }
 
 function storageTarget(compiled: CompileSuccess): StorageTargetPayloadV1 {
@@ -948,6 +1094,162 @@ async function assertApprovedActivationRecorded(
     result.rows[0]?.count,
     '1',
     'the successful advancement is bound to a persisted human approval',
+  );
+}
+
+async function assertApprovedReverseActivationRecorded(
+  pool: pg.Pool,
+  runtime: ComposedApplicationRuntime,
+  sourceReleaseId: MintedUuid,
+): Promise<void> {
+  const result = await pool.query<{ count: string }>(
+    `SELECT count(*)::text AS count
+       FROM platform.release_activation_attempts AS attempt
+       JOIN platform.release_approvals AS approval
+         ON approval.tenant_id = attempt.tenant_id
+        AND approval.environment_id = attempt.environment_id
+        AND approval.approval_id = attempt.approval_id
+        AND approval.activation_attempt_id = attempt.activation_attempt_id
+       JOIN platform.release_activation_attempt_outcomes AS outcome
+         ON outcome.tenant_id = attempt.tenant_id
+        AND outcome.environment_id = attempt.environment_id
+        AND outcome.activation_attempt_id = attempt.activation_attempt_id
+      WHERE approval.tenant_id = $1
+        AND approval.environment_id = $2
+        AND approval.expected_release_id = $3
+        AND approval.target_release_id = $4
+        AND outcome.outcome_code = 'SWAPPED'`,
+    [
+      runtime.identity.tenantId,
+      runtime.identity.environmentId,
+      sourceReleaseId,
+      runtime.activeReleaseId,
+    ],
+  );
+  assert.equal(
+    result.rows[0]?.count,
+    '1',
+    'the reverse transition is bound to a fresh persisted human approval',
+  );
+}
+
+async function assertMaterializedReversibleForwardTransition(
+  pool: pg.Pool,
+  sourceReleaseId: MintedUuid,
+  targetReleaseId: MintedUuid,
+): Promise<void> {
+  const result = await pool.query<{
+    compiler_transition_class: string;
+    generation_id: MintedUuid | null;
+    receipt_version: string;
+    recovery_mode: string;
+  }>(
+    `SELECT receipt.receipt_version,
+            receipt.generation_id,
+            receipt.compiler_transition_class,
+            receipt.recovery_mode
+       FROM platform.release_activation_swap_receipts AS swap
+       JOIN platform.release_approvals AS approval
+         ON approval.tenant_id = swap.tenant_id
+        AND approval.environment_id = swap.environment_id
+        AND approval.approval_id = swap.approval_id
+        AND approval.activation_attempt_id = swap.activation_attempt_id
+       JOIN platform.transition_preparation_receipts AS receipt
+         ON receipt.tenant_id = approval.tenant_id
+        AND receipt.environment_id = approval.environment_id
+        AND receipt.receipt_id = approval.transition_preparation_receipt_id
+      WHERE swap.previous_release_id = $1
+        AND swap.activated_release_id = $2`,
+    [sourceReleaseId, targetReleaseId],
+  );
+  const receipt = result.rows[0];
+  assert.ok(receipt);
+  assert.equal(
+    receipt.receipt_version,
+    'northstar.transition-preparation-receipt/v2',
+  );
+  assert.ok(receipt.generation_id);
+  assert.equal(receipt.compiler_transition_class, 'REVERSIBLE');
+  assert.equal(receipt.recovery_mode, 'REVERSIBLE');
+}
+
+async function assertNoReverseApprovalRecorded(
+  pool: pg.Pool,
+  runtime: ComposedApplicationRuntime,
+  sourceReleaseId: MintedUuid,
+  targetReleaseId: MintedUuid,
+): Promise<void> {
+  const result = await pool.query<{ count: string }>(
+    `SELECT count(*)::text AS count
+       FROM platform.release_approvals
+      WHERE tenant_id = $1
+        AND environment_id = $2
+        AND expected_release_id = $3
+        AND target_release_id = $4`,
+    [
+      runtime.identity.tenantId,
+      runtime.identity.environmentId,
+      sourceReleaseId,
+      targetReleaseId,
+    ],
+  );
+  assert.equal(
+    result.rows[0]?.count,
+    '0',
+    'a refused reverse transition does not reach approval creation',
+  );
+}
+
+async function setLatestForwardTransitionRecoveryMode(
+  pool: pg.Pool,
+  sourceReleaseId: MintedUuid,
+  targetReleaseId: MintedUuid,
+  mode: 'forwardOnly' | 'reversible',
+): Promise<void> {
+  await pool.query(
+    `ALTER TABLE platform.transition_preparation_receipts
+       DISABLE RULE transition_preparation_receipts_reject_update`,
+  );
+  try {
+    const result = await pool.query(
+      `UPDATE platform.transition_preparation_receipts AS receipt
+          SET compiler_transition_class = $3,
+              recovery_mode = $4
+         FROM platform.release_approvals AS approval
+         JOIN platform.release_activation_swap_receipts AS swap
+           ON swap.tenant_id = approval.tenant_id
+          AND swap.environment_id = approval.environment_id
+          AND swap.approval_id = approval.approval_id
+          AND swap.activation_attempt_id = approval.activation_attempt_id
+        WHERE receipt.tenant_id = approval.tenant_id
+          AND receipt.environment_id = approval.environment_id
+          AND receipt.receipt_id = approval.transition_preparation_receipt_id
+          AND swap.previous_release_id = $1
+          AND swap.activated_release_id = $2`,
+      [
+        sourceReleaseId,
+        targetReleaseId,
+        mode === 'forwardOnly' ? 'IRREVERSIBLE' : 'REVERSIBLE',
+        mode === 'forwardOnly' ? 'FORWARD_RECOVERY_ONLY' : 'REVERSIBLE',
+      ],
+    );
+    assert.equal(result.rowCount, 1);
+  } finally {
+    await pool.query(
+      `ALTER TABLE platform.transition_preparation_receipts
+         ENABLE RULE transition_preparation_receipts_reject_update`,
+    );
+  }
+  const rule = await pool.query<{ enabled: string }>(
+    `SELECT ev_enabled AS enabled
+       FROM pg_catalog.pg_rewrite
+      WHERE ev_class = 'platform.transition_preparation_receipts'::regclass
+        AND rulename = 'transition_preparation_receipts_reject_update'`,
+  );
+  assert.equal(
+    rule.rows[0]?.enabled,
+    'O',
+    'the immutable receipt update rule is restored after the control',
   );
 }
 
@@ -1024,11 +1326,16 @@ function createRuntime(
   compiledApplication: unknown,
   databaseUrl: string,
   tenantSlug: string,
+  releaseSelection?: Readonly<{
+    kind: 'rollback';
+    targetReleaseRoot: string;
+  }>,
 ) {
   return createComposedApplicationRuntime({
     compiledApplication,
     databaseUrl,
     migrationsDirectory,
+    ...(releaseSelection ? { releaseSelection } : {}),
     tenantSlug,
   });
 }
@@ -1040,13 +1347,40 @@ function connectionUrl(connection: pg.PoolConfig): string {
 async function compileCandidateEnvelope(
   compiledApplication: unknown,
   authoredApplication: Record<string, unknown>,
+  storageChange: boolean,
 ): Promise<unknown> {
   const candidateDefinition = structuredClone(authoredApplication);
   const packageDefinition = candidateDefinition.package as Record<
     string,
     unknown
   >;
-  packageDefinition.version = '1.0.1';
+  packageDefinition.version = storageChange ? '1.0.2' : '1.0.1';
+  if (storageChange) {
+    const fields = candidateDefinition.fields as Array<Record<string, unknown>>;
+    fields.push({
+      classification: 'internal',
+      collation: 'unicodeCaseInsensitive',
+      defaultSemantics: 'nullable',
+      entity: {
+        kind: 'entityReference',
+        schemaVersion: 'v3',
+        targetId: 'northstar.app:entity.party',
+      },
+      fieldId: rollbackFieldId,
+      fieldType: {
+        kind: 'textFieldType',
+        maximumLength: 160,
+        schemaVersion: 'v3',
+      },
+      kind: 'fieldDefinition',
+      label: 'Rollback note',
+      orderKey: 40,
+      presence: 'optional',
+      reportable: true,
+      schemaVersion: 'v3',
+      searchable: false,
+    });
+  }
   const directory = await mkdtemp(
     resolve(tmpdir(), 'northstar-app-release-advancement-'),
   );

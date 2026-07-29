@@ -53,6 +53,11 @@ import { PostgresModuleStorageMaterializer } from './module-storage-materializer
 import { PostgresReleaseActivationService } from './release-activation-service.js';
 import { PostgresReleaseApprovalService } from './release-approval-service.js';
 import { PostgresImmutableReleaseRepository } from './release-repository.js';
+import {
+  authorizeReverseTransitionIfApplicable,
+  refuseReverseTransition,
+  type ReleaseReverseTransitionAuthorization,
+} from './release-reverse-transition-policy.js';
 import { PostgresReleaseVerificationService } from './release-verification-service.js';
 import { PostgresRequestRuntimeViewService } from './request-runtime-view-service.js';
 import { withTrustedRequestTransaction } from './request-context.js';
@@ -71,6 +76,10 @@ export interface ComposedApplicationRuntimeOptions {
   readonly databaseUrl: string;
   readonly environmentSlug?: string;
   readonly migrationsDirectory: string;
+  readonly releaseSelection?: Readonly<{
+    readonly kind: 'rollback';
+    readonly targetReleaseRoot: string;
+  }>;
   readonly tenantSlug: string;
 }
 
@@ -234,72 +243,55 @@ export async function createComposedApplicationRuntime(
       materializerPool,
       modulePool,
     );
-    for (
-      let targetIndex = activeLineageIndex + 1;
-      targetIndex < lineage.length;
-      targetIndex += 1
-    ) {
-      const source = releaseLineage[targetIndex - 1]!;
+    let servingLineageIndex = activeLineageIndex;
+    if (options.releaseSelection?.kind === 'rollback') {
+      const targetIndex = releaseLineage.findIndex(
+        (release) =>
+          release.compiled.releaseRoot ===
+          options.releaseSelection?.targetReleaseRoot,
+      );
+      if (targetIndex < 1 || targetIndex !== activeLineageIndex - 1) {
+        refuseReverseTransition(
+          'ROLLBACK_TARGET_NOT_IMMEDIATE_PREDECESSOR',
+          'rollback target must be the immediate prior immutable application release',
+        );
+      }
+      const source = releaseLineage[activeLineageIndex]!;
       const target = releaseLineage[targetIndex]!;
       const targetIdentity = lineage[targetIndex]!;
-      const transition = assertExactCompiledTransition(source, target);
-      await assertExactSwapTriggerEnabled(adminPool);
-      const generationId = minted(randomUUID());
-      const preparationId = minted(randomUUID());
-      let attemptId: MintedUuid;
-      if (transition.elements.length === 0) {
-        await ensureReleaseAdmitted(
-          runtimePool,
-          runtimeContext,
-          targetIdentity,
-          target,
+      await ensureReleaseAdmitted(
+        runtimePool,
+        runtimeContext,
+        targetIdentity,
+        target,
+      );
+      const reverseAuthorization = await withTrustedRequestTransaction(
+        runtimePool,
+        runtimeContext,
+        async (client) =>
+          authorizeReverseTransitionIfApplicable(client, runtimeContext, {
+            expectedFence: pointer.fence,
+            sourceReleaseId: lineage[activeLineageIndex]!.releaseId,
+            targetReleaseId: targetIdentity.releaseId,
+          }),
+      );
+      if (reverseAuthorization === null) {
+        refuseReverseTransition(
+          'ROLLBACK_TARGET_NOT_IMMEDIATE_PREDECESSOR',
+          'rollback target does not reverse an exact compiled lineage edge',
         );
-        attemptId = await approveReleaseWithoutStorageTransition(
-          runtimePool,
-          runtimeContext,
-          approverContext,
-          pointer,
-          source,
-          targetIdentity,
-          target.compiled,
-        );
-      } else {
-        const prepared = await materializer.prepare({
-          context: runtimeContext,
-          expiresAt: new Date(Date.now() + 5 * 60_000).toISOString(),
-          generationId,
-          initiatedBy: runtimeContext.principalId,
-          preparationId,
-          targetReleaseId: targetIdentity.releaseId,
-        });
-        await ensureReleaseAdmitted(
-          runtimePool,
-          runtimeContext,
-          targetIdentity,
-          target,
-        );
-        attemptId = await approveModuleRelease(
-          runtimePool,
-          runtimeContext,
-          approverContext,
-          pointer,
-          targetIdentity,
-          target.compiled,
-          prepared,
-          preparationId,
-        );
-        const executed = await materializer.executeApprovedAttempt({
-          activationAttemptId: attemptId,
-          context: runtimeContext,
-          coordinatorId: minted(randomUUID()),
-          generationId,
-        });
-        if (executed.disposition !== 'READY_TO_SWAP') {
-          throw new Error(
-            `module materialization did not become ready: ${executed.disposition}`,
-          );
-        }
       }
+      await assertExactSwapTriggerEnabled(adminPool);
+      const attemptId = await approveReleaseWithoutStorageTransition(
+        runtimePool,
+        runtimeContext,
+        approverContext,
+        pointer,
+        source,
+        targetIdentity,
+        target.compiled,
+        reverseAuthorization,
+      );
       const activated = await activateWithExactSwapTrigger(
         adminPool,
         activation,
@@ -308,18 +300,104 @@ export async function createComposedApplicationRuntime(
       );
       if (activated.status !== 'SWAPPED_VERIFIED') {
         throw new Error(
-          `composed release activation did not verify: ${activated.status}`,
+          `composed release rollback did not verify: ${activated.status}`,
         );
       }
       pointer = await readPointer(runtimePool, runtimeContext);
       if (pointer.releaseId !== targetIdentity.releaseId) {
-        throw new Error(
-          'composed release activation selected the wrong target',
+        throw new Error('composed release rollback selected the wrong target');
+      }
+      servingLineageIndex = targetIndex;
+    } else {
+      for (
+        let targetIndex = activeLineageIndex + 1;
+        targetIndex < lineage.length;
+        targetIndex += 1
+      ) {
+        const source = releaseLineage[targetIndex - 1]!;
+        const target = releaseLineage[targetIndex]!;
+        const targetIdentity = lineage[targetIndex]!;
+        const transition = assertExactCompiledTransition(source, target);
+        await assertExactSwapTriggerEnabled(adminPool);
+        const generationId = minted(randomUUID());
+        const preparationId = minted(randomUUID());
+        let attemptId: MintedUuid;
+        if (transition.elements.length === 0) {
+          await ensureReleaseAdmitted(
+            runtimePool,
+            runtimeContext,
+            targetIdentity,
+            target,
+          );
+          attemptId = await approveReleaseWithoutStorageTransition(
+            runtimePool,
+            runtimeContext,
+            approverContext,
+            pointer,
+            source,
+            targetIdentity,
+            target.compiled,
+          );
+        } else {
+          const prepared = await materializer.prepare({
+            context: runtimeContext,
+            expiresAt: new Date(Date.now() + 5 * 60_000).toISOString(),
+            generationId,
+            initiatedBy: runtimeContext.principalId,
+            preparationId,
+            targetReleaseId: targetIdentity.releaseId,
+          });
+          await ensureReleaseAdmitted(
+            runtimePool,
+            runtimeContext,
+            targetIdentity,
+            target,
+          );
+          attemptId = await approveModuleRelease(
+            runtimePool,
+            runtimeContext,
+            approverContext,
+            pointer,
+            targetIdentity,
+            target.compiled,
+            prepared,
+            preparationId,
+          );
+          const executed = await materializer.executeApprovedAttempt({
+            activationAttemptId: attemptId,
+            context: runtimeContext,
+            coordinatorId: minted(randomUUID()),
+            generationId,
+          });
+          if (executed.disposition !== 'READY_TO_SWAP') {
+            throw new Error(
+              `module materialization did not become ready: ${executed.disposition}`,
+            );
+          }
+        }
+        const activated = await activateWithExactSwapTrigger(
+          adminPool,
+          activation,
+          systemContext,
+          attemptId,
         );
+        if (activated.status !== 'SWAPPED_VERIFIED') {
+          throw new Error(
+            `composed release activation did not verify: ${activated.status}`,
+          );
+        }
+        pointer = await readPointer(runtimePool, runtimeContext);
+        if (pointer.releaseId !== targetIdentity.releaseId) {
+          throw new Error(
+            'composed release activation selected the wrong target',
+          );
+        }
+        servingLineageIndex = targetIndex;
       }
     }
     await assertExactSwapTriggerEnabled(adminPool);
-    const applicationIdentity = applicationIdentities.at(-1)!;
+    const applicationIdentity = lineage[servingLineageIndex]!;
+    const applicationRelease = releaseLineage[servingLineageIndex]!;
 
     const policy = new AllowAllLocalPolicy();
     const interpreter = new PostgresModuleRuntimeInterpreter(
@@ -353,7 +431,7 @@ export async function createComposedApplicationRuntime(
       operationGateway,
       operationMediation,
       queryGateway,
-      releaseRoot: releases.application.compiled.releaseRoot,
+      releaseRoot: applicationRelease.compiled.releaseRoot,
       triggerEnabledDuringActivation: true as const,
     });
   } catch (error) {
@@ -969,6 +1047,7 @@ async function approveReleaseWithoutStorageTransition(
   source: ParsedRelease,
   target: PersistedReleaseIdentity,
   compiled: CompileSuccess,
+  reverseAuthorization?: ReleaseReverseTransitionAuthorization,
 ): Promise<MintedUuid> {
   if (pointer.releaseId === null) {
     throw new Error('release advancement requires an active source release');
@@ -1005,17 +1084,36 @@ async function approveReleaseWithoutStorageTransition(
         targetRoot,
         pointer.fence,
         COMPILER_TRANSITION_FACTS_VERSION,
-        digest(
-          'no-storage-compiler-facts',
-          source.compiled.releaseRoot,
-          compiled.releaseRoot,
-        ),
+        reverseAuthorization
+          ? digest(
+              'reverse-pointer-transition-facts',
+              reverseAuthorization.policyVersion,
+              reverseAuthorization.forwardReceiptId,
+              reverseAuthorization.forwardTransitionClass,
+              reverseAuthorization.forwardRecoveryMode,
+              source.compiled.releaseRoot,
+              compiled.releaseRoot,
+            )
+          : digest(
+              'no-storage-compiler-facts',
+              source.compiled.releaseRoot,
+              compiled.releaseRoot,
+            ),
         EXECUTOR_APPLIED_STATE_EVIDENCE_VERSION,
-        digest(
-          'no-storage-executor-evidence',
-          source.compiled.releaseRoot,
-          compiled.releaseRoot,
-        ),
+        reverseAuthorization
+          ? digest(
+              'reverse-pointer-storage-preservation',
+              reverseAuthorization.policyVersion,
+              reverseAuthorization.forwardActivationAttemptId,
+              reverseAuthorization.forwardReceiptId,
+              source.compiled.releaseRoot,
+              compiled.releaseRoot,
+            )
+          : digest(
+              'no-storage-executor-evidence',
+              source.compiled.releaseRoot,
+              compiled.releaseRoot,
+            ),
         TRANSITION_COMPATIBILITY_POLICY_VERSION,
       ],
     );

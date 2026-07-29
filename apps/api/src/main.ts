@@ -23,6 +23,9 @@ const application = await startComposedApplication({
   databaseUrl,
   host: process.env.HOST ?? '127.0.0.1',
   port: Number.parseInt(process.env.PORT ?? '4174', 10),
+  ...(process.env.NORTH_STAR_ROLLBACK_RELEASE_ROOT
+    ? { rollbackReleaseRoot: process.env.NORTH_STAR_ROLLBACK_RELEASE_ROOT }
+    : {}),
   tenantSlug:
     process.env.NORTH_STAR_TENANT_SLUG ?? 'local-composed-application',
 });

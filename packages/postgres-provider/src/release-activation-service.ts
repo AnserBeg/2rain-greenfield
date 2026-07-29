@@ -41,6 +41,7 @@ import {
 import type { Pool, PoolClient } from 'pg';
 
 import { withTrustedRequestTransaction } from './request-context.js';
+import { authorizeReverseTransitionIfApplicable } from './release-reverse-transition-policy.js';
 
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -586,6 +587,13 @@ export class PostgresReleaseActivationService {
           result: resultFromOutcome(context, record, existingOutcome),
           swapped: existingOutcome.outcome_code === 'SWAPPED',
         };
+      }
+      if (record.expected_release_id !== null) {
+        await authorizeReverseTransitionIfApplicable(client, context, {
+          expectedFence: safeFence(record.expected_fence),
+          sourceReleaseId: record.expected_release_id,
+          targetReleaseId: record.target_release_id,
+        });
       }
 
       const epoch = await lockAuthorityEpoch(client, context.tenantId);
