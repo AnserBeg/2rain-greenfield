@@ -67,6 +67,7 @@ const suiteDefinitions = [
       'test/architecture/surface-data-binding.test.ts',
       'test/architecture/surface-grammar-conformance.test.ts',
       'test/architecture/surface-runtime-seam.test.ts',
+      'test/architecture/tenant-completeness.test.ts',
       'test/architecture/test-reachability.test.ts',
       'test/architecture/ux-grammar-skill.test.ts',
     ],
