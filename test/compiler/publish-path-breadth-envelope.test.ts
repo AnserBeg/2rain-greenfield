@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import {
@@ -38,6 +39,7 @@ interface PhysicalIndexCount {
 
 interface BreadthPoint {
   readonly compileWallClockMilliseconds: number;
+  readonly entityCount: number;
   readonly measuredAtSha: string;
   readonly moduleCount: number;
   readonly moduleIds: readonly string[];
@@ -49,6 +51,18 @@ interface BreadthPoint {
 interface BreadthCurve {
   readonly points: readonly BreadthPoint[];
 }
+
+interface BreadthArtifact {
+  readonly runs: readonly BreadthCurve[];
+}
+
+test('the recorded breadth artifact carries shape-valid appendable runs', () => {
+  const artifact = JSON.parse(
+    readFileSync('docs/operations/publish-path-breadth-envelope.json', 'utf8'),
+  ) as unknown;
+
+  assertBreadthArtifactShape(artifact);
+});
 
 test('records a shape-valid publish-path breadth curve over first-party modules', () => {
   const measuredAtSha = execFileSync('git', ['rev-parse', 'HEAD'], {
@@ -148,6 +162,7 @@ function measureBreadthPoint(
 
   return {
     compileWallClockMilliseconds: roundToMicrosecond(median(samples)),
+    entityCount: storage.entities.length,
     measuredAtSha,
     moduleCount: moduleIds.length,
     moduleIds,
@@ -267,6 +282,7 @@ function assertBreadthCurveShape(
       point.compileWallClockMilliseconds,
       'compileWallClockMilliseconds',
     );
+    const entityCount = finiteCount(point.entityCount, 'entityCount');
     assert.match(
       requiredString(point.measuredAtSha, 'measuredAtSha'),
       /^[0-9a-f]{40}$/u,
@@ -284,15 +300,27 @@ function assertBreadthCurveShape(
       point.physicalIndexCountByEntity.length > 0,
       'physicalIndexCountByEntity must carry at least one entity',
     );
+    assert.equal(point.physicalIndexCountByEntity.length, entityCount);
+    const entityIds = new Set<string>();
     for (const physicalCount of point.physicalIndexCountByEntity) {
       const entity = requiredRecord(
         physicalCount,
         'physicalIndexCountByEntity',
       );
-      requiredString(entity.entityId, 'entityId');
+      entityIds.add(requiredString(entity.entityId, 'entityId'));
       finiteCount(entity.physicalIndexCount, 'physicalIndexCount');
     }
+    assert.equal(entityIds.size, entityCount, 'entityIds must be unique');
   }
+}
+
+function assertBreadthArtifactShape(
+  value: unknown,
+): asserts value is BreadthArtifact {
+  const artifact = requiredRecord(value, 'artifact');
+  assert.ok(Array.isArray(artifact.runs), 'runs must be an array');
+  assert.ok(artifact.runs.length > 0, 'artifact must carry at least one run');
+  for (const run of artifact.runs) assertBreadthCurveShape(run);
 }
 
 function finiteNumber(value: unknown, name: string): number {
@@ -320,6 +348,7 @@ function requiredString(value: unknown, name: string): string {
 function validShapePoint(): BreadthPoint {
   return {
     compileWallClockMilliseconds: 1,
+    entityCount: 1,
     measuredAtSha: 'a'.repeat(40),
     moduleCount: 1,
     moduleIds: ['northstar.test:module.one'],
