@@ -172,7 +172,11 @@ test('EXPLAIN plan guard rejects sequential and wrong-index scans structurally',
     () =>
       assertSubstringBoundedEvidence(
         {
-          indexScanDeltas: new Map([['expected_case_folded', 0n]]),
+          indexScanDeltas: new Map([
+            ['expected_primary', 0n],
+            ['expected_semantic', 0n],
+            ['expected_case_folded', 0n],
+          ]),
           root: {
             'Index Name': 'expected_case_folded',
             'Node Type': 'Index Scan',
@@ -181,13 +185,36 @@ test('EXPLAIN plan guard rejects sequential and wrong-index scans structurally',
         },
         substringTargets,
       ),
-    /did not increment tenant-bounding index expected_case_folded/,
+    /expected_case_folded incremented 0 times; expected 1/,
   );
   assert.throws(
     () =>
       assertSubstringBoundedEvidence(
         {
-          indexScanDeltas: new Map([['expected_primary', 1n]]),
+          indexScanDeltas: new Map([
+            ['expected_semantic', 1n],
+            ['expected_case_folded', 1n],
+            ['expected_primary', 0n],
+          ]),
+          root: {
+            'Index Name': 'expected_semantic',
+            'Node Type': 'Index Scan',
+            'Rows Removed by Filter': 3,
+          },
+        },
+        substringTargets,
+      ),
+    /expected_case_folded incremented 1 times; expected 0/,
+  );
+  assert.throws(
+    () =>
+      assertSubstringBoundedEvidence(
+        {
+          indexScanDeltas: new Map([
+            ['expected_primary', 1n],
+            ['expected_semantic', 0n],
+            ['expected_case_folded', 0n],
+          ]),
           root: {
             'Index Name': 'expected_primary',
             'Node Type': 'Index Scan',
@@ -1500,10 +1527,18 @@ function assertSubstringBoundedEvidence(
     selectedTenantIndexes.toSorted(),
     'substring predicate used an index outside the approved tenant bounds',
   );
-  for (const indexName of selectedTenantIndexes) {
-    assert.ok(
-      (evidence.indexScanDeltas.get(indexName) ?? 0n) >= 1n,
-      `substring predicate did not increment tenant-bounding index ${indexName}`,
+  for (const indexName of tenantBoundingIndexes) {
+    const delta = evidence.indexScanDeltas.get(indexName);
+    assert.equal(
+      typeof delta,
+      'bigint',
+      `substring predicate omitted scan-counter evidence for tenant-bounding index ${indexName}`,
+    );
+    const expected = selectedTenantIndexes.includes(indexName) ? 1n : 0n;
+    assert.equal(
+      delta,
+      expected,
+      `${indexName} incremented ${String(delta)} times; expected ${String(expected)}`,
     );
   }
   assert.ok(
