@@ -14,9 +14,9 @@ writer is holding those paths right now.
 
 | Lane | Theme | Current packet | Base | Status |
 |---|---|---|---|---|
-| **KERNEL** | Canonical language and the query tier | `4b` — v3 families and node shapes | `d9a21ae` | active |
+| **KERNEL** | Canonical language and the query tier | *awaiting selection — `4c` next; artifact window now OPEN* | — | **idle** |
 | **DEPLOY** | Release lifecycle and runtime infrastructure | `1b` — release-admission verification integrity | `07ce6de` | active |
-| **FIX** | Correctness defects → stage cutting → inventory build | `1f` — record and repo hygiene | `fc62a51` | active |
+| **FIX** | Correctness defects → stage cutting → inventory build | *awaiting selection — `1d` is now unblocked* | — | **idle** |
 | **BUILD** | Inventory contracts *(fourth lane, opened 2026-07-28)* | `G3-P1a` — the non-key inventory freeze | `9027a53` | active |
 
 Lane identity is stable across packets. When a lane's packet is accepted, the
@@ -92,9 +92,10 @@ regenerates once more and the result is correct.
 disjointness is the requirement; generated-artifact conflicts are re-derived, per
 the shared-files rule below.
 
-**The one exception:** a packet whose *proof* is that artifacts did not move —
-`4a` and `4b` — cannot run beside one that moves them, because its baseline
-would shift under it. That exception ends when `4b` lands.
+**The one exception has ENDED.** `4a` and `4b` proved artifacts did not move and
+both are accepted, so no packet now depends on artifact stillness. `4c`, `1d`
+and the G3 packets may move release roots concurrently, re-deriving generated
+files at integration.
 
 The orchestrator enforced the stronger constraint until 2026-07-28 and it cost
 sequencing that was never required.
