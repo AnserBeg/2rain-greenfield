@@ -15,6 +15,15 @@ import {
 // exact is a two-way ratchet: another branch fails, and resolving either one
 // also fails until the routed debt is deliberately removed from this record.
 const routedPlatformDebt: readonly ModulePressLawViolation[] = [
+  // Row 1e-2 owns this accepted G3-P1a module identity, newly visible when
+  // Inventory became definition-backed; keep it exact until that row lands.
+  {
+    file: 'packages/compiler/src/conformance.ts',
+    line: 902,
+    message: 'generic press references inventory identity northstar.inventory',
+    moduleDirectory: 'inventory',
+    ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+  },
   {
     file: 'packages/postgres-provider/src/saved-filter-executor.ts',
     line: 101,
@@ -56,7 +65,12 @@ test('consolidated guard red: the previously omitted Platform module is observed
   const platformViolations = result.violations.filter(
     (violation) => violation.moduleDirectory === 'platform',
   );
-  assert.deepEqual(platformViolations, routedPlatformDebt);
+  assert.deepEqual(
+    platformViolations,
+    routedPlatformDebt.filter(
+      (violation) => violation.moduleDirectory === 'platform',
+    ),
+  );
   assert.ok(
     platformViolations.some(
       (violation) => violation.ruleId === 'PRESS006_MODULE_ID_IN_PRESS',

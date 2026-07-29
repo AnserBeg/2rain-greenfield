@@ -1,4 +1,4 @@
-# ADR-0024: Inventory temporal and posting configuration in the platform plane
+# ADR-0025: Inventory temporal and posting configuration in the platform plane
 
 Date: 2026-07-29
 Status: proposed by packet G3-P2b-1; pending packet acceptance
