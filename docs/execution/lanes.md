@@ -16,8 +16,8 @@ writer is holding those paths right now.
 |---|---|---|---|
 | **KERNEL** | Canonical language and the query tier | `G2-P5d-b` **accepted** 2026-07-29 — surface anatomy 106 → 82; `Q1-P3b` before it left the balance chain complete to `G3-P5` | **idle** |
 | **DEPLOY** | Release lifecycle and runtime infrastructure | `1g2` **accepted** 2026-07-29 (ADR-0024) | **HELD IDLE 2026-07-29 — deliberate.** `G2-P9` is gated behind `G2-P8` (import), which carries the durable-execution substrate decision, and both fail the inventory-first filter. More importantly, **full matrices serialize**: a DEPLOY matrix now queues ahead of FIX's and delays inventory. Leaving it idle is the faster choice, not the idle one. |
-| **FIX** | Correctness defects → stage cutting → inventory build | `G3-P2b-1` — inventory measured at **71** violations; ratchet green at 5 modules | **active, unblocked 2026-07-29.** Stopped at `02164ad` (base `435bba5`) rather than run its matrix against superseded counts — the correct call. `G2-P5d-b` is now on main at `c567735`; FIX merges, re-derives **only** inventory + the module count, and runs the matrix and the Critical chain. |
-| **BUILD** | Inventory contracts | `G3-P2b-2` — intermediate `985dada`, **not frozen** | **HELD IDLE 2026-07-29 — gated on FIX, not on itself.** BUILD reports `packages/domain/src/inventory/definition.ts` is absent in its worktree, so its PostgreSQL controls cannot run: **the serializer half needs the storage half's movement table to exist.** The G3-P2b split assumed two parallel halves and they are in fact sequential at the evidence boundary. BUILD resumes by merging `main` once `G3-P2b-1` integrates. |
+| **FIX** | Correctness defects → stage cutting → inventory build | `G3-P2b-1` **accepted** 2026-07-29 — the movement table exists — *next: `G3-P2b-3` (contract binding)* | **idle** |
+| **BUILD** | Inventory contracts | `G3-P2b-2` — serializer proven 4/4 against real storage; **UNBLOCKED 2026-07-29**, merge main and run the real matrix | **active** |
 
 Lane identity is stable across packets. When a lane's packet is accepted, the
 next packet inherits the lane and its partition.
