@@ -46,10 +46,30 @@ const LEGAL_ENTITY_FAMILY_RULES = Object.freeze([
   { classification: 'entityOwned', familyId: 'inventory_movement' },
   { classification: 'entityOwned', familyId: 'inventory_transaction' },
   { classification: 'entityOwned', familyId: 'inventory_transaction_line' },
+  { classification: 'entityOwned', familyId: 'inventory_period_lock' },
   { classification: 'entityOwned', familyId: 'reservation' },
   { classification: 'entityOwned', familyId: 'stock_count' },
   { classification: 'entityOwned', familyId: 'stock_count_line' },
 ] as const);
+const INVENTORY_FACT_STORAGE_RULES = Object.freeze([
+  {
+    familyId: 'inventory_movement',
+    mutability: 'appendOnly',
+    partitionBy: 'tenantBusinessPeriod',
+  },
+] as const);
+const INVENTORY_MOVEMENT_FIELD_ROLES = Object.freeze({
+  effectiveAt: 'inventory_movement_effective_at',
+  itemId: 'inventory_movement_item_id',
+  locationId: 'inventory_movement_location_id',
+  postingRole: 'inventory_movement_posting_role',
+  recordedAt: 'inventory_movement_recorded_at',
+  sourceId: 'inventory_movement_source_id',
+  sourceLine: 'inventory_movement_source_line',
+  sourceRevision: 'inventory_movement_source_revision',
+  sourceType: 'inventory_movement_source_type',
+  unitId: 'inventory_movement_unit_id',
+} as const);
 const LEGAL_ENTITY_RELATION_RULES = Object.freeze([
   {
     semantics: 'sameEntity',
@@ -238,6 +258,60 @@ export function resolvePinnedLegalEntityFamily(
   return { familyId, status: 'outsidePinnedContract' };
 }
 
+export interface PinnedInventoryFactStorageRule {
+  familyId: string;
+  mutability: 'appendOnly';
+  partitionBy: 'tenantBusinessPeriod';
+}
+
+export type InventoryMovementStorageFieldRole =
+  keyof typeof INVENTORY_MOVEMENT_FIELD_ROLES;
+
+export function resolvePinnedInventoryFactStorage(
+  packageId: string,
+  entityId: string,
+): PinnedInventoryFactStorageRule | null {
+  if (!isLegalEntityGovernedPackage(packageId)) return null;
+  const familyId = canonicalFamilyId(entityId);
+  if (!familyId) return null;
+  const rule = INVENTORY_FACT_STORAGE_RULES.find(
+    (candidate) => candidate.familyId === familyId,
+  );
+  return rule ? { ...rule } : null;
+}
+
+export function resolvePinnedInventoryMovementFieldRole(
+  packageId: string,
+  entityId: string,
+  fieldId: string,
+): InventoryMovementStorageFieldRole | null {
+  const fact = resolvePinnedInventoryFactStorage(packageId, entityId);
+  if (!fact) return null;
+  const marker = ':field.';
+  const offset = fieldId.lastIndexOf(marker);
+  const localId = offset < 0 ? null : fieldId.slice(offset + marker.length);
+  for (const [role, declaredLocalId] of Object.entries(
+    INVENTORY_MOVEMENT_FIELD_ROLES,
+  )) {
+    if (localId === declaredLocalId) {
+      return role as InventoryMovementStorageFieldRole;
+    }
+  }
+  return null;
+}
+
+export function isPinnedInventoryBaseUnitField(
+  packageId: string,
+  entityId: string,
+  fieldId: string,
+): boolean {
+  const family = resolvePinnedLegalEntityFamily(packageId, entityId);
+  if (family.status !== 'classified' || family.familyId !== 'item') {
+    return false;
+  }
+  return fieldId.endsWith(':field.item_base_unit');
+}
+
 export function resolvePinnedLegalEntityRelationSemantics(
   sourceFamilyId: string,
   targetFamilyId: string,
@@ -391,6 +465,10 @@ export function validateModuleConformance(
       packageRevision.package.packageId,
       entity.entityId,
     );
+    const factStorage = resolvePinnedInventoryFactStorage(
+      packageRevision.package.packageId,
+      entity.entityId,
+    );
     if (family.status === 'undeclared') {
       diagnostics.push(
         inventoryModuleDiagnostic(
@@ -432,8 +510,21 @@ export function validateModuleConformance(
         )
         .map((operation) => operation.effect.kind),
     );
+    if (factStorage?.mutability === 'appendOnly' && operationEffects.size > 0) {
+      diagnostics.push(
+        compilerDiagnostic(
+          'COMPILER_DESTRUCTIVE_OPERATION_UNSUPPORTED',
+          'wholeModelValidation',
+          '$.operations.effect.kind',
+          entity.entityId,
+        ),
+      );
+    }
     for (const effect of REQUIRED_OPERATION_EFFECTS) {
-      if (!operationEffects.has(effect)) {
+      if (
+        factStorage?.mutability !== 'appendOnly' &&
+        !operationEffects.has(effect)
+      ) {
         missing(
           diagnostics,
           entity.entityId,
@@ -452,7 +543,10 @@ export function validateModuleConformance(
         .map((surface) => surface.surfaceRole),
     );
     for (const role of REQUIRED_SURFACE_ROLES) {
-      if (!surfaceRoles.has(role)) {
+      if (
+        !(factStorage?.mutability === 'appendOnly' && role === 'form') &&
+        !surfaceRoles.has(role)
+      ) {
         missing(diagnostics, entity.entityId, `surface.${role}`);
       }
     }

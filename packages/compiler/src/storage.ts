@@ -2,7 +2,12 @@ import { createHash } from 'node:crypto';
 
 import type { NormalizedApplicationPackage } from '@north-star/canonical-model';
 
-import { resolvePinnedLegalEntityFamily } from './conformance.js';
+import {
+  isPinnedInventoryBaseUnitField,
+  resolvePinnedInventoryFactStorage,
+  resolvePinnedInventoryMovementFieldRole,
+  resolvePinnedLegalEntityFamily,
+} from './conformance.js';
 import { compilerDiagnostic } from './diagnostics.js';
 import { hashCanonical } from './hash.js';
 import {
@@ -16,6 +21,7 @@ import {
   STORAGE_RENDERER_POLICY_VERSION,
   STORAGE_TARGET_PAYLOAD_VERSION,
   STORAGE_TARGET_PAYLOAD_V2_VERSION,
+  STORAGE_TARGET_PAYLOAD_V3_VERSION,
   STORAGE_TRANSITION_ENVELOPE_VERSION,
   TIGHTENING_DEBT_VERSION,
   type CompilerDiagnostic,
@@ -145,6 +151,34 @@ export const STORAGE_COMPATIBILITY_MATRIX: Readonly<
     oldRead: 'compatible',
     oldWrite: 'compatible',
   }),
+  createPartition: Object.freeze({
+    admission: 'additive',
+    newRead: 'compatible',
+    newWrite: 'compatible',
+    oldRead: 'notApplicable',
+    oldWrite: 'notApplicable',
+  }),
+  createCompanionTable: Object.freeze({
+    admission: 'additive',
+    newRead: 'compatible',
+    newWrite: 'compatible',
+    oldRead: 'notApplicable',
+    oldWrite: 'notApplicable',
+  }),
+  createRejectMutationTrigger: Object.freeze({
+    admission: 'blockingWhileAffectedWritersLive',
+    newRead: 'compatible',
+    newWrite: 'compatible',
+    oldRead: 'compatible',
+    oldWrite: 'mayReject',
+  }),
+  addAbiFunctionCheck: Object.freeze({
+    admission: 'blockingWhileAffectedWritersLive',
+    newRead: 'compatible',
+    newWrite: 'compatible',
+    oldRead: 'compatible',
+    oldWrite: 'mayReject',
+  }),
   createTable: Object.freeze({
     admission: 'additive',
     newRead: 'compatible',
@@ -215,10 +249,75 @@ export interface StorageTargetPayloadV1 {
   rlsGrantTemplate: typeof MODULE_RLS_GRANT_TEMPLATE;
   schemaVersion:
     | typeof STORAGE_TARGET_PAYLOAD_VERSION
-    | typeof STORAGE_TARGET_PAYLOAD_V2_VERSION;
+    | typeof STORAGE_TARGET_PAYLOAD_V2_VERSION
+    | typeof STORAGE_TARGET_PAYLOAD_V3_VERSION;
+}
+
+export interface StorageAbiFunctionCheckTarget {
+  checkKind: 'baseUnitBinding';
+  itemIdColumn: string;
+  movementItemIdColumn: string;
+  movementRecordIdColumn: string;
+  movementRecordedAtColumn: string;
+  movementTableName: string;
+  movementUnitIdColumn: string;
+  physicalName: string;
+  unitIdColumn: string;
+}
+
+export interface StorageFactCompanionTarget {
+  columns: Array<{ name: string; postgresqlType: string }>;
+  movementForeignKey: {
+    physicalName: string;
+    sourceColumns: string[];
+    targetColumns: string[];
+  };
+  movementUnique: { columns: string[]; physicalName: string };
+  physicalTableName: string;
+  primaryKey: { columns: string[]; physicalName: string };
+  rejectMutationTriggerName: string;
+}
+
+export interface StorageFactTarget {
+  businessPeriod: {
+    checkConstraintName: string;
+    column: 'business_period';
+    effectiveAtColumn: string;
+    postgresqlType: 'date';
+  };
+  companion: StorageFactCompanionTarget;
+  effectIdentityUnique: { columns: string[]; physicalName: string };
+  fieldColumns: Record<
+    | 'itemId'
+    | 'locationId'
+    | 'postingRole'
+    | 'recordedAt'
+    | 'sourceId'
+    | 'sourceLine'
+    | 'sourceRevision'
+    | 'sourceType'
+    | 'unitId',
+    string
+  >;
+  mutability: 'appendOnly';
+  partitioning: {
+    keyColumns: readonly ['tenant_id', 'business_period'];
+    kind: 'tenantBusinessPeriodHash';
+    partitions: Array<{
+      modulus: 8;
+      physicalTableName: string;
+      remainder: number;
+    }>;
+  };
+  rejectMutationTriggerName: string;
+  stockHorizonIndex: {
+    columns: string[];
+    physicalName: string;
+  };
 }
 
 export interface StorageEntityTarget {
+  abiFunctionChecks?: StorageAbiFunctionCheckTarget[];
   archive: {
     archivedAtColumn: string;
     defaultVisibility: 'excludeArchived';
@@ -243,6 +342,7 @@ export interface StorageEntityTarget {
   }>;
   entityId: string;
   foldedColumns: StorageFoldedColumnTarget[];
+  factStorage?: StorageFactTarget;
   indexes: StorageIndexTarget[];
   lifecycle: string;
   legalEntity?: {
@@ -338,7 +438,8 @@ export interface StorageCheckConstraintTarget {
 
 export interface StorageIndexTarget {
   columnNames: string[];
-  indexKind: 'caseInsensitiveUnique' | 'foldedAccess' | 'relation';
+  indexKind:
+    'caseInsensitiveUnique' | 'foldedAccess' | 'relation' | 'stockHorizon';
   physicalName: string;
   predicate: string | null;
 }
@@ -460,6 +561,15 @@ export function lowerStorageTargetV1(
       const entityOwned =
         legalEntityFamily.status === 'classified' &&
         legalEntityFamily.classification === 'entityOwned';
+      const factRule = resolvePinnedInventoryFactStorage(
+        packageRevision.package.packageId,
+        entity.entityId,
+      );
+      if (factRule && !entityOwned) {
+        throw new Error(
+          `INVENTORY_FACT_STORAGE_REQUIRES_ENTITY_OWNERSHIP: ${entity.entityId}`,
+        );
+      }
       const businessKeyScopeColumns = entityOwned
         ? ['tenant_id', 'environment_id', 'legal_entity_id']
         : ['tenant_id', 'environment_id'];
@@ -478,12 +588,21 @@ export function lowerStorageTargetV1(
         'constraint',
         `${entity.entityId}/primary-key`,
       );
+      const primaryKeyColumns = factRule
+        ? [
+            'tenant_id',
+            'business_period',
+            'environment_id',
+            'legal_entity_id',
+            'record_id',
+          ]
+        : ['tenant_id', 'environment_id', 'record_id'];
       addMapping(
         mappings,
         'constraint',
         `${entity.entityId}#primary-key`,
         primaryKeyName,
-        { columns: ['tenant_id', 'environment_id', 'record_id'] },
+        { columns: primaryKeyColumns },
       );
       const previousEntity = previousEntities.get(entity.entityId);
       const previousColumns = new Map(
@@ -675,6 +794,23 @@ export function lowerStorageTargetV1(
           );
         }
       }
+      const factStorage = factRule
+        ? buildFactStorageTarget(
+            packageRevision.package.packageId,
+            entity.entityId,
+            columns,
+            physicalTableName,
+            mappings,
+          )
+        : undefined;
+      if (factStorage) {
+        indexes.push({
+          columnNames: factStorage.stockHorizonIndex.columns,
+          indexKind: 'stockHorizon',
+          physicalName: factStorage.stockHorizonIndex.physicalName,
+          predicate: null,
+        });
+      }
       return {
         archive: {
           archivedAtColumn: 'archived_at',
@@ -705,6 +841,7 @@ export function lowerStorageTargetV1(
         foldedColumns: foldedColumns.sort((left, right) =>
           compare(left.physicalName, right.physicalName),
         ),
+        ...(factStorage ? { factStorage } : {}),
         indexes: indexes.sort((left, right) =>
           compare(left.physicalName, right.physicalName),
         ),
@@ -728,7 +865,7 @@ export function lowerStorageTargetV1(
         },
         physicalTableName,
         primaryKey: {
-          columns: ['tenant_id', 'environment_id', 'record_id'],
+          columns: primaryKeyColumns,
           physicalName: primaryKeyName,
         },
         recordIdentity: { column: 'record_id', postgresqlType: 'uuid' },
@@ -745,6 +882,51 @@ export function lowerStorageTargetV1(
   const entityById = new Map(
     entities.map((entity) => [entity.entityId, entity]),
   );
+  const factEntity = entities.find(
+    (entity) => entity.factStorage !== undefined,
+  );
+  if (factEntity?.factStorage) {
+    for (const itemEntity of entities) {
+      const baseUnitColumns = itemEntity.columns.filter((column) =>
+        isPinnedInventoryBaseUnitField(
+          packageRevision.package.packageId,
+          itemEntity.entityId,
+          column.canonicalFieldId,
+        ),
+      );
+      if (baseUnitColumns.length === 0) continue;
+      if (baseUnitColumns.length !== 1) {
+        throw new Error(
+          `INVENTORY_BASE_UNIT_COLUMN_INVALID: ${itemEntity.entityId}`,
+        );
+      }
+      const baseUnitColumn = baseUnitColumns[0]!;
+      const physicalName = physicalNameFor(
+        'constraint',
+        `${baseUnitColumn.canonicalFieldId}/first-movement-binding`,
+      );
+      const check: StorageAbiFunctionCheckTarget = {
+        checkKind: 'baseUnitBinding',
+        itemIdColumn: itemEntity.recordIdentity.column,
+        movementItemIdColumn: factEntity.factStorage.fieldColumns.itemId,
+        movementRecordIdColumn: factEntity.recordIdentity.column,
+        movementRecordedAtColumn:
+          factEntity.factStorage.fieldColumns.recordedAt,
+        movementTableName: factEntity.physicalTableName,
+        movementUnitIdColumn: factEntity.factStorage.fieldColumns.unitId,
+        physicalName,
+        unitIdColumn: baseUnitColumn.physicalName,
+      };
+      itemEntity.abiFunctionChecks = [check];
+      addMapping(
+        mappings,
+        'constraint',
+        `${baseUnitColumn.canonicalFieldId}#first-movement-binding`,
+        physicalName,
+        check,
+      );
+    }
+  }
   const relations = packageRevision.relations.map(
     (relation): StorageRelationTarget => {
       const source = entityById.get(relation.sourceEntity.targetId)!;
@@ -872,9 +1054,267 @@ export function lowerStorageTargetV1(
     ),
     rendererPolicyVersion: STORAGE_RENDERER_POLICY_VERSION,
     rlsGrantTemplate: MODULE_RLS_GRANT_TEMPLATE,
-    schemaVersion: entities.some((entity) => entity.legalEntity !== undefined)
-      ? STORAGE_TARGET_PAYLOAD_V2_VERSION
-      : STORAGE_TARGET_PAYLOAD_VERSION,
+    schemaVersion: entities.some((entity) => entity.factStorage !== undefined)
+      ? STORAGE_TARGET_PAYLOAD_V3_VERSION
+      : entities.some((entity) => entity.legalEntity !== undefined)
+        ? STORAGE_TARGET_PAYLOAD_V2_VERSION
+        : STORAGE_TARGET_PAYLOAD_VERSION,
+  };
+}
+
+function buildFactStorageTarget(
+  packageId: string,
+  entityId: string,
+  columns: readonly StorageColumnTarget[],
+  physicalTableName: string,
+  mappings: PhysicalMappingRecord[],
+): StorageFactTarget {
+  const byRole = new Map<string, StorageColumnTarget>();
+  for (const column of columns) {
+    const role = resolvePinnedInventoryMovementFieldRole(
+      packageId,
+      entityId,
+      column.canonicalFieldId,
+    );
+    if (role) byRole.set(role, column);
+  }
+  const required = (role: string): StorageColumnTarget => {
+    const column = byRole.get(role);
+    if (!column) {
+      throw new Error(
+        `INVENTORY_FACT_STORAGE_FIELD_REQUIRED: ${entityId}/${role}`,
+      );
+    }
+    return column;
+  };
+  const effectiveAt = required('effectiveAt');
+  const fieldColumns = {
+    itemId: required('itemId').physicalName,
+    locationId: required('locationId').physicalName,
+    postingRole: required('postingRole').physicalName,
+    recordedAt: required('recordedAt').physicalName,
+    sourceId: required('sourceId').physicalName,
+    sourceLine: required('sourceLine').physicalName,
+    sourceRevision: required('sourceRevision').physicalName,
+    sourceType: required('sourceType').physicalName,
+    unitId: required('unitId').physicalName,
+  };
+  const effectTuple = [
+    fieldColumns.sourceType,
+    fieldColumns.sourceId,
+    fieldColumns.sourceLine,
+    fieldColumns.sourceRevision,
+    fieldColumns.postingRole,
+  ];
+  const businessPeriodCheckName = physicalNameFor(
+    'constraint',
+    `${entityId}/business-period-check`,
+  );
+  const effectIdentityUniqueName = physicalNameFor(
+    'constraint',
+    `${entityId}/effect-identity-unique`,
+  );
+  const companionTableName = physicalNameFor(
+    'table',
+    `${entityId}/companion/effect-identity`,
+  );
+  const companionPrimaryKeyName = physicalNameFor(
+    'constraint',
+    `${entityId}/companion/effect-identity/primary-key`,
+  );
+  const companionMovementUniqueName = physicalNameFor(
+    'constraint',
+    `${entityId}/companion/effect-identity/movement-unique`,
+  );
+  const companionForeignKeyName = physicalNameFor(
+    'constraint',
+    `${entityId}/companion/effect-identity/movement-foreign-key`,
+  );
+  const movementTriggerName = physicalNameFor(
+    'trigger',
+    `${entityId}/reject-mutation`,
+  );
+  const companionTriggerName = physicalNameFor(
+    'trigger',
+    `${entityId}/companion/effect-identity/reject-mutation`,
+  );
+  const stockHorizonIndexName = physicalNameFor(
+    'index',
+    `${entityId}/stock-horizon`,
+  );
+
+  const partitioning = {
+    keyColumns: ['tenant_id', 'business_period'] as const,
+    kind: 'tenantBusinessPeriodHash' as const,
+    partitions: Array.from({ length: 8 }, (_, remainder) => ({
+      modulus: 8 as const,
+      physicalTableName: physicalNameFor(
+        'table',
+        `${entityId}/partition/${String(remainder)}`,
+      ),
+      remainder,
+    })),
+  };
+
+  for (const partition of partitioning.partitions) {
+    addMapping(
+      mappings,
+      'table',
+      `${entityId}#partition-${String(partition.remainder)}`,
+      partition.physicalTableName,
+      partition,
+    );
+  }
+  addMapping(
+    mappings,
+    'table',
+    `${entityId}#companion-effect-identity`,
+    companionTableName,
+    { owner: entityId },
+  );
+  for (const [canonicalId, physicalName, shape] of [
+    [
+      `${entityId}#business-period-check`,
+      businessPeriodCheckName,
+      { effectiveAt: effectiveAt.physicalName },
+    ],
+    [
+      `${entityId}#effect-identity-unique`,
+      effectIdentityUniqueName,
+      { columns: effectTuple },
+    ],
+    [
+      `${entityId}#companion-effect-identity-primary-key`,
+      companionPrimaryKeyName,
+      { columns: effectTuple },
+    ],
+    [
+      `${entityId}#companion-effect-identity-movement-unique`,
+      companionMovementUniqueName,
+      { columns: ['record_id'] },
+    ],
+    [
+      `${entityId}#companion-effect-identity-movement-foreign-key`,
+      companionForeignKeyName,
+      { columns: ['record_id', ...effectTuple] },
+    ],
+  ] as const) {
+    addMapping(mappings, 'constraint', canonicalId, physicalName, shape);
+  }
+  addMapping(
+    mappings,
+    'index',
+    `${entityId}#stock-horizon`,
+    stockHorizonIndexName,
+    { columns: [fieldColumns.itemId, fieldColumns.locationId] },
+  );
+  addMapping(
+    mappings,
+    'trigger',
+    `${entityId}#reject-mutation`,
+    movementTriggerName,
+    { operation: 'UPDATE OR DELETE' },
+  );
+  addMapping(
+    mappings,
+    'trigger',
+    `${entityId}#companion-effect-identity-reject-mutation`,
+    companionTriggerName,
+    { operation: 'UPDATE OR DELETE' },
+  );
+
+  const companionColumns = [
+    { name: 'tenant_id', postgresqlType: 'uuid' },
+    { name: 'environment_id', postgresqlType: 'uuid' },
+    { name: 'legal_entity_id', postgresqlType: 'uuid' },
+    { name: 'business_period', postgresqlType: 'date' },
+    { name: 'record_id', postgresqlType: 'uuid' },
+    ...effectTuple.map((name) => ({
+      name,
+      postgresqlType: required(
+        [...byRole.entries()].find(
+          ([, column]) => column.physicalName === name,
+        )?.[0] ?? '',
+      ).postgresqlType,
+    })),
+  ];
+
+  return {
+    businessPeriod: {
+      checkConstraintName: businessPeriodCheckName,
+      column: 'business_period',
+      effectiveAtColumn: effectiveAt.physicalName,
+      postgresqlType: 'date',
+    },
+    companion: {
+      columns: companionColumns,
+      movementForeignKey: {
+        physicalName: companionForeignKeyName,
+        sourceColumns: [
+          'tenant_id',
+          'business_period',
+          'environment_id',
+          'legal_entity_id',
+          'record_id',
+          ...effectTuple,
+        ],
+        targetColumns: [
+          'tenant_id',
+          'business_period',
+          'environment_id',
+          'legal_entity_id',
+          'record_id',
+          ...effectTuple,
+        ],
+      },
+      movementUnique: {
+        columns: [
+          'tenant_id',
+          'environment_id',
+          'legal_entity_id',
+          'record_id',
+        ],
+        physicalName: companionMovementUniqueName,
+      },
+      physicalTableName: companionTableName,
+      primaryKey: {
+        columns: [
+          'tenant_id',
+          'environment_id',
+          'legal_entity_id',
+          ...effectTuple,
+        ],
+        physicalName: companionPrimaryKeyName,
+      },
+      rejectMutationTriggerName: companionTriggerName,
+    },
+    effectIdentityUnique: {
+      columns: [
+        'tenant_id',
+        'business_period',
+        'environment_id',
+        'legal_entity_id',
+        'record_id',
+        ...effectTuple,
+      ],
+      physicalName: effectIdentityUniqueName,
+    },
+    fieldColumns,
+    mutability: 'appendOnly',
+    partitioning,
+    rejectMutationTriggerName: movementTriggerName,
+    stockHorizonIndex: {
+      columns: [
+        'tenant_id',
+        'environment_id',
+        'legal_entity_id',
+        fieldColumns.itemId,
+        fieldColumns.locationId,
+        effectiveAt.physicalName,
+        fieldColumns.recordedAt,
+      ],
+      physicalName: stockHorizonIndexName,
+    },
   };
 }
 
@@ -917,6 +1357,57 @@ export function buildStorageTransitionEnvelope(
       );
       elements.push(tableElement);
       createdTableElementIds.set(entity.entityId, tableElement.elementId);
+      const factDependencies: string[] = [];
+      if (entity.factStorage) {
+        const businessPeriodCheck = element(
+          'addAbiFunctionCheck',
+          entity.entityId,
+          null,
+          entity.factStorage.businessPeriod.checkConstraintName,
+          [tableElement.elementId],
+          'samePlan',
+        );
+        elements.push(businessPeriodCheck);
+        const companion = element(
+          'createCompanionTable',
+          entity.entityId,
+          null,
+          entity.factStorage.companion.physicalTableName,
+          [tableElement.elementId],
+          'samePlan',
+        );
+        elements.push(companion);
+        for (const partition of entity.factStorage.partitioning.partitions) {
+          const partitionElement = element(
+            'createPartition',
+            entity.entityId,
+            null,
+            partition.physicalTableName,
+            [tableElement.elementId, businessPeriodCheck.elementId],
+            'samePlan',
+          );
+          elements.push(partitionElement);
+          factDependencies.push(partitionElement.elementId);
+        }
+        elements.push(
+          element(
+            'createRejectMutationTrigger',
+            entity.entityId,
+            null,
+            entity.factStorage.rejectMutationTriggerName,
+            [tableElement.elementId],
+            'samePlan',
+          ),
+          element(
+            'createRejectMutationTrigger',
+            entity.entityId,
+            null,
+            entity.factStorage.companion.rejectMutationTriggerName,
+            [companion.elementId],
+            'samePlan',
+          ),
+        );
+      }
       for (const index of entity.indexes) {
         elements.push(
           element(
@@ -924,7 +1415,7 @@ export function buildStorageTransitionEnvelope(
             entity.entityId,
             null,
             index.physicalName,
-            [tableElement.elementId],
+            [tableElement.elementId, ...factDependencies],
             'samePlan',
           ),
         );
@@ -1120,6 +1611,38 @@ export function buildStorageTransitionEnvelope(
     }
   }
 
+  for (const entity of candidate.entities) {
+    const previousEntity = previousEntities.get(entity.entityId);
+    const previousChecks = new Set(
+      (previousEntity?.abiFunctionChecks ?? []).map(
+        (check) => check.physicalName,
+      ),
+    );
+    for (const check of entity.abiFunctionChecks ?? []) {
+      if (previousChecks.has(check.physicalName)) continue;
+      const movementEntity = candidate.entities.find(
+        (candidateEntity) =>
+          candidateEntity.physicalTableName === check.movementTableName,
+      );
+      const dependencies = [
+        createdTableElementIds.get(entity.entityId),
+        movementEntity
+          ? createdTableElementIds.get(movementEntity.entityId)
+          : undefined,
+      ].filter((entry): entry is string => entry !== undefined);
+      elements.push(
+        element(
+          'addAbiFunctionCheck',
+          entity.entityId,
+          null,
+          check.physicalName,
+          dependencies,
+          previousEntity ? 'existing' : 'samePlan',
+        ),
+      );
+    }
+  }
+
   const previousRelations = new Map(
     previous.relations.map((relation) => [relation.relationId, relation]),
   );
@@ -1269,12 +1792,29 @@ export function classifyStorageTransitionElement(
   const classification: StorageElementClassification = (() => {
     switch (kind) {
       case 'createTable':
+      case 'createPartition':
+      case 'createCompanionTable':
         return {
           dataEffect: 'catalogOnly',
           operationalRisk: 'boundedCatalogLock',
           preparationValidity: 'preApprovalInert',
           semanticEffect: 'additive',
         };
+      case 'createRejectMutationTrigger':
+      case 'addAbiFunctionCheck':
+        return objectOrigin === 'samePlan'
+          ? {
+              dataEffect: 'catalogOnly',
+              operationalRisk: 'none',
+              preparationValidity: 'preApprovalInert',
+              semanticEffect: 'additive',
+            }
+          : {
+              dataEffect: 'catalogOnly',
+              operationalRisk: 'boundedCatalogLock',
+              preparationValidity: 'inAttemptOnly',
+              semanticEffect: 'tightening',
+            };
       case 'addColumn':
         return {
           dataEffect: 'catalogOnly',
@@ -1343,7 +1883,10 @@ export function classifyStorageTransitionElement(
   })();
   const base = STORAGE_COMPATIBILITY_MATRIX[kind];
   const coexistence =
-    (kind === 'createIndex' || kind === 'addForeignKey') &&
+    (kind === 'createIndex' ||
+      kind === 'addForeignKey' ||
+      kind === 'addAbiFunctionCheck' ||
+      kind === 'createRejectMutationTrigger') &&
     objectOrigin === 'samePlan'
       ? {
           ...base,
@@ -1370,6 +1913,7 @@ export function physicalNameFor(
     constraint: 'nsm_k_',
     index: 'nsm_i_',
     table: 'nsm_t_',
+    trigger: 'nsm_g_',
   };
   const digest = createHash('sha256')
     .update(`${HASH_DOMAINS.physicalName}/${objectKind}`, 'utf8')

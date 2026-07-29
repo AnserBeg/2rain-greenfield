@@ -37,6 +37,10 @@ const storageTargetPayloadV2Version: Exclude<
   StorageTargetPayloadV1['schemaVersion'],
   typeof STORAGE_TARGET_PAYLOAD_VERSION
 > = 'northstar.storage-target-payload/v2';
+const storageTargetPayloadV3Version: Exclude<
+  StorageTargetPayloadV1['schemaVersion'],
+  typeof STORAGE_TARGET_PAYLOAD_VERSION
+> = 'northstar.storage-target-payload/v3';
 const unicodeCaseFoldFunctionName = 'nsm_unicode_case_fold_v1';
 const allowedTypes = [
   /^boolean$/,
@@ -968,12 +972,17 @@ async function loadVerifiedReleaseStorage(
   if (!targetProjection)
     throw failure('STORAGE_TARGET_MISSING', 'release lacks storage target');
   const target = targetProjection.payload as unknown as StorageTargetPayloadV1;
+  const hasInventoryFactTarget =
+    Array.isArray(target.entities) &&
+    target.entities.some((entity) => entity.factStorage !== undefined);
   const hasEntityOwnedTarget =
     Array.isArray(target.entities) &&
     target.entities.some((entity) => entity.legalEntity !== undefined);
-  const expectedStorageTargetPayloadVersion = hasEntityOwnedTarget
-    ? storageTargetPayloadV2Version
-    : STORAGE_TARGET_PAYLOAD_VERSION;
+  const expectedStorageTargetPayloadVersion = hasInventoryFactTarget
+    ? storageTargetPayloadV3Version
+    : hasEntityOwnedTarget
+      ? storageTargetPayloadV2Version
+      : STORAGE_TARGET_PAYLOAD_VERSION;
   if (
     target.kind !== 'storageTargetPayload' ||
     !Array.isArray(target.entities) ||

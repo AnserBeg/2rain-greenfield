@@ -34,6 +34,25 @@ export interface LegalEntityRelationRuleV1 {
   readonly targetFamilyId: string;
 }
 
+export interface InventoryFactStorageRuleV1 {
+  readonly familyId: string;
+  readonly partitionBy: 'tenantBusinessPeriod';
+  readonly mutability: 'appendOnly';
+}
+
+/**
+ * Physical fact semantics are pinned domain policy, not canonical syntax.
+ * The compiler validates this closed declaration and lowers it generically;
+ * module ids never select storage behavior in the press.
+ */
+export const INVENTORY_FACT_STORAGE_V1 = Object.freeze([
+  {
+    familyId: 'inventory_movement',
+    mutability: 'appendOnly',
+    partitionBy: 'tenantBusinessPeriod',
+  },
+] as const satisfies readonly InventoryFactStorageRuleV1[]);
+
 export const LEGAL_ENTITY_FAMILY_MAP_V1 = Object.freeze([
   { classification: 'tenantShared', familyId: 'legal_entity' },
   { classification: 'tenantShared', familyId: 'party' },
@@ -43,6 +62,7 @@ export const LEGAL_ENTITY_FAMILY_MAP_V1 = Object.freeze([
   { classification: 'entityOwned', familyId: 'inventory_movement' },
   { classification: 'entityOwned', familyId: 'inventory_transaction' },
   { classification: 'entityOwned', familyId: 'inventory_transaction_line' },
+  { classification: 'entityOwned', familyId: 'inventory_period_lock' },
   { classification: 'entityOwned', familyId: 'reservation' },
   { classification: 'entityOwned', familyId: 'stock_count' },
   { classification: 'entityOwned', familyId: 'stock_count_line' },
