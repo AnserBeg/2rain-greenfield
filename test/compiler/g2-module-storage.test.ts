@@ -291,6 +291,149 @@ test('physical names, reverse mappings, PostgreSQL types, scope, RLS, and grants
   );
 });
 
+test('pinned family ownership derives legal-entity storage and both business-key enforcers', () => {
+  const entityOwnedId = `${FIXTURE_IDS.namespace}:entity.inventory_movement`;
+  const entityOwned = lowerStorageTargetV1(
+    normalizeApplicationPackage(
+      definitionWithParentFamily('inventory_movement'),
+    ),
+  ).entities.find((entity) => entity.entityId === entityOwnedId);
+  assert.ok(entityOwned);
+  assert.deepEqual(entityOwned.legalEntity, {
+    column: 'legal_entity_id',
+    familyClassification: 'entityOwned',
+    immutableAfterCreate: true,
+    nullable: false,
+    postgresqlType: 'uuid',
+    referencedFamilyId: 'legal_entity',
+  });
+  assert.deepEqual(entityOwned.businessKeyScopeColumns, [
+    'tenant_id',
+    'environment_id',
+    'legal_entity_id',
+  ]);
+  assert.deepEqual(entityOwned.scopeKeyColumns, [
+    'tenant_id',
+    'environment_id',
+  ]);
+  assert.deepEqual(entityOwned.primaryKey.columns, [
+    'tenant_id',
+    'environment_id',
+    'record_id',
+  ]);
+
+  assert.equal(entityOwned.uniqueKeys.length, 1);
+  assert.deepEqual(entityOwned.uniqueKeys[0]?.columns.slice(0, 3), [
+    'tenant_id',
+    'environment_id',
+    'legal_entity_id',
+  ]);
+  const caseInsensitive = entityOwned.indexes.filter(
+    (index) => index.indexKind === 'caseInsensitiveUnique',
+  );
+  assert.equal(caseInsensitive.length, 1);
+  assert.deepEqual(
+    caseInsensitive[0]?.columnNames,
+    entityOwned.uniqueKeys[0]?.columns,
+  );
+  assert.equal(
+    caseInsensitive[0]?.predicate,
+    `${entityOwned.archive.archivedAtColumn} IS NULL`,
+  );
+
+  const tenantSharedId = `${FIXTURE_IDS.namespace}:entity.item`;
+  const tenantShared = lowerStorageTargetV1(
+    normalizeApplicationPackage(definitionWithParentFamily('item')),
+  ).entities.find((entity) => entity.entityId === tenantSharedId);
+  assert.ok(tenantShared);
+  assert.equal(Object.hasOwn(tenantShared, 'legalEntity'), false);
+  assert.equal(Object.hasOwn(tenantShared, 'businessKeyScopeColumns'), false);
+  assert.equal(
+    tenantShared.uniqueKeys.every(
+      (unique) => !unique.columns.includes('legal_entity_id'),
+    ),
+    true,
+  );
+  assert.equal(
+    tenantShared.indexes
+      .filter((index) => index.indexKind === 'caseInsensitiveUnique')
+      .every((index) => !index.columnNames.includes('legal_entity_id')),
+    true,
+  );
+});
+
+test('storage-target payload versions expose the pinned v1/v2 family split in release artifacts', () => {
+  const entityOwnedDefinition = definitionWithFamilies(
+    'location',
+    'inventory_movement',
+  );
+  const entityOwned = mustCompile(input(entityOwnedDefinition));
+  const entityOwnedStorage = projectionPayload<StorageTargetPayloadV1>(
+    entityOwned,
+    PROJECTION_FAMILY_IDS.storageTarget,
+  );
+  const entityOwnedReference = projectionReference(
+    entityOwned,
+    PROJECTION_FAMILY_IDS.storageTarget,
+  );
+  const entityOwnedManifest = projectionManifest(
+    entityOwned,
+    PROJECTION_FAMILY_IDS.storageTarget,
+  );
+  assert.equal(
+    entityOwnedStorage.schemaVersion,
+    'northstar.storage-target-payload/v2',
+  );
+  assert.equal(
+    entityOwnedReference.payloadSchemaVersion,
+    entityOwnedStorage.schemaVersion,
+  );
+  assert.equal(
+    entityOwnedManifest.payloadSchemaVersion,
+    entityOwnedStorage.schemaVersion,
+  );
+  const entityOwnedNext = mustCompile(
+    input(entityOwnedDefinition, expectedActiveReleaseFrom(entityOwned)),
+  );
+  const entityOwnedTransition = projectionPayload<StorageTransitionEnvelope>(
+    entityOwnedNext,
+    PROJECTION_FAMILY_IDS.storageTransition,
+  );
+  assert.equal(
+    entityOwnedTransition.schemaVersion,
+    STORAGE_TRANSITION_ENVELOPE_VERSION,
+  );
+  assert.deepEqual(entityOwnedTransition.elements, []);
+
+  const tenantShared = mustCompile(
+    input(definitionWithFamilies('party', 'party_role')),
+  );
+  const tenantSharedStorage = projectionPayload<StorageTargetPayloadV1>(
+    tenantShared,
+    PROJECTION_FAMILY_IDS.storageTarget,
+  );
+  const tenantSharedReference = projectionReference(
+    tenantShared,
+    PROJECTION_FAMILY_IDS.storageTarget,
+  );
+  const tenantSharedManifest = projectionManifest(
+    tenantShared,
+    PROJECTION_FAMILY_IDS.storageTarget,
+  );
+  assert.equal(
+    tenantSharedStorage.schemaVersion,
+    'northstar.storage-target-payload/v1',
+  );
+  assert.equal(
+    tenantSharedReference.payloadSchemaVersion,
+    tenantSharedStorage.schemaVersion,
+  );
+  assert.equal(
+    tenantSharedManifest.payloadSchemaVersion,
+    tenantSharedStorage.schemaVersion,
+  );
+});
+
 test('ratified storage targets evolve additively with relation-index elements', () => {
   const packageRevision = normalizeApplicationPackage(ordinaryModuleV1());
   const candidate = lowerStorageTargetV1(packageRevision);
@@ -938,19 +1081,33 @@ function projectionPayload<T>(
   compiled: CompileSuccess,
   familyId: ProjectionFamilyId,
 ): T {
-  const reference = compiled.bundle.releaseManifest.projections.find(
-    (entry) => entry.familyId === familyId,
-  )!;
-  const manifestArtifact = compiled.bundle.artifacts.find(
-    (entry) => entry.contentHash === reference.artifactRoot,
-  )!;
-  const manifest = JSON.parse(
-    new TextDecoder().decode(manifestArtifact.canonicalBytes),
-  ) as ProjectionManifestEnvelope;
+  const manifest = projectionManifest(compiled, familyId);
   const chunk = compiled.bundle.artifacts.find(
     (entry) => entry.contentHash === manifest.chunks[0]?.contentHash,
   )!;
   return JSON.parse(new TextDecoder().decode(chunk.canonicalBytes)) as T;
+}
+
+function projectionReference(
+  compiled: CompileSuccess,
+  familyId: ProjectionFamilyId,
+) {
+  return compiled.bundle.releaseManifest.projections.find(
+    (entry) => entry.familyId === familyId,
+  )!;
+}
+
+function projectionManifest(
+  compiled: CompileSuccess,
+  familyId: ProjectionFamilyId,
+): ProjectionManifestEnvelope {
+  const reference = projectionReference(compiled, familyId);
+  const manifestArtifact = compiled.bundle.artifacts.find(
+    (entry) => entry.contentHash === reference.artifactRoot,
+  )!;
+  return JSON.parse(
+    new TextDecoder().decode(manifestArtifact.canonicalBytes),
+  ) as ProjectionManifestEnvelope;
 }
 
 function structuralTransition(transition: StorageTransitionEnvelope): unknown {
@@ -996,6 +1153,45 @@ function secondaryParentRelation(required: boolean): Record<string, unknown> {
       targetId: FIXTURE_IDS.entityIds.parent,
     },
   };
+}
+
+function definitionWithParentFamily(familyId: string): unknown {
+  return replaceExactString(
+    ordinaryModuleV2(),
+    FIXTURE_IDS.entityIds.parent,
+    `${FIXTURE_IDS.namespace}:entity.${familyId}`,
+  );
+}
+
+function definitionWithFamilies(
+  parentFamilyId: string,
+  childFamilyId: string,
+): unknown {
+  return replaceExactString(
+    replaceExactString(
+      ordinaryModuleV2(),
+      FIXTURE_IDS.entityIds.parent,
+      `${FIXTURE_IDS.namespace}:entity.${parentFamilyId}`,
+    ),
+    FIXTURE_IDS.entityIds.child,
+    `${FIXTURE_IDS.namespace}:entity.${childFamilyId}`,
+  );
+}
+
+function replaceExactString(value: unknown, from: string, to: string): unknown {
+  if (value === from) return to;
+  if (Array.isArray(value)) {
+    return value.map((entry) => replaceExactString(entry, from, to));
+  }
+  if (typeof value === 'object' && value !== null) {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [
+        key,
+        replaceExactString(entry, from, to),
+      ]),
+    );
+  }
+  return value;
 }
 
 function transitionBinding() {

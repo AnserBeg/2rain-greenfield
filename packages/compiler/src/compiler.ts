@@ -56,6 +56,7 @@ import {
   REQUIRED_BASE_PROJECTION_FAMILIES,
   REQUIRED_MODULE_PROJECTION_FAMILIES,
   STORAGE_TARGET_PAYLOAD_VERSION,
+  STORAGE_TARGET_PAYLOAD_V2_VERSION,
   STORAGE_TRANSITION_ENVELOPE_VERSION,
   type CapabilityFact,
   type CompilationNodeContract,
@@ -1803,11 +1804,13 @@ function parseStorageTarget(bytes: Uint8Array): StorageTargetPayload {
 }
 
 function isStorageTargetV1(value: unknown): value is StorageTargetPayloadV1 {
+  const schemaVersion = (value as { schemaVersion?: unknown } | null)
+    ?.schemaVersion;
   return (
     typeof value === 'object' &&
     value !== null &&
-    (value as { schemaVersion?: unknown }).schemaVersion ===
-      STORAGE_TARGET_PAYLOAD_VERSION
+    (schemaVersion === STORAGE_TARGET_PAYLOAD_VERSION ||
+      schemaVersion === STORAGE_TARGET_PAYLOAD_V2_VERSION)
   );
 }
 
