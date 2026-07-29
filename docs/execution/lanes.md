@@ -66,7 +66,7 @@ the query tier both live there.
 |---|---|
 | `packages/canonical-model/src/**` | KERNEL |
 | `packages/compiler/src/predicate-lowering.ts` | KERNEL |
-| `packages/compiler/src/compiler.ts` | KERNEL *(granted 2026-07-28 for packet 4a — profile dispatch only; FIX is on a test-only packet)* |
+| `packages/compiler/src/compiler.ts` | **KERNEL (4c) and FIX (G3-P1b) — split by concern, granted 2026-07-28.** KERNEL owns language/profile dispatch; FIX owns **storage-target payload v1/v2 family recognition only** (the import near line 54 and the guard near line 1764). Verified disjoint before granting: 4c's hunks sit at ~1-11, 73-109, 789-836 and 990-1022, and 4c touches `STORAGE_TARGET_PAYLOAD_VERSION` **zero** times. 4c integrates first, so FIX merges and takes main's side on dispatch. *(Supersedes the 4a-era note "FIX is on a test-only packet" — no longer true.)* |
 | `packages/runtime/src/semantic-query-gateway.ts` | KERNEL |
 | `packages/compiler/src/storage.ts` | **FIX** |
 | `packages/compiler/src/projections.ts` | **FIX** |
