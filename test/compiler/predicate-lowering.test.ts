@@ -91,7 +91,7 @@ test('q1 query filters lower through the closed cost-class table', () => {
   }
 
   const unchangedQ0 = compiledListQuery(
-    partyModuleDefinition(),
+    legacyV2PartyDefinition(),
     partyListQueryId,
   );
   assert.equal(unchangedQ0.tier, 'q0');
@@ -142,7 +142,7 @@ function compiledListQuery(
 }
 
 function q1PartyDefinition(filter: unknown): Record<string, unknown> {
-  const definition = structuredClone(partyModuleDefinition()) as {
+  const definition = legacyV2PartyDefinition() as {
     queries: Array<Record<string, unknown>>;
   } & Record<string, unknown>;
   const query = definition.queries.find(
@@ -161,6 +161,31 @@ function q1PartyDefinition(filter: unknown): Record<string, unknown> {
   }));
   definition.queries.push(filtered);
   return definition;
+}
+
+function legacyV2PartyDefinition(): Record<string, unknown> {
+  const definition = replaceVersion(partyModuleDefinition(), 'v3', 'v2') as
+    Record<string, unknown> | undefined;
+  if (!definition) throw new TypeError('party definition is missing');
+  delete definition.impactAnalyses;
+  definition.normalizationProfileVersion = 'northstar.normalization/v2';
+  return definition;
+}
+
+function replaceVersion(value: unknown, from: string, to: string): unknown {
+  if (typeof value === 'string') return value === from ? to : value;
+  if (Array.isArray(value)) {
+    return value.map((entry) => replaceVersion(entry, from, to));
+  }
+  if (typeof value === 'object' && value !== null) {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [
+        key,
+        replaceVersion(entry, from, to),
+      ]),
+    );
+  }
+  return value;
 }
 
 function comparison(

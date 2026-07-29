@@ -4,7 +4,8 @@ import {
   canonicalize,
   normalizeApplicationPackage,
   parseAuthoredApplicationPackageJson,
-  type AuthoredApplicationPackage,
+  parseNormalizedApplicationPackageJson,
+  type VersionedAuthoredApplicationPackage,
 } from '../../packages/canonical-model/src/index.js';
 import {
   DEFAULT_COMPILER_LIMITS,
@@ -17,15 +18,15 @@ import {
   type ProjectionManifestEnvelope,
 } from '../../packages/compiler/src/index.js';
 
-export function authoredFixture(name: string): AuthoredApplicationPackage {
+export function authoredFixture(
+  name: string,
+): VersionedAuthoredApplicationPackage {
   return parseAuthoredApplicationPackageJson(
     readFileSync(`test/fixtures/g1/compiler/${name}.authored.json`),
   );
 }
 
-export function normalizedBytes(
-  authored: AuthoredApplicationPackage,
-): Uint8Array {
+export function normalizedBytes(authored: unknown): Uint8Array {
   return new TextEncoder().encode(
     canonicalize(normalizeApplicationPackage(authored)),
   );
@@ -39,13 +40,28 @@ export function compilerInput(
   bytes: Uint8Array,
   expectedActiveRelease: ExpectedActiveRelease | null = null,
 ): CompilerInput {
+  let languageVersion = DEFAULT_COMPILER_PROFILE.languageVersion;
+  let normalizationProfileVersion =
+    DEFAULT_COMPILER_PROFILE.normalizationProfileVersion;
+  try {
+    const normalizedDefinition = parseNormalizedApplicationPackageJson(bytes);
+    languageVersion = normalizedDefinition.languageVersion;
+    normalizationProfileVersion =
+      normalizedDefinition.normalizationProfileVersion;
+  } catch {
+    // Invalid-wire tests must reach the compiler's own fail-closed decoder.
+  }
   return {
     dependencies: [],
     expectedActiveRelease,
     kind: 'compilerInput',
     limits: { ...DEFAULT_COMPILER_LIMITS },
     normalizedDefinitionBytes: bytes,
-    profile: { ...DEFAULT_COMPILER_PROFILE },
+    profile: {
+      ...DEFAULT_COMPILER_PROFILE,
+      languageVersion,
+      normalizationProfileVersion,
+    },
   };
 }
 

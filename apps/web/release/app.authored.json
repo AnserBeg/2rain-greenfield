@@ -16,13 +16,13 @@
         "kind": "queryInvocation",
         "query": {
           "kind": "queryReference",
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "targetId": "northstar.app:query.party_get"
         },
-        "schemaVersion": "v2"
+        "schemaVersion": "v3"
       },
       "kind": "assertionDefinition",
-      "schemaVersion": "v2"
+      "schemaVersion": "v3"
     },
     {
       "assertionId": "northstar.app:assertion.party_role_walking_slice",
@@ -40,13 +40,13 @@
         "kind": "queryInvocation",
         "query": {
           "kind": "queryReference",
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "targetId": "northstar.app:query.party_role_get"
         },
-        "schemaVersion": "v2"
+        "schemaVersion": "v3"
       },
       "kind": "assertionDefinition",
-      "schemaVersion": "v2"
+      "schemaVersion": "v3"
     },
     {
       "assertionId": "northstar.app:assertion.item_walking_slice",
@@ -64,13 +64,13 @@
         "kind": "queryInvocation",
         "query": {
           "kind": "queryReference",
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "targetId": "northstar.app:query.item_get"
         },
-        "schemaVersion": "v2"
+        "schemaVersion": "v3"
       },
       "kind": "assertionDefinition",
-      "schemaVersion": "v2"
+      "schemaVersion": "v3"
     },
     {
       "assertionId": "northstar.app:assertion.location_walking_slice",
@@ -88,13 +88,13 @@
         "kind": "queryInvocation",
         "query": {
           "kind": "queryReference",
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "targetId": "northstar.app:query.location_get"
         },
-        "schemaVersion": "v2"
+        "schemaVersion": "v3"
       },
       "kind": "assertionDefinition",
-      "schemaVersion": "v2"
+      "schemaVersion": "v3"
     }
   ],
   "capabilityRequirements": [
@@ -113,7 +113,7 @@
         "reporting",
         "verification"
       ],
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "supportStatus": "supported"
     }
   ],
@@ -124,14 +124,14 @@
       "label": "Party",
       "module": {
         "kind": "moduleReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:module.party"
       },
       "orderKey": 10,
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "storage": {
         "kind": "storageMappingReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:storage.party"
       }
     },
@@ -141,14 +141,14 @@
       "label": "Party role",
       "module": {
         "kind": "moduleReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:module.party"
       },
       "orderKey": 20,
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "storage": {
         "kind": "storageMappingReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:storage.party_role"
       }
     },
@@ -158,14 +158,14 @@
       "label": "Item",
       "module": {
         "kind": "moduleReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:module.catalog"
       },
       "orderKey": 10,
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "storage": {
         "kind": "storageMappingReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:storage.item"
       }
     },
@@ -175,14 +175,14 @@
       "label": "Location",
       "module": {
         "kind": "moduleReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:module.location"
       },
       "orderKey": 10,
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "storage": {
         "kind": "storageMappingReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:storage.location"
       }
     }
@@ -195,21 +195,21 @@
       "defaultSemantics": "none",
       "entity": {
         "kind": "entityReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:entity.party"
       },
       "fieldId": "northstar.app:field.party_number",
       "fieldType": {
         "kind": "textFieldType",
         "maximumLength": 40,
-        "schemaVersion": "v2"
+        "schemaVersion": "v3"
       },
       "kind": "fieldDefinition",
       "label": "Party number",
       "orderKey": 10,
       "presence": "required",
       "reportable": true,
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "searchable": true
     },
     {
@@ -218,21 +218,21 @@
       "defaultSemantics": "none",
       "entity": {
         "kind": "entityReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:entity.party"
       },
       "fieldId": "northstar.app:field.party_name",
       "fieldType": {
         "kind": "textFieldType",
         "maximumLength": 240,
-        "schemaVersion": "v2"
+        "schemaVersion": "v3"
       },
       "kind": "fieldDefinition",
       "label": "Party name",
       "orderKey": 20,
       "presence": "required",
       "reportable": true,
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "searchable": true
     },
     {
@@ -241,21 +241,21 @@
       "defaultSemantics": "nullable",
       "entity": {
         "kind": "entityReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:entity.party"
       },
       "fieldId": "northstar.app:field.party_contact_summary",
       "fieldType": {
         "kind": "textFieldType",
         "maximumLength": 500,
-        "schemaVersion": "v2"
+        "schemaVersion": "v3"
       },
       "kind": "fieldDefinition",
       "label": "Contact summary",
       "orderKey": 30,
       "presence": "optional",
       "reportable": true,
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "searchable": false
     },
     {
@@ -264,7 +264,7 @@
       "defaultSemantics": "none",
       "entity": {
         "kind": "entityReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:entity.party_role"
       },
       "fieldId": "northstar.app:field.party_role_kind",
@@ -276,24 +276,24 @@
             "label": "Supplier",
             "optionId": "northstar.app:option.supplier",
             "orderKey": 10,
-            "schemaVersion": "v2"
+            "schemaVersion": "v3"
           },
           {
             "kind": "enumOption",
             "label": "Customer",
             "optionId": "northstar.app:option.customer",
             "orderKey": 20,
-            "schemaVersion": "v2"
+            "schemaVersion": "v3"
           }
         ],
-        "schemaVersion": "v2"
+        "schemaVersion": "v3"
       },
       "kind": "fieldDefinition",
       "label": "Party role",
       "orderKey": 10,
       "presence": "required",
       "reportable": true,
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "searchable": false
     },
     {
@@ -302,7 +302,7 @@
       "defaultSemantics": "none",
       "entity": {
         "kind": "entityReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:entity.party_role"
       },
       "fieldId": "northstar.app:field.party_role_status",
@@ -314,24 +314,24 @@
             "label": "Active",
             "optionId": "northstar.app:option.active",
             "orderKey": 10,
-            "schemaVersion": "v2"
+            "schemaVersion": "v3"
           },
           {
             "kind": "enumOption",
             "label": "Inactive",
             "optionId": "northstar.app:option.inactive",
             "orderKey": 20,
-            "schemaVersion": "v2"
+            "schemaVersion": "v3"
           }
         ],
-        "schemaVersion": "v2"
+        "schemaVersion": "v3"
       },
       "kind": "fieldDefinition",
       "label": "Role status",
       "orderKey": 20,
       "presence": "required",
       "reportable": true,
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "searchable": false
     },
     {
@@ -341,21 +341,21 @@
       "defaultSemantics": "none",
       "entity": {
         "kind": "entityReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:entity.item"
       },
       "fieldId": "northstar.app:field.item_sku",
       "fieldType": {
         "kind": "textFieldType",
         "maximumLength": 40,
-        "schemaVersion": "v2"
+        "schemaVersion": "v3"
       },
       "kind": "fieldDefinition",
       "label": "SKU",
       "orderKey": 10,
       "presence": "required",
       "reportable": true,
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "searchable": true
     },
     {
@@ -364,21 +364,21 @@
       "defaultSemantics": "none",
       "entity": {
         "kind": "entityReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:entity.item"
       },
       "fieldId": "northstar.app:field.item_name",
       "fieldType": {
         "kind": "textFieldType",
         "maximumLength": 240,
-        "schemaVersion": "v2"
+        "schemaVersion": "v3"
       },
       "kind": "fieldDefinition",
       "label": "Item name",
       "orderKey": 20,
       "presence": "required",
       "reportable": true,
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "searchable": true
     },
     {
@@ -387,21 +387,21 @@
       "defaultSemantics": "nullable",
       "entity": {
         "kind": "entityReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:entity.item"
       },
       "fieldId": "northstar.app:field.item_description",
       "fieldType": {
         "kind": "textFieldType",
         "maximumLength": 500,
-        "schemaVersion": "v2"
+        "schemaVersion": "v3"
       },
       "kind": "fieldDefinition",
       "label": "Description",
       "orderKey": 30,
       "presence": "optional",
       "reportable": true,
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "searchable": true
     },
     {
@@ -410,21 +410,21 @@
       "defaultSemantics": "none",
       "entity": {
         "kind": "entityReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:entity.item"
       },
       "fieldId": "northstar.app:field.item_base_unit",
       "fieldType": {
         "kind": "textFieldType",
         "maximumLength": 32,
-        "schemaVersion": "v2"
+        "schemaVersion": "v3"
       },
       "kind": "fieldDefinition",
       "label": "Base unit",
       "orderKey": 40,
       "presence": "required",
       "reportable": true,
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "searchable": false
     },
     {
@@ -434,21 +434,21 @@
       "defaultSemantics": "none",
       "entity": {
         "kind": "entityReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:entity.location"
       },
       "fieldId": "northstar.app:field.location_code",
       "fieldType": {
         "kind": "textFieldType",
         "maximumLength": 40,
-        "schemaVersion": "v2"
+        "schemaVersion": "v3"
       },
       "kind": "fieldDefinition",
       "label": "Code",
       "orderKey": 10,
       "presence": "required",
       "reportable": true,
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "searchable": true
     },
     {
@@ -457,21 +457,21 @@
       "defaultSemantics": "none",
       "entity": {
         "kind": "entityReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:entity.location"
       },
       "fieldId": "northstar.app:field.location_name",
       "fieldType": {
         "kind": "textFieldType",
         "maximumLength": 240,
-        "schemaVersion": "v2"
+        "schemaVersion": "v3"
       },
       "kind": "fieldDefinition",
       "label": "Location name",
       "orderKey": 20,
       "presence": "required",
       "reportable": true,
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "searchable": true
     },
     {
@@ -480,7 +480,7 @@
       "defaultSemantics": "none",
       "entity": {
         "kind": "entityReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:entity.location"
       },
       "fieldId": "northstar.app:field.location_type",
@@ -492,35 +492,36 @@
             "label": "Warehouse",
             "optionId": "northstar.app:option.warehouse",
             "orderKey": 10,
-            "schemaVersion": "v2"
+            "schemaVersion": "v3"
           },
           {
             "kind": "enumOption",
             "label": "Store",
             "optionId": "northstar.app:option.store",
             "orderKey": 20,
-            "schemaVersion": "v2"
+            "schemaVersion": "v3"
           }
         ],
-        "schemaVersion": "v2"
+        "schemaVersion": "v3"
       },
       "kind": "fieldDefinition",
       "label": "Location type",
       "orderKey": 30,
       "presence": "required",
       "reportable": true,
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "searchable": false
     }
   ],
   "hashAlgorithm": "sha256",
+  "impactAnalyses": [],
   "kind": "applicationPackageRevision",
-  "languageVersion": "v2",
+  "languageVersion": "v3",
   "modules": [
     {
       "composition": {
         "kind": "compositionSeam",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "status": "unsupported"
       },
       "kind": "moduleDefinition",
@@ -528,12 +529,12 @@
       "moduleId": "northstar.app:module.party",
       "orderKey": 10,
       "ownerPackageId": "northstar.app:package.application",
-      "schemaVersion": "v2"
+      "schemaVersion": "v3"
     },
     {
       "composition": {
         "kind": "compositionSeam",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "status": "unsupported"
       },
       "kind": "moduleDefinition",
@@ -541,12 +542,12 @@
       "moduleId": "northstar.app:module.catalog",
       "orderKey": 20,
       "ownerPackageId": "northstar.app:package.application",
-      "schemaVersion": "v2"
+      "schemaVersion": "v3"
     },
     {
       "composition": {
         "kind": "compositionSeam",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "status": "unsupported"
       },
       "kind": "moduleDefinition",
@@ -554,40 +555,40 @@
       "moduleId": "northstar.app:module.location",
       "orderKey": 30,
       "ownerPackageId": "northstar.app:package.application",
-      "schemaVersion": "v2"
+      "schemaVersion": "v3"
     }
   ],
-  "normalizationProfileVersion": "northstar.normalization/v2",
+  "normalizationProfileVersion": "northstar.normalization/v3",
   "operations": [
     {
       "confirmation": "none",
       "effect": {
         "entity": {
           "kind": "entityReference",
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "targetId": "northstar.app:entity.party"
         },
         "kind": "createRecordEffect",
-        "schemaVersion": "v2"
+        "schemaVersion": "v3"
       },
       "kind": "operationDefinition",
       "module": {
         "kind": "moduleReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:module.party"
       },
       "operationId": "northstar.app:operation.party_create",
       "permission": {
         "kind": "permissionReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:permission.party_create"
       },
       "readBack": {
         "kind": "queryReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:query.party_get"
       },
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "tier": "o0"
     },
     {
@@ -595,30 +596,30 @@
       "effect": {
         "entity": {
           "kind": "entityReference",
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "targetId": "northstar.app:entity.party"
         },
         "kind": "updateRecordEffect",
-        "schemaVersion": "v2"
+        "schemaVersion": "v3"
       },
       "kind": "operationDefinition",
       "module": {
         "kind": "moduleReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:module.party"
       },
       "operationId": "northstar.app:operation.party_update",
       "permission": {
         "kind": "permissionReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:permission.party_update"
       },
       "readBack": {
         "kind": "queryReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:query.party_get"
       },
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "tier": "o0"
     },
     {
@@ -626,30 +627,30 @@
       "effect": {
         "entity": {
           "kind": "entityReference",
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "targetId": "northstar.app:entity.party"
         },
         "kind": "archiveRecordEffect",
-        "schemaVersion": "v2"
+        "schemaVersion": "v3"
       },
       "kind": "operationDefinition",
       "module": {
         "kind": "moduleReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:module.party"
       },
       "operationId": "northstar.app:operation.party_archive",
       "permission": {
         "kind": "permissionReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:permission.party_archive"
       },
       "readBack": {
         "kind": "queryReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:query.party_get"
       },
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "tier": "o0"
     },
     {
@@ -657,30 +658,30 @@
       "effect": {
         "entity": {
           "kind": "entityReference",
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "targetId": "northstar.app:entity.party"
         },
         "kind": "restoreRecordEffect",
-        "schemaVersion": "v2"
+        "schemaVersion": "v3"
       },
       "kind": "operationDefinition",
       "module": {
         "kind": "moduleReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:module.party"
       },
       "operationId": "northstar.app:operation.party_restore",
       "permission": {
         "kind": "permissionReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:permission.party_restore"
       },
       "readBack": {
         "kind": "queryReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:query.party_get"
       },
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "tier": "o0"
     },
     {
@@ -688,30 +689,30 @@
       "effect": {
         "entity": {
           "kind": "entityReference",
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "targetId": "northstar.app:entity.party_role"
         },
         "kind": "createRecordEffect",
-        "schemaVersion": "v2"
+        "schemaVersion": "v3"
       },
       "kind": "operationDefinition",
       "module": {
         "kind": "moduleReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:module.party"
       },
       "operationId": "northstar.app:operation.party_role_create",
       "permission": {
         "kind": "permissionReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:permission.party_role_create"
       },
       "readBack": {
         "kind": "queryReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:query.party_role_get"
       },
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "tier": "o0"
     },
     {
@@ -719,30 +720,30 @@
       "effect": {
         "entity": {
           "kind": "entityReference",
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "targetId": "northstar.app:entity.party_role"
         },
         "kind": "updateRecordEffect",
-        "schemaVersion": "v2"
+        "schemaVersion": "v3"
       },
       "kind": "operationDefinition",
       "module": {
         "kind": "moduleReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:module.party"
       },
       "operationId": "northstar.app:operation.party_role_update",
       "permission": {
         "kind": "permissionReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:permission.party_role_update"
       },
       "readBack": {
         "kind": "queryReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:query.party_role_get"
       },
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "tier": "o0"
     },
     {
@@ -750,30 +751,30 @@
       "effect": {
         "entity": {
           "kind": "entityReference",
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "targetId": "northstar.app:entity.party_role"
         },
         "kind": "archiveRecordEffect",
-        "schemaVersion": "v2"
+        "schemaVersion": "v3"
       },
       "kind": "operationDefinition",
       "module": {
         "kind": "moduleReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:module.party"
       },
       "operationId": "northstar.app:operation.party_role_archive",
       "permission": {
         "kind": "permissionReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:permission.party_role_archive"
       },
       "readBack": {
         "kind": "queryReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:query.party_role_get"
       },
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "tier": "o0"
     },
     {
@@ -781,30 +782,30 @@
       "effect": {
         "entity": {
           "kind": "entityReference",
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "targetId": "northstar.app:entity.party_role"
         },
         "kind": "restoreRecordEffect",
-        "schemaVersion": "v2"
+        "schemaVersion": "v3"
       },
       "kind": "operationDefinition",
       "module": {
         "kind": "moduleReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:module.party"
       },
       "operationId": "northstar.app:operation.party_role_restore",
       "permission": {
         "kind": "permissionReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:permission.party_role_restore"
       },
       "readBack": {
         "kind": "queryReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:query.party_role_get"
       },
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "tier": "o0"
     },
     {
@@ -812,30 +813,30 @@
       "effect": {
         "entity": {
           "kind": "entityReference",
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "targetId": "northstar.app:entity.item"
         },
         "kind": "createRecordEffect",
-        "schemaVersion": "v2"
+        "schemaVersion": "v3"
       },
       "kind": "operationDefinition",
       "module": {
         "kind": "moduleReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:module.catalog"
       },
       "operationId": "northstar.app:operation.item_create",
       "permission": {
         "kind": "permissionReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:permission.item_create"
       },
       "readBack": {
         "kind": "queryReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:query.item_get"
       },
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "tier": "o0"
     },
     {
@@ -843,30 +844,30 @@
       "effect": {
         "entity": {
           "kind": "entityReference",
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "targetId": "northstar.app:entity.item"
         },
         "kind": "updateRecordEffect",
-        "schemaVersion": "v2"
+        "schemaVersion": "v3"
       },
       "kind": "operationDefinition",
       "module": {
         "kind": "moduleReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:module.catalog"
       },
       "operationId": "northstar.app:operation.item_update",
       "permission": {
         "kind": "permissionReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:permission.item_update"
       },
       "readBack": {
         "kind": "queryReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:query.item_get"
       },
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "tier": "o0"
     },
     {
@@ -874,30 +875,30 @@
       "effect": {
         "entity": {
           "kind": "entityReference",
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "targetId": "northstar.app:entity.item"
         },
         "kind": "archiveRecordEffect",
-        "schemaVersion": "v2"
+        "schemaVersion": "v3"
       },
       "kind": "operationDefinition",
       "module": {
         "kind": "moduleReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:module.catalog"
       },
       "operationId": "northstar.app:operation.item_archive",
       "permission": {
         "kind": "permissionReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:permission.item_archive"
       },
       "readBack": {
         "kind": "queryReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:query.item_get"
       },
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "tier": "o0"
     },
     {
@@ -905,30 +906,30 @@
       "effect": {
         "entity": {
           "kind": "entityReference",
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "targetId": "northstar.app:entity.item"
         },
         "kind": "restoreRecordEffect",
-        "schemaVersion": "v2"
+        "schemaVersion": "v3"
       },
       "kind": "operationDefinition",
       "module": {
         "kind": "moduleReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:module.catalog"
       },
       "operationId": "northstar.app:operation.item_restore",
       "permission": {
         "kind": "permissionReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:permission.item_restore"
       },
       "readBack": {
         "kind": "queryReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:query.item_get"
       },
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "tier": "o0"
     },
     {
@@ -936,30 +937,30 @@
       "effect": {
         "entity": {
           "kind": "entityReference",
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "targetId": "northstar.app:entity.location"
         },
         "kind": "createRecordEffect",
-        "schemaVersion": "v2"
+        "schemaVersion": "v3"
       },
       "kind": "operationDefinition",
       "module": {
         "kind": "moduleReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:module.location"
       },
       "operationId": "northstar.app:operation.location_create",
       "permission": {
         "kind": "permissionReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:permission.location_create"
       },
       "readBack": {
         "kind": "queryReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:query.location_get"
       },
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "tier": "o0"
     },
     {
@@ -967,30 +968,30 @@
       "effect": {
         "entity": {
           "kind": "entityReference",
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "targetId": "northstar.app:entity.location"
         },
         "kind": "updateRecordEffect",
-        "schemaVersion": "v2"
+        "schemaVersion": "v3"
       },
       "kind": "operationDefinition",
       "module": {
         "kind": "moduleReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:module.location"
       },
       "operationId": "northstar.app:operation.location_update",
       "permission": {
         "kind": "permissionReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:permission.location_update"
       },
       "readBack": {
         "kind": "queryReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:query.location_get"
       },
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "tier": "o0"
     },
     {
@@ -998,30 +999,30 @@
       "effect": {
         "entity": {
           "kind": "entityReference",
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "targetId": "northstar.app:entity.location"
         },
         "kind": "archiveRecordEffect",
-        "schemaVersion": "v2"
+        "schemaVersion": "v3"
       },
       "kind": "operationDefinition",
       "module": {
         "kind": "moduleReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:module.location"
       },
       "operationId": "northstar.app:operation.location_archive",
       "permission": {
         "kind": "permissionReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:permission.location_archive"
       },
       "readBack": {
         "kind": "queryReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:query.location_get"
       },
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "tier": "o0"
     },
     {
@@ -1029,30 +1030,30 @@
       "effect": {
         "entity": {
           "kind": "entityReference",
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "targetId": "northstar.app:entity.location"
         },
         "kind": "restoreRecordEffect",
-        "schemaVersion": "v2"
+        "schemaVersion": "v3"
       },
       "kind": "operationDefinition",
       "module": {
         "kind": "moduleReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:module.location"
       },
       "operationId": "northstar.app:operation.location_restore",
       "permission": {
         "kind": "permissionReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:permission.location_restore"
       },
       "readBack": {
         "kind": "queryReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:query.location_get"
       },
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "tier": "o0"
     }
   ],
@@ -1061,7 +1062,7 @@
     "namespace": "northstar.app",
     "packageId": "northstar.app:package.application",
     "provenance": "firstParty",
-    "schemaVersion": "v2",
+    "schemaVersion": "v3",
     "version": "1.0.0"
   },
   "permissions": [
@@ -1072,10 +1073,10 @@
       "permissionId": "northstar.app:permission.party_create",
       "resource": {
         "kind": "entityReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:entity.party"
       },
-      "schemaVersion": "v2"
+      "schemaVersion": "v3"
     },
     {
       "action": "read",
@@ -1084,10 +1085,10 @@
       "permissionId": "northstar.app:permission.party_read",
       "resource": {
         "kind": "entityReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:entity.party"
       },
-      "schemaVersion": "v2"
+      "schemaVersion": "v3"
     },
     {
       "action": "update",
@@ -1096,10 +1097,10 @@
       "permissionId": "northstar.app:permission.party_update",
       "resource": {
         "kind": "entityReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:entity.party"
       },
-      "schemaVersion": "v2"
+      "schemaVersion": "v3"
     },
     {
       "action": "archive",
@@ -1108,10 +1109,10 @@
       "permissionId": "northstar.app:permission.party_archive",
       "resource": {
         "kind": "entityReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:entity.party"
       },
-      "schemaVersion": "v2"
+      "schemaVersion": "v3"
     },
     {
       "action": "restore",
@@ -1120,10 +1121,10 @@
       "permissionId": "northstar.app:permission.party_restore",
       "resource": {
         "kind": "entityReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:entity.party"
       },
-      "schemaVersion": "v2"
+      "schemaVersion": "v3"
     },
     {
       "action": "create",
@@ -1132,10 +1133,10 @@
       "permissionId": "northstar.app:permission.party_role_create",
       "resource": {
         "kind": "entityReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:entity.party_role"
       },
-      "schemaVersion": "v2"
+      "schemaVersion": "v3"
     },
     {
       "action": "read",
@@ -1144,10 +1145,10 @@
       "permissionId": "northstar.app:permission.party_role_read",
       "resource": {
         "kind": "entityReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:entity.party_role"
       },
-      "schemaVersion": "v2"
+      "schemaVersion": "v3"
     },
     {
       "action": "update",
@@ -1156,10 +1157,10 @@
       "permissionId": "northstar.app:permission.party_role_update",
       "resource": {
         "kind": "entityReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:entity.party_role"
       },
-      "schemaVersion": "v2"
+      "schemaVersion": "v3"
     },
     {
       "action": "archive",
@@ -1168,10 +1169,10 @@
       "permissionId": "northstar.app:permission.party_role_archive",
       "resource": {
         "kind": "entityReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:entity.party_role"
       },
-      "schemaVersion": "v2"
+      "schemaVersion": "v3"
     },
     {
       "action": "restore",
@@ -1180,10 +1181,10 @@
       "permissionId": "northstar.app:permission.party_role_restore",
       "resource": {
         "kind": "entityReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:entity.party_role"
       },
-      "schemaVersion": "v2"
+      "schemaVersion": "v3"
     },
     {
       "action": "create",
@@ -1192,10 +1193,10 @@
       "permissionId": "northstar.app:permission.item_create",
       "resource": {
         "kind": "entityReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:entity.item"
       },
-      "schemaVersion": "v2"
+      "schemaVersion": "v3"
     },
     {
       "action": "read",
@@ -1204,10 +1205,10 @@
       "permissionId": "northstar.app:permission.item_read",
       "resource": {
         "kind": "entityReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:entity.item"
       },
-      "schemaVersion": "v2"
+      "schemaVersion": "v3"
     },
     {
       "action": "update",
@@ -1216,10 +1217,10 @@
       "permissionId": "northstar.app:permission.item_update",
       "resource": {
         "kind": "entityReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:entity.item"
       },
-      "schemaVersion": "v2"
+      "schemaVersion": "v3"
     },
     {
       "action": "archive",
@@ -1228,10 +1229,10 @@
       "permissionId": "northstar.app:permission.item_archive",
       "resource": {
         "kind": "entityReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:entity.item"
       },
-      "schemaVersion": "v2"
+      "schemaVersion": "v3"
     },
     {
       "action": "restore",
@@ -1240,10 +1241,10 @@
       "permissionId": "northstar.app:permission.item_restore",
       "resource": {
         "kind": "entityReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:entity.item"
       },
-      "schemaVersion": "v2"
+      "schemaVersion": "v3"
     },
     {
       "action": "create",
@@ -1252,10 +1253,10 @@
       "permissionId": "northstar.app:permission.location_create",
       "resource": {
         "kind": "entityReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:entity.location"
       },
-      "schemaVersion": "v2"
+      "schemaVersion": "v3"
     },
     {
       "action": "read",
@@ -1264,10 +1265,10 @@
       "permissionId": "northstar.app:permission.location_read",
       "resource": {
         "kind": "entityReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:entity.location"
       },
-      "schemaVersion": "v2"
+      "schemaVersion": "v3"
     },
     {
       "action": "update",
@@ -1276,10 +1277,10 @@
       "permissionId": "northstar.app:permission.location_update",
       "resource": {
         "kind": "entityReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:entity.location"
       },
-      "schemaVersion": "v2"
+      "schemaVersion": "v3"
     },
     {
       "action": "archive",
@@ -1288,10 +1289,10 @@
       "permissionId": "northstar.app:permission.location_archive",
       "resource": {
         "kind": "entityReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:entity.location"
       },
-      "schemaVersion": "v2"
+      "schemaVersion": "v3"
     },
     {
       "action": "restore",
@@ -1300,10 +1301,10 @@
       "permissionId": "northstar.app:permission.location_restore",
       "resource": {
         "kind": "entityReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:entity.location"
       },
-      "schemaVersion": "v2"
+      "schemaVersion": "v3"
     }
   ],
   "queries": [
@@ -1312,55 +1313,55 @@
       "maximumResultCount": 1,
       "module": {
         "kind": "moduleReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:module.party"
       },
       "permission": {
         "kind": "permissionReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:permission.party_read"
       },
       "queryId": "northstar.app:query.party_get",
       "queryType": "get",
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "selections": [
         {
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:field.party_number"
           },
           "kind": "querySelection",
           "orderKey": 10,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "selectionId": "northstar.app:selection.party_get_1"
         },
         {
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:field.party_name"
           },
           "kind": "querySelection",
           "orderKey": 20,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "selectionId": "northstar.app:selection.party_get_2"
         },
         {
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:field.party_contact_summary"
           },
           "kind": "querySelection",
           "orderKey": 30,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "selectionId": "northstar.app:selection.party_get_3"
         }
       ],
       "sourceEntity": {
         "kind": "entityReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:entity.party"
       },
       "tier": "q0"
@@ -1370,55 +1371,55 @@
       "maximumResultCount": 100,
       "module": {
         "kind": "moduleReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:module.party"
       },
       "permission": {
         "kind": "permissionReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:permission.party_read"
       },
       "queryId": "northstar.app:query.party_list",
       "queryType": "list",
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "selections": [
         {
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:field.party_number"
           },
           "kind": "querySelection",
           "orderKey": 10,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "selectionId": "northstar.app:selection.party_list_1"
         },
         {
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:field.party_name"
           },
           "kind": "querySelection",
           "orderKey": 20,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "selectionId": "northstar.app:selection.party_list_2"
         },
         {
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:field.party_contact_summary"
           },
           "kind": "querySelection",
           "orderKey": 30,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "selectionId": "northstar.app:selection.party_list_3"
         }
       ],
       "sourceEntity": {
         "kind": "entityReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:entity.party"
       },
       "tier": "q0"
@@ -1428,55 +1429,55 @@
       "maximumResultCount": 100,
       "module": {
         "kind": "moduleReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:module.party"
       },
       "permission": {
         "kind": "permissionReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:permission.party_read"
       },
       "queryId": "northstar.app:query.party_search",
       "queryType": "search",
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "selections": [
         {
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:field.party_number"
           },
           "kind": "querySelection",
           "orderKey": 10,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "selectionId": "northstar.app:selection.party_search_1"
         },
         {
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:field.party_name"
           },
           "kind": "querySelection",
           "orderKey": 20,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "selectionId": "northstar.app:selection.party_search_2"
         },
         {
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:field.party_contact_summary"
           },
           "kind": "querySelection",
           "orderKey": 30,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "selectionId": "northstar.app:selection.party_search_3"
         }
       ],
       "sourceEntity": {
         "kind": "entityReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:entity.party"
       },
       "tier": "q0"
@@ -1486,12 +1487,12 @@
       "maximumResultCount": 100,
       "module": {
         "kind": "moduleReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:module.party"
       },
       "permission": {
         "kind": "permissionReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:permission.party_read"
       },
       "queryId": "northstar.app:query.party_resolve",
@@ -1501,66 +1502,66 @@
           "authority": "identifier",
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:field.party_number"
           },
           "kind": "resolveMatchKey",
           "matchKeyId": "northstar.app:resolve-key.party_number",
           "orderKey": 10,
-          "schemaVersion": "v2"
+          "schemaVersion": "v3"
         },
         {
           "authority": "advisory",
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:field.party_name"
           },
           "kind": "resolveMatchKey",
           "matchKeyId": "northstar.app:resolve-key.party_name",
           "orderKey": 20,
-          "schemaVersion": "v2"
+          "schemaVersion": "v3"
         }
       ],
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "selections": [
         {
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:field.party_number"
           },
           "kind": "querySelection",
           "orderKey": 10,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "selectionId": "northstar.app:selection.party_resolve_1"
         },
         {
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:field.party_name"
           },
           "kind": "querySelection",
           "orderKey": 20,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "selectionId": "northstar.app:selection.party_resolve_2"
         },
         {
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:field.party_contact_summary"
           },
           "kind": "querySelection",
           "orderKey": 30,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "selectionId": "northstar.app:selection.party_resolve_3"
         }
       ],
       "sourceEntity": {
         "kind": "entityReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:entity.party"
       },
       "tier": "q0"
@@ -1570,44 +1571,44 @@
       "maximumResultCount": 1,
       "module": {
         "kind": "moduleReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:module.party"
       },
       "permission": {
         "kind": "permissionReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:permission.party_role_read"
       },
       "queryId": "northstar.app:query.party_role_get",
       "queryType": "get",
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "selections": [
         {
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:field.party_role_kind"
           },
           "kind": "querySelection",
           "orderKey": 10,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "selectionId": "northstar.app:selection.party_role_get_1"
         },
         {
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:field.party_role_status"
           },
           "kind": "querySelection",
           "orderKey": 20,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "selectionId": "northstar.app:selection.party_role_get_2"
         }
       ],
       "sourceEntity": {
         "kind": "entityReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:entity.party_role"
       },
       "tier": "q0"
@@ -1617,44 +1618,44 @@
       "maximumResultCount": 100,
       "module": {
         "kind": "moduleReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:module.party"
       },
       "permission": {
         "kind": "permissionReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:permission.party_role_read"
       },
       "queryId": "northstar.app:query.party_role_list",
       "queryType": "list",
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "selections": [
         {
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:field.party_role_kind"
           },
           "kind": "querySelection",
           "orderKey": 10,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "selectionId": "northstar.app:selection.party_role_list_1"
         },
         {
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:field.party_role_status"
           },
           "kind": "querySelection",
           "orderKey": 20,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "selectionId": "northstar.app:selection.party_role_list_2"
         }
       ],
       "sourceEntity": {
         "kind": "entityReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:entity.party_role"
       },
       "tier": "q0"
@@ -1664,44 +1665,44 @@
       "maximumResultCount": 100,
       "module": {
         "kind": "moduleReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:module.party"
       },
       "permission": {
         "kind": "permissionReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:permission.party_role_read"
       },
       "queryId": "northstar.app:query.party_role_search",
       "queryType": "search",
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "selections": [
         {
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:field.party_role_kind"
           },
           "kind": "querySelection",
           "orderKey": 10,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "selectionId": "northstar.app:selection.party_role_search_1"
         },
         {
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:field.party_role_status"
           },
           "kind": "querySelection",
           "orderKey": 20,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "selectionId": "northstar.app:selection.party_role_search_2"
         }
       ],
       "sourceEntity": {
         "kind": "entityReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:entity.party_role"
       },
       "tier": "q0"
@@ -1711,12 +1712,12 @@
       "maximumResultCount": 100,
       "module": {
         "kind": "moduleReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:module.party"
       },
       "permission": {
         "kind": "permissionReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:permission.party_role_read"
       },
       "queryId": "northstar.app:query.party_role_resolve",
@@ -1726,43 +1727,43 @@
           "authority": "advisory",
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:field.party_role_kind"
           },
           "kind": "resolveMatchKey",
           "matchKeyId": "northstar.app:resolve-key.party_role_role_kind",
           "orderKey": 10,
-          "schemaVersion": "v2"
+          "schemaVersion": "v3"
         }
       ],
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "selections": [
         {
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:field.party_role_kind"
           },
           "kind": "querySelection",
           "orderKey": 10,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "selectionId": "northstar.app:selection.party_role_resolve_1"
         },
         {
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:field.party_role_status"
           },
           "kind": "querySelection",
           "orderKey": 20,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "selectionId": "northstar.app:selection.party_role_resolve_2"
         }
       ],
       "sourceEntity": {
         "kind": "entityReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:entity.party_role"
       },
       "tier": "q0"
@@ -1772,66 +1773,66 @@
       "maximumResultCount": 1,
       "module": {
         "kind": "moduleReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:module.catalog"
       },
       "permission": {
         "kind": "permissionReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:permission.item_read"
       },
       "queryId": "northstar.app:query.item_get",
       "queryType": "get",
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "selections": [
         {
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:field.item_sku"
           },
           "kind": "querySelection",
           "orderKey": 10,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "selectionId": "northstar.app:selection.item_get_1"
         },
         {
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:field.item_name"
           },
           "kind": "querySelection",
           "orderKey": 20,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "selectionId": "northstar.app:selection.item_get_2"
         },
         {
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:field.item_description"
           },
           "kind": "querySelection",
           "orderKey": 30,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "selectionId": "northstar.app:selection.item_get_3"
         },
         {
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:field.item_base_unit"
           },
           "kind": "querySelection",
           "orderKey": 40,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "selectionId": "northstar.app:selection.item_get_4"
         }
       ],
       "sourceEntity": {
         "kind": "entityReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:entity.item"
       },
       "tier": "q0"
@@ -1841,66 +1842,66 @@
       "maximumResultCount": 100,
       "module": {
         "kind": "moduleReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:module.catalog"
       },
       "permission": {
         "kind": "permissionReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:permission.item_read"
       },
       "queryId": "northstar.app:query.item_list",
       "queryType": "list",
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "selections": [
         {
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:field.item_sku"
           },
           "kind": "querySelection",
           "orderKey": 10,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "selectionId": "northstar.app:selection.item_list_1"
         },
         {
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:field.item_name"
           },
           "kind": "querySelection",
           "orderKey": 20,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "selectionId": "northstar.app:selection.item_list_2"
         },
         {
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:field.item_description"
           },
           "kind": "querySelection",
           "orderKey": 30,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "selectionId": "northstar.app:selection.item_list_3"
         },
         {
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:field.item_base_unit"
           },
           "kind": "querySelection",
           "orderKey": 40,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "selectionId": "northstar.app:selection.item_list_4"
         }
       ],
       "sourceEntity": {
         "kind": "entityReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:entity.item"
       },
       "tier": "q0"
@@ -1910,66 +1911,66 @@
       "maximumResultCount": 100,
       "module": {
         "kind": "moduleReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:module.catalog"
       },
       "permission": {
         "kind": "permissionReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:permission.item_read"
       },
       "queryId": "northstar.app:query.item_search",
       "queryType": "search",
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "selections": [
         {
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:field.item_sku"
           },
           "kind": "querySelection",
           "orderKey": 10,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "selectionId": "northstar.app:selection.item_search_1"
         },
         {
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:field.item_name"
           },
           "kind": "querySelection",
           "orderKey": 20,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "selectionId": "northstar.app:selection.item_search_2"
         },
         {
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:field.item_description"
           },
           "kind": "querySelection",
           "orderKey": 30,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "selectionId": "northstar.app:selection.item_search_3"
         },
         {
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:field.item_base_unit"
           },
           "kind": "querySelection",
           "orderKey": 40,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "selectionId": "northstar.app:selection.item_search_4"
         }
       ],
       "sourceEntity": {
         "kind": "entityReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:entity.item"
       },
       "tier": "q0"
@@ -1979,12 +1980,12 @@
       "maximumResultCount": 100,
       "module": {
         "kind": "moduleReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:module.catalog"
       },
       "permission": {
         "kind": "permissionReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:permission.item_read"
       },
       "queryId": "northstar.app:query.item_resolve",
@@ -1994,77 +1995,77 @@
           "authority": "identifier",
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:field.item_sku"
           },
           "kind": "resolveMatchKey",
           "matchKeyId": "northstar.app:resolve-key.item_sku",
           "orderKey": 10,
-          "schemaVersion": "v2"
+          "schemaVersion": "v3"
         },
         {
           "authority": "advisory",
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:field.item_name"
           },
           "kind": "resolveMatchKey",
           "matchKeyId": "northstar.app:resolve-key.item_name",
           "orderKey": 20,
-          "schemaVersion": "v2"
+          "schemaVersion": "v3"
         }
       ],
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "selections": [
         {
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:field.item_sku"
           },
           "kind": "querySelection",
           "orderKey": 10,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "selectionId": "northstar.app:selection.item_resolve_1"
         },
         {
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:field.item_name"
           },
           "kind": "querySelection",
           "orderKey": 20,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "selectionId": "northstar.app:selection.item_resolve_2"
         },
         {
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:field.item_description"
           },
           "kind": "querySelection",
           "orderKey": 30,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "selectionId": "northstar.app:selection.item_resolve_3"
         },
         {
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:field.item_base_unit"
           },
           "kind": "querySelection",
           "orderKey": 40,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "selectionId": "northstar.app:selection.item_resolve_4"
         }
       ],
       "sourceEntity": {
         "kind": "entityReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:entity.item"
       },
       "tier": "q0"
@@ -2074,55 +2075,55 @@
       "maximumResultCount": 1,
       "module": {
         "kind": "moduleReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:module.location"
       },
       "permission": {
         "kind": "permissionReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:permission.location_read"
       },
       "queryId": "northstar.app:query.location_get",
       "queryType": "get",
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "selections": [
         {
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:field.location_code"
           },
           "kind": "querySelection",
           "orderKey": 10,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "selectionId": "northstar.app:selection.location_get_1"
         },
         {
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:field.location_name"
           },
           "kind": "querySelection",
           "orderKey": 20,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "selectionId": "northstar.app:selection.location_get_2"
         },
         {
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:field.location_type"
           },
           "kind": "querySelection",
           "orderKey": 30,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "selectionId": "northstar.app:selection.location_get_3"
         }
       ],
       "sourceEntity": {
         "kind": "entityReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:entity.location"
       },
       "tier": "q0"
@@ -2132,55 +2133,55 @@
       "maximumResultCount": 100,
       "module": {
         "kind": "moduleReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:module.location"
       },
       "permission": {
         "kind": "permissionReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:permission.location_read"
       },
       "queryId": "northstar.app:query.location_list",
       "queryType": "list",
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "selections": [
         {
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:field.location_code"
           },
           "kind": "querySelection",
           "orderKey": 10,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "selectionId": "northstar.app:selection.location_list_1"
         },
         {
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:field.location_name"
           },
           "kind": "querySelection",
           "orderKey": 20,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "selectionId": "northstar.app:selection.location_list_2"
         },
         {
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:field.location_type"
           },
           "kind": "querySelection",
           "orderKey": 30,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "selectionId": "northstar.app:selection.location_list_3"
         }
       ],
       "sourceEntity": {
         "kind": "entityReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:entity.location"
       },
       "tier": "q0"
@@ -2190,55 +2191,55 @@
       "maximumResultCount": 100,
       "module": {
         "kind": "moduleReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:module.location"
       },
       "permission": {
         "kind": "permissionReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:permission.location_read"
       },
       "queryId": "northstar.app:query.location_search",
       "queryType": "search",
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "selections": [
         {
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:field.location_code"
           },
           "kind": "querySelection",
           "orderKey": 10,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "selectionId": "northstar.app:selection.location_search_1"
         },
         {
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:field.location_name"
           },
           "kind": "querySelection",
           "orderKey": 20,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "selectionId": "northstar.app:selection.location_search_2"
         },
         {
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:field.location_type"
           },
           "kind": "querySelection",
           "orderKey": 30,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "selectionId": "northstar.app:selection.location_search_3"
         }
       ],
       "sourceEntity": {
         "kind": "entityReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:entity.location"
       },
       "tier": "q0"
@@ -2248,12 +2249,12 @@
       "maximumResultCount": 100,
       "module": {
         "kind": "moduleReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:module.location"
       },
       "permission": {
         "kind": "permissionReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:permission.location_read"
       },
       "queryId": "northstar.app:query.location_resolve",
@@ -2263,66 +2264,66 @@
           "authority": "identifier",
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:field.location_code"
           },
           "kind": "resolveMatchKey",
           "matchKeyId": "northstar.app:resolve-key.location_code",
           "orderKey": 10,
-          "schemaVersion": "v2"
+          "schemaVersion": "v3"
         },
         {
           "authority": "advisory",
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:field.location_name"
           },
           "kind": "resolveMatchKey",
           "matchKeyId": "northstar.app:resolve-key.location_name",
           "orderKey": 20,
-          "schemaVersion": "v2"
+          "schemaVersion": "v3"
         }
       ],
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "selections": [
         {
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:field.location_code"
           },
           "kind": "querySelection",
           "orderKey": 10,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "selectionId": "northstar.app:selection.location_resolve_1"
         },
         {
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:field.location_name"
           },
           "kind": "querySelection",
           "orderKey": 20,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "selectionId": "northstar.app:selection.location_resolve_2"
         },
         {
           "field": {
             "kind": "fieldReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:field.location_type"
           },
           "kind": "querySelection",
           "orderKey": 30,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "selectionId": "northstar.app:selection.location_resolve_3"
         }
       ],
       "sourceEntity": {
         "kind": "entityReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:entity.location"
       },
       "tier": "q0"
@@ -2335,7 +2336,7 @@
       "foreignKeyActions": {
         "onDelete": "restrict",
         "onUpdate": "restrict",
-        "schemaVersion": "v2"
+        "schemaVersion": "v3"
       },
       "joinEligibility": "query",
       "kind": "relationDefinition",
@@ -2343,63 +2344,63 @@
       "ownership": "parentScopedChild",
       "relationId": "northstar.app:relation.party_role_party",
       "required": true,
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "sourceEntity": {
         "kind": "entityReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:entity.party_role"
       },
       "targetEntity": {
         "kind": "entityReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:entity.party"
       }
     }
   ],
-  "schemaVersion": "v2",
+  "schemaVersion": "v3",
   "stateMachines": [],
   "storageMappings": [
     {
       "entity": {
         "kind": "entityReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:entity.party"
       },
       "kind": "storageMappingDefinition",
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "storageClass": "dedicatedTable",
       "storageMappingId": "northstar.app:storage.party"
     },
     {
       "entity": {
         "kind": "entityReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:entity.party_role"
       },
       "kind": "storageMappingDefinition",
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "storageClass": "dedicatedTable",
       "storageMappingId": "northstar.app:storage.party_role"
     },
     {
       "entity": {
         "kind": "entityReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:entity.item"
       },
       "kind": "storageMappingDefinition",
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "storageClass": "dedicatedTable",
       "storageMappingId": "northstar.app:storage.item"
     },
     {
       "entity": {
         "kind": "entityReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:entity.location"
       },
       "kind": "storageMappingDefinition",
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "storageClass": "dedicatedTable",
       "storageMappingId": "northstar.app:storage.location"
     }
@@ -2409,39 +2410,39 @@
       "archetype": "list",
       "dataSource": {
         "kind": "queryReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:query.party_list"
       },
       "kind": "surfaceDefinition",
       "label": "Party list",
       "module": {
         "kind": "moduleReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:module.party"
       },
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "slots": [
         {
           "content": {
             "kind": "opaqueSurfaceContentReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:capability.standard_surface_content"
           },
           "kind": "surfaceSlot",
           "orderKey": 10,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "slot": "title",
           "slotId": "northstar.app:slot.party_list_title"
         },
         {
           "content": {
             "kind": "opaqueSurfaceContentReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:capability.standard_surface_content"
           },
           "kind": "surfaceSlot",
           "orderKey": 20,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "slot": "dataGrid",
           "slotId": "northstar.app:slot.party_list_data_grid"
         }
@@ -2454,63 +2455,63 @@
       "archetype": "record",
       "dataSource": {
         "kind": "queryReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:query.party_get"
       },
       "kind": "surfaceDefinition",
       "label": "Party detail",
       "module": {
         "kind": "moduleReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:module.party"
       },
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "slots": [
         {
           "content": {
             "kind": "opaqueSurfaceContentReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:capability.standard_surface_content"
           },
           "kind": "surfaceSlot",
           "orderKey": 10,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "slot": "breadcrumb",
           "slotId": "northstar.app:slot.party_detail_breadcrumb"
         },
         {
           "content": {
             "kind": "opaqueSurfaceContentReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:capability.standard_surface_content"
           },
           "kind": "surfaceSlot",
           "orderKey": 20,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "slot": "titleStatus",
           "slotId": "northstar.app:slot.party_detail_title_status"
         },
         {
           "content": {
             "kind": "opaqueSurfaceContentReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:capability.standard_surface_content"
           },
           "kind": "surfaceSlot",
           "orderKey": 30,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "slot": "commandBar",
           "slotId": "northstar.app:slot.party_detail_command_bar"
         },
         {
           "content": {
             "kind": "opaqueSurfaceContentReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:capability.standard_surface_content"
           },
           "kind": "surfaceSlot",
           "orderKey": 40,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "slot": "keyFacts",
           "slotId": "northstar.app:slot.party_detail_key_facts"
         }
@@ -2523,63 +2524,63 @@
       "archetype": "record",
       "dataSource": {
         "kind": "queryReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:query.party_get"
       },
       "kind": "surfaceDefinition",
       "label": "Party form",
       "module": {
         "kind": "moduleReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:module.party"
       },
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "slots": [
         {
           "content": {
             "kind": "opaqueSurfaceContentReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:capability.standard_surface_content"
           },
           "kind": "surfaceSlot",
           "orderKey": 10,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "slot": "breadcrumb",
           "slotId": "northstar.app:slot.party_form_breadcrumb"
         },
         {
           "content": {
             "kind": "opaqueSurfaceContentReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:capability.standard_surface_content"
           },
           "kind": "surfaceSlot",
           "orderKey": 20,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "slot": "titleStatus",
           "slotId": "northstar.app:slot.party_form_title_status"
         },
         {
           "content": {
             "kind": "opaqueSurfaceContentReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:capability.standard_surface_content"
           },
           "kind": "surfaceSlot",
           "orderKey": 30,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "slot": "commandBar",
           "slotId": "northstar.app:slot.party_form_command_bar"
         },
         {
           "content": {
             "kind": "opaqueSurfaceContentReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:capability.standard_surface_content"
           },
           "kind": "surfaceSlot",
           "orderKey": 40,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "slot": "sections",
           "slotId": "northstar.app:slot.party_form_sections"
         }
@@ -2592,39 +2593,39 @@
       "archetype": "list",
       "dataSource": {
         "kind": "queryReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:query.party_role_list"
       },
       "kind": "surfaceDefinition",
       "label": "Party role list",
       "module": {
         "kind": "moduleReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:module.party"
       },
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "slots": [
         {
           "content": {
             "kind": "opaqueSurfaceContentReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:capability.standard_surface_content"
           },
           "kind": "surfaceSlot",
           "orderKey": 10,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "slot": "title",
           "slotId": "northstar.app:slot.party_role_list_title"
         },
         {
           "content": {
             "kind": "opaqueSurfaceContentReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:capability.standard_surface_content"
           },
           "kind": "surfaceSlot",
           "orderKey": 20,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "slot": "dataGrid",
           "slotId": "northstar.app:slot.party_role_list_data_grid"
         }
@@ -2637,63 +2638,63 @@
       "archetype": "record",
       "dataSource": {
         "kind": "queryReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:query.party_role_get"
       },
       "kind": "surfaceDefinition",
       "label": "Party role detail",
       "module": {
         "kind": "moduleReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:module.party"
       },
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "slots": [
         {
           "content": {
             "kind": "opaqueSurfaceContentReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:capability.standard_surface_content"
           },
           "kind": "surfaceSlot",
           "orderKey": 10,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "slot": "breadcrumb",
           "slotId": "northstar.app:slot.party_role_detail_breadcrumb"
         },
         {
           "content": {
             "kind": "opaqueSurfaceContentReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:capability.standard_surface_content"
           },
           "kind": "surfaceSlot",
           "orderKey": 20,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "slot": "titleStatus",
           "slotId": "northstar.app:slot.party_role_detail_title_status"
         },
         {
           "content": {
             "kind": "opaqueSurfaceContentReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:capability.standard_surface_content"
           },
           "kind": "surfaceSlot",
           "orderKey": 30,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "slot": "commandBar",
           "slotId": "northstar.app:slot.party_role_detail_command_bar"
         },
         {
           "content": {
             "kind": "opaqueSurfaceContentReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:capability.standard_surface_content"
           },
           "kind": "surfaceSlot",
           "orderKey": 40,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "slot": "keyFacts",
           "slotId": "northstar.app:slot.party_role_detail_key_facts"
         }
@@ -2706,63 +2707,63 @@
       "archetype": "record",
       "dataSource": {
         "kind": "queryReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:query.party_role_get"
       },
       "kind": "surfaceDefinition",
       "label": "Party role form",
       "module": {
         "kind": "moduleReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:module.party"
       },
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "slots": [
         {
           "content": {
             "kind": "opaqueSurfaceContentReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:capability.standard_surface_content"
           },
           "kind": "surfaceSlot",
           "orderKey": 10,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "slot": "breadcrumb",
           "slotId": "northstar.app:slot.party_role_form_breadcrumb"
         },
         {
           "content": {
             "kind": "opaqueSurfaceContentReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:capability.standard_surface_content"
           },
           "kind": "surfaceSlot",
           "orderKey": 20,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "slot": "titleStatus",
           "slotId": "northstar.app:slot.party_role_form_title_status"
         },
         {
           "content": {
             "kind": "opaqueSurfaceContentReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:capability.standard_surface_content"
           },
           "kind": "surfaceSlot",
           "orderKey": 30,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "slot": "commandBar",
           "slotId": "northstar.app:slot.party_role_form_command_bar"
         },
         {
           "content": {
             "kind": "opaqueSurfaceContentReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:capability.standard_surface_content"
           },
           "kind": "surfaceSlot",
           "orderKey": 40,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "slot": "sections",
           "slotId": "northstar.app:slot.party_role_form_sections"
         }
@@ -2775,39 +2776,39 @@
       "archetype": "list",
       "dataSource": {
         "kind": "queryReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:query.item_list"
       },
       "kind": "surfaceDefinition",
       "label": "Item list",
       "module": {
         "kind": "moduleReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:module.catalog"
       },
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "slots": [
         {
           "content": {
             "kind": "opaqueSurfaceContentReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:capability.standard_surface_content"
           },
           "kind": "surfaceSlot",
           "orderKey": 10,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "slot": "title",
           "slotId": "northstar.app:slot.item_list_title"
         },
         {
           "content": {
             "kind": "opaqueSurfaceContentReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:capability.standard_surface_content"
           },
           "kind": "surfaceSlot",
           "orderKey": 20,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "slot": "dataGrid",
           "slotId": "northstar.app:slot.item_list_data_grid"
         }
@@ -2820,63 +2821,63 @@
       "archetype": "record",
       "dataSource": {
         "kind": "queryReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:query.item_get"
       },
       "kind": "surfaceDefinition",
       "label": "Item detail",
       "module": {
         "kind": "moduleReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:module.catalog"
       },
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "slots": [
         {
           "content": {
             "kind": "opaqueSurfaceContentReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:capability.standard_surface_content"
           },
           "kind": "surfaceSlot",
           "orderKey": 10,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "slot": "breadcrumb",
           "slotId": "northstar.app:slot.item_detail_breadcrumb"
         },
         {
           "content": {
             "kind": "opaqueSurfaceContentReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:capability.standard_surface_content"
           },
           "kind": "surfaceSlot",
           "orderKey": 20,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "slot": "titleStatus",
           "slotId": "northstar.app:slot.item_detail_title_status"
         },
         {
           "content": {
             "kind": "opaqueSurfaceContentReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:capability.standard_surface_content"
           },
           "kind": "surfaceSlot",
           "orderKey": 30,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "slot": "commandBar",
           "slotId": "northstar.app:slot.item_detail_command_bar"
         },
         {
           "content": {
             "kind": "opaqueSurfaceContentReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:capability.standard_surface_content"
           },
           "kind": "surfaceSlot",
           "orderKey": 40,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "slot": "keyFacts",
           "slotId": "northstar.app:slot.item_detail_key_facts"
         }
@@ -2889,63 +2890,63 @@
       "archetype": "record",
       "dataSource": {
         "kind": "queryReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:query.item_get"
       },
       "kind": "surfaceDefinition",
       "label": "Item form",
       "module": {
         "kind": "moduleReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:module.catalog"
       },
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "slots": [
         {
           "content": {
             "kind": "opaqueSurfaceContentReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:capability.standard_surface_content"
           },
           "kind": "surfaceSlot",
           "orderKey": 10,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "slot": "breadcrumb",
           "slotId": "northstar.app:slot.item_form_breadcrumb"
         },
         {
           "content": {
             "kind": "opaqueSurfaceContentReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:capability.standard_surface_content"
           },
           "kind": "surfaceSlot",
           "orderKey": 20,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "slot": "titleStatus",
           "slotId": "northstar.app:slot.item_form_title_status"
         },
         {
           "content": {
             "kind": "opaqueSurfaceContentReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:capability.standard_surface_content"
           },
           "kind": "surfaceSlot",
           "orderKey": 30,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "slot": "commandBar",
           "slotId": "northstar.app:slot.item_form_command_bar"
         },
         {
           "content": {
             "kind": "opaqueSurfaceContentReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:capability.standard_surface_content"
           },
           "kind": "surfaceSlot",
           "orderKey": 40,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "slot": "sections",
           "slotId": "northstar.app:slot.item_form_sections"
         }
@@ -2958,39 +2959,39 @@
       "archetype": "list",
       "dataSource": {
         "kind": "queryReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:query.location_list"
       },
       "kind": "surfaceDefinition",
       "label": "Location list",
       "module": {
         "kind": "moduleReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:module.location"
       },
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "slots": [
         {
           "content": {
             "kind": "opaqueSurfaceContentReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:capability.standard_surface_content"
           },
           "kind": "surfaceSlot",
           "orderKey": 10,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "slot": "title",
           "slotId": "northstar.app:slot.location_list_title"
         },
         {
           "content": {
             "kind": "opaqueSurfaceContentReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:capability.standard_surface_content"
           },
           "kind": "surfaceSlot",
           "orderKey": 20,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "slot": "dataGrid",
           "slotId": "northstar.app:slot.location_list_data_grid"
         }
@@ -3003,63 +3004,63 @@
       "archetype": "record",
       "dataSource": {
         "kind": "queryReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:query.location_get"
       },
       "kind": "surfaceDefinition",
       "label": "Location detail",
       "module": {
         "kind": "moduleReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:module.location"
       },
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "slots": [
         {
           "content": {
             "kind": "opaqueSurfaceContentReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:capability.standard_surface_content"
           },
           "kind": "surfaceSlot",
           "orderKey": 10,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "slot": "breadcrumb",
           "slotId": "northstar.app:slot.location_detail_breadcrumb"
         },
         {
           "content": {
             "kind": "opaqueSurfaceContentReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:capability.standard_surface_content"
           },
           "kind": "surfaceSlot",
           "orderKey": 20,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "slot": "titleStatus",
           "slotId": "northstar.app:slot.location_detail_title_status"
         },
         {
           "content": {
             "kind": "opaqueSurfaceContentReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:capability.standard_surface_content"
           },
           "kind": "surfaceSlot",
           "orderKey": 30,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "slot": "commandBar",
           "slotId": "northstar.app:slot.location_detail_command_bar"
         },
         {
           "content": {
             "kind": "opaqueSurfaceContentReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:capability.standard_surface_content"
           },
           "kind": "surfaceSlot",
           "orderKey": 40,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "slot": "keyFacts",
           "slotId": "northstar.app:slot.location_detail_key_facts"
         }
@@ -3072,63 +3073,63 @@
       "archetype": "record",
       "dataSource": {
         "kind": "queryReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:query.location_get"
       },
       "kind": "surfaceDefinition",
       "label": "Location form",
       "module": {
         "kind": "moduleReference",
-        "schemaVersion": "v2",
+        "schemaVersion": "v3",
         "targetId": "northstar.app:module.location"
       },
-      "schemaVersion": "v2",
+      "schemaVersion": "v3",
       "slots": [
         {
           "content": {
             "kind": "opaqueSurfaceContentReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:capability.standard_surface_content"
           },
           "kind": "surfaceSlot",
           "orderKey": 10,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "slot": "breadcrumb",
           "slotId": "northstar.app:slot.location_form_breadcrumb"
         },
         {
           "content": {
             "kind": "opaqueSurfaceContentReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:capability.standard_surface_content"
           },
           "kind": "surfaceSlot",
           "orderKey": 20,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "slot": "titleStatus",
           "slotId": "northstar.app:slot.location_form_title_status"
         },
         {
           "content": {
             "kind": "opaqueSurfaceContentReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:capability.standard_surface_content"
           },
           "kind": "surfaceSlot",
           "orderKey": 30,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "slot": "commandBar",
           "slotId": "northstar.app:slot.location_form_command_bar"
         },
         {
           "content": {
             "kind": "opaqueSurfaceContentReference",
-            "schemaVersion": "v2",
+            "schemaVersion": "v3",
             "targetId": "northstar.app:capability.standard_surface_content"
           },
           "kind": "surfaceSlot",
           "orderKey": 40,
-          "schemaVersion": "v2",
+          "schemaVersion": "v3",
           "slot": "sections",
           "slotId": "northstar.app:slot.location_form_sections"
         }

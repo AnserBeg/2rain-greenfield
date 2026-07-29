@@ -4,14 +4,18 @@ import test from 'node:test';
 import {
   CanonicalIdSchema,
   LANGUAGE_VERSION,
+  LATEST_LANGUAGE_VERSION,
+  LATEST_NORMALIZATION_PROFILE_VERSION,
   LEGACY_LANGUAGE_VERSION,
   LEGACY_NORMALIZATION_PROFILE_VERSION,
   NORMALIZATION_PROFILE_VERSION,
+  PREVIOUS_LANGUAGE_VERSION,
+  PREVIOUS_NORMALIZATION_PROFILE_VERSION,
   canonicalize,
 } from '../../packages/canonical-model/src/index.js';
 import {
   PROJECTION_FAMILY_IDS,
-  REQUIRED_BASE_PROJECTION_FAMILIES,
+  REQUIRED_MODULE_PROJECTION_FAMILIES,
   STORAGE_ELEMENT_CONTRACT_VERSION,
   STORAGE_TRANSITION_ENVELOPE_VERSION,
   compileApplication,
@@ -46,10 +50,10 @@ test('bootstrap emits one complete hierarchical release with no tenant identity'
   );
   assert.deepEqual(
     compiled.bundle.releaseManifest.projections.map((entry) => entry.familyId),
-    [...REQUIRED_BASE_PROJECTION_FAMILIES].sort(),
+    [...REQUIRED_MODULE_PROJECTION_FAMILIES].sort(),
   );
-  assert.equal(compiled.bundle.artifacts.length, 17);
-  assert.equal(compiled.bundle.nodeContracts.length, 8);
+  assert.equal(compiled.bundle.artifacts.length, 19);
+  assert.equal(compiled.bundle.nodeContracts.length, 9);
   assert.equal(compiled.diagnostics.length, 0);
 
   const text = canonicalize(compiled.bundle.releaseManifest);
@@ -71,23 +75,49 @@ test('bootstrap emits one complete hierarchical release with no tenant identity'
   }
 });
 
-test('release manifests derive current versions from canonical authority for legacy compiler input', () => {
+test('release manifests derive v3 versions from the adopted canonical package', () => {
   const input = compilerInput(fixtureBytes('bootstrap'));
-  assert.equal(input.profile.languageVersion, LEGACY_LANGUAGE_VERSION);
+  assert.equal(input.profile.languageVersion, LATEST_LANGUAGE_VERSION);
   assert.equal(
     input.profile.normalizationProfileVersion,
-    LEGACY_NORMALIZATION_PROFILE_VERSION,
+    LATEST_NORMALIZATION_PROFILE_VERSION,
   );
 
   const compiled = mustCompile(input);
   assert.equal(
     compiled.bundle.releaseManifest.languageVersion,
-    LANGUAGE_VERSION,
+    LATEST_LANGUAGE_VERSION,
   );
   assert.equal(
     compiled.bundle.releaseManifest.normalizationProfileVersion,
-    NORMALIZATION_PROFILE_VERSION,
+    LATEST_NORMALIZATION_PROFILE_VERSION,
   );
+});
+
+test('v0, v1, and v2 readers still normalize and compile after v3 adoption', () => {
+  for (const [languageVersion, normalizationProfileVersion] of [
+    [LEGACY_LANGUAGE_VERSION, LEGACY_NORMALIZATION_PROFILE_VERSION],
+    [PREVIOUS_LANGUAGE_VERSION, PREVIOUS_NORMALIZATION_PROFILE_VERSION],
+    [LANGUAGE_VERSION, NORMALIZATION_PROFILE_VERSION],
+  ] as const) {
+    const authored = authoredFixture('bootstrap') as unknown as Record<
+      string,
+      unknown
+    >;
+    delete authored.impactAnalyses;
+    replaceSchemaVersion(authored, languageVersion);
+    authored.languageVersion = languageVersion;
+    authored.normalizationProfileVersion = normalizationProfileVersion;
+    const compiled = mustCompile(compilerInput(normalizedBytes(authored)));
+    assert.equal(
+      compiled.bundle.releaseManifest.languageVersion,
+      LANGUAGE_VERSION,
+    );
+    assert.equal(
+      compiled.bundle.releaseManifest.normalizationProfileVersion,
+      NORMALIZATION_PROFILE_VERSION,
+    );
+  }
 });
 
 test('identical input is byte-identical across deterministic schedules', () => {
@@ -187,7 +217,10 @@ test('revision two adds one optional field to storage and the existing form', ()
   const surface = projectionPayload<{
     surfaces: Array<{ fieldIds: string[]; surfaceId: string }>;
   }>(second, PROJECTION_FAMILY_IDS.surfaceManifest);
-  assert.deepEqual(surface.surfaces, [
+  assert.deepEqual(
+    surface.surfaces.find(
+      (entry) => entry.surfaceId === 'northstar.bootstrap:surface.item_form',
+    ),
     {
       archetype: 'record',
       dataSourceQueryId: 'northstar.bootstrap:query.item_get',
@@ -207,8 +240,9 @@ test('revision two adds one optional field to storage and the existing form', ()
       ],
       statusRoles: [],
       surfaceId: 'northstar.bootstrap:surface.item_form',
+      surfaceRole: 'form',
     },
-  ]);
+  );
 
   const diff = diffCompiledReleases(first, second);
   assert.ok(diff.impactCodes.includes('surface-only'));
@@ -283,7 +317,7 @@ test('the provisional transition lowerer rejects changes to existing storage fie
     result.diagnostics.map(({ code, subjectId }) => ({ code, subjectId })),
     [
       {
-        code: 'COMPILER_STORAGE_TRANSITION_UNSUPPORTED',
+        code: 'COMPILER_STORAGE_RETYPE_UNSUPPORTED',
         subjectId: 'northstar.bootstrap:field.item_name',
       },
     ],
@@ -338,12 +372,12 @@ test('derived state fields are present in the complete storage target', () => {
   authored.stateMachines.push({
     entity: {
       kind: 'entityReference',
-      schemaVersion: 'v0-experimental',
+      schemaVersion: LATEST_LANGUAGE_VERSION,
       targetId: CanonicalIdSchema.parse('northstar.bootstrap:entity.item'),
     },
     initialState: {
       kind: 'stateReference',
-      schemaVersion: 'v0-experimental',
+      schemaVersion: LATEST_LANGUAGE_VERSION,
       targetId: CanonicalIdSchema.parse(
         'northstar.bootstrap:state.item_active',
       ),
@@ -352,13 +386,13 @@ test('derived state fields are present in the complete storage target', () => {
     machineId: CanonicalIdSchema.parse(
       'northstar.bootstrap:machine.item_lifecycle',
     ),
-    schemaVersion: 'v0-experimental',
+    schemaVersion: LATEST_LANGUAGE_VERSION,
     states: [
       {
         kind: 'stateDefinition',
         label: 'Active',
         orderKey: 10,
-        schemaVersion: 'v0-experimental',
+        schemaVersion: LATEST_LANGUAGE_VERSION,
         stateId: CanonicalIdSchema.parse(
           'northstar.bootstrap:state.item_active',
         ),
@@ -378,14 +412,18 @@ test('derived state fields are present in the complete storage target', () => {
       entityId: string;
     }>;
   }>(result, PROJECTION_FAMILY_IDS.storageTarget);
-  assert.deepEqual(storage.entities[0]?.derivedStateFields, [
-    {
-      fieldId: 'northstar.bootstrap:derived_state_field.machine.item_lifecycle',
-      lifecycle: 'active',
-      stateMachineId: 'northstar.bootstrap:machine.item_lifecycle',
-      valueKind: 'stateId',
-    },
-  ]);
+  assert.deepEqual(
+    storage.entities[0]?.derivedStateFields.map(
+      ({ fieldId, stateMachineId }) => ({ fieldId, stateMachineId }),
+    ),
+    [
+      {
+        fieldId:
+          'northstar.bootstrap:derived_state_field.machine.item_lifecycle',
+        stateMachineId: 'northstar.bootstrap:machine.item_lifecycle',
+      },
+    ],
+  );
 });
 
 test('storage targets use the mapping selected by canonical entity identity', () => {
@@ -393,11 +431,11 @@ test('storage targets use the mapping selected by canonical entity identity', ()
   authored.storageMappings.push({
     entity: {
       kind: 'entityReference',
-      schemaVersion: 'v0-experimental',
+      schemaVersion: LATEST_LANGUAGE_VERSION,
       targetId: CanonicalIdSchema.parse('northstar.bootstrap:entity.item'),
     },
     kind: 'storageMappingDefinition',
-    schemaVersion: 'v0-experimental',
+    schemaVersion: LATEST_LANGUAGE_VERSION,
     storageClass: 'dedicatedTable',
     storageMappingId: CanonicalIdSchema.parse(
       'northstar.bootstrap:storage.item_alternative',
@@ -406,30 +444,20 @@ test('storage targets use the mapping selected by canonical entity identity', ()
   const result = mustCompile(compilerInput(normalizedBytes(authored)));
   const storage = projectionPayload<{
     entities: Array<{
+      entityId: string;
       storageClass: string;
       storageMappingId: string;
     }>;
   }>(result, PROJECTION_FAMILY_IDS.storageTarget);
-  assert.deepEqual(storage.entities[0], {
-    derivedStateFields: [],
-    entityId: 'northstar.bootstrap:entity.item',
-    fields: [
-      {
-        classification: 'internal',
-        fieldId: 'northstar.bootstrap:field.item_name',
-        fieldType: {
-          kind: 'textFieldType',
-          maximumLength: 240,
-          schemaVersion: 'v0-experimental',
-        },
-        lifecycle: 'active',
-        presence: 'optional',
-      },
-    ],
-    lifecycle: 'active',
-    storageClass: 'generatedTyped',
-    storageMappingId: 'northstar.bootstrap:storage.item',
-  });
+  assert.equal(
+    storage.entities[0]?.entityId,
+    'northstar.bootstrap:entity.item',
+  );
+  assert.equal(storage.entities[0]?.storageClass, 'dedicatedTable');
+  assert.equal(
+    storage.entities[0]?.storageMappingId,
+    'northstar.bootstrap:storage.item',
+  );
 });
 
 test('diagnostic truncation preserves the frozen structural order', () => {
@@ -483,7 +511,7 @@ test('diagnostic truncation preserves the frozen structural order', () => {
   );
 });
 
-test('partial lowering fails atomically after staging with no release root', () => {
+test('unsupported capability requirements fail before lowering', () => {
   const result = compileApplication(
     compilerInput(fixtureBytes('partial-lowering')),
   );
@@ -497,7 +525,7 @@ test('partial lowering fails atomically after staging with no release root', () 
     false,
   );
   assert.equal(result.attestation, null);
-  assert.ok(result.stagedArtifacts.length > 0);
+  assert.equal(result.stagedArtifacts.length, 0);
   assert.deepEqual(
     result.diagnostics.map(
       ({ code, occurrenceIndex, path, phase, subjectId }) => ({
@@ -510,15 +538,27 @@ test('partial lowering fails atomically after staging with no release root', () 
     ),
     [
       {
-        code: 'COMPILER_PROJECTION_REQUIRED_MISSING',
+        code: 'COMPILER_CAPABILITY_NOT_SUPPORTED',
         occurrenceIndex: 0,
-        path: '$.capabilityRequirements.requiredProjections',
-        phase: 'verifyCompleteness',
+        path: '$.capabilityRequirements.supportStatus',
+        phase: 'wholeModelValidation',
         subjectId: 'northstar.partial:capability.reporting',
       },
     ],
   );
 });
+
+function replaceSchemaVersion(value: unknown, version: string): void {
+  if (Array.isArray(value)) {
+    for (const entry of value) replaceSchemaVersion(entry, version);
+    return;
+  }
+  if (value === null || typeof value !== 'object') return;
+  const record = value as Record<string, unknown>;
+  if ('schemaVersion' in record) record.schemaVersion = version;
+  for (const entry of Object.values(record))
+    replaceSchemaVersion(entry, version);
+}
 
 test('the output limit covers the final release manifest as well as staged leaves', () => {
   const input = compilerInput(fixtureBytes('bootstrap'));

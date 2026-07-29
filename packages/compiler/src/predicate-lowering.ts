@@ -1,6 +1,7 @@
 import {
   PREDICATE_LOWERING_PLAN_VERSION,
   PREDICATE_POSITION_PROFILE_VERSION,
+  PredicateExpressionSchema,
   canonicalizeAndHash,
   type NormalizedApplicationPackage,
   type PredicateCostClass,
@@ -8,6 +9,7 @@ import {
   type PredicateLoweringNode,
   type PredicateLoweringPlan,
   type PredicateLoweringRowId,
+  type VersionedPredicateExpression,
 } from '@north-star/canonical-model';
 
 import type { StorageTargetPayloadV1 } from './storage.js';
@@ -40,6 +42,17 @@ export const PREDICATE_LOWERING_TABLE: readonly PredicateLoweringTableRow[] =
       providerProbeId: 'Q1-P1/tenant-bounded-scan',
     }),
   ]);
+
+/**
+ * v3 admits additional canonical spellings before their SQL lowering lands.
+ * Keep the Q1-P1 lowering surface closed to the already-probed operators and
+ * scalar operands while allowing those same shapes to retain v3 node stamps.
+ */
+export function isPredicateLoweringAdmitted(
+  predicate: Readonly<VersionedPredicateExpression>,
+): predicate is Readonly<PredicateExpression> {
+  return PredicateExpressionSchema.safeParse(predicate).success;
+}
 
 export function lowerQueryPredicate(
   predicate: Readonly<PredicateExpression>,

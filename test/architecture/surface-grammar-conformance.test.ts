@@ -7,6 +7,7 @@ import {
   CanonicalModelError,
   canonicalize,
   normalizeApplicationPackage,
+  parseNormalizedApplicationPackageJson,
 } from '@north-star/canonical-model';
 
 import {
@@ -590,13 +591,21 @@ function compilationDiagnosticCodes(
     const normalizedDefinitionBytes = new TextEncoder().encode(
       canonicalize(normalizeApplicationPackage(authored)),
     );
+    const normalizedDefinition = parseNormalizedApplicationPackageJson(
+      normalizedDefinitionBytes,
+    );
     const result = compileApplication({
       dependencies: [],
       expectedActiveRelease: null,
       kind: 'compilerInput',
       limits: { ...DEFAULT_COMPILER_LIMITS },
       normalizedDefinitionBytes,
-      profile: { ...DEFAULT_COMPILER_PROFILE },
+      profile: {
+        ...DEFAULT_COMPILER_PROFILE,
+        languageVersion: normalizedDefinition.languageVersion,
+        normalizationProfileVersion:
+          normalizedDefinition.normalizationProfileVersion,
+      },
     });
     assert.equal(result.status, 'failed');
     return result.diagnostics.map((diagnostic) => diagnostic.code).sort();

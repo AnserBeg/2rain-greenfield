@@ -1,6 +1,7 @@
 import {
   canonicalize,
   normalizeApplicationPackage,
+  parseNormalizedApplicationPackageJson,
 } from '../../../../packages/canonical-model/src/index';
 import {
   DEFAULT_COMPILER_LIMITS,
@@ -72,13 +73,22 @@ export function partyCompilerInput(
   definition: unknown,
   expectedActiveRelease: CompilerInput['expectedActiveRelease'] = null,
 ): CompilerInput {
+  const normalizedDefinitionBytes = partyDefinitionBytes(definition);
+  const normalizedDefinition = parseNormalizedApplicationPackageJson(
+    normalizedDefinitionBytes,
+  );
   return {
     dependencies: [],
     expectedActiveRelease,
     kind: 'compilerInput',
     limits: { ...DEFAULT_COMPILER_LIMITS },
-    normalizedDefinitionBytes: partyDefinitionBytes(definition),
-    profile: { ...MODULE_COMPILER_PROFILE },
+    normalizedDefinitionBytes,
+    profile: {
+      ...MODULE_COMPILER_PROFILE,
+      languageVersion: normalizedDefinition.languageVersion,
+      normalizationProfileVersion:
+        normalizedDefinition.normalizationProfileVersion,
+    },
   };
 }
 

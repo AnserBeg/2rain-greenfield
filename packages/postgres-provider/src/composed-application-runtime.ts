@@ -3,9 +3,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import {
   CANONICALIZATION_PROFILE_VERSION,
   CONTENT_HASH_ALGORITHM,
-  LANGUAGE_VERSION,
-  NORMALIZATION_PROFILE_VERSION,
   canonicalizeAndHash,
+  parseNormalizedApplicationPackageJson,
 } from '@north-star/canonical-model';
 import type {
   CompileSuccess,
@@ -729,11 +728,10 @@ async function ensurePersistedRelease(
   release: ParsedRelease,
   parentRevisionId: MintedUuid | null,
 ): Promise<PersistedReleaseIdentity> {
-  const digest = canonicalizeAndHash(
-    JSON.parse(
-      new TextDecoder().decode(release.normalizedDefinitionBytes),
-    ) as unknown,
+  const normalizedDefinition = parseNormalizedApplicationPackageJson(
+    release.normalizedDefinitionBytes,
   );
+  const digest = canonicalizeAndHash(normalizedDefinition);
   const existingRevision = await withTrustedRequestTransaction(
     pool,
     context,
@@ -756,12 +754,13 @@ async function ensurePersistedRelease(
       createdBy: context.principalId,
       desiredState: release.normalizedDefinitionBytes,
       hashAlgorithm: CONTENT_HASH_ALGORITHM,
-      languageVersion: LANGUAGE_VERSION,
-      normalizationProfileVersion: NORMALIZATION_PROFILE_VERSION,
+      languageVersion: normalizedDefinition.languageVersion,
+      normalizationProfileVersion:
+        normalizedDefinition.normalizationProfileVersion,
       parentRevisionId,
       provenance: 'firstParty',
       revisionId,
-      schemaVersion: LANGUAGE_VERSION,
+      schemaVersion: normalizedDefinition.schemaVersion,
       tenantId: context.tenantId,
     });
   }

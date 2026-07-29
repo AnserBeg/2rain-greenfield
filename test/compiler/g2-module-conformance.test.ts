@@ -6,6 +6,7 @@ import {
   CanonicalModelError,
   LANGUAGE_VERSION,
   LANGUAGE_VERSIONS,
+  LATEST_LANGUAGE_VERSION,
   NORMALIZATION_PROFILE_VERSIONS,
   NORMALIZATION_PROFILE_VERSION,
   PREVIOUS_LANGUAGE_VERSION,
@@ -551,7 +552,7 @@ test('reporting is a sanctioned required family and has per-entity lineage', () 
   );
 });
 
-test('resolver authority is explicit language v2 evolution while v1 remains profile-stable', () => {
+test('v3 adoption retains the explicit v2 and v1 compatibility authorities', () => {
   assert.equal(PREVIOUS_LANGUAGE_VERSION, 'v1');
   assert.equal(
     PREVIOUS_NORMALIZATION_PROFILE_VERSION,
@@ -559,12 +560,13 @@ test('resolver authority is explicit language v2 evolution while v1 remains prof
   );
   assert.equal(LANGUAGE_VERSION, 'v2');
   assert.equal(NORMALIZATION_PROFILE_VERSION, 'northstar.normalization/v2');
-  assert.equal(MODULE_COMPILER_PROFILE.languageVersion, 'v2');
+  assert.equal(MODULE_COMPILER_PROFILE.languageVersion, 'v3');
   const legacy = replaceVersion(
     ordinaryModuleV1(),
-    LANGUAGE_VERSION,
+    LATEST_LANGUAGE_VERSION,
     'v0-experimental',
   ) as Record<string, unknown>;
+  delete legacy.impactAnalyses;
   legacy.normalizationProfileVersion =
     'northstar.normalization/v0-experimental';
   assert.throws(
@@ -579,14 +581,23 @@ test('resolver authority is explicit language v2 evolution while v1 remains prof
 });
 
 test('v3 compiles through explicit profile dispatch with the complete v2 projection structure', () => {
-  const v2 = mustCompile(input(ordinaryModuleV1()));
-  const authoredV3 = replaceVersion(
+  const authoredV2 = replaceVersion(
     ordinaryModuleV1(),
+    LATEST_LANGUAGE_VERSION,
     LANGUAGE_VERSION,
-    LANGUAGE_VERSIONS.v3,
   ) as Record<string, unknown>;
-  authoredV3.impactAnalyses = [];
-  authoredV3.normalizationProfileVersion = NORMALIZATION_PROFILE_VERSIONS.v3;
+  delete authoredV2.impactAnalyses;
+  authoredV2.normalizationProfileVersion = NORMALIZATION_PROFILE_VERSION;
+  const normalizedV2 = normalizeApplicationPackage(authoredV2);
+  const v2Input = inputNormalized(normalizedV2);
+  v2Input.profile = {
+    ...MODULE_COMPILER_PROFILE,
+    languageVersion: LANGUAGE_VERSION,
+    normalizationProfileVersion: NORMALIZATION_PROFILE_VERSION,
+  };
+  const v2 = mustCompile(v2Input);
+
+  const authoredV3 = ordinaryModuleV1();
   const authoredOperation = (
     authoredV3.operations as Array<Record<string, unknown>>
   )[0]!;
@@ -603,6 +614,18 @@ test('v3 compiles through explicit profile dispatch with the complete v2 project
     normalizationProfileVersion: NORMALIZATION_PROFILE_VERSIONS.v3,
   };
   const v3 = mustCompile(v3Input);
+
+  const v3TransitionInput = inputNormalized(
+    normalizedV3,
+    expectedActiveReleaseFrom(v2),
+  );
+  v3TransitionInput.profile = { ...v3Input.profile };
+  const v3Transitioned = mustCompile(v3TransitionInput);
+  const versionOnlyTransition = projectionPayload<StorageTransitionEnvelope>(
+    v3Transitioned,
+    PROJECTION_FAMILY_IDS.storageTransition,
+  );
+  assert.deepEqual(versionOnlyTransition.elements, []);
 
   assert.deepEqual(
     v3.bundle.releaseManifest.projections.map((entry) => entry.familyId),
@@ -860,7 +883,7 @@ test('delete operations and renderer forms fail with compiler-owned diagnostics'
   rendered.surfaces[0]!.renderer = {
     kind: 'rendererForm',
     rendererId: `${FIXTURE_IDS.namespace}:renderer.destructive_form`,
-    schemaVersion: LANGUAGE_VERSION,
+    schemaVersion: LATEST_LANGUAGE_VERSION,
   };
   const rendererResult = compileApplication(input(rendered));
   assert.equal(rendererResult.status, 'failed');
@@ -939,7 +962,7 @@ test('generatedTyped and promotion reserves normalize and round-trip but compile
     capabilityId: PROMOTE_STORAGE_CLASS_CAPABILITY_ID,
     invariantVersion: 'northstar.storage-class-promotion-invariant/v1',
     kind: 'storageClassPromotionReserve',
-    schemaVersion: LANGUAGE_VERSION,
+    schemaVersion: LATEST_LANGUAGE_VERSION,
   };
   assertCanonicalRoundTrip(promotion);
   const promotionResult = compileApplication(input(promotion));
@@ -976,7 +999,7 @@ test('relation additions order the column before the FK and debt preserves both 
     foreignKeyActions: {
       onDelete: 'restrict',
       onUpdate: 'restrict',
-      schemaVersion: LANGUAGE_VERSION,
+      schemaVersion: LATEST_LANGUAGE_VERSION,
     },
     joinEligibility: 'query',
     kind: 'relationDefinition',
@@ -984,15 +1007,15 @@ test('relation additions order the column before the FK and debt preserves both 
     ownership: 'reference',
     relationId: `${FIXTURE_IDS.namespace}:relation.master_role_secondary_parent`,
     required: false,
-    schemaVersion: LANGUAGE_VERSION,
+    schemaVersion: LATEST_LANGUAGE_VERSION,
     sourceEntity: {
       kind: 'entityReference',
-      schemaVersion: LANGUAGE_VERSION,
+      schemaVersion: LATEST_LANGUAGE_VERSION,
       targetId: FIXTURE_IDS.entityIds.child,
     },
     targetEntity: {
       kind: 'entityReference',
-      schemaVersion: LANGUAGE_VERSION,
+      schemaVersion: LATEST_LANGUAGE_VERSION,
       targetId: FIXTURE_IDS.entityIds.parent,
     },
   });
