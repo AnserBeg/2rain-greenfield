@@ -41,7 +41,7 @@ representation.
 The default contract release root is:
 
 ```text
-6c1c81c0a72575b518fc3fcc33bcd1b1430ff11abef5f9a1bc7dcf90c12684e1
+f653a6365199f02186832bdab4e55e6009ba914a41fe2a6b3bb9c21e5c8579d5
 ```
 
 There was no predecessor inventory-contract release digest. No existing app,
@@ -110,9 +110,13 @@ and valuation remains unsupported.
 
 ### Authoritative posting dependencies
 
-The v1 release publishes 27 access-qualified dependencies. The compiler checks
-the posting access plan against this set; any undeclared read, append, or state
-transition fails `INVENTORY_POSTING_DEPENDENCY_UNDECLARED`.
+The v1 release publishes 30 access-qualified dependencies. The compiler pins
+their independently computed canonical set root as
+`7ef50e86732818a0ec4ec2a03a001066ac59408ea260c65bf018646e4377a63d`
+and checks both the declaration and posting access plan against it. Any
+undeclared read, append, or state transition fails
+`INVENTORY_POSTING_DEPENDENCY_UNDECLARED`; coordinated removal from both arrays
+fails the independent root check.
 
 | Authority | Published inputs/outputs |
 |---|---|
@@ -120,7 +124,7 @@ transition fails `INVENTORY_POSTING_DEPENDENCY_UNDECLARED`.
 | Operation input | stock identity and version, quantity, unit, effective time, source identity, posting role, reason, approval |
 | Catalog / Location / Party | item base unit and lifecycle; location lifecycle; legal-entity lifecycle |
 | Inventory | period lock, posting configuration, existing movement quantities; transaction-state transition; movement append |
-| Trust | invocation, business-change, audit, and outbox appends |
+| Trust | idempotency-receipt read/append; invocation, business-change, domain-event, audit, and outbox appends |
 
 Declaration and access-plan arrays and entries are deliberately distinct
 objects. Appending an access or mutating an existing access cannot repair the
@@ -176,15 +180,16 @@ none infers rejection from source text.
 | Required configuration dial absent | `INVENTORY_CONFIGURATION_REQUIRED` at `reasonRequirements` |
 | Configuration value outside declared range | `INVENTORY_CONFIGURATION_OUT_OF_RANGE` for 3651 backdate days; over-scale approval quantity also rejected |
 | `negativeStock` omitted from active values | compile succeeds only by reading declaration default `reject`; canonical release bytes contain `negativeStock: reject` |
-| Money field added to movement | `INVENTORY_MOVEMENT_MONEY_FORBIDDEN` |
-| Movement-derived monetary artifact added | `INVENTORY_MOVEMENT_VALUE_DERIVATION_FORBIDDEN` |
+| Money field added to movement declaration or ordinary movement candidate | `INVENTORY_MOVEMENT_MONEY_FORBIDDEN` |
+| Movement-derived monetary artifact added | `INVENTORY_MOVEMENT_VALUE_DERIVATION_FORBIDDEN`; malformed artifact shapes fail `INVENTORY_CONTRACT_INVALID` |
 | Dimension-set version absent | `INVENTORY_STOCK_DIMENSION_VERSION_REQUIRED` |
 | Dimension-set version unknown | `INVENTORY_STOCK_DIMENSION_VERSION_UNKNOWN` |
 | V1 `unspecified` declaration or member | `INVENTORY_STOCK_DIMENSION_UNSPECIFIED_FORBIDDEN` |
 | Base unit changed after movement | `INVENTORY_BASE_UNIT_IMMUTABLE`, naming `movement-00017` |
-| Undeclared posting read added | `INVENTORY_POSTING_DEPENDENCY_UNDECLARED` |
+| Undeclared posting read/append/transition added | `INVENTORY_POSTING_DEPENDENCY_UNDECLARED`; coordinated removal fails the pinned root |
+| Extra or malformed configuration declaration | `INVENTORY_CONFIGURATION_MALFORMED` |
 
-The focused compiler suite passes 66 tests including these eleven inventory
+The focused compiler suite passes 68 tests including these thirteen inventory
 contract tests. Exact final full-matrix evidence is reported with the frozen
 candidate SHA so this document does not change the SHA whose evidence it names.
 
@@ -210,6 +215,15 @@ them through the already-inventoried `g2-module-conformance.test.ts` callsite.
 The focused compiler suite then passed 66/66 and reachability observed all
 74/74 discovered test files across nine producer artifacts. Exact final matrix
 and review evidence belong to the later frozen SHA reported at checkpoint.
+
+The first Critical-tier Codex xhigh review of `3fa216f` returned `REVISE` with
+three in-scope findings: the movement-candidate seam ignored monetary extras;
+the two dependency arrays could be shortened together and omitted the trust
+domain-event/idempotency effects; and malformed artifact/extra-dial shapes
+compiled. The correction validates the complete ordinary movement shape, pins
+the independent 30-entry dependency root, adds the missing trust accesses, and
+closes artifact/config declaration shapes. Any corrected SHA receives the full
+matrix and a fresh review; the `3fa216f` review is not acceptance evidence.
 
 ## Gates
 
@@ -254,7 +268,7 @@ console.log(JSON.stringify({
 NODE
 ```
 
-Expect the exact stock tuple, `quantityOnlyMovement` with no money field, all 27
+Expect the exact stock tuple, `quantityOnlyMovement` with no money field, all 30
 dependencies, `configurationScope: "legalEntity"`, and release-recorded
 `negativeStock: "reject"`. The release root must match the digest above.
 

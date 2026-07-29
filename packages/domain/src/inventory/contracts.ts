@@ -4,6 +4,8 @@ export const INVENTORY_CONTRACT_RELEASE_VERSION =
   'northstar.inventory-contract-release/v1' as const;
 export const STOCK_DIMENSION_SET_ID =
   'northstar.stock-dimension-set/v1' as const;
+export const INVENTORY_POSTING_DEPENDENCY_SET_ROOT =
+  '7ef50e86732818a0ec4ec2a03a001066ac59408ea260c65bf018646e4377a63d' as const;
 
 export const INVENTORY_POSTING_ROLES = Object.freeze([
   'adjustment',
@@ -33,6 +35,7 @@ export interface InventoryAuthoritativeDependencyV1 {
 export interface InventoryContractDefinitionV1 {
   readonly authoritativeDependencies: {
     readonly accessPlan: readonly InventoryAuthoritativeDependencyV1[];
+    readonly dependencySetRoot: typeof INVENTORY_POSTING_DEPENDENCY_SET_ROOT;
     readonly dependencies: readonly InventoryAuthoritativeDependencyV1[];
     readonly exhaustiveByConstruction: true;
     readonly undeclaredAccess: 'compileFailure';
@@ -258,10 +261,13 @@ const AUTHORITATIVE_DEPENDENCIES = Object.freeze([
     'inventory',
   ),
   dependency('northstar.inventory:movement', 'append', 'inventory'),
+  dependency('northstar.trust:semantic_operation_receipt', 'read', 'trust'),
   dependency('northstar.trust:operation_invocation', 'append', 'trust'),
   dependency('northstar.trust:business_change_document', 'append', 'trust'),
+  dependency('northstar.trust:domain_event', 'append', 'trust'),
   dependency('northstar.trust:audit_event', 'append', 'trust'),
   dependency('northstar.trust:outbox_event', 'append', 'trust'),
+  dependency('northstar.trust:semantic_operation_receipt', 'append', 'trust'),
 ]);
 
 const DEFAULT_REASON_REQUIREMENTS = Object.freeze({
@@ -299,6 +305,7 @@ const movementField = (
 export const INVENTORY_CONTRACT_V1 = Object.freeze({
   authoritativeDependencies: {
     accessPlan: AUTHORITATIVE_DEPENDENCIES.map((entry) => ({ ...entry })),
+    dependencySetRoot: INVENTORY_POSTING_DEPENDENCY_SET_ROOT,
     dependencies: AUTHORITATIVE_DEPENDENCIES.map((entry) => ({ ...entry })),
     exhaustiveByConstruction: true,
     undeclaredAccess: 'compileFailure',

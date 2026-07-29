@@ -42,10 +42,13 @@
     "read:northstar.inventory:movement.quantity_delta",
     "transition:northstar.inventory:transaction.state",
     "append:northstar.inventory:movement",
+    "read:northstar.trust:semantic_operation_receipt",
     "append:northstar.trust:operation_invocation",
     "append:northstar.trust:business_change_document",
+    "append:northstar.trust:domain_event",
     "append:northstar.trust:audit_event",
-    "append:northstar.trust:outbox_event"
+    "append:northstar.trust:outbox_event",
+    "append:northstar.trust:semantic_operation_receipt"
   ],
   "movement": {
     "fields": [
@@ -92,6 +95,6 @@
     ],
     "kind": "quantityOnlyMovement"
   },
-  "releaseRoot": "6c1c81c0a72575b518fc3fcc33bcd1b1430ff11abef5f9a1bc7dcf90c12684e1",
+  "releaseRoot": "f653a6365199f02186832bdab4e55e6009ba914a41fe2a6b3bb9c21e5c8579d5",
   "stockDimensions": ["legalEntityId", "itemId", "locationId"]
 }

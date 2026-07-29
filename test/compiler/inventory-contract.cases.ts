@@ -7,12 +7,14 @@ import {
   validateInventoryMovementCandidate,
   type CompiledInventoryContractV1,
   type InventoryContractDiagnostic,
+  type InventoryMovementCandidateV1,
 } from '../../packages/compiler/src/conformance.js';
 import { INVENTORY_CONTRACT_V1 } from '../../packages/domain/src/inventory/index.js';
 
 interface MutableInventoryContract {
   authoritativeDependencies: {
     accessPlan: Array<Record<string, unknown>>;
+    dependencies: Array<Record<string, unknown>>;
   };
   compiledArtifacts: Array<Record<string, unknown>>;
   configuration: {
@@ -104,7 +106,7 @@ export function registerInventoryContractCases(
       );
       assert.equal(dependencies.exhaustiveByConstruction, true);
       assert.equal(dependencies.undeclaredAccess, 'compileFailure');
-      assert.equal(dependencies.dependencies.length, 27);
+      assert.equal(dependencies.dependencies.length, 30);
 
       const golden = JSON.parse(
         readFileSync(
@@ -277,15 +279,13 @@ export function registerInventoryContractCases(
 
   register('missing and unknown stock-dimension versions are rejected', () => {
     const compiled = mustCompile();
-    const stockIdentity = {
-      itemId: 'item-1',
-      legalEntityId: 'entity-1',
-      locationId: 'location-1',
-    };
+    const missingCandidate = validMovementCandidate();
+    delete missingCandidate.stockDimensionSetVersion;
 
-    const missing = validateInventoryMovementCandidate(compiled, {
-      stockIdentity,
-    });
+    const missing = validateInventoryMovementCandidate(
+      compiled,
+      missingCandidate,
+    );
     assert.equal(missing.status, 'rejected');
     assert.deepEqual(diagnosticView(missing.diagnostics), [
       {
@@ -297,8 +297,8 @@ export function registerInventoryContractCases(
     ]);
 
     const unknown = validateInventoryMovementCandidate(compiled, {
+      ...validMovementCandidate(),
       stockDimensionSetVersion: 'v99',
-      stockIdentity,
     });
     assert.equal(unknown.status, 'rejected');
     assert.deepEqual(diagnosticView(unknown.diagnostics), [
@@ -326,7 +326,7 @@ export function registerInventoryContractCases(
     ]);
 
     const result = validateInventoryMovementCandidate(mustCompile(), {
-      stockDimensionSetVersion: 'v1',
+      ...validMovementCandidate(),
       stockIdentity: {
         itemId: 'item-1',
         legalEntityId: 'entity-1',
@@ -343,6 +343,47 @@ export function registerInventoryContractCases(
       },
     ]);
   });
+
+  register(
+    'movement candidates reject monetary and other undeclared fields',
+    () => {
+      assert.deepEqual(
+        validateInventoryMovementCandidate(
+          mustCompile(),
+          validMovementCandidate(),
+        ),
+        { diagnostics: [], status: 'accepted' },
+      );
+
+      const result = validateInventoryMovementCandidate(mustCompile(), {
+        ...validMovementCandidate(),
+        currency: 'CAD',
+        monetaryAmount: '125.00',
+        warehouseNote: 'ordinary undeclared field',
+      } as InventoryMovementCandidateV1);
+      assert.equal(result.status, 'rejected');
+      assert.deepEqual(diagnosticView(result.diagnostics), [
+        {
+          bindingMovementId: null,
+          code: 'INVENTORY_MOVEMENT_MONEY_FORBIDDEN',
+          path: '$.movement.currency',
+          subjectId: 'currency',
+        },
+        {
+          bindingMovementId: null,
+          code: 'INVENTORY_MOVEMENT_MONEY_FORBIDDEN',
+          path: '$.movement.monetaryAmount',
+          subjectId: 'monetaryAmount',
+        },
+        {
+          bindingMovementId: null,
+          code: 'INVENTORY_CONTRACT_INVALID',
+          path: '$.movement.warehouseNote',
+          subjectId: 'warehouseNote',
+        },
+      ]);
+    },
+  );
 
   register('base-unit mutation rejection names the binding movement', () => {
     const result = validateInventoryBaseUnitChange(mustCompile(), {
@@ -363,36 +404,99 @@ export function registerInventoryContractCases(
   });
 
   register('undeclared posting dependencies fail conformance', () => {
-    const candidate = mutableContract();
-    candidate.authoritativeDependencies.accessPlan.push({
-      access: 'read',
-      authority: 'catalog',
-      dependencyId: 'northstar.catalog:item.description',
-    });
-    const result = compileInventoryContract(candidate);
-    assert.equal(result.status, 'failed');
-    assert.deepEqual(diagnosticView(result.diagnostics), [
+    for (const entry of [
       {
-        bindingMovementId: null,
-        code: 'INVENTORY_POSTING_DEPENDENCY_UNDECLARED',
-        path: '$.authoritativeDependencies.accessPlan',
-        subjectId: 'northstar.catalog:item.description',
+        access: 'read',
+        authority: 'catalog',
+        dependencyId: 'northstar.catalog:item.description',
       },
-    ]);
+      {
+        access: 'append',
+        authority: 'trust',
+        dependencyId: 'northstar.trust:undeclared_append',
+      },
+      {
+        access: 'transition',
+        authority: 'inventory',
+        dependencyId: 'northstar.inventory:undeclared_transition',
+      },
+    ]) {
+      const candidate = mutableContract();
+      candidate.authoritativeDependencies.accessPlan.push(entry);
+      const result = compileInventoryContract(candidate);
+      assert.equal(result.status, 'failed');
+      assertHasDiagnostic(
+        result.diagnostics,
+        'INVENTORY_POSTING_DEPENDENCY_UNDECLARED',
+        '$.authoritativeDependencies.accessPlan',
+        entry.dependencyId,
+      );
+    }
 
     const mutation = mutableContract();
     mutation.authoritativeDependencies.accessPlan[0]!.dependencyId =
       'northstar.context:undeclared';
     const mutationResult = compileInventoryContract(mutation);
     assert.equal(mutationResult.status, 'failed');
-    assert.deepEqual(diagnosticView(mutationResult.diagnostics), [
+    assertHasDiagnostic(
+      mutationResult.diagnostics,
+      'INVENTORY_POSTING_DEPENDENCY_UNDECLARED',
+      '$.authoritativeDependencies.accessPlan',
+      'northstar.context:undeclared',
+    );
+
+    const coordinatedRemoval = mutableContract();
+    coordinatedRemoval.authoritativeDependencies.dependencies.pop();
+    coordinatedRemoval.authoritativeDependencies.accessPlan.pop();
+    const coordinatedResult = compileInventoryContract(coordinatedRemoval);
+    assert.equal(coordinatedResult.status, 'failed');
+    assertHasDiagnostic(
+      coordinatedResult.diagnostics,
+      'INVENTORY_CONTRACT_INVALID',
+      '$.authoritativeDependencies.dependencies',
+      'dependencies',
+    );
+    assertHasDiagnostic(
+      coordinatedResult.diagnostics,
+      'INVENTORY_CONTRACT_INVALID',
+      '$.authoritativeDependencies.accessPlan',
+      'accessPlan',
+    );
+  });
+
+  register('malformed artifact and dial declarations fail closed', () => {
+    for (const artifact of [
+      { outputSemantic: 'money' },
       {
-        bindingMovementId: null,
-        code: 'INVENTORY_POSTING_DEPENDENCY_UNDECLARED',
-        path: '$.authoritativeDependencies.accessPlan',
-        subjectId: 'northstar.context:undeclared',
+        artifactId: 'northstar.inventory:artifact.bad_source',
+        outputSemantic: 'quantity',
+        source: 'movementGuess',
       },
-    ]);
+    ]) {
+      const candidate = mutableContract();
+      candidate.compiledArtifacts.push(artifact);
+      const result = compileInventoryContract(candidate);
+      assert.equal(result.status, 'failed');
+      assertHasDiagnostic(
+        result.diagnostics,
+        'INVENTORY_CONTRACT_INVALID',
+        '$.compiledArtifacts',
+        'artifactId' in artifact ? artifact.artifactId : null,
+      );
+    }
+
+    const extraDial = mutableContract();
+    extraDial.configuration.dials.sameInstantOrder = {
+      default: 'sourceId',
+    };
+    const dialResult = compileInventoryContract(extraDial);
+    assert.equal(dialResult.status, 'failed');
+    assertHasDiagnostic(
+      dialResult.diagnostics,
+      'INVENTORY_CONFIGURATION_MALFORMED',
+      '$.configuration.dials.sameInstantOrder',
+      'sameInstantOrder',
+    );
   });
 
   register(
@@ -442,6 +546,26 @@ function mutableContract(): MutableInventoryContract {
   ) as unknown as MutableInventoryContract;
 }
 
+function validMovementCandidate(): InventoryMovementCandidateV1 {
+  return {
+    effectiveAt: '2026-07-28T18:00:00.000Z',
+    movementId: 'movement-1',
+    postingRole: 'adjustment',
+    quantityDelta: '-1.25',
+    recordedAt: '2026-07-28T18:00:01.000Z',
+    sourceId: 'adjustment-1',
+    sourceLine: '1',
+    sourceType: 'inventoryAdjustment',
+    stockDimensionSetVersion: 'v1',
+    stockIdentity: {
+      itemId: 'item-1',
+      legalEntityId: 'entity-1',
+      locationId: 'location-1',
+    },
+    unitId: 'unit.each',
+  };
+}
+
 function diagnosticView(diagnostics: InventoryContractDiagnostic[]): unknown {
   return diagnostics.map(({ bindingMovementId, code, path, subjectId }) => ({
     bindingMovementId,
@@ -449,6 +573,24 @@ function diagnosticView(diagnostics: InventoryContractDiagnostic[]): unknown {
     path,
     subjectId,
   }));
+}
+
+function assertHasDiagnostic(
+  diagnostics: InventoryContractDiagnostic[],
+  code: InventoryContractDiagnostic['code'],
+  path: string,
+  subjectId: string | null,
+): void {
+  assert.equal(
+    diagnostics.some(
+      (diagnostic) =>
+        diagnostic.code === code &&
+        diagnostic.path === path &&
+        diagnostic.subjectId === subjectId,
+    ),
+    true,
+    JSON.stringify(diagnosticView(diagnostics)),
+  );
 }
 
 function releaseSummary(compiled: CompiledInventoryContractV1): unknown {

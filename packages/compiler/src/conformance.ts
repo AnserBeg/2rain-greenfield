@@ -30,6 +30,8 @@ const INVENTORY_CONTRACT_SCHEMA_VERSION =
 const INVENTORY_CONTRACT_RELEASE_VERSION =
   'northstar.inventory-contract-release/v1' as const;
 const STOCK_DIMENSION_SET_ID = 'northstar.stock-dimension-set/v1' as const;
+const INVENTORY_POSTING_DEPENDENCY_SET_ROOT =
+  '7ef50e86732818a0ec4ec2a03a001066ac59408ea260c65bf018646e4377a63d' as const;
 const INVENTORY_POSTING_ROLES = Object.freeze([
   'adjustment',
   'transfer',
@@ -47,6 +49,21 @@ const REASON_REQUIREMENTS = Object.freeze([
   'codeAndNarrative',
 ] as const);
 const CANONICAL_DECIMAL_V2 = /^(?:0|-[1-9]\d*|[1-9]\d*)(?:\.\d*[1-9])?$/;
+const MOVEMENT_MONEY_TOKEN =
+  /(?:amount|money|monetary|value|cost|price|currency)/iu;
+const INVENTORY_MOVEMENT_CANDIDATE_FIELDS = Object.freeze([
+  'movementId',
+  'stockDimensionSetVersion',
+  'stockIdentity',
+  'quantityDelta',
+  'unitId',
+  'effectiveAt',
+  'recordedAt',
+  'sourceType',
+  'sourceId',
+  'sourceLine',
+  'postingRole',
+] as const);
 
 type InventoryPostingRole = (typeof INVENTORY_POSTING_ROLES)[number];
 type NegativeStockMode = (typeof NEGATIVE_STOCK_MODES)[number];
@@ -109,10 +126,19 @@ export type InventoryContractCompileResult =
     };
 
 export interface InventoryMovementCandidateV1 {
+  effectiveAt?: string;
+  movementId?: string;
+  postingRole?: InventoryPostingRole;
+  quantityDelta?: string;
+  recordedAt?: string;
+  sourceId?: string;
+  sourceLine?: string;
+  sourceType?: string;
   stockDimensionSetVersion?: string;
   stockIdentity?: Partial<
     Record<'legalEntityId' | 'itemId' | 'locationId', string>
   >;
+  unitId?: string;
 }
 
 export interface InventoryBaseUnitChangeAttemptV1 {
@@ -393,11 +419,80 @@ export function validateInventoryMovementCandidate(
   candidate: InventoryMovementCandidateV1,
 ): InventoryConformanceResult {
   const diagnostics: InventoryContractDiagnostic[] = [];
+  const candidateRecord = candidate as unknown;
+  if (!isRecord(candidateRecord)) {
+    return inventoryConformanceResult([
+      inventoryDiagnostic('INVENTORY_CONTRACT_INVALID', '$.movement', null),
+    ]);
+  }
+
+  const allowedFields = new Set<string>(INVENTORY_MOVEMENT_CANDIDATE_FIELDS);
+  for (const fieldId of Object.keys(candidateRecord)) {
+    if (allowedFields.has(fieldId)) continue;
+    diagnostics.push(
+      inventoryDiagnostic(
+        MOVEMENT_MONEY_TOKEN.test(fieldId)
+          ? 'INVENTORY_MOVEMENT_MONEY_FORBIDDEN'
+          : 'INVENTORY_CONTRACT_INVALID',
+        `$.movement.${fieldId}`,
+        fieldId,
+      ),
+    );
+  }
+
+  for (const fieldId of [
+    'movementId',
+    'unitId',
+    'effectiveAt',
+    'recordedAt',
+    'sourceType',
+    'sourceId',
+    'sourceLine',
+  ]) {
+    const value = candidateRecord[fieldId];
+    if (typeof value !== 'string' || value.length === 0) {
+      diagnostics.push(
+        inventoryDiagnostic(
+          'INVENTORY_CONTRACT_INVALID',
+          `$.movement.${fieldId}`,
+          fieldId,
+        ),
+      );
+    }
+  }
+
+  if (
+    typeof candidateRecord.quantityDelta !== 'string' ||
+    !canonicalDecimalWithin(candidateRecord.quantityDelta, 38, 18)
+  ) {
+    diagnostics.push(
+      inventoryDiagnostic(
+        'INVENTORY_CONTRACT_INVALID',
+        '$.movement.quantityDelta',
+        'quantityDelta',
+      ),
+    );
+  }
+  if (
+    typeof candidateRecord.postingRole !== 'string' ||
+    !(INVENTORY_POSTING_ROLES as readonly string[]).includes(
+      candidateRecord.postingRole,
+    )
+  ) {
+    diagnostics.push(
+      inventoryDiagnostic(
+        'INVENTORY_CONTRACT_INVALID',
+        '$.movement.postingRole',
+        'postingRole',
+      ),
+    );
+  }
+
   const stock = nestedRecord(compiled.release.contract, ['stockDimensionSet']);
   const v1 = stock ? nestedRecord(stock, ['v1']) : undefined;
   const allowedVersions = v1?.allowedVersions;
   const dimensions = stock?.dimensions;
-  const version = candidate.stockDimensionSetVersion;
+  const version = candidateRecord.stockDimensionSetVersion;
 
   if (typeof version !== 'string' || version.length === 0) {
     diagnostics.push(
@@ -424,11 +519,8 @@ export function validateInventoryMovementCandidate(
     for (const dimension of dimensions) {
       if (typeof dimension !== 'string') continue;
       const value =
-        candidate.stockIdentity?.[
-          dimension as keyof NonNullable<
-            InventoryMovementCandidateV1['stockIdentity']
-          >
-        ];
+        isRecord(candidateRecord.stockIdentity) &&
+        candidateRecord.stockIdentity[dimension];
       if (typeof value !== 'string' || value.length === 0) {
         diagnostics.push(
           inventoryDiagnostic(
@@ -450,6 +542,28 @@ export function validateInventoryMovementCandidate(
           ),
         );
       }
+    }
+  }
+
+  if (isRecord(candidateRecord.stockIdentity)) {
+    const dimensionNames = new Set(
+      Array.isArray(dimensions)
+        ? dimensions.filter(
+            (dimension): dimension is string => typeof dimension === 'string',
+          )
+        : [],
+    );
+    for (const fieldId of Object.keys(candidateRecord.stockIdentity)) {
+      if (dimensionNames.has(fieldId)) continue;
+      diagnostics.push(
+        inventoryDiagnostic(
+          MOVEMENT_MONEY_TOKEN.test(fieldId)
+            ? 'INVENTORY_MOVEMENT_MONEY_FORBIDDEN'
+            : 'INVENTORY_CONTRACT_INVALID',
+          `$.movement.stockIdentity.${fieldId}`,
+          fieldId,
+        ),
+      );
     }
   }
 
@@ -830,21 +944,58 @@ function validateMonetaryBoundary(
     );
     return;
   }
+  const artifactIds = new Set<string>();
   for (const artifact of artifacts) {
-    if (!isRecord(artifact)) continue;
-    const output =
-      typeof artifact.outputSemantic === 'string'
-        ? artifact.outputSemantic
-        : '';
     if (
-      artifact.source === 'inventoryMovement' &&
-      /(?:amount|money|monetary|value|cost|price|currency)/iu.test(output)
+      !isRecord(artifact) ||
+      !hasExactKeys(artifact, ['artifactId', 'outputSemantic', 'source'])
     ) {
+      diagnostics.push(
+        inventoryDiagnostic(
+          'INVENTORY_CONTRACT_INVALID',
+          '$.compiledArtifacts',
+          isRecord(artifact) && typeof artifact.artifactId === 'string'
+            ? artifact.artifactId
+            : null,
+        ),
+      );
+      continue;
+    }
+
+    const artifactId = artifact.artifactId;
+    const output = artifact.outputSemantic;
+    if (
+      typeof artifactId !== 'string' ||
+      artifactId.length === 0 ||
+      artifactIds.has(artifactId) ||
+      artifact.source !== 'inventoryMovement' ||
+      typeof output !== 'string'
+    ) {
+      diagnostics.push(
+        inventoryDiagnostic(
+          'INVENTORY_CONTRACT_INVALID',
+          '$.compiledArtifacts',
+          typeof artifactId === 'string' ? artifactId : null,
+        ),
+      );
+      continue;
+    }
+    artifactIds.add(artifactId);
+
+    if (MOVEMENT_MONEY_TOKEN.test(output)) {
       diagnostics.push(
         inventoryDiagnostic(
           'INVENTORY_MOVEMENT_VALUE_DERIVATION_FORBIDDEN',
           '$.compiledArtifacts.outputSemantic',
-          typeof artifact.artifactId === 'string' ? artifact.artifactId : null,
+          artifactId,
+        ),
+      );
+    } else if (!['fact', 'quantity', 'time', 'text'].includes(output)) {
+      diagnostics.push(
+        inventoryDiagnostic(
+          'INVENTORY_CONTRACT_INVALID',
+          '$.compiledArtifacts.outputSemantic',
+          artifactId,
         ),
       );
     }
@@ -873,6 +1024,12 @@ function validateAuthoritativeDependencies(
     ['authoritativeDependencies', 'undeclaredAccess'],
     'compileFailure',
   );
+  expectInventoryLiteral(
+    diagnostics,
+    definition,
+    ['authoritativeDependencies', 'dependencySetRoot'],
+    INVENTORY_POSTING_DEPENDENCY_SET_ROOT,
+  );
   const dependencyContract = nestedRecord(definition, [
     'authoritativeDependencies',
   ]);
@@ -887,6 +1044,23 @@ function validateAuthoritativeDependencies(
       ),
     );
     return;
+  }
+
+  for (const [name, entries] of [
+    ['dependencies', dependencies],
+    ['accessPlan', accessPlan],
+  ] as const) {
+    if (
+      inventoryCanonicalRoot(entries) !== INVENTORY_POSTING_DEPENDENCY_SET_ROOT
+    ) {
+      diagnostics.push(
+        inventoryDiagnostic(
+          'INVENTORY_CONTRACT_INVALID',
+          `$.authoritativeDependencies.${name}`,
+          name,
+        ),
+      );
+    }
   }
 
   const declared = new Set<string>();
@@ -926,6 +1100,28 @@ function validateInventoryConfigurationDeclaration(
   diagnostics: InventoryContractDiagnostic[],
   definition: Record<string, unknown>,
 ): void {
+  const configuration = nestedRecord(definition, ['configuration']);
+  if (configuration) {
+    for (const key of Object.keys(configuration)) {
+      if (
+        ![
+          'dials',
+          'scope',
+          'scopeRationale',
+          'valuesAreReleaseRecorded',
+          'version',
+        ].includes(key)
+      ) {
+        diagnostics.push(
+          inventoryDiagnostic(
+            'INVENTORY_CONFIGURATION_MALFORMED',
+            `$.configuration.${key}`,
+            key,
+          ),
+        );
+      }
+    }
+  }
   expectInventoryLiteral(
     diagnostics,
     definition,
@@ -944,13 +1140,27 @@ function validateInventoryConfigurationDeclaration(
     ['configuration', 'version'],
     1,
   );
+  const scopeRationale = nestedValue(definition, [
+    'configuration',
+    'scopeRationale',
+  ]);
+  if (typeof scopeRationale !== 'string' || scopeRationale.length === 0) {
+    diagnostics.push(
+      inventoryDiagnostic(
+        'INVENTORY_CONFIGURATION_REQUIRED',
+        '$.configuration.scopeRationale',
+        'scopeRationale',
+      ),
+    );
+  }
   const dials = nestedRecord(definition, ['configuration', 'dials']);
-  for (const dialName of [
+  const requiredDials = [
     'negativeStock',
     'reasonRequirements',
     'approvalThresholds',
     'maximumBackdateDays',
-  ]) {
+  ];
+  for (const dialName of requiredDials) {
     if (!dials || !Object.hasOwn(dials, dialName)) {
       diagnostics.push(
         inventoryDiagnostic(
@@ -962,6 +1172,45 @@ function validateInventoryConfigurationDeclaration(
     }
   }
   if (!dials) return;
+
+  for (const dialName of Object.keys(dials)) {
+    if (requiredDials.includes(dialName)) continue;
+    diagnostics.push(
+      inventoryDiagnostic(
+        'INVENTORY_CONFIGURATION_MALFORMED',
+        `$.configuration.dials.${dialName}`,
+        dialName,
+      ),
+    );
+  }
+
+  const dialKeys: Readonly<Record<string, readonly string[]>> = {
+    approvalThresholds: [
+      'comparison',
+      'default',
+      'exactBaseUnit',
+      'kind',
+      'precision',
+      'scale',
+    ],
+    maximumBackdateDays: ['default', 'kind', 'maximum', 'minimum'],
+    negativeStock: ['default', 'evaluation', 'kind', 'values'],
+    reasonRequirements: ['default', 'kind'],
+  };
+  for (const dialName of requiredDials) {
+    const dial = nestedRecord(dials, [dialName]);
+    if (!dial) continue;
+    for (const key of Object.keys(dial)) {
+      if (dialKeys[dialName]?.includes(key)) continue;
+      diagnostics.push(
+        inventoryDiagnostic(
+          'INVENTORY_CONFIGURATION_MALFORMED',
+          `$.configuration.dials.${dialName}.${key}`,
+          key,
+        ),
+      );
+    }
+  }
 
   expectInventoryLiteral(
     diagnostics,
@@ -1396,6 +1645,14 @@ function inventoryDependencyKey(value: unknown): string | null {
     return null;
   }
   return `${value.access}\0${value.authority}\0${value.dependencyId}`;
+}
+
+function inventoryCanonicalRoot(value: unknown): string | null {
+  try {
+    return canonicalizeAndHash(value).contentHash;
+  } catch {
+    return null;
+  }
 }
 
 function nestedRecord(
