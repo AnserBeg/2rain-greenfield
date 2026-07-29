@@ -72,6 +72,7 @@ the query tier both live there.
 | `packages/compiler/src/storage.ts` | **FIX** |
 | `packages/compiler/src/projections.ts` | **FIX** |
 | `packages/compiler/src/protocol.ts` | **FIX** *(granted 2026-07-28 for `G3-P1b` — declare `northstar.storage-target-payload/v2` only. This is a ratified **Freeze F** artifact, but [ADR-0015](../decisions/ADR-0015-legal-entity-business-dimension.md):79 and :116 explicitly authorize this bump "under that ADR's own evolution rule" and name it as an accepted cost, so it is anticipated evolution rather than a freeze violation. Tenant-shared targets stay v1 and byte-identical.)* |
+| `packages/compiler/src/protocol.ts` — **family export** · `packages/compiler/src/index.ts` | **KERNEL** *(granted 2026-07-29 for `G3-P2b-4` — export `SUPPORTED_STORAGE_TARGET_PAYLOAD_VERSIONS` and re-export it, NOTHING ELSE. Split by concern with FIX, which owns the individual version constants in the same file for `G3-P2b-1`. `index.ts` is untouched by FIX. The family must be **one compiler-owned authority**; a local interpreter array would be the version-hardcode defect's sixth instance.)* |
 | `packages/postgres-provider/src/module-storage-materializer.ts` | FIX |
 | `apps/api/**` | DEPLOY |
 | `packages/postgres-provider/src/composed-application-runtime.ts` | **DEPLOY** *(returned 2026-07-29 on 4c's acceptance — the KERNEL grant was for 4c only, and Q1-P3b does not need it. For `1g2`.)* |
