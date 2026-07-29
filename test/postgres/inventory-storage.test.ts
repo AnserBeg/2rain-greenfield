@@ -202,6 +202,38 @@ test('inventory storage freezes quantity facts, entity scope, and recorded horiz
               count: '1',
               defaults: '1',
             });
+            const entityScopedKeys = await admin.query<{
+              definition: string;
+              table_name: string;
+            }>(
+              `SELECT relation.relname AS table_name,
+                      pg_get_constraintdef(constraint_record.oid, true)
+                        AS definition
+                 FROM pg_constraint AS constraint_record
+                 JOIN pg_class AS relation
+                   ON relation.oid = constraint_record.conrelid
+                 JOIN pg_namespace AS namespace
+                   ON namespace.oid = relation.relnamespace
+                WHERE namespace.nspname = 'platform'
+                  AND relation.relname IN (
+                    'inventory_period_locks',
+                    'inventory_posting_configurations'
+                  )
+                  AND constraint_record.contype = 'p'
+                ORDER BY relation.relname`,
+            );
+            assert.deepEqual(entityScopedKeys.rows, [
+              {
+                definition:
+                  'PRIMARY KEY (tenant_id, environment_id, legal_entity_id)',
+                table_name: 'inventory_period_locks',
+              },
+              {
+                definition:
+                  'PRIMARY KEY (tenant_id, environment_id, legal_entity_id)',
+                table_name: 'inventory_posting_configurations',
+              },
+            ]);
             const configuration = await loadInventoryPostingConfiguration(
               admin,
               {

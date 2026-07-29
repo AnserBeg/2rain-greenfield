@@ -1992,6 +1992,7 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
 });
 
 test('entity-owned v2 targets materialize legal-entity keys and base-unit binding constraints', async () => {
+  const legalEntityId = randomUUID();
   const emptyDefinition = emptyModuleDefinition();
   const source = mustCompile(moduleInput(emptyDefinition));
   const targetDefinition = inventoryOwnedModuleDefinition();
@@ -2010,7 +2011,12 @@ test('entity-owned v2 targets materialize legal-entity keys and base-unit bindin
     entity.entityId.endsWith(':entity.inventory_movement'),
   );
   assert.ok(item);
+  assert.equal(item.legalEntity, undefined);
   assert.ok(movement?.legalEntity);
+  const baseUnit = item.columns.find((column) =>
+    column.canonicalFieldId.endsWith(':field.item_base_unit'),
+  );
+  assert.ok(baseUnit);
 
   await withEphemeralPostgres(
     'module-storage-entity-owned',
@@ -2019,6 +2025,13 @@ test('entity-owned v2 targets materialize legal-entity keys and base-unit bindin
       try {
         await runMigrations(admin, await loadMigrations(migrations));
         await seedScope(admin);
+        await admin.query(
+          `SELECT platform.provision_inventory_scope(
+             $1, $2, $3, 'LE-A', 'Legal Entity A', 'America/Edmonton',
+             '06:00:00', $4
+           )`,
+          [tenantA, environmentA, legalEntityId, target.releaseRoot],
+        );
       } finally {
         admin.release();
       }
@@ -2197,6 +2210,126 @@ test('entity-owned v2 targets materialize legal-entity keys and base-unit bindin
               grant.privilege_type === 'UPDATE',
           ),
           false,
+        );
+
+        const itemId = randomUUID();
+        const requiredItemColumns = item.columns.filter(
+          (column) => !column.nullable && column.defaultSemantics === 'none',
+        );
+        const itemValues: unknown[] = [tenantA, environmentA, itemId];
+        for (const column of requiredItemColumns) {
+          itemValues.push(
+            column.physicalName === baseUnit.physicalName
+              ? 'EA'
+              : column.postgresqlType === 'uuid'
+                ? randomUUID()
+                : /^(?:bigint|numeric)/u.test(column.postgresqlType)
+                  ? '1'
+                  : `inventory-${itemId.slice(0, 8)}`,
+          );
+        }
+        await pool.query(
+          `INSERT INTO north_star_module.${quoteTestIdentifier(item.physicalTableName)} (
+             tenant_id,
+             environment_id,
+             ${quoteTestIdentifier(item.recordIdentity.column)},
+             ${requiredItemColumns
+               .map((column) => quoteTestIdentifier(column.physicalName))
+               .join(', ')}
+           ) VALUES (${itemValues.map((_, index) => `$${String(index + 1)}`).join(', ')})`,
+          itemValues,
+        );
+
+        const transactionId = randomUUID();
+        const transactionLineId = randomUUID();
+        const movementId = randomUUID();
+        const locationId = randomUUID();
+        const effectiveAt = '2026-07-29T12:00:00.000Z';
+        await pool.query(
+          `INSERT INTO platform.inventory_transactions (
+             tenant_id, environment_id, legal_entity_id, transaction_id,
+             transaction_number, transaction_type, state, source_type,
+             source_id, effective_at, recorded_at, actor_id
+           ) VALUES (
+             $1,$2,$3,$4,$5,'adjustment','posted','adjustment',$6,$7,$8,$9
+           )`,
+          [
+            tenantA,
+            environmentA,
+            legalEntityId,
+            transactionId,
+            `ADJ-${transactionId}`,
+            randomUUID(),
+            effectiveAt,
+            '2026-07-29T13:00:00.000Z',
+            principalA,
+          ],
+        );
+        await pool.query(
+          `INSERT INTO platform.inventory_transaction_lines (
+             tenant_id, environment_id, legal_entity_id, transaction_line_id,
+             transaction_id, line_number, item_id, to_location_id, quantity,
+             unit_id
+           ) VALUES ($1,$2,$3,$4,$5,1,$6,$7,1,'EA')`,
+          [
+            tenantA,
+            environmentA,
+            legalEntityId,
+            transactionLineId,
+            transactionId,
+            itemId,
+            locationId,
+          ],
+        );
+        const period = await pool.query<{ business_period: string }>(
+          `SELECT north_star_internal.inventory_business_period($1, $2)
+             AS business_period`,
+          [tenantA, effectiveAt],
+        );
+        await pool.query(
+          `INSERT INTO platform.inventory_movements (
+             tenant_id, environment_id, legal_entity_id, business_period,
+             movement_id, transaction_id, transaction_line_id,
+             stock_dimension_set_version, item_id, location_id,
+             quantity_delta, unit_id, effective_at, recorded_at, source_type,
+             source_id, source_line, revision, posting_role, actor_id
+           ) VALUES (
+             $1,$2,$3,$4,$5,$6,$7,'v1',$8,$9,1,'EA',$10,$11,
+             'adjustment',$12,'1',1,'adjustment',$13
+           )`,
+          [
+            tenantA,
+            environmentA,
+            legalEntityId,
+            period.rows[0]?.business_period,
+            movementId,
+            transactionId,
+            transactionLineId,
+            itemId,
+            locationId,
+            effectiveAt,
+            '2026-07-29T13:00:00.000Z',
+            randomUUID(),
+            principalA,
+          ],
+        );
+        await assert.rejects(
+          pool.query(
+            `UPDATE north_star_module.${quoteTestIdentifier(item.physicalTableName)}
+                SET ${quoteTestIdentifier(baseUnit.physicalName)} = 'BOX'
+              WHERE tenant_id = $1
+                AND environment_id = $2
+                AND ${quoteTestIdentifier(item.recordIdentity.column)} = $3`,
+            [tenantA, environmentA, itemId],
+          ),
+          (error: unknown) =>
+            error instanceof Error &&
+            (error as Error & { code?: string; detail?: string }).code ===
+              'P0001' &&
+            error.message === 'INVENTORY_BASE_UNIT_IMMUTABLE' &&
+            (error as Error & { detail?: string }).detail?.includes(
+              `bindingMovementId=${movementId}`,
+            ) === true,
         );
       } finally {
         await Promise.all([
