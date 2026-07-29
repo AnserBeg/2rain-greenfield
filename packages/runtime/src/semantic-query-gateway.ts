@@ -1,12 +1,17 @@
 import {
+  FieldTypeSchema,
+  PARAMETERIZED_PREDICATE_LOWERING_PLAN_VERSION,
   PREDICATE_LOWERING_PLAN_VERSION,
   PREDICATE_POSITION_PROFILE_VERSION,
+  QUERY_AGGREGATE_LOWERING_PLAN_VERSION,
   STRUCTURAL_LIMITS_V0,
+  VersionedPredicateExpressionSchema,
   canonicalizeAndHash,
   inspectPredicateForExecution,
   type PredicateCostClass,
   type PredicateKernelReceipt,
-  type PredicateLoweringPlan,
+  type QueryAggregateLoweringPlan,
+  type QueryFilterLoweringPlan,
 } from '@north-star/canonical-model';
 
 import type { TrustedRequestContext } from './request-context.js';
@@ -32,6 +37,8 @@ export const SEMANTIC_QUERY_REQUEST_VERSION =
   'northstar.semantic-query-request/v1' as const;
 export const SEMANTIC_QUERY_RESULT_VERSION =
   'northstar.semantic-query-result/v1' as const;
+export const SEMANTIC_AGGREGATE_RESULT_VERSION =
+  'northstar.semantic-aggregate-result/v1' as const;
 
 const QUERY_CATALOG_PAYLOAD_VERSION =
   'northstar.query-catalog-payload/v0-provisional' as const;
@@ -76,18 +83,60 @@ export interface SemanticQueryResultEnvelope {
   readonly unsupportedReason: string | null;
 }
 
-export interface RegisteredQueryDefinition {
+export interface SemanticAggregateResultEnvelope {
+  readonly kind: 'semanticAggregateResult';
+  readonly outcome: 'exact';
+  readonly queryId: string;
+  readonly schemaVersion: typeof SEMANTIC_AGGREGATE_RESULT_VERSION;
+  readonly value:
+    | Readonly<{
+        kind: 'exactDecimalResult';
+        precision: 38;
+        scale: number;
+        selectionId: string;
+        value: string;
+      }>
+    | Readonly<{
+        baseUnitId: string;
+        kind: 'quantityResult';
+        precision: 38;
+        scale: number;
+        selectionId: string;
+        value: string;
+      }>;
+}
+
+interface RegisteredQueryParameterDefinition {
+  readonly orderKey: number;
+  readonly parameterId: string;
+  readonly parameterType: Readonly<Record<string, ImmutableJsonValue>>;
+}
+
+interface RegisteredQueryAggregateSelection {
+  readonly fieldId: string;
+  readonly measureFieldType: Readonly<Record<string, ImmutableJsonValue>>;
+  readonly operator: 'sum';
+  readonly resultType: Readonly<Record<string, ImmutableJsonValue>>;
+  readonly selectionId: string;
+}
+
+interface RegisteredQueryDefinitionBase {
   readonly filter: Readonly<Record<string, ImmutableJsonValue>>;
-  readonly filterPlan?: PredicateLoweringPlan;
+  readonly filterPlan?: QueryFilterLoweringPlan;
+  readonly lifecycle: 'active' | 'retired';
+  readonly maximumResultCount: number;
+  readonly permissionId: string;
+  readonly queryId: string;
+  readonly sourceEntityId: string;
+  readonly tier: 'q0' | 'q1';
+}
+
+export interface RegisteredQueryDefinition extends RegisteredQueryDefinitionBase {
   readonly infrastructure?: {
     readonly archive: 'nullableArchivedAt';
     readonly optimisticRevision: 'requiredOnMutation';
     readonly recordIdentity: 'canonicalUuid';
   };
-  readonly lifecycle: 'active' | 'retired';
-  readonly maximumResultCount: number;
-  readonly permissionId: string;
-  readonly queryId: string;
   readonly queryType: 'get' | 'list' | 'resolve' | 'search';
   readonly resolveMatchKeys?: readonly {
     readonly authority: 'advisory' | 'identifier';
@@ -100,22 +149,45 @@ export interface RegisteredQueryDefinition {
     readonly orderKey: number;
     readonly selectionId: string;
   }[];
-  readonly sourceEntityId: string;
-  readonly tier: 'q0' | 'q1';
 }
+
+export interface RegisteredAggregateQueryDefinition extends RegisteredQueryDefinitionBase {
+  readonly aggregate: RegisteredQueryAggregateSelection;
+  readonly aggregatePlan: QueryAggregateLoweringPlan;
+  readonly filterPlan: QueryFilterLoweringPlan;
+  readonly maximumResultCount: 1;
+  readonly parameters: readonly RegisteredQueryParameterDefinition[];
+  readonly queryType: 'aggregate';
+  readonly resultContract: Readonly<Record<string, ImmutableJsonValue>>;
+  readonly tier: 'q1';
+}
+
+export type RegisteredSemanticQueryDefinition =
+  RegisteredAggregateQueryDefinition | RegisteredQueryDefinition;
 
 export interface SemanticQueryExecutionRequest {
   readonly arguments: ImmutableJsonValue;
   readonly context: TrustedRequestContext;
   readonly definition: RegisteredQueryDefinition;
-  readonly filterPlans: readonly PredicateLoweringPlan[];
+  readonly filterPlans: readonly QueryFilterLoweringPlan[];
   readonly list: AuthorizedSharedListRequest | null;
+  readonly parameterValues: Readonly<Record<string, ImmutableJsonValue>>;
+  readonly view: IssuedRequestRuntimeView;
+}
+
+export interface SemanticAggregateQueryExecutionRequest {
+  readonly arguments: ImmutableJsonValue;
+  readonly context: TrustedRequestContext;
+  readonly definition: RegisteredAggregateQueryDefinition;
+  readonly filterPlans: readonly QueryFilterLoweringPlan[];
+  readonly list: AuthorizedSharedListRequest | null;
+  readonly parameterValues: Readonly<Record<string, ImmutableJsonValue>>;
   readonly view: IssuedRequestRuntimeView;
 }
 
 export interface QueryPolicyNarrowingRequest {
   readonly arguments: ImmutableJsonValue;
-  readonly definition: RegisteredQueryDefinition;
+  readonly definition: RegisteredSemanticQueryDefinition;
   readonly view: IssuedRequestRuntimeView;
 }
 
@@ -128,6 +200,9 @@ export interface SemanticQueryExecutor {
   execute(
     request: SemanticQueryExecutionRequest,
   ): Promise<SemanticQueryResultEnvelope>;
+  executeAggregate?(
+    request: SemanticAggregateQueryExecutionRequest,
+  ): Promise<SemanticAggregateResultEnvelope>;
 }
 
 export class MalformedSemanticQueryRequestError extends Error {
@@ -179,6 +254,11 @@ export class NoSuchRegisteredQueryError extends Error {
   }
 }
 
+export class UnsupportedSemanticAggregateQueryError extends Error {
+  readonly code = 'SEMANTIC_AGGREGATE_UNSUPPORTED' as const;
+  override readonly name = 'UnsupportedSemanticAggregateQueryError';
+}
+
 /** Sole application read ingress for the request-pinned semantic contract. */
 export class SemanticQueryGateway {
   constructor(
@@ -194,6 +274,33 @@ export class SemanticQueryGateway {
     view: IssuedRequestRuntimeView,
     requestInput: unknown,
   ): Promise<SemanticQueryResultEnvelope> {
+    const result = await this.#invoke(view, requestInput, 'records');
+    if (result.kind !== 'semanticQueryResult') {
+      throw new MalformedPinnedQueryCatalogError(
+        'record query returned an aggregate result',
+      );
+    }
+    return result;
+  }
+
+  async invokeAggregate(
+    view: IssuedRequestRuntimeView,
+    requestInput: unknown,
+  ): Promise<SemanticAggregateResultEnvelope> {
+    const result = await this.#invoke(view, requestInput, 'aggregate');
+    if (result.kind !== 'semanticAggregateResult') {
+      throw new MalformedPinnedQueryCatalogError(
+        'aggregate query returned a record result',
+      );
+    }
+    return result;
+  }
+
+  async #invoke(
+    view: IssuedRequestRuntimeView,
+    requestInput: unknown,
+    expectedResult: 'aggregate' | 'records',
+  ): Promise<SemanticAggregateResultEnvelope | SemanticQueryResultEnvelope> {
     assertRequestRuntimeView(view);
     const request = parseSemanticQueryRequest(requestInput);
     const boundaryDecision = await authorizeCurrentPolicy(
@@ -212,9 +319,20 @@ export class SemanticQueryGateway {
       throw new SemanticQueryPolicyDeniedError(request.queryId, view);
     }
 
-    const definition = registeredQueryFromPinnedView(view, request.queryId);
+    const definition = registeredSemanticQueryFromPinnedView(
+      view,
+      request.queryId,
+    );
     if (!definition || !this.executor) {
       throw new NoSuchRegisteredQueryError(request.queryId, view);
+    }
+    if (
+      (expectedResult === 'aggregate') !==
+      (definition.queryType === 'aggregate')
+    ) {
+      throw new MalformedSemanticQueryRequestError(
+        'query result shape does not match the selected gateway method',
+      );
     }
     const queryDecision = await authorizeCurrentPolicy(
       this.currentPolicy,
@@ -232,9 +350,14 @@ export class SemanticQueryGateway {
       throw new SemanticQueryPolicyDeniedError(request.queryId, view);
     }
     if (definition.lifecycle !== 'active') {
+      if (definition.queryType === 'aggregate') {
+        throw new UnsupportedSemanticAggregateQueryError(
+          'aggregate query is not active',
+        );
+      }
       return unsupportedQueryResult(request.queryId, 'query-tier-unsupported');
     }
-    const filterPlans: PredicateLoweringPlan[] = [];
+    const filterPlans: QueryFilterLoweringPlan[] = [];
     if (definition.tier === 'q0') {
       const predicateReceipt = inspectPredicateForExecution(definition.filter);
       observePredicateReceiptSafely(
@@ -277,32 +400,70 @@ export class SemanticQueryGateway {
         definition.queryId,
       );
     }
-    const list = listQuery
-      ? await authorizeSharedListProjection(
-          this.currentPolicy,
-          view,
-          definition,
-          listQuery,
-          this.observePredicateReceipt,
-        )
-      : null;
+    const list =
+      listQuery && definition.queryType === 'list'
+        ? await authorizeSharedListProjection(
+            this.currentPolicy,
+            view,
+            definition,
+            listQuery,
+            this.observePredicateReceipt,
+          )
+        : null;
     if (listQuery && !list) {
       return unsupportedQueryResult(
         request.queryId,
         'query-filter-unsupported',
       );
     }
-    const result = await this.executor.execute(
-      Object.freeze({
-        arguments: request.arguments,
-        context: trustedContextForRequestRuntimeView(view),
-        definition,
-        filterPlans: Object.freeze(filterPlans),
-        list,
-        view,
-      }),
-    );
-    if (list) requireSharedListResult(result);
+    const parameterValues = bindQueryParameters(definition, request.arguments);
+    let result: SemanticAggregateResultEnvelope | SemanticQueryResultEnvelope;
+    if (definition.queryType === 'aggregate') {
+      if (!this.executor.executeAggregate) {
+        throw new UnsupportedSemanticAggregateQueryError(
+          'query executor does not implement aggregate execution',
+        );
+      }
+      result = await this.executor.executeAggregate(
+        Object.freeze({
+          arguments: request.arguments,
+          context: trustedContextForRequestRuntimeView(view),
+          definition,
+          filterPlans: Object.freeze(filterPlans),
+          list: null,
+          parameterValues,
+          view,
+        }),
+      );
+    } else {
+      result = await this.executor.execute(
+        Object.freeze({
+          arguments: request.arguments,
+          context: trustedContextForRequestRuntimeView(view),
+          definition,
+          filterPlans: Object.freeze(filterPlans),
+          list,
+          parameterValues,
+          view,
+        }),
+      );
+    }
+    if (list) {
+      if (result.kind !== 'semanticQueryResult') {
+        throw new SharedListContractError(
+          'LIST_RESULT_MALFORMED',
+          'shared list query returned an aggregate result',
+          definition.queryId,
+        );
+      }
+      requireSharedListResult(result);
+    }
+    if (
+      result.kind === 'semanticAggregateResult' &&
+      definition.queryType === 'aggregate'
+    ) {
+      requireSemanticAggregateResult(definition, result);
+    }
     return result;
   }
 }
@@ -426,6 +587,14 @@ export function registeredQueryFromPinnedView(
   view: IssuedRequestRuntimeView,
   queryId: string,
 ): RegisteredQueryDefinition | undefined {
+  const definition = registeredSemanticQueryFromPinnedView(view, queryId);
+  return definition?.queryType === 'aggregate' ? undefined : definition;
+}
+
+function registeredSemanticQueryFromPinnedView(
+  view: IssuedRequestRuntimeView,
+  queryId: string,
+): RegisteredSemanticQueryDefinition | undefined {
   const projection = view.projections.query;
   if (
     projection.familyId !== REQUEST_RUNTIME_PROJECTION_FAMILIES.query ||
@@ -456,36 +625,39 @@ export function registeredQueryFromPinnedView(
     );
   }
   const queryIds = new Set<string>();
-  let selected: RegisteredQueryDefinition | undefined;
+  let selected: RegisteredSemanticQueryDefinition | undefined;
   for (const query of payload.queries) {
-    assertQueryDefinition(query);
-    if (queryIds.has(query.queryId)) {
+    const definition = parseQueryDefinition(query);
+    if (queryIds.has(definition.queryId)) {
       throw new MalformedPinnedQueryCatalogError(
         'pinned query catalog contains a duplicate queryId',
       );
     }
-    queryIds.add(query.queryId);
-    if (query.queryId === queryId) selected = query;
+    queryIds.add(definition.queryId);
+    if (definition.queryId === queryId) selected = definition;
   }
   return selected;
 }
 
-function assertQueryDefinition(
+function parseQueryDefinition(
   value: unknown,
-): asserts value is RegisteredQueryDefinition {
+): RegisteredSemanticQueryDefinition {
   const invalid = (message: string): MalformedPinnedQueryCatalogError =>
     new MalformedPinnedQueryCatalogError(message);
   if (!isRecord(value)) {
     throw invalid('pinned query definition must be an object');
   }
+  const aggregate = value.queryType === 'aggregate';
   const expectedKeys = [
+    ...(aggregate
+      ? ['aggregate', 'aggregatePlan', 'parameters', 'resultContract']
+      : ['selections']),
     'filter',
     'lifecycle',
     'maximumResultCount',
     'permissionId',
     'queryId',
     'queryType',
-    'selections',
     'sourceEntityId',
     'tier',
   ];
@@ -507,7 +679,8 @@ function assertQueryDefinition(
   assertCanonicalId(value.sourceEntityId, 'sourceEntityId', invalid);
   if (
     (value.lifecycle !== 'active' && value.lifecycle !== 'retired') ||
-    (value.queryType !== 'get' &&
+    (value.queryType !== 'aggregate' &&
+      value.queryType !== 'get' &&
       value.queryType !== 'list' &&
       value.queryType !== 'resolve' &&
       value.queryType !== 'search') ||
@@ -515,7 +688,7 @@ function assertQueryDefinition(
     !Number.isSafeInteger(value.maximumResultCount) ||
     Number(value.maximumResultCount) < 1 ||
     !isRecord(value.filter) ||
-    !Array.isArray(value.selections) ||
+    (!aggregate && !Array.isArray(value.selections)) ||
     (hasResolveMatchKeys && !Array.isArray(value.resolveMatchKeys))
   ) {
     throw invalid('pinned query definition has an invalid shape');
@@ -524,7 +697,12 @@ function assertQueryDefinition(
     if (!hasFilterPlan) {
       throw invalid('q1 query requires a predicate lowering plan');
     }
-    assertPredicateLoweringPlan(value.filterPlan, value.filter, invalid);
+    assertPredicateLoweringPlan(
+      value.filterPlan,
+      value.filter,
+      invalid,
+      aggregate,
+    );
   } else if (hasFilterPlan) {
     throw invalid('q0 query cannot carry a predicate lowering plan');
   }
@@ -562,7 +740,13 @@ function assertQueryDefinition(
       throw invalid('pinned query infrastructure is unsupported');
     }
   }
-  for (const selection of value.selections) {
+  if (aggregate) {
+    assertAggregateQueryDefinition(value, invalid);
+    return Object.freeze(
+      value as unknown as RegisteredAggregateQueryDefinition,
+    );
+  }
+  for (const selection of value.selections as unknown[]) {
     if (!isRecord(selection)) {
       throw invalid('pinned query selection must be an object');
     }
@@ -610,9 +794,191 @@ function assertQueryDefinition(
     matchKeyIds.add(matchKey.matchKeyId);
     matchFieldIds.add(matchKey.fieldId);
   }
+  return value as unknown as RegisteredQueryDefinition;
 }
 
-function parsePolicyNarrowing(value: unknown): PredicateLoweringPlan {
+function assertAggregateQueryDefinition(
+  value: Record<string, unknown>,
+  invalid: (message: string) => Error,
+): void {
+  if (
+    value.tier !== 'q1' ||
+    value.maximumResultCount !== 1 ||
+    !isRecord(value.aggregate) ||
+    !isRecord(value.aggregatePlan) ||
+    !Array.isArray(value.parameters) ||
+    !isRecord(value.resultContract) ||
+    Object.hasOwn(value, 'infrastructure') ||
+    Object.hasOwn(value, 'resolveMatchKeys')
+  ) {
+    throw invalid('aggregate query definition has an invalid shape');
+  }
+  assertExactKeys(
+    value.aggregate,
+    ['fieldId', 'measureFieldType', 'operator', 'resultType', 'selectionId'],
+    invalid,
+  );
+  assertCanonicalId(value.aggregate.fieldId, 'aggregate.fieldId', invalid);
+  assertCanonicalId(
+    value.aggregate.selectionId,
+    'aggregate.selectionId',
+    invalid,
+  );
+  if (
+    value.aggregate.operator !== 'sum' ||
+    !isRecord(value.aggregate.measureFieldType) ||
+    FieldTypeSchema.safeParse(value.aggregate.measureFieldType).success ===
+      false ||
+    !isRecord(value.aggregate.resultType)
+  ) {
+    throw invalid('aggregate query selection is invalid');
+  }
+  assertAggregateResultType(value.aggregate.resultType, invalid);
+  assertExactKeys(
+    value.aggregatePlan,
+    [
+      'costClass',
+      'kind',
+      'loweringRowId',
+      'providerProbeId',
+      'schemaVersion',
+      'sourceFieldType',
+    ],
+    invalid,
+  );
+  if (
+    value.aggregatePlan.costClass !== 'tenantBoundedScan' ||
+    value.aggregatePlan.kind !== 'queryAggregateLoweringPlan' ||
+    value.aggregatePlan.loweringRowId !==
+      'northstar.query-aggregate-lowering/required-sum-v1' ||
+    value.aggregatePlan.providerProbeId !==
+      'Q1-P3b/required-sum-tenant-bounded-scan' ||
+    value.aggregatePlan.schemaVersion !==
+      QUERY_AGGREGATE_LOWERING_PLAN_VERSION ||
+    FieldTypeSchema.safeParse(value.aggregatePlan.sourceFieldType).success ===
+      false ||
+    !isRecord(value.aggregatePlan.sourceFieldType)
+  ) {
+    throw invalid('aggregate query lowering plan is invalid');
+  }
+  if (
+    canonicalizeAndHash(value.aggregatePlan.sourceFieldType).contentHash !==
+    canonicalizeAndHash(value.aggregate.measureFieldType).contentHash
+  ) {
+    throw invalid(
+      'aggregate lowering plan does not match its catalog measure field',
+    );
+  }
+  assertAggregateSourceMatchesResult(
+    value.aggregate.measureFieldType,
+    value.aggregate.resultType,
+    invalid,
+  );
+  assertExactKeys(
+    value.resultContract,
+    ['kind', 'outcome', 'schemaVersion'],
+    invalid,
+  );
+  if (
+    value.resultContract.kind !== 'semanticAggregateResult' ||
+    value.resultContract.outcome !== 'exact' ||
+    value.resultContract.schemaVersion !== SEMANTIC_AGGREGATE_RESULT_VERSION
+  ) {
+    throw invalid('aggregate result contract is invalid');
+  }
+  const parameterTypes = new Map<string, Record<string, unknown>>();
+  for (const parameter of value.parameters) {
+    if (!isRecord(parameter)) {
+      throw invalid('aggregate query parameter must be an object');
+    }
+    assertExactKeys(
+      parameter,
+      ['orderKey', 'parameterId', 'parameterType'],
+      invalid,
+    );
+    assertCanonicalId(parameter.parameterId, 'parameterId', invalid);
+    if (
+      !Number.isSafeInteger(parameter.orderKey) ||
+      Number(parameter.orderKey) < 0 ||
+      Number(parameter.orderKey) > 1_000_000 ||
+      parameterTypes.has(parameter.parameterId as string) ||
+      FieldTypeSchema.safeParse(parameter.parameterType).success === false ||
+      !isRecord(parameter.parameterType)
+    ) {
+      throw invalid('aggregate query parameter contract is invalid');
+    }
+    parameterTypes.set(
+      parameter.parameterId as string,
+      parameter.parameterType,
+    );
+  }
+  assertParameterizedPlanReferences(value.filterPlan, parameterTypes, invalid);
+}
+
+function assertAggregateSourceMatchesResult(
+  sourceFieldType: Record<string, unknown>,
+  resultType: Record<string, unknown>,
+  invalid: (message: string) => Error,
+): void {
+  const quantity = sourceFieldType.kind === 'quantityFieldType';
+  if (
+    (sourceFieldType.kind !== 'exactDecimalFieldType' && !quantity) ||
+    sourceFieldType.schemaVersion !== 'v3' ||
+    sourceFieldType.scale !== resultType.scale ||
+    (quantity
+      ? resultType.kind !== 'quantityAggregateResultType' ||
+        !isRecord(sourceFieldType.baseUnit) ||
+        !isRecord(resultType.baseUnit) ||
+        canonicalizeAndHash(sourceFieldType.baseUnit).contentHash !==
+          canonicalizeAndHash(resultType.baseUnit).contentHash
+      : resultType.kind !== 'exactDecimalAggregateResultType')
+  ) {
+    throw invalid('aggregate result type does not match its measure field');
+  }
+}
+
+function assertAggregateResultType(
+  value: Record<string, unknown>,
+  invalid: (message: string) => Error,
+): void {
+  const quantity = value.kind === 'quantityAggregateResultType';
+  assertExactKeys(
+    value,
+    quantity
+      ? ['baseUnit', 'kind', 'precision', 'scale', 'schemaVersion']
+      : ['kind', 'precision', 'scale', 'schemaVersion'],
+    invalid,
+  );
+  if (
+    (value.kind !== 'exactDecimalAggregateResultType' && !quantity) ||
+    value.precision !== 38 ||
+    !Number.isInteger(value.scale) ||
+    Number(value.scale) < 0 ||
+    Number(value.scale) > 18 ||
+    value.schemaVersion !== 'v3'
+  ) {
+    throw invalid('aggregate result type is invalid');
+  }
+  if (quantity) {
+    if (!isRecord(value.baseUnit)) {
+      throw invalid('quantity aggregate base unit is invalid');
+    }
+    assertExactKeys(
+      value.baseUnit,
+      ['kind', 'schemaVersion', 'targetId'],
+      invalid,
+    );
+    assertCanonicalId(value.baseUnit.targetId, 'baseUnit.targetId', invalid);
+    if (
+      value.baseUnit.kind !== 'unitReference' ||
+      value.baseUnit.schemaVersion !== 'v3'
+    ) {
+      throw invalid('quantity aggregate base unit is invalid');
+    }
+  }
+}
+
+function parsePolicyNarrowing(value: unknown): QueryFilterLoweringPlan {
   const invalid = (message: string): MalformedQueryPolicyNarrowingError =>
     new MalformedQueryPolicyNarrowingError(message);
   const cloned = cloneImmutableJson(value, '$.policyNarrowing', invalid);
@@ -623,15 +989,25 @@ function parsePolicyNarrowing(value: unknown): PredicateLoweringPlan {
   if (!isRecord(cloned.filter)) {
     throw invalid('policy narrowing filter must be an object');
   }
-  assertPredicateLoweringPlan(cloned.filterPlan, cloned.filter, invalid);
-  return cloned.filterPlan as unknown as PredicateLoweringPlan;
+  const parameterized =
+    isRecord(cloned.filterPlan) &&
+    cloned.filterPlan.schemaVersion ===
+      PARAMETERIZED_PREDICATE_LOWERING_PLAN_VERSION;
+  assertPredicateLoweringPlan(
+    cloned.filterPlan,
+    cloned.filter,
+    invalid,
+    parameterized,
+  );
+  return cloned.filterPlan as unknown as QueryFilterLoweringPlan;
 }
 
 function assertPredicateLoweringPlan(
   value: unknown,
   predicate: Readonly<Record<string, unknown>>,
   error: (message: string) => Error,
-): asserts value is PredicateLoweringPlan {
+  parameterizedExpected = false,
+): asserts value is QueryFilterLoweringPlan {
   if (!isRecord(value)) {
     throw error('predicate lowering plan must be an object');
   }
@@ -649,7 +1025,10 @@ function assertPredicateLoweringPlan(
   );
   if (
     value.kind !== 'predicateLoweringPlan' ||
-    value.schemaVersion !== PREDICATE_LOWERING_PLAN_VERSION ||
+    value.schemaVersion !==
+      (parameterizedExpected
+        ? PARAMETERIZED_PREDICATE_LOWERING_PLAN_VERSION
+        : PREDICATE_LOWERING_PLAN_VERSION) ||
     value.positionProfileVersion !== PREDICATE_POSITION_PROFILE_VERSION ||
     typeof value.predicateDigest !== 'string' ||
     !/^[0-9a-f]{64}$/.test(value.predicateDigest) ||
@@ -657,14 +1036,27 @@ function assertPredicateLoweringPlan(
   ) {
     throw error('predicate lowering plan identity is invalid');
   }
-  const predicateReceipt = inspectPredicateForExecution(predicate, {
-    bindingPosition: 'queryFilter',
-    resolveComparison: () => ({ presence: 'absent' }),
-  });
-  if (predicateReceipt.outcome !== 'evaluated') {
-    throw error('predicate lowering input is invalid');
+  if (parameterizedExpected) {
+    if (
+      VersionedPredicateExpressionSchema.safeParse(predicate).success === false
+    ) {
+      throw error('parameterized predicate lowering input is invalid');
+    }
+  } else {
+    const predicateReceipt = inspectPredicateForExecution(predicate, {
+      bindingPosition: 'queryFilter',
+      resolveComparison: () => ({ presence: 'absent' }),
+    });
+    if (predicateReceipt.outcome !== 'evaluated') {
+      throw error('predicate lowering input is invalid');
+    }
   }
-  const observed = inspectLoweringNode(value.root, 1, error);
+  const observed = inspectLoweringNode(
+    value.root,
+    1,
+    error,
+    parameterizedExpected,
+  );
   assertLoweringMatchesPredicate(value.root, predicate, error);
   const expectedCost =
     isRecord(value.root) &&
@@ -739,6 +1131,8 @@ function inspectLoweringNode(
   value: unknown,
   depth: number,
   error: (message: string) => Error,
+  parameterized: boolean,
+  parameterTypes?: Map<string, Record<string, unknown>>,
 ): Readonly<{
   comparisonCosts: PredicateCostClass[];
 }> {
@@ -765,6 +1159,7 @@ function inspectLoweringNode(
           'kind',
           'loweringRowId',
           'operator',
+          ...(parameterized ? ['sourceFieldType'] : []),
           'value',
         ],
         error,
@@ -772,11 +1167,52 @@ function inspectLoweringNode(
       assertCanonicalId(value.fieldId, 'fieldId', error);
       if (
         !isRecord(value.value) ||
-        !['equals', 'notEquals', 'lessThan', 'greaterThan'].includes(
-          String(value.operator),
-        )
+        (parameterized &&
+          (!isRecord(value.sourceFieldType) ||
+            FieldTypeSchema.safeParse(value.sourceFieldType).success ===
+              false ||
+            value.sourceFieldType.schemaVersion !== 'v3')) ||
+        !(
+          parameterized
+            ? [
+                'equals',
+                'notEquals',
+                'lessThan',
+                'greaterThan',
+                'greaterThanOrEqual',
+                'lessThanOrEqual',
+              ]
+            : ['equals', 'notEquals', 'lessThan', 'greaterThan']
+        ).includes(String(value.operator))
       ) {
         throw error('predicate comparison lowering is invalid');
+      }
+      if (parameterized && value.value.kind === 'queryParameterReference') {
+        assertExactKeys(
+          value.value,
+          ['kind', 'parameterId', 'schemaVersion'],
+          error,
+        );
+        assertCanonicalId(value.value.parameterId, 'parameterId', error);
+        if (value.value.schemaVersion !== 'v3') {
+          throw error('aggregate lowering parameter reference is invalid');
+        }
+        const parameterId = value.value.parameterId as string;
+        const sourceFieldType = value.sourceFieldType as Record<
+          string,
+          unknown
+        >;
+        const prior = parameterTypes?.get(parameterId);
+        if (
+          prior &&
+          canonicalizeAndHash(prior).contentHash !==
+            canonicalizeAndHash(sourceFieldType).contentHash
+        ) {
+          throw error(
+            'aggregate lowering uses one parameter with incompatible field types',
+          );
+        }
+        parameterTypes?.set(parameterId, sourceFieldType);
       }
       const folded =
         value.loweringRowId ===
@@ -789,8 +1225,23 @@ function inspectLoweringNode(
           'northstar.predicate-lowering/tenant-scan-comparison-v1' &&
         (value.comparisonMode === 'binary' ||
           value.comparisonMode === 'unicodeCaseFold') &&
+        (!parameterized ||
+          (value.value.kind !== 'queryParameterReference' &&
+            ['equals', 'notEquals', 'lessThan', 'greaterThan'].includes(
+              String(value.operator),
+            ))) &&
         value.costClass === 'tenantBoundedScan';
-      if (!folded && !bounded) {
+      const parameterizedComparison =
+        parameterized &&
+        value.loweringRowId ===
+          'northstar.predicate-lowering/parameterized-comparison-v1' &&
+        (value.comparisonMode === 'binary' ||
+          value.comparisonMode === 'unicodeCaseFold') &&
+        (value.value.kind === 'queryParameterReference' ||
+          value.operator === 'greaterThanOrEqual' ||
+          value.operator === 'lessThanOrEqual') &&
+        value.costClass === 'tenantBoundedScan';
+      if (!folded && !bounded && !parameterizedComparison) {
         throw error('predicate comparison lowering row is not admitted');
       }
       return {
@@ -799,7 +1250,13 @@ function inspectLoweringNode(
     }
     case 'notPredicate': {
       assertExactKeys(value, ['kind', 'term'], error);
-      return inspectLoweringNode(value.term, depth + 1, error);
+      return inspectLoweringNode(
+        value.term,
+        depth + 1,
+        error,
+        parameterized,
+        parameterTypes,
+      );
     }
     case 'allPredicate':
     case 'anyPredicate': {
@@ -808,7 +1265,13 @@ function inspectLoweringNode(
         throw error('predicate Boolean terms must be an array');
       }
       const terms = value.terms.map((term) =>
-        inspectLoweringNode(term, depth + 1, error),
+        inspectLoweringNode(
+          term,
+          depth + 1,
+          error,
+          parameterized,
+          parameterTypes,
+        ),
       );
       return {
         comparisonCosts: terms.flatMap((term) => term.comparisonCosts),
@@ -816,6 +1279,252 @@ function inspectLoweringNode(
     }
     default:
       throw error('predicate lowering node kind is not admitted');
+  }
+}
+
+function assertParameterizedPlanReferences(
+  plan: unknown,
+  declaredParameterTypes: ReadonlyMap<string, Record<string, unknown>>,
+  error: (message: string) => Error,
+): void {
+  if (!isRecord(plan) || !isRecord(plan.root)) {
+    throw error('aggregate parameterized lowering plan is invalid');
+  }
+  const observed = new Map<string, Record<string, unknown>>();
+  inspectLoweringNode(plan.root, 1, error, true, observed);
+  if (
+    observed.size !== declaredParameterTypes.size ||
+    [...declaredParameterTypes].some(
+      ([parameterId, parameterType]) =>
+        !observed.has(parameterId) ||
+        canonicalizeAndHash(observed.get(parameterId)!).contentHash !==
+          canonicalizeAndHash(parameterType).contentHash,
+    ) ||
+    [...observed].some(
+      ([parameterId]) => !declaredParameterTypes.has(parameterId),
+    )
+  ) {
+    throw error(
+      'aggregate lowering does not use exactly the declared parameter types',
+    );
+  }
+}
+
+function bindQueryParameters(
+  definition: RegisteredSemanticQueryDefinition,
+  argumentsValue: ImmutableJsonValue,
+): Readonly<Record<string, ImmutableJsonValue>> {
+  if (definition.queryType !== 'aggregate') return Object.freeze({});
+  if (!isRecord(argumentsValue) || !Array.isArray(definition.parameters)) {
+    throw new MalformedSemanticQueryRequestError(
+      'aggregate query arguments must be an object',
+    );
+  }
+  const expected = definition.parameters.map(
+    (parameter) => parameter.parameterId,
+  );
+  const actual = Object.keys(argumentsValue).sort();
+  if (actual.join('\0') !== [...expected].sort().join('\0')) {
+    throw new MalformedSemanticQueryRequestError(
+      'aggregate query arguments do not match the declared parameters',
+    );
+  }
+  const bound: Record<string, ImmutableJsonValue> = {};
+  for (const parameter of definition.parameters) {
+    const value = argumentsValue[parameter.parameterId];
+    if (!queryParameterValueMatches(parameter.parameterType, value)) {
+      throw new MalformedSemanticQueryRequestError(
+        `aggregate query argument ${parameter.parameterId} violates its declared type`,
+      );
+    }
+    bound[parameter.parameterId] = value!;
+  }
+  return Object.freeze(bound);
+}
+
+function queryParameterValueMatches(
+  type: Readonly<Record<string, ImmutableJsonValue>>,
+  value: ImmutableJsonValue | undefined,
+): boolean {
+  switch (type.kind) {
+    case 'booleanFieldType':
+      return typeof value === 'boolean';
+    case 'textFieldType':
+      return (
+        typeof value === 'string' &&
+        Number.isSafeInteger(type.maximumLength) &&
+        [...value].length <= Number(type.maximumLength)
+      );
+    case 'enumFieldType':
+      return (
+        typeof value === 'string' &&
+        Array.isArray(type.options) &&
+        type.options.some(
+          (option) => isRecord(option) && option.optionId === value,
+        )
+      );
+    case 'integerFieldType':
+      return (
+        typeof value === 'string' && /^(?:0|-[1-9]\d*|[1-9]\d*)$/u.test(value)
+      );
+    case 'exactDecimalFieldType':
+    case 'moneyFieldType':
+    case 'quantityFieldType':
+      return (
+        typeof value === 'string' &&
+        decimalArgumentFits(value, type.precision, type.scale)
+      );
+    case 'dateFieldType':
+      return typeof value === 'string' && isoDateArgumentFits(value);
+    case 'timeFieldType':
+      return (
+        typeof value === 'string' && isoTimeArgumentFits(value, type.precision)
+      );
+    case 'dateTimeFieldType':
+      return (
+        typeof value === 'string' &&
+        isoDateTimeArgumentFits(value, type.precision, type.timezoneSemantics)
+      );
+    default:
+      return false;
+  }
+}
+
+function isoDateArgumentFits(value: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(value);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (month < 1 || month > 12 || day < 1) return false;
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return day <= days[month - 1]!;
+}
+
+function isoTimeArgumentFits(
+  value: string,
+  precision: ImmutableJsonValue | undefined,
+): boolean {
+  if (precision !== 'second' && precision !== 'millisecond') return false;
+  const fraction = precision === 'millisecond' ? '\\.\\d{3}' : '';
+  const match = new RegExp(`^(\\d{2}):(\\d{2}):(\\d{2})${fraction}$`, 'u').exec(
+    value,
+  );
+  return (
+    match !== null &&
+    Number(match[1]) < 24 &&
+    Number(match[2]) < 60 &&
+    Number(match[3]) < 60
+  );
+}
+
+function isoDateTimeArgumentFits(
+  value: string,
+  precision: ImmutableJsonValue | undefined,
+  timezoneSemantics: ImmutableJsonValue | undefined,
+): boolean {
+  if (
+    (precision !== 'second' && precision !== 'millisecond') ||
+    (timezoneSemantics !== 'utcInstant' &&
+      timezoneSemantics !== 'offsetDateTime')
+  ) {
+    return false;
+  }
+  const fraction = precision === 'millisecond' ? '(\\.\\d{3})' : '';
+  const zone =
+    timezoneSemantics === 'utcInstant' ? '(Z)' : '([+-](\\d{2}):(\\d{2}))';
+  const match = new RegExp(
+    `^(\\d{4}-\\d{2}-\\d{2})T(\\d{2}:\\d{2}:\\d{2})${fraction}${zone}$`,
+    'u',
+  ).exec(value);
+  if (!match || !isoDateArgumentFits(match[1]!)) return false;
+  const time = `${match[2]}${precision === 'millisecond' ? match[3] : ''}`;
+  if (!isoTimeArgumentFits(time, precision)) return false;
+  if (timezoneSemantics === 'utcInstant') return true;
+  const zoneValue = match.at(-3);
+  const offsetHour = Number(match.at(-2));
+  const offsetMinute = Number(match.at(-1));
+  if (zoneValue === '-00:00') return false;
+  return (
+    offsetMinute < 60 &&
+    (offsetHour < 14 || (offsetHour === 14 && offsetMinute === 0))
+  );
+}
+
+function decimalArgumentFits(
+  value: string,
+  precision: ImmutableJsonValue | undefined,
+  scale: ImmutableJsonValue | undefined,
+): boolean {
+  if (
+    !Number.isSafeInteger(precision) ||
+    !Number.isSafeInteger(scale) ||
+    !/^-?(?:0|[1-9]\d*)(?:\.\d*[1-9])?$/u.test(value) ||
+    value === '-0'
+  ) {
+    return false;
+  }
+  const unsigned = value.startsWith('-') ? value.slice(1) : value;
+  const [integer = '', fraction = ''] = unsigned.split('.');
+  const integerDigits = integer === '0' ? 0 : integer.length;
+  return (
+    fraction.length <= Number(scale) &&
+    integerDigits <= Number(precision) - Number(scale)
+  );
+}
+
+function requireSemanticAggregateResult(
+  definition: RegisteredAggregateQueryDefinition,
+  result: SemanticAggregateResultEnvelope | SemanticQueryResultEnvelope,
+): asserts result is SemanticAggregateResultEnvelope {
+  const malformed = (message: string): MalformedPinnedQueryCatalogError =>
+    new MalformedPinnedQueryCatalogError(message);
+  if (!isRecord(result)) {
+    throw malformed('aggregate executor returned a malformed result');
+  }
+  assertExactKeys(
+    result,
+    ['kind', 'outcome', 'queryId', 'schemaVersion', 'value'],
+    malformed,
+  );
+  if (
+    result.kind !== 'semanticAggregateResult' ||
+    result.schemaVersion !== SEMANTIC_AGGREGATE_RESULT_VERSION ||
+    result.outcome !== 'exact' ||
+    result.queryId !== definition.queryId ||
+    !isRecord(result.value) ||
+    !definition.aggregate
+  ) {
+    throw new MalformedPinnedQueryCatalogError(
+      'aggregate executor returned a malformed result',
+    );
+  }
+  const expected = definition.aggregate.resultType;
+  const quantity = expected.kind === 'quantityAggregateResultType';
+  assertExactKeys(
+    result.value,
+    quantity
+      ? ['baseUnitId', 'kind', 'precision', 'scale', 'selectionId', 'value']
+      : ['kind', 'precision', 'scale', 'selectionId', 'value'],
+    malformed,
+  );
+  const valueShapeMatches =
+    quantity && result.value.kind === 'quantityResult'
+      ? isRecord(expected.baseUnit) &&
+        result.value.baseUnitId === expected.baseUnit.targetId
+      : !quantity && result.value.kind === 'exactDecimalResult';
+  if (
+    !valueShapeMatches ||
+    result.value.precision !== 38 ||
+    result.value.scale !== expected.scale ||
+    result.value.selectionId !== definition.aggregate.selectionId ||
+    typeof result.value.value !== 'string' ||
+    !decimalArgumentFits(result.value.value, 38, expected.scale)
+  ) {
+    throw new MalformedPinnedQueryCatalogError(
+      'aggregate executor result does not match the compiled contract',
+    );
   }
 }
 
