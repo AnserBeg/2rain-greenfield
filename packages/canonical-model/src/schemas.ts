@@ -91,59 +91,49 @@ export const CanonicalReferenceSchema = z.strictObject({
   targetId: CanonicalIdSchema,
 });
 
-export type PredicateExpression =
+type PredicateExpressionShape<
+  SchemaVersion extends CanonicalLanguageVersion,
+  Operator extends string,
+  Value,
+> =
   | {
       kind: 'booleanPredicate';
-      schemaVersion: CanonicalLanguageVersion;
+      schemaVersion: SchemaVersion;
       value: boolean;
     }
   | {
       field: z.infer<typeof CanonicalReferenceSchema>;
       kind: 'fieldComparisonPredicate';
-      operator: 'equals' | 'notEquals' | 'lessThan' | 'greaterThan';
-      schemaVersion: CanonicalLanguageVersion;
-      value: CanonicalScalar;
+      operator: Operator;
+      schemaVersion: SchemaVersion;
+      value: Value;
     }
   | {
       kind: 'allPredicate' | 'anyPredicate';
-      schemaVersion: CanonicalLanguageVersion;
-      terms: PredicateExpression[];
+      schemaVersion: SchemaVersion;
+      terms: PredicateExpressionShape<SchemaVersion, Operator, Value>[];
     }
   | {
       kind: 'notPredicate';
-      schemaVersion: CanonicalLanguageVersion;
-      term: PredicateExpression;
+      schemaVersion: SchemaVersion;
+      term: PredicateExpressionShape<SchemaVersion, Operator, Value>;
     };
 
-export type PredicateExpressionV3 =
-  | {
-      kind: 'booleanPredicate';
-      schemaVersion: 'v3';
-      value: boolean;
-    }
-  | {
-      field: z.infer<typeof CanonicalReferenceSchema>;
-      kind: 'fieldComparisonPredicate';
-      operator:
-        | 'equals'
-        | 'notEquals'
-        | 'lessThan'
-        | 'greaterThan'
-        | 'greaterThanOrEqual'
-        | 'lessThanOrEqual';
-      schemaVersion: 'v3';
-      value: CanonicalScalar | QueryParameterReference;
-    }
-  | {
-      kind: 'allPredicate' | 'anyPredicate';
-      schemaVersion: 'v3';
-      terms: PredicateExpressionV3[];
-    }
-  | {
-      kind: 'notPredicate';
-      schemaVersion: 'v3';
-      term: PredicateExpressionV3;
-    };
+type LegacyPredicateOperator =
+  'equals' | 'notEquals' | 'lessThan' | 'greaterThan';
+type V3PredicateOperator =
+  LegacyPredicateOperator | 'greaterThanOrEqual' | 'lessThanOrEqual';
+
+export type PredicateExpression = PredicateExpressionShape<
+  CanonicalLanguageVersion,
+  LegacyPredicateOperator,
+  CanonicalScalar
+>;
+export type PredicateExpressionV3 = PredicateExpressionShape<
+  'v3',
+  V3PredicateOperator,
+  CanonicalScalar | QueryParameterReference
+>;
 
 export type VersionedPredicateExpression =
   PredicateExpression | PredicateExpressionV3;
@@ -314,114 +304,75 @@ const QueryParameterReferenceSchema: z.ZodType<QueryParameterReference> =
     schemaVersion: v3NodeVersion,
   });
 
-const legacyPredicateExpressionSchema: z.ZodType<PredicateExpression> = z.lazy(
-  () =>
+function makePredicateExpressionSchema(
+  versionSchema: z.ZodType,
+  operatorSchema: z.ZodType,
+  valueSchema: z.ZodType,
+): z.ZodType<unknown> {
+  const expression: z.ZodType<unknown> = z.lazy(() =>
     z.union([
       z.strictObject({
         kind: z.literal('booleanPredicate'),
-        schemaVersion: legacyNodeVersion,
+        schemaVersion: versionSchema,
         value: z.boolean(),
       }),
       z.strictObject({
         field: CanonicalReferenceSchema,
         kind: z.literal('fieldComparisonPredicate'),
-        operator: z.enum(['equals', 'notEquals', 'lessThan', 'greaterThan']),
-        schemaVersion: legacyNodeVersion,
-        value: legacyCanonicalScalarSchema,
+        operator: operatorSchema,
+        schemaVersion: versionSchema,
+        value: valueSchema,
       }),
       z.strictObject({
         kind: z.literal('allPredicate'),
-        schemaVersion: legacyNodeVersion,
-        terms: z.array(legacyPredicateExpressionSchema),
+        schemaVersion: versionSchema,
+        terms: z.array(expression),
       }),
       z.strictObject({
         kind: z.literal('anyPredicate'),
-        schemaVersion: legacyNodeVersion,
-        terms: z.array(legacyPredicateExpressionSchema),
+        schemaVersion: versionSchema,
+        terms: z.array(expression),
       }),
       z.strictObject({
         kind: z.literal('notPredicate'),
-        schemaVersion: legacyNodeVersion,
-        term: legacyPredicateExpressionSchema,
-      }),
-    ]),
-);
-
-const v3PredicateExpressionSchema: z.ZodType<PredicateExpressionV3> = z.lazy(
-  () =>
-    z.union([
-      z.strictObject({
-        kind: z.literal('booleanPredicate'),
-        schemaVersion: v3NodeVersion,
-        value: z.boolean(),
-      }),
-      z.strictObject({
-        field: CanonicalReferenceSchema,
-        kind: z.literal('fieldComparisonPredicate'),
-        operator: z.enum([
-          'equals',
-          'notEquals',
-          'lessThan',
-          'greaterThan',
-          'greaterThanOrEqual',
-          'lessThanOrEqual',
-        ]),
-        schemaVersion: v3NodeVersion,
-        value: z.union([
-          v3CanonicalScalarSchema,
-          QueryParameterReferenceSchema,
-        ]),
-      }),
-      z.strictObject({
-        kind: z.literal('allPredicate'),
-        schemaVersion: v3NodeVersion,
-        terms: z.array(v3PredicateExpressionSchema),
-      }),
-      z.strictObject({
-        kind: z.literal('anyPredicate'),
-        schemaVersion: v3NodeVersion,
-        terms: z.array(v3PredicateExpressionSchema),
-      }),
-      z.strictObject({
-        kind: z.literal('notPredicate'),
-        schemaVersion: v3NodeVersion,
-        term: v3PredicateExpressionSchema,
-      }),
-    ]),
-);
-
-const v3CompatibilityPredicateExpressionSchema: z.ZodType<PredicateExpression> =
-  z.lazy(() =>
-    z.union([
-      z.strictObject({
-        kind: z.literal('booleanPredicate'),
-        schemaVersion: v3NodeVersion,
-        value: z.boolean(),
-      }),
-      z.strictObject({
-        field: CanonicalReferenceSchema,
-        kind: z.literal('fieldComparisonPredicate'),
-        operator: z.enum(['equals', 'notEquals', 'lessThan', 'greaterThan']),
-        schemaVersion: v3NodeVersion,
-        value: v3CanonicalScalarSchema,
-      }),
-      z.strictObject({
-        kind: z.literal('allPredicate'),
-        schemaVersion: v3NodeVersion,
-        terms: z.array(v3CompatibilityPredicateExpressionSchema),
-      }),
-      z.strictObject({
-        kind: z.literal('anyPredicate'),
-        schemaVersion: v3NodeVersion,
-        terms: z.array(v3CompatibilityPredicateExpressionSchema),
-      }),
-      z.strictObject({
-        kind: z.literal('notPredicate'),
-        schemaVersion: v3NodeVersion,
-        term: v3CompatibilityPredicateExpressionSchema,
+        schemaVersion: versionSchema,
+        term: expression,
       }),
     ]),
   );
+  return expression;
+}
+
+const legacyPredicateOperators = z.enum([
+  'equals',
+  'notEquals',
+  'lessThan',
+  'greaterThan',
+]);
+const v3PredicateOperators = z.enum([
+  'equals',
+  'notEquals',
+  'lessThan',
+  'greaterThan',
+  'greaterThanOrEqual',
+  'lessThanOrEqual',
+]);
+
+const legacyPredicateExpressionSchema = makePredicateExpressionSchema(
+  legacyNodeVersion,
+  legacyPredicateOperators,
+  legacyCanonicalScalarSchema,
+) as z.ZodType<PredicateExpression>;
+const v3PredicateExpressionSchema = makePredicateExpressionSchema(
+  v3NodeVersion,
+  v3PredicateOperators,
+  z.union([v3CanonicalScalarSchema, QueryParameterReferenceSchema]),
+) as z.ZodType<PredicateExpressionV3>;
+const v3CompatibilityPredicateExpressionSchema = makePredicateExpressionSchema(
+  v3NodeVersion,
+  legacyPredicateOperators,
+  v3CanonicalScalarSchema,
+) as z.ZodType<PredicateExpression>;
 
 export const PredicateExpressionSchema: z.ZodType<PredicateExpression> =
   z.union([
