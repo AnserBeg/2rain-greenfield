@@ -529,10 +529,10 @@ test('q1 required sum executes through the real gateway with typed parameters an
       assert.ok(stockIndex);
       const rls = await runtime.adminPool.query<{
         forced: boolean;
-        policy_count: string;
+        policy_commands: string[];
       }>(
         `SELECT c.relforcerowsecurity AS forced,
-                count(p.policyname)::text AS policy_count
+                array_agg(p.cmd ORDER BY p.cmd) AS policy_commands
            FROM pg_catalog.pg_class AS c
            JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace
            LEFT JOIN pg_catalog.pg_policies AS p
@@ -541,7 +541,14 @@ test('q1 required sum executes through the real gateway with typed parameters an
           GROUP BY c.relforcerowsecurity`,
         [party.physicalTableName],
       );
-      assert.deepEqual(rls.rows, [{ forced: true, policy_count: '1' }]);
+      assert.deepEqual(rls.rows, [
+        {
+          forced: true,
+          policy_commands: [
+            ...runtime.storage.rlsGrantTemplate.policyCommands,
+          ].sort(),
+        },
+      ]);
 
       const arguments_ = {
         [aggregateIds.atTimeParameter]: '2026-06-01T00:00:00.000Z',

@@ -2328,7 +2328,8 @@ function decimalFits(
   if (
     precision === null ||
     scale === null ||
-    !/^(?:0|-[1-9]\d*|[1-9]\d*)(?:\.\d*[1-9])?$/u.test(value)
+    !/^-?(?:0|[1-9]\d*)(?:\.\d*[1-9])?$/u.test(value) ||
+    value === '-0'
   ) {
     return false;
   }
