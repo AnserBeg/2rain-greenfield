@@ -48,6 +48,175 @@ export class SchemaDriftError extends Error {
   override readonly name = 'SchemaDriftError';
 }
 
+export type InventoryNegativeStockMode = 'reject' | 'allowWithFlag' | 'allow';
+export type InventoryReasonRequirement = 'codeOnly' | 'codeAndNarrative';
+export type InventoryPostingRole =
+  'adjustment' | 'transfer' | 'count' | 'correction' | 'reBaseline';
+
+export interface InventoryPostingConfiguration {
+  readonly approvalThresholds: Readonly<
+    Record<InventoryPostingRole, string | null>
+  >;
+  readonly contractReleaseRoot: string;
+  readonly maximumBackdateDays: number;
+  readonly negativeStock: InventoryNegativeStockMode;
+  readonly reasonRequirements: Readonly<
+    Record<InventoryPostingRole, InventoryReasonRequirement>
+  >;
+  readonly revision: string;
+  readonly version: 1;
+}
+
+export class InventoryPersistenceError extends Error {
+  override readonly name = 'InventoryPersistenceError';
+
+  constructor(
+    readonly code:
+      | 'INVENTORY_POSTING_CONFIGURATION_INVALID'
+      | 'INVENTORY_POSTING_CONFIGURATION_UNDECLARED',
+    message: string,
+  ) {
+    super(`${code}: ${message}`);
+  }
+}
+
+interface InventoryPostingConfigurationRow {
+  adjustment_approval_threshold: string | null;
+  adjustment_reason_requirement: string;
+  configuration_version: number;
+  contract_release_root: string;
+  correction_approval_threshold: string | null;
+  correction_reason_requirement: string;
+  count_approval_threshold: string | null;
+  count_reason_requirement: string;
+  maximum_backdate_days: number;
+  negative_stock: string;
+  rebaseline_approval_threshold: string | null;
+  rebaseline_reason_requirement: string;
+  revision: string;
+  transfer_approval_threshold: string | null;
+  transfer_reason_requirement: string;
+}
+
+export async function loadInventoryPostingConfiguration(
+  client: PoolClient,
+  scope: {
+    readonly environmentId: string;
+    readonly legalEntityId: string;
+    readonly tenantId: string;
+  },
+): Promise<InventoryPostingConfiguration> {
+  const result = await client.query<InventoryPostingConfigurationRow>(
+    `SELECT *
+       FROM platform.load_inventory_posting_configuration($1, $2, $3)`,
+    [scope.tenantId, scope.environmentId, scope.legalEntityId],
+  );
+  const row = result.rows[0];
+  if (!row) {
+    throw new InventoryPersistenceError(
+      'INVENTORY_POSTING_CONFIGURATION_UNDECLARED',
+      `no release-recorded configuration exists for ${scope.tenantId}/${scope.environmentId}/${scope.legalEntityId}`,
+    );
+  }
+  if (result.rows.length !== 1) {
+    throw new InventoryPersistenceError(
+      'INVENTORY_POSTING_CONFIGURATION_INVALID',
+      'configuration scope resolved more than one row',
+    );
+  }
+  const negativeStock = requiredInventoryNegativeStock(row.negative_stock);
+  const reasonRequirements = Object.freeze({
+    adjustment: requiredInventoryReason(
+      row.adjustment_reason_requirement,
+      'adjustment',
+    ),
+    transfer: requiredInventoryReason(
+      row.transfer_reason_requirement,
+      'transfer',
+    ),
+    count: requiredInventoryReason(row.count_reason_requirement, 'count'),
+    correction: requiredInventoryReason(
+      row.correction_reason_requirement,
+      'correction',
+    ),
+    reBaseline: requiredInventoryReason(
+      row.rebaseline_reason_requirement,
+      'reBaseline',
+    ),
+  });
+  if (
+    row.configuration_version !== 1 ||
+    !Number.isInteger(row.maximum_backdate_days) ||
+    row.maximum_backdate_days < 0 ||
+    row.maximum_backdate_days > 3650 ||
+    !/^[0-9a-f]{64}$/u.test(row.contract_release_root) ||
+    !/^[1-9][0-9]*$/u.test(row.revision)
+  ) {
+    throw new InventoryPersistenceError(
+      'INVENTORY_POSTING_CONFIGURATION_INVALID',
+      'persisted configuration violates the v1 storage contract',
+    );
+  }
+  return Object.freeze({
+    approvalThresholds: Object.freeze({
+      adjustment: normalizeInventoryThreshold(
+        row.adjustment_approval_threshold,
+      ),
+      transfer: normalizeInventoryThreshold(row.transfer_approval_threshold),
+      count: normalizeInventoryThreshold(row.count_approval_threshold),
+      correction: normalizeInventoryThreshold(
+        row.correction_approval_threshold,
+      ),
+      reBaseline: normalizeInventoryThreshold(
+        row.rebaseline_approval_threshold,
+      ),
+    }),
+    contractReleaseRoot: row.contract_release_root,
+    maximumBackdateDays: row.maximum_backdate_days,
+    negativeStock,
+    reasonRequirements,
+    revision: row.revision,
+    version: 1,
+  });
+}
+
+function requiredInventoryNegativeStock(
+  value: string,
+): InventoryNegativeStockMode {
+  if (value === 'reject' || value === 'allowWithFlag' || value === 'allow') {
+    return value;
+  }
+  throw new InventoryPersistenceError(
+    'INVENTORY_POSTING_CONFIGURATION_INVALID',
+    `unknown negative-stock mode ${value}`,
+  );
+}
+
+function requiredInventoryReason(
+  value: string,
+  role: InventoryPostingRole,
+): InventoryReasonRequirement {
+  if (value === 'codeOnly' || value === 'codeAndNarrative') return value;
+  throw new InventoryPersistenceError(
+    'INVENTORY_POSTING_CONFIGURATION_INVALID',
+    `unknown ${role} reason requirement ${value}`,
+  );
+}
+
+function normalizeInventoryThreshold(value: string | null): string | null {
+  if (value === null) return null;
+  if (!/^(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$/u.test(value)) {
+    throw new InventoryPersistenceError(
+      'INVENTORY_POSTING_CONFIGURATION_INVALID',
+      `invalid approval threshold ${value}`,
+    );
+  }
+  const normalized = value.includes('.')
+    ? value.replace(/0+$/u, '').replace(/\.$/u, '')
+    : value;
+  return normalized === '' ? '0' : normalized;
+}
+
 const migrationFilePattern = /^(\d{4})_[a-z0-9_]+\.sql$/;
 const transactionControlPattern =
   /^\s*(?:ABORT|BEGIN|COMMIT|END|ROLLBACK|START\s+TRANSACTION)\b/im;

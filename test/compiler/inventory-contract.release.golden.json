@@ -86,6 +86,10 @@
       },
       {
         "classification": "entityOwned",
+        "familyId": "inventory_period_lock"
+      },
+      {
+        "classification": "entityOwned",
         "familyId": "reservation"
       },
       {
@@ -109,6 +113,11 @@
         "targetFamilyId": "inventory_transaction"
       },
       {
+        "semantics": "sameEntity",
+        "sourceFamilyId": "inventory_movement",
+        "targetFamilyId": "inventory_transaction_line"
+      },
+      {
         "semantics": "crossEntityAllowed",
         "sourceFamilyId": "inventory_movement",
         "targetFamilyId": "item"
@@ -117,6 +126,11 @@
         "semantics": "crossEntityAllowed",
         "sourceFamilyId": "party_role",
         "targetFamilyId": "party"
+      },
+      {
+        "semantics": "sameEntity",
+        "sourceFamilyId": "inventory_transaction_line",
+        "targetFamilyId": "inventory_transaction"
       }
     ],
     "undeclaredFamily": {
@@ -174,9 +188,9 @@
     ],
     "kind": "quantityOnlyMovement"
   },
-  "releaseRoot": "c65517349623a30f3ddce75e57dca0af404646e82f27e73ce0b6586b4c1d17fb",
+  "releaseRoot": "bd977ff0a00db745e79b7d8e158cb55863319f9f37f7674d77b618e85272d116",
   "storageTargetPayloadVersions": {
-    "entityOwned": "northstar.storage-target-payload/v2",
+    "entityOwned": "northstar.storage-target-payload/v3",
     "tenantShared": "northstar.storage-target-payload/v1"
   },
   "stockDimensions": ["legalEntityId", "itemId", "locationId"]

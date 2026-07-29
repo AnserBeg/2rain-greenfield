@@ -15,6 +15,15 @@ import {
 // exact is a two-way ratchet: another branch fails, and resolving either one
 // also fails until the routed debt is deliberately removed from this record.
 const routedPlatformDebt: readonly ModulePressLawViolation[] = [
+  // Row 1e-2 owns this accepted G3-P1a module identity, newly visible when
+  // Inventory became definition-backed; keep it exact until that row lands.
+  {
+    file: 'packages/compiler/src/conformance.ts',
+    line: 1317,
+    message: 'generic press references inventory identity northstar.inventory',
+    moduleDirectory: 'inventory',
+    ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
+  },
   {
     file: 'packages/postgres-provider/src/saved-filter-executor.ts',
     line: 101,
@@ -37,11 +46,12 @@ test('one auto-discovered guard covers every definition-backed product module', 
   console.log(formatModulePressLaw(result));
   assert.deepEqual(result.moduleDirectories, [
     'catalog',
+    'inventory',
     'location',
     'party',
     'platform',
   ]);
-  assert.equal(result.modulesRead, 4);
+  assert.equal(result.modulesRead, 5);
   assert.ok(
     result.productionFilesRead > 0,
     'press-law guard read zero production files',
@@ -55,7 +65,12 @@ test('consolidated guard red: the previously omitted Platform module is observed
   const platformViolations = result.violations.filter(
     (violation) => violation.moduleDirectory === 'platform',
   );
-  assert.deepEqual(platformViolations, routedPlatformDebt);
+  assert.deepEqual(
+    platformViolations,
+    routedPlatformDebt.filter(
+      (violation) => violation.moduleDirectory === 'platform',
+    ),
+  );
   assert.ok(
     platformViolations.some(
       (violation) => violation.ruleId === 'PRESS006_MODULE_ID_IN_PRESS',
@@ -118,6 +133,22 @@ test('consolidated guard derives generated query and operation local IDs', () =>
         ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
       },
     ]);
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});
+
+test('consolidated guard distinguishes a module namespace from a longer contract namespace', () => {
+  const root = createArchitectureFixture({
+    'apps/api/src/generic.ts':
+      "export const schema = 'northstar.widget-contract/v1';\n",
+    'packages/domain/src/widget/definition.ts': [
+      "export const WIDGET_NAMESPACE = 'northstar.widget';",
+      'const entityId = `${WIDGET_NAMESPACE}:entity.widget`;',
+    ].join('\n'),
+  });
+  try {
+    assert.deepEqual(checkModulePressLaw(root).violations, []);
   } finally {
     removeArchitectureFixture(root);
   }

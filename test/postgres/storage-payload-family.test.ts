@@ -5,7 +5,10 @@ import {
   STORAGE_TARGET_PAYLOAD_VERSION,
   SUPPORTED_STORAGE_TARGET_PAYLOAD_VERSIONS,
 } from '../../packages/compiler/src/index.js';
-import { STORAGE_TARGET_PAYLOAD_V2_VERSION } from '../../packages/compiler/src/protocol.js';
+import {
+  STORAGE_TARGET_PAYLOAD_V2_VERSION,
+  STORAGE_TARGET_PAYLOAD_V3_VERSION,
+} from '../../packages/compiler/src/protocol.js';
 import {
   assertSupportedStorageTargetArtifactVersions,
   ModuleRuntimeInterpreterError,
@@ -15,6 +18,7 @@ test('the runtime admits the compiler-owned storage payload family and rejects u
   assert.deepEqual(SUPPORTED_STORAGE_TARGET_PAYLOAD_VERSIONS, [
     STORAGE_TARGET_PAYLOAD_VERSION,
     STORAGE_TARGET_PAYLOAD_V2_VERSION,
+    STORAGE_TARGET_PAYLOAD_V3_VERSION,
   ]);
 
   for (const version of SUPPORTED_STORAGE_TARGET_PAYLOAD_VERSIONS) {
