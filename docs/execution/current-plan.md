@@ -29,6 +29,37 @@ current slot.
 - Acceptance requires the **full CI matrix green at the integrated SHA** (not a
   packet-chosen subset) — the rule PR-1 put in force.
 
+### Standing prioritization rule — user directive 2026-07-28 (binding)
+
+**A working inventory module is the goal, as soon as possible.** Every packet
+selection passes this filter, in order:
+
+  1. **Does it help get inventory running?** If yes, it is a candidate.
+  2. **If no — can it be done later?** If yes, defer it. Not "schedule it
+     lower"; defer it.
+  3. **Only if it genuinely cannot be done later** does non-inventory work run
+     now. A real closing window (a one-way door, an irreversible contract, a
+     baseline that cannot be reconstructed *and* that something soon depends on)
+     qualifies. "It would be tidier now" does not.
+
+**An idle lane is not a reason to start something.** Filling a lane with work
+that fails this filter costs a serialized full-matrix slot against the packets
+that do pass it, and buys nothing. Leaving it idle is the correct action.
+
+Applied the same day it was issued, retracting three orchestrator
+recommendations: **row 9** (publish-path breadth envelope) and **row 8**
+(capability cycle-time baseline) both fail step 1, and row 9's
+baseline-cannot-be-reconstructed argument does not reach step 3 — the curve can
+begin at any N. **Row 1c-a** (rule the platform tier) also fails: 1c is in
+neither inventory chain, its own row records that no product path is affected,
+and deciding it later is *better*, because a real posting-service case would
+ground the Tier-B question that a hypothetical cannot.
+
+The inventory chains are `4c → Q1-P3b → G3-P5` and
+`1d → G3-P1b → G3-P2b → G3-P3`. When every downstream link is gated on a packet
+in flight, the highest-value orchestrator action is **landing that packet and
+pre-scoping its successor**, not opening a fourth lane.
+
 ## Where we are
 
 | Stage | State |
