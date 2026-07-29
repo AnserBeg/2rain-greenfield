@@ -53,6 +53,7 @@ import {
 import { withEphemeralPostgres } from '../helpers/postgres.js';
 
 const checkedInMigrations = resolve('db/migrations');
+const applicationBuilderImport = '../../packages/domain/src/app/builder.js';
 const inventoryModuleImport =
   '../../packages/domain/src/inventory/definition.js';
 const tenantId = '11000000-0000-4000-8000-000000000001';
@@ -100,7 +101,7 @@ test('stock lock plan is canonical, total, stable, and duplicate-free', () => {
 test(
   'same-stock posting checks visibly wait for the transaction-scoped lock',
   { timeout: 30_000 },
-  async () => {
+  async (context) => {
     await withSerializerDatabase(
       'stock-lock-wait',
       async ({ movement, pool }) => {
@@ -141,6 +142,9 @@ test(
               pid: holderPid,
             },
           );
+          context.diagnostic(
+            `executed wait red: ${JSON.stringify({ holderPid, waitingLock: blocked })}`,
+          );
 
           await holder.query('COMMIT');
           await waitingAcquire;
@@ -171,7 +175,7 @@ test(
 test(
   'unordered opposite transfers deadlock, while the serializer total order does not',
   { timeout: 30_000 },
-  async () => {
+  async (context) => {
     await withSerializerDatabase(
       'stock-lock-order',
       async ({ movement, pool }) => {
@@ -218,6 +222,15 @@ test(
           assert.equal(
             unordered.filter((result) => result.status === 'fulfilled').length,
             1,
+          );
+          context.diagnostic(
+            `ordering removed: ${JSON.stringify(
+              unordered.map((result) =>
+                result.status === 'rejected'
+                  ? { code: postgresCode(result.reason), status: result.status }
+                  : { status: result.status },
+              ),
+            )}`,
           );
           await rollbackQuietly(left);
           await rollbackQuietly(right);
@@ -268,6 +281,13 @@ test(
           assert.equal(await movementBalance(loser, movement, stockA), '0');
           assert.equal(await movementBalance(loser, movement, stockB), '0');
           await loser.query('COMMIT');
+          context.diagnostic(
+            `ordering restored: ${JSON.stringify({
+              firstIdentityKey: firstTarget.identityKey,
+              loserPid,
+              statuses: [first.result.status, second.status],
+            })}`,
+          );
         } finally {
           await rollbackQuietly(left);
           await rollbackQuietly(right);
@@ -283,7 +303,7 @@ test(
 test(
   'the reserved two-key lock is real, transaction-only, and disjoint from bigint locks',
   { timeout: 30_000 },
-  async () => {
+  async (context) => {
     await withSerializerDatabase('stock-lock-control', async ({ pool }) => {
       const stockClient = await pool.connect();
       const bigintClient = await pool.connect();
@@ -331,6 +351,9 @@ test(
             { granted: true, objsubid: 1, pid: bigintPid },
           ].sort((left, right) => left.pid - right.pid),
         );
+        context.diagnostic(
+          `genuine lock control: ${JSON.stringify(locks.rows)}`,
+        );
 
         await stockClient.query('COMMIT');
         assert.equal(
@@ -364,20 +387,18 @@ interface MovementStorageBinding {
   tenantColumn: string;
 }
 
+type EmittedInventoryFactEntity = StorageTargetPayloadV1['entities'][number] & {
+  factStorage?: {
+    fieldColumns: {
+      itemId: string;
+      locationId: string;
+    };
+  };
+};
+
 interface SerializerDatabase {
   movement: MovementStorageBinding;
   pool: Pool;
-}
-
-interface InventoryDefinitionIds {
-  entityIds: { movement: string };
-  fieldIds: {
-    movement: {
-      itemId: string;
-      locationId: string;
-      quantityDelta: string;
-    };
-  };
 }
 
 interface CompiledInventoryFixture {
@@ -397,7 +418,7 @@ async function withSerializerDatabase(
 ): Promise<void> {
   const fixture = await compiledInventoryFixture();
   await withEphemeralPostgres(label, async (database) => {
-    await migrateAndSeed(database.pool);
+    await migrateAndSeed(database.pool, fixture.inventory.releaseRoot);
     const runtimePool = new pg.Pool({
       ...database.connection,
       max: 2,
@@ -481,7 +502,7 @@ async function compiledInventoryFixture(): Promise<CompiledInventoryFixture> {
 }
 
 async function buildCompiledInventoryFixture(): Promise<CompiledInventoryFixture> {
-  const { definition, ids } = await loadInventoryDefinition();
+  const definition = await loadInventoryDefinition();
   const emptyDefinition = emptyDefinitionFrom(definition);
   const empty = mustCompile(moduleInput(emptyDefinition));
   const inventory = mustCompile(
@@ -496,81 +517,114 @@ async function buildCompiledInventoryFixture(): Promise<CompiledInventoryFixture
     emptyDefinition,
     inventory,
     inventoryDefinition: definition,
-    movement: resolveMovementStorage(storage, ids),
+    movement: resolveMovementStorage(storage),
   };
 }
 
-async function loadInventoryDefinition(): Promise<{
-  definition: Record<string, unknown>;
-  ids: InventoryDefinitionIds;
-}> {
-  const loaded: unknown = await import(inventoryModuleImport);
+async function loadInventoryDefinition(): Promise<Record<string, unknown>> {
+  const [loaded, applicationBuilder]: unknown[] = await Promise.all([
+    import(inventoryModuleImport),
+    import(applicationBuilderImport),
+  ]);
   if (!isRecord(loaded)) {
     throw new TypeError('inventory definition module did not load');
+  }
+  if (!isRecord(applicationBuilder)) {
+    throw new TypeError('application definition module did not load');
   }
   const factory = loaded.inventoryModuleDefinition;
   if (typeof factory !== 'function') {
     throw new TypeError('inventory definition factory is unavailable');
   }
-  const definition: unknown = Reflect.apply(factory, undefined, []);
-  if (!isRecord(definition)) {
+  const applicationFactory = applicationBuilder.composedApplicationDefinition;
+  const applicationNamespace = applicationBuilder.APPLICATION_NAMESPACE;
+  if (
+    typeof applicationFactory !== 'function' ||
+    typeof applicationNamespace !== 'string'
+  ) {
+    throw new TypeError('composed application definition is unavailable');
+  }
+  const definition: unknown = Reflect.apply(applicationFactory, undefined, []);
+  const inventory: unknown = Reflect.apply(factory, undefined, [
+    applicationNamespace,
+  ]);
+  if (!isRecord(definition) || !isRecord(inventory)) {
     throw new TypeError('inventory definition factory returned a non-object');
   }
-  const ids = loaded.INVENTORY_IDS;
-  if (!isRecord(ids) || !isRecord(ids.entityIds) || !isRecord(ids.fieldIds)) {
-    throw new TypeError('inventory definition ids are unavailable');
+  for (const collection of [
+    'assertions',
+    'entities',
+    'fields',
+    'operations',
+    'permissions',
+    'queries',
+    'relations',
+    'stateMachines',
+    'storageMappings',
+    'surfaces',
+  ]) {
+    const applicationMembers = definition[collection];
+    const inventoryMembers = inventory[collection];
+    if (
+      !Array.isArray(applicationMembers) ||
+      !Array.isArray(inventoryMembers)
+    ) {
+      throw new TypeError(`module collection ${collection} is unavailable`);
+    }
+    definition[collection] = [...applicationMembers, ...inventoryMembers];
   }
-  const movementFields = ids.fieldIds.movement;
+  const applicationModules = definition.modules;
+  const inventoryModules = inventory.modules;
+  const packageDefinition = definition.package;
   if (
-    !isRecord(movementFields) ||
-    typeof ids.entityIds.movement !== 'string' ||
-    typeof movementFields.itemId !== 'string' ||
-    typeof movementFields.locationId !== 'string' ||
-    typeof movementFields.quantityDelta !== 'string'
+    !Array.isArray(applicationModules) ||
+    !Array.isArray(inventoryModules) ||
+    !isRecord(inventoryModules[0]) ||
+    !isRecord(packageDefinition) ||
+    typeof packageDefinition.packageId !== 'string'
   ) {
-    throw new TypeError('inventory movement ids are malformed');
+    throw new TypeError('inventory module ownership is unavailable');
   }
-  return {
-    definition,
-    ids: {
-      entityIds: { movement: ids.entityIds.movement },
-      fieldIds: {
-        movement: {
-          itemId: movementFields.itemId,
-          locationId: movementFields.locationId,
-          quantityDelta: movementFields.quantityDelta,
-        },
-      },
-    },
-  };
+  applicationModules.push({
+    ...inventoryModules[0],
+    orderKey: 40,
+    ownerPackageId: packageDefinition.packageId,
+  });
+  return definition;
 }
 
 function resolveMovementStorage(
   storage: StorageTargetPayloadV1,
-  ids: InventoryDefinitionIds,
 ): MovementStorageBinding {
-  const movement = storage.entities.find(
-    (entity) => entity.entityId === ids.entityIds.movement,
-  );
-  assert.ok(movement, 'compiled storage target has no inventory movement');
+  const factEntities = storage.entities
+    .map((entity) => entity as EmittedInventoryFactEntity)
+    .filter((entity) => entity.factStorage !== undefined);
+  assert.equal(factEntities.length, 1, 'compiled target must have one fact');
+  const movement = factEntities[0];
+  const factStorage = movement?.factStorage;
+  assert.ok(factStorage, 'compiled target has no inventory fact');
   assert.deepEqual(movement.scopeKeyColumns, ['tenant_id', 'environment_id']);
   assert.ok(
     movement.legalEntity,
     'compiled movement lacks its derived legal-entity column',
   );
-  const fieldColumn = (fieldId: string): string => {
-    const column = movement.columns.find(
-      (candidate) => candidate.canonicalFieldId === fieldId,
+  const fieldColumn = (fieldSuffix: string): string => {
+    const columns = movement.columns.filter((candidate) =>
+      candidate.canonicalFieldId.endsWith(fieldSuffix),
     );
-    assert.ok(column, `compiled movement lacks field ${fieldId}`);
-    return column.physicalName;
+    assert.equal(
+      columns.length,
+      1,
+      `compiled movement lacks unique field ${fieldSuffix}`,
+    );
+    return columns[0]!.physicalName;
   };
   return {
     environmentColumn: movement.scopeKeyColumns[1],
-    itemColumn: fieldColumn(ids.fieldIds.movement.itemId),
+    itemColumn: factStorage.fieldColumns.itemId,
     legalEntityColumn: movement.legalEntity.column,
-    locationColumn: fieldColumn(ids.fieldIds.movement.locationId),
-    quantityColumn: fieldColumn(ids.fieldIds.movement.quantityDelta),
+    locationColumn: factStorage.fieldColumns.locationId,
+    quantityColumn: fieldColumn(':field.inventory_movement_quantity_delta'),
     schemaName: storage.providerAbi.managedSchema,
     tableName: movement.physicalTableName,
     tenantColumn: movement.scopeKeyColumns[0],
@@ -622,7 +676,10 @@ async function assertMovementRelation(
   );
 }
 
-async function migrateAndSeed(pool: Pool): Promise<void> {
+async function migrateAndSeed(
+  pool: Pool,
+  contractReleaseRoot: string,
+): Promise<void> {
   const client = await pool.connect();
   try {
     const migrations = await loadMigrations(checkedInMigrations);
@@ -637,6 +694,36 @@ async function migrateAndSeed(pool: Pool): Promise<void> {
       `INSERT INTO platform.environments (tenant_id, id, slug)
        VALUES ($1,$2,'production')`,
       [tenantId, environmentId],
+    );
+    await client.query(
+      `SELECT platform.provision_inventory_scope(
+         $1, $2, $3, $4, $5, $6, $7, $8,
+         $9::smallint, $10, $11, $12, $13, $14, $15, $16,
+         $17, $18, $19, $20, $21
+       )`,
+      [
+        tenantId,
+        environmentId,
+        legalEntityId,
+        'SERIALIZER',
+        'Serializer control legal entity',
+        'UTC',
+        '00:00:00',
+        contractReleaseRoot,
+        1,
+        'reject',
+        0,
+        'codeAndNarrative',
+        'codeOnly',
+        'codeAndNarrative',
+        'codeAndNarrative',
+        'codeAndNarrative',
+        null,
+        null,
+        null,
+        null,
+        null,
+      ],
     );
   } finally {
     client.release();
