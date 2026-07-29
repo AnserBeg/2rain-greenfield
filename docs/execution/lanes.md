@@ -15,8 +15,8 @@ writer is holding those paths right now.
 | Lane | Theme | Current packet | Status |
 |---|---|---|---|
 | **KERNEL** | Canonical language and the query tier | `4c` — packages adopt v3 (the artifact event) | **active** |
-| **DEPLOY** | Release lifecycle and runtime infrastructure | `1c-a` **accepted** 2026-07-28 (ADR-0023) — *awaiting selection* | **idle** |
-| **FIX** | Correctness defects → stage cutting → inventory build | `1d` **accepted** 2026-07-28 — **`G3-P1b` is next and now unblocked** | **idle** |
+| **DEPLOY** | Release lifecycle and runtime infrastructure | `9` **accepted** 2026-07-28 (breadth-envelope curve) — *awaiting selection; `1c-b` when compiler/domain leases release* | **idle** |
+| **FIX** | Correctness defects → stage cutting → inventory build | `G3-P1b` — legal-entity family map and key participation | **active** |
 | **BUILD** | Inventory contracts | `G3-P2a` — tenant-completeness manifest | **active** |
 
 Lane identity is stable across packets. When a lane's packet is accepted, the
