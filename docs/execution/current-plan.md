@@ -35,16 +35,33 @@ current slot.
 selection passes this filter, in order:
 
   1. **Does it help get inventory running?** If yes, it is a candidate.
-  2. **If no — can it be done later?** If yes, defer it. Not "schedule it
-     lower"; defer it.
-  3. **Only if it genuinely cannot be done later** does non-inventory work run
-     now. A real closing window (a one-way door, an irreversible contract, a
-     baseline that cannot be reconstructed *and* that something soon depends on)
-     qualifies. "It would be tidier now" does not.
+  2. **If no — does it COST inventory?** This is the real test, and it is
+     narrower than "is it inventory work". A packet costs inventory if it does
+     any of:
+       - **holds or contends for a lease** on a file an inventory-path packet
+         needs;
+       - **takes the full-matrix slot** ahead of an inventory lane;
+       - **adds weight to the shared gates** every lane's matrix runs — a slow
+         or flaky new test taxes the inventory lanes on every run, which is the
+         subtle one; or
+       - **consumes adjudication attention** while an inventory lane is stopped
+         waiting on a ruling.
+  3. **If it costs nothing on all four, run it concurrently.** An idle lane is
+     waste, not safety.
 
-**An idle lane is not a reason to start something.** Filling a lane with work
-that fails this filter costs a serialized full-matrix slot against the packets
-that do pass it, and buys nothing. Leaving it idle is the correct action.
+**Two standing priorities make concurrency safe**, and they are what replace
+idling: inventory lanes get the **matrix slot** first — a non-inventory lane
+waits — and inventory-lane reports get **adjudicated** first, always.
+
+**Corrected 2026-07-28, same day it was written.** The first draft said
+non-inventory work should be *deferred* unless it faced a closing window. That
+was over-corrected, as the user pointed out: the constraint is opportunity cost,
+not subject matter, and where opportunity cost is genuinely zero, an idle lane
+buys nothing. Authoring is fully parallel and only the matrix serializes, so a
+fourth lane on disjoint paths is net positive. What the original draft got right
+and is retained: an idle lane is **not itself a reason** to start something, so
+the answer to "what can we run" is still a real cost check and not a scramble
+for filler.
 
 Applied the same day it was issued, retracting three orchestrator
 recommendations: **row 9** (publish-path breadth envelope) and **row 8**
