@@ -690,6 +690,7 @@ test('v3 aggregate catalog metadata is derived from one canonical source', () =>
     queries: Array<{
       aggregate?: {
         fieldId: string;
+        measureFieldType: Record<string, unknown>;
         operator: string;
         resultType: Record<string, unknown>;
         selectionId: string;
@@ -709,6 +710,13 @@ test('v3 aggregate catalog metadata is derived from one canonical source', () =>
   assert.deepEqual(aggregate, {
     aggregate: {
       fieldId: FIXTURE_IDS.fieldIds.parentAmount,
+      measureFieldType: {
+        kind: 'exactDecimalFieldType',
+        precision: 5,
+        representation: 'canonicalString',
+        scale: 2,
+        schemaVersion: LANGUAGE_VERSIONS.v3,
+      },
       operator: 'sum',
       resultType: {
         kind: 'exactDecimalAggregateResultType',
@@ -718,11 +726,77 @@ test('v3 aggregate catalog metadata is derived from one canonical source', () =>
       },
       selectionId: V3_AGGREGATE_IDS.aggregateSelection,
     },
+    aggregatePlan: {
+      costClass: 'tenantBoundedScan',
+      kind: 'queryAggregateLoweringPlan',
+      loweringRowId: 'northstar.query-aggregate-lowering/required-sum-v1',
+      providerProbeId: 'Q1-P3b/required-sum-tenant-bounded-scan',
+      schemaVersion: 'northstar.query-aggregate-lowering-plan/postgres-v1',
+      sourceFieldType: {
+        kind: 'exactDecimalFieldType',
+        precision: 5,
+        representation: 'canonicalString',
+        scale: 2,
+        schemaVersion: LANGUAGE_VERSIONS.v3,
+      },
+    },
     filter: (
       normalized.queries.find(
         (query) => query.queryId === V3_AGGREGATE_IDS.aggregateQuery,
       ) as { filter: unknown }
     ).filter,
+    filterPlan: {
+      costClass: 'tenantBoundedScan',
+      kind: 'predicateLoweringPlan',
+      positionProfileVersion: 'northstar.predicate-position-profile/v1',
+      predicateDigest:
+        'dcb40bb99f3a2cb9845832fa096bf3a981d26a07aec198a66a7e03d8450f1e2f',
+      root: {
+        kind: 'allPredicate',
+        terms: [
+          {
+            comparisonMode: 'unicodeCaseFold',
+            costClass: 'indexedFoldedEquality',
+            fieldId: FIXTURE_IDS.fieldIds.parentNumber,
+            kind: 'fieldComparisonPredicate',
+            loweringRowId: 'northstar.predicate-lowering/folded-equality-v1',
+            operator: 'equals',
+            sourceFieldType: {
+              kind: 'textFieldType',
+              maximumLength: 40,
+              schemaVersion: LANGUAGE_VERSIONS.v3,
+            },
+            value: {
+              kind: 'queryParameterReference',
+              parameterId: V3_AGGREGATE_IDS.stockParameter,
+              schemaVersion: LANGUAGE_VERSIONS.v3,
+            },
+          },
+          {
+            comparisonMode: 'binary',
+            costClass: 'tenantBoundedScan',
+            fieldId: FIXTURE_IDS.fieldIds.parentUtcInstant,
+            kind: 'fieldComparisonPredicate',
+            loweringRowId:
+              'northstar.predicate-lowering/parameterized-comparison-v1',
+            operator: 'lessThanOrEqual',
+            sourceFieldType: {
+              kind: 'dateTimeFieldType',
+              precision: 'millisecond',
+              schemaVersion: LANGUAGE_VERSIONS.v3,
+              timezoneSemantics: 'utcInstant',
+            },
+            value: {
+              kind: 'queryParameterReference',
+              parameterId: V3_AGGREGATE_IDS.atTimeParameter,
+              schemaVersion: LANGUAGE_VERSIONS.v3,
+            },
+          },
+        ],
+      },
+      schemaVersion:
+        'northstar.predicate-lowering-plan/postgres-parameterized-v1',
+    },
     lifecycle: 'active',
     maximumResultCount: 1,
     parameters: [
