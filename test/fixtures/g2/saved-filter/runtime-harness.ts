@@ -209,7 +209,7 @@ class SavedFilterVerificationExecutor
           values: {
             [PLATFORM_IDS.fieldIds.criteria]: canonicalize({
               kind: 'booleanPredicate',
-              schemaVersion: 'v2',
+              schemaVersion: request.definition.effect.schemaVersion,
               value: true,
             }),
             [PLATFORM_IDS.fieldIds.name]: `Verification ${input.recordId}`,

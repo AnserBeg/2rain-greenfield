@@ -30,6 +30,10 @@ import {
   type ProjectionPayloadPlan,
 } from './projections.js';
 import {
+  isPredicateLoweringAdmitted,
+  lowerQueryPredicate,
+} from './predicate-lowering.js';
+import {
   buildStorageTransitionEnvelope,
   buildStorageTransitionEnvelopeFromLegacyTargets,
   validatePhysicalMappingRecords,
@@ -857,6 +861,14 @@ function decorateV3ProjectionPlans(
   packageRevision: VersionedNormalizedApplicationPackage,
 ): ProjectionPayloadPlan[] {
   if (packageRevision.languageVersion !== LANGUAGE_VERSIONS.v3) return plans;
+  const dispatchRevision = projectionDispatchRevision(packageRevision);
+  const storagePlan = plans.find(
+    (plan) => plan.familyId === PROJECTION_FAMILY_IDS.storageTarget,
+  );
+  if (!storagePlan || !isStorageTargetV1(storagePlan.payload)) {
+    throw new TypeError('v3 projection decoration requires a storage target');
+  }
+  const storage = storagePlan.payload;
   return plans.map((plan) => {
     if (plan.familyId === PROJECTION_FAMILY_IDS.queryCatalog) {
       const payload = plan.payload as {
@@ -899,6 +911,17 @@ function decorateV3ProjectionPlans(
                   }
                 : {
                     filter: query.filter,
+                    ...(query.tier === 'q1' &&
+                    isPredicateLoweringAdmitted(query.filter)
+                      ? {
+                          filterPlan: lowerQueryPredicate(
+                            query.filter,
+                            query.sourceEntity.targetId,
+                            dispatchRevision,
+                            storage,
+                          ),
+                        }
+                      : {}),
                     infrastructure: {
                       archive: 'nullableArchivedAt',
                       optimisticRevision: 'requiredOnMutation',

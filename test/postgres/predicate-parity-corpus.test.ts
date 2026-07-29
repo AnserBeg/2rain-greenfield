@@ -189,8 +189,10 @@ function corpusPartyDefinition(
 ): Record<string, unknown> {
   const definition = structuredClone(partyModuleDefinition()) as {
     fields: Array<Record<string, unknown>>;
+    languageVersion: string;
     queries: Array<Record<string, unknown>>;
   } & Record<string, unknown>;
+  const schemaVersion = definition.languageVersion;
   const contact = definition.fields.find(
     (field) => field.fieldId === PARTY_IDS.fieldIds.contactSummary,
   );
@@ -200,40 +202,40 @@ function corpusPartyDefinition(
     classification: 'internal',
     collation: 'unicodeCaseInsensitive',
     defaultSemantics: 'nullable',
-    entity: reference(PARTY_IDS.entityIds.party),
+    entity: reference(PARTY_IDS.entityIds.party, schemaVersion),
     fieldId: Q1_CORPUS_FIELD_IDS.foldedText,
     fieldType: {
       kind: 'textFieldType',
       maximumLength: 500,
-      schemaVersion: 'v2',
+      schemaVersion,
     },
     kind: 'fieldDefinition',
     label: 'Parity folded text',
     orderKey: 40,
     presence: 'optional',
     reportable: true,
-    schemaVersion: 'v2',
+    schemaVersion,
     searchable: false,
   });
   definition.fields.push({
     classification: 'internal',
     collation: 'binary',
     defaultSemantics: 'nullable',
-    entity: reference(PARTY_IDS.entityIds.party),
+    entity: reference(PARTY_IDS.entityIds.party, schemaVersion),
     fieldId: Q1_CORPUS_FIELD_IDS.exactDecimal,
     fieldType: {
       kind: 'exactDecimalFieldType',
       precision: 20,
       representation: 'canonicalString',
       scale: 6,
-      schemaVersion: 'v2',
+      schemaVersion,
     },
     kind: 'fieldDefinition',
     label: 'Parity exact decimal',
     orderKey: 50,
     presence: 'optional',
     reportable: true,
-    schemaVersion: 'v2',
+    schemaVersion,
     searchable: false,
   });
   const template = definition.queries.find(
@@ -293,8 +295,11 @@ function requiredColumn(
   return column;
 }
 
-function reference(targetId: string): Record<string, unknown> {
-  return { kind: 'entityReference', schemaVersion: 'v2', targetId };
+function reference(
+  targetId: string,
+  schemaVersion: string,
+): Record<string, unknown> {
+  return { kind: 'entityReference', schemaVersion, targetId };
 }
 
 function quoted(identifier: string): string {

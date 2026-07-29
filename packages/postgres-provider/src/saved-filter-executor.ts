@@ -2,13 +2,14 @@ import { randomUUID } from 'node:crypto';
 
 import {
   CanonicalModelError,
-  NormalizedApplicationPackageSchema,
+  LANGUAGE_VERSIONS,
   PredicateExpressionSchema,
+  VersionedNormalizedApplicationPackageSchema,
   canonicalAuthoredProjection,
   canonicalize,
   normalizeApplicationPackage,
-  type NormalizedApplicationPackage,
   type PredicateExpression,
+  type VersionedNormalizedApplicationPackage,
 } from '@north-star/canonical-model';
 import type { Pool, PoolClient } from 'pg';
 
@@ -64,7 +65,7 @@ interface SavedFilterRow {
 }
 
 interface ReleaseMetadata {
-  definition: NormalizedApplicationPackage;
+  definition: VersionedNormalizedApplicationPackage;
   languageVersion: string;
   normalizationProfileVersion: string;
 }
@@ -691,10 +692,13 @@ function validateAgainstPinnedDefinition(
   predicate: PredicateExpression,
   criteriaCanonicalJson: string,
   queryId: string,
-  definition: NormalizedApplicationPackage,
+  definition: VersionedNormalizedApplicationPackage,
 ): void {
-  const authored = canonicalAuthoredProjection(definition);
-  let normalized: NormalizedApplicationPackage;
+  const authored =
+    definition.languageVersion === LANGUAGE_VERSIONS.v3
+      ? canonicalAuthoredProjection(definition)
+      : canonicalAuthoredProjection(definition);
+  let normalized: VersionedNormalizedApplicationPackage;
   try {
     normalized = normalizeApplicationPackage({
       ...authored,
@@ -913,9 +917,9 @@ async function loadReleaseMetadata(
       '$.release',
     );
   }
-  let definition: NormalizedApplicationPackage;
+  let definition: VersionedNormalizedApplicationPackage;
   try {
-    definition = NormalizedApplicationPackageSchema.parse(
+    definition = VersionedNormalizedApplicationPackageSchema.parse(
       JSON.parse(new TextDecoder().decode(row.desired_state)) as unknown,
     );
   } catch {
