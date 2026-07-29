@@ -122,7 +122,7 @@ committed.
 | “single responsive rendering” could still hide a duplicate table | render the same List body twice and run the journey | the unique `Alpine Office Supply` cell resolved to two elements and Playwright failed strict mode |
 | the conformance decrease could be a hand-edited baseline | compile the real modules against the old baseline | `catalog=13/19, location=13/19, party=23/35, platform=33/33`; the ratchet failed with three unrecorded decreases |
 | the new List slot could be decorative or omitted from a shared factory | remove `bulkActions` from the Party factory and run the real-product ratchet | Party changed from `23/23` to `27/23`; `SGR003_VIOLATION_INCREASE` failed the gate |
-| key facts could remain an undifferentiated field dump | replace the compiled revision fact with an unrelated label and run the composed journey | expected `Revision`; observed `Record … State Active Version 1`, and Playwright failed at the `record:keyFacts` slot |
+| key facts could remain an undifferentiated field dump | append the complete compiled field-detail list to `record:keyFacts` and run the composed journey | expected zero `[data-field-id]` detail elements in key facts; received three, while the separate `record:sections` slot still carried all three and the contact-summary value |
 | capping compact grid columns could still leave more than five navigation targets mounted | remove the compact overflow rule from a synthetic six-List application | expected five visible compact links; received six, with the locator resolving to six elements 13 times; desktop still required all six |
 | a compact-collapsed Record section could become unreachable after widening | restore the former desktop-hidden summary and run the close-then-widen journey | expected the existing `Party fields` summary to remain visible; it stayed hidden 14 times while the closed details also hid its fields |
 
@@ -211,6 +211,13 @@ Both former behaviors were then executed as the two reds above. The fixes keep
 one navigation DOM with deterministic compact overflow, preserve every desktop
 entry, and keep the same native section control operable across breakpoints.
 
-The replacement frozen SHA receives a fresh naive Codex xhigh review with the
+That replacement review of integrated candidate `cde9cbd4` returned `REVISE`
+on one evidence gap: the positive key-facts check required `Revision` but did not
+exclude a simultaneous full field dump. The composed journey now observes zero
+field-detail elements and no contact-summary value in key facts while observing
+all three detail elements and that value in sections. The former duplicate dump
+is the executed red recorded above.
+
+The resulting final candidate receives a fresh naive Codex xhigh review with the
 same bounded charter. Its exact verdict and non-empty artifact path are reported
 in the writer handoff.

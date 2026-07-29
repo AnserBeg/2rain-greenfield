@@ -184,15 +184,18 @@ async function productJourney(page: Page, baseUrl: string): Promise<void> {
   await expect(
     page.getByRole('navigation', { name: 'Breadcrumb' }),
   ).toContainText('Party list');
+  const keyFactsSlot = page.locator('[data-platform-slot="record:keyFacts"]');
+  const sectionsSlot = page.locator('[data-platform-slot="record:sections"]');
   await expect(
-    page.getByText('P-BROWSER-REAL-001', { exact: true }),
+    sectionsSlot.getByText('P-BROWSER-REAL-001', { exact: true }),
   ).toBeVisible();
-  await expect(
-    page.locator('[data-platform-slot="record:keyFacts"]'),
-  ).toContainText('Revision');
-  await expect(
-    page.locator('[data-platform-slot="record:sections"]'),
-  ).toContainText('browser-persisted@example.test');
+  await expect(keyFactsSlot).toContainText('Revision');
+  await expect(keyFactsSlot.locator('[data-field-id]')).toHaveCount(0);
+  await expect(keyFactsSlot).not.toContainText(
+    'browser-persisted@example.test',
+  );
+  await expect(sectionsSlot.locator('[data-field-id]')).toHaveCount(3);
+  await expect(sectionsSlot).toContainText('browser-persisted@example.test');
   await page.setViewportSize({ height: 844, width: 390 });
   const compactSections = page.locator(
     '[data-platform-slot="record:sections"] details.record-section-group',
