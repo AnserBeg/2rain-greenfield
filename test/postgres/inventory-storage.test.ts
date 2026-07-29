@@ -50,6 +50,11 @@ test('inventory storage freezes quantity facts, entity scope, and recorded horiz
         max: 1,
         user: 'north_star_runtime',
       });
+      const moduleRuntimePool = new pg.Pool({
+        ...connection,
+        max: 1,
+        user: 'north_star_module_runtime',
+      });
       try {
         const migrations = await loadMigrations(checkedInMigrations);
         const migrated = await runMigrations(admin, migrations);
@@ -362,6 +367,26 @@ test('inventory storage freezes quantity facts, entity scope, and recorded horiz
         });
 
         await t.test(
+          'security-definer lookups reject forged tenant scope',
+          async () => {
+            await assertTrustedScopeRejected(
+              runtimePool,
+              `SELECT north_star_internal.inventory_business_period(
+                 $1, '2026-07-29T12:00:00.000Z'
+               )`,
+              [tenantB],
+            );
+            await assertTrustedScopeRejected(
+              moduleRuntimePool,
+              `SELECT north_star_internal.inventory_base_unit_change_allowed(
+                 $1, $2, $3, 'EA'
+               )`,
+              [tenantB, environmentB, itemB],
+            );
+          },
+        );
+
+        await t.test(
           'missing and unknown dimension versions and v1 unspecified members are rejected',
           async () => {
             await assert.rejects(
@@ -557,7 +582,7 @@ test('inventory storage freezes quantity facts, entity scope, and recorded horiz
         );
       } finally {
         admin.release();
-        await runtimePool.end();
+        await Promise.all([runtimePool.end(), moduleRuntimePool.end()]);
       }
     },
   );
@@ -816,6 +841,33 @@ async function extractAtRecordedHorizon(
     await client.query('ROLLBACK');
     throw error;
   } finally {
+    client.release();
+  }
+}
+
+async function assertTrustedScopeRejected(
+  pool: pg.Pool,
+  statement: string,
+  values: readonly unknown[],
+): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      `SELECT set_config('north_star.tenant_id', $1, true),
+              set_config('north_star.environment_id', $2, true),
+              set_config('north_star.principal_id', $3, true)`,
+      [tenantA, environmentA, actorA],
+    );
+    await assert.rejects(
+      client.query(statement, [...values]),
+      (error: unknown) =>
+        error instanceof Error &&
+        (error as Error & { code?: string }).code === 'P0001' &&
+        error.message === 'INVENTORY_TRUSTED_SCOPE_MISMATCH',
+    );
+  } finally {
+    await client.query('ROLLBACK');
     client.release();
   }
 }

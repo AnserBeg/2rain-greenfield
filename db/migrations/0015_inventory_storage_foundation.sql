@@ -198,6 +198,13 @@ SET search_path = pg_catalog, platform
 AS $inventory_business_period$ DECLARE
   declared_boundary time without time zone;
   declared_zone text; BEGIN
+  IF session_user = 'north_star_runtime'
+     AND requested_tenant_id IS DISTINCT FROM
+       nullif(current_setting('north_star.tenant_id', true), '')::uuid
+  THEN
+    RAISE EXCEPTION 'INVENTORY_TRUSTED_SCOPE_MISMATCH'
+      USING ERRCODE = 'P0001',
+            DETAIL = format('tenantId=%s', requested_tenant_id); END IF;
   SELECT calendar.business_day_boundary, calendar.time_zone
     INTO declared_boundary, declared_zone
     FROM platform.inventory_tenant_calendars AS calendar
@@ -428,6 +435,21 @@ SET search_path = pg_catalog, platform
 AS $inventory_base_unit_change_allowed$ DECLARE
   binding_movement_id uuid;
   binding_unit_id text; BEGIN
+  IF session_user = 'north_star_module_runtime'
+     AND (
+       requested_tenant_id IS DISTINCT FROM
+         nullif(current_setting('north_star.tenant_id', true), '')::uuid
+       OR requested_environment_id IS DISTINCT FROM
+         nullif(current_setting('north_star.environment_id', true), '')::uuid
+     )
+  THEN
+    RAISE EXCEPTION 'INVENTORY_TRUSTED_SCOPE_MISMATCH'
+      USING ERRCODE = 'P0001',
+            DETAIL = format(
+              'tenantId=%s environmentId=%s',
+              requested_tenant_id,
+              requested_environment_id
+            ); END IF;
   SELECT movement.movement_id, movement.unit_id
     INTO binding_movement_id, binding_unit_id
     FROM platform.inventory_movements AS movement
