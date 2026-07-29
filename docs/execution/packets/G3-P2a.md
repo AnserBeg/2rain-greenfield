@@ -140,6 +140,9 @@ inserted into a verifier fixture list.
 | A business table can claim independence | replace `platform.tenant_fixture_records` with a shared-catalog declaration | `TENANT_INDEPENDENT_BUSINESS_TABLE: platform.tenant_fixture_records is a business or tenant-bearing table and cannot be tenant-independent` |
 | A scoped declaration need not name a real column | name `missing_tenant_id` on `platform.saved_master_filters` | `TENANT_COLUMN_MISSING: platform.saved_master_filters names missing tenant column missing_tenant_id` |
 | “No tenant column” passes as a reason | replace the migration-history reason with that restatement | `TENANT_INDEPENDENT_REASON_INVALID: tables[10].reason must explain the platform-wide mechanism or shared immutable identity; absence of a tenant column is not a reason` |
+| The checked count can disagree with its own entries | declare 50 tables while carrying 49 classifications | `TENANT_TABLE_COUNT_MISMATCH: manifest declares 50 tables but contains 49 classifications` |
+| The verifier can trust a stale checked count | verify the 49 live tables and classifications against an expected count of 50 | `TENANT_TABLE_COUNT_MISMATCH: expected 50 tables, enumerated 49, and resolved 49 classifications` |
+| A malformed classification can carry an unreviewed field | add `unreviewedDefault` to the first manifest entry | `TENANT_MANIFEST_INVALID: tables[0] must contain exactly classification, reason, reasonCode, schema, table` |
 | More than one classification still resolves | append a second classification for the fold witness | `TENANT_CLASSIFICATION_DUPLICATE: north_star_internal.module_fold_function_ddl_witnesses has more than one tenancy classification` |
 | Zero input passes vacuously | verify the manifest against no tables | `TENANT_ENUMERATION_EMPTY: cannot verify tenant completeness against zero tables` |
 | An unknown enumerated kind is silently skipped | replace one observed relation kind with `?` | `TENANT_ENUMERATION_OBJECT_KIND_UNKNOWN: unknown relation kind ? for north_star_internal.module_fold_function_ddl_witnesses` |
@@ -172,7 +175,7 @@ independently reports the same 42/7 split.
 
 Focused evidence before the frozen candidate:
 
-- tenant-completeness test: 7/7 PASS, including live PostgreSQL enumeration;
+- tenant-completeness test: 8/8 PASS, including live PostgreSQL enumeration;
 - complete architecture suite: PASS with the final controls;
 - architecture boundaries: PASS;
 - typecheck and lint: PASS; and
@@ -207,6 +210,11 @@ corrects the gate chronology. Fresh Codex xhigh and Fable max reviews both
 passed successor `692d997`, but accepted 1b then changed the integrated schema.
 Those verdicts are therefore invalidated. Any final successor SHA receives the
 entire fresh review chain; no earlier verdict is acceptance evidence.
+
+The first review of integrated candidate `6e13abf` returned `REVISE` because
+parser-time count mismatch, verifier-time count mismatch, and malformed-entry
+branches lacked direct reds. The successor adds all three controls and records
+their exact diagnostics above. The `6e13abf` matrix and verdict are invalidated.
 
 ## Test it yourself
 

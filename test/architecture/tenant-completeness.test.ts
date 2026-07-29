@@ -139,6 +139,48 @@ test('absence of a tenant column is not an independence reason', (context) => {
   context.diagnostic(error.message);
 });
 
+test('count mismatches and malformed classifications fail closed', (context) => {
+  const raw = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
+    expectedTableCount: number;
+    tables: Array<Record<string, unknown>>;
+  };
+  const parserCount = expectDiagnostic(
+    () =>
+      parseTenantCompletenessManifest({
+        ...raw,
+        expectedTableCount: raw.expectedTableCount + 1,
+      }),
+    'TENANT_TABLE_COUNT_MISMATCH',
+  );
+  context.diagnostic(`parser: ${parserCount.message}`);
+
+  const manifest = loadManifest();
+  const tables = enumerateTenantTablesFromSnapshot(loadSnapshot());
+  const verifierCount = expectDiagnostic(
+    () =>
+      verifyTenantCompleteness(
+        {
+          ...manifest,
+          expectedTableCount: manifest.expectedTableCount + 1,
+        },
+        tables,
+      ),
+    'TENANT_TABLE_COUNT_MISMATCH',
+  );
+  context.diagnostic(`verifier: ${verifierCount.message}`);
+
+  const malformed = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
+    tables: Array<Record<string, unknown>>;
+  };
+  assert.ok(malformed.tables[0]);
+  malformed.tables[0].unreviewedDefault = true;
+  const malformedError = expectDiagnostic(
+    () => parseTenantCompletenessManifest(malformed),
+    'TENANT_MANIFEST_INVALID',
+  );
+  context.diagnostic(malformedError.message);
+});
+
 test('stale and untrusted tenant-column declarations fail closed', (context) => {
   const manifest = loadManifest();
   const tables = enumerateTenantTablesFromSnapshot(loadSnapshot());
