@@ -96,13 +96,13 @@ export async function acquireStockIdentityLocks(
   }
 
   await transaction.query(`SAVEPOINT ${transactionContractSavepoint}`);
+  await transaction.query(`RELEASE SAVEPOINT ${transactionContractSavepoint}`);
   for (const target of targets) {
     await transaction.query(
       'SELECT pg_advisory_xact_lock($1::integer, $2::integer)',
       [STOCK_IDENTITY_LOCK_NAMESPACE, target.identityKey],
     );
   }
-  await transaction.query(`RELEASE SAVEPOINT ${transactionContractSavepoint}`);
   return targets;
 }
 
