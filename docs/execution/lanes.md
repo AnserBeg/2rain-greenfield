@@ -49,6 +49,7 @@ the query tier both live there.
 | `docs/execution/packets/**` · `docs/execution/stage-cut-inputs.md` | FIX *(granted 2026-07-28 for G3-P0; each lane still owns its own packet doc)* |
 | `packages/domain/src/{party,catalog,location,platform}/definition.ts` · `app/builder.ts` | KERNEL *(granted 2026-07-28 for 4c — **version/profile strings and the empty `impactAnalyses` root only**; no definition semantics)* |
 | `packages/domain/src/inventory/**` | BUILD *(G3-P1a creates it)* — KERNEL may migrate its **version strings only**, and only if it exists at 4c's integration time |
+| `test/helpers/postgres.ts` | DEPLOY *(granted 2026-07-28 for 1b — readiness-race fix only; a 1f regression blocking its gate)* |
 | `apps/web/scripts/compile-app-release.ts` | KERNEL *(granted 2026-07-28 for 4c — per-artifact compiler-profile selection when verifying persisted lineage)* |
 | `apps/web/**` (rest) · rest of `packages/domain/**` | **none — frozen while lanes run** |
 
