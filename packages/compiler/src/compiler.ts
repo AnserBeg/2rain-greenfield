@@ -31,6 +31,7 @@ import {
 } from './projections.js';
 import {
   isPredicateLoweringAdmitted,
+  lowerQueryAggregate,
   lowerQueryPredicate,
 } from './predicate-lowering.js';
 import {
@@ -884,6 +885,7 @@ function decorateV3ProjectionPlans(
             .map((query) =>
               query.queryType === 'aggregate'
                 ? {
+                    ...lowerQueryAggregate(query, dispatchRevision, storage),
                     aggregate: {
                       fieldId: query.aggregate.field.targetId,
                       operator: query.aggregate.operator,

@@ -1,14 +1,23 @@
 import {
+  PARAMETERIZED_PREDICATE_LOWERING_PLAN_VERSION,
   PREDICATE_LOWERING_PLAN_VERSION,
   PREDICATE_POSITION_PROFILE_VERSION,
   PredicateExpressionSchema,
+  QUERY_AGGREGATE_LOWERING_PLAN_VERSION,
+  VersionedPredicateExpressionSchema,
   canonicalizeAndHash,
   type NormalizedApplicationPackage,
+  type ParameterizedPredicateLoweringNode,
+  type ParameterizedPredicateLoweringPlan,
+  type ParameterizedPredicateLoweringRowId,
   type PredicateCostClass,
   type PredicateExpression,
+  type PredicateExpressionV3,
   type PredicateLoweringNode,
   type PredicateLoweringPlan,
   type PredicateLoweringRowId,
+  type QueryAggregateLoweringPlan,
+  type VersionedNormalizedApplicationPackage,
   type VersionedPredicateExpression,
 } from '@north-star/canonical-model';
 
@@ -16,15 +25,21 @@ import type { StorageTargetPayloadV1 } from './storage.js';
 
 export interface PredicateLoweringTableRow {
   readonly costClass: PredicateCostClass;
-  readonly loweringRowId: PredicateLoweringRowId;
-  readonly match: 'foldedEqualityWithDeclaredIndex' | 'remainingComparison';
+  readonly loweringRowId:
+    | PredicateLoweringRowId
+    | ParameterizedPredicateLoweringRowId
+    | QueryAggregateLoweringPlan['loweringRowId'];
+  readonly match:
+    | 'foldedEqualityWithDeclaredIndex'
+    | 'remainingComparison'
+    | 'parameterizedComparison'
+    | 'requiredSum';
   readonly providerProbeId: string;
 }
 
 /**
- * Closed v1 admission table. Order is semantic: the indexed specialization is
- * selected before the deny-by-default fallback for the remaining current
- * comparison vocabulary.
+ * Closed, versioned admission table. Order is semantic: indexed
+ * specializations precede their deny-by-default bounded-scan fallbacks.
  */
 export const PREDICATE_LOWERING_TABLE: readonly PredicateLoweringTableRow[] =
   Object.freeze([
@@ -40,6 +55,20 @@ export const PREDICATE_LOWERING_TABLE: readonly PredicateLoweringTableRow[] =
         'northstar.predicate-lowering/tenant-scan-comparison-v1' as const,
       match: 'remainingComparison' as const,
       providerProbeId: 'Q1-P1/tenant-bounded-scan',
+    }),
+    Object.freeze({
+      costClass: 'tenantBoundedScan',
+      loweringRowId:
+        'northstar.predicate-lowering/parameterized-comparison-v1' as const,
+      match: 'parameterizedComparison' as const,
+      providerProbeId: 'Q1-P3b/parameterized-comparison-tenant-bounded-scan',
+    }),
+    Object.freeze({
+      costClass: 'tenantBoundedScan',
+      loweringRowId:
+        'northstar.query-aggregate-lowering/required-sum-v1' as const,
+      match: 'requiredSum' as const,
+      providerProbeId: 'Q1-P3b/required-sum-tenant-bounded-scan',
     }),
   ]);
 
@@ -69,7 +98,12 @@ export function lowerQueryPredicate(
   if (!entity) {
     throw new Error('query predicate source entity has no storage target');
   }
-  const root = lowerNode(predicate, fields, entity);
+  const root = lowerVersionedNode(
+    predicate,
+    fields,
+    entity,
+    false,
+  ) as PredicateLoweringNode;
   return Object.freeze({
     costClass: costClassFor(root),
     kind: 'predicateLoweringPlan',
@@ -80,14 +114,71 @@ export function lowerQueryPredicate(
   });
 }
 
+type AggregateQuery = Extract<
+  VersionedNormalizedApplicationPackage['queries'][number],
+  { queryType: 'aggregate' }
+>;
+
+export function lowerQueryAggregate(
+  query: Readonly<AggregateQuery>,
+  packageRevision: VersionedNormalizedApplicationPackage,
+  storage: StorageTargetPayloadV1,
+): Readonly<{
+  aggregatePlan: QueryAggregateLoweringPlan;
+  filterPlan: ParameterizedPredicateLoweringPlan;
+}> {
+  const fields = new Map(
+    packageRevision.fields.map((field) => [field.fieldId, field] as const),
+  );
+  const entity = storage.entities.find(
+    (candidate) => candidate.entityId === query.sourceEntity.targetId,
+  );
+  if (!entity) {
+    throw new Error('aggregate query source entity has no storage target');
+  }
+  if (!VersionedPredicateExpressionSchema.safeParse(query.filter).success) {
+    throw new Error('aggregate query filter is outside the lowering table');
+  }
+  const root = lowerVersionedNode(
+    query.filter,
+    fields,
+    entity,
+    true,
+  ) as ParameterizedPredicateLoweringNode;
+  const row = PREDICATE_LOWERING_TABLE.find(
+    (candidate) => candidate.match === 'requiredSum',
+  );
+  if (!row) throw new Error('aggregate lowering table row is missing');
+  return Object.freeze({
+    aggregatePlan: Object.freeze({
+      costClass: 'tenantBoundedScan',
+      kind: 'queryAggregateLoweringPlan',
+      loweringRowId:
+        row.loweringRowId as QueryAggregateLoweringPlan['loweringRowId'],
+      providerProbeId:
+        row.providerProbeId as QueryAggregateLoweringPlan['providerProbeId'],
+      schemaVersion: QUERY_AGGREGATE_LOWERING_PLAN_VERSION,
+    }),
+    filterPlan: Object.freeze({
+      costClass: costClassFor(root),
+      kind: 'predicateLoweringPlan',
+      positionProfileVersion: PREDICATE_POSITION_PROFILE_VERSION,
+      predicateDigest: canonicalizeAndHash(query.filter).contentHash,
+      root,
+      schemaVersion: PARAMETERIZED_PREDICATE_LOWERING_PLAN_VERSION,
+    }),
+  });
+}
+
 type FieldDefinition = NormalizedApplicationPackage['fields'][number];
 type StorageEntity = StorageTargetPayloadV1['entities'][number];
 
-function lowerNode(
-  predicate: Readonly<PredicateExpression>,
+function lowerVersionedNode(
+  predicate: Readonly<PredicateExpression | PredicateExpressionV3>,
   fields: ReadonlyMap<string, FieldDefinition>,
   entity: StorageEntity,
-): PredicateLoweringNode {
+  parameterized: boolean,
+): ParameterizedPredicateLoweringNode | PredicateLoweringNode {
   switch (predicate.kind) {
     case 'booleanPredicate':
       return Object.freeze({ kind: predicate.kind, value: predicate.value });
@@ -108,13 +199,21 @@ function lowerNode(
         predicate.operator === 'equals' &&
         comparisonMode === 'unicodeCaseFold' &&
         hasFoldedEqualityIndex(entity, column.physicalName, field.fieldId);
-      const row = PREDICATE_LOWERING_TABLE[indexedFoldedEquality ? 0 : 1]!;
+      const parameterizedComparison =
+        parameterized &&
+        (predicate.value.kind === 'queryParameterReference' ||
+          predicate.operator === 'greaterThanOrEqual' ||
+          predicate.operator === 'lessThanOrEqual');
+      const row =
+        PREDICATE_LOWERING_TABLE[
+          indexedFoldedEquality ? 0 : parameterizedComparison ? 2 : 1
+        ]!;
       return Object.freeze({
         comparisonMode,
         costClass: row.costClass,
         fieldId: field.fieldId,
         kind: predicate.kind,
-        loweringRowId: row.loweringRowId,
+        loweringRowId: row.loweringRowId as ParameterizedPredicateLoweringRowId,
         operator: predicate.operator,
         value: Object.freeze(structuredClone(predicate.value)),
       });
@@ -122,14 +221,16 @@ function lowerNode(
     case 'notPredicate':
       return Object.freeze({
         kind: predicate.kind,
-        term: lowerNode(predicate.term, fields, entity),
+        term: lowerVersionedNode(predicate.term, fields, entity, parameterized),
       });
     case 'allPredicate':
     case 'anyPredicate':
       return Object.freeze({
         kind: predicate.kind,
         terms: Object.freeze(
-          predicate.terms.map((term) => lowerNode(term, fields, entity)),
+          predicate.terms.map((term) =>
+            lowerVersionedNode(term, fields, entity, parameterized),
+          ),
         ),
       });
   }
@@ -153,7 +254,9 @@ function hasFoldedEqualityIndex(
   );
 }
 
-function costClassFor(root: PredicateLoweringNode): PredicateCostClass {
+function costClassFor(
+  root: PredicateLoweringNode | ParameterizedPredicateLoweringNode,
+): PredicateCostClass {
   return root.kind === 'fieldComparisonPredicate' &&
     root.costClass === 'indexedFoldedEquality'
     ? 'indexedFoldedEquality'

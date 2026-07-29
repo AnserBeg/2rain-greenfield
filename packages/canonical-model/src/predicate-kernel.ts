@@ -11,6 +11,7 @@ import {
   VersionedCanonicalScalarSchema,
   type CanonicalScalar,
   type PredicateExpression,
+  type QueryParameterReference,
 } from './schemas.js';
 
 export const PREDICATE_KERNEL_RECEIPT_VERSION =
@@ -21,6 +22,12 @@ export const PREDICATE_POSITION_PROFILE_VERSION =
 
 export const PREDICATE_LOWERING_PLAN_VERSION =
   'northstar.predicate-lowering-plan/postgres-row-v1' as const;
+
+export const PARAMETERIZED_PREDICATE_LOWERING_PLAN_VERSION =
+  'northstar.predicate-lowering-plan/postgres-parameterized-v1' as const;
+
+export const QUERY_AGGREGATE_LOWERING_PLAN_VERSION =
+  'northstar.query-aggregate-lowering-plan/postgres-v1' as const;
 
 export type PredicateCostClass =
   | 'indexedEquality'
@@ -62,6 +69,77 @@ export interface PredicateLoweringPlan {
   readonly predicateDigest: string;
   readonly root: PredicateLoweringNode;
   readonly schemaVersion: typeof PREDICATE_LOWERING_PLAN_VERSION;
+}
+
+export type ParameterizedPredicateLoweringRowId =
+  | PredicateLoweringRowId
+  | 'northstar.predicate-lowering/parameterized-comparison-v1';
+
+type PredicateLoweringBooleanNode = Extract<
+  PredicateLoweringNode,
+  { readonly value: boolean }
+>;
+type PredicateLoweringComparisonNode = Extract<
+  PredicateLoweringNode,
+  { readonly comparisonMode: unknown }
+>;
+type PredicateLoweringTermsNode = Extract<
+  PredicateLoweringNode,
+  { readonly terms: readonly unknown[] }
+>;
+type PredicateLoweringNotNode = Extract<
+  PredicateLoweringNode,
+  { readonly term: unknown }
+>;
+
+export type ParameterizedPredicateLoweringNode =
+  | Readonly<{
+      kind: PredicateLoweringBooleanNode['kind'];
+      value: boolean;
+    }>
+  | Readonly<{
+      comparisonMode: 'binary' | 'unicodeCaseFold';
+      costClass: PredicateCostClass;
+      fieldId: string;
+      kind: PredicateLoweringComparisonNode['kind'];
+      loweringRowId: ParameterizedPredicateLoweringRowId;
+      operator:
+        | FieldComparisonPredicate['operator']
+        | 'greaterThanOrEqual'
+        | 'lessThanOrEqual';
+      value: Readonly<CanonicalScalar | QueryParameterReference>;
+    }>
+  | Readonly<{
+      kind: PredicateLoweringTermsNode['kind'];
+      terms: readonly ParameterizedPredicateLoweringNode[];
+    }>
+  | Readonly<{
+      kind: PredicateLoweringNotNode['kind'];
+      term: ParameterizedPredicateLoweringNode;
+    }>;
+
+/**
+ * Versioned PostgreSQL plan for v3 filters whose values are bound at query
+ * execution. It is internal compiler/runtime IR, not a canonical wire node.
+ */
+export interface ParameterizedPredicateLoweringPlan {
+  readonly costClass: PredicateCostClass;
+  readonly kind: 'predicateLoweringPlan';
+  readonly positionProfileVersion: typeof PREDICATE_POSITION_PROFILE_VERSION;
+  readonly predicateDigest: string;
+  readonly root: ParameterizedPredicateLoweringNode;
+  readonly schemaVersion: typeof PARAMETERIZED_PREDICATE_LOWERING_PLAN_VERSION;
+}
+
+export type QueryFilterLoweringPlan =
+  PredicateLoweringPlan | ParameterizedPredicateLoweringPlan;
+
+export interface QueryAggregateLoweringPlan {
+  readonly costClass: 'tenantBoundedScan';
+  readonly kind: 'queryAggregateLoweringPlan';
+  readonly loweringRowId: 'northstar.query-aggregate-lowering/required-sum-v1';
+  readonly providerProbeId: 'Q1-P3b/required-sum-tenant-bounded-scan';
+  readonly schemaVersion: typeof QUERY_AGGREGATE_LOWERING_PLAN_VERSION;
 }
 
 export type PredicateBindingPosition =

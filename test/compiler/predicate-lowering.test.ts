@@ -31,6 +31,18 @@ test('q1 query filters lower through the closed cost-class table', () => {
       match: 'remainingComparison',
       providerProbeId: 'Q1-P1/tenant-bounded-scan',
     },
+    {
+      costClass: 'tenantBoundedScan',
+      loweringRowId: 'northstar.predicate-lowering/parameterized-comparison-v1',
+      match: 'parameterizedComparison',
+      providerProbeId: 'Q1-P3b/parameterized-comparison-tenant-bounded-scan',
+    },
+    {
+      costClass: 'tenantBoundedScan',
+      loweringRowId: 'northstar.query-aggregate-lowering/required-sum-v1',
+      match: 'requiredSum',
+      providerProbeId: 'Q1-P3b/required-sum-tenant-bounded-scan',
+    },
   ]);
 
   const indexed = compiledListQuery(

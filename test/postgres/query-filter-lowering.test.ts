@@ -2,9 +2,14 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  QUERY_AGGREGATE_PROFILE_VERSION,
+  evaluateQueryAggregateSemantics,
   inspectPredicateForExecution,
+  type ParameterizedPredicateLoweringPlan,
   type PredicateExpression,
   type PredicateLoweringPlan,
+  type QueryAggregateLoweringPlan,
+  type QueryFilterLoweringPlan,
 } from '../../packages/canonical-model/src/index.js';
 import {
   PREDICATE_LOWERING_TABLE,
@@ -18,6 +23,7 @@ import {
 import { withTrustedRequestTransaction } from '../../packages/postgres-provider/src/request-context.js';
 import { TrustedActorEnvelopeIssuer } from '../../packages/postgres-provider/src/trust/trusted-actor-envelope.js';
 import {
+  MalformedSemanticQueryRequestError,
   MalformedQueryPolicyNarrowingError,
   SEMANTIC_QUERY_REQUEST_VERSION,
   SemanticQueryGateway,
@@ -48,6 +54,12 @@ const demonstrateMissingPolicy =
   process.env.Q1P1_DEMONSTRATE_MISSING_POLICY === '1';
 const demonstrateMissingTenantRls =
   process.env.Q1P1_DEMONSTRATE_MISSING_TENANT_RLS === '1';
+const demonstrateAggregateMissingArchive =
+  process.env.Q1P3B_DEMONSTRATE_MISSING_ARCHIVE === '1';
+const demonstrateAggregateMissingIndex =
+  process.env.Q1P3B_DEMONSTRATE_MISSING_INDEX === '1';
+const demonstrateAggregateMissingPolicy =
+  process.env.Q1P3B_DEMONSTRATE_MISSING_POLICY === '1';
 
 const differentialRows = [
   {
@@ -75,6 +87,17 @@ const differentialRows = [
     number: 'Q1-DIFF-4',
   },
 ] as const;
+
+const aggregateIds = Object.freeze({
+  amountField: `${PARTY_IDS.namespace}:field.q1_aggregate_amount`,
+  atTimeParameter: `${PARTY_IDS.namespace}:parameter.q1_aggregate_at_time`,
+  effectiveAtField: `${PARTY_IDS.namespace}:field.q1_aggregate_effective_at`,
+  policyQuery: `${PARTY_IDS.namespace}:query.party_q1_aggregate_policy`,
+  query: `${PARTY_IDS.namespace}:query.party_q1_aggregate_sum`,
+  selection: `${PARTY_IDS.namespace}:selection.party_q1_aggregate_sum`,
+  stockField: `${PARTY_IDS.namespace}:field.q1_aggregate_stock`,
+  stockParameter: `${PARTY_IDS.namespace}:parameter.q1_aggregate_stock`,
+});
 
 test('q1 filters preserve total semantics, cost classes, policy narrowing, and provider conjunctions', async () => {
   const definition = q1PartyDefinition();
@@ -280,7 +303,11 @@ test('q1 filters preserve total semantics, cost classes, policy narrowing, and p
       observedProbeIds.add('Q1-P1/tenant-bounded-scan');
       assert.deepEqual(
         [...observedProbeIds].sort(),
-        PREDICATE_LOWERING_TABLE.map((row) => row.providerProbeId).sort(),
+        PREDICATE_LOWERING_TABLE.filter((row) =>
+          row.providerProbeId.startsWith('Q1-P1/'),
+        )
+          .map((row) => row.providerProbeId)
+          .sort(),
       );
 
       const policyAllowed = 'e1000000-0000-4000-8000-000000000001';
@@ -475,6 +502,508 @@ test('q1 filters preserve total semantics, cost classes, policy narrowing, and p
   );
 });
 
+test('q1 required sum executes through the real gateway with typed parameters and provider-owned narrowing', async () => {
+  const definition = q1AggregatePartyDefinition();
+  await withRealPartyRuntime(
+    'q1-p3b-required-sum-lowering',
+    async (runtime) => {
+      const party = runtime.storage.entities.find(
+        (entity) => entity.entityId === PARTY_IDS.entityIds.party,
+      );
+      assert.ok(party);
+      const amountColumn = requiredColumn(party, aggregateIds.amountField);
+      const effectiveAtColumn = requiredColumn(
+        party,
+        aggregateIds.effectiveAtField,
+      );
+      const stockColumn = requiredColumn(party, aggregateIds.stockField);
+      const stockFolded = party.foldedColumns.find(
+        (column) => column.canonicalFieldId === aggregateIds.stockField,
+      );
+      assert.ok(stockFolded);
+      const stockIndex = party.indexes.find(
+        (index) =>
+          index.indexKind === 'foldedAccess' &&
+          index.columnNames.includes(stockFolded.physicalName),
+      );
+      assert.ok(stockIndex);
+      const rls = await runtime.adminPool.query<{
+        forced: boolean;
+        policy_count: string;
+      }>(
+        `SELECT c.relforcerowsecurity AS forced,
+                count(p.policyname)::text AS policy_count
+           FROM pg_catalog.pg_class AS c
+           JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace
+           LEFT JOIN pg_catalog.pg_policies AS p
+             ON p.schemaname = n.nspname AND p.tablename = c.relname
+          WHERE n.nspname = 'north_star_module' AND c.relname = $1
+          GROUP BY c.relforcerowsecurity`,
+        [party.physicalTableName],
+      );
+      assert.deepEqual(rls.rows, [{ forced: true, policy_count: '1' }]);
+
+      const arguments_ = {
+        [aggregateIds.atTimeParameter]: '2026-06-01T00:00:00.000Z',
+        [aggregateIds.stockParameter]: 'STOCK-A',
+      };
+      const empty = await runtime.queryGateway.invokeAggregate(
+        runtime.views.b,
+        {
+          arguments: arguments_,
+          queryId: aggregateIds.query,
+          schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+        },
+      );
+      assertAggregateValue(empty, '0');
+
+      const activeAllowed = [
+        ['a3000000-0000-4000-8000-000000000001', '-0.25'],
+        ['a3000000-0000-4000-8000-000000000002', '1.000001'],
+        ['a3000000-0000-4000-8000-000000000003', '0.000001'],
+      ] as const;
+      const policyBlocked = 'a3000000-0000-4000-8000-000000000004';
+      const archived = 'a3000000-0000-4000-8000-000000000005';
+      const later = 'a3000000-0000-4000-8000-000000000006';
+      const otherStock = 'a3000000-0000-4000-8000-000000000007';
+      for (const [recordId, amount] of activeAllowed) {
+        await createAggregateParty(runtime, runtime.views.a, {
+          amount,
+          contact: 'allowed',
+          effectiveAt: '2026-01-01T00:00:00.000Z',
+          recordId,
+          stock: 'STOCK-A',
+        });
+      }
+      await createAggregateParty(runtime, runtime.views.a, {
+        amount: '10',
+        contact: 'blocked',
+        effectiveAt: '2026-01-01T00:00:00.000Z',
+        recordId: policyBlocked,
+        stock: 'STOCK-A',
+      });
+      await createAggregateParty(runtime, runtime.views.a, {
+        amount: '100',
+        contact: 'allowed',
+        effectiveAt: '2026-01-01T00:00:00.000Z',
+        recordId: archived,
+        stock: 'STOCK-A',
+      });
+      await createAggregateParty(runtime, runtime.views.a, {
+        amount: '1000',
+        contact: 'allowed',
+        effectiveAt: '2027-01-01T00:00:00.000Z',
+        recordId: later,
+        stock: 'STOCK-A',
+      });
+      await createAggregateParty(runtime, runtime.views.a, {
+        amount: '2000',
+        contact: 'allowed',
+        effectiveAt: '2026-01-01T00:00:00.000Z',
+        recordId: otherStock,
+        stock: 'STOCK-B',
+      });
+      await invokePartyOperation(runtime, runtime.views.a, 'party_archive', {
+        expectedRevision: 1,
+        recordId: archived,
+      });
+      await createAggregateParty(runtime, runtime.views.b, {
+        amount: '4000',
+        contact: 'allowed',
+        effectiveAt: '2026-01-01T00:00:00.000Z',
+        recordId: 'a3000000-0000-4000-8000-000000000008',
+        stock: 'STOCK-A',
+      });
+      await insertAggregateCrossEnvironmentRow(runtime.adminPool, party, {
+        amountColumn: amountColumn.physicalName,
+        effectiveAtColumn: effectiveAtColumn.physicalName,
+        recordId: 'a3000000-0000-4000-8000-000000000009',
+        stockColumn: stockColumn.physicalName,
+      });
+      await insertAggregatePlannerRows(runtime.adminPool, party, {
+        amountColumn: amountColumn.physicalName,
+        effectiveAtColumn: effectiveAtColumn.physicalName,
+        stockColumn: stockColumn.physicalName,
+      });
+      await runtime.adminPool.query(
+        `ANALYZE north_star_module.${quoted(party.physicalTableName)}`,
+      );
+
+      const compiled = compiledAggregateQuery(
+        runtime.views.a,
+        aggregateIds.query,
+      );
+      const policy = compiledAggregateQuery(
+        runtime.views.a,
+        aggregateIds.policyQuery,
+      );
+      const policyGateway: QueryPolicyNarrowingGateway = {
+        async narrow() {
+          return { filter: policy.filter, filterPlan: policy.filterPlan };
+        },
+      };
+      let malformedExecutorCount = 0;
+      const malformedGateway = new SemanticQueryGateway(new AllowPolicy(), {
+        async execute() {
+          throw new Error('record executor must not receive an aggregate');
+        },
+        async executeAggregate() {
+          malformedExecutorCount += 1;
+          throw new Error('malformed parameter reached the provider');
+        },
+      });
+      await assert.rejects(
+        () =>
+          malformedGateway.invokeAggregate(runtime.views.a, {
+            arguments: {
+              ...arguments_,
+              [aggregateIds.atTimeParameter]: false,
+            },
+            queryId: aggregateIds.query,
+            schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+          }),
+        (error: unknown) => error instanceof MalformedSemanticQueryRequestError,
+      );
+      assert.equal(malformedExecutorCount, 0);
+
+      const base = await runtime.queryGateway.invokeAggregate(runtime.views.a, {
+        arguments: arguments_,
+        queryId: aggregateIds.query,
+        schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+      });
+      assertAggregateValue(base, '10.750002');
+      const narrowedGateway = new SemanticQueryGateway(
+        new AllowPolicy(),
+        new PostgresModuleRuntimeInterpreter(
+          runtime.runtimePool,
+          actorIssuer(),
+        ),
+        undefined,
+        demonstrateAggregateMissingPolicy ? undefined : policyGateway,
+      );
+
+      if (demonstrateAggregateMissingIndex) {
+        await runtime.adminPool.query(
+          `DROP INDEX north_star_module.${quoted(stockIndex.physicalName)}`,
+        );
+        await runtime.adminPool.query(
+          `ANALYZE north_star_module.${quoted(party.physicalTableName)}`,
+        );
+      }
+      await runtime.runtimePool.query('SELECT pg_stat_force_next_flush()');
+      const before = await readIndexCounters(runtime.adminPool, [
+        stockIndex.physicalName,
+      ]);
+      const narrowed = await narrowedGateway.invokeAggregate(runtime.views.a, {
+        arguments: arguments_,
+        queryId: aggregateIds.query,
+        schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+      });
+      await runtime.runtimePool.query('SELECT pg_stat_force_next_flush()');
+      const after = await readIndexCounters(runtime.adminPool, [
+        stockIndex.physicalName,
+      ]);
+      const indexDelta =
+        (after.get(stockIndex.physicalName) ?? 0n) -
+        (before.get(stockIndex.physicalName) ?? 0n);
+      assert.equal(indexDelta, 1n);
+
+      const ir = evaluateQueryAggregateSemantics({
+        elements: activeAllowed.map(([, value]) => ({
+          presence: 'present',
+          value,
+        })),
+        field: {
+          fieldId: aggregateIds.amountField,
+          kind: 'exactDecimalFieldType',
+          precision: 20,
+          presence: 'required',
+          scale: 6,
+        },
+        operator: 'sum',
+        profileVersion: QUERY_AGGREGATE_PROFILE_VERSION,
+      });
+      assert.equal(ir.outcome, 'evaluated');
+      assertAggregateValue(
+        narrowed,
+        ir.outcome === 'evaluated' ? ir.result.value : 'unreachable',
+      );
+
+      const policyEvidence = await explainAggregatePlans(
+        runtime.runtimePool,
+        runtime.contexts.a,
+        party,
+        amountColumn.physicalName,
+        [compiled.filterPlan, policy.filterPlan],
+        arguments_,
+      );
+      assert.ok(policyEvidence.indexNames.has(stockIndex.physicalName));
+      assert.ok(policyEvidence.rowsRemoved > 0);
+      const archivedIncluded = await aggregateWithoutArchivePredicate(
+        runtime.runtimePool,
+        runtime.contexts.a,
+        party,
+        amountColumn.physicalName,
+        [compiled.filterPlan, policy.filterPlan],
+        arguments_,
+      );
+      assert.equal(archivedIncluded, '100.750002');
+      assert.notEqual(archivedIncluded, aggregateValue(narrowed));
+      if (demonstrateAggregateMissingArchive) {
+        assert.equal(archivedIncluded, aggregateValue(narrowed));
+      }
+
+      const observedProbeIds = new Set([
+        compiled.aggregatePlan.providerProbeId,
+        'Q1-P3b/parameterized-comparison-tenant-bounded-scan',
+      ]);
+      assert.deepEqual(
+        [...observedProbeIds].sort(),
+        PREDICATE_LOWERING_TABLE.filter((row) =>
+          row.providerProbeId.startsWith('Q1-P3b/'),
+        )
+          .map((row) => row.providerProbeId)
+          .sort(),
+      );
+      console.log(
+        `Q1-P3b aggregate probe index=${stockIndex.physicalName} delta=${String(indexDelta)} rows_removed=${String(policyEvidence.rowsRemoved)} empty=0 base=${aggregateValue(base)} policy=${aggregateValue(narrowed)} archive_removed=${archivedIncluded} signed_subunit=-0.25 boundary_scale=0.000001 tenant_other=4000 environment_other=8000 forced_rls=true`,
+      );
+    },
+    definition,
+  );
+});
+
+function q1AggregatePartyDefinition(): Record<string, unknown> {
+  const definition = structuredClone(partyModuleDefinition()) as {
+    fields: Array<Record<string, unknown>>;
+    languageVersion: string;
+    queries: Array<Record<string, unknown>>;
+  } & Record<string, unknown>;
+  const schemaVersion = definition.languageVersion;
+  const reference = (kind: string, targetId: string) => ({
+    kind,
+    schemaVersion,
+    targetId,
+  });
+  const fieldBase = (input: {
+    fieldId: string;
+    fieldType: Record<string, unknown>;
+    label: string;
+    orderKey: number;
+    searchable: boolean;
+  }) => ({
+    classification: 'internal',
+    collation:
+      input.fieldType.kind === 'textFieldType'
+        ? 'unicodeCaseInsensitive'
+        : 'binary',
+    defaultSemantics: 'none',
+    entity: reference('entityReference', PARTY_IDS.entityIds.party),
+    fieldId: input.fieldId,
+    fieldType: { ...input.fieldType, schemaVersion },
+    kind: 'fieldDefinition',
+    label: input.label,
+    orderKey: input.orderKey,
+    presence: 'required',
+    reportable: true,
+    schemaVersion,
+    searchable: input.searchable,
+  });
+  definition.fields.push(
+    fieldBase({
+      fieldId: aggregateIds.stockField,
+      fieldType: { kind: 'textFieldType', maximumLength: 80 },
+      label: 'Aggregate stock identity',
+      orderKey: 40,
+      searchable: true,
+    }),
+    fieldBase({
+      fieldId: aggregateIds.effectiveAtField,
+      fieldType: {
+        kind: 'dateTimeFieldType',
+        precision: 'millisecond',
+        timezoneSemantics: 'utcInstant',
+      },
+      label: 'Aggregate effective at',
+      orderKey: 50,
+      searchable: false,
+    }),
+    fieldBase({
+      fieldId: aggregateIds.amountField,
+      fieldType: {
+        kind: 'exactDecimalFieldType',
+        precision: 20,
+        representation: 'canonicalString',
+        scale: 6,
+      },
+      label: 'Aggregate amount',
+      orderKey: 60,
+      searchable: false,
+    }),
+  );
+  const contact = definition.fields.find(
+    (field) => field.fieldId === PARTY_IDS.fieldIds.contactSummary,
+  );
+  assert.ok(contact);
+  contact.collation = 'binary';
+  const aggregateSelection = (selectionId: string) => ({
+    field: reference('fieldReference', aggregateIds.amountField),
+    kind: 'queryAggregateSelection',
+    operator: 'sum',
+    schemaVersion,
+    selectionId,
+  });
+  const common = {
+    kind: 'queryDefinition',
+    maximumResultCount: 1,
+    module: reference('moduleReference', PARTY_IDS.moduleId),
+    permission: reference(
+      'permissionReference',
+      `${PARTY_IDS.namespace}:permission.party_read`,
+    ),
+    queryType: 'aggregate',
+    schemaVersion,
+    sourceEntity: reference('entityReference', PARTY_IDS.entityIds.party),
+    tier: 'q1',
+  };
+  definition.queries.push(
+    {
+      ...common,
+      aggregate: aggregateSelection(aggregateIds.selection),
+      filter: {
+        kind: 'allPredicate',
+        schemaVersion,
+        terms: [
+          {
+            field: reference('fieldReference', aggregateIds.stockField),
+            kind: 'fieldComparisonPredicate',
+            operator: 'equals',
+            schemaVersion,
+            value: {
+              kind: 'queryParameterReference',
+              parameterId: aggregateIds.stockParameter,
+              schemaVersion,
+            },
+          },
+          {
+            field: reference('fieldReference', aggregateIds.effectiveAtField),
+            kind: 'fieldComparisonPredicate',
+            operator: 'lessThanOrEqual',
+            schemaVersion,
+            value: {
+              kind: 'queryParameterReference',
+              parameterId: aggregateIds.atTimeParameter,
+              schemaVersion,
+            },
+          },
+          {
+            field: reference('fieldReference', aggregateIds.amountField),
+            kind: 'fieldComparisonPredicate',
+            operator: 'greaterThanOrEqual',
+            schemaVersion,
+            value: {
+              kind: 'exactDecimalValue',
+              schemaVersion,
+              value: '-0.25',
+            },
+          },
+        ],
+      },
+      parameters: [
+        {
+          kind: 'queryParameterDefinition',
+          orderKey: 10,
+          parameterId: aggregateIds.stockParameter,
+          schemaVersion,
+        },
+        {
+          kind: 'queryParameterDefinition',
+          orderKey: 20,
+          parameterId: aggregateIds.atTimeParameter,
+          schemaVersion,
+        },
+      ],
+      queryId: aggregateIds.query,
+    },
+    {
+      ...common,
+      aggregate: aggregateSelection(
+        `${PARTY_IDS.namespace}:selection.party_q1_aggregate_policy`,
+      ),
+      filter: {
+        field: reference('fieldReference', PARTY_IDS.fieldIds.contactSummary),
+        kind: 'fieldComparisonPredicate',
+        operator: 'equals',
+        schemaVersion,
+        value: { kind: 'textValue', schemaVersion, value: 'allowed' },
+      },
+      parameters: [],
+      queryId: aggregateIds.policyQuery,
+    },
+  );
+  return definition;
+}
+
+interface CompiledAggregateQuery {
+  readonly aggregatePlan: QueryAggregateLoweringPlan;
+  readonly filter: Readonly<Record<string, ImmutableJsonValue>>;
+  readonly filterPlan: ParameterizedPredicateLoweringPlan;
+}
+
+function compiledAggregateQuery(
+  view: Parameters<typeof invokePartyQuery>[1],
+  queryId: string,
+): CompiledAggregateQuery {
+  const payload = view.projections.query.payload;
+  assert.ok(isRecord(payload));
+  assert.ok(Array.isArray(payload.queries));
+  const query = payload.queries.find(
+    (candidate) => isRecord(candidate) && candidate.queryId === queryId,
+  );
+  assert.ok(isRecord(query));
+  assert.ok(isRecord(query.aggregatePlan));
+  assert.ok(isRecord(query.filter));
+  assert.ok(isRecord(query.filterPlan));
+  return query as unknown as CompiledAggregateQuery;
+}
+
+async function createAggregateParty(
+  runtime: Parameters<typeof invokePartyOperation>[0],
+  view: Parameters<typeof invokePartyOperation>[1],
+  input: {
+    amount: string;
+    contact: string;
+    effectiveAt: string;
+    recordId: string;
+    stock: string;
+  },
+): Promise<void> {
+  await invokePartyOperation(runtime, view, 'party_create', {
+    recordId: input.recordId,
+    values: {
+      [aggregateIds.amountField]: input.amount,
+      [aggregateIds.effectiveAtField]: input.effectiveAt,
+      [aggregateIds.stockField]: input.stock,
+      [PARTY_IDS.fieldIds.contactSummary]: input.contact,
+      [PARTY_IDS.fieldIds.name]: `Aggregate ${input.recordId.slice(-4)}`,
+      [PARTY_IDS.fieldIds.number]: `Q1-AGG-${input.recordId.slice(-12)}`,
+    },
+  });
+}
+
+function aggregateValue(result: {
+  readonly value: { readonly value: string };
+}): string {
+  return result.value.value;
+}
+
+function assertAggregateValue(
+  result: { readonly value: { readonly value: string } },
+  expected: string,
+): void {
+  assert.equal(aggregateValue(result), expected);
+}
+
 function q1PartyDefinition(): Record<string, unknown> {
   const definition = structuredClone(partyModuleDefinition()) as {
     fields: Array<Record<string, unknown>>;
@@ -666,6 +1195,163 @@ async function insertCrossEnvironmentRow(
   );
 }
 
+async function insertAggregateCrossEnvironmentRow(
+  pool: Pool,
+  entity: Parameters<typeof requiredColumn>[0],
+  columns: {
+    amountColumn: string;
+    effectiveAtColumn: string;
+    recordId: string;
+    stockColumn: string;
+  },
+): Promise<void> {
+  const contactColumn = requiredColumn(
+    entity,
+    PARTY_IDS.fieldIds.contactSummary,
+  ).physicalName;
+  const nameColumn = requiredColumn(
+    entity,
+    PARTY_IDS.fieldIds.name,
+  ).physicalName;
+  const numberColumn = requiredColumn(
+    entity,
+    PARTY_IDS.fieldIds.number,
+  ).physicalName;
+  await pool.query(
+    `INSERT INTO north_star_module.${quoted(entity.physicalTableName)}
+       (tenant_id, environment_id, record_id, revision,
+        ${quoted(numberColumn)}, ${quoted(nameColumn)}, ${quoted(contactColumn)},
+        ${quoted(columns.stockColumn)}, ${quoted(columns.effectiveAtColumn)},
+        ${quoted(columns.amountColumn)})
+     VALUES ($1::uuid, $2::uuid, $3::uuid, 1,
+             'Q1-AGG-OTHER-ENV', 'Other environment aggregate', 'allowed',
+             'STOCK-A', '2026-01-01T00:00:00.000Z'::timestamptz, 8000::numeric)`,
+    [
+      PARTY_TEST_SCOPE.a.tenantId,
+      PARTY_TEST_SCOPE.b.environmentId,
+      columns.recordId,
+    ],
+  );
+}
+
+async function insertAggregatePlannerRows(
+  pool: Pool,
+  entity: Parameters<typeof requiredColumn>[0],
+  columns: {
+    amountColumn: string;
+    effectiveAtColumn: string;
+    stockColumn: string;
+  },
+): Promise<void> {
+  const contactColumn = requiredColumn(
+    entity,
+    PARTY_IDS.fieldIds.contactSummary,
+  ).physicalName;
+  const nameColumn = requiredColumn(
+    entity,
+    PARTY_IDS.fieldIds.name,
+  ).physicalName;
+  const numberColumn = requiredColumn(
+    entity,
+    PARTY_IDS.fieldIds.number,
+  ).physicalName;
+  await pool.query(
+    `INSERT INTO north_star_module.${quoted(entity.physicalTableName)}
+       (tenant_id, environment_id, record_id, revision,
+        ${quoted(numberColumn)}, ${quoted(nameColumn)}, ${quoted(contactColumn)},
+        ${quoted(columns.stockColumn)}, ${quoted(columns.effectiveAtColumn)},
+        ${quoted(columns.amountColumn)})
+     SELECT $1::uuid,
+            $2::uuid,
+            ('b3000000-0000-4000-8000-' || lpad(row_number::text, 12, '0'))::uuid,
+            1,
+            'Q1-AGG-BULK-' || lpad(row_number::text, 5, '0'),
+            'Aggregate planner row ' || lpad(row_number::text, 5, '0'),
+            'allowed',
+            'OTHER-STOCK-' || lpad(row_number::text, 5, '0'),
+            '2026-01-01T00:00:00.000Z'::timestamptz,
+            1::numeric
+       FROM generate_series(1, 10000) AS row_number`,
+    [PARTY_TEST_SCOPE.a.tenantId, PARTY_TEST_SCOPE.a.environmentId],
+  );
+}
+
+async function explainAggregatePlans(
+  pool: Pool,
+  context: Parameters<typeof withTrustedRequestTransaction>[1],
+  entity: Parameters<typeof requiredColumn>[0],
+  amountColumn: string,
+  plans: readonly QueryFilterLoweringPlan[],
+  parameterValues: Readonly<Record<string, ImmutableJsonValue>>,
+): Promise<ReturnType<typeof inspectPlan>> {
+  const alias = 'q1_aggregate_source';
+  const predicate = buildQueryFilterPredicate(
+    entity,
+    plans,
+    alias,
+    parameterValues,
+  );
+  const root = await withTrustedRequestTransaction(
+    pool,
+    context,
+    async (client) => {
+      await client.query('SET LOCAL ROLE north_star_module_runtime');
+      try {
+        await client.query('SET LOCAL max_parallel_workers_per_gather = 0');
+        return explain(
+          client,
+          `SELECT COALESCE(SUM(${qualified(alias, amountColumn)}), 0)::numeric(38,6)::text
+             FROM north_star_module.${quoted(entity.physicalTableName)} AS ${quoted(alias)}
+            WHERE ${qualified(alias, entity.archive.archivedAtColumn)} IS NULL
+              AND ${predicate.sql}`,
+          predicate.values,
+        );
+      } finally {
+        await client.query('RESET ROLE');
+      }
+    },
+  );
+  return inspectPlan(root);
+}
+
+async function aggregateWithoutArchivePredicate(
+  pool: Pool,
+  context: Parameters<typeof withTrustedRequestTransaction>[1],
+  entity: Parameters<typeof requiredColumn>[0],
+  amountColumn: string,
+  plans: readonly QueryFilterLoweringPlan[],
+  parameterValues: Readonly<Record<string, ImmutableJsonValue>>,
+): Promise<string> {
+  const predicate = buildQueryFilterPredicate(
+    entity,
+    plans,
+    undefined,
+    parameterValues,
+  );
+  return withTrustedRequestTransaction(pool, context, async (client) => {
+    await client.query('SET LOCAL ROLE north_star_module_runtime');
+    try {
+      const result = await client.query<{ total: string }>(
+        `SELECT COALESCE(SUM(${quoted(amountColumn)}), 0)::numeric(38,6)::text AS total
+           FROM north_star_module.${quoted(entity.physicalTableName)}
+          WHERE ${predicate.sql}`,
+        [...predicate.values],
+      );
+      assert.equal(result.rowCount, 1);
+      return canonicalExactDecimal(result.rows[0]!.total);
+    } finally {
+      await client.query('RESET ROLE');
+    }
+  });
+}
+
+function canonicalExactDecimal(value: string): string {
+  const trimmed = value.includes('.')
+    ? value.replace(/0+$/u, '').replace(/\.$/u, '')
+    : value;
+  return trimmed === '-0' ? '0' : trimmed;
+}
+
 interface PlanNode {
   readonly 'Index Name'?: unknown;
   readonly 'Node Type'?: unknown;
@@ -786,6 +1472,7 @@ function inspectPlan(root: PlanNode): {
   let rowsRemoved = 0;
   let sequentialScan = false;
   const recognized = new Set([
+    'Aggregate',
     'BitmapAnd',
     'Bitmap Heap Scan',
     'Bitmap Index Scan',
