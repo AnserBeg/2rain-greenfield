@@ -50,6 +50,7 @@ encoding mechanical rather than authorizing a lease collision.
 | Generic storage cannot express owner scope | migration 0012 binds every policy to `owner_principal_id`; compiler storage and the materializer contain zero `principal_id` references |
 | Provenance cannot classify the tier | Party, Catalog, Location, Platform and app-builder definitions all declare `firstParty` |
 | The product blast radius is closed | the composed authored application contains only Party, Catalog and Location |
+| The existing guard sees the contradiction | `test:architecture` reports `PRESS007_MODULE_GLUE_IN_PRESS` for the adapter and `PRESS006_MODULE_ID_IN_PRESS` for its platform identity |
 
 Q1-P1's historical red is incorporated as evidence, not reproduced: before the explicit
 refusal, a constant-false policy contribution still returned the saved row and the test failed
@@ -94,12 +95,18 @@ This answers audit B5/G11 directly. The selected path is a narrow typed capabili
 not a late general code hatch: no tenant-authored body, no direct route/tool, no managed-table
 access, no policy/release/trust bypass, and no advertised support without executed evidence.
 
+The existing adapter may know its own registered protocol IDs; generic compiler/interpreter/
+gateway/fallback/materializer code may not. Row 1e must replace the current two recorded press-
+law violations with a structural capability-adapter classification, not a saved-filter ID or
+path allowlist. Failure to express that distinction is a stop condition for 1c-b.
+
 ## Downstream disposition
 
 - **Current-plan row 1 (`savedViews`)** proceeds after the encoding packet makes get/list and
   lifecycle operations releasable.
 - **Row 1e** retains the executor-contract work that makes accepting or explicitly refusing
-  every gateway obligation structural rather than voluntary.
+  every gateway obligation structural rather than voluntary, and must replace the two current
+  press-law findings with structural adapter classification before a second Tier-B capability.
 - **Row 7** later contributes real permission/policy denial and narrowing. It cannot weaken
   migration 0012's tenant/environment/principal RLS.
 
@@ -114,6 +121,13 @@ This packet changes no executable or generated input. The final full CI matrix i
 frozen candidate after both documents are committed and after confirming no other lane matrix
 is active. The immutable completion handoff records the exact counts and SHA; editing this file
 after that run would invalidate the evidence.
+
+The first frozen draft at `a869bfbd1c9a8879e899f8ce12e5d64041f301f1` was deliberately
+superseded before review. Its matrix was manually stopped after the architecture gate's two
+saved-filter press-law diagnostics exposed an ambiguous enforcement paragraph; every gate
+through schema drift was green, and PostgreSQL had passed 1/92 when stopped. The replacement
+candidate explicitly rules capability-local identity versus generic module branching and
+routes the structural guard to row 1e. The stopped run is not final gate evidence.
 
 Artifact stillness is checked rather than inferred:
 
@@ -170,6 +184,7 @@ applies. Re-evaluate after the follow-on is integrated or at the next stage/capa
    decorative storage class/projection, narrow queries, derive Tier-B conformance and genuine
    verification, and make saved filters release-admissible.
 2. **1e — consolidate the press guards/executor obligation contract:** make silent gateway-
-   obligation drops structurally impossible before a second provider adapter exists.
+   obligation drops structurally impossible and distinguish a typed platform-capability
+   adapter from generic module glue without an ID/path allowlist.
 3. **G2-P5d-b savedViews slice:** consume the admitted get/list capability after 1c-b rather
    than building against the currently refused package.

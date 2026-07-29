@@ -105,6 +105,13 @@ must remain behind the ordinary semantic Query/Operation gateways. It may not cr
 HTTP route, top-level agent tool, policy bypass, release bypass, private desired-state
 registry, or generic-press branch.
 
+A capability-local adapter may know the IDs and wire contract of the one capability it
+implements. That is not permission for the generic interpreter, compiler, gateway, fallback
+router, or materializer to inspect a module namespace. Dispatch into the adapter is by a typed,
+versioned registration checked against the pinned release; after dispatch, protocol-local code
+may compare the registered query/operation IDs it owns. The generic fallback remains free of
+platform identities.
+
 This does not weaken the storage-topology verdict. R1's generic executor remains exclusive for
 module tables; the saved-filter adapter touches a `platform` table. R2's ownership split is
 restored: migration 0012 owns the table, while the canonical release owns only the capability
@@ -174,6 +181,15 @@ The saved-filter capability is the sole capability admitted by this ADR. A later
 capability needs its own accepted ADR, versioned protocol, explicit kernel-plane ownership,
 provider registration and real verification evidence. The compiler does not learn a general
 "platform namespace" allowlist.
+
+The current press-law scan reports the dedicated adapter as
+`PRESS007_MODULE_GLUE_IN_PRESS` and its protocol identity as
+`PRESS006_MODULE_ID_IN_PRESS`. Those findings are not deleted or allowlisted by name. Row 1e
+must make the guard distinguish a structurally registered platform-capability adapter from a
+module branch in generic machinery, then keep both diagnostics red for the generic
+interpreter, fallback, compiler, materializer and unregistered provider code. If that
+distinction cannot be expressed without a module-ID allowlist, the encoding packet stops; this
+ADR does not authorize a broad exemption.
 
 This is the envelope audit B5 says must precede deadline pressure. It is not Tier C: no tenant
 or module author supplies code. The executable implementation is platform-maintained, typed,
@@ -248,6 +264,11 @@ impossible rather than merely detectable. Current-plan row 7 still owns real aut
 query-side denial evidence and the policy predicate kernel. This ADR does not reinterpret
 today's allow-all policy as authorization.
 
+Row 1e's structural adapter classification must land before any second Tier-B platform
+capability is admitted. Its two current press-law diagnostics do not by themselves block the
+one saved-filter capability after exact registration and verification become green; until row
+1e lands they remain explicit transition debt, not an allowlist precedent.
+
 ### 7. Releasability and downstream sequencing
 
 The saved-filter package remains non-releasable in the current tree. The packet-1b refusal is
@@ -257,7 +278,9 @@ the correct gate until the follow-on encoding:
 2. narrows the declared query set to `get` and `list`;
 3. derives conformance and verification from the storage-less capability contract;
 4. executes the complete real provider plan; and
-5. persists exact evidence and admits the release.
+5. persists exact evidence and admits the release; and
+6. retains the two press-law findings as named transition debt until row 1e replaces them with
+   the structural adapter guard, admitting no second Tier-B capability first.
 
 After that evidence is green, saved filters are releasable under the program's current
 internal-team-only authorization posture. They are not safe for external user access until
@@ -326,8 +349,11 @@ The follow-on encoding must add deterministic negative controls for:
 8. non-empty policy narrowing being either executed or explicitly refused before provider SQL.
 
 Architecture enforcement must continue to forbid SQL or handlers in domain packages, direct
-routes/tools, namespace branches in the generic press, and module-table access by Tier-B
-adapters. Migration replay and schema drift continue to prove kernel-plane ownership.
+routes/tools, namespace branches in generic machinery, and module-table access by Tier-B
+adapters. A capability-local adapter is admitted only when the guard structurally observes its
+typed registration, platform-plane-only access and gateway boundary; filename, namespace and
+an ID allowlist are insufficient. Migration replay and schema drift continue to prove
+kernel-plane ownership.
 
 ## Limits
 
