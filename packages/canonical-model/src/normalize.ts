@@ -8,6 +8,7 @@ import {
   LATEST_LANGUAGE_VERSION,
   LEGACY_LANGUAGE_VERSION,
   LANGUAGE_VERSION,
+  LANGUAGE_VERSIONS,
   STRUCTURAL_LIMITS_V0,
   SURFACE_SLOTS,
   canonicalLanguageProfileFor,
@@ -22,11 +23,17 @@ import {
 } from './diagnostics.js';
 import {
   AuthoredApplicationPackageSchema,
-  NormalizedApplicationPackageSchema,
+  VersionedAuthoredApplicationPackageSchema,
+  VersionedNormalizedApplicationPackageSchema,
   type AuthoredApplicationPackage,
   type CanonicalScalar,
   type NormalizedApplicationPackage,
-  type PredicateExpression,
+  type QueryParameterReference,
+  type V3AuthoredApplicationPackage,
+  type V3NormalizedApplicationPackage,
+  type VersionedAuthoredApplicationPackage,
+  type VersionedNormalizedApplicationPackage,
+  type VersionedPredicateExpression,
 } from './schemas.js';
 import { parseStrictJson } from './strict-json.js';
 import { inspectPredicateForExecution } from './predicate-kernel.js';
@@ -37,11 +44,40 @@ type CanonicalReference = {
   targetId: string;
 };
 
-type FieldType = AuthoredApplicationPackage['fields'][number]['fieldType'];
+type FieldType =
+  VersionedAuthoredApplicationPackage['fields'][number]['fieldType'];
+type AggregateNormalizedQuery = Extract<
+  VersionedNormalizedApplicationPackage['queries'][number],
+  { queryType: 'aggregate' }
+>;
+type AggregateContract = {
+  parameterTypes: Map<string, FieldType>;
+  resultType: AggregateNormalizedQuery['aggregate']['resultType'];
+};
 
 export function parseAuthoredApplicationPackageJson(
   input: string | Uint8Array,
 ): AuthoredApplicationPackage {
+  const parsed = parseAuthoredJsonInput(input);
+  try {
+    return AuthoredApplicationPackageSchema.parse(parsed.value);
+  } catch (error) {
+    if (error instanceof ZodError) throw schemaError(error, parsed.value);
+    throw error;
+  }
+}
+
+export function parseVersionedAuthoredApplicationPackageJson(
+  input: string | Uint8Array,
+): VersionedAuthoredApplicationPackage {
+  const parsed = parseAuthoredJsonInput(input);
+  return parseAuthoredValue(parsed.value);
+}
+
+function parseAuthoredJsonInput(input: string | Uint8Array): {
+  byteLength: number;
+  value: unknown;
+} {
   const parsed = parseStrictJson(input);
   if (parsed.byteLength > STRUCTURAL_LIMITS_V0.maximumAuthoredBytes) {
     throw new CanonicalModelError([
@@ -53,12 +89,47 @@ export function parseAuthoredApplicationPackageJson(
       ),
     ]);
   }
-  return parseAuthoredValue(parsed.value);
+  return parsed;
+}
+
+export function parseNormalizedApplicationPackageJson(
+  input: string | Uint8Array,
+): VersionedNormalizedApplicationPackage {
+  const parsed = parseStrictJson(input);
+  if (parsed.byteLength > STRUCTURAL_LIMITS_V0.maximumNormalizedBytes) {
+    throw new CanonicalModelError([
+      diagnostic(
+        'CANON_LIMIT_NORMALIZED_BYTES',
+        '$',
+        `normalized package bytes must not exceed ${STRUCTURAL_LIMITS_V0.maximumNormalizedBytes}`,
+        'split the package or reduce canonical definitions',
+      ),
+    ]);
+  }
+  let normalized: VersionedNormalizedApplicationPackage;
+  try {
+    normalized = VersionedNormalizedApplicationPackageSchema.parse(
+      parsed.value,
+    );
+  } catch (error) {
+    if (error instanceof ZodError) throw schemaError(error, parsed.value);
+    throw error;
+  }
+  enforceFamilyBounds(normalized);
+  validateSemantics(normalized);
+  enforceValueBounds(normalized);
+  return deepFreeze(normalized);
 }
 
 export function normalizeApplicationPackage(
+  input: V3AuthoredApplicationPackage,
+): V3NormalizedApplicationPackage;
+export function normalizeApplicationPackage(
   input: unknown,
-): NormalizedApplicationPackage {
+): NormalizedApplicationPackage;
+export function normalizeApplicationPackage(
+  input: unknown,
+): VersionedNormalizedApplicationPackage {
   const authored = parseAuthoredValue(input);
   const authoredBytes = new TextEncoder().encode(canonicalize(authored));
   if (authoredBytes.byteLength > STRUCTURAL_LIMITS_V0.maximumAuthoredBytes) {
@@ -77,6 +148,7 @@ export function normalizeApplicationPackage(
   const fieldTypes = new Map(
     authored.fields.map((field) => [field.fieldId, field.fieldType] as const),
   );
+  const aggregateContracts = deriveAggregateContracts(authored);
 
   const normalizedCandidate = {
     assertions: authored.assertions.map((entry) => ({
@@ -91,6 +163,11 @@ export function normalizeApplicationPackage(
       lifecycle: entry.lifecycle ?? IMMUTABLE_DEFAULTS_V0.lifecycle,
       requiredProjections: sortedStrings(entry.requiredProjections),
     })),
+    ...(authored.languageVersion === LANGUAGE_VERSIONS.v3
+      ? {
+          impactAnalyses: authored.impactAnalyses,
+        }
+      : {}),
     entities: authored.entities.map((entry) => ({
       ...entry,
       lifecycle: entry.lifecycle ?? IMMUTABLE_DEFAULTS_V0.lifecycle,
@@ -119,15 +196,29 @@ export function normalizeApplicationPackage(
     normalizationProfileVersion: normalizationProfileFor(
       authored.languageVersion,
     ),
-    operations: authored.operations.map((entry) => ({
-      ...entry,
-      lifecycle: entry.lifecycle ?? IMMUTABLE_DEFAULTS_V0.lifecycle,
-      precondition: normalizePredicate(
-        entry.precondition ?? defaultPredicate(authored.languageVersion),
-        1,
-        fieldTypes,
-      ),
-    })),
+    operations: authored.operations.map((entry) =>
+      authored.languageVersion === LANGUAGE_VERSIONS.v3
+        ? {
+            ...entry,
+            lifecycle: entry.lifecycle ?? IMMUTABLE_DEFAULTS_V0.lifecycle,
+            precondition: normalizePredicate(
+              (entry as V3AuthoredApplicationPackage['operations'][number])
+                .precondition ?? defaultPredicate(LANGUAGE_VERSIONS.v3),
+              1,
+              fieldTypes,
+            ),
+          }
+        : {
+            ...entry,
+            lifecycle: entry.lifecycle ?? IMMUTABLE_DEFAULTS_V0.lifecycle,
+            precondition: normalizePredicate(
+              (entry as AuthoredApplicationPackage['operations'][number])
+                .precondition ?? defaultPredicate(authored.languageVersion),
+              1,
+              fieldTypes,
+            ),
+          },
+    ),
     package: {
       ...authored.package,
       lifecycle: authored.package.lifecycle ?? IMMUTABLE_DEFAULTS_V0.lifecycle,
@@ -136,25 +227,72 @@ export function normalizeApplicationPackage(
       ...entry,
       lifecycle: entry.lifecycle ?? IMMUTABLE_DEFAULTS_V0.lifecycle,
     })),
-    queries: authored.queries.map((entry) => ({
-      ...entry,
-      filter: normalizePredicate(
-        entry.filter ?? defaultPredicate(authored.languageVersion),
-        1,
-        fieldTypes,
-      ),
-      lifecycle: entry.lifecycle ?? IMMUTABLE_DEFAULTS_V0.lifecycle,
-      ...(entry.resolveMatchKeys !== undefined ||
-      languageHasV2Features(authored.languageVersion)
-        ? {
-            resolveMatchKeys: sortByOrderAndId(
-              entry.resolveMatchKeys ?? [],
-              'matchKeyId',
-            ),
-          }
-        : {}),
-      selections: sortByOrderAndId(entry.selections, 'selectionId'),
-    })),
+    queries: authored.queries.map((entry) => {
+      if (entry.queryType === 'aggregate') {
+        const contract = aggregateContracts.get(entry.queryId)!;
+        return {
+          ...entry,
+          aggregate: {
+            ...entry.aggregate,
+            resultType: contract.resultType,
+          },
+          filter: normalizePredicate(
+            entry.filter ?? defaultPredicate(LANGUAGE_VERSIONS.v3),
+            1,
+            fieldTypes,
+          ),
+          lifecycle: entry.lifecycle ?? IMMUTABLE_DEFAULTS_V0.lifecycle,
+          parameters: sortByOrderAndId(
+            entry.parameters.map((parameter) => ({
+              ...parameter,
+              parameterType: contract.parameterTypes.get(
+                parameter.parameterId,
+              )!,
+            })),
+            'parameterId',
+          ),
+        };
+      }
+      if (authored.languageVersion === LANGUAGE_VERSIONS.v3) {
+        const v3Entry = entry as Extract<
+          V3AuthoredApplicationPackage['queries'][number],
+          { queryType: 'get' | 'list' | 'resolve' | 'search' }
+        >;
+        return {
+          ...v3Entry,
+          filter: normalizePredicate(
+            v3Entry.filter ?? defaultPredicate(LANGUAGE_VERSIONS.v3),
+            1,
+            fieldTypes,
+          ),
+          lifecycle: v3Entry.lifecycle ?? IMMUTABLE_DEFAULTS_V0.lifecycle,
+          resolveMatchKeys: sortByOrderAndId(
+            v3Entry.resolveMatchKeys ?? [],
+            'matchKeyId',
+          ),
+          selections: sortByOrderAndId(v3Entry.selections, 'selectionId'),
+        };
+      }
+      return {
+        ...entry,
+        filter: normalizePredicate(
+          entry.filter ?? defaultPredicate(authored.languageVersion),
+          1,
+          fieldTypes,
+        ),
+        lifecycle: entry.lifecycle ?? IMMUTABLE_DEFAULTS_V0.lifecycle,
+        ...(entry.resolveMatchKeys !== undefined ||
+        languageHasV2Features(authored.languageVersion)
+          ? {
+              resolveMatchKeys: sortByOrderAndId(
+                entry.resolveMatchKeys ?? [],
+                'matchKeyId',
+              ),
+            }
+          : {}),
+        selections: sortByOrderAndId(entry.selections, 'selectionId'),
+      };
+    }),
     relations: authored.relations.map((entry) => ({
       ...entry,
       joinEligibility:
@@ -198,6 +336,11 @@ export function normalizeApplicationPackage(
       normalizedCandidate.capabilityRequirements,
       'capabilityId',
     ),
+    ...(authored.languageVersion === LANGUAGE_VERSIONS.v3
+      ? {
+          impactAnalyses: normalizedCandidate.impactAnalyses,
+        }
+      : {}),
     entities: sortByOwnerOrderAndId(
       normalizedCandidate.entities,
       (entry) => entry.module.targetId,
@@ -225,9 +368,10 @@ export function normalizeApplicationPackage(
     surfaces: sortById(normalizedCandidate.surfaces, 'surfaceId'),
   };
 
-  let normalized: NormalizedApplicationPackage;
+  let normalized: VersionedNormalizedApplicationPackage;
   try {
-    normalized = NormalizedApplicationPackageSchema.parse(sortedCandidate);
+    normalized =
+      VersionedNormalizedApplicationPackageSchema.parse(sortedCandidate);
   } catch (error) {
     if (error instanceof ZodError) throw schemaError(error, sortedCandidate);
     throw error;
@@ -252,9 +396,15 @@ export function normalizeApplicationPackage(
 }
 
 export function canonicalAuthoredProjection(
+  normalized: V3NormalizedApplicationPackage,
+): V3AuthoredApplicationPackage;
+export function canonicalAuthoredProjection(
   normalized: NormalizedApplicationPackage,
-): AuthoredApplicationPackage {
-  NormalizedApplicationPackageSchema.parse(normalized);
+): AuthoredApplicationPackage;
+export function canonicalAuthoredProjection(
+  normalized: VersionedNormalizedApplicationPackage,
+): VersionedAuthoredApplicationPackage {
+  VersionedNormalizedApplicationPackageSchema.parse(normalized);
   const projected = structuredClone(normalized) as unknown as Record<
     string,
     unknown
@@ -288,6 +438,12 @@ export function canonicalAuthoredProjection(
     ) {
       delete object.filter;
     }
+    if (object.kind === 'queryParameterDefinition') {
+      delete object.parameterType;
+    }
+    if (object.kind === 'queryAggregateSelection') {
+      delete object.resultType;
+    }
     if (
       object.kind === 'operationDefinition' &&
       inspectPredicateForExecution(object.precondition).outcome === 'accepted'
@@ -298,9 +454,11 @@ export function canonicalAuthoredProjection(
   return parseAuthoredValue(projected);
 }
 
-function parseAuthoredValue(input: unknown): AuthoredApplicationPackage {
+function parseAuthoredValue(
+  input: unknown,
+): VersionedAuthoredApplicationPackage {
   try {
-    return AuthoredApplicationPackageSchema.parse(input);
+    return VersionedAuthoredApplicationPackageSchema.parse(input);
   } catch (error) {
     if (error instanceof ZodError) throw schemaError(error, input);
     throw error;
@@ -339,8 +497,151 @@ function schemaError(error: ZodError, input: unknown): CanonicalModelError {
   return new CanonicalModelError(diagnostics);
 }
 
+function deriveAggregateContracts(
+  authored: VersionedAuthoredApplicationPackage,
+): Map<string, AggregateContract> {
+  const contracts = new Map<string, AggregateContract>();
+  if (authored.languageVersion !== LANGUAGE_VERSIONS.v3) return contracts;
+  const diagnostics: CanonicalDiagnostic[] = [];
+  const fields = new Map(
+    authored.fields.map((field) => [field.fieldId, field] as const),
+  );
+  for (const query of authored.queries) {
+    if (query.queryType !== 'aggregate') continue;
+    const source = fields.get(query.aggregate.field.targetId);
+    if (!source) {
+      diagnostics.push(
+        diagnostic(
+          'CANON_REFERENCE_UNRESOLVED',
+          '$.queries.aggregate.field',
+          'aggregate source fields resolve inside the complete package',
+          'reference a declared field',
+          query.queryId,
+        ),
+      );
+      continue;
+    }
+    if (source.entity.targetId !== query.sourceEntity.targetId) {
+      diagnostics.push(
+        diagnostic(
+          'CANON_QUERY_AGGREGATE_FIELD_LOCALITY',
+          '$.queries.aggregate.field',
+          'aggregate selections belong to the query source entity',
+          'reference a field owned by the source entity',
+          query.queryId,
+        ),
+      );
+    }
+    if (source.presence !== 'required') {
+      diagnostics.push(
+        diagnostic(
+          'CANON_QUERY_AGGREGATE_OPTIONAL_UNSUPPORTED',
+          '$.queries.aggregate.field',
+          'query aggregate profile v1 rejects optional source fields',
+          'make the exact-numeric source field required',
+          query.queryId,
+        ),
+      );
+    }
+    if (
+      source.fieldType.kind !== 'exactDecimalFieldType' &&
+      source.fieldType.kind !== 'quantityFieldType'
+    ) {
+      diagnostics.push(
+        diagnostic(
+          'CANON_QUERY_AGGREGATE_TYPE_UNSUPPORTED',
+          '$.queries.aggregate.field',
+          'query aggregate profile v1 admits required exact-decimal and quantity sources only',
+          'use a required exactDecimalFieldType or quantityFieldType source',
+          query.queryId,
+        ),
+      );
+      continue;
+    }
+
+    const parameters = new Map(
+      query.parameters.map((parameter) => [parameter.parameterId, parameter]),
+    );
+    const parameterTypes = new Map<string, FieldType>();
+    visitQueryParameterReferences(
+      query.filter ?? defaultPredicate(LANGUAGE_VERSIONS.v3),
+      (reference, comparison) => {
+        const parameter = parameters.get(reference.parameterId);
+        if (!parameter) {
+          diagnostics.push(
+            diagnostic(
+              'CANON_QUERY_PARAMETER_UNRESOLVED',
+              '$.queries.filter.value.parameterId',
+              'query parameter references resolve within their aggregate query',
+              'declare the referenced queryParameterDefinition',
+              query.queryId,
+            ),
+          );
+          return;
+        }
+        const comparedField = fields.get(comparison.field.targetId);
+        if (!comparedField) return;
+        const prior = parameterTypes.get(reference.parameterId);
+        if (
+          prior !== undefined &&
+          canonicalize(prior) !== canonicalize(comparedField.fieldType)
+        ) {
+          diagnostics.push(
+            diagnostic(
+              'CANON_QUERY_PARAMETER_TYPE_MISMATCH',
+              '$.queries.filter.value',
+              'one query parameter has one scalar type across every use',
+              'use distinct parameters for incompatible field types',
+              query.queryId,
+            ),
+          );
+          return;
+        }
+        parameterTypes.set(reference.parameterId, comparedField.fieldType);
+      },
+    );
+    for (const parameter of query.parameters) {
+      if (!parameterTypes.has(parameter.parameterId)) {
+        diagnostics.push(
+          diagnostic(
+            'CANON_QUERY_PARAMETER_UNUSED',
+            '$.queries.parameters',
+            'every declared query parameter is used by the aggregate filter',
+            'remove the parameter or reference it from the filter',
+            query.queryId,
+          ),
+        );
+      }
+    }
+    if (
+      parameterTypes.size !== query.parameters.length ||
+      diagnostics.some((entry) => entry.objectId === query.queryId)
+    ) {
+      continue;
+    }
+    const resultType: AggregateContract['resultType'] =
+      source.fieldType.kind === 'quantityFieldType'
+        ? {
+            baseUnit: source.fieldType.baseUnit,
+            kind: 'quantityAggregateResultType',
+            precision: 38,
+            scale: source.fieldType.scale,
+            schemaVersion: LANGUAGE_VERSIONS.v3,
+          }
+        : {
+            kind: 'exactDecimalAggregateResultType',
+            precision: 38,
+            scale: source.fieldType.scale,
+            schemaVersion: LANGUAGE_VERSIONS.v3,
+          };
+    contracts.set(query.queryId, { parameterTypes, resultType });
+  }
+  if (diagnostics.length > 0) throw new CanonicalModelError(diagnostics);
+  return contracts;
+}
+
 function validateSemantics(
-  packageRevision: NormalizedApplicationPackage,
+  packageRevision: VersionedNormalizedApplicationPackage,
 ): void {
   const diagnostics: CanonicalDiagnostic[] = [];
   const namespace = packageRevision.package.namespace;
@@ -523,7 +824,7 @@ function validateSemantics(
 }
 
 function validateOwnedReferences(
-  packageRevision: NormalizedApplicationPackage,
+  packageRevision: VersionedNormalizedApplicationPackage,
   index: Map<string, Set<string>>,
   namespace: string,
   diagnostics: CanonicalDiagnostic[],
@@ -701,13 +1002,40 @@ function validateOwnedReferences(
       '$.queries.sourceEntity',
       query.queryId,
     );
-    for (const selection of query.selections) {
+    if (query.queryType === 'aggregate') {
       check(
-        selection.field,
+        query.aggregate.field,
         'fieldReference',
-        '$.queries.selections.field',
+        '$.queries.aggregate.field',
         query.queryId,
       );
+      if (query.aggregate.resultType.kind === 'quantityAggregateResultType') {
+        check(
+          query.aggregate.resultType.baseUnit,
+          'unitReference',
+          '$.queries.aggregate.resultType.baseUnit',
+          query.queryId,
+        );
+      }
+      for (const parameter of query.parameters) {
+        if (parameter.parameterType.kind === 'quantityFieldType') {
+          check(
+            parameter.parameterType.baseUnit,
+            'unitReference',
+            '$.queries.parameters.parameterType.baseUnit',
+            query.queryId,
+          );
+        }
+      }
+    } else {
+      for (const selection of query.selections) {
+        check(
+          selection.field,
+          'fieldReference',
+          '$.queries.selections.field',
+          query.queryId,
+        );
+      }
     }
     for (const matchKey of query.resolveMatchKeys ?? []) {
       check(
@@ -807,7 +1135,7 @@ function validateOwnedReferences(
 }
 
 function validateSurfaceVocabulary(
-  packageRevision: NormalizedApplicationPackage,
+  packageRevision: VersionedNormalizedApplicationPackage,
   diagnostics: CanonicalDiagnostic[],
 ): void {
   for (const surface of packageRevision.surfaces) {
@@ -842,7 +1170,7 @@ function validateSurfaceVocabulary(
 }
 
 function validateReferenceLocality(
-  packageRevision: NormalizedApplicationPackage,
+  packageRevision: VersionedNormalizedApplicationPackage,
   diagnostics: CanonicalDiagnostic[],
 ): void {
   const entityModule = new Map(
@@ -1031,20 +1359,37 @@ function validateReferenceLocality(
         ),
       );
     }
-    for (const selection of query.selections) {
-      if (
-        fieldEntity.get(selection.field.targetId) !==
-        query.sourceEntity.targetId
-      ) {
+    if (query.queryType === 'aggregate') {
+      const aggregateField = fieldDefinitions.get(
+        query.aggregate.field.targetId,
+      );
+      if (aggregateField?.entity.targetId !== query.sourceEntity.targetId) {
         diagnostics.push(
           diagnostic(
-            'CANON_QUERY_FIELD_LOCALITY',
-            '$.queries.selections.field',
-            'v0 query selections belong to the source entity',
-            'use a field owned by the source entity',
+            'CANON_QUERY_AGGREGATE_FIELD_LOCALITY',
+            '$.queries.aggregate.field',
+            'aggregate selections belong to the query source entity',
+            'reference a field owned by the source entity',
             query.queryId,
           ),
         );
+      }
+    } else {
+      for (const selection of query.selections) {
+        if (
+          fieldEntity.get(selection.field.targetId) !==
+          query.sourceEntity.targetId
+        ) {
+          diagnostics.push(
+            diagnostic(
+              'CANON_QUERY_FIELD_LOCALITY',
+              '$.queries.selections.field',
+              'v0 query selections belong to the source entity',
+              'use a field owned by the source entity',
+              query.queryId,
+            ),
+          );
+        }
       }
     }
     visitFieldComparisons(query.filter, (comparison, path) => {
@@ -1070,6 +1415,19 @@ function validateReferenceLocality(
         diagnostics,
       );
     });
+    if (query.queryType !== 'aggregate') {
+      visitQueryParameterReferences(query.filter, () => {
+        diagnostics.push(
+          diagnostic(
+            'CANON_QUERY_PARAMETER_SCOPE_INVALID',
+            '$.queries.filter.value',
+            'query parameter references belong only to the aggregate query that declares them',
+            'use a canonical scalar or declare an aggregate query parameter',
+            query.queryId,
+          ),
+        );
+      });
+    }
   }
   for (const operation of packageRevision.operations) {
     visitFieldComparisons(operation.precondition, (comparison, path) => {
@@ -1079,6 +1437,17 @@ function validateReferenceLocality(
         `$.operations.precondition${path}.value`,
         operation.operationId,
         diagnostics,
+      );
+    });
+    visitQueryParameterReferences(operation.precondition, () => {
+      diagnostics.push(
+        diagnostic(
+          'CANON_QUERY_PARAMETER_SCOPE_INVALID',
+          '$.operations.precondition.value',
+          'query parameter references cannot escape their aggregate query',
+          'use a canonical scalar operation precondition',
+          operation.operationId,
+        ),
       );
     });
   }
@@ -1114,7 +1483,7 @@ function validateReferenceLocality(
 }
 
 function validateSetCollections(
-  packageRevision: NormalizedApplicationPackage,
+  packageRevision: VersionedNormalizedApplicationPackage,
   diagnostics: CanonicalDiagnostic[],
 ): void {
   for (const surface of packageRevision.surfaces) {
@@ -1181,7 +1550,7 @@ function rejectDuplicateStrings(
 }
 
 function validateOrderKeys(
-  packageRevision: NormalizedApplicationPackage,
+  packageRevision: VersionedNormalizedApplicationPackage,
   diagnostics: CanonicalDiagnostic[],
 ): void {
   const collections: Array<{
@@ -1236,9 +1605,13 @@ function validateOrderKeys(
       path: '$.surfaces.slots',
     })),
     ...packageRevision.queries.map((query) => ({
-      entries: query.selections,
+      entries:
+        query.queryType === 'aggregate' ? query.parameters : query.selections,
       objectId: query.queryId,
-      path: '$.queries.selections',
+      path:
+        query.queryType === 'aggregate'
+          ? '$.queries.parameters'
+          : '$.queries.selections',
     })),
     ...packageRevision.queries.map((query) => ({
       entries: query.resolveMatchKeys ?? [],
@@ -1266,7 +1639,7 @@ function validateOrderKeys(
 }
 
 function validateAuthoredDerivedStateFields(
-  authored: AuthoredApplicationPackage,
+  authored: VersionedAuthoredApplicationPackage,
 ): void {
   const diagnostics: CanonicalDiagnostic[] = [];
   for (const machine of authored.stateMachines) {
@@ -1329,10 +1702,10 @@ function orderCollectionsByOwner<T extends { orderKey: number }>(
 }
 
 function normalizePredicate(
-  predicate: PredicateExpression,
+  predicate: VersionedPredicateExpression,
   depth: number,
   fieldTypes: ReadonlyMap<string, FieldType>,
-): PredicateExpression {
+): VersionedPredicateExpression {
   if (depth > STRUCTURAL_LIMITS_V0.maximumExpressionDepth) {
     throw new CanonicalModelError([
       diagnostic(
@@ -1347,7 +1720,7 @@ function normalizePredicate(
     return {
       ...predicate,
       term: normalizePredicate(predicate.term, depth + 1, fieldTypes),
-    };
+    } as VersionedPredicateExpression;
   }
   if (predicate.kind === 'allPredicate' || predicate.kind === 'anyPredicate') {
     const terms = predicate.terms
@@ -1355,16 +1728,19 @@ function normalizePredicate(
       .sort((left, right) =>
         compareCodeUnits(canonicalize(left), canonicalize(right)),
       );
-    return { ...predicate, terms };
+    return { ...predicate, terms } as VersionedPredicateExpression;
   }
   if (predicate.kind === 'fieldComparisonPredicate') {
     return {
       ...predicate,
-      value: normalizeScalarForField(
-        predicate.value,
-        fieldTypes.get(predicate.field.targetId),
-      ),
-    };
+      value:
+        predicate.value.kind === 'queryParameterReference'
+          ? predicate.value
+          : normalizeScalarForField(
+              predicate.value,
+              fieldTypes.get(predicate.field.targetId),
+            ),
+    } as VersionedPredicateExpression;
   }
   return predicate;
 }
@@ -1426,7 +1802,7 @@ function canonicalDateTime(
 
 function defaultPredicate(
   schemaVersion: CanonicalLanguageVersion,
-): PredicateExpression {
+): VersionedPredicateExpression {
   return {
     kind: 'booleanPredicate',
     schemaVersion,
@@ -1444,16 +1820,22 @@ function normalizationProfileFor(
 function languageHasV2Features(
   languageVersion: CanonicalLanguageVersion,
 ): boolean {
-  return canonicalLanguageProfileFor(languageVersion).featureLevel === 'v2';
+  const featureLevel =
+    canonicalLanguageProfileFor(languageVersion).featureLevel;
+  return featureLevel === 'v2' || featureLevel === 'v3';
 }
 
-function enforceFamilyBounds(authored: AuthoredApplicationPackage): void {
+function enforceFamilyBounds(
+  authored:
+    VersionedAuthoredApplicationPackage | VersionedNormalizedApplicationPackage,
+): void {
   const diagnostics: CanonicalDiagnostic[] = [];
   for (const [family, maximum] of Object.entries(
     STRUCTURAL_LIMITS_V0.families,
   )) {
-    const count =
-      authored[family as keyof typeof STRUCTURAL_LIMITS_V0.families].length;
+    const entries = (authored as unknown as Record<string, unknown>)[family];
+    if (!Array.isArray(entries)) continue;
+    const count = entries.length;
     if (count > maximum) {
       diagnostics.push(
         diagnostic(
@@ -1509,7 +1891,7 @@ function enforceValueBounds(value: unknown): void {
 }
 
 function referenceIndex(
-  packageRevision: NormalizedApplicationPackage,
+  packageRevision: VersionedNormalizedApplicationPackage,
 ): Map<string, Set<string>> {
   const capabilities = new Set(
     packageRevision.capabilityRequirements.map((entry) => entry.capabilityId),
@@ -1576,7 +1958,7 @@ function referenceIndex(
 }
 
 function collectIds(
-  packageRevision: NormalizedApplicationPackage,
+  packageRevision: VersionedNormalizedApplicationPackage,
 ): Record<string, string[]> {
   return {
     package: [packageRevision.package.packageId],
@@ -1603,7 +1985,12 @@ function collectIds(
     queries: packageRevision.queries.flatMap((entry) => [
       entry.queryId,
       ...(entry.resolveMatchKeys ?? []).map((matchKey) => matchKey.matchKeyId),
-      ...entry.selections.map((selection) => selection.selectionId),
+      ...(entry.queryType === 'aggregate'
+        ? [
+            entry.aggregate.selectionId,
+            ...entry.parameters.map((parameter) => parameter.parameterId),
+          ]
+        : entry.selections.map((selection) => selection.selectionId)),
     ]),
     operations: packageRevision.operations.map((entry) => entry.operationId),
     permissions: packageRevision.permissions.map((entry) => entry.permissionId),
@@ -1614,6 +2001,7 @@ function collectIds(
     capabilityRequirements: packageRevision.capabilityRequirements.map(
       (entry) => entry.capabilityId,
     ),
+    ...('impactAnalyses' in packageRevision ? { impactAnalyses: [] } : {}),
   };
 }
 
@@ -1710,6 +2098,8 @@ const IDENTITY_KEY_BY_KIND: Readonly<Record<string, string>> = Object.freeze({
   packageDefinition: 'packageId',
   permissionDefinition: 'permissionId',
   queryDefinition: 'queryId',
+  queryAggregateSelection: 'selectionId',
+  queryParameterDefinition: 'parameterId',
   querySelection: 'selectionId',
   resolveMatchKey: 'matchKeyId',
   relationDefinition: 'relationId',
@@ -1734,6 +2124,7 @@ const OWNED_IDENTITY_KEYS = Object.freeze([
   'optionId',
   'packageId',
   'permissionId',
+  'parameterId',
   'queryId',
   'relationId',
   'rendererId',
@@ -1746,7 +2137,7 @@ const OWNED_IDENTITY_KEYS = Object.freeze([
 ] as const);
 
 function visitPredicate(
-  predicate: PredicateExpression,
+  predicate: VersionedPredicateExpression,
   visit: (
     reference: CanonicalReference,
     path: string,
@@ -1776,13 +2167,14 @@ function visitPredicate(
 }
 
 type FieldComparison = Extract<
-  PredicateExpression,
+  VersionedPredicateExpression,
   { kind: 'fieldComparisonPredicate' }
 >;
-type NormalizedFieldDefinition = NormalizedApplicationPackage['fields'][number];
+type NormalizedFieldDefinition =
+  VersionedNormalizedApplicationPackage['fields'][number];
 
 function visitFieldComparisons(
-  predicate: PredicateExpression,
+  predicate: VersionedPredicateExpression,
   visit: (comparison: FieldComparison, path: string) => void,
   path = '',
 ): void {
@@ -1809,6 +2201,7 @@ function validateComparisonValue(
 ): void {
   if (!field) return;
   const value = comparison.value;
+  if (value.kind === 'queryParameterReference') return;
   const expectedKind: Record<FieldType['kind'], CanonicalScalar['kind']> = {
     booleanFieldType: 'booleanValue',
     dateFieldType: 'dateValue',
@@ -1897,6 +2290,20 @@ function validateComparisonValue(
       ),
     );
   }
+}
+
+function visitQueryParameterReferences(
+  predicate: VersionedPredicateExpression,
+  visit: (
+    reference: QueryParameterReference,
+    comparison: FieldComparison,
+  ) => void,
+): void {
+  visitFieldComparisons(predicate, (comparison) => {
+    if (comparison.value.kind === 'queryParameterReference') {
+      visit(comparison.value, comparison);
+    }
+  });
 }
 
 function decimalFits(value: string, precision: number, scale: number): boolean {

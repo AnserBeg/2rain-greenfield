@@ -5,6 +5,7 @@ import {
   CONTENT_HASH_ALGORITHM,
   CURRENCY_MINOR_UNITS_V0,
   PROMOTE_STORAGE_CLASS_CAPABILITY_ID,
+  QUERY_PARAMETER_LIMIT_V3,
   SUPPORTED_LANGUAGE_VERSIONS,
   SUPPORTED_NORMALIZATION_PROFILE_VERSIONS,
   STATUS_ROLES,
@@ -13,6 +14,8 @@ import {
 } from './constants.js';
 
 const nodeVersion = z.enum(SUPPORTED_LANGUAGE_VERSIONS);
+const legacyNodeVersion = z.enum(['v0-experimental', 'v1', 'v2']);
+const v3NodeVersion = z.literal('v3');
 const boundedOrderKey = z.int().min(0).max(1_000_000);
 const boundedCount = z.int().min(1).max(1_000_000);
 const positiveVersion = z.int().min(1).max(1_000_000);
@@ -48,6 +51,9 @@ export const CanonicalIntegerStringSchema = z
 export const CanonicalDecimalStringSchema = z
   .string()
   .regex(/^(?:0|-[1-9]\d*|[1-9]\d*)(?:\.\d*[1-9])?$/);
+export const CanonicalSignedDecimalStringSchema = z
+  .string()
+  .regex(/^(?:0|-?(?:[1-9]\d*(?:\.\d*[1-9])?|0\.\d*[1-9]))$/);
 
 const IsoDateValueSchema = z
   .string()
@@ -109,6 +115,45 @@ export type PredicateExpression =
       term: PredicateExpression;
     };
 
+export type PredicateExpressionV3 =
+  | {
+      kind: 'booleanPredicate';
+      schemaVersion: 'v3';
+      value: boolean;
+    }
+  | {
+      field: z.infer<typeof CanonicalReferenceSchema>;
+      kind: 'fieldComparisonPredicate';
+      operator:
+        | 'equals'
+        | 'notEquals'
+        | 'lessThan'
+        | 'greaterThan'
+        | 'greaterThanOrEqual'
+        | 'lessThanOrEqual';
+      schemaVersion: 'v3';
+      value: CanonicalScalar | QueryParameterReference;
+    }
+  | {
+      kind: 'allPredicate' | 'anyPredicate';
+      schemaVersion: 'v3';
+      terms: PredicateExpressionV3[];
+    }
+  | {
+      kind: 'notPredicate';
+      schemaVersion: 'v3';
+      term: PredicateExpressionV3;
+    };
+
+export type VersionedPredicateExpression =
+  PredicateExpression | PredicateExpressionV3;
+
+export interface QueryParameterReference {
+  readonly kind: 'queryParameterReference';
+  readonly parameterId: z.infer<typeof CanonicalIdSchema>;
+  readonly schemaVersion: 'v3';
+}
+
 export type CanonicalScalar =
   | {
       kind: 'textValue';
@@ -144,26 +189,26 @@ export type CanonicalScalar =
       value: string;
     };
 
-export const CanonicalScalarSchema: z.ZodType<CanonicalScalar> =
+const legacyCanonicalScalarSchema: z.ZodType<CanonicalScalar> =
   z.discriminatedUnion('kind', [
     z.strictObject({
       kind: z.literal('textValue'),
-      schemaVersion: nodeVersion,
+      schemaVersion: legacyNodeVersion,
       value: z.string().max(4_000),
     }),
     z.strictObject({
       kind: z.literal('booleanValue'),
-      schemaVersion: nodeVersion,
+      schemaVersion: legacyNodeVersion,
       value: z.boolean(),
     }),
     z.strictObject({
       kind: z.literal('integerValue'),
-      schemaVersion: nodeVersion,
+      schemaVersion: legacyNodeVersion,
       value: CanonicalIntegerStringSchema,
     }),
     z.strictObject({
       kind: z.literal('exactDecimalValue'),
-      schemaVersion: nodeVersion,
+      schemaVersion: legacyNodeVersion,
       value: CanonicalDecimalStringSchema,
     }),
     z
@@ -171,7 +216,7 @@ export const CanonicalScalarSchema: z.ZodType<CanonicalScalar> =
         currencyCode: CurrencyCodeSchema,
         kind: z.literal('moneyValue'),
         minorUnit: z.int().min(0).max(6),
-        schemaVersion: nodeVersion,
+        schemaVersion: legacyNodeVersion,
         value: CanonicalDecimalStringSchema,
       })
       .refine(
@@ -180,59 +225,211 @@ export const CanonicalScalarSchema: z.ZodType<CanonicalScalar> =
       ),
     z.strictObject({
       kind: z.literal('dateValue'),
-      schemaVersion: nodeVersion,
+      schemaVersion: legacyNodeVersion,
       value: IsoDateValueSchema,
     }),
     z.strictObject({
       kind: z.literal('timeValue'),
-      schemaVersion: nodeVersion,
+      schemaVersion: legacyNodeVersion,
       value: IsoTimeValueSchema,
     }),
     z.strictObject({
       kind: z.literal('dateTimeValue'),
-      schemaVersion: nodeVersion,
+      schemaVersion: legacyNodeVersion,
       value: IsoDateTimeValueSchema,
     }),
     z.strictObject({
       baseUnit: CanonicalReferenceSchema,
       kind: z.literal('quantityValue'),
-      schemaVersion: nodeVersion,
+      schemaVersion: legacyNodeVersion,
       value: CanonicalDecimalStringSchema,
     }),
   ]);
 
-export const PredicateExpressionSchema: z.ZodType<PredicateExpression> = z.lazy(
+const v3CanonicalScalarSchema: z.ZodType<CanonicalScalar> =
+  z.discriminatedUnion('kind', [
+    z.strictObject({
+      kind: z.literal('textValue'),
+      schemaVersion: v3NodeVersion,
+      value: z.string().max(4_000),
+    }),
+    z.strictObject({
+      kind: z.literal('booleanValue'),
+      schemaVersion: v3NodeVersion,
+      value: z.boolean(),
+    }),
+    z.strictObject({
+      kind: z.literal('integerValue'),
+      schemaVersion: v3NodeVersion,
+      value: CanonicalIntegerStringSchema,
+    }),
+    z.strictObject({
+      kind: z.literal('exactDecimalValue'),
+      schemaVersion: v3NodeVersion,
+      value: CanonicalSignedDecimalStringSchema,
+    }),
+    z
+      .strictObject({
+        currencyCode: CurrencyCodeSchema,
+        kind: z.literal('moneyValue'),
+        minorUnit: z.int().min(0).max(6),
+        schemaVersion: v3NodeVersion,
+        value: CanonicalSignedDecimalStringSchema,
+      })
+      .refine(
+        (value) =>
+          CURRENCY_MINOR_UNITS_V0[value.currencyCode] === value.minorUnit,
+      ),
+    z.strictObject({
+      kind: z.literal('dateValue'),
+      schemaVersion: v3NodeVersion,
+      value: IsoDateValueSchema,
+    }),
+    z.strictObject({
+      kind: z.literal('timeValue'),
+      schemaVersion: v3NodeVersion,
+      value: IsoTimeValueSchema,
+    }),
+    z.strictObject({
+      kind: z.literal('dateTimeValue'),
+      schemaVersion: v3NodeVersion,
+      value: IsoDateTimeValueSchema,
+    }),
+    z.strictObject({
+      baseUnit: CanonicalReferenceSchema,
+      kind: z.literal('quantityValue'),
+      schemaVersion: v3NodeVersion,
+      value: CanonicalSignedDecimalStringSchema,
+    }),
+  ]);
+
+export const CanonicalScalarSchema = legacyCanonicalScalarSchema;
+export const VersionedCanonicalScalarSchema: z.ZodType<CanonicalScalar> =
+  z.union([legacyCanonicalScalarSchema, v3CanonicalScalarSchema]);
+
+const QueryParameterReferenceSchema: z.ZodType<QueryParameterReference> =
+  z.strictObject({
+    kind: z.literal('queryParameterReference'),
+    parameterId: CanonicalIdSchema,
+    schemaVersion: v3NodeVersion,
+  });
+
+const legacyPredicateExpressionSchema: z.ZodType<PredicateExpression> = z.lazy(
   () =>
-    z.discriminatedUnion('kind', [
+    z.union([
       z.strictObject({
         kind: z.literal('booleanPredicate'),
-        schemaVersion: nodeVersion,
+        schemaVersion: legacyNodeVersion,
         value: z.boolean(),
       }),
       z.strictObject({
         field: CanonicalReferenceSchema,
         kind: z.literal('fieldComparisonPredicate'),
         operator: z.enum(['equals', 'notEquals', 'lessThan', 'greaterThan']),
-        schemaVersion: nodeVersion,
-        value: CanonicalScalarSchema,
+        schemaVersion: legacyNodeVersion,
+        value: legacyCanonicalScalarSchema,
       }),
       z.strictObject({
         kind: z.literal('allPredicate'),
-        schemaVersion: nodeVersion,
-        terms: z.array(PredicateExpressionSchema),
+        schemaVersion: legacyNodeVersion,
+        terms: z.array(legacyPredicateExpressionSchema),
       }),
       z.strictObject({
         kind: z.literal('anyPredicate'),
-        schemaVersion: nodeVersion,
-        terms: z.array(PredicateExpressionSchema),
+        schemaVersion: legacyNodeVersion,
+        terms: z.array(legacyPredicateExpressionSchema),
       }),
       z.strictObject({
         kind: z.literal('notPredicate'),
-        schemaVersion: nodeVersion,
-        term: PredicateExpressionSchema,
+        schemaVersion: legacyNodeVersion,
+        term: legacyPredicateExpressionSchema,
       }),
     ]),
 );
+
+const v3PredicateExpressionSchema: z.ZodType<PredicateExpressionV3> = z.lazy(
+  () =>
+    z.union([
+      z.strictObject({
+        kind: z.literal('booleanPredicate'),
+        schemaVersion: v3NodeVersion,
+        value: z.boolean(),
+      }),
+      z.strictObject({
+        field: CanonicalReferenceSchema,
+        kind: z.literal('fieldComparisonPredicate'),
+        operator: z.enum([
+          'equals',
+          'notEquals',
+          'lessThan',
+          'greaterThan',
+          'greaterThanOrEqual',
+          'lessThanOrEqual',
+        ]),
+        schemaVersion: v3NodeVersion,
+        value: z.union([
+          v3CanonicalScalarSchema,
+          QueryParameterReferenceSchema,
+        ]),
+      }),
+      z.strictObject({
+        kind: z.literal('allPredicate'),
+        schemaVersion: v3NodeVersion,
+        terms: z.array(v3PredicateExpressionSchema),
+      }),
+      z.strictObject({
+        kind: z.literal('anyPredicate'),
+        schemaVersion: v3NodeVersion,
+        terms: z.array(v3PredicateExpressionSchema),
+      }),
+      z.strictObject({
+        kind: z.literal('notPredicate'),
+        schemaVersion: v3NodeVersion,
+        term: v3PredicateExpressionSchema,
+      }),
+    ]),
+);
+
+const v3CompatibilityPredicateExpressionSchema: z.ZodType<PredicateExpression> =
+  z.lazy(() =>
+    z.union([
+      z.strictObject({
+        kind: z.literal('booleanPredicate'),
+        schemaVersion: v3NodeVersion,
+        value: z.boolean(),
+      }),
+      z.strictObject({
+        field: CanonicalReferenceSchema,
+        kind: z.literal('fieldComparisonPredicate'),
+        operator: z.enum(['equals', 'notEquals', 'lessThan', 'greaterThan']),
+        schemaVersion: v3NodeVersion,
+        value: v3CanonicalScalarSchema,
+      }),
+      z.strictObject({
+        kind: z.literal('allPredicate'),
+        schemaVersion: v3NodeVersion,
+        terms: z.array(v3CompatibilityPredicateExpressionSchema),
+      }),
+      z.strictObject({
+        kind: z.literal('anyPredicate'),
+        schemaVersion: v3NodeVersion,
+        terms: z.array(v3CompatibilityPredicateExpressionSchema),
+      }),
+      z.strictObject({
+        kind: z.literal('notPredicate'),
+        schemaVersion: v3NodeVersion,
+        term: v3CompatibilityPredicateExpressionSchema,
+      }),
+    ]),
+  );
+
+export const PredicateExpressionSchema: z.ZodType<PredicateExpression> =
+  z.union([
+    legacyPredicateExpressionSchema,
+    v3CompatibilityPredicateExpressionSchema,
+  ]);
+export const VersionedPredicateExpressionSchema: z.ZodType<VersionedPredicateExpression> =
+  z.union([legacyPredicateExpressionSchema, v3PredicateExpressionSchema]);
 
 const textFieldType = z.strictObject({
   kind: z.literal('textFieldType'),
@@ -531,8 +728,8 @@ const resolveMatchKey = z.strictObject({
   orderKey: boundedOrderKey,
   schemaVersion: nodeVersion,
 });
-const normalizedQueryDefinition = z.strictObject({
-  filter: PredicateExpressionSchema,
+const normalizedRowQueryDefinition = z.strictObject({
+  filter: legacyPredicateExpressionSchema,
   kind: z.literal('queryDefinition'),
   lifecycle: z.enum(['active', 'retired']),
   maximumResultCount: boundedCount,
@@ -546,11 +743,100 @@ const normalizedQueryDefinition = z.strictObject({
   sourceEntity: CanonicalReferenceSchema,
   tier: z.enum(['q0', 'q1']),
 });
-const authoredQueryDefinition = normalizedQueryDefinition.extend({
-  filter: PredicateExpressionSchema.optional(),
+const authoredRowQueryDefinition = normalizedRowQueryDefinition.extend({
+  filter: legacyPredicateExpressionSchema.optional(),
   lifecycle: z.enum(['active', 'retired']).optional(),
   resolveMatchKeys: z.array(resolveMatchKey).optional(),
 });
+const normalizedV3RowQueryDefinition = normalizedRowQueryDefinition.extend({
+  filter: v3PredicateExpressionSchema,
+  schemaVersion: v3NodeVersion,
+});
+const authoredV3RowQueryDefinition = normalizedV3RowQueryDefinition.extend({
+  filter: v3PredicateExpressionSchema.optional(),
+  lifecycle: z.enum(['active', 'retired']).optional(),
+  resolveMatchKeys: z.array(resolveMatchKey).optional(),
+});
+
+const authoredQueryParameterDefinition = z.strictObject({
+  kind: z.literal('queryParameterDefinition'),
+  orderKey: boundedOrderKey,
+  parameterId: CanonicalIdSchema,
+  schemaVersion: v3NodeVersion,
+});
+const normalizedQueryParameterDefinition =
+  authoredQueryParameterDefinition.extend({
+    parameterType: FieldTypeSchema,
+  });
+const authoredQueryAggregateSelection = z.strictObject({
+  field: CanonicalReferenceSchema,
+  kind: z.literal('queryAggregateSelection'),
+  operator: z.literal('sum'),
+  schemaVersion: v3NodeVersion,
+  selectionId: CanonicalIdSchema,
+});
+const normalizedQueryAggregateSelection =
+  authoredQueryAggregateSelection.extend({
+    resultType: z.discriminatedUnion('kind', [
+      z.strictObject({
+        kind: z.literal('exactDecimalAggregateResultType'),
+        precision: z.literal(38),
+        scale: z.int().min(0).max(18),
+        schemaVersion: v3NodeVersion,
+      }),
+      z.strictObject({
+        baseUnit: CanonicalReferenceSchema,
+        kind: z.literal('quantityAggregateResultType'),
+        precision: z.literal(38),
+        scale: z.int().min(0).max(18),
+        schemaVersion: v3NodeVersion,
+      }),
+    ]),
+  });
+const normalizedAggregateQueryDefinition = z.strictObject({
+  aggregate: normalizedQueryAggregateSelection,
+  filter: v3PredicateExpressionSchema,
+  kind: z.literal('queryDefinition'),
+  lifecycle: z.enum(['active', 'retired']),
+  maximumResultCount: z.literal(1),
+  module: CanonicalReferenceSchema,
+  parameters: z
+    .array(normalizedQueryParameterDefinition)
+    .max(QUERY_PARAMETER_LIMIT_V3),
+  permission: CanonicalReferenceSchema,
+  queryId: CanonicalIdSchema,
+  queryType: z.literal('aggregate'),
+  resolveMatchKeys: z.never().optional(),
+  schemaVersion: v3NodeVersion,
+  sourceEntity: CanonicalReferenceSchema,
+  tier: z.literal('q1'),
+});
+const authoredAggregateQueryDefinition = z.strictObject({
+  aggregate: authoredQueryAggregateSelection,
+  filter: v3PredicateExpressionSchema.optional(),
+  kind: z.literal('queryDefinition'),
+  lifecycle: z.enum(['active', 'retired']).optional(),
+  maximumResultCount: z.literal(1),
+  module: CanonicalReferenceSchema,
+  parameters: z
+    .array(authoredQueryParameterDefinition)
+    .max(QUERY_PARAMETER_LIMIT_V3),
+  permission: CanonicalReferenceSchema,
+  queryId: CanonicalIdSchema,
+  queryType: z.literal('aggregate'),
+  schemaVersion: v3NodeVersion,
+  sourceEntity: CanonicalReferenceSchema,
+  tier: z.literal('q1'),
+});
+
+const normalizedV3QueryDefinition = z.union([
+  normalizedV3RowQueryDefinition,
+  normalizedAggregateQueryDefinition,
+]);
+const authoredV3QueryDefinition = z.union([
+  authoredV3RowQueryDefinition,
+  authoredAggregateQueryDefinition,
+]);
 
 const operationEffect = z.discriminatedUnion('kind', [
   z.strictObject({
@@ -607,14 +893,22 @@ const normalizedOperationDefinition = z.strictObject({
   module: CanonicalReferenceSchema,
   operationId: CanonicalIdSchema,
   permission: CanonicalReferenceSchema,
-  precondition: PredicateExpressionSchema,
+  precondition: legacyPredicateExpressionSchema,
   readBack: CanonicalReferenceSchema,
   schemaVersion: nodeVersion,
   tier: z.enum(['o0', 'o1']),
 });
 const authoredOperationDefinition = normalizedOperationDefinition.extend({
   lifecycle: z.enum(['active', 'retired']).optional(),
-  precondition: PredicateExpressionSchema.optional(),
+  precondition: legacyPredicateExpressionSchema.optional(),
+});
+const normalizedV3OperationDefinition = normalizedOperationDefinition.extend({
+  precondition: v3PredicateExpressionSchema,
+  schemaVersion: v3NodeVersion,
+});
+const authoredV3OperationDefinition = normalizedV3OperationDefinition.extend({
+  lifecycle: z.enum(['active', 'retired']).optional(),
+  precondition: v3PredicateExpressionSchema.optional(),
 });
 
 const normalizedPermissionDefinition = z.strictObject({
@@ -730,7 +1024,7 @@ const authoredCapabilityRequirement = normalizedCapabilityRequirement.extend({
   lifecycle: z.enum(['active', 'retired']).optional(),
 });
 
-const normalizedShape = {
+const legacyNormalizedShape = {
   assertions: z.array(normalizedAssertionDefinition),
   canonicalizationProfileVersion: z.literal(CANONICALIZATION_PROFILE_VERSION),
   capabilityRequirements: z.array(normalizedCapabilityRequirement),
@@ -738,13 +1032,13 @@ const normalizedShape = {
   fields: z.array(normalizedFieldDefinition),
   hashAlgorithm: z.literal(CONTENT_HASH_ALGORITHM),
   kind: z.literal('applicationPackageRevision'),
-  languageVersion: z.enum(SUPPORTED_LANGUAGE_VERSIONS),
+  languageVersion: legacyNodeVersion,
   modules: z.array(normalizedModuleDefinition),
   normalizationProfileVersion: z.enum(SUPPORTED_NORMALIZATION_PROFILE_VERSIONS),
   operations: z.array(normalizedOperationDefinition),
   package: normalizedPackageDefinition,
   permissions: z.array(normalizedPermissionDefinition),
-  queries: z.array(normalizedQueryDefinition),
+  queries: z.array(normalizedRowQueryDefinition),
   relations: z.array(normalizedRelationDefinition),
   schemaVersion: nodeVersion,
   stateMachines: z.array(normalizedStateMachineDefinition),
@@ -752,10 +1046,32 @@ const normalizedShape = {
   surfaces: z.array(normalizedSurfaceDefinition),
 } as const;
 
-export const NormalizedApplicationPackageSchema =
-  z.strictObject(normalizedShape);
+const v3NormalizedShape = {
+  ...legacyNormalizedShape,
+  // The collection is the v3 closed-set reservation. Row 4d owns its element
+  // spelling, so 4b deliberately admits no impact-analysis content.
+  impactAnalyses: z.tuple([]),
+  languageVersion: v3NodeVersion,
+  operations: z.array(normalizedV3OperationDefinition),
+  queries: z.array(normalizedV3QueryDefinition),
+} as const;
 
-export const AuthoredApplicationPackageSchema = z.strictObject({
+const LegacyNormalizedApplicationPackageSchema = z.strictObject(
+  legacyNormalizedShape,
+);
+const V3NormalizedApplicationPackageSchema = z.strictObject(v3NormalizedShape);
+
+export const VersionedNormalizedApplicationPackageSchema = z.discriminatedUnion(
+  'languageVersion',
+  [
+    LegacyNormalizedApplicationPackageSchema,
+    V3NormalizedApplicationPackageSchema,
+  ],
+);
+export const NormalizedApplicationPackageSchema =
+  LegacyNormalizedApplicationPackageSchema;
+
+const legacyAuthoredShape = {
   assertions: z.array(authoredAssertionDefinition),
   canonicalizationProfileVersion: z
     .literal(CANONICALIZATION_PROFILE_VERSION)
@@ -765,7 +1081,7 @@ export const AuthoredApplicationPackageSchema = z.strictObject({
   fields: z.array(authoredFieldDefinition),
   hashAlgorithm: z.literal(CONTENT_HASH_ALGORITHM).optional(),
   kind: z.literal('applicationPackageRevision'),
-  languageVersion: z.enum(SUPPORTED_LANGUAGE_VERSIONS),
+  languageVersion: legacyNodeVersion,
   modules: z.array(authoredModuleDefinition),
   normalizationProfileVersion: z
     .enum(SUPPORTED_NORMALIZATION_PROFILE_VERSIONS)
@@ -773,20 +1089,50 @@ export const AuthoredApplicationPackageSchema = z.strictObject({
   operations: z.array(authoredOperationDefinition),
   package: authoredPackageDefinition,
   permissions: z.array(authoredPermissionDefinition),
-  queries: z.array(authoredQueryDefinition),
+  queries: z.array(authoredRowQueryDefinition),
   relations: z.array(authoredRelationDefinition),
   schemaVersion: nodeVersion,
   stateMachines: z.array(authoredStateMachineDefinition),
   storageMappings: z.array(authoredStorageMappingDefinition),
   surfaces: z.array(authoredSurfaceDefinition),
-});
+} as const;
 
+const v3AuthoredShape = {
+  ...legacyAuthoredShape,
+  impactAnalyses: z.tuple([]),
+  languageVersion: v3NodeVersion,
+  operations: z.array(authoredV3OperationDefinition),
+  queries: z.array(authoredV3QueryDefinition),
+} as const;
+
+const LegacyAuthoredApplicationPackageSchema =
+  z.strictObject(legacyAuthoredShape);
+const V3AuthoredApplicationPackageSchema = z.strictObject(v3AuthoredShape);
+
+export const VersionedAuthoredApplicationPackageSchema = z.discriminatedUnion(
+  'languageVersion',
+  [LegacyAuthoredApplicationPackageSchema, V3AuthoredApplicationPackageSchema],
+);
+export const AuthoredApplicationPackageSchema =
+  LegacyAuthoredApplicationPackageSchema;
+
+/** Current adopted package shape. Runtime and provider consumers stay on v2. */
 export type AuthoredApplicationPackage = z.infer<
-  typeof AuthoredApplicationPackageSchema
+  typeof LegacyAuthoredApplicationPackageSchema
 >;
 export type NormalizedApplicationPackage = z.infer<
-  typeof NormalizedApplicationPackageSchema
+  typeof LegacyNormalizedApplicationPackageSchema
 >;
+export type V3AuthoredApplicationPackage = z.infer<
+  typeof V3AuthoredApplicationPackageSchema
+>;
+export type V3NormalizedApplicationPackage = z.infer<
+  typeof V3NormalizedApplicationPackageSchema
+>;
+export type VersionedAuthoredApplicationPackage =
+  AuthoredApplicationPackage | V3AuthoredApplicationPackage;
+export type VersionedNormalizedApplicationPackage =
+  NormalizedApplicationPackage | V3NormalizedApplicationPackage;
 export type CanonicalId = z.infer<typeof CanonicalIdSchema>;
 
 function isValidIsoDate(value: string): boolean {

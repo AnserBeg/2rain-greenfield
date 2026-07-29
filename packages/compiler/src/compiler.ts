@@ -9,10 +9,10 @@ import {
   CanonicalModelError,
   canonicalLanguageProfileFor,
   canonicalizeAndHash,
-  normalizeApplicationPackage,
-  parseAuthoredApplicationPackageJson,
+  parseNormalizedApplicationPackageJson,
   type CanonicalDiagnostic,
   type NormalizedApplicationPackage,
+  type VersionedNormalizedApplicationPackage,
 } from '@north-star/canonical-model';
 
 import { validateModuleConformance } from './conformance.js';
@@ -223,9 +223,12 @@ export function compileApplication(
         input.expectedActiveRelease.storageTargetCanonicalBytes,
       )
     : null;
-  const basePlans = lowerBaseProjectionPayloads(
-    projectionDispatchRevision(packageRevision),
-    isStorageTargetV1(previousStorageTarget) ? previousStorageTarget : null,
+  const basePlans = decorateV3ProjectionPlans(
+    lowerBaseProjectionPayloads(
+      projectionDispatchRevision(packageRevision),
+      isStorageTargetV1(previousStorageTarget) ? previousStorageTarget : null,
+    ),
+    packageRevision,
   );
   const emittedBase = emitScheduledProjections(
     basePlans,
@@ -455,12 +458,11 @@ export function expectedActiveReleaseFrom(
 function decodeNormalizedPackage(bytes: Uint8Array):
   | {
       normalizedDefinitionDigest: string;
-      packageRevision: NormalizedApplicationPackage;
+      packageRevision: VersionedNormalizedApplicationPackage;
     }
   | { diagnostics: CompilerDiagnostic[] } {
   try {
-    const authored = parseAuthoredApplicationPackageJson(bytes);
-    const packageRevision = normalizeApplicationPackage(authored);
+    const packageRevision = parseNormalizedApplicationPackageJson(bytes);
     const canonical = canonicalizeAndHash(packageRevision);
     if (!equalBytes(bytes, canonical.bytes)) {
       return {
@@ -521,7 +523,7 @@ interface CompilerSymbols {
 }
 
 function collectSymbols(
-  packageRevision: NormalizedApplicationPackage,
+  packageRevision: VersionedNormalizedApplicationPackage,
 ): CompilerSymbols {
   const byId = new Map<string, string>();
   const diagnostics: CompilerDiagnostic[] = [];
@@ -534,6 +536,7 @@ function collectSymbols(
     ['operationReference', new Set<string>()],
     ['permissionReference', new Set<string>()],
     ['queryReference', new Set<string>()],
+    ['queryParameterReference', new Set<string>()],
     ['stateMachineReference', new Set<string>()],
     ['stateReference', new Set<string>()],
     ['storageMappingReference', new Set<string>()],
@@ -589,11 +592,18 @@ function collectSymbols(
   }
   for (const query of packageRevision.queries) {
     add(query.queryId, query.kind, ['queryReference']);
-    for (const selection of query.selections) {
-      add(selection.selectionId, selection.kind, []);
-    }
     for (const matchKey of query.resolveMatchKeys ?? []) {
       add(matchKey.matchKeyId, matchKey.kind, []);
+    }
+    if (query.queryType === 'aggregate') {
+      add(query.aggregate.selectionId, query.aggregate.kind, []);
+      for (const parameter of query.parameters) {
+        add(parameter.parameterId, parameter.kind, ['queryParameterReference']);
+      }
+    } else {
+      for (const selection of query.selections) {
+        add(selection.selectionId, selection.kind, []);
+      }
     }
   }
   for (const value of packageRevision.operations) {
@@ -619,7 +629,7 @@ function collectSymbols(
 }
 
 function resolveReferences(
-  packageRevision: NormalizedApplicationPackage,
+  packageRevision: VersionedNormalizedApplicationPackage,
   symbols: CompilerSymbols,
 ): CompilerDiagnostic[] {
   const diagnostics: CompilerDiagnostic[] = [];
@@ -657,7 +667,7 @@ function resolveReferences(
 }
 
 function typeCheck(
-  packageRevision: NormalizedApplicationPackage,
+  packageRevision: VersionedNormalizedApplicationPackage,
 ): CompilerDiagnostic[] {
   const diagnostics: CompilerDiagnostic[] = [];
   const fieldById = new Map(
@@ -667,19 +677,21 @@ function typeCheck(
     packageRevision.queries.map((query) => [query.queryId, query] as const),
   );
   for (const query of packageRevision.queries) {
-    for (const selection of query.selections) {
-      if (
-        fieldById.get(selection.field.targetId)?.entity.targetId !==
-        query.sourceEntity.targetId
-      ) {
-        diagnostics.push(
-          compilerDiagnostic(
-            'COMPILER_TYPE_INVALID',
-            'typeCheck',
-            '$.queries.selections.field',
-            selection.selectionId,
-          ),
-        );
+    if (query.queryType !== 'aggregate') {
+      for (const selection of query.selections) {
+        if (
+          fieldById.get(selection.field.targetId)?.entity.targetId !==
+          query.sourceEntity.targetId
+        ) {
+          diagnostics.push(
+            compilerDiagnostic(
+              'COMPILER_TYPE_INVALID',
+              'typeCheck',
+              '$.queries.selections.field',
+              selection.selectionId,
+            ),
+          );
+        }
       }
     }
     for (const matchKey of query.resolveMatchKeys ?? []) {
@@ -693,6 +705,24 @@ function typeCheck(
             'typeCheck',
             '$.queries.resolveMatchKeys.field',
             matchKey.matchKeyId,
+          ),
+        );
+      }
+    }
+    if (query.queryType === 'aggregate') {
+      const aggregateField = fieldById.get(query.aggregate.field.targetId);
+      if (
+        aggregateField?.entity.targetId !== query.sourceEntity.targetId ||
+        aggregateField.presence !== 'required' ||
+        (aggregateField.fieldType.kind !== 'exactDecimalFieldType' &&
+          aggregateField.fieldType.kind !== 'quantityFieldType')
+      ) {
+        diagnostics.push(
+          compilerDiagnostic(
+            'COMPILER_TYPE_INVALID',
+            'typeCheck',
+            '$.queries.aggregate.field',
+            query.aggregate.selectionId,
           ),
         );
       }
@@ -715,7 +745,7 @@ function typeCheck(
 }
 
 function validateWholeModel(
-  packageRevision: NormalizedApplicationPackage,
+  packageRevision: VersionedNormalizedApplicationPackage,
 ): CompilerDiagnostic[] {
   const diagnostics: CompilerDiagnostic[] = [];
   if (packageRevision.package.provenance !== 'firstParty') {
@@ -751,9 +781,11 @@ function validateWholeModel(
 }
 
 function languageUsesModuleProjectionShape(
-  languageVersion: NormalizedApplicationPackage['languageVersion'],
+  languageVersion: VersionedNormalizedApplicationPackage['languageVersion'],
 ): boolean {
-  return canonicalLanguageProfileFor(languageVersion).featureLevel === 'v2';
+  const featureLevel =
+    canonicalLanguageProfileFor(languageVersion).featureLevel;
+  return featureLevel === 'v2' || featureLevel === 'v3';
 }
 
 /**
@@ -762,11 +794,174 @@ function languageUsesModuleProjectionShape(
  * node and is never hashed as the normalized definition.
  */
 function projectionDispatchRevision(
-  packageRevision: NormalizedApplicationPackage,
+  packageRevision: VersionedNormalizedApplicationPackage,
 ): NormalizedApplicationPackage {
-  return packageRevision.languageVersion === LANGUAGE_VERSIONS.v3
-    ? { ...packageRevision, languageVersion: LANGUAGE_VERSION }
-    : packageRevision;
+  if (packageRevision.languageVersion !== LANGUAGE_VERSIONS.v3) {
+    return packageRevision;
+  }
+  const common = Object.fromEntries(
+    Object.entries(packageRevision).filter(([key]) => key !== 'impactAnalyses'),
+  ) as Omit<
+    Extract<VersionedNormalizedApplicationPackage, { languageVersion: 'v3' }>,
+    'impactAnalyses'
+  >;
+  return {
+    ...common,
+    languageVersion: LANGUAGE_VERSION,
+    operations: packageRevision.operations.map((operation) => ({
+      ...operation,
+      precondition: {
+        kind: 'booleanPredicate' as const,
+        schemaVersion: LANGUAGE_VERSION,
+        value: true,
+      },
+    })),
+    queries: packageRevision.queries
+      .filter((query) => query.queryType !== 'aggregate')
+      .map((query) => ({
+        ...query,
+        filter: {
+          kind: 'booleanPredicate' as const,
+          schemaVersion: LANGUAGE_VERSION,
+          value: true,
+        },
+      })),
+  };
+}
+
+function decorateV3ProjectionPlans(
+  plans: ProjectionPayloadPlan[],
+  packageRevision: VersionedNormalizedApplicationPackage,
+): ProjectionPayloadPlan[] {
+  if (packageRevision.languageVersion !== LANGUAGE_VERSIONS.v3) return plans;
+  return plans.map((plan) => {
+    if (plan.familyId === PROJECTION_FAMILY_IDS.queryCatalog) {
+      const payload = plan.payload as {
+        kind: string;
+        queries: Array<Record<string, unknown>>;
+        schemaVersion: string;
+      };
+      return {
+        ...plan,
+        payload: {
+          ...payload,
+          queries: packageRevision.queries
+            .map((query) =>
+              query.queryType === 'aggregate'
+                ? {
+                    aggregate: {
+                      fieldId: query.aggregate.field.targetId,
+                      operator: query.aggregate.operator,
+                      resultType: query.aggregate.resultType,
+                      selectionId: query.aggregate.selectionId,
+                    },
+                    filter: query.filter,
+                    lifecycle: query.lifecycle,
+                    maximumResultCount: query.maximumResultCount,
+                    parameters: query.parameters.map((parameter) => ({
+                      orderKey: parameter.orderKey,
+                      parameterId: parameter.parameterId,
+                      parameterType: parameter.parameterType,
+                    })),
+                    permissionId: query.permission.targetId,
+                    queryId: query.queryId,
+                    queryType: query.queryType,
+                    resultContract: {
+                      kind: 'semanticAggregateResult',
+                      outcome: 'exact',
+                      schemaVersion: 'northstar.semantic-aggregate-result/v1',
+                    },
+                    sourceEntityId: query.sourceEntity.targetId,
+                    tier: query.tier,
+                  }
+                : {
+                    filter: query.filter,
+                    infrastructure: {
+                      archive: 'nullableArchivedAt',
+                      optimisticRevision: 'requiredOnMutation',
+                      recordIdentity: 'canonicalUuid',
+                    },
+                    lifecycle: query.lifecycle,
+                    maximumResultCount: query.maximumResultCount,
+                    permissionId: query.permission.targetId,
+                    queryId: query.queryId,
+                    queryType: query.queryType,
+                    resolveMatchKeys: (query.resolveMatchKeys ?? []).map(
+                      (matchKey) => ({
+                        authority: matchKey.authority,
+                        fieldId: matchKey.field.targetId,
+                        matchKeyId: matchKey.matchKeyId,
+                        orderKey: matchKey.orderKey,
+                      }),
+                    ),
+                    selections: query.selections.map((selection) => ({
+                      fieldId: selection.field.targetId,
+                      orderKey: selection.orderKey,
+                      selectionId: selection.selectionId,
+                    })),
+                    sourceEntityId: query.sourceEntity.targetId,
+                    tier: query.tier,
+                  },
+            )
+            .sort((left, right) =>
+              compare(String(left.queryId), String(right.queryId)),
+            ),
+        },
+      };
+    }
+    if (plan.familyId === PROJECTION_FAMILY_IDS.semanticModel) {
+      const payload = plan.payload as {
+        constructs: Array<{
+          constructKind: string;
+          semanticFingerprint: string;
+          subjectId: string;
+        }>;
+        kind: string;
+        schemaVersion: string;
+      };
+      const replacements = new Map<string, unknown>([
+        ...packageRevision.queries.map(
+          (query) => [query.queryId, query] as const,
+        ),
+        ...packageRevision.operations.map(
+          (operation) => [operation.operationId, operation] as const,
+        ),
+      ]);
+      const existingIds = new Set(
+        payload.constructs.map((construct) => construct.subjectId),
+      );
+      const constructs = payload.constructs.map((construct) => {
+        const source = replacements.get(construct.subjectId);
+        return source === undefined
+          ? construct
+          : {
+              ...construct,
+              semanticFingerprint: hashCanonical(
+                HASH_DOMAINS.semanticConstruct,
+                source,
+              ).digest,
+            };
+      });
+      for (const [subjectId, source] of replacements) {
+        if (existingIds.has(subjectId)) continue;
+        constructs.push({
+          constructKind: String(
+            (source as { kind?: unknown }).kind ?? 'unknown',
+          ),
+          semanticFingerprint: hashCanonical(
+            HASH_DOMAINS.semanticConstruct,
+            source,
+          ).digest,
+          subjectId,
+        });
+      }
+      constructs.sort((left, right) =>
+        compare(left.subjectId, right.subjectId),
+      );
+      return { ...plan, payload: { ...payload, constructs } };
+    }
+    return plan;
+  });
 }
 
 function validateProfile(
@@ -1039,7 +1234,7 @@ function emitProjection(
 }
 
 function lowerStorageTransition(
-  packageRevision: NormalizedApplicationPackage,
+  packageRevision: VersionedNormalizedApplicationPackage,
   expected: ExpectedActiveRelease,
   previous: StorageTargetPayload,
   candidateStorage: EmittedProjection,
@@ -1061,7 +1256,7 @@ function lowerStorageTransition(
       };
     }
     const lowered = buildStorageTransitionEnvelope(
-      packageRevision,
+      projectionDispatchRevision(packageRevision),
       previous,
       candidateStorage.payload,
       {
@@ -1185,7 +1380,7 @@ function lowerStorageTransition(
 }
 
 function emitStorageTransitionProjection(
-  packageRevision: NormalizedApplicationPackage,
+  packageRevision: VersionedNormalizedApplicationPackage,
   expected: ExpectedActiveRelease,
   candidateStorage: EmittedProjection,
   payload: StorageTransitionEnvelope,
@@ -1219,7 +1414,7 @@ function emitStorageTransitionProjection(
 }
 
 function verifyCompleteness(
-  packageRevision: NormalizedApplicationPackage,
+  packageRevision: VersionedNormalizedApplicationPackage,
   emitted: EmittedProjection[],
 ): CompilerDiagnostic[] {
   const diagnostics: CompilerDiagnostic[] = [];
@@ -1370,7 +1565,9 @@ function verifyCompleteness(
       ? queryById.get(source.dataSource.targetId)
       : undefined;
     const expected =
-      query?.selections.map((entry) => entry.field.targetId) ?? [];
+      query !== undefined && query.queryType !== 'aggregate'
+        ? query.selections.map((entry) => entry.field.targetId)
+        : [];
     if (!arraysEqual(compiledSurface.fieldIds, expected)) {
       diagnostics.push(
         compilerDiagnostic(
@@ -1398,7 +1595,7 @@ function verifyCompleteness(
 }
 
 function buildCapabilityFacts(
-  packageRevision: NormalizedApplicationPackage,
+  packageRevision: VersionedNormalizedApplicationPackage,
 ): CapabilityFact[] {
   return packageRevision.capabilityRequirements
     .filter(
