@@ -78,6 +78,170 @@ test('empty, concurrent, and previously migrated databases converge', async () =
   );
 });
 
+test('archive uniqueness migration replaces both legacy indexes without renaming them', async () => {
+  await withEphemeralPostgres(
+    'archive-unique-index-migration',
+    async ({ pool }) => {
+      const client = await pool.connect();
+      try {
+        const tableName = `nsm_t_${'a'.repeat(52)}`;
+        const semanticIndexName = `nsm_k_${'b'.repeat(52)}`;
+        const caseInsensitiveIndexName = `nsm_i_${'c'.repeat(52)}`;
+        const foldedColumnName = `nsm_c_${'d'.repeat(52)}`;
+        const unrelatedIndexName = 'permanently_reserved_code';
+        const migrations = await loadMigrations(checkedInMigrations);
+        const replacement = migrations.at(-1);
+        assert.equal(
+          replacement?.name,
+          '0014_archive_excluding_module_uniqueness.sql',
+        );
+        await runMigrations(client, migrations.slice(0, -1));
+        await client.query(`
+          CREATE TABLE north_star_module.${tableName} (
+            tenant_id uuid NOT NULL,
+            environment_id uuid NOT NULL,
+            record_id uuid NOT NULL,
+            archived_at timestamptz,
+            code text NOT NULL,
+            ${foldedColumnName} text GENERATED ALWAYS AS (lower(code)) STORED,
+            PRIMARY KEY (tenant_id, environment_id, record_id)
+          );
+          CREATE UNIQUE INDEX ${semanticIndexName}
+            ON north_star_module.${tableName}
+            (tenant_id, environment_id, ${foldedColumnName});
+          CREATE UNIQUE INDEX ${caseInsensitiveIndexName}
+            ON north_star_module.${tableName}
+            (tenant_id, environment_id, ${foldedColumnName});
+          CREATE UNIQUE INDEX ${unrelatedIndexName}
+            ON north_star_module.${tableName}
+            (tenant_id, environment_id, code);
+          ALTER TABLE north_star_module.${tableName}
+            OWNER TO north_star_module_materializer;
+        `);
+        const before = await client.query<{
+          name: string;
+          predicate: string | null;
+        }>(
+          `SELECT index_relation.relname AS name,
+                  pg_get_expr(index_record.indpred, index_record.indrelid, true) AS predicate
+             FROM pg_index AS index_record
+             JOIN pg_class AS index_relation
+               ON index_relation.oid = index_record.indexrelid
+             JOIN pg_class AS table_relation
+               ON table_relation.oid = index_record.indrelid
+             JOIN pg_namespace AS namespace
+               ON namespace.oid = table_relation.relnamespace
+            WHERE namespace.nspname = 'north_star_module'
+              AND table_relation.relname = $1
+              AND NOT index_record.indisprimary
+            ORDER BY index_relation.relname`,
+          [tableName],
+        );
+        assert.deepEqual(before.rows, [
+          { name: caseInsensitiveIndexName, predicate: null },
+          { name: semanticIndexName, predicate: null },
+          { name: unrelatedIndexName, predicate: null },
+        ]);
+
+        await assert.rejects(
+          runMigrations(client, migrations),
+          /is not a generated managed business-key index/,
+        );
+        const afterRefusal = await client.query<{
+          name: string;
+          predicate: string | null;
+        }>(
+          `SELECT index_relation.relname AS name,
+                  pg_get_expr(index_record.indpred, index_record.indrelid, true) AS predicate
+             FROM pg_index AS index_record
+             JOIN pg_class AS index_relation
+               ON index_relation.oid = index_record.indexrelid
+             JOIN pg_class AS table_relation
+               ON table_relation.oid = index_record.indrelid
+             JOIN pg_namespace AS namespace
+               ON namespace.oid = table_relation.relnamespace
+            WHERE namespace.nspname = 'north_star_module'
+              AND table_relation.relname = $1
+              AND NOT index_record.indisprimary
+            ORDER BY index_relation.relname`,
+          [tableName],
+        );
+        assert.deepEqual(afterRefusal.rows, before.rows);
+        await client.query(
+          `DROP INDEX north_star_module.${unrelatedIndexName}`,
+        );
+
+        const upgraded = await runMigrations(client, migrations);
+        assert.deepEqual(upgraded.applied, [replacement.name]);
+        const after = await client.query<{
+          name: string;
+          owner: string;
+          predicate: string | null;
+        }>(
+          `SELECT index_relation.relname AS name,
+                  pg_get_userbyid(index_relation.relowner) AS owner,
+                  pg_get_expr(index_record.indpred, index_record.indrelid, true) AS predicate
+             FROM pg_index AS index_record
+             JOIN pg_class AS index_relation
+               ON index_relation.oid = index_record.indexrelid
+             JOIN pg_class AS table_relation
+               ON table_relation.oid = index_record.indrelid
+             JOIN pg_namespace AS namespace
+               ON namespace.oid = table_relation.relnamespace
+            WHERE namespace.nspname = 'north_star_module'
+              AND table_relation.relname = $1
+              AND NOT index_record.indisprimary
+            ORDER BY index_relation.relname`,
+          [tableName],
+        );
+        assert.deepEqual(after.rows, [
+          {
+            name: caseInsensitiveIndexName,
+            owner: 'north_star_module_materializer',
+            predicate: 'archived_at IS NULL',
+          },
+          {
+            name: semanticIndexName,
+            owner: 'north_star_module_materializer',
+            predicate: 'archived_at IS NULL',
+          },
+        ]);
+
+        const scope = [
+          '10000000-0000-4000-8000-000000000001',
+          '10000000-0000-4000-8000-000000000002',
+        ] as const;
+        await client.query(
+          `INSERT INTO north_star_module.${tableName}
+             (tenant_id, environment_id, record_id, archived_at, code)
+           VALUES ($1,$2,$3,clock_timestamp(),'WH-A'),
+                  ($1,$2,$4,clock_timestamp(),'wh-a'),
+                  ($1,$2,$5,NULL,'WH-A')`,
+          [
+            ...scope,
+            '10000000-0000-4000-8000-000000000003',
+            '10000000-0000-4000-8000-000000000004',
+            '10000000-0000-4000-8000-000000000005',
+          ],
+        );
+        await assert.rejects(
+          client.query(
+            `INSERT INTO north_star_module.${tableName}
+               (tenant_id, environment_id, record_id, code)
+             VALUES ($1,$2,$3,'wh-a')`,
+            [...scope, '10000000-0000-4000-8000-000000000006'],
+          ),
+          (error: unknown) =>
+            error instanceof Error &&
+            (error as Error & { code?: string }).code === '23505',
+        );
+      } finally {
+        client.release();
+      }
+    },
+  );
+});
+
 test('edited and missing applied migrations fail deterministically', async () => {
   await withMigrationDirectory(async (directory) => {
     const original = 'CREATE SCHEMA fixture;\n';

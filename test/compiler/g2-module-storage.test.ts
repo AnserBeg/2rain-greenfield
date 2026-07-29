@@ -208,6 +208,10 @@ test('physical names, reverse mappings, PostgreSQL types, scope, RLS, and grants
         'tenant_id',
         'environment_id',
       ]);
+      assert.equal(
+        unique.predicate,
+        `${entity.archive.archivedAtColumn} IS NULL`,
+      );
     }
     for (const foldedColumn of entity.foldedColumns) {
       assert.equal(foldedColumn.collation, 'C');
@@ -236,6 +240,14 @@ test('physical names, reverse mappings, PostgreSQL types, scope, RLS, and grants
       entity.indexes.some((index) => (index.indexKind as string) === 'search'),
       false,
     );
+    for (const index of entity.indexes) {
+      assert.equal(
+        index.predicate,
+        index.indexKind === 'caseInsensitiveUnique'
+          ? `${entity.archive.archivedAtColumn} IS NULL`
+          : null,
+      );
+    }
   }
   for (const relation of storage.relations) {
     assert.deepEqual(relation.foreignKey.sourceColumns.slice(0, 2), [

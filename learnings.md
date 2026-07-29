@@ -215,3 +215,9 @@ How to apply: derive a role-specific connection URL for each least-privilege poo
 Date: 2026-07-27
 Why: G2-P5e's first persistent restart exposed a fresh-database harness assumption: zero migrations were newly applied even though every migration verified successfully.
 How to apply: persistent startup must require the complete ordered migration set to verify and may report zero newly applied; keep fresh-database assertions in fresh-database harnesses. The shared runner already has this shape, so the fix belongs in its composition-root caller. See `docs/execution/packets/G2-P5e.md`.
+
+## Enumerate every physical uniqueness enforcer
+Date: 2026-07-28
+Status: Unadjudicated pending acceptance of packet 1d.
+Why: One business key emitted a semantic unique index and a case-insensitive index; changing only one left the other invisibly enforcing the old archive scope.
+How to apply: before changing uniqueness semantics, enumerate and test every physical index the key produces; see `docs/execution/packets/1d.md`.

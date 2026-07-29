@@ -16,7 +16,7 @@ writer is holding those paths right now.
 |---|---|---|---|
 | **KERNEL** | Canonical language and the query tier | `4c` — packages adopt v3 (the artifact event) | **active** |
 | **DEPLOY** | Release lifecycle and runtime infrastructure | `1c-a` **accepted** 2026-07-28 (ADR-0023) — *awaiting selection* | **idle** |
-| **FIX** | Correctness defects → stage cutting → inventory build | `1d` — the unique-index emitter | **active** |
+| **FIX** | Correctness defects → stage cutting → inventory build | `1d` **accepted** 2026-07-28 — **`G3-P1b` is next and now unblocked** | **idle** |
 | **BUILD** | Inventory contracts | `G3-P2a` — tenant-completeness manifest | **active** |
 
 Lane identity is stable across packets. When a lane's packet is accepted, the
