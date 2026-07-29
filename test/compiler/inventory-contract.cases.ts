@@ -24,6 +24,8 @@ import {
 import {
   INVENTORY_CONTRACT_V1,
   INVENTORY_FACT_STORAGE_V1,
+  INVENTORY_PERIOD_LOCK_STORAGE_V1,
+  INVENTORY_STORAGE_REFERENCES_V1,
   LEGAL_ENTITY_FAMILY_MAP_V1,
   LEGAL_ENTITY_RELATION_SEMANTICS_V1,
   inventoryModuleDefinition,
@@ -66,6 +68,13 @@ export function registerInventoryContractCases(
           partitionBy: 'tenantBusinessPeriod',
         },
       ]);
+      assert.equal(INVENTORY_STORAGE_REFERENCES_V1.length, 5);
+      assert.deepEqual(INVENTORY_PERIOD_LOCK_STORAGE_V1, {
+        advanceOperationLocalId: 'advance_period_lock',
+        familyId: 'inventory_period_lock',
+        reopenOperationLocalId: 'reopen_period',
+        scope: 'onePerLegalEntity',
+      });
       const compiled = mustCompileModule(inventoryModuleDefinition());
       const target = projectionPayload<{
         entities: Array<{
@@ -76,7 +85,10 @@ export function registerInventoryContractCases(
               column: string;
               effectiveAtColumn: string;
             };
-            companion: { physicalTableName: string };
+            companion: {
+              physicalTableName: string;
+              reservationTriggerName: string;
+            };
             mutability: string;
             partitioning: {
               keyColumns: string[];
@@ -99,8 +111,20 @@ export function registerInventoryContractCases(
             };
             provisioning: string;
           };
+          periodLock?: {
+            advanceOperationId: string;
+            provisioningTriggerName: string;
+            reopenOperationId: string;
+            scopeUniqueIndex: { columns: string[] };
+          };
           physicalTableName: string;
           primaryKey: { columns: string[] };
+        }>;
+        relations: Array<{
+          foreignKey: { sourceColumns: string[]; targetColumns: string[] };
+          relationColumn: { origin?: string };
+          sourceEntityId: string;
+          targetEntityId: string;
         }>;
         schemaVersion: string;
       }>(compiled, PROJECTION_FAMILY_IDS.storageTarget);
@@ -138,6 +162,39 @@ export function registerInventoryContractCases(
       assert.match(
         movement.factStorage.companion.physicalTableName,
         /^nsm_t_[a-z2-7]{52}$/u,
+      );
+      assert.match(
+        movement.factStorage.companion.reservationTriggerName,
+        /^nsm_g_[a-z2-7]{52}$/u,
+      );
+      const periodLock = target.entities.find((entity) =>
+        entity.entityId.endsWith(':entity.inventory_period_lock'),
+      );
+      assert.ok(periodLock?.periodLock);
+      assert.deepEqual(periodLock.primaryKey.columns, [
+        'tenant_id',
+        'environment_id',
+        'legal_entity_id',
+        'record_id',
+      ]);
+      assert.deepEqual(periodLock.periodLock.scopeUniqueIndex.columns, [
+        'tenant_id',
+        'environment_id',
+        'legal_entity_id',
+      ]);
+      assert.equal(
+        periodLock.consumerWriterRoots.writerOperationIds.includes(
+          'northstar.inventory:operation.inventory_period_lock_create',
+        ),
+        false,
+      );
+      assert.equal(
+        target.relations.filter(
+          (relation) =>
+            relation.foreignKey.sourceColumns.includes('legal_entity_id') &&
+            relation.foreignKey.targetColumns.includes('legal_entity_id'),
+        ).length,
+        3,
       );
       const legalEntity = target.entities.find((entity) =>
         entity.entityId.endsWith(':entity.legal_entity'),
@@ -287,6 +344,83 @@ export function registerInventoryContractCases(
         ),
       ) as unknown;
       assert.deepEqual(releaseSummary(first), golden);
+    },
+  );
+
+  register(
+    'period locks expose only the named advance and reopen mutation authority',
+    () => {
+      const definition = structuredClone(inventoryModuleDefinition()) as Record<
+        string,
+        unknown
+      >;
+      const operations = definition.operations as Array<
+        Record<string, unknown>
+      >;
+      const permissions = definition.permissions as Array<
+        Record<string, unknown>
+      >;
+      const templateOperation = operations.find((operation) =>
+        String(operation.operationId).endsWith(
+          ':operation.inventory_transaction_create',
+        ),
+      );
+      const templatePermission = permissions.find((permission) =>
+        String(permission.permissionId).endsWith(
+          ':permission.inventory_transaction_create',
+        ),
+      );
+      assert.ok(templateOperation);
+      assert.ok(templatePermission);
+      const periodEntityId = 'northstar.inventory:entity.inventory_period_lock';
+      const permissionId =
+        'northstar.inventory:permission.inventory_period_lock_create';
+      permissions.push({
+        ...structuredClone(templatePermission),
+        permissionId,
+        resource: {
+          kind: 'entityReference',
+          schemaVersion: 'v3',
+          targetId: periodEntityId,
+        },
+      });
+      operations.push({
+        ...structuredClone(templateOperation),
+        effect: {
+          entity: {
+            kind: 'entityReference',
+            schemaVersion: 'v3',
+            targetId: periodEntityId,
+          },
+          kind: 'createRecordEffect',
+          schemaVersion: 'v3',
+        },
+        operationId:
+          'northstar.inventory:operation.inventory_period_lock_create',
+        permission: {
+          kind: 'permissionReference',
+          schemaVersion: 'v3',
+          targetId: permissionId,
+        },
+        readBack: {
+          kind: 'queryReference',
+          schemaVersion: 'v3',
+          targetId: 'northstar.inventory:query.inventory_period_lock_get',
+        },
+      });
+      const result = compileApplication(moduleInput(definition));
+      assert.equal(result.status, 'failed');
+      if (result.status !== 'failed') return;
+      assert.equal(
+        result.diagnostics.some(
+          (diagnostic) =>
+            diagnostic.code === 'COMPILER_ENTITY_PROJECTION_MISSING' &&
+            diagnostic.path === '$.conformance.operation.periodLockLifecycle' &&
+            diagnostic.subjectId === periodEntityId,
+        ),
+        true,
+        JSON.stringify(result.diagnostics),
+      );
     },
   );
 

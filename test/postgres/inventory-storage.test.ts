@@ -15,7 +15,7 @@ import { withEphemeralPostgres } from '../helpers/postgres.js';
 
 const checkedInMigrations = resolve('db/migrations');
 const contractReleaseRoot =
-  'e3868a1c07b6bbf73de264b349b28718c94e7460e2b1538908ad32ca55153b99';
+  'bd977ff0a00db745e79b7d8e158cb55863319f9f37f7674d77b618e85272d116';
 
 const tenantA = 'a1000000-1000-4000-8000-000000000001';
 const environmentA = 'a2000000-2000-4000-8000-000000000002';
@@ -107,21 +107,21 @@ test('inventory platform authority is limited to calendars and release-recorded 
             );
             assert.deepEqual(configuration, {
               approvalThresholds: {
-                adjustment: null,
+                adjustment: '100',
                 transfer: null,
-                count: null,
-                correction: null,
-                reBaseline: null,
+                count: '250.5',
+                correction: '10',
+                reBaseline: '1000',
               },
               contractReleaseRoot,
-              maximumBackdateDays: 0,
-              negativeStock: 'reject',
+              maximumBackdateDays: 31,
+              negativeStock: 'allowWithFlag',
               reasonRequirements: {
-                adjustment: 'codeAndNarrative',
-                transfer: 'codeOnly',
+                adjustment: 'codeOnly',
+                transfer: 'codeAndNarrative',
                 count: 'codeAndNarrative',
-                correction: 'codeAndNarrative',
-                reBaseline: 'codeAndNarrative',
+                correction: 'codeOnly',
+                reBaseline: 'codeOnly',
               },
               revision: '1',
               version: 1,
@@ -135,6 +135,32 @@ test('inventory platform authority is limited to calendars and release-recorded 
               (error: unknown) =>
                 error instanceof InventoryPersistenceError &&
                 error.code === 'INVENTORY_POSTING_CONFIGURATION_UNDECLARED',
+            );
+            await assert.rejects(
+              provision(
+                admin,
+                tenantA,
+                environmentA,
+                legalEntityA,
+                'LE-A',
+                'America/Edmonton',
+                '06:00:00',
+                { negativeStock: 'allow' },
+              ),
+              (error: unknown) =>
+                error instanceof Error &&
+                (error as Error & { code?: string }).code === 'P0001' &&
+                error.message === 'INVENTORY_POSTING_CONFIGURATION_CONFLICT',
+            );
+            await assert.rejects(
+              admin.query(
+                `INSERT INTO platform.inventory_posting_configurations (
+                   tenant_id, environment_id, legal_entity_id,
+                   contract_release_root
+                 ) VALUES ($1, $2, $3, $4)`,
+                [tenantA, environmentA, randomUUID(), contractReleaseRoot],
+              ),
+              hasPostgresCode('23502'),
             );
             await assert.rejects(
               admin.query(
@@ -245,10 +271,13 @@ async function provision(
   entityCode: string,
   timeZone: string,
   boundary: string,
+  overrides: { negativeStock?: 'allow' | 'allowWithFlag' | 'reject' } = {},
 ): Promise<void> {
   await client.query(
     `SELECT platform.provision_inventory_scope(
-       $1, $2, $3, $4, $5, $6, $7, $8
+       $1, $2, $3, $4, $5, $6, $7, $8,
+       $9::smallint, $10, $11, $12, $13, $14, $15, $16,
+       $17, $18, $19, $20, $21
      )`,
     [
       tenantId,
@@ -259,6 +288,20 @@ async function provision(
       timeZone,
       boundary,
       contractReleaseRoot,
+      1,
+      overrides.negativeStock ??
+        (entityCode === 'LE-A' ? 'allowWithFlag' : 'reject'),
+      entityCode === 'LE-A' ? 31 : 0,
+      'codeOnly',
+      entityCode === 'LE-A' ? 'codeAndNarrative' : 'codeOnly',
+      'codeAndNarrative',
+      'codeOnly',
+      'codeOnly',
+      entityCode === 'LE-A' ? '100' : null,
+      null,
+      entityCode === 'LE-A' ? '250.5' : null,
+      entityCode === 'LE-A' ? '10' : null,
+      entityCode === 'LE-A' ? '1000' : null,
     ],
   );
 }

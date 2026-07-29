@@ -327,6 +327,7 @@ test('pinned family ownership derives legal-entity storage and both business-key
   assert.deepEqual(entityOwned.primaryKey.columns, [
     'tenant_id',
     'environment_id',
+    'legal_entity_id',
     'record_id',
   ]);
 

@@ -1274,7 +1274,11 @@ async function createManagedTable(
   entity: StorageEntityTarget,
 ): Promise<void> {
   const relationColumns = target.relations
-    .filter((relation) => relation.sourceEntityId === entity.entityId)
+    .filter(
+      (relation) =>
+        relation.sourceEntityId === entity.entityId &&
+        relation.relationColumn.origin !== 'field',
+    )
     .map((relation) => relation.relationColumn);
   const columns = [
     'tenant_id uuid NOT NULL',
@@ -1364,6 +1368,10 @@ async function createManagedTable(
   if (entity.legalEntityMaster) {
     await provisionDefaultLegalEntity(client, entity);
   }
+  if (entity.periodLock) {
+    await provisionPeriodLockRows(client, target, entity);
+    await ensurePeriodLockProvisioningTrigger(client, target, entity);
+  }
   await client.query(
     `ALTER TABLE north_star_module.${quoted(entity.physicalTableName)} ENABLE ROW LEVEL SECURITY`,
   );
@@ -1374,7 +1382,9 @@ async function createManagedTable(
     AND environment_id = north_star_internal.trusted_environment_id()`;
   const policyCommands = entity.factStorage
     ? (['SELECT', 'INSERT'] as const)
-    : (['SELECT', 'INSERT', 'UPDATE'] as const);
+    : entity.periodLock
+      ? (['SELECT', 'UPDATE'] as const)
+      : (['SELECT', 'INSERT', 'UPDATE'] as const);
   for (const command of policyCommands) {
     const policy = managedPolicyName(entity.physicalTableName, command);
     const exists = await client.query<{ present: boolean }>(
@@ -1408,6 +1418,18 @@ async function createManagedTable(
     await client.query(
       `REVOKE UPDATE ON north_star_module.${quoted(entity.physicalTableName)} FROM north_star_module_runtime`,
     );
+  } else if (entity.periodLock) {
+    await client.query(
+      `GRANT SELECT ON north_star_module.${quoted(entity.physicalTableName)} TO north_star_module_runtime`,
+    );
+    await client.query(
+      `REVOKE INSERT, UPDATE ON north_star_module.${quoted(entity.physicalTableName)} FROM north_star_module_runtime`,
+    );
+    await client.query(
+      `GRANT UPDATE (${quoted(entity.periodLock.closedThroughColumn)})
+         ON north_star_module.${quoted(entity.physicalTableName)}
+         TO north_star_module_runtime`,
+    );
   } else if (entity.legalEntity) {
     await client.query(
       `GRANT SELECT, INSERT ON north_star_module.${quoted(entity.physicalTableName)} TO north_star_module_runtime`,
@@ -1433,6 +1455,68 @@ async function createManagedTable(
   );
   await client.query(
     `REVOKE DELETE, TRUNCATE, REFERENCES, TRIGGER ON north_star_module.${quoted(entity.physicalTableName)} FROM north_star_module_materializer`,
+  );
+}
+
+async function provisionPeriodLockRows(
+  client: PoolClient,
+  target: StorageTargetPayloadV1,
+  entity: StorageEntityTarget,
+): Promise<void> {
+  const periodLock = entity.periodLock;
+  if (!periodLock) return;
+  const master = requiredLegalEntityMaster(target);
+  await client.query(
+    `INSERT INTO north_star_module.${quoted(entity.physicalTableName)} (
+       tenant_id,
+       environment_id,
+       legal_entity_id,
+       record_id,
+       ${quoted(periodLock.closedThroughColumn)}
+     )
+     SELECT tenant_id, environment_id, record_id, record_id, NULL
+       FROM north_star_module.${quoted(master.physicalTableName)}
+      WHERE tenant_id = nullif(current_setting('north_star.tenant_id', true), '')::uuid
+        AND environment_id = nullif(current_setting('north_star.environment_id', true), '')::uuid
+     ON CONFLICT DO NOTHING`,
+  );
+}
+
+async function ensurePeriodLockProvisioningTrigger(
+  client: PoolClient,
+  target: StorageTargetPayloadV1,
+  entity: StorageEntityTarget,
+): Promise<void> {
+  const periodLock = entity.periodLock;
+  if (!periodLock) return;
+  const master = requiredLegalEntityMaster(target);
+  const exists = await client.query<{ present: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1 FROM pg_trigger AS trigger_record
+       JOIN pg_class AS relation ON relation.oid = trigger_record.tgrelid
+       JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+      WHERE namespace.nspname = 'north_star_module'
+        AND relation.relname = $1
+        AND trigger_record.tgname = $2
+        AND NOT trigger_record.tgisinternal
+     ) AS present`,
+    [master.physicalTableName, periodLock.provisioningTriggerName],
+  );
+  if (exists.rows[0]?.present) return;
+  await client.query(
+    `GRANT TRIGGER ON north_star_module.${quoted(master.physicalTableName)}
+       TO north_star_module_materializer`,
+  );
+  await client.query(
+    `CREATE TRIGGER ${quoted(periodLock.provisioningTriggerName)}
+       AFTER INSERT ON north_star_module.${quoted(master.physicalTableName)}
+       FOR EACH ROW EXECUTE FUNCTION north_star_internal.provision_inventory_period_lock(
+         'north_star_module.${entity.physicalTableName}'
+       )`,
+  );
+  await client.query(
+    `REVOKE TRIGGER ON north_star_module.${quoted(master.physicalTableName)}
+       FROM north_star_module_materializer`,
   );
 }
 
@@ -1500,6 +1584,12 @@ async function createFactCompanionTable(
          ON DELETE RESTRICT ON UPDATE RESTRICT
      )`,
   );
+  await ensureFactReservationTrigger(
+    client,
+    entity.physicalTableName,
+    companion.physicalTableName,
+    companion.reservationTriggerName,
+  );
   await client.query(
     `REVOKE REFERENCES ON north_star_module.${quoted(entity.physicalTableName)}
        FROM north_star_module_materializer`,
@@ -1545,6 +1635,42 @@ async function createFactCompanionTable(
   await client.query(
     `REVOKE UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER
        ON north_star_module.${quoted(companion.physicalTableName)}
+       FROM north_star_module_materializer`,
+  );
+}
+
+async function ensureFactReservationTrigger(
+  client: PoolClient,
+  movementTableName: string,
+  companionTableName: string,
+  triggerName: string,
+): Promise<void> {
+  const exists = await client.query<{ present: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1 FROM pg_trigger AS trigger_record
+       JOIN pg_class AS relation ON relation.oid = trigger_record.tgrelid
+       JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+      WHERE namespace.nspname = 'north_star_module'
+        AND relation.relname = $1
+        AND trigger_record.tgname = $2
+        AND NOT trigger_record.tgisinternal
+     ) AS present`,
+    [movementTableName, triggerName],
+  );
+  if (exists.rows[0]?.present) return;
+  await client.query(
+    `GRANT TRIGGER ON north_star_module.${quoted(movementTableName)}
+       TO north_star_module_materializer`,
+  );
+  await client.query(
+    `CREATE TRIGGER ${quoted(triggerName)}
+       AFTER INSERT ON north_star_module.${quoted(movementTableName)}
+       FOR EACH ROW EXECUTE FUNCTION north_star_internal.reserve_inventory_movement_effect(
+         'north_star_module.${companionTableName}'
+       )`,
+  );
+  await client.query(
+    `REVOKE TRIGGER ON north_star_module.${quoted(movementTableName)}
        FROM north_star_module_materializer`,
   );
 }
@@ -2996,6 +3122,7 @@ function buildExpectedColumns(
     }
   }
   for (const relation of relations.values()) {
+    if (relation.relationColumn.origin === 'field') continue;
     const entity = entityById.get(relation.sourceEntityId);
     if (!entity) {
       throw failure('ENTITY_TARGET_MISSING', relation.sourceEntityId);
@@ -3483,7 +3610,8 @@ function isUniqueStorageIndex(
 ): boolean {
   return (
     index.indexKind === 'caseInsensitiveUnique' ||
-    index.indexKind === 'legalEntityDefaultUnique'
+    index.indexKind === 'legalEntityDefaultUnique' ||
+    index.indexKind === 'periodLockScopeUnique'
   );
 }
 
@@ -3585,24 +3713,54 @@ function sqlTextLiteral(value: string): string {
 function buildExpectedTriggers(
   tables: ReadonlyMap<string, StorageEntityTarget>,
 ) {
+  const legalEntityMaster = [...tables.values()].find(
+    (entity) => entity.legalEntityMaster !== undefined,
+  );
   return [...tables.values()]
     .flatMap((entity) => {
-      if (!entity.factStorage) return [];
-      return [
-        {
-          name: entity.factStorage.rejectMutationTriggerName,
-          tableName: entity.physicalTableName,
-        },
-        {
-          name: entity.factStorage.companion.rejectMutationTriggerName,
-          tableName: entity.factStorage.companion.physicalTableName,
-        },
-      ].map(({ name, tableName }) => ({
+      const triggers: Array<{
+        definition?: string;
+        name: string;
+        tableName: string;
+      }> = [];
+      if (entity.factStorage) {
+        triggers.push(
+          {
+            definition: `CREATE TRIGGER ${entity.factStorage.companion.reservationTriggerName} AFTER INSERT ON north_star_module.${entity.physicalTableName} FOR EACH ROW EXECUTE FUNCTION north_star_internal.reserve_inventory_movement_effect('north_star_module.${entity.factStorage.companion.physicalTableName}')`,
+            name: entity.factStorage.companion.reservationTriggerName,
+            tableName: entity.physicalTableName,
+          },
+          {
+            name: entity.factStorage.rejectMutationTriggerName,
+            tableName: entity.physicalTableName,
+          },
+          {
+            name: entity.factStorage.companion.rejectMutationTriggerName,
+            tableName: entity.factStorage.companion.physicalTableName,
+          },
+        );
+      }
+      if (entity.periodLock) {
+        if (!legalEntityMaster) {
+          throw failure(
+            'LEGAL_ENTITY_MASTER_TARGET_INVALID',
+            'period-lock provisioning requires a legal-entity master',
+          );
+        }
+        triggers.push({
+          definition: `CREATE TRIGGER ${entity.periodLock.provisioningTriggerName} AFTER INSERT ON north_star_module.${legalEntityMaster.physicalTableName} FOR EACH ROW EXECUTE FUNCTION north_star_internal.provision_inventory_period_lock('north_star_module.${entity.physicalTableName}')`,
+          name: entity.periodLock.provisioningTriggerName,
+          tableName: legalEntityMaster.physicalTableName,
+        });
+      }
+      return triggers.map((trigger) => ({
         definition: normalizeSqlExpressionRequired(
-          `CREATE TRIGGER ${name} BEFORE DELETE OR UPDATE ON north_star_module.${tableName} FOR EACH ROW EXECUTE FUNCTION north_star_internal.reject_inventory_fact_mutation()`,
+          trigger.definition !== undefined
+            ? trigger.definition
+            : `CREATE TRIGGER ${trigger.name} BEFORE DELETE OR UPDATE ON north_star_module.${trigger.tableName} FOR EACH ROW EXECUTE FUNCTION north_star_internal.reject_inventory_fact_mutation()`,
         ),
-        name,
-        tableName,
+        name: trigger.name,
+        tableName: trigger.tableName,
       }));
     })
     .toSorted((left, right) =>
@@ -3628,7 +3786,9 @@ function buildExpectedPolicies(
       {
         commands: entity.factStorage
           ? (['SELECT', 'INSERT'] as const)
-          : (['SELECT', 'INSERT', 'UPDATE'] as const),
+          : entity.periodLock
+            ? (['SELECT', 'UPDATE'] as const)
+            : (['SELECT', 'INSERT', 'UPDATE'] as const),
         tableName: entity.physicalTableName,
       },
       ...(entity.factStorage
@@ -3687,9 +3847,12 @@ function buildExpectedTableGrants(
             : grantee === 'north_star_module_runtime' &&
               (entity.factStorage !== undefined ||
                 entity.legalEntity !== undefined);
-          const privilegeTypes = createOnly
-            ? ['INSERT', 'SELECT']
-            : ['INSERT', 'SELECT', 'UPDATE'];
+          const privilegeTypes =
+            grantee === 'north_star_module_runtime' && entity.periodLock
+              ? ['SELECT']
+              : createOnly
+                ? ['INSERT', 'SELECT']
+                : ['INSERT', 'SELECT', 'UPDATE'];
           return privilegeTypes.map((privilegeType) => ({
             grantee,
             isGrantable: false,
@@ -3707,17 +3870,25 @@ function buildExpectedColumnGrants(
   relations: ReadonlyMap<string, StorageRelationTarget>,
 ) {
   return [...tables.values()].flatMap((entity) =>
-    entity.legalEntity && !entity.factStorage
-      ? entityOwnedMutableColumnNamesFromRelations(entity, relations).map(
-          (columnName) => ({
-            columnName,
-            grantee: 'north_star_module_runtime',
-            isGrantable: false,
-            privilegeType: 'UPDATE',
-            tableName: entity.physicalTableName,
-          }),
-        )
-      : [],
+    entity.periodLock
+      ? [entity.periodLock.closedThroughColumn].map((columnName) => ({
+          columnName,
+          grantee: 'north_star_module_runtime',
+          isGrantable: false,
+          privilegeType: 'UPDATE',
+          tableName: entity.physicalTableName,
+        }))
+      : entity.legalEntity && !entity.factStorage
+        ? entityOwnedMutableColumnNamesFromRelations(entity, relations).map(
+            (columnName) => ({
+              columnName,
+              grantee: 'north_star_module_runtime',
+              isGrantable: false,
+              privilegeType: 'UPDATE',
+              tableName: entity.physicalTableName,
+            }),
+          )
+        : [],
   );
 }
 
@@ -3774,13 +3945,15 @@ function entityOwnedMutableColumnNamesFromRelations(
   relations: ReadonlyMap<string, StorageRelationTarget>,
 ): string[] {
   return [
-    entity.optimisticRevision.column,
-    entity.archive.archivedAtColumn,
-    ...entity.columns.map((column) => column.physicalName),
-    ...[...relations.values()]
-      .filter((relation) => relation.sourceEntityId === entity.entityId)
-      .map((relation) => relation.relationColumn.physicalName),
-    ...entity.derivedStateFields.map((column) => column.physicalName),
+    ...new Set([
+      entity.optimisticRevision.column,
+      entity.archive.archivedAtColumn,
+      ...entity.columns.map((column) => column.physicalName),
+      ...[...relations.values()]
+        .filter((relation) => relation.sourceEntityId === entity.entityId)
+        .map((relation) => relation.relationColumn.physicalName),
+      ...entity.derivedStateFields.map((column) => column.physicalName),
+    ]),
   ].toSorted((left, right) => (left < right ? -1 : left > right ? 1 : 0));
 }
 

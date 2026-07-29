@@ -58,6 +58,49 @@ const INVENTORY_FACT_STORAGE_RULES = Object.freeze([
     partitionBy: 'tenantBusinessPeriod',
   },
 ] as const);
+const INVENTORY_STORAGE_REFERENCE_RULES = Object.freeze([
+  {
+    fieldLocalId: 'inventory_transaction_line_item_id',
+    required: true,
+    semantics: 'crossEntityAllowed',
+    sourceFamilyId: 'inventory_transaction_line',
+    targetFamilyId: 'item',
+  },
+  {
+    fieldLocalId: 'inventory_transaction_line_from_location_id',
+    required: false,
+    semantics: 'sameEntity',
+    sourceFamilyId: 'inventory_transaction_line',
+    targetFamilyId: 'location',
+  },
+  {
+    fieldLocalId: 'inventory_transaction_line_to_location_id',
+    required: false,
+    semantics: 'sameEntity',
+    sourceFamilyId: 'inventory_transaction_line',
+    targetFamilyId: 'location',
+  },
+  {
+    fieldLocalId: 'inventory_movement_item_id',
+    required: true,
+    semantics: 'crossEntityAllowed',
+    sourceFamilyId: 'inventory_movement',
+    targetFamilyId: 'item',
+  },
+  {
+    fieldLocalId: 'inventory_movement_location_id',
+    required: true,
+    semantics: 'sameEntity',
+    sourceFamilyId: 'inventory_movement',
+    targetFamilyId: 'location',
+  },
+] as const);
+const INVENTORY_PERIOD_LOCK_STORAGE_RULE = Object.freeze({
+  advanceOperationLocalId: 'advance_period_lock',
+  familyId: 'inventory_period_lock',
+  reopenOperationLocalId: 'reopen_period',
+  scope: 'onePerLegalEntity',
+} as const);
 const INVENTORY_MOVEMENT_FIELD_ROLES = Object.freeze({
   effectiveAt: 'inventory_movement_effective_at',
   itemId: 'inventory_movement_item_id',
@@ -88,6 +131,11 @@ const LEGAL_ENTITY_RELATION_RULES = Object.freeze([
     targetFamilyId: 'inventory_transaction',
   },
   {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'inventory_movement',
+    targetFamilyId: 'inventory_transaction_line',
+  },
+  {
     semantics: 'crossEntityAllowed',
     sourceFamilyId: 'inventory_movement',
     targetFamilyId: 'item',
@@ -96,6 +144,11 @@ const LEGAL_ENTITY_RELATION_RULES = Object.freeze([
     semantics: 'crossEntityAllowed',
     sourceFamilyId: 'party_role',
     targetFamilyId: 'party',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'inventory_transaction_line',
+    targetFamilyId: 'inventory_transaction',
   },
 ] as const);
 const LEGAL_ENTITY_GOVERNED_PACKAGES = Object.freeze([
@@ -270,6 +323,21 @@ export interface PinnedInventoryFactStorageRule {
   partitionBy: 'tenantBusinessPeriod';
 }
 
+export interface PinnedInventoryStorageReferenceRule {
+  fieldLocalId: string;
+  required: boolean;
+  semantics: LegalEntityRelationSemantics;
+  sourceFamilyId: string;
+  targetFamilyId: string;
+}
+
+export interface PinnedInventoryPeriodLockStorageRule {
+  advanceOperationLocalId: 'advance_period_lock';
+  familyId: 'inventory_period_lock';
+  reopenOperationLocalId: 'reopen_period';
+  scope: 'onePerLegalEntity';
+}
+
 export type InventoryMovementStorageFieldRole =
   keyof typeof INVENTORY_MOVEMENT_FIELD_ROLES;
 
@@ -283,6 +351,30 @@ export function resolvePinnedInventoryFactStorage(
     (candidate) => candidate.familyId === familyId,
   );
   return rule ? { ...rule } : null;
+}
+
+export function resolvePinnedInventoryStorageReference(
+  entityId: string,
+  fieldId: string,
+): PinnedInventoryStorageReferenceRule | null {
+  const sourceFamilyId = canonicalFamilyId(entityId);
+  const fieldLocalId = canonicalFieldLocalId(fieldId);
+  if (!sourceFamilyId || !fieldLocalId) return null;
+  const rule = INVENTORY_STORAGE_REFERENCE_RULES.find(
+    (candidate) =>
+      candidate.sourceFamilyId === sourceFamilyId &&
+      candidate.fieldLocalId === fieldLocalId,
+  );
+  return rule ? { ...rule } : null;
+}
+
+export function resolvePinnedInventoryPeriodLockStorage(
+  entityId: string,
+): PinnedInventoryPeriodLockStorageRule | null {
+  return canonicalFamilyId(entityId) ===
+    INVENTORY_PERIOD_LOCK_STORAGE_RULE.familyId
+    ? { ...INVENTORY_PERIOD_LOCK_STORAGE_RULE }
+    : null;
 }
 
 export function resolvePinnedInventoryMovementFieldRole(
@@ -502,6 +594,9 @@ export function validateModuleConformance(
       packageRevision.package.packageId,
       entity.entityId,
     );
+    const periodLockStorage = resolvePinnedInventoryPeriodLockStorage(
+      entity.entityId,
+    );
     if (family.status === 'undeclared') {
       diagnostics.push(
         inventoryModuleDiagnostic(
@@ -532,16 +627,15 @@ export function validateModuleConformance(
       }
     }
 
+    const entityOperations = packageRevision.operations.filter(
+      (operation) =>
+        operation.lifecycle === 'active' &&
+        operation.tier === 'o0' &&
+        'entity' in operation.effect &&
+        operation.effect.entity.targetId === entity.entityId,
+    );
     const operationEffects = new Set(
-      packageRevision.operations
-        .filter(
-          (operation) =>
-            operation.lifecycle === 'active' &&
-            operation.tier === 'o0' &&
-            'entity' in operation.effect &&
-            operation.effect.entity.targetId === entity.entityId,
-        )
-        .map((operation) => operation.effect.kind),
+      entityOperations.map((operation) => operation.effect.kind),
     );
     if (factStorage?.mutability === 'appendOnly' && operationEffects.size > 0) {
       diagnostics.push(
@@ -556,6 +650,7 @@ export function validateModuleConformance(
     for (const effect of REQUIRED_OPERATION_EFFECTS) {
       if (
         factStorage?.mutability !== 'appendOnly' &&
+        !periodLockStorage &&
         !operationEffects.has(effect)
       ) {
         missing(
@@ -563,6 +658,30 @@ export function validateModuleConformance(
           entity.entityId,
           `operation.${effect.replace('RecordEffect', '')}`,
         );
+      }
+    }
+    if (periodLockStorage) {
+      const requiredOperationIds = new Set<string>([
+        `${packageRevision.package.namespace}:operation.${periodLockStorage.advanceOperationLocalId}`,
+        `${packageRevision.package.namespace}:operation.${periodLockStorage.reopenOperationLocalId}`,
+      ]);
+      const observedOperationIds = new Set<string>(
+        entityOperations.map((operation) => operation.operationId),
+      );
+      for (const operationId of requiredOperationIds) {
+        if (!observedOperationIds.has(operationId)) {
+          missing(diagnostics, entity.entityId, `operation.${operationId}`);
+        }
+      }
+      if (
+        entityOperations.length !== requiredOperationIds.size ||
+        entityOperations.some(
+          (operation) =>
+            operation.effect.kind !== 'updateRecordEffect' ||
+            !requiredOperationIds.has(operation.operationId),
+        )
+      ) {
+        missing(diagnostics, entity.entityId, 'operation.periodLockLifecycle');
       }
     }
 
@@ -577,7 +696,10 @@ export function validateModuleConformance(
     );
     for (const role of REQUIRED_SURFACE_ROLES) {
       if (
-        !(factStorage?.mutability === 'appendOnly' && role === 'form') &&
+        !(
+          (factStorage?.mutability === 'appendOnly' || periodLockStorage) &&
+          role === 'form'
+        ) &&
         !surfaceRoles.has(role)
       ) {
         missing(diagnostics, entity.entityId, `surface.${role}`);
@@ -586,6 +708,32 @@ export function validateModuleConformance(
 
     if (!assertedEntities.has(entity.entityId)) {
       missing(diagnostics, entity.entityId, 'verification.executableScenario');
+    }
+
+    if (family.status === 'classified') {
+      const referenceRules = INVENTORY_STORAGE_REFERENCE_RULES.filter(
+        (rule) => rule.sourceFamilyId === family.familyId,
+      );
+      const entityFields = packageRevision.fields.filter(
+        (field) => field.entity.targetId === entity.entityId,
+      );
+      for (const rule of referenceRules) {
+        const field = entityFields.find(
+          (candidate) =>
+            canonicalFieldLocalId(candidate.fieldId) === rule.fieldLocalId,
+        );
+        if (
+          !field ||
+          (rule.required && field.presence !== 'required') ||
+          (!rule.required && field.presence !== 'optional')
+        ) {
+          missing(
+            diagnostics,
+            entity.entityId,
+            `field.inventoryReference.${rule.fieldLocalId}`,
+          );
+        }
+      }
     }
   }
   for (const relation of packageRevision.relations) {
@@ -2180,6 +2328,14 @@ function canonicalFamilyId(entityId: string): string | null {
   if (offset < 1) return null;
   const familyId = entityId.slice(offset + marker.length);
   return familyId.length > 0 ? familyId : null;
+}
+
+function canonicalFieldLocalId(fieldId: string): string | null {
+  const marker = ':field.';
+  const offset = fieldId.lastIndexOf(marker);
+  if (offset < 1) return null;
+  const localId = fieldId.slice(offset + marker.length);
+  return localId.length > 0 ? localId : null;
 }
 
 function isLegalEntityGovernedPackage(packageId: string): boolean {

@@ -53,8 +53,6 @@ function ids(namespace: string) {
           'inventory_movement',
           'stock_dimension_set_version',
         ),
-        transactionId: field('inventory_movement', 'transaction_id'),
-        transactionLineId: field('inventory_movement', 'transaction_line_id'),
         unitId: field('inventory_movement', 'unit_id'),
       },
       periodLock: {
@@ -78,13 +76,17 @@ function ids(namespace: string) {
         lineNumber: field('inventory_transaction_line', 'line_number'),
         quantity: field('inventory_transaction_line', 'quantity'),
         toLocationId: field('inventory_transaction_line', 'to_location_id'),
-        transactionId: field('inventory_transaction_line', 'transaction_id'),
         unitId: field('inventory_transaction_line', 'unit_id'),
       },
     },
     moduleId: `${namespace}:module.inventory`,
     namespace,
     packageId: `${namespace}:package.inventory`,
+    relationIds: {
+      movementTransaction: `${namespace}:relation.inventory_movement_transaction`,
+      movementTransactionLine: `${namespace}:relation.inventory_movement_transaction_line`,
+      transactionLineTransaction: `${namespace}:relation.inventory_transaction_line_transaction`,
+    },
   } as const;
 }
 
@@ -297,17 +299,9 @@ export function inventoryModuleDefinition(
       field(
         definitionIds,
         entityIds.transactionLine,
-        fieldIds.transactionLine.transactionId,
-        'Transaction id',
-        10,
-        text(80),
-      ),
-      field(
-        definitionIds,
-        entityIds.transactionLine,
         fieldIds.transactionLine.lineNumber,
         'Line number',
-        20,
+        10,
         integer(),
       ),
       field(
@@ -315,7 +309,7 @@ export function inventoryModuleDefinition(
         entityIds.transactionLine,
         fieldIds.transactionLine.itemId,
         'Item id',
-        30,
+        20,
         text(80),
       ),
       field(
@@ -323,7 +317,7 @@ export function inventoryModuleDefinition(
         entityIds.transactionLine,
         fieldIds.transactionLine.fromLocationId,
         'From location id',
-        40,
+        30,
         text(80),
         { optional: true },
       ),
@@ -332,7 +326,7 @@ export function inventoryModuleDefinition(
         entityIds.transactionLine,
         fieldIds.transactionLine.toLocationId,
         'To location id',
-        50,
+        40,
         text(80),
         { optional: true },
       ),
@@ -341,7 +335,7 @@ export function inventoryModuleDefinition(
         entityIds.transactionLine,
         fieldIds.transactionLine.quantity,
         'Quantity',
-        60,
+        50,
         decimal(),
       ),
       field(
@@ -349,7 +343,7 @@ export function inventoryModuleDefinition(
         entityIds.transactionLine,
         fieldIds.transactionLine.unitId,
         'Unit id',
-        70,
+        60,
         text(32),
       ),
 
@@ -366,25 +360,9 @@ export function inventoryModuleDefinition(
       field(
         definitionIds,
         entityIds.movement,
-        fieldIds.movement.transactionId,
-        'Transaction id',
-        10,
-        text(80),
-      ),
-      field(
-        definitionIds,
-        entityIds.movement,
-        fieldIds.movement.transactionLineId,
-        'Transaction line id',
-        20,
-        text(80),
-      ),
-      field(
-        definitionIds,
-        entityIds.movement,
         fieldIds.movement.stockDimensionSetVersion,
         'Stock dimension set version',
-        30,
+        10,
         enumeration(definitionIds, 'stock_dimension_set_version', ['v1']),
       ),
       field(
@@ -392,7 +370,7 @@ export function inventoryModuleDefinition(
         entityIds.movement,
         fieldIds.movement.itemId,
         'Item id',
-        40,
+        20,
         text(80),
       ),
       field(
@@ -400,7 +378,7 @@ export function inventoryModuleDefinition(
         entityIds.movement,
         fieldIds.movement.locationId,
         'Location id',
-        50,
+        30,
         text(80),
       ),
       field(
@@ -408,7 +386,7 @@ export function inventoryModuleDefinition(
         entityIds.movement,
         fieldIds.movement.quantityDelta,
         'Quantity delta',
-        60,
+        40,
         decimal(),
       ),
       field(
@@ -416,7 +394,7 @@ export function inventoryModuleDefinition(
         entityIds.movement,
         fieldIds.movement.unitId,
         'Unit id',
-        70,
+        50,
         text(32),
       ),
       field(
@@ -424,7 +402,7 @@ export function inventoryModuleDefinition(
         entityIds.movement,
         fieldIds.movement.effectiveAt,
         'Effective at',
-        80,
+        60,
         instant(),
       ),
       field(
@@ -432,7 +410,7 @@ export function inventoryModuleDefinition(
         entityIds.movement,
         fieldIds.movement.recordedAt,
         'Recorded at',
-        90,
+        70,
         instant(),
       ),
       field(
@@ -440,7 +418,7 @@ export function inventoryModuleDefinition(
         entityIds.movement,
         fieldIds.movement.sourceType,
         'Source type',
-        100,
+        80,
         text(80),
       ),
       field(
@@ -448,7 +426,7 @@ export function inventoryModuleDefinition(
         entityIds.movement,
         fieldIds.movement.sourceId,
         'Source id',
-        110,
+        90,
         text(80),
       ),
       field(
@@ -456,7 +434,7 @@ export function inventoryModuleDefinition(
         entityIds.movement,
         fieldIds.movement.sourceLine,
         'Source line',
-        120,
+        100,
         text(80),
       ),
       field(
@@ -464,7 +442,7 @@ export function inventoryModuleDefinition(
         entityIds.movement,
         fieldIds.movement.sourceRevision,
         'Source revision',
-        130,
+        110,
         integer(),
       ),
       field(
@@ -472,7 +450,7 @@ export function inventoryModuleDefinition(
         entityIds.movement,
         fieldIds.movement.postingRole,
         'Posting role',
-        140,
+        120,
         enumeration(definitionIds, 'inventory_posting_role', [
           'adjustment',
           'transfer',
@@ -486,7 +464,7 @@ export function inventoryModuleDefinition(
         entityIds.movement,
         fieldIds.movement.reasonCode,
         'Reason code',
-        150,
+        130,
         text(80),
         { optional: true },
       ),
@@ -495,7 +473,7 @@ export function inventoryModuleDefinition(
         entityIds.movement,
         fieldIds.movement.reasonNarrative,
         'Reason narrative',
-        160,
+        140,
         text(1000),
         { optional: true },
       ),
@@ -504,7 +482,7 @@ export function inventoryModuleDefinition(
         entityIds.movement,
         fieldIds.movement.actorId,
         'Actor id',
-        170,
+        150,
         text(80),
       ),
       field(
@@ -512,7 +490,7 @@ export function inventoryModuleDefinition(
         entityIds.movement,
         fieldIds.movement.reversalOfMovementId,
         'Reversal movement id',
-        180,
+        160,
         text(80),
         { optional: true },
       ),
@@ -538,7 +516,9 @@ export function inventoryModuleDefinition(
     ],
     normalizationProfileVersion,
     operations: standardEntities.flatMap(([local, , entityId]) =>
-      operations(definitionIds, local, entityId),
+      local === 'inventory_period_lock'
+        ? periodLockOperations(definitionIds, entityId)
+        : operations(definitionIds, local, entityId),
     ),
     package: {
       kind: 'packageDefinition',
@@ -550,7 +530,9 @@ export function inventoryModuleDefinition(
     },
     permissions: [
       ...standardEntities.flatMap(([local, , entityId]) =>
-        permissions(definitionIds, local, entityId, false),
+        local === 'inventory_period_lock'
+          ? periodLockPermissions(definitionIds, entityId)
+          : permissions(definitionIds, local, entityId, false),
       ),
       ...permissions(
         definitionIds,
@@ -578,7 +560,27 @@ export function inventoryModuleDefinition(
         fieldIds.movement.sourceId,
       ),
     ],
-    relations: [],
+    relations: [
+      relation(
+        definitionIds.relationIds.transactionLineTransaction,
+        entityIds.transactionLine,
+        entityIds.transaction,
+        10,
+      ),
+      relation(
+        definitionIds.relationIds.movementTransaction,
+        entityIds.movement,
+        entityIds.transaction,
+        20,
+      ),
+      relation(
+        definitionIds.relationIds.movementTransactionLine,
+        entityIds.movement,
+        entityIds.transactionLine,
+        30,
+        'reference',
+      ),
+    ],
     schemaVersion: version,
     stateMachines: [],
     storageMappings: [
@@ -589,7 +591,12 @@ export function inventoryModuleDefinition(
     ],
     surfaces: [
       ...standardEntities.flatMap(([local, label]) =>
-        surfaces(definitionIds, local, label, false),
+        surfaces(
+          definitionIds,
+          local,
+          label,
+          local === 'inventory_period_lock',
+        ),
       ),
       ...surfaces(
         definitionIds,
@@ -796,6 +803,84 @@ function operations(
     schemaVersion: version,
     tier: 'o0',
   }));
+}
+
+function periodLockOperations(
+  ids: InventoryIds,
+  entityId: string,
+): Array<Record<string, unknown>> {
+  return (
+    [
+      ['advance_period_lock', 'advance_period_lock'],
+      ['reopen_period', 'reopen_period'],
+    ] as const
+  ).map(([operationLocalId, permissionLocalId]) => ({
+    confirmation:
+      operationLocalId === 'reopen_period' ? 'humanRequired' : 'none',
+    effect: {
+      entity: reference('entityReference', entityId),
+      kind: 'updateRecordEffect',
+      schemaVersion: version,
+    },
+    kind: 'operationDefinition',
+    module: reference('moduleReference', ids.moduleId),
+    operationId: `${ids.namespace}:operation.${operationLocalId}`,
+    permission: reference(
+      'permissionReference',
+      `${ids.namespace}:permission.${permissionLocalId}`,
+    ),
+    readBack: reference(
+      'queryReference',
+      `${ids.namespace}:query.inventory_period_lock_get`,
+    ),
+    schemaVersion: version,
+    tier: 'o0',
+  }));
+}
+
+function periodLockPermissions(
+  ids: InventoryIds,
+  entityId: string,
+): Array<Record<string, unknown>> {
+  return [
+    ['inventory_period_lock_read', 'read'],
+    ['advance_period_lock', 'update'],
+    ['reopen_period', 'update'],
+  ].map(([localId, action]) => ({
+    action,
+    kind: 'permissionDefinition',
+    label: `inventory_period_lock ${localId}`,
+    permissionId: `${ids.namespace}:permission.${localId}`,
+    resource: reference('entityReference', entityId),
+    schemaVersion: version,
+  }));
+}
+
+function relation(
+  relationId: string,
+  sourceEntityId: string,
+  targetEntityId: string,
+  orderKey: number,
+  ownership: 'parentScopedChild' | 'reference' = 'parentScopedChild',
+): Record<string, unknown> {
+  return {
+    archiveBehavior: 'restrict',
+    cardinality: 'manyToOne',
+    foreignKeyActions: {
+      onDelete: 'restrict',
+      onUpdate: 'restrict',
+      schemaVersion: version,
+    },
+    joinEligibility: 'query',
+    kind: 'relationDefinition',
+    orderKey,
+    ownership,
+    relationId,
+    required: true,
+    schemaVersion: version,
+    sourceEntity: reference('entityReference', sourceEntityId),
+    targetEntity: reference('entityReference', targetEntityId),
+  };
 }
 
 function permissions(

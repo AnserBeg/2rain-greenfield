@@ -12,14 +12,14 @@ CREATE TABLE platform.inventory_posting_configurations (
   environment_id uuid NOT NULL,
   legal_entity_id uuid NOT NULL,
   contract_release_root text NOT NULL,
-  configuration_version smallint NOT NULL DEFAULT 1,
-  negative_stock text NOT NULL DEFAULT 'reject',
-  maximum_backdate_days integer NOT NULL DEFAULT 0,
-  adjustment_reason_requirement text NOT NULL DEFAULT 'codeAndNarrative',
-  transfer_reason_requirement text NOT NULL DEFAULT 'codeOnly',
-  count_reason_requirement text NOT NULL DEFAULT 'codeAndNarrative',
-  correction_reason_requirement text NOT NULL DEFAULT 'codeAndNarrative',
-  rebaseline_reason_requirement text NOT NULL DEFAULT 'codeAndNarrative',
+  configuration_version smallint NOT NULL,
+  negative_stock text NOT NULL,
+  maximum_backdate_days integer NOT NULL,
+  adjustment_reason_requirement text NOT NULL,
+  transfer_reason_requirement text NOT NULL,
+  count_reason_requirement text NOT NULL,
+  correction_reason_requirement text NOT NULL,
+  rebaseline_reason_requirement text NOT NULL,
   adjustment_approval_threshold numeric(38,18),
   transfer_approval_threshold numeric(38,18),
   count_approval_threshold numeric(38,18),
@@ -129,6 +129,71 @@ AS $reject_inventory_fact_mutation$ BEGIN
             COALESCE(OLD.record_id::text, 'unknown')
           ); END
 $reject_inventory_fact_mutation$;
+
+CREATE FUNCTION north_star_internal.reserve_inventory_movement_effect()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = pg_catalog
+AS $reserve_inventory_movement_effect$ DECLARE
+  companion_columns text;
+  companion_relation regclass;
+  companion_values text; BEGIN
+  companion_relation := TG_ARGV[0]::regclass;
+  SELECT
+    string_agg(format('%I', attribute.attname), ', ' ORDER BY attribute.attnum),
+    string_agg(
+      format(
+        '(to_jsonb($1)->>%L)::%s',
+        attribute.attname,
+        format_type(attribute.atttypid, attribute.atttypmod)
+      ),
+      ', ' ORDER BY attribute.attnum
+    )
+    INTO companion_columns, companion_values
+    FROM pg_attribute AS attribute
+   WHERE attribute.attrelid = companion_relation
+     AND attribute.attnum > 0
+     AND NOT attribute.attisdropped;
+  IF companion_columns IS NULL OR companion_values IS NULL THEN
+    RAISE EXCEPTION 'INVENTORY_MOVEMENT_EFFECT_TARGET_INVALID'
+      USING ERRCODE = 'P0001'; END IF;
+  EXECUTE format(
+    'INSERT INTO %s (%s) SELECT %s',
+    companion_relation,
+    companion_columns,
+    companion_values
+  ) USING NEW;
+  RETURN NEW; END
+$reserve_inventory_movement_effect$;
+
+CREATE FUNCTION north_star_internal.provision_inventory_period_lock()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog
+AS $provision_inventory_period_lock$ DECLARE
+  lock_relation regclass;
+  relation_owner text;
+  relation_schema text; BEGIN
+  lock_relation := TG_ARGV[0]::regclass;
+  SELECT namespace.nspname, pg_get_userbyid(relation.relowner)
+    INTO relation_schema, relation_owner
+    FROM pg_class AS relation
+    JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+   WHERE relation.oid = lock_relation
+     AND relation.relkind = 'r';
+  IF relation_schema IS DISTINCT FROM 'north_star_module'
+     OR relation_owner IS DISTINCT FROM 'north_star_module_materializer'
+  THEN
+    RAISE EXCEPTION 'INVENTORY_PERIOD_LOCK_RELATION_UNTRUSTED'
+      USING ERRCODE = 'P0001'; END IF;
+  EXECUTE format(
+    'INSERT INTO %s (tenant_id, environment_id, legal_entity_id, record_id) '
+    || 'VALUES ($1, $2, $3, $3) ON CONFLICT DO NOTHING',
+    lock_relation
+  ) USING NEW.tenant_id, NEW.environment_id, NEW.record_id;
+  RETURN NEW; END
+$provision_inventory_period_lock$;
 
 CREATE FUNCTION north_star_internal.inventory_base_unit_change_allowed(
   requested_tenant_id uuid,
@@ -296,7 +361,20 @@ CREATE FUNCTION platform.provision_inventory_scope(
   requested_entity_name text,
   requested_time_zone text,
   requested_business_day_boundary time without time zone,
-  requested_contract_release_root text
+  requested_contract_release_root text,
+  requested_configuration_version smallint,
+  requested_negative_stock text,
+  requested_maximum_backdate_days integer,
+  requested_adjustment_reason_requirement text,
+  requested_transfer_reason_requirement text,
+  requested_count_reason_requirement text,
+  requested_correction_reason_requirement text,
+  requested_rebaseline_reason_requirement text,
+  requested_adjustment_approval_threshold numeric,
+  requested_transfer_approval_threshold numeric,
+  requested_count_approval_threshold numeric,
+  requested_correction_approval_threshold numeric,
+  requested_rebaseline_approval_threshold numeric
 ) RETURNS void
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -342,12 +420,38 @@ AS $provision_inventory_scope$ DECLARE
     tenant_id,
     environment_id,
     legal_entity_id,
-    contract_release_root
+    contract_release_root,
+    configuration_version,
+    negative_stock,
+    maximum_backdate_days,
+    adjustment_reason_requirement,
+    transfer_reason_requirement,
+    count_reason_requirement,
+    correction_reason_requirement,
+    rebaseline_reason_requirement,
+    adjustment_approval_threshold,
+    transfer_approval_threshold,
+    count_approval_threshold,
+    correction_approval_threshold,
+    rebaseline_approval_threshold
   ) VALUES (
     requested_tenant_id,
     requested_environment_id,
     requested_legal_entity_id,
-    requested_contract_release_root
+    requested_contract_release_root,
+    requested_configuration_version,
+    requested_negative_stock,
+    requested_maximum_backdate_days,
+    requested_adjustment_reason_requirement,
+    requested_transfer_reason_requirement,
+    requested_count_reason_requirement,
+    requested_correction_reason_requirement,
+    requested_rebaseline_reason_requirement,
+    requested_adjustment_approval_threshold,
+    requested_transfer_approval_threshold,
+    requested_count_approval_threshold,
+    requested_correction_approval_threshold,
+    requested_rebaseline_approval_threshold
   ) ON CONFLICT (tenant_id, environment_id, legal_entity_id) DO NOTHING;
   IF NOT EXISTS (
     SELECT 1 FROM platform.inventory_posting_configurations AS configuration
@@ -355,6 +459,19 @@ AS $provision_inventory_scope$ DECLARE
        AND configuration.environment_id = requested_environment_id
        AND configuration.legal_entity_id = requested_legal_entity_id
        AND configuration.contract_release_root = requested_contract_release_root
+       AND configuration.configuration_version = requested_configuration_version
+       AND configuration.negative_stock = requested_negative_stock
+       AND configuration.maximum_backdate_days = requested_maximum_backdate_days
+       AND configuration.adjustment_reason_requirement = requested_adjustment_reason_requirement
+       AND configuration.transfer_reason_requirement = requested_transfer_reason_requirement
+       AND configuration.count_reason_requirement = requested_count_reason_requirement
+       AND configuration.correction_reason_requirement = requested_correction_reason_requirement
+       AND configuration.rebaseline_reason_requirement = requested_rebaseline_reason_requirement
+       AND configuration.adjustment_approval_threshold IS NOT DISTINCT FROM requested_adjustment_approval_threshold
+       AND configuration.transfer_approval_threshold IS NOT DISTINCT FROM requested_transfer_approval_threshold
+       AND configuration.count_approval_threshold IS NOT DISTINCT FROM requested_count_approval_threshold
+       AND configuration.correction_approval_threshold IS NOT DISTINCT FROM requested_correction_approval_threshold
+       AND configuration.rebaseline_approval_threshold IS NOT DISTINCT FROM requested_rebaseline_approval_threshold
   ) THEN
     RAISE EXCEPTION 'INVENTORY_POSTING_CONFIGURATION_CONFLICT'
       USING ERRCODE = 'P0001',
@@ -395,10 +512,14 @@ REVOKE ALL ON FUNCTION
     uuid, uuid, uuid, text, regclass, name, name, name, name
   ),
   north_star_internal.inventory_provisioned_legal_entity_id(uuid, uuid),
+  north_star_internal.provision_inventory_period_lock(),
+  north_star_internal.reserve_inventory_movement_effect(),
   north_star_internal.reject_inventory_fact_mutation(),
   platform.load_inventory_posting_configuration(uuid, uuid, uuid),
   platform.provision_inventory_scope(
-    uuid, uuid, uuid, text, text, text, time without time zone, text
+    uuid, uuid, uuid, text, text, text, time without time zone, text,
+    smallint, text, integer, text, text, text, text, text,
+    numeric, numeric, numeric, numeric, numeric
   ) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION
   north_star_internal.inventory_business_period(uuid, timestamptz)
@@ -411,6 +532,12 @@ GRANT EXECUTE ON FUNCTION
 GRANT EXECUTE ON FUNCTION
   north_star_internal.inventory_provisioned_legal_entity_id(uuid, uuid)
   TO north_star_module_materializer;
+GRANT EXECUTE ON FUNCTION
+  north_star_internal.provision_inventory_period_lock()
+  TO north_star_module_materializer, north_star_module_runtime;
+GRANT EXECUTE ON FUNCTION
+  north_star_internal.reserve_inventory_movement_effect()
+  TO north_star_module_materializer, north_star_module_runtime;
 GRANT EXECUTE ON FUNCTION
   north_star_internal.reject_inventory_fact_mutation()
   TO north_star_module_materializer, north_star_module_runtime;

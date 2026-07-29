@@ -86,7 +86,7 @@ const environmentB = 'b2000000-0000-4000-8000-000000000002';
 const principalA = 'a3000000-0000-4000-8000-000000000003';
 const principalB = 'b3000000-0000-4000-8000-000000000003';
 const inventoryContractReleaseRoot =
-  'e3868a1c07b6bbf73de264b349b28718c94e7460e2b1538908ad32ca55153b99';
+  'bd977ff0a00db745e79b7d8e158cb55863319f9f37f7674d77b618e85272d116';
 const approverA = 'a4000000-0000-4000-8000-000000000004';
 const demonstrateFoldFunctionDrift =
   process.env.PR6B_DEMONSTRATE_FOLD_FUNCTION_DRIFT;
@@ -2017,6 +2017,18 @@ test('inventory v3 targets materialize the compiled legal master, fact partition
   const item = storage.entities.find((entity) =>
     entity.entityId.endsWith(':entity.item'),
   );
+  const location = storage.entities.find((entity) =>
+    entity.entityId.endsWith(':entity.location'),
+  );
+  const transaction = storage.entities.find((entity) =>
+    entity.entityId.endsWith(':entity.inventory_transaction'),
+  );
+  const transactionLine = storage.entities.find((entity) =>
+    entity.entityId.endsWith(':entity.inventory_transaction_line'),
+  );
+  const periodLock = storage.entities.find((entity) =>
+    entity.entityId.endsWith(':entity.inventory_period_lock'),
+  );
   const movement = storage.entities.find((entity) =>
     entity.entityId.endsWith(':entity.inventory_movement'),
   );
@@ -2024,6 +2036,27 @@ test('inventory v3 targets materialize the compiled legal master, fact partition
     (entity) => entity.legalEntityMaster !== undefined,
   );
   assert.ok(item);
+  assert.ok(location);
+  assert.ok(transaction);
+  assert.ok(transactionLine);
+  assert.ok(periodLock?.periodLock);
+  const periodLockStorage = periodLock.periodLock;
+  assert.deepEqual(periodLock.consumerWriterRoots.writerOperationIds, [
+    `${APPLICATION_NAMESPACE}:operation.advance_period_lock`,
+    `${APPLICATION_NAMESPACE}:operation.reopen_period`,
+  ]);
+  assert.deepEqual(
+    {
+      advanceOperationId: periodLockStorage.advanceOperationId,
+      reopenOperationId: periodLockStorage.reopenOperationId,
+      scope: periodLockStorage.scopeUniqueIndex.columns,
+    },
+    {
+      advanceOperationId: `${APPLICATION_NAMESPACE}:operation.advance_period_lock`,
+      reopenOperationId: `${APPLICATION_NAMESPACE}:operation.reopen_period`,
+      scope: ['tenant_id', 'environment_id', 'legal_entity_id'],
+    },
+  );
   assert.equal(item.legalEntity, undefined);
   assert.ok(movement?.legalEntity);
   assert.ok(movement.factStorage);
@@ -2057,6 +2090,34 @@ test('inventory v3 targets materialize the compiled legal master, fact partition
     column.canonicalFieldId.endsWith(':field.item_base_unit'),
   );
   assert.ok(baseUnit);
+  const movementRelations = storage.relations.filter(
+    (relation) => relation.sourceEntityId === movement.entityId,
+  );
+  const movementTransaction = movementRelations.find(
+    (relation) => relation.targetEntityId === transaction.entityId,
+  );
+  const movementTransactionLine = movementRelations.find(
+    (relation) => relation.targetEntityId === transactionLine.entityId,
+  );
+  const lineTransaction = storage.relations.find(
+    (relation) =>
+      relation.sourceEntityId === transactionLine.entityId &&
+      relation.targetEntityId === transaction.entityId,
+  );
+  assert.ok(movementTransaction);
+  assert.ok(movementTransactionLine);
+  assert.ok(lineTransaction);
+  for (const relation of [
+    movementTransaction,
+    movementTransactionLine,
+    lineTransaction,
+  ]) {
+    assert.deepEqual(relation.foreignKey.sourceColumns.slice(0, 3), [
+      'tenant_id',
+      'environment_id',
+      'legal_entity_id',
+    ]);
+  }
 
   await withEphemeralPostgres(
     'module-storage-entity-owned',
@@ -2068,14 +2129,20 @@ test('inventory v3 targets materialize the compiled legal master, fact partition
         await admin.query(
           `SELECT platform.provision_inventory_scope(
              $1, $2, $3, 'LE-A', 'Legal Entity A', 'America/Edmonton',
-             '06:00:00', $4
+             '06:00:00', $4, 1::smallint, 'reject', 0,
+             'codeAndNarrative', 'codeOnly', 'codeAndNarrative',
+             'codeAndNarrative', 'codeAndNarrative',
+             NULL, NULL, NULL, NULL, NULL
            )`,
           [tenantA, environmentA, legalEntityId, inventoryContractReleaseRoot],
         );
         await admin.query(
           `SELECT platform.provision_inventory_scope(
              $1, $2, $3, 'LE-B', 'Legal Entity B', 'America/Toronto',
-             '04:00:00', $4
+             '04:00:00', $4, 1::smallint, 'reject', 0,
+             'codeAndNarrative', 'codeOnly', 'codeAndNarrative',
+             'codeAndNarrative', 'codeAndNarrative',
+             NULL, NULL, NULL, NULL, NULL
            )`,
           [tenantB, environmentB, legalEntityB, inventoryContractReleaseRoot],
         );
@@ -2393,37 +2460,137 @@ test('inventory v3 targets materialize the compiled legal master, fact partition
           true,
         );
 
-        const itemId = randomUUID();
-        const requiredItemColumns = item.columns.filter(
-          (column) => !column.nullable && column.defaultSemantics === 'none',
-        );
-        const itemValues: unknown[] = [tenantA, environmentA, itemId];
-        for (const column of requiredItemColumns) {
-          itemValues.push(
-            column.physicalName === baseUnit.physicalName
-              ? 'EA'
-              : column.postgresqlType === 'uuid'
-                ? randomUUID()
-                : /^(?:bigint|numeric)/u.test(column.postgresqlType)
-                  ? '1'
-                  : `inventory-${itemId.slice(0, 8)}`,
+        const insertRequiredEntity = async (input: {
+          entity: (typeof storage.entities)[number];
+          environmentId: string;
+          legalEntityId?: string;
+          localValues?: Readonly<Record<string, unknown>>;
+          recordId: string;
+          relationRecordIds?: Readonly<Record<string, string>>;
+          tenantId: string;
+        }): Promise<void> => {
+          const requiredColumns = input.entity.columns.filter(
+            (column) => !column.nullable && column.defaultSemantics === 'none',
           );
-        }
-        await pool.query(
-          `INSERT INTO north_star_module.${quoteTestIdentifier(item.physicalTableName)} (
-             tenant_id,
-             environment_id,
-             ${quoteTestIdentifier(item.recordIdentity.column)},
-             ${requiredItemColumns
-               .map((column) => quoteTestIdentifier(column.physicalName))
-               .join(', ')}
-           ) VALUES (${itemValues.map((_, index) => `$${String(index + 1)}`).join(', ')})`,
-          itemValues,
-        );
+          const requiredRelations = storage.relations.filter(
+            (relation) =>
+              relation.sourceEntityId === input.entity.entityId &&
+              relation.relationColumn.origin !== 'field' &&
+              !relation.relationColumn.nullable,
+          );
+          const columnValue = (
+            column: (typeof storage.entities)[number]['columns'][number],
+          ): unknown => {
+            const localId = column.canonicalFieldId.split(':field.').at(-1)!;
+            if (Object.hasOwn(input.localValues ?? {}, localId)) {
+              return input.localValues?.[localId];
+            }
+            if (column.fieldContract.enumOptionIds.length > 0) {
+              return column.fieldContract.enumOptionIds[0];
+            }
+            if (column.postgresqlType === 'uuid') return randomUUID();
+            if (/^(?:bigint|integer|numeric)/u.test(column.postgresqlType)) {
+              return '1';
+            }
+            if (column.postgresqlType.startsWith('timestamp')) {
+              return '2026-07-29T12:00:00.000Z';
+            }
+            if (column.postgresqlType === 'boolean') return false;
+            return `inventory-${input.recordId.slice(0, 8)}`;
+          };
+          const names = [
+            'tenant_id',
+            'environment_id',
+            ...(input.entity.legalEntity ? ['legal_entity_id'] : []),
+            input.entity.recordIdentity.column,
+            ...requiredColumns.map((column) => column.physicalName),
+            ...requiredRelations.map(
+              (relation) => relation.relationColumn.physicalName,
+            ),
+          ];
+          const values: unknown[] = [
+            input.tenantId,
+            input.environmentId,
+            ...(input.entity.legalEntity ? [input.legalEntityId] : []),
+            input.recordId,
+            ...requiredColumns.map(columnValue),
+            ...requiredRelations.map((relation) => {
+              const value = input.relationRecordIds?.[relation.targetEntityId];
+              if (!value) {
+                throw new Error(
+                  `missing relation value ${relation.relationId}`,
+                );
+              }
+              return value;
+            }),
+          ];
+          await pool.query(
+            `INSERT INTO north_star_module.${quoteTestIdentifier(input.entity.physicalTableName)} (
+               ${names.map(quoteTestIdentifier).join(', ')}
+             ) VALUES (${values.map((_, index) => `$${String(index + 1)}`).join(', ')})`,
+            values,
+          );
+        };
 
+        const seedInventoryReferences = async (scope: {
+          environmentId: string;
+          itemId: string;
+          legalEntityId: string;
+          locationId: string;
+          tenantId: string;
+          transactionId: string;
+          transactionLineId: string;
+        }): Promise<void> => {
+          await insertRequiredEntity({
+            entity: item,
+            environmentId: scope.environmentId,
+            localValues: { item_base_unit: 'EA' },
+            recordId: scope.itemId,
+            tenantId: scope.tenantId,
+          });
+          await insertRequiredEntity({
+            entity: location,
+            environmentId: scope.environmentId,
+            recordId: scope.locationId,
+            tenantId: scope.tenantId,
+          });
+          await insertRequiredEntity({
+            entity: transaction,
+            environmentId: scope.environmentId,
+            legalEntityId: scope.legalEntityId,
+            recordId: scope.transactionId,
+            tenantId: scope.tenantId,
+          });
+          await insertRequiredEntity({
+            entity: transactionLine,
+            environmentId: scope.environmentId,
+            legalEntityId: scope.legalEntityId,
+            localValues: {
+              inventory_transaction_line_item_id: scope.itemId,
+            },
+            recordId: scope.transactionLineId,
+            relationRecordIds: {
+              [transaction.entityId]: scope.transactionId,
+            },
+            tenantId: scope.tenantId,
+          });
+        };
+
+        const itemId = randomUUID();
         const movementId = randomUUID();
         const sourceId = randomUUID();
         const locationId = randomUUID();
+        const transactionId = randomUUID();
+        const transactionLineId = randomUUID();
+        await seedInventoryReferences({
+          environmentId: environmentA,
+          itemId,
+          legalEntityId,
+          locationId,
+          tenantId: tenantA,
+          transactionId,
+          transactionLineId,
+        });
         const effectiveAt = '2026-07-29T12:00:00.000Z';
         const recordedAt = '2026-07-29T13:00:00.000Z';
         const period = await pool.query<{ business_period: string }>(
@@ -2445,8 +2612,6 @@ test('inventory v3 targets materialize the compiled legal master, fact partition
         ): unknown => {
           const localId = column.canonicalFieldId.split(':field.').at(-1);
           switch (localId) {
-            case 'inventory_movement_transaction_id':
-            case 'inventory_movement_transaction_line_id':
             case 'inventory_movement_actor_id':
               return randomUUID();
             case 'inventory_movement_stock_dimension_set_version':
@@ -2500,7 +2665,12 @@ test('inventory v3 targets materialize the compiled legal master, fact partition
           sourceLine: string;
           stockVersion?: string | null;
           tenantId: string;
+          transactionId: string;
+          transactionLineId: string;
         }): Promise<void> => {
+          const declaredRelations = movementRelations.filter(
+            (relation) => relation.relationColumn.origin !== 'field',
+          );
           const values = [
             input.tenantId,
             input.environmentId,
@@ -2508,6 +2678,11 @@ test('inventory v3 targets materialize the compiled legal master, fact partition
             input.businessPeriod,
             input.movementId,
             ...movement.columns.map((column) => movementValue(column, input)),
+            ...declaredRelations.map((relation) =>
+              relation.targetEntityId === transaction.entityId
+                ? input.transactionId
+                : input.transactionLineId,
+            ),
           ];
           await pool.query(
             `INSERT INTO north_star_module.${quoteTestIdentifier(movement.physicalTableName)} (
@@ -2515,6 +2690,11 @@ test('inventory v3 targets materialize the compiled legal master, fact partition
                ${quoteTestIdentifier(movement.recordIdentity.column)},
                ${movement.columns
                  .map((column) => quoteTestIdentifier(column.physicalName))
+                 .join(', ')},
+               ${declaredRelations
+                 .map((relation) =>
+                   quoteTestIdentifier(relation.relationColumn.physicalName),
+                 )
                  .join(', ')}
              ) VALUES (${values.map((_, index) => `$${String(index + 1)}`).join(', ')})`,
             values,
@@ -2532,6 +2712,8 @@ test('inventory v3 targets materialize the compiled legal master, fact partition
           sourceId,
           sourceLine: '1',
           tenantId: tenantA,
+          transactionId,
+          transactionLineId,
         };
         await assert.rejects(
           insertMovement({
@@ -2572,6 +2754,57 @@ test('inventory v3 targets materialize the compiled legal master, fact partition
           );
         }
         await insertMovement(movementInput);
+
+        await assert.rejects(
+          insertMovement({
+            ...movementInput,
+            itemId: randomUUID(),
+            movementId: randomUUID(),
+            sourceLine: 'missing-item-reference',
+          }),
+          hasPostgresErrorCode('23503'),
+        );
+        await assert.rejects(
+          insertMovement({
+            ...movementInput,
+            movementId: randomUUID(),
+            sourceLine: 'missing-transaction-reference',
+            transactionId: randomUUID(),
+          }),
+          hasPostgresErrorCode('23503'),
+        );
+        const otherLegalEntityId = randomUUID();
+        const otherTransactionId = randomUUID();
+        await insertRequiredEntity({
+          entity: legalEntity,
+          environmentId: environmentA,
+          recordId: otherLegalEntityId,
+          tenantId: tenantA,
+        });
+        const provisionedOtherLock = await pool.query<{ count: string }>(
+          `SELECT count(*)::text AS count
+             FROM north_star_module.${quoteTestIdentifier(periodLock.physicalTableName)}
+            WHERE tenant_id = $1 AND environment_id = $2
+              AND legal_entity_id = $3`,
+          [tenantA, environmentA, otherLegalEntityId],
+        );
+        assert.equal(provisionedOtherLock.rows[0]?.count, '1');
+        await insertRequiredEntity({
+          entity: transaction,
+          environmentId: environmentA,
+          legalEntityId: otherLegalEntityId,
+          recordId: otherTransactionId,
+          tenantId: tenantA,
+        });
+        await assert.rejects(
+          insertMovement({
+            ...movementInput,
+            movementId: randomUUID(),
+            sourceLine: 'cross-entity-transaction',
+            transactionId: otherTransactionId,
+          }),
+          hasPostgresErrorCode('23503'),
+        );
 
         const plan = await pool.query<{ 'QUERY PLAN': unknown }>(
           `EXPLAIN (FORMAT JSON, COSTS FALSE)
@@ -2637,13 +2870,63 @@ test('inventory v3 targets materialize the compiled legal master, fact partition
             client.release();
           }
         };
+        const lockRows = await queryAsModuleRuntime(
+          `SELECT record_id
+             FROM north_star_module.${quoteTestIdentifier(periodLock.physicalTableName)}
+            WHERE legal_entity_id = $1`,
+          [legalEntityId],
+        );
+        assert.deepEqual(lockRows.rows, [{ record_id: legalEntityId }]);
+        await assert.rejects(
+          pool.query(
+            `INSERT INTO north_star_module.${quoteTestIdentifier(periodLock.physicalTableName)} (
+               tenant_id, environment_id, legal_entity_id, record_id
+             ) VALUES ($1, $2, $3, $4)`,
+            [tenantA, environmentA, legalEntityId, randomUUID()],
+          ),
+          hasPostgresErrorCode('23505'),
+        );
+        await assert.rejects(
+          queryAsModuleRuntime(
+            `INSERT INTO north_star_module.${quoteTestIdentifier(periodLock.physicalTableName)} (
+               tenant_id, environment_id, legal_entity_id, record_id
+             ) VALUES ($1, $2, $3, $4)`,
+            [tenantA, environmentA, legalEntityId, randomUUID()],
+          ),
+          hasPostgresErrorCode('42501'),
+        );
         await queryAsModuleRuntime(
-          `INSERT INTO north_star_module.${quoteTestIdentifier(companion.physicalTableName)} (
-             ${companion.columns
-               .map((column) => quoteTestIdentifier(column.name))
-               .join(', ')}
-           ) VALUES (${effectValues.map((_, index) => `$${String(index + 1)}`).join(', ')})`,
-          effectValues,
+          `UPDATE north_star_module.${quoteTestIdentifier(periodLock.physicalTableName)}
+              SET ${quoteTestIdentifier(periodLockStorage.closedThroughColumn)} = $1
+            WHERE legal_entity_id = $2`,
+          ['2026-07-28T23:59:59.999Z', legalEntityId],
+        );
+        await assert.rejects(
+          queryAsModuleRuntime(
+            `UPDATE north_star_module.${quoteTestIdentifier(periodLock.physicalTableName)}
+                SET revision = revision + 1
+              WHERE legal_entity_id = $1`,
+            [legalEntityId],
+          ),
+          hasPostgresErrorCode('42501'),
+        );
+        const reservedEffect = await queryAsModuleRuntime(
+          `SELECT count(*)::text AS count
+             FROM north_star_module.${quoteTestIdentifier(companion.physicalTableName)}
+            WHERE record_id = $1`,
+          [movementId],
+        );
+        assert.equal(reservedEffect.rows[0]?.count, '1');
+        await assert.rejects(
+          queryAsModuleRuntime(
+            `INSERT INTO north_star_module.${quoteTestIdentifier(companion.physicalTableName)} (
+               ${companion.columns
+                 .map((column) => quoteTestIdentifier(column.name))
+                 .join(', ')}
+             ) VALUES (${effectValues.map((_, index) => `$${String(index + 1)}`).join(', ')})`,
+            effectValues,
+          ),
+          hasPostgresErrorCode('23505'),
         );
 
         const secondEffectiveAt = '2026-08-01T12:00:00.000Z';
@@ -2653,14 +2936,37 @@ test('inventory v3 targets materialize the compiled legal master, fact partition
           [tenantA, secondEffectiveAt],
         );
         const secondMovementId = randomUUID();
-        await insertMovement({
-          ...movementInput,
-          businessPeriod: secondPeriod.rows[0]!.business_period,
-          effectiveAt: secondEffectiveAt,
-          movementId: secondMovementId,
-          recordedAt: '2026-08-01T13:00:00.000Z',
-        });
+        await assert.rejects(
+          insertMovement({
+            ...movementInput,
+            businessPeriod: secondPeriod.rows[0]!.business_period,
+            effectiveAt: secondEffectiveAt,
+            movementId: secondMovementId,
+            recordedAt: '2026-08-01T13:00:00.000Z',
+          }),
+          hasPostgresErrorCode('23505'),
+        );
+        const rejectedMovement = await pool.query<{ count: string }>(
+          `SELECT count(*)::text AS count
+             FROM north_star_module.${quoteTestIdentifier(movement.physicalTableName)}
+            WHERE record_id = $1`,
+          [secondMovementId],
+        );
+        assert.equal(rejectedMovement.rows[0]?.count, '0');
         const movementB = randomUUID();
+        const itemB = randomUUID();
+        const locationB = randomUUID();
+        const transactionB = randomUUID();
+        const transactionLineB = randomUUID();
+        await seedInventoryReferences({
+          environmentId: environmentB,
+          itemId: itemB,
+          legalEntityId: legalEntityB,
+          locationId: locationB,
+          tenantId: tenantB,
+          transactionId: transactionB,
+          transactionLineId: transactionLineB,
+        });
         const effectiveAtB = '2026-07-29T10:00:00.000Z';
         const periodB = await pool.query<{ business_period: string }>(
           `SELECT north_star_internal.inventory_business_period($1, $2)
@@ -2671,14 +2977,16 @@ test('inventory v3 targets materialize the compiled legal master, fact partition
           businessPeriod: periodB.rows[0]!.business_period,
           effectiveAt: effectiveAtB,
           environmentId: environmentB,
-          itemId: randomUUID(),
+          itemId: itemB,
           legalEntityId: legalEntityB,
-          locationId: randomUUID(),
+          locationId: locationB,
           movementId: movementB,
           recordedAt: '2026-07-29T12:30:00.000Z',
           sourceId: randomUUID(),
           sourceLine: 'tenant-b',
           tenantId: tenantB,
+          transactionId: transactionB,
+          transactionLineId: transactionLineB,
         });
         const extractAtHorizon = async (
           context: TrustedRequestContext,
@@ -2712,28 +3020,15 @@ test('inventory v3 targets materialize the compiled legal master, fact partition
         assert.deepEqual(await extractAtHorizon(contexts.a), [movementId]);
         assert.deepEqual(await extractAtHorizon(contexts.b), [movementB]);
 
-        const secondEffectValues = companion.columns.map((column, index) => {
-          if (column.name === 'business_period')
-            return secondPeriod.rows[0]!.business_period;
-          if (column.name === 'record_id') return secondMovementId;
-          return effectValues[index];
+        const mismatchedEffectValues = effectValues.map((value, index) => {
+          const column = companion.columns[index];
+          if (column?.name === 'record_id') return randomUUID();
+          if (column?.name === factStorage.fieldColumns.sourceId)
+            return randomUUID();
+          if (column?.name === factStorage.fieldColumns.sourceLine)
+            return 'not-the-movement-source-line';
+          return value;
         });
-        await assert.rejects(
-          queryAsModuleRuntime(
-            `INSERT INTO north_star_module.${quoteTestIdentifier(companion.physicalTableName)} (
-               ${companion.columns
-                 .map((column) => quoteTestIdentifier(column.name))
-                 .join(', ')}
-             ) VALUES (${secondEffectValues.map((_, index) => `$${String(index + 1)}`).join(', ')})`,
-            secondEffectValues,
-          ),
-          hasPostgresErrorCode('23505'),
-        );
-        const mismatchedEffectValues = secondEffectValues.map((value, index) =>
-          companion.columns[index]?.name === factStorage.fieldColumns.sourceLine
-            ? 'not-the-movement-source-line'
-            : value,
-        );
         await assert.rejects(
           queryAsModuleRuntime(
             `INSERT INTO north_star_module.${quoteTestIdentifier(companion.physicalTableName)} (
@@ -2785,6 +3080,32 @@ test('inventory v3 targets materialize the compiled legal master, fact partition
               `bindingMovementId=${movementId}`,
             ) === true,
         );
+        await pool.query(
+          'ALTER TABLE platform.active_release_pointers DISABLE TRIGGER active_release_pointer_exact_swap',
+        );
+        try {
+          await pool.query(
+            `UPDATE platform.active_release_pointers
+                SET release_id = $1
+              WHERE tenant_id = $2 AND environment_id = $3`,
+            [releases.a.target, tenantA, environmentA],
+          );
+          await pool.query(
+            `DROP TRIGGER ${quoteTestIdentifier(companion.reservationTriggerName)}
+               ON north_star_module.${quoteTestIdentifier(movement.physicalTableName)}`,
+          );
+          await assertCatalogDrift(
+            materializer,
+            contexts.a,
+            new RegExp(
+              `missing managed trigger [^.]+\\.${companion.reservationTriggerName}`,
+            ),
+          );
+        } finally {
+          await pool.query(
+            'ALTER TABLE platform.active_release_pointers ENABLE TRIGGER active_release_pointer_exact_swap',
+          );
+        }
       } finally {
         await Promise.all([
           runtimePool.end(),

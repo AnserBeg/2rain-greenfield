@@ -7,6 +7,9 @@ import {
   isPinnedLegalEntityMaster,
   resolvePinnedInventoryFactStorage,
   resolvePinnedInventoryMovementFieldRole,
+  resolvePinnedInventoryPeriodLockStorage,
+  resolvePinnedInventoryStorageReference,
+  resolvePinnedLegalEntityRelationSemantics,
   resolvePinnedLegalEntityMasterFieldRole,
   resolvePinnedLegalEntityFamily,
 } from './conformance.js';
@@ -277,6 +280,7 @@ export interface StorageFactCompanionTarget {
   movementUnique: { columns: string[]; physicalName: string };
   physicalTableName: string;
   primaryKey: { columns: string[]; physicalName: string };
+  reservationTriggerName: string;
   rejectMutationTriggerName: string;
 }
 
@@ -380,6 +384,16 @@ export interface StorageEntityTarget {
     initialValue: '1';
     postgresqlType: 'bigint';
   };
+  periodLock?: {
+    advanceOperationId: string;
+    closedThroughColumn: string;
+    reopenOperationId: string;
+    provisioningTriggerName: string;
+    scopeUniqueIndex: {
+      columns: readonly ['tenant_id', 'environment_id', 'legal_entity_id'];
+      physicalName: string;
+    };
+  };
   physicalTableName: string;
   primaryKey: {
     columns: string[];
@@ -464,6 +478,7 @@ export interface StorageIndexTarget {
     | 'caseInsensitiveUnique'
     | 'foldedAccess'
     | 'legalEntityDefaultUnique'
+    | 'periodLockScopeUnique'
     | 'relation'
     | 'resolveAccess'
     | 'stockHorizon';
@@ -491,6 +506,7 @@ export interface StorageRelationTarget {
   ownership: 'reference' | 'parentScopedChild';
   relationColumn: {
     nullable: boolean;
+    origin?: 'field';
     physicalName: string;
     postgresqlType: 'uuid';
   };
@@ -623,7 +639,9 @@ export function lowerStorageTargetV1(
             'legal_entity_id',
             'record_id',
           ]
-        : ['tenant_id', 'environment_id', 'record_id'];
+        : entityOwned
+          ? ['tenant_id', 'environment_id', 'legal_entity_id', 'record_id']
+          : ['tenant_id', 'environment_id', 'record_id'];
       addMapping(
         mappings,
         'constraint',
@@ -645,7 +663,17 @@ export function lowerStorageTargetV1(
             field.presence === 'required' &&
             previousEntity !== undefined &&
             (previousColumn === undefined || previousColumn.nullable);
-          return lowerColumn(field, mappings, deferRequiredTightening);
+          return lowerColumn(
+            field,
+            mappings,
+            deferRequiredTightening,
+            resolvePinnedInventoryStorageReference(
+              entity.entityId,
+              field.fieldId,
+            )
+              ? 'uuid'
+              : undefined,
+          );
         },
       );
       const resolveMatchFieldIds = new Set<string>(
@@ -865,6 +893,18 @@ export function lowerStorageTargetV1(
             mappings,
           )
         : undefined;
+      const periodLockRule = resolvePinnedInventoryPeriodLockStorage(
+        entity.entityId,
+      );
+      const periodLock = periodLockRule
+        ? buildPeriodLockStorageTarget(
+            packageRevision.package.namespace,
+            entity.entityId,
+            columns,
+            mappings,
+            periodLockRule,
+          )
+        : undefined;
       if (factStorage) {
         indexes.push({
           columnNames: factStorage.stockHorizonIndex.columns,
@@ -879,6 +919,14 @@ export function lowerStorageTargetV1(
           indexKind: 'legalEntityDefaultUnique',
           physicalName: legalEntityMaster.defaultUniqueIndex.physicalName,
           predicate: legalEntityMaster.defaultUniqueIndex.predicate,
+        });
+      }
+      if (periodLock) {
+        indexes.push({
+          columnNames: [...periodLock.scopeUniqueIndex.columns],
+          indexKind: 'periodLockScopeUnique',
+          physicalName: periodLock.scopeUniqueIndex.physicalName,
+          predicate: null,
         });
       }
       return {
@@ -934,6 +982,7 @@ export function lowerStorageTargetV1(
           initialValue: '1',
           postgresqlType: 'bigint',
         },
+        ...(periodLock ? { periodLock } : {}),
         physicalTableName,
         primaryKey: {
           columns: primaryKeyColumns,
@@ -998,91 +1047,179 @@ export function lowerStorageTargetV1(
       );
     }
   }
-  const relations = packageRevision.relations.map(
-    (relation): StorageRelationTarget => {
-      const source = entityById.get(relation.sourceEntity.targetId)!;
-      const target = entityById.get(relation.targetEntity.targetId)!;
-      if (!source || !target) {
-        throw new Error('validated relation target is missing');
-      }
-      const relationColumn = physicalNameFor(
+  const relations: StorageRelationTarget[] = [];
+  const registerRelation = (input: {
+    archiveBehavior: StorageRelationTarget['archiveBehavior'];
+    nullable: boolean;
+    origin: 'declaredRelation' | 'field';
+    ownership: StorageRelationTarget['ownership'];
+    relationColumn: string;
+    relationId: string;
+    semantics: 'crossEntityAllowed' | 'sameEntity' | null;
+    source: StorageEntityTarget;
+    target: StorageEntityTarget;
+  }): void => {
+    const entityScoped =
+      input.semantics === 'sameEntity' &&
+      input.source.legalEntity !== undefined &&
+      input.target.legalEntity !== undefined;
+    const sourceColumns = [
+      'tenant_id',
+      'environment_id',
+      ...(entityScoped ? ['legal_entity_id'] : []),
+      input.relationColumn,
+    ];
+    const targetColumns = [
+      'tenant_id',
+      'environment_id',
+      ...(entityScoped ? ['legal_entity_id'] : []),
+      input.target.recordIdentity.column,
+    ];
+    const physicalName = physicalNameFor(
+      'constraint',
+      `${input.relationId}/foreign-key`,
+    );
+    const targetShape: StorageRelationTarget = {
+      archiveBehavior: input.archiveBehavior,
+      foreignKey: {
+        onDelete: 'restrict',
+        onUpdate: 'restrict',
+        physicalName,
+        sourceColumns,
+        targetColumns,
+      },
+      ownership: input.ownership,
+      relationColumn: {
+        nullable: input.nullable,
+        ...(input.origin === 'field' ? { origin: 'field' as const } : {}),
+        physicalName: input.relationColumn,
+        postgresqlType: 'uuid',
+      },
+      relationId: input.relationId,
+      sourceEntityId: input.source.entityId,
+      targetEntityId: input.target.entityId,
+    };
+    const compatibilityShape = {
+      archiveBehavior: targetShape.archiveBehavior,
+      foreignKey: targetShape.foreignKey,
+      ownership: targetShape.ownership,
+      relationColumn: targetShape.relationColumn,
+      relationId: targetShape.relationId,
+      sourceEntityId: targetShape.sourceEntityId,
+      targetEntityId: targetShape.targetEntityId,
+    };
+    if (input.origin === 'declaredRelation') {
+      addMapping(
+        mappings,
+        'column',
+        `${input.relationId}#target-record-id`,
+        input.relationColumn,
+        compatibilityShape,
+      );
+    }
+    addMapping(
+      mappings,
+      'constraint',
+      `${input.relationId}#foreign-key`,
+      physicalName,
+      compatibilityShape,
+    );
+    const relationIndexSuffix =
+      input.origin === 'declaredRelation'
+        ? 'tenant-environment-relation'
+        : 'scoped-relation';
+    const relationIndex = {
+      columnNames: sourceColumns,
+      indexKind: 'relation' as const,
+      physicalName: physicalNameFor(
+        'index',
+        `${input.relationId}/${relationIndexSuffix}`,
+      ),
+      predicate: null,
+    };
+    input.source.indexes.push(relationIndex);
+    input.source.indexes.sort((left, right) =>
+      compare(left.physicalName, right.physicalName),
+    );
+    addMapping(
+      mappings,
+      'index',
+      `${input.relationId}#${relationIndexSuffix}`,
+      relationIndex.physicalName,
+      relationIndex,
+    );
+    relations.push(targetShape);
+  };
+
+  for (const relation of packageRevision.relations) {
+    const source = entityById.get(relation.sourceEntity.targetId);
+    const target = entityById.get(relation.targetEntity.targetId);
+    if (!source || !target) {
+      throw new Error('validated relation target is missing');
+    }
+    const sourceFamily = resolvePinnedLegalEntityFamily(
+      packageRevision.package.packageId,
+      source.entityId,
+    );
+    const targetFamily = resolvePinnedLegalEntityFamily(
+      packageRevision.package.packageId,
+      target.entityId,
+    );
+    const semantics =
+      sourceFamily.status === 'classified' &&
+      targetFamily.status === 'classified'
+        ? resolvePinnedLegalEntityRelationSemantics(
+            sourceFamily.familyId,
+            targetFamily.familyId,
+          )
+        : null;
+    registerRelation({
+      archiveBehavior: relation.archiveBehavior,
+      nullable: !relation.required,
+      origin: 'declaredRelation',
+      ownership: relation.ownership,
+      relationColumn: physicalNameFor(
         'column',
         `${relation.relationId}/target-record-id`,
+      ),
+      relationId: relation.relationId,
+      semantics,
+      source,
+      target,
+    });
+  }
+
+  for (const source of entities) {
+    for (const column of source.columns) {
+      const rule = resolvePinnedInventoryStorageReference(
+        source.entityId,
+        column.canonicalFieldId,
       );
-      const physicalName = physicalNameFor(
-        'constraint',
-        `${relation.relationId}/foreign-key`,
-      );
-      const foreignKey = {
-        onDelete: 'restrict' as const,
-        onUpdate: 'restrict' as const,
-        physicalName,
-        sourceColumns: ['tenant_id', 'environment_id', relationColumn],
-        targetColumns: [
-          'tenant_id',
-          'environment_id',
-          target.recordIdentity.column,
-        ],
-      };
-      const targetShape: StorageRelationTarget = {
-        archiveBehavior: relation.archiveBehavior,
-        foreignKey,
-        ownership: relation.ownership,
-        relationColumn: {
-          nullable: !relation.required,
-          physicalName: relationColumn,
-          postgresqlType: 'uuid',
-        },
-        relationId: relation.relationId,
-        sourceEntityId: relation.sourceEntity.targetId,
-        targetEntityId: relation.targetEntity.targetId,
-      };
-      const compatibilityShape = {
-        archiveBehavior: targetShape.archiveBehavior,
-        foreignKey: targetShape.foreignKey,
-        ownership: targetShape.ownership,
-        relationColumn: targetShape.relationColumn,
-        relationId: targetShape.relationId,
-        sourceEntityId: targetShape.sourceEntityId,
-        targetEntityId: targetShape.targetEntityId,
-      };
-      addMapping(
-        mappings,
-        'column',
-        `${relation.relationId}#target-record-id`,
-        relationColumn,
-        compatibilityShape,
-      );
-      addMapping(
-        mappings,
-        'constraint',
-        `${relation.relationId}#foreign-key`,
-        physicalName,
-        compatibilityShape,
-      );
-      const relationIndex = {
-        columnNames: ['tenant_id', 'environment_id', relationColumn],
-        indexKind: 'relation' as const,
-        physicalName: physicalNameFor(
-          'index',
-          `${relation.relationId}/tenant-environment-relation`,
-        ),
-        predicate: null,
-      };
-      source.indexes.push(relationIndex);
-      source.indexes.sort((left, right) =>
-        compare(left.physicalName, right.physicalName),
-      );
-      addMapping(
-        mappings,
-        'index',
-        `${relation.relationId}#tenant-environment-relation`,
-        relationIndex.physicalName,
-        relationIndex,
-      );
-      return targetShape;
-    },
-  );
+      if (!rule) continue;
+      const target = entities.find((candidate) => {
+        const family = resolvePinnedLegalEntityFamily(
+          packageRevision.package.packageId,
+          candidate.entityId,
+        );
+        return (
+          family.status === 'classified' &&
+          family.familyId === rule.targetFamilyId
+        );
+      });
+      if (!target) continue;
+      registerRelation({
+        archiveBehavior: 'restrict',
+        nullable: !rule.required,
+        origin: 'field',
+        ownership: 'reference',
+        relationColumn: column.physicalName,
+        relationId: `${column.canonicalFieldId}#inventory-reference`,
+        semantics: rule.semantics,
+        source,
+        target,
+      });
+    }
+  }
 
   return {
     backfillInvariant: {
@@ -1130,6 +1267,58 @@ export function lowerStorageTargetV1(
       : entities.some((entity) => entity.legalEntity !== undefined)
         ? STORAGE_TARGET_PAYLOAD_V2_VERSION
         : STORAGE_TARGET_PAYLOAD_VERSION,
+  };
+}
+
+function buildPeriodLockStorageTarget(
+  namespace: string,
+  entityId: string,
+  columns: readonly StorageColumnTarget[],
+  mappings: PhysicalMappingRecord[],
+  rule: NonNullable<ReturnType<typeof resolvePinnedInventoryPeriodLockStorage>>,
+): NonNullable<StorageEntityTarget['periodLock']> {
+  const closedThrough = columns.find((column) =>
+    column.canonicalFieldId.endsWith(
+      ':field.inventory_period_lock_closed_through',
+    ),
+  );
+  if (!closedThrough) {
+    throw new Error(
+      `INVENTORY_PERIOD_LOCK_FIELD_REQUIRED: ${entityId}/closedThrough`,
+    );
+  }
+  const physicalName = physicalNameFor(
+    'index',
+    `${entityId}/one-per-legal-entity`,
+  );
+  const scopeUniqueIndex = {
+    columns: ['tenant_id', 'environment_id', 'legal_entity_id'] as const,
+    physicalName,
+  };
+  const provisioningTriggerName = physicalNameFor(
+    'trigger',
+    `${entityId}/provision-on-legal-entity-insert`,
+  );
+  addMapping(
+    mappings,
+    'index',
+    `${entityId}#one-per-legal-entity`,
+    physicalName,
+    scopeUniqueIndex,
+  );
+  addMapping(
+    mappings,
+    'trigger',
+    `${entityId}#provision-on-legal-entity-insert`,
+    provisioningTriggerName,
+    { operation: 'AFTER INSERT' },
+  );
+  return {
+    advanceOperationId: `${namespace}:operation.${rule.advanceOperationLocalId}`,
+    closedThroughColumn: closedThrough.physicalName,
+    provisioningTriggerName,
+    reopenOperationId: `${namespace}:operation.${rule.reopenOperationLocalId}`,
+    scopeUniqueIndex,
   };
 }
 
@@ -1266,6 +1455,10 @@ function buildFactStorageTarget(
     'trigger',
     `${entityId}/companion/effect-identity/reject-mutation`,
   );
+  const reservationTriggerName = physicalNameFor(
+    'trigger',
+    `${entityId}/companion/effect-identity/reserve-on-insert`,
+  );
   const stockHorizonIndexName = physicalNameFor(
     'index',
     `${entityId}/stock-horizon`,
@@ -1373,6 +1566,13 @@ function buildFactStorageTarget(
   addMapping(
     mappings,
     'trigger',
+    `${entityId}#companion-effect-identity-reserve-on-insert`,
+    reservationTriggerName,
+    { operation: 'AFTER INSERT' },
+  );
+  addMapping(
+    mappings,
+    'trigger',
     `${entityId}#companion-effect-identity-reject-mutation`,
     companionTriggerName,
     { operation: 'UPDATE OR DELETE' },
@@ -1441,6 +1641,7 @@ function buildFactStorageTarget(
         ],
         physicalName: companionPrimaryKeyName,
       },
+      reservationTriggerName,
       rejectMutationTriggerName: companionTriggerName,
     },
     effectIdentityUnique: {
@@ -2212,9 +2413,11 @@ function lowerColumn(
   field: Field,
   mappings: PhysicalMappingRecord[],
   deferRequiredTightening: boolean,
+  postgresqlTypeOverride?: string,
 ): StorageColumnTarget {
   const physicalName = physicalNameFor('column', field.fieldId);
-  const postgresqlType = postgresqlTypeFor(field.fieldType);
+  const postgresqlType =
+    postgresqlTypeOverride ?? postgresqlTypeFor(field.fieldType);
   const defaultSemantics =
     field.defaultSemantics ??
     (field.presence === 'optional' ? 'nullable' : 'none');

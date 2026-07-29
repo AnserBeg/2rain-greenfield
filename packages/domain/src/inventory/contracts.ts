@@ -40,6 +40,21 @@ export interface InventoryFactStorageRuleV1 {
   readonly mutability: 'appendOnly';
 }
 
+export interface InventoryStorageReferenceRuleV1 {
+  readonly fieldLocalId: string;
+  readonly required: boolean;
+  readonly semantics: LegalEntityRelationSemantics;
+  readonly sourceFamilyId: string;
+  readonly targetFamilyId: string;
+}
+
+export interface InventoryPeriodLockStorageRuleV1 {
+  readonly advanceOperationLocalId: 'advance_period_lock';
+  readonly familyId: 'inventory_period_lock';
+  readonly reopenOperationLocalId: 'reopen_period';
+  readonly scope: 'onePerLegalEntity';
+}
+
 /**
  * Physical fact semantics are pinned domain policy, not canonical syntax.
  * The compiler validates this closed declaration and lowers it generically;
@@ -52,6 +67,51 @@ export const INVENTORY_FACT_STORAGE_V1 = Object.freeze([
     partitionBy: 'tenantBusinessPeriod',
   },
 ] as const satisfies readonly InventoryFactStorageRuleV1[]);
+
+export const INVENTORY_STORAGE_REFERENCES_V1 = Object.freeze([
+  {
+    fieldLocalId: 'inventory_transaction_line_item_id',
+    required: true,
+    semantics: 'crossEntityAllowed',
+    sourceFamilyId: 'inventory_transaction_line',
+    targetFamilyId: 'item',
+  },
+  {
+    fieldLocalId: 'inventory_transaction_line_from_location_id',
+    required: false,
+    semantics: 'sameEntity',
+    sourceFamilyId: 'inventory_transaction_line',
+    targetFamilyId: 'location',
+  },
+  {
+    fieldLocalId: 'inventory_transaction_line_to_location_id',
+    required: false,
+    semantics: 'sameEntity',
+    sourceFamilyId: 'inventory_transaction_line',
+    targetFamilyId: 'location',
+  },
+  {
+    fieldLocalId: 'inventory_movement_item_id',
+    required: true,
+    semantics: 'crossEntityAllowed',
+    sourceFamilyId: 'inventory_movement',
+    targetFamilyId: 'item',
+  },
+  {
+    fieldLocalId: 'inventory_movement_location_id',
+    required: true,
+    semantics: 'sameEntity',
+    sourceFamilyId: 'inventory_movement',
+    targetFamilyId: 'location',
+  },
+] as const satisfies readonly InventoryStorageReferenceRuleV1[]);
+
+export const INVENTORY_PERIOD_LOCK_STORAGE_V1 = Object.freeze({
+  advanceOperationLocalId: 'advance_period_lock',
+  familyId: 'inventory_period_lock',
+  reopenOperationLocalId: 'reopen_period',
+  scope: 'onePerLegalEntity',
+} as const satisfies InventoryPeriodLockStorageRuleV1);
 
 export const LEGAL_ENTITY_FAMILY_MAP_V1 = Object.freeze([
   { classification: 'tenantShared', familyId: 'legal_entity' },
@@ -80,6 +140,11 @@ export const LEGAL_ENTITY_RELATION_SEMANTICS_V1 = Object.freeze([
     targetFamilyId: 'inventory_transaction',
   },
   {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'inventory_movement',
+    targetFamilyId: 'inventory_transaction_line',
+  },
+  {
     semantics: 'crossEntityAllowed',
     sourceFamilyId: 'inventory_movement',
     targetFamilyId: 'item',
@@ -88,6 +153,11 @@ export const LEGAL_ENTITY_RELATION_SEMANTICS_V1 = Object.freeze([
     semantics: 'crossEntityAllowed',
     sourceFamilyId: 'party_role',
     targetFamilyId: 'party',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'inventory_transaction_line',
+    targetFamilyId: 'inventory_transaction',
   },
 ] as const satisfies readonly LegalEntityRelationRuleV1[]);
 
