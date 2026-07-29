@@ -16,6 +16,7 @@ import {
 import {
   HASH_ALGORITHM,
   HASH_DOMAINS,
+  PROJECTION_FAMILY_IDS,
   compileApplication,
   type CompileSuccess,
   type ContentAddressedArtifact,
@@ -35,6 +36,11 @@ import {
   ReleasePersistenceIdentityError,
   ReleasePersistenceIntegrityError,
 } from '../../packages/postgres-provider/src/release-repository.js';
+import {
+  PostgresReleaseVerificationService,
+  ReleaseVerificationIntegrityError,
+  verificationEvidenceIdForCandidate,
+} from '../../packages/postgres-provider/src/release-verification-service.js';
 import {
   loadMigrations,
   runMigrations,
@@ -63,10 +69,6 @@ const verticalRevisionA = minted('a3000000-0000-4000-8000-000000000004');
 const releaseA = minted('a4000000-0000-4000-8000-000000000004');
 const releaseB = minted('b4000000-0000-4000-8000-000000000004');
 const verticalReleaseA = minted('a4000000-0000-4000-8000-000000000005');
-const evidenceA = minted('a5000000-0000-4000-8000-000000000005');
-const evidenceB = minted('b5000000-0000-4000-8000-000000000005');
-const verticalEvidenceA = minted('a5000000-0000-4000-8000-000000000006');
-
 const identities = new Map<string, AuthenticatedIdentity>([
   [
     'session-a',
@@ -94,11 +96,229 @@ const identities = new Map<string, AuthenticatedIdentity>([
   ],
 ]);
 
+test('release admission rejects a staged candidate with missing executed results', async () => {
+  const bootstrapBytes = fixtureBytes('bootstrap');
+  const bootstrap = mustCompile(bootstrapBytes);
+
+  await withEphemeralPostgres(
+    'release-verification-missing-results-red',
+    async ({ connection, pool }) => {
+      const admin = await pool.connect();
+      try {
+        await runMigrations(admin, await loadMigrations(checkedInMigrations));
+        await seedTenants(admin);
+      } finally {
+        admin.release();
+      }
+
+      const runtimePool = new pg.Pool({
+        ...connection,
+        max: 1,
+        user: 'north_star_runtime',
+      });
+      try {
+        const repository = new PostgresImmutableReleaseRepository(runtimePool);
+        const context = await contextFor(requestEntry(), 'session-a');
+        const revisionId = minted('a3000000-0000-4000-8000-000000000097');
+        const releaseId = minted('a4000000-0000-4000-8000-000000000097');
+        await repository.storeAppPackageRevision(
+          context,
+          revisionCommand(context, revisionId, bootstrapBytes),
+        );
+        const staged = await repository.stageTenantReleaseCandidate(context, {
+          appPackageRevisionId: revisionId,
+          compiledRelease: bootstrap,
+          createdBy: context.principalId,
+          environmentId: context.environmentId,
+          releaseId,
+          tenantId: context.tenantId,
+        });
+
+        await assert.rejects(
+          repository.registerTenantRelease(
+            context,
+            releaseCommand(
+              context,
+              releaseId,
+              revisionId,
+              staged.verificationEvidenceId,
+              bootstrap,
+            ),
+          ),
+          (error: unknown) => {
+            assert.ok(error instanceof ReleasePersistenceIntegrityError);
+            assert.equal(error.code, 'VERIFICATION_EVIDENCE_NOT_FOUND');
+            return true;
+          },
+        );
+
+        const verification = new PostgresReleaseVerificationService(
+          runtimePool,
+        );
+        assert.equal(
+          (
+            verification as unknown as {
+              executeAndPersist?: unknown;
+            }
+          ).executeAndPersist,
+          undefined,
+          'raw callback persistence is not a public runtime surface',
+        );
+        const exactCommand = {
+          compiledRelease: bootstrap,
+          evidenceId: staged.verificationEvidenceId,
+          releaseId,
+        };
+        const callerLabeledCommand = {
+          ...exactCommand,
+          providerRunId: 'caller-invented-run',
+        };
+        await assert.rejects(
+          verification.executeSemanticCandidateAndPersist(
+            context,
+            callerLabeledCommand,
+          ),
+          /command is closed/,
+        );
+        await assert.rejects(
+          verification.executeSemanticCandidateAndPersist(context, {
+            ...exactCommand,
+            compiledRelease:
+              doctoredRuntimeProjectionWithoutChangingContentAddress(bootstrap),
+          }),
+          (error: unknown) => {
+            assert.ok(error instanceof ReleaseVerificationIntegrityError);
+            assert.equal(
+              error.code,
+              'VERIFICATION_CANDIDATE_ARTIFACT_MISMATCH',
+            );
+            return true;
+          },
+        );
+        const transient =
+          await verification.executeSemanticCandidateWithExecutor(
+            context,
+            exactCommand,
+            {} as Parameters<
+              typeof verification.executeSemanticCandidateWithExecutor
+            >[2],
+          );
+        assert.equal(transient.results.length, 0);
+        const persisted = await pool.query<{
+          admissions: string;
+          evidence: string;
+        }>(
+          `SELECT
+             (SELECT count(*) FROM platform.release_verification_evidence)::text
+               AS evidence,
+             (SELECT count(*) FROM platform.tenant_release_admissions)::text
+               AS admissions`,
+        );
+        assert.deepEqual(persisted.rows[0], {
+          admissions: '0',
+          evidence: '0',
+        });
+        await assert.rejects(
+          repository.registerTenantRelease(
+            context,
+            releaseCommand(
+              context,
+              releaseId,
+              revisionId,
+              staged.verificationEvidenceId,
+              bootstrap,
+            ),
+          ),
+          (error: unknown) => {
+            assert.ok(error instanceof ReleasePersistenceIntegrityError);
+            assert.equal(error.code, 'VERIFICATION_EVIDENCE_NOT_FOUND');
+            return true;
+          },
+        );
+      } finally {
+        await runtimePool.end();
+      }
+    },
+  );
+});
+
+test('release admission rejects a fabricated verification evidence identity', async () => {
+  const bootstrapBytes = fixtureBytes('bootstrap');
+  const bootstrap = mustCompile(bootstrapBytes);
+
+  await withEphemeralPostgres(
+    'release-verification-fabricated-red',
+    async ({ connection, pool }) => {
+      const admin = await pool.connect();
+      try {
+        await runMigrations(admin, await loadMigrations(checkedInMigrations));
+        await seedTenants(admin);
+      } finally {
+        admin.release();
+      }
+
+      const runtimePool = new pg.Pool({
+        ...connection,
+        max: 1,
+        user: 'north_star_runtime',
+      });
+      try {
+        const repository = new PostgresImmutableReleaseRepository(runtimePool);
+        const context = await contextFor(requestEntry(), 'session-a');
+        const revisionId = minted('a3000000-0000-4000-8000-000000000098');
+        const releaseId = minted('a4000000-0000-4000-8000-000000000098');
+        const fabricatedEvidenceId = minted(
+          'a5000000-0000-4000-8000-000000000098',
+        );
+        await repository.storeAppPackageRevision(
+          context,
+          revisionCommand(context, revisionId, bootstrapBytes),
+        );
+
+        await assert.rejects(
+          repository.registerTenantRelease(
+            context,
+            releaseCommand(
+              context,
+              releaseId,
+              revisionId,
+              fabricatedEvidenceId,
+              bootstrap,
+            ),
+          ),
+          (error: unknown) => {
+            assert.ok(error instanceof ReleasePersistenceIntegrityError);
+            assert.equal(error.code, 'VERIFICATION_EVIDENCE_NOT_FOUND');
+            return true;
+          },
+        );
+      } finally {
+        await runtimePool.end();
+      }
+    },
+  );
+});
+
 test('immutable release persistence verifies bytes, identities, links, RLS, and deduplication', async (t) => {
   const bootstrapBytes = fixtureBytes('bootstrap');
-  const verticalBytes = fixtureBytes('vertical-v1');
+  const verticalBytes = emptyRevisionBytes(bootstrapBytes, '1.0.1');
   const bootstrap = mustCompile(bootstrapBytes);
   const vertical = mustCompile(verticalBytes);
+  const evidenceA = verificationEvidenceIdForCandidate(
+    { environmentId: environmentA, tenantId: tenantA },
+    releaseA,
+    bootstrap.releaseRoot,
+  );
+  const evidenceB = verificationEvidenceIdForCandidate(
+    { environmentId: environmentB, tenantId: tenantB },
+    releaseB,
+    bootstrap.releaseRoot,
+  );
+  const verticalEvidenceA = verificationEvidenceIdForCandidate(
+    { environmentId: environmentA, tenantId: tenantA },
+    verticalReleaseA,
+    vertical.releaseRoot,
+  );
 
   await withEphemeralPostgres(
     'release-persistence',
@@ -139,7 +359,9 @@ test('immutable release persistence verifies bytes, identities, links, RLS, and 
               revisionCommand(contextA, verticalRevisionA, verticalBytes),
             );
 
-            const storedA = await repository.registerTenantRelease(
+            const storedA = await admitEmptyRelease(
+              runtimePool,
+              repository,
               contextA,
               releaseCommand(
                 contextA,
@@ -149,7 +371,9 @@ test('immutable release persistence verifies bytes, identities, links, RLS, and 
                 bootstrap,
               ),
             );
-            const storedB = await repository.registerTenantRelease(
+            const storedB = await admitEmptyRelease(
+              runtimePool,
+              repository,
               contextB,
               releaseCommand(
                 contextB,
@@ -159,7 +383,9 @@ test('immutable release persistence verifies bytes, identities, links, RLS, and 
                 bootstrap,
               ),
             );
-            const storedVertical = await repository.registerTenantRelease(
+            const storedVertical = await admitEmptyRelease(
+              runtimePool,
+              repository,
               contextA,
               releaseCommand(
                 contextA,
@@ -741,6 +967,45 @@ function mustCompile(bytes: Uint8Array): CompileSuccess {
   return compiled;
 }
 
+async function admitEmptyRelease(
+  pool: pg.Pool,
+  repository: PostgresImmutableReleaseRepository,
+  context: TrustedRequestContext,
+  command: RegisterTenantReleaseCommand<CompileSuccess>,
+) {
+  const staged = await repository.stageTenantReleaseCandidate(context, {
+    appPackageRevisionId: command.appPackageRevisionId,
+    compiledRelease: command.compiledRelease,
+    createdBy: command.createdBy,
+    environmentId: command.environmentId,
+    releaseId: command.releaseId,
+    tenantId: command.tenantId,
+  });
+  assert.equal(staged.verificationEvidenceId, command.verificationEvidenceId);
+  await new PostgresReleaseVerificationService(
+    pool,
+  ).executeSemanticCandidateAndPersist(context, {
+    compiledRelease: command.compiledRelease,
+    evidenceId: staged.verificationEvidenceId,
+    releaseId: command.releaseId,
+  });
+  return repository.registerTenantRelease(context, command);
+}
+
+function emptyRevisionBytes(
+  bootstrapBytes: Uint8Array,
+  version: string,
+): Uint8Array {
+  const definition = JSON.parse(
+    new TextDecoder().decode(bootstrapBytes),
+  ) as Record<string, unknown>;
+  assert.ok(
+    typeof definition.package === 'object' && definition.package !== null,
+  );
+  (definition.package as Record<string, unknown>).version = version;
+  return new TextEncoder().encode(canonicalize(definition));
+}
+
 function assertReleaseBytes(
   stored: readonly {
     artifactKind: string;
@@ -973,6 +1238,42 @@ function wrongSuccessfulDiagnostics(compiled: CompileSuccess): CompileSuccess {
   const clone = structuredClone(compiled);
   const success = clone as unknown as { diagnostics: unknown[] };
   success.diagnostics = [{ code: 'unexpected-success-diagnostic' }];
+  return clone;
+}
+
+function doctoredRuntimeProjectionWithoutChangingContentAddress(
+  compiled: CompileSuccess,
+): CompileSuccess {
+  const clone = structuredClone(compiled);
+  const reference = clone.bundle.releaseManifest.projections.find(
+    (projection) => projection.familyId === PROJECTION_FAMILY_IDS.queryCatalog,
+  );
+  assert.ok(reference);
+  const manifestArtifact = clone.bundle.artifacts.find(
+    (artifact) => artifact.contentHash === reference.artifactRoot,
+  );
+  assert.ok(manifestArtifact);
+  const manifest = JSON.parse(
+    new TextDecoder().decode(manifestArtifact.canonicalBytes),
+  ) as ProjectionManifestEnvelope;
+  const chunkHash = manifest.chunks[0]?.contentHash;
+  assert.ok(chunkHash);
+  const chunk = clone.bundle.artifacts.find(
+    (artifact) => artifact.contentHash === chunkHash,
+  );
+  const stagedChunk = clone.stagedArtifacts.find(
+    (artifact) => artifact.contentHash === chunkHash,
+  );
+  assert.ok(chunk);
+  assert.ok(stagedChunk);
+  const payload = JSON.parse(
+    new TextDecoder().decode(chunk.canonicalBytes),
+  ) as Record<string, unknown>;
+  const doctoredBytes = new TextEncoder().encode(
+    canonicalize({ ...payload, doctoredAfterStaging: true }),
+  );
+  chunk.canonicalBytes = doctoredBytes;
+  stagedChunk.canonicalBytes = doctoredBytes;
   return clone;
 }
 

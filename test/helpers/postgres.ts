@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
+import { performance } from 'node:perf_hooks';
 import { promisify } from 'node:util';
 
 import pg from 'pg';
@@ -21,6 +22,16 @@ interface DockerResult {
 }
 
 type DockerRunner = (arguments_: readonly string[]) => Promise<DockerResult>;
+
+export interface EphemeralPostgresReadinessOptions {
+  deadlineMilliseconds?: number;
+  inspectContainer?: (containerName: string) => Promise<string>;
+  isReadyInsideContainer?: (containerName: string) => Promise<boolean>;
+  now?: () => number;
+  pause?: (milliseconds: number) => Promise<void>;
+  probePublished?: (connection: pg.PoolConfig) => Promise<unknown | undefined>;
+  readContainerLogs?: (containerName: string) => Promise<DockerResult>;
+}
 
 const terminalContainerStates = new Set([
   'dead',
@@ -92,34 +103,54 @@ export async function withEphemeralPostgres<T>(
   }
 }
 
-async function waitUntilReady(
+export async function waitUntilReady(
   connection: pg.PoolConfig,
   containerName: string,
+  options: EphemeralPostgresReadinessOptions = {},
 ): Promise<void> {
+  const deadlineMilliseconds = options.deadlineMilliseconds ?? 30_000;
+  const inspectContainer =
+    options.inspectContainer ?? inspectEphemeralPostgresContainer;
+  const isReadyInsideContainer =
+    options.isReadyInsideContainer ?? isEphemeralPostgresReadyInsideContainer;
+  const now = options.now ?? (() => performance.now());
+  const pause =
+    options.pause ??
+    ((milliseconds: number) =>
+      new Promise((resolveDelay) => setTimeout(resolveDelay, milliseconds)));
+  const probePublished = options.probePublished ?? probePublishedPostgres;
+  const readContainerLogs = options.readContainerLogs ?? containerLogs;
+  const startedAt = now();
   let lastError: unknown;
+  let readyInsideContainer = false;
 
-  while (true) {
-    lastError = await probePublishedPostgres(connection);
+  while (now() - startedAt < deadlineMilliseconds) {
+    lastError = await probePublished(connection);
     if (lastError === undefined) return;
 
-    const state = await inspectEphemeralPostgresContainer(containerName);
+    const state = await inspectContainer(containerName);
     if (classifyEphemeralPostgresContainerState(state) === 'terminal') {
       await throwStoppedBeforeReady(containerName, state, lastError);
     }
 
-    if (
-      state === 'running' &&
-      (await isEphemeralPostgresReadyInsideContainer(containerName))
-    ) {
-      const finalError = await probePublishedPostgres(connection);
+    if (state === 'running' && (await isReadyInsideContainer(containerName))) {
+      readyInsideContainer = true;
+      const finalError = await probePublished(connection);
       if (finalError === undefined) return;
-      const { stdout, stderr } = await containerLogs(containerName);
-      throw new Error(
-        `ephemeral PostgreSQL is ready inside its container but its published endpoint is unavailable: ${String(finalError)}\n${stdout}${stderr}`,
-      );
+      lastError = finalError;
     }
-    await new Promise((resolveDelay) => setTimeout(resolveDelay, 100));
+    await pause(100);
   }
+
+  const { stdout, stderr } = await readContainerLogs(containerName);
+  if (readyInsideContainer) {
+    throw new Error(
+      `ephemeral PostgreSQL is ready inside its container but its published endpoint is unavailable: ${String(lastError)}\n${stdout}${stderr}`,
+    );
+  }
+  throw new Error(
+    `ephemeral PostgreSQL was not ready within ${deadlineMilliseconds}ms: ${String(lastError)}\n${stdout}${stderr}`,
+  );
 }
 
 async function probePublishedPostgres(

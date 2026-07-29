@@ -43,6 +43,11 @@ import type {
 import type { TrustedRequestContext } from '@north-star/runtime';
 import type { Pool, PoolClient } from 'pg';
 
+import {
+  readDurableVerificationEvidence,
+  releaseVerificationBinding,
+  verificationEvidenceIdForCandidate,
+} from './release-verification-service.js';
 import { withTrustedRequestTransaction } from './request-context.js';
 
 const sha256Pattern = /^[0-9a-f]{64}$/;
@@ -134,6 +139,16 @@ interface VerifiedRelease {
   projections: readonly ProjectionLink[];
 }
 
+export type StageTenantReleaseCandidateCommand = Omit<
+  RegisterTenantReleaseCommand<CompileSuccess>,
+  'verificationEvidenceId'
+>;
+
+export interface StagedTenantReleaseCandidate {
+  readonly releaseId: MintedUuid;
+  readonly verificationEvidenceId: MintedUuid;
+}
+
 export class PostgresImmutableReleaseRepository implements ImmutableReleaseRepository<
   TrustedRequestContext,
   CompileSuccess
@@ -215,15 +230,49 @@ export class PostgresImmutableReleaseRepository implements ImmutableReleaseRepos
     }
 
     // All Freeze A/B verification completes before the transaction can insert
-    // a TenantRelease root. The immutable revision cannot change afterward.
+    // an admission event. A staged candidate root is not an admitted release.
     const verified = verifyCompiledRelease(command.compiledRelease, revision);
+    const verificationBinding = releaseVerificationBinding(
+      command.compiledRelease,
+    );
 
     await withTrustedRequestTransaction(this.pool, context, async (client) => {
-      await stageArtifacts(client, verified.artifacts);
-      await insertReleaseRoot(client, command, verified);
-      await insertArtifactLinks(client, command, verified.closureArtifacts);
-      await insertProjectionLinks(client, command, verified.projections);
-      await insertChunkLinks(client, command, verified.chunks);
+      await ensureStagedCandidate(client, command, verified);
+      const evidence = await readDurableVerificationEvidence(
+        client,
+        context,
+        command.verificationEvidenceId,
+        verificationBinding,
+      );
+      if (!evidence) {
+        throw integrity(
+          'VERIFICATION_EVIDENCE_NOT_FOUND',
+          'candidate admission requires durable executed verification evidence',
+        );
+      }
+      const admitted = await client.query<{ admitted: boolean }>(
+        `SELECT true AS admitted
+           FROM platform.tenant_release_admissions
+          WHERE tenant_id = $1
+            AND environment_id = $2
+            AND release_id = $3`,
+        [context.tenantId, context.environmentId, command.releaseId],
+      );
+      if (!admitted.rows[0]) {
+        await client.query(
+          `INSERT INTO platform.tenant_release_admissions (
+             tenant_id, environment_id, release_id, verification_evidence_id,
+             admitted_by
+           ) VALUES ($1,$2,$3,$4,$5)`,
+          [
+            context.tenantId,
+            context.environmentId,
+            command.releaseId,
+            command.verificationEvidenceId,
+            context.principalId,
+          ],
+        );
+      }
     });
 
     const stored = await this.getTenantRelease(context, command.releaseId);
@@ -236,6 +285,37 @@ export class PostgresImmutableReleaseRepository implements ImmutableReleaseRepos
     return stored;
   }
 
+  async stageTenantReleaseCandidate(
+    context: TrustedRequestContext,
+    command: StageTenantReleaseCandidateCommand,
+  ): Promise<StagedTenantReleaseCandidate> {
+    assertStagedReleaseIdentity(context, command);
+    const revision = await this.getAppPackageRevision(
+      context,
+      command.appPackageRevisionId,
+    );
+    if (!revision) {
+      throw integrity(
+        'REVISION_NOT_FOUND',
+        'tenant release staging requires a visible package revision',
+      );
+    }
+    const verified = verifyCompiledRelease(command.compiledRelease, revision);
+    const verificationEvidenceId = verificationEvidenceIdForCandidate(
+      context,
+      command.releaseId,
+      command.compiledRelease.releaseRoot,
+    );
+    const stagedCommand = { ...command, verificationEvidenceId };
+    await withTrustedRequestTransaction(this.pool, context, (client) =>
+      ensureStagedCandidate(client, stagedCommand, verified),
+    );
+    return Object.freeze({
+      releaseId: command.releaseId,
+      verificationEvidenceId,
+    });
+  }
+
   async getTenantRelease(
     context: TrustedRequestContext,
     releaseId: MintedUuid,
@@ -243,11 +323,17 @@ export class PostgresImmutableReleaseRepository implements ImmutableReleaseRepos
     assertUuid(releaseId, 'releaseId');
     return withTrustedRequestTransaction(this.pool, context, async (client) => {
       const releaseResult = await client.query<ReleaseRow>(
-        `SELECT *
-           FROM platform.tenant_releases
-          WHERE tenant_id = $1
-            AND environment_id = $2
-            AND release_id = $3`,
+        `SELECT release.*
+           FROM platform.tenant_releases AS release
+           JOIN platform.tenant_release_admissions AS admission
+             ON admission.tenant_id = release.tenant_id
+            AND admission.environment_id = release.environment_id
+            AND admission.release_id = release.release_id
+            AND admission.verification_evidence_id =
+                release.verification_evidence_id
+          WHERE release.tenant_id = $1
+            AND release.environment_id = $2
+            AND release.release_id = $3`,
         [context.tenantId, context.environmentId, releaseId],
       );
       const row = releaseResult.rows[0];
@@ -268,6 +354,27 @@ export class PostgresImmutableReleaseRepository implements ImmutableReleaseRepos
         release: releaseFromRow(row),
       });
     });
+  }
+}
+
+function assertStagedReleaseIdentity(
+  context: TrustedRequestContext,
+  command: StageTenantReleaseCandidateCommand,
+): void {
+  assertUuid(command.releaseId, 'releaseId');
+  assertUuid(command.appPackageRevisionId, 'appPackageRevisionId');
+  if (
+    command.tenantId !== context.tenantId ||
+    command.environmentId !== context.environmentId
+  ) {
+    throw new ReleasePersistenceIdentityError(
+      'release tenant and environment must match trusted request context',
+    );
+  }
+  if (command.createdBy !== context.principalId) {
+    throw new ReleasePersistenceIdentityError(
+      'release creator must match trusted principal context',
+    );
   }
 }
 
@@ -295,22 +402,8 @@ function assertReleaseIdentity(
   context: TrustedRequestContext,
   command: RegisterTenantReleaseCommand<CompileSuccess>,
 ): void {
-  assertUuid(command.releaseId, 'releaseId');
-  assertUuid(command.appPackageRevisionId, 'appPackageRevisionId');
+  assertStagedReleaseIdentity(context, command);
   assertUuid(command.verificationEvidenceId, 'verificationEvidenceId');
-  if (
-    command.tenantId !== context.tenantId ||
-    command.environmentId !== context.environmentId
-  ) {
-    throw new ReleasePersistenceIdentityError(
-      'release tenant and environment must match trusted request context',
-    );
-  }
-  if (command.createdBy !== context.principalId) {
-    throw new ReleasePersistenceIdentityError(
-      'release creator must match trusted principal context',
-    );
-  }
 }
 
 function verifyRevisionCommand(command: StoreAppPackageRevisionCommand): void {
@@ -850,6 +943,43 @@ async function stageArtifacts(
       ],
     );
   }
+}
+
+async function ensureStagedCandidate(
+  client: PoolClient,
+  command: RegisterTenantReleaseCommand<CompileSuccess>,
+  verified: VerifiedRelease,
+): Promise<void> {
+  const existing = await client.query<ReleaseRow>(
+    `SELECT *
+       FROM platform.tenant_releases
+      WHERE tenant_id = $1
+        AND environment_id = $2
+        AND release_id = $3`,
+    [command.tenantId, command.environmentId, command.releaseId],
+  );
+  const row = existing.rows[0];
+  if (row) {
+    if (
+      row.app_package_revision_id !== command.appPackageRevisionId ||
+      row.content_hash !== command.compiledRelease.releaseRoot ||
+      row.compiler_attestation_digest !==
+        command.compiledRelease.attestation.attestationDigest ||
+      row.verification_evidence_id !== command.verificationEvidenceId ||
+      row.created_by !== command.createdBy
+    ) {
+      throw integrity(
+        'STAGED_CANDIDATE_IDENTITY_MISMATCH',
+        'staged candidate identity differs from the exact registration command',
+      );
+    }
+    return;
+  }
+  await stageArtifacts(client, verified.artifacts);
+  await insertReleaseRoot(client, command, verified);
+  await insertArtifactLinks(client, command, verified.closureArtifacts);
+  await insertProjectionLinks(client, command, verified.projections);
+  await insertChunkLinks(client, command, verified.chunks);
 }
 
 async function insertReleaseRoot(
