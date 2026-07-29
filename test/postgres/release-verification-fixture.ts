@@ -37,7 +37,6 @@ export async function admitEmptyPlanRelease(
   ).executeSemanticCandidateAndPersist(context, {
     compiledRelease: command.compiledRelease,
     evidenceId: staged.verificationEvidenceId,
-    providerRunId: `postgres-fixture:${command.releaseId}`,
     releaseId: command.releaseId,
   });
   return repository.registerTenantRelease(context, command);

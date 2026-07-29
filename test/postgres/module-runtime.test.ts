@@ -1928,7 +1928,6 @@ async function persistSequence(
       ).executeSemanticCandidateAndPersist(context, {
         compiledRelease: compiled,
         evidenceId: staged.verificationEvidenceId,
-        providerRunId: `module-runtime-bootstrap:${releaseId}`,
         releaseId,
       });
       await repository.registerTenantRelease(
@@ -1978,7 +1977,6 @@ async function admitCandidate(
   ).executeSemanticCandidateAndPersist(context, {
     compiledRelease: compiled,
     evidenceId: staged.verification_evidence_id,
-    providerRunId: `module-runtime-candidate:${releaseId}`,
     releaseId,
   });
   await repository.registerTenantRelease(

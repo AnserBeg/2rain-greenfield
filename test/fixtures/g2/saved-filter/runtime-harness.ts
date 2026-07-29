@@ -134,12 +134,11 @@ export async function observeSavedFilterAdmissionRefusal(
       const executionError = await capturedFailure(
         new PostgresReleaseVerificationService(
           runtimePool,
-        ).executeSemanticCandidateWithExecutorAndPersist(
+        ).executeSemanticCandidateWithExecutor(
           context,
           {
             compiledRelease: fixture.compiled,
             evidenceId: staged.verificationEvidenceId,
-            providerRunId: 'saved-filter-real-verification-refusal',
             releaseId,
           },
           executor,

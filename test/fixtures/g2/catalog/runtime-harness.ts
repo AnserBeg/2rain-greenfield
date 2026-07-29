@@ -453,7 +453,6 @@ async function persistSequence(
       await verification.executeSemanticCandidateAndPersist(context, {
         compiledRelease: compiled,
         evidenceId: staged.verificationEvidenceId,
-        providerRunId: `catalog-harness-bootstrap:${context.tenantId}`,
         releaseId,
       });
       await repository.registerTenantRelease(context, command);
@@ -478,7 +477,6 @@ async function admitCandidate(
   ).executeSemanticCandidateAndPersist(context, {
     compiledRelease: release.compiled,
     evidenceId: release.command.verificationEvidenceId,
-    providerRunId: `catalog-harness-candidate:${context.tenantId}`,
     releaseId: release.releaseId,
   });
   await new PostgresImmutableReleaseRepository(

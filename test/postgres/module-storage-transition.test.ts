@@ -3447,7 +3447,6 @@ async function persistPairForBothTenants(
     ).executeSemanticCandidateAndPersist(context, {
       compiledRelease: source,
       evidenceId: stagedSource.verificationEvidenceId,
-      providerRunId: `module-storage-source:${sourceRelease}`,
       releaseId: sourceRelease,
     });
     await repository.registerTenantRelease(
@@ -3742,7 +3741,6 @@ async function admitPreparedTarget(
   ).executeSemanticCandidateAndPersist(context, {
     compiledRelease: release.compiled,
     evidenceId: release.targetEvidence,
-    providerRunId: `module-storage-target:${release.target}`,
     releaseId: release.target,
   });
   await repository.registerTenantRelease(

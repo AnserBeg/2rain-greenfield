@@ -192,7 +192,6 @@ export async function createComposedApplicationRuntime(
         runtimeContext,
         bootstrapIdentity,
         releases.bootstrap,
-        'composed-application:bootstrap',
       );
       await assertExactSwapTriggerEnabled(adminPool);
       const attemptId = await approveInitialRelease(
@@ -231,7 +230,6 @@ export async function createComposedApplicationRuntime(
       runtimeContext,
       lineage[activeLineageIndex]!,
       releaseLineage[activeLineageIndex]!,
-      `composed-application:active:${String(activeLineageIndex)}`,
     );
     const materializer = new PostgresModuleStorageMaterializer(
       materializerPool,
@@ -256,7 +254,6 @@ export async function createComposedApplicationRuntime(
           runtimeContext,
           targetIdentity,
           target,
-          `composed-application:candidate:${String(targetIndex)}`,
         );
         attemptId = await approveReleaseWithoutStorageTransition(
           runtimePool,
@@ -281,7 +278,6 @@ export async function createComposedApplicationRuntime(
           runtimeContext,
           targetIdentity,
           target,
-          `composed-application:candidate:${String(targetIndex)}`,
         );
         attemptId = await approveModuleRelease(
           runtimePool,
@@ -806,7 +802,6 @@ async function ensureReleaseAdmitted(
   context: TrustedRequestContext,
   identity: PersistedReleaseIdentity,
   release: ParsedRelease,
-  providerRunId: string,
 ): Promise<void> {
   const repository = new PostgresImmutableReleaseRepository(pool);
   if (await repository.getTenantRelease(context, identity.releaseId)) return;
@@ -815,7 +810,6 @@ async function ensureReleaseAdmitted(
   ).executeSemanticCandidateAndPersist(context, {
     compiledRelease: release.compiled,
     evidenceId: identity.evidenceId,
-    providerRunId,
     releaseId: identity.releaseId,
   });
   await repository.registerTenantRelease(context, {

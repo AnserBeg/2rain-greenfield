@@ -149,6 +149,75 @@ test('release admission rejects a staged candidate with missing executed results
             return true;
           },
         );
+
+        const verification = new PostgresReleaseVerificationService(
+          runtimePool,
+        );
+        assert.equal(
+          (
+            verification as unknown as {
+              executeAndPersist?: unknown;
+            }
+          ).executeAndPersist,
+          undefined,
+          'raw callback persistence is not a public runtime surface',
+        );
+        const exactCommand = {
+          compiledRelease: bootstrap,
+          evidenceId: staged.verificationEvidenceId,
+          releaseId,
+        };
+        const callerLabeledCommand = {
+          ...exactCommand,
+          providerRunId: 'caller-invented-run',
+        };
+        await assert.rejects(
+          verification.executeSemanticCandidateAndPersist(
+            context,
+            callerLabeledCommand,
+          ),
+          /command is closed/,
+        );
+        const transient =
+          await verification.executeSemanticCandidateWithExecutor(
+            context,
+            exactCommand,
+            {} as Parameters<
+              typeof verification.executeSemanticCandidateWithExecutor
+            >[2],
+          );
+        assert.equal(transient.results.length, 0);
+        const persisted = await pool.query<{
+          admissions: string;
+          evidence: string;
+        }>(
+          `SELECT
+             (SELECT count(*) FROM platform.release_verification_evidence)::text
+               AS evidence,
+             (SELECT count(*) FROM platform.tenant_release_admissions)::text
+               AS admissions`,
+        );
+        assert.deepEqual(persisted.rows[0], {
+          admissions: '0',
+          evidence: '0',
+        });
+        await assert.rejects(
+          repository.registerTenantRelease(
+            context,
+            releaseCommand(
+              context,
+              releaseId,
+              revisionId,
+              staged.verificationEvidenceId,
+              bootstrap,
+            ),
+          ),
+          (error: unknown) => {
+            assert.ok(error instanceof ReleasePersistenceIntegrityError);
+            assert.equal(error.code, 'VERIFICATION_EVIDENCE_NOT_FOUND');
+            return true;
+          },
+        );
       } finally {
         await runtimePool.end();
       }
@@ -901,7 +970,6 @@ async function admitEmptyRelease(
   ).executeSemanticCandidateAndPersist(context, {
     compiledRelease: command.compiledRelease,
     evidenceId: staged.verificationEvidenceId,
-    providerRunId: `release-persistence:${command.releaseId}`,
     releaseId: command.releaseId,
   });
   return repository.registerTenantRelease(context, command);

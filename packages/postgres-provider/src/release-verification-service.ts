@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import { canonicalize } from '@north-star/canonical-model';
 import {
@@ -12,6 +12,7 @@ import {
   type VerificationScenario,
   type VerificationScenarioExecutor,
 } from '@north-star/compiler';
+import type { ExecutedVerificationResultSet } from '../../compiler/src/verification.js';
 import type { MintedUuid } from '@north-star/platform-runtime';
 import {
   AuthenticatedRequestEntryAdapter,
@@ -84,7 +85,6 @@ export interface DurableReleaseVerificationEvidence {
 export interface ExecuteReleaseVerificationCommand {
   readonly compiledRelease: CompileSuccess;
   readonly evidenceId: MintedUuid;
-  readonly providerRunId: string;
   readonly releaseId: MintedUuid;
 }
 
@@ -139,7 +139,7 @@ export class ReleaseVerificationIntegrityError extends Error {
 export class PostgresReleaseVerificationService {
   constructor(private readonly pool: Pool) {}
 
-  async executeAndPersist(
+  async #executeAndPersist(
     context: TrustedRequestContext,
     command: ExecuteReleaseVerificationCommand,
     executor: VerificationScenarioExecutor,
@@ -160,7 +160,7 @@ export class PostgresReleaseVerificationService {
       binding.plan,
       {
         artifactClosureDigest: binding.artifactClosureDigest,
-        providerRunId: command.providerRunId,
+        providerRunId: providerRunId(),
         releaseRoot: binding.releaseRoot,
         verificationPlanArtifactRoot: binding.verificationPlanArtifactRoot,
         verificationPlanSemanticDigest: binding.verificationPlanSemanticDigest,
@@ -225,24 +225,74 @@ export class PostgresReleaseVerificationService {
       this.pool,
       verificationActorIssuer(),
     );
-    return this.executeSemanticCandidateWithExecutorAndPersist(
+    return this.#executeSemanticCandidateWithExecutorAndPersist(
       context,
       command,
       interpreter,
     );
   }
 
-  async executeSemanticCandidateWithExecutorAndPersist(
+  async executeSemanticCandidateWithExecutor(
+    context: TrustedRequestContext,
+    command: ExecuteReleaseVerificationCommand,
+    executorProvider: SemanticOperationExecutor & SemanticQueryExecutor,
+  ): Promise<ExecutedVerificationResultSet> {
+    assertClosedCommand(command);
+    assertUuid(command.evidenceId, 'evidenceId');
+    assertUuid(command.releaseId, 'releaseId');
+    const binding = releaseVerificationBinding(command.compiledRelease);
+    await this.assertStagedCandidate(context, command, binding);
+    if (binding.plan.scenarios.length === 0) {
+      return executeVerificationPlan(
+        binding.plan,
+        executionBinding(binding),
+        () => ({ positiveProbe: { emptyPlanExecuted: true } }),
+      );
+    }
+    return this.#executeSemanticCandidateWithExecutor(
+      context,
+      command,
+      binding,
+      executorProvider,
+      (executor) =>
+        executeVerificationPlan(
+          binding.plan,
+          executionBinding(binding),
+          (scenario) => executor.execute(scenario),
+        ),
+    );
+  }
+
+  async #executeSemanticCandidateWithExecutorAndPersist(
     context: TrustedRequestContext,
     command: ExecuteReleaseVerificationCommand,
     executorProvider: SemanticOperationExecutor & SemanticQueryExecutor,
   ): Promise<DurableReleaseVerificationEvidence> {
     const binding = releaseVerificationBinding(command.compiledRelease);
     if (binding.plan.scenarios.length === 0) {
-      return this.executeAndPersist(context, command, () => ({
+      return this.#executeAndPersist(context, command, () => ({
         positiveProbe: { emptyPlanExecuted: true },
       }));
     }
+    return this.#executeSemanticCandidateWithExecutor(
+      context,
+      command,
+      binding,
+      executorProvider,
+      (executor) =>
+        this.#executeAndPersist(context, command, (scenario) =>
+          executor.execute(scenario),
+        ),
+    );
+  }
+
+  async #executeSemanticCandidateWithExecutor<TResult>(
+    context: TrustedRequestContext,
+    command: ExecuteReleaseVerificationCommand,
+    binding: ReleaseVerificationBinding,
+    executorProvider: SemanticOperationExecutor & SemanticQueryExecutor,
+    execute: (executor: SemanticVerificationExecutor) => Promise<TResult>,
+  ): Promise<TResult> {
     const policy = new VerificationAllowPolicy();
     const mediation = new SemanticOperationMediationAuthority();
     const operationGateway = new SemanticOperationGateway(
@@ -275,9 +325,7 @@ export class PostgresReleaseVerificationService {
       );
       return (async () => {
         try {
-          return await this.executeAndPersist(context, command, (scenario) =>
-            executor.execute(scenario),
-          );
+          return await execute(executor);
         } finally {
           await executor.archiveProbeRecords();
         }
@@ -1547,6 +1595,20 @@ function stableUuid(label: string): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
+function executionBinding(binding: ReleaseVerificationBinding) {
+  return {
+    artifactClosureDigest: binding.artifactClosureDigest,
+    providerRunId: providerRunId(),
+    releaseRoot: binding.releaseRoot,
+    verificationPlanArtifactRoot: binding.verificationPlanArtifactRoot,
+    verificationPlanSemanticDigest: binding.verificationPlanSemanticDigest,
+  };
+}
+
+function providerRunId(): string {
+  return `postgres-verification:${randomUUID()}`;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -1623,12 +1685,7 @@ async function insertEvidence(
 }
 
 function assertClosedCommand(command: ExecuteReleaseVerificationCommand): void {
-  const expected = [
-    'compiledRelease',
-    'evidenceId',
-    'providerRunId',
-    'releaseId',
-  ];
+  const expected = ['compiledRelease', 'evidenceId', 'releaseId'];
   const actual = Object.keys(command).sort(compare);
   if (
     actual.length !== expected.length ||

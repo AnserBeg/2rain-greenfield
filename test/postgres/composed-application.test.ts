@@ -354,7 +354,6 @@ async function assertApprovalEnforcementAndApprovedActivation(
     ).executeSemanticCandidateAndPersist(context, {
       compiledRelease: application.compiled,
       evidenceId: staged.verificationEvidenceId,
-      providerRunId: 'composed-approval-enforcement-candidate',
       releaseId: candidateReleaseId,
     });
     await repository.registerTenantRelease(context, {
@@ -499,7 +498,6 @@ async function assertApprovalRequiredForAdvancement(
       ).executeSemanticCandidateAndPersist(context, {
         compiledRelease: application.compiled,
         evidenceId: target.verification_evidence_id,
-        providerRunId: 'composed-approval-required-candidate',
         releaseId: target.release_id,
       });
       await repository.registerTenantRelease(context, {
