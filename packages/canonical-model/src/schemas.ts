@@ -474,6 +474,7 @@ export const FieldTypeSchema = z.discriminatedUnion('kind', [
   quantityFieldType,
   enumFieldType,
 ]);
+export type FieldType = z.infer<typeof FieldTypeSchema>;
 
 const normalizedPackageDefinition = z.strictObject({
   kind: z.literal('packageDefinition'),

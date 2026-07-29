@@ -31,6 +31,7 @@ import {
 } from './projections.js';
 import {
   isPredicateLoweringAdmitted,
+  lowerQueryAggregate,
   lowerQueryPredicate,
 } from './predicate-lowering.js';
 import {
@@ -858,6 +859,24 @@ function projectionDispatchRevision(
   };
 }
 
+function aggregateMeasureFieldType(
+  query: Extract<
+    VersionedNormalizedApplicationPackage['queries'][number],
+    { queryType: 'aggregate' }
+  >,
+  packageRevision: VersionedNormalizedApplicationPackage,
+): VersionedNormalizedApplicationPackage['fields'][number]['fieldType'] {
+  const field = packageRevision.fields.find(
+    (candidate) => candidate.fieldId === query.aggregate.field.targetId,
+  );
+  if (!field) {
+    throw new TypeError(
+      'aggregate measure field has no canonical field definition',
+    );
+  }
+  return structuredClone(field.fieldType);
+}
+
 function decorateV3ProjectionPlans(
   plans: ProjectionPayloadPlan[],
   packageRevision: VersionedNormalizedApplicationPackage,
@@ -886,8 +905,13 @@ function decorateV3ProjectionPlans(
             .map((query) =>
               query.queryType === 'aggregate'
                 ? {
+                    ...lowerQueryAggregate(query, packageRevision, storage),
                     aggregate: {
                       fieldId: query.aggregate.field.targetId,
+                      measureFieldType: aggregateMeasureFieldType(
+                        query,
+                        packageRevision,
+                      ),
                       operator: query.aggregate.operator,
                       resultType: query.aggregate.resultType,
                       selectionId: query.aggregate.selectionId,
