@@ -230,6 +230,12 @@ drift reaching physical storage, and undeclared executor output separately.
 This is the second and final writer fix round under the Critical convergence
 cap; the next fresh Codex review must PASS or the packet stops for re-scoping.
 
+The first full-matrix attempt for this round stopped honestly at integration
+58/59: two new diagnostic strings used bare physical-vocabulary word `source`,
+which the unchanged semantic-gateway vocabulary guard forbids. Renaming that
+prose to `measure field` / `field types` restored the focused gate at 18/18;
+the guard was not edited or weakened.
+
 ## Focused gates so far
 
 No PostgreSQL/container suite has been started while another lane holds the

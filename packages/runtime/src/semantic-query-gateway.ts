@@ -921,7 +921,7 @@ function assertAggregateSourceMatchesResult(
           canonicalizeAndHash(resultType.baseUnit).contentHash
       : resultType.kind !== 'exactDecimalAggregateResultType')
   ) {
-    throw invalid('aggregate result type does not match its source field');
+    throw invalid('aggregate result type does not match its measure field');
   }
 }
 
@@ -1197,7 +1197,7 @@ function inspectLoweringNode(
             canonicalizeAndHash(sourceFieldType).contentHash
         ) {
           throw error(
-            'aggregate lowering uses one parameter with incompatible source types',
+            'aggregate lowering uses one parameter with incompatible field types',
           );
         }
         parameterTypes?.set(parameterId, sourceFieldType);
