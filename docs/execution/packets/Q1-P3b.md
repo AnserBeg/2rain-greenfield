@@ -6,9 +6,9 @@ Base: `c768eb1c6c529c84e3180cc7a7b078a126d33b55`
 Branch: `packet/q1-p3b`
 
 The branch merged accepted G3-P1b from `main` at `d376d09` before provider
-execution. Its compiler/storage changes are disjoint from Q1-P3b's aggregate
-catalog decoration; the merged focused compiler suite is the count recorded
-below.
+execution, then accepted G3-P2a at `f242cde` before freeze. Their compiler,
+storage, inventory, and tenant-completeness changes are disjoint from Q1-P3b's
+aggregate catalog decoration; the merged focused counts are recorded below.
 
 ## Outcome
 
@@ -202,7 +202,7 @@ serialized matrix slot.
 | Unit | 45/45 |
 | Compiler | 78/78 after merging accepted G3-P1b |
 | Integration | 59/59 |
-| Architecture | 90/90 |
+| Architecture | 98/98 after merging accepted G3-P2a |
 
 The untouched base compiler suite was 74/74. Q1-P3b adds no new test file, so
 no repository-hygiene or reachability inventory entry is required; the
@@ -247,7 +247,9 @@ environment isolation fails.
 
 ## Full gates and review evidence
 
-Pending serialized full-matrix clearance. The final immutable handoff will name
-the frozen integrated SHA, complete gate counts, the non-empty fresh Codex xhigh
-review artifact, and the non-empty Fable max confirmation artifact for that
-identical unchanged SHA.
+The exact final full-matrix counts and review verdicts are reported with the
+frozen candidate SHA so this document does not change the SHA whose evidence it
+names. Acceptance requires the complete install, format, lint, typecheck, build,
+boundaries, schema, aggregate `test` chain, and security-scan matrix; a non-empty
+fresh Codex xhigh review artifact; and a non-empty Fable max confirmation
+artifact for the identical unchanged SHA.
