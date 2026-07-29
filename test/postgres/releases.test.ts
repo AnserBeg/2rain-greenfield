@@ -8,10 +8,9 @@ import pg from 'pg';
 import {
   CANONICALIZATION_PROFILE_VERSION,
   CONTENT_HASH_ALGORITHM,
-  LANGUAGE_VERSION,
-  NORMALIZATION_PROFILE_VERSION,
   canonicalize,
   canonicalizeAndHash,
+  parseNormalizedApplicationPackageJson,
 } from '../../packages/canonical-model/src/index.js';
 import {
   HASH_ALGORITHM,
@@ -922,21 +921,22 @@ function revisionCommand(
   revisionId: MintedUuid,
   desiredState: Uint8Array,
 ): StoreAppPackageRevisionCommand {
-  const normalized = canonicalizeAndHash(
-    JSON.parse(new TextDecoder().decode(desiredState)) as unknown,
-  );
+  const normalizedDefinition =
+    parseNormalizedApplicationPackageJson(desiredState);
+  const normalized = canonicalizeAndHash(normalizedDefinition);
   return {
     canonicalizationProfileVersion: CANONICALIZATION_PROFILE_VERSION,
     contentHash: normalized.contentHash,
     createdBy: context.principalId,
     desiredState,
     hashAlgorithm: CONTENT_HASH_ALGORITHM,
-    languageVersion: LANGUAGE_VERSION,
-    normalizationProfileVersion: NORMALIZATION_PROFILE_VERSION,
+    languageVersion: normalizedDefinition.languageVersion,
+    normalizationProfileVersion:
+      normalizedDefinition.normalizationProfileVersion,
     parentRevisionId: null,
     provenance: 'firstParty',
     revisionId,
-    schemaVersion: LANGUAGE_VERSION,
+    schemaVersion: normalizedDefinition.schemaVersion,
     tenantId: context.tenantId,
   };
 }
