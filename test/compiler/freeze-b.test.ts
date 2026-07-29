@@ -444,6 +444,7 @@ test('storage targets use the mapping selected by canonical entity identity', ()
   const result = mustCompile(compilerInput(normalizedBytes(authored)));
   const storage = projectionPayload<{
     entities: Array<{
+      entityId: string;
       storageClass: string;
       storageMappingId: string;
     }>;

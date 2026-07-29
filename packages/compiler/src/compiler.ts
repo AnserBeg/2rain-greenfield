@@ -796,9 +796,11 @@ function languageUsesModuleProjectionShape(
 }
 
 /**
- * The v3 reader deliberately reuses the existing v2 projection shape until 4b
- * defines v3 content. The shallow dispatch alias changes no nested canonical
- * node and is never hashed as the normalized definition.
+ * Existing projection families retain their v2 physical interpretation at v3.
+ * Canonical node-version markers are projected back to v2 before those
+ * families calculate physical fingerprints; v3-only metadata is added later
+ * by decorateV3ProjectionPlans. This alias is never hashed as the normalized
+ * definition.
  */
 function projectionDispatchRevision(
   packageRevision: VersionedNormalizedApplicationPackage,
@@ -814,6 +816,20 @@ function projectionDispatchRevision(
   >;
   return {
     ...common,
+    fields: packageRevision.fields.map((field) => ({
+      ...field,
+      fieldType:
+        field.fieldType.kind === 'enumFieldType'
+          ? {
+              ...field.fieldType,
+              options: field.fieldType.options.map((option) => ({
+                ...option,
+                schemaVersion: LANGUAGE_VERSION,
+              })),
+              schemaVersion: LANGUAGE_VERSION,
+            }
+          : { ...field.fieldType, schemaVersion: LANGUAGE_VERSION },
+    })),
     languageVersion: LANGUAGE_VERSION,
     operations: packageRevision.operations.map((operation) => ({
       ...operation,

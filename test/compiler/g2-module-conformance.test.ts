@@ -615,6 +615,18 @@ test('v3 compiles through explicit profile dispatch with the complete v2 project
   };
   const v3 = mustCompile(v3Input);
 
+  const v3TransitionInput = inputNormalized(
+    normalizedV3,
+    expectedActiveReleaseFrom(v2),
+  );
+  v3TransitionInput.profile = { ...v3Input.profile };
+  const v3Transitioned = mustCompile(v3TransitionInput);
+  const versionOnlyTransition = projectionPayload<StorageTransitionEnvelope>(
+    v3Transitioned,
+    PROJECTION_FAMILY_IDS.storageTransition,
+  );
+  assert.deepEqual(versionOnlyTransition.elements, []);
+
   assert.deepEqual(
     v3.bundle.releaseManifest.projections.map((entry) => entry.familyId),
     v2.bundle.releaseManifest.projections.map((entry) => entry.familyId),
