@@ -260,6 +260,18 @@ CREATE TABLE platform.inventory_movements (
     legal_entity_id,
     movement_id
   ),
+  CONSTRAINT inventory_movements_effect_identity_unique UNIQUE (
+    tenant_id,
+    business_period,
+    environment_id,
+    legal_entity_id,
+    movement_id,
+    source_type,
+    source_id,
+    source_line,
+    revision,
+    posting_role
+  ),
   CONSTRAINT inventory_movements_transaction_fkey
     FOREIGN KEY (
       tenant_id, environment_id, legal_entity_id, transaction_id
@@ -369,13 +381,23 @@ CREATE TABLE platform.inventory_movement_effects (
       business_period,
       environment_id,
       legal_entity_id,
-      movement_id
+      movement_id,
+      source_type,
+      source_id,
+      source_line,
+      revision,
+      posting_role
     ) REFERENCES platform.inventory_movements (
       tenant_id,
       business_period,
       environment_id,
       legal_entity_id,
-      movement_id
+      movement_id,
+      source_type,
+      source_id,
+      source_line,
+      revision,
+      posting_role
     ) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT inventory_movement_effects_shape CHECK (
     btrim(source_type) <> ''

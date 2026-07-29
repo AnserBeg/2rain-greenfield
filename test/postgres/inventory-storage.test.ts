@@ -405,6 +405,26 @@ test('inventory storage freezes quantity facts, entity scope, and recorded horiz
           async () => {
             await admin.query('BEGIN');
             try {
+              const bound = await insertMovement(admin, {
+                effectiveAt: '2026-08-01T12:00:00.000Z',
+                recordedAt: '2026-08-01T13:00:00.000Z',
+                scope: scopeA,
+                sourceLine: 'bound-source-line',
+                transaction: transactionA,
+                writeEffect: false,
+              });
+              await assert.rejects(
+                insertEffect(admin, {
+                  ...bound,
+                  sourceLine: 'mismatched-source-line',
+                }),
+                hasPostgresCode('23503'),
+              );
+            } finally {
+              await admin.query('ROLLBACK');
+            }
+            await admin.query('BEGIN');
+            try {
               const duplicate = await insertMovement(admin, {
                 effectiveAt: '2026-08-02T12:00:00.000Z',
                 recordedAt: '2026-08-02T13:00:00.000Z',
