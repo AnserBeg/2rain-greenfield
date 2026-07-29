@@ -74,17 +74,22 @@ The gateway validates exact catalog keys, plan versions, predicate digests,
 structural equality, lowering-row/cost pairs, declared parameter use, parameter
 types, result shape, and the fixed ADR-0022 aggregate identity before provider
 execution. Each parameter type is byte-semantically matched to the source field
-type carried by its compiler-owned plan node. The aggregate result kind, scale,
-and quantity base unit are likewise matched to its compiler-owned source type.
-Arguments are untrusted JSON; the request must name exactly every declared
-canonical parameter ID and each value must satisfy that matched type.
+type carried by its compiler-owned plan node. For the aggregate measure, the
+query catalog now carries a separate `measureFieldType` projected directly from
+the canonical field definition. The gateway requires the lowering plan's field
+type to match that projection, then binds the result kind, scale, and quantity
+base unit to it. Arguments are untrusted JSON; the request must name exactly
+every declared canonical parameter ID and each value must satisfy that matched
+type.
 
 The PostgreSQL interpreter independently matches each plan source type against
 the compiled physical field contract before binding a parameter or summing a
 column. Catalog metadata therefore cannot relabel an `atTime` timestamp as text
 to admit PostgreSQL's `infinity`, or relabel an exact-decimal measure as a
-quantity with an invented unit. Executor output is also a closed envelope:
-unknown top-level keys are rejected rather than returned to a semantic caller.
+quantity. The physical contract currently carries kind, precision, and scale
+but not quantity base unit; the separately routed residual from the final
+review is stated below. Executor output is also a closed envelope: unknown
+top-level keys are rejected rather than returned to a semantic caller.
 
 The provider appends all validated query and policy plans after its mandatory
 archive predicate. Tenant and environment remain forced-RLS session predicates.
@@ -116,7 +121,7 @@ then executes the aggregate through `SemanticQueryGateway.invokeAggregate` and
 `PostgresModuleRuntimeInterpreter` under forced RLS. PostgreSQL printed:
 
 ```text
-Q1-P3b aggregate probe index=nsm_i_lepgpjussjyql6b3ldh4rwxrj4j57lv75uua4rhg2odbv7kpc7gq delta=1 rows_removed=3 empty=0 base=10.750002 policy=0.750002 archive_removed=100.750002 signed_subunit=-0.25 boundary_scale=0.000001 tenant_other=4000 environment_other=8000 forced_rls=true malformed_temporal=5 malformed_catalog=2 physical_catalog=2 malformed_result=4 malformed_envelope=1
+Q1-P3b aggregate probe index=nsm_i_lepgpjussjyql6b3ldh4rwxrj4j57lv75uua4rhg2odbv7kpc7gq delta=1 rows_removed=3 empty=0 base=10.750002 policy=0.750002 archive_removed=100.750002 signed_subunit=-0.25 boundary_scale=0.000001 tenant_other=4000 environment_other=8000 forced_rls=true malformed_temporal=5 malformed_catalog=3 physical_catalog=2 malformed_result=4 malformed_envelope=1
 ```
 
 This observes:
@@ -197,7 +202,9 @@ guards the quarry failure it was designed around.
 | Temporal argument validation accepts syntax but not the declared value domain | temporarily reinstate the former regex/`Date.parse` check and supply nonexistent `2026-02-30T00:00:00.000Z` | **RED:** `malformed parameter reached the provider`; the assertion expected `MalformedSemanticQueryRequestError`. The restored check also rejects hour 24, offset input for `utcInstant`, and missing milliseconds for a millisecond declaration before provider execution. |
 | Provider result shape accepts any string as exact decimal | temporarily remove the precision/scale/canonical-decimal validation and return `NaN` | **RED:** `Missing expected rejection.` The restored check independently rejects `NaN`, `1e3`, scale 7 against scale 6, and a 33-integer-digit value against precision 38/scale 6. |
 | Parameter metadata can be relabelled independently of its compared field | change only `atTime.parameterType` to valid text and submit PostgreSQL-specific `infinity` | Executed rejection: `MalformedPinnedQueryCatalogError`; executor count exactly zero. Changing both catalog copies to text reaches the independent physical check and rejects with `MODULE_QUERY_FILTER_PLAN_INVALID`. |
-| Aggregate result metadata can be relabelled independently of its measure | change exact-decimal result metadata to quantity with an invented base unit | Executed rejection: `MalformedPinnedQueryCatalogError`; executor count exactly zero. Coordinating both catalog copies still reaches the physical check and rejects with `MODULE_AGGREGATE_CONTRACT_INVALID`. |
+| Aggregate result metadata can be relabelled independently of its measure | change exact-decimal result metadata to quantity with an invented base unit | Executed rejection: `MalformedPinnedQueryCatalogError`; executor count exactly zero. |
+| Two aggregate copies can agree on a unit that differs from the canonical field definition | project a declared quantity base unit into `aggregate.measureFieldType`, then relabel both `aggregate.resultType` and `aggregatePlan.sourceFieldType` to a different unit | Executed rejection: `MalformedPinnedQueryCatalogError`; executor count exactly zero. Temporarily restoring the former two-copy comparison made the test **RED**: `The validation function is expected to return "true". Received false` after `Error: malformed aggregate catalog reached the provider`. |
+| All three catalog copies can disagree with physical kind/precision/scale | coordinate `measureFieldType`, result type, and lowering plan while leaving physical storage unchanged | The independent provider check rejects with `MODULE_AGGREGATE_CONTRACT_INVALID`. Physical base-unit binding remains the separately routed limit below. |
 | Executor envelope accepts undeclared provider data | return a valid aggregate result plus `unintendedProviderData` | Executed rejection: `MalformedPinnedQueryCatalogError`; removing the exact-key check makes this control red with `Missing expected rejection.` |
 | Signed sub-unit literal is declaration-only | temporarily reinstate the former provider decimal validator, then execute the O0 write and compiled `amount >= -0.25` term | **RED:** `MODULE_FIELD_VALUE_INVALID`; with the fix, the gateway total includes `-0.25` and equals the IR evaluator. |
 | Tenant/environment restriction is replaceable | same stock identity and time exist in both foreign scopes | real gateway result remains the same; forced RLS and policy catalog are observed |
@@ -235,6 +242,24 @@ The first full-matrix attempt for this round stopped honestly at integration
 which the unchanged semantic-gateway vocabulary guard forbids. Renaming that
 prose to `measure field` / `field types` restored the focused gate at 18/18;
 the guard was not edited or weakened.
+
+## Adjudication at the convergence cap
+
+The fresh Codex review of
+`ece8e563d8ef164b43a47e3c45b3f5dd2c156bc1` found that quantity physical
+validation compared only precision and scale. The finding was adjudicated as
+valid, but its complete remedy is outside this packet: the ratified Freeze F
+physical contract in `protocol.ts` carries no base unit to compare, and that
+file is held by the active storage work.
+
+The bounded remedy closes the foundation-stage accidental-divergence threat
+without pretending to extend storage authority. The compiler projects the
+canonical measure field's declared type into the query catalog independently of
+the aggregate result and lowering-plan copies. The gateway requires all three
+to agree, and the former two-copy validator red above proves the new comparison
+is load-bearing. The full independent binding is routed on disk to
+`G3-P2b-1`, which owns the physical payload version and can place base unit
+beside precision and scale.
 
 ## Focused gates so far
 
@@ -274,6 +299,11 @@ modified PostgreSQL file remains in the existing CI-discovered glob.
   predicates. This packet adds an aggregate evaluator comparison in the real
   provider receipt; it does not claim grouped or optional-value coverage that
   ADR-0022 rejects.
+- A catalog corrupted consistently across `aggregate.measureFieldType`,
+  `aggregatePlan.sourceFieldType`, and `aggregate.resultType` can still relabel
+  a quantity unit because the physical storage contract has no independent
+  base-unit anchor. This packet detects accidental divergence among those three
+  compiled catalog locations; `G3-P2b-1` owns the complete Freeze F binding.
 
 ## Test it yourself
 

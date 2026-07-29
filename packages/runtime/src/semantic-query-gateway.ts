@@ -114,6 +114,7 @@ interface RegisteredQueryParameterDefinition {
 
 interface RegisteredQueryAggregateSelection {
   readonly fieldId: string;
+  readonly measureFieldType: Readonly<Record<string, ImmutableJsonValue>>;
   readonly operator: 'sum';
   readonly resultType: Readonly<Record<string, ImmutableJsonValue>>;
   readonly selectionId: string;
@@ -814,7 +815,7 @@ function assertAggregateQueryDefinition(
   }
   assertExactKeys(
     value.aggregate,
-    ['fieldId', 'operator', 'resultType', 'selectionId'],
+    ['fieldId', 'measureFieldType', 'operator', 'resultType', 'selectionId'],
     invalid,
   );
   assertCanonicalId(value.aggregate.fieldId, 'aggregate.fieldId', invalid);
@@ -825,6 +826,9 @@ function assertAggregateQueryDefinition(
   );
   if (
     value.aggregate.operator !== 'sum' ||
+    !isRecord(value.aggregate.measureFieldType) ||
+    FieldTypeSchema.safeParse(value.aggregate.measureFieldType).success ===
+      false ||
     !isRecord(value.aggregate.resultType)
   ) {
     throw invalid('aggregate query selection is invalid');
@@ -857,8 +861,16 @@ function assertAggregateQueryDefinition(
   ) {
     throw invalid('aggregate query lowering plan is invalid');
   }
+  if (
+    canonicalizeAndHash(value.aggregatePlan.sourceFieldType).contentHash !==
+    canonicalizeAndHash(value.aggregate.measureFieldType).contentHash
+  ) {
+    throw invalid(
+      'aggregate lowering plan does not match its catalog measure field',
+    );
+  }
   assertAggregateSourceMatchesResult(
-    value.aggregatePlan.sourceFieldType,
+    value.aggregate.measureFieldType,
     value.aggregate.resultType,
     invalid,
   );

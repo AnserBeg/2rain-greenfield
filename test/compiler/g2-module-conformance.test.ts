@@ -690,6 +690,7 @@ test('v3 aggregate catalog metadata is derived from one canonical source', () =>
     queries: Array<{
       aggregate?: {
         fieldId: string;
+        measureFieldType: Record<string, unknown>;
         operator: string;
         resultType: Record<string, unknown>;
         selectionId: string;
@@ -709,6 +710,13 @@ test('v3 aggregate catalog metadata is derived from one canonical source', () =>
   assert.deepEqual(aggregate, {
     aggregate: {
       fieldId: FIXTURE_IDS.fieldIds.parentAmount,
+      measureFieldType: {
+        kind: 'exactDecimalFieldType',
+        precision: 5,
+        representation: 'canonicalString',
+        scale: 2,
+        schemaVersion: LANGUAGE_VERSIONS.v3,
+      },
       operator: 'sum',
       resultType: {
         kind: 'exactDecimalAggregateResultType',

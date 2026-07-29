@@ -760,6 +760,61 @@ test('q1 required sum executes through the real gateway with typed parameters an
           }),
         (error: unknown) => error instanceof MalformedPinnedQueryCatalogError,
       );
+
+      const mismatchedMeasureBaseUnitView =
+        await issuedViewWithMutatedAggregateQuery(
+          runtime.views.a,
+          aggregateIds.query,
+          (query) => {
+            const declaredBaseUnit = {
+              kind: 'unitReference',
+              schemaVersion: 'v3',
+              targetId: `${PARTY_IDS.namespace}:unit.declared`,
+            };
+            const relabelledBaseUnit = {
+              kind: 'unitReference',
+              schemaVersion: 'v3',
+              targetId: `${PARTY_IDS.namespace}:unit.relabelled`,
+            };
+            assert.ok(isRecord(query.aggregate));
+            query.aggregate.measureFieldType = {
+              baseUnit: declaredBaseUnit,
+              kind: 'quantityFieldType',
+              precision: 20,
+              representation: 'canonicalString',
+              scale: 6,
+              schemaVersion: 'v3',
+            };
+            query.aggregate.resultType = {
+              baseUnit: relabelledBaseUnit,
+              kind: 'quantityAggregateResultType',
+              precision: 38,
+              scale: 6,
+              schemaVersion: 'v3',
+            };
+            assert.ok(isRecord(query.aggregatePlan));
+            query.aggregatePlan.sourceFieldType = {
+              baseUnit: relabelledBaseUnit,
+              kind: 'quantityFieldType',
+              precision: 20,
+              representation: 'canonicalString',
+              scale: 6,
+              schemaVersion: 'v3',
+            };
+          },
+        );
+      await assert.rejects(
+        () =>
+          malformedCatalogGateway.invokeAggregate(
+            mismatchedMeasureBaseUnitView,
+            {
+              arguments: arguments_,
+              queryId: aggregateIds.query,
+              schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+            },
+          ),
+        (error: unknown) => error instanceof MalformedPinnedQueryCatalogError,
+      );
       assert.equal(malformedCatalogExecutorCount, 0);
 
       const physicalParameterMismatchView =
@@ -813,6 +868,15 @@ test('q1 required sum executes through the real gateway with typed parameters an
               targetId: `${PARTY_IDS.namespace}:unit.review_mismatch`,
             };
             assert.ok(isRecord(query.aggregate));
+            const sourceFieldType = {
+              baseUnit,
+              kind: 'quantityFieldType',
+              precision: 20,
+              representation: 'canonicalString',
+              scale: 6,
+              schemaVersion: 'v3',
+            };
+            query.aggregate.measureFieldType = sourceFieldType;
             query.aggregate.resultType = {
               baseUnit,
               kind: 'quantityAggregateResultType',
@@ -821,14 +885,7 @@ test('q1 required sum executes through the real gateway with typed parameters an
               schemaVersion: 'v3',
             };
             assert.ok(isRecord(query.aggregatePlan));
-            query.aggregatePlan.sourceFieldType = {
-              baseUnit,
-              kind: 'quantityFieldType',
-              precision: 20,
-              representation: 'canonicalString',
-              scale: 6,
-              schemaVersion: 'v3',
-            };
+            query.aggregatePlan.sourceFieldType = sourceFieldType;
           },
         );
       await assert.rejects(
@@ -1018,7 +1075,7 @@ test('q1 required sum executes through the real gateway with typed parameters an
           .sort(),
       );
       console.log(
-        `Q1-P3b aggregate probe index=${stockIndex.physicalName} delta=${String(indexDelta)} rows_removed=${String(policyEvidence.rowsRemoved)} empty=0 base=${aggregateValue(base)} policy=${aggregateValue(narrowed)} archive_removed=${archivedIncluded} signed_subunit=-0.25 boundary_scale=0.000001 tenant_other=4000 environment_other=8000 forced_rls=true malformed_temporal=5 malformed_catalog=2 physical_catalog=2 malformed_result=4 malformed_envelope=1`,
+        `Q1-P3b aggregate probe index=${stockIndex.physicalName} delta=${String(indexDelta)} rows_removed=${String(policyEvidence.rowsRemoved)} empty=0 base=${aggregateValue(base)} policy=${aggregateValue(narrowed)} archive_removed=${archivedIncluded} signed_subunit=-0.25 boundary_scale=0.000001 tenant_other=4000 environment_other=8000 forced_rls=true malformed_temporal=5 malformed_catalog=3 physical_catalog=2 malformed_result=4 malformed_envelope=1`,
       );
     },
     definition,
