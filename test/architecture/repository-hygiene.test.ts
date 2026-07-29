@@ -103,6 +103,7 @@ const suiteDefinitions = [
       'test/postgres/releases.test.ts',
       'test/postgres/request-runtime-view.test.ts',
       'test/postgres/saved-filter.test.ts',
+      'test/postgres/storage-payload-family.test.ts',
       'test/postgres/table-behavior.test.ts',
       'test/postgres/tenant-isolation.test.ts',
       'test/postgres/trust-substrate.test.ts',

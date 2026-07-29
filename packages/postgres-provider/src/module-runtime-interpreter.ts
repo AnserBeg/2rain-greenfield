@@ -11,7 +11,7 @@ import {
 } from '@north-star/canonical-model';
 import {
   PROJECTION_FAMILY_IDS,
-  STORAGE_TARGET_PAYLOAD_VERSION,
+  SUPPORTED_STORAGE_TARGET_PAYLOAD_VERSIONS,
   type StorageTargetPayloadV1,
 } from '@north-star/compiler';
 import type {
@@ -2048,11 +2048,7 @@ async function loadPinnedStorageTarget(
     (entry): entry is Record<string, unknown> =>
       isRecord(entry) && entry.familyId === PROJECTION_FAMILY_IDS.storageTarget,
   );
-  if (
-    !reference ||
-    typeof reference.artifactRoot !== 'string' ||
-    reference.payloadSchemaVersion !== STORAGE_TARGET_PAYLOAD_VERSION
-  ) {
+  if (!reference || typeof reference.artifactRoot !== 'string') {
     throw failure(
       'MODULE_STORAGE_PROJECTION_MISSING',
       'pinned release has no supported storage target',
@@ -2071,7 +2067,6 @@ async function loadPinnedStorageTarget(
   const projection = decodeCanonical(projectionArtifact.canonical_bytes);
   if (
     projection.familyId !== PROJECTION_FAMILY_IDS.storageTarget ||
-    projection.payloadSchemaVersion !== STORAGE_TARGET_PAYLOAD_VERSION ||
     !Array.isArray(projection.chunks) ||
     projection.chunks.length !== 1 ||
     !isRecord(projection.chunks[0]) ||
@@ -2090,9 +2085,13 @@ async function loadPinnedStorageTarget(
     );
   }
   const target = decodeCanonical(chunk.canonical_bytes);
+  assertSupportedStorageTargetArtifactVersions({
+    projectionPayloadSchemaVersion: projection.payloadSchemaVersion,
+    referencePayloadSchemaVersion: reference.payloadSchemaVersion,
+    targetSchemaVersion: target.schemaVersion,
+  });
   if (
     target.kind !== 'storageTargetPayload' ||
-    target.schemaVersion !== STORAGE_TARGET_PAYLOAD_VERSION ||
     !Array.isArray(target.entities) ||
     !Array.isArray(target.relations) ||
     !isRecord(target.providerAbi) ||
@@ -2105,6 +2104,39 @@ async function loadPinnedStorageTarget(
     );
   }
   return target as unknown as StorageTargetPayloadV1;
+}
+
+export function assertSupportedStorageTargetArtifactVersions(versions: {
+  readonly projectionPayloadSchemaVersion: unknown;
+  readonly referencePayloadSchemaVersion: unknown;
+  readonly targetSchemaVersion: unknown;
+}): void {
+  if (
+    !SUPPORTED_STORAGE_TARGET_PAYLOAD_VERSIONS.some(
+      (supportedVersion) =>
+        supportedVersion === versions.referencePayloadSchemaVersion,
+    )
+  ) {
+    throw failure(
+      'MODULE_STORAGE_PROJECTION_MISSING',
+      'pinned release has no supported storage target',
+    );
+  }
+  if (
+    versions.projectionPayloadSchemaVersion !==
+    versions.referencePayloadSchemaVersion
+  ) {
+    throw failure(
+      'MODULE_STORAGE_PROJECTION_MALFORMED',
+      'storage projection manifest payload version does not match its release reference',
+    );
+  }
+  if (versions.targetSchemaVersion !== versions.referencePayloadSchemaVersion) {
+    throw failure(
+      'MODULE_STORAGE_TARGET_MALFORMED',
+      'storage target payload version does not match its projection manifest',
+    );
+  }
 }
 
 function verifyArtifact(artifact: ArtifactRow): void {
