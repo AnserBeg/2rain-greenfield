@@ -541,7 +541,9 @@ function inventoryMovementFieldShapeMatches(
   rule: InventoryMovementModuleFieldRule,
   namespace: string,
 ): boolean {
-  if (field.presence !== rule.presence) return false;
+  if (field.lifecycle !== 'active' || field.presence !== rule.presence) {
+    return false;
+  }
   const fieldType = field.fieldType;
   switch (rule.shape.kind) {
     case 'dateTime':
@@ -589,8 +591,7 @@ function validatePinnedInventoryMovementEntity(
   diagnostics: CompilerDiagnostic[],
 ): void {
   const fields = packageRevision.fields.filter(
-    (field) =>
-      field.lifecycle === 'active' && field.entity.targetId === entityId,
+    (field) => field.entity.targetId === entityId,
   );
   const rules = new Map<string, InventoryMovementModuleFieldRule>(
     INVENTORY_MOVEMENT_MODULE_FIELD_RULES.map((rule) => [
@@ -700,6 +701,33 @@ export function validateModuleConformance(
       mapping,
     ]),
   );
+
+  for (const entity of packageRevision.entities) {
+    const family = resolvePinnedLegalEntityFamily(
+      packageRevision.package.packageId,
+      entity.entityId,
+    );
+    if (
+      family.status !== 'classified' ||
+      family.familyId !== 'inventory_movement'
+    ) {
+      continue;
+    }
+    if (entity.lifecycle !== 'active') {
+      diagnostics.push(
+        inventoryModuleDiagnostic(
+          'INVENTORY_CONTRACT_INVALID',
+          '$.entities.inventory_movement.lifecycle',
+          entity.entityId,
+        ),
+      );
+    }
+    validatePinnedInventoryMovementEntity(
+      packageRevision,
+      entity.entityId,
+      diagnostics,
+    );
+  }
 
   for (const mapping of packageRevision.storageMappings.filter(
     (entry) => entry.lifecycle === 'active',
@@ -972,13 +1000,6 @@ export function validateModuleConformance(
             `field.inventoryReference.${rule.fieldLocalId}`,
           );
         }
-      }
-      if (family.familyId === 'inventory_movement') {
-        validatePinnedInventoryMovementEntity(
-          packageRevision,
-          entity.entityId,
-          diagnostics,
-        );
       }
     }
   }

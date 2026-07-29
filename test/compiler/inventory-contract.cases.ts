@@ -377,6 +377,60 @@ export function registerInventoryContractCases(
         true,
       );
 
+      const withRetiredMoney = structuredClone(inventoryModuleDefinition()) as {
+        fields: Array<Record<string, unknown>>;
+      };
+      const retiredQuantity = withRetiredMoney.fields.find((field) =>
+        String(field.fieldId).endsWith(
+          ':field.inventory_movement_quantity_delta',
+        ),
+      );
+      assert.ok(retiredQuantity);
+      withRetiredMoney.fields.push({
+        ...structuredClone(retiredQuantity),
+        fieldId: 'northstar.inventory:field.inventory_movement_unit_cost',
+        label: 'Unit cost',
+        lifecycle: 'retired',
+        orderKey: 170,
+      });
+      const retiredMoneyResult = compileApplication(
+        moduleInput(withRetiredMoney),
+      );
+      assert.equal(retiredMoneyResult.status, 'failed');
+      assert.equal(
+        retiredMoneyResult.diagnostics.some(
+          ({ code, subjectId }) =>
+            code === 'INVENTORY_MOVEMENT_MONEY_FORBIDDEN' &&
+            subjectId ===
+              'northstar.inventory:field.inventory_movement_unit_cost',
+        ),
+        true,
+      );
+
+      const withRetiredMovement = structuredClone(
+        inventoryModuleDefinition(),
+      ) as {
+        entities: Array<{ entityId: string; lifecycle?: string }>;
+      };
+      const retiredMovement = withRetiredMovement.entities.find((entity) =>
+        entity.entityId.endsWith(':entity.inventory_movement'),
+      );
+      assert.ok(retiredMovement);
+      retiredMovement.lifecycle = 'retired';
+      const retiredMovementResult = compileApplication(
+        moduleInput(withRetiredMovement),
+      );
+      assert.equal(retiredMovementResult.status, 'failed');
+      assert.equal(
+        retiredMovementResult.diagnostics.some(
+          ({ code, path, subjectId }) =>
+            code === 'INVENTORY_CONTRACT_INVALID' &&
+            path === '$.entities.inventory_movement.lifecycle' &&
+            subjectId === 'northstar.inventory:entity.inventory_movement',
+        ),
+        true,
+      );
+
       const withoutQuantity = inventoryDefinitionWithoutMovementField(
         'inventory_movement_quantity_delta',
       );
