@@ -23,6 +23,8 @@ export const POLICY_MODEL_VERSION =
   'northstar.policy-model/v0-experimental' as const;
 export const STORAGE_TARGET_PAYLOAD_VERSION =
   'northstar.storage-target-payload/v1' as const;
+export const STORAGE_TARGET_PAYLOAD_V2_VERSION =
+  'northstar.storage-target-payload/v2' as const;
 export const MODULE_FIELD_CONTRACT_VERSION =
   'northstar.module-field-contract/v1' as const;
 export const MODULE_INPUT_CONTRACT_VERSION =

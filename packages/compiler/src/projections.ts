@@ -15,7 +15,6 @@ import {
   OPERATIONS_AGENT_TOOL_IDS,
   POLICY_MODEL_VERSION,
   PROJECTION_FAMILY_IDS,
-  STORAGE_TARGET_PAYLOAD_VERSION,
   VERIFICATION_PLAN_PAYLOAD_VERSION,
   VERIFICATION_SCENARIO_VERSION,
   type LogicalScope,
@@ -125,7 +124,7 @@ export function lowerBaseProjectionPayloads(
       namespace,
       packageScope,
       currentStorageTarget ?? storageTargetPayload(packageRevision),
-      isModuleV1 ? STORAGE_TARGET_PAYLOAD_VERSION : undefined,
+      isModuleV1 ? currentStorageTarget?.schemaVersion : undefined,
     ),
     plan(
       PROJECTION_FAMILY_IDS.queryCatalog,

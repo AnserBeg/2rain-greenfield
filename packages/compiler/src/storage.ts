@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 
 import type { NormalizedApplicationPackage } from '@north-star/canonical-model';
 
+import { resolvePinnedLegalEntityFamily } from './conformance.js';
 import { compilerDiagnostic } from './diagnostics.js';
 import { hashCanonical } from './hash.js';
 import {
@@ -14,6 +15,7 @@ import {
   STORAGE_ELEMENT_CONTRACT_VERSION,
   STORAGE_RENDERER_POLICY_VERSION,
   STORAGE_TARGET_PAYLOAD_VERSION,
+  STORAGE_TARGET_PAYLOAD_V2_VERSION,
   STORAGE_TRANSITION_ENVELOPE_VERSION,
   TIGHTENING_DEBT_VERSION,
   type CompilerDiagnostic,
@@ -211,7 +213,9 @@ export interface StorageTargetPayloadV1 {
   relations: StorageRelationTarget[];
   rendererPolicyVersion: typeof STORAGE_RENDERER_POLICY_VERSION;
   rlsGrantTemplate: typeof MODULE_RLS_GRANT_TEMPLATE;
-  schemaVersion: typeof STORAGE_TARGET_PAYLOAD_VERSION;
+  schemaVersion:
+    | typeof STORAGE_TARGET_PAYLOAD_VERSION
+    | typeof STORAGE_TARGET_PAYLOAD_V2_VERSION;
 }
 
 export interface StorageEntityTarget {
@@ -220,6 +224,11 @@ export interface StorageEntityTarget {
     defaultVisibility: 'excludeArchived';
     representation: 'nullableTimestamp';
   };
+  businessKeyScopeColumns?: readonly [
+    'tenant_id',
+    'environment_id',
+    'legal_entity_id',
+  ];
   columns: StorageColumnTarget[];
   checkConstraints: StorageCheckConstraintTarget[];
   consumerWriterRoots: {
@@ -236,6 +245,14 @@ export interface StorageEntityTarget {
   foldedColumns: StorageFoldedColumnTarget[];
   indexes: StorageIndexTarget[];
   lifecycle: string;
+  legalEntity?: {
+    column: 'legal_entity_id';
+    familyClassification: 'entityOwned';
+    immutableAfterCreate: true;
+    nullable: false;
+    postgresqlType: 'uuid';
+    referencedFamilyId: 'legal_entity';
+  };
   optimisticRevision: {
     column: string;
     initialValue: '1';
@@ -431,6 +448,21 @@ export function lowerStorageTargetV1(
 
   const entities = packageRevision.entities.map(
     (entity): StorageEntityTarget => {
+      const legalEntityFamily = resolvePinnedLegalEntityFamily(
+        packageRevision.package.packageId,
+        entity.entityId,
+      );
+      if (legalEntityFamily.status === 'undeclared') {
+        throw new Error(
+          `INVENTORY_LEGAL_ENTITY_FAMILY_UNDECLARED: ${entity.entityId}`,
+        );
+      }
+      const entityOwned =
+        legalEntityFamily.status === 'classified' &&
+        legalEntityFamily.classification === 'entityOwned';
+      const businessKeyScopeColumns = entityOwned
+        ? ['tenant_id', 'environment_id', 'legal_entity_id']
+        : ['tenant_id', 'environment_id'];
       const storage = storageById.get(entity.storage.targetId);
       if (storage?.storageClass !== 'dedicatedTable') {
         throw new Error(
@@ -582,7 +614,7 @@ export function lowerStorageTargetV1(
           );
           const unique = {
             collation: 'unicodeCaseInsensitive' as const,
-            columns: ['tenant_id', 'environment_id', column.physicalName],
+            columns: [...businessKeyScopeColumns, column.physicalName],
             normalization: 'unicodeCaseFold' as const,
             physicalName,
             predicate: archiveExcludingPredicate,
@@ -649,6 +681,15 @@ export function lowerStorageTargetV1(
           defaultVisibility: 'excludeArchived',
           representation: 'nullableTimestamp',
         },
+        ...(entityOwned
+          ? {
+              businessKeyScopeColumns: [
+                'tenant_id',
+                'environment_id',
+                'legal_entity_id',
+              ] as const,
+            }
+          : {}),
         checkConstraints,
         columns,
         consumerWriterRoots: {
@@ -668,6 +709,18 @@ export function lowerStorageTargetV1(
           compare(left.physicalName, right.physicalName),
         ),
         lifecycle: entity.lifecycle,
+        ...(entityOwned
+          ? {
+              legalEntity: {
+                column: 'legal_entity_id' as const,
+                familyClassification: 'entityOwned' as const,
+                immutableAfterCreate: true as const,
+                nullable: false as const,
+                postgresqlType: 'uuid' as const,
+                referencedFamilyId: 'legal_entity' as const,
+              },
+            }
+          : {}),
         optimisticRevision: {
           column: 'revision',
           initialValue: '1',
@@ -819,7 +872,9 @@ export function lowerStorageTargetV1(
     ),
     rendererPolicyVersion: STORAGE_RENDERER_POLICY_VERSION,
     rlsGrantTemplate: MODULE_RLS_GRANT_TEMPLATE,
-    schemaVersion: STORAGE_TARGET_PAYLOAD_VERSION,
+    schemaVersion: entities.some((entity) => entity.legalEntity !== undefined)
+      ? STORAGE_TARGET_PAYLOAD_V2_VERSION
+      : STORAGE_TARGET_PAYLOAD_VERSION,
   };
 }
 
