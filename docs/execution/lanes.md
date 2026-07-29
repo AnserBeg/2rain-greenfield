@@ -14,7 +14,7 @@ writer is holding those paths right now.
 
 | Lane | Theme | Current packet | Status |
 |---|---|---|---|
-| **KERNEL** | Canonical language and the query tier | `4c` **accepted** 2026-07-28 — **`Q1-P3b` is next and now unblocked** | **idle** |
+| **KERNEL** | Canonical language and the query tier | `Q1-P3b` **accepted** 2026-07-29 — balance chain complete to `G3-P5` | **idle** |
 | **DEPLOY** | Release lifecycle and runtime infrastructure | `9` **accepted** 2026-07-28 (breadth-envelope curve) — *awaiting selection; `1c-b` when compiler/domain leases release* | **idle** |
 | **FIX** | Correctness defects → stage cutting → inventory build | `G3-P1b` **accepted** 2026-07-29 — **`G3-P2b-1` (storage half) is next** | **idle** |
 | **BUILD** | Inventory contracts | `G3-P2a` **accepted** 2026-07-29 — *awaiting selection* | **idle** |
