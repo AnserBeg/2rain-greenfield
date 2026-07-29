@@ -15,7 +15,7 @@ writer is holding those paths right now.
 | Lane | Theme | Current packet | Base | Status |
 |---|---|---|---|---|
 | **KERNEL** | Canonical language and the query tier | *awaiting selection — `4c` next; artifact window now OPEN* | — | **idle** |
-| **DEPLOY** | Release lifecycle and runtime infrastructure | `1b` — release-admission verification integrity | `07ce6de` | active |
+| **DEPLOY** | Release lifecycle and runtime infrastructure | *awaiting selection — `1g2` reverse-transition, or `1c` platform classification* | — | **idle** |
 | **FIX** | Correctness defects → stage cutting → inventory build | *awaiting selection — `1d` is now unblocked* | — | **idle** |
 | **BUILD** | Inventory contracts *(fourth lane, opened 2026-07-28)* | *awaiting selection — `G3-P1b` after `1d`; `G3-P2` after both* | — | **idle** |
 
@@ -38,13 +38,13 @@ the query tier both live there.
 | `packages/compiler/src/projections.ts` | **FIX** |
 | `packages/postgres-provider/src/module-storage-materializer.ts` | FIX |
 | `apps/api/**` | DEPLOY |
-| `packages/postgres-provider/src/composed-application-runtime.ts` | DEPLOY |
-| `packages/postgres-provider/src/release-*.ts` | DEPLOY |
+| `packages/postgres-provider/src/composed-application-runtime.ts` | **KERNEL** *(released from DEPLOY 2026-07-28 on 1b's integration, for 4c)* |
+| `packages/postgres-provider/src/release-*.ts` | **KERNEL** *(released from DEPLOY 2026-07-28 on 1b's integration, for 4c)* |
 | `packages/compiler/src/verification.ts` | DEPLOY *(assigned 2026-07-28 for packet 1b)* |
 | `db/schema.snapshot.json` | DEPLOY *(granted 2026-07-28 for 1b — migration 0013 moves it)* |
 | `test/architecture/release-persistence-boundary.test.ts` | DEPLOY *(granted for 1b — hardcodes the migration inventory through 0012)* |
-| `test/fixtures/g2/*/runtime-harness.ts` | DEPLOY *(granted for 1b — all four mint `randomUUID()` evidence and must produce genuine evidence instead; **no test-only bypass**)* |
-| `db/migrations/**` · `packages/postgres-provider/src/migrations.ts` | **DEPLOY while 1b runs** — reassigned from FIX, whose current packet (1e press guards) needs no migration. Reverts to FIX when 1b lands. |
+| `test/fixtures/g2/*/runtime-harness.ts` | **KERNEL** *(released from DEPLOY 2026-07-28 on 1b's integration, for 4c's version-stamp fix)* |
+| `db/migrations/**` · `packages/postgres-provider/src/migrations.ts` | **FIX** *(reverted from DEPLOY 2026-07-28 on 1b's integration; `0013` is taken, so 1d's migration is `0014`)* |
 | `packages/postgres-provider/src/module-runtime-interpreter.ts` | KERNEL |
 | `docs/execution/packets/**` · `docs/execution/stage-cut-inputs.md` | FIX *(granted 2026-07-28 for G3-P0; each lane still owns its own packet doc)* |
 | `packages/domain/src/{party,catalog,location,platform}/definition.ts` · `app/builder.ts` | KERNEL *(granted 2026-07-28 for 4c — **version/profile strings and the empty `impactAnalyses` root only**; no definition semantics)* |
