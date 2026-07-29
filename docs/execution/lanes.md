@@ -17,7 +17,7 @@ writer is holding those paths right now.
 | **KERNEL** | Canonical language and the query tier | *awaiting selection — `4c` next; artifact window now OPEN* | — | **idle** |
 | **DEPLOY** | Release lifecycle and runtime infrastructure | `1b` — release-admission verification integrity | `07ce6de` | active |
 | **FIX** | Correctness defects → stage cutting → inventory build | *awaiting selection — `1d` is now unblocked* | — | **idle** |
-| **BUILD** | Inventory contracts *(fourth lane, opened 2026-07-28)* | `G3-P1a` — the non-key inventory freeze | `9027a53` | active |
+| **BUILD** | Inventory contracts *(fourth lane, opened 2026-07-28)* | *awaiting selection — `G3-P1b` after `1d`; `G3-P2` after both* | — | **idle** |
 
 Lane identity is stable across packets. When a lane's packet is accepted, the
 next packet inherits the lane and its partition.
