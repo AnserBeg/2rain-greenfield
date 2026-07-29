@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdtemp, rm, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -235,6 +236,102 @@ test('archive uniqueness migration replaces both legacy indexes without renaming
             error instanceof Error &&
             (error as Error & { code?: string }).code === '23505',
         );
+      } finally {
+        client.release();
+      }
+    },
+  );
+});
+
+test('inventory migration upgrades an already-materialized item base-unit binding', async () => {
+  await withEphemeralPostgres(
+    'inventory-base-unit-upgrade',
+    async ({ pool }) => {
+      const client = await pool.connect();
+      try {
+        const migrations = await loadMigrations(checkedInMigrations);
+        const inventoryMigration = migrations.at(-1);
+        assert.equal(
+          inventoryMigration?.name,
+          '0015_inventory_storage_foundation.sql',
+        );
+        await runMigrations(client, migrations.slice(0, -1));
+        const tableName = `nsm_t_${'a'.repeat(52)}`;
+        await client.query(`
+          CREATE TABLE north_star_module.${tableName} (
+            tenant_id uuid NOT NULL,
+            environment_id uuid NOT NULL,
+            record_id uuid NOT NULL,
+            base_unit varchar(32) NOT NULL,
+            PRIMARY KEY (tenant_id, environment_id, record_id)
+          )
+        `);
+        const payload = Buffer.from(
+          JSON.stringify({
+            entities: [
+              {
+                columns: [
+                  {
+                    canonicalFieldId: 'northstar.catalog:field.item_base_unit',
+                    physicalName: 'base_unit',
+                  },
+                ],
+                entityId: 'northstar.catalog:entity.item',
+                physicalTableName: tableName,
+              },
+            ],
+            kind: 'storageTargetPayload',
+          }),
+        );
+        const contentHash = createHash('sha256').update(payload).digest('hex');
+        await client.query(
+          `INSERT INTO platform.release_artifact_blobs (
+             content_hash,
+             artifact_kind,
+             domain_tag,
+             media_type,
+             canonical_bytes,
+             byte_length
+           ) VALUES (
+             $1,
+             'projectionChunk',
+             'northstar.test.inventory-base-unit-upgrade',
+             'application/vnd.northstar.canonical+json',
+             $2,
+             $3
+           )`,
+          [contentHash, payload, payload.byteLength],
+        );
+
+        const applied = await runMigrations(client, migrations);
+        assert.deepEqual(applied.applied, [inventoryMigration.name]);
+        const constraint = await client.query<{
+          definition: string;
+          name: string;
+        }>(
+          `SELECT constraint_record.conname AS name,
+                  pg_get_expr(
+                    constraint_record.conbin,
+                    constraint_record.conrelid,
+                    true
+                  ) AS definition
+             FROM pg_constraint AS constraint_record
+             JOIN pg_class AS relation
+               ON relation.oid = constraint_record.conrelid
+             JOIN pg_namespace AS namespace
+               ON namespace.oid = relation.relnamespace
+            WHERE namespace.nspname = 'north_star_module'
+              AND relation.relname = $1
+              AND constraint_record.contype = 'c'`,
+          [tableName],
+        );
+        assert.deepEqual(constraint.rows, [
+          {
+            definition:
+              'north_star_internal.inventory_base_unit_change_allowed(tenant_id, environment_id, record_id, base_unit::text)',
+            name: `nsm_b_${'a'.repeat(52)}`,
+          },
+        ]);
       } finally {
         client.release();
       }

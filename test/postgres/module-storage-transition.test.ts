@@ -1991,6 +1991,224 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
   );
 });
 
+test('entity-owned v2 targets materialize legal-entity keys and base-unit binding constraints', async () => {
+  const emptyDefinition = emptyModuleDefinition();
+  const source = mustCompile(moduleInput(emptyDefinition));
+  const targetDefinition = inventoryOwnedModuleDefinition();
+  const target = mustCompile(
+    moduleInput(targetDefinition, expectedActiveReleaseFrom(source)),
+  );
+  const storage = projectionPayload<StorageTargetPayloadV1>(
+    target,
+    PROJECTION_FAMILY_IDS.storageTarget,
+  );
+  assert.equal(storage.schemaVersion, 'northstar.storage-target-payload/v2');
+  const item = storage.entities.find((entity) =>
+    entity.entityId.endsWith(':entity.item'),
+  );
+  const movement = storage.entities.find((entity) =>
+    entity.entityId.endsWith(':entity.inventory_movement'),
+  );
+  assert.ok(item);
+  assert.ok(movement?.legalEntity);
+
+  await withEphemeralPostgres(
+    'module-storage-entity-owned',
+    async ({ connection, pool }) => {
+      const admin = await pool.connect();
+      try {
+        await runMigrations(admin, await loadMigrations(migrations));
+        await seedScope(admin);
+      } finally {
+        admin.release();
+      }
+      const runtimePool = new pg.Pool({
+        ...connection,
+        max: 2,
+        user: 'north_star_runtime',
+      });
+      const materializerPool = new pg.Pool({
+        ...connection,
+        max: 2,
+        user: 'north_star_module_materializer',
+      });
+      const moduleRuntimePool = new pg.Pool({
+        ...connection,
+        max: 1,
+        user: 'north_star_module_runtime',
+      });
+      materializerPool.on('error', () => undefined);
+      moduleRuntimePool.on('error', () => undefined);
+      try {
+        const contexts = await trustedContexts();
+        const releases = await persistPairForBothTenants(
+          runtimePool,
+          contexts,
+          source,
+          definitionBytes(emptyDefinition),
+          target,
+          definitionBytes(targetDefinition),
+        );
+        await installSourcePointers(pool, releases);
+        await grantExecutorAuthority(pool);
+        const materializer = new PostgresModuleStorageMaterializer(
+          materializerPool,
+          moduleRuntimePool,
+        );
+        const prepared = await materializer.prepare({
+          context: contexts.a,
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+          generationId: randomUUID(),
+          initiatedBy: principalA,
+          preparationId: randomUUID(),
+          targetReleaseId: releases.a.target,
+        });
+        assert.equal(prepared.schemaState, 'APPLIED');
+
+        const legalColumn = await pool.query<{
+          is_nullable: boolean;
+          postgresql_type: string;
+        }>(
+          `SELECT NOT attribute.attnotnull AS is_nullable,
+                  format_type(attribute.atttypid, attribute.atttypmod)
+                    AS postgresql_type
+             FROM pg_attribute AS attribute
+             JOIN pg_class AS relation
+               ON relation.oid = attribute.attrelid
+             JOIN pg_namespace AS namespace
+               ON namespace.oid = relation.relnamespace
+            WHERE namespace.nspname = 'north_star_module'
+              AND relation.relname = $1
+              AND attribute.attname = 'legal_entity_id'
+              AND attribute.attnum > 0
+              AND NOT attribute.attisdropped`,
+          [movement.physicalTableName],
+        );
+        assert.deepEqual(legalColumn.rows, [
+          { is_nullable: false, postgresql_type: 'uuid' },
+        ]);
+
+        const constraints = await pool.query<{
+          definition: string | null;
+          name: string;
+          referenced_schema: string | null;
+          referenced_table: string | null;
+          table_name: string;
+          type: string;
+        }>(
+          `SELECT source.relname AS table_name,
+                  constraint_record.conname AS name,
+                  constraint_record.contype AS type,
+                  pg_get_expr(
+                    constraint_record.conbin,
+                    constraint_record.conrelid,
+                    true
+                  ) AS definition,
+                  target_namespace.nspname AS referenced_schema,
+                  target.relname AS referenced_table
+             FROM pg_constraint AS constraint_record
+             JOIN pg_class AS source
+               ON source.oid = constraint_record.conrelid
+             JOIN pg_namespace AS source_namespace
+               ON source_namespace.oid = source.relnamespace
+             LEFT JOIN pg_class AS target
+               ON target.oid = constraint_record.confrelid
+             LEFT JOIN pg_namespace AS target_namespace
+               ON target_namespace.oid = target.relnamespace
+            WHERE source_namespace.nspname = 'north_star_module'
+              AND source.relname = ANY($1::text[])
+            ORDER BY source.relname, constraint_record.conname`,
+          [[item.physicalTableName, movement.physicalTableName]],
+        );
+        const legalForeignKey = constraints.rows.find(
+          (constraint) =>
+            constraint.table_name === movement.physicalTableName &&
+            constraint.type === 'f' &&
+            constraint.referenced_schema === 'platform' &&
+            constraint.referenced_table === 'legal_entities',
+        );
+        assert.ok(legalForeignKey);
+        const baseUnitCheck = constraints.rows.find(
+          (constraint) =>
+            constraint.table_name === item.physicalTableName &&
+            constraint.type === 'c' &&
+            constraint.definition?.includes(
+              'inventory_base_unit_change_allowed',
+            ),
+        );
+        assert.ok(baseUnitCheck);
+
+        const indexes = await pool.query<{
+          first_column: string;
+          predicate: string | null;
+          second_column: string;
+          third_column: string;
+        }>(
+          `SELECT pg_get_indexdef(index_relation.oid, 1, true) AS first_column,
+                  pg_get_indexdef(index_relation.oid, 2, true) AS second_column,
+                  pg_get_indexdef(index_relation.oid, 3, true) AS third_column,
+                  pg_get_expr(
+                    index_record.indpred,
+                    index_record.indrelid,
+                    true
+                  ) AS predicate
+             FROM pg_index AS index_record
+             JOIN pg_class AS source
+               ON source.oid = index_record.indrelid
+             JOIN pg_class AS index_relation
+               ON index_relation.oid = index_record.indexrelid
+             JOIN pg_namespace AS namespace
+               ON namespace.oid = source.relnamespace
+            WHERE namespace.nspname = 'north_star_module'
+              AND source.relname = $1
+              AND index_record.indisunique
+              AND NOT index_record.indisprimary
+            ORDER BY index_relation.relname`,
+          [movement.physicalTableName],
+        );
+        assert.equal(indexes.rows.length, 2);
+        assert.equal(
+          indexes.rows.every(
+            (index) =>
+              index.first_column === 'tenant_id' &&
+              index.second_column === 'environment_id' &&
+              index.third_column === 'legal_entity_id' &&
+              index.predicate === 'archived_at IS NULL',
+          ),
+          true,
+        );
+
+        const runtimeGrants = await pool.query<{
+          column_name: string;
+          privilege_type: string;
+        }>(
+          `SELECT column_name, privilege_type
+             FROM information_schema.column_privileges
+            WHERE table_schema = 'north_star_module'
+              AND table_name = $1
+              AND grantee = 'north_star_module_runtime'
+            ORDER BY column_name, privilege_type`,
+          [movement.physicalTableName],
+        );
+        assert.equal(
+          runtimeGrants.rows.some(
+            (grant) =>
+              grant.column_name === 'legal_entity_id' &&
+              grant.privilege_type === 'UPDATE',
+          ),
+          false,
+        );
+      } finally {
+        await Promise.all([
+          runtimePool.end(),
+          materializerPool.end(),
+          moduleRuntimePool.end(),
+        ]);
+      }
+    },
+  );
+});
+
 test('fold-function drift surfaces the specific diagnostic before a terminal claim mismatch', async () => {
   const emptyDefinition = emptyModuleDefinition();
   const source = mustCompile(moduleInput(emptyDefinition));
@@ -2851,6 +3069,55 @@ function emptyModuleDefinition(): Record<string, unknown> {
     definition[family] = [];
   }
   return definition;
+}
+
+function inventoryOwnedModuleDefinition(): Record<string, unknown> {
+  const definition = replaceExactDefinitionString(
+    replaceExactDefinitionString(
+      replaceExactDefinitionString(
+        ordinaryModuleV2(),
+        FIXTURE_IDS.entityIds.parent,
+        `${FIXTURE_IDS.namespace}:entity.item`,
+      ),
+      FIXTURE_IDS.entityIds.child,
+      `${FIXTURE_IDS.namespace}:entity.inventory_movement`,
+    ),
+    FIXTURE_IDS.fieldIds.parentName,
+    `${FIXTURE_IDS.namespace}:field.item_base_unit`,
+  ) as Record<string, unknown>;
+  const fields = definition.fields as Array<Record<string, unknown>>;
+  const movementField = fields.find(
+    (field) => field.fieldId === FIXTURE_IDS.fieldIds.childRole,
+  );
+  assert.ok(movementField);
+  movementField.businessKey = 'tenantEnvironmentCaseInsensitiveUnique';
+  movementField.collation = 'unicodeCaseInsensitive';
+  movementField.fieldType = {
+    kind: 'textFieldType',
+    maximumLength: 40,
+    schemaVersion: movementField.schemaVersion,
+  };
+  return definition;
+}
+
+function replaceExactDefinitionString(
+  value: unknown,
+  from: string,
+  to: string,
+): unknown {
+  if (value === from) return to;
+  if (Array.isArray(value)) {
+    return value.map((entry) => replaceExactDefinitionString(entry, from, to));
+  }
+  if (typeof value === 'object' && value !== null) {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [
+        key,
+        replaceExactDefinitionString(entry, from, to),
+      ]),
+    );
+  }
+  return value;
 }
 
 function definitionBytes(definition: unknown): Uint8Array {

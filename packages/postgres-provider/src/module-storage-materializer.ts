@@ -33,6 +33,10 @@ import type { Pool, PoolClient, QueryResultRow } from 'pg';
 
 const sha256Pattern = /^[0-9a-f]{64}$/;
 const identifierPattern = /^[a-z][a-z0-9_]{0,62}$/;
+const storageTargetPayloadV2Version: Exclude<
+  StorageTargetPayloadV1['schemaVersion'],
+  typeof STORAGE_TARGET_PAYLOAD_VERSION
+> = 'northstar.storage-target-payload/v2';
 const unicodeCaseFoldFunctionName = 'nsm_unicode_case_fold_v1';
 const allowedTypes = [
   /^boolean$/,
@@ -964,9 +968,16 @@ async function loadVerifiedReleaseStorage(
   if (!targetProjection)
     throw failure('STORAGE_TARGET_MISSING', 'release lacks storage target');
   const target = targetProjection.payload as unknown as StorageTargetPayloadV1;
+  const hasEntityOwnedTarget =
+    Array.isArray(target.entities) &&
+    target.entities.some((entity) => entity.legalEntity !== undefined);
+  const expectedStorageTargetPayloadVersion = hasEntityOwnedTarget
+    ? storageTargetPayloadV2Version
+    : STORAGE_TARGET_PAYLOAD_VERSION;
   if (
     target.kind !== 'storageTargetPayload' ||
-    target.schemaVersion !== STORAGE_TARGET_PAYLOAD_VERSION ||
+    !Array.isArray(target.entities) ||
+    target.schemaVersion !== expectedStorageTargetPayloadVersion ||
     target.rendererPolicyVersion !== STORAGE_RENDERER_POLICY_VERSION ||
     target.providerAbi.managedSchema !== 'north_star_module' ||
     target.providerAbi.materializerRole !== 'north_star_module_materializer' ||
@@ -1222,6 +1233,9 @@ async function createManagedTable(
   const columns = [
     'tenant_id uuid NOT NULL',
     'environment_id uuid NOT NULL',
+    ...(entity.legalEntity
+      ? [`${quoted(entity.legalEntity.column)} uuid NOT NULL`]
+      : []),
     `${quoted(entity.recordIdentity.column)} uuid NOT NULL`,
     `${quoted(entity.optimisticRevision.column)} bigint NOT NULL DEFAULT 1`,
     `${quoted(entity.archive.archivedAtColumn)} timestamp with time zone`,
@@ -1240,6 +1254,26 @@ async function createManagedTable(
     ...entity.derivedStateFields.map(
       (column) => `${quoted(column.physicalName)} text`,
     ),
+    ...(entity.legalEntity
+      ? [
+          `CONSTRAINT ${quoted(legalEntityForeignKeyName(entity))}
+             FOREIGN KEY (tenant_id, environment_id, ${quoted(entity.legalEntity.column)})
+             REFERENCES platform.legal_entities
+               (tenant_id, environment_id, legal_entity_id)
+             ON DELETE RESTRICT ON UPDATE RESTRICT`,
+        ]
+      : []),
+    ...(itemBaseUnitColumn(entity)
+      ? [
+          `CONSTRAINT ${quoted(baseUnitBindingConstraintName(entity))}
+             CHECK (north_star_internal.inventory_base_unit_change_allowed(
+               tenant_id,
+               environment_id,
+               ${quoted(entity.recordIdentity.column)},
+               ${quoted(itemBaseUnitColumn(entity)!.physicalName)}::text
+             ))`,
+        ]
+      : []),
   ];
   await client.query(
     `CREATE TABLE IF NOT EXISTS north_star_module.${quoted(entity.physicalTableName)} (
@@ -1291,9 +1325,26 @@ async function createManagedTable(
   await client.query(
     `REVOKE ALL ON north_star_module.${quoted(entity.physicalTableName)} FROM PUBLIC`,
   );
-  await client.query(
-    `GRANT SELECT, INSERT, UPDATE ON north_star_module.${quoted(entity.physicalTableName)} TO north_star_module_runtime`,
-  );
+  if (entity.legalEntity) {
+    await client.query(
+      `GRANT SELECT, INSERT ON north_star_module.${quoted(entity.physicalTableName)} TO north_star_module_runtime`,
+    );
+    await client.query(
+      `REVOKE UPDATE ON north_star_module.${quoted(entity.physicalTableName)} FROM north_star_module_runtime`,
+    );
+    const mutableColumns = entityOwnedMutableColumnNames(target, entity);
+    if (mutableColumns.length > 0) {
+      await client.query(
+        `GRANT UPDATE (${mutableColumns.map(quoted).join(', ')})
+           ON north_star_module.${quoted(entity.physicalTableName)}
+           TO north_star_module_runtime`,
+      );
+    }
+  } else {
+    await client.query(
+      `GRANT SELECT, INSERT, UPDATE ON north_star_module.${quoted(entity.physicalTableName)} TO north_star_module_runtime`,
+    );
+  }
   await client.query(
     `REVOKE DELETE, TRUNCATE, REFERENCES, TRIGGER ON north_star_module.${quoted(entity.physicalTableName)} FROM north_star_module_runtime`,
   );
@@ -1858,7 +1909,7 @@ async function verifyCatalogOnClient(
   compareCatalogCollection(
     drift,
     'managed column grant',
-    [],
+    buildExpectedColumnGrants(expectedTables, expectedRelations),
     actualColumnGrants,
     (value) =>
       `${value.tableName}.${value.columnName}.${value.grantee}.${value.privilegeType}`,
@@ -2423,6 +2474,13 @@ function buildExpectedColumns(
       });
     base('tenant_id', 'uuid', false);
     base('environment_id', 'uuid', false);
+    if (entity.legalEntity) {
+      base(
+        entity.legalEntity.column,
+        entity.legalEntity.postgresqlType,
+        entity.legalEntity.nullable,
+      );
+    }
     base(
       entity.recordIdentity.column,
       entity.recordIdentity.postgresqlType,
@@ -2522,6 +2580,50 @@ function buildExpectedConstraints(
       validated: true,
     }),
   );
+  for (const entity of tables.values()) {
+    if (entity.legalEntity) {
+      result.push({
+        columns: ['tenant_id', 'environment_id', entity.legalEntity.column],
+        deferred: false,
+        deferrable: false,
+        definition: null,
+        deleteAction: 'r',
+        name: legalEntityForeignKeyName(entity),
+        referencedColumns: ['tenant_id', 'environment_id', 'legal_entity_id'],
+        referencedSchema: 'platform',
+        referencedTable: 'legal_entities',
+        tableName: entity.physicalTableName,
+        type: 'f',
+        updateAction: 'r',
+        validated: true,
+      });
+    }
+    const baseUnit = itemBaseUnitColumn(entity);
+    if (baseUnit) {
+      result.push({
+        columns: [
+          'tenant_id',
+          'environment_id',
+          entity.recordIdentity.column,
+          baseUnit.physicalName,
+        ],
+        deferred: false,
+        deferrable: false,
+        definition: normalizeSqlExpressionRequired(
+          `north_star_internal.inventory_base_unit_change_allowed(tenant_id, environment_id, ${entity.recordIdentity.column}, ${baseUnit.physicalName}::text)`,
+        ),
+        deleteAction: ' ',
+        name: baseUnitBindingConstraintName(entity),
+        referencedColumns: null,
+        referencedSchema: null,
+        referencedTable: null,
+        tableName: entity.physicalTableName,
+        type: 'c',
+        updateAction: ' ',
+        validated: true,
+      });
+    }
+  }
   for (const relation of relations.values()) {
     const source = entityById.get(relation.sourceEntityId);
     const target = entityById.get(relation.targetEntityId);
@@ -2701,7 +2803,9 @@ function uniqueKeyColumnExpressions(
       `unique key ${unique.physicalName} has an unsupported normalization contract`,
     );
   }
-  const scopeColumns = new Set(entity.scopeKeyColumns);
+  const scopeColumns = new Set(
+    entity.businessKeyScopeColumns ?? entity.scopeKeyColumns,
+  );
   return unique.columns.map((column) =>
     scopeColumns.has(column as (typeof entity.scopeKeyColumns)[number])
       ? quoted(column)
@@ -2850,17 +2954,110 @@ function buildExpectedPolicies(
 function buildExpectedTableGrants(
   tables: ReadonlyMap<string, StorageEntityTarget>,
 ) {
-  return [...tables.keys()].flatMap((tableName) =>
+  return [...tables.values()].flatMap((entity) =>
     ['north_star_module_materializer', 'north_star_module_runtime'].flatMap(
-      (grantee) =>
-        ['INSERT', 'SELECT', 'UPDATE'].map((privilegeType) => ({
+      (grantee) => {
+        const privilegeTypes =
+          grantee === 'north_star_module_runtime' && entity.legalEntity
+            ? ['INSERT', 'SELECT']
+            : ['INSERT', 'SELECT', 'UPDATE'];
+        return privilegeTypes.map((privilegeType) => ({
           grantee,
           isGrantable: false,
           privilegeType,
-          tableName,
-        })),
+          tableName: entity.physicalTableName,
+        }));
+      },
     ),
   );
+}
+
+function buildExpectedColumnGrants(
+  tables: ReadonlyMap<string, StorageEntityTarget>,
+  relations: ReadonlyMap<string, StorageRelationTarget>,
+) {
+  return [...tables.values()].flatMap((entity) =>
+    entity.legalEntity
+      ? entityOwnedMutableColumnNamesFromRelations(entity, relations).map(
+          (columnName) => ({
+            columnName,
+            grantee: 'north_star_module_runtime',
+            isGrantable: false,
+            privilegeType: 'UPDATE',
+            tableName: entity.physicalTableName,
+          }),
+        )
+      : [],
+  );
+}
+
+function legalEntityForeignKeyName(entity: StorageEntityTarget): string {
+  return managedEntityConstraintName(entity, 'e');
+}
+
+function baseUnitBindingConstraintName(entity: StorageEntityTarget): string {
+  return managedEntityConstraintName(entity, 'b');
+}
+
+function managedEntityConstraintName(
+  entity: StorageEntityTarget,
+  prefix: 'b' | 'e',
+): string {
+  const match = /^nsm_t_([a-z2-7]{52})$/u.exec(entity.physicalTableName);
+  if (!match?.[1]) {
+    throw failure(
+      'PHYSICAL_TABLE_NAME_INVALID',
+      `managed entity table has invalid name ${entity.physicalTableName}`,
+    );
+  }
+  return `nsm_${prefix}_${match[1]}`;
+}
+
+function itemBaseUnitColumn(entity: StorageEntityTarget) {
+  if (!entity.entityId.endsWith(':entity.item')) return undefined;
+  const matches = entity.columns.filter((column) =>
+    column.canonicalFieldId.endsWith(':field.item_base_unit'),
+  );
+  if (
+    matches.length !== 1 ||
+    !/^(?:text|varchar\([1-9][0-9]*\))$/u.test(matches[0]?.postgresqlType ?? '')
+  ) {
+    throw failure(
+      'INVENTORY_BASE_UNIT_COLUMN_INVALID',
+      `${entity.entityId} must expose exactly one text-compatible item_base_unit field`,
+    );
+  }
+  return matches[0];
+}
+
+function entityOwnedMutableColumnNames(
+  target: StorageTargetPayloadV1,
+  entity: StorageEntityTarget,
+): string[] {
+  return entityOwnedMutableColumnNamesFromRelations(
+    entity,
+    new Map(
+      target.relations.map((relation) => [
+        relation.foreignKey.physicalName,
+        relation,
+      ]),
+    ),
+  );
+}
+
+function entityOwnedMutableColumnNamesFromRelations(
+  entity: StorageEntityTarget,
+  relations: ReadonlyMap<string, StorageRelationTarget>,
+): string[] {
+  return [
+    entity.optimisticRevision.column,
+    entity.archive.archivedAtColumn,
+    ...entity.columns.map((column) => column.physicalName),
+    ...[...relations.values()]
+      .filter((relation) => relation.sourceEntityId === entity.entityId)
+      .map((relation) => relation.relationColumn.physicalName),
+    ...entity.derivedStateFields.map((column) => column.physicalName),
+  ].toSorted((left, right) => (left < right ? -1 : left > right ? 1 : 0));
 }
 
 function managedPolicyName(
