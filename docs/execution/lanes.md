@@ -104,6 +104,22 @@ files at integration.
 The orchestrator enforced the stronger constraint until 2026-07-28 and it cost
 sequencing that was never required.
 
+## The PostgreSQL suite runs serially — found 2026-07-28 by packet 1b
+
+`test:postgres` carried no `--test-concurrency` flag, so Node defaulted to
+CPU-count concurrency across **21 files**, each spinning Docker containers. The
+heaviest test (`composed product activates through the kernel`) blew its 120 s
+bound under sibling load while passing in **45.2 s** alone.
+
+**A gate whose verdict depends on machine load is not observing the fact it
+asserts** — it is observing the fact plus the scheduler. The script now pins
+`--test-concurrency=1`, which is what every writer had already been doing by
+hand: 1f's, G3-P1a's and 1b's own test-it-yourself commands all pass it.
+
+This class of phantom failure cost three packets real time before it was
+diagnosed. **Do not raise a timeout to make a loaded run pass** — that widens
+what starvation is allowed to look like instead of removing it.
+
 ## Full-matrix runs must NOT overlap — found 2026-07-28 by packet 1f
 
 Authoring runs in parallel. **Matrix runs do not.** Packet 1f recorded two
