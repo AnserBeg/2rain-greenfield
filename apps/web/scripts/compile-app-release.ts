@@ -5,6 +5,7 @@ import {
   canonicalize,
   normalizeApplicationPackage,
   parseAuthoredApplicationPackageJson,
+  parseNormalizedApplicationPackageJson,
 } from '@north-star/canonical-model';
 import {
   DEFAULT_COMPILER_LIMITS,
@@ -217,13 +218,21 @@ function mustCompile(
     typeof compileApplication
   >[0]['expectedActiveRelease'],
 ): CompileSuccess {
+  const normalizedDefinition = parseNormalizedApplicationPackageJson(
+    normalizedDefinitionBytes,
+  );
   const result = compileApplication({
     dependencies: [],
     expectedActiveRelease,
     kind: 'compilerInput',
     limits: { ...DEFAULT_COMPILER_LIMITS },
     normalizedDefinitionBytes,
-    profile: { ...MODULE_COMPILER_PROFILE },
+    profile: {
+      ...MODULE_COMPILER_PROFILE,
+      languageVersion: normalizedDefinition.languageVersion,
+      normalizationProfileVersion:
+        normalizedDefinition.normalizationProfileVersion,
+    },
   });
   if (result.status !== 'compiled') {
     throw new Error(

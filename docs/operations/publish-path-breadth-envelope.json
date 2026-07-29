@@ -1,0 +1,100 @@
+{
+  "artifactKind": "publishPathBreadthEnvelopeCurve",
+  "schemaVersion": "northstar.operations.publish-path-breadth-envelope/v1",
+  "measurementMethod": {
+    "compileMode": "coldFull",
+    "compileSamplesPerPoint": 5,
+    "durationStatistic": "median",
+    "moduleOrder": ["party", "catalog", "location"],
+    "physicalIndexSource": "emitted storage-target entity indexes",
+    "searchableFieldSource": "normalized package fields with searchable true",
+    "timeSource": "process.hrtime.bigint()"
+  },
+  "limitations": [
+    "The first-party Party, Catalog, and Location composition is not a real tenant-authored application.",
+    "The recorded duration covers the complete cold compiler call, not verification, preparation, approval, activation, or platform exclusion.",
+    "Compiler and domain changes, including packets 4c and 1d, can change every measured value; later runs append rather than replacing this pre-1d baseline."
+  ],
+  "runs": [
+    {
+      "points": [
+        {
+          "compileWallClockMilliseconds": 58.435,
+          "entityCount": 2,
+          "measuredAtSha": "7369c33564c05eca5be723b8cabeb38ea0bcecce",
+          "moduleCount": 1,
+          "moduleIds": ["northstar.breadth:module.party"],
+          "physicalIndexCountByEntity": [
+            {
+              "entityId": "northstar.breadth:entity.party",
+              "physicalIndexCount": 2
+            },
+            {
+              "entityId": "northstar.breadth:entity.party_role",
+              "physicalIndexCount": 2
+            }
+          ],
+          "searchableFieldCount": 2,
+          "totalFieldCount": 5
+        },
+        {
+          "compileWallClockMilliseconds": 60.914,
+          "entityCount": 3,
+          "measuredAtSha": "7369c33564c05eca5be723b8cabeb38ea0bcecce",
+          "moduleCount": 2,
+          "moduleIds": [
+            "northstar.breadth:module.party",
+            "northstar.breadth:module.catalog"
+          ],
+          "physicalIndexCountByEntity": [
+            {
+              "entityId": "northstar.breadth:entity.item",
+              "physicalIndexCount": 3
+            },
+            {
+              "entityId": "northstar.breadth:entity.party",
+              "physicalIndexCount": 2
+            },
+            {
+              "entityId": "northstar.breadth:entity.party_role",
+              "physicalIndexCount": 2
+            }
+          ],
+          "searchableFieldCount": 5,
+          "totalFieldCount": 9
+        },
+        {
+          "compileWallClockMilliseconds": 39.513,
+          "entityCount": 4,
+          "measuredAtSha": "7369c33564c05eca5be723b8cabeb38ea0bcecce",
+          "moduleCount": 3,
+          "moduleIds": [
+            "northstar.breadth:module.party",
+            "northstar.breadth:module.catalog",
+            "northstar.breadth:module.location"
+          ],
+          "physicalIndexCountByEntity": [
+            {
+              "entityId": "northstar.breadth:entity.item",
+              "physicalIndexCount": 3
+            },
+            {
+              "entityId": "northstar.breadth:entity.location",
+              "physicalIndexCount": 2
+            },
+            {
+              "entityId": "northstar.breadth:entity.party",
+              "physicalIndexCount": 2
+            },
+            {
+              "entityId": "northstar.breadth:entity.party_role",
+              "physicalIndexCount": 2
+            }
+          ],
+          "searchableFieldCount": 7,
+          "totalFieldCount": 12
+        }
+      ]
+    }
+  ]
+}

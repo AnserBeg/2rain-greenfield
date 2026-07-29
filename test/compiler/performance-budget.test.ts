@@ -9,21 +9,19 @@ const FULL_COMPILE_BUDGET_MILLISECONDS = 5_000;
 
 test('cold full compile stays within the numeric v0 maximum-field budget', () => {
   const authored = authoredFixture('vertical-v1');
-  authored.surfaces = [];
-  authored.queries = [];
-  authored.operations = [];
-  authored.permissions = [];
-  authored.capabilityRequirements = [];
   const template = structuredClone(authored.fields[0]!);
   authored.fields = Array.from(
     { length: STRUCTURAL_LIMITS_V0.families.fields },
-    (_, index) => ({
-      ...structuredClone(template),
-      fieldId:
-        `northstar.bootstrap:field.maximum_${String(index).padStart(4, '0')}` as typeof template.fieldId,
-      label: `Field ${index}`,
-      orderKey: index + 1,
-    }),
+    (_, index) =>
+      index === 0
+        ? template
+        : {
+            ...structuredClone(template),
+            fieldId:
+              `northstar.bootstrap:field.maximum_${String(index).padStart(4, '0')}` as typeof template.fieldId,
+            label: `Field ${index}`,
+            orderKey: (index + 1) * 10,
+          },
   );
 
   const bytes = normalizedBytes(authored);

@@ -30,6 +30,7 @@ const suiteDefinitions = [
       'test/compiler/golden-vectors.test.ts',
       'test/compiler/performance-budget.test.ts',
       'test/compiler/predicate-lowering.test.ts',
+      'test/compiler/publish-path-breadth-envelope.test.ts',
     ],
     script: 'test:compiler',
   },

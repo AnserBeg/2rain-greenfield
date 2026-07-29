@@ -111,10 +111,11 @@ Date: 2026-07-23
 Why: fresh `clock_timestamp()` reads are statement-time but still steppable wall time, so a backward correction can delay a deadline derived from an earlier persisted wall timestamp.
 How to apply: supersedes the elapsed-age part of “Use statement time for deadline decisions”: persist a boot-scoped monotonic anchor, inject wall/monotonic time in regression tests, and use wall time only for timestamp representation. See `docs/execution/packets/G1-P4b-monotonic-reconciliation.md`.
 
-## Derive persisted envelope versions from canonical authority
+## Take persisted versions from the artifact
 Date: 2026-07-23
-Why: G2-P2a copied legacy-compatible compiler-input versions into a current persisted release envelope, causing downstream PostgreSQL registration to reject it.
-How to apply: derive cross-layer persisted envelope language/profile versions from canonical constants; when compiler roots or persisted metadata change, run downstream PostgreSQL registration suites before acceptance. See [G2-P2a-fix](docs/execution/packets/G2-P2a-manifest-version.md).
+Status: Adopted 2026-07-28; supersedes “Derive persisted envelope versions from canonical authority.”
+Why: G2-P2a copied legacy-compatible versions into a current release envelope; 4c then found current constants misdescribing historical artifacts across a version boundary.
+How to apply: readers and writers take language/profile versions from each persisted artifact, never a compile-time constant; when compiler roots or persisted metadata change, run downstream PostgreSQL registration suites before acceptance. See [G2-P2a-fix](docs/execution/packets/G2-P2a-manifest-version.md) and [4c](docs/execution/packets/4c.md).
 
 ## Enforce semantic normalization where uniqueness lives
 Date: 2026-07-23

@@ -7,10 +7,9 @@ import pg from 'pg';
 import {
   CANONICALIZATION_PROFILE_VERSION,
   CONTENT_HASH_ALGORITHM,
-  LANGUAGE_VERSION,
-  NORMALIZATION_PROFILE_VERSION,
   canonicalize,
   canonicalizeAndHash,
+  parseNormalizedApplicationPackageJson,
 } from '../../../../packages/canonical-model/src/index.js';
 import { PLATFORM_IDS } from '../../../../packages/domain/src/platform/index.js';
 import type { MintedUuid } from '../../../../packages/platform-runtime/src/index.js';
@@ -90,21 +89,22 @@ export async function observeSavedFilterAdmissionRefusal(
       const revisionId = minted(randomUUID());
       const releaseId = minted(randomUUID());
       const desiredState = platformDefinitionBytes(fixture.definition);
-      const definitionDigest = canonicalizeAndHash(
-        JSON.parse(new TextDecoder().decode(desiredState)) as unknown,
-      );
+      const normalizedDefinition =
+        parseNormalizedApplicationPackageJson(desiredState);
+      const definitionDigest = canonicalizeAndHash(normalizedDefinition);
       await repository.storeAppPackageRevision(context, {
         canonicalizationProfileVersion: CANONICALIZATION_PROFILE_VERSION,
         contentHash: definitionDigest.contentHash,
         createdBy: context.principalId,
         desiredState,
         hashAlgorithm: CONTENT_HASH_ALGORITHM,
-        languageVersion: LANGUAGE_VERSION,
-        normalizationProfileVersion: NORMALIZATION_PROFILE_VERSION,
+        languageVersion: normalizedDefinition.languageVersion,
+        normalizationProfileVersion:
+          normalizedDefinition.normalizationProfileVersion,
         parentRevisionId: null,
         provenance: 'firstParty',
         revisionId,
-        schemaVersion: LANGUAGE_VERSION,
+        schemaVersion: normalizedDefinition.schemaVersion,
         tenantId: context.tenantId,
       });
       const staged = await repository.stageTenantReleaseCandidate(context, {
@@ -209,7 +209,7 @@ class SavedFilterVerificationExecutor
           values: {
             [PLATFORM_IDS.fieldIds.criteria]: canonicalize({
               kind: 'booleanPredicate',
-              schemaVersion: 'v2',
+              schemaVersion: request.definition.effect.schemaVersion,
               value: true,
             }),
             [PLATFORM_IDS.fieldIds.name]: `Verification ${input.recordId}`,

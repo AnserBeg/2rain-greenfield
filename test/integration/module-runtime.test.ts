@@ -3,7 +3,6 @@ import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 
 import {
-  LANGUAGE_VERSION,
   canonicalize,
   normalizeApplicationPackage,
   type PredicateKernelReceipt,
@@ -133,6 +132,7 @@ test('compiled registration data drives both generic gateway ports from one pinn
 
 test('unsupported compiled predicates fail closed before the generic executor', async () => {
   const compiled = compileFixture();
+  const schemaVersion = compiled.bundle.releaseManifest.languageVersion;
   const policy = new AllowPolicy();
   const executor = new RecordingExecutor();
   const view = await issuedView(compiled, policy, (projections) => ({
@@ -141,7 +141,7 @@ test('unsupported compiled predicates fail closed before the generic executor', 
       ...entry,
       precondition: {
         kind: 'booleanPredicate',
-        schemaVersion: LANGUAGE_VERSION,
+        schemaVersion,
         value: false,
       },
     })),
@@ -149,7 +149,7 @@ test('unsupported compiled predicates fail closed before the generic executor', 
       ...entry,
       filter: {
         kind: 'booleanPredicate',
-        schemaVersion: LANGUAGE_VERSION,
+        schemaVersion,
         value: false,
       },
     })),
@@ -196,6 +196,7 @@ test('unsupported compiled predicates fail closed before the generic executor', 
 
 test('strict predicate receipts route every gateway site and preserve exact outcomes', async (t) => {
   const compiled = compileFixture();
+  const schemaVersion = compiled.bundle.releaseManifest.languageVersion;
   const rejectedPredicates: readonly {
     label: string;
     value: ImmutableJsonValue;
@@ -212,7 +213,7 @@ test('strict predicate receipts route every gateway site and preserve exact outc
       label: 'unknown property',
       value: {
         kind: 'booleanPredicate',
-        schemaVersion: LANGUAGE_VERSION,
+        schemaVersion,
         unexpectedAuthority: 'x',
         value: true,
       },

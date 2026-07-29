@@ -8,24 +8,29 @@ export const NUMERIC_SORT_FIELD_ID =
 
 export function numericPartyModuleDefinition(): Record<string, unknown> {
   const definition = structuredClone(partyModuleDefinition());
+  const schemaVersion = requiredString(definition, 'languageVersion');
   const fields = requiredArray(definition, 'fields');
   fields.push({
     classification: 'internal',
     collation: 'binary',
     defaultSemantics: 'nullable',
-    entity: reference('entityReference', PARTY_IDS.entityIds.party),
+    entity: reference(
+      'entityReference',
+      PARTY_IDS.entityIds.party,
+      schemaVersion,
+    ),
     fieldId: NUMERIC_SORT_FIELD_ID,
     fieldType: {
       kind: 'integerFieldType',
       representation: 'canonicalString',
-      schemaVersion: 'v2',
+      schemaVersion,
     },
     kind: 'fieldDefinition',
     label: 'Numeric sort probe',
     orderKey: 40,
     presence: 'optional',
     reportable: true,
-    schemaVersion: 'v2',
+    schemaVersion,
     searchable: false,
   });
 
@@ -37,10 +42,14 @@ export function numericPartyModuleDefinition(): Record<string, unknown> {
         PARTY_IDS.entityIds.party
     ) {
       requiredArray(query, 'selections').push({
-        field: reference('fieldReference', NUMERIC_SORT_FIELD_ID),
+        field: reference(
+          'fieldReference',
+          NUMERIC_SORT_FIELD_ID,
+          schemaVersion,
+        ),
         kind: 'querySelection',
         orderKey: 40,
-        schemaVersion: 'v2',
+        schemaVersion,
         selectionId: `${PARTY_IDS.namespace}:selection.party_numeric_sort_probe_${String(query.queryType)}`,
       });
     }
@@ -48,8 +57,15 @@ export function numericPartyModuleDefinition(): Record<string, unknown> {
   return definition;
 }
 
-function reference(kind: string, targetId: string) {
-  return { kind, schemaVersion: 'v2', targetId };
+function reference(kind: string, targetId: string, schemaVersion: string) {
+  return { kind, schemaVersion, targetId };
+}
+
+function requiredString(record: Record<string, unknown>, key: string): string {
+  const value = record[key];
+  if (typeof value !== 'string')
+    throw new Error(`fixture ${key} must be a string`);
+  return value;
 }
 
 function requiredArray(
