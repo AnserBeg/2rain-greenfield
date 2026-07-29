@@ -1,0 +1,290 @@
+{
+  "schemaVersion": "northstar.tenant-completeness-manifest/v1",
+  "tenantIndependentDefinition": "A table is tenant-independent only when its rows represent a database-wide kernel mechanism or immutable content deliberately shared across tenants; business records are never tenant-independent, and absence of a tenant column is not evidence.",
+  "expectedTableCount": 46,
+  "tables": [
+    {
+      "schema": "north_star_internal",
+      "table": "module_fold_function_ddl_witnesses",
+      "classification": "tenant-independent",
+      "reasonCode": "kernel-integrity-witness",
+      "reason": "Pins the database-wide Unicode fold-function definition so materializer DDL drift can be detected; it contains no business records."
+    },
+    {
+      "schema": "north_star_internal",
+      "table": "module_storage_attempt_claims",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "north_star_internal",
+      "table": "module_storage_backfill_checkpoints",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "north_star_internal",
+      "table": "module_storage_catalog_receipts",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "north_star_internal",
+      "table": "module_storage_element_applications",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "north_star_internal",
+      "table": "module_storage_elements",
+      "classification": "tenant-independent",
+      "reasonCode": "shared-immutable-catalog",
+      "reason": "Immutable physical-shape element definitions are shared across tenant generations; tenant reachability is carried by module_storage_root_membership."
+    },
+    {
+      "schema": "north_star_internal",
+      "table": "module_storage_generations",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "north_star_internal",
+      "table": "module_storage_reference_counts",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "north_star_internal",
+      "table": "module_storage_root_membership",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "north_star_internal",
+      "table": "module_storage_tightening_debt",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "north_star_internal",
+      "table": "schema_migrations",
+      "classification": "tenant-independent",
+      "reasonCode": "migration-history",
+      "reason": "Records which ordered platform migrations were applied to the database as a whole, independently of business tenants."
+    },
+    {
+      "schema": "platform",
+      "table": "active_release_pointers",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "app_package_revisions",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "environments",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "immutable_release_write_guard",
+      "classification": "tenant-independent",
+      "reasonCode": "kernel-integrity-witness",
+      "reason": "An always-rejecting kernel relation targeted by release immutability rules; its false check constraint prevents retained rows."
+    },
+    {
+      "schema": "platform",
+      "table": "release_activation_attempt_outcomes",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "release_activation_attempts",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "release_activation_authority_epochs",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "release_activation_control_events",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "release_activation_history",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "release_activation_outbox",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "release_activation_phase_receipts",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "release_activation_preparations",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "release_activation_reconciliation_alarms",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "release_activation_reconciliation_starts",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "release_activation_swap_receipts",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "release_activation_verification_receipts",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "release_activation_write_guard",
+      "classification": "tenant-independent",
+      "reasonCode": "kernel-integrity-witness",
+      "reason": "An always-rejecting kernel relation targeted by activation append-only rules; its false check constraint prevents retained rows."
+    },
+    {
+      "schema": "platform",
+      "table": "release_approvals",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "release_approver_eligibility_events",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "release_artifact_blobs",
+      "classification": "tenant-independent",
+      "reasonCode": "shared-immutable-content",
+      "reason": "Content-addressed canonical release bytes are immutable and deliberately shared; tenant reachability is recorded by tenant_release artifact links."
+    },
+    {
+      "schema": "platform",
+      "table": "release_executor_authority_events",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "saved_master_filters",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "semantic_operation_receipts",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "tenant_fixture_records",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "tenant_release_artifact_links",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "tenant_release_chunk_links",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "tenant_release_projection_links",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "tenant_releases",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "tenants",
+      "classification": "tenant-scoped",
+      "tenantColumn": "id"
+    },
+    {
+      "schema": "platform",
+      "table": "transition_preparation_receipts",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "trust_action_invocations",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "trust_business_change_documents",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "trust_domain_events",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "trust_immutable_write_guard",
+      "classification": "tenant-independent",
+      "reasonCode": "kernel-integrity-witness",
+      "reason": "An always-rejecting kernel relation targeted by trust-substrate immutability rules; its false check constraint prevents retained rows."
+    },
+    {
+      "schema": "platform",
+      "table": "trust_outbox",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    }
+  ]
+}
