@@ -13,6 +13,9 @@ import {
   LATEST_NORMALIZATION_PROFILE_VERSION,
   NORMALIZATION_PROFILE_VERSION,
   NORMALIZATION_PROFILE_VERSIONS,
+  VersionedAuthoredApplicationPackageSchema,
+  VersionedCanonicalScalarSchema,
+  VersionedPredicateExpressionSchema,
   SUPPORTED_LANGUAGE_VERSIONS,
   SUPPORTED_NORMALIZATION_PROFILE_VERSIONS,
   canonicalAuthoredProjection,
@@ -20,7 +23,13 @@ import {
   canonicalizeAndHash,
   normalizeApplicationPackage,
   parseAuthoredApplicationPackageJson,
+  parseVersionedAuthoredApplicationPackageJson,
+  type V3AuthoredApplicationPackage,
 } from '../../../packages/canonical-model/src/index.js';
+import {
+  V3_AGGREGATE_IDS,
+  v3AggregateModule,
+} from '../../compiler/v3-definition.js';
 
 const fixturePath =
   'test/fixtures/canonical-model/representative.authored.json';
@@ -141,7 +150,8 @@ test('v3 selects its profile, rejects mixed nodes, and leaves adopted v2 explici
     authored,
     'v0-experimental',
     'v3',
-  ) as typeof authored;
+  ) as typeof authored & { impactAnalyses: [] };
+  v3.impactAnalyses = [];
   v3.normalizationProfileVersion = NORMALIZATION_PROFILE_VERSIONS.v3;
   const normalized = normalizeApplicationPackage(v3);
   assert.equal(normalized.languageVersion, LANGUAGE_VERSIONS.v3);
@@ -185,6 +195,183 @@ test('v3 selects its profile, rejects mixed nodes, and leaves adopted v2 explici
       Object.entries(hypotheticalProfileV4).filter(([name]) => name !== 'v4'),
     ),
     NORMALIZATION_PROFILE_VERSIONS,
+  );
+});
+
+test('v3 gates aggregate nodes, typed parameters, signed decimals, and the D2 reservation', () => {
+  const authored = parseVersionedAuthoredApplicationPackageJson(
+    canonicalize(
+      VersionedAuthoredApplicationPackageSchema.parse(v3AggregateModule()),
+    ),
+  );
+  const normalized = normalizeApplicationPackage(
+    authored as V3AuthoredApplicationPackage,
+  );
+  assert.equal(normalized.languageVersion, LANGUAGE_VERSIONS.v3);
+  assert.deepEqual(normalized.impactAnalyses, []);
+  const aggregate = normalized.queries.find(
+    (query) => query.queryType === 'aggregate',
+  );
+  assert.ok(aggregate && aggregate.queryType === 'aggregate');
+  assert.equal('selections' in aggregate, false);
+  assert.deepEqual(aggregate.aggregate.resultType, {
+    kind: 'exactDecimalAggregateResultType',
+    precision: 38,
+    scale: 2,
+    schemaVersion: LANGUAGE_VERSIONS.v3,
+  });
+  assert.deepEqual(
+    aggregate.parameters.map((parameter) => ({
+      kind: parameter.parameterType.kind,
+      parameterId: parameter.parameterId,
+    })),
+    [
+      {
+        kind: 'textFieldType',
+        parameterId: V3_AGGREGATE_IDS.stockParameter,
+      },
+      {
+        kind: 'dateTimeFieldType',
+        parameterId: V3_AGGREGATE_IDS.atTimeParameter,
+      },
+    ],
+  );
+  assert.equal(
+    canonicalize(
+      normalizeApplicationPackage(canonicalAuthoredProjection(normalized)),
+    ),
+    canonicalize(normalized),
+  );
+
+  for (const operator of ['greaterThanOrEqual', 'lessThanOrEqual'] as const) {
+    assert.equal(
+      VersionedPredicateExpressionSchema.safeParse({
+        field: {
+          kind: 'fieldReference',
+          schemaVersion: 'v3',
+          targetId: 'northstar.example:field.value',
+        },
+        kind: 'fieldComparisonPredicate',
+        operator,
+        schemaVersion: 'v3',
+        value: {
+          kind: 'exactDecimalValue',
+          schemaVersion: 'v3',
+          value: '1',
+        },
+      }).success,
+      true,
+      operator,
+    );
+    assert.equal(
+      VersionedPredicateExpressionSchema.safeParse({
+        field: {
+          kind: 'fieldReference',
+          schemaVersion: 'v2',
+          targetId: 'northstar.example:field.value',
+        },
+        kind: 'fieldComparisonPredicate',
+        operator,
+        schemaVersion: 'v2',
+        value: {
+          kind: 'exactDecimalValue',
+          schemaVersion: 'v2',
+          value: '1',
+        },
+      }).success,
+      false,
+      operator,
+    );
+  }
+  assert.equal(
+    VersionedCanonicalScalarSchema.safeParse({
+      kind: 'exactDecimalValue',
+      schemaVersion: 'v3',
+      value: '-0.25',
+    }).success,
+    true,
+  );
+  assert.equal(
+    VersionedCanonicalScalarSchema.safeParse({
+      kind: 'exactDecimalValue',
+      schemaVersion: 'v2',
+      value: '-0.25',
+    }).success,
+    false,
+  );
+  assert.equal(
+    VersionedCanonicalScalarSchema.safeParse({
+      kind: 'exactDecimalValue',
+      schemaVersion: 'v3',
+      value: '-0',
+    }).success,
+    false,
+  );
+
+  const defaulted = v3AggregateModule() as {
+    fields: Array<Record<string, unknown>>;
+  };
+  const amount = defaulted.fields.find(
+    (field) => field.fieldId === 'northstar.modulefixture:field.master_amount',
+  )!;
+  amount.defaultSemantics = 'declaredDefault';
+  amount.defaultValue = {
+    kind: 'exactDecimalValue',
+    schemaVersion: 'v3',
+    value: '-0.25',
+  };
+  const normalizedDefault = normalizeApplicationPackage(defaulted);
+  assert.deepEqual(
+    normalizedDefault.fields.find(
+      (field) =>
+        field.fieldId === 'northstar.modulefixture:field.master_amount',
+    )?.defaultValue,
+    amount.defaultValue,
+  );
+});
+
+test('legacy envelopes reject every v3-only collection and query spelling', () => {
+  const legacy = parseAuthoredApplicationPackageJson(readFileSync(fixturePath));
+  const withImpact = {
+    ...legacy,
+    impactAnalyses: [],
+  };
+  assert.throws(
+    () => normalizeApplicationPackage(withImpact),
+    (error: unknown) =>
+      error instanceof CanonicalModelError &&
+      error.diagnostics.some(
+        (diagnostic) => diagnostic.code === 'CANON_SCHEMA_INVALID',
+      ),
+  );
+
+  const withAggregate = structuredClone(legacy) as unknown as {
+    queries: Array<Record<string, unknown>>;
+  };
+  withAggregate.queries[0] = {
+    ...withAggregate.queries[0],
+    aggregate: {
+      field: {
+        kind: 'fieldReference',
+        schemaVersion: 'v0-experimental',
+        targetId: 'northstar.inventory:field.item_quantity',
+      },
+      kind: 'queryAggregateSelection',
+      operator: 'sum',
+      schemaVersion: 'v0-experimental',
+      selectionId: 'northstar.inventory:selection.item_quantity_sum',
+    },
+    parameters: [],
+    queryType: 'aggregate',
+    tier: 'q1',
+  };
+  assert.throws(
+    () => normalizeApplicationPackage(withAggregate),
+    (error: unknown) =>
+      error instanceof CanonicalModelError &&
+      error.diagnostics.some(
+        (diagnostic) => diagnostic.code === 'CANON_SCHEMA_INVALID',
+      ),
   );
 });
 
