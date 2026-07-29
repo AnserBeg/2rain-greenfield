@@ -189,7 +189,7 @@ none infers rejection from source text.
 | Undeclared posting read/append/transition added | `INVENTORY_POSTING_DEPENDENCY_UNDECLARED`; coordinated removal fails the pinned root |
 | Extra or malformed configuration declaration | `INVENTORY_CONFIGURATION_MALFORMED` |
 
-The focused compiler suite passes 68 tests including these thirteen inventory
+The integrated compiler suite passes 69 tests including these thirteen inventory
 contract tests. Exact final full-matrix evidence is reported with the frozen
 candidate SHA so this document does not change the SHA whose evidence it names.
 
