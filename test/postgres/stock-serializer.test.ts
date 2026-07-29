@@ -73,6 +73,12 @@ test('stock lock plan is canonical, total, stable, and duplicate-free', () => {
   assert.deepEqual(forward, reverse);
   assert.equal(forward.length, 2);
   assert.equal(forward[0]!.identityKey < forward[1]!.identityKey, true);
+  const periodOne = { ...stockA, businessPeriod: '2026-07-01' };
+  const periodTwo = { ...stockA, businessPeriod: '2026-08-01' };
+  assert.deepEqual(
+    planStockIdentityLocks([periodOne]),
+    planStockIdentityLocks([periodTwo]),
+  );
   for (const target of forward) {
     assert.equal(Number.isInteger(target.identityKey), true);
     assert.equal(
