@@ -188,6 +188,15 @@ The focused compiler suite passes 66 tests including these eleven inventory
 contract tests. Exact final full-matrix evidence is reported with the frozen
 candidate SHA so this document does not change the SHA whose evidence it names.
 
+The first full-matrix attempt at `52904a0` was honestly red in three
+architecture checks: compiler hermeticity observed `localeCompare`, the press
+law observed a Catalog ID in generic compiler code, and repository hygiene
+observed a new standalone `*.test.ts` absent from its reviewed inventory. The
+follow-up removes locale-sensitive comparison, validates the base-unit field by
+generic canonical suffix rather than module identity, and imports the inventory
+cases through the already-inventoried compiler conformance suite. Focused
+architecture and compiler re-runs then passed 84/84 and 66/66 respectively.
+
 ## Gates
 
 - `corepack pnpm install --frozen-lockfile --reporter=append-only`
