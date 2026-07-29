@@ -2,7 +2,6 @@ import { randomUUID } from 'node:crypto';
 
 import {
   CanonicalModelError,
-  LANGUAGE_VERSIONS,
   PredicateExpressionSchema,
   VersionedNormalizedApplicationPackageSchema,
   canonicalAuthoredProjection,
@@ -694,10 +693,7 @@ function validateAgainstPinnedDefinition(
   queryId: string,
   definition: VersionedNormalizedApplicationPackage,
 ): void {
-  const authored =
-    definition.languageVersion === LANGUAGE_VERSIONS.v3
-      ? canonicalAuthoredProjection(definition)
-      : canonicalAuthoredProjection(definition);
+  const authored = canonicalAuthoredProjectionFor(definition);
   let normalized: VersionedNormalizedApplicationPackage;
   try {
     normalized = normalizeApplicationPackage({
@@ -1177,4 +1173,12 @@ function malformed(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function canonicalAuthoredProjectionFor(
+  definition: VersionedNormalizedApplicationPackage,
+) {
+  return definition.languageVersion === 'v3'
+    ? canonicalAuthoredProjection(definition)
+    : canonicalAuthoredProjection(definition);
 }

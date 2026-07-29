@@ -1,6 +1,7 @@
 import {
   PREDICATE_LOWERING_PLAN_VERSION,
   PREDICATE_POSITION_PROFILE_VERSION,
+  PredicateExpressionSchema,
   canonicalizeAndHash,
   type NormalizedApplicationPackage,
   type PredicateCostClass,
@@ -50,23 +51,7 @@ export const PREDICATE_LOWERING_TABLE: readonly PredicateLoweringTableRow[] =
 export function isPredicateLoweringAdmitted(
   predicate: Readonly<VersionedPredicateExpression>,
 ): predicate is Readonly<PredicateExpression> {
-  switch (predicate.kind) {
-    case 'booleanPredicate':
-      return true;
-    case 'fieldComparisonPredicate':
-      return (
-        predicate.value.kind !== 'queryParameterReference' &&
-        (predicate.operator === 'equals' ||
-          predicate.operator === 'notEquals' ||
-          predicate.operator === 'lessThan' ||
-          predicate.operator === 'greaterThan')
-      );
-    case 'notPredicate':
-      return isPredicateLoweringAdmitted(predicate.term);
-    case 'allPredicate':
-    case 'anyPredicate':
-      return predicate.terms.every(isPredicateLoweringAdmitted);
-  }
+  return PredicateExpressionSchema.safeParse(predicate).success;
 }
 
 export function lowerQueryPredicate(
