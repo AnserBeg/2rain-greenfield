@@ -88,7 +88,7 @@ test('archive uniqueness migration replaces both legacy indexes without renaming
         const replacement = migrations.at(-1);
         assert.equal(
           replacement?.name,
-          '0013_archive_excluding_module_uniqueness.sql',
+          '0014_archive_excluding_module_uniqueness.sql',
         );
         await runMigrations(client, migrations.slice(0, -1));
         await client.query(`

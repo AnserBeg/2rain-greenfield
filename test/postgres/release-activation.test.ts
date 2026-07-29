@@ -42,6 +42,7 @@ import {
 } from '../../packages/postgres-provider/src/release-activation-service.js';
 import { PostgresReleaseApprovalService } from '../../packages/postgres-provider/src/release-approval-service.js';
 import { PostgresImmutableReleaseRepository } from '../../packages/postgres-provider/src/release-repository.js';
+import { verificationEvidenceIdForCandidate } from '../../packages/postgres-provider/src/release-verification-service.js';
 import {
   loadMigrations,
   runMigrations,
@@ -53,6 +54,10 @@ import {
 } from '../../packages/runtime/src/request-context.js';
 import { compilerInput, fixtureBytes } from '../compiler/helpers.js';
 import { withEphemeralPostgres } from '../helpers/postgres.js';
+import {
+  admitEmptyPlanRelease,
+  definitionWithoutAssertions,
+} from './release-verification-fixture.js';
 
 const execFileAsync = promisify(execFile);
 const checkedInMigrations = resolve('db/migrations');
@@ -91,7 +96,7 @@ interface PointerFixture {
 
 test('G1-P4b atomic activation, reconciliation, rollback, and invalidation', async (t) => {
   const bootstrapBytes = fixtureBytes('bootstrap');
-  const verticalBytes = fixtureBytes('vertical-v1');
+  const verticalBytes = definitionWithoutAssertions(bootstrapBytes, '1.0.1');
   const bootstrap = mustCompile(bootstrapBytes);
   const vertical = mustCompile(verticalBytes);
 
@@ -1605,8 +1610,14 @@ async function seedEnvironmentReleases(
     const compiled = index % 2 === 0 ? bootstrap : vertical;
     const revisionId = index % 2 === 0 ? bootstrapRevision : verticalRevision;
     const releaseId = minted(randomUUID());
-    const evidenceId = minted(randomUUID());
-    await repository.registerTenantRelease(
+    const evidenceId = verificationEvidenceIdForCandidate(
+      context,
+      releaseId,
+      compiled.releaseRoot,
+    );
+    await admitEmptyPlanRelease(
+      pool,
+      repository,
       context,
       releaseCommand(context, releaseId, revisionId, evidenceId, compiled),
     );

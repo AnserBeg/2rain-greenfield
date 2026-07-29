@@ -30,6 +30,7 @@ import {
   ReleaseApprovalError,
 } from '../../packages/postgres-provider/src/release-approval-service.js';
 import { PostgresImmutableReleaseRepository } from '../../packages/postgres-provider/src/release-repository.js';
+import { verificationEvidenceIdForCandidate } from '../../packages/postgres-provider/src/release-verification-service.js';
 import {
   loadMigrations,
   runMigrations,
@@ -42,6 +43,10 @@ import {
 } from '../../packages/runtime/src/request-context.js';
 import { compilerInput, fixtureBytes } from '../compiler/helpers.js';
 import { withEphemeralPostgres } from '../helpers/postgres.js';
+import {
+  admitEmptyPlanRelease,
+  definitionWithoutAssertions,
+} from './release-verification-fixture.js';
 
 const checkedInMigrations = resolve('db/migrations');
 const tenantA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -61,8 +66,8 @@ const revisionOne = minted('a3000000-0000-4000-8000-000000000001');
 const revisionTwo = minted('a3000000-0000-4000-8000-000000000002');
 const releaseOne = minted('a4000000-0000-4000-8000-000000000001');
 const releaseTwo = minted('a4000000-0000-4000-8000-000000000002');
-const evidenceOne = minted('a5000000-0000-4000-8000-000000000001');
-const evidenceTwo = minted('a5000000-0000-4000-8000-000000000002');
+let evidenceOne = minted('a5000000-0000-4000-8000-000000000001');
+let evidenceTwo = minted('a5000000-0000-4000-8000-000000000002');
 const preparationOne = minted('a6000000-0000-4000-8000-000000000001');
 const receiptOne = minted('a7000000-0000-4000-8000-000000000001');
 const badPreparation = minted('a6000000-0000-4000-8000-000000000002');
@@ -82,9 +87,19 @@ const identities = new Map<string, AuthenticatedIdentity>([
 
 test('G1-P4a PostgreSQL contracts and trusted approval service', async (t) => {
   const bootstrapBytes = fixtureBytes('bootstrap');
-  const verticalBytes = fixtureBytes('vertical-v1');
+  const verticalBytes = definitionWithoutAssertions(bootstrapBytes, '1.0.1');
   const bootstrap = mustCompile(bootstrapBytes);
   const vertical = mustCompile(verticalBytes);
+  evidenceOne = verificationEvidenceIdForCandidate(
+    { environmentId: environmentA, tenantId: tenantA },
+    releaseOne,
+    bootstrap.releaseRoot,
+  );
+  evidenceTwo = verificationEvidenceIdForCandidate(
+    { environmentId: environmentA, tenantId: tenantA },
+    releaseTwo,
+    vertical.releaseRoot,
+  );
 
   await withEphemeralPostgres(
     'release-approval',
@@ -194,7 +209,9 @@ test('G1-P4a PostgreSQL contracts and trusted approval service', async (t) => {
           makerContext,
           revisionCommand(makerContext, revisionTwo, verticalBytes),
         );
-        await repository.registerTenantRelease(
+        await admitEmptyPlanRelease(
+          runtimePool,
+          repository,
           makerContext,
           releaseCommand(
             makerContext,
@@ -204,7 +221,9 @@ test('G1-P4a PostgreSQL contracts and trusted approval service', async (t) => {
             bootstrap,
           ),
         );
-        await repository.registerTenantRelease(
+        await admitEmptyPlanRelease(
+          runtimePool,
+          repository,
           makerContext,
           releaseCommand(
             makerContext,
