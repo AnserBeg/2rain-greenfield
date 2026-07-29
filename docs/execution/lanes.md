@@ -12,12 +12,12 @@ writer is holding those paths right now.
 
 ## The lanes
 
-| Lane | Theme | Current packet | Base | Status |
-|---|---|---|---|---|
-| **KERNEL** | Canonical language and the query tier | *awaiting selection — `4c` next; artifact window now OPEN* | — | **idle** |
-| **DEPLOY** | Release lifecycle and runtime infrastructure | *awaiting selection — `1g2` reverse-transition, or `1c` platform classification* | — | **idle** |
-| **FIX** | Correctness defects → stage cutting → inventory build | *awaiting selection — `1d` is now unblocked* | — | **idle** |
-| **BUILD** | Inventory contracts *(fourth lane, opened 2026-07-28)* | *awaiting selection — `G3-P1b` after `1d`; `G3-P2` after both* | — | **idle** |
+| Lane | Theme | Current packet | Status |
+|---|---|---|---|
+| **KERNEL** | Canonical language and the query tier | `4c` — packages adopt v3 (the artifact event) | **active** |
+| **DEPLOY** | Release lifecycle and runtime infrastructure | *awaiting selection — `1c` recommended, or `1g2`* | **idle** |
+| **FIX** | Correctness defects → stage cutting → inventory build | `1d` — the unique-index emitter | **active** |
+| **BUILD** | Inventory contracts | `G3-P2a` — tenant-completeness manifest | **active** |
 
 Lane identity is stable across packets. When a lane's packet is accepted, the
 next packet inherits the lane and its partition.
