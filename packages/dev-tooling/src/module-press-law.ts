@@ -340,7 +340,7 @@ function moduleIdentityMatch(
   module: ModuleDescriptor,
 ): { index: number; value: string } | undefined {
   const patterns = [
-    escapeRegExp(module.namespace),
+    `${escapeRegExp(module.namespace)}(?![A-Za-z0-9_./-])`,
     `\\b${escapeRegExp(module.symbolPrefix)}_(?:IDS|NAMESPACE)\\b`,
     ...module.localIds.map((localId) => `\\b${escapeRegExp(localId)}\\b`),
   ];

@@ -58,6 +58,7 @@ import {
   REQUIRED_MODULE_PROJECTION_FAMILIES,
   STORAGE_TARGET_PAYLOAD_VERSION,
   STORAGE_TARGET_PAYLOAD_V2_VERSION,
+  STORAGE_TARGET_PAYLOAD_V3_VERSION,
   STORAGE_TRANSITION_ENVELOPE_VERSION,
   type CapabilityFact,
   type CompilationNodeContract,
@@ -1834,7 +1835,8 @@ function isStorageTargetV1(value: unknown): value is StorageTargetPayloadV1 {
     typeof value === 'object' &&
     value !== null &&
     (schemaVersion === STORAGE_TARGET_PAYLOAD_VERSION ||
-      schemaVersion === STORAGE_TARGET_PAYLOAD_V2_VERSION)
+      schemaVersion === STORAGE_TARGET_PAYLOAD_V2_VERSION ||
+      schemaVersion === STORAGE_TARGET_PAYLOAD_V3_VERSION)
   );
 }
 

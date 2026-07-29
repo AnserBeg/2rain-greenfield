@@ -90,12 +90,16 @@ test('archive uniqueness migration replaces both legacy indexes without renaming
         const foldedColumnName = `nsm_c_${'d'.repeat(52)}`;
         const unrelatedIndexName = 'permanently_reserved_code';
         const migrations = await loadMigrations(checkedInMigrations);
-        const replacement = migrations.at(-1);
+        const replacementIndex = migrations.findIndex(
+          (migration) =>
+            migration.name === '0014_archive_excluding_module_uniqueness.sql',
+        );
+        const replacement = migrations[replacementIndex];
         assert.equal(
           replacement?.name,
           '0014_archive_excluding_module_uniqueness.sql',
         );
-        await runMigrations(client, migrations.slice(0, -1));
+        await runMigrations(client, migrations.slice(0, replacementIndex));
         await client.query(`
           CREATE TABLE north_star_module.${tableName} (
             tenant_id uuid NOT NULL,
@@ -144,7 +148,7 @@ test('archive uniqueness migration replaces both legacy indexes without renaming
         ]);
 
         await assert.rejects(
-          runMigrations(client, migrations),
+          runMigrations(client, migrations.slice(0, replacementIndex + 1)),
           /is not a generated managed business-key index/,
         );
         const afterRefusal = await client.query<{
@@ -171,7 +175,10 @@ test('archive uniqueness migration replaces both legacy indexes without renaming
           `DROP INDEX north_star_module.${unrelatedIndexName}`,
         );
 
-        const upgraded = await runMigrations(client, migrations);
+        const upgraded = await runMigrations(
+          client,
+          migrations.slice(0, replacementIndex + 1),
+        );
         assert.deepEqual(upgraded.applied, [replacement.name]);
         const after = await client.query<{
           name: string;
@@ -235,6 +242,48 @@ test('archive uniqueness migration replaces both legacy indexes without renaming
             error instanceof Error &&
             (error as Error & { code?: string }).code === '23505',
         );
+      } finally {
+        client.release();
+      }
+    },
+  );
+});
+
+test('inventory migration owns exactly two platform relations and no managed-module DDL', async () => {
+  await withEphemeralPostgres(
+    'inventory-base-unit-upgrade',
+    async ({ pool }) => {
+      const client = await pool.connect();
+      try {
+        const migrations = await loadMigrations(checkedInMigrations);
+        const inventoryMigration = migrations.at(-1);
+        assert.equal(
+          inventoryMigration?.name,
+          '0015_inventory_storage_foundation.sql',
+        );
+        assert.doesNotMatch(
+          inventoryMigration.sql,
+          /(?:CREATE|ALTER|DROP|TRUNCATE)\s+(?:TABLE\s+)?north_star_module\./iu,
+        );
+
+        await runMigrations(client, migrations.slice(0, -1));
+        const applied = await runMigrations(client, migrations);
+        assert.deepEqual(applied.applied, [inventoryMigration.name]);
+        const relations = await client.query<{
+          name: string;
+        }>(
+          `SELECT relation.relname AS name
+             FROM pg_class AS relation
+             JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+            WHERE namespace.nspname = 'platform'
+              AND relation.relkind IN ('r', 'p')
+              AND relation.relname LIKE 'inventory_%'
+            ORDER BY relation.relname`,
+        );
+        assert.deepEqual(relations.rows, [
+          { name: 'inventory_posting_configurations' },
+          { name: 'inventory_tenant_calendars' },
+        ]);
       } finally {
         client.release();
       }

@@ -7,6 +7,12 @@ import test from 'node:test';
 import pg from 'pg';
 
 import {
+  APPLICATION_NAMESPACE,
+  composedApplicationDefinition,
+} from '../../packages/domain/src/app/builder.js';
+import { inventoryModuleDefinition } from '../../packages/domain/src/inventory/definition.js';
+
+import {
   CANONICALIZATION_PROFILE_VERSION,
   CONTENT_HASH_ALGORITHM,
   UNICODE_CASE_FOLD_EXPANSIONS,
@@ -79,6 +85,8 @@ const environmentA = 'a2000000-0000-4000-8000-000000000002';
 const environmentB = 'b2000000-0000-4000-8000-000000000002';
 const principalA = 'a3000000-0000-4000-8000-000000000003';
 const principalB = 'b3000000-0000-4000-8000-000000000003';
+const inventoryContractReleaseRoot =
+  'bd977ff0a00db745e79b7d8e158cb55863319f9f37f7674d77b618e85272d116';
 const approverA = 'a4000000-0000-4000-8000-000000000004';
 const demonstrateFoldFunctionDrift =
   process.env.PR6B_DEMONSTRATE_FOLD_FUNCTION_DRIFT;
@@ -143,6 +151,7 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
           '0012_saved_master_filters.sql',
           '0013_release_verification_evidence.sql',
           '0014_archive_excluding_module_uniqueness.sql',
+          '0015_inventory_storage_foundation.sql',
         ]);
         assert.equal(migrationResult.verified.length, allMigrations.length);
         await seedScope(admin);
@@ -1991,6 +2000,1236 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
   );
 });
 
+test('standalone inventory materialization fails closed when Item and Location targets are absent', async () => {
+  const legalEntityA = randomUUID();
+  const legalEntityB = randomUUID();
+  const emptyDefinition = emptyModuleDefinition();
+  const source = mustCompile(moduleInput(emptyDefinition));
+  const targetDefinition = inventoryModuleDefinition();
+  const target = mustCompile(
+    moduleInput(targetDefinition, expectedActiveReleaseFrom(source)),
+  );
+  const storage = projectionPayload<StorageTargetPayloadV1>(
+    target,
+    PROJECTION_FAMILY_IDS.storageTarget,
+  );
+
+  await withEphemeralPostgres(
+    'module-storage-inventory-missing-references',
+    async ({ connection, pool }) => {
+      const admin = await pool.connect();
+      try {
+        await runMigrations(admin, await loadMigrations(migrations));
+        await seedScope(admin);
+        await admin.query(
+          `SELECT platform.provision_inventory_scope(
+             $1, $2, $3, 'LE-A', 'Legal Entity A', 'America/Edmonton',
+             '06:00:00', $4, 1::smallint, 'reject', 0,
+             'codeAndNarrative', 'codeOnly', 'codeAndNarrative',
+             'codeAndNarrative', 'codeAndNarrative',
+             NULL, NULL, NULL, NULL, NULL
+           )`,
+          [tenantA, environmentA, legalEntityA, inventoryContractReleaseRoot],
+        );
+        await admin.query(
+          `SELECT platform.provision_inventory_scope(
+             $1, $2, $3, 'LE-B', 'Legal Entity B', 'America/Toronto',
+             '04:00:00', $4, 1::smallint, 'reject', 0,
+             'codeAndNarrative', 'codeOnly', 'codeAndNarrative',
+             'codeAndNarrative', 'codeAndNarrative',
+             NULL, NULL, NULL, NULL, NULL
+           )`,
+          [tenantB, environmentB, legalEntityB, inventoryContractReleaseRoot],
+        );
+      } finally {
+        admin.release();
+      }
+      const runtimePool = new pg.Pool({
+        ...connection,
+        max: 2,
+        user: 'north_star_runtime',
+      });
+      const materializerPool = new pg.Pool({
+        ...connection,
+        max: 2,
+        user: 'north_star_module_materializer',
+      });
+      const moduleRuntimePool = new pg.Pool({
+        ...connection,
+        max: 1,
+        user: 'north_star_module_runtime',
+      });
+      materializerPool.on('error', () => undefined);
+      moduleRuntimePool.on('error', () => undefined);
+      try {
+        const contexts = await trustedContexts();
+        const releases = await persistPairForBothTenants(
+          runtimePool,
+          contexts,
+          source,
+          definitionBytes(emptyDefinition),
+          target,
+          definitionBytes(targetDefinition),
+        );
+        await installSourcePointers(pool, releases);
+        await grantExecutorAuthority(pool);
+        const materializer = new PostgresModuleStorageMaterializer(
+          materializerPool,
+          moduleRuntimePool,
+        );
+        await assert.rejects(
+          materializer.prepare({
+            context: contexts.a,
+            expiresAt: new Date(Date.now() + 60_000).toISOString(),
+            generationId: randomUUID(),
+            initiatedBy: principalA,
+            preparationId: randomUUID(),
+            targetReleaseId: releases.a.target,
+          }),
+          (error: unknown) =>
+            error instanceof ModuleStorageMaterializationError &&
+            error.code === 'ENTITY_TARGET_MISSING',
+        );
+      } finally {
+        await Promise.all([
+          runtimePool.end(),
+          materializerPool.end(),
+          moduleRuntimePool.end(),
+        ]);
+      }
+    },
+  );
+
+  const externalTargets = storage.relations
+    .filter((relation) => relation.relationColumn.origin === 'field')
+    .map((relation) => relation.targetEntityId)
+    .toSorted();
+  assert.deepEqual(externalTargets, [
+    'northstar.inventory:entity.item',
+    'northstar.inventory:entity.item',
+    'northstar.inventory:entity.location',
+    'northstar.inventory:entity.location',
+    'northstar.inventory:entity.location',
+  ]);
+});
+
+test('inventory v3 targets materialize the compiled legal master, fact partitions, and base-unit binding', async () => {
+  const legalEntityId = randomUUID();
+  const legalEntityB = randomUUID();
+  const emptyDefinition = emptyModuleDefinition();
+  const source = mustCompile(moduleInput(emptyDefinition));
+  const targetDefinition = inventoryOwnedModuleDefinition();
+  const target = mustCompile(
+    moduleInput(targetDefinition, expectedActiveReleaseFrom(source)),
+  );
+  const storage = projectionPayload<StorageTargetPayloadV1>(
+    target,
+    PROJECTION_FAMILY_IDS.storageTarget,
+  );
+  assert.equal(storage.schemaVersion, 'northstar.storage-target-payload/v3');
+  const item = storage.entities.find((entity) =>
+    entity.entityId.endsWith(':entity.item'),
+  );
+  const location = storage.entities.find((entity) =>
+    entity.entityId.endsWith(':entity.location'),
+  );
+  const transaction = storage.entities.find((entity) =>
+    entity.entityId.endsWith(':entity.inventory_transaction'),
+  );
+  const transactionLine = storage.entities.find((entity) =>
+    entity.entityId.endsWith(':entity.inventory_transaction_line'),
+  );
+  const periodLock = storage.entities.find((entity) =>
+    entity.entityId.endsWith(':entity.inventory_period_lock'),
+  );
+  const movement = storage.entities.find((entity) =>
+    entity.entityId.endsWith(':entity.inventory_movement'),
+  );
+  const legalEntity = storage.entities.find(
+    (entity) => entity.legalEntityMaster !== undefined,
+  );
+  assert.ok(item);
+  assert.ok(location);
+  assert.ok(transaction);
+  assert.ok(transactionLine);
+  assert.ok(periodLock?.periodLock);
+  const periodLockStorage = periodLock.periodLock;
+  assert.deepEqual(periodLock.consumerWriterRoots.writerOperationIds, [
+    `${APPLICATION_NAMESPACE}:operation.advance_period_lock`,
+    `${APPLICATION_NAMESPACE}:operation.reopen_period`,
+  ]);
+  assert.deepEqual(
+    {
+      advanceOperationId: periodLockStorage.advanceOperationId,
+      reopenOperationId: periodLockStorage.reopenOperationId,
+      scope: periodLockStorage.scopeUniqueIndex.columns,
+    },
+    {
+      advanceOperationId: `${APPLICATION_NAMESPACE}:operation.advance_period_lock`,
+      reopenOperationId: `${APPLICATION_NAMESPACE}:operation.reopen_period`,
+      scope: ['tenant_id', 'environment_id', 'legal_entity_id'],
+    },
+  );
+  assert.equal(item.legalEntity, undefined);
+  assert.ok(movement?.legalEntity);
+  assert.ok(movement.factStorage);
+  assert.ok(legalEntity?.legalEntityMaster);
+  const transition = projectionPayload<StorageTransitionEnvelope>(
+    target,
+    PROJECTION_FAMILY_IDS.storageTransition,
+  );
+  const legalEntityTable = transition.elements.find(
+    (element) =>
+      element.kind === 'createTable' &&
+      element.subjectId === legalEntity.entityId,
+  );
+  assert.ok(legalEntityTable);
+  for (const entity of storage.entities.filter(
+    (candidate) => candidate.legalEntity !== undefined,
+  )) {
+    const table = transition.elements.find(
+      (element) =>
+        element.kind === 'createTable' && element.subjectId === entity.entityId,
+    );
+    assert.ok(table);
+    assert.ok(
+      table.declaredDependencyIds.includes(legalEntityTable.elementId),
+      `${entity.entityId} must depend on the legal-entity master table`,
+    );
+  }
+  const factStorage = movement.factStorage;
+  const legalEntityMaster = legalEntity.legalEntityMaster;
+  const baseUnit = item.columns.find((column) =>
+    column.canonicalFieldId.endsWith(':field.item_base_unit'),
+  );
+  assert.ok(baseUnit);
+  const movementRelations = storage.relations.filter(
+    (relation) => relation.sourceEntityId === movement.entityId,
+  );
+  const movementTransaction = movementRelations.find(
+    (relation) => relation.targetEntityId === transaction.entityId,
+  );
+  const movementTransactionLine = movementRelations.find(
+    (relation) => relation.targetEntityId === transactionLine.entityId,
+  );
+  const lineTransaction = storage.relations.find(
+    (relation) =>
+      relation.sourceEntityId === transactionLine.entityId &&
+      relation.targetEntityId === transaction.entityId,
+  );
+  assert.ok(movementTransaction);
+  assert.ok(movementTransactionLine);
+  assert.ok(lineTransaction);
+  for (const relation of [
+    movementTransaction,
+    movementTransactionLine,
+    lineTransaction,
+  ]) {
+    assert.deepEqual(relation.foreignKey.sourceColumns.slice(0, 3), [
+      'tenant_id',
+      'environment_id',
+      'legal_entity_id',
+    ]);
+  }
+
+  await withEphemeralPostgres(
+    'module-storage-entity-owned',
+    async ({ connection, pool }) => {
+      const admin = await pool.connect();
+      try {
+        await runMigrations(admin, await loadMigrations(migrations));
+        await seedScope(admin);
+        await admin.query(
+          `SELECT platform.provision_inventory_scope(
+             $1, $2, $3, 'LE-A', 'Legal Entity A', 'America/Edmonton',
+             '06:00:00', $4, 1::smallint, 'reject', 0,
+             'codeAndNarrative', 'codeOnly', 'codeAndNarrative',
+             'codeAndNarrative', 'codeAndNarrative',
+             NULL, NULL, NULL, NULL, NULL
+           )`,
+          [tenantA, environmentA, legalEntityId, inventoryContractReleaseRoot],
+        );
+        await admin.query(
+          `SELECT platform.provision_inventory_scope(
+             $1, $2, $3, 'LE-B', 'Legal Entity B', 'America/Toronto',
+             '04:00:00', $4, 1::smallint, 'reject', 0,
+             'codeAndNarrative', 'codeOnly', 'codeAndNarrative',
+             'codeAndNarrative', 'codeAndNarrative',
+             NULL, NULL, NULL, NULL, NULL
+           )`,
+          [tenantB, environmentB, legalEntityB, inventoryContractReleaseRoot],
+        );
+      } finally {
+        admin.release();
+      }
+      const runtimePool = new pg.Pool({
+        ...connection,
+        max: 2,
+        user: 'north_star_runtime',
+      });
+      const materializerPool = new pg.Pool({
+        ...connection,
+        max: 2,
+        user: 'north_star_module_materializer',
+      });
+      const moduleRuntimePool = new pg.Pool({
+        ...connection,
+        max: 1,
+        user: 'north_star_module_runtime',
+      });
+      materializerPool.on('error', () => undefined);
+      moduleRuntimePool.on('error', () => undefined);
+      try {
+        const contexts = await trustedContexts();
+        const releases = await persistPairForBothTenants(
+          runtimePool,
+          contexts,
+          source,
+          definitionBytes(emptyDefinition),
+          target,
+          definitionBytes(targetDefinition),
+        );
+        await installSourcePointers(pool, releases);
+        await grantExecutorAuthority(pool);
+        const materializer = new PostgresModuleStorageMaterializer(
+          materializerPool,
+          moduleRuntimePool,
+        );
+        const prepared = await materializer.prepare({
+          context: contexts.a,
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+          generationId: randomUUID(),
+          initiatedBy: principalA,
+          preparationId: randomUUID(),
+          targetReleaseId: releases.a.target,
+        });
+        assert.equal(prepared.schemaState, 'APPLIED');
+
+        const legalEntityBValues = legalEntity.columns.map((column) => {
+          if (column.physicalName === legalEntityMaster.fieldColumns.code)
+            return 'LE-B';
+          if (column.physicalName === legalEntityMaster.fieldColumns.name)
+            return 'Legal Entity B';
+          if (column.physicalName === legalEntityMaster.fieldColumns.status)
+            return legalEntityMaster.activeStatusValue;
+          if (column.physicalName === legalEntityMaster.fieldColumns.isDefault)
+            return true;
+          if (column.nullable) return null;
+          throw new Error(
+            `unmapped legal-entity field ${column.canonicalFieldId}`,
+          );
+        });
+        await pool.query(
+          `INSERT INTO north_star_module.${quoteTestIdentifier(legalEntity.physicalTableName)} (
+             tenant_id, environment_id,
+             ${quoteTestIdentifier(legalEntity.recordIdentity.column)},
+             ${legalEntity.columns
+               .map((column) => quoteTestIdentifier(column.physicalName))
+               .join(', ')}
+           ) VALUES (${[
+             tenantB,
+             environmentB,
+             legalEntityB,
+             ...legalEntityBValues,
+           ]
+             .map((_, index) => `$${String(index + 1)}`)
+             .join(', ')})`,
+          [tenantB, environmentB, legalEntityB, ...legalEntityBValues],
+        );
+
+        const secondDefaultId = randomUUID();
+        const secondDefaultValues = legalEntity.columns.map((column) => {
+          if (column.physicalName === legalEntityMaster.fieldColumns.code)
+            return 'LE-SECOND';
+          if (column.physicalName === legalEntityMaster.fieldColumns.name)
+            return 'Second default';
+          if (column.physicalName === legalEntityMaster.fieldColumns.status)
+            return legalEntityMaster.activeStatusValue;
+          if (column.physicalName === legalEntityMaster.fieldColumns.isDefault)
+            return true;
+          if (column.nullable) return null;
+          throw new Error(
+            `unmapped legal-entity field ${column.canonicalFieldId}`,
+          );
+        });
+        await assert.rejects(
+          pool.query(
+            `INSERT INTO north_star_module.${quoteTestIdentifier(legalEntity.physicalTableName)} (
+               tenant_id, environment_id,
+               ${quoteTestIdentifier(legalEntity.recordIdentity.column)},
+               ${legalEntity.columns
+                 .map((column) => quoteTestIdentifier(column.physicalName))
+                 .join(', ')}
+             ) VALUES (${[
+               tenantA,
+               environmentA,
+               secondDefaultId,
+               ...secondDefaultValues,
+             ]
+               .map((_, index) => `$${String(index + 1)}`)
+               .join(', ')})`,
+            [tenantA, environmentA, secondDefaultId, ...secondDefaultValues],
+          ),
+          (error: unknown) =>
+            error instanceof Error &&
+            (error as Error & { code?: string; constraint?: string }).code ===
+              '23505' &&
+            (error as Error & { code?: string; constraint?: string })
+              .constraint === legalEntityMaster.defaultUniqueIndex.physicalName,
+        );
+
+        const legalColumn = await pool.query<{
+          is_nullable: boolean;
+          postgresql_type: string;
+        }>(
+          `SELECT NOT attribute.attnotnull AS is_nullable,
+                  format_type(attribute.atttypid, attribute.atttypmod)
+                    AS postgresql_type
+             FROM pg_attribute AS attribute
+             JOIN pg_class AS relation
+               ON relation.oid = attribute.attrelid
+             JOIN pg_namespace AS namespace
+               ON namespace.oid = relation.relnamespace
+            WHERE namespace.nspname = 'north_star_module'
+              AND relation.relname = $1
+              AND attribute.attname = 'legal_entity_id'
+              AND attribute.attnum > 0
+              AND NOT attribute.attisdropped`,
+          [movement.physicalTableName],
+        );
+        assert.deepEqual(legalColumn.rows, [
+          { is_nullable: false, postgresql_type: 'uuid' },
+        ]);
+
+        const companion = factStorage.companion;
+        const stockVersionColumn = movement.columns.find((column) =>
+          column.canonicalFieldId.endsWith(
+            ':field.inventory_movement_stock_dimension_set_version',
+          ),
+        );
+        assert.ok(stockVersionColumn);
+        const movementColumns = await pool.query<{
+          is_nullable: boolean;
+          name: string;
+        }>(
+          `SELECT attribute.attname AS name,
+                  NOT attribute.attnotnull AS is_nullable
+             FROM pg_attribute AS attribute
+             JOIN pg_class AS relation ON relation.oid = attribute.attrelid
+             JOIN pg_namespace AS namespace
+               ON namespace.oid = relation.relnamespace
+            WHERE namespace.nspname = 'north_star_module'
+              AND relation.relname = $1
+              AND attribute.attnum > 0
+              AND NOT attribute.attisdropped
+            ORDER BY attribute.attnum`,
+          [movement.physicalTableName],
+        );
+        assert.equal(
+          movementColumns.rows.some(({ name }) =>
+            /(?:amount|cost|currency|money|price|value|lot|serial|bin)/iu.test(
+              name,
+            ),
+          ),
+          false,
+        );
+        for (const required of [
+          'legal_entity_id',
+          'business_period',
+          stockVersionColumn.physicalName,
+          factStorage.fieldColumns.itemId,
+          factStorage.fieldColumns.locationId,
+          factStorage.fieldColumns.recordedAt,
+        ]) {
+          assert.equal(
+            movementColumns.rows.find(({ name }) => name === required)
+              ?.is_nullable,
+            false,
+          );
+        }
+
+        const partitionShape = await pool.query<{
+          leaves: string;
+          partition_key: string;
+        }>(
+          `SELECT pg_get_partkeydef($1::regclass) AS partition_key,
+                  count(*) FILTER (WHERE isleaf)::text AS leaves
+             FROM pg_partition_tree($1::regclass)
+            GROUP BY partition_key`,
+          [`north_star_module.${movement.physicalTableName}`],
+        );
+        assert.deepEqual(partitionShape.rows, [
+          {
+            leaves: '8',
+            partition_key: 'HASH (tenant_id, business_period)',
+          },
+        ]);
+
+        const constraints = await pool.query<{
+          definition: string | null;
+          name: string;
+          referenced_schema: string | null;
+          referenced_table: string | null;
+          table_name: string;
+          type: string;
+        }>(
+          `SELECT source.relname AS table_name,
+                  constraint_record.conname AS name,
+                  constraint_record.contype AS type,
+                  pg_get_expr(
+                    constraint_record.conbin,
+                    constraint_record.conrelid,
+                    true
+                  ) AS definition,
+                  target_namespace.nspname AS referenced_schema,
+                  target.relname AS referenced_table
+             FROM pg_constraint AS constraint_record
+             JOIN pg_class AS source
+               ON source.oid = constraint_record.conrelid
+             JOIN pg_namespace AS source_namespace
+               ON source_namespace.oid = source.relnamespace
+             LEFT JOIN pg_class AS target
+               ON target.oid = constraint_record.confrelid
+             LEFT JOIN pg_namespace AS target_namespace
+               ON target_namespace.oid = target.relnamespace
+            WHERE source_namespace.nspname = 'north_star_module'
+              AND source.relname = ANY($1::text[])
+            ORDER BY source.relname, constraint_record.conname`,
+          [
+            [
+              item.physicalTableName,
+              movement.physicalTableName,
+              companion.physicalTableName,
+            ],
+          ],
+        );
+        assert.ok(
+          constraints.rows.some(
+            (constraint) =>
+              constraint.table_name === movement.physicalTableName &&
+              constraint.type === 'f' &&
+              constraint.referenced_schema === 'north_star_module' &&
+              constraint.referenced_table === legalEntity.physicalTableName,
+          ),
+        );
+        assert.ok(
+          constraints.rows.some(
+            (constraint) =>
+              constraint.table_name === item.physicalTableName &&
+              constraint.type === 'c' &&
+              constraint.definition?.includes(
+                'inventory_base_unit_change_allowed',
+              ),
+          ),
+        );
+        assert.ok(
+          constraints.rows.some(
+            (constraint) =>
+              constraint.table_name === movement.physicalTableName &&
+              constraint.name ===
+                factStorage.businessPeriod.checkConstraintName,
+          ),
+        );
+        assert.ok(
+          constraints.rows.some(
+            (constraint) =>
+              constraint.table_name === companion.physicalTableName &&
+              constraint.name === companion.movementForeignKey.physicalName &&
+              constraint.referenced_table === movement.physicalTableName,
+          ),
+        );
+
+        const tableGrants = await pool.query<{
+          grantee: string;
+          privilege_type: string;
+          table_name: string;
+        }>(
+          `SELECT grantee, table_name, privilege_type
+             FROM information_schema.role_table_grants
+            WHERE table_schema = 'north_star_module'
+              AND table_name = ANY($1::text[])
+              AND grantee IN (
+                'north_star_module_materializer', 'north_star_module_runtime'
+              )
+            ORDER BY table_name, grantee, privilege_type`,
+          [[movement.physicalTableName, companion.physicalTableName]],
+        );
+        assert.equal(tableGrants.rows.length, 9);
+        assert.equal(
+          tableGrants.rows
+            .filter(({ grantee }) => grantee === 'north_star_module_runtime')
+            .every(({ privilege_type }) =>
+              ['INSERT', 'SELECT'].includes(privilege_type),
+            ),
+          true,
+        );
+        assert.equal(
+          tableGrants.rows.some(
+            ({ grantee, privilege_type, table_name }) =>
+              grantee === 'north_star_module_materializer' &&
+              privilege_type === 'UPDATE' &&
+              table_name === movement.physicalTableName,
+          ),
+          true,
+        );
+
+        const insertRequiredEntity = async (input: {
+          entity: (typeof storage.entities)[number];
+          environmentId: string;
+          legalEntityId?: string;
+          localValues?: Readonly<Record<string, unknown>>;
+          recordId: string;
+          relationRecordIds?: Readonly<Record<string, string>>;
+          tenantId: string;
+        }): Promise<void> => {
+          const requiredColumns = input.entity.columns.filter(
+            (column) => !column.nullable && column.defaultSemantics === 'none',
+          );
+          const requiredRelations = storage.relations.filter(
+            (relation) =>
+              relation.sourceEntityId === input.entity.entityId &&
+              relation.relationColumn.origin !== 'field' &&
+              !relation.relationColumn.nullable,
+          );
+          const columnValue = (
+            column: (typeof storage.entities)[number]['columns'][number],
+          ): unknown => {
+            const localId = column.canonicalFieldId.split(':field.').at(-1)!;
+            if (Object.hasOwn(input.localValues ?? {}, localId)) {
+              return input.localValues?.[localId];
+            }
+            if (column.fieldContract.enumOptionIds.length > 0) {
+              return column.fieldContract.enumOptionIds[0];
+            }
+            if (column.postgresqlType === 'uuid') return randomUUID();
+            if (/^(?:bigint|integer|numeric)/u.test(column.postgresqlType)) {
+              return '1';
+            }
+            if (column.postgresqlType.startsWith('timestamp')) {
+              return '2026-07-29T12:00:00.000Z';
+            }
+            if (column.postgresqlType === 'boolean') return false;
+            return `inventory-${input.recordId.slice(0, 8)}`;
+          };
+          const names = [
+            'tenant_id',
+            'environment_id',
+            ...(input.entity.legalEntity ? ['legal_entity_id'] : []),
+            input.entity.recordIdentity.column,
+            ...requiredColumns.map((column) => column.physicalName),
+            ...requiredRelations.map(
+              (relation) => relation.relationColumn.physicalName,
+            ),
+          ];
+          const values: unknown[] = [
+            input.tenantId,
+            input.environmentId,
+            ...(input.entity.legalEntity ? [input.legalEntityId] : []),
+            input.recordId,
+            ...requiredColumns.map(columnValue),
+            ...requiredRelations.map((relation) => {
+              const value = input.relationRecordIds?.[relation.targetEntityId];
+              if (!value) {
+                throw new Error(
+                  `missing relation value ${relation.relationId}`,
+                );
+              }
+              return value;
+            }),
+          ];
+          await pool.query(
+            `INSERT INTO north_star_module.${quoteTestIdentifier(input.entity.physicalTableName)} (
+               ${names.map(quoteTestIdentifier).join(', ')}
+             ) VALUES (${values.map((_, index) => `$${String(index + 1)}`).join(', ')})`,
+            values,
+          );
+        };
+
+        const seedInventoryReferences = async (scope: {
+          environmentId: string;
+          itemId: string;
+          legalEntityId: string;
+          locationId: string;
+          tenantId: string;
+          transactionId: string;
+          transactionLineId: string;
+        }): Promise<void> => {
+          await insertRequiredEntity({
+            entity: item,
+            environmentId: scope.environmentId,
+            localValues: { item_base_unit: 'EA' },
+            recordId: scope.itemId,
+            tenantId: scope.tenantId,
+          });
+          await insertRequiredEntity({
+            entity: location,
+            environmentId: scope.environmentId,
+            recordId: scope.locationId,
+            tenantId: scope.tenantId,
+          });
+          await insertRequiredEntity({
+            entity: transaction,
+            environmentId: scope.environmentId,
+            legalEntityId: scope.legalEntityId,
+            recordId: scope.transactionId,
+            tenantId: scope.tenantId,
+          });
+          await insertRequiredEntity({
+            entity: transactionLine,
+            environmentId: scope.environmentId,
+            legalEntityId: scope.legalEntityId,
+            localValues: {
+              inventory_transaction_line_item_id: scope.itemId,
+            },
+            recordId: scope.transactionLineId,
+            relationRecordIds: {
+              [transaction.entityId]: scope.transactionId,
+            },
+            tenantId: scope.tenantId,
+          });
+        };
+
+        const itemId = randomUUID();
+        const movementId = randomUUID();
+        const sourceId = randomUUID();
+        const locationId = randomUUID();
+        const transactionId = randomUUID();
+        const transactionLineId = randomUUID();
+        await seedInventoryReferences({
+          environmentId: environmentA,
+          itemId,
+          legalEntityId,
+          locationId,
+          tenantId: tenantA,
+          transactionId,
+          transactionLineId,
+        });
+        const effectiveAt = '2026-07-29T12:00:00.000Z';
+        const recordedAt = '2026-07-29T13:00:00.000Z';
+        const period = await pool.query<{ business_period: string }>(
+          `SELECT north_star_internal.inventory_business_period($1, $2)
+             AS business_period`,
+          [tenantA, effectiveAt],
+        );
+        const movementValue = (
+          column: (typeof movement.columns)[number],
+          input: {
+            effectiveAt: string;
+            itemId: string;
+            locationId: string;
+            recordedAt: string;
+            sourceId: string;
+            sourceLine: string;
+            stockVersion?: string | null;
+          },
+        ): unknown => {
+          const localId = column.canonicalFieldId.split(':field.').at(-1);
+          switch (localId) {
+            case 'inventory_movement_actor_id':
+              return randomUUID();
+            case 'inventory_movement_stock_dimension_set_version':
+              return input.stockVersion === undefined
+                ? column.fieldContract.enumOptionIds.find((id) =>
+                    id.endsWith('_v1'),
+                  )
+                : input.stockVersion;
+            case 'inventory_movement_item_id':
+              return input.itemId;
+            case 'inventory_movement_location_id':
+              return input.locationId;
+            case 'inventory_movement_quantity_delta':
+              return '2';
+            case 'inventory_movement_unit_id':
+              return 'EA';
+            case 'inventory_movement_effective_at':
+              return input.effectiveAt;
+            case 'inventory_movement_recorded_at':
+              return input.recordedAt;
+            case 'inventory_movement_source_type':
+              return 'adjustment';
+            case 'inventory_movement_source_id':
+              return input.sourceId;
+            case 'inventory_movement_source_line':
+              return input.sourceLine;
+            case 'inventory_movement_source_revision':
+              return '1';
+            case 'inventory_movement_posting_role':
+              return column.fieldContract.enumOptionIds.find((id) =>
+                id.endsWith('_adjustment'),
+              );
+            case 'inventory_movement_reason_code':
+            case 'inventory_movement_reason_narrative':
+            case 'inventory_movement_reversal_of_movement_id':
+              return null;
+            default:
+              throw new Error(`unmapped movement field ${String(localId)}`);
+          }
+        };
+        const insertMovement = async (input: {
+          businessPeriod: string;
+          effectiveAt: string;
+          environmentId: string;
+          itemId: string;
+          legalEntityId: string;
+          locationId: string;
+          movementId: string;
+          recordedAt: string;
+          sourceId: string;
+          sourceLine: string;
+          stockVersion?: string | null;
+          tenantId: string;
+          transactionId: string;
+          transactionLineId: string;
+        }): Promise<void> => {
+          const declaredRelations = movementRelations.filter(
+            (relation) => relation.relationColumn.origin !== 'field',
+          );
+          const values = [
+            input.tenantId,
+            input.environmentId,
+            input.legalEntityId,
+            input.businessPeriod,
+            input.movementId,
+            ...movement.columns.map((column) => movementValue(column, input)),
+            ...declaredRelations.map((relation) =>
+              relation.targetEntityId === transaction.entityId
+                ? input.transactionId
+                : input.transactionLineId,
+            ),
+          ];
+          await pool.query(
+            `INSERT INTO north_star_module.${quoteTestIdentifier(movement.physicalTableName)} (
+               tenant_id, environment_id, legal_entity_id, business_period,
+               ${quoteTestIdentifier(movement.recordIdentity.column)},
+               ${movement.columns
+                 .map((column) => quoteTestIdentifier(column.physicalName))
+                 .join(', ')},
+               ${declaredRelations
+                 .map((relation) =>
+                   quoteTestIdentifier(relation.relationColumn.physicalName),
+                 )
+                 .join(', ')}
+             ) VALUES (${values.map((_, index) => `$${String(index + 1)}`).join(', ')})`,
+            values,
+          );
+        };
+        const movementInput = {
+          businessPeriod: period.rows[0]!.business_period,
+          effectiveAt,
+          environmentId: environmentA,
+          itemId,
+          legalEntityId,
+          locationId,
+          movementId,
+          recordedAt,
+          sourceId,
+          sourceLine: '1',
+          tenantId: tenantA,
+          transactionId,
+          transactionLineId,
+        };
+        await assert.rejects(
+          insertMovement({
+            ...movementInput,
+            businessPeriod: '2000-01-01',
+            movementId: randomUUID(),
+            sourceLine: 'wrong-period',
+          }),
+          hasPostgresErrorCode('23514'),
+        );
+        await assert.rejects(
+          insertMovement({
+            ...movementInput,
+            movementId: randomUUID(),
+            sourceLine: 'missing-version',
+            stockVersion: null,
+          }),
+          hasPostgresErrorCode('23502'),
+        );
+        await assert.rejects(
+          insertMovement({
+            ...movementInput,
+            movementId: randomUUID(),
+            sourceLine: 'unknown-version',
+            stockVersion: 'v2',
+          }),
+          hasPostgresErrorCode('23514'),
+        );
+        for (const member of ['itemId', 'locationId'] as const) {
+          await assert.rejects(
+            insertMovement({
+              ...movementInput,
+              [member]: '00000000-0000-0000-0000-000000000000',
+              movementId: randomUUID(),
+              sourceLine: `unspecified-${member}`,
+            }),
+            hasPostgresErrorCode('23514'),
+          );
+        }
+        await insertMovement(movementInput);
+
+        await assert.rejects(
+          insertMovement({
+            ...movementInput,
+            itemId: randomUUID(),
+            movementId: randomUUID(),
+            sourceLine: 'missing-item-reference',
+          }),
+          hasPostgresErrorCode('23503'),
+        );
+        await assert.rejects(
+          insertMovement({
+            ...movementInput,
+            movementId: randomUUID(),
+            sourceLine: 'missing-transaction-reference',
+            transactionId: randomUUID(),
+          }),
+          hasPostgresErrorCode('23503'),
+        );
+        const otherLegalEntityId = randomUUID();
+        const otherTransactionId = randomUUID();
+        await insertRequiredEntity({
+          entity: legalEntity,
+          environmentId: environmentA,
+          recordId: otherLegalEntityId,
+          tenantId: tenantA,
+        });
+        const provisionedOtherLock = await pool.query<{ count: string }>(
+          `SELECT count(*)::text AS count
+             FROM north_star_module.${quoteTestIdentifier(periodLock.physicalTableName)}
+            WHERE tenant_id = $1 AND environment_id = $2
+              AND legal_entity_id = $3`,
+          [tenantA, environmentA, otherLegalEntityId],
+        );
+        assert.equal(provisionedOtherLock.rows[0]?.count, '1');
+        await insertRequiredEntity({
+          entity: transaction,
+          environmentId: environmentA,
+          legalEntityId: otherLegalEntityId,
+          recordId: otherTransactionId,
+          tenantId: tenantA,
+        });
+        await assert.rejects(
+          insertMovement({
+            ...movementInput,
+            movementId: randomUUID(),
+            sourceLine: 'cross-entity-transaction',
+            transactionId: otherTransactionId,
+          }),
+          hasPostgresErrorCode('23503'),
+        );
+
+        const plan = await pool.query<{ 'QUERY PLAN': unknown }>(
+          `EXPLAIN (FORMAT JSON, COSTS FALSE)
+           SELECT ${quoteTestIdentifier(movement.recordIdentity.column)}
+             FROM north_star_module.${quoteTestIdentifier(movement.physicalTableName)}
+            WHERE tenant_id = $1 AND business_period = $2`,
+          [tenantA, period.rows[0]!.business_period],
+        );
+        assert.equal(
+          collectPlanRelationNames(plan.rows[0]?.['QUERY PLAN']).filter(
+            (name) =>
+              factStorage.partitioning.partitions.some(
+                (partition) => partition.physicalTableName === name,
+              ),
+          ).length,
+          1,
+        );
+
+        const effectValues = companion.columns.map((column) => {
+          if (column.name === 'tenant_id') return tenantA;
+          if (column.name === 'environment_id') return environmentA;
+          if (column.name === 'legal_entity_id') return legalEntityId;
+          if (column.name === 'business_period')
+            return period.rows[0]!.business_period;
+          if (column.name === 'record_id') return movementId;
+          if (column.name === factStorage.fieldColumns.sourceType)
+            return 'adjustment';
+          if (column.name === factStorage.fieldColumns.sourceId)
+            return sourceId;
+          if (column.name === factStorage.fieldColumns.sourceLine) return '1';
+          if (column.name === factStorage.fieldColumns.sourceRevision)
+            return '1';
+          if (column.name === factStorage.fieldColumns.postingRole) {
+            const postingRole = movement.columns.find(
+              (candidate) => candidate.physicalName === column.name,
+            );
+            return postingRole?.fieldContract.enumOptionIds.find((id) =>
+              id.endsWith('_adjustment'),
+            );
+          }
+          throw new Error(`unmapped companion column ${column.name}`);
+        });
+        const queryAsModuleRuntime = async (
+          statement: string,
+          values: readonly unknown[],
+        ): Promise<pg.QueryResult> => {
+          const client = await moduleRuntimePool.connect();
+          try {
+            await client.query('BEGIN');
+            await client.query(
+              `SELECT set_config('north_star.tenant_id', $1, true),
+                      set_config('north_star.environment_id', $2, true),
+                      set_config('north_star.principal_id', $3, true)`,
+              [tenantA, environmentA, principalA],
+            );
+            const result = await client.query(statement, [...values]);
+            await client.query('COMMIT');
+            return result;
+          } catch (error) {
+            await client.query('ROLLBACK');
+            throw error;
+          } finally {
+            client.release();
+          }
+        };
+        const lockRows = await queryAsModuleRuntime(
+          `SELECT record_id
+             FROM north_star_module.${quoteTestIdentifier(periodLock.physicalTableName)}
+            WHERE legal_entity_id = $1`,
+          [legalEntityId],
+        );
+        assert.deepEqual(lockRows.rows, [{ record_id: legalEntityId }]);
+        await assert.rejects(
+          pool.query(
+            `INSERT INTO north_star_module.${quoteTestIdentifier(periodLock.physicalTableName)} (
+               tenant_id, environment_id, legal_entity_id, record_id
+             ) VALUES ($1, $2, $3, $4)`,
+            [tenantA, environmentA, legalEntityId, randomUUID()],
+          ),
+          hasPostgresErrorCode('23505'),
+        );
+        await assert.rejects(
+          queryAsModuleRuntime(
+            `INSERT INTO north_star_module.${quoteTestIdentifier(periodLock.physicalTableName)} (
+               tenant_id, environment_id, legal_entity_id, record_id
+             ) VALUES ($1, $2, $3, $4)`,
+            [tenantA, environmentA, legalEntityId, randomUUID()],
+          ),
+          hasPostgresErrorCode('42501'),
+        );
+        await queryAsModuleRuntime(
+          `UPDATE north_star_module.${quoteTestIdentifier(periodLock.physicalTableName)}
+              SET ${quoteTestIdentifier(periodLockStorage.closedThroughColumn)} = $1
+            WHERE legal_entity_id = $2`,
+          ['2026-07-28T23:59:59.999Z', legalEntityId],
+        );
+        await assert.rejects(
+          queryAsModuleRuntime(
+            `UPDATE north_star_module.${quoteTestIdentifier(periodLock.physicalTableName)}
+                SET revision = revision + 1
+              WHERE legal_entity_id = $1`,
+            [legalEntityId],
+          ),
+          hasPostgresErrorCode('42501'),
+        );
+        const reservedEffect = await queryAsModuleRuntime(
+          `SELECT count(*)::text AS count
+             FROM north_star_module.${quoteTestIdentifier(companion.physicalTableName)}
+            WHERE record_id = $1`,
+          [movementId],
+        );
+        assert.equal(reservedEffect.rows[0]?.count, '1');
+        await assert.rejects(
+          queryAsModuleRuntime(
+            `INSERT INTO north_star_module.${quoteTestIdentifier(companion.physicalTableName)} (
+               ${companion.columns
+                 .map((column) => quoteTestIdentifier(column.name))
+                 .join(', ')}
+             ) VALUES (${effectValues.map((_, index) => `$${String(index + 1)}`).join(', ')})`,
+            effectValues,
+          ),
+          hasPostgresErrorCode('23505'),
+        );
+
+        const secondEffectiveAt = '2026-08-01T12:00:00.000Z';
+        const secondPeriod = await pool.query<{ business_period: string }>(
+          `SELECT north_star_internal.inventory_business_period($1, $2)
+             AS business_period`,
+          [tenantA, secondEffectiveAt],
+        );
+        const secondMovementId = randomUUID();
+        await assert.rejects(
+          insertMovement({
+            ...movementInput,
+            businessPeriod: secondPeriod.rows[0]!.business_period,
+            effectiveAt: secondEffectiveAt,
+            movementId: secondMovementId,
+            recordedAt: '2026-08-01T13:00:00.000Z',
+          }),
+          hasPostgresErrorCode('23505'),
+        );
+        const rejectedMovement = await pool.query<{ count: string }>(
+          `SELECT count(*)::text AS count
+             FROM north_star_module.${quoteTestIdentifier(movement.physicalTableName)}
+            WHERE record_id = $1`,
+          [secondMovementId],
+        );
+        assert.equal(rejectedMovement.rows[0]?.count, '0');
+        const movementB = randomUUID();
+        const itemB = randomUUID();
+        const locationB = randomUUID();
+        const transactionB = randomUUID();
+        const transactionLineB = randomUUID();
+        await seedInventoryReferences({
+          environmentId: environmentB,
+          itemId: itemB,
+          legalEntityId: legalEntityB,
+          locationId: locationB,
+          tenantId: tenantB,
+          transactionId: transactionB,
+          transactionLineId: transactionLineB,
+        });
+        const effectiveAtB = '2026-07-29T10:00:00.000Z';
+        const periodB = await pool.query<{ business_period: string }>(
+          `SELECT north_star_internal.inventory_business_period($1, $2)
+             AS business_period`,
+          [tenantB, effectiveAtB],
+        );
+        await insertMovement({
+          businessPeriod: periodB.rows[0]!.business_period,
+          effectiveAt: effectiveAtB,
+          environmentId: environmentB,
+          itemId: itemB,
+          legalEntityId: legalEntityB,
+          locationId: locationB,
+          movementId: movementB,
+          recordedAt: '2026-07-29T12:30:00.000Z',
+          sourceId: randomUUID(),
+          sourceLine: 'tenant-b',
+          tenantId: tenantB,
+          transactionId: transactionB,
+          transactionLineId: transactionLineB,
+        });
+        const extractAtHorizon = async (
+          context: TrustedRequestContext,
+        ): Promise<string[]> => {
+          const client = await moduleRuntimePool.connect();
+          try {
+            await client.query('BEGIN');
+            await client.query(
+              `SELECT set_config('north_star.tenant_id', $1, true),
+                      set_config('north_star.environment_id', $2, true),
+                      set_config('north_star.principal_id', $3, true)`,
+              [context.tenantId, context.environmentId, context.principalId],
+            );
+            const rows = await client.query<{ record_id: string }>(
+              `SELECT ${quoteTestIdentifier(movement.recordIdentity.column)} AS record_id
+                 FROM north_star_module.${quoteTestIdentifier(movement.physicalTableName)}
+                WHERE ${quoteTestIdentifier(factStorage.fieldColumns.recordedAt)} <= $1
+                ORDER BY ${quoteTestIdentifier(factStorage.fieldColumns.recordedAt)},
+                         ${quoteTestIdentifier(movement.recordIdentity.column)}`,
+              ['2026-07-29T14:00:00.000Z'],
+            );
+            await client.query('COMMIT');
+            return rows.rows.map(({ record_id }) => record_id);
+          } catch (error) {
+            await client.query('ROLLBACK');
+            throw error;
+          } finally {
+            client.release();
+          }
+        };
+        assert.deepEqual(await extractAtHorizon(contexts.a), [movementId]);
+        assert.deepEqual(await extractAtHorizon(contexts.b), [movementB]);
+
+        const mismatchedEffectValues = effectValues.map((value, index) => {
+          const column = companion.columns[index];
+          if (column?.name === 'record_id') return randomUUID();
+          if (column?.name === factStorage.fieldColumns.sourceId)
+            return randomUUID();
+          if (column?.name === factStorage.fieldColumns.sourceLine)
+            return 'not-the-movement-source-line';
+          return value;
+        });
+        await assert.rejects(
+          queryAsModuleRuntime(
+            `INSERT INTO north_star_module.${quoteTestIdentifier(companion.physicalTableName)} (
+               ${companion.columns
+                 .map((column) => quoteTestIdentifier(column.name))
+                 .join(', ')}
+             ) VALUES (${mismatchedEffectValues.map((_, index) => `$${String(index + 1)}`).join(', ')})`,
+            mismatchedEffectValues,
+          ),
+          hasPostgresErrorCode('23503'),
+        );
+
+        for (const statement of [
+          `UPDATE north_star_module.${quoteTestIdentifier(movement.physicalTableName)}
+              SET revision = revision + 1
+            WHERE record_id = $1`,
+          `DELETE FROM north_star_module.${quoteTestIdentifier(movement.physicalTableName)}
+            WHERE record_id = $1`,
+          `UPDATE north_star_module.${quoteTestIdentifier(companion.physicalTableName)}
+              SET business_period = business_period
+            WHERE record_id = $1`,
+          `DELETE FROM north_star_module.${quoteTestIdentifier(companion.physicalTableName)}
+            WHERE record_id = $1`,
+        ]) {
+          await assert.rejects(
+            pool.query(statement, [movementId]),
+            (error: unknown) =>
+              error instanceof Error &&
+              (error as Error & { code?: string }).code === 'P0001' &&
+              error.message === 'INVENTORY_MOVEMENT_IMMUTABLE',
+          );
+        }
+
+        await assert.rejects(
+          pool.query(
+            `UPDATE north_star_module.${quoteTestIdentifier(item.physicalTableName)}
+                SET ${quoteTestIdentifier(baseUnit.physicalName)} = 'BOX'
+              WHERE tenant_id = $1
+                AND environment_id = $2
+                AND ${quoteTestIdentifier(item.recordIdentity.column)} = $3`,
+            [tenantA, environmentA, itemId],
+          ),
+          (error: unknown) =>
+            error instanceof Error &&
+            (error as Error & { code?: string; detail?: string }).code ===
+              'P0001' &&
+            error.message === 'INVENTORY_BASE_UNIT_IMMUTABLE' &&
+            (error as Error & { detail?: string }).detail?.includes(
+              `bindingMovementId=${movementId}`,
+            ) === true,
+        );
+        await pool.query(
+          'ALTER TABLE platform.active_release_pointers DISABLE TRIGGER active_release_pointer_exact_swap',
+        );
+        try {
+          await pool.query(
+            `UPDATE platform.active_release_pointers
+                SET release_id = $1
+              WHERE tenant_id = $2 AND environment_id = $3`,
+            [releases.a.target, tenantA, environmentA],
+          );
+          await pool.query(
+            `DROP TRIGGER ${quoteTestIdentifier(companion.reservationTriggerName)}
+               ON north_star_module.${quoteTestIdentifier(movement.physicalTableName)}`,
+          );
+          await assertCatalogDrift(
+            materializer,
+            contexts.a,
+            new RegExp(
+              `missing managed trigger [^.]+\\.${companion.reservationTriggerName}`,
+            ),
+          );
+        } finally {
+          await pool.query(
+            'ALTER TABLE platform.active_release_pointers ENABLE TRIGGER active_release_pointer_exact_swap',
+          );
+        }
+      } finally {
+        await Promise.all([
+          runtimePool.end(),
+          materializerPool.end(),
+          moduleRuntimePool.end(),
+        ]);
+      }
+    },
+  );
+});
+
 test('fold-function drift surfaces the specific diagnostic before a terminal claim mismatch', async () => {
   const emptyDefinition = emptyModuleDefinition();
   const source = mustCompile(moduleInput(emptyDefinition));
@@ -2851,6 +4090,57 @@ function emptyModuleDefinition(): Record<string, unknown> {
     definition[family] = [];
   }
   return definition;
+}
+
+function inventoryOwnedModuleDefinition(): Record<string, unknown> {
+  const application = composedApplicationDefinition();
+  const inventory = inventoryModuleDefinition(APPLICATION_NAMESPACE);
+  const mergedCollections = [
+    'assertions',
+    'entities',
+    'fields',
+    'operations',
+    'permissions',
+    'queries',
+    'relations',
+    'stateMachines',
+    'storageMappings',
+    'surfaces',
+  ] as const;
+  for (const collection of mergedCollections) {
+    application[collection] = [
+      ...(application[collection] as unknown[]),
+      ...(inventory[collection] as unknown[]),
+    ];
+  }
+  const inventoryModule = (
+    inventory.modules as Array<Record<string, unknown>>
+  )[0];
+  assert.ok(inventoryModule);
+  (application.modules as Array<Record<string, unknown>>).push({
+    ...inventoryModule,
+    orderKey: 40,
+    ownerPackageId: (application.package as { packageId: string }).packageId,
+  });
+  return application;
+}
+
+function collectPlanRelationNames(value: unknown): string[] {
+  if (Array.isArray(value)) return value.flatMap(collectPlanRelationNames);
+  if (typeof value !== 'object' || value === null) return [];
+  const record = value as Record<string, unknown>;
+  return [
+    ...(typeof record['Relation Name'] === 'string'
+      ? [record['Relation Name']]
+      : []),
+    ...Object.values(record).flatMap(collectPlanRelationNames),
+  ];
+}
+
+function hasPostgresErrorCode(code: string): (error: unknown) => boolean {
+  return (error: unknown) =>
+    error instanceof Error &&
+    (error as Error & { code?: string }).code === code;
 }
 
 function definitionBytes(definition: unknown): Uint8Array {

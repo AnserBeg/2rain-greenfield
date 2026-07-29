@@ -2,16 +2,22 @@ export {
   INVENTORY_CONTRACT_RELEASE_VERSION,
   INVENTORY_CONTRACT_SCHEMA_VERSION,
   INVENTORY_CONTRACT_V1,
+  INVENTORY_FACT_STORAGE_V1,
+  INVENTORY_PERIOD_LOCK_STORAGE_V1,
   INVENTORY_POSTING_DEPENDENCY_SET_ROOT,
   INVENTORY_POSTING_ROLES,
+  INVENTORY_STORAGE_REFERENCES_V1,
   LEGAL_ENTITY_FAMILY_CONTRACT_VERSION,
   LEGAL_ENTITY_FAMILY_MAP_V1,
   LEGAL_ENTITY_RELATION_SEMANTICS_V1,
   STOCK_DIMENSION_SET_ID,
   type InventoryAuthoritativeDependencyV1,
   type InventoryContractDefinitionV1,
+  type InventoryFactStorageRuleV1,
   type InventoryPostingConfigurationInputV1,
+  type InventoryPeriodLockStorageRuleV1,
   type InventoryPostingRole,
+  type InventoryStorageReferenceRuleV1,
   type LegalEntityFamilyClassification,
   type LegalEntityFamilyRuleV1,
   type LegalEntityRelationRuleV1,
@@ -19,3 +25,9 @@ export {
   type NegativeStockMode,
   type ReasonRequirement,
 } from './contracts.js';
+
+export {
+  INVENTORY_IDS,
+  INVENTORY_NAMESPACE,
+  inventoryModuleDefinition,
+} from './definition.js';

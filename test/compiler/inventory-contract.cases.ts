@@ -23,14 +23,14 @@ import {
 } from '../../packages/compiler/src/conformance.js';
 import {
   INVENTORY_CONTRACT_V1,
+  INVENTORY_FACT_STORAGE_V1,
+  INVENTORY_PERIOD_LOCK_STORAGE_V1,
+  INVENTORY_STORAGE_REFERENCES_V1,
   LEGAL_ENTITY_FAMILY_MAP_V1,
   LEGAL_ENTITY_RELATION_SEMANTICS_V1,
+  inventoryModuleDefinition,
 } from '../../packages/domain/src/inventory/index.js';
 import { partyModuleDefinition } from '../../packages/domain/src/party/definition.js';
-import {
-  FIXTURE_IDS,
-  ordinaryModuleV2,
-} from '../fixtures/g2/module-conformance/definitions.js';
 
 interface MutableInventoryContract {
   authoritativeDependencies: {
@@ -58,6 +58,209 @@ type InventoryContractCase = (name: string, run: () => void) => void;
 export function registerInventoryContractCases(
   register: InventoryContractCase,
 ): void {
+  register(
+    'inventory fact storage lowers to payload v3 with compiled partitions and an append-only companion',
+    () => {
+      assert.deepEqual(INVENTORY_FACT_STORAGE_V1, [
+        {
+          familyId: 'inventory_movement',
+          mutability: 'appendOnly',
+          partitionBy: 'tenantBusinessPeriod',
+        },
+      ]);
+      assert.equal(INVENTORY_STORAGE_REFERENCES_V1.length, 5);
+      assert.deepEqual(INVENTORY_PERIOD_LOCK_STORAGE_V1, {
+        advanceOperationLocalId: 'advance_period_lock',
+        familyId: 'inventory_period_lock',
+        reopenOperationLocalId: 'reopen_period',
+        scope: 'onePerLegalEntity',
+      });
+      const compiled = mustCompileModule(inventoryModuleDefinition());
+      const target = projectionPayload<{
+        entities: Array<{
+          consumerWriterRoots: { writerOperationIds: string[] };
+          entityId: string;
+          factStorage?: {
+            businessPeriod: {
+              column: string;
+              effectiveAtColumn: string;
+            };
+            companion: {
+              physicalTableName: string;
+              reservationTriggerName: string;
+            };
+            mutability: string;
+            partitioning: {
+              keyColumns: string[];
+              kind: string;
+              partitions: Array<{ modulus: number; remainder: number }>;
+            };
+          };
+          indexes: Array<{
+            columnNames: string[];
+            indexKind: string;
+            physicalName: string;
+            predicate: string | null;
+          }>;
+          legalEntity?: { column: string };
+          legalEntityMaster?: {
+            defaultUniqueIndex: {
+              columns: string[];
+              physicalName: string;
+              predicate: string;
+            };
+            provisioning: string;
+          };
+          periodLock?: {
+            advanceOperationId: string;
+            provisioningTriggerName: string;
+            reopenOperationId: string;
+            scopeUniqueIndex: { columns: string[] };
+          };
+          physicalTableName: string;
+          primaryKey: { columns: string[] };
+        }>;
+        relations: Array<{
+          foreignKey: { sourceColumns: string[]; targetColumns: string[] };
+          relationColumn: { origin?: string };
+          sourceEntityId: string;
+          targetEntityId: string;
+        }>;
+        schemaVersion: string;
+      }>(compiled, PROJECTION_FAMILY_IDS.storageTarget);
+      assert.equal(target.schemaVersion, 'northstar.storage-target-payload/v3');
+      const movement = target.entities.find((entity) =>
+        entity.entityId.endsWith(':entity.inventory_movement'),
+      );
+      assert.ok(movement?.factStorage);
+      assert.deepEqual(movement.primaryKey.columns, [
+        'tenant_id',
+        'business_period',
+        'environment_id',
+        'legal_entity_id',
+        'record_id',
+      ]);
+      assert.deepEqual(movement.consumerWriterRoots.writerOperationIds, []);
+      assert.equal(movement.factStorage.mutability, 'appendOnly');
+      assert.equal(
+        movement.factStorage.partitioning.kind,
+        'tenantBusinessPeriodHash',
+      );
+      assert.deepEqual(movement.factStorage.partitioning.keyColumns, [
+        'tenant_id',
+        'business_period',
+      ]);
+      assert.deepEqual(
+        movement.factStorage.partitioning.partitions.map(
+          ({ modulus, remainder }) => ({ modulus, remainder }),
+        ),
+        Array.from({ length: 8 }, (_, remainder) => ({
+          modulus: 8,
+          remainder,
+        })),
+      );
+      assert.match(
+        movement.factStorage.companion.physicalTableName,
+        /^nsm_t_[a-z2-7]{52}$/u,
+      );
+      assert.match(
+        movement.factStorage.companion.reservationTriggerName,
+        /^nsm_g_[a-z2-7]{52}$/u,
+      );
+      const periodLock = target.entities.find((entity) =>
+        entity.entityId.endsWith(':entity.inventory_period_lock'),
+      );
+      assert.ok(periodLock?.periodLock);
+      assert.deepEqual(periodLock.primaryKey.columns, [
+        'tenant_id',
+        'environment_id',
+        'legal_entity_id',
+        'record_id',
+      ]);
+      assert.deepEqual(periodLock.periodLock.scopeUniqueIndex.columns, [
+        'tenant_id',
+        'environment_id',
+        'legal_entity_id',
+      ]);
+      assert.equal(
+        periodLock.consumerWriterRoots.writerOperationIds.includes(
+          'northstar.inventory:operation.inventory_period_lock_create',
+        ),
+        false,
+      );
+      assert.equal(
+        target.relations.filter(
+          (relation) =>
+            relation.foreignKey.sourceColumns.includes('legal_entity_id') &&
+            relation.foreignKey.targetColumns.includes('legal_entity_id'),
+        ).length,
+        3,
+      );
+      const legalEntity = target.entities.find((entity) =>
+        entity.entityId.endsWith(':entity.legal_entity'),
+      );
+      assert.equal(
+        legalEntity?.legalEntityMaster?.provisioning,
+        'oneDefaultPerTenantEnvironment',
+      );
+      assert.ok(legalEntity);
+      const declaredDefaultIndex =
+        legalEntity.legalEntityMaster?.defaultUniqueIndex;
+      assert.ok(declaredDefaultIndex);
+      assert.deepEqual(declaredDefaultIndex.columns, [
+        'tenant_id',
+        'environment_id',
+      ]);
+      assert.match(
+        declaredDefaultIndex.predicate,
+        /^nsm_c_[a-z2-7]{52} IS TRUE AND archived_at IS NULL$/u,
+      );
+      assert.deepEqual(
+        legalEntity.indexes.find(
+          (index) => index.indexKind === 'legalEntityDefaultUnique',
+        ),
+        {
+          columnNames: ['tenant_id', 'environment_id'],
+          indexKind: 'legalEntityDefaultUnique',
+          physicalName: declaredDefaultIndex.physicalName,
+          predicate: declaredDefaultIndex.predicate,
+        },
+      );
+      const invalid = structuredClone(inventoryModuleDefinition()) as {
+        operations: Array<Record<string, unknown>>;
+      };
+      const transactionUpdate = invalid.operations.find(
+        (operation) =>
+          operation.operationId ===
+          'northstar.inventory:operation.inventory_transaction_update',
+      );
+      assert.ok(transactionUpdate);
+      invalid.operations.push({
+        ...(replaceExactString(
+          transactionUpdate,
+          'northstar.inventory:entity.inventory_transaction',
+          'northstar.inventory:entity.inventory_movement',
+        ) as Record<string, unknown>),
+        operationId:
+          'northstar.inventory:operation.inventory_movement_update_regression',
+      });
+      const rejected = compileApplication(moduleInput(invalid));
+      assert.equal(rejected.status, 'failed');
+      if (rejected.status === 'failed') {
+        assert.equal(
+          rejected.diagnostics.some(
+            (diagnostic) =>
+              diagnostic.code ===
+                'COMPILER_DESTRUCTIVE_OPERATION_UNSUPPORTED' &&
+              diagnostic.subjectId ===
+                'northstar.inventory:entity.inventory_movement',
+          ),
+          true,
+        );
+      }
+    },
+  );
+
   register(
     'inventory declarations compile to one deterministic quantity-only contract release',
     () => {
@@ -141,6 +344,229 @@ export function registerInventoryContractCases(
         ),
       ) as unknown;
       assert.deepEqual(releaseSummary(first), golden);
+    },
+  );
+
+  register(
+    'the compiled movement entity is bound to the quantity-only movement contract',
+    () => {
+      const withMoney = structuredClone(inventoryModuleDefinition()) as {
+        fields: Array<Record<string, unknown>>;
+      };
+      const quantity = withMoney.fields.find((field) =>
+        String(field.fieldId).endsWith(
+          ':field.inventory_movement_quantity_delta',
+        ),
+      );
+      assert.ok(quantity);
+      withMoney.fields.push({
+        ...structuredClone(quantity),
+        fieldId: 'northstar.inventory:field.inventory_movement_unit_cost',
+        label: 'Unit cost',
+        orderKey: 170,
+      });
+      const moneyResult = compileApplication(moduleInput(withMoney));
+      assert.equal(moneyResult.status, 'failed');
+      assert.equal(
+        moneyResult.diagnostics.some(
+          ({ code, subjectId }) =>
+            code === 'INVENTORY_MOVEMENT_MONEY_FORBIDDEN' &&
+            subjectId ===
+              'northstar.inventory:field.inventory_movement_unit_cost',
+        ),
+        true,
+      );
+
+      const withRetiredMoney = structuredClone(inventoryModuleDefinition()) as {
+        fields: Array<Record<string, unknown>>;
+      };
+      const retiredQuantity = withRetiredMoney.fields.find((field) =>
+        String(field.fieldId).endsWith(
+          ':field.inventory_movement_quantity_delta',
+        ),
+      );
+      assert.ok(retiredQuantity);
+      withRetiredMoney.fields.push({
+        ...structuredClone(retiredQuantity),
+        fieldId: 'northstar.inventory:field.inventory_movement_unit_cost',
+        label: 'Unit cost',
+        lifecycle: 'retired',
+        orderKey: 170,
+      });
+      const retiredMoneyResult = compileApplication(
+        moduleInput(withRetiredMoney),
+      );
+      assert.equal(retiredMoneyResult.status, 'failed');
+      assert.equal(
+        retiredMoneyResult.diagnostics.some(
+          ({ code, subjectId }) =>
+            code === 'INVENTORY_MOVEMENT_MONEY_FORBIDDEN' &&
+            subjectId ===
+              'northstar.inventory:field.inventory_movement_unit_cost',
+        ),
+        true,
+      );
+
+      const withRetiredMovement = structuredClone(
+        inventoryModuleDefinition(),
+      ) as {
+        entities: Array<{ entityId: string; lifecycle?: string }>;
+      };
+      const retiredMovement = withRetiredMovement.entities.find((entity) =>
+        entity.entityId.endsWith(':entity.inventory_movement'),
+      );
+      assert.ok(retiredMovement);
+      retiredMovement.lifecycle = 'retired';
+      const retiredMovementResult = compileApplication(
+        moduleInput(withRetiredMovement),
+      );
+      assert.equal(retiredMovementResult.status, 'failed');
+      assert.equal(
+        retiredMovementResult.diagnostics.some(
+          ({ code, path, subjectId }) =>
+            code === 'INVENTORY_CONTRACT_INVALID' &&
+            path === '$.entities.inventory_movement.lifecycle' &&
+            subjectId === 'northstar.inventory:entity.inventory_movement',
+        ),
+        true,
+      );
+
+      const withoutQuantity = inventoryDefinitionWithoutMovementField(
+        'inventory_movement_quantity_delta',
+      );
+      const quantityResult = compileApplication(moduleInput(withoutQuantity));
+      assert.equal(quantityResult.status, 'failed');
+      assert.equal(
+        quantityResult.diagnostics.some(
+          ({ code, subjectId }) =>
+            code === 'INVENTORY_CONTRACT_INVALID' &&
+            subjectId ===
+              'northstar.inventory:field.inventory_movement_quantity_delta',
+        ),
+        true,
+      );
+
+      const withoutVersion = inventoryDefinitionWithoutMovementField(
+        'inventory_movement_stock_dimension_set_version',
+      );
+      const versionResult = compileApplication(moduleInput(withoutVersion));
+      assert.equal(versionResult.status, 'failed');
+      assert.equal(
+        versionResult.diagnostics.some(
+          ({ code, subjectId }) =>
+            code === 'INVENTORY_STOCK_DIMENSION_VERSION_REQUIRED' &&
+            subjectId ===
+              'northstar.inventory:field.inventory_movement_stock_dimension_set_version',
+        ),
+        true,
+      );
+
+      const withRenamedVersion = structuredClone(
+        inventoryModuleDefinition(),
+      ) as {
+        fields: Array<{
+          fieldId: string;
+          fieldType: { options?: Array<{ optionId: string }> };
+        }>;
+      };
+      const versionField = withRenamedVersion.fields.find((field) =>
+        field.fieldId.endsWith(
+          ':field.inventory_movement_stock_dimension_set_version',
+        ),
+      );
+      assert.ok(versionField?.fieldType.options?.[0]);
+      versionField.fieldType.options[0].optionId =
+        'northstar.inventory:option.stock_dimension_set_version_v2';
+      const renamedVersionResult = compileApplication(
+        moduleInput(withRenamedVersion),
+      );
+      assert.equal(renamedVersionResult.status, 'failed');
+      assert.equal(
+        renamedVersionResult.diagnostics.some(
+          ({ code, subjectId }) =>
+            code === 'INVENTORY_STOCK_DIMENSION_VERSION_REQUIRED' &&
+            subjectId ===
+              'northstar.inventory:field.inventory_movement_stock_dimension_set_version',
+        ),
+        true,
+      );
+    },
+  );
+
+  register(
+    'period locks expose only the named advance and reopen mutation authority',
+    () => {
+      const definition = structuredClone(inventoryModuleDefinition()) as Record<
+        string,
+        unknown
+      >;
+      const operations = definition.operations as Array<
+        Record<string, unknown>
+      >;
+      const permissions = definition.permissions as Array<
+        Record<string, unknown>
+      >;
+      const templateOperation = operations.find((operation) =>
+        String(operation.operationId).endsWith(
+          ':operation.inventory_transaction_create',
+        ),
+      );
+      const templatePermission = permissions.find((permission) =>
+        String(permission.permissionId).endsWith(
+          ':permission.inventory_transaction_create',
+        ),
+      );
+      assert.ok(templateOperation);
+      assert.ok(templatePermission);
+      const periodEntityId = 'northstar.inventory:entity.inventory_period_lock';
+      const permissionId =
+        'northstar.inventory:permission.inventory_period_lock_create';
+      permissions.push({
+        ...structuredClone(templatePermission),
+        permissionId,
+        resource: {
+          kind: 'entityReference',
+          schemaVersion: 'v3',
+          targetId: periodEntityId,
+        },
+      });
+      operations.push({
+        ...structuredClone(templateOperation),
+        effect: {
+          entity: {
+            kind: 'entityReference',
+            schemaVersion: 'v3',
+            targetId: periodEntityId,
+          },
+          kind: 'createRecordEffect',
+          schemaVersion: 'v3',
+        },
+        operationId:
+          'northstar.inventory:operation.inventory_period_lock_create',
+        permission: {
+          kind: 'permissionReference',
+          schemaVersion: 'v3',
+          targetId: permissionId,
+        },
+        readBack: {
+          kind: 'queryReference',
+          schemaVersion: 'v3',
+          targetId: 'northstar.inventory:query.inventory_period_lock_get',
+        },
+      });
+      const result = compileApplication(moduleInput(definition));
+      assert.equal(result.status, 'failed');
+      if (result.status !== 'failed') return;
+      assert.equal(
+        result.diagnostics.some(
+          (diagnostic) =>
+            diagnostic.code === 'COMPILER_ENTITY_PROJECTION_MISSING' &&
+            diagnostic.path === '$.conformance.operation.periodLockLifecycle' &&
+            diagnostic.subjectId === periodEntityId,
+        ),
+        true,
+        JSON.stringify(result.diagnostics),
+      );
     },
   );
 
@@ -781,16 +1207,49 @@ function storageTargetPayloadVersion(definition: unknown): string {
   return reference.payloadSchemaVersion;
 }
 
-function entityOwnedStorageDefinition(): unknown {
-  return replaceExactString(
-    replaceExactString(
-      ordinaryModuleV2(),
-      FIXTURE_IDS.entityIds.parent,
-      `${FIXTURE_IDS.namespace}:entity.location`,
-    ),
-    FIXTURE_IDS.entityIds.child,
-    `${FIXTURE_IDS.namespace}:entity.inventory_movement`,
+function projectionPayload<T>(compiled: CompileSuccess, familyId: string): T {
+  const reference = compiled.bundle.releaseManifest.projections.find(
+    (projection) => projection.familyId === familyId,
   );
+  assert.ok(reference);
+  const manifestArtifact = compiled.bundle.artifacts.find(
+    (artifact) => artifact.contentHash === reference.artifactRoot,
+  );
+  assert.ok(manifestArtifact);
+  const manifest = JSON.parse(
+    new TextDecoder().decode(manifestArtifact.canonicalBytes),
+  ) as { chunks: Array<{ contentHash: string }> };
+  assert.equal(manifest.chunks.length, 1);
+  const chunk = compiled.bundle.artifacts.find(
+    (artifact) => artifact.contentHash === manifest.chunks[0]?.contentHash,
+  );
+  assert.ok(chunk);
+  return JSON.parse(new TextDecoder().decode(chunk.canonicalBytes)) as T;
+}
+
+function entityOwnedStorageDefinition(): unknown {
+  return inventoryModuleDefinition();
+}
+
+function inventoryDefinitionWithoutMovementField(
+  fieldLocalId: string,
+): Record<string, unknown> {
+  const definition = structuredClone(inventoryModuleDefinition()) as {
+    fields: Array<{ fieldId: string }>;
+    queries: Array<{
+      selections: Array<{ field: { targetId: string } }>;
+    }>;
+  };
+  const suffix = `:field.${fieldLocalId}`;
+  definition.fields = definition.fields.filter(
+    (field) => !field.fieldId.endsWith(suffix),
+  );
+  for (const query of definition.queries) {
+    query.selections = query.selections.filter(
+      (selection) => !selection.field.targetId.endsWith(suffix),
+    );
+  }
+  return definition;
 }
 
 function replaceExactString(value: unknown, from: string, to: string): unknown {
