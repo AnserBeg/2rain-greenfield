@@ -14,6 +14,13 @@ export const TENANT_INDEPENDENT_DEFINITION =
 
 const tableRelationKinds = new Set(['f', 'p', 'r']);
 const knownNonTableRelationKinds = new Set(['c', 'm', 'v']);
+
+export type TenantIndependentReasonCode =
+  | 'kernel-integrity-witness'
+  | 'migration-history'
+  | 'shared-immutable-catalog'
+  | 'shared-immutable-content';
+
 const independentReasonCodes = new Set([
   'kernel-integrity-witness',
   'migration-history',
@@ -21,11 +28,24 @@ const independentReasonCodes = new Set([
   'shared-immutable-content',
 ]);
 
-export type TenantIndependentReasonCode =
-  | 'kernel-integrity-witness'
-  | 'migration-history'
-  | 'shared-immutable-catalog'
-  | 'shared-immutable-content';
+// Tenant independence is a closed v1 exception set, not a label a new table
+// can self-assign. Extending this registry is an explicit reviewed contract
+// change paired with the checked manifest.
+const tenantIndependentV1TableAuthorities: ReadonlyMap<
+  string,
+  TenantIndependentReasonCode
+> = new Map([
+  [
+    'north_star_internal.module_fold_function_ddl_witnesses',
+    'kernel-integrity-witness',
+  ],
+  ['north_star_internal.module_storage_elements', 'shared-immutable-catalog'],
+  ['north_star_internal.schema_migrations', 'migration-history'],
+  ['platform.immutable_release_write_guard', 'kernel-integrity-witness'],
+  ['platform.release_activation_write_guard', 'kernel-integrity-witness'],
+  ['platform.release_artifact_blobs', 'shared-immutable-content'],
+  ['platform.trust_immutable_write_guard', 'kernel-integrity-witness'],
+]);
 
 export interface TenantScopedClassification {
   readonly classification: 'tenant-scoped';
@@ -78,6 +98,7 @@ export type TenantCompletenessDiagnosticCode =
   | 'TENANT_ENUMERATION_DUPLICATE'
   | 'TENANT_ENUMERATION_EMPTY'
   | 'TENANT_ENUMERATION_OBJECT_KIND_UNKNOWN'
+  | 'TENANT_INDEPENDENT_AUTHORITY_INVALID'
   | 'TENANT_INDEPENDENT_BUSINESS_TABLE'
   | 'TENANT_INDEPENDENT_REASON_INVALID'
   | 'TENANT_MANIFEST_INVALID'
@@ -407,6 +428,19 @@ function verifyClassification(
       throw new TenantCompletenessError(
         'TENANT_INDEPENDENT_BUSINESS_TABLE',
         `${key} is a business or tenant-bearing table and cannot be tenant-independent`,
+      );
+    }
+    const authorizedReasonCode = tenantIndependentV1TableAuthorities.get(key);
+    if (authorizedReasonCode === undefined) {
+      throw new TenantCompletenessError(
+        'TENANT_INDEPENDENT_AUTHORITY_INVALID',
+        `${key} is not a governed tenant-independent table in v1`,
+      );
+    }
+    if (authorizedReasonCode !== classification.reasonCode) {
+      throw new TenantCompletenessError(
+        'TENANT_INDEPENDENT_AUTHORITY_INVALID',
+        `${key} must use v1 tenant-independent reason code ${authorizedReasonCode}, not ${classification.reasonCode}`,
       );
     }
     return;

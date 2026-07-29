@@ -70,7 +70,7 @@ test('empty and unknown-kind enumerations fail closed', (context) => {
   context.diagnostic(unknown.message);
 });
 
-test('duplicate, business-independent, and missing-column classifications fail', (context) => {
+test('duplicate, independent-authority, and missing-column classifications fail', (context) => {
   const tables = enumerateTenantTablesFromSnapshot(loadSnapshot());
   const manifest = loadManifest();
   const duplicate = expectDiagnostic(
@@ -86,23 +86,23 @@ test('duplicate, business-independent, and missing-column classifications fail',
   );
   context.diagnostic(duplicate.message);
 
-  const businessIndependent = mutateClassification(
+  const wrongIndependentAuthority = mutateClassification(
     manifest,
-    'platform.tenant_fixture_records',
+    'platform.release_artifact_blobs',
     {
       classification: 'tenant-independent',
       reason:
-        'Fixture business records would remain shared across every tenant under this deliberately invalid negative control.',
+        'Content-addressed canonical release bytes are immutable and deliberately shared; tenant reachability is recorded by tenant-release links.',
       reasonCode: 'shared-immutable-catalog',
       schema: 'platform',
-      table: 'tenant_fixture_records',
+      table: 'release_artifact_blobs',
     },
   );
-  const business = expectDiagnostic(
-    () => verifyTenantCompleteness(businessIndependent, tables),
-    'TENANT_INDEPENDENT_BUSINESS_TABLE',
+  const authority = expectDiagnostic(
+    () => verifyTenantCompleteness(wrongIndependentAuthority, tables),
+    'TENANT_INDEPENDENT_AUTHORITY_INVALID',
   );
-  context.diagnostic(business.message);
+  context.diagnostic(authority.message);
 
   const missingColumn = mutateClassification(
     manifest,
@@ -345,6 +345,53 @@ test('ADR-0011 enumeration discovers unclassified tables in known and new schema
         verifyTenantCompleteness(manifest, await enumerateTenantTables(client))
           .tableCount,
         49,
+      );
+
+      await client.query(
+        `CREATE TABLE platform.g3_p2a_tenantless_business_records (
+           record_id uuid NOT NULL PRIMARY KEY,
+           display_name text NOT NULL
+         )`,
+      );
+      const tenantlessBusinessTables = await enumerateTenantTables(client);
+      const tenantlessBusinessTable = tenantlessBusinessTables.find(
+        ({ schema, table }) =>
+          schema === 'platform' &&
+          table === 'g3_p2a_tenantless_business_records',
+      );
+      assert.ok(tenantlessBusinessTable);
+      assert.equal(
+        tenantlessBusinessTable.columns.some(
+          ({ name }) => name === 'tenant_id',
+        ),
+        false,
+      );
+      const forgedIndependentManifest: TenantCompletenessManifest = {
+        ...manifest,
+        expectedTableCount: manifest.expectedTableCount + 1,
+        tables: [
+          ...manifest.tables,
+          {
+            classification: 'tenant-independent',
+            reason:
+              'Business records are incorrectly presented as a shared immutable catalog across every tenant for this negative control.',
+            reasonCode: 'shared-immutable-catalog',
+            schema: 'platform',
+            table: 'g3_p2a_tenantless_business_records',
+          },
+        ],
+      };
+      const forgedIndependentError = expectDiagnostic(
+        () =>
+          verifyTenantCompleteness(
+            forgedIndependentManifest,
+            tenantlessBusinessTables,
+          ),
+        'TENANT_INDEPENDENT_AUTHORITY_INVALID',
+      );
+      context.diagnostic(forgedIndependentError.message);
+      await client.query(
+        'DROP TABLE platform.g3_p2a_tenantless_business_records',
       );
 
       await client.query(

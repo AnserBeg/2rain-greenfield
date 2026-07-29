@@ -40,6 +40,14 @@ the authority for what exists. Consequently:
 - an entry matching no live table is stale and red; and
 - each physical partition or foreign table is a table and needs its own entry.
 
+Stated limit: `TENANT_ENUMERATION_OBJECT_KIND_UNKNOWN` has injected-snapshot
+evidence only. ADR-0011's shared live walker currently admits exactly PostgreSQL
+relation kinds `r`, `p`, `v`, `m`, `c`, and `f`; this covers every row-holding
+relation kind PostgreSQL currently exposes. A future PostgreSQL relation kind
+would be filtered upstream before this verifier could diagnose it. G3-P2b owns
+the shared-walker contract correction with its migration/provider evidence; this
+packet does not imply live unknown-kind coverage.
+
 ## Meaning of tenant-independent
 
 V1 defines tenant-independent narrowly:
@@ -54,6 +62,11 @@ immutable catalog, and shared immutable content. A free-text reason must explain
 the database-wide mechanism or shared identity; “no tenant column” and equivalent
 restatements fail. Any table in `north_star_module`, any table carrying
 `tenant_id`, and `platform.tenants` cannot be declared independent.
+
+V1 additionally binds tenant independence to a closed table authority: the
+seven independently classified tables below, each paired with its one permitted
+reason code. A new table cannot claim a legitimate code to manufacture
+independence; extending the authority is an explicit reviewed contract change.
 
 `platform.tenants` is tenant-scoped by its required UUID `id`, because that row
 is the root tenant identity. Every other current scoped table uses a required
@@ -128,16 +141,17 @@ partitioned and foreign tables when they appear.
 ## Executed reds and anti-vacuity evidence
 
 These diagnostics were emitted by the real verifier during the passing focused
-architecture run. The first two table probes were actual DDL in disposable
-PostgreSQL, followed by a fresh ADR-0011 snapshot walk; neither table was
-inserted into a verifier fixture list.
+architecture run. The unclassified-table, new-schema, and tenant-less business
+probes were actual DDL in disposable PostgreSQL followed by fresh ADR-0011
+snapshot walks; none was inserted into a verifier fixture list.
 
 | Vacuity vector | Deliberately executed case | Real output |
 |---|---|---|
 | An unclassified table is ignored | create `platform.g3_p2a_unclassified_probe` after migrations | `TENANT_TABLE_UNCLASSIFIED: platform.g3_p2a_unclassified_probe has no tenant-completeness classification` |
 | A concurrently integrated migration silently widens the schema | merge accepted 1b migration 0013 before updating this manifest | `TENANT_TABLE_UNCLASSIFIED: platform.release_verification_evidence has no tenant-completeness classification` |
 | Enumeration is bounded by known schemas or a hand list | create schema `g3_p2a_unlisted_plane` and table `shadow_business_records` | `TENANT_TABLE_UNCLASSIFIED: g3_p2a_unlisted_plane.shadow_business_records has no tenant-completeness classification` |
-| A business table can claim independence | replace `platform.tenant_fixture_records` with a shared-catalog declaration | `TENANT_INDEPENDENT_BUSINESS_TABLE: platform.tenant_fixture_records is a business or tenant-bearing table and cannot be tenant-independent` |
+| A new business table without `tenant_id` can claim a governed independence code | create real `platform.g3_p2a_tenantless_business_records` with only business fields, classify it `shared-immutable-catalog`, and freshly enumerate it | `TENANT_INDEPENDENT_AUTHORITY_INVALID: platform.g3_p2a_tenantless_business_records is not a governed tenant-independent table in v1` |
+| A governed independent table can claim the wrong governed code | classify `platform.release_artifact_blobs` as `shared-immutable-catalog` | `TENANT_INDEPENDENT_AUTHORITY_INVALID: platform.release_artifact_blobs must use v1 tenant-independent reason code shared-immutable-content, not shared-immutable-catalog` |
 | A scoped declaration need not name a real column | name `missing_tenant_id` on `platform.saved_master_filters` | `TENANT_COLUMN_MISSING: platform.saved_master_filters names missing tenant column missing_tenant_id` |
 | “No tenant column” passes as a reason | replace the migration-history reason with that restatement | `TENANT_INDEPENDENT_REASON_INVALID: tables[10].reason must explain the platform-wide mechanism or shared immutable identity; absence of a tenant column is not a reason` |
 | The checked count can disagree with its own entries | declare 50 tables while carrying 49 classifications | `TENANT_TABLE_COUNT_MISMATCH: manifest declares 50 tables but contains 49 classifications` |
@@ -145,7 +159,7 @@ inserted into a verifier fixture list.
 | A malformed classification can carry an unreviewed field | add `unreviewedDefault` to the first manifest entry | `TENANT_MANIFEST_INVALID: tables[0] must contain exactly classification, reason, reasonCode, schema, table` |
 | More than one classification still resolves | append a second classification for the fold witness | `TENANT_CLASSIFICATION_DUPLICATE: north_star_internal.module_fold_function_ddl_witnesses has more than one tenancy classification` |
 | Zero input passes vacuously | verify the manifest against no tables | `TENANT_ENUMERATION_EMPTY: cannot verify tenant completeness against zero tables` |
-| An unknown enumerated kind is silently skipped | replace one observed relation kind with `?` | `TENANT_ENUMERATION_OBJECT_KIND_UNKNOWN: unknown relation kind ? for north_star_internal.module_fold_function_ddl_witnesses` |
+| An unknown enumerated kind is silently skipped (injected-snapshot evidence only; live limitation stated above) | replace one observed snapshot relation kind with `?` | `TENANT_ENUMERATION_OBJECT_KIND_UNKNOWN: unknown relation kind ? for north_star_internal.module_fold_function_ddl_witnesses` |
 | A removed table leaves an accepted stale declaration | add a classification for absent `platform.removed_business_records` | `TENANT_CLASSIFICATION_STALE: platform.removed_business_records is classified but was not enumerated` |
 | Any required UUID can impersonate tenant authority | name the real `environment_id` UUID on `platform.saved_master_filters` | `TENANT_COLUMN_INVALID: platform.saved_master_filters.environment_id must be a required uuid trusted tenant identifier` |
 | Tenant column nullability is not checked | make the observed `tenant_id` nullable | `nullable: TENANT_COLUMN_INVALID: platform.saved_master_filters.tenant_id must be a required uuid trusted tenant identifier` |
@@ -215,6 +229,13 @@ The first review of integrated candidate `6e13abf` returned `REVISE` because
 parser-time count mismatch, verifier-time count mismatch, and malformed-entry
 branches lacked direct reds. The successor adds all three controls and records
 their exact diagnostics above. The `6e13abf` matrix and verdict are invalidated.
+
+The fresh review of `eb64bc5` returned `REVISE` on two findings. The user ruled
+the tenant-less business-table bypass in-scope and directed the closed v1 table
+authority now implemented and exercised above. The live unknown-kind finding was
+denied as an out-of-scope limitation in ADR-0011's shared walker and routed to
+G3-P2b; the exact proof boundary is stated under Enumeration and closure. All
+review and matrix evidence for `eb64bc5` is invalidated by this successor.
 
 ## Test it yourself
 
