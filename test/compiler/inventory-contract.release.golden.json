@@ -86,6 +86,10 @@
       },
       {
         "classification": "entityOwned",
+        "familyId": "inventory_period_lock"
+      },
+      {
+        "classification": "entityOwned",
         "familyId": "reservation"
       },
       {
@@ -174,9 +178,9 @@
     ],
     "kind": "quantityOnlyMovement"
   },
-  "releaseRoot": "c65517349623a30f3ddce75e57dca0af404646e82f27e73ce0b6586b4c1d17fb",
+  "releaseRoot": "e3868a1c07b6bbf73de264b349b28718c94e7460e2b1538908ad32ca55153b99",
   "storageTargetPayloadVersions": {
-    "entityOwned": "northstar.storage-target-payload/v2",
+    "entityOwned": "northstar.storage-target-payload/v3",
     "tenantShared": "northstar.storage-target-payload/v1"
   },
   "stockDimensions": ["legalEntityId", "itemId", "locationId"]

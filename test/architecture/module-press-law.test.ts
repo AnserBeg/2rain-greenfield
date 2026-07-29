@@ -37,11 +37,12 @@ test('one auto-discovered guard covers every definition-backed product module', 
   console.log(formatModulePressLaw(result));
   assert.deepEqual(result.moduleDirectories, [
     'catalog',
+    'inventory',
     'location',
     'party',
     'platform',
   ]);
-  assert.equal(result.modulesRead, 4);
+  assert.equal(result.modulesRead, 5);
   assert.ok(
     result.productionFilesRead > 0,
     'press-law guard read zero production files',
@@ -118,6 +119,22 @@ test('consolidated guard derives generated query and operation local IDs', () =>
         ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
       },
     ]);
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});
+
+test('consolidated guard distinguishes a module namespace from a longer contract namespace', () => {
+  const root = createArchitectureFixture({
+    'apps/api/src/generic.ts':
+      "export const schema = 'northstar.widget-contract/v1';\n",
+    'packages/domain/src/widget/definition.ts': [
+      "export const WIDGET_NAMESPACE = 'northstar.widget';",
+      'const entityId = `${WIDGET_NAMESPACE}:entity.widget`;',
+    ].join('\n'),
+  });
+  try {
+    assert.deepEqual(checkModulePressLaw(root).violations, []);
   } finally {
     removeArchitectureFixture(root);
   }

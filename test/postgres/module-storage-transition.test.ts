@@ -7,6 +7,12 @@ import test from 'node:test';
 import pg from 'pg';
 
 import {
+  APPLICATION_NAMESPACE,
+  composedApplicationDefinition,
+} from '../../packages/domain/src/app/builder.js';
+import { inventoryModuleDefinition } from '../../packages/domain/src/inventory/definition.js';
+
+import {
   CANONICALIZATION_PROFILE_VERSION,
   CONTENT_HASH_ALGORITHM,
   UNICODE_CASE_FOLD_EXPANSIONS,
@@ -79,6 +85,8 @@ const environmentA = 'a2000000-0000-4000-8000-000000000002';
 const environmentB = 'b2000000-0000-4000-8000-000000000002';
 const principalA = 'a3000000-0000-4000-8000-000000000003';
 const principalB = 'b3000000-0000-4000-8000-000000000003';
+const inventoryContractReleaseRoot =
+  'e3868a1c07b6bbf73de264b349b28718c94e7460e2b1538908ad32ca55153b99';
 const approverA = 'a4000000-0000-4000-8000-000000000004';
 const demonstrateFoldFunctionDrift =
   process.env.PR6B_DEMONSTRATE_FOLD_FUNCTION_DRIFT;
@@ -143,6 +151,7 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
           '0012_saved_master_filters.sql',
           '0013_release_verification_evidence.sql',
           '0014_archive_excluding_module_uniqueness.sql',
+          '0015_inventory_storage_foundation.sql',
         ]);
         assert.equal(migrationResult.verified.length, allMigrations.length);
         await seedScope(admin);
@@ -1991,8 +2000,9 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
   );
 });
 
-test('entity-owned v2 targets materialize legal-entity keys and base-unit binding constraints', async () => {
+test('inventory v3 targets materialize the compiled legal master, fact partitions, and base-unit binding', async () => {
   const legalEntityId = randomUUID();
+  const legalEntityB = randomUUID();
   const emptyDefinition = emptyModuleDefinition();
   const source = mustCompile(moduleInput(emptyDefinition));
   const targetDefinition = inventoryOwnedModuleDefinition();
@@ -2003,16 +2013,46 @@ test('entity-owned v2 targets materialize legal-entity keys and base-unit bindin
     target,
     PROJECTION_FAMILY_IDS.storageTarget,
   );
-  assert.equal(storage.schemaVersion, 'northstar.storage-target-payload/v2');
+  assert.equal(storage.schemaVersion, 'northstar.storage-target-payload/v3');
   const item = storage.entities.find((entity) =>
     entity.entityId.endsWith(':entity.item'),
   );
   const movement = storage.entities.find((entity) =>
     entity.entityId.endsWith(':entity.inventory_movement'),
   );
+  const legalEntity = storage.entities.find(
+    (entity) => entity.legalEntityMaster !== undefined,
+  );
   assert.ok(item);
   assert.equal(item.legalEntity, undefined);
   assert.ok(movement?.legalEntity);
+  assert.ok(movement.factStorage);
+  assert.ok(legalEntity?.legalEntityMaster);
+  const transition = projectionPayload<StorageTransitionEnvelope>(
+    target,
+    PROJECTION_FAMILY_IDS.storageTransition,
+  );
+  const legalEntityTable = transition.elements.find(
+    (element) =>
+      element.kind === 'createTable' &&
+      element.subjectId === legalEntity.entityId,
+  );
+  assert.ok(legalEntityTable);
+  for (const entity of storage.entities.filter(
+    (candidate) => candidate.legalEntity !== undefined,
+  )) {
+    const table = transition.elements.find(
+      (element) =>
+        element.kind === 'createTable' && element.subjectId === entity.entityId,
+    );
+    assert.ok(table);
+    assert.ok(
+      table.declaredDependencyIds.includes(legalEntityTable.elementId),
+      `${entity.entityId} must depend on the legal-entity master table`,
+    );
+  }
+  const factStorage = movement.factStorage;
+  const legalEntityMaster = legalEntity.legalEntityMaster;
   const baseUnit = item.columns.find((column) =>
     column.canonicalFieldId.endsWith(':field.item_base_unit'),
   );
@@ -2030,7 +2070,14 @@ test('entity-owned v2 targets materialize legal-entity keys and base-unit bindin
              $1, $2, $3, 'LE-A', 'Legal Entity A', 'America/Edmonton',
              '06:00:00', $4
            )`,
-          [tenantA, environmentA, legalEntityId, target.releaseRoot],
+          [tenantA, environmentA, legalEntityId, inventoryContractReleaseRoot],
+        );
+        await admin.query(
+          `SELECT platform.provision_inventory_scope(
+             $1, $2, $3, 'LE-B', 'Legal Entity B', 'America/Toronto',
+             '04:00:00', $4
+           )`,
+          [tenantB, environmentB, legalEntityB, inventoryContractReleaseRoot],
         );
       } finally {
         admin.release();
@@ -2078,6 +2125,79 @@ test('entity-owned v2 targets materialize legal-entity keys and base-unit bindin
         });
         assert.equal(prepared.schemaState, 'APPLIED');
 
+        const legalEntityBValues = legalEntity.columns.map((column) => {
+          if (column.physicalName === legalEntityMaster.fieldColumns.code)
+            return 'LE-B';
+          if (column.physicalName === legalEntityMaster.fieldColumns.name)
+            return 'Legal Entity B';
+          if (column.physicalName === legalEntityMaster.fieldColumns.status)
+            return legalEntityMaster.activeStatusValue;
+          if (column.physicalName === legalEntityMaster.fieldColumns.isDefault)
+            return true;
+          if (column.nullable) return null;
+          throw new Error(
+            `unmapped legal-entity field ${column.canonicalFieldId}`,
+          );
+        });
+        await pool.query(
+          `INSERT INTO north_star_module.${quoteTestIdentifier(legalEntity.physicalTableName)} (
+             tenant_id, environment_id,
+             ${quoteTestIdentifier(legalEntity.recordIdentity.column)},
+             ${legalEntity.columns
+               .map((column) => quoteTestIdentifier(column.physicalName))
+               .join(', ')}
+           ) VALUES (${[
+             tenantB,
+             environmentB,
+             legalEntityB,
+             ...legalEntityBValues,
+           ]
+             .map((_, index) => `$${String(index + 1)}`)
+             .join(', ')})`,
+          [tenantB, environmentB, legalEntityB, ...legalEntityBValues],
+        );
+
+        const secondDefaultId = randomUUID();
+        const secondDefaultValues = legalEntity.columns.map((column) => {
+          if (column.physicalName === legalEntityMaster.fieldColumns.code)
+            return 'LE-SECOND';
+          if (column.physicalName === legalEntityMaster.fieldColumns.name)
+            return 'Second default';
+          if (column.physicalName === legalEntityMaster.fieldColumns.status)
+            return legalEntityMaster.activeStatusValue;
+          if (column.physicalName === legalEntityMaster.fieldColumns.isDefault)
+            return true;
+          if (column.nullable) return null;
+          throw new Error(
+            `unmapped legal-entity field ${column.canonicalFieldId}`,
+          );
+        });
+        await assert.rejects(
+          pool.query(
+            `INSERT INTO north_star_module.${quoteTestIdentifier(legalEntity.physicalTableName)} (
+               tenant_id, environment_id,
+               ${quoteTestIdentifier(legalEntity.recordIdentity.column)},
+               ${legalEntity.columns
+                 .map((column) => quoteTestIdentifier(column.physicalName))
+                 .join(', ')}
+             ) VALUES (${[
+               tenantA,
+               environmentA,
+               secondDefaultId,
+               ...secondDefaultValues,
+             ]
+               .map((_, index) => `$${String(index + 1)}`)
+               .join(', ')})`,
+            [tenantA, environmentA, secondDefaultId, ...secondDefaultValues],
+          ),
+          (error: unknown) =>
+            error instanceof Error &&
+            (error as Error & { code?: string; constraint?: string }).code ===
+              '23505' &&
+            (error as Error & { code?: string; constraint?: string })
+              .constraint === legalEntityMaster.defaultUniqueIndex.physicalName,
+        );
+
         const legalColumn = await pool.query<{
           is_nullable: boolean;
           postgresql_type: string;
@@ -2099,6 +2219,70 @@ test('entity-owned v2 targets materialize legal-entity keys and base-unit bindin
         );
         assert.deepEqual(legalColumn.rows, [
           { is_nullable: false, postgresql_type: 'uuid' },
+        ]);
+
+        const companion = factStorage.companion;
+        const stockVersionColumn = movement.columns.find((column) =>
+          column.canonicalFieldId.endsWith(
+            ':field.inventory_movement_stock_dimension_set_version',
+          ),
+        );
+        assert.ok(stockVersionColumn);
+        const movementColumns = await pool.query<{
+          is_nullable: boolean;
+          name: string;
+        }>(
+          `SELECT attribute.attname AS name,
+                  NOT attribute.attnotnull AS is_nullable
+             FROM pg_attribute AS attribute
+             JOIN pg_class AS relation ON relation.oid = attribute.attrelid
+             JOIN pg_namespace AS namespace
+               ON namespace.oid = relation.relnamespace
+            WHERE namespace.nspname = 'north_star_module'
+              AND relation.relname = $1
+              AND attribute.attnum > 0
+              AND NOT attribute.attisdropped
+            ORDER BY attribute.attnum`,
+          [movement.physicalTableName],
+        );
+        assert.equal(
+          movementColumns.rows.some(({ name }) =>
+            /(?:amount|cost|currency|money|price|value|lot|serial|bin)/iu.test(
+              name,
+            ),
+          ),
+          false,
+        );
+        for (const required of [
+          'legal_entity_id',
+          'business_period',
+          stockVersionColumn.physicalName,
+          factStorage.fieldColumns.itemId,
+          factStorage.fieldColumns.locationId,
+          factStorage.fieldColumns.recordedAt,
+        ]) {
+          assert.equal(
+            movementColumns.rows.find(({ name }) => name === required)
+              ?.is_nullable,
+            false,
+          );
+        }
+
+        const partitionShape = await pool.query<{
+          leaves: string;
+          partition_key: string;
+        }>(
+          `SELECT pg_get_partkeydef($1::regclass) AS partition_key,
+                  count(*) FILTER (WHERE isleaf)::text AS leaves
+             FROM pg_partition_tree($1::regclass)
+            GROUP BY partition_key`,
+          [`north_star_module.${movement.physicalTableName}`],
+        );
+        assert.deepEqual(partitionShape.rows, [
+          {
+            leaves: '8',
+            partition_key: 'HASH (tenant_id, business_period)',
+          },
         ]);
 
         const constraints = await pool.query<{
@@ -2131,85 +2315,82 @@ test('entity-owned v2 targets materialize legal-entity keys and base-unit bindin
             WHERE source_namespace.nspname = 'north_star_module'
               AND source.relname = ANY($1::text[])
             ORDER BY source.relname, constraint_record.conname`,
-          [[item.physicalTableName, movement.physicalTableName]],
+          [
+            [
+              item.physicalTableName,
+              movement.physicalTableName,
+              companion.physicalTableName,
+            ],
+          ],
         );
-        const legalForeignKey = constraints.rows.find(
-          (constraint) =>
-            constraint.table_name === movement.physicalTableName &&
-            constraint.type === 'f' &&
-            constraint.referenced_schema === 'platform' &&
-            constraint.referenced_table === 'legal_entities',
-        );
-        assert.ok(legalForeignKey);
-        const baseUnitCheck = constraints.rows.find(
-          (constraint) =>
-            constraint.table_name === item.physicalTableName &&
-            constraint.type === 'c' &&
-            constraint.definition?.includes(
-              'inventory_base_unit_change_allowed',
-            ),
-        );
-        assert.ok(baseUnitCheck);
-
-        const indexes = await pool.query<{
-          first_column: string;
-          predicate: string | null;
-          second_column: string;
-          third_column: string;
-        }>(
-          `SELECT pg_get_indexdef(index_relation.oid, 1, true) AS first_column,
-                  pg_get_indexdef(index_relation.oid, 2, true) AS second_column,
-                  pg_get_indexdef(index_relation.oid, 3, true) AS third_column,
-                  pg_get_expr(
-                    index_record.indpred,
-                    index_record.indrelid,
-                    true
-                  ) AS predicate
-             FROM pg_index AS index_record
-             JOIN pg_class AS source
-               ON source.oid = index_record.indrelid
-             JOIN pg_class AS index_relation
-               ON index_relation.oid = index_record.indexrelid
-             JOIN pg_namespace AS namespace
-               ON namespace.oid = source.relnamespace
-            WHERE namespace.nspname = 'north_star_module'
-              AND source.relname = $1
-              AND index_record.indisunique
-              AND NOT index_record.indisprimary
-            ORDER BY index_relation.relname`,
-          [movement.physicalTableName],
-        );
-        assert.equal(indexes.rows.length, 2);
-        assert.equal(
-          indexes.rows.every(
-            (index) =>
-              index.first_column === 'tenant_id' &&
-              index.second_column === 'environment_id' &&
-              index.third_column === 'legal_entity_id' &&
-              index.predicate === 'archived_at IS NULL',
+        assert.ok(
+          constraints.rows.some(
+            (constraint) =>
+              constraint.table_name === movement.physicalTableName &&
+              constraint.type === 'f' &&
+              constraint.referenced_schema === 'north_star_module' &&
+              constraint.referenced_table === legalEntity.physicalTableName,
           ),
+        );
+        assert.ok(
+          constraints.rows.some(
+            (constraint) =>
+              constraint.table_name === item.physicalTableName &&
+              constraint.type === 'c' &&
+              constraint.definition?.includes(
+                'inventory_base_unit_change_allowed',
+              ),
+          ),
+        );
+        assert.ok(
+          constraints.rows.some(
+            (constraint) =>
+              constraint.table_name === movement.physicalTableName &&
+              constraint.name ===
+                factStorage.businessPeriod.checkConstraintName,
+          ),
+        );
+        assert.ok(
+          constraints.rows.some(
+            (constraint) =>
+              constraint.table_name === companion.physicalTableName &&
+              constraint.name === companion.movementForeignKey.physicalName &&
+              constraint.referenced_table === movement.physicalTableName,
+          ),
+        );
+
+        const tableGrants = await pool.query<{
+          grantee: string;
+          privilege_type: string;
+          table_name: string;
+        }>(
+          `SELECT grantee, table_name, privilege_type
+             FROM information_schema.role_table_grants
+            WHERE table_schema = 'north_star_module'
+              AND table_name = ANY($1::text[])
+              AND grantee IN (
+                'north_star_module_materializer', 'north_star_module_runtime'
+              )
+            ORDER BY table_name, grantee, privilege_type`,
+          [[movement.physicalTableName, companion.physicalTableName]],
+        );
+        assert.equal(tableGrants.rows.length, 9);
+        assert.equal(
+          tableGrants.rows
+            .filter(({ grantee }) => grantee === 'north_star_module_runtime')
+            .every(({ privilege_type }) =>
+              ['INSERT', 'SELECT'].includes(privilege_type),
+            ),
           true,
         );
-
-        const runtimeGrants = await pool.query<{
-          column_name: string;
-          privilege_type: string;
-        }>(
-          `SELECT column_name, privilege_type
-             FROM information_schema.column_privileges
-            WHERE table_schema = 'north_star_module'
-              AND table_name = $1
-              AND grantee = 'north_star_module_runtime'
-            ORDER BY column_name, privilege_type`,
-          [movement.physicalTableName],
-        );
         assert.equal(
-          runtimeGrants.rows.some(
-            (grant) =>
-              grant.column_name === 'legal_entity_id' &&
-              grant.privilege_type === 'UPDATE',
+          tableGrants.rows.some(
+            ({ grantee, privilege_type, table_name }) =>
+              grantee === 'north_star_module_materializer' &&
+              privilege_type === 'UPDATE' &&
+              table_name === movement.physicalTableName,
           ),
-          false,
+          true,
         );
 
         const itemId = randomUUID();
@@ -2240,79 +2421,352 @@ test('entity-owned v2 targets materialize legal-entity keys and base-unit bindin
           itemValues,
         );
 
-        const transactionId = randomUUID();
-        const transactionLineId = randomUUID();
         const movementId = randomUUID();
+        const sourceId = randomUUID();
         const locationId = randomUUID();
         const effectiveAt = '2026-07-29T12:00:00.000Z';
-        await pool.query(
-          `INSERT INTO platform.inventory_transactions (
-             tenant_id, environment_id, legal_entity_id, transaction_id,
-             transaction_number, transaction_type, state, source_type,
-             source_id, effective_at, recorded_at, actor_id
-           ) VALUES (
-             $1,$2,$3,$4,$5,'adjustment','posted','adjustment',$6,$7,$8,$9
-           )`,
-          [
-            tenantA,
-            environmentA,
-            legalEntityId,
-            transactionId,
-            `ADJ-${transactionId}`,
-            randomUUID(),
-            effectiveAt,
-            '2026-07-29T13:00:00.000Z',
-            principalA,
-          ],
-        );
-        await pool.query(
-          `INSERT INTO platform.inventory_transaction_lines (
-             tenant_id, environment_id, legal_entity_id, transaction_line_id,
-             transaction_id, line_number, item_id, to_location_id, quantity,
-             unit_id
-           ) VALUES ($1,$2,$3,$4,$5,1,$6,$7,1,'EA')`,
-          [
-            tenantA,
-            environmentA,
-            legalEntityId,
-            transactionLineId,
-            transactionId,
-            itemId,
-            locationId,
-          ],
-        );
+        const recordedAt = '2026-07-29T13:00:00.000Z';
         const period = await pool.query<{ business_period: string }>(
           `SELECT north_star_internal.inventory_business_period($1, $2)
              AS business_period`,
           [tenantA, effectiveAt],
         );
-        await pool.query(
-          `INSERT INTO platform.inventory_movements (
-             tenant_id, environment_id, legal_entity_id, business_period,
-             movement_id, transaction_id, transaction_line_id,
-             stock_dimension_set_version, item_id, location_id,
-             quantity_delta, unit_id, effective_at, recorded_at, source_type,
-             source_id, source_line, revision, posting_role, actor_id
-           ) VALUES (
-             $1,$2,$3,$4,$5,$6,$7,'v1',$8,$9,1,'EA',$10,$11,
-             'adjustment',$12,'1',1,'adjustment',$13
-           )`,
-          [
-            tenantA,
-            environmentA,
-            legalEntityId,
-            period.rows[0]?.business_period,
-            movementId,
-            transactionId,
-            transactionLineId,
-            itemId,
-            locationId,
-            effectiveAt,
-            '2026-07-29T13:00:00.000Z',
-            randomUUID(),
-            principalA,
-          ],
+        const movementValue = (
+          column: (typeof movement.columns)[number],
+          input: {
+            effectiveAt: string;
+            itemId: string;
+            locationId: string;
+            recordedAt: string;
+            sourceId: string;
+            sourceLine: string;
+            stockVersion?: string | null;
+          },
+        ): unknown => {
+          const localId = column.canonicalFieldId.split(':field.').at(-1);
+          switch (localId) {
+            case 'inventory_movement_transaction_id':
+            case 'inventory_movement_transaction_line_id':
+            case 'inventory_movement_actor_id':
+              return randomUUID();
+            case 'inventory_movement_stock_dimension_set_version':
+              return input.stockVersion === undefined
+                ? column.fieldContract.enumOptionIds.find((id) =>
+                    id.endsWith('_v1'),
+                  )
+                : input.stockVersion;
+            case 'inventory_movement_item_id':
+              return input.itemId;
+            case 'inventory_movement_location_id':
+              return input.locationId;
+            case 'inventory_movement_quantity_delta':
+              return '2';
+            case 'inventory_movement_unit_id':
+              return 'EA';
+            case 'inventory_movement_effective_at':
+              return input.effectiveAt;
+            case 'inventory_movement_recorded_at':
+              return input.recordedAt;
+            case 'inventory_movement_source_type':
+              return 'adjustment';
+            case 'inventory_movement_source_id':
+              return input.sourceId;
+            case 'inventory_movement_source_line':
+              return input.sourceLine;
+            case 'inventory_movement_source_revision':
+              return '1';
+            case 'inventory_movement_posting_role':
+              return column.fieldContract.enumOptionIds.find((id) =>
+                id.endsWith('_adjustment'),
+              );
+            case 'inventory_movement_reason_code':
+            case 'inventory_movement_reason_narrative':
+            case 'inventory_movement_reversal_of_movement_id':
+              return null;
+            default:
+              throw new Error(`unmapped movement field ${String(localId)}`);
+          }
+        };
+        const insertMovement = async (input: {
+          businessPeriod: string;
+          effectiveAt: string;
+          environmentId: string;
+          itemId: string;
+          legalEntityId: string;
+          locationId: string;
+          movementId: string;
+          recordedAt: string;
+          sourceId: string;
+          sourceLine: string;
+          stockVersion?: string | null;
+          tenantId: string;
+        }): Promise<void> => {
+          const values = [
+            input.tenantId,
+            input.environmentId,
+            input.legalEntityId,
+            input.businessPeriod,
+            input.movementId,
+            ...movement.columns.map((column) => movementValue(column, input)),
+          ];
+          await pool.query(
+            `INSERT INTO north_star_module.${quoteTestIdentifier(movement.physicalTableName)} (
+               tenant_id, environment_id, legal_entity_id, business_period,
+               ${quoteTestIdentifier(movement.recordIdentity.column)},
+               ${movement.columns
+                 .map((column) => quoteTestIdentifier(column.physicalName))
+                 .join(', ')}
+             ) VALUES (${values.map((_, index) => `$${String(index + 1)}`).join(', ')})`,
+            values,
+          );
+        };
+        const movementInput = {
+          businessPeriod: period.rows[0]!.business_period,
+          effectiveAt,
+          environmentId: environmentA,
+          itemId,
+          legalEntityId,
+          locationId,
+          movementId,
+          recordedAt,
+          sourceId,
+          sourceLine: '1',
+          tenantId: tenantA,
+        };
+        await assert.rejects(
+          insertMovement({
+            ...movementInput,
+            businessPeriod: '2000-01-01',
+            movementId: randomUUID(),
+            sourceLine: 'wrong-period',
+          }),
+          hasPostgresErrorCode('23514'),
         );
+        await assert.rejects(
+          insertMovement({
+            ...movementInput,
+            movementId: randomUUID(),
+            sourceLine: 'missing-version',
+            stockVersion: null,
+          }),
+          hasPostgresErrorCode('23502'),
+        );
+        await assert.rejects(
+          insertMovement({
+            ...movementInput,
+            movementId: randomUUID(),
+            sourceLine: 'unknown-version',
+            stockVersion: 'v2',
+          }),
+          hasPostgresErrorCode('23514'),
+        );
+        for (const member of ['itemId', 'locationId'] as const) {
+          await assert.rejects(
+            insertMovement({
+              ...movementInput,
+              [member]: '00000000-0000-0000-0000-000000000000',
+              movementId: randomUUID(),
+              sourceLine: `unspecified-${member}`,
+            }),
+            hasPostgresErrorCode('23514'),
+          );
+        }
+        await insertMovement(movementInput);
+
+        const plan = await pool.query<{ 'QUERY PLAN': unknown }>(
+          `EXPLAIN (FORMAT JSON, COSTS FALSE)
+           SELECT ${quoteTestIdentifier(movement.recordIdentity.column)}
+             FROM north_star_module.${quoteTestIdentifier(movement.physicalTableName)}
+            WHERE tenant_id = $1 AND business_period = $2`,
+          [tenantA, period.rows[0]!.business_period],
+        );
+        assert.equal(
+          collectPlanRelationNames(plan.rows[0]?.['QUERY PLAN']).filter(
+            (name) =>
+              factStorage.partitioning.partitions.some(
+                (partition) => partition.physicalTableName === name,
+              ),
+          ).length,
+          1,
+        );
+
+        const effectValues = companion.columns.map((column) => {
+          if (column.name === 'tenant_id') return tenantA;
+          if (column.name === 'environment_id') return environmentA;
+          if (column.name === 'legal_entity_id') return legalEntityId;
+          if (column.name === 'business_period')
+            return period.rows[0]!.business_period;
+          if (column.name === 'record_id') return movementId;
+          if (column.name === factStorage.fieldColumns.sourceType)
+            return 'adjustment';
+          if (column.name === factStorage.fieldColumns.sourceId)
+            return sourceId;
+          if (column.name === factStorage.fieldColumns.sourceLine) return '1';
+          if (column.name === factStorage.fieldColumns.sourceRevision)
+            return '1';
+          if (column.name === factStorage.fieldColumns.postingRole) {
+            const postingRole = movement.columns.find(
+              (candidate) => candidate.physicalName === column.name,
+            );
+            return postingRole?.fieldContract.enumOptionIds.find((id) =>
+              id.endsWith('_adjustment'),
+            );
+          }
+          throw new Error(`unmapped companion column ${column.name}`);
+        });
+        const queryAsModuleRuntime = async (
+          statement: string,
+          values: readonly unknown[],
+        ): Promise<pg.QueryResult> => {
+          const client = await moduleRuntimePool.connect();
+          try {
+            await client.query('BEGIN');
+            await client.query(
+              `SELECT set_config('north_star.tenant_id', $1, true),
+                      set_config('north_star.environment_id', $2, true),
+                      set_config('north_star.principal_id', $3, true)`,
+              [tenantA, environmentA, principalA],
+            );
+            const result = await client.query(statement, [...values]);
+            await client.query('COMMIT');
+            return result;
+          } catch (error) {
+            await client.query('ROLLBACK');
+            throw error;
+          } finally {
+            client.release();
+          }
+        };
+        await queryAsModuleRuntime(
+          `INSERT INTO north_star_module.${quoteTestIdentifier(companion.physicalTableName)} (
+             ${companion.columns
+               .map((column) => quoteTestIdentifier(column.name))
+               .join(', ')}
+           ) VALUES (${effectValues.map((_, index) => `$${String(index + 1)}`).join(', ')})`,
+          effectValues,
+        );
+
+        const secondEffectiveAt = '2026-08-01T12:00:00.000Z';
+        const secondPeriod = await pool.query<{ business_period: string }>(
+          `SELECT north_star_internal.inventory_business_period($1, $2)
+             AS business_period`,
+          [tenantA, secondEffectiveAt],
+        );
+        const secondMovementId = randomUUID();
+        await insertMovement({
+          ...movementInput,
+          businessPeriod: secondPeriod.rows[0]!.business_period,
+          effectiveAt: secondEffectiveAt,
+          movementId: secondMovementId,
+          recordedAt: '2026-08-01T13:00:00.000Z',
+        });
+        const movementB = randomUUID();
+        const effectiveAtB = '2026-07-29T10:00:00.000Z';
+        const periodB = await pool.query<{ business_period: string }>(
+          `SELECT north_star_internal.inventory_business_period($1, $2)
+             AS business_period`,
+          [tenantB, effectiveAtB],
+        );
+        await insertMovement({
+          businessPeriod: periodB.rows[0]!.business_period,
+          effectiveAt: effectiveAtB,
+          environmentId: environmentB,
+          itemId: randomUUID(),
+          legalEntityId: legalEntityB,
+          locationId: randomUUID(),
+          movementId: movementB,
+          recordedAt: '2026-07-29T12:30:00.000Z',
+          sourceId: randomUUID(),
+          sourceLine: 'tenant-b',
+          tenantId: tenantB,
+        });
+        const extractAtHorizon = async (
+          context: TrustedRequestContext,
+        ): Promise<string[]> => {
+          const client = await moduleRuntimePool.connect();
+          try {
+            await client.query('BEGIN');
+            await client.query(
+              `SELECT set_config('north_star.tenant_id', $1, true),
+                      set_config('north_star.environment_id', $2, true),
+                      set_config('north_star.principal_id', $3, true)`,
+              [context.tenantId, context.environmentId, context.principalId],
+            );
+            const rows = await client.query<{ record_id: string }>(
+              `SELECT ${quoteTestIdentifier(movement.recordIdentity.column)} AS record_id
+                 FROM north_star_module.${quoteTestIdentifier(movement.physicalTableName)}
+                WHERE ${quoteTestIdentifier(factStorage.fieldColumns.recordedAt)} <= $1
+                ORDER BY ${quoteTestIdentifier(factStorage.fieldColumns.recordedAt)},
+                         ${quoteTestIdentifier(movement.recordIdentity.column)}`,
+              ['2026-07-29T14:00:00.000Z'],
+            );
+            await client.query('COMMIT');
+            return rows.rows.map(({ record_id }) => record_id);
+          } catch (error) {
+            await client.query('ROLLBACK');
+            throw error;
+          } finally {
+            client.release();
+          }
+        };
+        assert.deepEqual(await extractAtHorizon(contexts.a), [movementId]);
+        assert.deepEqual(await extractAtHorizon(contexts.b), [movementB]);
+
+        const secondEffectValues = companion.columns.map((column, index) => {
+          if (column.name === 'business_period')
+            return secondPeriod.rows[0]!.business_period;
+          if (column.name === 'record_id') return secondMovementId;
+          return effectValues[index];
+        });
+        await assert.rejects(
+          queryAsModuleRuntime(
+            `INSERT INTO north_star_module.${quoteTestIdentifier(companion.physicalTableName)} (
+               ${companion.columns
+                 .map((column) => quoteTestIdentifier(column.name))
+                 .join(', ')}
+             ) VALUES (${secondEffectValues.map((_, index) => `$${String(index + 1)}`).join(', ')})`,
+            secondEffectValues,
+          ),
+          hasPostgresErrorCode('23505'),
+        );
+        const mismatchedEffectValues = secondEffectValues.map((value, index) =>
+          companion.columns[index]?.name === factStorage.fieldColumns.sourceLine
+            ? 'not-the-movement-source-line'
+            : value,
+        );
+        await assert.rejects(
+          queryAsModuleRuntime(
+            `INSERT INTO north_star_module.${quoteTestIdentifier(companion.physicalTableName)} (
+               ${companion.columns
+                 .map((column) => quoteTestIdentifier(column.name))
+                 .join(', ')}
+             ) VALUES (${mismatchedEffectValues.map((_, index) => `$${String(index + 1)}`).join(', ')})`,
+            mismatchedEffectValues,
+          ),
+          hasPostgresErrorCode('23503'),
+        );
+
+        for (const statement of [
+          `UPDATE north_star_module.${quoteTestIdentifier(movement.physicalTableName)}
+              SET revision = revision + 1
+            WHERE record_id = $1`,
+          `DELETE FROM north_star_module.${quoteTestIdentifier(movement.physicalTableName)}
+            WHERE record_id = $1`,
+          `UPDATE north_star_module.${quoteTestIdentifier(companion.physicalTableName)}
+              SET business_period = business_period
+            WHERE record_id = $1`,
+          `DELETE FROM north_star_module.${quoteTestIdentifier(companion.physicalTableName)}
+            WHERE record_id = $1`,
+        ]) {
+          await assert.rejects(
+            pool.query(statement, [movementId]),
+            (error: unknown) =>
+              error instanceof Error &&
+              (error as Error & { code?: string }).code === 'P0001' &&
+              error.message === 'INVENTORY_MOVEMENT_IMMUTABLE',
+          );
+        }
+
         await assert.rejects(
           pool.query(
             `UPDATE north_star_module.${quoteTestIdentifier(item.physicalTableName)}
@@ -3205,32 +3659,54 @@ function emptyModuleDefinition(): Record<string, unknown> {
 }
 
 function inventoryOwnedModuleDefinition(): Record<string, unknown> {
-  const definition = replaceExactDefinitionString(
-    replaceExactDefinitionString(
-      replaceExactDefinitionString(
-        ordinaryModuleV2(),
-        FIXTURE_IDS.entityIds.parent,
-        `${FIXTURE_IDS.namespace}:entity.item`,
-      ),
-      FIXTURE_IDS.entityIds.child,
-      `${FIXTURE_IDS.namespace}:entity.inventory_movement`,
-    ),
-    FIXTURE_IDS.fieldIds.parentName,
-    `${FIXTURE_IDS.namespace}:field.item_base_unit`,
-  ) as Record<string, unknown>;
-  const fields = definition.fields as Array<Record<string, unknown>>;
-  const movementField = fields.find(
-    (field) => field.fieldId === FIXTURE_IDS.fieldIds.childRole,
-  );
-  assert.ok(movementField);
-  movementField.businessKey = 'tenantEnvironmentCaseInsensitiveUnique';
-  movementField.collation = 'unicodeCaseInsensitive';
-  movementField.fieldType = {
-    kind: 'textFieldType',
-    maximumLength: 40,
-    schemaVersion: movementField.schemaVersion,
-  };
-  return definition;
+  const application = composedApplicationDefinition();
+  const inventory = inventoryModuleDefinition(APPLICATION_NAMESPACE);
+  const mergedCollections = [
+    'assertions',
+    'entities',
+    'fields',
+    'operations',
+    'permissions',
+    'queries',
+    'relations',
+    'stateMachines',
+    'storageMappings',
+    'surfaces',
+  ] as const;
+  for (const collection of mergedCollections) {
+    application[collection] = [
+      ...(application[collection] as unknown[]),
+      ...(inventory[collection] as unknown[]),
+    ];
+  }
+  const inventoryModule = (
+    inventory.modules as Array<Record<string, unknown>>
+  )[0];
+  assert.ok(inventoryModule);
+  (application.modules as Array<Record<string, unknown>>).push({
+    ...inventoryModule,
+    orderKey: 40,
+    ownerPackageId: (application.package as { packageId: string }).packageId,
+  });
+  return application;
+}
+
+function collectPlanRelationNames(value: unknown): string[] {
+  if (Array.isArray(value)) return value.flatMap(collectPlanRelationNames);
+  if (typeof value !== 'object' || value === null) return [];
+  const record = value as Record<string, unknown>;
+  return [
+    ...(typeof record['Relation Name'] === 'string'
+      ? [record['Relation Name']]
+      : []),
+    ...Object.values(record).flatMap(collectPlanRelationNames),
+  ];
+}
+
+function hasPostgresErrorCode(code: string): (error: unknown) => boolean {
+  return (error: unknown) =>
+    error instanceof Error &&
+    (error as Error & { code?: string }).code === code;
 }
 
 function replaceExactDefinitionString(

@@ -1,7 +1,7 @@
 {
   "schemaVersion": "northstar.tenant-completeness-manifest/v1",
   "tenantIndependentDefinition": "A table is tenant-independent only when its rows represent a database-wide kernel mechanism or immutable content deliberately shared across tenants; business records are never tenant-independent, and absence of a tenant column is not evidence.",
-  "expectedTableCount": 65,
+  "expectedTableCount": 51,
   "tables": [
     {
       "schema": "north_star_internal",
@@ -99,72 +99,6 @@
     },
     {
       "schema": "platform",
-      "table": "inventory_movement_effects",
-      "classification": "tenant-scoped",
-      "tenantColumn": "tenant_id"
-    },
-    {
-      "schema": "platform",
-      "table": "inventory_movements",
-      "classification": "tenant-scoped",
-      "tenantColumn": "tenant_id"
-    },
-    {
-      "schema": "platform",
-      "table": "inventory_movements_p0",
-      "classification": "tenant-scoped",
-      "tenantColumn": "tenant_id"
-    },
-    {
-      "schema": "platform",
-      "table": "inventory_movements_p1",
-      "classification": "tenant-scoped",
-      "tenantColumn": "tenant_id"
-    },
-    {
-      "schema": "platform",
-      "table": "inventory_movements_p2",
-      "classification": "tenant-scoped",
-      "tenantColumn": "tenant_id"
-    },
-    {
-      "schema": "platform",
-      "table": "inventory_movements_p3",
-      "classification": "tenant-scoped",
-      "tenantColumn": "tenant_id"
-    },
-    {
-      "schema": "platform",
-      "table": "inventory_movements_p4",
-      "classification": "tenant-scoped",
-      "tenantColumn": "tenant_id"
-    },
-    {
-      "schema": "platform",
-      "table": "inventory_movements_p5",
-      "classification": "tenant-scoped",
-      "tenantColumn": "tenant_id"
-    },
-    {
-      "schema": "platform",
-      "table": "inventory_movements_p6",
-      "classification": "tenant-scoped",
-      "tenantColumn": "tenant_id"
-    },
-    {
-      "schema": "platform",
-      "table": "inventory_movements_p7",
-      "classification": "tenant-scoped",
-      "tenantColumn": "tenant_id"
-    },
-    {
-      "schema": "platform",
-      "table": "inventory_period_locks",
-      "classification": "tenant-scoped",
-      "tenantColumn": "tenant_id"
-    },
-    {
-      "schema": "platform",
       "table": "inventory_posting_configurations",
       "classification": "tenant-scoped",
       "tenantColumn": "tenant_id"
@@ -172,24 +106,6 @@
     {
       "schema": "platform",
       "table": "inventory_tenant_calendars",
-      "classification": "tenant-scoped",
-      "tenantColumn": "tenant_id"
-    },
-    {
-      "schema": "platform",
-      "table": "inventory_transaction_lines",
-      "classification": "tenant-scoped",
-      "tenantColumn": "tenant_id"
-    },
-    {
-      "schema": "platform",
-      "table": "inventory_transactions",
-      "classification": "tenant-scoped",
-      "tenantColumn": "tenant_id"
-    },
-    {
-      "schema": "platform",
-      "table": "legal_entities",
       "classification": "tenant-scoped",
       "tenantColumn": "tenant_id"
     },

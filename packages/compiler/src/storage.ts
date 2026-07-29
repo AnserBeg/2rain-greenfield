@@ -4,8 +4,10 @@ import type { NormalizedApplicationPackage } from '@north-star/canonical-model';
 
 import {
   isPinnedInventoryBaseUnitField,
+  isPinnedLegalEntityMaster,
   resolvePinnedInventoryFactStorage,
   resolvePinnedInventoryMovementFieldRole,
+  resolvePinnedLegalEntityMasterFieldRole,
   resolvePinnedLegalEntityFamily,
 } from './conformance.js';
 import { compilerDiagnostic } from './diagnostics.js';
@@ -314,6 +316,11 @@ export interface StorageFactTarget {
     columns: string[];
     physicalName: string;
   };
+  stockIdentityV1MemberChecks: Array<{
+    column: string;
+    physicalName: string;
+    rejectedSentinel: '00000000-0000-0000-0000-000000000000';
+  }>;
 }
 
 export interface StorageEntityTarget {
@@ -352,6 +359,21 @@ export interface StorageEntityTarget {
     nullable: false;
     postgresqlType: 'uuid';
     referencedFamilyId: 'legal_entity';
+  };
+  legalEntityMaster?: {
+    activeStatusValue: string;
+    defaultUniqueIndex: {
+      columns: ['tenant_id', 'environment_id'];
+      physicalName: string;
+      predicate: string;
+    };
+    fieldColumns: {
+      code: string;
+      isDefault: string;
+      name: string;
+      status: string;
+    };
+    provisioning: 'oneDefaultPerTenantEnvironment';
   };
   optimisticRevision: {
     column: string;
@@ -439,7 +461,12 @@ export interface StorageCheckConstraintTarget {
 export interface StorageIndexTarget {
   columnNames: string[];
   indexKind:
-    'caseInsensitiveUnique' | 'foldedAccess' | 'relation' | 'stockHorizon';
+    | 'caseInsensitiveUnique'
+    | 'foldedAccess'
+    | 'legalEntityDefaultUnique'
+    | 'relation'
+    | 'resolveAccess'
+    | 'stockHorizon';
   physicalName: string;
   predicate: string | null;
 }
@@ -637,6 +664,7 @@ export function lowerStorageTargetV1(
           );
           if (
             !field ||
+            !isUnicodeFoldableField(field) ||
             (field.businessKey !== 'tenantEnvironmentCaseInsensitiveUnique' &&
               !field.searchable &&
               !resolveMatchFieldIds.has(field.fieldId))
@@ -719,14 +747,13 @@ export function lowerStorageTargetV1(
       const indexes: StorageIndexTarget[] = [];
       const archiveExcludingPredicate = 'archived_at IS NULL';
       for (const column of columns) {
+        const field = (fieldsByEntity.get(entity.entityId) ?? []).find(
+          (candidate) => candidate.fieldId === column.canonicalFieldId,
+        );
         const foldedColumn = foldedColumns.find(
           (candidate) => candidate.canonicalFieldId === column.canonicalFieldId,
         );
-        if (
-          (fieldsByEntity.get(entity.entityId) ?? []).find(
-            (field) => field.fieldId === column.canonicalFieldId,
-          )?.businessKey === 'tenantEnvironmentCaseInsensitiveUnique'
-        ) {
+        if (field?.businessKey === 'tenantEnvironmentCaseInsensitiveUnique') {
           const physicalName = physicalNameFor(
             'constraint',
             `${column.canonicalFieldId}/tenant-environment-unique`,
@@ -793,6 +820,30 @@ export function lowerStorageTargetV1(
             index,
           );
         }
+        if (
+          field &&
+          resolveMatchFieldIds.has(field.fieldId) &&
+          !isUnicodeFoldableField(field)
+        ) {
+          const physicalName = physicalNameFor(
+            'index',
+            `${column.canonicalFieldId}/tenant-environment-resolve-access`,
+          );
+          const index = {
+            columnNames: [...businessKeyScopeColumns, column.physicalName],
+            indexKind: 'resolveAccess' as const,
+            physicalName,
+            predicate: null,
+          };
+          indexes.push(index);
+          addMapping(
+            mappings,
+            'index',
+            `${column.canonicalFieldId}#tenant-environment-resolve-access`,
+            physicalName,
+            index,
+          );
+        }
       }
       const factStorage = factRule
         ? buildFactStorageTarget(
@@ -803,12 +854,31 @@ export function lowerStorageTargetV1(
             mappings,
           )
         : undefined;
+      const legalEntityMaster = isPinnedLegalEntityMaster(
+        packageRevision.package.packageId,
+        entity.entityId,
+      )
+        ? buildLegalEntityMasterTarget(
+            packageRevision.package.packageId,
+            entity.entityId,
+            columns,
+            mappings,
+          )
+        : undefined;
       if (factStorage) {
         indexes.push({
           columnNames: factStorage.stockHorizonIndex.columns,
           indexKind: 'stockHorizon',
           physicalName: factStorage.stockHorizonIndex.physicalName,
           predicate: null,
+        });
+      }
+      if (legalEntityMaster) {
+        indexes.push({
+          columnNames: [...legalEntityMaster.defaultUniqueIndex.columns],
+          indexKind: 'legalEntityDefaultUnique',
+          physicalName: legalEntityMaster.defaultUniqueIndex.physicalName,
+          predicate: legalEntityMaster.defaultUniqueIndex.predicate,
         });
       }
       return {
@@ -826,6 +896,7 @@ export function lowerStorageTargetV1(
               ] as const,
             }
           : {}),
+        ...(legalEntityMaster ? { legalEntityMaster } : {}),
         checkConstraints,
         columns,
         consumerWriterRoots: {
@@ -1062,6 +1133,63 @@ export function lowerStorageTargetV1(
   };
 }
 
+function buildLegalEntityMasterTarget(
+  packageId: string,
+  entityId: string,
+  columns: readonly StorageColumnTarget[],
+  mappings: PhysicalMappingRecord[],
+): NonNullable<StorageEntityTarget['legalEntityMaster']> {
+  const byRole = new Map<string, StorageColumnTarget>();
+  for (const column of columns) {
+    const role = resolvePinnedLegalEntityMasterFieldRole(
+      packageId,
+      entityId,
+      column.canonicalFieldId,
+    );
+    if (role) byRole.set(role, column);
+  }
+  const required = (role: string): StorageColumnTarget => {
+    const column = byRole.get(role);
+    if (!column) {
+      throw new Error(
+        `LEGAL_ENTITY_MASTER_FIELD_REQUIRED: ${entityId}/${role}`,
+      );
+    }
+    return column;
+  };
+  const status = required('status');
+  const activeStatusValue = status.fieldContract.enumOptionIds.find((option) =>
+    option.endsWith('_active'),
+  );
+  if (!activeStatusValue) {
+    throw new Error(`LEGAL_ENTITY_MASTER_ACTIVE_STATUS_REQUIRED: ${entityId}`);
+  }
+  const isDefault = required('isDefault');
+  const defaultUniqueIndex = {
+    columns: ['tenant_id', 'environment_id'] as ['tenant_id', 'environment_id'],
+    physicalName: physicalNameFor('index', `${entityId}/one-active-default`),
+    predicate: `${isDefault.physicalName} IS TRUE AND archived_at IS NULL`,
+  };
+  addMapping(
+    mappings,
+    'index',
+    `${entityId}#one-active-default`,
+    defaultUniqueIndex.physicalName,
+    defaultUniqueIndex,
+  );
+  return {
+    activeStatusValue,
+    defaultUniqueIndex,
+    fieldColumns: {
+      code: required('code').physicalName,
+      isDefault: isDefault.physicalName,
+      name: required('name').physicalName,
+      status: status.physicalName,
+    },
+    provisioning: 'oneDefaultPerTenantEnvironment',
+  };
+}
+
 function buildFactStorageTarget(
   packageId: string,
   entityId: string,
@@ -1142,6 +1270,24 @@ function buildFactStorageTarget(
     'index',
     `${entityId}/stock-horizon`,
   );
+  const stockIdentityV1MemberChecks = [
+    {
+      column: fieldColumns.itemId,
+      physicalName: physicalNameFor(
+        'constraint',
+        `${entityId}/stock-identity-v1/item-real-value`,
+      ),
+      rejectedSentinel: '00000000-0000-0000-0000-000000000000' as const,
+    },
+    {
+      column: fieldColumns.locationId,
+      physicalName: physicalNameFor(
+        'constraint',
+        `${entityId}/stock-identity-v1/location-real-value`,
+      ),
+      rejectedSentinel: '00000000-0000-0000-0000-000000000000' as const,
+    },
+  ];
 
   const partitioning = {
     keyColumns: ['tenant_id', 'business_period'] as const,
@@ -1208,6 +1354,15 @@ function buildFactStorageTarget(
     stockHorizonIndexName,
     { columns: [fieldColumns.itemId, fieldColumns.locationId] },
   );
+  for (const check of stockIdentityV1MemberChecks) {
+    addMapping(
+      mappings,
+      'constraint',
+      `${entityId}#stock-identity-v1-real-${check.column}`,
+      check.physicalName,
+      check,
+    );
+  }
   addMapping(
     mappings,
     'trigger',
@@ -1315,6 +1470,7 @@ function buildFactStorageTarget(
       ],
       physicalName: stockHorizonIndexName,
     },
+    stockIdentityV1MemberChecks,
   };
 }
 
@@ -1333,7 +1489,26 @@ export function buildStorageTransitionEnvelope(
   const elements: StorageTransitionElement[] = [];
   const debts: TighteningDebt[] = [];
   const createdTableElementIds = new Map<string, string>();
-
+  const legalEntityMaster = candidate.entities.find(
+    (entity) => entity.legalEntityMaster !== undefined,
+  );
+  const newLegalEntityMasterTableElement =
+    legalEntityMaster && !previousEntities.has(legalEntityMaster.entityId)
+      ? element(
+          'createTable',
+          legalEntityMaster.entityId,
+          null,
+          legalEntityMaster.physicalTableName,
+          [],
+          'samePlan',
+        )
+      : null;
+  if (newLegalEntityMasterTableElement && legalEntityMaster) {
+    createdTableElementIds.set(
+      legalEntityMaster.entityId,
+      newLegalEntityMasterTableElement.elementId,
+    );
+  }
   for (const oldEntityId of previousEntities.keys()) {
     if (!candidateEntities.has(oldEntityId)) {
       return failureDiagnostic(
@@ -1347,14 +1522,25 @@ export function buildStorageTransitionEnvelope(
   for (const entity of candidate.entities) {
     const oldEntity = previousEntities.get(entity.entityId);
     if (!oldEntity) {
-      const tableElement = element(
-        'createTable',
-        entity.entityId,
-        null,
-        entity.physicalTableName,
-        [],
-        'samePlan',
-      );
+      const tableDependencies = entity.legalEntity
+        ? [
+            legalEntityMaster
+              ? createdTableElementIds.get(legalEntityMaster.entityId)
+              : undefined,
+          ].filter((entry): entry is string => entry !== undefined)
+        : [];
+      const tableElement =
+        entity.entityId === legalEntityMaster?.entityId &&
+        newLegalEntityMasterTableElement
+          ? newLegalEntityMasterTableElement
+          : element(
+              'createTable',
+              entity.entityId,
+              null,
+              entity.physicalTableName,
+              tableDependencies,
+              'samePlan',
+            );
       elements.push(tableElement);
       createdTableElementIds.set(entity.entityId, tableElement.elementId);
       const factDependencies: string[] = [];
@@ -2013,6 +2199,13 @@ export function postgresqlTypeFor(fieldType: FieldType): string {
     case 'timeFieldType':
       return `time(${fieldType.precision === 'second' ? 0 : 3}) without time zone`;
   }
+}
+
+function isUnicodeFoldableField(field: Field): boolean {
+  return (
+    field.fieldType.kind === 'textFieldType' ||
+    field.fieldType.kind === 'enumFieldType'
+  );
 }
 
 function lowerColumn(

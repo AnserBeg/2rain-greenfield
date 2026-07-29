@@ -1143,6 +1143,43 @@ async function applyDdlElement(
       await createManagedTable(client, target, entity);
       return;
     }
+    case 'createPartition': {
+      const located = locateFactPartition(target, element);
+      await client.query(
+        `CREATE TABLE IF NOT EXISTS north_star_module.${quoted(located.partition.physicalTableName)}
+           PARTITION OF north_star_module.${quoted(located.entity.physicalTableName)}
+           FOR VALUES WITH (
+             MODULUS ${String(located.partition.modulus)},
+             REMAINDER ${String(located.partition.remainder)}
+           )`,
+      );
+      return;
+    }
+    case 'createCompanionTable': {
+      const entity = target.entities.find(
+        (candidate) =>
+          candidate.factStorage?.companion.physicalTableName ===
+          element.physicalObjectName,
+      );
+      if (!entity?.factStorage) {
+        throw failure('ELEMENT_TARGET_MISSING', element.elementId);
+      }
+      await createFactCompanionTable(client, entity);
+      return;
+    }
+    case 'createRejectMutationTrigger': {
+      const located = locateRejectMutationTrigger(target, element);
+      await ensureRejectMutationTrigger(
+        client,
+        located.tableName,
+        element.physicalObjectName,
+      );
+      return;
+    }
+    case 'addAbiFunctionCheck': {
+      await ensureAbiFunctionCheck(client, target, element);
+      return;
+    }
     case 'addColumn': {
       const folded = locateFoldedColumn(target, element);
       if (folded) {
@@ -1167,7 +1204,7 @@ async function applyDdlElement(
       const columns = indexColumnExpressions(located.entity, located.index);
       const predicate = indexPredicateSql(located.entity, located.index);
       await client.query(
-        `CREATE ${located.index.indexKind === 'caseInsensitiveUnique' ? 'UNIQUE ' : ''}INDEX IF NOT EXISTS ${quoted(located.index.physicalName)}
+        `CREATE ${isUniqueStorageIndex(located.index) ? 'UNIQUE ' : ''}INDEX IF NOT EXISTS ${quoted(located.index.physicalName)}
            ON north_star_module.${quoted(located.entity.physicalTableName)}
            (${columns.join(', ')})${predicate ? ` WHERE ${predicate}` : ''}`,
       );
@@ -1245,6 +1282,11 @@ async function createManagedTable(
     ...(entity.legalEntity
       ? [`${quoted(entity.legalEntity.column)} uuid NOT NULL`]
       : []),
+    ...(entity.factStorage
+      ? [
+          `${quoted(entity.factStorage.businessPeriod.column)} ${safeType(entity.factStorage.businessPeriod.postgresqlType)} NOT NULL`,
+        ]
+      : []),
     `${quoted(entity.recordIdentity.column)} uuid NOT NULL`,
     `${quoted(entity.optimisticRevision.column)} bigint NOT NULL DEFAULT 1`,
     `${quoted(entity.archive.archivedAtColumn)} timestamp with time zone`,
@@ -1267,30 +1309,46 @@ async function createManagedTable(
       ? [
           `CONSTRAINT ${quoted(legalEntityForeignKeyName(entity))}
              FOREIGN KEY (tenant_id, environment_id, ${quoted(entity.legalEntity.column)})
-             REFERENCES platform.legal_entities
-               (tenant_id, environment_id, legal_entity_id)
+             REFERENCES north_star_module.${quoted(requiredLegalEntityMaster(target).physicalTableName)}
+               (tenant_id, environment_id, record_id)
              ON DELETE RESTRICT ON UPDATE RESTRICT`,
         ]
       : []),
-    ...(itemBaseUnitColumn(entity)
+    ...(entity.factStorage
       ? [
-          `CONSTRAINT ${quoted(baseUnitBindingConstraintName(entity))}
-             CHECK (north_star_internal.inventory_base_unit_change_allowed(
-               tenant_id,
-               environment_id,
-               ${quoted(entity.recordIdentity.column)},
-               ${quoted(itemBaseUnitColumn(entity)!.physicalName)}::text
-             ))`,
+          `CONSTRAINT ${quoted(entity.factStorage.effectIdentityUnique.physicalName)}
+             UNIQUE (${entity.factStorage.effectIdentityUnique.columns.map(quoted).join(', ')})`,
+          ...entity.factStorage.stockIdentityV1MemberChecks.map(
+            (check) =>
+              `CONSTRAINT ${quoted(check.physicalName)}
+                 CHECK (btrim(${quoted(check.column)}::text) <> ''
+                   AND ${quoted(check.column)}::text <> ${sqlTextLiteral(check.rejectedSentinel)})`,
+          ),
         ]
       : []),
   ];
+  const legalEntityMaster = entity.legalEntity
+    ? requiredLegalEntityMaster(target)
+    : null;
+  if (legalEntityMaster) {
+    await client.query(
+      `GRANT REFERENCES ON north_star_module.${quoted(legalEntityMaster.physicalTableName)}
+         TO north_star_module_materializer`,
+    );
+  }
   await client.query(
     `CREATE TABLE IF NOT EXISTS north_star_module.${quoted(entity.physicalTableName)} (
        ${columns.join(',\n')},
        CONSTRAINT ${quoted(entity.primaryKey.physicalName)} PRIMARY KEY
          (${entity.primaryKey.columns.map(quoted).join(', ')})
-     )`,
+    )${entity.factStorage ? ` PARTITION BY HASH (${entity.factStorage.partitioning.keyColumns.map(quoted).join(', ')})` : ''}`,
   );
+  if (legalEntityMaster) {
+    await client.query(
+      `REVOKE REFERENCES ON north_star_module.${quoted(legalEntityMaster.physicalTableName)}
+         FROM north_star_module_materializer`,
+    );
+  }
   for (const check of entity.checkConstraints ?? []) {
     await ensureEnumCheckConstraint(client, entity, check);
   }
@@ -1303,6 +1361,9 @@ async function createManagedTable(
          (${columns.join(', ')}) WHERE ${predicate}`,
     );
   }
+  if (entity.legalEntityMaster) {
+    await provisionDefaultLegalEntity(client, entity);
+  }
   await client.query(
     `ALTER TABLE north_star_module.${quoted(entity.physicalTableName)} ENABLE ROW LEVEL SECURITY`,
   );
@@ -1311,7 +1372,10 @@ async function createManagedTable(
   );
   const predicate = `tenant_id = north_star_internal.trusted_tenant_id()
     AND environment_id = north_star_internal.trusted_environment_id()`;
-  for (const command of ['SELECT', 'INSERT', 'UPDATE'] as const) {
+  const policyCommands = entity.factStorage
+    ? (['SELECT', 'INSERT'] as const)
+    : (['SELECT', 'INSERT', 'UPDATE'] as const);
+  for (const command of policyCommands) {
     const policy = managedPolicyName(entity.physicalTableName, command);
     const exists = await client.query<{ present: boolean }>(
       `SELECT EXISTS (SELECT 1 FROM pg_policies
@@ -1331,10 +1395,20 @@ async function createManagedTable(
       );
     }
   }
+  if (entity.factStorage || entity.legalEntity || entity.legalEntityMaster) {
+    await ensureMaterializerSelectPolicy(client, entity.physicalTableName);
+  }
   await client.query(
     `REVOKE ALL ON north_star_module.${quoted(entity.physicalTableName)} FROM PUBLIC`,
   );
-  if (entity.legalEntity) {
+  if (entity.factStorage) {
+    await client.query(
+      `GRANT SELECT, INSERT ON north_star_module.${quoted(entity.physicalTableName)} TO north_star_module_runtime`,
+    );
+    await client.query(
+      `REVOKE UPDATE ON north_star_module.${quoted(entity.physicalTableName)} FROM north_star_module_runtime`,
+    );
+  } else if (entity.legalEntity) {
     await client.query(
       `GRANT SELECT, INSERT ON north_star_module.${quoted(entity.physicalTableName)} TO north_star_module_runtime`,
     );
@@ -1362,6 +1436,243 @@ async function createManagedTable(
   );
 }
 
+function locateFactPartition(
+  target: StorageTargetPayloadV1,
+  element: StorageTransitionElement,
+) {
+  for (const entity of target.entities) {
+    const partition = entity.factStorage?.partitioning.partitions.find(
+      (candidate) => candidate.physicalTableName === element.physicalObjectName,
+    );
+    if (partition) return { entity, partition };
+  }
+  throw failure('ELEMENT_TARGET_MISSING', element.elementId);
+}
+
+function locateRejectMutationTrigger(
+  target: StorageTargetPayloadV1,
+  element: StorageTransitionElement,
+): { tableName: string } {
+  for (const entity of target.entities) {
+    if (
+      entity.factStorage?.rejectMutationTriggerName ===
+      element.physicalObjectName
+    ) {
+      return { tableName: entity.physicalTableName };
+    }
+    if (
+      entity.factStorage?.companion.rejectMutationTriggerName ===
+      element.physicalObjectName
+    ) {
+      return { tableName: entity.factStorage.companion.physicalTableName };
+    }
+  }
+  throw failure('ELEMENT_TARGET_MISSING', element.elementId);
+}
+
+async function createFactCompanionTable(
+  client: PoolClient,
+  entity: StorageEntityTarget,
+): Promise<void> {
+  const fact = entity.factStorage;
+  if (!fact) throw failure('FACT_STORAGE_TARGET_MISSING', entity.entityId);
+  const companion = fact.companion;
+  await client.query(
+    `GRANT REFERENCES ON north_star_module.${quoted(entity.physicalTableName)}
+       TO north_star_module_materializer`,
+  );
+  await client.query(
+    `CREATE TABLE IF NOT EXISTS north_star_module.${quoted(companion.physicalTableName)} (
+       ${companion.columns
+         .map(
+           (column) =>
+             `${quoted(column.name)} ${safeType(column.postgresqlType)} NOT NULL`,
+         )
+         .join(',\n')},
+       CONSTRAINT ${quoted(companion.primaryKey.physicalName)}
+         PRIMARY KEY (${companion.primaryKey.columns.map(quoted).join(', ')}),
+       CONSTRAINT ${quoted(companion.movementUnique.physicalName)}
+         UNIQUE (${companion.movementUnique.columns.map(quoted).join(', ')}),
+       CONSTRAINT ${quoted(companion.movementForeignKey.physicalName)}
+         FOREIGN KEY (${companion.movementForeignKey.sourceColumns.map(quoted).join(', ')})
+         REFERENCES north_star_module.${quoted(entity.physicalTableName)}
+           (${companion.movementForeignKey.targetColumns.map(quoted).join(', ')})
+         ON DELETE RESTRICT ON UPDATE RESTRICT
+     )`,
+  );
+  await client.query(
+    `REVOKE REFERENCES ON north_star_module.${quoted(entity.physicalTableName)}
+       FROM north_star_module_materializer`,
+  );
+  await client.query(
+    `ALTER TABLE north_star_module.${quoted(companion.physicalTableName)} ENABLE ROW LEVEL SECURITY`,
+  );
+  await client.query(
+    `ALTER TABLE north_star_module.${quoted(companion.physicalTableName)} FORCE ROW LEVEL SECURITY`,
+  );
+  const predicate = `tenant_id = north_star_internal.trusted_tenant_id()
+    AND environment_id = north_star_internal.trusted_environment_id()`;
+  for (const command of ['SELECT', 'INSERT'] as const) {
+    const policy = managedPolicyName(companion.physicalTableName, command);
+    const exists = await client.query<{ present: boolean }>(
+      `SELECT EXISTS (SELECT 1 FROM pg_policies
+        WHERE schemaname = 'north_star_module' AND tablename = $1 AND policyname = $2) AS present`,
+      [companion.physicalTableName, policy],
+    );
+    if (!exists.rows[0]?.present) {
+      const clause =
+        command === 'SELECT'
+          ? `USING (${predicate})`
+          : `WITH CHECK (${predicate})`;
+      await client.query(
+        `CREATE POLICY ${quoted(policy)} ON north_star_module.${quoted(companion.physicalTableName)}
+           FOR ${command} TO north_star_module_runtime ${clause}`,
+      );
+    }
+  }
+  await ensureMaterializerSelectPolicy(client, companion.physicalTableName);
+  await client.query(
+    `REVOKE ALL ON north_star_module.${quoted(companion.physicalTableName)} FROM PUBLIC`,
+  );
+  await client.query(
+    `GRANT SELECT, INSERT ON north_star_module.${quoted(companion.physicalTableName)} TO north_star_module_runtime`,
+  );
+  await client.query(
+    `REVOKE UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER
+       ON north_star_module.${quoted(companion.physicalTableName)}
+       FROM north_star_module_runtime`,
+  );
+  await client.query(
+    `REVOKE UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER
+       ON north_star_module.${quoted(companion.physicalTableName)}
+       FROM north_star_module_materializer`,
+  );
+}
+
+async function ensureMaterializerSelectPolicy(
+  client: PoolClient,
+  tableName: string,
+): Promise<void> {
+  const policyName = managedMaterializerPolicyName(tableName);
+  const exists = await client.query<{ present: boolean }>(
+    `SELECT EXISTS (SELECT 1 FROM pg_policies
+      WHERE schemaname = 'north_star_module'
+        AND tablename = $1
+        AND policyname = $2) AS present`,
+    [tableName, policyName],
+  );
+  if (exists.rows[0]?.present) return;
+  await client.query(
+    `CREATE POLICY ${quoted(policyName)} ON north_star_module.${quoted(tableName)}
+       FOR SELECT TO north_star_module_materializer
+       USING (
+         tenant_id = nullif(current_setting('north_star.tenant_id', true), '')::uuid
+         AND environment_id = nullif(current_setting('north_star.environment_id', true), '')::uuid
+       )`,
+  );
+}
+
+async function ensureRejectMutationTrigger(
+  client: PoolClient,
+  tableName: string,
+  triggerName: string,
+): Promise<void> {
+  const exists = await client.query<{ present: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1 FROM pg_trigger AS trigger_record
+       JOIN pg_class AS relation ON relation.oid = trigger_record.tgrelid
+       JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+      WHERE namespace.nspname = 'north_star_module'
+        AND relation.relname = $1
+        AND trigger_record.tgname = $2
+        AND NOT trigger_record.tgisinternal
+     ) AS present`,
+    [tableName, triggerName],
+  );
+  if (exists.rows[0]?.present) return;
+  await client.query(
+    `GRANT TRIGGER ON north_star_module.${quoted(tableName)}
+       TO north_star_module_materializer`,
+  );
+  await client.query(
+    `CREATE TRIGGER ${quoted(triggerName)}
+       BEFORE UPDATE OR DELETE ON north_star_module.${quoted(tableName)}
+       FOR EACH ROW EXECUTE FUNCTION north_star_internal.reject_inventory_fact_mutation()`,
+  );
+  await client.query(
+    `REVOKE TRIGGER ON north_star_module.${quoted(tableName)}
+       FROM north_star_module_materializer`,
+  );
+}
+
+async function ensureAbiFunctionCheck(
+  client: PoolClient,
+  target: StorageTargetPayloadV1,
+  element: StorageTransitionElement,
+): Promise<void> {
+  for (const entity of target.entities) {
+    if (
+      entity.factStorage?.businessPeriod.checkConstraintName ===
+      element.physicalObjectName
+    ) {
+      const check = entity.factStorage.businessPeriod;
+      await ensureNamedCheckConstraint(
+        client,
+        entity.physicalTableName,
+        check.checkConstraintName,
+        `${quoted(check.column)} = north_star_internal.inventory_business_period(tenant_id, ${quoted(check.effectiveAtColumn)})`,
+      );
+      return;
+    }
+    const check = entity.abiFunctionChecks?.find(
+      (candidate) => candidate.physicalName === element.physicalObjectName,
+    );
+    if (!check) continue;
+    await ensureNamedCheckConstraint(
+      client,
+      entity.physicalTableName,
+      check.physicalName,
+      `north_star_internal.inventory_base_unit_change_allowed(
+         tenant_id,
+         environment_id,
+         ${quoted(check.itemIdColumn)},
+         ${quoted(check.unitIdColumn)}::text,
+         ${sqlTextLiteral(`north_star_module.${check.movementTableName}`)}::regclass,
+         ${sqlTextLiteral(check.movementItemIdColumn)}::name,
+         ${sqlTextLiteral(check.movementUnitIdColumn)}::name,
+         ${sqlTextLiteral(check.movementRecordedAtColumn)}::name,
+         ${sqlTextLiteral(check.movementRecordIdColumn)}::name
+       )`,
+    );
+    return;
+  }
+  throw failure('ELEMENT_TARGET_MISSING', element.elementId);
+}
+
+async function ensureNamedCheckConstraint(
+  client: PoolClient,
+  tableName: string,
+  constraintName: string,
+  expression: string,
+): Promise<void> {
+  const exists = await client.query<{ present: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1 FROM pg_constraint AS constraint_record
+       JOIN pg_class AS relation ON relation.oid = constraint_record.conrelid
+       JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+      WHERE namespace.nspname = 'north_star_module'
+        AND relation.relname = $1
+        AND constraint_record.conname = $2
+     ) AS present`,
+    [tableName, constraintName],
+  );
+  if (exists.rows[0]?.present) return;
+  await client.query(
+    `ALTER TABLE north_star_module.${quoted(tableName)}
+       ADD CONSTRAINT ${quoted(constraintName)} CHECK (${expression})`,
+  );
+}
+
 async function ensureEnumCheckConstraint(
   client: PoolClient,
   entity: StorageEntityTarget,
@@ -1386,6 +1697,39 @@ async function ensureEnumCheckConstraint(
     `ALTER TABLE north_star_module.${quoted(entity.physicalTableName)}
        ADD CONSTRAINT ${quoted(check.physicalName)}
        CHECK (${enumCheckExpression(entity, check)}) NOT VALID`,
+  );
+}
+
+async function provisionDefaultLegalEntity(
+  client: PoolClient,
+  entity: StorageEntityTarget,
+): Promise<void> {
+  const master = entity.legalEntityMaster;
+  if (!master) return;
+  await client.query(
+    `INSERT INTO north_star_module.${quoted(entity.physicalTableName)} (
+       tenant_id,
+       environment_id,
+       ${quoted(entity.recordIdentity.column)},
+       ${quoted(entity.optimisticRevision.column)},
+       ${quoted(master.fieldColumns.code)},
+       ${quoted(master.fieldColumns.name)},
+       ${quoted(master.fieldColumns.status)},
+       ${quoted(master.fieldColumns.isDefault)}
+     ) SELECT
+       nullif(current_setting('north_star.tenant_id', true), '')::uuid,
+       nullif(current_setting('north_star.environment_id', true), '')::uuid,
+       north_star_internal.inventory_provisioned_legal_entity_id(
+         nullif(current_setting('north_star.tenant_id', true), '')::uuid,
+         nullif(current_setting('north_star.environment_id', true), '')::uuid
+       ),
+       1,
+       'DEFAULT',
+       'Default legal entity',
+       ${sqlTextLiteral(master.activeStatusValue)},
+       true
+     ON CONFLICT (tenant_id, environment_id, ${quoted(entity.recordIdentity.column)})
+       DO NOTHING`,
   );
 }
 
@@ -1535,14 +1879,7 @@ async function verifyCatalogOnClient(
   compareCatalogCollection(
     drift,
     'managed relation',
-    [...expectedTables.keys()].map((tableName) => ({
-      forceRowLevelSecurity: true,
-      isPartition: false,
-      kind: 'r',
-      name: tableName,
-      owner: 'north_star_module_materializer',
-      rowLevelSecurity: true,
-    })),
+    buildExpectedManagedRelations(expectedTables),
     relations.rows.map((relation) => ({
       forceRowLevelSecurity: relation.force_row_level_security,
       isPartition: relation.is_partition,
@@ -1552,6 +1889,36 @@ async function verifyCatalogOnClient(
       rowLevelSecurity: relation.row_level_security,
     })),
     (value) => value.name,
+  );
+
+  const partitionBounds = await client.query<{
+    bound: string;
+    parent_name: string;
+    partition_name: string;
+  }>(
+    `SELECT partition.relname AS partition_name,
+            parent.relname AS parent_name,
+            pg_get_expr(partition.relpartbound, partition.oid, true) AS bound
+       FROM pg_inherits AS inheritance
+       JOIN pg_class AS partition ON partition.oid = inheritance.inhrelid
+       JOIN pg_class AS parent ON parent.oid = inheritance.inhparent
+       JOIN pg_namespace AS namespace ON namespace.oid = partition.relnamespace
+      WHERE namespace.nspname = 'north_star_module'
+        AND partition.relispartition
+        AND partition.relkind = 'r'
+        AND parent.relkind = 'p'
+      ORDER BY parent.relname, partition.relname`,
+  );
+  compareCatalogCollection(
+    drift,
+    'managed partition bound',
+    buildExpectedPartitionBounds(expectedTables),
+    partitionBounds.rows.map((partition) => ({
+      bound: normalizeSqlExpressionRequired(partition.bound),
+      parentName: partition.parent_name,
+      partitionName: partition.partition_name,
+    })),
+    (value) => value.partitionName,
   );
 
   const columns = await client.query<{
@@ -1584,6 +1951,7 @@ async function verifyCatalogOnClient(
         ON collation_record.oid = attribute.attcollation
       WHERE namespace.nspname = 'north_star_module'
         AND relation.relkind IN ('r','p','v','m','c','f')
+        AND NOT relation.relispartition
         AND attribute.attnum > 0 AND NOT attribute.attisdropped
       ORDER BY relation.relname, attribute.attname`,
   );
@@ -1663,6 +2031,8 @@ async function verifyCatalogOnClient(
        LEFT JOIN pg_namespace AS target_namespace
          ON target_namespace.oid = target.relnamespace
       WHERE source_namespace.nspname = 'north_star_module'
+        AND NOT source.relispartition
+        AND constraint_record.conparentid = 0
       ORDER BY source.relname, constraint_record.conname`,
   );
   const effectivePendingConstraintNames = new Set(pendingConstraintNames);
@@ -1761,6 +2131,7 @@ async function verifyCatalogOnClient(
          ON constraint_record.conindid = index_record.indexrelid
         AND constraint_record.contype IN ('p','u','x')
       WHERE namespace.nspname = 'north_star_module'
+        AND NOT source.relispartition
       ORDER BY source.relname, index_relation.relname`,
   );
   const actualIndexes: ActualIndexShape[] = indexes.rows.map((index) => ({
@@ -1816,6 +2187,7 @@ async function verifyCatalogOnClient(
        JOIN pg_class AS relation ON relation.oid = policy.polrelid
        JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
       WHERE namespace.nspname = 'north_star_module'
+        AND NOT relation.relispartition
       ORDER BY relation.relname, policy.polname`,
   );
   const actualPolicies = policies.rows.map((policy) => ({
@@ -1858,6 +2230,7 @@ async function verifyCatalogOnClient(
        LEFT JOIN pg_roles AS grantee ON grantee.oid = privilege.grantee
       WHERE namespace.nspname = 'north_star_module'
         AND relation.relkind IN ('r','p')
+        AND NOT relation.relispartition
       ORDER BY relation.relname, grantee, privilege.privilege_type`,
   );
   const actualTableGrants = tableGrants.rows.map((grant) => ({
@@ -1904,6 +2277,7 @@ async function verifyCatalogOnClient(
        LEFT JOIN pg_roles AS grantee ON grantee.oid = privilege.grantee
       WHERE namespace.nspname = 'north_star_module'
         AND relation.relkind IN ('r','p')
+        AND NOT relation.relispartition
         AND attribute.attnum > 0 AND NOT attribute.attisdropped
       ORDER BY relation.relname, attribute.attname, grantee,
                privilege.privilege_type`,
@@ -2037,21 +2411,22 @@ async function verifyCatalogOnClient(
        JOIN pg_class AS relation ON relation.oid = trigger_record.tgrelid
        JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
       WHERE namespace.nspname = 'north_star_module'
+        AND NOT relation.relispartition
         AND NOT trigger_record.tgisinternal
       ORDER BY relation.relname, trigger_record.tgname`,
   );
+  const actualTriggers = triggers.rows.map((trigger) => ({
+    definition: normalizeSqlExpressionRequired(trigger.definition),
+    name: trigger.name,
+    tableName: trigger.table_name,
+  }));
   compareCatalogCollection(
     drift,
     'managed trigger',
-    [],
-    triggers.rows,
-    (value) => `${value.table_name}.${value.name}`,
+    buildExpectedTriggers(expectedTables),
+    actualTriggers,
+    (value) => `${value.tableName}.${value.name}`,
   );
-  for (const trigger of triggers.rows) {
-    drift.push(
-      `delete-capable trigger seam ${trigger.table_name}.${trigger.name}`,
-    );
-  }
 
   const rules = await client.query<{
     definition: string;
@@ -2113,6 +2488,7 @@ async function verifyCatalogOnClient(
           constraints: actualConstraints,
           functions: functions.rows,
           indexes: actualIndexes,
+          partitionBounds: partitionBounds.rows,
           relations: relations.rows,
           registry,
           drift,
@@ -2121,7 +2497,7 @@ async function verifyCatalogOnClient(
           schema,
           schemaGrants: schemaGrants.rows,
           tableGrants: actualTableGrants,
-          triggers: triggers.rows,
+          triggers: actualTriggers,
           types: types.rows,
         }),
       )
@@ -2390,7 +2766,9 @@ function compareCatalogCollection<T>(
         drift.push(`missing ${label} ${key}`);
       }
     } else if (canonicalize(expectedValue) !== canonicalize(actualValue)) {
-      drift.push(`altered ${label} ${key}`);
+      drift.push(
+        `altered ${label} ${key}: expected ${canonicalize(expectedValue)}, actual ${canonicalize(actualValue)}`,
+      );
     }
   }
   for (const key of actualByKey.keys()) {
@@ -2448,6 +2826,61 @@ function mergeExpectedRelations(
   return result;
 }
 
+function buildExpectedManagedRelations(
+  tables: ReadonlyMap<string, StorageEntityTarget>,
+) {
+  return [...tables.values()]
+    .flatMap((entity) => [
+      {
+        forceRowLevelSecurity: true,
+        isPartition: false,
+        kind: entity.factStorage ? 'p' : 'r',
+        name: entity.physicalTableName,
+        owner: 'north_star_module_materializer',
+        rowLevelSecurity: true,
+      },
+      ...(entity.factStorage
+        ? [
+            ...entity.factStorage.partitioning.partitions.map((partition) => ({
+              forceRowLevelSecurity: false,
+              isPartition: true,
+              kind: 'r',
+              name: partition.physicalTableName,
+              owner: 'north_star_module_materializer',
+              rowLevelSecurity: false,
+            })),
+            {
+              forceRowLevelSecurity: true,
+              isPartition: false,
+              kind: 'r',
+              name: entity.factStorage.companion.physicalTableName,
+              owner: 'north_star_module_materializer',
+              rowLevelSecurity: true,
+            },
+          ]
+        : []),
+    ])
+    .toSorted((left, right) => left.name.localeCompare(right.name));
+}
+
+function buildExpectedPartitionBounds(
+  tables: ReadonlyMap<string, StorageEntityTarget>,
+) {
+  return [...tables.values()]
+    .flatMap((entity) =>
+      (entity.factStorage?.partitioning.partitions ?? []).map((partition) => ({
+        bound: normalizeSqlExpressionRequired(
+          `FOR VALUES WITH (modulus ${String(partition.modulus)}, remainder ${String(partition.remainder)})`,
+        ),
+        parentName: entity.physicalTableName,
+        partitionName: partition.physicalTableName,
+      })),
+    )
+    .toSorted((left, right) =>
+      left.partitionName.localeCompare(right.partitionName),
+    );
+}
+
 function buildExpectedColumns(
   tables: ReadonlyMap<string, StorageEntityTarget>,
   relations: ReadonlyMap<string, StorageRelationTarget>,
@@ -2488,6 +2921,13 @@ function buildExpectedColumns(
         entity.legalEntity.column,
         entity.legalEntity.postgresqlType,
         entity.legalEntity.nullable,
+      );
+    }
+    if (entity.factStorage) {
+      base(
+        entity.factStorage.businessPeriod.column,
+        entity.factStorage.businessPeriod.postgresqlType,
+        false,
       );
     }
     base(
@@ -2540,6 +2980,20 @@ function buildExpectedColumns(
     for (const column of entity.derivedStateFields) {
       base(column.physicalName, column.postgresqlType, true);
     }
+    if (entity.factStorage) {
+      for (const column of entity.factStorage.companion.columns) {
+        add({
+          collation: null,
+          defaultExpression: null,
+          generatedKind: '',
+          identityKind: '',
+          name: column.name,
+          nullable: false,
+          postgresqlType: catalogType(column.postgresqlType),
+          tableName: entity.factStorage.companion.physicalTableName,
+        });
+      }
+    }
   }
   for (const relation of relations.values()) {
     const entity = entityById.get(relation.sourceEntityId);
@@ -2572,6 +3026,9 @@ function buildExpectedConstraints(
   const entityById = new Map(
     [...tables.values()].map((entity) => [entity.entityId, entity]),
   );
+  const legalEntityMaster = [...tables.values()].find(
+    (entity) => entity.legalEntityMaster !== undefined,
+  );
   const result: ExpectedConstraintShape[] = [...tables.values()].map(
     (entity) => ({
       columns: [...entity.primaryKey.columns],
@@ -2591,6 +3048,9 @@ function buildExpectedConstraints(
   );
   for (const entity of tables.values()) {
     if (entity.legalEntity) {
+      if (!legalEntityMaster) {
+        throw failure('LEGAL_ENTITY_MASTER_TARGET_INVALID', entity.entityId);
+      }
       result.push({
         columns: ['tenant_id', 'environment_id', entity.legalEntity.column],
         deferred: false,
@@ -2598,31 +3058,135 @@ function buildExpectedConstraints(
         definition: null,
         deleteAction: 'r',
         name: legalEntityForeignKeyName(entity),
-        referencedColumns: ['tenant_id', 'environment_id', 'legal_entity_id'],
-        referencedSchema: 'platform',
-        referencedTable: 'legal_entities',
+        referencedColumns: ['tenant_id', 'environment_id', 'record_id'],
+        referencedSchema: 'north_star_module',
+        referencedTable: legalEntityMaster.physicalTableName,
         tableName: entity.physicalTableName,
         type: 'f',
         updateAction: 'r',
         validated: true,
       });
     }
-    const baseUnit = itemBaseUnitColumn(entity);
-    if (baseUnit) {
+    if (entity.factStorage) {
+      result.push({
+        columns: [...entity.factStorage.effectIdentityUnique.columns],
+        deferred: false,
+        deferrable: false,
+        definition: null,
+        deleteAction: ' ',
+        name: entity.factStorage.effectIdentityUnique.physicalName,
+        referencedColumns: null,
+        referencedSchema: null,
+        referencedTable: null,
+        tableName: entity.physicalTableName,
+        type: 'u',
+        updateAction: ' ',
+        validated: true,
+      });
       result.push({
         columns: [
+          entity.factStorage.businessPeriod.column,
           'tenant_id',
-          'environment_id',
-          entity.recordIdentity.column,
-          baseUnit.physicalName,
+          entity.factStorage.businessPeriod.effectiveAtColumn,
         ],
         deferred: false,
         deferrable: false,
         definition: normalizeSqlExpressionRequired(
-          `north_star_internal.inventory_base_unit_change_allowed(tenant_id, environment_id, ${entity.recordIdentity.column}, ${baseUnit.physicalName}::text)`,
+          `${entity.factStorage.businessPeriod.column} = north_star_internal.inventory_business_period(tenant_id, ${entity.factStorage.businessPeriod.effectiveAtColumn})`,
         ),
         deleteAction: ' ',
-        name: baseUnitBindingConstraintName(entity),
+        name: entity.factStorage.businessPeriod.checkConstraintName,
+        referencedColumns: null,
+        referencedSchema: null,
+        referencedTable: null,
+        tableName: entity.physicalTableName,
+        type: 'c',
+        updateAction: ' ',
+        validated: true,
+      });
+      const companion = entity.factStorage.companion;
+      result.push(
+        {
+          columns: [...companion.primaryKey.columns],
+          deferred: false,
+          deferrable: false,
+          definition: null,
+          deleteAction: ' ',
+          name: companion.primaryKey.physicalName,
+          referencedColumns: null,
+          referencedSchema: null,
+          referencedTable: null,
+          tableName: companion.physicalTableName,
+          type: 'p',
+          updateAction: ' ',
+          validated: true,
+        },
+        {
+          columns: [...companion.movementUnique.columns],
+          deferred: false,
+          deferrable: false,
+          definition: null,
+          deleteAction: ' ',
+          name: companion.movementUnique.physicalName,
+          referencedColumns: null,
+          referencedSchema: null,
+          referencedTable: null,
+          tableName: companion.physicalTableName,
+          type: 'u',
+          updateAction: ' ',
+          validated: true,
+        },
+        {
+          columns: [...companion.movementForeignKey.sourceColumns],
+          deferred: false,
+          deferrable: false,
+          definition: null,
+          deleteAction: 'r',
+          name: companion.movementForeignKey.physicalName,
+          referencedColumns: [...companion.movementForeignKey.targetColumns],
+          referencedSchema: 'north_star_module',
+          referencedTable: entity.physicalTableName,
+          tableName: companion.physicalTableName,
+          type: 'f',
+          updateAction: 'r',
+          validated: true,
+        },
+      );
+      for (const check of entity.factStorage.stockIdentityV1MemberChecks) {
+        result.push({
+          columns: [check.column],
+          deferred: false,
+          deferrable: false,
+          definition: normalizeSqlExpressionRequired(
+            `btrim(${check.column}::text) <> ${sqlTextLiteral('')} AND ${check.column}::text <> ${sqlTextLiteral(check.rejectedSentinel)}`,
+          ),
+          deleteAction: ' ',
+          name: check.physicalName,
+          referencedColumns: null,
+          referencedSchema: null,
+          referencedTable: null,
+          tableName: entity.physicalTableName,
+          type: 'c',
+          updateAction: ' ',
+          validated: true,
+        });
+      }
+    }
+    for (const check of entity.abiFunctionChecks ?? []) {
+      result.push({
+        columns: [
+          'tenant_id',
+          'environment_id',
+          check.itemIdColumn,
+          check.unitIdColumn,
+        ],
+        deferred: false,
+        deferrable: false,
+        definition: normalizeSqlExpressionRequired(
+          `north_star_internal.inventory_base_unit_change_allowed(tenant_id, environment_id, ${check.itemIdColumn}, ${check.unitIdColumn}::text, ${sqlTextLiteral(`north_star_module.${check.movementTableName}`)}::regclass, ${sqlTextLiteral(check.movementItemIdColumn)}::name, ${sqlTextLiteral(check.movementUnitIdColumn)}::name, ${sqlTextLiteral(check.movementRecordedAtColumn)}::name, ${sqlTextLiteral(check.movementRecordIdColumn)}::name)`,
+        ),
+        deleteAction: ' ',
+        name: check.physicalName,
         referencedColumns: null,
         referencedSchema: null,
         referencedTable: null,
@@ -2699,6 +3263,8 @@ function buildExpectedIndexes(
         entity.primaryKey.physicalName,
         entity.primaryKey.columns,
         true,
+        null,
+        entity.factStorage !== undefined,
       ),
       name: entity.primaryKey.physicalName,
       owner: 'north_star_module_materializer',
@@ -2709,6 +3275,54 @@ function buildExpectedIndexes(
       unique: true,
       valid: true,
     });
+    if (entity.factStorage) {
+      const effectUnique = entity.factStorage.effectIdentityUnique;
+      result.push({
+        columns: [...effectUnique.columns],
+        constraintName: effectUnique.physicalName,
+        definition: expectedIndexDefinition(
+          entity.physicalTableName,
+          effectUnique.physicalName,
+          effectUnique.columns,
+          true,
+          null,
+          true,
+        ),
+        name: effectUnique.physicalName,
+        owner: 'north_star_module_materializer',
+        predicate: null,
+        primary: false,
+        ready: true,
+        tableName: entity.physicalTableName,
+        unique: true,
+        valid: true,
+      });
+      for (const constraint of [
+        entity.factStorage.companion.primaryKey,
+        entity.factStorage.companion.movementUnique,
+      ]) {
+        result.push({
+          columns: [...constraint.columns],
+          constraintName: constraint.physicalName,
+          definition: expectedIndexDefinition(
+            entity.factStorage.companion.physicalTableName,
+            constraint.physicalName,
+            constraint.columns,
+            true,
+          ),
+          name: constraint.physicalName,
+          owner: 'north_star_module_materializer',
+          predicate: null,
+          primary:
+            constraint.physicalName ===
+            entity.factStorage.companion.primaryKey.physicalName,
+          ready: true,
+          tableName: entity.factStorage.companion.physicalTableName,
+          unique: true,
+          valid: true,
+        });
+      }
+    }
     for (const unique of entity.uniqueKeys) {
       const columns = uniqueKeyColumnExpressions(entity, unique);
       const predicate = uniqueKeyPredicateSql(entity, unique);
@@ -2721,6 +3335,7 @@ function buildExpectedIndexes(
           columns,
           true,
           predicate,
+          entity.factStorage !== undefined,
         ),
         name: unique.physicalName,
         owner: 'north_star_module_materializer',
@@ -2742,8 +3357,9 @@ function buildExpectedIndexes(
           entity.physicalTableName,
           index.physicalName,
           columns,
-          index.indexKind === 'caseInsensitiveUnique',
+          isUniqueStorageIndex(index),
           predicate,
+          entity.factStorage !== undefined,
         ),
         name: index.physicalName,
         owner: 'north_star_module_materializer',
@@ -2751,7 +3367,7 @@ function buildExpectedIndexes(
         primary: false,
         ready: true,
         tableName: entity.physicalTableName,
-        unique: index.indexKind === 'caseInsensitiveUnique',
+        unique: isUniqueStorageIndex(index),
         valid: true,
       });
     }
@@ -2769,10 +3385,11 @@ function expectedIndexDefinition(
   columns: readonly string[],
   unique: boolean,
   predicate: string | null = null,
+  only = false,
 ): string {
   return normalizeSqlExpressionRequired(
     `CREATE ${unique ? 'UNIQUE ' : ''}INDEX ${indexName}
-       ON north_star_module.${tableName} USING btree (${columns.join(', ')})${predicate ? ` WHERE ${predicate}` : ''}`,
+       ON ${only ? 'ONLY ' : ''}north_star_module.${tableName} USING btree (${columns.join(', ')})${predicate ? ` WHERE ${predicate}` : ''}`,
   );
 }
 
@@ -2836,6 +3453,22 @@ function indexPredicateSql(
   if (index.indexKind === 'caseInsensitiveUnique') {
     return archiveExcludingPredicateSql(entity, index.predicate);
   }
+  if (index.indexKind === 'legalEntityDefaultUnique') {
+    const master = entity.legalEntityMaster;
+    const expected = master?.defaultUniqueIndex;
+    if (
+      !master ||
+      !expected ||
+      index.physicalName !== expected.physicalName ||
+      index.predicate !== expected.predicate
+    ) {
+      throw failure(
+        'LEGAL_ENTITY_DEFAULT_INDEX_INVALID',
+        `legal-entity default index ${index.physicalName} does not match its pinned target`,
+      );
+    }
+    return `${quoted(master.fieldColumns.isDefault)} IS TRUE AND ${quoted(entity.archive.archivedAtColumn)} IS NULL`;
+  }
   if (index.predicate !== null && index.predicate !== undefined) {
     throw failure(
       'INDEX_PREDICATE_UNSUPPORTED',
@@ -2843,6 +3476,15 @@ function indexPredicateSql(
     );
   }
   return null;
+}
+
+function isUniqueStorageIndex(
+  index: StorageEntityTarget['indexes'][number],
+): boolean {
+  return (
+    index.indexKind === 'caseInsensitiveUnique' ||
+    index.indexKind === 'legalEntityDefaultUnique'
+  );
 }
 
 function archiveExcludingPredicateSql(
@@ -2940,6 +3582,36 @@ function sqlTextLiteral(value: string): string {
   return `'${value.replaceAll("'", "''")}'::text`;
 }
 
+function buildExpectedTriggers(
+  tables: ReadonlyMap<string, StorageEntityTarget>,
+) {
+  return [...tables.values()]
+    .flatMap((entity) => {
+      if (!entity.factStorage) return [];
+      return [
+        {
+          name: entity.factStorage.rejectMutationTriggerName,
+          tableName: entity.physicalTableName,
+        },
+        {
+          name: entity.factStorage.companion.rejectMutationTriggerName,
+          tableName: entity.factStorage.companion.physicalTableName,
+        },
+      ].map(({ name, tableName }) => ({
+        definition: normalizeSqlExpressionRequired(
+          `CREATE TRIGGER ${name} BEFORE DELETE OR UPDATE ON north_star_module.${tableName} FOR EACH ROW EXECUTE FUNCTION north_star_internal.reject_inventory_fact_mutation()`,
+        ),
+        name,
+        tableName,
+      }));
+    })
+    .toSorted((left, right) =>
+      `${left.tableName}.${left.name}`.localeCompare(
+        `${right.tableName}.${right.name}`,
+      ),
+    );
+}
+
 function buildExpectedPolicies(
   tables: ReadonlyMap<string, StorageEntityTarget>,
 ) {
@@ -2947,36 +3619,85 @@ function buildExpectedPolicies(
     `tenant_id = north_star_internal.trusted_tenant_id()
      AND environment_id = north_star_internal.trusted_environment_id()`,
   );
-  return [...tables.keys()].flatMap((tableName) =>
-    (['SELECT', 'INSERT', 'UPDATE'] as const).map((command) => ({
-      command,
-      name: managedPolicyName(tableName, command),
-      permissive: true,
-      qual: command === 'INSERT' ? null : predicate,
-      roles: ['north_star_module_runtime'],
-      tableName,
-      withCheck: command === 'SELECT' ? null : predicate,
-    })),
+  const materializerPredicate = normalizePolicyExpression(
+    `tenant_id = NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text)::uuid
+     AND environment_id = NULLIF(current_setting('north_star.environment_id'::text, true), ''::text)::uuid`,
   );
+  return [...tables.values()].flatMap((entity) => {
+    const tablePolicies = [
+      {
+        commands: entity.factStorage
+          ? (['SELECT', 'INSERT'] as const)
+          : (['SELECT', 'INSERT', 'UPDATE'] as const),
+        tableName: entity.physicalTableName,
+      },
+      ...(entity.factStorage
+        ? [
+            {
+              commands: ['SELECT', 'INSERT'] as const,
+              tableName: entity.factStorage.companion.physicalTableName,
+            },
+          ]
+        : []),
+    ];
+    return [
+      ...tablePolicies.flatMap(({ commands, tableName }) =>
+        commands.map((command) => ({
+          command,
+          name: managedPolicyName(tableName, command),
+          permissive: true,
+          qual: command === 'INSERT' ? null : predicate,
+          roles: ['north_star_module_runtime'],
+          tableName,
+          withCheck: command === 'SELECT' ? null : predicate,
+        })),
+      ),
+      ...(entity.factStorage || entity.legalEntity || entity.legalEntityMaster
+        ? tablePolicies
+        : []
+      ).map(({ tableName }) => ({
+        command: 'SELECT' as const,
+        name: managedMaterializerPolicyName(tableName),
+        permissive: true,
+        qual: materializerPredicate,
+        roles: ['north_star_module_materializer'],
+        tableName,
+        withCheck: null,
+      })),
+    ];
+  });
 }
 
 function buildExpectedTableGrants(
   tables: ReadonlyMap<string, StorageEntityTarget>,
 ) {
   return [...tables.values()].flatMap((entity) =>
-    ['north_star_module_materializer', 'north_star_module_runtime'].flatMap(
-      (grantee) => {
-        const privilegeTypes =
-          grantee === 'north_star_module_runtime' && entity.legalEntity
+    [
+      entity.physicalTableName,
+      ...(entity.factStorage
+        ? [entity.factStorage.companion.physicalTableName]
+        : []),
+    ].flatMap((tableName) =>
+      ['north_star_module_materializer', 'north_star_module_runtime'].flatMap(
+        (grantee) => {
+          const companion =
+            entity.factStorage?.companion.physicalTableName === tableName;
+          const createOnly = companion
+            ? true
+            : grantee === 'north_star_module_runtime' &&
+              (entity.factStorage !== undefined ||
+                entity.legalEntity !== undefined);
+          const privilegeTypes = createOnly
             ? ['INSERT', 'SELECT']
             : ['INSERT', 'SELECT', 'UPDATE'];
-        return privilegeTypes.map((privilegeType) => ({
-          grantee,
-          isGrantable: false,
-          privilegeType,
-          tableName: entity.physicalTableName,
-        }));
-      },
+          return privilegeTypes.map((privilegeType) => ({
+            grantee,
+            isGrantable: false,
+            privilegeType,
+            tableName,
+          }));
+        },
+      ),
     ),
   );
 }
@@ -2986,7 +3707,7 @@ function buildExpectedColumnGrants(
   relations: ReadonlyMap<string, StorageRelationTarget>,
 ) {
   return [...tables.values()].flatMap((entity) =>
-    entity.legalEntity
+    entity.legalEntity && !entity.factStorage
       ? entityOwnedMutableColumnNamesFromRelations(entity, relations).map(
           (columnName) => ({
             columnName,
@@ -3004,13 +3725,9 @@ function legalEntityForeignKeyName(entity: StorageEntityTarget): string {
   return managedEntityConstraintName(entity, 'e');
 }
 
-function baseUnitBindingConstraintName(entity: StorageEntityTarget): string {
-  return managedEntityConstraintName(entity, 'b');
-}
-
 function managedEntityConstraintName(
   entity: StorageEntityTarget,
-  prefix: 'b' | 'e',
+  prefix: 'e',
 ): string {
   const match = /^nsm_t_([a-z2-7]{52})$/u.exec(entity.physicalTableName);
   if (!match?.[1]) {
@@ -3022,21 +3739,19 @@ function managedEntityConstraintName(
   return `nsm_${prefix}_${match[1]}`;
 }
 
-function itemBaseUnitColumn(entity: StorageEntityTarget) {
-  if (!entity.entityId.endsWith(':entity.item')) return undefined;
-  const matches = entity.columns.filter((column) =>
-    column.canonicalFieldId.endsWith(':field.item_base_unit'),
+function requiredLegalEntityMaster(
+  target: StorageTargetPayloadV1,
+): StorageEntityTarget {
+  const masters = target.entities.filter(
+    (entity) => entity.legalEntityMaster !== undefined,
   );
-  if (
-    matches.length !== 1 ||
-    !/^(?:text|varchar\([1-9][0-9]*\))$/u.test(matches[0]?.postgresqlType ?? '')
-  ) {
+  if (masters.length !== 1) {
     throw failure(
-      'INVENTORY_BASE_UNIT_COLUMN_INVALID',
-      `${entity.entityId} must expose exactly one text-compatible item_base_unit field`,
+      'LEGAL_ENTITY_MASTER_TARGET_INVALID',
+      `expected one compiled legal-entity master, received ${String(masters.length)}`,
     );
   }
-  return matches[0];
+  return masters[0]!;
 }
 
 function entityOwnedMutableColumnNames(
@@ -3077,6 +3792,15 @@ function managedPolicyName(
     .update(tableName)
     .update('\0')
     .update(command)
+    .digest('hex')
+    .slice(0, 32)}`;
+}
+
+function managedMaterializerPolicyName(tableName: string): string {
+  return `nsm_p_${createHash('sha256')
+    .update(tableName)
+    .update('\0')
+    .update('MATERIALIZER_SELECT')
     .digest('hex')
     .slice(0, 32)}`;
 }

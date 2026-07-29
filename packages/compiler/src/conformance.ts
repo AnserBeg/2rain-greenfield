@@ -70,6 +70,12 @@ const INVENTORY_MOVEMENT_FIELD_ROLES = Object.freeze({
   sourceType: 'inventory_movement_source_type',
   unitId: 'inventory_movement_unit_id',
 } as const);
+const LEGAL_ENTITY_MASTER_FIELD_ROLES = Object.freeze({
+  code: 'legal_entity_code',
+  isDefault: 'legal_entity_is_default',
+  name: 'legal_entity_name',
+  status: 'legal_entity_status',
+} as const);
 const LEGAL_ENTITY_RELATION_RULES = Object.freeze([
   {
     semantics: 'sameEntity',
@@ -268,10 +274,9 @@ export type InventoryMovementStorageFieldRole =
   keyof typeof INVENTORY_MOVEMENT_FIELD_ROLES;
 
 export function resolvePinnedInventoryFactStorage(
-  packageId: string,
+  _packageId: string,
   entityId: string,
 ): PinnedInventoryFactStorageRule | null {
-  if (!isLegalEntityGovernedPackage(packageId)) return null;
   const familyId = canonicalFamilyId(entityId);
   if (!familyId) return null;
   const rule = INVENTORY_FACT_STORAGE_RULES.find(
@@ -310,6 +315,34 @@ export function isPinnedInventoryBaseUnitField(
     return false;
   }
   return fieldId.endsWith(':field.item_base_unit');
+}
+
+export type LegalEntityMasterFieldRole =
+  keyof typeof LEGAL_ENTITY_MASTER_FIELD_ROLES;
+
+export function isPinnedLegalEntityMaster(
+  packageId: string,
+  entityId: string,
+): boolean {
+  const family = resolvePinnedLegalEntityFamily(packageId, entityId);
+  return family.status === 'classified' && family.familyId === 'legal_entity';
+}
+
+export function resolvePinnedLegalEntityMasterFieldRole(
+  packageId: string,
+  entityId: string,
+  fieldId: string,
+): LegalEntityMasterFieldRole | null {
+  if (!isPinnedLegalEntityMaster(packageId, entityId)) return null;
+  const marker = ':field.';
+  const offset = fieldId.lastIndexOf(marker);
+  const localId = offset < 0 ? null : fieldId.slice(offset + marker.length);
+  for (const [role, declaredLocalId] of Object.entries(
+    LEGAL_ENTITY_MASTER_FIELD_ROLES,
+  )) {
+    if (localId === declaredLocalId) return role as LegalEntityMasterFieldRole;
+  }
+  return null;
 }
 
 export function resolvePinnedLegalEntityRelationSemantics(

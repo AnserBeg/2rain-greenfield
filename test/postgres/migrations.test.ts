@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import { mkdtemp, rm, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -91,12 +90,16 @@ test('archive uniqueness migration replaces both legacy indexes without renaming
         const foldedColumnName = `nsm_c_${'d'.repeat(52)}`;
         const unrelatedIndexName = 'permanently_reserved_code';
         const migrations = await loadMigrations(checkedInMigrations);
-        const replacement = migrations.at(-1);
+        const replacementIndex = migrations.findIndex(
+          (migration) =>
+            migration.name === '0014_archive_excluding_module_uniqueness.sql',
+        );
+        const replacement = migrations[replacementIndex];
         assert.equal(
           replacement?.name,
           '0014_archive_excluding_module_uniqueness.sql',
         );
-        await runMigrations(client, migrations.slice(0, -1));
+        await runMigrations(client, migrations.slice(0, replacementIndex));
         await client.query(`
           CREATE TABLE north_star_module.${tableName} (
             tenant_id uuid NOT NULL,
@@ -145,7 +148,7 @@ test('archive uniqueness migration replaces both legacy indexes without renaming
         ]);
 
         await assert.rejects(
-          runMigrations(client, migrations),
+          runMigrations(client, migrations.slice(0, replacementIndex + 1)),
           /is not a generated managed business-key index/,
         );
         const afterRefusal = await client.query<{
@@ -172,7 +175,10 @@ test('archive uniqueness migration replaces both legacy indexes without renaming
           `DROP INDEX north_star_module.${unrelatedIndexName}`,
         );
 
-        const upgraded = await runMigrations(client, migrations);
+        const upgraded = await runMigrations(
+          client,
+          migrations.slice(0, replacementIndex + 1),
+        );
         assert.deepEqual(upgraded.applied, [replacement.name]);
         const after = await client.query<{
           name: string;
@@ -243,7 +249,7 @@ test('archive uniqueness migration replaces both legacy indexes without renaming
   );
 });
 
-test('inventory migration upgrades an already-materialized item base-unit binding', async () => {
+test('inventory migration owns exactly two platform relations and no managed-module DDL', async () => {
   await withEphemeralPostgres(
     'inventory-base-unit-upgrade',
     async ({ pool }) => {
@@ -255,82 +261,28 @@ test('inventory migration upgrades an already-materialized item base-unit bindin
           inventoryMigration?.name,
           '0015_inventory_storage_foundation.sql',
         );
-        await runMigrations(client, migrations.slice(0, -1));
-        const tableName = `nsm_t_${'a'.repeat(52)}`;
-        await client.query(`
-          CREATE TABLE north_star_module.${tableName} (
-            tenant_id uuid NOT NULL,
-            environment_id uuid NOT NULL,
-            record_id uuid NOT NULL,
-            base_unit varchar(32) NOT NULL,
-            PRIMARY KEY (tenant_id, environment_id, record_id)
-          )
-        `);
-        const payload = Buffer.from(
-          JSON.stringify({
-            entities: [
-              {
-                columns: [
-                  {
-                    canonicalFieldId: 'northstar.catalog:field.item_base_unit',
-                    physicalName: 'base_unit',
-                  },
-                ],
-                entityId: 'northstar.catalog:entity.item',
-                physicalTableName: tableName,
-              },
-            ],
-            kind: 'storageTargetPayload',
-          }),
-        );
-        const contentHash = createHash('sha256').update(payload).digest('hex');
-        await client.query(
-          `INSERT INTO platform.release_artifact_blobs (
-             content_hash,
-             artifact_kind,
-             domain_tag,
-             media_type,
-             canonical_bytes,
-             byte_length
-           ) VALUES (
-             $1,
-             'projectionChunk',
-             'northstar.test.inventory-base-unit-upgrade',
-             'application/vnd.northstar.canonical+json',
-             $2,
-             $3
-           )`,
-          [contentHash, payload, payload.byteLength],
+        assert.doesNotMatch(
+          inventoryMigration.sql,
+          /(?:CREATE|ALTER|DROP|TRUNCATE)\s+(?:TABLE\s+)?north_star_module\./iu,
         );
 
+        await runMigrations(client, migrations.slice(0, -1));
         const applied = await runMigrations(client, migrations);
         assert.deepEqual(applied.applied, [inventoryMigration.name]);
-        const constraint = await client.query<{
-          definition: string;
+        const relations = await client.query<{
           name: string;
         }>(
-          `SELECT constraint_record.conname AS name,
-                  pg_get_expr(
-                    constraint_record.conbin,
-                    constraint_record.conrelid,
-                    true
-                  ) AS definition
-             FROM pg_constraint AS constraint_record
-             JOIN pg_class AS relation
-               ON relation.oid = constraint_record.conrelid
-             JOIN pg_namespace AS namespace
-               ON namespace.oid = relation.relnamespace
-            WHERE namespace.nspname = 'north_star_module'
-              AND relation.relname = $1
-              AND constraint_record.contype = 'c'`,
-          [tableName],
+          `SELECT relation.relname AS name
+             FROM pg_class AS relation
+             JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+            WHERE namespace.nspname = 'platform'
+              AND relation.relkind IN ('r', 'p')
+              AND relation.relname LIKE 'inventory_%'
+            ORDER BY relation.relname`,
         );
-        assert.deepEqual(constraint.rows, [
-          {
-            definition:
-              'north_star_internal.inventory_base_unit_change_allowed(tenant_id, environment_id, record_id, base_unit::text)',
-            name: `nsm_b_${'a'.repeat(52)}`,
-          },
+        assert.deepEqual(relations.rows, [
+          { name: 'inventory_posting_configurations' },
+          { name: 'inventory_tenant_calendars' },
         ]);
       } finally {
         client.release();

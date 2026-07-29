@@ -32,6 +32,7 @@ import {
   type StorageTargetPayloadV1,
   type StorageTransitionEnvelope,
 } from '../../packages/compiler/src/index.js';
+import { inventoryModuleDefinition } from '../../packages/domain/src/inventory/definition.js';
 import {
   FIXTURE_IDS,
   ordinaryModuleV1,
@@ -292,12 +293,19 @@ test('physical names, reverse mappings, PostgreSQL types, scope, RLS, and grants
 });
 
 test('pinned family ownership derives legal-entity storage and both business-key enforcers', () => {
-  const entityOwnedId = `${FIXTURE_IDS.namespace}:entity.inventory_movement`;
-  const entityOwned = lowerStorageTargetV1(
+  const entityOwnedId = `${FIXTURE_IDS.namespace}:entity.inventory_transaction`;
+  const entityOwnedTarget = lowerStorageTargetV1(
     normalizeApplicationPackage(
-      definitionWithParentFamily('inventory_movement'),
+      definitionWithParentFamily('inventory_transaction'),
     ),
-  ).entities.find((entity) => entity.entityId === entityOwnedId);
+  );
+  assert.equal(
+    entityOwnedTarget.schemaVersion,
+    'northstar.storage-target-payload/v2',
+  );
+  const entityOwned = entityOwnedTarget.entities.find(
+    (entity) => entity.entityId === entityOwnedId,
+  );
   assert.ok(entityOwned);
   assert.deepEqual(entityOwned.legalEntity, {
     column: 'legal_entity_id',
@@ -362,11 +370,8 @@ test('pinned family ownership derives legal-entity storage and both business-key
   );
 });
 
-test('storage-target payload versions expose the pinned v1/v2 family split in release artifacts', () => {
-  const entityOwnedDefinition = definitionWithFamilies(
-    'location',
-    'inventory_movement',
-  );
+test('storage-target payload versions expose the pinned v1/v2/v3 split in release artifacts', () => {
+  const entityOwnedDefinition = inventoryModuleDefinition();
   const entityOwned = mustCompile(input(entityOwnedDefinition));
   const entityOwnedStorage = projectionPayload<StorageTargetPayloadV1>(
     entityOwned,
@@ -382,7 +387,7 @@ test('storage-target payload versions expose the pinned v1/v2 family split in re
   );
   assert.equal(
     entityOwnedStorage.schemaVersion,
-    'northstar.storage-target-payload/v2',
+    'northstar.storage-target-payload/v3',
   );
   assert.equal(
     entityOwnedReference.payloadSchemaVersion,
@@ -432,6 +437,52 @@ test('storage-target payload versions expose the pinned v1/v2 family split in re
     tenantSharedManifest.payloadSchemaVersion,
     tenantSharedStorage.schemaVersion,
   );
+});
+
+test('entity-owned table creation depends on a new legal-entity master regardless of target order', () => {
+  const packageRevision = normalizeApplicationPackage(
+    inventoryModuleDefinition(),
+  );
+  const candidate = lowerStorageTargetV1(packageRevision);
+  candidate.entities = candidate.entities.toSorted(
+    (left, right) =>
+      Number(left.legalEntityMaster !== undefined) -
+      Number(right.legalEntityMaster !== undefined),
+  );
+  const previous = structuredClone(candidate);
+  previous.entities = [];
+  previous.relations = [];
+  previous.physicalMapping.records = [];
+  const transition = buildStorageTransitionEnvelope(
+    packageRevision,
+    previous,
+    candidate,
+    transitionBinding(),
+  );
+  assert.equal('diagnostic' in transition, false);
+  if ('diagnostic' in transition) return;
+  const master = candidate.entities.find(
+    (entity) => entity.legalEntityMaster !== undefined,
+  );
+  assert.ok(master);
+  const masterTable = transition.elements.find(
+    (element) =>
+      element.kind === 'createTable' && element.subjectId === master.entityId,
+  );
+  assert.ok(masterTable);
+  for (const entity of candidate.entities.filter(
+    (candidateEntity) => candidateEntity.legalEntity !== undefined,
+  )) {
+    const table = transition.elements.find(
+      (element) =>
+        element.kind === 'createTable' && element.subjectId === entity.entityId,
+    );
+    assert.ok(table);
+    assert.ok(
+      table.declaredDependencyIds.includes(masterTable.elementId),
+      `${entity.entityId} must depend on ${master.entityId}`,
+    );
+  }
 });
 
 test('ratified storage targets evolve additively with relation-index elements', () => {
@@ -940,11 +991,15 @@ test('the PR-2 metadata bridge adds enum checks without retyping persisted colum
 
 test('the compatibility matrix is closed and old-writes-may-reject is never additive', () => {
   assert.deepEqual(Object.keys(STORAGE_COMPATIBILITY_MATRIX).sort(), [
+    'addAbiFunctionCheck',
     'addColumn',
     'addForeignKey',
     'addNotValidConstraint',
     'backfill',
+    'createCompanionTable',
     'createIndex',
+    'createPartition',
+    'createRejectMutationTrigger',
     'createTable',
     'duplicateScan',
     'tightenNotNull',

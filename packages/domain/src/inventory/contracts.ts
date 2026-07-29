@@ -43,7 +43,7 @@ export interface InventoryFactStorageRuleV1 {
 /**
  * Physical fact semantics are pinned domain policy, not canonical syntax.
  * The compiler validates this closed declaration and lowers it generically;
- * module ids never select storage behavior in the press.
+ * module ids never choose storage behavior in the press.
  */
 export const INVENTORY_FACT_STORAGE_V1 = Object.freeze([
   {
