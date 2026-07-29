@@ -3,7 +3,8 @@
 **Read this before starting or resuming any packet while more than one lane is
 active.** `mission-cadence` permits parallel packets only when the user
 explicitly selects them and their owned paths are disjoint. The user selected
-three lanes on 2026-07-28 to compress the inventory timeline.
+three lanes on 2026-07-28 to compress the inventory timeline, and a fourth
+(BUILD) once G3-P1a proved startable without the artifact window.
 
 The writers cannot see each other. Every session reconstructs state from disk,
 so the shared state lives here. If this file says a lane is active, assume a
@@ -13,9 +14,10 @@ writer is holding those paths right now.
 
 | Lane | Theme | Current packet | Base | Status |
 |---|---|---|---|---|
-| **KERNEL** | Canonical language and the query tier | *awaiting selection — `4b` is next and moves no artifacts* | — | **idle** |
+| **KERNEL** | Canonical language and the query tier | *awaiting selection — `4c` next; artifact window now OPEN* | — | **idle** |
 | **DEPLOY** | Release lifecycle and runtime infrastructure | `1b` — release-admission verification integrity | `07ce6de` | active |
-| **FIX** | Correctness defects → stage cutting → **inventory build** | *awaiting selection — `G3-P1` is unblocked and needs no aggregate lowering* | — | **idle** |
+| **FIX** | Correctness defects → stage cutting → inventory build | *awaiting selection — `1d` is now unblocked* | — | **idle** |
+| **BUILD** | Inventory contracts *(fourth lane, opened 2026-07-28)* | `G3-P1a` — the non-key inventory freeze | `9027a53` | active |
 
 Lane identity is stable across packets. When a lane's packet is accepted, the
 next packet inherits the lane and its partition.
@@ -90,12 +92,38 @@ regenerates once more and the result is correct.
 disjointness is the requirement; generated-artifact conflicts are re-derived, per
 the shared-files rule below.
 
-**The one exception:** a packet whose *proof* is that artifacts did not move —
-`4a` and `4b` — cannot run beside one that moves them, because its baseline
-would shift under it. That exception ends when `4b` lands.
+**The one exception has ENDED.** `4a` and `4b` proved artifacts did not move and
+both are accepted, so no packet now depends on artifact stillness. `4c`, `1d`
+and the G3 packets may move release roots concurrently, re-deriving generated
+files at integration.
 
 The orchestrator enforced the stronger constraint until 2026-07-28 and it cost
 sequencing that was never required.
+
+## Full-matrix runs must NOT overlap — found 2026-07-28 by packet 1f
+
+Authoring runs in parallel. **Matrix runs do not.** Packet 1f recorded two
+concurrent-lane corruptions of its own gate evidence:
+
+  - `Superseded PostgreSQL run: 89/90 after another worktree's concurrent
+    matrix sent SIGTERM.`
+  - `First final-candidate matrix during a later 4b lane collision: 90/92;
+    release-activation.test.ts:611 reported false !== true. The isolated rerun
+    was 92/92 and the serial final matrix was fully green.`
+
+Container names are unique per process (`north-star-<label>-<pid>-<uuid>`), so
+this is not a naming collision. It is CPU/IO contention, and the second failure
+is the serious one: `release-activation` is **timing-sensitive**, not
+readiness-sensitive, so a loaded machine produces a *wrong verdict* rather than
+an obvious timeout.
+
+**A green matrix produced while another lane's matrix was running is not
+evidence.** Before running the full matrix, check that no other lane is running
+one; if one is, wait. A lane may keep authoring and running focused suites
+throughout — only the full matrix serializes.
+
+This is a real cost of parallelism and it caps useful lane count: past roughly
+four lanes, matrix queueing dominates and additional lanes buy nothing.
 
 ## Integration is serial even though work is parallel
 

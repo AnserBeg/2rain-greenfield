@@ -17,6 +17,10 @@ import {
   type AuthoredApplicationPackage,
 } from '../../../packages/canonical-model/src/index.js';
 import {
+  V3_AGGREGATE_IDS,
+  v3AggregateModule,
+} from '../../compiler/v3-definition.js';
+import {
   Q1_AGGREGATE_PARITY_CASES,
   evaluatePredicateCase,
   loadPredicateParityCorpus,
@@ -554,6 +558,199 @@ test('query aggregate semantics are total, exact, strict, and sum-only', () => {
     assert.equal(
       receipt.outcome === 'rejected' && receipt.reason,
       'unsupported-operator',
+    );
+  }
+});
+
+test('v3 aggregate admission rejects optional, unused, and unsupported shapes', () => {
+  const missingReservation = v3AggregateModule();
+  delete missingReservation.impactAnalyses;
+  expectDiagnostic(
+    () => normalizeApplicationPackage(missingReservation),
+    'CANON_SCHEMA_INVALID',
+  );
+
+  const populatedReservation = v3AggregateModule();
+  populatedReservation.impactAnalyses = [{}];
+  expectDiagnostic(
+    () => normalizeApplicationPackage(populatedReservation),
+    'CANON_SCHEMA_INVALID',
+  );
+
+  const optional = v3AggregateModule() as {
+    fields: Array<Record<string, unknown>>;
+  };
+  optional.fields.find(
+    (field) => field.fieldId === 'northstar.modulefixture:field.master_amount',
+  )!.presence = 'optional';
+  expectDiagnostic(
+    () => normalizeApplicationPackage(optional),
+    'CANON_QUERY_AGGREGATE_OPTIONAL_UNSUPPORTED',
+    { objectId: V3_AGGREGATE_IDS.aggregateQuery },
+  );
+
+  const unused = v3AggregateModule() as {
+    queries: Array<Record<string, unknown>>;
+  };
+  const unusedQuery = unused.queries.find(
+    (query) => query.queryId === V3_AGGREGATE_IDS.aggregateQuery,
+  )!;
+  unusedQuery.parameters = [
+    ...(unusedQuery.parameters as unknown[]),
+    {
+      kind: 'queryParameterDefinition',
+      orderKey: 30,
+      parameterId: 'northstar.modulefixture:parameter.unused',
+      schemaVersion: 'v3',
+    },
+  ];
+  expectDiagnostic(
+    () => normalizeApplicationPackage(unused),
+    'CANON_QUERY_PARAMETER_UNUSED',
+    { objectId: V3_AGGREGATE_IDS.aggregateQuery },
+  );
+
+  const unsupportedOperator = v3AggregateModule() as {
+    queries: Array<Record<string, unknown>>;
+  };
+  (
+    unsupportedOperator.queries.find(
+      (query) => query.queryId === V3_AGGREGATE_IDS.aggregateQuery,
+    )!.aggregate as Record<string, unknown>
+  ).operator = 'count';
+  expectDiagnostic(
+    () => normalizeApplicationPackage(unsupportedOperator),
+    'CANON_SCHEMA_INVALID',
+  );
+
+  const tooManyRows = v3AggregateModule() as {
+    queries: Array<Record<string, unknown>>;
+  };
+  tooManyRows.queries.find(
+    (query) => query.queryId === V3_AGGREGATE_IDS.aggregateQuery,
+  )!.maximumResultCount = 2;
+  expectDiagnostic(
+    () => normalizeApplicationPackage(tooManyRows),
+    'CANON_SCHEMA_INVALID',
+  );
+
+  const tooManyParameters = v3AggregateModule() as {
+    queries: Array<Record<string, unknown>>;
+  };
+  tooManyParameters.queries.find(
+    (query) => query.queryId === V3_AGGREGATE_IDS.aggregateQuery,
+  )!.parameters = Array.from({ length: 65 }, (_, index) => ({
+    kind: 'queryParameterDefinition',
+    orderKey: index,
+    parameterId: `northstar.modulefixture:parameter.bound_${index}`,
+    schemaVersion: 'v3',
+  }));
+  expectDiagnostic(
+    () => normalizeApplicationPackage(tooManyParameters),
+    'CANON_SCHEMA_INVALID',
+  );
+
+  const crossEntity = v3AggregateModule() as {
+    queries: Array<Record<string, unknown>>;
+  };
+  const crossEntityQuery = crossEntity.queries.find(
+    (query) => query.queryId === V3_AGGREGATE_IDS.aggregateQuery,
+  )!;
+  (
+    (crossEntityQuery.aggregate as Record<string, unknown>).field as Record<
+      string,
+      unknown
+    >
+  ).targetId = 'northstar.modulefixture:field.master_role_kind';
+  expectDiagnostic(
+    () => normalizeApplicationPackage(crossEntity),
+    'CANON_QUERY_AGGREGATE_FIELD_LOCALITY',
+    { objectId: V3_AGGREGATE_IDS.aggregateQuery },
+  );
+
+  const wrongSourceType = v3AggregateModule() as {
+    queries: Array<Record<string, unknown>>;
+  };
+  const wrongSourceQuery = wrongSourceType.queries.find(
+    (query) => query.queryId === V3_AGGREGATE_IDS.aggregateQuery,
+  )!;
+  (
+    (wrongSourceQuery.aggregate as Record<string, unknown>).field as Record<
+      string,
+      unknown
+    >
+  ).targetId = 'northstar.modulefixture:field.master_number';
+  expectDiagnostic(
+    () => normalizeApplicationPackage(wrongSourceType),
+    'CANON_QUERY_AGGREGATE_TYPE_UNSUPPORTED',
+    { objectId: V3_AGGREGATE_IDS.aggregateQuery },
+  );
+
+  const unresolvedParameter = v3AggregateModule() as {
+    queries: Array<Record<string, unknown>>;
+  };
+  const unresolvedQuery = unresolvedParameter.queries.find(
+    (query) => query.queryId === V3_AGGREGATE_IDS.aggregateQuery,
+  )!;
+  const unresolvedTerms = (
+    unresolvedQuery.filter as { terms: Array<Record<string, unknown>> }
+  ).terms;
+  (unresolvedTerms[0]!.value as Record<string, unknown>).parameterId =
+    'northstar.modulefixture:parameter.missing';
+  expectDiagnostic(
+    () => normalizeApplicationPackage(unresolvedParameter),
+    'CANON_QUERY_PARAMETER_UNRESOLVED',
+    { objectId: V3_AGGREGATE_IDS.aggregateQuery },
+  );
+
+  const incompatibleParameter = v3AggregateModule() as {
+    queries: Array<Record<string, unknown>>;
+  };
+  const incompatibleQuery = incompatibleParameter.queries.find(
+    (query) => query.queryId === V3_AGGREGATE_IDS.aggregateQuery,
+  )!;
+  const terms = (
+    incompatibleQuery.filter as { terms: Array<Record<string, unknown>> }
+  ).terms;
+  (terms[1]!.value as Record<string, unknown>).parameterId =
+    V3_AGGREGATE_IDS.stockParameter;
+  expectDiagnostic(
+    () => normalizeApplicationPackage(incompatibleParameter),
+    'CANON_QUERY_PARAMETER_TYPE_MISMATCH',
+    { objectId: V3_AGGREGATE_IDS.aggregateQuery },
+  );
+
+  for (const authoredAuthority of [
+    { path: 'query', property: 'groupBy', value: [] },
+    { path: 'query', property: 'selections', value: [] },
+    {
+      path: 'aggregate',
+      property: 'resultType',
+      value: { kind: 'exactDecimalAggregateResultType' },
+    },
+    {
+      path: 'parameter',
+      property: 'parameterType',
+      value: { kind: 'textFieldType' },
+    },
+    { path: 'parameter', property: 'presence', value: 'optional' },
+  ] as const) {
+    const candidate = v3AggregateModule() as {
+      queries: Array<Record<string, unknown>>;
+    };
+    const query = candidate.queries.find(
+      (entry) => entry.queryId === V3_AGGREGATE_IDS.aggregateQuery,
+    )!;
+    const target =
+      authoredAuthority.path === 'aggregate'
+        ? (query.aggregate as Record<string, unknown>)
+        : authoredAuthority.path === 'parameter'
+          ? ((query.parameters as Array<Record<string, unknown>>)[0] ?? {})
+          : query;
+    target[authoredAuthority.property] = authoredAuthority.value;
+    expectDiagnostic(
+      () => normalizeApplicationPackage(candidate),
+      'CANON_SCHEMA_INVALID',
     );
   }
 });

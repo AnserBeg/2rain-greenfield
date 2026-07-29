@@ -40,6 +40,7 @@ import {
   ordinaryModuleV1,
   ordinaryModuleV2,
 } from '../fixtures/g2/module-conformance/definitions.js';
+import { V3_AGGREGATE_IDS, v3AggregateModule } from './v3-definition.js';
 
 test('ordinary v1 and v2 parent/child definitions compile cleanly and twice identically', () => {
   const first = mustCompile(input(ordinaryModuleV1()));
@@ -581,7 +582,16 @@ test('v3 compiles through explicit profile dispatch with the complete v2 project
     LANGUAGE_VERSION,
     LANGUAGE_VERSIONS.v3,
   ) as Record<string, unknown>;
+  authoredV3.impactAnalyses = [];
   authoredV3.normalizationProfileVersion = NORMALIZATION_PROFILE_VERSIONS.v3;
+  const authoredOperation = (
+    authoredV3.operations as Array<Record<string, unknown>>
+  )[0]!;
+  authoredOperation.precondition = {
+    kind: 'booleanPredicate',
+    schemaVersion: LANGUAGE_VERSIONS.v3,
+    value: false,
+  };
   const normalizedV3 = normalizeApplicationPackage(authoredV3);
   const v3Input = inputNormalized(normalizedV3);
   v3Input.profile = {
@@ -607,6 +617,23 @@ test('v3 compiles through explicit profile dispatch with the complete v2 project
     v3.bundle.releaseManifest.normalizationProfileVersion,
     NORMALIZATION_PROFILE_VERSIONS.v3,
   );
+  const operationCatalog = projectionPayload<{
+    operations: Array<{ operationId: string; precondition: unknown }>;
+  }>(v3, PROJECTION_FAMILY_IDS.operationCatalog);
+  const normalizedPrecondition = normalizedV3.operations.find(
+    (operation) => operation.operationId === authoredOperation.operationId,
+  )?.precondition;
+  assert.deepEqual(normalizedPrecondition, {
+    kind: 'booleanPredicate',
+    schemaVersion: LANGUAGE_VERSIONS.v3,
+    value: false,
+  });
+  assert.deepEqual(
+    operationCatalog.operations.find(
+      (operation) => operation.operationId === authoredOperation.operationId,
+    )?.precondition,
+    normalizedPrecondition,
+  );
 
   const invalidV3 = structuredClone(normalizedV3);
   invalidV3.queries.find(
@@ -620,6 +647,146 @@ test('v3 compiles through explicit profile dispatch with the complete v2 project
     rejected.diagnostics.some(
       (diagnostic) =>
         diagnostic.code === 'COMPILER_RESOLVE_MATCH_AUTHORITY_REQUIRED',
+    ),
+  );
+});
+
+test('v3 aggregate catalog metadata is derived from one canonical source', () => {
+  const normalized = normalizeApplicationPackage(v3AggregateModule());
+  const compilerInput = inputNormalized(normalized);
+  compilerInput.profile = {
+    ...MODULE_COMPILER_PROFILE,
+    languageVersion: LANGUAGE_VERSIONS.v3,
+    normalizationProfileVersion: NORMALIZATION_PROFILE_VERSIONS.v3,
+  };
+  const compiled = mustCompile(compilerInput);
+  const catalog = projectionPayload<{
+    queries: Array<{
+      aggregate?: {
+        fieldId: string;
+        operator: string;
+        resultType: Record<string, unknown>;
+        selectionId: string;
+      };
+      parameters?: Array<{
+        parameterId: string;
+        parameterType: { kind: string };
+      }>;
+      queryId: string;
+      queryType: string;
+      resultContract?: Record<string, unknown>;
+    }>;
+  }>(compiled, PROJECTION_FAMILY_IDS.queryCatalog);
+  const aggregate = catalog.queries.find(
+    (query) => query.queryId === V3_AGGREGATE_IDS.aggregateQuery,
+  );
+  assert.deepEqual(aggregate, {
+    aggregate: {
+      fieldId: FIXTURE_IDS.fieldIds.parentAmount,
+      operator: 'sum',
+      resultType: {
+        kind: 'exactDecimalAggregateResultType',
+        precision: 38,
+        scale: 2,
+        schemaVersion: LANGUAGE_VERSIONS.v3,
+      },
+      selectionId: V3_AGGREGATE_IDS.aggregateSelection,
+    },
+    filter: (
+      normalized.queries.find(
+        (query) => query.queryId === V3_AGGREGATE_IDS.aggregateQuery,
+      ) as { filter: unknown }
+    ).filter,
+    lifecycle: 'active',
+    maximumResultCount: 1,
+    parameters: [
+      {
+        orderKey: 10,
+        parameterId: V3_AGGREGATE_IDS.stockParameter,
+        parameterType: {
+          kind: 'textFieldType',
+          maximumLength: 40,
+          schemaVersion: LANGUAGE_VERSIONS.v3,
+        },
+      },
+      {
+        orderKey: 20,
+        parameterId: V3_AGGREGATE_IDS.atTimeParameter,
+        parameterType: {
+          kind: 'dateTimeFieldType',
+          precision: 'millisecond',
+          schemaVersion: LANGUAGE_VERSIONS.v3,
+          timezoneSemantics: 'utcInstant',
+        },
+      },
+    ],
+    permissionId: `${FIXTURE_IDS.namespace}:permission.master_read`,
+    queryId: V3_AGGREGATE_IDS.aggregateQuery,
+    queryType: 'aggregate',
+    resultContract: {
+      kind: 'semanticAggregateResult',
+      outcome: 'exact',
+      schemaVersion: 'northstar.semantic-aggregate-result/v1',
+    },
+    sourceEntityId: FIXTURE_IDS.entityIds.parent,
+    tier: 'q1',
+  });
+
+  const semantic = projectionPayload<{
+    constructs: Array<{ constructKind: string; subjectId: string }>;
+  }>(compiled, PROJECTION_FAMILY_IDS.semanticModel);
+  assert.deepEqual(
+    semantic.constructs
+      .filter(
+        (construct) => construct.subjectId === V3_AGGREGATE_IDS.aggregateQuery,
+      )
+      .map(({ constructKind, subjectId }) => ({ constructKind, subjectId })),
+    [
+      {
+        constructKind: 'queryDefinition',
+        subjectId: V3_AGGREGATE_IDS.aggregateQuery,
+      },
+    ].sort((left, right) =>
+      left.subjectId < right.subjectId
+        ? -1
+        : left.subjectId > right.subjectId
+          ? 1
+          : 0,
+    ),
+  );
+
+  const tamperedResultType = structuredClone(normalized) as unknown as {
+    queries: Array<Record<string, unknown>>;
+  };
+  const tamperedAggregate = tamperedResultType.queries.find(
+    (query) => query.queryId === V3_AGGREGATE_IDS.aggregateQuery,
+  )!.aggregate as { resultType: Record<string, unknown> };
+  tamperedAggregate.resultType.scale = 3;
+  const tamperedResultInput = inputNormalized(tamperedResultType);
+  tamperedResultInput.profile = { ...compilerInput.profile };
+  const tamperedResult = compileApplication(tamperedResultInput);
+  assert.equal(tamperedResult.status, 'failed');
+  assert.ok(
+    tamperedResult.diagnostics.some(
+      (diagnostic) => diagnostic.code === 'CANON_NORMALIZED_DERIVED_MISMATCH',
+    ),
+  );
+
+  const tamperedParameter = structuredClone(normalized) as unknown as {
+    queries: Array<Record<string, unknown>>;
+  };
+  const tamperedFilter = tamperedParameter.queries.find(
+    (query) => query.queryId === V3_AGGREGATE_IDS.aggregateQuery,
+  )!.filter as { terms: Array<Record<string, unknown>> };
+  (tamperedFilter.terms[0]!.value as Record<string, unknown>).parameterId =
+    'northstar.modulefixture:parameter.missing';
+  const tamperedParameterInput = inputNormalized(tamperedParameter);
+  tamperedParameterInput.profile = { ...compilerInput.profile };
+  const unresolvedParameter = compileApplication(tamperedParameterInput);
+  assert.equal(unresolvedParameter.status, 'failed');
+  assert.ok(
+    unresolvedParameter.diagnostics.some(
+      (diagnostic) => diagnostic.code === 'CANON_QUERY_PARAMETER_UNRESOLVED',
     ),
   );
 });

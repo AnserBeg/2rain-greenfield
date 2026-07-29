@@ -8,7 +8,7 @@ import {
 } from './constants.js';
 import {
   CanonicalReferenceSchema,
-  CanonicalScalarSchema,
+  VersionedCanonicalScalarSchema,
   type CanonicalScalar,
   type PredicateExpression,
 } from './schemas.js';
@@ -257,7 +257,7 @@ function parsePredicate(value: unknown, depth: number): ParsedPredicate {
         return rejected(version, 'invalid-node-shape');
       }
       const field = CanonicalReferenceSchema.safeParse(value.field);
-      const scalar = CanonicalScalarSchema.safeParse(value.value);
+      const scalar = VersionedCanonicalScalarSchema.safeParse(value.value);
       if (
         !field.success ||
         field.data.kind !== 'fieldReference' ||
