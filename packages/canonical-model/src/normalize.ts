@@ -22,7 +22,6 @@ import {
   type CanonicalDiagnostic,
 } from './diagnostics.js';
 import {
-  AuthoredApplicationPackageSchema,
   VersionedAuthoredApplicationPackageSchema,
   VersionedNormalizedApplicationPackageSchema,
   type AuthoredApplicationPackage,
@@ -57,14 +56,9 @@ type AggregateContract = {
 
 export function parseAuthoredApplicationPackageJson(
   input: string | Uint8Array,
-): AuthoredApplicationPackage {
+): VersionedAuthoredApplicationPackage {
   const parsed = parseAuthoredJsonInput(input);
-  try {
-    return AuthoredApplicationPackageSchema.parse(parsed.value);
-  } catch (error) {
-    if (error instanceof ZodError) throw schemaError(error, parsed.value);
-    throw error;
-  }
+  return parseAuthoredValue(parsed.value);
 }
 
 export function parseVersionedAuthoredApplicationPackageJson(

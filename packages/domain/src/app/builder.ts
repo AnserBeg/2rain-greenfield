@@ -2,8 +2,8 @@ import { catalogModuleDefinition } from '../catalog/definition.js';
 import { locationModuleDefinition } from '../location/definition.js';
 import { partyModuleDefinition } from '../party/definition.js';
 
-const version = 'v2' as const;
-const normalizationProfileVersion = 'northstar.normalization/v2' as const;
+const version = 'v3' as const;
+const normalizationProfileVersion = 'northstar.normalization/v3' as const;
 
 export const APPLICATION_NAMESPACE = 'northstar.app' as const;
 
@@ -67,6 +67,7 @@ export function composedApplicationDefinition(): Record<string, unknown> {
     entities: merged(definitions, 'entities'),
     fields: merged(definitions, 'fields'),
     hashAlgorithm: 'sha256',
+    impactAnalyses: [],
     kind: 'applicationPackageRevision',
     languageVersion: version,
     modules,

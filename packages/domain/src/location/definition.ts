@@ -1,5 +1,5 @@
-const version = 'v2' as const;
-const normalizationProfileVersion = 'northstar.normalization/v2' as const;
+const version = 'v3' as const;
+const normalizationProfileVersion = 'northstar.normalization/v3' as const;
 
 export const LOCATION_NAMESPACE = 'northstar.location' as const;
 
@@ -107,6 +107,7 @@ export function locationModuleDefinition(
       ),
     ],
     hashAlgorithm: 'sha256',
+    impactAnalyses: [],
     kind: 'applicationPackageRevision',
     languageVersion: version,
     modules: [
