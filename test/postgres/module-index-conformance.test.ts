@@ -148,6 +148,83 @@ test('EXPLAIN plan guard rejects sequential and wrong-index scans structurally',
       }),
     /unrecognized EXPLAIN rows removed by filter: 3/,
   );
+  const substringTargets = {
+    nameFoldedIndex: { physicalName: 'unexpected_name_folded' },
+    numberUniqueIndexNames: ['expected_semantic', 'expected_case_folded'],
+    party: { primaryKey: { physicalName: 'expected_primary' } },
+  } as unknown as RelationTargets;
+  assert.throws(
+    () =>
+      assertSubstringBoundedEvidence(
+        {
+          indexScanDeltas: new Map([['unrelated_index', 1n]]),
+          root: {
+            'Index Name': 'unrelated_index',
+            'Node Type': 'Index Scan',
+            'Rows Removed by Filter': 3,
+          },
+        },
+        substringTargets,
+      ),
+    /did not use exactly one tenant-bounding index/,
+  );
+  assert.throws(
+    () =>
+      assertSubstringBoundedEvidence(
+        {
+          indexScanDeltas: new Map([
+            ['expected_primary', 0n],
+            ['expected_semantic', 0n],
+            ['expected_case_folded', 0n],
+          ]),
+          root: {
+            'Index Name': 'expected_case_folded',
+            'Node Type': 'Index Scan',
+            'Rows Removed by Filter': 3,
+          },
+        },
+        substringTargets,
+      ),
+    /expected_case_folded incremented 0 times; expected 1/,
+  );
+  assert.throws(
+    () =>
+      assertSubstringBoundedEvidence(
+        {
+          indexScanDeltas: new Map([
+            ['expected_semantic', 1n],
+            ['expected_case_folded', 1n],
+            ['expected_primary', 0n],
+          ]),
+          root: {
+            'Index Name': 'expected_semantic',
+            'Node Type': 'Index Scan',
+            'Rows Removed by Filter': 3,
+          },
+        },
+        substringTargets,
+      ),
+    /expected_case_folded incremented 1 times; expected 0/,
+  );
+  assert.throws(
+    () =>
+      assertSubstringBoundedEvidence(
+        {
+          indexScanDeltas: new Map([
+            ['expected_primary', 1n],
+            ['expected_semantic', 0n],
+            ['expected_case_folded', 0n],
+          ]),
+          root: {
+            'Index Name': 'expected_primary',
+            'Node Type': 'Index Scan',
+            'Rows Removed by Filter': 0,
+          },
+        },
+        substringTargets,
+      ),
+    /did not observe its expected bounded post-filter/,
+  );
   assert.equal(foldedPrefixUpperBound('\u{10ffff}'), null);
   assert.equal(foldedPrefixUpperBound(`a\u{10ffff}`), 'b');
   assert.equal(foldedPrefixUpperBound('\ud7ff'), '\ue000');
@@ -533,7 +610,7 @@ test('forced-RLS relation, resolve, unique, and prefix predicates use their decl
       'literal escaping changed the tenant-bounded substring plan shape',
     );
     console.log(
-      `PR-6d substring bounded rows=${String(priorRowCount)} removed_by_filter=${String(inspectPlan(literalSubstring.root).totalRowsRemovedByFilter)} tenant_index_delta=${String(literalSubstring.indexScanDeltas.get(targets.party.primaryKey.physicalName) ?? 'missing')}`,
+      `PR-6d substring bounded rows=${String(priorRowCount)} removed_by_filter=${String(inspectPlan(literalSubstring.root).totalRowsRemovedByFilter)} tenant_index_deltas=${[targets.party.primaryKey.physicalName, ...targets.numberUniqueIndexNames].map((indexName) => `${indexName}:${String(literalSubstring.indexScanDeltas.get(indexName) ?? 'missing')}`).join(',')}`,
     );
     if (demonstrateMissingPrefixIndex === 'prefix') {
       await runtime.adminPool.query(
@@ -1428,34 +1505,51 @@ function assertSubstringBoundedEvidence(
   targets: RelationTargets,
 ): void {
   const plan = inspectPlan(evidence.root);
-  const primaryKey = targets.party.primaryKey.physicalName;
+  const tenantBoundingIndexes = [
+    targets.party.primaryKey.physicalName,
+    ...targets.numberUniqueIndexNames,
+  ];
   assert.equal(
     plan.sequentialScan,
     false,
     'substring predicate escaped the tenant/environment index bound',
   );
-  assert.ok(
-    plan.indexNames.has(primaryKey),
-    `substring predicate did not use tenant-bounding index ${primaryKey}; used ${[...plan.indexNames].join(', ') || 'none'}`,
+  const selectedTenantIndexes = tenantBoundingIndexes.filter((indexName) =>
+    plan.indexNames.has(indexName),
   );
-  assert.ok(
-    (evidence.indexScanDeltas.get(primaryKey) ?? 0n) >= 1n,
-    `substring predicate did not increment tenant-bounding index ${primaryKey}`,
+  assert.equal(
+    selectedTenantIndexes.length,
+    1,
+    `substring predicate did not use exactly one tenant-bounding index ${tenantBoundingIndexes.join(' or ')}; used ${[...plan.indexNames].join(', ') || 'none'}`,
   );
+  assert.deepEqual(
+    [...plan.indexNames].toSorted(),
+    selectedTenantIndexes.toSorted(),
+    'substring predicate used an index outside the approved tenant bounds',
+  );
+  for (const indexName of tenantBoundingIndexes) {
+    const delta = evidence.indexScanDeltas.get(indexName);
+    assert.equal(
+      typeof delta,
+      'bigint',
+      `substring predicate omitted scan-counter evidence for tenant-bounding index ${indexName}`,
+    );
+    const expected = selectedTenantIndexes.includes(indexName) ? 1n : 0n;
+    assert.equal(
+      delta,
+      expected,
+      `${indexName} incremented ${String(delta)} times; expected ${String(expected)}`,
+    );
+  }
   assert.ok(
     plan.totalRowsRemovedByFilter > 0,
     'substring predicate did not observe its expected bounded post-filter',
   );
-  for (const foldedIndex of [
-    targets.nameFoldedIndex.physicalName,
-    ...targets.numberUniqueIndexNames,
-  ]) {
-    assert.equal(
-      evidence.indexScanDeltas.get(foldedIndex) ?? 0n,
-      0n,
-      `unanchored substring unexpectedly used folded index ${foldedIndex}`,
-    );
-  }
+  assert.equal(
+    evidence.indexScanDeltas.get(targets.nameFoldedIndex.physicalName) ?? 0n,
+    0n,
+    `unanchored substring unexpectedly used folded search index ${targets.nameFoldedIndex.physicalName}`,
+  );
 }
 
 function actualTotalTime(root: PlanNode): number {
