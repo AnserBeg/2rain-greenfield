@@ -42,9 +42,14 @@ The only admissible request is `B -> A` where all of the following hold:
    - `REVERSIBLE` with `REVERSIBLE` recovery.
 
 `IRREVERSIBLE` / `FORWARD_RECOVERY_ONLY`, missing or unverified forward evidence, a
-non-adjacent target, and a target outside the lineage each fail closed with a typed rollback
-refusal before a reverse approval is created. The remedy for an irreversible edge is a
-governed forward recovery release, never an inferred pointer reversal.
+non-adjacent ancestor, and a different release identity for the predecessor each fail closed
+with a typed rollback refusal before a reverse approval is created. The explicit product
+rollback selection also rejects a target outside the supplied compiled lineage. The shared
+release services continue to admit unrelated pairs through their pre-existing generic
+forward-activation contract: without an explicit rollback selection or an ancestral
+relationship, such a pair is not classified as a reverse transition. The remedy for an
+irreversible edge is a governed forward recovery release, never an inferred pointer
+reversal.
 
 An admitted reversal then uses the real release path: canonical preparation over B and the
 already admitted immutable A, a fresh human approval bound to the current pointer and
@@ -114,12 +119,19 @@ activation. It does not recompile A or mint a replacement for it.
 ## Enforcement
 
 `release-reverse-transition-policy.ts` selects only the verified activation at the current
-pointer fence and returns a typed refusal for every inadmissible reverse edge. The composed
-application checks it before preparation; release approval and activation invoke the same
-policy again so bypassing the composition root does not bypass the rule.
+pointer fence and returns a typed refusal for every structurally recognizable inadmissible
+reverse edge. The composed application validates the explicit rollback selection before
+preparation; release approval and activation invoke the same policy again so a skipped
+ancestor or an unestablished predecessor release identity cannot bypass the rule by entering
+below the composition root. Unrelated pairs retain the release kernel's generic forward
+semantics and gain no rollback authorization from this policy.
 
 `test/postgres/composed-application.test.ts` executes the complete A -> B -> A -> B journey,
 asserts physical tuple identity and the retained storage column, asserts fresh approval and
 exact-swap trigger evidence, and forces the persisted forward classification to
 `IRREVERSIBLE` / `FORWARD_RECOVERY_ONLY` to observe
-`ROLLBACK_FORWARD_TRANSITION_NOT_REVERSIBLE` before approval.
+`ROLLBACK_FORWARD_TRANSITION_NOT_REVERSIBLE` before approval. Direct service controls also
+observe approval refusing a skipped ancestor and a separately admitted predecessor release
+identity, then observe activation revalidating an approved edge whose persisted ancestry no
+longer makes it immediate; none writes an approval, swaps the pointer, or records a terminal
+activation outcome past the applicable refusal boundary.

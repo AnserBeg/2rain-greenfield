@@ -348,6 +348,14 @@ test(
             candidateReleaseId,
             sourceReleaseId,
           );
+          await assertReleaseServicesRejectNonExactReversePairs(
+            runtime,
+            compiledApplication,
+            connection,
+            pool,
+            candidateReleaseId,
+            sourceReleaseId,
+          );
           await assertExactSwapTriggerEnabled(pool);
           runtime = await createRuntime(
             candidate,
@@ -685,6 +693,352 @@ async function assertApprovalRequiredForAdvancement(
   } finally {
     await runtimePool.end();
   }
+}
+
+async function assertReleaseServicesRejectNonExactReversePairs(
+  runtime: ComposedApplicationRuntime,
+  previousCompiledApplication: unknown,
+  connection: pg.PoolConfig,
+  adminPool: pg.Pool,
+  sourceReleaseId: MintedUuid,
+  immediateTargetReleaseId: MintedUuid,
+): Promise<void> {
+  const runtimePool = new pg.Pool({
+    ...connection,
+    max: 2,
+    user: 'north_star_runtime',
+  });
+  runtimePool.on('error', () => undefined);
+  try {
+    const context = await new AuthenticatedRequestEntryAdapter(
+      async () => runtime.identity,
+    ).enter({});
+    const approverPrincipalId = await currentApproverPrincipal(
+      adminPool,
+      context.tenantId,
+    );
+    const approverContext = await new AuthenticatedRequestEntryAdapter(
+      async () => ({
+        environmentId: context.environmentId,
+        principalId: approverPrincipalId,
+        tenantId: context.tenantId,
+      }),
+    ).enter({});
+    const systemContext = await new AuthenticatedRequestEntryAdapter(
+      async () => ({
+        environmentId: context.environmentId,
+        principalId: SYSTEM_EXECUTION_PRINCIPAL.principalId,
+        tenantId: context.tenantId,
+      }),
+    ).enter({});
+    const previous = parseCompiledApplication(previousCompiledApplication);
+    const immediateTarget = await releaseTarget(
+      adminPool,
+      context,
+      immediateTargetReleaseId,
+      previous.application.compiled,
+    );
+    const bootstrapRelease = await releaseTargetForRoot(
+      adminPool,
+      context,
+      previous.bootstrap.compiled.releaseRoot,
+      previous.bootstrap.compiled,
+    );
+
+    const skippedApprovalCount = await approvalCountForPair(
+      adminPool,
+      context,
+      sourceReleaseId,
+      bootstrapRelease.releaseId,
+    );
+    await assert.rejects(
+      prepareAndApproveCandidate(
+        runtimePool,
+        context,
+        approverContext,
+        bootstrapRelease,
+      ),
+      (error: unknown) =>
+        assertReverseRefusal(
+          error,
+          'RELEASE_TRANSITION_NOT_EXACT_LINEAGE_EDGE',
+        ),
+    );
+    assert.equal(
+      await approvalCountForPair(
+        adminPool,
+        context,
+        sourceReleaseId,
+        bootstrapRelease.releaseId,
+      ),
+      skippedApprovalCount,
+      'approval refuses a skipped B-to-bootstrap lineage edge before writing an approval',
+    );
+
+    const outsideReleaseId = randomUUID() as MintedUuid;
+    const repository = new PostgresImmutableReleaseRepository(runtimePool);
+    const staged = await repository.stageTenantReleaseCandidate(context, {
+      appPackageRevisionId: immediateTarget.revisionId,
+      compiledRelease: immediateTarget.compiled,
+      createdBy: context.principalId,
+      environmentId: context.environmentId,
+      releaseId: outsideReleaseId,
+      tenantId: context.tenantId,
+    });
+    await new PostgresReleaseVerificationService(
+      runtimePool,
+    ).executeSemanticCandidateAndPersist(context, {
+      compiledRelease: immediateTarget.compiled,
+      evidenceId: staged.verificationEvidenceId,
+      releaseId: outsideReleaseId,
+    });
+    await repository.registerTenantRelease(context, {
+      appPackageRevisionId: immediateTarget.revisionId,
+      compiledRelease: immediateTarget.compiled,
+      createdBy: context.principalId,
+      environmentId: context.environmentId,
+      releaseId: outsideReleaseId,
+      tenantId: context.tenantId,
+      verificationEvidenceId: staged.verificationEvidenceId,
+    });
+    const outsideTarget = {
+      compiled: immediateTarget.compiled,
+      evidenceId: staged.verificationEvidenceId,
+      releaseId: outsideReleaseId,
+      revisionId: immediateTarget.revisionId,
+    };
+    await assert.rejects(
+      prepareAndApproveCandidate(
+        runtimePool,
+        context,
+        approverContext,
+        outsideTarget,
+      ),
+      (error: unknown) =>
+        assertReverseRefusal(error, 'ROLLBACK_FORWARD_ACTIVATION_NOT_VERIFIED'),
+    );
+    assert.equal(
+      await approvalCountForPair(
+        adminPool,
+        context,
+        sourceReleaseId,
+        outsideReleaseId,
+      ),
+      0,
+      'approval refuses an admitted release identity outside the activated lineage',
+    );
+
+    const activationAttemptId = await prepareAndApproveCandidate(
+      runtimePool,
+      context,
+      approverContext,
+      immediateTarget,
+    );
+    const sourceRevision = await adminPool.query<{
+      parent_revision_id: MintedUuid | null;
+      revision_id: MintedUuid;
+    }>(
+      `SELECT revision.revision_id, revision.parent_revision_id
+         FROM platform.tenant_releases AS release
+         JOIN platform.app_package_revisions AS revision
+           ON revision.tenant_id = release.tenant_id
+          AND revision.revision_id = release.app_package_revision_id
+        WHERE release.tenant_id = $1
+          AND release.environment_id = $2
+          AND release.release_id = $3`,
+      [context.tenantId, context.environmentId, sourceReleaseId],
+    );
+    const sourceRevisionRow = sourceRevision.rows[0];
+    assert.ok(sourceRevisionRow);
+    assert.equal(
+      sourceRevisionRow.parent_revision_id,
+      immediateTarget.revisionId,
+      'the activation control starts from the real immediate reverse edge',
+    );
+    const skippedAncestorRevisionId = randomUUID() as MintedUuid;
+    const insertedAncestor = await adminPool.query(
+      `INSERT INTO platform.app_package_revisions (
+         tenant_id, revision_id, parent_revision_id, schema_version,
+         language_version, normalization_profile_version,
+         canonicalization_profile_version, hash_algorithm, content_hash,
+         desired_state, provenance, created_by
+       )
+       SELECT tenant_id, $3, revision_id, schema_version, language_version,
+              normalization_profile_version,
+              canonicalization_profile_version, hash_algorithm, content_hash,
+              desired_state, provenance, $4
+         FROM platform.app_package_revisions
+        WHERE tenant_id = $1 AND revision_id = $2`,
+      [
+        context.tenantId,
+        immediateTarget.revisionId,
+        skippedAncestorRevisionId,
+        context.principalId,
+      ],
+    );
+    assert.equal(insertedAncestor.rowCount, 1);
+    await adminPool.query(
+      `ALTER TABLE platform.app_package_revisions
+         DISABLE RULE app_package_revisions_reject_update`,
+    );
+    try {
+      const changed = await adminPool.query(
+        `UPDATE platform.app_package_revisions
+            SET parent_revision_id = $3
+          WHERE tenant_id = $1 AND revision_id = $2`,
+        [
+          context.tenantId,
+          sourceRevisionRow.revision_id,
+          skippedAncestorRevisionId,
+        ],
+      );
+      assert.equal(changed.rowCount, 1);
+      await assert.rejects(
+        new PostgresReleaseActivationService(runtimePool).activate(
+          systemContext,
+          { activationAttemptId },
+        ),
+        (error: unknown) =>
+          assertReverseRefusal(
+            error,
+            'RELEASE_TRANSITION_NOT_EXACT_LINEAGE_EDGE',
+          ),
+      );
+    } finally {
+      await adminPool.query(
+        `UPDATE platform.app_package_revisions
+            SET parent_revision_id = $3
+          WHERE tenant_id = $1 AND revision_id = $2`,
+        [
+          context.tenantId,
+          sourceRevisionRow.revision_id,
+          immediateTarget.revisionId,
+        ],
+      );
+      await adminPool.query(
+        `ALTER TABLE platform.app_package_revisions
+           ENABLE RULE app_package_revisions_reject_update`,
+      );
+    }
+    const immutableRule = await adminPool.query<{ enabled: string }>(
+      `SELECT ev_enabled AS enabled
+         FROM pg_catalog.pg_rewrite
+        WHERE ev_class = 'platform.app_package_revisions'::regclass
+          AND rulename = 'app_package_revisions_reject_update'`,
+    );
+    assert.equal(
+      immutableRule.rows[0]?.enabled,
+      'O',
+      'the immutable revision update rule is restored after the activation control',
+    );
+    assert.equal(
+      await activeReleaseId(adminPool, runtime.identity),
+      sourceReleaseId,
+      'activation refuses the no-longer-exact pair before swapping the pointer',
+    );
+    const outcome = await adminPool.query<{ count: string }>(
+      `SELECT count(*)::text AS count
+         FROM platform.release_activation_attempt_outcomes
+        WHERE activation_attempt_id = $1`,
+      [activationAttemptId],
+    );
+    assert.equal(
+      outcome.rows[0]?.count,
+      '0',
+      'the activation boundary refuses before recording a decisive outcome',
+    );
+  } finally {
+    await runtimePool.end();
+  }
+}
+
+async function releaseTarget(
+  pool: pg.Pool,
+  context: TrustedRequestContext,
+  releaseId: MintedUuid,
+  compiled: ReturnType<
+    typeof parseCompiledApplication
+  >['application']['compiled'],
+): Promise<{
+  compiled: ReturnType<
+    typeof parseCompiledApplication
+  >['application']['compiled'];
+  evidenceId: MintedUuid;
+  releaseId: MintedUuid;
+  revisionId: MintedUuid;
+}> {
+  const result = await pool.query<{
+    app_package_revision_id: MintedUuid;
+    release_id: MintedUuid;
+    verification_evidence_id: MintedUuid;
+  }>(
+    `SELECT app_package_revision_id, release_id, verification_evidence_id
+       FROM platform.tenant_releases
+      WHERE tenant_id = $1
+        AND environment_id = $2
+        AND release_id = $3`,
+    [context.tenantId, context.environmentId, releaseId],
+  );
+  const row = result.rows[0];
+  assert.ok(row);
+  return {
+    compiled,
+    evidenceId: row.verification_evidence_id,
+    releaseId: row.release_id,
+    revisionId: row.app_package_revision_id,
+  };
+}
+
+async function releaseTargetForRoot(
+  pool: pg.Pool,
+  context: TrustedRequestContext,
+  releaseRoot: string,
+  compiled: ReturnType<
+    typeof parseCompiledApplication
+  >['application']['compiled'],
+): ReturnType<typeof releaseTarget> {
+  const result = await pool.query<{ release_id: MintedUuid }>(
+    `SELECT release_id
+       FROM platform.tenant_releases
+      WHERE tenant_id = $1
+        AND environment_id = $2
+        AND content_hash = $3
+      ORDER BY created_at, release_id
+      LIMIT 1`,
+    [context.tenantId, context.environmentId, releaseRoot],
+  );
+  const releaseId = result.rows[0]?.release_id;
+  assert.ok(releaseId);
+  return releaseTarget(pool, context, releaseId, compiled);
+}
+
+async function approvalCountForPair(
+  pool: pg.Pool,
+  context: TrustedRequestContext,
+  sourceReleaseId: MintedUuid,
+  targetReleaseId: MintedUuid,
+): Promise<number> {
+  const result = await pool.query<{ count: string }>(
+    `SELECT count(*)::text AS count
+       FROM platform.release_approvals
+      WHERE tenant_id = $1
+        AND environment_id = $2
+        AND expected_release_id = $3
+        AND target_release_id = $4`,
+    [context.tenantId, context.environmentId, sourceReleaseId, targetReleaseId],
+  );
+  return Number(result.rows[0]?.count ?? '0');
+}
+
+function assertReverseRefusal(
+  error: unknown,
+  code:
+    | 'RELEASE_TRANSITION_NOT_EXACT_LINEAGE_EDGE'
+    | 'ROLLBACK_FORWARD_ACTIVATION_NOT_VERIFIED',
+): true {
+  assert.ok(error instanceof ReleaseReverseTransitionRefusal);
+  assert.equal(error.code, code);
+  return true;
 }
 
 async function prepareAndApproveCandidate(

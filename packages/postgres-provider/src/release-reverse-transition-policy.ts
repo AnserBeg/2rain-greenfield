@@ -14,6 +14,7 @@ export const RELEASE_REVERSE_TRANSITION_POLICY_VERSION =
   'northstar.release-reverse-transition-policy/v1' as const;
 
 export type ReleaseReverseTransitionRefusalCode =
+  | 'RELEASE_TRANSITION_NOT_EXACT_LINEAGE_EDGE'
   | 'ROLLBACK_FORWARD_ACTIVATION_NOT_VERIFIED'
   | 'ROLLBACK_FORWARD_EVIDENCE_INVALID'
   | 'ROLLBACK_FORWARD_TRANSITION_NOT_REVERSIBLE'
@@ -41,6 +42,7 @@ export interface ReleaseReverseTransitionAuthorization {
 }
 
 interface ReverseTransitionEvidenceRow {
+  exact_forward_lineage: boolean;
   exact_reverse_lineage: boolean;
   forward_activation_attempt_id: MintedUuid | null;
   forward_receipt_id: MintedUuid | null;
@@ -57,14 +59,17 @@ interface ReverseTransitionEvidenceRow {
   receipt_static_compatibility: string | null;
   receipt_target_manifest_root_matches: boolean | null;
   receipt_target_release_id: MintedUuid | null;
+  target_is_ancestor: boolean;
 }
 
 /**
- * Returns null for a forward, equivalent, or unrelated pair. For an exact
- * reverse lineage edge, returns the immutable forward activation evidence or
- * throws a typed refusal. The current pointer fence selects the activation
- * that actually established the source release; an older compatible receipt
- * cannot authorize reversal of a later activation.
+ * Returns null for a positively established exact forward lineage edge and for
+ * equivalent or unrelated pairs in the pre-existing generic forward-activation
+ * domain. For an exact reverse lineage edge, returns the immutable forward
+ * activation evidence or throws a typed refusal. A non-immediate ancestor is
+ * an attempted skipped reverse edge and fails closed. The current pointer
+ * fence selects the activation that actually established the source release;
+ * an older compatible receipt cannot authorize reversal of a later activation.
  */
 export async function authorizeReverseTransitionIfApplicable(
   client: PoolClient,
@@ -76,8 +81,25 @@ export async function authorizeReverseTransitionIfApplicable(
   }>,
 ): Promise<ReleaseReverseTransitionAuthorization | null> {
   const result = await client.query<ReverseTransitionEvidenceRow>(
-    `SELECT source_revision.parent_revision_id = target_revision.revision_id
+    `SELECT target_revision.parent_revision_id = source_revision.revision_id
+              AS exact_forward_lineage,
+            source_revision.parent_revision_id = target_revision.revision_id
               AS exact_reverse_lineage,
+            EXISTS (
+              WITH RECURSIVE source_ancestors(revision_id) AS (
+                SELECT source_revision.parent_revision_id
+                UNION
+                SELECT ancestor.parent_revision_id
+                  FROM platform.app_package_revisions AS ancestor
+                  JOIN source_ancestors
+                    ON source_ancestors.revision_id = ancestor.revision_id
+                 WHERE ancestor.tenant_id = source.tenant_id
+                   AND source_ancestors.revision_id IS NOT NULL
+              )
+              SELECT 1
+                FROM source_ancestors
+               WHERE revision_id = target_revision.revision_id
+            ) AS target_is_ancestor,
             swap.activation_attempt_id AS forward_activation_attempt_id,
             verification.status AS forward_verification_status,
             receipt.receipt_id AS forward_receipt_id,
@@ -141,7 +163,22 @@ export async function authorizeReverseTransitionIfApplicable(
     ],
   );
   const row = result.rows[0];
-  if (!row || !row.exact_reverse_lineage) return null;
+  if (row?.exact_forward_lineage) return null;
+  if (!row) {
+    refuse(
+      'RELEASE_TRANSITION_NOT_EXACT_LINEAGE_EDGE',
+      'release transition pair is not visible in the trusted environment',
+    );
+  }
+  if (!row.exact_reverse_lineage) {
+    if (row.target_is_ancestor) {
+      refuse(
+        'RELEASE_TRANSITION_NOT_EXACT_LINEAGE_EDGE',
+        'reverse release transition must follow one exact lineage edge',
+      );
+    }
+    return null;
+  }
 
   if (
     row.forward_activation_attempt_id === null ||
