@@ -16,6 +16,7 @@ import {
 import {
   HASH_ALGORITHM,
   HASH_DOMAINS,
+  PROJECTION_FAMILY_IDS,
   compileApplication,
   type CompileSuccess,
   type ContentAddressedArtifact,
@@ -37,6 +38,7 @@ import {
 } from '../../packages/postgres-provider/src/release-repository.js';
 import {
   PostgresReleaseVerificationService,
+  ReleaseVerificationIntegrityError,
   verificationEvidenceIdForCandidate,
 } from '../../packages/postgres-provider/src/release-verification-service.js';
 import {
@@ -177,6 +179,21 @@ test('release admission rejects a staged candidate with missing executed results
             callerLabeledCommand,
           ),
           /command is closed/,
+        );
+        await assert.rejects(
+          verification.executeSemanticCandidateAndPersist(context, {
+            ...exactCommand,
+            compiledRelease:
+              doctoredRuntimeProjectionWithoutChangingContentAddress(bootstrap),
+          }),
+          (error: unknown) => {
+            assert.ok(error instanceof ReleaseVerificationIntegrityError);
+            assert.equal(
+              error.code,
+              'VERIFICATION_CANDIDATE_ARTIFACT_MISMATCH',
+            );
+            return true;
+          },
         );
         const transient =
           await verification.executeSemanticCandidateWithExecutor(
@@ -1221,6 +1238,42 @@ function wrongSuccessfulDiagnostics(compiled: CompileSuccess): CompileSuccess {
   const clone = structuredClone(compiled);
   const success = clone as unknown as { diagnostics: unknown[] };
   success.diagnostics = [{ code: 'unexpected-success-diagnostic' }];
+  return clone;
+}
+
+function doctoredRuntimeProjectionWithoutChangingContentAddress(
+  compiled: CompileSuccess,
+): CompileSuccess {
+  const clone = structuredClone(compiled);
+  const reference = clone.bundle.releaseManifest.projections.find(
+    (projection) => projection.familyId === PROJECTION_FAMILY_IDS.queryCatalog,
+  );
+  assert.ok(reference);
+  const manifestArtifact = clone.bundle.artifacts.find(
+    (artifact) => artifact.contentHash === reference.artifactRoot,
+  );
+  assert.ok(manifestArtifact);
+  const manifest = JSON.parse(
+    new TextDecoder().decode(manifestArtifact.canonicalBytes),
+  ) as ProjectionManifestEnvelope;
+  const chunkHash = manifest.chunks[0]?.contentHash;
+  assert.ok(chunkHash);
+  const chunk = clone.bundle.artifacts.find(
+    (artifact) => artifact.contentHash === chunkHash,
+  );
+  const stagedChunk = clone.stagedArtifacts.find(
+    (artifact) => artifact.contentHash === chunkHash,
+  );
+  assert.ok(chunk);
+  assert.ok(stagedChunk);
+  const payload = JSON.parse(
+    new TextDecoder().decode(chunk.canonicalBytes),
+  ) as Record<string, unknown>;
+  const doctoredBytes = new TextEncoder().encode(
+    canonicalize({ ...payload, doctoredAfterStaging: true }),
+  );
+  chunk.canonicalBytes = doctoredBytes;
+  stagedChunk.canonicalBytes = doctoredBytes;
   return clone;
 }
 

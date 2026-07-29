@@ -105,6 +105,14 @@ interface EvidenceRow {
   verification_plan_semantic_digest: string;
 }
 
+interface CandidateArtifactRow {
+  artifact_kind: string;
+  canonical_bytes: Uint8Array;
+  content_hash: string;
+  domain_tag: string;
+  media_type: string;
+}
+
 export interface FederateReleaseVerificationCommand {
   readonly compiledRelease: CompileSuccess;
   readonly sourceEnvironmentId: string;
@@ -221,13 +229,14 @@ export class PostgresReleaseVerificationService {
     context: TrustedRequestContext,
     command: ExecuteReleaseVerificationCommand,
   ): Promise<DurableReleaseVerificationEvidence> {
+    const snapshot = snapshotExecutionCommand(command);
     const interpreter = new PostgresModuleRuntimeInterpreter(
       this.pool,
       verificationActorIssuer(),
     );
     return this.#executeSemanticCandidateWithExecutorAndPersist(
       context,
-      command,
+      snapshot,
       interpreter,
     );
   }
@@ -237,11 +246,9 @@ export class PostgresReleaseVerificationService {
     command: ExecuteReleaseVerificationCommand,
     executorProvider: SemanticOperationExecutor & SemanticQueryExecutor,
   ): Promise<ExecutedVerificationResultSet> {
-    assertClosedCommand(command);
-    assertUuid(command.evidenceId, 'evidenceId');
-    assertUuid(command.releaseId, 'releaseId');
-    const binding = releaseVerificationBinding(command.compiledRelease);
-    await this.assertStagedCandidate(context, command, binding);
+    const snapshot = snapshotExecutionCommand(command);
+    const binding = releaseVerificationBinding(snapshot.compiledRelease);
+    await this.assertStagedCandidate(context, snapshot, binding);
     if (binding.plan.scenarios.length === 0) {
       return executeVerificationPlan(
         binding.plan,
@@ -251,7 +258,7 @@ export class PostgresReleaseVerificationService {
     }
     return this.#executeSemanticCandidateWithExecutor(
       context,
-      command,
+      snapshot,
       binding,
       executorProvider,
       (executor) =>
@@ -371,6 +378,17 @@ export class PostgresReleaseVerificationService {
           'verification execution requires the exact staged candidate identity and root',
         );
       }
+      const persistedArtifacts = await client.query<CandidateArtifactRow>(
+        `SELECT artifact_kind, content_hash, domain_tag, media_type,
+                canonical_bytes
+           FROM platform.read_tenant_release_artifacts($1)`,
+        [command.releaseId],
+      );
+      assertExactCandidateArtifacts(
+        command.compiledRelease,
+        binding.releaseRoot,
+        persistedArtifacts.rows,
+      );
     });
   }
 }
@@ -1695,6 +1713,76 @@ function assertClosedCommand(command: ExecuteReleaseVerificationCommand): void {
       'release verification command is closed; skip, sampling, time-box, and unknown parameters are forbidden',
     );
   }
+}
+
+function snapshotExecutionCommand(
+  command: ExecuteReleaseVerificationCommand,
+): ExecuteReleaseVerificationCommand {
+  assertClosedCommand(command);
+  assertUuid(command.evidenceId, 'evidenceId');
+  assertUuid(command.releaseId, 'releaseId');
+  return Object.freeze({
+    compiledRelease: structuredClone(command.compiledRelease),
+    evidenceId: command.evidenceId,
+    releaseId: command.releaseId,
+  });
+}
+
+function assertExactCandidateArtifacts(
+  compiledRelease: CompileSuccess,
+  releaseRoot: string,
+  persistedArtifacts: readonly CandidateArtifactRow[],
+): void {
+  const suppliedArtifacts = [...compiledRelease.bundle.artifacts].sort(
+    (left, right) => compare(left.contentHash, right.contentHash),
+  );
+  const suppliedStagedArtifacts = [...compiledRelease.stagedArtifacts].sort(
+    (left, right) => compare(left.contentHash, right.contentHash),
+  );
+  const persisted = [...persistedArtifacts].sort((left, right) =>
+    compare(left.content_hash, right.content_hash),
+  );
+  const exactArtifacts = (supplied: typeof suppliedArtifacts): boolean =>
+    supplied.length === persisted.length &&
+    supplied.every((artifact, index) => {
+      const stored = persisted[index];
+      return (
+        stored !== undefined &&
+        artifact.contentHash === stored.content_hash &&
+        artifact.artifactKind === stored.artifact_kind &&
+        artifact.domainTag === stored.domain_tag &&
+        artifact.mediaType === stored.media_type &&
+        equalBytes(artifact.canonicalBytes, stored.canonical_bytes)
+      );
+    });
+  const persistedRoot = persisted.find(
+    (artifact) => artifact.content_hash === releaseRoot,
+  );
+  const manifestObjectBytes = new TextEncoder().encode(
+    canonicalize(compiledRelease.bundle.releaseManifest),
+  );
+  if (
+    !exactArtifacts(suppliedArtifacts) ||
+    !exactArtifacts(suppliedStagedArtifacts) ||
+    !persistedRoot ||
+    !equalBytes(
+      compiledRelease.bundle.releaseManifestBytes,
+      persistedRoot.canonical_bytes,
+    ) ||
+    !equalBytes(manifestObjectBytes, persistedRoot.canonical_bytes)
+  ) {
+    throw failure(
+      'VERIFICATION_CANDIDATE_ARTIFACT_MISMATCH',
+      'verification execution requires the exact persisted candidate artifact bundle',
+    );
+  }
+}
+
+function equalBytes(left: Uint8Array, right: Uint8Array): boolean {
+  return (
+    left.byteLength === right.byteLength &&
+    left.every((byte, index) => byte === right[index])
+  );
 }
 
 function decode(bytes: Uint8Array): Record<string, unknown> {
