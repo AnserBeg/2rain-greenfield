@@ -39,7 +39,9 @@ import {
   ordinaryModuleV1,
   ordinaryModuleV2,
 } from '../fixtures/g2/module-conformance/definitions.js';
-import './inventory-contract.cases.js';
+import { registerInventoryContractCases } from './inventory-contract.cases.js';
+
+registerInventoryContractCases((name, run) => test(name, run));
 
 test('ordinary v1 and v2 parent/child definitions compile cleanly and twice identically', () => {
   const first = mustCompile(input(ordinaryModuleV1()));

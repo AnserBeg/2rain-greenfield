@@ -197,6 +197,20 @@ generic canonical suffix rather than module identity, and imports the inventory
 cases through the already-inventoried compiler conformance suite. Focused
 architecture and compiler re-runs then passed 84/84 and 66/66 respectively.
 
+An exact-SHA full-matrix run at `17bbee9` later recorded two further reds. The
+untouched PostgreSQL activation test for overdue recovery observed one alarm
+row instead of zero under shared suite load; the complete 15-test activation
+file passed immediately in isolation, so no out-of-scope production or timing
+test was changed. The subsequent aggregate run made every functional suite
+green, including PostgreSQL 92/92, but executed-file reachability correctly
+rejected `inventory-contract.cases.ts`: its `test()` registrations made a
+non-`*.test.ts` helper look like an independently undiscovered test file. The
+in-scope correction keeps the case bodies in that helper while registering
+them through the already-inventoried `g2-module-conformance.test.ts` callsite.
+The focused compiler suite then passed 66/66 and reachability observed all
+74/74 discovered test files across nine producer artifacts. Exact final matrix
+and review evidence belong to the later frozen SHA reported at checkpoint.
+
 ## Gates
 
 - `corepack pnpm install --frozen-lockfile --reporter=append-only`

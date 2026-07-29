@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import test from 'node:test';
 
 import {
   compileInventoryContract,
@@ -27,369 +26,403 @@ interface MutableInventoryContract {
   };
 }
 
-test('inventory declarations compile to one deterministic quantity-only contract release', () => {
-  const first = mustCompile();
-  const second = mustCompile();
-  assert.equal(first.releaseRoot, second.releaseRoot);
-  assert.deepEqual(first.canonicalBytes, second.canonicalBytes);
+type InventoryContractCase = (name: string, run: () => void) => void;
 
-  const contract = first.release.contract;
-  const stock = contract.stockDimensionSet as {
-    dimensions: string[];
-    setId: string;
-  };
-  const movement = contract.movement as {
-    fields: Array<{
-      fieldId: string;
-      semantic: string;
-      valueShape?: Record<string, unknown>;
-    }>;
-    kind: string;
-    updatePath: string;
-  };
-  const dependencies = contract.authoritativeDependencies as {
-    dependencies: Array<{ access: string; dependencyId: string }>;
-    exhaustiveByConstruction: boolean;
-    undeclaredAccess: string;
-  };
+export function registerInventoryContractCases(
+  register: InventoryContractCase,
+): void {
+  register(
+    'inventory declarations compile to one deterministic quantity-only contract release',
+    () => {
+      const first = mustCompile();
+      const second = mustCompile();
+      assert.equal(first.releaseRoot, second.releaseRoot);
+      assert.deepEqual(first.canonicalBytes, second.canonicalBytes);
 
-  assert.deepEqual(stock, {
-    dimensions: ['legalEntityId', 'itemId', 'locationId'],
-    extension: {
-      addition: 'governedVersionedEvent',
-      reBaselineOperationId: 'northstar.inventory:operation.re_baseline',
-      removal: 'unsupported',
-      unspecifiedFromVersion: 2,
+      const contract = first.release.contract;
+      const stock = contract.stockDimensionSet as {
+        dimensions: string[];
+        setId: string;
+      };
+      const movement = contract.movement as {
+        fields: Array<{
+          fieldId: string;
+          semantic: string;
+          valueShape?: Record<string, unknown>;
+        }>;
+        kind: string;
+        updatePath: string;
+      };
+      const dependencies = contract.authoritativeDependencies as {
+        dependencies: Array<{ access: string; dependencyId: string }>;
+        exhaustiveByConstruction: boolean;
+        undeclaredAccess: string;
+      };
+
+      assert.deepEqual(stock, {
+        dimensions: ['legalEntityId', 'itemId', 'locationId'],
+        extension: {
+          addition: 'governedVersionedEvent',
+          reBaselineOperationId: 'northstar.inventory:operation.re_baseline',
+          removal: 'unsupported',
+          unspecifiedFromVersion: 2,
+        },
+        setId: 'northstar.stock-dimension-set/v1',
+        v1: {
+          allowedVersions: ['v1'],
+          membersRequiredAtPosting: true,
+          unspecifiedMembers: 'structurallyUnreachable',
+        },
+      });
+      assert.equal(movement.kind, 'quantityOnlyMovement');
+      assert.equal(movement.updatePath, 'none');
+      assert.deepEqual(
+        movement.fields.map((field) => [field.fieldId, field.semantic]),
+        [
+          ['movementId', 'identifier'],
+          ['stockDimensionSetVersion', 'stockDimensionSetVersion'],
+          ['quantityDelta', 'quantity'],
+          ['unitId', 'unit'],
+          ['effectiveAt', 'instant'],
+          ['recordedAt', 'instant'],
+          ['sourceType', 'sourceType'],
+          ['sourceId', 'identifier'],
+          ['sourceLine', 'sourceLine'],
+          ['postingRole', 'postingRole'],
+        ],
+      );
+      assert.deepEqual(
+        movement.fields.find((field) => field.fieldId === 'quantityDelta')
+          ?.valueShape,
+        {
+          precision: 38,
+          representation: 'canonicalDecimalStringV2',
+          scale: 18,
+          signed: true,
+          unitFieldId: 'unitId',
+        },
+      );
+      assert.equal(dependencies.exhaustiveByConstruction, true);
+      assert.equal(dependencies.undeclaredAccess, 'compileFailure');
+      assert.equal(dependencies.dependencies.length, 27);
+
+      const golden = JSON.parse(
+        readFileSync(
+          'test/compiler/inventory-contract.release.golden.json',
+          'utf8',
+        ),
+      ) as unknown;
+      assert.deepEqual(releaseSummary(first), golden);
     },
-    setId: 'northstar.stock-dimension-set/v1',
-    v1: {
-      allowedVersions: ['v1'],
-      membersRequiredAtPosting: true,
-      unspecifiedMembers: 'structurallyUnreachable',
-    },
-  });
-  assert.equal(movement.kind, 'quantityOnlyMovement');
-  assert.equal(movement.updatePath, 'none');
-  assert.deepEqual(
-    movement.fields.map((field) => [field.fieldId, field.semantic]),
-    [
-      ['movementId', 'identifier'],
-      ['stockDimensionSetVersion', 'stockDimensionSetVersion'],
-      ['quantityDelta', 'quantity'],
-      ['unitId', 'unit'],
-      ['effectiveAt', 'instant'],
-      ['recordedAt', 'instant'],
-      ['sourceType', 'sourceType'],
-      ['sourceId', 'identifier'],
-      ['sourceLine', 'sourceLine'],
-      ['postingRole', 'postingRole'],
-    ],
-  );
-  assert.deepEqual(
-    movement.fields.find((field) => field.fieldId === 'quantityDelta')
-      ?.valueShape,
-    {
-      precision: 38,
-      representation: 'canonicalDecimalStringV2',
-      scale: 18,
-      signed: true,
-      unitFieldId: 'unitId',
-    },
-  );
-  assert.equal(dependencies.exhaustiveByConstruction, true);
-  assert.equal(dependencies.undeclaredAccess, 'compileFailure');
-  assert.equal(dependencies.dependencies.length, 27);
-
-  const golden = JSON.parse(
-    readFileSync(
-      'test/compiler/inventory-contract.release.golden.json',
-      'utf8',
-    ),
-  ) as unknown;
-  assert.deepEqual(releaseSummary(first), golden);
-});
-
-test('compiled release data is detached, frozen, and still matches its canonical bytes', () => {
-  const candidate = mutableContract();
-  const result = compileInventoryContract(candidate);
-  assert.equal(result.status, 'compiled');
-  candidate.configuration.dials.negativeStock = { default: 'allow' };
-
-  assert.equal(result.release.release.configuration.negativeStock, 'reject');
-  assert.equal(Object.isFrozen(result.release.release), true);
-  assert.equal(Object.isFrozen(result.release.release.contract), true);
-  assert.deepEqual(
-    JSON.parse(new TextDecoder().decode(result.release.canonicalBytes)),
-    result.release.release,
-  );
-});
-
-test('configuration rejects a missing required dial and an out-of-range value', () => {
-  const missing = mutableContract();
-  delete missing.configuration.dials.reasonRequirements;
-  const missingResult = compileInventoryContract(missing);
-  assert.equal(missingResult.status, 'failed');
-  assert.deepEqual(diagnosticView(missingResult.diagnostics), [
-    {
-      bindingMovementId: null,
-      code: 'INVENTORY_CONFIGURATION_REQUIRED',
-      path: '$.configuration.dials.reasonRequirements',
-      subjectId: 'reasonRequirements',
-    },
-    {
-      bindingMovementId: null,
-      code: 'INVENTORY_CONFIGURATION_REQUIRED',
-      path: '$.configuration.dials.reasonRequirements.default',
-      subjectId: null,
-    },
-    {
-      bindingMovementId: null,
-      code: 'INVENTORY_CONTRACT_INVALID',
-      path: '$.configuration.dials.reasonRequirements.kind',
-      subjectId: 'kind',
-    },
-  ]);
-
-  const outOfRange = compileInventoryContract(INVENTORY_CONTRACT_V1, {
-    maximumBackdateDays: 3651,
-  });
-  assert.equal(outOfRange.status, 'failed');
-  assert.deepEqual(diagnosticView(outOfRange.diagnostics), [
-    {
-      bindingMovementId: null,
-      code: 'INVENTORY_CONFIGURATION_OUT_OF_RANGE',
-      path: '$.configuration.values.maximumBackdateDays',
-      subjectId: '3651',
-    },
-  ]);
-});
-
-test('negative stock defaults from declaration data and is recorded in release bytes', () => {
-  const compiled = mustCompile();
-  assert.equal(compiled.release.configurationScope, 'legalEntity');
-  assert.equal(compiled.release.configuration.negativeStock, 'reject');
-  assert.match(
-    new TextDecoder().decode(compiled.canonicalBytes),
-    /"configuration":\{"approvalThresholds".*"negativeStock":"reject"/u,
   );
 
-  const explicit = mustCompile({ negativeStock: 'allowWithFlag' });
-  assert.equal(explicit.release.configuration.negativeStock, 'allowWithFlag');
-  assert.notEqual(explicit.releaseRoot, compiled.releaseRoot);
-});
+  register(
+    'compiled release data is detached, frozen, and still matches its canonical bytes',
+    () => {
+      const candidate = mutableContract();
+      const result = compileInventoryContract(candidate);
+      assert.equal(result.status, 'compiled');
+      candidate.configuration.dials.negativeStock = { default: 'allow' };
 
-test('approval thresholds are release-recorded exact base-unit quantities', () => {
-  const thresholds = {
-    adjustment: '12.5',
-    correction: null,
-    count: null,
-    reBaseline: null,
-    transfer: '100',
-  };
-  const compiled = mustCompile({ approvalThresholds: thresholds });
-  assert.deepEqual(
-    compiled.release.configuration.approvalThresholds,
-    thresholds,
+      assert.equal(
+        result.release.release.configuration.negativeStock,
+        'reject',
+      );
+      assert.equal(Object.isFrozen(result.release.release), true);
+      assert.equal(Object.isFrozen(result.release.release.contract), true);
+      assert.deepEqual(
+        JSON.parse(new TextDecoder().decode(result.release.canonicalBytes)),
+        result.release.release,
+      );
+    },
   );
 
-  const invalid = compileInventoryContract(INVENTORY_CONTRACT_V1, {
-    approvalThresholds: {
-      ...thresholds,
-      adjustment: '0.1234567890123456789',
-    },
-  });
-  assert.equal(invalid.status, 'failed');
-  assert.deepEqual(diagnosticView(invalid.diagnostics), [
-    {
-      bindingMovementId: null,
-      code: 'INVENTORY_CONFIGURATION_OUT_OF_RANGE',
-      path: '$.configuration.values.approvalThresholds.adjustment',
-      subjectId: 'adjustment',
-    },
-  ]);
-});
+  register(
+    'configuration rejects a missing required dial and an out-of-range value',
+    () => {
+      const missing = mutableContract();
+      delete missing.configuration.dials.reasonRequirements;
+      const missingResult = compileInventoryContract(missing);
+      assert.equal(missingResult.status, 'failed');
+      assert.deepEqual(diagnosticView(missingResult.diagnostics), [
+        {
+          bindingMovementId: null,
+          code: 'INVENTORY_CONFIGURATION_REQUIRED',
+          path: '$.configuration.dials.reasonRequirements',
+          subjectId: 'reasonRequirements',
+        },
+        {
+          bindingMovementId: null,
+          code: 'INVENTORY_CONFIGURATION_REQUIRED',
+          path: '$.configuration.dials.reasonRequirements.default',
+          subjectId: null,
+        },
+        {
+          bindingMovementId: null,
+          code: 'INVENTORY_CONTRACT_INVALID',
+          path: '$.configuration.dials.reasonRequirements.kind',
+          subjectId: 'kind',
+        },
+      ]);
 
-test('money fields and movement-derived monetary artifacts fail compilation separately', () => {
-  const moneyField = mutableContract();
-  moneyField.movement.fields.push({
-    fieldId: 'monetaryAmount',
-    immutable: true,
-    presence: 'required',
-    semantic: 'money',
-    valueShape: { kind: 'moneyFieldType' },
-  });
-  const fieldResult = compileInventoryContract(moneyField);
-  assert.equal(fieldResult.status, 'failed');
-  assert.deepEqual(diagnosticView(fieldResult.diagnostics), [
-    {
-      bindingMovementId: null,
-      code: 'INVENTORY_MOVEMENT_MONEY_FORBIDDEN',
-      path: '$.movement.fields.monetaryAmount',
-      subjectId: 'monetaryAmount',
+      const outOfRange = compileInventoryContract(INVENTORY_CONTRACT_V1, {
+        maximumBackdateDays: 3651,
+      });
+      assert.equal(outOfRange.status, 'failed');
+      assert.deepEqual(diagnosticView(outOfRange.diagnostics), [
+        {
+          bindingMovementId: null,
+          code: 'INVENTORY_CONFIGURATION_OUT_OF_RANGE',
+          path: '$.configuration.values.maximumBackdateDays',
+          subjectId: '3651',
+        },
+      ]);
     },
-  ]);
+  );
 
-  const monetaryProjection = mutableContract();
-  monetaryProjection.compiledArtifacts.push({
-    artifactId: 'northstar.inventory:artifact.movement_value',
-    outputSemantic: 'money',
-    source: 'inventoryMovement',
-  });
-  const artifactResult = compileInventoryContract(monetaryProjection);
-  assert.equal(artifactResult.status, 'failed');
-  assert.deepEqual(diagnosticView(artifactResult.diagnostics), [
-    {
-      bindingMovementId: null,
-      code: 'INVENTORY_MOVEMENT_VALUE_DERIVATION_FORBIDDEN',
-      path: '$.compiledArtifacts.outputSemantic',
-      subjectId: 'northstar.inventory:artifact.movement_value',
+  register(
+    'negative stock defaults from declaration data and is recorded in release bytes',
+    () => {
+      const compiled = mustCompile();
+      assert.equal(compiled.release.configurationScope, 'legalEntity');
+      assert.equal(compiled.release.configuration.negativeStock, 'reject');
+      assert.match(
+        new TextDecoder().decode(compiled.canonicalBytes),
+        /"configuration":\{"approvalThresholds".*"negativeStock":"reject"/u,
+      );
+
+      const explicit = mustCompile({ negativeStock: 'allowWithFlag' });
+      assert.equal(
+        explicit.release.configuration.negativeStock,
+        'allowWithFlag',
+      );
+      assert.notEqual(explicit.releaseRoot, compiled.releaseRoot);
     },
-  ]);
-});
+  );
 
-test('missing and unknown stock-dimension versions are rejected', () => {
-  const compiled = mustCompile();
-  const stockIdentity = {
-    itemId: 'item-1',
-    legalEntityId: 'entity-1',
-    locationId: 'location-1',
-  };
+  register(
+    'approval thresholds are release-recorded exact base-unit quantities',
+    () => {
+      const thresholds = {
+        adjustment: '12.5',
+        correction: null,
+        count: null,
+        reBaseline: null,
+        transfer: '100',
+      };
+      const compiled = mustCompile({ approvalThresholds: thresholds });
+      assert.deepEqual(
+        compiled.release.configuration.approvalThresholds,
+        thresholds,
+      );
 
-  const missing = validateInventoryMovementCandidate(compiled, {
-    stockIdentity,
-  });
-  assert.equal(missing.status, 'rejected');
-  assert.deepEqual(diagnosticView(missing.diagnostics), [
-    {
-      bindingMovementId: null,
-      code: 'INVENTORY_STOCK_DIMENSION_VERSION_REQUIRED',
-      path: '$.movement.stockDimensionSetVersion',
-      subjectId: null,
+      const invalid = compileInventoryContract(INVENTORY_CONTRACT_V1, {
+        approvalThresholds: {
+          ...thresholds,
+          adjustment: '0.1234567890123456789',
+        },
+      });
+      assert.equal(invalid.status, 'failed');
+      assert.deepEqual(diagnosticView(invalid.diagnostics), [
+        {
+          bindingMovementId: null,
+          code: 'INVENTORY_CONFIGURATION_OUT_OF_RANGE',
+          path: '$.configuration.values.approvalThresholds.adjustment',
+          subjectId: 'adjustment',
+        },
+      ]);
     },
-  ]);
+  );
 
-  const unknown = validateInventoryMovementCandidate(compiled, {
-    stockDimensionSetVersion: 'v99',
-    stockIdentity,
-  });
-  assert.equal(unknown.status, 'rejected');
-  assert.deepEqual(diagnosticView(unknown.diagnostics), [
-    {
-      bindingMovementId: null,
-      code: 'INVENTORY_STOCK_DIMENSION_VERSION_UNKNOWN',
-      path: '$.movement.stockDimensionSetVersion',
-      subjectId: 'v99',
+  register(
+    'money fields and movement-derived monetary artifacts fail compilation separately',
+    () => {
+      const moneyField = mutableContract();
+      moneyField.movement.fields.push({
+        fieldId: 'monetaryAmount',
+        immutable: true,
+        presence: 'required',
+        semantic: 'money',
+        valueShape: { kind: 'moneyFieldType' },
+      });
+      const fieldResult = compileInventoryContract(moneyField);
+      assert.equal(fieldResult.status, 'failed');
+      assert.deepEqual(diagnosticView(fieldResult.diagnostics), [
+        {
+          bindingMovementId: null,
+          code: 'INVENTORY_MOVEMENT_MONEY_FORBIDDEN',
+          path: '$.movement.fields.monetaryAmount',
+          subjectId: 'monetaryAmount',
+        },
+      ]);
+
+      const monetaryProjection = mutableContract();
+      monetaryProjection.compiledArtifacts.push({
+        artifactId: 'northstar.inventory:artifact.movement_value',
+        outputSemantic: 'money',
+        source: 'inventoryMovement',
+      });
+      const artifactResult = compileInventoryContract(monetaryProjection);
+      assert.equal(artifactResult.status, 'failed');
+      assert.deepEqual(diagnosticView(artifactResult.diagnostics), [
+        {
+          bindingMovementId: null,
+          code: 'INVENTORY_MOVEMENT_VALUE_DERIVATION_FORBIDDEN',
+          path: '$.compiledArtifacts.outputSemantic',
+          subjectId: 'northstar.inventory:artifact.movement_value',
+        },
+      ]);
     },
-  ]);
-});
+  );
 
-test('v1 unspecified members are structurally unreachable', () => {
-  const declaration = mutableContract();
-  declaration.stockDimensionSet.v1.unspecifiedMembers = 'declared';
-  const declarationResult = compileInventoryContract(declaration);
-  assert.equal(declarationResult.status, 'failed');
-  assert.deepEqual(diagnosticView(declarationResult.diagnostics), [
-    {
-      bindingMovementId: null,
-      code: 'INVENTORY_STOCK_DIMENSION_UNSPECIFIED_FORBIDDEN',
-      path: '$.stockDimensionSet.v1.unspecifiedMembers',
-      subjectId: 'unspecifiedMembers',
-    },
-  ]);
-
-  const result = validateInventoryMovementCandidate(mustCompile(), {
-    stockDimensionSetVersion: 'v1',
-    stockIdentity: {
+  register('missing and unknown stock-dimension versions are rejected', () => {
+    const compiled = mustCompile();
+    const stockIdentity = {
       itemId: 'item-1',
       legalEntityId: 'entity-1',
-      locationId: 'northstar.location:member.unspecified',
-    },
-  });
-  assert.equal(result.status, 'rejected');
-  assert.deepEqual(diagnosticView(result.diagnostics), [
-    {
-      bindingMovementId: null,
-      code: 'INVENTORY_STOCK_DIMENSION_UNSPECIFIED_FORBIDDEN',
-      path: '$.movement.stockIdentity.locationId',
-      subjectId: 'northstar.location:member.unspecified',
-    },
-  ]);
-});
+      locationId: 'location-1',
+    };
 
-test('base-unit mutation rejection names the binding movement', () => {
-  const result = validateInventoryBaseUnitChange(mustCompile(), {
-    bindingMovementId: 'movement-00017',
-    currentBaseUnitId: 'unit.each',
-    itemId: 'item-42',
-    requestedBaseUnitId: 'unit.case',
+    const missing = validateInventoryMovementCandidate(compiled, {
+      stockIdentity,
+    });
+    assert.equal(missing.status, 'rejected');
+    assert.deepEqual(diagnosticView(missing.diagnostics), [
+      {
+        bindingMovementId: null,
+        code: 'INVENTORY_STOCK_DIMENSION_VERSION_REQUIRED',
+        path: '$.movement.stockDimensionSetVersion',
+        subjectId: null,
+      },
+    ]);
+
+    const unknown = validateInventoryMovementCandidate(compiled, {
+      stockDimensionSetVersion: 'v99',
+      stockIdentity,
+    });
+    assert.equal(unknown.status, 'rejected');
+    assert.deepEqual(diagnosticView(unknown.diagnostics), [
+      {
+        bindingMovementId: null,
+        code: 'INVENTORY_STOCK_DIMENSION_VERSION_UNKNOWN',
+        path: '$.movement.stockDimensionSetVersion',
+        subjectId: 'v99',
+      },
+    ]);
   });
-  assert.equal(result.status, 'rejected');
-  assert.deepEqual(diagnosticView(result.diagnostics), [
-    {
+
+  register('v1 unspecified members are structurally unreachable', () => {
+    const declaration = mutableContract();
+    declaration.stockDimensionSet.v1.unspecifiedMembers = 'declared';
+    const declarationResult = compileInventoryContract(declaration);
+    assert.equal(declarationResult.status, 'failed');
+    assert.deepEqual(diagnosticView(declarationResult.diagnostics), [
+      {
+        bindingMovementId: null,
+        code: 'INVENTORY_STOCK_DIMENSION_UNSPECIFIED_FORBIDDEN',
+        path: '$.stockDimensionSet.v1.unspecifiedMembers',
+        subjectId: 'unspecifiedMembers',
+      },
+    ]);
+
+    const result = validateInventoryMovementCandidate(mustCompile(), {
+      stockDimensionSetVersion: 'v1',
+      stockIdentity: {
+        itemId: 'item-1',
+        legalEntityId: 'entity-1',
+        locationId: 'northstar.location:member.unspecified',
+      },
+    });
+    assert.equal(result.status, 'rejected');
+    assert.deepEqual(diagnosticView(result.diagnostics), [
+      {
+        bindingMovementId: null,
+        code: 'INVENTORY_STOCK_DIMENSION_UNSPECIFIED_FORBIDDEN',
+        path: '$.movement.stockIdentity.locationId',
+        subjectId: 'northstar.location:member.unspecified',
+      },
+    ]);
+  });
+
+  register('base-unit mutation rejection names the binding movement', () => {
+    const result = validateInventoryBaseUnitChange(mustCompile(), {
       bindingMovementId: 'movement-00017',
-      code: 'INVENTORY_BASE_UNIT_IMMUTABLE',
-      path: '$.item.baseUnitId',
-      subjectId: 'item-42',
-    },
-  ]);
-});
-
-test('undeclared posting dependencies fail conformance', () => {
-  const candidate = mutableContract();
-  candidate.authoritativeDependencies.accessPlan.push({
-    access: 'read',
-    authority: 'catalog',
-    dependencyId: 'northstar.catalog:item.description',
+      currentBaseUnitId: 'unit.each',
+      itemId: 'item-42',
+      requestedBaseUnitId: 'unit.case',
+    });
+    assert.equal(result.status, 'rejected');
+    assert.deepEqual(diagnosticView(result.diagnostics), [
+      {
+        bindingMovementId: 'movement-00017',
+        code: 'INVENTORY_BASE_UNIT_IMMUTABLE',
+        path: '$.item.baseUnitId',
+        subjectId: 'item-42',
+      },
+    ]);
   });
-  const result = compileInventoryContract(candidate);
-  assert.equal(result.status, 'failed');
-  assert.deepEqual(diagnosticView(result.diagnostics), [
-    {
-      bindingMovementId: null,
-      code: 'INVENTORY_POSTING_DEPENDENCY_UNDECLARED',
-      path: '$.authoritativeDependencies.accessPlan',
-      subjectId: 'northstar.catalog:item.description',
+
+  register('undeclared posting dependencies fail conformance', () => {
+    const candidate = mutableContract();
+    candidate.authoritativeDependencies.accessPlan.push({
+      access: 'read',
+      authority: 'catalog',
+      dependencyId: 'northstar.catalog:item.description',
+    });
+    const result = compileInventoryContract(candidate);
+    assert.equal(result.status, 'failed');
+    assert.deepEqual(diagnosticView(result.diagnostics), [
+      {
+        bindingMovementId: null,
+        code: 'INVENTORY_POSTING_DEPENDENCY_UNDECLARED',
+        path: '$.authoritativeDependencies.accessPlan',
+        subjectId: 'northstar.catalog:item.description',
+      },
+    ]);
+
+    const mutation = mutableContract();
+    mutation.authoritativeDependencies.accessPlan[0]!.dependencyId =
+      'northstar.context:undeclared';
+    const mutationResult = compileInventoryContract(mutation);
+    assert.equal(mutationResult.status, 'failed');
+    assert.deepEqual(diagnosticView(mutationResult.diagnostics), [
+      {
+        bindingMovementId: null,
+        code: 'INVENTORY_POSTING_DEPENDENCY_UNDECLARED',
+        path: '$.authoritativeDependencies.accessPlan',
+        subjectId: 'northstar.context:undeclared',
+      },
+    ]);
+  });
+
+  register(
+    'temporal operations, global tie-break, and the v2 decimal limit stay explicit',
+    () => {
+      const contract = mustCompile().release.contract;
+      assert.deepEqual(contract.temporal, INVENTORY_CONTRACT_V1.temporal);
+      assert.deepEqual(
+        contract.sameInstantTieBreak,
+        INVENTORY_CONTRACT_V1.sameInstantTieBreak,
+      );
+      assert.equal(
+        (contract.sameInstantTieBreak as { configurable: boolean })
+          .configurable,
+        false,
+      );
+
+      const limit = contract.v2DecimalLimit as {
+        canonicalPattern: string;
+        signedSubUnitExample: string;
+        signedSubUnitValues: string;
+      };
+      const v2Decimal = new RegExp(limit.canonicalPattern);
+      assert.equal(v2Decimal.test('-0.25'), false);
+      assert.equal(v2Decimal.test('-1.25'), true);
+      assert.equal(limit.signedSubUnitExample, '-0.25');
+      assert.equal(limit.signedSubUnitValues, 'inexpressibleUntilV3');
     },
-  ]);
-
-  const mutation = mutableContract();
-  mutation.authoritativeDependencies.accessPlan[0]!.dependencyId =
-    'northstar.context:undeclared';
-  const mutationResult = compileInventoryContract(mutation);
-  assert.equal(mutationResult.status, 'failed');
-  assert.deepEqual(diagnosticView(mutationResult.diagnostics), [
-    {
-      bindingMovementId: null,
-      code: 'INVENTORY_POSTING_DEPENDENCY_UNDECLARED',
-      path: '$.authoritativeDependencies.accessPlan',
-      subjectId: 'northstar.context:undeclared',
-    },
-  ]);
-});
-
-test('temporal operations, global tie-break, and the v2 decimal limit stay explicit', () => {
-  const contract = mustCompile().release.contract;
-  assert.deepEqual(contract.temporal, INVENTORY_CONTRACT_V1.temporal);
-  assert.deepEqual(
-    contract.sameInstantTieBreak,
-    INVENTORY_CONTRACT_V1.sameInstantTieBreak,
   );
-  assert.equal(
-    (contract.sameInstantTieBreak as { configurable: boolean }).configurable,
-    false,
-  );
-
-  const limit = contract.v2DecimalLimit as {
-    canonicalPattern: string;
-    signedSubUnitExample: string;
-    signedSubUnitValues: string;
-  };
-  const v2Decimal = new RegExp(limit.canonicalPattern);
-  assert.equal(v2Decimal.test('-0.25'), false);
-  assert.equal(v2Decimal.test('-1.25'), true);
-  assert.equal(limit.signedSubUnitExample, '-0.25');
-  assert.equal(limit.signedSubUnitValues, 'inexpressibleUntilV3');
-});
+}
 
 function mustCompile(
   configuration: Record<string, unknown> = {},
