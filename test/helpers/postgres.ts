@@ -15,6 +15,26 @@ export interface EphemeralPostgres {
   pool: pg.Pool;
 }
 
+interface DockerResult {
+  stderr: string;
+  stdout: string;
+}
+
+type DockerRunner = (arguments_: readonly string[]) => Promise<DockerResult>;
+
+const terminalContainerStates = new Set([
+  'dead',
+  'exited',
+  'removed',
+  'removing',
+]);
+const waitingContainerStates = new Set([
+  'created',
+  'paused',
+  'restarting',
+  'running',
+]);
+
 export async function withEphemeralPostgres<T>(
   label: string,
   run: (database: EphemeralPostgres) => Promise<T>,
@@ -67,7 +87,7 @@ export async function withEphemeralPostgres<T>(
   } finally {
     if (pool) await pool.end();
     if (started) {
-      await docker(['rm', '--force', containerName], true);
+      await removeEphemeralPostgresContainer(containerName);
     }
   }
 }
@@ -93,9 +113,9 @@ async function waitUntilReady(
       await client.end().catch(() => undefined);
     }
 
-    const state = await containerState(containerName);
-    if (state !== 'running') {
-      const { stdout, stderr } = await docker(['logs', containerName], true);
+    const state = await inspectEphemeralPostgresContainer(containerName);
+    if (classifyEphemeralPostgresContainerState(state) === 'terminal') {
+      const { stdout, stderr } = await containerLogs(containerName);
       throw new Error(
         `ephemeral PostgreSQL stopped before it was ready (${state}): ${String(lastError)}\n${stdout}${stderr}`,
       );
@@ -104,25 +124,77 @@ async function waitUntilReady(
   }
 }
 
-async function containerState(containerName: string): Promise<string> {
-  const { stdout } = await docker(
-    ['inspect', '--format', '{{.State.Status}}', containerName],
-    true,
-  );
-  return stdout.trim() || 'removed';
+export function classifyEphemeralPostgresContainerState(
+  state: string,
+): 'terminal' | 'waiting' {
+  if (terminalContainerStates.has(state)) return 'terminal';
+  if (waitingContainerStates.has(state)) return 'waiting';
+  throw new Error(`docker returned an unexpected container state: ${state}`);
 }
 
-async function docker(
-  arguments_: readonly string[],
-  tolerateFailure = false,
-): Promise<{ stderr: string; stdout: string }> {
+export async function inspectEphemeralPostgresContainer(
+  containerName: string,
+  runDocker: DockerRunner = docker,
+): Promise<string> {
+  try {
+    const { stdout } = await runDocker([
+      'inspect',
+      '--format',
+      '{{.State.Status}}',
+      containerName,
+    ]);
+    return stdout.trim();
+  } catch (error) {
+    if (isMissingDockerContainerError(error, containerName)) return 'removed';
+    throw error;
+  }
+}
+
+export async function removeEphemeralPostgresContainer(
+  containerName: string,
+  runDocker: DockerRunner = docker,
+): Promise<void> {
+  try {
+    await runDocker(['rm', '--force', containerName]);
+  } catch (error) {
+    if (!isMissingDockerContainerError(error, containerName)) throw error;
+  }
+}
+
+async function containerLogs(containerName: string): Promise<DockerResult> {
+  try {
+    return await docker(['logs', containerName]);
+  } catch (error) {
+    if (isMissingDockerContainerError(error, containerName)) {
+      return { stderr: '', stdout: '' };
+    }
+    throw error;
+  }
+}
+
+function isMissingDockerContainerError(
+  error: unknown,
+  containerName: string,
+): boolean {
+  const cause = error instanceof Error ? error.cause : undefined;
+  if (typeof cause !== 'object' || cause === null || !('stderr' in cause)) {
+    return false;
+  }
+  const stderr = cause.stderr;
+  return (
+    typeof stderr === 'string' &&
+    (stderr.includes(`No such container: ${containerName}`) ||
+      stderr.includes(`No such object: ${containerName}`))
+  );
+}
+
+async function docker(arguments_: readonly string[]): Promise<DockerResult> {
   try {
     return await execFileAsync('docker', [...arguments_], {
       encoding: 'utf8',
       maxBuffer: 2 * 1024 * 1024,
     });
   } catch (error) {
-    if (tolerateFailure) return { stderr: '', stdout: '' };
     throw new Error(`docker ${arguments_[0] ?? ''} failed`, { cause: error });
   }
 }

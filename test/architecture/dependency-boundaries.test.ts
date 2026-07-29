@@ -12,6 +12,11 @@ import {
   packageManifest,
   removeArchitectureFixture,
 } from '../helpers/architecture-fixture.js';
+import {
+  classifyEphemeralPostgresContainerState,
+  inspectEphemeralPostgresContainer,
+  removeEphemeralPostgresContainer,
+} from '../helpers/postgres.js';
 
 test('the greenfield repository satisfies executable architecture boundaries', () => {
   assert.deepEqual(checkArchitecture(process.cwd()).violations, []);
@@ -129,41 +134,101 @@ test('inventory append ownership follows the consolidated domain module path', (
   const root = createArchitectureFixture({
     'package.json': packageManifest('fixture'),
     'packages/domain/package.json': packageManifest('@north-star/domain'),
-    'packages/domain/src/inventory/post.ts':
-      "export const sql = 'INSERT INTO inventory_movement VALUES (1)';",
+    'packages/domain/src/inventory/append.ts': [
+      "export const movement = 'INSERT INTO inventory_movement VALUES (1)';",
+      "export const reservation = 'INSERT INTO inventory_reservation VALUES (1)';",
+    ].join('\n'),
+    'packages/domain/src/inventory/balance.ts':
+      "export const sql = 'INSERT INTO inventory_balance VALUES (1)';",
+    'packages/domain/src/inventory/delete.ts':
+      "export const sql = 'DELETE FROM inventory_movement';",
+    'packages/domain/src/inventory/quantity.ts':
+      "export const sql = 'INSERT INTO inventory_quantity VALUES (1)';",
     'packages/domain/src/inventory/rewrite.ts':
-      "export const sql = 'UPDATE inventory_movement SET quantity = 0';",
+      "export const sql = `UPDATE inventory_movement SET memo = 'changed'`;",
+    'packages/domain/src/inventory/stock.ts':
+      "export const sql = 'INSERT INTO inventory_stock VALUES (1)';",
     'packages/domain/src/sales/post.ts':
+      "export const sql = 'INSERT INTO inventory_movement VALUES (1)';",
+    'packages/domain-inventory/package.json': packageManifest(
+      '@north-star/domain-inventory',
+    ),
+    'packages/domain-inventory/src/post.ts':
       "export const sql = 'INSERT INTO inventory_movement VALUES (1)';",
   });
 
   try {
     const violations = checkArchitecture(root).violations;
-    assert.equal(
-      violations.some(
-        (violation) =>
-          violation.file.endsWith('packages/domain/src/inventory/post.ts') &&
-          violation.ruleId === 'AUTH003_GATEWAY_BYPASS',
-      ),
-      false,
-    );
-    assert.ok(
-      violations.some(
-        (violation) =>
-          violation.file.endsWith('packages/domain/src/inventory/rewrite.ts') &&
-          violation.ruleId === 'AUTH004_INVENTORY_PEER',
-      ),
-    );
-    assert.ok(
-      violations.some(
-        (violation) =>
-          violation.file.endsWith('packages/domain/src/sales/post.ts') &&
-          violation.ruleId === 'AUTH003_GATEWAY_BYPASS',
-      ),
-    );
+    const rulesFor = (path: string) =>
+      violations
+        .filter((violation) => violation.file.endsWith(path))
+        .map((violation) => violation.ruleId)
+        .sort();
+    assert.deepEqual(rulesFor('packages/domain/src/inventory/append.ts'), []);
+    assert.deepEqual(rulesFor('packages/domain/src/inventory/rewrite.ts'), [
+      'AUTH004_INVENTORY_PEER',
+    ]);
+    assert.deepEqual(rulesFor('packages/domain/src/inventory/delete.ts'), [
+      'AUTH004_INVENTORY_PEER',
+      'AUTH006_HARD_DELETE',
+    ]);
+    for (const path of ['balance.ts', 'quantity.ts', 'stock.ts']) {
+      assert.deepEqual(rulesFor(`packages/domain/src/inventory/${path}`), [
+        'AUTH004_INVENTORY_PEER',
+      ]);
+    }
+    assert.deepEqual(rulesFor('packages/domain/src/sales/post.ts'), [
+      'AUTH003_GATEWAY_BYPASS',
+    ]);
+    assert.deepEqual(rulesFor('packages/domain-inventory/src/post.ts'), [
+      'AUTH003_GATEWAY_BYPASS',
+    ]);
   } finally {
     removeArchitectureFixture(root);
   }
+});
+
+test('ephemeral PostgreSQL readiness observes terminal states and Docker failures exactly', async () => {
+  for (const state of ['created', 'paused', 'restarting', 'running']) {
+    assert.equal(classifyEphemeralPostgresContainerState(state), 'waiting');
+  }
+  for (const state of ['dead', 'exited', 'removed', 'removing']) {
+    assert.equal(classifyEphemeralPostgresContainerState(state), 'terminal');
+  }
+  assert.throws(
+    () => classifyEphemeralPostgresContainerState('unknown'),
+    /unexpected container state/,
+  );
+
+  const containerName = 'north-star-control';
+  const missing = new Error('docker inspect failed', {
+    cause: {
+      stderr: `Error response from daemon: No such container: ${containerName}`,
+    },
+  });
+  const daemonUnavailable = new Error('docker inspect failed', {
+    cause: { stderr: 'Cannot connect to the Docker daemon' },
+  });
+  const missingRunner = async (): Promise<never> => {
+    throw missing;
+  };
+  const unavailableRunner = async (): Promise<never> => {
+    throw daemonUnavailable;
+  };
+
+  assert.equal(
+    await inspectEphemeralPostgresContainer(containerName, missingRunner),
+    'removed',
+  );
+  await removeEphemeralPostgresContainer(containerName, missingRunner);
+  await assert.rejects(
+    inspectEphemeralPostgresContainer(containerName, unavailableRunner),
+    (error: unknown) => error === daemonUnavailable,
+  );
+  await assert.rejects(
+    removeEphemeralPostgresContainer(containerName, unavailableRunner),
+    (error: unknown) => error === daemonUnavailable,
+  );
 });
 
 test('plain raw, sixth, and wrong-count agent tool catalogs fail', () => {
