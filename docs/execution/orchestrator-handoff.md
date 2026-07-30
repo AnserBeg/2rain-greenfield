@@ -188,7 +188,7 @@ Four worktrees hold uncommitted-or-unreviewed work. **None is on `main`.**
 |---|---|---|
 | `packet/g3-p4` (G3-P4a, transfer) | `/home/rvham/2rain-greenfield-g3p4` | matrix-green at `41ceb638`; Fable **CONFIRM**, Codex **REVISE**×2; round 4 fixes authored |
 | `packet/q1-p4` | `/home/rvham/2rain-greenfield-q1p4` | format/typecheck/lint clean at `c726634`; **matrix not yet re-run**; no review yet |
-| `packet/g3-p4b` (stock count) | `/home/rvham/2rain-greenfield-g3p4b` | first authoring round |
+| `packet/g3-p4b` (stock count) | `/home/rvham/2rain-greenfield-g3p4b` | **writer still running at handback** — see "Collecting G3-P4b" below |
 | `packet/g3-p6a` | `/home/rvham/2rain-greenfield-g3p6a` | **not started**; prompt staged, both bridges granted |
 
 Prompts, launchers and every review artifact are in `~/2rain-missions/`.
@@ -267,3 +267,52 @@ orchestrator's own prompts omitting paths the work obviously needed
 (`app/builder.ts`, `docs/decisions/**`). Two produced better plans than either
 option offered — the `G3-P4`/`G3-P4b` split, and the refusal of language v4.
 Verify a stop by reading before overriding it.
+
+
+## Collecting `G3-P4b` — its writer was still running at handback
+
+A spawned Codex writer was mid-authoring when the session ended. **Nothing is
+lost**: it writes files directly into `/home/rvham/2rain-greenfield-g3p4b` and
+leaves them uncommitted.
+
+To collect it:
+
+```bash
+cat ~/2rain-missions/g3-p4b.done            # exists once the writer exits
+cat ~/2rain-missions/g3-p4b.last-message.txt # its report
+cd /home/rvham/2rain-greenfield-g3p4b && git status --short && git diff
+```
+
+Then gate before committing — **format and typecheck first, matrix second**:
+
+```bash
+corepack pnpm format && corepack pnpm typecheck && corepack pnpm lint
+```
+
+To kill it instead: `pkill -f run-g3p4b.sh`. Its prompt is
+`~/2rain-missions/g3-p4b.prompt.md` and can be relaunched with
+`~/2rain-missions/run-g3p4b.sh`.
+
+**`G3-P4b` cuts dependency-set v4** — a governed protocol version event that
+`G3-P0` item 7 permits, provided before/after roots are recorded. Check that its
+report records them.
+
+## Immediate next steps, in order
+
+1. **`G3-P4a` is one matrix away from re-review.** It is at `ebea719` with round-4
+   fixes committed and format/typecheck/lint green. Run
+   `~/2rain-missions/run-matrix.sh g3p4a /home/rvham/2rain-greenfield-g3p4`.
+   Its migration was renumbered `0017` → `0016` because
+   `migrations.ts:248` requires a contiguous stream and `main` is at `0015`.
+   On green it needs a **re-review of the round-4 delta only** — Fable already
+   CONFIRMed at `41ceb638`, Codex REVISEd twice and both findings are addressed.
+2. **Then `G3-P6a` immediately.** Prompt at `~/2rain-missions/g3-p6a-r2.prompt.md`,
+   both bridges already granted, worktree exists. It must be refreshed from `main`
+   first, because it edits the fixture `G3-P4a` just changed. Verify its fixture
+   rewrite against `/tmp/p3-accepted-controls.txt` — the 32 control labels observed
+   in `G3-P3`'s accepted matrix — so no control is silently dropped.
+3. **`Q1-P4` needs its matrix re-run** at `c726634` (the first attempt failed on
+   Prettier only, now fixed) and has had **no review at all**. It is the hard
+   prerequisite of `G3-P5`.
+4. **Renumber `Q1-P4`'s ADR to `0028`** before integrating it — it currently
+   collides with `G3-P4a`'s `ADR-0027`.
