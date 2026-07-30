@@ -163,3 +163,148 @@ Silent no-ops left the lane board wrong for hours.
   Never rebase or reset `main`.
 - Paste rulings into a lane that has **stopped and asked**. Never interrupt a
   lane mid-task.
+
+---
+
+# Session addendum — 2026-07-30, autonomous orchestration run
+
+Written at handback. `main` at the commit this section lands on. The user ran an
+overnight session in which the orchestrator drove Codex writers directly instead
+of relaying prompts. This section records the live state and the traps found, so
+the next session does not rediscover them.
+
+## What landed
+
+**`G3-P3` — inventory adjustment posting — is ACCEPTED and on `main`** (merge
+`c3a926b`, reviewed SHA `3e813e3`). A movement can be posted atomically:
+serialized per stock identity, bound to the frozen contract, idempotent on the
+natural effect key. Thirteen rounds, full Critical chain, 32 observed controls.
+
+## What is in flight, and where
+
+Four worktrees hold uncommitted-or-unreviewed work. **None is on `main`.**
+
+| Branch | Worktree | State |
+|---|---|---|
+| `packet/g3-p4` (G3-P4a, transfer) | `/home/rvham/2rain-greenfield-g3p4` | matrix-green at `41ceb638`; Fable **CONFIRM**, Codex **REVISE**×2; round 4 fixes authored |
+| `packet/q1-p4` | `/home/rvham/2rain-greenfield-q1p4` | format/typecheck/lint clean at `c726634`; **matrix not yet re-run**; no review yet |
+| `packet/g3-p4b` (stock count) | `/home/rvham/2rain-greenfield-g3p4b` | **PARTIAL, interrupted** at `f9e53b2` — writer died on a network failure, no report, ungated |
+| `packet/g3-p6a` | `/home/rvham/2rain-greenfield-g3p6a` | **not started**; prompt staged, both bridges granted |
+
+Prompts, launchers and every review artifact are in `~/2rain-missions/`.
+`~/2rain-missions/run-matrix.sh` is a flock-serialized full-matrix runner —
+matrices must never overlap.
+
+## The two review findings G3-P4a still owes
+
+Both verified by the orchestrator before ruling. Round 4 addressed them; **the
+round-4 work has not been re-reviewed and the matrix has not been re-run.**
+
+1. **A persisted artifact's input shape changed without versioning.**
+   `digestCommand` on `main` is `canonicalize(semanticInput)`; on the branch it is
+   `canonicalize({postingRole, ...semanticInput})`. That value persists as
+   `input_digest` and is read back to decide replay versus conflict. Folding the
+   role in is *correct*; leaving it unversioned is the defect. This is the
+   **version-from-artifact rule**, now found violated in **six** layers.
+2. **A monetary-absence gate that cannot see a monetary field held as a value.**
+   `objectKeys` collects only property *names*, so a persisted
+   `{fieldId: 'unitCost', newState: {value: '1.00'}}` is invisible to it.
+
+## Blocking discoveries — these are structural, not scheduling
+
+- **`G3-P5` cannot be built yet.** `onHand` must scope by the stock tuple
+  `(legalEntityId, itemId, locationId)`, but `module-runtime-interpreter.ts`
+  contains **zero** occurrences of legal entity. A registered aggregate would sum
+  across legal entities and return a confidently wrong balance. Row `q1-p4` exists
+  to fix it. Root cause: **`G3-P1` was chartered by `G3-P0.md:94` to freeze the
+  "operation/query shape" for legal entity and froze only the storage half** — the
+  frozen contract has families, relation semantics and diagnostics, no query shape.
+- **A canonical language-version event was proposed and DECLINED.** The lane wanted
+  new canonical spellings plus language v4. Precedent says otherwise:
+  `LEGAL_ENTITY_FAMILY_RULES` lives in `conformance.ts:433` and appears **zero**
+  times in `packages/canonical-model/` — this program adds legal-entity semantics
+  with no canonical spelling. On re-analysis the lane agreed.
+- **`G3-P6a` is serial behind `G3-P4a`, not parked by choice.** Mounting inventory
+  duplicates the manual composition in `loadInventoryDefinition()`
+  (`inventory-posting.test.ts`), which would break the fixture's compile and
+  **silently bypass G3-P3's 32 controls**. The mount and the fixture repair are one
+  atomic change, and there is no gateable subset because the nav assertion stays red
+  until inventory mounts.
+
+## Traps that cost real time — do not rediscover
+
+- **`ADR-0027` is claimed TWICE** — by `G3-P4a` (transfer) and by `q1-p4`
+  (issued legal-entity read scope). Concurrent packets, same next free number.
+  Renumber `q1-p4`'s to `ADR-0028` at integration; `G3-P4b` was pointed at
+  `ADR-0029`.
+- **Spawned writers cannot run the gates they claim.** No Docker socket, no
+  `pnpm exec`, and a fresh worktree has no `node_modules` at all. Three separate
+  matrix slots were burned on Prettier and typecheck failures a writer could not
+  have caught. **Run format + typecheck locally before ever launching a matrix** —
+  they cost forty seconds and catch most failures.
+- **Never infer a launcher failed from output-file size.** `claude -p … > file`
+  truncates at launch and writes at exit; a mid-run size check reads zero bytes.
+  Ledger row `1d` was wrong for two days because of this. Wait for process exit;
+  the launchers now write a `.done` marker.
+- **Load corrupts matrices.** A composed-application test timed out at 120 s while
+  the orchestrator ran an app server, a database container, migrations and seeding
+  concurrently; the identical SHA passed clean on a quiet machine. **Never raise a
+  bound to make a loaded run pass** — re-measure quiescent instead.
+- **A single green run of a nondeterministic test proves nothing.** `G3-P3`'s
+  twelfth control was reported verified from one isolated green run; it was a coin
+  flip, because the fixture freezes `recordedAt` so a random UUID decided the
+  binding movement.
+- **The derived-key fixture trap.** `defaultFieldValue` builds required text from
+  `recordId.slice(0, 8)` and `seedDraft` builds the transaction business key from
+  `transactionId.slice(0, 12)`. Fixture ids share long prefixes, so two records
+  collide on a case-insensitive unique business key. Mint ids; override unique
+  fields explicitly.
+
+## Standing lesson from this run
+
+**Every one of the six lane stops was correct**, and four were caused by the
+orchestrator's own prompts omitting paths the work obviously needed
+(`app/builder.ts`, `docs/decisions/**`). Two produced better plans than either
+option offered — the `G3-P4`/`G3-P4b` split, and the refusal of language v4.
+Verify a stop by reading before overriding it.
+
+
+## `G3-P4b` was interrupted — read this before trusting its branch
+
+Its writer **died on a network failure** (`failed to lookup address information`
+on the websocket to the Codex backend), not on anything in the code. It exited
+with status 1, wrote **no report**, and left seven partially-edited files.
+
+Those are committed at `f9e53b2` purely so they survive. **The commit is
+incomplete and ungated**: never formatted, typechecked, linted, tested or
+reviewed, and the dependency-set v4 before/after roots the packet owes are not
+recorded. There is no account of what the writer intended or checked.
+
+Re-running from `~/2rain-missions/g3-p4b.prompt.md` on a fresh branch is probably
+cheaper than auditing a half-finished edit. If you do keep it, **its migration is
+numbered `0018` and must become `0017`** — `G3-P4a`'s was renumbered to `0016`, and
+`migrations.ts:248` requires a contiguous stream.
+
+**`G3-P4b` cuts dependency-set v4** — a governed protocol version event that
+`G3-P0` item 7 permits, provided before/after roots are recorded. Check that its
+report records them.
+
+## Immediate next steps, in order
+
+1. **`G3-P4a` is one matrix away from re-review.** It is at `ebea719` with round-4
+   fixes committed and format/typecheck/lint green. Run
+   `~/2rain-missions/run-matrix.sh g3p4a /home/rvham/2rain-greenfield-g3p4`.
+   Its migration was renumbered `0017` → `0016` because
+   `migrations.ts:248` requires a contiguous stream and `main` is at `0015`.
+   On green it needs a **re-review of the round-4 delta only** — Fable already
+   CONFIRMed at `41ceb638`, Codex REVISEd twice and both findings are addressed.
+2. **Then `G3-P6a` immediately.** Prompt at `~/2rain-missions/g3-p6a-r2.prompt.md`,
+   both bridges already granted, worktree exists. It must be refreshed from `main`
+   first, because it edits the fixture `G3-P4a` just changed. Verify its fixture
+   rewrite against `/tmp/p3-accepted-controls.txt` — the 32 control labels observed
+   in `G3-P3`'s accepted matrix — so no control is silently dropped.
+3. **`Q1-P4` needs its matrix re-run** at `c726634` (the first attempt failed on
+   Prettier only, now fixed) and has had **no review at all**. It is the hard
+   prerequisite of `G3-P5`.
+4. **Renumber `Q1-P4`'s ADR to `0028`** before integrating it — it currently
+   collides with `G3-P4a`'s `ADR-0027`.

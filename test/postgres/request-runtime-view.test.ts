@@ -11,13 +11,24 @@ import pg from 'pg';
 import {
   CANONICALIZATION_PROFILE_VERSION,
   CONTENT_HASH_ALGORITHM,
+  canonicalize,
   canonicalizeAndHash,
+  normalizeApplicationPackage,
   parseNormalizedApplicationPackageJson,
 } from '../../packages/canonical-model/src/index.js';
 import {
+  FLAT_SURFACE_MANIFEST_PAYLOAD_VERSION,
+  GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION,
+  HASH_ALGORITHM,
+  HASH_DOMAINS,
+  PROJECTION_FAMILY_IDS,
   compileApplication,
   type CompileSuccess,
+  type ContentAddressedArtifact,
+  type ProjectionManifestEnvelope,
 } from '../../packages/compiler/src/index.js';
+import { composedApplicationDefinition } from '../../packages/domain/src/index.js';
+import { inventoryModuleDefinition } from '../../packages/domain/src/inventory/index.js';
 import {
   COMPILER_TRANSITION_FACTS_VERSION,
   EXECUTOR_APPLIED_STATE_EVIDENCE_VERSION,
@@ -78,6 +89,7 @@ const tenantA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const tenantB = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const environmentA = 'a1000000-0000-4000-8000-000000000001';
 const environmentB = 'b1000000-0000-4000-8000-000000000001';
+const versionEnvironment = 'a1000000-0000-4000-8000-000000000003';
 const brokenEnvironment = 'a1000000-0000-4000-8000-000000000002';
 const missingEnvironment = 'a1000000-0000-4000-8000-000000000099';
 const principalA = 'aa000000-0000-4000-8000-000000000001';
@@ -85,6 +97,8 @@ const principalB = 'bb000000-0000-4000-8000-000000000001';
 const approverA = 'ac000000-0000-4000-8000-000000000002';
 const approverB = 'bc000000-0000-4000-8000-000000000002';
 const authorityOperator = 'a9000000-0000-4000-8000-000000000009';
+const unknownSurfacePayloadVersion =
+  'northstar.surface-manifest-payload/unknown';
 
 interface ReleaseFixture {
   compiled: CompileSuccess;
@@ -107,8 +121,18 @@ interface PointerFixture {
 test('G1-P5 pins one immutable release while policy and pointer authority remain current', async (t) => {
   const bootstrapBytes = fixtureBytes('bootstrap');
   const verticalBytes = definitionWithoutAssertions(bootstrapBytes, '1.0.1');
+  const groupedBytes = groupedNavigationDefinitionBytes();
   const bootstrap = mustCompile(bootstrapBytes);
   const vertical = mustCompile(verticalBytes);
+  const grouped = withoutVerificationScenarios(mustCompile(groupedBytes));
+  const unknownSurfaceVersion = rewriteSurfacePayloadVersions(grouped, {
+    envelopeVersion: unknownSurfacePayloadVersion,
+    payloadVersion: unknownSurfacePayloadVersion,
+  });
+  const mismatchedSurfaceVersion = rewriteSurfacePayloadVersions(grouped, {
+    envelopeVersion: GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION,
+    payloadVersion: FLAT_SURFACE_MANIFEST_PAYLOAD_VERSION,
+  });
 
   await withEphemeralPostgres(
     'request-runtime-view',
@@ -181,6 +205,16 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
         environmentB,
         approverB,
       );
+      const versionContext = await issuedContext(
+        tenantA,
+        versionEnvironment,
+        principalA,
+      );
+      const versionApproverContext = await issuedContext(
+        tenantA,
+        versionEnvironment,
+        approverA,
+      );
       const systemContextA = await issuedContext(
         tenantA,
         environmentA,
@@ -189,6 +223,11 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
       const systemContextB = await issuedContext(
         tenantB,
         environmentB,
+        SYSTEM_EXECUTION_PRINCIPAL.principalId,
+      );
+      const versionSystemContext = await issuedContext(
+        tenantA,
+        versionEnvironment,
         SYSTEM_EXECUTION_PRINCIPAL.principalId,
       );
 
@@ -200,6 +239,15 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
         const releasesB = await seedReleases(runtimePool, contextB, [
           [bootstrapBytes, bootstrap],
         ]);
+        const versionReleases = await seedReleases(
+          runtimePool,
+          versionContext,
+          [
+            [groupedBytes, grouped],
+            [groupedBytes, unknownSurfaceVersion],
+            [groupedBytes, mismatchedSurfaceVersion],
+          ],
+        );
         const policy = new VersionedPolicyAdapter();
         policy.set(contextA, true);
         policy.set(contextB, true);
@@ -306,6 +354,10 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
             assert.notEqual(viewA.release.releaseId, viewB.release.releaseId);
             assert.equal(viewA.pointer.fence, 1);
             assert.equal(viewB.pointer.fence, 1);
+            assert.equal(
+              viewA.projections.surface.payloadSchemaVersion,
+              FLAT_SURFACE_MANIFEST_PAYLOAD_VERSION,
+            );
             assert.equal(Object.isFrozen(viewA), true);
             assert.equal(Object.isFrozen(viewA.projections), true);
             assert.equal(
@@ -494,6 +546,80 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
         );
 
         await t.test(
+          'persisted grouped surface payload propagates its v1 artifact version',
+          async () => {
+            await activateRelease(
+              runtimePool,
+              pool,
+              activationService,
+              versionApproverContext,
+              versionContext,
+              versionSystemContext,
+              versionReleases[0]!,
+            );
+            const loaded = await new PostgresRequestRuntimeViewService(
+              runtimePool,
+            ).load(versionContext);
+            assert.equal(
+              loaded.projections.surface.payloadSchemaVersion,
+              GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION,
+            );
+            const payload = mutableRecord(loaded.projections.surface.payload);
+            assert.equal(
+              payload.schemaVersion,
+              GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION,
+            );
+            assert.ok(payload.navigation);
+          },
+        );
+
+        await t.test(
+          'unknown persisted surface payload version fails closed',
+          async () => {
+            await activateRelease(
+              runtimePool,
+              pool,
+              activationService,
+              versionApproverContext,
+              versionContext,
+              versionSystemContext,
+              versionReleases[1]!,
+            );
+            await assertLoadError(
+              () =>
+                new PostgresRequestRuntimeViewService(runtimePool).load(
+                  versionContext,
+                ),
+              'MALFORMED_REQUIRED_PROJECTION',
+              /projection manifest contract is malformed/,
+            );
+          },
+        );
+
+        await t.test(
+          'persisted surface manifest and payload version mismatch fails closed',
+          async () => {
+            await activateRelease(
+              runtimePool,
+              pool,
+              activationService,
+              versionApproverContext,
+              versionContext,
+              versionSystemContext,
+              versionReleases[2]!,
+            );
+            await assertLoadError(
+              () =>
+                new PostgresRequestRuntimeViewService(runtimePool).load(
+                  versionContext,
+                ),
+              'MALFORMED_REQUIRED_PROJECTION',
+              /projection payload version or kind is unsupported/,
+            );
+          },
+        );
+
+        await t.test(
           'missing required projection structure has no source fallback',
           async () => {
             await removeRequiredProjection(pool, releasesB[0]!.releaseId);
@@ -570,8 +696,16 @@ async function seedScopes(client: pg.PoolClient): Promise<void> {
     `INSERT INTO platform.environments (tenant_id, id, slug)
      VALUES ($1, $2, 'production'),
             ($3, $4, 'production'),
-            ($1, $5, 'broken-fixture')`,
-    [tenantA, environmentA, tenantB, environmentB, brokenEnvironment],
+            ($1, $5, 'broken-fixture'),
+            ($1, $6, 'surface-version-fixture')`,
+    [
+      tenantA,
+      environmentA,
+      tenantB,
+      environmentB,
+      brokenEnvironment,
+      versionEnvironment,
+    ],
   );
 }
 
@@ -949,10 +1083,12 @@ async function assertSeparateProcessPin(
 async function assertLoadError(
   run: () => Promise<unknown>,
   code: RequestRuntimeViewLoadError['code'],
+  message?: RegExp,
 ): Promise<void> {
   await assert.rejects(run, (error: unknown) => {
     assert.ok(error instanceof RequestRuntimeViewLoadError);
     assert.equal(error.code, code);
+    if (message) assert.match(error.message, message);
     return true;
   });
 }
@@ -1018,6 +1154,232 @@ function mustCompile(bytes: Uint8Array): CompileSuccess {
     throw new Error(JSON.stringify(result.diagnostics));
   }
   return result;
+}
+
+function groupedNavigationDefinitionBytes(): Uint8Array {
+  const definition = structuredClone(composedApplicationDefinition());
+  const inventory = inventoryModuleDefinition('northstar.app');
+  for (const collectionName of [
+    'assertions',
+    'entities',
+    'fields',
+    'operations',
+    'permissions',
+    'queries',
+    'relations',
+    'stateMachines',
+    'storageMappings',
+    'surfaces',
+  ] as const) {
+    const target = definition[collectionName];
+    const source = inventory[collectionName];
+    assert.ok(Array.isArray(target));
+    assert.ok(Array.isArray(source));
+    target.push(...source);
+  }
+  const modules = definition.modules;
+  const inventoryModules = inventory.modules;
+  assert.ok(Array.isArray(modules));
+  assert.ok(Array.isArray(inventoryModules));
+  const inventoryModule = inventoryModules[0];
+  assert.ok(inventoryModule && typeof inventoryModule === 'object');
+  modules.push({
+    ...inventoryModule,
+    orderKey: 40,
+    ownerPackageId: 'northstar.app:package.application',
+  });
+  return new TextEncoder().encode(
+    canonicalize(normalizeApplicationPackage(definition)),
+  );
+}
+
+function rewriteSurfacePayloadVersions(
+  compiled: CompileSuccess,
+  versions: {
+    readonly envelopeVersion: string;
+    readonly payloadVersion: string;
+  },
+): CompileSuccess {
+  return rewriteProjectionPayload(
+    compiled,
+    PROJECTION_FAMILY_IDS.surfaceManifest,
+    (payload) => {
+      payload.schemaVersion = versions.payloadVersion;
+    },
+    versions.envelopeVersion,
+  );
+}
+
+function withoutVerificationScenarios(
+  compiled: CompileSuccess,
+): CompileSuccess {
+  return rewriteProjectionPayload(
+    compiled,
+    PROJECTION_FAMILY_IDS.verificationPlan,
+    (payload) => {
+      payload.scenarios = [];
+    },
+  );
+}
+
+function rewriteProjectionPayload(
+  compiled: CompileSuccess,
+  familyId: string,
+  mutatePayload: (payload: Record<string, unknown>) => void,
+  envelopeVersion?: string,
+): CompileSuccess {
+  const clone = structuredClone(compiled);
+  const reference = clone.bundle.releaseManifest.projections.find(
+    (candidate) => candidate.familyId === familyId,
+  );
+  assert.ok(reference);
+  const priorManifestHash = reference.artifactRoot;
+  const manifestArtifact = clone.bundle.artifacts.find(
+    (candidate) => candidate.contentHash === priorManifestHash,
+  );
+  assert.ok(manifestArtifact);
+  const manifest = JSON.parse(
+    new TextDecoder().decode(manifestArtifact.canonicalBytes),
+  ) as ProjectionManifestEnvelope;
+  const descriptor = manifest.chunks[0];
+  assert.ok(descriptor);
+  const priorChunkHash = descriptor.contentHash;
+  const chunkArtifact = clone.bundle.artifacts.find(
+    (candidate) => candidate.contentHash === priorChunkHash,
+  );
+  assert.ok(chunkArtifact);
+  const payload = JSON.parse(
+    new TextDecoder().decode(chunkArtifact.canonicalBytes),
+  ) as Record<string, unknown>;
+  mutatePayload(payload);
+  const payloadBytes = canonicalBytes(payload);
+  const replacementChunk: ContentAddressedArtifact = {
+    ...chunkArtifact,
+    canonicalBytes: payloadBytes,
+    contentHash: hashArtifactBytes(chunkArtifact.domainTag, payloadBytes),
+  };
+
+  descriptor.byteLength = payloadBytes.byteLength;
+  descriptor.contentHash = replacementChunk.contentHash;
+  if (envelopeVersion !== undefined) {
+    manifest.payloadSchemaVersion = envelopeVersion;
+    reference.payloadSchemaVersion = envelopeVersion;
+  }
+  manifest.semanticDigest = hashArtifactBytes(
+    `${HASH_DOMAINS.projectionSemantic}/${familyId}`,
+    payloadBytes,
+  );
+  reference.semanticDigest = manifest.semanticDigest;
+  const manifestBytes = canonicalBytes(manifest);
+  const replacementManifest: ContentAddressedArtifact = {
+    ...manifestArtifact,
+    canonicalBytes: manifestBytes,
+    contentHash: hashArtifactBytes(manifestArtifact.domainTag, manifestBytes),
+  };
+  reference.artifactRoot = replacementManifest.contentHash;
+
+  clone.bundle.releaseManifest.artifactClosure =
+    clone.bundle.releaseManifest.artifactClosure
+      .map((contentHash) =>
+        contentHash === priorChunkHash
+          ? replacementChunk.contentHash
+          : contentHash === priorManifestHash
+            ? replacementManifest.contentHash
+            : contentHash,
+      )
+      .toSorted();
+  clone.bundle.artifacts = replaceArtifacts(
+    clone.bundle.artifacts,
+    new Map([
+      [priorChunkHash, replacementChunk],
+      [priorManifestHash, replacementManifest],
+    ]),
+  );
+  clone.stagedArtifacts = replaceArtifacts(
+    clone.stagedArtifacts,
+    new Map([
+      [priorChunkHash, replacementChunk],
+      [priorManifestHash, replacementManifest],
+    ]),
+  );
+  const node = clone.bundle.nodeContracts.find(
+    (candidate) => candidate.stableNodeId === `${reference.instanceId}.node`,
+  );
+  assert.ok(node);
+  node.outputFingerprint = hashArtifactBytes(
+    HASH_DOMAINS.nodeOutput,
+    canonicalBytes({
+      artifactRoot: replacementManifest.contentHash,
+      semanticDigest: manifest.semanticDigest,
+    }),
+  );
+  return rebuildReleaseRoot(clone);
+}
+
+function rebuildReleaseRoot(compiled: CompileSuccess): CompileSuccess {
+  const bytes = canonicalBytes(compiled.bundle.releaseManifest);
+  const root = hashArtifactBytes(HASH_DOMAINS.releaseManifest, bytes);
+  const replacement: ContentAddressedArtifact = {
+    artifactKind: 'releaseManifest',
+    canonicalBytes: bytes,
+    contentHash: root,
+    domainTag: HASH_DOMAINS.releaseManifest,
+    kind: 'contentAddressedArtifact',
+    mediaType: 'application/vnd.northstar.canonical+json',
+  };
+  compiled.bundle.releaseManifestBytes = bytes;
+  compiled.releaseRoot = root;
+  compiled.bundle.artifacts = replaceRootArtifact(
+    compiled.bundle.artifacts,
+    replacement,
+  );
+  compiled.stagedArtifacts = replaceRootArtifact(
+    compiled.stagedArtifacts,
+    replacement,
+  );
+  compiled.attestation.releaseRoot = root;
+  const attestation = { ...compiled.attestation } as Record<string, unknown>;
+  delete attestation.attestationDigest;
+  compiled.attestation.attestationDigest = hashArtifactBytes(
+    HASH_DOMAINS.compilerAttestation,
+    canonicalBytes(attestation),
+  );
+  return compiled;
+}
+
+function replaceArtifacts(
+  artifacts: ContentAddressedArtifact[],
+  replacements: ReadonlyMap<string, ContentAddressedArtifact>,
+): ContentAddressedArtifact[] {
+  return artifacts.map(
+    (artifact) => replacements.get(artifact.contentHash) ?? artifact,
+  );
+}
+
+function replaceRootArtifact(
+  artifacts: ContentAddressedArtifact[],
+  replacement: ContentAddressedArtifact,
+): ContentAddressedArtifact[] {
+  return artifacts.map((artifact) =>
+    artifact.artifactKind === 'releaseManifest' ? replacement : artifact,
+  );
+}
+
+function canonicalBytes(value: unknown): Uint8Array {
+  return new TextEncoder().encode(canonicalize(value));
+}
+
+function hashArtifactBytes(domainTag: string, bytes: Uint8Array): string {
+  return createHash(HASH_ALGORITHM)
+    .update(domainTag, 'utf8')
+    .update(Uint8Array.of(0))
+    .update(bytes)
+    .digest('hex');
+}
+
+function mutableRecord(value: unknown): Record<string, unknown> {
+  assert.ok(value && typeof value === 'object' && !Array.isArray(value));
+  return value as Record<string, unknown>;
 }
 
 function subjectKey(subject: CurrentPolicySubject): string {

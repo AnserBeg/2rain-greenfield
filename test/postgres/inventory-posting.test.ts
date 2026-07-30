@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import test, { type TestContext } from 'node:test';
 
@@ -38,12 +38,17 @@ import {
   INVENTORY_POSTING_CAPABILITY_ID,
   INVENTORY_POSTING_DEPENDENCY_SET_ROOT,
   InventoryPostingError,
+  compareInventoryMovementOrderEntries,
   planInventoryPostingRequestLock,
   PostgresInventoryPostingService,
   translateInventoryPostingError,
   type InventoryAdjustmentLineV1,
   type InventoryAdjustmentPostingCommandV1,
+  type InventoryMovementOrderEntryV1,
+  type InventoryPostingResultV1,
   type InventoryPostingRegistrationV1,
+  type InventoryTransferLineV1,
+  type InventoryTransferPostingCommandV1,
 } from '../../packages/postgres-provider/src/inventory-posting-service.js';
 import {
   planStockIdentityLocks,
@@ -84,6 +89,10 @@ const sameInstantTieBreakItemId = '44000000-0000-4000-8000-000000000005';
 const locationPrimary = '55000000-0000-4000-8000-000000000001';
 const locationTie = '55000000-0000-4000-8000-000000000002';
 const locationRace = '55000000-0000-4000-8000-000000000003';
+const transferItemId = '46000000-0000-4000-8000-000000000006';
+const orderDecisiveItemId = '47000000-0000-4000-8000-000000000007';
+const transferLocationA = '56000000-0000-4000-8000-000000000006';
+const transferLocationB = '57000000-0000-4000-8000-000000000007';
 const firstInsertedTieBreakMovementId = 'ffffffff-ffff-4fff-bfff-ffffffffffff';
 const laterInsertedTieBreakMovementId = '00000000-0000-4000-8000-000000000000';
 const businessPeriod = '2026-07-29';
@@ -96,6 +105,7 @@ const lineRaceLockNamespace = 0x47335033;
 const lineRaceLockKey = 1;
 const requestKeyRaceIdempotencyKey = '99000000-0000-4000-8000-000000000009';
 const requestKeyRaceExpectedKey = -364_379_365;
+const transferAtomicitySourceId = 'transfer-atomic-rollback';
 
 type StorageEntityTarget = StorageTargetPayloadV1['entities'][number];
 
@@ -131,6 +141,7 @@ interface TestEntityBinding {
 }
 
 interface TestStorageBinding {
+  companionMovementIdColumn: string;
   companionTableName: string;
   item: TestEntityBinding;
   legalEntity: TestEntityBinding;
@@ -143,6 +154,30 @@ interface TestStorageBinding {
   transaction: TestEntityBinding;
   transactionLine: TestEntityBinding;
 }
+
+test('the global same-instant order reaches its movementId tie-break', () => {
+  const shared = {
+    effectiveAt,
+    postingRole: 'transfer',
+    recordedAt,
+    sourceId: 'same-instant-movement-id-only',
+    sourceLine: '1:out',
+    sourceType: 'transfer',
+  } as const;
+  const laterId = 'ffffffff-ffff-4fff-bfff-ffffffffffff';
+  const earlierId = '00000000-0000-4000-8000-000000000000';
+  const entries: InventoryMovementOrderEntryV1[] = [
+    { ...shared, movementId: laterId },
+    { ...shared, movementId: earlierId },
+  ];
+  assert.deepEqual(
+    entries
+      .toSorted(compareInventoryMovementOrderEntries)
+      .map((entry) => entry.movementId),
+    [earlierId, laterId],
+    'removing the production comparator movementId branch must reverse this verdict',
+  );
+});
 
 test(
   'the Inventory posting capability closes the first-movement one-way doors',
@@ -173,6 +208,10 @@ test(
       assert.equal(posted.movements[0]?.recordedAt, recordedAt);
       assert.equal(await movementCount(database), 1);
       assert.equal(await companionCount(database), 1);
+      assert.equal(
+        await receiptInputDigestVersion(database, first.idempotencyKey),
+        2,
+      );
 
       const sameRequestReplay = await database.service.postAdjustment(
         database.context,
@@ -194,6 +233,27 @@ test(
       assert.equal(await movementCount(database), 1);
       assert.equal(await companionCount(database), 1);
 
+      const legacyReplayCommand = {
+        ...first,
+        idempotencyKey: randomUUID(),
+      };
+      await cloneLegacyAdjustmentReceipt(
+        database,
+        first.idempotencyKey,
+        legacyReplayCommand,
+      );
+      const legacyReplay = await database.service.postAdjustment(
+        database.context,
+        database.actor,
+        legacyReplayCommand,
+      );
+      assert.equal(legacyReplay.replayed, true);
+      assert.deepEqual(legacyReplay.movements, posted.movements);
+      assert.deepEqual(
+        legacyReplay.movements.map((movement) => movement.postingRole),
+        ['adjustment'],
+      );
+
       await assert.rejects(
         database.service.postAdjustment(database.context, database.actor, {
           ...first,
@@ -212,7 +272,7 @@ test(
 
       await assertBaseUnitBound(testContext, database);
       await assertSameInstantMovementIdTieBreak(testContext, database);
-      await assertQuantityOnlyEvidence(testContext, database, posted);
+      await assertQuantityOnlyEvidence(testContext, database, posted, 1);
       await assert.rejects(
         database.service.postAdjustment(database.context, database.actor, {
           ...first,
@@ -509,6 +569,8 @@ test(
       );
       assert.equal(allowedResult.negativeStockFlag, false);
 
+      await assertTransferPosting(testContext, database);
+
       const entityOneEffect = command({
         legalEntityId: legalReject,
         locationId: locationPrimary,
@@ -742,6 +804,63 @@ function line(quantityDelta: string, sourceLine: string, locationId: string) {
   } as const;
 }
 
+function transferCommand(
+  overrides: Partial<InventoryTransferPostingCommandV1> & {
+    fromLocationId?: string;
+    legalEntityId: string;
+    quantity?: string;
+    sourceId: string;
+    toLocationId?: string;
+  },
+): InventoryTransferPostingCommandV1 {
+  const {
+    fromLocationId = transferLocationA,
+    quantity = '1',
+    toLocationId = transferLocationB,
+    ...specified
+  } = overrides;
+  return {
+    authorization: specified.authorization ?? {
+      decision: 'ALLOW',
+      evaluatorVersion: 'northstar.test-policy-evaluator/v1',
+      policyVersion: 'northstar.test-policy/v1',
+    },
+    channel: specified.channel ?? 'API',
+    effectiveAt: specified.effectiveAt ?? effectiveAt,
+    idempotencyKey: specified.idempotencyKey ?? randomUUID(),
+    legalEntityId: specified.legalEntityId,
+    lines: specified.lines ?? [
+      transferLine(quantity, '1', fromLocationId, toLocationId),
+    ],
+    reason: specified.reason ?? {
+      code: 'WAREHOUSE-TRANSFER',
+      narrative: null,
+    },
+    sourceId: specified.sourceId,
+    sourceRevision: specified.sourceRevision ?? 1,
+    sourceType: specified.sourceType ?? 'transfer',
+    stockDimensionSetVersion: specified.stockDimensionSetVersion ?? 'v1',
+    transactionId: specified.transactionId ?? randomUUID(),
+  };
+}
+
+function transferLine(
+  quantity: string,
+  sourceLine: string,
+  fromLocationId: string,
+  toLocationId: string,
+): InventoryTransferLineV1 {
+  return {
+    fromLocationId,
+    itemId: transferItemId,
+    quantity,
+    sourceLine,
+    toLocationId,
+    transactionLineId: randomUUID(),
+    unitId: 'EA',
+  };
+}
+
 async function assertRegistrationHardening(
   testContext: TestContext,
   database: PostingDatabase,
@@ -884,6 +1003,608 @@ async function assertDraftBinding(
         error,
         'INVENTORY_TRANSACTION_STATE_CONFLICT',
       ),
+  );
+}
+
+async function assertTransferPosting(
+  testContext: TestContext,
+  database: PostingDatabase,
+): Promise<void> {
+  await seedAdjustmentBalance(
+    database,
+    legalReject,
+    transferItemId,
+    transferLocationA,
+    '5',
+    '00-transfer-balance-a',
+  );
+  const balanced = transferCommand({
+    legalEntityId: legalReject,
+    quantity: '2',
+    sourceId: '10-transfer-balanced',
+  });
+  await seedTransferDraft(database, balanced);
+  const posted = await database.service.postTransfer(
+    database.context,
+    database.actor,
+    balanced,
+  );
+  assert.equal(posted.replayed, false);
+  assert.equal(posted.recordedAt, recordedAt);
+  assert.equal(posted.movements.length, 2);
+  assert.deepEqual(
+    posted.movements.map((movement) => movement.quantityDelta).toSorted(),
+    ['-2', '2'],
+  );
+  assert.deepEqual(
+    [...new Set(posted.movements.map((movement) => movement.postingRole))],
+    ['transfer'],
+  );
+  assert.deepEqual(
+    [...new Set(posted.movements.map((movement) => movement.unitId))],
+    ['EA'],
+  );
+  assert.deepEqual(
+    posted.movements.map((movement) => movement.sourceLine).toSorted(),
+    ['1:in', '1:out'],
+  );
+  assert.equal(
+    await stockBalance(
+      database,
+      legalReject,
+      transferLocationA,
+      transferItemId,
+    ),
+    '3',
+  );
+  assert.equal(
+    await stockBalance(
+      database,
+      legalReject,
+      transferLocationB,
+      transferItemId,
+    ),
+    '2',
+  );
+  assert.deepEqual(await transactionState(database, balanced.transactionId), {
+    revision: 2,
+    state: enumOption(
+      field(database.binding.transaction, 'inventory_transaction_state'),
+      'posted',
+    ),
+  });
+  assert.deepEqual(await transferMovementRows(database, balanced.sourceId), [
+    {
+      locationId: transferLocationB,
+      postingRole: enumOption(
+        field(database.binding.movement, 'inventory_movement_posting_role'),
+        'transfer',
+      ),
+      quantityDelta: '2',
+      sourceLine: '1:in',
+    },
+    {
+      locationId: transferLocationA,
+      postingRole: enumOption(
+        field(database.binding.movement, 'inventory_movement_posting_role'),
+        'transfer',
+      ),
+      quantityDelta: '-2',
+      sourceLine: '1:out',
+    },
+  ]);
+  await assertQuantityOnlyEvidence(testContext, database, posted, 2);
+
+  const requestReplay = await database.service.postTransfer(
+    database.context,
+    database.actor,
+    balanced,
+  );
+  const naturalReplay = await database.service.postTransfer(
+    database.context,
+    database.actor,
+    { ...balanced, idempotencyKey: randomUUID() },
+  );
+  assert.equal(requestReplay.replayed, true);
+  assert.equal(naturalReplay.replayed, true);
+  assert.deepEqual(requestReplay.movements, posted.movements);
+  assert.deepEqual(naturalReplay.trust, posted.trust);
+  assert.equal(await movementCountBySource(database, balanced.sourceId), 2);
+  await assert.rejects(
+    database.service.postTransfer(database.context, database.actor, {
+      ...balanced,
+      lines: [{ ...balanced.lines[0]!, quantity: '3' }],
+    }),
+    (error: unknown) =>
+      observePostingError(
+        testContext,
+        'transfer-same-key-different-input',
+        error,
+        'INVENTORY_POSTING_IDEMPOTENCY_CONFLICT',
+      ),
+  );
+
+  const missingCode = transferCommand({
+    legalEntityId: legalReject,
+    reason: { code: '', narrative: null },
+    sourceId: 'transfer-reason-code-required',
+  });
+  await seedTransferDraft(database, missingCode);
+  await assert.rejects(
+    database.service.postTransfer(
+      database.context,
+      database.actor,
+      missingCode,
+    ),
+    (error: unknown) =>
+      observePostingError(
+        testContext,
+        'transfer-code-only-reason',
+        error,
+        'INVENTORY_TRANSFER_REASON_REQUIRED',
+      ),
+  );
+
+  await seedAdjustmentBalance(
+    database,
+    legalApproval,
+    transferItemId,
+    transferLocationA,
+    '1',
+    '00-transfer-approval-seed-a',
+  );
+  await seedAdjustmentBalance(
+    database,
+    legalApproval,
+    transferItemId,
+    transferLocationA,
+    '1',
+    '00-transfer-approval-seed-b',
+  );
+  await updatePostingConfiguration(database, legalApproval, {
+    transferApprovalThreshold: '3',
+  });
+  const belowTransferApproval = transferCommand({
+    legalEntityId: legalApproval,
+    quantity: '2',
+    sourceId: '10-transfer-below-approval',
+  });
+  await seedTransferDraft(database, belowTransferApproval);
+  assert.equal(
+    (
+      await database.service.postTransfer(
+        database.context,
+        database.actor,
+        belowTransferApproval,
+      )
+    ).replayed,
+    false,
+  );
+  for (const sourceId of [
+    '11-transfer-approval-seed-a',
+    '11-transfer-approval-seed-b',
+    '11-transfer-approval-seed-c',
+    '11-transfer-approval-seed-d',
+  ]) {
+    await seedAdjustmentBalance(
+      database,
+      legalApproval,
+      transferItemId,
+      transferLocationA,
+      '1',
+      sourceId,
+    );
+  }
+  const approvalRequired = transferCommand({
+    legalEntityId: legalApproval,
+    quantity: '4',
+    sourceId: '12-transfer-approval-required',
+  });
+  await seedTransferDraft(database, approvalRequired);
+  await assert.rejects(
+    database.service.postTransfer(
+      database.context,
+      database.actor,
+      approvalRequired,
+    ),
+    (error: unknown) =>
+      observePostingError(
+        testContext,
+        'transfer-approval-dial',
+        error,
+        'INVENTORY_TRANSFER_APPROVAL_REQUIRED',
+      ),
+  );
+  assert.equal(
+    (
+      await database.service.postTransfer(
+        database.context,
+        database.approvedActor,
+        approvalRequired,
+      )
+    ).replayed,
+    false,
+  );
+
+  await setPeriodLock(database, legalReject, effectiveAt);
+  const closed = transferCommand({
+    legalEntityId: legalReject,
+    sourceId: 'transfer-closed-period',
+  });
+  await seedTransferDraft(database, closed);
+  await assert.rejects(
+    database.service.postTransfer(database.context, database.actor, closed),
+    (error: unknown) =>
+      observePostingError(
+        testContext,
+        'transfer-period-lock',
+        error,
+        'INVENTORY_PERIOD_CLOSED',
+      ),
+  );
+  assert.equal(await movementCountBySource(database, closed.sourceId), 0);
+  await setPeriodLock(database, legalReject, null);
+
+  await assertTransferRollbackIsAtomic(testContext, database);
+  await assertConcurrentOppositeTransfers(testContext, database);
+  await assertPersistedPlannedOrderIsDecisive(testContext, database);
+}
+
+async function seedAdjustmentBalance(
+  database: PostingDatabase,
+  legalEntityId: string,
+  requestedItemId: string,
+  locationId: string,
+  quantityDelta: string,
+  sourceId: string,
+  sourceType = 'adjustment',
+): Promise<void> {
+  const posting = command({
+    legalEntityId,
+    lines: [
+      {
+        ...line(quantityDelta, '1', locationId),
+        itemId: requestedItemId,
+      },
+    ],
+    sourceId,
+    sourceType,
+  });
+  await seedDraft(database, posting);
+  await database.service.postAdjustment(
+    database.context,
+    database.actor,
+    posting,
+  );
+}
+
+async function cloneLegacyAdjustmentReceipt(
+  database: PostingDatabase,
+  sourceIdempotencyKey: string,
+  command: InventoryAdjustmentPostingCommandV1,
+): Promise<void> {
+  const { idempotencyKey, ...semanticInput } = command;
+  const inputDigest = createHash('sha256')
+    .update(canonicalize(semanticInput))
+    .digest('hex');
+  const inserted = await database.adminPool.query(
+    `INSERT INTO platform.semantic_operation_receipts (
+       tenant_id, environment_id, principal_id, release_id,
+       release_content_hash, action_id, idempotency_key, input_digest,
+       input_digest_version, mutation_result, invocation_id, correlation_id,
+       change_document_id, domain_event_id, outbox_id, recorded_at
+     )
+     SELECT receipt.tenant_id, receipt.environment_id, receipt.principal_id,
+            receipt.release_id, receipt.release_content_hash, receipt.action_id,
+            $5, $6, 1,
+            jsonb_set(
+              receipt.mutation_result,
+              '{movements}',
+              (
+                SELECT jsonb_agg(movement - 'postingRole')
+                  FROM jsonb_array_elements(
+                    receipt.mutation_result->'movements'
+                  ) AS movement
+              ),
+              false
+            ),
+            receipt.invocation_id, receipt.correlation_id,
+            receipt.change_document_id, receipt.domain_event_id,
+            receipt.outbox_id, receipt.recorded_at
+       FROM platform.semantic_operation_receipts AS receipt
+      WHERE receipt.tenant_id=$1 AND receipt.environment_id=$2
+        AND receipt.action_id=$3 AND receipt.idempotency_key=$4`,
+    [
+      tenantId,
+      environmentId,
+      postingCapabilityId,
+      sourceIdempotencyKey,
+      idempotencyKey,
+      inputDigest,
+    ],
+  );
+  assert.equal(inserted.rowCount, 1);
+  const stored = await database.adminPool.query<{
+    inputDigest: string;
+    inputDigestVersion: number;
+    movementRoleCount: number;
+  }>(
+    `SELECT input_digest AS "inputDigest",
+            input_digest_version AS "inputDigestVersion",
+            (
+              SELECT count(*)::integer
+                FROM jsonb_array_elements(
+                  receipt.mutation_result->'movements'
+                ) AS movement
+               WHERE movement ? 'postingRole'
+            ) AS "movementRoleCount"
+       FROM platform.semantic_operation_receipts AS receipt
+      WHERE receipt.tenant_id=$1 AND receipt.environment_id=$2
+        AND receipt.action_id=$3 AND receipt.idempotency_key=$4`,
+    [tenantId, environmentId, postingCapabilityId, idempotencyKey],
+  );
+  assert.deepEqual(stored.rows, [
+    {
+      inputDigest,
+      inputDigestVersion: 1,
+      movementRoleCount: 0,
+    },
+  ]);
+}
+
+async function assertTransferRollbackIsAtomic(
+  testContext: TestContext,
+  database: PostingDatabase,
+): Promise<void> {
+  const posting = transferCommand({
+    legalEntityId: legalReject,
+    sourceId: transferAtomicitySourceId,
+  });
+  await seedTransferDraft(database, posting);
+  await installTransferRollbackProbe(database);
+  const companionBefore = await companionCount(database);
+  const trustBefore = await trustCountByRequest(
+    database,
+    database.context.requestId,
+  );
+  try {
+    await assert.rejects(
+      database.service.postTransfer(database.context, database.actor, posting),
+      (error: unknown) => {
+        testContext.diagnostic(
+          `transfer-atomic-rollback: ${postingCode(error) ?? 'unknown'} ${String(error)}`,
+        );
+        return (
+          postingCode(error) === 'INVENTORY_POSTING_STORAGE_REJECTED' &&
+          postingDetail(error, 'sqlstate') === 'P0001'
+        );
+      },
+    );
+    assert.equal(await transferRollbackProbeCount(database), 1);
+    assert.equal(await movementCountBySource(database, posting.sourceId), 0);
+    assert.equal(await companionCount(database), companionBefore);
+    assert.equal(
+      await trustCountByRequest(database, database.context.requestId),
+      trustBefore,
+    );
+    assert.deepEqual(await transactionState(database, posting.transactionId), {
+      revision: 1,
+      state: enumOption(
+        field(database.binding.transaction, 'inventory_transaction_state'),
+        'draft',
+      ),
+    });
+  } finally {
+    await removeTransferRollbackProbe(database);
+  }
+}
+
+async function assertConcurrentOppositeTransfers(
+  testContext: TestContext,
+  database: PostingDatabase,
+): Promise<void> {
+  await seedAdjustmentBalance(
+    database,
+    legalReject,
+    transferItemId,
+    transferLocationB,
+    '5',
+    '00-transfer-balance-b',
+  );
+  const transferA = transferCommand({
+    fromLocationId: transferLocationA,
+    legalEntityId: legalReject,
+    sourceId: '20-opposite-transfer-a',
+    toLocationId: transferLocationB,
+  });
+  const transferB = transferCommand({
+    fromLocationId: transferLocationB,
+    legalEntityId: legalReject,
+    sourceId: '20-opposite-transfer-b',
+    toLocationId: transferLocationA,
+  });
+  await seedTransferDraft(database, transferA);
+  await seedTransferDraft(database, transferB);
+
+  const pool = new pg.Pool({
+    ...database.connection,
+    application_name: `${postingApplicationName}-opposite-transfers`,
+    max: 2,
+    user: 'north_star_runtime',
+  });
+  const arrivals: number[] = [];
+  let releaseFirstAcquisitions = (): void => undefined;
+  const acquisitionGate = new Promise<void>((resolveGate) => {
+    releaseFirstAcquisitions = resolveGate;
+  });
+  let resolveTwoArrivals = (): void => undefined;
+  const twoArrivals = new Promise<void>((resolveArrivals) => {
+    resolveTwoArrivals = resolveArrivals;
+  });
+  const seenClients = new WeakSet<PoolClient>();
+  const connect = pool.connect.bind(pool);
+  const instrumentedPool = new Proxy(pool, {
+    get(target, property, receiver) {
+      if (property !== 'connect') {
+        const value = Reflect.get(target, property, receiver) as unknown;
+        return typeof value === 'function' ? value.bind(target) : value;
+      }
+      return async (): Promise<PoolClient> => {
+        const client = await connect();
+        client.query = new Proxy(client.query, {
+          apply: async (queryTarget, thisArgument, argumentsList) => {
+            const text =
+              typeof argumentsList[0] === 'string' ? argumentsList[0] : '';
+            const values = Array.isArray(argumentsList[1])
+              ? (argumentsList[1] as unknown[])
+              : [];
+            const result: unknown = await Reflect.apply(
+              queryTarget,
+              thisArgument,
+              argumentsList,
+            );
+            if (
+              !seenClients.has(client) &&
+              text.includes('pg_advisory_xact_lock') &&
+              values[0] === STOCK_IDENTITY_LOCK_NAMESPACE
+            ) {
+              seenClients.add(client);
+              arrivals.push(Number(values[1]));
+              if (arrivals.length === 2) resolveTwoArrivals();
+              await acquisitionGate;
+            }
+            return result;
+          },
+        });
+        return client;
+      };
+    },
+  });
+  const service = new PostgresInventoryPostingService(
+    instrumentedPool,
+    database.registration,
+    { currentInstant: () => recordedAt },
+  );
+  const lockKeys = planStockIdentityLocks([
+    {
+      environmentId,
+      itemId: transferItemId,
+      legalEntityId: legalReject,
+      locationId: transferLocationA,
+      tenantId,
+    },
+    {
+      environmentId,
+      itemId: transferItemId,
+      legalEntityId: legalReject,
+      locationId: transferLocationB,
+      tenantId,
+    },
+  ]).map((target) => target.identityKey);
+  const abortWait = new AbortController();
+  let outcomesPromise: Promise<PostingOutcome[]> | undefined;
+  try {
+    outcomesPromise = Promise.all([
+      settlePosting(
+        service.postTransfer(database.context, database.actor, transferA),
+      ),
+      settlePosting(
+        service.postTransfer(database.context, database.actor, transferB),
+      ),
+    ]);
+    const acquisitionShape = await Promise.race([
+      twoArrivals.then(() => 'opposite-first-locks' as const),
+      waitForAnyStockLockWait(
+        database.adminPool,
+        lockKeys,
+        abortWait.signal,
+      ).then(() => 'shared-first-lock' as const),
+    ]);
+    abortWait.abort();
+    releaseFirstAcquisitions();
+    const outcomes = await outcomesPromise;
+    assert.equal(
+      acquisitionShape,
+      'shared-first-lock',
+      `opposite callers acquired different first stock keys: ${arrivals.join(',')}`,
+    );
+    assert.equal(arrivals.length, 2);
+    assert.equal(
+      outcomes.filter((outcome) => outcome.status === 'fulfilled').length,
+      2,
+      outcomes
+        .map((outcome) =>
+          outcome.status === 'fulfilled'
+            ? 'fulfilled'
+            : `${postingCode(outcome.reason) ?? postgresCode(outcome.reason) ?? 'unknown'}:${String(outcome.reason)}`,
+        )
+        .join('\n'),
+    );
+    assert.equal(
+      outcomes.some(
+        (outcome) =>
+          outcome.status === 'rejected' &&
+          (postgresCode(outcome.reason) === '40P01' ||
+            postingDetail(outcome.reason, 'sqlstate') === '40P01'),
+      ),
+      false,
+    );
+    testContext.diagnostic(
+      `opposite-transfer-order: both callers converged on first key ${String(arrivals[0])}; the waiter exposed the same ungranted NSST key and both transfers committed without 40P01`,
+    );
+  } finally {
+    abortWait.abort();
+    releaseFirstAcquisitions();
+    if (outcomesPromise) await outcomesPromise;
+    await pool.end();
+  }
+}
+
+async function assertPersistedPlannedOrderIsDecisive(
+  testContext: TestContext,
+  database: PostingDatabase,
+): Promise<void> {
+  await seedAdjustmentBalance(
+    database,
+    legalReject,
+    orderDecisiveItemId,
+    transferLocationA,
+    '1',
+    'z-persisted-credit',
+    'same-instant-order',
+  );
+  const posting = transferCommand({
+    legalEntityId: legalReject,
+    lines: [
+      {
+        ...transferLine('1', '1', transferLocationA, transferLocationB),
+        itemId: orderDecisiveItemId,
+      },
+    ],
+    sourceId: 'a-planned-debit',
+    sourceType: 'same-instant-order',
+  });
+  await seedTransferDraft(database, posting);
+  await assert.rejects(
+    database.service.postTransfer(database.context, database.actor, posting),
+    (error: unknown) =>
+      observePostingError(
+        testContext,
+        'persisted-planned-global-order',
+        error,
+        'INVENTORY_STOCK_NEGATIVE',
+      ),
+  );
+  assert.equal(await movementCountBySource(database, posting.sourceId), 0);
+  assert.deepEqual(await transactionState(database, posting.transactionId), {
+    revision: 1,
+    state: enumOption(
+      field(database.binding.transaction, 'inventory_transaction_state'),
+      'draft',
+    ),
+  });
+  testContext.diagnostic(
+    'persisted-planned-global-order: planned debit sourceId=a sorts before persisted credit sourceId=z at the same effectiveAt/recordedAt; removing the production persisted-plus-planned sort changes rejection to commit',
   );
 }
 
@@ -1867,10 +2588,38 @@ async function seedManagedFoundation(
       null,
       {},
     );
+    await insertEntity(
+      client,
+      binding,
+      binding.item,
+      {
+        item_base_unit: 'EA',
+        item_code: 'ITEM-TRANSFER',
+        item_name: 'Transfer posting item',
+      },
+      transferItemId,
+      null,
+      {},
+    );
+    await insertEntity(
+      client,
+      binding,
+      binding.item,
+      {
+        item_base_unit: 'EA',
+        item_code: 'ITEM-ORDER-DECISIVE',
+        item_name: 'Order-decisive posting item',
+      },
+      orderDecisiveItemId,
+      null,
+      {},
+    );
     for (const [index, locationId] of [
       locationPrimary,
       locationTie,
       locationRace,
+      transferLocationA,
+      transferLocationB,
     ].entries()) {
       await insertEntity(
         client,
@@ -1927,6 +2676,73 @@ async function seedDraft(
       }
     },
   );
+}
+
+async function seedTransferDraft(
+  database: PostingDatabase,
+  input: InventoryTransferPostingCommandV1,
+): Promise<void> {
+  await withModuleRole(
+    database.runtimePool,
+    database.context,
+    async (client) => {
+      await insertEntity(
+        client,
+        database.binding,
+        database.binding.transaction,
+        {
+          inventory_transaction_actor_id: principalId,
+          inventory_transaction_effective_at: input.effectiveAt,
+          inventory_transaction_number: `TRF-${input.transactionId.slice(0, 12)}`,
+          inventory_transaction_reason_code: input.reason.code || null,
+          inventory_transaction_reason_narrative: input.reason.narrative,
+          inventory_transaction_recorded_at: recordedAt,
+          inventory_transaction_source_id: input.sourceId,
+          inventory_transaction_source_type: input.sourceType,
+          inventory_transaction_state: enumOption(
+            field(database.binding.transaction, 'inventory_transaction_state'),
+            'draft',
+          ),
+          inventory_transaction_type: enumOption(
+            field(database.binding.transaction, 'inventory_transaction_type'),
+            'transfer',
+          ),
+        },
+        input.transactionId,
+        input.legalEntityId,
+        {},
+      );
+      for (const postingLine of input.lines) {
+        await insertTransferDraftLine(client, database, input, postingLine);
+      }
+    },
+  );
+}
+
+async function insertTransferDraftLine(
+  client: PoolClient,
+  database: PostingDatabase,
+  input: InventoryTransferPostingCommandV1,
+  postingLine: InventoryTransferLineV1,
+): Promise<void> {
+  const prepared = prepareEntityInsert(
+    database.binding,
+    database.binding.transactionLine,
+    {
+      inventory_transaction_line_from_location_id: postingLine.fromLocationId,
+      inventory_transaction_line_item_id: postingLine.itemId,
+      inventory_transaction_line_line_number: Number(postingLine.sourceLine),
+      inventory_transaction_line_quantity: postingLine.quantity,
+      inventory_transaction_line_to_location_id: postingLine.toLocationId,
+      inventory_transaction_line_unit_id: postingLine.unitId,
+    },
+    postingLine.transactionLineId,
+    input.legalEntityId,
+    {
+      [database.binding.transaction.entity.entityId]: input.transactionId,
+    },
+  );
+  await client.query(prepared.text, prepared.values);
 }
 
 async function insertDraftLine(
@@ -2072,11 +2888,23 @@ function testStorageBinding(
   };
   const item = bind('item');
   const movement = bind('inventory_movement');
-  assert.ok(movement.entity.factStorage);
+  const factStorage = movement.entity.factStorage;
+  assert.ok(factStorage);
+  const companionMovementIdIndex =
+    factStorage.companion.movementForeignKey.targetColumns.indexOf(
+      movement.recordIdColumn,
+    );
+  assert.notEqual(companionMovementIdIndex, -1);
+  const companionMovementIdColumn =
+    factStorage.companion.movementForeignKey.sourceColumns[
+      companionMovementIdIndex
+    ];
+  assert.ok(companionMovementIdColumn);
   const periodLock = bind('inventory_period_lock');
   assert.ok(periodLock.entity.periodLock);
   return {
-    companionTableName: movement.entity.factStorage.companion.physicalTableName,
+    companionMovementIdColumn,
+    companionTableName: factStorage.companion.physicalTableName,
     item,
     legalEntity: bind('legal_entity'),
     location: bind('location'),
@@ -2400,15 +3228,22 @@ async function assertMovementCannotUpdate(
 async function assertQuantityOnlyEvidence(
   testContext: TestContext,
   database: PostingDatabase,
-  result: Awaited<
-    ReturnType<PostgresInventoryPostingService['postAdjustment']>
-  >,
+  result: InventoryPostingResultV1,
+  expectedMovementCount: number,
 ): Promise<void> {
-  const movement = await database.adminPool.query<{ document: unknown }>(
+  assert.equal(result.movements.length, expectedMovementCount);
+  const movementIds = result.movements.map((movement) => movement.movementId);
+  const movements = await database.adminPool.query<{ document: unknown }>(
     `SELECT to_jsonb(fact) AS document
        FROM ${table(database.binding, database.binding.movement)} AS fact
-      WHERE record_id=$1`,
-    [result.movements[0]!.movementId],
+      WHERE ${quoted(database.binding.movement.recordIdColumn)}=ANY($1::uuid[])`,
+    [movementIds],
+  );
+  const companions = await database.adminPool.query<{ document: unknown }>(
+    `SELECT to_jsonb(companion) AS document
+       FROM ${quoted(database.binding.schemaName)}.${quoted(database.binding.companionTableName)} AS companion
+      WHERE ${quoted(database.binding.companionMovementIdColumn)}=ANY($1::uuid[])`,
+    [movementIds],
   );
   const audit = await database.adminPool.query<{ document: unknown }>(
     `SELECT changes AS document
@@ -2426,24 +3261,45 @@ async function assertQuantityOnlyEvidence(
       WHERE outbox_id=$1`,
     [result.trust.outboxId],
   );
-  for (const document of [
-    movement.rows[0]?.document,
+  assert.equal(movements.rows.length, expectedMovementCount);
+  assert.equal(companions.rows.length, expectedMovementCount);
+  assert.equal(audit.rows.length, 1);
+  assert.equal(event.rows.length, 1);
+  assert.equal(outbox.rows.length, 1);
+  const evidenceDocuments = [
+    ...movements.rows.map((row) => row.document),
+    ...companions.rows.map((row) => row.document),
     result,
     audit.rows[0]?.document,
     event.rows[0]?.document,
     outbox.rows[0]?.document,
-  ]) {
+  ];
+  assert.equal(evidenceDocuments.length, expectedMovementCount * 2 + 4);
+  for (const document of evidenceDocuments) {
     assert.ok(document !== undefined);
     assertNoMonetaryKeys(document);
   }
   assert.throws(() => assertNoMonetaryKeys({ unitCost: '1.00' }), /unitCost/u);
+  assert.throws(
+    () =>
+      assertNoMonetaryKeys({
+        classification: 'INTERNAL',
+        fieldId: 'unitCost',
+        newState: { state: 'VALUE', value: '1.00' },
+        oldState: { state: 'ABSENT' },
+      }),
+    /unitCost/u,
+  );
   testContext.diagnostic(
-    'quantity-only parser red: ERR_ASSERTION monetary keys: unitCost',
+    'quantity-only parser reds: key and business-change fieldId both reject unitCost',
   );
 }
 
 function assertNoMonetaryKeys(document: unknown): void {
-  const forbidden = objectKeys(document).filter((key) =>
+  const forbidden = [
+    ...objectKeys(document),
+    ...semanticFieldIds(document),
+  ].filter((key) =>
     /(?:amount|money|cost|price|currency|valuation)/iu.test(key),
   );
   assert.deepEqual(forbidden, [], `monetary keys: ${forbidden.join(',')}`);
@@ -2505,11 +3361,15 @@ async function recordedTransactionRevision(
 async function updatePostingConfiguration(
   database: PostingDatabase,
   legalEntityId: string,
-  values: { adjustmentReasonRequirement?: 'codeOnly' | 'codeAndNarrative' },
+  values: {
+    adjustmentReasonRequirement?: 'codeOnly' | 'codeAndNarrative';
+    transferApprovalThreshold?: string | null;
+  },
 ): Promise<void> {
   await database.adminPool.query(
     `UPDATE platform.inventory_posting_configurations
         SET adjustment_reason_requirement = COALESCE($4, adjustment_reason_requirement),
+            transfer_approval_threshold = COALESCE($5, transfer_approval_threshold),
             revision = revision + 1,
             updated_at = transaction_timestamp()
       WHERE tenant_id=$1 AND environment_id=$2 AND legal_entity_id=$3`,
@@ -2518,6 +3378,7 @@ async function updatePostingConfiguration(
       environmentId,
       legalEntityId,
       values.adjustmentReasonRequirement ?? null,
+      values.transferApprovalThreshold ?? null,
     ],
   );
 }
@@ -2576,6 +3437,79 @@ async function installLateRollbackProbe(
   );
 }
 
+async function installTransferRollbackProbe(
+  database: PostingDatabase,
+): Promise<void> {
+  const sourceIdColumn = field(
+    database.binding.movement,
+    'inventory_movement_source_id',
+  ).physicalName;
+  const quantityColumn = field(
+    database.binding.movement,
+    'inventory_movement_quantity_delta',
+  ).physicalName;
+  await database.adminPool.query(
+    `CREATE SEQUENCE public.g3p4_transfer_insert_probe MINVALUE 0 START 0;
+     CREATE FUNCTION public.g3p4_reject_transfer_second_side()
+       RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER
+       SET search_path = pg_catalog, public AS $reject$
+       BEGIN
+         IF NEW.${quoted(sourceIdColumn)} = '${transferAtomicitySourceId}'
+            AND NEW.${quoted(quantityColumn)} < 0
+         THEN
+           RAISE EXCEPTION 'G3P4_INJECTED_SECOND_SIDE_FAILURE'
+             USING ERRCODE='P0001';
+         END IF;
+         RETURN NEW;
+       END
+       $reject$;
+     CREATE FUNCTION public.g3p4_observe_transfer_first_side()
+       RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER
+       SET search_path = pg_catalog, public AS $observe$
+       BEGIN
+         IF NEW.${quoted(sourceIdColumn)} = '${transferAtomicitySourceId}' THEN
+           PERFORM nextval('public.g3p4_transfer_insert_probe');
+         END IF;
+         RETURN NEW;
+       END
+       $observe$;
+     CREATE TRIGGER g3p4_reject_transfer_second_side
+       BEFORE INSERT ON ${table(database.binding, database.binding.movement)}
+       FOR EACH ROW EXECUTE FUNCTION public.g3p4_reject_transfer_second_side();
+     CREATE TRIGGER g3p4_observe_transfer_first_side
+       AFTER INSERT ON ${table(database.binding, database.binding.movement)}
+       FOR EACH ROW EXECUTE FUNCTION public.g3p4_observe_transfer_first_side()`,
+  );
+}
+
+async function transferRollbackProbeCount(
+  database: PostingDatabase,
+): Promise<number> {
+  const result = await database.adminPool.query<{
+    is_called: boolean;
+    last_value: string;
+  }>(
+    `SELECT last_value::text, is_called
+       FROM public.g3p4_transfer_insert_probe`,
+  );
+  const row = result.rows[0];
+  return row?.is_called ? Number(row.last_value) + 1 : 0;
+}
+
+async function removeTransferRollbackProbe(
+  database: PostingDatabase,
+): Promise<void> {
+  await database.adminPool.query(
+    `DROP TRIGGER IF EXISTS g3p4_reject_transfer_second_side
+       ON ${table(database.binding, database.binding.movement)};
+     DROP TRIGGER IF EXISTS g3p4_observe_transfer_first_side
+       ON ${table(database.binding, database.binding.movement)};
+     DROP FUNCTION IF EXISTS public.g3p4_reject_transfer_second_side();
+     DROP FUNCTION IF EXISTS public.g3p4_observe_transfer_first_side();
+     DROP SEQUENCE IF EXISTS public.g3p4_transfer_insert_probe`,
+  );
+}
+
 async function rollbackProbeCount(database: PostingDatabase): Promise<number> {
   const result = await database.adminPool.query<{
     is_called: boolean;
@@ -2616,10 +3550,62 @@ async function movementCountBySource(
   return Number(result.rows[0]?.count ?? '-1');
 }
 
+async function receiptInputDigestVersion(
+  database: PostingDatabase,
+  idempotencyKey: string,
+): Promise<number> {
+  const result = await database.adminPool.query<{
+    inputDigestVersion: number;
+  }>(
+    `SELECT input_digest_version AS "inputDigestVersion"
+       FROM platform.semantic_operation_receipts
+      WHERE tenant_id=$1 AND environment_id=$2
+        AND action_id=$3 AND idempotency_key=$4`,
+    [tenantId, environmentId, postingCapabilityId, idempotencyKey],
+  );
+  assert.equal(result.rows.length, 1);
+  return result.rows[0]!.inputDigestVersion;
+}
+
+async function transferMovementRows(
+  database: PostingDatabase,
+  sourceId: string,
+): Promise<
+  Array<{
+    locationId: string;
+    postingRole: string;
+    quantityDelta: string;
+    sourceLine: string;
+  }>
+> {
+  const result = await database.adminPool.query<{
+    locationId: string;
+    postingRole: string;
+    quantityDelta: string;
+    sourceLine: string;
+  }>(
+    `SELECT ${quoted(field(database.binding.movement, 'inventory_movement_location_id').physicalName)}::text AS "locationId",
+            ${quoted(field(database.binding.movement, 'inventory_movement_posting_role').physicalName)} AS "postingRole",
+            ${quoted(field(database.binding.movement, 'inventory_movement_quantity_delta').physicalName)}::text AS "quantityDelta",
+            ${quoted(field(database.binding.movement, 'inventory_movement_source_line').physicalName)} AS "sourceLine"
+       FROM ${table(database.binding, database.binding.movement)}
+      WHERE ${quoted(field(database.binding.movement, 'inventory_movement_source_id').physicalName)}=$1
+      ORDER BY ${quoted(field(database.binding.movement, 'inventory_movement_source_line').physicalName)}`,
+    [sourceId],
+  );
+  return result.rows.map((row) => ({
+    ...row,
+    quantityDelta: row.quantityDelta
+      .replace(/(\.[0-9]*?)0+$/u, '$1')
+      .replace(/\.$/u, ''),
+  }));
+}
+
 async function stockBalance(
   database: PostingDatabase,
   legalEntityId: string,
   locationId: string,
+  requestedItemId = itemId,
 ): Promise<string> {
   const result = await database.adminPool.query<{ balance: string }>(
     `SELECT COALESCE(sum(${quoted(field(database.binding.movement, 'inventory_movement_quantity_delta').physicalName)}),0)::text AS balance
@@ -2627,7 +3613,7 @@ async function stockBalance(
       WHERE legal_entity_id=$1
         AND ${quoted(field(database.binding.movement, 'inventory_movement_item_id').physicalName)}=$2
         AND ${quoted(field(database.binding.movement, 'inventory_movement_location_id').physicalName)}=$3`,
-    [legalEntityId, itemId, locationId],
+    [legalEntityId, requestedItemId, locationId],
   );
   const balance = result.rows[0]?.balance;
   if (balance === undefined) return 'missing';
@@ -2846,6 +3832,31 @@ async function waitForExactAdvisoryLock(
   throw new Error(
     `backend ${String(pid)} did not expose advisory lock ${String(namespace)}/${String(key)} granted=${String(granted)}`,
   );
+}
+
+async function waitForAnyStockLockWait(
+  observer: Pool,
+  identityKeys: readonly number[],
+  signal: AbortSignal,
+): Promise<void> {
+  const deadline = process.hrtime.bigint() + 10_000_000_000n;
+  const unsignedKeys = identityKeys.map(unsignedInt32);
+  while (process.hrtime.bigint() < deadline) {
+    if (signal.aborted) throw new Error('stock-lock wait observation aborted');
+    const result = await observer.query<{ present: boolean }>(
+      `SELECT EXISTS (
+         SELECT 1
+           FROM pg_catalog.pg_locks
+          WHERE locktype='advisory' AND NOT granted AND objsubid=2
+            AND classid::bigint=$1::bigint
+            AND objid::bigint=ANY($2::bigint[])
+       ) AS present`,
+      [unsignedInt32(STOCK_IDENTITY_LOCK_NAMESPACE), unsignedKeys],
+    );
+    if (result.rows[0]?.present) return;
+    await new Promise<void>((resolveTurn) => setImmediate(resolveTurn));
+  }
+  throw new Error('opposite transfers did not expose a shared first-lock wait');
 }
 
 async function assertStockLockHeld(
@@ -3284,6 +4295,15 @@ function objectKeys(value: unknown): string[] {
   if (Array.isArray(value)) return value.flatMap(objectKeys);
   if (!isRecord(value)) return [];
   return [...Object.keys(value), ...Object.values(value).flatMap(objectKeys)];
+}
+
+function semanticFieldIds(value: unknown): string[] {
+  if (Array.isArray(value)) return value.flatMap(semanticFieldIds);
+  if (!isRecord(value)) return [];
+  return [
+    ...(typeof value.fieldId === 'string' ? [value.fieldId] : []),
+    ...Object.values(value).flatMap(semanticFieldIds),
+  ];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

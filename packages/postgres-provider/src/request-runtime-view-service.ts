@@ -8,6 +8,7 @@ import {
   OUTPUT_PROTOCOL_VERSION,
   PROJECTION_MANIFEST_VERSION,
   RELEASE_MANIFEST_VERSION,
+  SUPPORTED_SURFACE_MANIFEST_PAYLOAD_VERSIONS,
 } from '@north-star/compiler';
 import {
   ReleaseInvalidationFenceState,
@@ -151,27 +152,35 @@ const maximumFillAttempts = 4;
 const supportedProjectionSchemas = Object.freeze({
   [REQUEST_RUNTIME_PROJECTION_FAMILIES.agent]: Object.freeze({
     payloadKind: 'agentDiscoveryPayload',
-    payloadSchemaVersion: 'northstar.agent-discovery-payload/v0-provisional',
+    payloadSchemaVersions: Object.freeze([
+      'northstar.agent-discovery-payload/v0-provisional',
+    ]),
   }),
   [REQUEST_RUNTIME_PROJECTION_FAMILIES.catalog]: Object.freeze({
     payloadKind: 'semanticModelPayload',
-    payloadSchemaVersion: 'northstar.semantic-model-payload/v0-provisional',
+    payloadSchemaVersions: Object.freeze([
+      'northstar.semantic-model-payload/v0-provisional',
+    ]),
   }),
   [REQUEST_RUNTIME_PROJECTION_FAMILIES.operation]: Object.freeze({
     payloadKind: 'operationCatalogPayload',
-    payloadSchemaVersion: 'northstar.operation-catalog-payload/v0-provisional',
+    payloadSchemaVersions: Object.freeze([
+      'northstar.operation-catalog-payload/v0-provisional',
+    ]),
   }),
   [REQUEST_RUNTIME_PROJECTION_FAMILIES.query]: Object.freeze({
     payloadKind: 'queryCatalogPayload',
-    payloadSchemaVersion: 'northstar.query-catalog-payload/v0-provisional',
+    payloadSchemaVersions: Object.freeze([
+      'northstar.query-catalog-payload/v0-provisional',
+    ]),
   }),
   [REQUEST_RUNTIME_PROJECTION_FAMILIES.surface]: Object.freeze({
     payloadKind: 'surfaceManifestPayload',
-    payloadSchemaVersion: 'northstar.surface-manifest-payload/v0-provisional',
+    payloadSchemaVersions: SUPPORTED_SURFACE_MANIFEST_PAYLOAD_VERSIONS,
   }),
 } satisfies Record<
   RequestRuntimeProjectionFamily,
-  { payloadKind: string; payloadSchemaVersion: string }
+  { payloadKind: string; payloadSchemaVersions: readonly string[] }
 >);
 
 const authoritativeSnapshotSql = `
@@ -603,7 +612,11 @@ function definitionFromSnapshotRows(
       manifestArtifact.bytes,
       'MALFORMED_REQUIRED_PROJECTION',
     );
-    validateProjectionManifest(familyId, reference, manifest);
+    const payloadSchemaVersion = validateProjectionManifest(
+      familyId,
+      reference,
+      manifest,
+    );
     const descriptors = requireArray(manifest.chunks, 'chunks');
     if (descriptors.length !== 1) {
       throw malformedProjection(
@@ -670,7 +683,7 @@ function definitionFromSnapshotRows(
     if (
       !isRecord(payload) ||
       payload.kind !== expected.payloadKind ||
-      payload.schemaVersion !== expected.payloadSchemaVersion
+      payload.schemaVersion !== payloadSchemaVersion
     ) {
       throw malformedProjection(
         'projection payload version or kind is unsupported',
@@ -681,7 +694,7 @@ function definitionFromSnapshotRows(
       familyId,
       instanceId,
       payload: freezeJson(payload),
-      payloadSchemaVersion: expected.payloadSchemaVersion,
+      payloadSchemaVersion,
       semanticDigest,
     });
   };
@@ -730,16 +743,20 @@ function validateProjectionManifest(
   familyId: RequestRuntimeProjectionFamily,
   reference: Record<string, unknown>,
   manifest: Record<string, unknown>,
-): void {
+): string {
   const expected = supportedProjectionSchemas[familyId];
+  const payloadSchemaVersion = manifest.payloadSchemaVersion;
   if (
+    typeof payloadSchemaVersion !== 'string' ||
+    !expected.payloadSchemaVersions.some(
+      (supported) => supported === payloadSchemaVersion,
+    ) ||
     manifest.kind !== 'projectionManifest' ||
     manifest.familyId !== familyId ||
     manifest.instanceId !== reference.instanceId ||
     manifest.manifestVersion !== PROJECTION_MANIFEST_VERSION ||
     manifest.outputProtocolVersion !== OUTPUT_PROTOCOL_VERSION ||
     manifest.chunkingSchemeVersion !== CHUNKING_SCHEME_VERSION ||
-    manifest.payloadSchemaVersion !== expected.payloadSchemaVersion ||
     canonicalize(reference) !==
       canonicalize({
         artifactRoot: reference.artifactRoot,
@@ -758,6 +775,7 @@ function validateProjectionManifest(
   ) {
     throw malformedProjection('projection manifest contract is malformed');
   }
+  return payloadSchemaVersion;
 }
 
 function pointerAuthorityFromRows(

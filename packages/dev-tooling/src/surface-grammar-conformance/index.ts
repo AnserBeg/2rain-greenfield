@@ -24,7 +24,8 @@ export type SurfaceGrammarRuleId =
   | 'SG008_COMPACT_NAVIGATION_BUDGET'
   | 'SG009_COMPACT_SLOT'
   | 'SG010_CONTRAST'
-  | 'SG011_TARGET_SIZE';
+  | 'SG011_TARGET_SIZE'
+  | 'SG012_NAVIGATION_REACHABILITY';
 
 export interface SurfaceGrammarViolation {
   readonly message: string;
@@ -45,8 +46,28 @@ export interface ConformanceSurface {
   readonly surfaceRole?: string | null;
 }
 
+export interface ConformanceNavigationSurface {
+  readonly kind: 'navigationSurface';
+  readonly surfaceId: string;
+}
+
+export interface ConformanceNavigationGroup {
+  readonly children: readonly ConformanceNavigationEntry[];
+  readonly kind: 'navigationGroup';
+  readonly label: string;
+  readonly navigationId: string;
+}
+
+export type ConformanceNavigationEntry =
+  ConformanceNavigationGroup | ConformanceNavigationSurface;
+
+export interface ConformanceNavigationTree {
+  readonly entries: readonly ConformanceNavigationGroup[];
+  readonly kind: 'navigationTree';
+}
+
 export interface CompactSurfaceProjection {
-  readonly navigationSurfaceIds: readonly string[];
+  readonly navigationEntryIds: readonly string[];
   readonly surfaces: readonly {
     readonly slots: readonly string[];
     readonly surfaceId: string;
@@ -117,11 +138,12 @@ export interface AccessibilityCheckResult {
 
 export function projectCompactSurfaces(
   surfaces: readonly ConformanceSurface[],
+  navigation: ConformanceNavigationTree | null = null,
 ): CompactSurfaceProjection {
   const active = surfaces.filter((surface) => surface.lifecycle === 'active');
   return Object.freeze({
-    navigationSurfaceIds: Object.freeze(
-      active.filter(isNavigationSurface).map((surface) => surface.surfaceId),
+    navigationEntryIds: Object.freeze(
+      topLevelNavigationEntryIds(active, navigation),
     ),
     surfaces: Object.freeze(
       active.map((surface) =>
@@ -136,7 +158,8 @@ export function projectCompactSurfaces(
 
 export function checkSurfaceGrammarConformance(
   surfaces: readonly ConformanceSurface[],
-  compact = projectCompactSurfaces(surfaces),
+  navigation: ConformanceNavigationTree | null = null,
+  compact = projectCompactSurfaces(surfaces, navigation),
 ): SurfaceGrammarCheckResult {
   const active = surfaces.filter((surface) => surface.lifecycle === 'active');
   const violations: SurfaceGrammarViolation[] = [];
@@ -235,7 +258,48 @@ export function checkSurfaceGrammarConformance(
     }
   }
 
-  const desktopNavigationItems = active.filter(isNavigationSurface).length;
+  const desktopNavigationEntryIds = topLevelNavigationEntryIds(
+    active,
+    navigation,
+  );
+  const expectedNavigationSurfaceIds = active
+    .filter(isNavigationSurface)
+    .map((surface) => surface.surfaceId)
+    .sort();
+  const observedNavigationSurfaceIds = navigation
+    ? navigation.entries.flatMap(navigationSurfaceIds).sort()
+    : [...expectedNavigationSurfaceIds];
+  if (
+    observedNavigationSurfaceIds.length !==
+      new Set(observedNavigationSurfaceIds).size ||
+    observedNavigationSurfaceIds.length !==
+      expectedNavigationSurfaceIds.length ||
+    observedNavigationSurfaceIds.some(
+      (surfaceId, index) => surfaceId !== expectedNavigationSurfaceIds[index],
+    )
+  ) {
+    add(
+      violations,
+      'SG012_NAVIGATION_REACHABILITY',
+      'navigation',
+      'compiled navigation must reach every active navigation surface exactly once',
+    );
+  }
+  if (
+    compact.navigationEntryIds.length !== desktopNavigationEntryIds.length ||
+    compact.navigationEntryIds.some(
+      (entryId, index) => entryId !== desktopNavigationEntryIds[index],
+    )
+  ) {
+    add(
+      violations,
+      'SG012_NAVIGATION_REACHABILITY',
+      'compact-navigation',
+      'compact navigation must retain every compiled top-level entry in order',
+    );
+  }
+
+  const desktopNavigationItems = desktopNavigationEntryIds.length;
   if (desktopNavigationItems > SURFACE_GRAMMAR_LIMITS.desktopNavigationItems) {
     add(
       violations,
@@ -245,14 +309,14 @@ export function checkSurfaceGrammarConformance(
     );
   }
   if (
-    compact.navigationSurfaceIds.length >
+    compact.navigationEntryIds.length >
     SURFACE_GRAMMAR_LIMITS.compactNavigationItems
   ) {
     add(
       violations,
       'SG008_COMPACT_NAVIGATION_BUDGET',
       'navigation',
-      `compact navigation observed ${compact.navigationSurfaceIds.length} items; maximum is ${SURFACE_GRAMMAR_LIMITS.compactNavigationItems}`,
+      `compact navigation observed ${compact.navigationEntryIds.length} items; maximum is ${SURFACE_GRAMMAR_LIMITS.compactNavigationItems}`,
     );
   }
 
@@ -261,6 +325,21 @@ export function checkSurfaceGrammarConformance(
     surfacesRead: active.length,
     violations: Object.freeze(violations),
   });
+}
+
+function topLevelNavigationEntryIds(
+  active: readonly ConformanceSurface[],
+  navigation: ConformanceNavigationTree | null,
+): string[] {
+  return navigation
+    ? navigation.entries.map((entry) => entry.navigationId)
+    : active.filter(isNavigationSurface).map((surface) => surface.surfaceId);
+}
+
+function navigationSurfaceIds(entry: ConformanceNavigationEntry): string[] {
+  return entry.kind === 'navigationSurface'
+    ? [entry.surfaceId]
+    : entry.children.flatMap(navigationSurfaceIds);
 }
 
 function isNavigationSurface(surface: ConformanceSurface): boolean {
