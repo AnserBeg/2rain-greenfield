@@ -188,7 +188,7 @@ Four worktrees hold uncommitted-or-unreviewed work. **None is on `main`.**
 |---|---|---|
 | `packet/g3-p4` (G3-P4a, transfer) | `/home/rvham/2rain-greenfield-g3p4` | matrix-green at `41ceb638`; Fable **CONFIRM**, Codex **REVISE**×2; round 4 fixes authored |
 | `packet/q1-p4` | `/home/rvham/2rain-greenfield-q1p4` | format/typecheck/lint clean at `c726634`; **matrix not yet re-run**; no review yet |
-| `packet/g3-p4b` (stock count) | `/home/rvham/2rain-greenfield-g3p4b` | **writer still running at handback** — see "Collecting G3-P4b" below |
+| `packet/g3-p4b` (stock count) | `/home/rvham/2rain-greenfield-g3p4b` | **PARTIAL, interrupted** at `f9e53b2` — writer died on a network failure, no report, ungated |
 | `packet/g3-p6a` | `/home/rvham/2rain-greenfield-g3p6a` | **not started**; prompt staged, both bridges granted |
 
 Prompts, launchers and every review artifact are in `~/2rain-missions/`.
@@ -269,29 +269,21 @@ option offered — the `G3-P4`/`G3-P4b` split, and the refusal of language v4.
 Verify a stop by reading before overriding it.
 
 
-## Collecting `G3-P4b` — its writer was still running at handback
+## `G3-P4b` was interrupted — read this before trusting its branch
 
-A spawned Codex writer was mid-authoring when the session ended. **Nothing is
-lost**: it writes files directly into `/home/rvham/2rain-greenfield-g3p4b` and
-leaves them uncommitted.
+Its writer **died on a network failure** (`failed to lookup address information`
+on the websocket to the Codex backend), not on anything in the code. It exited
+with status 1, wrote **no report**, and left seven partially-edited files.
 
-To collect it:
+Those are committed at `f9e53b2` purely so they survive. **The commit is
+incomplete and ungated**: never formatted, typechecked, linted, tested or
+reviewed, and the dependency-set v4 before/after roots the packet owes are not
+recorded. There is no account of what the writer intended or checked.
 
-```bash
-cat ~/2rain-missions/g3-p4b.done            # exists once the writer exits
-cat ~/2rain-missions/g3-p4b.last-message.txt # its report
-cd /home/rvham/2rain-greenfield-g3p4b && git status --short && git diff
-```
-
-Then gate before committing — **format and typecheck first, matrix second**:
-
-```bash
-corepack pnpm format && corepack pnpm typecheck && corepack pnpm lint
-```
-
-To kill it instead: `pkill -f run-g3p4b.sh`. Its prompt is
-`~/2rain-missions/g3-p4b.prompt.md` and can be relaunched with
-`~/2rain-missions/run-g3p4b.sh`.
+Re-running from `~/2rain-missions/g3-p4b.prompt.md` on a fresh branch is probably
+cheaper than auditing a half-finished edit. If you do keep it, **its migration is
+numbered `0018` and must become `0017`** — `G3-P4a`'s was renumbered to `0016`, and
+`migrations.ts:248` requires a contiguous stream.
 
 **`G3-P4b` cuts dependency-set v4** — a governed protocol version event that
 `G3-P0` item 7 permits, provided before/after roots are recorded. Check that its
