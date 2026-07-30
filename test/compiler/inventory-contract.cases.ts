@@ -558,14 +558,9 @@ export function registerInventoryContractCases(
         'stock_count_line_counted_quantity',
         'stock_count_line_variance_quantity',
       ]) {
-        const mutation = structuredClone(inventoryModuleDefinition()) as {
-          fields: Array<{ fieldId: string }>;
-        };
-        mutation.fields = mutation.fields.filter(
-          (field) => !field.fieldId.endsWith(`:field.${victim}`),
-        );
+        const mutation = inventoryDefinitionWithoutCountEvidenceField(victim);
         const result = compileApplication(moduleInput(mutation));
-        assertCompileDiagnostic(
+        assertOnlyCompileDiagnostic(
           result,
           'INVENTORY_COUNT_EVIDENCE_INVALID',
           `$.fields.${victim}`,
@@ -1561,6 +1556,45 @@ function inventoryDefinitionWithoutMovementField(
   return definition;
 }
 
+function inventoryDefinitionWithoutCountEvidenceField(
+  fieldLocalId: string,
+): Record<string, unknown> {
+  const definition = structuredClone(inventoryModuleDefinition()) as {
+    fields: Array<{ fieldId: string }>;
+    queries: Array<{
+      resolveMatchKeys?: Array<{ field: { targetId: string } }>;
+      selections: Array<{ field: { targetId: string } }>;
+    }>;
+  };
+  const fieldId = `northstar.inventory:field.${fieldLocalId}`;
+  const matchKeyFallbackId =
+    'northstar.inventory:field.stock_count_line_line_number';
+  definition.fields = definition.fields.filter(
+    (field) => field.fieldId !== fieldId,
+  );
+  let removedSelections = 0;
+  let replacedMatchKeys = 0;
+  for (const query of definition.queries) {
+    const retained = query.selections.filter(
+      (selection) => selection.field.targetId !== fieldId,
+    );
+    removedSelections += query.selections.length - retained.length;
+    query.selections = retained;
+    for (const matchKey of query.resolveMatchKeys ?? []) {
+      if (matchKey.field.targetId !== fieldId) continue;
+      matchKey.field.targetId = matchKeyFallbackId;
+      replacedMatchKeys += 1;
+    }
+  }
+  assert.equal(removedSelections, 4);
+  assert.equal(
+    replacedMatchKeys,
+    fieldLocalId === 'stock_count_line_counted_quantity' ? 1 : 0,
+  );
+  assert.equal(containsAnyExactString(definition, new Set([fieldId])), false);
+  return definition;
+}
+
 function inventoryDefinitionWithoutFamily(
   familyLocalId: string,
 ): Record<string, unknown> {
@@ -1681,6 +1715,30 @@ function assertCompileDiagnostic(
     ),
     true,
     JSON.stringify(result.diagnostics),
+  );
+}
+
+function assertOnlyCompileDiagnostic(
+  result: ReturnType<typeof compileApplication>,
+  code: string,
+  path: string,
+  subjectId: string,
+): void {
+  assert.equal(
+    result.status,
+    'failed',
+    result.status === 'compiled'
+      ? JSON.stringify(result.diagnostics)
+      : undefined,
+  );
+  if (result.status !== 'failed') return;
+  assert.deepEqual(
+    result.diagnostics.map((diagnostic) => ({
+      code: diagnostic.code,
+      path: diagnostic.path,
+      subjectId: diagnostic.subjectId,
+    })),
+    [{ code, path, subjectId }],
   );
 }
 
