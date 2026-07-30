@@ -12,10 +12,17 @@ import {
   SURFACE_ARCHETYPES,
   type CanonicalLanguageVersion,
 } from './constants.js';
+import { LEGAL_ENTITY_SCOPE_CONTRACT_V1 } from './legal-entity-scope-kernel.js';
 
 const nodeVersion = z.enum(SUPPORTED_LANGUAGE_VERSIONS);
 const legacyNodeVersion = z.enum(['v0-experimental', 'v1', 'v2']);
+// Node-level version for the family v3 introduced. v4 reads every v3 node, so
+// the node schema admits both; `CANON_VERSION_MIXED` in normalize.ts is what
+// keeps a package's nodes on the package's own version, exactly as it already
+// does for the `nodeVersion` enum above.
+const v3PlusNodeVersion = z.enum(['v3', 'v4']);
 const v3NodeVersion = z.literal('v3');
+const v4NodeVersion = z.literal('v4');
 const boundedOrderKey = z.int().min(0).max(1_000_000);
 const boundedCount = z.int().min(1).max(1_000_000);
 const positiveVersion = z.int().min(1).max(1_000_000);
@@ -130,7 +137,7 @@ export type PredicateExpression = PredicateExpressionShape<
   CanonicalScalar
 >;
 export type PredicateExpressionV3 = PredicateExpressionShape<
-  'v3',
+  'v3' | 'v4',
   V3PredicateOperator,
   CanonicalScalar | QueryParameterReference
 >;
@@ -141,7 +148,7 @@ export type VersionedPredicateExpression =
 export interface QueryParameterReference {
   readonly kind: 'queryParameterReference';
   readonly parameterId: z.infer<typeof CanonicalIdSchema>;
-  readonly schemaVersion: 'v3';
+  readonly schemaVersion: 'v3' | 'v4';
 }
 
 export type CanonicalScalar =
@@ -240,22 +247,22 @@ const v3CanonicalScalarSchema: z.ZodType<CanonicalScalar> =
   z.discriminatedUnion('kind', [
     z.strictObject({
       kind: z.literal('textValue'),
-      schemaVersion: v3NodeVersion,
+      schemaVersion: v3PlusNodeVersion,
       value: z.string().max(4_000),
     }),
     z.strictObject({
       kind: z.literal('booleanValue'),
-      schemaVersion: v3NodeVersion,
+      schemaVersion: v3PlusNodeVersion,
       value: z.boolean(),
     }),
     z.strictObject({
       kind: z.literal('integerValue'),
-      schemaVersion: v3NodeVersion,
+      schemaVersion: v3PlusNodeVersion,
       value: CanonicalIntegerStringSchema,
     }),
     z.strictObject({
       kind: z.literal('exactDecimalValue'),
-      schemaVersion: v3NodeVersion,
+      schemaVersion: v3PlusNodeVersion,
       value: CanonicalSignedDecimalStringSchema,
     }),
     z
@@ -263,7 +270,7 @@ const v3CanonicalScalarSchema: z.ZodType<CanonicalScalar> =
         currencyCode: CurrencyCodeSchema,
         kind: z.literal('moneyValue'),
         minorUnit: z.int().min(0).max(6),
-        schemaVersion: v3NodeVersion,
+        schemaVersion: v3PlusNodeVersion,
         value: CanonicalSignedDecimalStringSchema,
       })
       .refine(
@@ -272,23 +279,23 @@ const v3CanonicalScalarSchema: z.ZodType<CanonicalScalar> =
       ),
     z.strictObject({
       kind: z.literal('dateValue'),
-      schemaVersion: v3NodeVersion,
+      schemaVersion: v3PlusNodeVersion,
       value: IsoDateValueSchema,
     }),
     z.strictObject({
       kind: z.literal('timeValue'),
-      schemaVersion: v3NodeVersion,
+      schemaVersion: v3PlusNodeVersion,
       value: IsoTimeValueSchema,
     }),
     z.strictObject({
       kind: z.literal('dateTimeValue'),
-      schemaVersion: v3NodeVersion,
+      schemaVersion: v3PlusNodeVersion,
       value: IsoDateTimeValueSchema,
     }),
     z.strictObject({
       baseUnit: CanonicalReferenceSchema,
       kind: z.literal('quantityValue'),
-      schemaVersion: v3NodeVersion,
+      schemaVersion: v3PlusNodeVersion,
       value: CanonicalSignedDecimalStringSchema,
     }),
   ]);
@@ -301,7 +308,7 @@ const QueryParameterReferenceSchema: z.ZodType<QueryParameterReference> =
   z.strictObject({
     kind: z.literal('queryParameterReference'),
     parameterId: CanonicalIdSchema,
-    schemaVersion: v3NodeVersion,
+    schemaVersion: v3PlusNodeVersion,
   });
 
 function makePredicateExpressionSchema(
@@ -364,12 +371,12 @@ const legacyPredicateExpressionSchema = makePredicateExpressionSchema(
   legacyCanonicalScalarSchema,
 ) as z.ZodType<PredicateExpression>;
 const v3PredicateExpressionSchema = makePredicateExpressionSchema(
-  v3NodeVersion,
+  v3PlusNodeVersion,
   v3PredicateOperators,
   z.union([v3CanonicalScalarSchema, QueryParameterReferenceSchema]),
 ) as z.ZodType<PredicateExpressionV3>;
 const v3CompatibilityPredicateExpressionSchema = makePredicateExpressionSchema(
-  v3NodeVersion,
+  v3PlusNodeVersion,
   legacyPredicateOperators,
   v3CanonicalScalarSchema,
 ) as z.ZodType<PredicateExpression>;
@@ -711,7 +718,7 @@ const authoredRowQueryDefinition = normalizedRowQueryDefinition.extend({
 });
 const normalizedV3RowQueryDefinition = normalizedRowQueryDefinition.extend({
   filter: v3PredicateExpressionSchema,
-  schemaVersion: v3NodeVersion,
+  schemaVersion: v3PlusNodeVersion,
 });
 const authoredV3RowQueryDefinition = normalizedV3RowQueryDefinition.extend({
   filter: v3PredicateExpressionSchema.optional(),
@@ -723,7 +730,7 @@ const authoredQueryParameterDefinition = z.strictObject({
   kind: z.literal('queryParameterDefinition'),
   orderKey: boundedOrderKey,
   parameterId: CanonicalIdSchema,
-  schemaVersion: v3NodeVersion,
+  schemaVersion: v3PlusNodeVersion,
 });
 const normalizedQueryParameterDefinition =
   authoredQueryParameterDefinition.extend({
@@ -733,7 +740,7 @@ const authoredQueryAggregateSelection = z.strictObject({
   field: CanonicalReferenceSchema,
   kind: z.literal('queryAggregateSelection'),
   operator: z.literal('sum'),
-  schemaVersion: v3NodeVersion,
+  schemaVersion: v3PlusNodeVersion,
   selectionId: CanonicalIdSchema,
 });
 const normalizedQueryAggregateSelection =
@@ -743,14 +750,14 @@ const normalizedQueryAggregateSelection =
         kind: z.literal('exactDecimalAggregateResultType'),
         precision: z.literal(38),
         scale: z.int().min(0).max(18),
-        schemaVersion: v3NodeVersion,
+        schemaVersion: v3PlusNodeVersion,
       }),
       z.strictObject({
         baseUnit: CanonicalReferenceSchema,
         kind: z.literal('quantityAggregateResultType'),
         precision: z.literal(38),
         scale: z.int().min(0).max(18),
-        schemaVersion: v3NodeVersion,
+        schemaVersion: v3PlusNodeVersion,
       }),
     ]),
   });
@@ -768,7 +775,7 @@ const normalizedAggregateQueryDefinition = z.strictObject({
   queryId: CanonicalIdSchema,
   queryType: z.literal('aggregate'),
   resolveMatchKeys: z.never().optional(),
-  schemaVersion: v3NodeVersion,
+  schemaVersion: v3PlusNodeVersion,
   sourceEntity: CanonicalReferenceSchema,
   tier: z.literal('q1'),
 });
@@ -785,7 +792,7 @@ const authoredAggregateQueryDefinition = z.strictObject({
   permission: CanonicalReferenceSchema,
   queryId: CanonicalIdSchema,
   queryType: z.literal('aggregate'),
-  schemaVersion: v3NodeVersion,
+  schemaVersion: v3PlusNodeVersion,
   sourceEntity: CanonicalReferenceSchema,
   tier: z.literal('q1'),
 });
@@ -797,6 +804,91 @@ const normalizedV3QueryDefinition = z.union([
 const authoredV3QueryDefinition = z.union([
   authoredV3RowQueryDefinition,
   authoredAggregateQueryDefinition,
+]);
+
+/**
+ * v4: the legal-entity query operand.
+ *
+ * Tenant and environment are ambient trust identity. *Which* legal entities a
+ * read consolidates is a business value that changes the answer — scope {A}
+ * returns 5 where scope {A,B} returns 12 — so it is a query operand and it is
+ * spelled in the query shape. The operand is an ordinary declared query
+ * parameter, which is what lets an API caller supply it through the existing
+ * two-argument gateway envelope without a new transport.
+ *
+ * The member is deliberately absent from every v3 shape above: a `strictObject`
+ * rejects it there, which is how [ADR-0021]'s rule that adding a spelling to a
+ * released version retroactively widens it is enforced rather than promised.
+ */
+const queryLegalEntityScope = z.strictObject({
+  cardinality: z.enum(LEGAL_ENTITY_SCOPE_CONTRACT_V1.admittedCardinalities),
+  kind: z.literal('queryLegalEntityScope'),
+  operand: z.strictObject({
+    kind: z.literal('queryParameterReference'),
+    parameterId: CanonicalIdSchema,
+    schemaVersion: v4NodeVersion,
+  }),
+  schemaVersion: v4NodeVersion,
+});
+
+/**
+ * A scope operand carries legal-entity identity, not a business field value,
+ * so it has no `FieldTypeSchema` spelling. Normalization derives this type for
+ * exactly the parameter a `queryLegalEntityScope` names.
+ */
+const legalEntityReferenceParameterType = z.strictObject({
+  kind: z.literal('legalEntityReferenceParameterType'),
+  schemaVersion: v4NodeVersion,
+});
+const normalizedV4QueryParameterDefinition =
+  authoredQueryParameterDefinition.extend({
+    parameterType: z.union([
+      FieldTypeSchema,
+      legalEntityReferenceParameterType,
+    ]),
+  });
+
+// v4 admits parameters on row queries so a Q0 read of an entity-owned family
+// can carry the same operand an aggregate does. Without it the four Q0 reads
+// over an entity-owned family stay unaskable and release verification has no
+// declared contract to probe.
+const normalizedV4RowQueryDefinition = normalizedV3RowQueryDefinition.extend({
+  legalEntityScope: queryLegalEntityScope.optional(),
+  parameters: z
+    .array(normalizedV4QueryParameterDefinition)
+    .max(QUERY_PARAMETER_LIMIT_V3),
+  schemaVersion: v4NodeVersion,
+});
+const authoredV4RowQueryDefinition = normalizedV4RowQueryDefinition.extend({
+  filter: v3PredicateExpressionSchema.optional(),
+  lifecycle: z.enum(['active', 'retired']).optional(),
+  parameters: z
+    .array(authoredQueryParameterDefinition)
+    .max(QUERY_PARAMETER_LIMIT_V3)
+    .optional(),
+  resolveMatchKeys: z.array(resolveMatchKey).optional(),
+});
+const normalizedV4AggregateQueryDefinition =
+  normalizedAggregateQueryDefinition.extend({
+    legalEntityScope: queryLegalEntityScope.optional(),
+    parameters: z
+      .array(normalizedV4QueryParameterDefinition)
+      .max(QUERY_PARAMETER_LIMIT_V3),
+    schemaVersion: v4NodeVersion,
+  });
+const authoredV4AggregateQueryDefinition =
+  authoredAggregateQueryDefinition.extend({
+    legalEntityScope: queryLegalEntityScope.optional(),
+    schemaVersion: v4NodeVersion,
+  });
+
+const normalizedV4QueryDefinition = z.union([
+  normalizedV4RowQueryDefinition,
+  normalizedV4AggregateQueryDefinition,
+]);
+const authoredV4QueryDefinition = z.union([
+  authoredV4RowQueryDefinition,
+  authoredV4AggregateQueryDefinition,
 ]);
 
 const operationEffect = z.discriminatedUnion('kind', [
@@ -865,7 +957,7 @@ const authoredOperationDefinition = normalizedOperationDefinition.extend({
 });
 const normalizedV3OperationDefinition = normalizedOperationDefinition.extend({
   precondition: v3PredicateExpressionSchema,
-  schemaVersion: v3NodeVersion,
+  schemaVersion: v3PlusNodeVersion,
 });
 const authoredV3OperationDefinition = normalizedV3OperationDefinition.extend({
   lifecycle: z.enum(['active', 'retired']).optional(),
@@ -1018,16 +1110,27 @@ const v3NormalizedShape = {
   queries: z.array(normalizedV3QueryDefinition),
 } as const;
 
+// v4 adds no family collection. It changes exactly one family's element shape,
+// so a v4 package that declares no legal-entity scope is byte-identical to the
+// same package at v3 apart from its version strings.
+const v4NormalizedShape = {
+  ...v3NormalizedShape,
+  languageVersion: v4NodeVersion,
+  queries: z.array(normalizedV4QueryDefinition),
+} as const;
+
 const LegacyNormalizedApplicationPackageSchema = z.strictObject(
   legacyNormalizedShape,
 );
 const V3NormalizedApplicationPackageSchema = z.strictObject(v3NormalizedShape);
+const V4NormalizedApplicationPackageSchema = z.strictObject(v4NormalizedShape);
 
 export const VersionedNormalizedApplicationPackageSchema = z.discriminatedUnion(
   'languageVersion',
   [
     LegacyNormalizedApplicationPackageSchema,
     V3NormalizedApplicationPackageSchema,
+    V4NormalizedApplicationPackageSchema,
   ],
 );
 export const NormalizedApplicationPackageSchema =
@@ -1068,13 +1171,24 @@ const v3AuthoredShape = {
   queries: z.array(authoredV3QueryDefinition),
 } as const;
 
+const v4AuthoredShape = {
+  ...v3AuthoredShape,
+  languageVersion: v4NodeVersion,
+  queries: z.array(authoredV4QueryDefinition),
+} as const;
+
 const LegacyAuthoredApplicationPackageSchema =
   z.strictObject(legacyAuthoredShape);
 const V3AuthoredApplicationPackageSchema = z.strictObject(v3AuthoredShape);
+const V4AuthoredApplicationPackageSchema = z.strictObject(v4AuthoredShape);
 
 export const VersionedAuthoredApplicationPackageSchema = z.discriminatedUnion(
   'languageVersion',
-  [LegacyAuthoredApplicationPackageSchema, V3AuthoredApplicationPackageSchema],
+  [
+    LegacyAuthoredApplicationPackageSchema,
+    V3AuthoredApplicationPackageSchema,
+    V4AuthoredApplicationPackageSchema,
+  ],
 );
 export const AuthoredApplicationPackageSchema =
   LegacyAuthoredApplicationPackageSchema;
@@ -1092,10 +1206,21 @@ export type V3AuthoredApplicationPackage = z.infer<
 export type V3NormalizedApplicationPackage = z.infer<
   typeof V3NormalizedApplicationPackageSchema
 >;
+export type V4AuthoredApplicationPackage = z.infer<
+  typeof V4AuthoredApplicationPackageSchema
+>;
+export type V4NormalizedApplicationPackage = z.infer<
+  typeof V4NormalizedApplicationPackageSchema
+>;
+export type QueryLegalEntityScope = z.infer<typeof queryLegalEntityScope>;
 export type VersionedAuthoredApplicationPackage =
-  AuthoredApplicationPackage | V3AuthoredApplicationPackage;
+  | AuthoredApplicationPackage
+  | V3AuthoredApplicationPackage
+  | V4AuthoredApplicationPackage;
 export type VersionedNormalizedApplicationPackage =
-  NormalizedApplicationPackage | V3NormalizedApplicationPackage;
+  | NormalizedApplicationPackage
+  | V3NormalizedApplicationPackage
+  | V4NormalizedApplicationPackage;
 export type CanonicalId = z.infer<typeof CanonicalIdSchema>;
 
 function isValidIsoDate(value: string): boolean {

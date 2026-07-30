@@ -8,10 +8,11 @@ import {
   LATEST_LANGUAGE_VERSION,
   LEGACY_LANGUAGE_VERSION,
   LANGUAGE_VERSION,
-  LANGUAGE_VERSIONS,
   STRUCTURAL_LIMITS_V0,
   SURFACE_SLOTS,
   canonicalLanguageProfileFor,
+  languageHasLegalEntityQueryScope,
+  languageHasV3Features,
   type CanonicalLanguageVersion,
   type CanonicalNormalizationProfileVersion,
 } from './constants.js';
@@ -30,6 +31,8 @@ import {
   type QueryParameterReference,
   type V3AuthoredApplicationPackage,
   type V3NormalizedApplicationPackage,
+  type V4AuthoredApplicationPackage,
+  type V4NormalizedApplicationPackage,
   type VersionedAuthoredApplicationPackage,
   type VersionedNormalizedApplicationPackage,
   type VersionedPredicateExpression,
@@ -49,9 +52,24 @@ type AggregateNormalizedQuery = Extract<
   VersionedNormalizedApplicationPackage['queries'][number],
   { queryType: 'aggregate' }
 >;
-type AggregateContract = {
-  parameterTypes: Map<string, FieldType>;
-  resultType: AggregateNormalizedQuery['aggregate']['resultType'];
+/**
+ * Narrows the package union, which a predicate on `languageVersion` alone
+ * cannot do. v4 carries every v3 family, so both versions answer yes.
+ */
+function authoredHasV3Families(
+  authored: VersionedAuthoredApplicationPackage,
+): authored is V3AuthoredApplicationPackage | V4AuthoredApplicationPackage {
+  return languageHasV3Features(authored.languageVersion);
+}
+
+type LegalEntityReferenceParameterType = {
+  kind: 'legalEntityReferenceParameterType';
+  schemaVersion: 'v4';
+};
+type QueryParameterType = FieldType | LegalEntityReferenceParameterType;
+type QueryContract = {
+  parameterTypes: Map<string, QueryParameterType>;
+  resultType?: AggregateNormalizedQuery['aggregate']['resultType'];
 };
 
 export function parseAuthoredApplicationPackageJson(
@@ -143,7 +161,7 @@ export function normalizeApplicationPackage(
   const fieldTypes = new Map(
     authored.fields.map((field) => [field.fieldId, field.fieldType] as const),
   );
-  const aggregateContracts = deriveAggregateContracts(authored);
+  const queryContracts = deriveQueryContracts(authored);
 
   const normalizedCandidate = {
     assertions: authored.assertions.map((entry) => ({
@@ -158,7 +176,7 @@ export function normalizeApplicationPackage(
       lifecycle: entry.lifecycle ?? IMMUTABLE_DEFAULTS_V0.lifecycle,
       requiredProjections: sortedStrings(entry.requiredProjections),
     })),
-    ...(authored.languageVersion === LANGUAGE_VERSIONS.v3
+    ...(authoredHasV3Families(authored)
       ? {
           impactAnalyses: authored.impactAnalyses,
         }
@@ -192,13 +210,13 @@ export function normalizeApplicationPackage(
       authored.languageVersion,
     ),
     operations: authored.operations.map((entry) =>
-      authored.languageVersion === LANGUAGE_VERSIONS.v3
+      languageHasV3Features(authored.languageVersion)
         ? {
             ...entry,
             lifecycle: entry.lifecycle ?? IMMUTABLE_DEFAULTS_V0.lifecycle,
             precondition: normalizePredicate(
               (entry as V3AuthoredApplicationPackage['operations'][number])
-                .precondition ?? defaultPredicate(LANGUAGE_VERSIONS.v3),
+                .precondition ?? defaultPredicate(authored.languageVersion),
               1,
               fieldTypes,
             ),
@@ -224,7 +242,7 @@ export function normalizeApplicationPackage(
     })),
     queries: authored.queries.map((entry) => {
       if (entry.queryType === 'aggregate') {
-        const contract = aggregateContracts.get(entry.queryId)!;
+        const contract = queryContracts.get(entry.queryId)!;
         return {
           ...entry,
           aggregate: {
@@ -232,7 +250,7 @@ export function normalizeApplicationPackage(
             resultType: contract.resultType,
           },
           filter: normalizePredicate(
-            entry.filter ?? defaultPredicate(LANGUAGE_VERSIONS.v3),
+            entry.filter ?? defaultPredicate(authored.languageVersion),
             1,
             fieldTypes,
           ),
@@ -248,19 +266,36 @@ export function normalizeApplicationPackage(
           ),
         };
       }
-      if (authored.languageVersion === LANGUAGE_VERSIONS.v3) {
+      if (languageHasV3Features(authored.languageVersion)) {
         const v3Entry = entry as Extract<
           V3AuthoredApplicationPackage['queries'][number],
           { queryType: 'get' | 'list' | 'resolve' | 'search' }
         >;
+        const rowContract = queryContracts.get(v3Entry.queryId);
         return {
           ...v3Entry,
           filter: normalizePredicate(
-            v3Entry.filter ?? defaultPredicate(LANGUAGE_VERSIONS.v3),
+            v3Entry.filter ?? defaultPredicate(authored.languageVersion),
             1,
             fieldTypes,
           ),
           lifecycle: v3Entry.lifecycle ?? IMMUTABLE_DEFAULTS_V0.lifecycle,
+          // v4 row queries always carry the collection, empty when the query
+          // declares no operand, so the normalized shape is closed rather than
+          // conditionally present.
+          ...(languageHasLegalEntityQueryScope(authored.languageVersion)
+            ? {
+                parameters: sortByOrderAndId(
+                  authoredRowParameters(v3Entry).map((parameter) => ({
+                    ...parameter,
+                    parameterType: rowContract!.parameterTypes.get(
+                      parameter.parameterId,
+                    )!,
+                  })),
+                  'parameterId',
+                ),
+              }
+            : {}),
           resolveMatchKeys: sortByOrderAndId(
             v3Entry.resolveMatchKeys ?? [],
             'matchKeyId',
@@ -331,7 +366,7 @@ export function normalizeApplicationPackage(
       normalizedCandidate.capabilityRequirements,
       'capabilityId',
     ),
-    ...(authored.languageVersion === LANGUAGE_VERSIONS.v3
+    ...(languageHasV3Features(authored.languageVersion)
       ? {
           impactAnalyses: normalizedCandidate.impactAnalyses,
         }
@@ -394,8 +429,17 @@ export function canonicalAuthoredProjection(
   normalized: V3NormalizedApplicationPackage,
 ): V3AuthoredApplicationPackage;
 export function canonicalAuthoredProjection(
+  normalized: V4NormalizedApplicationPackage,
+): V4AuthoredApplicationPackage;
+export function canonicalAuthoredProjection(
   normalized: NormalizedApplicationPackage,
 ): AuthoredApplicationPackage;
+// Callers holding an unnarrowed package need an overload of their own, or they
+// are forced into a dead `languageVersion === 'v3' ? x : x` ternary that breaks
+// the moment a version is appended. Two call sites had exactly that.
+export function canonicalAuthoredProjection(
+  normalized: VersionedNormalizedApplicationPackage,
+): VersionedAuthoredApplicationPackage;
 export function canonicalAuthoredProjection(
   normalized: VersionedNormalizedApplicationPackage,
 ): VersionedAuthoredApplicationPackage {
@@ -452,10 +496,9 @@ export function canonicalAuthoredProjection(
 function validateNormalizedDerivation(
   normalized: VersionedNormalizedApplicationPackage,
 ): void {
-  const renormalized =
-    normalized.languageVersion === LANGUAGE_VERSIONS.v3
-      ? normalizeApplicationPackage(canonicalAuthoredProjection(normalized))
-      : normalizeApplicationPackage(canonicalAuthoredProjection(normalized));
+  const renormalized = normalizeApplicationPackage(
+    canonicalAuthoredProjection(normalized),
+  );
   if (canonicalize(renormalized) === canonicalize(normalized)) return;
   throw new CanonicalModelError([
     diagnostic(
@@ -511,17 +554,26 @@ function schemaError(error: ZodError, input: unknown): CanonicalModelError {
   return new CanonicalModelError(diagnostics);
 }
 
-function deriveAggregateContracts(
+function deriveQueryContracts(
   authored: VersionedAuthoredApplicationPackage,
-): Map<string, AggregateContract> {
-  const contracts = new Map<string, AggregateContract>();
-  if (authored.languageVersion !== LANGUAGE_VERSIONS.v3) return contracts;
+): Map<string, QueryContract> {
+  const contracts = new Map<string, QueryContract>();
+  if (!languageHasV3Features(authored.languageVersion)) return contracts;
   const diagnostics: CanonicalDiagnostic[] = [];
   const fields = new Map(
     authored.fields.map((field) => [field.fieldId, field] as const),
   );
   for (const query of authored.queries) {
-    if (query.queryType !== 'aggregate') continue;
+    if (query.queryType !== 'aggregate') {
+      const rowContract = deriveRowQueryContract(
+        authored,
+        query,
+        fields,
+        diagnostics,
+      );
+      if (rowContract) contracts.set(query.queryId, rowContract);
+      continue;
+    }
     const source = fields.get(query.aggregate.field.targetId);
     if (!source) {
       diagnostics.push(
@@ -573,85 +625,187 @@ function deriveAggregateContracts(
       continue;
     }
 
-    const parameters = new Map(
-      query.parameters.map((parameter) => [parameter.parameterId, parameter]),
+    const parameterTypes = deriveQueryParameterTypes(
+      authored,
+      query,
+      query.parameters,
+      fields,
+      diagnostics,
     );
-    const parameterTypes = new Map<string, FieldType>();
-    visitQueryParameterReferences(
-      query.filter ?? defaultPredicate(LANGUAGE_VERSIONS.v3),
-      (reference, comparison) => {
-        const parameter = parameters.get(reference.parameterId);
-        if (!parameter) {
-          diagnostics.push(
-            diagnostic(
-              'CANON_QUERY_PARAMETER_UNRESOLVED',
-              '$.queries.filter.value.parameterId',
-              'query parameter references resolve within their aggregate query',
-              'declare the referenced queryParameterDefinition',
-              query.queryId,
-            ),
-          );
-          return;
-        }
-        const comparedField = fields.get(comparison.field.targetId);
-        if (!comparedField) return;
-        const prior = parameterTypes.get(reference.parameterId);
-        if (
-          prior !== undefined &&
-          canonicalize(prior) !== canonicalize(comparedField.fieldType)
-        ) {
-          diagnostics.push(
-            diagnostic(
-              'CANON_QUERY_PARAMETER_TYPE_MISMATCH',
-              '$.queries.filter.value',
-              'one query parameter has one scalar type across every use',
-              'use distinct parameters for incompatible field types',
-              query.queryId,
-            ),
-          );
-          return;
-        }
-        parameterTypes.set(reference.parameterId, comparedField.fieldType);
-      },
-    );
-    for (const parameter of query.parameters) {
-      if (!parameterTypes.has(parameter.parameterId)) {
-        diagnostics.push(
-          diagnostic(
-            'CANON_QUERY_PARAMETER_UNUSED',
-            '$.queries.parameters',
-            'every declared query parameter is used by the aggregate filter',
-            'remove the parameter or reference it from the filter',
-            query.queryId,
-          ),
-        );
-      }
-    }
     if (
       parameterTypes.size !== query.parameters.length ||
       diagnostics.some((entry) => entry.objectId === query.queryId)
     ) {
       continue;
     }
-    const resultType: AggregateContract['resultType'] =
+    const resultType: QueryContract['resultType'] =
       source.fieldType.kind === 'quantityFieldType'
         ? {
             baseUnit: source.fieldType.baseUnit,
             kind: 'quantityAggregateResultType',
             precision: 38,
             scale: source.fieldType.scale,
-            schemaVersion: LANGUAGE_VERSIONS.v3,
+            schemaVersion: authored.languageVersion,
           }
         : {
             kind: 'exactDecimalAggregateResultType',
             precision: 38,
             scale: source.fieldType.scale,
-            schemaVersion: LANGUAGE_VERSIONS.v3,
+            schemaVersion: authored.languageVersion,
           };
     contracts.set(query.queryId, { parameterTypes, resultType });
   }
   if (diagnostics.length > 0) throw new CanonicalModelError(diagnostics);
   return contracts;
+}
+
+type AuthoredQuery = VersionedAuthoredApplicationPackage['queries'][number];
+
+function authoredRowParameters(
+  query: AuthoredQuery,
+): readonly AuthoredParameterDefinition[] {
+  return 'parameters' in query && Array.isArray(query.parameters)
+    ? (query.parameters as AuthoredParameterDefinition[])
+    : [];
+}
+type AuthoredParameterDefinition = Extract<
+  AuthoredQuery,
+  { queryType: 'aggregate' }
+>['parameters'][number];
+
+/**
+ * v4 row queries carry parameters so they can carry a legal-entity operand.
+ * Earlier versions have no `parameters` collection, so they contribute nothing.
+ */
+function deriveRowQueryContract(
+  authored: VersionedAuthoredApplicationPackage,
+  query: AuthoredQuery,
+  fields: ReadonlyMap<
+    string,
+    VersionedAuthoredApplicationPackage['fields'][number]
+  >,
+  diagnostics: CanonicalDiagnostic[],
+): QueryContract | null {
+  if (!languageHasLegalEntityQueryScope(authored.languageVersion)) return null;
+  const declared = authoredRowParameters(query);
+  if (declared.length === 0 && !('legalEntityScope' in query)) return null;
+  const parameterTypes = deriveQueryParameterTypes(
+    authored,
+    query,
+    declared,
+    fields,
+    diagnostics,
+  );
+  return { parameterTypes };
+}
+
+/**
+ * One derivation for every query branch. A parameter's type comes from exactly
+ * one binding position — the field it is compared against, or the legal-entity
+ * scope operand that names it. A parameter bound in both positions is refused
+ * rather than given a winner, because a silent winner is a second authority on
+ * what the caller's argument means.
+ */
+function deriveQueryParameterTypes(
+  authored: VersionedAuthoredApplicationPackage,
+  query: AuthoredQuery,
+  declared: readonly AuthoredParameterDefinition[],
+  fields: ReadonlyMap<
+    string,
+    VersionedAuthoredApplicationPackage['fields'][number]
+  >,
+  diagnostics: CanonicalDiagnostic[],
+): Map<string, QueryParameterType> {
+  const parameters = new Map(
+    declared.map((parameter) => [parameter.parameterId, parameter] as const),
+  );
+  const parameterTypes = new Map<string, QueryParameterType>();
+  const scope =
+    languageHasLegalEntityQueryScope(authored.languageVersion) &&
+    'legalEntityScope' in query
+      ? query.legalEntityScope
+      : undefined;
+  if (scope) {
+    if (!parameters.has(scope.operand.parameterId)) {
+      diagnostics.push(
+        diagnostic(
+          'CANON_QUERY_PARAMETER_UNRESOLVED',
+          '$.queries.legalEntityScope.operand.parameterId',
+          'query parameter references resolve within their own query',
+          'declare the referenced queryParameterDefinition',
+          query.queryId,
+        ),
+      );
+    } else {
+      parameterTypes.set(scope.operand.parameterId, {
+        kind: 'legalEntityReferenceParameterType',
+        schemaVersion: 'v4',
+      });
+    }
+  }
+  visitQueryParameterReferences(
+    query.filter ?? defaultPredicate(authored.languageVersion),
+    (reference, comparison) => {
+      const parameter = parameters.get(reference.parameterId);
+      if (!parameter) {
+        diagnostics.push(
+          diagnostic(
+            'CANON_QUERY_PARAMETER_UNRESOLVED',
+            '$.queries.filter.value.parameterId',
+            'query parameter references resolve within their own query',
+            'declare the referenced queryParameterDefinition',
+            query.queryId,
+          ),
+        );
+        return;
+      }
+      if (scope && reference.parameterId === scope.operand.parameterId) {
+        diagnostics.push(
+          diagnostic(
+            'CANON_QUERY_LEGAL_ENTITY_SCOPE_PARAMETER_CONFLICT',
+            '$.queries.filter.value.parameterId',
+            'the legal-entity scope operand is not also an ordinary filter operand',
+            'declare a separate queryParameterDefinition for the filter comparison',
+            query.queryId,
+          ),
+        );
+        return;
+      }
+      const comparedField = fields.get(comparison.field.targetId);
+      if (!comparedField) return;
+      const prior = parameterTypes.get(reference.parameterId);
+      if (
+        prior !== undefined &&
+        canonicalize(prior) !== canonicalize(comparedField.fieldType)
+      ) {
+        diagnostics.push(
+          diagnostic(
+            'CANON_QUERY_PARAMETER_TYPE_MISMATCH',
+            '$.queries.filter.value',
+            'one query parameter has one scalar type across every use',
+            'use distinct parameters for incompatible field types',
+            query.queryId,
+          ),
+        );
+        return;
+      }
+      parameterTypes.set(reference.parameterId, comparedField.fieldType);
+    },
+  );
+  for (const parameter of declared) {
+    if (!parameterTypes.has(parameter.parameterId)) {
+      diagnostics.push(
+        diagnostic(
+          'CANON_QUERY_PARAMETER_UNUSED',
+          '$.queries.parameters',
+          'every declared query parameter has exactly one binding position',
+          'remove the parameter, reference it from the filter, or name it as the legal-entity scope operand',
+          query.queryId,
+        ),
+      );
+    }
+  }
+  return parameterTypes;
 }
 
 function validateSemantics(
@@ -1836,7 +1990,11 @@ function languageHasV2Features(
 ): boolean {
   const featureLevel =
     canonicalLanguageProfileFor(languageVersion).featureLevel;
-  return featureLevel === 'v2' || featureLevel === 'v3';
+  // Feature levels are cumulative. Leaving a newly cut version out of a
+  // predecessor's check is how a version cut silently drops a released rule.
+  return (
+    featureLevel === 'v2' || featureLevel === 'v3' || featureLevel === 'v4'
+  );
 }
 
 function enforceFamilyBounds(

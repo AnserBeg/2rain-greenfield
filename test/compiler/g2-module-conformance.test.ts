@@ -6,7 +6,7 @@ import {
   CanonicalModelError,
   LANGUAGE_VERSION,
   LANGUAGE_VERSIONS,
-  LATEST_LANGUAGE_VERSION,
+  ADOPTED_LANGUAGE_VERSION,
   NORMALIZATION_PROFILE_VERSIONS,
   NORMALIZATION_PROFILE_VERSION,
   PREVIOUS_LANGUAGE_VERSION,
@@ -563,7 +563,7 @@ test('v3 adoption retains the explicit v2 and v1 compatibility authorities', () 
   assert.equal(MODULE_COMPILER_PROFILE.languageVersion, 'v3');
   const legacy = replaceVersion(
     ordinaryModuleV1(),
-    LATEST_LANGUAGE_VERSION,
+    ADOPTED_LANGUAGE_VERSION,
     'v0-experimental',
   ) as Record<string, unknown>;
   delete legacy.impactAnalyses;
@@ -583,7 +583,7 @@ test('v3 adoption retains the explicit v2 and v1 compatibility authorities', () 
 test('v3 compiles through explicit profile dispatch with the complete v2 projection structure', () => {
   const authoredV2 = replaceVersion(
     ordinaryModuleV1(),
-    LATEST_LANGUAGE_VERSION,
+    ADOPTED_LANGUAGE_VERSION,
     LANGUAGE_VERSION,
   ) as Record<string, unknown>;
   delete authoredV2.impactAnalyses;
@@ -957,7 +957,7 @@ test('delete operations and renderer forms fail with compiler-owned diagnostics'
   rendered.surfaces[0]!.renderer = {
     kind: 'rendererForm',
     rendererId: `${FIXTURE_IDS.namespace}:renderer.destructive_form`,
-    schemaVersion: LATEST_LANGUAGE_VERSION,
+    schemaVersion: ADOPTED_LANGUAGE_VERSION,
   };
   const rendererResult = compileApplication(input(rendered));
   assert.equal(rendererResult.status, 'failed');
@@ -1036,7 +1036,7 @@ test('generatedTyped and promotion reserves normalize and round-trip but compile
     capabilityId: PROMOTE_STORAGE_CLASS_CAPABILITY_ID,
     invariantVersion: 'northstar.storage-class-promotion-invariant/v1',
     kind: 'storageClassPromotionReserve',
-    schemaVersion: LATEST_LANGUAGE_VERSION,
+    schemaVersion: ADOPTED_LANGUAGE_VERSION,
   };
   assertCanonicalRoundTrip(promotion);
   const promotionResult = compileApplication(input(promotion));
@@ -1073,7 +1073,7 @@ test('relation additions order the column before the FK and debt preserves both 
     foreignKeyActions: {
       onDelete: 'restrict',
       onUpdate: 'restrict',
-      schemaVersion: LATEST_LANGUAGE_VERSION,
+      schemaVersion: ADOPTED_LANGUAGE_VERSION,
     },
     joinEligibility: 'query',
     kind: 'relationDefinition',
@@ -1081,15 +1081,15 @@ test('relation additions order the column before the FK and debt preserves both 
     ownership: 'reference',
     relationId: `${FIXTURE_IDS.namespace}:relation.master_role_secondary_parent`,
     required: false,
-    schemaVersion: LATEST_LANGUAGE_VERSION,
+    schemaVersion: ADOPTED_LANGUAGE_VERSION,
     sourceEntity: {
       kind: 'entityReference',
-      schemaVersion: LATEST_LANGUAGE_VERSION,
+      schemaVersion: ADOPTED_LANGUAGE_VERSION,
       targetId: FIXTURE_IDS.entityIds.child,
     },
     targetEntity: {
       kind: 'entityReference',
-      schemaVersion: LATEST_LANGUAGE_VERSION,
+      schemaVersion: ADOPTED_LANGUAGE_VERSION,
       targetId: FIXTURE_IDS.entityIds.parent,
     },
   });

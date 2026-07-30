@@ -1,9 +1,9 @@
 import {
-  LATEST_LANGUAGE_VERSION,
-  LATEST_NORMALIZATION_PROFILE_VERSION,
+  ADOPTED_LANGUAGE_VERSION,
+  ADOPTED_NORMALIZATION_PROFILE_VERSION,
 } from '@north-star/canonical-model';
 
-const version = LATEST_LANGUAGE_VERSION;
+const version = ADOPTED_LANGUAGE_VERSION;
 const namespace = 'northstar.modulefixture';
 
 const reference = (kind: string, targetId: string) => ({
@@ -196,7 +196,7 @@ export function ordinaryModuleV1(): Record<string, unknown> {
         schemaVersion: version,
       },
     ],
-    normalizationProfileVersion: LATEST_NORMALIZATION_PROFILE_VERSION,
+    normalizationProfileVersion: ADOPTED_NORMALIZATION_PROFILE_VERSION,
     operations,
     package: {
       kind: 'packageDefinition',

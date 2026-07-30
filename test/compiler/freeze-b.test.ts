@@ -4,8 +4,8 @@ import test from 'node:test';
 import {
   CanonicalIdSchema,
   LANGUAGE_VERSION,
-  LATEST_LANGUAGE_VERSION,
-  LATEST_NORMALIZATION_PROFILE_VERSION,
+  ADOPTED_LANGUAGE_VERSION,
+  ADOPTED_NORMALIZATION_PROFILE_VERSION,
   LEGACY_LANGUAGE_VERSION,
   LEGACY_NORMALIZATION_PROFILE_VERSION,
   NORMALIZATION_PROFILE_VERSION,
@@ -77,20 +77,20 @@ test('bootstrap emits one complete hierarchical release with no tenant identity'
 
 test('release manifests derive v3 versions from the adopted canonical package', () => {
   const input = compilerInput(fixtureBytes('bootstrap'));
-  assert.equal(input.profile.languageVersion, LATEST_LANGUAGE_VERSION);
+  assert.equal(input.profile.languageVersion, ADOPTED_LANGUAGE_VERSION);
   assert.equal(
     input.profile.normalizationProfileVersion,
-    LATEST_NORMALIZATION_PROFILE_VERSION,
+    ADOPTED_NORMALIZATION_PROFILE_VERSION,
   );
 
   const compiled = mustCompile(input);
   assert.equal(
     compiled.bundle.releaseManifest.languageVersion,
-    LATEST_LANGUAGE_VERSION,
+    ADOPTED_LANGUAGE_VERSION,
   );
   assert.equal(
     compiled.bundle.releaseManifest.normalizationProfileVersion,
-    LATEST_NORMALIZATION_PROFILE_VERSION,
+    ADOPTED_NORMALIZATION_PROFILE_VERSION,
   );
 });
 
@@ -372,12 +372,12 @@ test('derived state fields are present in the complete storage target', () => {
   authored.stateMachines.push({
     entity: {
       kind: 'entityReference',
-      schemaVersion: LATEST_LANGUAGE_VERSION,
+      schemaVersion: ADOPTED_LANGUAGE_VERSION,
       targetId: CanonicalIdSchema.parse('northstar.bootstrap:entity.item'),
     },
     initialState: {
       kind: 'stateReference',
-      schemaVersion: LATEST_LANGUAGE_VERSION,
+      schemaVersion: ADOPTED_LANGUAGE_VERSION,
       targetId: CanonicalIdSchema.parse(
         'northstar.bootstrap:state.item_active',
       ),
@@ -386,13 +386,13 @@ test('derived state fields are present in the complete storage target', () => {
     machineId: CanonicalIdSchema.parse(
       'northstar.bootstrap:machine.item_lifecycle',
     ),
-    schemaVersion: LATEST_LANGUAGE_VERSION,
+    schemaVersion: ADOPTED_LANGUAGE_VERSION,
     states: [
       {
         kind: 'stateDefinition',
         label: 'Active',
         orderKey: 10,
-        schemaVersion: LATEST_LANGUAGE_VERSION,
+        schemaVersion: ADOPTED_LANGUAGE_VERSION,
         stateId: CanonicalIdSchema.parse(
           'northstar.bootstrap:state.item_active',
         ),
@@ -431,11 +431,11 @@ test('storage targets use the mapping selected by canonical entity identity', ()
   authored.storageMappings.push({
     entity: {
       kind: 'entityReference',
-      schemaVersion: LATEST_LANGUAGE_VERSION,
+      schemaVersion: ADOPTED_LANGUAGE_VERSION,
       targetId: CanonicalIdSchema.parse('northstar.bootstrap:entity.item'),
     },
     kind: 'storageMappingDefinition',
-    schemaVersion: LATEST_LANGUAGE_VERSION,
+    schemaVersion: ADOPTED_LANGUAGE_VERSION,
     storageClass: 'dedicatedTable',
     storageMappingId: CanonicalIdSchema.parse(
       'northstar.bootstrap:storage.item_alternative',

@@ -183,6 +183,40 @@ export function lowerBaseProjectionPayloads(
   return plans;
 }
 
+/**
+ * The compiled catalog entry for the v4 legal-entity operand. The gateway
+ * reads exactly this to learn that a query requires a scope, which declared
+ * parameter carries it, and how many entities that parameter admits — so the
+ * query contract and the execution contract have one authority, not two.
+ *
+ * An absent member means the query declares no operand. It never means "all".
+ */
+export function legalEntityScopeCatalogEntry(
+  query: Readonly<Record<string, unknown>>,
+): Readonly<Record<string, unknown>> {
+  const scope = query.legalEntityScope;
+  return scope === undefined
+    ? {}
+    : { legalEntityScope: structuredClone(scope) };
+}
+
+/**
+ * Declared query parameters, compiled for every branch that has them. v3 emits
+ * this for aggregates only; v4 row queries carry it too, because a Q0 read of
+ * an entity-owned family needs the same operand an aggregate does.
+ */
+export function queryParameterCatalogEntries(
+  query: Readonly<Record<string, unknown>>,
+): readonly Readonly<Record<string, unknown>>[] {
+  const parameters = query.parameters;
+  if (!Array.isArray(parameters)) return [];
+  return parameters.map((parameter: Record<string, unknown>) => ({
+    orderKey: parameter.orderKey,
+    parameterId: parameter.parameterId,
+    parameterType: structuredClone(parameter.parameterType),
+  }));
+}
+
 export function requiredProjectionFamily(
   requirement: string,
 ): ProjectionFamilyId | null {
