@@ -242,3 +242,8 @@ How to apply: after all domain locks, acquire a scoped request-key lock before r
 Date: 2026-07-30
 Why: G3-P3's matrix hung behind an idle lock holder in an acyclic wait chain, so PostgreSQL's deadlock detector had no cycle to break and neither the product nor its control could make progress.
 How to apply: keep deliberate blocking semantics, but set an explicit lock timeout, translate it to a domain-typed concurrency error, and make every real lock control assert the database timeout rather than an absence of progress. See `docs/execution/packets/G3-P3.md`.
+
+## Keep negative fixtures valid until the target rule
+Date: 2026-07-30
+Why: G3-P4b removed a required evidence field but left canonical query references behind, so normalization failed before the intended inventory conformance rule ran.
+How to apply: remove or replace every dependent reference with the mutated declaration, prove the fixture still crosses earlier validation layers, and pin the exact downstream diagnostic. See `docs/execution/packets/G3-P4b.md`.
