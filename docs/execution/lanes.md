@@ -14,7 +14,7 @@ writer is holding those paths right now.
 
 | Lane | Theme | Current packet | Status |
 |---|---|---|---|
-| **KERNEL** | Canonical language and the query tier | `G2-P5d-b` **accepted** 2026-07-29 — surface anatomy 106 → 82; `Q1-P3b` before it left the balance chain complete to `G3-P5` | **idle** |
+| **KERNEL** | Canonical language and the query tier | `G3-P2b-4` **accepted** 2026-07-29 — runtime payload family; posting unblocked | **idle** |
 | **DEPLOY** | Release lifecycle and runtime infrastructure | `1g2` **accepted** 2026-07-29 (ADR-0024) | **HELD IDLE 2026-07-29 — deliberate.** `G2-P9` is gated behind `G2-P8` (import), which carries the durable-execution substrate decision, and both fail the inventory-first filter. More importantly, **full matrices serialize**: a DEPLOY matrix now queues ahead of FIX's and delays inventory. Leaving it idle is the faster choice, not the idle one. |
 | **FIX** | Correctness defects → stage cutting → inventory build | `G3-P2b-1` **accepted** 2026-07-29 — the movement table exists — *next: `G3-P2b-3` (contract binding)* | **idle** |
 | **BUILD** | Inventory contracts | `G3-P2b-2` — serializer proven 4/4 against real storage; **UNBLOCKED 2026-07-29**, merge main and run the real matrix | **active** |

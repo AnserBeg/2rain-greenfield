@@ -28,6 +28,16 @@ import {
   type StorageTargetPayloadV1,
   type VerificationPlanPayloadV1,
 } from '../../packages/compiler/src/index.js';
+import { STORAGE_TARGET_PAYLOAD_V3_VERSION } from '../../packages/compiler/src/protocol.js';
+import {
+  APPLICATION_NAMESPACE,
+  composedApplicationDefinition,
+} from '../../packages/domain/src/app/builder.js';
+import {
+  INVENTORY_IDS,
+  INVENTORY_NAMESPACE,
+  inventoryModuleDefinition,
+} from '../../packages/domain/src/inventory/index.js';
 import type {
   MintedUuid,
   RegisterTenantReleaseCommand,
@@ -71,11 +81,15 @@ import {
 import {
   AuthenticatedRequestRuntimeEntryAdapter,
   CURRENT_POLICY_DECISION_VERSION,
+  REQUEST_RUNTIME_PROJECTION_FAMILIES,
   type CurrentPolicyDecisionRequest,
   type CurrentPolicyGateway,
   type CurrentPolicySubject,
   type ImmutableJsonValue,
+  type LoadedRequestRuntimeDefinition,
+  type RequestRuntimeProjectionFamily,
   type RequestRuntimeView,
+  type RuntimeProjection,
 } from '../../packages/runtime/src/request-runtime-view.js';
 import {
   FIXTURE_IDS,
@@ -772,6 +786,218 @@ test('definition-only module is served generically through Q0/O0, trust, RLS, an
             })
           ).outcome,
           'not-found',
+        );
+      } finally {
+        await Promise.all([
+          runtimePool.end(),
+          materializerPool.end(),
+          modulePool.end(),
+        ]);
+      }
+    },
+  );
+});
+
+test('a real v3 inventory period lock executes through the generic operation gateway', async () => {
+  const definition = inventoryApplicationDefinition();
+  const emptyInventory = emptyDefinition(ordinaryModuleV1());
+  const empty = mustCompile(moduleInput(emptyInventory));
+  const compiled = mustCompile(
+    moduleInput(definition, expectedActiveReleaseFrom(empty)),
+  );
+  const storage = compiledProjectionPayload<StorageTargetPayloadV1>(
+    compiled,
+    PROJECTION_FAMILY_IDS.storageTarget,
+  );
+  assert.equal(storage.schemaVersion, STORAGE_TARGET_PAYLOAD_V3_VERSION);
+  const periodLock = storage.entities.find(
+    (entity) =>
+      entity.entityId ===
+      applicationInventoryId(INVENTORY_IDS.entityIds.periodLock),
+  );
+  assert.ok(periodLock?.periodLock);
+  const periodLockStorage = periodLock.periodLock;
+
+  const tenant = 'd1000000-0000-4000-8000-000000000001';
+  const environment = 'd2000000-0000-4000-8000-000000000002';
+  const principal = 'd3000000-0000-4000-8000-000000000003';
+  const closedThrough = '2026-07-28T23:59:59.999Z';
+
+  await withEphemeralPostgres(
+    'module-runtime-inventory-v3',
+    async ({ connection, pool }) => {
+      await migrateAndSeed(pool, [[tenant, environment, 'inventory-v3']]);
+      const legalEntityId = randomUUID();
+      await pool.query(
+        `SELECT platform.provision_inventory_scope(
+           $1, $2, $3, $4, $5, $6, $7, $8,
+           $9::smallint, $10, $11, $12, $13, $14, $15, $16,
+           $17, $18, $19, $20, $21
+         )`,
+        [
+          tenant,
+          environment,
+          legalEntityId,
+          'DEFAULT',
+          'Default legal entity',
+          'America/Edmonton',
+          '00:00:00',
+          compiled.releaseRoot,
+          1,
+          'reject',
+          0,
+          'codeOnly',
+          'codeOnly',
+          'codeOnly',
+          'codeOnly',
+          'codeOnly',
+          null,
+          null,
+          null,
+          null,
+          null,
+        ],
+      );
+      const runtimePool = new pg.Pool({
+        ...connection,
+        max: 3,
+        user: 'north_star_runtime',
+      });
+      const materializerPool = new pg.Pool({
+        ...connection,
+        max: 2,
+        user: 'north_star_module_materializer',
+      });
+      const modulePool = new pg.Pool({
+        ...connection,
+        max: 2,
+        user: 'north_star_module_runtime',
+      });
+      materializerPool.on('error', () => undefined);
+      modulePool.on('error', () => undefined);
+      try {
+        const contexts = await contextsFor([
+          ['inventory', tenant, environment, principal],
+        ]);
+        const context = contexts.inventory!;
+        const releases = await persistSequence(runtimePool, context, [
+          [empty, emptyInventory],
+          [compiled, definition],
+        ]);
+        await setPointer(pool, tenant, environment, releases[0]!);
+        await grantExecutorAuthority(pool, [[tenant, principal]]);
+
+        const materializer = new PostgresModuleStorageMaterializer(
+          materializerPool,
+          modulePool,
+        );
+        await prepare(materializer, context, principal, releases[1]!);
+
+        const provisioned = await pool.query<{
+          closed_through: Date | null;
+          record_id: string;
+          revision: string;
+        }>(
+          `SELECT ${periodLock.recordIdentity.column} AS record_id,
+                  ${periodLock.optimisticRevision.column}::text AS revision,
+                  ${periodLockStorage.closedThroughColumn} AS closed_through
+             FROM north_star_module.${periodLock.physicalTableName}
+            WHERE tenant_id = $1 AND environment_id = $2`,
+          [tenant, environment],
+        );
+        assert.equal(provisioned.rowCount, 1);
+        assert.equal(provisioned.rows[0]?.revision, '1');
+        assert.equal(provisioned.rows[0]?.closed_through, null);
+        const recordId = provisioned.rows[0]!.record_id;
+        assert.equal(recordId, legalEntityId);
+
+        const policy = new AllowPolicy();
+        const interpreter = new PostgresModuleRuntimeInterpreter(
+          runtimePool,
+          humanActorIssuer(),
+        );
+        const gateway = operationGatewayFor(policy, interpreter);
+        const activePointer = await pool.query<{
+          fence: string;
+          pointer_id: string;
+        }>(
+          `SELECT pointer_id, fence::text
+             FROM platform.active_release_pointers
+            WHERE tenant_id = $1 AND environment_id = $2`,
+          [tenant, environment],
+        );
+        assert.ok(activePointer.rows[0]);
+        const view = await issuedCandidateView(
+          compiled,
+          releases[1]!,
+          identity(tenant, environment, principal),
+          {
+            fence: Number(activePointer.rows[0].fence),
+            pointerId: activePointer.rows[0].pointer_id,
+          },
+          policy,
+        );
+        const result = await operation(
+          gateway,
+          view,
+          'advance_period_lock',
+          {
+            expectedRevision: 1,
+            patch: {
+              [applicationInventoryId(
+                INVENTORY_IDS.fieldIds.periodLock.closedThrough,
+              )]: closedThrough,
+            },
+            recordId,
+          },
+          APPLICATION_NAMESPACE,
+        );
+        assert.equal(result.outcome, 'succeeded');
+        assert.equal(result.readBack?.recordId, recordId);
+        assert.equal(result.readBack?.revision, 2);
+        assert.equal(
+          result.readBack?.values[
+            applicationInventoryId(
+              INVENTORY_IDS.fieldIds.periodLock.closedThrough,
+            )
+          ],
+          closedThrough,
+        );
+        assert.ok(result.trust);
+
+        const persisted = await pool.query<{
+          closed_through: Date;
+          revision: string;
+        }>(
+          `SELECT ${periodLock.optimisticRevision.column}::text AS revision,
+                  ${periodLockStorage.closedThroughColumn} AS closed_through
+             FROM north_star_module.${periodLock.physicalTableName}
+            WHERE tenant_id = $1 AND environment_id = $2
+              AND ${periodLock.recordIdentity.column} = $3`,
+          [tenant, environment, recordId],
+        );
+        assert.equal(persisted.rows[0]?.revision, '2');
+        assert.equal(
+          persisted.rows[0]?.closed_through.toISOString(),
+          closedThrough,
+        );
+
+        const updateColumns = await pool.query<{ column_name: string }>(
+          `SELECT column_name
+             FROM information_schema.column_privileges
+            WHERE table_schema = 'north_star_module'
+              AND table_name = $1
+              AND grantee = 'north_star_module_runtime'
+              AND privilege_type = 'UPDATE'
+            ORDER BY column_name`,
+          [periodLock.physicalTableName],
+        );
+        assert.deepEqual(
+          updateColumns.rows.map(({ column_name }) => column_name),
+          [
+            periodLockStorage.closedThroughColumn,
+            periodLock.optimisticRevision.column,
+          ].toSorted(),
         );
       } finally {
         await Promise.all([
@@ -1824,6 +2050,52 @@ async function issuedView(
   return entry.run({ headers: { authorization: token } }, async (view) => view);
 }
 
+async function issuedCandidateView(
+  compiled: CompileSuccess,
+  releaseId: string,
+  candidateIdentity: AuthenticatedIdentity,
+  pointer: LoadedRequestRuntimeDefinition['pointer'],
+  policy: CurrentPolicyGateway,
+): Promise<RequestRuntimeView> {
+  const entry = new AuthenticatedRequestRuntimeEntryAdapter(
+    new AuthenticatedRequestEntryAdapter(async () => candidateIdentity),
+    {
+      async load(): Promise<LoadedRequestRuntimeDefinition> {
+        return {
+          environmentId: candidateIdentity.environmentId,
+          pointer,
+          projections: {
+            agent: runtimeProjection(
+              compiled,
+              REQUEST_RUNTIME_PROJECTION_FAMILIES.agent,
+            ),
+            catalog: runtimeProjection(
+              compiled,
+              REQUEST_RUNTIME_PROJECTION_FAMILIES.catalog,
+            ),
+            operation: runtimeProjection(
+              compiled,
+              REQUEST_RUNTIME_PROJECTION_FAMILIES.operation,
+            ),
+            query: runtimeProjection(
+              compiled,
+              REQUEST_RUNTIME_PROJECTION_FAMILIES.query,
+            ),
+            surface: runtimeProjection(
+              compiled,
+              REQUEST_RUNTIME_PROJECTION_FAMILIES.surface,
+            ),
+          },
+          release: { contentHash: compiled.releaseRoot, releaseId },
+          tenantId: candidateIdentity.tenantId,
+        };
+      },
+    },
+    policy,
+  );
+  return entry.run({}, async (view) => view);
+}
+
 function humanActorIssuer(): TrustedActorEnvelopeIssuer {
   return new TrustedActorEnvelopeIssuer({
     async resolve(context) {
@@ -2258,6 +2530,43 @@ function emptyDefinition(
   return definition;
 }
 
+function inventoryApplicationDefinition(): Record<string, unknown> {
+  const application = composedApplicationDefinition();
+  const inventory = inventoryModuleDefinition(APPLICATION_NAMESPACE);
+  for (const collection of [
+    'assertions',
+    'entities',
+    'fields',
+    'operations',
+    'permissions',
+    'queries',
+    'relations',
+    'stateMachines',
+    'storageMappings',
+    'surfaces',
+  ] as const) {
+    application[collection] = [
+      ...(application[collection] as unknown[]),
+      ...(inventory[collection] as unknown[]),
+    ];
+  }
+  const inventoryModule = (
+    inventory.modules as Array<Record<string, unknown>>
+  )[0];
+  assert.ok(inventoryModule);
+  (application.modules as Array<Record<string, unknown>>).push({
+    ...inventoryModule,
+    orderKey: 40,
+    ownerPackageId: (application.package as { packageId: string }).packageId,
+  });
+  return application;
+}
+
+function applicationInventoryId(id: string): string {
+  assert.ok(id.startsWith(`${INVENTORY_NAMESPACE}:`));
+  return `${APPLICATION_NAMESPACE}${id.slice(INVENTORY_NAMESPACE.length)}`;
+}
+
 function definitionBytes(definition: unknown): Uint8Array {
   return new TextEncoder().encode(
     canonicalize(normalizeApplicationPackage(definition)),
@@ -2306,6 +2615,24 @@ function compiledProjectionPayload<T>(
   );
   assert.ok(chunk);
   return JSON.parse(new TextDecoder().decode(chunk.canonicalBytes)) as T;
+}
+
+function runtimeProjection<TFamily extends RequestRuntimeProjectionFamily>(
+  compiled: CompileSuccess,
+  familyId: TFamily,
+): RuntimeProjection<TFamily> {
+  const reference = compiled.bundle.releaseManifest.projections.find(
+    (candidate) => candidate.familyId === familyId,
+  );
+  assert.ok(reference);
+  return Object.freeze({
+    artifactRoot: reference.artifactRoot,
+    familyId,
+    instanceId: reference.instanceId,
+    payload: compiledProjectionPayload<ImmutableJsonValue>(compiled, familyId),
+    payloadSchemaVersion: reference.payloadSchemaVersion,
+    semanticDigest: reference.semanticDigest,
+  });
 }
 
 function assertModuleError(

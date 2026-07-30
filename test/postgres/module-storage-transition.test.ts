@@ -3014,10 +3014,16 @@ test('inventory v3 targets materialize the compiled legal master, fact partition
             WHERE legal_entity_id = $2`,
           ['2026-07-28T23:59:59.999Z', legalEntityId],
         );
+        await queryAsModuleRuntime(
+          `UPDATE north_star_module.${quoteTestIdentifier(periodLock.physicalTableName)}
+              SET revision = revision + 1
+            WHERE legal_entity_id = $1`,
+          [legalEntityId],
+        );
         await assert.rejects(
           queryAsModuleRuntime(
             `UPDATE north_star_module.${quoteTestIdentifier(periodLock.physicalTableName)}
-                SET revision = revision + 1
+                SET archived_at = clock_timestamp()
               WHERE legal_entity_id = $1`,
             [legalEntityId],
           ),
