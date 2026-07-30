@@ -1166,7 +1166,7 @@ async function assertPostingMasters(
         AND ${quoted(binding.item.recordIdColumn)} = ANY($3::uuid[])
         AND ${quoted(binding.item.archiveColumn)} IS NULL
       ORDER BY ${quoted(binding.item.recordIdColumn)}
-      FOR UPDATE`,
+      FOR NO KEY UPDATE`,
     [context.tenantId, context.environmentId, itemIds],
   );
   const checkedItems = new Map(
@@ -1292,7 +1292,7 @@ async function enforcePeriodLock(
       WHERE tenant_id = $1 AND environment_id = $2
         AND ${quoted(binding.periodLock.legalEntityColumn!)} = $3
         AND ${quoted(binding.periodLock.archiveColumn)} IS NULL
-      FOR UPDATE`,
+      FOR NO KEY UPDATE`,
     [context.tenantId, context.environmentId, legalEntityId],
   );
   if (result.rows.length !== 1) {
