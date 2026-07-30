@@ -73,9 +73,7 @@ import {
   SemanticOperationMediationAuthority,
   type SemanticOperationResultEnvelope,
 } from '../../packages/runtime/src/semantic-operation-gateway.js';
-import {
-  SHARED_LIST_QUERY_VERSION,
-} from '../../packages/runtime/src/list-behavior/index.js';
+import { SHARED_LIST_QUERY_VERSION } from '../../packages/runtime/src/list-behavior/index.js';
 import {
   SEMANTIC_QUERY_REQUEST_VERSION,
   SemanticQueryGateway,
@@ -124,8 +122,7 @@ const inventoryScopeProbeIds = Object.freeze({
   itemParameter: `${APPLICATION_NAMESPACE}:parameter.scope_probe_item`,
   locationParameter: `${APPLICATION_NAMESPACE}:parameter.scope_probe_location`,
   query: `${APPLICATION_NAMESPACE}:query.inventory_movement_scope_probe_sum`,
-  selection:
-    `${APPLICATION_NAMESPACE}:selection.inventory_movement_scope_probe_sum`,
+  selection: `${APPLICATION_NAMESPACE}:selection.inventory_movement_scope_probe_sum`,
 });
 
 test('accepted pre-PR-2 semantic metadata fails closed before module DML', () => {
@@ -849,7 +846,11 @@ test('v3 inventory reads require issued legal-entity scope and preserve generic 
       entity.entityId ===
       applicationInventoryId(INVENTORY_IDS.entityIds.transactionLine),
   );
-  assert.ok(legalEntityMaster?.legalEntityMaster);
+  assert.ok(
+    legalEntityMaster?.legalEntityMaster,
+    'compiled target has no legal-entity master',
+  );
+  const legalEntityMasterStorage = legalEntityMaster.legalEntityMaster;
   assert.ok(movement?.legalEntity?.column);
   assert.ok(transaction?.legalEntity?.column);
   assert.ok(transactionLine?.legalEntity?.column);
@@ -944,10 +945,10 @@ test('v3 inventory reads require issued legal-entity scope and preserve generic 
                environment_id,
                ${legalEntityMaster.recordIdentity.column},
                ${legalEntityMaster.optimisticRevision.column},
-               ${legalEntityMaster.legalEntityMaster.fieldColumns.code},
-               ${legalEntityMaster.legalEntityMaster.fieldColumns.name},
-               ${legalEntityMaster.legalEntityMaster.fieldColumns.status},
-               ${legalEntityMaster.legalEntityMaster.fieldColumns.isDefault}
+               ${legalEntityMasterStorage.fieldColumns.code},
+               ${legalEntityMasterStorage.fieldColumns.name},
+               ${legalEntityMasterStorage.fieldColumns.status},
+               ${legalEntityMasterStorage.fieldColumns.isDefault}
              ) VALUES ($1, $2, $3, 1, $4, $5, $6, false)
              ON CONFLICT (tenant_id, environment_id, ${legalEntityMaster.recordIdentity.column})
              DO NOTHING`,
@@ -957,7 +958,7 @@ test('v3 inventory reads require issued legal-entity scope and preserve generic 
               entityId,
               code,
               name,
-              legalEntityMaster.legalEntityMaster.activeStatusValue,
+              legalEntityMasterStorage.activeStatusValue,
             ],
           );
         }
@@ -1118,62 +1119,60 @@ test('v3 inventory reads require issued legal-entity scope and preserve generic 
         const scopeB = await issueLegalEntityReadScope(policy, view, [
           secondLegalEntityId,
         ]);
-        const consolidatedScope = await issueLegalEntityReadScope(policy, view, [
-          legalEntityId,
-          secondLegalEntityId,
-        ]);
+        const consolidatedScope = await issueLegalEntityReadScope(
+          policy,
+          view,
+          [legalEntityId, secondLegalEntityId],
+        );
         const aggregateArguments = {
           [inventoryScopeProbeIds.itemParameter]: sharedItemId,
           [inventoryScopeProbeIds.locationParameter]: sharedLocationId,
         };
         assert.equal(
           (
-            await aggregateQuery(
-              queryGateway,
-              view,
-              aggregateArguments,
-              { legalEntityReadScope: scopeA },
-            )
+            await aggregateQuery(queryGateway, view, aggregateArguments, {
+              legalEntityReadScope: scopeA,
+            })
           ).value.value,
           '5',
         );
         assert.equal(
           (
-            await aggregateQuery(
-              queryGateway,
-              view,
-              aggregateArguments,
-              { legalEntityReadScope: scopeB },
-            )
+            await aggregateQuery(queryGateway, view, aggregateArguments, {
+              legalEntityReadScope: scopeB,
+            })
           ).value.value,
           '7',
         );
         assert.equal(
           (
-            await aggregateQuery(
-              queryGateway,
-              view,
-              aggregateArguments,
-              { legalEntityReadScope: consolidatedScope },
-            )
+            await aggregateQuery(queryGateway, view, aggregateArguments, {
+              legalEntityReadScope: consolidatedScope,
+            })
           ).value.value,
           '12',
         );
         const unscopedDefect = await pool.query<{ quantity: string }>(
-          `SELECT COALESCE(SUM(${requiredStorageColumn(
-            movement,
-            INVENTORY_IDS.fieldIds.movement.quantityDelta,
-          ).physicalName}), 0)::text AS quantity
+          `SELECT COALESCE(SUM(${
+            requiredStorageColumn(
+              movement,
+              INVENTORY_IDS.fieldIds.movement.quantityDelta,
+            ).physicalName
+          }), 0)::text AS quantity
              FROM north_star_module.${movement.physicalTableName}
             WHERE tenant_id = $1 AND environment_id = $2
-              AND ${requiredStorageColumn(
-                movement,
-                INVENTORY_IDS.fieldIds.movement.itemId,
-              ).physicalName} = $3
-              AND ${requiredStorageColumn(
-                movement,
-                INVENTORY_IDS.fieldIds.movement.locationId,
-              ).physicalName} = $4`,
+              AND ${
+                requiredStorageColumn(
+                  movement,
+                  INVENTORY_IDS.fieldIds.movement.itemId,
+                ).physicalName
+              } = $3
+              AND ${
+                requiredStorageColumn(
+                  movement,
+                  INVENTORY_IDS.fieldIds.movement.locationId,
+                ).physicalName
+              } = $4`,
           [tenant, environment, sharedItemId, sharedLocationId],
         );
         assert.equal(unscopedDefect.rows[0]?.quantity, '12');
@@ -3078,12 +3077,10 @@ function movementScopeProbeValues(
     [applicationInventoryId(INVENTORY_IDS.fieldIds.movement.itemId)]: itemId,
     [applicationInventoryId(INVENTORY_IDS.fieldIds.movement.locationId)]:
       locationId,
-    [applicationInventoryId(
-      INVENTORY_IDS.fieldIds.movement.quantityDelta,
-    )]: quantityDelta,
-    [applicationInventoryId(
-      INVENTORY_IDS.fieldIds.movement.postingRole,
-    )]: `${APPLICATION_NAMESPACE}:option.inventory_posting_role_adjustment`,
+    [applicationInventoryId(INVENTORY_IDS.fieldIds.movement.quantityDelta)]:
+      quantityDelta,
+    [applicationInventoryId(INVENTORY_IDS.fieldIds.movement.postingRole)]:
+      `${APPLICATION_NAMESPACE}:option.inventory_posting_role_adjustment`,
     [applicationInventoryId(
       INVENTORY_IDS.fieldIds.movement.stockDimensionSetVersion,
     )]: `${APPLICATION_NAMESPACE}:option.stock_dimension_set_version_v1`,
