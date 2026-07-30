@@ -2213,6 +2213,8 @@ async function installLineRaceBlocker(
        RETURNS trigger LANGUAGE plpgsql AS $body$
        BEGIN
          IF NEW.${quoted(sourceIdColumn)} = TG_ARGV[0] THEN
+           -- This control exercises the digest-conflict path, not the lock-timeout path, so let its barrier complete.
+           PERFORM set_config('lock_timeout', '30s', true);
            PERFORM pg_advisory_xact_lock(${String(lineRaceLockNamespace)}, ${String(lineRaceLockKey)});
          END IF;
          RETURN NEW;
