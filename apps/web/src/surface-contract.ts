@@ -62,6 +62,26 @@ export interface CompiledSurfaceDefinition {
   readonly surfaceRole: CompiledSurfaceRole | null;
 }
 
+export interface CompiledNavigationSurface {
+  readonly kind: 'navigationSurface';
+  readonly surfaceId: string;
+}
+
+export interface CompiledNavigationGroup {
+  readonly children: readonly CompiledNavigationEntry[];
+  readonly kind: 'navigationGroup';
+  readonly label: string;
+  readonly navigationId: string;
+}
+
+export type CompiledNavigationEntry =
+  CompiledNavigationGroup | CompiledNavigationSurface;
+
+export interface CompiledNavigationTree {
+  readonly entries: readonly CompiledNavigationGroup[];
+  readonly kind: 'navigationTree';
+}
+
 export interface CompiledSurfaceOperationBinding {
   readonly confirmation: RegisteredOperationDefinition['confirmation'];
   readonly intent: SurfaceOperationIntent;
@@ -76,6 +96,7 @@ export interface CompiledSurfaceDataBinding {
 
 export interface CompiledSurfaceManifest {
   readonly kind: 'surfaceManifestPayload';
+  readonly navigation: CompiledNavigationTree | null;
   readonly schemaVersion: typeof SURFACE_MANIFEST_PAYLOAD_VERSION;
   readonly surfaces: readonly CompiledSurfaceDefinition[];
 }
@@ -88,6 +109,7 @@ export class SurfaceProjectionError extends Error {
       | 'DUPLICATE_SURFACE_ID'
       | 'INVALID_SURFACE_BINDING'
       | 'INVALID_SURFACE_MANIFEST'
+      | 'INVALID_SURFACE_NAVIGATION'
       | 'INVALID_SURFACE_SLOT'
       | 'UNSUPPORTED_SURFACE_VERSION',
     message: string,
@@ -274,12 +296,151 @@ export function readCompiledSurfaceManifest(
     seenSurfaceIds.add(surface.surfaceId);
     return surface;
   });
+  const navigation =
+    payload.navigation === undefined
+      ? null
+      : parseNavigationTree(payload.navigation, surfaces);
+  validateNavigationReachability(navigation, surfaces);
 
   return Object.freeze({
     kind: 'surfaceManifestPayload' as const,
+    navigation,
     schemaVersion: SURFACE_MANIFEST_PAYLOAD_VERSION,
     surfaces: Object.freeze(surfaces),
   });
+}
+
+function parseNavigationTree(
+  value: unknown,
+  surfaces: readonly CompiledSurfaceDefinition[],
+): CompiledNavigationTree {
+  if (
+    !isRecord(value) ||
+    value.kind !== 'navigationTree' ||
+    !Array.isArray(value.entries) ||
+    value.entries.length === 0 ||
+    value.entries.length > 5
+  ) {
+    throw invalidNavigation('compiled navigation has an invalid tree');
+  }
+  const surfaceIds = new Set(surfaces.map((surface) => surface.surfaceId));
+  const navigationIds = new Set<string>();
+  const entries = value.entries.map((entry, index) => {
+    const parsed = parseNavigationEntry(
+      entry,
+      `navigation.entries[${String(index)}]`,
+      0,
+      navigationIds,
+      surfaceIds,
+    );
+    if (parsed.kind !== 'navigationGroup') {
+      throw invalidNavigation(
+        'compiled navigation top-level entries must be groups',
+      );
+    }
+    return parsed;
+  });
+  return Object.freeze({
+    entries: Object.freeze(entries),
+    kind: 'navigationTree' as const,
+  });
+}
+
+function parseNavigationEntry(
+  value: unknown,
+  path: string,
+  depth: number,
+  navigationIds: Set<string>,
+  surfaceIds: ReadonlySet<string>,
+): CompiledNavigationEntry {
+  if (!isRecord(value) || depth > 2) {
+    throw invalidNavigation(`${path} is invalid or nested too deeply`);
+  }
+  if (value.kind === 'navigationSurface') {
+    if (!isNonBlank(value.surfaceId) || !surfaceIds.has(value.surfaceId)) {
+      throw invalidNavigation(`${path} references an unknown surface`);
+    }
+    return Object.freeze({
+      kind: 'navigationSurface' as const,
+      surfaceId: value.surfaceId,
+    });
+  }
+  if (
+    value.kind !== 'navigationGroup' ||
+    !isNonBlank(value.label) ||
+    !isNonBlank(value.navigationId) ||
+    !Array.isArray(value.children) ||
+    value.children.length === 0 ||
+    navigationIds.has(value.navigationId)
+  ) {
+    throw invalidNavigation(`${path} is not a valid navigation group`);
+  }
+  navigationIds.add(value.navigationId);
+  return Object.freeze({
+    children: Object.freeze(
+      value.children.map((child, index) =>
+        parseNavigationEntry(
+          child,
+          `${path}.children[${String(index)}]`,
+          depth + 1,
+          navigationIds,
+          surfaceIds,
+        ),
+      ),
+    ),
+    kind: 'navigationGroup' as const,
+    label: value.label,
+    navigationId: value.navigationId,
+  });
+}
+
+function validateNavigationReachability(
+  navigation: CompiledNavigationTree | null,
+  surfaces: readonly CompiledSurfaceDefinition[],
+): void {
+  const expected = surfaces
+    .filter(
+      (surface) =>
+        surface.lifecycle === 'active' && isNavigationSurface(surface),
+    )
+    .map((surface) => surface.surfaceId)
+    .sort();
+  if (!navigation) {
+    if (expected.length > 5) {
+      throw invalidNavigation(
+        'an over-budget surface manifest is missing compiled navigation grouping',
+      );
+    }
+    return;
+  }
+  const observed = navigation.entries.flatMap(navigationSurfaceIds).sort();
+  if (
+    observed.length !== new Set(observed).size ||
+    observed.length !== expected.length ||
+    observed.some((surfaceId, index) => surfaceId !== expected[index])
+  ) {
+    throw invalidNavigation(
+      'compiled navigation must reach every active navigation surface exactly once',
+    );
+  }
+}
+
+function navigationSurfaceIds(entry: CompiledNavigationEntry): string[] {
+  return entry.kind === 'navigationSurface'
+    ? [entry.surfaceId]
+    : entry.children.flatMap(navigationSurfaceIds);
+}
+
+function isNavigationSurface(surface: CompiledSurfaceDefinition): boolean {
+  return (
+    surface.surfaceRole === 'list' ||
+    (surface.surfaceRole === null &&
+      (surface.archetype === 'list' || surface.archetype === 'home'))
+  );
+}
+
+function invalidNavigation(message: string): SurfaceProjectionError {
+  return new SurfaceProjectionError('INVALID_SURFACE_NAVIGATION', message);
 }
 
 function parseSurface(

@@ -53,6 +53,8 @@ const payloadSchemaVersions: Record<
   [PROJECTION_FAMILY_IDS.verificationPlan]: VERIFICATION_PLAN_PAYLOAD_VERSION,
 };
 
+const MAX_PRIMARY_NAVIGATION_ENTRIES = 5;
+
 const runtimeCapabilities: Record<
   Exclude<ProjectionFamilyId, typeof PROJECTION_FAMILY_IDS.storageTransition>,
   RuntimeCapabilityRequirement
@@ -429,8 +431,10 @@ function surfaceManifestPayload(
   packageRevision: NormalizedApplicationPackage,
   queryById: Map<string, NormalizedApplicationPackage['queries'][number]>,
 ): unknown {
+  const navigation = surfaceNavigationTree(packageRevision);
   return {
     kind: 'surfaceManifestPayload',
+    ...(navigation ? { navigation } : {}),
     schemaVersion: payloadSchemaVersions[PROJECTION_FAMILY_IDS.surfaceManifest],
     surfaces: packageRevision.surfaces.map((surface) => ({
       archetype: surface.archetype,
@@ -454,6 +458,74 @@ function surfaceManifestPayload(
         : {}),
     })),
   };
+}
+
+interface SurfaceNavigationLeaf {
+  readonly kind: 'navigationSurface';
+  readonly surfaceId: string;
+}
+
+interface SurfaceNavigationGroup {
+  readonly children: readonly (
+    SurfaceNavigationGroup | SurfaceNavigationLeaf
+  )[];
+  readonly kind: 'navigationGroup';
+  readonly label: string;
+  readonly navigationId: string;
+}
+
+function surfaceNavigationTree(packageRevision: NormalizedApplicationPackage): {
+  readonly entries: readonly SurfaceNavigationGroup[];
+  readonly kind: 'navigationTree';
+} | null {
+  const navigationSurfaces = packageRevision.surfaces.filter(
+    (surface) => surface.lifecycle === 'active' && isNavigationSurface(surface),
+  );
+  if (navigationSurfaces.length <= MAX_PRIMARY_NAVIGATION_ENTRIES) return null;
+
+  const surfaceLeavesByModule = new Map<string, SurfaceNavigationLeaf[]>();
+  for (const surface of navigationSurfaces) {
+    const leaves = surfaceLeavesByModule.get(surface.module.targetId) ?? [];
+    leaves.push({ kind: 'navigationSurface', surfaceId: surface.surfaceId });
+    surfaceLeavesByModule.set(surface.module.targetId, leaves);
+  }
+
+  const moduleGroups = packageRevision.modules.flatMap((module) => {
+    const children = surfaceLeavesByModule.get(module.moduleId);
+    return children
+      ? [
+          {
+            children,
+            kind: 'navigationGroup' as const,
+            label: module.label,
+            navigationId: module.moduleId,
+          },
+        ]
+      : [];
+  });
+  const entries =
+    moduleGroups.length <= MAX_PRIMARY_NAVIGATION_ENTRIES
+      ? moduleGroups
+      : [
+          ...moduleGroups.slice(0, MAX_PRIMARY_NAVIGATION_ENTRIES - 1),
+          {
+            children: moduleGroups.slice(MAX_PRIMARY_NAVIGATION_ENTRIES - 1),
+            kind: 'navigationGroup' as const,
+            label: 'More',
+            navigationId: `${packageRevision.package.namespace}:navigation.more`,
+          },
+        ];
+  return { entries, kind: 'navigationTree' };
+}
+
+function isNavigationSurface(
+  surface: NormalizedApplicationPackage['surfaces'][number],
+): boolean {
+  return (
+    surface.surfaceRole === 'list' ||
+    (surface.surfaceRole === undefined &&
+      (surface.archetype === 'list' || surface.archetype === 'home'))
+  );
 }
 
 function reportingPayload(
