@@ -46,6 +46,7 @@ const suiteDefinitions = [
       'test/integration/party-runtime.test.ts',
       'test/integration/security-scan-contract.test.ts',
       'test/integration/semantic-gateways.test.ts',
+      'test/integration/semantic-query-legal-entity-scope.test.ts',
       'test/integration/surface-data-binding.test.ts',
       'test/integration/table-behavior.test.ts',
       'test/integration/toolchain-contract.test.ts',
