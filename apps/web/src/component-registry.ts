@@ -8,10 +8,7 @@ import type {
 
 import { escapeHtml, shortIdentity } from './html.js';
 import { sharedListView } from './list-runtime.js';
-import {
-  readCompiledSurfaceDataBinding,
-  surfaceSupportsMutation,
-} from './surface-contract.js';
+import { readCompiledSurfaceDataBinding } from './surface-contract.js';
 import type {
   CompiledSurfaceDefinition,
   CompiledSurfaceOperationBinding,
@@ -50,8 +47,7 @@ export type SurfaceDataRenderState =
         | 'QUERY_NOT_FOUND'
         | 'QUERY_PERMISSION_DENIED'
         | 'QUERY_UNAVAILABLE'
-        | 'QUERY_UNSUPPORTED'
-        | 'SURFACE_GRAMMAR_INCOMPLETE';
+        | 'QUERY_UNSUPPORTED';
       readonly status: 'DIAGNOSTIC';
     };
 
@@ -116,22 +112,20 @@ export const REGISTERED_SURFACE_COMPONENT_IDS = Object.freeze(
   Object.keys(componentRegistry).sort(),
 );
 
+/** One registry-resolution authority backs both visible diagnostics and writes. */
+export function surfaceHasUnsupportedComponent(
+  surface: CompiledSurfaceDefinition,
+): boolean {
+  return surface.slots.some(
+    (slot) => surfaceComponentRenderer(surface, slot) === undefined,
+  );
+}
+
 /** Closed lookup: there is deliberately no register/override escape hatch. */
 export function renderRegisteredSurfaceComponent(
   context: SurfaceComponentContext,
 ): SurfaceComponentRenderResult {
-  const slotKey = `${context.surface.archetype}:${context.slot.slot}`;
-  const slotRenderer = Object.hasOwn(surfaceSlotRegistry, slotKey)
-    ? surfaceSlotRegistry[slotKey]
-    : undefined;
-  if (slotRenderer) return renderComponent(slotRenderer, context);
-
-  const renderer = Object.hasOwn(
-    componentRegistry,
-    context.slot.contentReferenceId,
-  )
-    ? componentRegistry[context.slot.contentReferenceId]
-    : undefined;
+  const renderer = surfaceComponentRenderer(context.surface, context.slot);
   if (!renderer) {
     return Object.freeze({
       code: 'UNSUPPORTED_COMPONENT' as const,
@@ -145,6 +139,19 @@ export function renderRegisteredSurfaceComponent(
   }
 
   return renderComponent(renderer, context);
+}
+
+function surfaceComponentRenderer(
+  surface: CompiledSurfaceDefinition,
+  slot: CompiledSurfaceSlot,
+): SurfaceComponentRenderer | undefined {
+  const slotKey = `${surface.archetype}:${slot.slot}`;
+  if (Object.hasOwn(surfaceSlotRegistry, slotKey)) {
+    return surfaceSlotRegistry[slotKey];
+  }
+  return Object.hasOwn(componentRegistry, slot.contentReferenceId)
+    ? componentRegistry[slot.contentReferenceId]
+    : undefined;
 }
 
 function renderComponent(
@@ -553,10 +560,6 @@ function dataDiagnostic(
       'Capability unavailable',
       'The pinned release does not provide this semantic data capability.',
     ],
-    SURFACE_GRAMMAR_INCOMPLETE: [
-      'Surface incomplete',
-      'The pinned release does not declare the complete grammar required for this screen.',
-    ],
   } as const;
   const [title, message] = copy[code];
   return diagnostic(title, message, code);
@@ -614,7 +617,9 @@ function relatedSurface(
       if (candidate.lifecycle !== 'active' || candidate.surfaceRole !== role) {
         return false;
       }
-      if (role === 'form' && !surfaceSupportsMutation(candidate)) return false;
+      if (role === 'form' && surfaceHasUnsupportedComponent(candidate)) {
+        return false;
+      }
       try {
         return (
           readCompiledSurfaceDataBinding(context.view, candidate).query

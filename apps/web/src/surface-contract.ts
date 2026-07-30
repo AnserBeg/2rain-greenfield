@@ -103,22 +103,6 @@ export interface CompiledSurfaceDataBinding {
   readonly query: RegisteredQueryDefinition;
 }
 
-/**
- * Mutation controls are admitted only when the compiled surface declares the
- * grammar-owned slots that make the action visible and reviewable. An
- * incomplete form remains a release diagnostic, never an implicit write path.
- */
-export function surfaceSupportsMutation(
-  surface: CompiledSurfaceDefinition,
-): boolean {
-  const slots = new Set(surface.slots.map((slot) => slot.slot));
-  return surface.surfaceRole === 'form'
-    ? slots.has('commandBar') && slots.has('sections')
-    : surface.surfaceRole === 'record'
-      ? slots.has('commandBar')
-      : false;
-}
-
 export interface CompiledSurfaceManifest {
   readonly kind: 'surfaceManifestPayload';
   readonly navigation: CompiledNavigationTree | null;

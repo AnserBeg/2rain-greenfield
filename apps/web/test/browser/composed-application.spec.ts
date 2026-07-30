@@ -207,7 +207,7 @@ async function productJourney(page: Page, baseUrl: string): Promise<void> {
   ).toHaveCount(0);
   await page.goto(surfaceUrl(baseUrl, 'inventory_transaction_form'));
   await expect(
-    page.locator('[data-diagnostic-code="SURFACE_GRAMMAR_INCOMPLETE"]'),
+    page.locator('[data-diagnostic-code="UNSUPPORTED_COMPONENT"]'),
   ).toBeVisible();
   await expect(page.getByRole('textbox')).toHaveCount(0);
   await expect(page.getByRole('button')).toHaveCount(0);

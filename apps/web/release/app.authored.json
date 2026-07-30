@@ -7609,6 +7609,18 @@
           "schemaVersion": "v3",
           "slot": "titleStatus",
           "slotId": "northstar.app:slot.legal_entity_form_title_status"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v3",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 30,
+          "schemaVersion": "v3",
+          "slot": "activity",
+          "slotId": "northstar.app:slot.legal_entity_form_activity"
         }
       ],
       "statusRoles": [],
@@ -7756,6 +7768,18 @@
           "schemaVersion": "v3",
           "slot": "titleStatus",
           "slotId": "northstar.app:slot.inventory_transaction_form_title_status"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v3",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 30,
+          "schemaVersion": "v3",
+          "slot": "activity",
+          "slotId": "northstar.app:slot.inventory_transaction_form_activity"
         }
       ],
       "statusRoles": [],
@@ -7903,6 +7927,18 @@
           "schemaVersion": "v3",
           "slot": "titleStatus",
           "slotId": "northstar.app:slot.inventory_transaction_line_form_title_status"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v3",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 30,
+          "schemaVersion": "v3",
+          "slot": "activity",
+          "slotId": "northstar.app:slot.inventory_transaction_line_form_activity"
         }
       ],
       "statusRoles": [],

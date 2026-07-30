@@ -23,6 +23,7 @@ import { SHARED_LIST_QUERY_VERSION } from '../../../packages/runtime/src/list-be
 import {
   renderRegisteredSurfaceComponent,
   renderSurfaceDataComponent,
+  surfaceHasUnsupportedComponent,
   type SurfaceDataRenderState,
   type SurfaceOperationFeedback,
 } from './component-registry.js';
@@ -30,7 +31,6 @@ import { escapeHtml, shortIdentity } from './html.js';
 import {
   readCompiledSurfaceManifest,
   readCompiledSurfaceDataBinding,
-  surfaceSupportsMutation,
   SurfaceProjectionError,
   type CompiledNavigationEntry,
   type CompiledNavigationTree,
@@ -69,19 +69,6 @@ export function renderSurfaceRuntime(
   assertRequestRuntimeView(view);
   const selection = selectSurface(view, requestUrl);
   if ('statusCode' in selection) return selection;
-  if (
-    selection.selected.surfaceRole === 'form' &&
-    !surfaceSupportsMutation(selection.selected)
-  ) {
-    return renderSelectedSurface(
-      view,
-      selection,
-      { code: 'SURFACE_GRAMMAR_INCOMPLETE', status: 'DIAGNOSTIC' },
-      null,
-      [],
-      422,
-    );
-  }
   return renderSelectedSurface(
     view,
     selection,
@@ -101,19 +88,6 @@ export async function renderSurfaceRuntimeWithData(
   assertRequestRuntimeView(view);
   const selection = selectSurface(view, requestUrl);
   if ('statusCode' in selection) return selection;
-  if (
-    selection.selected.surfaceRole === 'form' &&
-    !surfaceSupportsMutation(selection.selected)
-  ) {
-    return renderSelectedSurface(
-      view,
-      selection,
-      { code: 'SURFACE_GRAMMAR_INCOMPLETE', status: 'DIAGNOSTIC' },
-      feedback,
-      [],
-      422,
-    );
-  }
   let binding: CompiledSurfaceDataBinding;
   try {
     binding = readCompiledSurfaceDataBinding(view, selection.selected);
@@ -473,12 +447,11 @@ function surfaceAllowsIntent(
   surface: CompiledSurfaceDefinition,
   intent: SurfaceOperationIntent,
 ): boolean {
+  if (surfaceHasUnsupportedComponent(surface)) return false;
   return surface.surfaceRole === 'form'
-    ? surfaceSupportsMutation(surface) &&
-        (intent === 'create' || intent === 'update')
+    ? intent === 'create' || intent === 'update'
     : surface.surfaceRole === 'record'
-      ? surfaceSupportsMutation(surface) &&
-        (intent === 'archive' || intent === 'restore')
+      ? intent === 'archive' || intent === 'restore'
       : false;
 }
 

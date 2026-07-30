@@ -914,7 +914,9 @@ function surfaces(
     ['detail', 'record', ['breadcrumb', 'titleStatus', 'keyFacts'], 'record'],
     ...(readOnly
       ? []
-      : ([['form', 'record', ['breadcrumb', 'titleStatus'], 'form']] as const)),
+      : ([
+          ['form', 'record', ['breadcrumb', 'titleStatus', 'activity'], 'form'],
+        ] as const)),
   ];
   return descriptors.map(([suffix, archetype, slots, surfaceRole]) => ({
     archetype,
