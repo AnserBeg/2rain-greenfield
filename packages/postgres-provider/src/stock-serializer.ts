@@ -6,10 +6,12 @@ import type { PoolClient } from 'pg';
  * 0x4e535354 is the ASCII tag "NSST" (North Star stock).
  *
  * PostgreSQL keeps the two-integer advisory-lock family in a key space that is
- * disjoint from the one-bigint family. The migration and materializer locks use
- * the one-bigint family, so this namespace cannot collide with them even when
- * the underlying 64 bits are identical. Within the two-integer family this
- * value is reserved exclusively for stock identities.
+ * disjoint from the one-bigint family used by migration locks. The existing
+ * materializer generation lock is also two-integer: its first key is
+ * hashtext('north-star:module-storage-generation:v1'), observed and pinned by
+ * provider controls as -1322922032. NSST is 1314083668, so the namespaces are
+ * distinct. Within the two-integer family NSST is reserved exclusively for
+ * stock identities.
  */
 export const STOCK_IDENTITY_LOCK_NAMESPACE = 0x4e535354;
 

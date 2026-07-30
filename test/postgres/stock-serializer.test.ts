@@ -307,6 +307,7 @@ test(
     await withSerializerDatabase('stock-lock-control', async ({ pool }) => {
       const stockClient = await pool.connect();
       const bigintClient = await pool.connect();
+      const generationClient = await pool.connect();
       const observer = await pool.connect();
       try {
         await assert.rejects(
@@ -316,6 +317,7 @@ test(
 
         const stockPid = await backendPid(stockClient);
         const bigintPid = await backendPid(bigintClient);
+        const generationPid = await backendPid(generationClient);
         const target = planStockIdentityLocks([stockA])[0];
         assert.ok(target);
         await stockClient.query('BEGIN');
@@ -325,6 +327,30 @@ test(
         await bigintClient.query('SELECT pg_advisory_xact_lock($1::bigint)', [
           packedBigintKey(STOCK_IDENTITY_LOCK_NAMESPACE, target.identityKey),
         ]);
+
+        const generationNamespaceResult = await generationClient.query<{
+          namespace: number;
+        }>(
+          `SELECT hashtext(
+             'north-star:module-storage-generation:v1'
+           ) AS namespace`,
+        );
+        const generationNamespace =
+          generationNamespaceResult.rows[0]?.namespace;
+        assert.equal(generationNamespace, -1_322_922_032);
+        assert.notEqual(generationNamespace, STOCK_IDENTITY_LOCK_NAMESPACE);
+        await generationClient.query('BEGIN');
+        await generationClient.query("SET LOCAL statement_timeout = '2s'");
+        // Reproduce the accepted materializer's first two-key namespace while
+        // deliberately sharing the stock lock's second key. Simultaneous grant
+        // proves the reserved NSST first key keeps the families disjoint.
+        await generationClient.query(
+          `SELECT pg_advisory_xact_lock(
+             hashtext('north-star:module-storage-generation:v1'),
+             $1::integer
+           )`,
+          [target.identityKey],
+        );
 
         const locks = await observer.query<{
           granted: boolean;
@@ -354,6 +380,22 @@ test(
         context.diagnostic(
           `genuine lock control: ${JSON.stringify(locks.rows)}`,
         );
+        const generationLock = await advisoryLock(
+          observer,
+          generationPid,
+          target.identityKey,
+          true,
+          generationNamespace,
+        );
+        assert.deepEqual(generationLock, {
+          granted: true,
+          identityKey: unsignedInt32(target.identityKey),
+          namespace: generationNamespace,
+          pid: generationPid,
+        });
+        context.diagnostic(
+          `existing two-key namespace control: ${JSON.stringify(generationLock)}`,
+        );
 
         await stockClient.query('COMMIT');
         assert.equal(
@@ -361,11 +403,24 @@ test(
           undefined,
         );
         await bigintClient.query('COMMIT');
+        await generationClient.query('COMMIT');
+        assert.equal(
+          await advisoryLock(
+            observer,
+            generationPid,
+            target.identityKey,
+            true,
+            generationNamespace,
+          ),
+          undefined,
+        );
       } finally {
         await rollbackQuietly(stockClient);
         await rollbackQuietly(bigintClient);
+        await rollbackQuietly(generationClient);
         stockClient.release();
         bigintClient.release();
+        generationClient.release();
         observer.release();
       }
     });
@@ -971,10 +1026,11 @@ async function advisoryLock(
   pid: number,
   identityKey: number,
   granted: boolean,
+  namespace: number = STOCK_IDENTITY_LOCK_NAMESPACE,
 ): Promise<ObservedAdvisoryLock | undefined> {
   const result = await observer.query<ObservedAdvisoryLock>(
     `SELECT pid,
-            classid::bigint::integer AS namespace,
+            classid::bigint AS namespace,
             objid::bigint AS "identityKey",
             granted
        FROM pg_locks
@@ -984,14 +1040,14 @@ async function advisoryLock(
         AND classid::bigint = $2::bigint
         AND objid::bigint = $3::bigint
         AND granted = $4`,
-    [pid, STOCK_IDENTITY_LOCK_NAMESPACE, unsignedInt32(identityKey), granted],
+    [pid, unsignedInt32(namespace), unsignedInt32(identityKey), granted],
   );
   const row = result.rows[0];
   if (!row) return undefined;
   return {
     granted: row.granted,
     identityKey: Number(row.identityKey),
-    namespace: Number(row.namespace),
+    namespace: signedInt32(Number(row.namespace)),
     pid: row.pid,
   };
 }
@@ -1057,6 +1113,10 @@ function packedBigintKey(namespace: number, identityKey: number): string {
 
 function unsignedInt32(value: number): number {
   return value >>> 0;
+}
+
+function signedInt32(value: number): number {
+  return value > 2_147_483_647 ? value - 4_294_967_296 : value;
 }
 
 function postgresCode(error: unknown): string | undefined {
