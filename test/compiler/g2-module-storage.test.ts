@@ -3,7 +3,6 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import {
-  ADOPTED_LANGUAGE_VERSION,
   canonicalize,
   normalizeApplicationPackage,
 } from '../../packages/canonical-model/src/index.js';
@@ -35,6 +34,7 @@ import {
 import { inventoryModuleDefinition } from '../../packages/domain/src/inventory/definition.js';
 import {
   FIXTURE_IDS,
+  FIXTURE_LANGUAGE_VERSION,
   ordinaryModuleV1,
   ordinaryModuleV2,
 } from '../fixtures/g2/module-conformance/definitions.js';
@@ -791,7 +791,7 @@ test('required fields added to existing tables stay nullable until deferred tigh
   added.defaultSemantics = 'coalesceAtRead';
   added.defaultValue = {
     kind: 'textValue',
-    schemaVersion: ADOPTED_LANGUAGE_VERSION,
+    schemaVersion: FIXTURE_LANGUAGE_VERSION,
     value: '',
   };
 
@@ -1024,13 +1024,13 @@ test('backfill completeness cannot become load-bearing', () => {
   admissibleField.defaultSemantics = 'coalesceAtRead';
   admissibleField.defaultValue = {
     kind: 'textValue',
-    schemaVersion: ADOPTED_LANGUAGE_VERSION,
+    schemaVersion: FIXTURE_LANGUAGE_VERSION,
     value: '',
   };
   admissibleField.storageEvolution = {
     kind: 'backfillEvolution',
     residualReadSemantics: 'coalesceAtRead',
-    schemaVersion: ADOPTED_LANGUAGE_VERSION,
+    schemaVersion: FIXTURE_LANGUAGE_VERSION,
   };
   const admissibleResult = mustCompile(
     input(admissible, expectedActiveReleaseFrom(first)),
@@ -1059,7 +1059,7 @@ test('backfill completeness cannot become load-bearing', () => {
   added.storageEvolution = {
     kind: 'backfillEvolution',
     residualReadSemantics: 'requiresCompleteness',
-    schemaVersion: ADOPTED_LANGUAGE_VERSION,
+    schemaVersion: FIXTURE_LANGUAGE_VERSION,
   };
   const result = compileApplication(
     input(candidate, expectedActiveReleaseFrom(first)),
@@ -1189,7 +1189,7 @@ function secondaryParentRelation(required: boolean): Record<string, unknown> {
     foreignKeyActions: {
       onDelete: 'restrict',
       onUpdate: 'restrict',
-      schemaVersion: ADOPTED_LANGUAGE_VERSION,
+      schemaVersion: FIXTURE_LANGUAGE_VERSION,
     },
     joinEligibility: 'query',
     kind: 'relationDefinition',
@@ -1197,15 +1197,15 @@ function secondaryParentRelation(required: boolean): Record<string, unknown> {
     ownership: 'reference',
     relationId: `${FIXTURE_IDS.namespace}:relation.master_role_secondary_parent`,
     required,
-    schemaVersion: ADOPTED_LANGUAGE_VERSION,
+    schemaVersion: FIXTURE_LANGUAGE_VERSION,
     sourceEntity: {
       kind: 'entityReference',
-      schemaVersion: ADOPTED_LANGUAGE_VERSION,
+      schemaVersion: FIXTURE_LANGUAGE_VERSION,
       targetId: FIXTURE_IDS.entityIds.child,
     },
     targetEntity: {
       kind: 'entityReference',
-      schemaVersion: ADOPTED_LANGUAGE_VERSION,
+      schemaVersion: FIXTURE_LANGUAGE_VERSION,
       targetId: FIXTURE_IDS.entityIds.parent,
     },
   };
