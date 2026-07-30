@@ -41,6 +41,9 @@ interface MutableInventoryContract {
     version: number;
   };
   compiledArtifacts: Array<Record<string, unknown>>;
+  countEvidence: {
+    lineValues: Array<Record<string, unknown>>;
+  };
   configuration: {
     dials: Record<string, unknown>;
   };
@@ -71,7 +74,7 @@ export function registerInventoryContractCases(
           partitionBy: 'tenantBusinessPeriod',
         },
       ]);
-      assert.equal(INVENTORY_STORAGE_REFERENCES_V1.length, 5);
+      assert.equal(INVENTORY_STORAGE_REFERENCES_V1.length, 7);
       assert.deepEqual(INVENTORY_PERIOD_LOCK_STORAGE_V1, {
         advanceOperationLocalId: 'advance_period_lock',
         familyId: 'inventory_period_lock',
@@ -197,7 +200,7 @@ export function registerInventoryContractCases(
             relation.foreignKey.sourceColumns.includes('legal_entity_id') &&
             relation.foreignKey.targetColumns.includes('legal_entity_id'),
         ).length,
-        3,
+        7,
       );
       const legalEntity = target.entities.find((entity) =>
         entity.entityId.endsWith(':entity.legal_entity'),
@@ -338,8 +341,12 @@ export function registerInventoryContractCases(
       );
       assert.equal(dependencies.exhaustiveByConstruction, true);
       assert.equal(dependencies.undeclaredAccess, 'compileFailure');
-      assert.equal(dependencies.version, 3);
-      assert.equal(dependencies.dependencies.length, 32);
+      assert.equal(dependencies.version, 4);
+      assert.equal(dependencies.dependencies.length, 35);
+      assert.deepEqual(
+        contract.countEvidence,
+        INVENTORY_CONTRACT_V1.countEvidence,
+      );
       assert.deepEqual(contract.legalEntity, INVENTORY_CONTRACT_V1.legalEntity);
 
       const golden = JSON.parse(
@@ -504,6 +511,8 @@ export function registerInventoryContractCases(
     'inventory_transaction_line',
     'inventory_period_lock',
     'inventory_movement',
+    'stock_count',
+    'stock_count_line',
   ] as const) {
     register(
       `the Inventory module requires the ${familyLocalId} family`,
@@ -520,6 +529,72 @@ export function registerInventoryContractCases(
       },
     );
   }
+
+  register(
+    'stock-count entities preserve expected, counted, and variance as three exact recorded fields',
+    () => {
+      const definition = inventoryModuleDefinition() as {
+        fields: Array<Record<string, unknown>>;
+        relations: Array<Record<string, unknown>>;
+      };
+      const lineFields = definition.fields
+        .filter((field) =>
+          String((field.entity as { targetId?: unknown }).targetId).endsWith(
+            ':entity.stock_count_line',
+          ),
+        )
+        .map((field) => String(field.fieldId).split(':field.').at(-1));
+      assert.deepEqual(lineFields, [
+        'stock_count_line_line_number',
+        'stock_count_line_item_id',
+        'stock_count_line_expected_quantity',
+        'stock_count_line_counted_quantity',
+        'stock_count_line_variance_quantity',
+        'stock_count_line_unit_id',
+        'stock_count_line_reversal_of_movement_id',
+      ]);
+      for (const victim of [
+        'stock_count_line_expected_quantity',
+        'stock_count_line_counted_quantity',
+        'stock_count_line_variance_quantity',
+      ]) {
+        const mutation = structuredClone(inventoryModuleDefinition()) as {
+          fields: Array<{ fieldId: string }>;
+        };
+        mutation.fields = mutation.fields.filter(
+          (field) => !field.fieldId.endsWith(`:field.${victim}`),
+        );
+        const result = compileApplication(moduleInput(mutation));
+        assertCompileDiagnostic(
+          result,
+          'INVENTORY_COUNT_EVIDENCE_INVALID',
+          `$.fields.${victim}`,
+          `northstar.inventory:field.${victim}`,
+        );
+      }
+      for (const relationLocalId of [
+        'stock_count_transaction',
+        'stock_count_supersedes',
+        'stock_count_line_session',
+        'stock_count_line_transaction_line',
+      ]) {
+        const mutation = structuredClone(inventoryModuleDefinition()) as {
+          relations: Array<{ relationId: string }>;
+        };
+        mutation.relations = mutation.relations.filter(
+          (relation) =>
+            !relation.relationId.endsWith(`:relation.${relationLocalId}`),
+        );
+        const result = compileApplication(moduleInput(mutation));
+        assertCompileDiagnostic(
+          result,
+          'INVENTORY_COUNT_EVIDENCE_INVALID',
+          `$.relations.${relationLocalId}`,
+          `northstar.inventory:relation.${relationLocalId}`,
+        );
+      }
+    },
+  );
 
   for (const fieldLocalId of [
     'inventory_transaction_line_item_id',
@@ -1028,6 +1103,47 @@ export function registerInventoryContractCases(
           subjectId: 'northstar.inventory:artifact.movement_value',
         },
       ]);
+
+      const countMoneyValue = mutableContract();
+      countMoneyValue.countEvidence.lineValues.push({
+        fieldId: 'unitCost',
+        presence: 'required',
+        semantic: 'ordinaryQuantity',
+        valueShape: { representation: 'canonicalDecimalStringV2' },
+      });
+      const countMoneyResult = compileInventoryContract(countMoneyValue);
+      assert.equal(countMoneyResult.status, 'failed');
+      assertHasDiagnostic(
+        countMoneyResult.diagnostics,
+        'INVENTORY_COUNT_EVIDENCE_MONEY_FORBIDDEN',
+        '$.countEvidence.lineValues.3.fieldId',
+        'unitCost',
+      );
+    },
+  );
+
+  register(
+    'the count-evidence contract requires expected, counted, and variance independently',
+    () => {
+      for (const fieldId of [
+        'expectedQuantity',
+        'countedQuantity',
+        'varianceQuantity',
+      ]) {
+        const candidate = mutableContract();
+        candidate.countEvidence.lineValues =
+          candidate.countEvidence.lineValues.filter(
+            (value) => value.fieldId !== fieldId,
+          );
+        const result = compileInventoryContract(candidate);
+        assert.equal(result.status, 'failed');
+        assertHasDiagnostic(
+          result.diagnostics,
+          'INVENTORY_COUNT_EVIDENCE_INVALID',
+          '$.countEvidence.lineValues',
+          null,
+        );
+      }
     },
   );
 
@@ -1244,15 +1360,16 @@ export function registerInventoryContractCases(
       oldDependencyProtocol.authoritativeDependencies[key] =
         oldDependencyProtocol.authoritativeDependencies[key].filter(
           (entry) =>
-            !(
-              entry.dependencyId === 'northstar.trust:outbox_event' &&
-              entry.access === 'read'
-            ),
+            ![
+              'northstar.inventory:stock_count',
+              'northstar.inventory:stock_count_line',
+              'northstar.inventory:stock_count.state',
+            ].includes(String(entry.dependencyId)),
         );
     }
-    oldDependencyProtocol.authoritativeDependencies.version = 2;
+    oldDependencyProtocol.authoritativeDependencies.version = 3;
     oldDependencyProtocol.authoritativeDependencies.dependencySetRoot =
-      '2eb1de635331ee5781fe928a37d3664e3d4f8ccfe56ca44e231a652a806eca05';
+      '35fc38eaca7fbe47d8da5030ceefce8211a2194a25d233c45282ef0450d553ad';
     const oldDependencyProtocolResult = compileInventoryContract(
       oldDependencyProtocol,
     );
@@ -1624,6 +1741,7 @@ function releaseSummary(compiled: CompiledInventoryContractV1): unknown {
   return {
     configuration: compiled.release.configuration,
     configurationScope: compiled.release.configurationScope,
+    countEvidence: contract.countEvidence,
     dependencySet: dependencies.dependencies.map(
       (entry) => `${entry.access}:${entry.dependencyId}`,
     ),

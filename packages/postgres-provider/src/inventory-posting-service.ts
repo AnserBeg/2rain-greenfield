@@ -36,7 +36,7 @@ export const INVENTORY_POSTING_CAPABILITY_VERSION = 1 as const;
 export const INVENTORY_POSTING_CAPABILITY_ID =
   `${'northstar'}.${'inventory'}:capability.posting` as const;
 export const INVENTORY_POSTING_DEPENDENCY_SET_ROOT =
-  '35fc38eaca7fbe47d8da5030ceefce8211a2194a25d233c45282ef0450d553ad' as const;
+  'ffd4e9f6103b5c6053c39b62fe64e69dd255cb0c86cfd349ae465ab25179b3d3' as const;
 // Finite hang-prevention bound, not a posting-latency budget or SLA. Fifteen
 // seconds leaves room for lock-holder coordination while still terminating an
 // acyclic lock convoy that PostgreSQL's deadlock detector cannot break.
@@ -44,7 +44,8 @@ const inventoryPostingLockTimeoutMilliseconds = 15_000;
 const requestKeyLockDerivationVersion =
   'northstar.inventory-posting-request-lock/v1';
 const legacyInventoryPostingInputDigestVersion = 1 as const;
-const currentInventoryPostingInputDigestVersion = 2 as const;
+const standardInventoryPostingInputDigestVersion = 2 as const;
+const stockCountInventoryPostingInputDigestVersion = 3 as const;
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const sha256Pattern = /^[0-9a-f]{64}$/u;
@@ -131,10 +132,49 @@ export interface InventoryTransferPostingCommandV1 {
   readonly transactionId: string;
 }
 
-export type InventoryPostingCommandV1 =
-  InventoryAdjustmentPostingCommandV1 | InventoryTransferPostingCommandV1;
+export type InventoryStockCountKindV1 = 'initial' | 'correction' | 'reversal';
 
-export type InventoryPostingRoleV1 = 'adjustment' | 'transfer';
+export interface InventoryStockCountLineV1 {
+  readonly countedQuantity: string;
+  readonly expectedQuantity: string;
+  readonly itemId: string;
+  readonly reversalOfMovementId: string | null;
+  readonly sourceLine: string;
+  readonly stockCountLineId: string;
+  readonly transactionLineId: string;
+  readonly unitId: string;
+  readonly varianceQuantity: string;
+}
+
+export interface InventoryStockCountPostingCommandV1 {
+  readonly authorization: InventoryPostingAuthorizationV1;
+  readonly channel: InvocationChannel;
+  readonly effectiveAt: string;
+  readonly idempotencyKey: string;
+  readonly kind: InventoryStockCountKindV1;
+  readonly legalEntityId: string;
+  readonly lines: readonly InventoryStockCountLineV1[];
+  readonly locationId: string;
+  readonly reason: {
+    readonly code: string;
+    readonly narrative: string | null;
+  };
+  readonly sourceId: string;
+  readonly sourceRevision: number;
+  readonly sourceType: 'stockCount';
+  readonly stockCountId: string;
+  readonly stockDimensionSetVersion: 'v1';
+  readonly supersedesStockCountId: string | null;
+  readonly transactionId: string;
+}
+
+export type InventoryPostingCommandV1 =
+  | InventoryAdjustmentPostingCommandV1
+  | InventoryStockCountPostingCommandV1
+  | InventoryTransferPostingCommandV1;
+
+export type InventoryPostingRoleV1 =
+  'adjustment' | 'correction' | 'count' | 'transfer';
 
 export interface InventoryMovementOrderEntryV1 {
   readonly effectiveAt: string;
@@ -164,6 +204,27 @@ export interface PostedInventoryMovementV1 {
   readonly unitId: string;
 }
 
+export interface PostedStockCountLineEvidenceV1 {
+  readonly countedQuantity: string;
+  readonly expectedQuantity: string;
+  readonly itemId: string;
+  readonly movementId: string;
+  readonly reversalOfMovementId: string | null;
+  readonly sourceLine: string;
+  readonly stockCountLineId: string;
+  readonly transactionLineId: string;
+  readonly unitId: string;
+  readonly varianceQuantity: string;
+}
+
+export interface PostedStockCountEvidenceV1 {
+  readonly kind: InventoryStockCountKindV1;
+  readonly lines: readonly PostedStockCountLineEvidenceV1[];
+  readonly locationId: string;
+  readonly stockCountId: string;
+  readonly supersedesStockCountId: string | null;
+}
+
 export interface InventoryPostingTrustLinksV1 {
   readonly changeDocumentId: string;
   readonly correlationId: string;
@@ -184,17 +245,20 @@ export interface InventoryPostingResultV1 {
   readonly negativeStockFlag: boolean;
   readonly recordedAt: string;
   readonly replayed: boolean;
+  readonly stockCountEvidence: PostedStockCountEvidenceV1 | null;
   readonly transactionId: string;
   readonly trust: InventoryPostingTrustLinksV1;
 }
 
 export type InventoryAdjustmentPostingResultV1 = InventoryPostingResultV1;
 export type InventoryTransferPostingResultV1 = InventoryPostingResultV1;
+export type InventoryStockCountPostingResultV1 = InventoryPostingResultV1;
 
 type RecordedInventoryPostingResult = Omit<
   InventoryPostingResultV1,
-  'movements'
+  'movements' | 'stockCountEvidence'
 > & {
+  readonly stockCountEvidence?: PostedStockCountEvidenceV1 | null;
   readonly movements: readonly (Omit<
     PostedInventoryMovementV1,
     'postingRole'
@@ -208,6 +272,10 @@ export type InventoryPostingErrorCode =
   | 'INVENTORY_ADJUSTMENT_REASON_REQUIRED'
   | 'INVENTORY_BACKDATE_LIMIT_EXCEEDED'
   | 'INVENTORY_BASE_UNIT_IMMUTABLE'
+  | 'INVENTORY_COUNT_APPROVAL_REQUIRED'
+  | 'INVENTORY_COUNT_COMPENSATION_CONFLICT'
+  | 'INVENTORY_COUNT_EVIDENCE_CONFLICT'
+  | 'INVENTORY_COUNT_REASON_REQUIRED'
   | 'INVENTORY_ITEM_INACTIVE'
   | 'INVENTORY_ITEM_UNIT_MISMATCH'
   | 'INVENTORY_LEGAL_ENTITY_INACTIVE'
@@ -262,15 +330,19 @@ interface PostingStorageBinding {
   movement: EntityBinding;
   movementBusinessPeriodColumn: string;
   movementPostingRoleAdjustment: string;
+  movementPostingRoleCorrection: string;
+  movementPostingRoleCount: string;
   movementPostingRoleTransfer: string;
   movementRelationToLineColumn: string;
   movementRelationToTransactionColumn: string;
+  movementReversalOfMovementColumn: string;
   movementStockVersionV1: string;
   periodLock: EntityBinding;
   periodLockClosedThroughColumn: string;
   schemaName: string;
   transaction: EntityBinding;
   transactionAdjustmentType: string;
+  transactionCountCorrectionType: string;
   transactionTransferType: string;
   transactionDraftState: string;
   transactionPostedState: string;
@@ -284,6 +356,32 @@ interface PostingStorageBinding {
   transactionLineRelationToTransactionColumn: string;
   transactionLineToLocationColumn: string;
   transactionLineUnitColumn: string;
+  stockCount: EntityBinding;
+  stockCountActorColumn: string;
+  stockCountCountedAtColumn: string;
+  stockCountInitialKind: string;
+  stockCountCorrectionKind: string;
+  stockCountKindColumn: string;
+  stockCountLocationColumn: string;
+  stockCountPostedState: string;
+  stockCountReasonCodeColumn: string;
+  stockCountReasonNarrativeColumn: string;
+  stockCountRecordedAtColumn: string;
+  stockCountRelationToTransactionColumn: string;
+  stockCountReviewedState: string;
+  stockCountReversalKind: string;
+  stockCountStateColumn: string;
+  stockCountSupersedesColumn: string;
+  stockCountLine: EntityBinding;
+  stockCountLineCountedColumn: string;
+  stockCountLineExpectedColumn: string;
+  stockCountLineItemColumn: string;
+  stockCountLineLineNumberColumn: string;
+  stockCountLineRelationToSessionColumn: string;
+  stockCountLineRelationToTransactionLineColumn: string;
+  stockCountLineReversalColumn: string;
+  stockCountLineUnitColumn: string;
+  stockCountLineVarianceColumn: string;
 }
 
 type StorageEntityTarget = StorageTargetPayloadV1['entities'][number];
@@ -298,6 +396,7 @@ interface PlannedMovement {
   readonly quantityDelta: string;
   readonly quantityScaled: bigint;
   readonly recordedAt: string;
+  readonly reversalOfMovementId: string | null;
   readonly sourceId: string;
   readonly sourceLine: string;
   readonly sourceRevision: number;
@@ -322,7 +421,9 @@ interface RecordedReceiptRow {
 
 interface VersionedInputDigest {
   readonly value: string;
-  readonly version: typeof currentInventoryPostingInputDigestVersion;
+  readonly version:
+    | typeof standardInventoryPostingInputDigestVersion
+    | typeof stockCountInventoryPostingInputDigestVersion;
 }
 
 interface EvidenceIds {
@@ -341,6 +442,10 @@ type ParsedPosting =
   | {
       readonly command: InventoryTransferPostingCommandV1;
       readonly postingRole: 'transfer';
+    }
+  | {
+      readonly command: InventoryStockCountPostingCommandV1;
+      readonly postingRole: 'correction' | 'count';
     };
 
 /**
@@ -381,6 +486,18 @@ export class PostgresInventoryPostingService {
     return this.#post(context, actorEnvelope, {
       command: validateTransferCommand(command),
       postingRole: 'transfer',
+    });
+  }
+
+  async postStockCount(
+    context: TrustedRequestContext,
+    actorEnvelope: TrustedActorEnvelope,
+    command: InventoryStockCountPostingCommandV1,
+  ): Promise<InventoryStockCountPostingResultV1> {
+    const parsed = validateStockCountCommand(command);
+    return this.#post(context, actorEnvelope, {
+      command: parsed,
+      postingRole: parsed.kind === 'initial' ? 'count' : 'correction',
     });
   }
 
@@ -490,6 +607,14 @@ export class PostgresInventoryPostingService {
         parsed,
       );
       await assertInventoryLineSet(client, this.#binding, context, posting);
+      const countEvidenceDigest = isStockCountPosting(posting)
+        ? await lockAndAssertStockCountEvidence(
+            client,
+            this.#binding,
+            context,
+            posting,
+          )
+        : null;
       const naturalReplay = await findNaturalReplay(
         client,
         this.#binding,
@@ -514,6 +639,14 @@ export class PostgresInventoryPostingService {
       }
 
       await assertInventoryDraftHeader(client, this.#binding, context, posting);
+      if (isStockCountPosting(posting)) {
+        await assertStockCountCompensationAvailable(
+          client,
+          this.#binding,
+          context,
+          posting,
+        );
+      }
       await assertPostingMasters(
         client,
         this.#binding,
@@ -541,6 +674,7 @@ export class PostgresInventoryPostingService {
 
       await client.query('SAVEPOINT inventory_posting_write');
       let transactionRevision = -1;
+      let stockCountRevision: number | null = null;
       try {
         for (const movement of ordered) {
           await insertMovement(
@@ -559,6 +693,17 @@ export class PostgresInventoryPostingService {
           posting,
           lineSetDigest,
         );
+        if (isStockCountPosting(posting)) {
+          stockCountRevision = await transitionStockCountToPosted(
+            client,
+            this.#binding,
+            context,
+            actorEnvelope,
+            posting,
+            countEvidenceDigest!,
+            recordedAt,
+          );
+        }
         await client.query('RELEASE SAVEPOINT inventory_posting_write');
       } catch (error) {
         if (postgresCode(error) !== '23505') throw error;
@@ -598,6 +743,15 @@ export class PostgresInventoryPostingService {
         parsed.legalEntityId,
         ordered,
       );
+      const stockCountEvidence = isStockCountPosting(posting)
+        ? await readBackStockCountEvidence(
+            client,
+            this.#binding,
+            context,
+            posting,
+            persistedMovements,
+          )
+        : null;
       await resetModuleRole(client);
       const ids = mintEvidenceIds(this.mintUuid);
       const resultWithoutTrust = {
@@ -607,6 +761,7 @@ export class PostgresInventoryPostingService {
         negativeStockFlag,
         recordedAt,
         replayed: false,
+        stockCountEvidence,
         transactionId: parsed.transactionId,
       } as const;
       const trust = await persistAcceptedEvidence(
@@ -618,7 +773,7 @@ export class PostgresInventoryPostingService {
         configuration,
         resultWithoutTrust,
         ids,
-        transactionRevision,
+        stockCountRevision ?? transactionRevision,
       );
       const result = Object.freeze({ ...resultWithoutTrust, trust });
       await insertReceipt(
@@ -764,6 +919,8 @@ function resolvePostingStorage(
   const locationEntity = entity('location');
   const movementEntity = entity('inventory_movement');
   const periodLockEntity = entity('inventory_period_lock');
+  const stockCountEntity = entity('stock_count');
+  const stockCountLineEntity = entity('stock_count_line');
   const transactionEntity = entity('inventory_transaction');
   const transactionLineEntity = entity('inventory_transaction_line');
   if (
@@ -783,6 +940,8 @@ function resolvePostingStorage(
   const location = bindEntity(locationEntity);
   const movement = bindEntity(movementEntity);
   const periodLock = bindEntity(periodLockEntity);
+  const stockCount = bindEntity(stockCountEntity);
+  const stockCountLine = bindEntity(stockCountLineEntity);
   const transaction = bindEntity(transactionEntity);
   const transactionLine = bindEntity(transactionLineEntity);
   const transactionState = requiredField(
@@ -802,6 +961,8 @@ function resolvePostingStorage(
     movement,
     'inventory_movement_stock_dimension_set_version',
   );
+  const stockCountKind = requiredField(stockCount, 'stock_count_kind');
+  const stockCountState = requiredField(stockCount, 'stock_count_state');
   return Object.freeze({
     item,
     itemBaseUnitColumn: requiredField(item, 'item_base_unit').name,
@@ -816,6 +977,11 @@ function resolvePostingStorage(
       movementPostingRole,
       'adjustment',
     ),
+    movementPostingRoleCorrection: requiredEnumOption(
+      movementPostingRole,
+      'correction',
+    ),
+    movementPostingRoleCount: requiredEnumOption(movementPostingRole, 'count'),
     movementPostingRoleTransfer: requiredEnumOption(
       movementPostingRole,
       'transfer',
@@ -830,6 +996,10 @@ function resolvePostingStorage(
       movementEntity,
       'inventory_transaction',
     ),
+    movementReversalOfMovementColumn: requiredField(
+      movement,
+      'inventory_movement_reversal_of_movement_id',
+    ).name,
     movementStockVersionV1: requiredEnumOption(movementStockVersion, 'v1'),
     periodLock,
     periodLockClosedThroughColumn:
@@ -839,6 +1009,10 @@ function resolvePostingStorage(
     transactionAdjustmentType: requiredEnumOption(
       transactionType,
       'adjustment',
+    ),
+    transactionCountCorrectionType: requiredEnumOption(
+      transactionType,
+      'count_correction',
     ),
     transactionTransferType: requiredEnumOption(transactionType, 'transfer'),
     transactionDraftState: requiredEnumOption(transactionState, 'draft'),
@@ -874,6 +1048,85 @@ function resolvePostingStorage(
     transactionLineUnitColumn: requiredField(
       transactionLine,
       'inventory_transaction_line_unit_id',
+    ).name,
+    stockCount,
+    stockCountActorColumn: requiredField(stockCount, 'stock_count_actor_id')
+      .name,
+    stockCountCountedAtColumn: requiredField(
+      stockCount,
+      'stock_count_counted_at',
+    ).name,
+    stockCountCorrectionKind: requiredEnumOption(stockCountKind, 'correction'),
+    stockCountInitialKind: requiredEnumOption(stockCountKind, 'initial'),
+    stockCountKindColumn: stockCountKind.name,
+    stockCountLocationColumn: requiredField(
+      stockCount,
+      'stock_count_location_id',
+    ).name,
+    stockCountPostedState: requiredEnumOption(stockCountState, 'posted'),
+    stockCountReasonCodeColumn: requiredField(
+      stockCount,
+      'stock_count_reason_code',
+    ).name,
+    stockCountReasonNarrativeColumn: requiredField(
+      stockCount,
+      'stock_count_reason_narrative',
+    ).name,
+    stockCountRecordedAtColumn: requiredField(
+      stockCount,
+      'stock_count_recorded_at',
+    ).name,
+    stockCountRelationToTransactionColumn: requiredRelationColumn(
+      target,
+      stockCountEntity,
+      'inventory_transaction',
+    ),
+    stockCountReviewedState: requiredEnumOption(stockCountState, 'reviewed'),
+    stockCountReversalKind: requiredEnumOption(stockCountKind, 'reversal'),
+    stockCountStateColumn: stockCountState.name,
+    stockCountSupersedesColumn: requiredRelationColumn(
+      target,
+      stockCountEntity,
+      'stock_count',
+    ),
+    stockCountLine,
+    stockCountLineCountedColumn: requiredField(
+      stockCountLine,
+      'stock_count_line_counted_quantity',
+    ).name,
+    stockCountLineExpectedColumn: requiredField(
+      stockCountLine,
+      'stock_count_line_expected_quantity',
+    ).name,
+    stockCountLineItemColumn: requiredField(
+      stockCountLine,
+      'stock_count_line_item_id',
+    ).name,
+    stockCountLineLineNumberColumn: requiredField(
+      stockCountLine,
+      'stock_count_line_line_number',
+    ).name,
+    stockCountLineRelationToSessionColumn: requiredRelationColumn(
+      target,
+      stockCountLineEntity,
+      'stock_count',
+    ),
+    stockCountLineRelationToTransactionLineColumn: requiredRelationColumn(
+      target,
+      stockCountLineEntity,
+      'inventory_transaction_line',
+    ),
+    stockCountLineReversalColumn: requiredField(
+      stockCountLine,
+      'stock_count_line_reversal_of_movement_id',
+    ).name,
+    stockCountLineUnitColumn: requiredField(
+      stockCountLine,
+      'stock_count_line_unit_id',
+    ).name,
+    stockCountLineVarianceColumn: requiredField(
+      stockCountLine,
+      'stock_count_line_variance_quantity',
     ).name,
   });
 }
@@ -934,9 +1187,16 @@ function movementPostingRole(
   binding: PostingStorageBinding,
   postingRole: InventoryPostingRoleV1,
 ): string {
-  return postingRole === 'adjustment'
-    ? binding.movementPostingRoleAdjustment
-    : binding.movementPostingRoleTransfer;
+  switch (postingRole) {
+    case 'adjustment':
+      return binding.movementPostingRoleAdjustment;
+    case 'correction':
+      return binding.movementPostingRoleCorrection;
+    case 'count':
+      return binding.movementPostingRoleCount;
+    case 'transfer':
+      return binding.movementPostingRoleTransfer;
+  }
 }
 
 function postingRoleFromStorage(
@@ -944,6 +1204,8 @@ function postingRoleFromStorage(
   value: string,
 ): InventoryPostingRoleV1 {
   if (value === binding.movementPostingRoleAdjustment) return 'adjustment';
+  if (value === binding.movementPostingRoleCorrection) return 'correction';
+  if (value === binding.movementPostingRoleCount) return 'count';
   if (value === binding.movementPostingRoleTransfer) return 'transfer';
   throw postingError(
     'INVENTORY_POSTING_STORAGE_REJECTED',
@@ -955,9 +1217,15 @@ function transactionType(
   binding: PostingStorageBinding,
   postingRole: InventoryPostingRoleV1,
 ): string {
-  return postingRole === 'adjustment'
-    ? binding.transactionAdjustmentType
-    : binding.transactionTransferType;
+  switch (postingRole) {
+    case 'adjustment':
+      return binding.transactionAdjustmentType;
+    case 'correction':
+    case 'count':
+      return binding.transactionCountCorrectionType;
+    case 'transfer':
+      return binding.transactionTransferType;
+  }
 }
 
 function requiredRelationColumn(
@@ -1062,7 +1330,118 @@ function validateTransferCommand(
   };
 }
 
-function validateCommandEnvelope(command: InventoryPostingCommandV1): void {
+function validateStockCountCommand(
+  command: InventoryStockCountPostingCommandV1,
+): InventoryStockCountPostingCommandV1 {
+  validateCommandEnvelope(command, [
+    'kind',
+    'locationId',
+    'stockCountId',
+    'supersedesStockCountId',
+  ]);
+  if (!['initial', 'correction', 'reversal'].includes(command.kind)) {
+    throw inputError('stock count kind is not supported');
+  }
+  requiredUuid(command.locationId, 'locationId');
+  requiredUuid(command.stockCountId, 'stockCountId');
+  if (command.sourceType !== 'stockCount') {
+    throw inputError('stock-count sourceType must be stockCount');
+  }
+  if (command.sourceId.toLowerCase() !== command.stockCountId.toLowerCase()) {
+    throw inputError('stock-count sourceId must equal stockCountId');
+  }
+  if (command.kind === 'initial') {
+    if (command.supersedesStockCountId !== null) {
+      throw inputError('an initial stock count cannot supersede another count');
+    }
+  } else {
+    if (command.supersedesStockCountId === null) {
+      throw inputError('a correction or reversal must supersede a stock count');
+    }
+    requiredUuid(command.supersedesStockCountId, 'supersedesStockCountId');
+    if (
+      command.supersedesStockCountId.toLowerCase() ===
+      command.stockCountId.toLowerCase()
+    ) {
+      throw inputError('a stock count cannot supersede itself');
+    }
+  }
+  if (!Array.isArray(command.lines) || command.lines.length === 0) {
+    throw inputError('a stock count requires at least one line');
+  }
+  const naturalKeys = new Set<string>();
+  const evidenceIds = new Set<string>();
+  for (const line of command.lines) {
+    exactKeys(line, [
+      'countedQuantity',
+      'expectedQuantity',
+      'itemId',
+      'reversalOfMovementId',
+      'sourceLine',
+      'stockCountLineId',
+      'transactionLineId',
+      'unitId',
+      'varianceQuantity',
+    ]);
+    validateLineIdentity(line);
+    requiredUuid(line.stockCountLineId, 'line.stockCountLineId');
+    if (evidenceIds.has(line.stockCountLineId.toLowerCase())) {
+      throw inputError('stock-count lines repeat a stockCountLineId');
+    }
+    evidenceIds.add(line.stockCountLineId.toLowerCase());
+    const expected = decimalToScaled(
+      line.expectedQuantity,
+      'line.expectedQuantity',
+    );
+    const counted = decimalToScaled(
+      line.countedQuantity,
+      'line.countedQuantity',
+    );
+    const variance = decimalToScaled(
+      line.varianceQuantity,
+      'line.varianceQuantity',
+    );
+    if (expected < 0n || counted < 0n) {
+      throw inputError('expected and counted quantities cannot be negative');
+    }
+    if (counted - expected !== variance) {
+      throw inputError('varianceQuantity must equal counted minus expected');
+    }
+    if (command.kind === 'reversal') {
+      if (line.reversalOfMovementId === null) {
+        throw inputError('a reversal line must name reversalOfMovementId');
+      }
+      requiredUuid(line.reversalOfMovementId, 'line.reversalOfMovementId');
+    } else if (line.reversalOfMovementId !== null) {
+      throw inputError('only reversal lines may name reversalOfMovementId');
+    }
+    assertUniqueSourceLine(naturalKeys, line.sourceLine, 'correction');
+  }
+  const parsed = structuredClone(command);
+  return {
+    ...normalizeCommandEnvelope(parsed),
+    locationId: parsed.locationId.toLowerCase(),
+    sourceId: parsed.sourceId.toLowerCase(),
+    stockCountId: parsed.stockCountId.toLowerCase(),
+    supersedesStockCountId:
+      parsed.supersedesStockCountId?.toLowerCase() ?? null,
+    lines: parsed.lines.map((line) => ({
+      ...line,
+      countedQuantity: normalizeDecimal(line.countedQuantity),
+      expectedQuantity: normalizeDecimal(line.expectedQuantity),
+      itemId: line.itemId.toLowerCase(),
+      reversalOfMovementId: line.reversalOfMovementId?.toLowerCase() ?? null,
+      stockCountLineId: line.stockCountLineId.toLowerCase(),
+      transactionLineId: line.transactionLineId.toLowerCase(),
+      varianceQuantity: normalizeDecimal(line.varianceQuantity),
+    })),
+  };
+}
+
+function validateCommandEnvelope(
+  command: InventoryPostingCommandV1,
+  additionalKeys: readonly string[] = [],
+): void {
   exactKeys(command, [
     'authorization',
     'channel',
@@ -1076,6 +1455,7 @@ function validateCommandEnvelope(command: InventoryPostingCommandV1): void {
     'sourceType',
     'stockDimensionSetVersion',
     'transactionId',
+    ...additionalKeys,
   ]);
   exactKeys(command.authorization, [
     'decision',
@@ -1164,6 +1544,20 @@ function plannedMovements(
       ),
     );
   }
+  if (isStockCountPosting(posting)) {
+    return posting.command.lines.map((line) =>
+      plannedMovement(
+        posting.command,
+        line,
+        posting.command.locationId,
+        line.varianceQuantity,
+        line.sourceLine,
+        posting.postingRole,
+        mintUuid,
+        line.reversalOfMovementId,
+      ),
+    );
+  }
   return posting.command.lines.flatMap((line) => [
     plannedMovement(
       posting.command,
@@ -1188,12 +1582,16 @@ function plannedMovements(
 
 function plannedMovement(
   command: InventoryPostingCommandV1,
-  line: InventoryAdjustmentLineV1 | InventoryTransferLineV1,
+  line:
+    | InventoryAdjustmentLineV1
+    | InventoryStockCountLineV1
+    | InventoryTransferLineV1,
   locationId: string,
   quantityDelta: string,
   sourceLine: string,
   postingRole: InventoryPostingRoleV1,
   mintUuid: () => string,
+  reversalOfMovementId: string | null = null,
 ): PlannedMovement {
   const movementId = mintUuid();
   requiredUuid(movementId, 'minted movementId');
@@ -1207,6 +1605,7 @@ function plannedMovement(
     quantityDelta: normalizeDecimal(quantityDelta),
     quantityScaled: decimalToScaled(quantityDelta, 'movement.quantityDelta'),
     recordedAt: '',
+    reversalOfMovementId,
     sourceId: command.sourceId,
     sourceLine,
     sourceRevision: command.sourceRevision,
@@ -1510,7 +1909,9 @@ function enforceReasonAndApproval(
     const code =
       postingRole === 'adjustment'
         ? 'INVENTORY_ADJUSTMENT_REASON_REQUIRED'
-        : 'INVENTORY_TRANSFER_REASON_REQUIRED';
+        : postingRole === 'transfer'
+          ? 'INVENTORY_TRANSFER_REASON_REQUIRED'
+          : 'INVENTORY_COUNT_REASON_REQUIRED';
     throw postingError(code, `${postingRole} requires ${reason}`);
   }
   const threshold = configuration.approvalThresholds[postingRole];
@@ -1523,15 +1924,24 @@ function enforceReasonAndApproval(
             absolute(decimalToScaled(line.quantityDelta, 'quantity')) >
             scaledThreshold,
         )
-      : posting.command.lines.some(
-          (line) =>
-            decimalToScaled(line.quantity, 'quantity') > scaledThreshold,
-        );
+      : posting.postingRole === 'transfer'
+        ? posting.command.lines.some(
+            (line) =>
+              decimalToScaled(line.quantity, 'quantity') > scaledThreshold,
+          )
+        : posting.command.lines.some(
+            (line) =>
+              absolute(
+                decimalToScaled(line.varianceQuantity, 'varianceQuantity'),
+              ) > scaledThreshold,
+          );
   if (exceeds && actor.approvingHumanId === null) {
     const code =
       postingRole === 'adjustment'
         ? 'INVENTORY_ADJUSTMENT_APPROVAL_REQUIRED'
-        : 'INVENTORY_TRANSFER_APPROVAL_REQUIRED';
+        : postingRole === 'transfer'
+          ? 'INVENTORY_TRANSFER_APPROVAL_REQUIRED'
+          : 'INVENTORY_COUNT_APPROVAL_REQUIRED';
     throw postingError(
       code,
       `${postingRole} exceeds approval threshold ${threshold}`,
@@ -1709,7 +2119,10 @@ async function insertMovement(
       'inventory_movement_actor_id',
       actorEnvelope.actor.executionPrincipal.principalId,
     ],
-    ['inventory_movement_reversal_of_movement_id', null],
+    [
+      'inventory_movement_reversal_of_movement_id',
+      movement.reversalOfMovementId,
+    ],
   ] as const;
   const columns = [
     'tenant_id',
@@ -1910,10 +2323,22 @@ async function assertInventoryLineSet(
         line.transactionLineId,
       );
     }
-  } else {
+  } else if (posting.postingRole === 'transfer') {
     for (const line of posting.command.lines) {
       assertInventoryLineMatches(
         transferLineMatches(byId.get(line.transactionLineId), line),
+        command.transactionId,
+        line.transactionLineId,
+      );
+    }
+  } else {
+    for (const line of posting.command.lines) {
+      assertInventoryLineMatches(
+        stockCountTransactionLineMatches(
+          byId.get(line.transactionLineId),
+          posting.command.locationId,
+          line,
+        ),
         command.transactionId,
         line.transactionLineId,
       );
@@ -1965,8 +2390,487 @@ function transferLineMatches(
   );
 }
 
+function stockCountTransactionLineMatches(
+  row: Record<string, unknown> | undefined,
+  locationId: string,
+  line: InventoryStockCountLineV1,
+): boolean {
+  const negative = line.varianceQuantity.startsWith('-');
+  return (
+    row !== undefined &&
+    String(row.itemId).toLowerCase() === line.itemId &&
+    normalizeDatabaseDecimal(String(row.quantity)) === line.varianceQuantity &&
+    String(row.unitId) === line.unitId &&
+    String(row.lineNumber) === line.sourceLine &&
+    nullableUuid(row.fromLocationId) === (negative ? locationId : null) &&
+    nullableUuid(row.toLocationId) === (negative ? null : locationId)
+  );
+}
+
 function nullableUuid(value: unknown): string | null {
   return value === null ? null : String(value).toLowerCase();
+}
+
+function isStockCountPosting(
+  posting: ParsedPosting,
+): posting is Extract<ParsedPosting, { postingRole: 'correction' | 'count' }> {
+  return (
+    posting.postingRole === 'count' || posting.postingRole === 'correction'
+  );
+}
+
+function stockCountKindFromStorage(
+  binding: PostingStorageBinding,
+  value: string,
+): InventoryStockCountKindV1 {
+  if (value === binding.stockCountInitialKind) return 'initial';
+  if (value === binding.stockCountCorrectionKind) return 'correction';
+  if (value === binding.stockCountReversalKind) return 'reversal';
+  throw postingError(
+    'INVENTORY_COUNT_EVIDENCE_CONFLICT',
+    `stock count returned unsupported kind ${value}`,
+  );
+}
+
+function stockCountKindToStorage(
+  binding: PostingStorageBinding,
+  value: InventoryStockCountKindV1,
+): string {
+  switch (value) {
+    case 'initial':
+      return binding.stockCountInitialKind;
+    case 'correction':
+      return binding.stockCountCorrectionKind;
+    case 'reversal':
+      return binding.stockCountReversalKind;
+  }
+}
+
+async function lockAndAssertStockCountEvidence(
+  client: PoolClient,
+  binding: PostingStorageBinding,
+  context: TrustedRequestContext,
+  posting: Extract<ParsedPosting, { postingRole: 'correction' | 'count' }>,
+): Promise<string> {
+  const { command } = posting;
+  const session = await client.query<Record<string, unknown>>(
+    `SELECT ${quoted(binding.stockCountStateColumn)} AS state,
+            ${quoted(binding.stockCountKindColumn)} AS kind,
+            ${quoted(binding.stockCountLocationColumn)}::text AS "locationId",
+            to_char(${quoted(binding.stockCountCountedAtColumn)} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "countedAt",
+            ${quoted(binding.stockCountReasonCodeColumn)} AS "reasonCode",
+            ${quoted(binding.stockCountReasonNarrativeColumn)} AS "reasonNarrative",
+            ${quoted(binding.stockCountSupersedesColumn)}::text AS "supersedesStockCountId",
+            ${quoted(binding.stockCountRelationToTransactionColumn)}::text AS "transactionId",
+            ${quoted(binding.stockCount.revisionColumn)}::integer AS revision
+       FROM ${table(binding, binding.stockCount)}
+      WHERE tenant_id = $1 AND environment_id = $2
+        AND ${quoted(binding.stockCount.legalEntityColumn!)} = $3
+        AND ${quoted(binding.stockCount.recordIdColumn)} = $4
+        AND ${quoted(binding.stockCount.archiveColumn)} IS NULL
+      FOR NO KEY UPDATE`,
+    [
+      context.tenantId,
+      context.environmentId,
+      command.legalEntityId,
+      command.stockCountId,
+    ],
+  );
+  const row = session.rows[0];
+  const state = row?.state;
+  if (
+    session.rows.length !== 1 ||
+    (state !== binding.stockCountReviewedState &&
+      state !== binding.stockCountPostedState) ||
+    stockCountKindFromStorage(binding, String(row!.kind)) !== command.kind ||
+    String(row!.locationId).toLowerCase() !== command.locationId ||
+    String(row!.countedAt) !== command.effectiveAt ||
+    String(row!.reasonCode ?? '') !== command.reason.code ||
+    (row!.reasonNarrative === null ? null : String(row!.reasonNarrative)) !==
+      command.reason.narrative ||
+    nullableUuid(row!.supersedesStockCountId) !==
+      command.supersedesStockCountId ||
+    String(row!.transactionId).toLowerCase() !== command.transactionId ||
+    Number(row!.revision) !==
+      (state === binding.stockCountReviewedState
+        ? command.sourceRevision
+        : command.sourceRevision + 1)
+  ) {
+    throw postingError(
+      'INVENTORY_COUNT_EVIDENCE_CONFLICT',
+      `stock count ${command.stockCountId} does not exactly match the reviewed evidence`,
+      { stockCountId: command.stockCountId },
+    );
+  }
+
+  const lines = await client.query<Record<string, unknown>>(
+    `SELECT ${quoted(binding.stockCountLine.recordIdColumn)}::text AS "stockCountLineId",
+            ${quoted(binding.stockCountLineItemColumn)}::text AS "itemId",
+            ${quoted(binding.stockCountLineLineNumberColumn)}::text AS "sourceLine",
+            ${quoted(binding.stockCountLineExpectedColumn)}::text AS "expectedQuantity",
+            ${quoted(binding.stockCountLineCountedColumn)}::text AS "countedQuantity",
+            ${quoted(binding.stockCountLineVarianceColumn)}::text AS "varianceQuantity",
+            ${quoted(binding.stockCountLineUnitColumn)} AS "unitId",
+            ${quoted(binding.stockCountLineReversalColumn)}::text AS "reversalOfMovementId",
+            ${quoted(binding.stockCountLineRelationToTransactionLineColumn)}::text AS "transactionLineId"
+       FROM ${table(binding, binding.stockCountLine)}
+      WHERE tenant_id = $1 AND environment_id = $2
+        AND ${quoted(binding.stockCountLine.legalEntityColumn!)} = $3
+        AND ${quoted(binding.stockCountLineRelationToSessionColumn)} = $4
+        AND ${quoted(binding.stockCountLine.archiveColumn)} IS NULL
+      ORDER BY ${quoted(binding.stockCountLine.recordIdColumn)}
+      FOR NO KEY UPDATE`,
+    [
+      context.tenantId,
+      context.environmentId,
+      command.legalEntityId,
+      command.stockCountId,
+    ],
+  );
+  if (lines.rows.length !== command.lines.length) {
+    throw postingError(
+      'INVENTORY_COUNT_EVIDENCE_CONFLICT',
+      `stock count ${command.stockCountId} line set differs from the posting command`,
+      { stockCountId: command.stockCountId },
+    );
+  }
+  const byId = new Map(
+    lines.rows.map((line) => [
+      String(line.stockCountLineId).toLowerCase(),
+      line,
+    ]),
+  );
+  for (const line of command.lines) {
+    const persisted = byId.get(line.stockCountLineId);
+    if (
+      persisted === undefined ||
+      String(persisted.itemId).toLowerCase() !== line.itemId ||
+      String(persisted.sourceLine) !== line.sourceLine ||
+      normalizeDatabaseDecimal(String(persisted.expectedQuantity)) !==
+        line.expectedQuantity ||
+      normalizeDatabaseDecimal(String(persisted.countedQuantity)) !==
+        line.countedQuantity ||
+      normalizeDatabaseDecimal(String(persisted.varianceQuantity)) !==
+        line.varianceQuantity ||
+      String(persisted.unitId) !== line.unitId ||
+      nullableUuid(persisted.reversalOfMovementId) !==
+        line.reversalOfMovementId ||
+      nullableUuid(persisted.transactionLineId) !== line.transactionLineId
+    ) {
+      throw postingError(
+        'INVENTORY_COUNT_EVIDENCE_CONFLICT',
+        `stock-count line ${line.stockCountLineId} differs from the posting command`,
+        { stockCountLineId: line.stockCountLineId },
+      );
+    }
+  }
+  const digest = await client.query<{ digest: string }>(
+    `SELECT ${stockCountEvidenceDigestSql(binding, '$1', '$2', '$3', '$4')} AS digest`,
+    [
+      context.tenantId,
+      context.environmentId,
+      command.legalEntityId,
+      command.stockCountId,
+    ],
+  );
+  if (!/^[0-9a-f]{32}$/u.test(digest.rows[0]?.digest ?? '')) {
+    throw postingError(
+      'INVENTORY_POSTING_STORAGE_INVALID',
+      'stock-count evidence digest could not be captured',
+      { stockCountId: command.stockCountId },
+    );
+  }
+  return digest.rows[0]!.digest;
+}
+
+async function assertStockCountCompensationAvailable(
+  client: PoolClient,
+  binding: PostingStorageBinding,
+  context: TrustedRequestContext,
+  posting: Extract<ParsedPosting, { postingRole: 'correction' | 'count' }>,
+): Promise<void> {
+  const { command } = posting;
+  if (command.kind === 'initial') return;
+  const prior = await client.query<Record<string, unknown>>(
+    `SELECT ${quoted(binding.stockCountStateColumn)} AS state,
+            ${quoted(binding.stockCountLocationColumn)}::text AS "locationId"
+       FROM ${table(binding, binding.stockCount)}
+      WHERE tenant_id = $1 AND environment_id = $2
+        AND ${quoted(binding.stockCount.legalEntityColumn!)} = $3
+        AND ${quoted(binding.stockCount.recordIdColumn)} = $4
+        AND ${quoted(binding.stockCount.archiveColumn)} IS NULL
+      FOR NO KEY UPDATE`,
+    [
+      context.tenantId,
+      context.environmentId,
+      command.legalEntityId,
+      command.supersedesStockCountId,
+    ],
+  );
+  if (
+    prior.rows.length !== 1 ||
+    prior.rows[0]!.state !== binding.stockCountPostedState ||
+    String(prior.rows[0]!.locationId).toLowerCase() !== command.locationId
+  ) {
+    throw postingError(
+      'INVENTORY_COUNT_COMPENSATION_CONFLICT',
+      'a correction or reversal must supersede one posted count at the same location',
+      { supersedesStockCountId: command.supersedesStockCountId! },
+    );
+  }
+  const alreadyCompensated = await client.query<{ present: boolean }>(
+    `SELECT true AS present
+       FROM ${table(binding, binding.stockCount)}
+      WHERE tenant_id = $1 AND environment_id = $2
+        AND ${quoted(binding.stockCount.legalEntityColumn!)} = $3
+        AND ${quoted(binding.stockCountSupersedesColumn)} = $4
+        AND ${quoted(binding.stockCount.recordIdColumn)} <> $5
+        AND ${quoted(binding.stockCountStateColumn)} = $6
+        AND ${quoted(binding.stockCount.archiveColumn)} IS NULL
+      LIMIT 1
+      FOR NO KEY UPDATE`,
+    [
+      context.tenantId,
+      context.environmentId,
+      command.legalEntityId,
+      command.supersedesStockCountId,
+      command.stockCountId,
+      binding.stockCountPostedState,
+    ],
+  );
+  if (alreadyCompensated.rows[0]?.present) {
+    throw postingError(
+      'INVENTORY_COUNT_COMPENSATION_CONFLICT',
+      `stock count ${command.supersedesStockCountId!} already has a posted compensation`,
+      { supersedesStockCountId: command.supersedesStockCountId! },
+    );
+  }
+  if (command.kind !== 'reversal') return;
+  for (const line of command.lines) {
+    const priorMovement = await client.query<Record<string, unknown>>(
+      `SELECT ${quoted(requiredField(binding.movement, 'inventory_movement_item_id').name)}::text AS "itemId",
+              ${quoted(requiredField(binding.movement, 'inventory_movement_location_id').name)}::text AS "locationId",
+              ${quoted(requiredField(binding.movement, 'inventory_movement_quantity_delta').name)}::text AS "quantityDelta",
+              ${quoted(requiredField(binding.movement, 'inventory_movement_unit_id').name)} AS "unitId"
+         FROM ${table(binding, binding.movement)} AS movement
+         JOIN ${table(binding, binding.stockCountLine)} AS count_line
+           ON count_line.tenant_id = movement.tenant_id
+          AND count_line.environment_id = movement.environment_id
+          AND count_line.${quoted(binding.stockCountLine.legalEntityColumn!)} = movement.${quoted(binding.movement.legalEntityColumn!)}
+          AND count_line.${quoted(binding.stockCountLineRelationToTransactionLineColumn)} = movement.${quoted(binding.movementRelationToLineColumn)}
+        WHERE movement.tenant_id = $1 AND movement.environment_id = $2
+          AND movement.${quoted(binding.movement.legalEntityColumn!)} = $3
+          AND movement.${quoted(binding.movement.recordIdColumn)} = $4
+          AND count_line.${quoted(binding.stockCountLineRelationToSessionColumn)} = $5
+          AND count_line.${quoted(binding.stockCountLine.archiveColumn)} IS NULL`,
+      [
+        context.tenantId,
+        context.environmentId,
+        command.legalEntityId,
+        line.reversalOfMovementId,
+        command.supersedesStockCountId,
+      ],
+    );
+    const priorLine = priorMovement.rows[0];
+    if (
+      priorMovement.rows.length !== 1 ||
+      String(priorLine!.itemId).toLowerCase() !== line.itemId ||
+      String(priorLine!.locationId).toLowerCase() !== command.locationId ||
+      String(priorLine!.unitId) !== line.unitId ||
+      databaseDecimalToScaled(String(priorLine!.quantityDelta)) !==
+        -decimalToScaled(line.varianceQuantity, 'line.varianceQuantity')
+    ) {
+      throw postingError(
+        'INVENTORY_COUNT_COMPENSATION_CONFLICT',
+        `reversal line ${line.stockCountLineId} is not the exact inverse of its superseded movement`,
+        { stockCountLineId: line.stockCountLineId },
+      );
+    }
+  }
+}
+
+function stockCountEvidenceDigestSql(
+  binding: PostingStorageBinding,
+  tenantParameter: string,
+  environmentParameter: string,
+  legalEntityParameter: string,
+  stockCountParameter: string,
+): string {
+  return `(SELECT md5(jsonb_build_object(
+              'session', to_jsonb(count_session),
+              'lines', COALESCE((
+                SELECT jsonb_agg(to_jsonb(count_line)
+                         ORDER BY count_line.${quoted(binding.stockCountLine.recordIdColumn)}::text)
+                  FROM ${table(binding, binding.stockCountLine)} AS count_line
+                 WHERE count_line.tenant_id = ${tenantParameter}
+                   AND count_line.environment_id = ${environmentParameter}
+                   AND count_line.${quoted(binding.stockCountLine.legalEntityColumn!)} = ${legalEntityParameter}
+                   AND count_line.${quoted(binding.stockCountLineRelationToSessionColumn)} = ${stockCountParameter}
+                   AND count_line.${quoted(binding.stockCountLine.archiveColumn)} IS NULL
+              ), '[]'::jsonb)
+            )::text)
+       FROM ${table(binding, binding.stockCount)} AS count_session
+      WHERE count_session.tenant_id = ${tenantParameter}
+        AND count_session.environment_id = ${environmentParameter}
+        AND count_session.${quoted(binding.stockCount.legalEntityColumn!)} = ${legalEntityParameter}
+        AND count_session.${quoted(binding.stockCount.recordIdColumn)} = ${stockCountParameter}
+        AND count_session.${quoted(binding.stockCount.archiveColumn)} IS NULL)`;
+}
+
+async function transitionStockCountToPosted(
+  client: PoolClient,
+  binding: PostingStorageBinding,
+  context: TrustedRequestContext,
+  actorEnvelope: TrustedActorEnvelope,
+  posting: Extract<ParsedPosting, { postingRole: 'correction' | 'count' }>,
+  evidenceDigest: string,
+  recordedAt: string,
+): Promise<number> {
+  const { command } = posting;
+  const result = await client.query<{ revision: number }>(
+    `UPDATE ${table(binding, binding.stockCount)}
+        SET ${quoted(binding.stockCountStateColumn)} = $5,
+            ${quoted(binding.stockCountRecordedAtColumn)} = $6::timestamptz,
+            ${quoted(binding.stockCountActorColumn)} = $7,
+            ${quoted(binding.stockCount.revisionColumn)} = ${quoted(binding.stockCount.revisionColumn)} + 1
+      WHERE tenant_id = $1 AND environment_id = $2
+        AND ${quoted(binding.stockCount.legalEntityColumn!)} = $3
+        AND ${quoted(binding.stockCount.recordIdColumn)} = $4
+        AND ${quoted(binding.stockCountStateColumn)} = $8
+        AND ${quoted(binding.stockCountKindColumn)} = $9
+        AND ${quoted(binding.stockCountLocationColumn)} = $10
+        AND ${quoted(binding.stockCountRelationToTransactionColumn)} = $11
+        AND ${quoted(binding.stockCountSupersedesColumn)} IS NOT DISTINCT FROM $12::uuid
+        AND ${quoted(binding.stockCount.revisionColumn)} = $13
+        AND ${quoted(binding.stockCount.archiveColumn)} IS NULL
+        AND ${stockCountEvidenceDigestSql(binding, '$1', '$2', '$3', '$4')} = $14
+      RETURNING ${quoted(binding.stockCount.revisionColumn)}::integer AS revision`,
+    [
+      context.tenantId,
+      context.environmentId,
+      command.legalEntityId,
+      command.stockCountId,
+      binding.stockCountPostedState,
+      recordedAt,
+      actorEnvelope.actor.executionPrincipal.principalId,
+      binding.stockCountReviewedState,
+      stockCountKindToStorage(binding, command.kind),
+      command.locationId,
+      command.transactionId,
+      command.supersedesStockCountId,
+      command.sourceRevision,
+      evidenceDigest,
+    ],
+  );
+  if (
+    result.rowCount !== 1 ||
+    result.rows[0]?.revision !== command.sourceRevision + 1
+  ) {
+    throw postingError(
+      'INVENTORY_COUNT_EVIDENCE_CONFLICT',
+      `stock count ${command.stockCountId} changed after evidence validation`,
+      { stockCountId: command.stockCountId },
+    );
+  }
+  return result.rows[0].revision;
+}
+
+async function readBackStockCountEvidence(
+  client: PoolClient,
+  binding: PostingStorageBinding,
+  context: TrustedRequestContext,
+  posting: Extract<ParsedPosting, { postingRole: 'correction' | 'count' }>,
+  movements: readonly PostedInventoryMovementV1[],
+): Promise<PostedStockCountEvidenceV1> {
+  const { command } = posting;
+  const session = await client.query<Record<string, unknown>>(
+    `SELECT ${quoted(binding.stockCountKindColumn)} AS kind,
+            ${quoted(binding.stockCountLocationColumn)}::text AS "locationId",
+            ${quoted(binding.stockCountSupersedesColumn)}::text AS "supersedesStockCountId"
+       FROM ${table(binding, binding.stockCount)}
+      WHERE tenant_id = $1 AND environment_id = $2
+        AND ${quoted(binding.stockCount.legalEntityColumn!)} = $3
+        AND ${quoted(binding.stockCount.recordIdColumn)} = $4
+        AND ${quoted(binding.stockCountStateColumn)} = $5
+        AND ${quoted(binding.stockCount.archiveColumn)} IS NULL`,
+    [
+      context.tenantId,
+      context.environmentId,
+      command.legalEntityId,
+      command.stockCountId,
+      binding.stockCountPostedState,
+    ],
+  );
+  if (session.rows.length !== 1) {
+    throw postingError(
+      'INVENTORY_POSTING_STORAGE_REJECTED',
+      'stock-count session read-back did not return the posted session',
+    );
+  }
+  const lines = await client.query<Record<string, unknown>>(
+    `SELECT ${quoted(binding.stockCountLine.recordIdColumn)}::text AS "stockCountLineId",
+            ${quoted(binding.stockCountLineItemColumn)}::text AS "itemId",
+            ${quoted(binding.stockCountLineLineNumberColumn)}::text AS "sourceLine",
+            ${quoted(binding.stockCountLineExpectedColumn)}::text AS "expectedQuantity",
+            ${quoted(binding.stockCountLineCountedColumn)}::text AS "countedQuantity",
+            ${quoted(binding.stockCountLineVarianceColumn)}::text AS "varianceQuantity",
+            ${quoted(binding.stockCountLineUnitColumn)} AS "unitId",
+            ${quoted(binding.stockCountLineReversalColumn)}::text AS "reversalOfMovementId",
+            ${quoted(binding.stockCountLineRelationToTransactionLineColumn)}::text AS "transactionLineId"
+       FROM ${table(binding, binding.stockCountLine)}
+      WHERE tenant_id = $1 AND environment_id = $2
+        AND ${quoted(binding.stockCountLine.legalEntityColumn!)} = $3
+        AND ${quoted(binding.stockCountLineRelationToSessionColumn)} = $4
+        AND ${quoted(binding.stockCountLine.archiveColumn)} IS NULL
+      ORDER BY ${quoted(binding.stockCountLineLineNumberColumn)}`,
+    [
+      context.tenantId,
+      context.environmentId,
+      command.legalEntityId,
+      command.stockCountId,
+    ],
+  );
+  if (lines.rows.length !== command.lines.length) {
+    throw postingError(
+      'INVENTORY_POSTING_STORAGE_REJECTED',
+      'stock-count line read-back did not return the complete evidence set',
+    );
+  }
+  const movementByLine = new Map(
+    movements.map((movement) => [movement.transactionLineId, movement]),
+  );
+  const evidenceLines = lines.rows.map((line) => {
+    const transactionLineId = String(line.transactionLineId).toLowerCase();
+    const movement = movementByLine.get(transactionLineId);
+    if (!movement) {
+      throw postingError(
+        'INVENTORY_POSTING_STORAGE_REJECTED',
+        `stock-count line ${String(line.stockCountLineId)} has no posted movement`,
+      );
+    }
+    return Object.freeze({
+      countedQuantity: normalizeDatabaseDecimal(String(line.countedQuantity)),
+      expectedQuantity: normalizeDatabaseDecimal(String(line.expectedQuantity)),
+      itemId: String(line.itemId).toLowerCase(),
+      movementId: movement.movementId,
+      reversalOfMovementId: nullableUuid(line.reversalOfMovementId),
+      sourceLine: String(line.sourceLine),
+      stockCountLineId: String(line.stockCountLineId).toLowerCase(),
+      transactionLineId,
+      unitId: String(line.unitId),
+      varianceQuantity: normalizeDatabaseDecimal(String(line.varianceQuantity)),
+    });
+  });
+  const persistedSession = session.rows[0]!;
+  return Object.freeze({
+    kind: stockCountKindFromStorage(binding, String(persistedSession.kind)),
+    lines: Object.freeze(evidenceLines),
+    locationId: String(persistedSession.locationId).toLowerCase(),
+    stockCountId: command.stockCountId,
+    supersedesStockCountId: nullableUuid(
+      persistedSession.supersedesStockCountId,
+    ),
+  });
 }
 
 async function transitionTransactionToPosted(
@@ -2161,6 +3065,7 @@ async function findNaturalReplay(
               to_char(${quoted(requiredField(binding.movement, 'inventory_movement_effective_at').name)} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "effectiveAt",
               ${quoted(requiredField(binding.movement, 'inventory_movement_reason_code').name)} AS "reasonCode",
               ${quoted(requiredField(binding.movement, 'inventory_movement_reason_narrative').name)} AS "reasonNarrative",
+              ${quoted(binding.movementReversalOfMovementColumn)}::text AS "reversalOfMovementId",
               ${quoted(binding.movementRelationToTransactionColumn)}::text AS "transactionId",
               ${quoted(binding.movementRelationToLineColumn)}::text AS "transactionLineId"
          FROM ${table(binding, binding.movement)}
@@ -2194,6 +3099,8 @@ async function findNaturalReplay(
       String(row.reasonCode) !== command.reason.code ||
       (row.reasonNarrative === null ? null : String(row.reasonNarrative)) !==
         command.reason.narrative ||
+      nullableUuid(row.reversalOfMovementId) !==
+        movement.reversalOfMovementId ||
       String(row.transactionId) !== command.transactionId ||
       String(row.transactionLineId) !== movement.transactionLineId
     ) {
@@ -2367,7 +3274,7 @@ async function persistAcceptedEvidence(
   const namespace = capabilityNamespace(registration.capabilityId);
   const eventType = `${namespace}:event.${postingRole}_posted`;
   const eventVersion = `${namespace}-${postingRole}-posted/v1`;
-  const recordType = `${namespace}:record.${postingRole}`;
+  const recordType = `${namespace}:record.${isStockCountPosting(posting) ? 'stock_count' : postingRole}`;
   const metadata = redactEvidenceMetadata({
     capabilityVersion: classified(
       'INTERNAL',
@@ -2387,13 +3294,40 @@ async function persistAcceptedEvidence(
     postingRole: classified('INTERNAL', postingRole),
   });
   const changesInput: BusinessFieldChangeInput[] = [
-    businessChange('state', 'draft', 'posted'),
+    businessChange(
+      'state',
+      isStockCountPosting(posting) ? 'reviewed' : 'draft',
+      'posted',
+    ),
     businessChange('recordedAt', null, result.recordedAt),
     businessChange(
       'quantityDelta',
       null,
       result.movements.map((movement) => movement.quantityDelta),
     ),
+    ...(result.stockCountEvidence
+      ? [
+          businessChange(
+            'expectedQuantity',
+            null,
+            result.stockCountEvidence.lines.map(
+              (line) => line.expectedQuantity,
+            ),
+          ),
+          businessChange(
+            'countedQuantity',
+            null,
+            result.stockCountEvidence.lines.map((line) => line.countedQuantity),
+          ),
+          businessChange(
+            'varianceQuantity',
+            null,
+            result.stockCountEvidence.lines.map(
+              (line) => line.varianceQuantity,
+            ),
+          ),
+        ]
+      : []),
   ];
   const changes = redactBusinessChanges(changesInput);
   const eventPayload = redactEvidenceMetadata({
@@ -2405,6 +3339,7 @@ async function persistAcceptedEvidence(
     ),
     negativeStockFlag: classified('INTERNAL', result.negativeStockFlag),
     recordedAt: classified('INTERNAL', result.recordedAt),
+    stockCountEvidence: classified('INTERNAL', result.stockCountEvidence),
     transactionId: classified('INTERNAL', command.transactionId),
   });
   const actorColumns = resolvedActorColumns(actor);
@@ -2485,7 +3420,9 @@ async function persistAcceptedEvidence(
       registration.releaseId,
       registration.releaseContentHash,
       recordType,
-      command.transactionId,
+      isStockCountPosting(posting)
+        ? posting.command.stockCountId
+        : command.transactionId,
       transactionRevision,
       JSON.stringify(changes),
       actorColumns.executionPrincipalKind,
@@ -2650,6 +3587,11 @@ function naturalEffects(
       sourceLine: line.sourceLine,
     }));
   }
+  if (posting.postingRole === 'count' || posting.postingRole === 'correction') {
+    return posting.command.lines.map((line) => ({
+      sourceLine: line.sourceLine,
+    }));
+  }
   return posting.command.lines.flatMap((line) => [
     { sourceLine: transferEffectSourceLine(line.sourceLine, 'out') },
     { sourceLine: transferEffectSourceLine(line.sourceLine, 'in') },
@@ -2657,9 +3599,12 @@ function naturalEffects(
 }
 
 function currentCommandDigest(posting: ParsedPosting): VersionedInputDigest {
+  const version = isStockCountPosting(posting)
+    ? stockCountInventoryPostingInputDigestVersion
+    : standardInventoryPostingInputDigestVersion;
   return Object.freeze({
-    value: digestCommand(posting, currentInventoryPostingInputDigestVersion),
-    version: currentInventoryPostingInputDigestVersion,
+    value: digestCommand(posting, version),
+    version,
   });
 }
 
@@ -2669,10 +3614,19 @@ function digestCommand(posting: ParsedPosting, version: number): string {
   void idempotencyKey;
   const digestInput =
     version === legacyInventoryPostingInputDigestVersion
-      ? semanticInput
-      : version === currentInventoryPostingInputDigestVersion
-        ? { postingRole: posting.postingRole, ...semanticInput }
-        : unsupportedReceiptVersion(version);
+      ? posting.postingRole === 'adjustment'
+        ? semanticInput
+        : unsupportedReceiptVersion(version)
+      : version === standardInventoryPostingInputDigestVersion
+        ? posting.postingRole === 'adjustment' ||
+          posting.postingRole === 'transfer'
+          ? { postingRole: posting.postingRole, ...semanticInput }
+          : unsupportedReceiptVersion(version)
+        : version === stockCountInventoryPostingInputDigestVersion
+          ? isStockCountPosting(posting)
+            ? { postingRole: posting.postingRole, ...semanticInput }
+            : unsupportedReceiptVersion(version)
+          : unsupportedReceiptVersion(version);
   return createHash('sha256').update(canonicalize(digestInput)).digest('hex');
 }
 
@@ -2682,7 +3636,8 @@ function recordedResultForReplay(
   const version = receipt.input_digest_version;
   if (
     version !== legacyInventoryPostingInputDigestVersion &&
-    version !== currentInventoryPostingInputDigestVersion
+    version !== standardInventoryPostingInputDigestVersion &&
+    version !== stockCountInventoryPostingInputDigestVersion
   ) {
     return unsupportedReceiptVersion(version);
   }
@@ -2692,25 +3647,58 @@ function recordedResultForReplay(
       postingRole:
         version === legacyInventoryPostingInputDigestVersion
           ? 'adjustment'
-          : requiredRecordedPostingRole(movement.postingRole),
+          : requiredRecordedPostingRole(movement.postingRole, version),
     }),
   );
   return Object.freeze({
     ...receipt.mutation_result,
     movements,
     replayed: true,
+    stockCountEvidence:
+      version === stockCountInventoryPostingInputDigestVersion
+        ? requiredRecordedStockCountEvidence(
+            receipt.mutation_result.stockCountEvidence,
+          )
+        : null,
   });
 }
 
 function requiredRecordedPostingRole(
   postingRole: InventoryPostingRoleV1 | undefined,
+  version: number,
 ): InventoryPostingRoleV1 {
-  if (postingRole === 'adjustment' || postingRole === 'transfer') {
+  if (
+    version === standardInventoryPostingInputDigestVersion &&
+    (postingRole === 'adjustment' || postingRole === 'transfer')
+  ) {
+    return postingRole;
+  }
+  if (
+    version === stockCountInventoryPostingInputDigestVersion &&
+    (postingRole === 'count' || postingRole === 'correction')
+  ) {
     return postingRole;
   }
   throw postingError(
     'INVENTORY_POSTING_IDEMPOTENCY_CONFLICT',
     'persisted posting receipt has no valid posting role',
+  );
+}
+
+function requiredRecordedStockCountEvidence(
+  evidence: PostedStockCountEvidenceV1 | null | undefined,
+): PostedStockCountEvidenceV1 {
+  if (
+    evidence &&
+    Array.isArray(evidence.lines) &&
+    evidence.lines.length > 0 &&
+    ['initial', 'correction', 'reversal'].includes(evidence.kind)
+  ) {
+    return evidence;
+  }
+  throw postingError(
+    'INVENTORY_POSTING_IDEMPOTENCY_CONFLICT',
+    'persisted stock-count receipt has no readable count evidence',
   );
 }
 
