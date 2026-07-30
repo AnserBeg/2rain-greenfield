@@ -117,3 +117,103 @@ test('PostgreSQL owns same-statement fill, P4b invalidation, and no release muta
     /AsyncLocalStorage|defaultTenant|globalActiveRelease/,
   );
 });
+
+test('issued legal-entity read scope is generic, explicit, and complete across read dispatch', () => {
+  const runtime = read('packages/runtime/src/request-runtime-view.ts');
+  const gateway = read('packages/runtime/src/semantic-query-gateway.ts');
+  const interpreter = read(
+    'packages/postgres-provider/src/module-runtime-interpreter.ts',
+  );
+  const requestContext = read(
+    'packages/postgres-provider/src/request-context.ts',
+  );
+  const savedFilters = read(
+    'packages/postgres-provider/src/saved-filter-executor.ts',
+  );
+  const compiler = read('packages/compiler/src/storage.ts');
+  const scopeMechanism = interpreter.slice(
+    interpreter.indexOf('export function legalEntityReadScopeRequirement'),
+    interpreter.indexOf('function createChanges'),
+  );
+
+  assert.match(runtime, /issuedLegalEntityReadScopes = new WeakMap/);
+  assert.match(runtime, /legalEntityIds\.length === 0/);
+  assert.match(runtime, /for \(const legalEntityId of legalEntityIds\)/);
+  assert.match(runtime, /issuedLegalEntityReadScopes\.get\(value\) !== view/);
+  assert.match(
+    gateway,
+    /legalEntityReadScope:\s*executionContext\.legalEntityReadScope \?\? null/u,
+  );
+  assert.match(scopeMechanism, /Object\.hasOwn\(entity, 'legalEntity'\)/);
+  assert.match(scopeMechanism, /MODULE_LEGAL_ENTITY_READ_SCOPE_REQUIRED/);
+  assert.match(scopeMechanism, /MODULE_LEGAL_ENTITY_READ_SCOPE_NOT_FOUND/);
+  assert.match(scopeMechanism, /= ANY\(\$1::uuid\[\]\)/);
+  assert.doesNotMatch(
+    scopeMechanism,
+    /inventory|INVENTORY|entityId\.(?:includes|endsWith)|moduleId/u,
+  );
+  assert.match(
+    interpreter,
+    /legalEntityReadScopeJoinConjunction\(\s*plan\.target,\s*readScope,\s*values,\s*plan\.tableAlias/u,
+  );
+  assert.ok(
+    [...interpreter.matchAll(/appendLegalEntityReadScopePredicate\(/gu)]
+      .length >= 7,
+  );
+  assert.match(
+    savedFilters,
+    /this\.#requiredFallback\(\)\.execute\(request\)/,
+  );
+  assert.match(savedFilters, /return fallback\.executeAggregate\(request\)/);
+  assert.doesNotMatch(savedFilters, /FROM north_star_module/u);
+  assert.doesNotMatch(
+    requestContext,
+    /set_config\('north_star\.legal_entity/u,
+  );
+  assert.match(
+    compiler,
+    /legalEntity\?: \{[\s\S]*familyClassification: 'entityOwned'/u,
+  );
+
+  const victimControls = [
+    [
+      runtime,
+      'issuedLegalEntityReadScopes.get(value) !== view',
+      /issuedLegalEntityReadScopes\.get\(value\) !== view/,
+    ],
+    [
+      scopeMechanism,
+      "Object.hasOwn(entity, 'legalEntity')",
+      /Object\.hasOwn\(entity, 'legalEntity'\)/,
+    ],
+    [
+      scopeMechanism,
+      'MODULE_LEGAL_ENTITY_READ_SCOPE_REQUIRED',
+      /MODULE_LEGAL_ENTITY_READ_SCOPE_REQUIRED/,
+    ],
+    [
+      scopeMechanism,
+      'MODULE_LEGAL_ENTITY_READ_SCOPE_NOT_FOUND',
+      /MODULE_LEGAL_ENTITY_READ_SCOPE_NOT_FOUND/,
+    ],
+    [
+      interpreter,
+      'legalEntityReadScopeJoinConjunction(',
+      /legalEntityReadScopeJoinConjunction\(/,
+    ],
+    [
+      savedFilters,
+      'this.#requiredFallback().execute(request)',
+      /this\.#requiredFallback\(\)\.execute\(request\)/,
+    ],
+    [
+      savedFilters,
+      'return fallback.executeAggregate(request)',
+      /return fallback\.executeAggregate\(request\)/,
+    ],
+  ] as const;
+  for (const [source, victim, invariant] of victimControls) {
+    const mutant = source.replaceAll(victim, '/* victim removed */');
+    assert.doesNotMatch(mutant, invariant, `mutation survived: ${victim}`);
+  }
+});

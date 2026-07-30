@@ -13,6 +13,13 @@ export const PIN_VALIDATION_RESULT_VERSION =
   'northstar.pin-validation-result/v1' as const;
 export const CURRENT_POLICY_DECISION_VERSION =
   'northstar.current-policy-decision/v1' as const;
+export const LEGAL_ENTITY_READ_SCOPE_VERSION =
+  'northstar.legal-entity-read-scope/v1' as const;
+
+const LEGAL_ENTITY_READ_SCOPE_POLICY_INPUT_VERSION =
+  'northstar.legal-entity-read-scope-policy-input/v1' as const;
+const LEGAL_ENTITY_READ_SCOPE_PERMISSION_ID =
+  'northstar.runtime:permission.legal-entity-read-scope' as const;
 
 export const REQUEST_RUNTIME_PROJECTION_FAMILIES = Object.freeze({
   agent: 'northstar.compiler:projection-family.agent-discovery',
@@ -137,6 +144,17 @@ export interface RequestRuntimeView {
   readonly tenantId: string;
 }
 
+/**
+ * An immutable, policy-approved business scope for one issued request view.
+ * Runtime object identity, not these copyable fields, is the capability seal.
+ */
+export interface LegalEntityReadScope {
+  readonly legalEntityIds: readonly string[];
+  readonly policyVersion: string;
+  readonly requestId: string;
+  readonly schemaVersion: typeof LEGAL_ENTITY_READ_SCOPE_VERSION;
+}
+
 export interface PinnedRuntimeContextEnvelope {
   readonly entryPolicyVersion: string;
   readonly environmentId: string;
@@ -162,10 +180,35 @@ export type PinValidationResult =
 
 const issuedViews = new WeakSet<object>();
 const issuedViewContexts = new WeakMap<object, TrustedRequestContext>();
+const issuedLegalEntityReadScopes = new WeakMap<object, RequestRuntimeView>();
 const sha256Pattern = /^[0-9a-f]{64}$/;
+const uuidPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export class RequestRuntimeViewIntegrityError extends Error {
   override readonly name = 'RequestRuntimeViewIntegrityError';
+}
+
+export class InvalidLegalEntityReadScopeSelectionError extends Error {
+  readonly code = 'LEGAL_ENTITY_READ_SCOPE_SELECTION_INVALID' as const;
+  override readonly name = 'InvalidLegalEntityReadScopeSelectionError';
+}
+
+export class LegalEntityReadScopeIntegrityError extends Error {
+  readonly code = 'LEGAL_ENTITY_READ_SCOPE_INTEGRITY_INVALID' as const;
+  override readonly name = 'LegalEntityReadScopeIntegrityError';
+}
+
+export class LegalEntityReadScopePolicyDeniedError extends Error {
+  readonly code = 'LEGAL_ENTITY_READ_SCOPE_POLICY_DENIED' as const;
+  readonly legalEntityId: string;
+
+  override readonly name = 'LegalEntityReadScopePolicyDeniedError';
+
+  constructor(legalEntityId: string) {
+    super(`current policy denied legal-entity read scope ${legalEntityId}`);
+    this.legalEntityId = legalEntityId;
+  }
 }
 
 /**
@@ -231,6 +274,115 @@ export async function authorizeCurrentPolicy(
   }
   assertNonBlank(decision.policyVersion, 'policyVersion');
   return Object.freeze({ ...decision });
+}
+
+/**
+ * Issues one nonempty authorized set. Each member receives its own live policy
+ * decision so a future restrictive policy kernel can deny individual entities.
+ */
+export async function issueLegalEntityReadScope(
+  gateway: CurrentPolicyGateway,
+  view: RequestRuntimeView,
+  requestedLegalEntityIds: readonly string[],
+): Promise<LegalEntityReadScope> {
+  assertRequestRuntimeView(view);
+  if (!Array.isArray(requestedLegalEntityIds)) {
+    throw new InvalidLegalEntityReadScopeSelectionError(
+      'legal-entity read scope must be requested as an array',
+    );
+  }
+  if (
+    requestedLegalEntityIds.length === 0 ||
+    requestedLegalEntityIds.some(
+      (legalEntityId) =>
+        typeof legalEntityId !== 'string' || !uuidPattern.test(legalEntityId),
+    )
+  ) {
+    throw new InvalidLegalEntityReadScopeSelectionError(
+      'legal-entity read scope must contain one or more UUIDs',
+    );
+  }
+  const legalEntityIds = [
+    ...new Set(
+      requestedLegalEntityIds.map((legalEntityId) =>
+        legalEntityId.toLowerCase(),
+      ),
+    ),
+  ].sort();
+
+  let policyVersion: string | undefined;
+  for (const legalEntityId of legalEntityIds) {
+    const decision = await authorizeCurrentPolicy(
+      gateway,
+      view,
+      LEGAL_ENTITY_READ_SCOPE_PERMISSION_ID,
+      Object.freeze({
+        kind: 'legalEntityReadScopePolicyInput',
+        legalEntityId,
+        requestId: view.requestId,
+        schemaVersion: LEGAL_ENTITY_READ_SCOPE_POLICY_INPUT_VERSION,
+      }),
+    );
+    if (decision.decision === 'DENY') {
+      throw new LegalEntityReadScopePolicyDeniedError(legalEntityId);
+    }
+    if (
+      policyVersion !== undefined &&
+      policyVersion !== decision.policyVersion
+    ) {
+      throw new LegalEntityReadScopeIntegrityError(
+        'current policy version changed while legal-entity scope was issued',
+      );
+    }
+    policyVersion = decision.policyVersion;
+  }
+
+  if (policyVersion === undefined) {
+    throw new LegalEntityReadScopeIntegrityError(
+      'legal-entity read scope was not backed by a policy decision',
+    );
+  }
+  const scope: LegalEntityReadScope = Object.freeze({
+    legalEntityIds: Object.freeze(legalEntityIds),
+    policyVersion,
+    requestId: view.requestId,
+    schemaVersion: LEGAL_ENTITY_READ_SCOPE_VERSION,
+  });
+  issuedLegalEntityReadScopes.set(scope, view);
+  return scope;
+}
+
+/** Copying the visible fields never copies the issued capability. */
+export function legalEntityIdsFromIssuedReadScope(
+  value: unknown,
+  view: RequestRuntimeView,
+): readonly string[] {
+  assertRequestRuntimeView(view);
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    issuedLegalEntityReadScopes.get(value) !== view
+  ) {
+    throw new LegalEntityReadScopeIntegrityError(
+      'legal-entity read scope must be issued for this request runtime view',
+    );
+  }
+  const scope = value as LegalEntityReadScope;
+  if (
+    scope.schemaVersion !== LEGAL_ENTITY_READ_SCOPE_VERSION ||
+    scope.requestId !== view.requestId ||
+    !Array.isArray(scope.legalEntityIds) ||
+    scope.legalEntityIds.length === 0 ||
+    scope.legalEntityIds.some(
+      (legalEntityId) =>
+        typeof legalEntityId !== 'string' || !uuidPattern.test(legalEntityId),
+    )
+  ) {
+    throw new LegalEntityReadScopeIntegrityError(
+      'issued legal-entity read scope has an invalid version or shape',
+    );
+  }
+  return scope.legalEntityIds;
 }
 
 export function createPinnedRuntimeContextEnvelope(

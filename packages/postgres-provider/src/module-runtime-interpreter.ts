@@ -33,7 +33,6 @@ import { SEMANTIC_OPERATION_RESULT_VERSION } from '../../runtime/src/semantic-op
 import type {
   RegisteredAggregateQueryDefinition,
   RegisteredQueryDefinition,
-  RegisteredSemanticQueryDefinition,
   SemanticAggregateQueryExecutionRequest,
   SemanticAggregateResultEnvelope,
   SemanticQueryExecutionRequest,
@@ -45,7 +44,11 @@ import {
   SEMANTIC_AGGREGATE_RESULT_VERSION,
   SEMANTIC_QUERY_RESULT_VERSION,
 } from '../../runtime/src/semantic-query-gateway.js';
-import type { ImmutableJsonValue } from '../../runtime/src/request-runtime-view.js';
+import {
+  legalEntityIdsFromIssuedReadScope,
+  type ImmutableJsonValue,
+  type RequestRuntimeView,
+} from '../../runtime/src/request-runtime-view.js';
 import {
   encodeSharedListCursor,
   SHARED_LIST_RESULT_VERSION,
@@ -97,6 +100,15 @@ interface RawRecord {
 }
 
 type StorageEntity = StorageTargetPayloadV1['entities'][number];
+
+export interface StorageLegalEntityReadScopeRequirement {
+  readonly column: string;
+  readonly kind: 'legalEntity';
+}
+
+interface VerifiedLegalEntityReadScope {
+  readonly legalEntityIds: readonly string[];
+}
 
 export class ModuleRuntimeInterpreterError extends Error {
   override readonly name = 'ModuleRuntimeInterpreterError';
@@ -210,11 +222,7 @@ export class PostgresModuleRuntimeInterpreter
             executeQueryOnClient(
               client,
               storage,
-              request.definition,
-              request.arguments,
-              request.list,
-              request.filterPlans,
-              request.parameterValues,
+              request,
             ),
           );
         },
@@ -698,13 +706,31 @@ async function assertRestorableRelations(
 async function executeQueryOnClient(
   client: PoolClient,
   storage: StorageTargetPayloadV1,
-  definition: RegisteredSemanticQueryDefinition,
-  argumentValue: ImmutableJsonValue,
-  list: AuthorizedSharedListRequest | null,
-  filterPlans: readonly QueryFilterLoweringPlan[],
-  parameterValues: Readonly<Record<string, ImmutableJsonValue>>,
+  request:
+    | SemanticAggregateQueryExecutionRequest
+    | SemanticQueryExecutionRequest,
 ): Promise<SemanticAggregateResultEnvelope | SemanticQueryResultEnvelope> {
+  const {
+    arguments: argumentValue,
+    definition,
+    filterPlans,
+    list,
+    parameterValues,
+  } = request;
   const entity = requiredEntity(storage, definition.sourceEntityId);
+  const relationPlans =
+    definition.queryType === 'list' && list
+      ? list.relationLabels.map((authorization, index) =>
+          listRelationPlan(storage, entity, authorization, index),
+        )
+      : [];
+  const readScope = await verifyLegalEntityReadScope(
+    client,
+    storage,
+    request.view,
+    request.legalEntityReadScope,
+    [entity, ...relationPlans.map((plan) => plan.target)],
+  );
   if (definition.queryType === 'aggregate') {
     return executeAggregateQuery(
       client,
@@ -712,6 +738,7 @@ async function executeQueryOnClient(
       definition,
       filterPlans,
       parameterValues,
+      readScope,
     );
   }
   if (!definition.infrastructure) {
@@ -728,12 +755,13 @@ async function executeQueryOnClient(
   switch (definition.queryType) {
     case 'get': {
       const recordId = requiredUuid(args.recordId, 'recordId');
-      const record = await loadRawRecord(
+      const record = await loadScopedRawRecord(
         client,
         entity,
         recordId,
         includeArchived,
         filterPlans,
+        readScope,
       );
       records = record ? [record] : [];
       return queryResult(
@@ -747,11 +775,12 @@ async function executeQueryOnClient(
       if (list) {
         return listSharedRecords(
           client,
-          storage,
           entity,
           definition,
           list,
           filterPlans,
+          relationPlans,
+          readScope,
         );
       }
       const limit = boundedLimit(args.limit, definition.maximumResultCount);
@@ -763,6 +792,7 @@ async function executeQueryOnClient(
         limit,
         afterRecordId,
         filterPlans,
+        readScope,
       );
       return queryResult(
         definition.queryId,
@@ -784,6 +814,7 @@ async function executeQueryOnClient(
         includeArchived,
         limit,
         filterPlans,
+        readScope,
       );
       return queryResult(
         definition.queryId,
@@ -802,6 +833,7 @@ async function executeQueryOnClient(
         includeArchived,
         Math.max(2, definition.maximumResultCount),
         filterPlans,
+        readScope,
       );
       const outcome =
         matches.records.length === 0
@@ -828,6 +860,7 @@ async function executeAggregateQuery(
   definition: RegisteredAggregateQueryDefinition,
   filterPlans: readonly QueryFilterLoweringPlan[],
   parameterValues: Readonly<Record<string, ImmutableJsonValue>>,
+  readScope: VerifiedLegalEntityReadScope | null,
 ): Promise<SemanticAggregateResultEnvelope> {
   const aggregate = definition.aggregate;
   if (
@@ -870,6 +903,7 @@ async function executeAggregateQuery(
   }
   const values: unknown[] = [];
   const predicates = archivePredicate(entity, false);
+  appendLegalEntityReadScopePredicate(entity, readScope, values, predicates);
   appendQueryFilterPredicates(
     entity,
     filterPlans,
@@ -963,9 +997,11 @@ async function listRecords(
   limit: number,
   afterRecordId: string | null,
   filterPlans: readonly QueryFilterLoweringPlan[],
+  readScope: VerifiedLegalEntityReadScope | null,
 ): Promise<RawRecord[]> {
   const values: unknown[] = [];
   const predicates = archivePredicate(entity, includeArchived);
+  appendLegalEntityReadScopePredicate(entity, readScope, values, predicates);
   if (afterRecordId) {
     predicates.push(
       `${quoted(entity.recordIdentity.column)} > ${parameter(values, afterRecordId)}`,
@@ -995,11 +1031,12 @@ interface ListRelationPlan {
 
 async function listSharedRecords(
   client: PoolClient,
-  storage: StorageTargetPayloadV1,
   entity: StorageEntity,
   definition: RegisteredQueryDefinition,
   list: AuthorizedSharedListRequest,
   filterPlans: readonly QueryFilterLoweringPlan[],
+  relationPlans: readonly ListRelationPlan[],
+  readScope: VerifiedLegalEntityReadScope | null,
 ): Promise<SemanticQueryResultEnvelope> {
   const sourceAlias = 'table_source';
   const selectedColumns = definition.selections.map((selection) => {
@@ -1015,15 +1052,25 @@ async function listSharedRecords(
     }
     return column;
   });
-  const relationPlans = list.relationLabels.map((authorization, index) =>
-    listRelationPlan(storage, entity, authorization, index),
-  );
-  const fromSql = listFromSql(entity, sourceAlias, relationPlans);
   const values: unknown[] = [];
+  const fromSql = listFromSql(
+    entity,
+    sourceAlias,
+    relationPlans,
+    readScope,
+    values,
+  );
   const predicates = listArchivePredicates(
     entity,
     sourceAlias,
     list.query.includeArchived,
+  );
+  appendLegalEntityReadScopePredicate(
+    entity,
+    readScope,
+    values,
+    predicates,
+    sourceAlias,
   );
   const searchExpressions = [
     ...selectedColumns.map((column) =>
@@ -1163,6 +1210,8 @@ function listFromSql(
   entity: StorageEntity,
   sourceAlias: string,
   relations: readonly ListRelationPlan[],
+  readScope: VerifiedLegalEntityReadScope | null,
+  values: unknown[],
 ): string {
   return [
     `FROM north_star_module.${quoted(entity.physicalTableName)} AS ${quoted(sourceAlias)}`,
@@ -1171,7 +1220,12 @@ function listFromSql(
         `LEFT JOIN north_star_module.${quoted(plan.target.physicalTableName)} AS ${quoted(plan.tableAlias)}
            ON ${qualified(plan.tableAlias, 'tenant_id')} = ${qualified(sourceAlias, 'tenant_id')}
           AND ${qualified(plan.tableAlias, 'environment_id')} = ${qualified(sourceAlias, 'environment_id')}
-          AND ${qualified(plan.tableAlias, plan.target.recordIdentity.column)} = ${qualified(sourceAlias, plan.relation.relationColumn.physicalName)}`,
+          AND ${qualified(plan.tableAlias, plan.target.recordIdentity.column)} = ${qualified(sourceAlias, plan.relation.relationColumn.physicalName)}${legalEntityReadScopeJoinConjunction(
+            plan.target,
+            readScope,
+            values,
+            plan.tableAlias,
+          )}`,
     ),
   ].join('\n');
 }
@@ -1347,6 +1401,7 @@ async function matchRecords(
   includeArchived: boolean,
   limit: number,
   filterPlans: readonly QueryFilterLoweringPlan[],
+  readScope: VerifiedLegalEntityReadScope | null,
 ): Promise<RawRecord[]> {
   const selected = new Set(definition.selections.map((item) => item.fieldId));
   const columns = entity.columns.filter(
@@ -1358,6 +1413,7 @@ async function matchRecords(
   const match = buildFoldedMatchPredicate(entity, columns, text, matchMode);
   const values = [...match.values];
   const predicates = archivePredicate(entity, includeArchived);
+  appendLegalEntityReadScopePredicate(entity, readScope, values, predicates);
   predicates.push(match.sql);
   appendQueryFilterPredicates(entity, filterPlans, values, predicates);
   const rows = await client.query<QueryResultRow>(
@@ -1379,6 +1435,7 @@ async function matchResolveRecords(
   includeArchived: boolean,
   limit: number,
   filterPlans: readonly QueryFilterLoweringPlan[],
+  readScope: VerifiedLegalEntityReadScope | null,
 ): Promise<{
   advisoryMatchCount: number;
   identifierMatchCount: number;
@@ -1418,6 +1475,7 @@ async function matchResolveRecords(
     includeArchived,
     limit,
     filterPlans,
+    readScope,
   );
   const advisoryMatches = await exactFoldedMatches(
     client,
@@ -1427,6 +1485,7 @@ async function matchResolveRecords(
     includeArchived,
     limit,
     filterPlans,
+    readScope,
   );
   const recordsById = new Map<string, RawRecord>();
   for (const record of [...identifierMatches, ...advisoryMatches]) {
@@ -1455,11 +1514,13 @@ async function exactFoldedMatches(
   includeArchived: boolean,
   limit: number,
   filterPlans: readonly QueryFilterLoweringPlan[],
+  readScope: VerifiedLegalEntityReadScope | null,
 ): Promise<RawRecord[]> {
   if (columns.length === 0) return [];
   const match = buildFoldedMatchPredicate(entity, columns, text, 'exact');
   const values = [...match.values];
   const predicates = archivePredicate(entity, includeArchived);
+  appendLegalEntityReadScopePredicate(entity, readScope, values, predicates);
   predicates.push(match.sql);
   appendQueryFilterPredicates(entity, filterPlans, values, predicates);
   const rows = await client.query<QueryResultRow>(
@@ -1923,6 +1984,28 @@ async function loadRawRecord(
 ): Promise<RawRecord | null> {
   const values: unknown[] = [];
   const predicates = archivePredicate(entity, includeArchived);
+  predicates.push(
+    `${quoted(entity.recordIdentity.column)} = ${parameter(values, recordId)}`,
+  );
+  appendQueryFilterPredicates(entity, filterPlans, values, predicates);
+  const result = await client.query<QueryResultRow>(
+    selectSql(entity, predicates, 'LIMIT 1'),
+    values,
+  );
+  return result.rows[0] ? rawRecord(entity, result.rows[0]) : null;
+}
+
+async function loadScopedRawRecord(
+  client: PoolClient,
+  entity: StorageEntity,
+  recordId: string,
+  includeArchived: boolean,
+  filterPlans: readonly QueryFilterLoweringPlan[],
+  readScope: VerifiedLegalEntityReadScope | null,
+): Promise<RawRecord | null> {
+  const values: unknown[] = [];
+  const predicates = archivePredicate(entity, includeArchived);
+  appendLegalEntityReadScopePredicate(entity, readScope, values, predicates);
   predicates.push(
     `${quoted(entity.recordIdentity.column)} = ${parameter(values, recordId)}`,
   );
@@ -2521,6 +2604,148 @@ export function assertModuleSemanticStorageContract(
       invalidRelation?.relationId ?? invalidEntity?.entityId ?? null,
     );
   }
+}
+
+/**
+ * The compiler-owned marker is the entire dispatch key. Module identity,
+ * entity identity, and inventory-specific families are intentionally absent.
+ */
+export function legalEntityReadScopeRequirement(
+  entity: StorageEntity,
+): StorageLegalEntityReadScopeRequirement | null {
+  if (!Object.hasOwn(entity, 'legalEntity')) return null;
+  const legalEntity = entity.legalEntity;
+  if (
+    !legalEntity ||
+    legalEntity.column !== 'legal_entity_id' ||
+    legalEntity.familyClassification !== 'entityOwned' ||
+    legalEntity.immutableAfterCreate !== true ||
+    legalEntity.nullable !== false ||
+    legalEntity.postgresqlType !== 'uuid' ||
+    legalEntity.referencedFamilyId !== 'legal_entity'
+  ) {
+    throw failure(
+      'MODULE_STORAGE_TARGET_MALFORMED',
+      'entity-owned storage has an invalid legal-entity scope descriptor',
+      entity.entityId,
+    );
+  }
+  safeIdentifier(legalEntity.column);
+  return Object.freeze({ column: legalEntity.column, kind: 'legalEntity' });
+}
+
+async function verifyLegalEntityReadScope(
+  client: PoolClient,
+  storage: StorageTargetPayloadV1,
+  view: RequestRuntimeView,
+  value: unknown,
+  readEntities: readonly StorageEntity[],
+): Promise<VerifiedLegalEntityReadScope | null> {
+  const required: Array<{
+    entity: StorageEntity;
+    requirement: StorageLegalEntityReadScopeRequirement;
+  }> = [];
+  for (const entity of readEntities) {
+    const requirement = legalEntityReadScopeRequirement(entity);
+    if (requirement) required.push({ entity, requirement });
+  }
+  if (required.length === 0) return null;
+  if (value === null || value === undefined) {
+    throw failure(
+      'MODULE_LEGAL_ENTITY_READ_SCOPE_REQUIRED',
+      'entity-owned reads require an issued legal-entity read scope',
+      required[0]!.entity.entityId,
+    );
+  }
+
+  let legalEntityIds: readonly string[];
+  try {
+    legalEntityIds = legalEntityIdsFromIssuedReadScope(value, view);
+  } catch {
+    throw failure(
+      'MODULE_LEGAL_ENTITY_READ_SCOPE_INVALID',
+      'legal-entity read scope was not issued for this request view',
+      required[0]!.entity.entityId,
+    );
+  }
+
+  const masters = storage.entities.filter(
+    (entity) => entity.legalEntityMaster !== undefined,
+  );
+  if (masters.length !== 1) {
+    throw failure(
+      'MODULE_STORAGE_TARGET_MALFORMED',
+      'entity-owned storage requires exactly one legal-entity master',
+      required[0]!.entity.entityId,
+    );
+  }
+  const master = masters[0]!;
+  safeIdentifier(master.physicalTableName);
+  safeIdentifier(master.recordIdentity.column);
+
+  const result = await client.query<{ legal_entity_id: string }>(
+    `SELECT ${quoted(master.recordIdentity.column)}::text AS legal_entity_id
+       FROM north_star_module.${quoted(master.physicalTableName)}
+      WHERE ${quoted(master.recordIdentity.column)} = ANY($1::uuid[])`,
+    [[...legalEntityIds]],
+  );
+  const existingIds = new Set(
+    result.rows.map((row) => requiredUuid(row.legal_entity_id, 'legalEntityId')),
+  );
+  const missingId = legalEntityIds.find(
+    (legalEntityId) => !existingIds.has(legalEntityId),
+  );
+  if (missingId) {
+    throw failure(
+      'MODULE_LEGAL_ENTITY_READ_SCOPE_NOT_FOUND',
+      'issued legal-entity read scope contains no tenant-visible entity',
+      missingId,
+    );
+  }
+  return Object.freeze({ legalEntityIds });
+}
+
+function appendLegalEntityReadScopePredicate(
+  entity: StorageEntity,
+  readScope: VerifiedLegalEntityReadScope | null,
+  values: unknown[],
+  predicates: string[],
+  alias?: string,
+): void {
+  const requirement = legalEntityReadScopeRequirement(entity);
+  if (!requirement) return;
+  if (!readScope) {
+    throw failure(
+      'MODULE_LEGAL_ENTITY_READ_SCOPE_REQUIRED',
+      'verified legal-entity read scope is absent during predicate lowering',
+      entity.entityId,
+    );
+  }
+  const column = alias
+    ? qualified(alias, requirement.column)
+    : quoted(requirement.column);
+  predicates.push(
+    `${column} = ANY(${parameter(values, [...readScope.legalEntityIds])}::uuid[])`,
+  );
+}
+
+function legalEntityReadScopeJoinConjunction(
+  entity: StorageEntity,
+  readScope: VerifiedLegalEntityReadScope | null,
+  values: unknown[],
+  alias: string,
+): string {
+  const requirement = legalEntityReadScopeRequirement(entity);
+  if (!requirement) return '';
+  if (!readScope) {
+    throw failure(
+      'MODULE_LEGAL_ENTITY_READ_SCOPE_REQUIRED',
+      'verified legal-entity read scope is absent during join lowering',
+      entity.entityId,
+    );
+  }
+  return `
+          AND ${qualified(alias, requirement.column)} = ANY(${parameter(values, [...readScope.legalEntityIds])}::uuid[])`;
 }
 
 function createChanges(

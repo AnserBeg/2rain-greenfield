@@ -74,14 +74,21 @@ import {
   type SemanticOperationResultEnvelope,
 } from '../../packages/runtime/src/semantic-operation-gateway.js';
 import {
+  SHARED_LIST_QUERY_VERSION,
+} from '../../packages/runtime/src/list-behavior/index.js';
+import {
   SEMANTIC_QUERY_REQUEST_VERSION,
   SemanticQueryGateway,
+  type SemanticAggregateResultEnvelope,
+  type SemanticQueryExecutionContext,
   type SemanticQueryResultEnvelope,
 } from '../../packages/runtime/src/semantic-query-gateway.js';
 import {
   AuthenticatedRequestRuntimeEntryAdapter,
   CURRENT_POLICY_DECISION_VERSION,
+  LegalEntityReadScopePolicyDeniedError,
   REQUEST_RUNTIME_PROJECTION_FAMILIES,
+  issueLegalEntityReadScope,
   type CurrentPolicyDecisionRequest,
   type CurrentPolicyGateway,
   type CurrentPolicySubject,
@@ -112,6 +119,13 @@ const principalB = 'b3000000-0000-4000-8000-000000000003';
 const localeOrderingFieldIds = Object.freeze({
   digit: `${FIXTURE_IDS.namespace}:field.a0`,
   punctuation: `${FIXTURE_IDS.namespace}:field.a_a`,
+});
+const inventoryScopeProbeIds = Object.freeze({
+  itemParameter: `${APPLICATION_NAMESPACE}:parameter.scope_probe_item`,
+  locationParameter: `${APPLICATION_NAMESPACE}:parameter.scope_probe_location`,
+  query: `${APPLICATION_NAMESPACE}:query.inventory_movement_scope_probe_sum`,
+  selection:
+    `${APPLICATION_NAMESPACE}:selection.inventory_movement_scope_probe_sum`,
 });
 
 test('accepted pre-PR-2 semantic metadata fails closed before module DML', () => {
@@ -798,7 +812,7 @@ test('definition-only module is served generically through Q0/O0, trust, RLS, an
   );
 });
 
-test('a real v3 inventory period lock executes through the generic operation gateway', async () => {
+test('v3 inventory reads require issued legal-entity scope and preserve generic operations', async () => {
   const definition = inventoryApplicationDefinition();
   const emptyInventory = emptyDefinition(ordinaryModuleV1());
   const empty = mustCompile(moduleInput(emptyInventory));
@@ -817,47 +831,75 @@ test('a real v3 inventory period lock executes through the generic operation gat
   );
   assert.ok(periodLock?.periodLock);
   const periodLockStorage = periodLock.periodLock;
+  const legalEntityMaster = storage.entities.find(
+    (entity) => entity.legalEntityMaster !== undefined,
+  );
+  const movement = storage.entities.find(
+    (entity) =>
+      entity.entityId ===
+      applicationInventoryId(INVENTORY_IDS.entityIds.movement),
+  );
+  const transaction = storage.entities.find(
+    (entity) =>
+      entity.entityId ===
+      applicationInventoryId(INVENTORY_IDS.entityIds.transaction),
+  );
+  const transactionLine = storage.entities.find(
+    (entity) =>
+      entity.entityId ===
+      applicationInventoryId(INVENTORY_IDS.entityIds.transactionLine),
+  );
+  assert.ok(legalEntityMaster?.legalEntityMaster);
+  assert.ok(movement?.legalEntity?.column);
+  assert.ok(transaction?.legalEntity?.column);
+  assert.ok(transactionLine?.legalEntity?.column);
 
   const tenant = 'd1000000-0000-4000-8000-000000000001';
   const environment = 'd2000000-0000-4000-8000-000000000002';
   const principal = 'd3000000-0000-4000-8000-000000000003';
   const closedThrough = '2026-07-28T23:59:59.999Z';
+  const legalEntityId = randomUUID();
+  const secondLegalEntityId = randomUUID();
 
   await withEphemeralPostgres(
     'module-runtime-inventory-v3',
     async ({ connection, pool }) => {
       await migrateAndSeed(pool, [[tenant, environment, 'inventory-v3']]);
-      const legalEntityId = randomUUID();
-      await pool.query(
-        `SELECT platform.provision_inventory_scope(
-           $1, $2, $3, $4, $5, $6, $7, $8,
-           $9::smallint, $10, $11, $12, $13, $14, $15, $16,
-           $17, $18, $19, $20, $21
-         )`,
-        [
-          tenant,
-          environment,
-          legalEntityId,
-          'DEFAULT',
-          'Default legal entity',
-          'America/Edmonton',
-          '00:00:00',
-          compiled.releaseRoot,
-          1,
-          'reject',
-          0,
-          'codeOnly',
-          'codeOnly',
-          'codeOnly',
-          'codeOnly',
-          'codeOnly',
-          null,
-          null,
-          null,
-          null,
-          null,
-        ],
-      );
+      for (const [entityId, code, name] of [
+        [legalEntityId, 'ENTITY-A', 'Legal entity A'],
+        [secondLegalEntityId, 'ENTITY-B', 'Legal entity B'],
+      ] as const) {
+        await pool.query(
+          `SELECT platform.provision_inventory_scope(
+             $1, $2, $3, $4, $5, $6, $7, $8,
+             $9::smallint, $10, $11, $12, $13, $14, $15, $16,
+             $17, $18, $19, $20, $21
+           )`,
+          [
+            tenant,
+            environment,
+            entityId,
+            code,
+            name,
+            'America/Edmonton',
+            '00:00:00',
+            compiled.releaseRoot,
+            1,
+            'reject',
+            0,
+            'codeOnly',
+            'codeOnly',
+            'codeOnly',
+            'codeOnly',
+            'codeOnly',
+            null,
+            null,
+            null,
+            null,
+            null,
+          ],
+        );
+      }
       const runtimePool = new pg.Pool({
         ...connection,
         max: 3,
@@ -892,6 +934,33 @@ test('a real v3 inventory period lock executes through the generic operation gat
           modulePool,
         );
         await prepare(materializer, context, principal, releases[1]!);
+        for (const [entityId, code, name] of [
+          [legalEntityId, 'ENTITY-A', 'Legal entity A'],
+          [secondLegalEntityId, 'ENTITY-B', 'Legal entity B'],
+        ] as const) {
+          await pool.query(
+            `INSERT INTO north_star_module.${legalEntityMaster.physicalTableName} (
+               tenant_id,
+               environment_id,
+               ${legalEntityMaster.recordIdentity.column},
+               ${legalEntityMaster.optimisticRevision.column},
+               ${legalEntityMaster.legalEntityMaster.fieldColumns.code},
+               ${legalEntityMaster.legalEntityMaster.fieldColumns.name},
+               ${legalEntityMaster.legalEntityMaster.fieldColumns.status},
+               ${legalEntityMaster.legalEntityMaster.fieldColumns.isDefault}
+             ) VALUES ($1, $2, $3, 1, $4, $5, $6, false)
+             ON CONFLICT (tenant_id, environment_id, ${legalEntityMaster.recordIdentity.column})
+             DO NOTHING`,
+            [
+              tenant,
+              environment,
+              entityId,
+              code,
+              name,
+              legalEntityMaster.legalEntityMaster.activeStatusValue,
+            ],
+          );
+        }
 
         const provisioned = await pool.query<{
           closed_through: Date | null;
@@ -909,13 +978,16 @@ test('a real v3 inventory period lock executes through the generic operation gat
         assert.equal(provisioned.rows[0]?.revision, '1');
         assert.equal(provisioned.rows[0]?.closed_through, null);
         const recordId = provisioned.rows[0]!.record_id;
-        assert.equal(recordId, legalEntityId);
+        assert.ok(
+          recordId === legalEntityId || recordId === secondLegalEntityId,
+        );
 
         const policy = new AllowPolicy();
         const interpreter = new PostgresModuleRuntimeInterpreter(
           runtimePool,
           humanActorIssuer(),
         );
+        const queryGateway = new SemanticQueryGateway(policy, interpreter);
         const gateway = operationGatewayFor(policy, interpreter);
         const activePointer = await pool.query<{
           fence: string;
@@ -937,6 +1009,331 @@ test('a real v3 inventory period lock executes through the generic operation gat
           },
           policy,
         );
+        const transactionAId = randomUUID();
+        const transactionBId = randomUUID();
+        const lineAId = randomUUID();
+        const lineBId = randomUUID();
+        const movementAId = randomUUID();
+        const movementBId = randomUUID();
+        const adversarialMovementId = randomUUID();
+        const sharedItemId = 'same-item';
+        const sharedLocationId = 'same-location';
+
+        await insertScopedTestRecord(
+          pool,
+          storage,
+          transaction,
+          tenant,
+          environment,
+          legalEntityId,
+          transactionAId,
+          {
+            [applicationInventoryId(INVENTORY_IDS.fieldIds.transaction.number)]:
+              'ENTITY-A-TRANSACTION',
+            [applicationInventoryId(INVENTORY_IDS.fieldIds.transaction.state)]:
+              `${APPLICATION_NAMESPACE}:option.inventory_transaction_state_posted`,
+          },
+          {},
+        );
+        await insertScopedTestRecord(
+          pool,
+          storage,
+          transaction,
+          tenant,
+          environment,
+          secondLegalEntityId,
+          transactionBId,
+          {
+            [applicationInventoryId(INVENTORY_IDS.fieldIds.transaction.number)]:
+              'ENTITY-B-SECRET',
+            [applicationInventoryId(INVENTORY_IDS.fieldIds.transaction.state)]:
+              `${APPLICATION_NAMESPACE}:option.inventory_transaction_state_posted`,
+          },
+          {},
+        );
+        await insertScopedTestRecord(
+          pool,
+          storage,
+          transactionLine,
+          tenant,
+          environment,
+          legalEntityId,
+          lineAId,
+          {
+            [applicationInventoryId(
+              INVENTORY_IDS.fieldIds.transactionLine.itemId,
+            )]: sharedItemId,
+          },
+          { [transaction.entityId]: transactionAId },
+        );
+        await insertScopedTestRecord(
+          pool,
+          storage,
+          transactionLine,
+          tenant,
+          environment,
+          secondLegalEntityId,
+          lineBId,
+          {
+            [applicationInventoryId(
+              INVENTORY_IDS.fieldIds.transactionLine.itemId,
+            )]: sharedItemId,
+          },
+          { [transaction.entityId]: transactionBId },
+        );
+        await insertScopedTestRecord(
+          pool,
+          storage,
+          movement,
+          tenant,
+          environment,
+          legalEntityId,
+          movementAId,
+          movementScopeProbeValues(sharedItemId, sharedLocationId, '5'),
+          {
+            [transaction.entityId]: transactionAId,
+            [transactionLine.entityId]: lineAId,
+          },
+          '2026-07-29',
+        );
+        await insertScopedTestRecord(
+          pool,
+          storage,
+          movement,
+          tenant,
+          environment,
+          secondLegalEntityId,
+          movementBId,
+          movementScopeProbeValues(sharedItemId, sharedLocationId, '7'),
+          {
+            [transaction.entityId]: transactionBId,
+            [transactionLine.entityId]: lineBId,
+          },
+          '2026-07-29',
+        );
+
+        const scopeA = await issueLegalEntityReadScope(policy, view, [
+          legalEntityId,
+        ]);
+        const scopeB = await issueLegalEntityReadScope(policy, view, [
+          secondLegalEntityId,
+        ]);
+        const consolidatedScope = await issueLegalEntityReadScope(policy, view, [
+          legalEntityId,
+          secondLegalEntityId,
+        ]);
+        const aggregateArguments = {
+          [inventoryScopeProbeIds.itemParameter]: sharedItemId,
+          [inventoryScopeProbeIds.locationParameter]: sharedLocationId,
+        };
+        assert.equal(
+          (
+            await aggregateQuery(
+              queryGateway,
+              view,
+              aggregateArguments,
+              { legalEntityReadScope: scopeA },
+            )
+          ).value.value,
+          '5',
+        );
+        assert.equal(
+          (
+            await aggregateQuery(
+              queryGateway,
+              view,
+              aggregateArguments,
+              { legalEntityReadScope: scopeB },
+            )
+          ).value.value,
+          '7',
+        );
+        assert.equal(
+          (
+            await aggregateQuery(
+              queryGateway,
+              view,
+              aggregateArguments,
+              { legalEntityReadScope: consolidatedScope },
+            )
+          ).value.value,
+          '12',
+        );
+        const unscopedDefect = await pool.query<{ quantity: string }>(
+          `SELECT COALESCE(SUM(${requiredStorageColumn(
+            movement,
+            INVENTORY_IDS.fieldIds.movement.quantityDelta,
+          ).physicalName}), 0)::text AS quantity
+             FROM north_star_module.${movement.physicalTableName}
+            WHERE tenant_id = $1 AND environment_id = $2
+              AND ${requiredStorageColumn(
+                movement,
+                INVENTORY_IDS.fieldIds.movement.itemId,
+              ).physicalName} = $3
+              AND ${requiredStorageColumn(
+                movement,
+                INVENTORY_IDS.fieldIds.movement.locationId,
+              ).physicalName} = $4`,
+          [tenant, environment, sharedItemId, sharedLocationId],
+        );
+        assert.equal(unscopedDefect.rows[0]?.quantity, '12');
+
+        await assert.rejects(
+          aggregateQuery(queryGateway, view, aggregateArguments),
+          (error: unknown) =>
+            assertModuleError(
+              error,
+              'MODULE_LEGAL_ENTITY_READ_SCOPE_REQUIRED',
+              movement.entityId,
+            ),
+        );
+        const nonexistentId = randomUUID();
+        const nonexistentScope = await issueLegalEntityReadScope(policy, view, [
+          nonexistentId,
+        ]);
+        await assert.rejects(
+          aggregateQuery(queryGateway, view, aggregateArguments, {
+            legalEntityReadScope: nonexistentScope,
+          }),
+          (error: unknown) =>
+            assertModuleError(
+              error,
+              'MODULE_LEGAL_ENTITY_READ_SCOPE_NOT_FOUND',
+              nonexistentId,
+            ),
+        );
+        const copiedScope = Object.freeze({
+          ...scopeA,
+          legalEntityIds: Object.freeze([secondLegalEntityId]),
+        });
+        await assert.rejects(
+          aggregateQuery(queryGateway, view, aggregateArguments, {
+            legalEntityReadScope: copiedScope,
+          }),
+          (error: unknown) =>
+            assertModuleError(
+              error,
+              'MODULE_LEGAL_ENTITY_READ_SCOPE_INVALID',
+              movement.entityId,
+            ),
+        );
+        const otherView = await issuedCandidateView(
+          compiled,
+          releases[1]!,
+          identity(tenant, environment, principal),
+          {
+            fence: Number(activePointer.rows[0].fence),
+            pointerId: activePointer.rows[0].pointer_id,
+          },
+          policy,
+        );
+        const otherViewScope = await issueLegalEntityReadScope(
+          policy,
+          otherView,
+          [legalEntityId],
+        );
+        await assert.rejects(
+          aggregateQuery(queryGateway, view, aggregateArguments, {
+            legalEntityReadScope: otherViewScope,
+          }),
+          (error: unknown) =>
+            assertModuleError(
+              error,
+              'MODULE_LEGAL_ENTITY_READ_SCOPE_INVALID',
+              movement.entityId,
+            ),
+        );
+        await assert.rejects(
+          issueLegalEntityReadScope(new DenyPolicy(), view, [legalEntityId]),
+          (error: unknown) =>
+            error instanceof LegalEntityReadScopePolicyDeniedError &&
+            error.legalEntityId === legalEntityId,
+        );
+
+        const tenantShared = await query(
+          queryGateway,
+          view,
+          'legal_entity_list',
+          { includeArchived: false, limit: 10 },
+          APPLICATION_NAMESPACE,
+        );
+        assert.equal(tenantShared.records.length, 2);
+
+        const adversarialClient = await pool.connect();
+        try {
+          await adversarialClient.query(
+            'SET session_replication_role = replica',
+          );
+          await insertScopedTestRecord(
+            adversarialClient,
+            storage,
+            movement,
+            tenant,
+            environment,
+            legalEntityId,
+            adversarialMovementId,
+            movementScopeProbeValues(sharedItemId, sharedLocationId, '0'),
+            {
+              [transaction.entityId]: transactionBId,
+              [transactionLine.entityId]: lineAId,
+            },
+            '2026-07-29',
+          );
+        } finally {
+          await adversarialClient.query(
+            'SET session_replication_role = origin',
+          );
+          adversarialClient.release();
+        }
+        const joined = await query(
+          queryGateway,
+          view,
+          'inventory_movement_list',
+          {
+            includeArchived: false,
+            list: {
+              cursor: null,
+              matchMode: 'substring',
+              pageSize: 10,
+              relationLabels: [
+                {
+                  fieldId: applicationInventoryId(
+                    INVENTORY_IDS.fieldIds.transaction.number,
+                  ),
+                  queryId: `${APPLICATION_NAMESPACE}:query.inventory_transaction_list`,
+                  relationId: applicationInventoryId(
+                    INVENTORY_IDS.relationIds.movementTransaction,
+                  ),
+                },
+              ],
+              schemaVersion: SHARED_LIST_QUERY_VERSION,
+              search: '',
+              sort: [],
+            },
+          },
+          APPLICATION_NAMESPACE,
+          { legalEntityReadScope: scopeA },
+        );
+        assert.equal(joined.records.length, 2);
+        const normalJoined = joined.records.find(
+          (record) => record.recordId === movementAId,
+        );
+        const adversarialJoined = joined.records.find(
+          (record) => record.recordId === adversarialMovementId,
+        );
+        const relationId = applicationInventoryId(
+          INVENTORY_IDS.relationIds.movementTransaction,
+        );
+        assert.equal(
+          normalJoined?.relationLabels?.[relationId]?.label,
+          'ENTITY-A-TRANSACTION',
+        );
+        assert.deepEqual(adversarialJoined?.relationLabels?.[relationId], {
+          label: null,
+          recordId: null,
+        });
+        assert.doesNotMatch(JSON.stringify(joined), /ENTITY-B-SECRET/u);
+
         const result = await operation(
           gateway,
           view,
@@ -2021,12 +2418,34 @@ async function query(
   localId: string,
   args: Record<string, unknown>,
   namespace: string = FIXTURE_IDS.namespace,
+  executionContext: SemanticQueryExecutionContext = Object.freeze({}),
 ): Promise<SemanticQueryResultEnvelope> {
-  return gateway.invoke(view, {
-    arguments: args,
-    queryId: `${namespace}:query.${localId}`,
-    schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
-  });
+  return gateway.invoke(
+    view,
+    {
+      arguments: args,
+      queryId: `${namespace}:query.${localId}`,
+      schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+    },
+    executionContext,
+  );
+}
+
+async function aggregateQuery(
+  gateway: SemanticQueryGateway,
+  view: RequestRuntimeView,
+  args: Record<string, unknown>,
+  executionContext: SemanticQueryExecutionContext = Object.freeze({}),
+): Promise<SemanticAggregateResultEnvelope> {
+  return gateway.invokeAggregate(
+    view,
+    {
+      arguments: args,
+      queryId: inventoryScopeProbeIds.query,
+      schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+    },
+    executionContext,
+  );
 }
 
 function runtimeEntry(
@@ -2550,6 +2969,81 @@ function inventoryApplicationDefinition(): Record<string, unknown> {
       ...(inventory[collection] as unknown[]),
     ];
   }
+  (application.queries as Array<Record<string, unknown>>).push({
+    aggregate: {
+      field: applicationReference(
+        'fieldReference',
+        INVENTORY_IDS.fieldIds.movement.quantityDelta,
+      ),
+      kind: 'queryAggregateSelection',
+      operator: 'sum',
+      schemaVersion: 'v3',
+      selectionId: inventoryScopeProbeIds.selection,
+    },
+    filter: {
+      kind: 'allPredicate',
+      schemaVersion: 'v3',
+      terms: [
+        {
+          field: applicationReference(
+            'fieldReference',
+            INVENTORY_IDS.fieldIds.movement.itemId,
+          ),
+          kind: 'fieldComparisonPredicate',
+          operator: 'equals',
+          schemaVersion: 'v3',
+          value: {
+            kind: 'queryParameterReference',
+            parameterId: inventoryScopeProbeIds.itemParameter,
+            schemaVersion: 'v3',
+          },
+        },
+        {
+          field: applicationReference(
+            'fieldReference',
+            INVENTORY_IDS.fieldIds.movement.locationId,
+          ),
+          kind: 'fieldComparisonPredicate',
+          operator: 'equals',
+          schemaVersion: 'v3',
+          value: {
+            kind: 'queryParameterReference',
+            parameterId: inventoryScopeProbeIds.locationParameter,
+            schemaVersion: 'v3',
+          },
+        },
+      ],
+    },
+    kind: 'queryDefinition',
+    maximumResultCount: 1,
+    module: applicationReference('moduleReference', INVENTORY_IDS.moduleId),
+    parameters: [
+      {
+        kind: 'queryParameterDefinition',
+        orderKey: 10,
+        parameterId: inventoryScopeProbeIds.itemParameter,
+        schemaVersion: 'v3',
+      },
+      {
+        kind: 'queryParameterDefinition',
+        orderKey: 20,
+        parameterId: inventoryScopeProbeIds.locationParameter,
+        schemaVersion: 'v3',
+      },
+    ],
+    permission: applicationReference(
+      'permissionReference',
+      `${INVENTORY_IDS.namespace}:permission.inventory_movement_read`,
+    ),
+    queryId: inventoryScopeProbeIds.query,
+    queryType: 'aggregate',
+    schemaVersion: 'v3',
+    sourceEntity: applicationReference(
+      'entityReference',
+      INVENTORY_IDS.entityIds.movement,
+    ),
+    tier: 'q1',
+  });
   const inventoryModule = (
     inventory.modules as Array<Record<string, unknown>>
   )[0];
@@ -2562,9 +3056,145 @@ function inventoryApplicationDefinition(): Record<string, unknown> {
   return application;
 }
 
+function applicationReference(kind: string, inventoryId: string) {
+  return {
+    kind,
+    schemaVersion: 'v3',
+    targetId: applicationInventoryId(inventoryId),
+  };
+}
+
 function applicationInventoryId(id: string): string {
   assert.ok(id.startsWith(`${INVENTORY_NAMESPACE}:`));
   return `${APPLICATION_NAMESPACE}${id.slice(INVENTORY_NAMESPACE.length)}`;
+}
+
+function movementScopeProbeValues(
+  itemId: string,
+  locationId: string,
+  quantityDelta: string,
+): Record<string, unknown> {
+  return {
+    [applicationInventoryId(INVENTORY_IDS.fieldIds.movement.itemId)]: itemId,
+    [applicationInventoryId(INVENTORY_IDS.fieldIds.movement.locationId)]:
+      locationId,
+    [applicationInventoryId(
+      INVENTORY_IDS.fieldIds.movement.quantityDelta,
+    )]: quantityDelta,
+    [applicationInventoryId(
+      INVENTORY_IDS.fieldIds.movement.postingRole,
+    )]: `${APPLICATION_NAMESPACE}:option.inventory_posting_role_adjustment`,
+    [applicationInventoryId(
+      INVENTORY_IDS.fieldIds.movement.stockDimensionSetVersion,
+    )]: `${APPLICATION_NAMESPACE}:option.stock_dimension_set_version_v1`,
+  };
+}
+
+function requiredStorageColumn(
+  entity: StorageTargetPayloadV1['entities'][number],
+  inventoryFieldId: string,
+): StorageTargetPayloadV1['entities'][number]['columns'][number] {
+  const column = entity.columns.find(
+    (candidate) =>
+      candidate.canonicalFieldId === applicationInventoryId(inventoryFieldId),
+  );
+  assert.ok(column, `missing storage column for ${inventoryFieldId}`);
+  return column;
+}
+
+async function insertScopedTestRecord(
+  client: pg.Pool | pg.PoolClient,
+  storage: StorageTargetPayloadV1,
+  entity: StorageTargetPayloadV1['entities'][number],
+  tenantId: string,
+  environmentId: string,
+  legalEntityId: string,
+  recordId: string,
+  overrides: Readonly<Record<string, unknown>>,
+  relationTargetIds: Readonly<Record<string, string>>,
+  businessPeriod: string | null = null,
+): Promise<void> {
+  assert.ok(entity.legalEntity);
+  const relationColumns = storage.relations.filter(
+    (relation) =>
+      relation.sourceEntityId === entity.entityId &&
+      relation.relationColumn.origin !== 'field',
+  );
+  const businessPeriodColumn = entity.factStorage?.businessPeriod.column;
+  if (businessPeriodColumn) assert.ok(businessPeriod);
+  const columns = [
+    'tenant_id',
+    'environment_id',
+    entity.legalEntity.column,
+    ...(businessPeriodColumn ? [businessPeriodColumn] : []),
+    entity.recordIdentity.column,
+    ...entity.columns.map((column) => column.physicalName),
+    ...relationColumns.map((relation) => relation.relationColumn.physicalName),
+  ];
+  const values = [
+    tenantId,
+    environmentId,
+    legalEntityId,
+    ...(businessPeriodColumn ? [businessPeriod] : []),
+    recordId,
+    ...entity.columns.map((column) =>
+      Object.hasOwn(overrides, column.canonicalFieldId)
+        ? overrides[column.canonicalFieldId]
+        : scopeProbeDefaultValue(column, recordId),
+    ),
+    ...relationColumns.map((relation) => {
+      const targetId = relationTargetIds[relation.targetEntityId];
+      assert.ok(targetId, `missing relation target ${relation.relationId}`);
+      return targetId;
+    }),
+  ];
+  await client.query(
+    `INSERT INTO north_star_module.${quoteTestIdentifier(entity.physicalTableName)}
+       (${columns.map(quoteTestIdentifier).join(', ')})
+     VALUES (${values.map((_, index) => `$${String(index + 1)}`).join(', ')})`,
+    values,
+  );
+}
+
+function scopeProbeDefaultValue(
+  column: StorageTargetPayloadV1['entities'][number]['columns'][number],
+  recordId: string,
+): unknown {
+  if (!column.fieldContract.required) return null;
+  switch (column.fieldContract.fieldKind) {
+    case 'booleanFieldType':
+      return false;
+    case 'dateFieldType':
+      return '2026-07-29';
+    case 'dateTimeFieldType':
+      return '2026-07-29T12:00:00.000Z';
+    case 'enumFieldType':
+      return (
+        column.fieldContract.enumOptionIds.find((option) =>
+          option.endsWith('_active'),
+        ) ?? column.fieldContract.enumOptionIds[0]
+      );
+    case 'exactDecimalFieldType':
+    case 'moneyFieldType':
+    case 'quantityFieldType':
+      return '1';
+    case 'integerFieldType':
+      return 1;
+    case 'textFieldType': {
+      const maximumLength = column.fieldContract.bounds.maximumLength ?? 80;
+      return `${column.physicalName}-${recordId.slice(0, 8)}`.slice(
+        0,
+        maximumLength,
+      );
+    }
+    case 'timeFieldType':
+      return '00:00:00';
+  }
+}
+
+function quoteTestIdentifier(identifier: string): string {
+  assert.match(identifier, /^[a-z][a-z0-9_]{0,62}$/u);
+  return `"${identifier}"`;
 }
 
 function definitionBytes(definition: unknown): Uint8Array {
