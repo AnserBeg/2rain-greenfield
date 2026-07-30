@@ -137,12 +137,11 @@ test('issued legal-entity read scope is generic, explicit, and complete across r
   );
 
   assert.match(runtime, /issuedLegalEntityReadScopes = new WeakMap/);
-  assert.match(runtime, /legalEntityIds\.length === 0/);
   assert.match(runtime, /for \(const legalEntityId of legalEntityIds\)/);
   assert.match(runtime, /issuedLegalEntityReadScopes\.get\(value\) !== view/);
   assert.match(
     gateway,
-    /legalEntityReadScope:\s*executionContext\.legalEntityReadScope \?\? null/u,
+    /await verifyLegalEntityReadScope\(\s*this\.currentPolicy,\s*executionContext\.legalEntityReadScope,\s*view,\s*\)/u,
   );
   assert.match(scopeMechanism, /Object\.hasOwn\(entity, 'legalEntity'\)/);
   assert.match(scopeMechanism, /MODULE_LEGAL_ENTITY_READ_SCOPE_REQUIRED/);
@@ -189,6 +188,11 @@ test('issued legal-entity read scope is generic, explicit, and complete across r
       scopeMechanism,
       'MODULE_LEGAL_ENTITY_READ_SCOPE_NOT_FOUND',
       /MODULE_LEGAL_ENTITY_READ_SCOPE_NOT_FOUND/,
+    ],
+    [
+      gateway,
+      'await verifyLegalEntityReadScope(',
+      /await verifyLegalEntityReadScope\(/,
     ],
     [
       interpreter,

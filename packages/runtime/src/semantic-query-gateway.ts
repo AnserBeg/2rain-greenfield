@@ -20,6 +20,7 @@ import {
   assertRequestRuntimeView,
   authorizeCurrentPolicy,
   trustedContextForRequestRuntimeView,
+  verifyLegalEntityReadScope,
   type CurrentPolicyGateway,
   type ImmutableJsonValue,
   type LegalEntityReadScope,
@@ -437,6 +438,14 @@ export class SemanticQueryGateway {
       );
     }
     const parameterValues = bindQueryParameters(definition, request.arguments);
+    const legalEntityReadScope =
+      executionContext.legalEntityReadScope === undefined
+        ? null
+        : await verifyLegalEntityReadScope(
+            this.currentPolicy,
+            executionContext.legalEntityReadScope,
+            view,
+          );
     let result: SemanticAggregateResultEnvelope | SemanticQueryResultEnvelope;
     if (definition.queryType === 'aggregate') {
       if (!this.executor.executeAggregate) {
@@ -450,7 +459,7 @@ export class SemanticQueryGateway {
           context: trustedContextForRequestRuntimeView(view),
           definition,
           filterPlans: Object.freeze(filterPlans),
-          legalEntityReadScope: executionContext.legalEntityReadScope ?? null,
+          legalEntityReadScope,
           list: null,
           parameterValues,
           view,
@@ -463,7 +472,7 @@ export class SemanticQueryGateway {
           context: trustedContextForRequestRuntimeView(view),
           definition,
           filterPlans: Object.freeze(filterPlans),
-          legalEntityReadScope: executionContext.legalEntityReadScope ?? null,
+          legalEntityReadScope,
           list,
           parameterValues,
           view,

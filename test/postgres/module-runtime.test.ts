@@ -84,6 +84,8 @@ import {
 import {
   AuthenticatedRequestRuntimeEntryAdapter,
   CURRENT_POLICY_DECISION_VERSION,
+  InvalidLegalEntityReadScopeSelectionError,
+  LegalEntityReadScopeIntegrityError,
   LegalEntityReadScopePolicyDeniedError,
   REQUEST_RUNTIME_PROJECTION_FAMILIES,
   issueLegalEntityReadScope,
@@ -1186,6 +1188,31 @@ test('v3 inventory reads require issued legal-entity scope and preserve generic 
           view,
           [legalEntityId, secondLegalEntityId],
         );
+        await assert.rejects(
+          issueLegalEntityReadScope(policy, view, []),
+          InvalidLegalEntityReadScopeSelectionError,
+        );
+        const [allowedFirstId, deniedSecondId] = [
+          legalEntityId,
+          secondLegalEntityId,
+        ].toSorted();
+        assert.ok(allowedFirstId);
+        assert.ok(deniedSecondId);
+        const mixedIssuancePolicy = new SelectiveLegalEntityPolicy();
+        mixedIssuancePolicy.deny(deniedSecondId);
+        await assert.rejects(
+          issueLegalEntityReadScope(mixedIssuancePolicy, view, [
+            deniedSecondId,
+            allowedFirstId,
+          ]),
+          (error: unknown) =>
+            error instanceof LegalEntityReadScopePolicyDeniedError &&
+            error.legalEntityId === deniedSecondId,
+        );
+        assert.deepEqual(mixedIssuancePolicy.legalEntityAuthorizationCalls, [
+          allowedFirstId,
+          deniedSecondId,
+        ]);
         const aggregateArguments = {
           [inventoryScopeProbeIds.itemParameter]: sharedItemId,
           [inventoryScopeProbeIds.locationParameter]: sharedLocationId,
@@ -1214,6 +1241,56 @@ test('v3 inventory reads require issued legal-entity scope and preserve generic 
           ).value.value,
           '12',
         );
+
+        const memberRecheckPolicy = new SelectiveLegalEntityPolicy();
+        const memberRecheckGateway = new SemanticQueryGateway(
+          memberRecheckPolicy,
+          interpreter,
+        );
+        const memberRecheckScope = await issueLegalEntityReadScope(
+          memberRecheckPolicy,
+          view,
+          [deniedSecondId, allowedFirstId],
+        );
+        memberRecheckPolicy.resetLegalEntityAuthorizationCalls();
+        memberRecheckPolicy.deny(deniedSecondId);
+        await assert.rejects(
+          aggregateQuery(memberRecheckGateway, view, aggregateArguments, {
+            legalEntityReadScope: memberRecheckScope,
+          }),
+          (error: unknown) =>
+            error instanceof LegalEntityReadScopePolicyDeniedError &&
+            error.legalEntityId === deniedSecondId,
+        );
+        assert.deepEqual(memberRecheckPolicy.legalEntityAuthorizationCalls, [
+          allowedFirstId,
+          deniedSecondId,
+        ]);
+
+        const advancedPolicy = new SelectiveLegalEntityPolicy();
+        const advancedPolicyGateway = new SemanticQueryGateway(
+          advancedPolicy,
+          interpreter,
+        );
+        const staleScope = await issueLegalEntityReadScope(
+          advancedPolicy,
+          view,
+          [legalEntityId],
+        );
+        advancedPolicy.resetLegalEntityAuthorizationCalls();
+        advancedPolicy.setPolicyVersion('module-runtime-selective-policy/v2');
+        await assert.rejects(
+          aggregateQuery(advancedPolicyGateway, view, aggregateArguments, {
+            legalEntityReadScope: staleScope,
+          }),
+          (error: unknown) =>
+            error instanceof LegalEntityReadScopeIntegrityError &&
+            error.message ===
+              'issued legal-entity read scope policy is no longer current',
+        );
+        assert.deepEqual(advancedPolicy.legalEntityAuthorizationCalls, [
+          legalEntityId,
+        ]);
         const unscopedDefect = await pool.query<{
           contains_combined_quantity: boolean;
         }>(
@@ -2294,6 +2371,59 @@ class DenyPolicy implements CurrentPolicyGateway {
     void _subject;
     return { policyVersion: 'module-runtime-deny-policy/v1' };
   }
+}
+
+class SelectiveLegalEntityPolicy implements CurrentPolicyGateway {
+  readonly legalEntityAuthorizationCalls: string[] = [];
+  readonly #deniedLegalEntityIds = new Set<string>();
+  #policyVersion = 'module-runtime-selective-policy/v1';
+
+  deny(...legalEntityIds: readonly string[]): void {
+    for (const legalEntityId of legalEntityIds) {
+      this.#deniedLegalEntityIds.add(legalEntityId);
+    }
+  }
+
+  resetLegalEntityAuthorizationCalls(): void {
+    this.legalEntityAuthorizationCalls.length = 0;
+  }
+
+  setPolicyVersion(policyVersion: string): void {
+    this.#policyVersion = policyVersion;
+  }
+
+  async authorize(request: CurrentPolicyDecisionRequest) {
+    const legalEntityId = legalEntityIdFromPolicyInput(request.decisionInput);
+    if (legalEntityId) {
+      this.legalEntityAuthorizationCalls.push(legalEntityId);
+    }
+    return {
+      decision:
+        legalEntityId && this.#deniedLegalEntityIds.has(legalEntityId)
+          ? ('DENY' as const)
+          : ('ALLOW' as const),
+      decisionVersion: CURRENT_POLICY_DECISION_VERSION,
+      policyVersion: this.#policyVersion,
+    };
+  }
+
+  async readCurrentVersion(_subject: CurrentPolicySubject) {
+    void _subject;
+    return { policyVersion: this.#policyVersion };
+  }
+}
+
+function legalEntityIdFromPolicyInput(
+  input: ImmutableJsonValue,
+): string | null {
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+    return null;
+  }
+  const record = input as { readonly [key: string]: ImmutableJsonValue };
+  return record.kind === 'legalEntityReadScopePolicyInput' &&
+    typeof record.legalEntityId === 'string'
+    ? record.legalEntityId
+    : null;
 }
 
 async function operation(

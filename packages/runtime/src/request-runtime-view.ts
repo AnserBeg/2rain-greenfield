@@ -316,12 +316,7 @@ export async function issueLegalEntityReadScope(
       gateway,
       view,
       LEGAL_ENTITY_READ_SCOPE_PERMISSION_ID,
-      Object.freeze({
-        kind: 'legalEntityReadScopePolicyInput',
-        legalEntityId,
-        requestId: view.requestId,
-        schemaVersion: LEGAL_ENTITY_READ_SCOPE_POLICY_INPUT_VERSION,
-      }),
+      legalEntityReadScopePolicyInput(view, legalEntityId),
     );
     if (decision.decision === 'DENY') {
       throw new LegalEntityReadScopePolicyDeniedError(legalEntityId);
@@ -383,6 +378,53 @@ export function legalEntityIdsFromIssuedReadScope(
     );
   }
   return scope.legalEntityIds;
+}
+
+/** Issuance is evidence only; every execution rechecks every member live. */
+export async function verifyLegalEntityReadScope(
+  gateway: CurrentPolicyGateway,
+  value: unknown,
+  view: RequestRuntimeView,
+): Promise<LegalEntityReadScope> {
+  const legalEntityIds = legalEntityIdsFromIssuedReadScope(value, view);
+  const scope = value as LegalEntityReadScope;
+  assertNonBlank(scope.policyVersion, 'policyVersion');
+
+  let decisionPolicyVersion: string | undefined;
+  for (const legalEntityId of legalEntityIds) {
+    const decision = await authorizeCurrentPolicy(
+      gateway,
+      view,
+      LEGAL_ENTITY_READ_SCOPE_PERMISSION_ID,
+      legalEntityReadScopePolicyInput(view, legalEntityId),
+    );
+    if (decision.decision === 'DENY') {
+      throw new LegalEntityReadScopePolicyDeniedError(legalEntityId);
+    }
+    if (
+      decisionPolicyVersion !== undefined &&
+      decisionPolicyVersion !== decision.policyVersion
+    ) {
+      throw new LegalEntityReadScopeIntegrityError(
+        'current policy version changed while legal-entity scope was verified',
+      );
+    }
+    decisionPolicyVersion = decision.policyVersion;
+  }
+
+  const currentPolicy = await gateway.readCurrentVersion(policySubject(view));
+  assertNonBlank(currentPolicy.policyVersion, 'policyVersion');
+  if (decisionPolicyVersion !== currentPolicy.policyVersion) {
+    throw new LegalEntityReadScopeIntegrityError(
+      'current policy version changed while legal-entity scope was verified',
+    );
+  }
+  if (currentPolicy.policyVersion !== scope.policyVersion) {
+    throw new LegalEntityReadScopeIntegrityError(
+      'issued legal-entity read scope policy is no longer current',
+    );
+  }
+  return scope;
 }
 
 export function createPinnedRuntimeContextEnvelope(
@@ -631,11 +673,23 @@ function cloneImmutableJson(value: unknown, path: string): ImmutableJsonValue {
   );
 }
 
-function policySubject(context: TrustedRequestContext): CurrentPolicySubject {
+function policySubject(context: CurrentPolicySubject): CurrentPolicySubject {
   return Object.freeze({
     environmentId: context.environmentId,
     principalId: context.principalId,
     tenantId: context.tenantId,
+  });
+}
+
+function legalEntityReadScopePolicyInput(
+  view: RequestRuntimeView,
+  legalEntityId: string,
+): ImmutableJsonValue {
+  return Object.freeze({
+    kind: 'legalEntityReadScopePolicyInput',
+    legalEntityId,
+    requestId: view.requestId,
+    schemaVersion: LEGAL_ENTITY_READ_SCOPE_POLICY_INPUT_VERSION,
   });
 }
 
