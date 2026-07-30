@@ -1,7 +1,7 @@
 # ADR-0025: Inventory temporal and posting configuration in the platform plane
 
 Date: 2026-07-29
-Status: proposed by packet G3-P2b-1; pending packet acceptance
+Status: **ratified** — accepted with packet G3-P2b-1 on 2026-07-29 (see `docs/execution/ledger.md`)
 Tier: Critical (review per `review-tiers`)
 
 ## Context
