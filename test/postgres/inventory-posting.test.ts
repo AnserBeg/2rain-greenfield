@@ -35,6 +35,7 @@ import {
 } from '../../packages/domain/src/inventory/contracts.js';
 import {
   INVENTORY_POSTING_CAPABILITY_VERSION,
+  INVENTORY_POSTING_CAPABILITY_ID,
   INVENTORY_POSTING_DEPENDENCY_SET_ROOT,
   InventoryPostingError,
   PostgresInventoryPostingService,
@@ -87,6 +88,7 @@ interface PostingFixture {
   inventory: CompileSuccess;
   inventoryDefinition: Record<string, unknown>;
   storage: StorageTargetPayloadV1;
+  storageContentHash: string;
 }
 
 interface PostingDatabase {
@@ -96,6 +98,7 @@ interface PostingDatabase {
   binding: TestStorageBinding;
   context: TrustedRequestContext;
   runtimePool: Pool;
+  registration: InventoryPostingRegistrationV1;
   service: PostgresInventoryPostingService;
 }
 
@@ -128,6 +131,10 @@ test(
   { timeout: 180_000 },
   async (testContext) => {
     await withPostingDatabase(async (database) => {
+      assert.equal(INVENTORY_POSTING_CAPABILITY_ID, postingCapabilityId);
+      await assertRegistrationHardening(testContext, database);
+      await assertDraftBinding(testContext, database);
+
       const first = command({
         legalEntityId: legalReject,
         locationId: locationPrimary,
@@ -183,46 +190,12 @@ test(
       );
       assert.equal(await movementCount(database), 1);
 
-      const forcedRollback = command({
-        legalEntityId: legalReject,
-        locationId: locationPrimary,
-        quantityDelta: '1',
-        sourceId: 'forced-rollback',
-      });
-      await seedDraft(database, forcedRollback);
-      await setTransactionState(
-        database,
-        forcedRollback.transactionId,
-        'posted',
-      );
-      await assert.rejects(
-        database.service.postAdjustment(
-          database.context,
-          database.actor,
-          forcedRollback,
-        ),
-        (error: unknown) =>
-          observePostingError(
-            testContext,
-            'forced-rollback',
-            error,
-            'INVENTORY_TRANSACTION_STATE_CONFLICT',
-          ),
-      );
-      assert.equal(await movementCountBySource(database, 'forced-rollback'), 0);
-      assert.equal(await companionCount(database), 1);
-      assert.equal(
-        await trustCountByRequest(database, database.context.requestId),
-        1,
-      );
-
       await assertBaseUnitBound(
         testContext,
         database,
         posted.movements[0]!.movementId,
       );
       await assertQuantityOnlyEvidence(testContext, database, posted);
-
       await assert.rejects(
         database.service.postAdjustment(database.context, database.actor, {
           ...first,
@@ -240,6 +213,78 @@ test(
         testContext,
         database,
         posted.movements[0]!.movementId,
+      );
+
+      const revisedDraft = command({
+        legalEntityId: legalReject,
+        locationId: locationPrimary,
+        quantityDelta: '1',
+        sourceId: 'revised-draft',
+      });
+      await seedDraft(database, revisedDraft);
+      await incrementTransactionRevision(database, revisedDraft.transactionId);
+      await assert.rejects(
+        database.service.postAdjustment(
+          database.context,
+          database.actor,
+          revisedDraft,
+        ),
+        (error: unknown) =>
+          observePostingError(
+            testContext,
+            'stale-draft-revision',
+            error,
+            'INVENTORY_TRANSACTION_STATE_CONFLICT',
+          ),
+      );
+      const revisedPosted = await database.service.postAdjustment(
+        database.context,
+        database.actor,
+        { ...revisedDraft, sourceRevision: 2 },
+      );
+      assert.equal(
+        await recordedTransactionRevision(
+          database,
+          revisedPosted.trust.changeDocumentId,
+        ),
+        3,
+      );
+
+      const forcedRollback = command({
+        legalEntityId: legalReject,
+        locationId: locationPrimary,
+        quantityDelta: '1',
+        sourceId: 'forced-rollback',
+      });
+      await seedDraft(database, forcedRollback);
+      await installLateRollbackProbe(database, forcedRollback.transactionId);
+      const trustBeforeRollback = await trustCountByRequest(
+        database,
+        database.context.requestId,
+      );
+      const companionBeforeRollback = await companionCount(database);
+      await assert.rejects(
+        database.service.postAdjustment(
+          database.context,
+          database.actor,
+          forcedRollback,
+        ),
+        (error: unknown) => {
+          testContext.diagnostic(
+            `forced-rollback: ${postingCode(error) ?? 'unknown'} sqlstate=${postingDetail(error, 'sqlstate') ?? 'unknown'} ${String(error)}`,
+          );
+          return (
+            postingCode(error) === 'INVENTORY_POSTING_STORAGE_REJECTED' &&
+            postingDetail(error, 'sqlstate') === 'P0001'
+          );
+        },
+      );
+      assert.equal(await rollbackProbeCount(database), 1);
+      assert.equal(await movementCountBySource(database, 'forced-rollback'), 0);
+      assert.equal(await companionCount(database), companionBeforeRollback);
+      assert.equal(
+        await trustCountByRequest(database, database.context.requestId),
+        trustBeforeRollback,
       );
 
       const rejectedNegative = command({
@@ -288,6 +333,74 @@ test(
           ),
       );
       assert.equal(await movementCountBySource(database, 'missing-reason'), 0);
+
+      await updatePostingConfiguration(database, legalAllow, {
+        adjustmentReasonRequirement: 'codeOnly',
+      });
+      const codeOnlyReason = command({
+        legalEntityId: legalAllow,
+        locationId: locationPrimary,
+        quantityDelta: '1',
+        reason: { code: 'CODE-ONLY', narrative: null },
+        sourceId: 'reason-code-only',
+      });
+      await seedDraft(database, codeOnlyReason);
+      assert.equal(
+        (
+          await database.service.postAdjustment(
+            database.context,
+            database.actor,
+            codeOnlyReason,
+          )
+        ).replayed,
+        false,
+      );
+
+      const staleEffective = command({
+        effectiveAt: '2026-07-28T12:00:00.000Z',
+        legalEntityId: legalReject,
+        locationId: locationPrimary,
+        quantityDelta: '1',
+        sourceId: 'backdate-reject',
+      });
+      await seedDraft(database, staleEffective);
+      await assert.rejects(
+        database.service.postAdjustment(
+          database.context,
+          database.actor,
+          staleEffective,
+        ),
+        (error: unknown) =>
+          observePostingError(
+            testContext,
+            'backdate-dial',
+            error,
+            'INVENTORY_BACKDATE_LIMIT_EXCEEDED',
+          ),
+      );
+
+      for (const [sourceId, quantityDelta] of [
+        ['approval-below-threshold', '0.5'],
+        ['approval-at-threshold', '1'],
+      ] as const) {
+        const withinThreshold = command({
+          legalEntityId: legalApproval,
+          locationId: locationPrimary,
+          quantityDelta,
+          sourceId,
+        });
+        await seedDraft(database, withinThreshold);
+        assert.equal(
+          (
+            await database.service.postAdjustment(
+              database.context,
+              database.actor,
+              withinThreshold,
+            )
+          ).replayed,
+          false,
+        );
+      }
 
       const approval = command({
         legalEntityId: legalApproval,
@@ -344,6 +457,71 @@ test(
         allowed,
       );
       assert.equal(allowedResult.negativeStockFlag, false);
+
+      const entityOneEffect = command({
+        legalEntityId: legalReject,
+        locationId: locationPrimary,
+        quantityDelta: '1',
+        sourceId: 'shared-natural-effect',
+      });
+      const entityTwoEffect = command({
+        legalEntityId: legalAllow,
+        locationId: locationPrimary,
+        quantityDelta: '1',
+        sourceId: 'shared-natural-effect',
+      });
+      await seedDraft(database, entityOneEffect);
+      await seedDraft(database, entityTwoEffect);
+      await database.service.postAdjustment(
+        database.context,
+        database.actor,
+        entityOneEffect,
+      );
+      const entityTwoPosted = await database.service.postAdjustment(
+        database.context,
+        database.actor,
+        entityTwoEffect,
+      );
+      assert.equal(
+        (
+          await database.service.postAdjustment(
+            database.context,
+            database.actor,
+            { ...entityTwoEffect, idempotencyKey: randomUUID() },
+          )
+        ).replayed,
+        true,
+      );
+      assert.equal(
+        await movementCountBySource(database, 'shared-natural-effect'),
+        2,
+      );
+      assert.equal(entityTwoPosted.replayed, false);
+
+      const mixedCase = uppercaseUuidCommand(
+        command({
+          legalEntityId: legalAllow,
+          locationId: locationTie,
+          quantityDelta: '1',
+          sourceId: 'uppercase-uuid-replay',
+        }),
+      );
+      await seedDraft(database, mixedCase);
+      const mixedCasePosted = await database.service.postAdjustment(
+        database.context,
+        database.actor,
+        mixedCase,
+      );
+      const normalizedReplay = await database.service.postAdjustment(
+        database.context,
+        database.actor,
+        {
+          ...lowercaseUuidCommand(mixedCase),
+          idempotencyKey: randomUUID(),
+        },
+      );
+      assert.equal(normalizedReplay.replayed, true);
+      assert.deepEqual(normalizedReplay.movements, mixedCasePosted.movements);
 
       const tie = command({
         legalEntityId: legalReject,
@@ -427,6 +605,10 @@ test(
       );
 
       await setPeriodLock(database, legalReject, effectiveAt);
+      const trustBeforeClosed = await trustCountByRequest(
+        database,
+        database.context.requestId,
+      );
       const closed = command({
         legalEntityId: legalReject,
         locationId: locationPrimary,
@@ -451,7 +633,7 @@ test(
       assert.equal(await movementCountBySource(database, 'closed-period'), 0);
       assert.equal(
         await trustCountByRequest(database, database.context.requestId),
-        7,
+        trustBeforeClosed,
       );
     });
   },
@@ -504,6 +686,185 @@ function line(quantityDelta: string, sourceLine: string, locationId: string) {
   } as const;
 }
 
+async function assertRegistrationHardening(
+  testContext: TestContext,
+  database: PostingDatabase,
+): Promise<void> {
+  assert.throws(
+    () =>
+      new PostgresInventoryPostingService(
+        database.runtimePool,
+        {
+          ...database.registration,
+          capabilityId: 'northstar.fake:capability.posting',
+        } as unknown as InventoryPostingRegistrationV1,
+        { currentInstant: () => recordedAt },
+      ),
+    (error: unknown) =>
+      observePostingError(
+        testContext,
+        'capability-id-mismatch',
+        error,
+        'INVENTORY_POSTING_CAPABILITY_MISMATCH',
+      ),
+  );
+  assert.throws(
+    () =>
+      new PostgresInventoryPostingService(
+        database.runtimePool,
+        {
+          ...database.registration,
+          dependencySetRoot:
+            '7ef50e86732818a0ec4ec2a03a001066ac59408ea260c65bf018646e4377a63d',
+        } as unknown as InventoryPostingRegistrationV1,
+        { currentInstant: () => recordedAt },
+      ),
+    (error: unknown) =>
+      observePostingError(
+        testContext,
+        'dependency-root-mismatch',
+        error,
+        'INVENTORY_POSTING_CAPABILITY_MISMATCH',
+      ),
+  );
+
+  const tamperedStorage = {
+    ...structuredClone(database.registration.storageTarget),
+    reviewTamper: true,
+  } as unknown as StorageTargetPayloadV1;
+  const tamperedService = new PostgresInventoryPostingService(
+    database.runtimePool,
+    { ...database.registration, storageTarget: tamperedStorage },
+    { currentInstant: () => recordedAt },
+  );
+  const artifactMismatch = command({
+    legalEntityId: legalReject,
+    sourceId: 'storage-artifact-mismatch',
+  });
+  await seedDraft(database, artifactMismatch);
+  await assert.rejects(
+    tamperedService.postAdjustment(
+      database.context,
+      database.actor,
+      artifactMismatch,
+    ),
+    (error: unknown) =>
+      observePostingError(
+        testContext,
+        'storage-artifact-mismatch',
+        error,
+        'INVENTORY_POSTING_RELEASE_MISMATCH',
+      ),
+  );
+}
+
+async function assertDraftBinding(
+  testContext: TestContext,
+  database: PostingDatabase,
+): Promise<void> {
+  const draftA = command({
+    legalEntityId: legalReject,
+    sourceId: 'draft-a',
+  });
+  const draftB = command({
+    legalEntityId: legalReject,
+    sourceId: 'draft-b',
+  });
+  await seedDraft(database, draftA);
+  await seedDraft(database, draftB);
+  await assert.rejects(
+    database.service.postAdjustment(database.context, database.actor, {
+      ...draftA,
+      lines: [
+        {
+          ...draftA.lines[0]!,
+          transactionLineId: draftB.lines[0]!.transactionLineId,
+        },
+      ],
+    }),
+    (error: unknown) =>
+      observePostingError(
+        testContext,
+        'foreign-draft-line',
+        error,
+        'INVENTORY_TRANSACTION_STATE_CONFLICT',
+      ),
+  );
+
+  const changedValue = command({
+    legalEntityId: legalReject,
+    sourceId: 'draft-value-mismatch',
+  });
+  await seedDraft(database, changedValue);
+  await assert.rejects(
+    database.service.postAdjustment(database.context, database.actor, {
+      ...changedValue,
+      lines: [{ ...changedValue.lines[0]!, quantityDelta: '2' }],
+    }),
+    (error: unknown) =>
+      observePostingError(
+        testContext,
+        'draft-line-value-mismatch',
+        error,
+        'INVENTORY_TRANSACTION_STATE_CONFLICT',
+      ),
+  );
+
+  const incomplete = command({
+    legalEntityId: legalReject,
+    lines: [line('1', '1', locationPrimary), line('1', '2', locationPrimary)],
+    sourceId: 'draft-line-omitted',
+  });
+  await seedDraft(database, incomplete);
+  await assert.rejects(
+    database.service.postAdjustment(database.context, database.actor, {
+      ...incomplete,
+      lines: [incomplete.lines[0]!],
+    }),
+    (error: unknown) =>
+      observePostingError(
+        testContext,
+        'draft-line-set-incomplete',
+        error,
+        'INVENTORY_TRANSACTION_STATE_CONFLICT',
+      ),
+  );
+}
+
+function uppercaseUuidCommand(
+  input: InventoryAdjustmentPostingCommandV1,
+): InventoryAdjustmentPostingCommandV1 {
+  return {
+    ...input,
+    idempotencyKey: input.idempotencyKey.toUpperCase(),
+    legalEntityId: input.legalEntityId.toUpperCase(),
+    lines: input.lines.map((entry) => ({
+      ...entry,
+      itemId: entry.itemId.toUpperCase(),
+      locationId: entry.locationId.toUpperCase(),
+      transactionLineId: entry.transactionLineId.toUpperCase(),
+    })),
+    transactionId: input.transactionId.toUpperCase(),
+  };
+}
+
+function lowercaseUuidCommand(
+  input: InventoryAdjustmentPostingCommandV1,
+): InventoryAdjustmentPostingCommandV1 {
+  return {
+    ...input,
+    idempotencyKey: input.idempotencyKey.toLowerCase(),
+    legalEntityId: input.legalEntityId.toLowerCase(),
+    lines: input.lines.map((entry) => ({
+      ...entry,
+      itemId: entry.itemId.toLowerCase(),
+      locationId: entry.locationId.toLowerCase(),
+      transactionLineId: entry.transactionLineId.toLowerCase(),
+    })),
+    transactionId: input.transactionId.toLowerCase(),
+  };
+}
+
 let fixturePromise: Promise<PostingFixture> | undefined;
 
 async function compiledFixture(): Promise<PostingFixture> {
@@ -518,15 +879,17 @@ async function buildFixture(): Promise<PostingFixture> {
   const inventory = mustCompile(
     moduleInput(inventoryDefinition, expectedActiveReleaseFrom(empty)),
   );
+  const storage = projectionPayload<StorageTargetPayloadV1>(
+    inventory,
+    PROJECTION_FAMILY_IDS.storageTarget,
+  );
   return {
     empty,
     emptyDefinition,
     inventory,
     inventoryDefinition,
-    storage: projectionPayload<StorageTargetPayloadV1>(
-      inventory,
-      PROJECTION_FAMILY_IDS.storageTarget,
-    ),
+    storage: storage.payload,
+    storageContentHash: storage.contentHash,
   };
 }
 
@@ -586,6 +949,7 @@ async function withPostingDatabase(
         releaseContentHash: fixture.inventory.releaseRoot,
         releaseId: targetReleaseId,
         storageTarget: fixture.storage,
+        storageTargetContentHash: fixture.storageContentHash,
       };
       assert.equal(
         DECLARED_POSTING_DEPENDENCY_SET_ROOT,
@@ -602,6 +966,7 @@ async function withPostingDatabase(
         approvedActor,
         binding,
         context,
+        registration,
         runtimePool,
         service,
       });
@@ -767,7 +1132,7 @@ async function seedDraft(
         input.legalEntityId,
         {},
       );
-      for (const [index, postingLine] of input.lines.entries()) {
+      for (const postingLine of input.lines) {
         const negative = postingLine.quantityDelta.startsWith('-');
         await insertEntity(
           client,
@@ -778,7 +1143,9 @@ async function seedDraft(
               ? postingLine.locationId
               : null,
             inventory_transaction_line_item_id: postingLine.itemId,
-            inventory_transaction_line_line_number: index + 1,
+            inventory_transaction_line_line_number: Number(
+              postingLine.sourceLine,
+            ),
             inventory_transaction_line_quantity: postingLine.quantityDelta,
             inventory_transaction_line_to_location_id: negative
               ? null
@@ -1058,10 +1425,9 @@ async function setPeriodLock(
   );
 }
 
-async function setTransactionState(
+async function incrementTransactionRevision(
   database: PostingDatabase,
   transactionId: string,
-  state: 'draft' | 'posted',
 ): Promise<void> {
   await withModuleRole(
     database.runtimePool,
@@ -1069,22 +1435,91 @@ async function setTransactionState(
     async (client) => {
       await client.query(
         `UPDATE ${table(database.binding, database.binding.transaction)}
-          SET ${quoted(field(database.binding.transaction, 'inventory_transaction_state').physicalName)}=$4,
-              ${quoted(database.binding.transaction.revisionColumn)}=${quoted(database.binding.transaction.revisionColumn)}+1
+          SET ${quoted(database.binding.transaction.revisionColumn)}=${quoted(database.binding.transaction.revisionColumn)}+1
         WHERE tenant_id=$1 AND environment_id=$2
           AND ${quoted(database.binding.transaction.recordIdColumn)}=$3`,
-        [
-          tenantId,
-          environmentId,
-          transactionId,
-          enumOption(
-            field(database.binding.transaction, 'inventory_transaction_state'),
-            state,
-          ),
-        ],
+        [tenantId, environmentId, transactionId],
       );
     },
   );
+}
+
+async function recordedTransactionRevision(
+  database: PostingDatabase,
+  changeDocumentId: string,
+): Promise<number> {
+  const result = await database.adminPool.query<{ revision: number }>(
+    `SELECT revision
+       FROM platform.trust_business_change_documents
+      WHERE tenant_id=$1 AND environment_id=$2 AND change_document_id=$3`,
+    [tenantId, environmentId, changeDocumentId],
+  );
+  return Number(result.rows[0]?.revision ?? -1);
+}
+
+async function updatePostingConfiguration(
+  database: PostingDatabase,
+  legalEntityId: string,
+  values: { adjustmentReasonRequirement?: 'codeOnly' | 'codeAndNarrative' },
+): Promise<void> {
+  await database.adminPool.query(
+    `UPDATE platform.inventory_posting_configurations
+        SET adjustment_reason_requirement = COALESCE($4, adjustment_reason_requirement),
+            revision = revision + 1,
+            updated_at = transaction_timestamp()
+      WHERE tenant_id=$1 AND environment_id=$2 AND legal_entity_id=$3`,
+    [
+      tenantId,
+      environmentId,
+      legalEntityId,
+      values.adjustmentReasonRequirement ?? null,
+    ],
+  );
+}
+
+async function installLateRollbackProbe(
+  database: PostingDatabase,
+  transactionId: string,
+): Promise<void> {
+  await database.adminPool.query(
+    `CREATE SEQUENCE public.g3p3_movement_insert_probe MINVALUE 0 START 0;
+     CREATE FUNCTION public.g3p3_observe_movement_insert()
+       RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER
+       SET search_path = pg_catalog, public AS $probe$
+       BEGIN
+         PERFORM nextval('public.g3p3_movement_insert_probe');
+         RETURN NEW;
+       END
+       $probe$;
+     CREATE TRIGGER g3p3_observe_movement_insert
+       AFTER INSERT ON ${table(database.binding, database.binding.movement)}
+       FOR EACH ROW EXECUTE FUNCTION public.g3p3_observe_movement_insert();
+     CREATE FUNCTION public.g3p3_reject_target_transition()
+       RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER
+       SET search_path = pg_catalog, public AS $reject$
+       BEGIN
+         IF NEW.${quoted(database.binding.transaction.recordIdColumn)} = TG_ARGV[0]::uuid THEN
+           RAISE EXCEPTION 'G3P3_INJECTED_LATE_FAILURE' USING ERRCODE='P0001';
+         END IF;
+         RETURN NEW;
+       END
+       $reject$;
+     CREATE TRIGGER g3p3_reject_target_transition
+       BEFORE UPDATE ON ${table(database.binding, database.binding.transaction)}
+       FOR EACH ROW EXECUTE FUNCTION public.g3p3_reject_target_transition('${transactionId}')`,
+  );
+}
+
+async function rollbackProbeCount(database: PostingDatabase): Promise<number> {
+  const result = await database.adminPool.query<{
+    is_called: boolean;
+    last_value: string;
+  }>(
+    `SELECT last_value::text, is_called
+       FROM public.g3p3_movement_insert_probe`,
+  );
+  const row = result.rows[0];
+  return row?.is_called ? Number(row.last_value) + 1 : 0;
 }
 
 async function movementCount(database: PostingDatabase): Promise<number> {
@@ -1305,7 +1740,10 @@ function mustCompile(input: CompilerInput): CompileSuccess {
   return result;
 }
 
-function projectionPayload<T>(compiled: CompileSuccess, familyId: string): T {
+function projectionPayload<T>(
+  compiled: CompileSuccess,
+  familyId: string,
+): { contentHash: string; payload: T } {
   const reference = compiled.bundle.releaseManifest.projections.find(
     (candidate) => candidate.familyId === familyId,
   );
@@ -1321,7 +1759,10 @@ function projectionPayload<T>(compiled: CompileSuccess, familyId: string): T {
     (artifact) => artifact.contentHash === manifest.chunks[0]?.contentHash,
   );
   assert.ok(chunk);
-  return JSON.parse(new TextDecoder().decode(chunk.canonicalBytes)) as T;
+  return {
+    contentHash: chunk.contentHash,
+    payload: JSON.parse(new TextDecoder().decode(chunk.canonicalBytes)) as T,
+  };
 }
 
 async function persistSequence(
@@ -1479,6 +1920,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function postingCode(error: unknown): string | undefined {
   return error instanceof InventoryPostingError ? error.code : undefined;
+}
+
+function postingDetail(error: unknown, key: string): string | undefined {
+  if (!(error instanceof InventoryPostingError)) return undefined;
+  return error.details[key];
 }
 
 function observePostingError(

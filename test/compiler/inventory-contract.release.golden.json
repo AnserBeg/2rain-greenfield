@@ -40,6 +40,7 @@
     "read:northstar.inventory:period_lock.closed_through",
     "read:northstar.inventory:posting_configuration",
     "read:northstar.inventory:movement.quantity_delta",
+    "read:northstar.inventory:transaction_line",
     "transition:northstar.inventory:transaction.state",
     "append:northstar.inventory:movement",
     "read:northstar.trust:semantic_operation_receipt",
@@ -50,6 +51,8 @@
     "append:northstar.trust:outbox_event",
     "append:northstar.trust:semantic_operation_receipt"
   ],
+  "dependencySetRoot": "2eb1de635331ee5781fe928a37d3664e3d4f8ccfe56ca44e231a652a806eca05",
+  "dependencySetVersion": 2,
   "legalEntity": {
     "families": [
       {
@@ -188,7 +191,7 @@
     ],
     "kind": "quantityOnlyMovement"
   },
-  "releaseRoot": "bd977ff0a00db745e79b7d8e158cb55863319f9f37f7674d77b618e85272d116",
+  "releaseRoot": "31c47953a0f92c56d2e6edbb2a5a2137f7b8ae52b27f3f93ac60a3dc6e77857c",
   "storageTargetPayloadVersions": {
     "entityOwned": "northstar.storage-target-payload/v3",
     "tenantShared": "northstar.storage-target-payload/v1"

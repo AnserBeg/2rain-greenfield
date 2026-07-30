@@ -15,7 +15,7 @@ whole-command stock decision, acquire all affected stock identities before
 reading balance, or atomically couple the immutable fact to its natural effect
 identity and trust evidence.
 
-G3-P1a froze `northstar.inventory:capability.posting` version 1 and its exact
+G3-P1a froze `northstar.inventory:capability.posting` version 1 and its initial
 30-entry dependency set. G3-P2b-1 created its partitioned append-only storage,
 and G3-P2b-2 froze the per-stock-identity serializer. Those artifacts declare
 what posting must do, but none authorizes a provider implementation.
@@ -45,19 +45,37 @@ must match all of:
 
 - capability ID `northstar.inventory:capability.posting`;
 - capability version `1`;
-- G3-P1a's pinned dependency-set root
-  `7ef50e86732818a0ec4ec2a03a001066ac59408ea260c65bf018646e4377a63d`;
+- dependency-set version `2` and root
+  `2eb1de635331ee5781fe928a37d3664e3d4f8ccfe56ca44e231a652a806eca05`;
 - an active tenant release with the same immutable content hash; and
 - the compiler-emitted `northstar.storage-target-payload/v3` managed-storage
   contract.
 
-Neither package provenance nor namespace dispatch selects it. The declaring
-package supplies the exact capability ID in the registration; the provider
-validates the posting-capability shape and derives event/record identities from
-that registration instead of embedding a module namespace. The independently
-pinned dependency root and active release bind the protocol. The compiler,
+Neither package provenance nor namespace dispatch selects it. The
+capability-local adapter exact-matches the compiled-in frozen ID, version, and
+dependency root; it does not accept an arbitrary `:capability.posting` suffix.
+It also verifies that the supplied storage payload bytes and digest name an
+actual projection chunk of the active release. The compiler,
 generic interpreter, materializer, gateways, and fallback routing gain no
 Inventory branch.
+
+No current active-release artifact declares this posting capability. Therefore
+this decision does not claim release-persisted capability admission. Creating a
+separate admission table before the release has a declaration would create a
+second desired-state authority with no release source, repeating the
+dual-lineage defect. Inventory mounting in G3-P6a plus the routed projection
+follow-on must make the declaration part of release output; only then may
+runtime admission be evidenced against it. Until that lands, exact compiled
+contract identity/root plus exact active storage artifact is the intentionally
+recorded achievable boundary.
+
+The dependency set evolves before first posting from v1/30 entries/root
+`7ef50e86732818a0ec4ec2a03a001066ac59408ea260c65bf018646e4377a63d`
+to v2/31 entries/root
+`2eb1de635331ee5781fe928a37d3664e3d4f8ccfe56ca44e231a652a806eca05`.
+The added `read:northstar.inventory:transaction_line` authority binds the
+command to the complete persisted draft line set. This is a protocol version
+event before the first fact, not a rewrite of posted history.
 
 The capability also owns its atomic trust write as one closed aggregate. The
 existing generic trust service begins its transaction and performs runtime-role,
@@ -77,8 +95,8 @@ The adapter owns one top-level PostgreSQL transaction. Its order is binding:
 1. `BEGIN`;
 2. acquire every affected v1 stock identity with G3-P2b-2's serializer,
    immediately and before any caller savepoint;
-3. read serialized movement state and evaluate `negativeStock` inside that
-   transaction;
+3. read and bind the complete adjustment draft line set and revision, then read
+   serialized movement state and evaluate `negativeStock` inside that transaction;
 4. load and enforce the release-recorded reason, approval, and backdate dials,
    and enforce the per-legal-entity period lock in the same transaction;
 5. append each movement; its compiled `AFTER INSERT` trigger claims the natural
@@ -124,13 +142,13 @@ This ADR does not:
   reservation writer;
 - authorize transfer, count correction, purchasing, valuation, or a mutable
   balance;
-- widen the 30-entry posting dependency set; or
+- add any posting dependency beyond the ratified v2 31-entry set; or
 - replace the policy kernel. The current adapter requires an upstream ALLOW
   decision and persists it; real policy narrowing remains owned by row 7.
 
-A second posting implementation, dependency-set change, new command family, or
-new platform table requires a superseding decision. Similarity to this
-capability is not authorization.
+A second posting implementation, another dependency-set change, new command
+family, or new platform table requires a superseding decision. Similarity to
+this capability is not authorization.
 
 ## Consequences and verification
 

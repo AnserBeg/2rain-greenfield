@@ -34,7 +34,7 @@ const INVENTORY_CONTRACT_RELEASE_VERSION =
   'northstar.inventory-contract-release/v1' as const;
 const STOCK_DIMENSION_SET_ID = 'northstar.stock-dimension-set/v1' as const;
 const INVENTORY_POSTING_DEPENDENCY_SET_ROOT =
-  '7ef50e86732818a0ec4ec2a03a001066ac59408ea260c65bf018646e4377a63d' as const;
+  '2eb1de635331ee5781fe928a37d3664e3d4f8ccfe56ca44e231a652a806eca05' as const;
 const LEGAL_ENTITY_FAMILY_CONTRACT_VERSION =
   'northstar.legal-entity-family-contract/v1' as const;
 const LEGAL_ENTITY_FAMILY_RULES = Object.freeze([
@@ -2076,7 +2076,7 @@ function validateAuthoritativeDependencies(
     diagnostics,
     definition,
     ['authoritativeDependencies', 'version'],
-    1,
+    2,
   );
   expectInventoryLiteral(
     diagnostics,

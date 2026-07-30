@@ -36,7 +36,9 @@ import { partyModuleDefinition } from '../../packages/domain/src/party/definitio
 interface MutableInventoryContract {
   authoritativeDependencies: {
     accessPlan: Array<Record<string, unknown>>;
+    dependencySetRoot: string;
     dependencies: Array<Record<string, unknown>>;
+    version: number;
   };
   compiledArtifacts: Array<Record<string, unknown>>;
   configuration: {
@@ -288,6 +290,7 @@ export function registerInventoryContractCases(
         dependencies: Array<{ access: string; dependencyId: string }>;
         exhaustiveByConstruction: boolean;
         undeclaredAccess: string;
+        version: number;
       };
 
       assert.deepEqual(stock, {
@@ -335,7 +338,8 @@ export function registerInventoryContractCases(
       );
       assert.equal(dependencies.exhaustiveByConstruction, true);
       assert.equal(dependencies.undeclaredAccess, 'compileFailure');
-      assert.equal(dependencies.dependencies.length, 30);
+      assert.equal(dependencies.version, 2);
+      assert.equal(dependencies.dependencies.length, 31);
       assert.deepEqual(contract.legalEntity, INVENTORY_CONTRACT_V1.legalEntity);
 
       const golden = JSON.parse(
@@ -1212,6 +1216,40 @@ export function registerInventoryContractCases(
       '$.authoritativeDependencies.accessPlan',
       'accessPlan',
     );
+
+    const missingTransactionLineRead = mutableContract();
+    for (const key of ['dependencies', 'accessPlan'] as const) {
+      missingTransactionLineRead.authoritativeDependencies[key] =
+        missingTransactionLineRead.authoritativeDependencies[key].filter(
+          (entry) =>
+            entry.dependencyId !== 'northstar.inventory:transaction_line',
+        );
+    }
+    const missingTransactionLineResult = compileInventoryContract(
+      missingTransactionLineRead,
+    );
+    assert.equal(missingTransactionLineResult.status, 'failed');
+    assertHasDiagnostic(
+      missingTransactionLineResult.diagnostics,
+      'INVENTORY_CONTRACT_INVALID',
+      '$.authoritativeDependencies.dependencies',
+      'dependencies',
+    );
+
+    const oldDependencyProtocol = mutableContract();
+    oldDependencyProtocol.authoritativeDependencies.version = 1;
+    oldDependencyProtocol.authoritativeDependencies.dependencySetRoot =
+      '7ef50e86732818a0ec4ec2a03a001066ac59408ea260c65bf018646e4377a63d';
+    const oldDependencyProtocolResult = compileInventoryContract(
+      oldDependencyProtocol,
+    );
+    assert.equal(oldDependencyProtocolResult.status, 'failed');
+    assertHasDiagnostic(
+      oldDependencyProtocolResult.diagnostics,
+      'INVENTORY_CONTRACT_INVALID',
+      '$.authoritativeDependencies.version',
+      'version',
+    );
   });
 
   register('malformed artifact and dial declarations fail closed', () => {
@@ -1566,7 +1604,9 @@ function releaseSummary(compiled: CompiledInventoryContractV1): unknown {
     kind: string;
   };
   const dependencies = contract.authoritativeDependencies as {
+    dependencySetRoot: string;
     dependencies: Array<{ access: string; dependencyId: string }>;
+    version: number;
   };
   return {
     configuration: compiled.release.configuration,
@@ -1574,6 +1614,8 @@ function releaseSummary(compiled: CompiledInventoryContractV1): unknown {
     dependencySet: dependencies.dependencies.map(
       (entry) => `${entry.access}:${entry.dependencyId}`,
     ),
+    dependencySetRoot: dependencies.dependencySetRoot,
+    dependencySetVersion: dependencies.version,
     legalEntity: contract.legalEntity,
     movement: {
       fields: movement.fields.map((field) => ({

@@ -32,8 +32,10 @@ import {
 import { assertTrustedActorEnvelope } from './trust/trusted-actor-envelope.js';
 
 export const INVENTORY_POSTING_CAPABILITY_VERSION = 1 as const;
+export const INVENTORY_POSTING_CAPABILITY_ID =
+  `${'northstar'}.${'inventory'}:capability.posting` as const;
 export const INVENTORY_POSTING_DEPENDENCY_SET_ROOT =
-  '7ef50e86732818a0ec4ec2a03a001066ac59408ea260c65bf018646e4377a63d' as const;
+  '2eb1de635331ee5781fe928a37d3664e3d4f8ccfe56ca44e231a652a806eca05' as const;
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const sha256Pattern = /^[0-9a-f]{64}$/u;
@@ -48,12 +50,13 @@ export interface InventoryRecordedAtAuthority {
 }
 
 export interface InventoryPostingRegistrationV1 {
-  readonly capabilityId: string;
+  readonly capabilityId: typeof INVENTORY_POSTING_CAPABILITY_ID;
   readonly capabilityVersion: typeof INVENTORY_POSTING_CAPABILITY_VERSION;
   readonly dependencySetRoot: typeof INVENTORY_POSTING_DEPENDENCY_SET_ROOT;
   readonly releaseContentHash: string;
   readonly releaseId: string;
   readonly storageTarget: StorageTargetPayloadV1;
+  readonly storageTargetContentHash: string;
 }
 
 export interface InventoryPostingAuthorizationV1 {
@@ -192,6 +195,14 @@ interface PostingStorageBinding {
   transactionPostedState: string;
   transactionStateColumn: string;
   transactionTypeColumn: string;
+  transactionLine: EntityBinding;
+  transactionLineFromLocationColumn: string;
+  transactionLineItemColumn: string;
+  transactionLineLineNumberColumn: string;
+  transactionLineQuantityColumn: string;
+  transactionLineRelationToTransactionColumn: string;
+  transactionLineToLocationColumn: string;
+  transactionLineUnitColumn: string;
 }
 
 type StorageEntityTarget = StorageTargetPayloadV1['entities'][number];
@@ -249,8 +260,8 @@ export class PostgresInventoryPostingService {
     private readonly recordedAtAuthority: InventoryRecordedAtAuthority,
     private readonly mintUuid: () => string = randomUUID,
   ) {
-    validateRegistration(registration);
     this.#binding = resolvePostingStorage(registration.storageTarget);
+    validateRegistration(registration);
   }
 
   async postAdjustment(
@@ -336,6 +347,7 @@ export class PostgresInventoryPostingService {
         .toSorted(comparePlannedMovements);
 
       await assumeModuleRole(client);
+      await assertAdjustmentLineSet(client, this.#binding, context, parsed);
       const naturalReplay = await findNaturalReplay(
         client,
         this.#binding,
@@ -358,6 +370,7 @@ export class PostgresInventoryPostingService {
         return replay;
       }
 
+      await assertAdjustmentDraftHeader(client, this.#binding, context, parsed);
       await assertPostingMasters(
         client,
         this.#binding,
@@ -384,6 +397,7 @@ export class PostgresInventoryPostingService {
       );
 
       await client.query('SAVEPOINT inventory_posting_write');
+      let transactionRevision = -1;
       try {
         for (const movement of ordered) {
           await insertMovement(
@@ -395,7 +409,7 @@ export class PostgresInventoryPostingService {
             movement,
           );
         }
-        await transitionTransactionToPosted(
+        transactionRevision = await transitionTransactionToPosted(
           client,
           this.#binding,
           context,
@@ -459,6 +473,7 @@ export class PostgresInventoryPostingService {
         configuration,
         resultWithoutTrust,
         ids,
+        transactionRevision,
       );
       const result = Object.freeze({ ...resultWithoutTrust, trust });
       await insertReceipt(
@@ -499,9 +514,7 @@ function validateRegistration(
   registration: InventoryPostingRegistrationV1,
 ): void {
   if (
-    !/^[a-z][a-z0-9]*(?:\.[a-z][a-z0-9]*):capability\.posting$/u.test(
-      registration.capabilityId,
-    ) ||
+    registration.capabilityId !== INVENTORY_POSTING_CAPABILITY_ID ||
     registration.capabilityVersion !== INVENTORY_POSTING_CAPABILITY_VERSION ||
     registration.dependencySetRoot !== INVENTORY_POSTING_DEPENDENCY_SET_ROOT
   ) {
@@ -515,6 +528,12 @@ function validateRegistration(
     throw postingError(
       'INVENTORY_POSTING_CAPABILITY_MISMATCH',
       'releaseContentHash must be a lowercase SHA-256 digest',
+    );
+  }
+  if (!sha256Pattern.test(registration.storageTargetContentHash)) {
+    throw postingError(
+      'INVENTORY_POSTING_CAPABILITY_MISMATCH',
+      'storageTargetContentHash must be a lowercase SHA-256 digest',
     );
   }
   if (
@@ -553,6 +572,7 @@ function resolvePostingStorage(
   const movementEntity = entity('inventory_movement');
   const periodLockEntity = entity('inventory_period_lock');
   const transactionEntity = entity('inventory_transaction');
+  const transactionLineEntity = entity('inventory_transaction_line');
   if (
     !movementEntity.factStorage ||
     movementEntity.factStorage.mutability !== 'appendOnly' ||
@@ -571,6 +591,7 @@ function resolvePostingStorage(
   const movement = bindEntity(movementEntity);
   const periodLock = bindEntity(periodLockEntity);
   const transaction = bindEntity(transactionEntity);
+  const transactionLine = bindEntity(transactionLineEntity);
   const transactionState = requiredField(
     transaction,
     'inventory_transaction_state',
@@ -626,6 +647,36 @@ function resolvePostingStorage(
     transactionPostedState: requiredEnumOption(transactionState, 'posted'),
     transactionStateColumn: transactionState.name,
     transactionTypeColumn: transactionType.name,
+    transactionLine,
+    transactionLineFromLocationColumn: requiredField(
+      transactionLine,
+      'inventory_transaction_line_from_location_id',
+    ).name,
+    transactionLineItemColumn: requiredField(
+      transactionLine,
+      'inventory_transaction_line_item_id',
+    ).name,
+    transactionLineLineNumberColumn: requiredField(
+      transactionLine,
+      'inventory_transaction_line_line_number',
+    ).name,
+    transactionLineQuantityColumn: requiredField(
+      transactionLine,
+      'inventory_transaction_line_quantity',
+    ).name,
+    transactionLineRelationToTransactionColumn: requiredRelationColumn(
+      target,
+      transactionLineEntity,
+      'inventory_transaction',
+    ),
+    transactionLineToLocationColumn: requiredField(
+      transactionLine,
+      'inventory_transaction_line_to_location_id',
+    ).name,
+    transactionLineUnitColumn: requiredField(
+      transactionLine,
+      'inventory_transaction_line_unit_id',
+    ).name,
   });
 }
 
@@ -781,7 +832,20 @@ function validateCommand(
     }
     naturalKeys.add(natural);
   }
-  return structuredClone(command);
+  const parsed = structuredClone(command);
+  return {
+    ...parsed,
+    idempotencyKey: parsed.idempotencyKey.toLowerCase(),
+    legalEntityId: parsed.legalEntityId.toLowerCase(),
+    lines: parsed.lines.map((line) => ({
+      ...line,
+      itemId: line.itemId.toLowerCase(),
+      locationId: line.locationId.toLowerCase(),
+      quantityDelta: normalizeDecimal(line.quantityDelta),
+      transactionLineId: line.transactionLineId.toLowerCase(),
+    })),
+    transactionId: parsed.transactionId.toLowerCase(),
+  };
 }
 
 function plannedMovement(
@@ -950,6 +1014,30 @@ async function assertActiveRelease(
     throw postingError(
       'INVENTORY_POSTING_RELEASE_MISMATCH',
       'posting registration is not the active tenant release',
+    );
+  }
+  const storageTargetBytes = Buffer.from(
+    canonicalize(registration.storageTarget),
+  );
+  const artifact = await client.query<{ content_hash: string }>(
+    `SELECT content_hash
+       FROM platform.read_tenant_release_artifacts($1)
+      WHERE artifact_kind = 'projectionChunk'
+        AND content_hash = $2
+        AND canonical_bytes = $3::bytea`,
+    [
+      registration.releaseId,
+      registration.storageTargetContentHash,
+      storageTargetBytes,
+    ],
+  );
+  if (
+    artifact.rows[0]?.content_hash !== registration.storageTargetContentHash
+  ) {
+    throw postingError(
+      'INVENTORY_POSTING_RELEASE_MISMATCH',
+      'posting storage target is not the exact artifact persisted by the active release',
+      { storageTargetContentHash: registration.storageTargetContentHash },
     );
   }
 }
@@ -1313,12 +1401,146 @@ async function insertMovement(
   );
 }
 
-async function transitionTransactionToPosted(
+async function assertAdjustmentDraftHeader(
   client: PoolClient,
   binding: PostingStorageBinding,
   context: TrustedRequestContext,
   command: InventoryAdjustmentPostingCommandV1,
 ): Promise<void> {
+  const effectiveAtColumn = requiredField(
+    binding.transaction,
+    'inventory_transaction_effective_at',
+  ).name;
+  const reasonCodeColumn = requiredField(
+    binding.transaction,
+    'inventory_transaction_reason_code',
+  ).name;
+  const reasonNarrativeColumn = requiredField(
+    binding.transaction,
+    'inventory_transaction_reason_narrative',
+  ).name;
+  const sourceTypeColumn = requiredField(
+    binding.transaction,
+    'inventory_transaction_source_type',
+  ).name;
+  const sourceIdColumn = requiredField(
+    binding.transaction,
+    'inventory_transaction_source_id',
+  ).name;
+  const header = await client.query<{ present: boolean }>(
+    `SELECT true AS present
+       FROM ${table(binding, binding.transaction)}
+      WHERE tenant_id = $1 AND environment_id = $2
+        AND ${quoted(binding.transaction.legalEntityColumn!)} = $3
+        AND ${quoted(binding.transaction.recordIdColumn)} = $4
+        AND ${quoted(binding.transactionStateColumn)} = $5
+        AND ${quoted(binding.transactionTypeColumn)} = $6
+        AND ${quoted(binding.transaction.revisionColumn)} = $7
+        AND ${quoted(effectiveAtColumn)} = $8::timestamptz
+        AND ${quoted(reasonCodeColumn)} IS NOT DISTINCT FROM $9
+        AND ${quoted(reasonNarrativeColumn)} IS NOT DISTINCT FROM $10
+        AND ${quoted(sourceTypeColumn)} = $11
+        AND ${quoted(sourceIdColumn)} = $12
+        AND ${quoted(binding.transaction.archiveColumn)} IS NULL`,
+    [
+      context.tenantId,
+      context.environmentId,
+      command.legalEntityId,
+      command.transactionId,
+      binding.transactionDraftState,
+      binding.transactionAdjustmentType,
+      command.sourceRevision,
+      command.effectiveAt,
+      command.reason.code || null,
+      command.reason.narrative,
+      command.sourceType,
+      command.sourceId,
+    ],
+  );
+  if (!header.rows[0]?.present) {
+    throw postingError(
+      'INVENTORY_TRANSACTION_STATE_CONFLICT',
+      `transaction ${command.transactionId} does not exactly match the active draft`,
+      { transactionId: command.transactionId },
+    );
+  }
+}
+
+async function assertAdjustmentLineSet(
+  client: PoolClient,
+  binding: PostingStorageBinding,
+  context: TrustedRequestContext,
+  command: InventoryAdjustmentPostingCommandV1,
+): Promise<void> {
+  const result = await client.query<Record<string, unknown>>(
+    `SELECT ${quoted(binding.transactionLine.recordIdColumn)}::text AS "transactionLineId",
+            ${quoted(binding.transactionLineItemColumn)}::text AS "itemId",
+            ${quoted(binding.transactionLineFromLocationColumn)}::text AS "fromLocationId",
+            ${quoted(binding.transactionLineToLocationColumn)}::text AS "toLocationId",
+            ${quoted(binding.transactionLineQuantityColumn)}::text AS "quantity",
+            ${quoted(binding.transactionLineLineNumberColumn)}::text AS "lineNumber",
+            ${quoted(binding.transactionLineUnitColumn)} AS "unitId"
+       FROM ${table(binding, binding.transactionLine)}
+      WHERE tenant_id = $1 AND environment_id = $2
+        AND ${quoted(binding.transactionLine.legalEntityColumn!)} = $3
+        AND ${quoted(binding.transactionLineRelationToTransactionColumn)} = $4
+        AND ${quoted(binding.transactionLine.archiveColumn)} IS NULL`,
+    [
+      context.tenantId,
+      context.environmentId,
+      command.legalEntityId,
+      command.transactionId,
+    ],
+  );
+  if (result.rows.length !== command.lines.length) {
+    throw postingError(
+      'INVENTORY_TRANSACTION_STATE_CONFLICT',
+      `transaction ${command.transactionId} line set differs from the posting command`,
+      { transactionId: command.transactionId },
+    );
+  }
+  const byId = new Map(
+    result.rows.map((row) => [
+      String(row.transactionLineId).toLowerCase(),
+      row,
+    ]),
+  );
+  for (const line of command.lines) {
+    const row = byId.get(line.transactionLineId);
+    const negative = line.quantityDelta.startsWith('-');
+    if (
+      !row ||
+      String(row.itemId).toLowerCase() !== line.itemId ||
+      normalizeDatabaseDecimal(String(row.quantity)) !== line.quantityDelta ||
+      String(row.unitId) !== line.unitId ||
+      String(row.lineNumber) !== line.sourceLine ||
+      (row.fromLocationId === null
+        ? null
+        : String(row.fromLocationId).toLowerCase()) !==
+        (negative ? line.locationId : null) ||
+      (row.toLocationId === null
+        ? null
+        : String(row.toLocationId).toLowerCase()) !==
+        (negative ? null : line.locationId)
+    ) {
+      throw postingError(
+        'INVENTORY_TRANSACTION_STATE_CONFLICT',
+        `transaction line ${line.transactionLineId} differs from the posting command`,
+        {
+          transactionId: command.transactionId,
+          transactionLineId: line.transactionLineId,
+        },
+      );
+    }
+  }
+}
+
+async function transitionTransactionToPosted(
+  client: PoolClient,
+  binding: PostingStorageBinding,
+  context: TrustedRequestContext,
+  command: InventoryAdjustmentPostingCommandV1,
+): Promise<number> {
   const effectiveAtColumn = requiredField(
     binding.transaction,
     'inventory_transaction_effective_at',
@@ -1353,7 +1575,9 @@ async function transitionTransactionToPosted(
         AND ${quoted(reasonNarrativeColumn)} IS NOT DISTINCT FROM $10
         AND ${quoted(sourceTypeColumn)} = $11
         AND ${quoted(sourceIdColumn)} = $12
-        AND ${quoted(binding.transaction.archiveColumn)} IS NULL`,
+        AND ${quoted(binding.transaction.revisionColumn)} = $13
+        AND ${quoted(binding.transaction.archiveColumn)} IS NULL
+      RETURNING ${quoted(binding.transaction.revisionColumn)}::integer AS revision`,
     [
       context.tenantId,
       context.environmentId,
@@ -1363,10 +1587,11 @@ async function transitionTransactionToPosted(
       binding.transactionDraftState,
       binding.transactionAdjustmentType,
       command.effectiveAt,
-      command.reason.code,
+      command.reason.code || null,
       command.reason.narrative,
       command.sourceType,
       command.sourceId,
+      command.sourceRevision,
     ],
   );
   if (result.rowCount !== 1) {
@@ -1376,6 +1601,18 @@ async function transitionTransactionToPosted(
       { transactionId: command.transactionId },
     );
   }
+  const revision = Number((result.rows[0] as { revision?: unknown }).revision);
+  if (
+    !Number.isSafeInteger(revision) ||
+    revision !== command.sourceRevision + 1
+  ) {
+    throw postingError(
+      'INVENTORY_TRANSACTION_STATE_CONFLICT',
+      `transaction ${command.transactionId} returned an invalid posted revision`,
+      { transactionId: command.transactionId },
+    );
+  }
+  return revision;
 }
 
 async function readBackMovements(
@@ -1661,6 +1898,7 @@ async function persistAcceptedEvidence(
   configuration: InventoryPostingConfiguration,
   result: Omit<InventoryAdjustmentPostingResultV1, 'trust'>,
   ids: EvidenceIds,
+  transactionRevision: number,
 ): Promise<InventoryPostingTrustLinksV1> {
   const namespace = capabilityNamespace(registration.capabilityId);
   const eventType = `${namespace}:event.adjustment_posted`;
@@ -1768,8 +2006,8 @@ async function persistAcceptedEvidence(
        delegated_to_principal_kind, delegated_to_principal_id,
        domain_event_id, outbox_id, recorded_at
      ) VALUES (
-       $1,$2,$3,$4,$5,'SUCCEEDED',$6,$7,$8,$9,$10,$11,$12,2,$13::jsonb,
-       $14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27
+       $1,$2,$3,$4,$5,'SUCCEEDED',$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,
+       $15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28
      )`,
     [
       context.tenantId,
@@ -1784,6 +2022,7 @@ async function persistAcceptedEvidence(
       registration.releaseContentHash,
       recordType,
       command.transactionId,
+      transactionRevision,
       JSON.stringify(changes),
       actorColumns.executionPrincipalKind,
       actorColumns.executionPrincipalId,
@@ -1923,6 +2162,7 @@ function effectDeduplicationKey(
 ): string {
   const natural = command.lines
     .map((line) => [
+      command.legalEntityId,
       command.sourceType,
       command.sourceId,
       line.sourceLine,
