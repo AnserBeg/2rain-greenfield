@@ -80,9 +80,13 @@ const legalApproval = '33000000-0000-4000-8000-000000000004';
 const principalId = '77000000-0000-4000-8000-000000000007';
 const approvingHumanId = '88000000-0000-4000-8000-000000000008';
 const itemId = '44000000-0000-4000-8000-000000000004';
+const sameInstantTieBreakItemId = '44000000-0000-4000-8000-000000000005';
 const locationPrimary = '55000000-0000-4000-8000-000000000001';
 const locationTie = '55000000-0000-4000-8000-000000000002';
 const locationRace = '55000000-0000-4000-8000-000000000003';
+const firstInsertedTieBreakMovementId = 'ffffffff-ffff-4fff-bfff-ffffffffffff';
+const laterInsertedTieBreakMovementId = '00000000-0000-4000-8000-000000000000';
+const businessPeriod = '2026-07-29';
 const recordedAt = '2026-07-29T13:00:00.000Z';
 const effectiveAt = '2026-07-29T12:00:00.000Z';
 const postingCapabilityId = INVENTORY_CONTRACT_V1.capabilityId;
@@ -206,11 +210,8 @@ test(
       assert.equal(await movementCount(database), 1);
       await assertConcurrentRequestKeyConflict(testContext, database);
 
-      await assertBaseUnitBound(
-        testContext,
-        database,
-        posted.movements[0]!.movementId,
-      );
+      await assertBaseUnitBound(testContext, database);
+      await assertSameInstantMovementIdTieBreak(testContext, database);
       await assertQuantityOnlyEvidence(testContext, database, posted);
       await assert.rejects(
         database.service.postAdjustment(database.context, database.actor, {
@@ -1799,6 +1800,7 @@ async function insertEntity(
   recordId: string,
   legalEntityId: string | null,
   relationIds: Record<string, string>,
+  factBusinessPeriod: string | null = null,
 ): Promise<void> {
   const prepared = prepareEntityInsert(
     binding,
@@ -1807,6 +1809,7 @@ async function insertEntity(
     recordId,
     legalEntityId,
     relationIds,
+    factBusinessPeriod,
   );
   await client.query(prepared.text, prepared.values);
 }
@@ -1818,14 +1821,20 @@ function prepareEntityInsert(
   recordId: string,
   legalEntityId: string | null,
   relationIds: Record<string, string>,
+  factBusinessPeriod: string | null = null,
 ): { text: string; values: unknown[] } {
   const relationColumns = bindingRelations(binding, entity).filter(
     (relation) => relation.relationColumn.origin !== 'field',
   );
+  const businessPeriodColumn = entity.entity.factStorage?.businessPeriod.column;
+  if (businessPeriodColumn) {
+    assert.ok(factBusinessPeriod, `missing business period for ${recordId}`);
+  }
   const columns = [
     'tenant_id',
     'environment_id',
     ...(entity.legalEntityColumn ? [entity.legalEntityColumn] : []),
+    ...(businessPeriodColumn ? [businessPeriodColumn] : []),
     entity.recordIdColumn,
     ...entity.entity.columns.map((column) => column.physicalName),
     ...relationColumns.map((relation) => relation.relationColumn.physicalName),
@@ -1834,6 +1843,7 @@ function prepareEntityInsert(
     tenantId,
     environmentId,
     ...(entity.legalEntityColumn ? [legalEntityId] : []),
+    ...(businessPeriodColumn ? [factBusinessPeriod] : []),
     recordId,
     ...entity.entity.columns.map((column) =>
       Object.hasOwn(overrides, localField(column))
@@ -1941,8 +1951,10 @@ function defaultFieldValue(
 async function assertBaseUnitBound(
   testContext: TestContext,
   database: PostingDatabase,
-  movementId: string,
 ): Promise<void> {
+  const movements = await bindingMovementsForItem(database, itemId);
+  assert.ok(movements.length > 0, `no binding movement for item ${itemId}`);
+  const expectedBinding = movements.toSorted(compareBindingMovements)[0]!;
   await assert.rejects(
     withModuleRole(database.runtimePool, database.context, async (client) => {
       await client.query(
@@ -1966,12 +1978,225 @@ async function assertBaseUnitBound(
         error instanceof InventoryPostingError &&
         error.code === 'INVENTORY_BASE_UNIT_IMMUTABLE' &&
         error.details.itemId === itemId &&
-        error.details.bindingMovementId === movementId &&
+        error.details.bindingMovementId === expectedBinding.movementId &&
         error.details.bindingUnitId === 'EA' &&
         error.details.requestedUnitId === 'BOX'
       );
     },
   );
+}
+
+async function assertSameInstantMovementIdTieBreak(
+  testContext: TestContext,
+  database: PostingDatabase,
+): Promise<void> {
+  assert.ok(
+    laterInsertedTieBreakMovementId < firstInsertedTieBreakMovementId,
+    'the later-inserted movement must have the smaller UUID',
+  );
+  await withModuleRole(
+    database.runtimePool,
+    database.context,
+    async (client) => {
+      await insertEntity(
+        client,
+        database.binding,
+        database.binding.item,
+        {
+          item_base_unit: 'EA',
+          item_code: 'ITEM-SAME-INSTANT',
+          item_name: 'Same-instant tie-break item',
+        },
+        sameInstantTieBreakItemId,
+        null,
+        {},
+      );
+    },
+  );
+  const insertions = [
+    {
+      command: command({
+        legalEntityId: legalAllow,
+        lines: [
+          {
+            itemId: sameInstantTieBreakItemId,
+            locationId: locationPrimary,
+            quantityDelta: '1',
+            sourceLine: '1',
+            transactionLineId: '66000000-0000-4000-8000-000000000011',
+            unitId: 'EA',
+          },
+        ],
+        sourceId: 'same-instant-id-tie-first',
+        transactionId: '66000000-0000-4000-8000-000000000001',
+      }),
+      movementId: firstInsertedTieBreakMovementId,
+    },
+    {
+      command: command({
+        legalEntityId: legalAllow,
+        lines: [
+          {
+            itemId: sameInstantTieBreakItemId,
+            locationId: locationPrimary,
+            quantityDelta: '1',
+            sourceLine: '1',
+            transactionLineId: '66000000-0000-4000-8000-000000000012',
+            unitId: 'EA',
+          },
+        ],
+        sourceId: 'same-instant-id-tie-later',
+        transactionId: '66000000-0000-4000-8000-000000000002',
+      }),
+      movementId: laterInsertedTieBreakMovementId,
+    },
+  ] as const;
+  for (const insertion of insertions) {
+    await seedDraft(database, insertion.command);
+    await insertTieBreakMovement(
+      database,
+      insertion.command,
+      insertion.movementId,
+    );
+  }
+
+  const movements = await bindingMovementsForItem(
+    database,
+    sameInstantTieBreakItemId,
+  );
+  assert.equal(movements.length, 2);
+  assert.equal(
+    new Set(movements.map((movement) => movement.recordedAt.getTime())).size,
+    1,
+    'the chosen movements must share one recorded instant',
+  );
+  const expectedBinding = movements.toSorted(compareBindingMovements)[0]!;
+  assert.equal(expectedBinding.movementId, laterInsertedTieBreakMovementId);
+
+  await assert.rejects(
+    withModuleRole(database.runtimePool, database.context, async (client) => {
+      await client.query(
+        `UPDATE ${table(database.binding, database.binding.item)}
+            SET ${quoted(field(database.binding.item, 'item_base_unit').physicalName)}='BOX',
+                ${quoted(database.binding.item.revisionColumn)}=${quoted(database.binding.item.revisionColumn)}+1
+          WHERE tenant_id=$1 AND environment_id=$2
+            AND ${quoted(database.binding.item.recordIdColumn)}=$3`,
+        [tenantId, environmentId, sameInstantTieBreakItemId],
+      );
+    }).catch((error: unknown) => {
+      throw translateInventoryPostingError(error);
+    }),
+    (error: unknown) => {
+      const details =
+        error instanceof InventoryPostingError ? error.details : {};
+      testContext.diagnostic(
+        `same-instant-id-tie: later-inserted ${laterInsertedTieBreakMovementId} sorts before first-inserted ${firstInsertedTieBreakMovementId}; ${postingCode(error) ?? 'unknown'} details=${JSON.stringify(details)}`,
+      );
+      return (
+        error instanceof InventoryPostingError &&
+        error.code === 'INVENTORY_BASE_UNIT_IMMUTABLE' &&
+        error.details.itemId === sameInstantTieBreakItemId &&
+        error.details.bindingMovementId === expectedBinding.movementId &&
+        error.details.bindingUnitId === 'EA' &&
+        error.details.requestedUnitId === 'BOX'
+      );
+    },
+  );
+}
+
+async function insertTieBreakMovement(
+  database: PostingDatabase,
+  input: InventoryAdjustmentPostingCommandV1,
+  movementId: string,
+): Promise<void> {
+  assert.equal(input.lines.length, 1);
+  const postingLine = input.lines[0]!;
+  await withModuleRole(
+    database.runtimePool,
+    database.context,
+    async (client) => {
+      await insertEntity(
+        client,
+        database.binding,
+        database.binding.movement,
+        {
+          inventory_movement_actor_id: principalId,
+          inventory_movement_effective_at: input.effectiveAt,
+          inventory_movement_item_id: postingLine.itemId,
+          inventory_movement_location_id: postingLine.locationId,
+          inventory_movement_posting_role: enumOption(
+            field(database.binding.movement, 'inventory_movement_posting_role'),
+            'adjustment',
+          ),
+          inventory_movement_quantity_delta: postingLine.quantityDelta,
+          inventory_movement_reason_code: input.reason.code,
+          inventory_movement_reason_narrative: input.reason.narrative,
+          inventory_movement_recorded_at: recordedAt,
+          inventory_movement_reversal_of_movement_id: null,
+          inventory_movement_source_id: input.sourceId,
+          inventory_movement_source_line: postingLine.sourceLine,
+          inventory_movement_source_revision: input.sourceRevision,
+          inventory_movement_source_type: input.sourceType,
+          inventory_movement_stock_dimension_set_version: enumOption(
+            field(
+              database.binding.movement,
+              'inventory_movement_stock_dimension_set_version',
+            ),
+            'v1',
+          ),
+          inventory_movement_unit_id: postingLine.unitId,
+        },
+        movementId,
+        input.legalEntityId,
+        {
+          [database.binding.transaction.entity.entityId]: input.transactionId,
+          [database.binding.transactionLine.entity.entityId]:
+            postingLine.transactionLineId,
+        },
+        businessPeriod,
+      );
+    },
+  );
+}
+
+interface BindingMovement {
+  movementId: string;
+  recordedAt: Date;
+}
+
+async function bindingMovementsForItem(
+  database: PostingDatabase,
+  requestedItemId: string,
+): Promise<BindingMovement[]> {
+  const result = await database.adminPool.query<BindingMovement>(
+    `SELECT ${quoted(database.binding.movement.recordIdColumn)}::text AS "movementId",
+            ${quoted(field(database.binding.movement, 'inventory_movement_recorded_at').physicalName)} AS "recordedAt"
+       FROM ${table(database.binding, database.binding.movement)}
+      WHERE tenant_id=$1 AND environment_id=$2
+        AND ${quoted(field(database.binding.movement, 'inventory_movement_item_id').physicalName)}::text=$3::text`,
+    [tenantId, environmentId, requestedItemId],
+  );
+  for (const movement of result.rows) {
+    assert.ok(
+      movement.recordedAt instanceof Date &&
+        Number.isFinite(movement.recordedAt.getTime()),
+      `movement ${movement.movementId} has an invalid recorded instant`,
+    );
+  }
+  return result.rows;
+}
+
+function compareBindingMovements(
+  left: BindingMovement,
+  right: BindingMovement,
+): number {
+  const leftRecordedAt = left.recordedAt.getTime();
+  const rightRecordedAt = right.recordedAt.getTime();
+  if (leftRecordedAt !== rightRecordedAt) {
+    return leftRecordedAt < rightRecordedAt ? -1 : 1;
+  }
+  if (left.movementId === right.movementId) return 0;
+  return left.movementId < right.movementId ? -1 : 1;
 }
 
 async function assertMovementCannotUpdate(
