@@ -83,6 +83,16 @@ export interface InventoryAdjustmentLineV1 {
   readonly unitId: string;
 }
 
+export interface InventoryTransferLineV1 {
+  readonly fromLocationId: string;
+  readonly itemId: string;
+  readonly quantity: string;
+  readonly sourceLine: string;
+  readonly toLocationId: string;
+  readonly transactionLineId: string;
+  readonly unitId: string;
+}
+
 export interface InventoryAdjustmentPostingCommandV1 {
   readonly authorization: InventoryPostingAuthorizationV1;
   readonly channel: InvocationChannel;
@@ -101,12 +111,46 @@ export interface InventoryAdjustmentPostingCommandV1 {
   readonly transactionId: string;
 }
 
+export interface InventoryTransferPostingCommandV1 {
+  readonly authorization: InventoryPostingAuthorizationV1;
+  readonly channel: InvocationChannel;
+  readonly effectiveAt: string;
+  readonly idempotencyKey: string;
+  readonly legalEntityId: string;
+  readonly lines: readonly InventoryTransferLineV1[];
+  readonly reason: {
+    readonly code: string;
+    readonly narrative: string | null;
+  };
+  readonly sourceId: string;
+  readonly sourceRevision: number;
+  readonly sourceType: string;
+  readonly stockDimensionSetVersion: 'v1';
+  readonly transactionId: string;
+}
+
+export type InventoryPostingCommandV1 =
+  InventoryAdjustmentPostingCommandV1 | InventoryTransferPostingCommandV1;
+
+export type InventoryPostingRoleV1 = 'adjustment' | 'transfer';
+
+export interface InventoryMovementOrderEntryV1 {
+  readonly effectiveAt: string;
+  readonly movementId: string;
+  readonly postingRole: string;
+  readonly recordedAt: string;
+  readonly sourceId: string;
+  readonly sourceLine: string;
+  readonly sourceType: string;
+}
+
 export interface PostedInventoryMovementV1 {
   readonly businessPeriod: string;
   readonly effectiveAt: string;
   readonly itemId: string;
   readonly locationId: string;
   readonly movementId: string;
+  readonly postingRole: InventoryPostingRoleV1;
   readonly quantityDelta: string;
   readonly recordedAt: string;
   readonly sourceId: string;
@@ -131,7 +175,7 @@ export interface InventoryPostingRequestLockTargetV1 {
   readonly requestKey: number;
 }
 
-export interface InventoryAdjustmentPostingResultV1 {
+export interface InventoryPostingResultV1 {
   readonly capabilityId: string;
   readonly capabilityVersion: typeof INVENTORY_POSTING_CAPABILITY_VERSION;
   readonly movements: readonly PostedInventoryMovementV1[];
@@ -141,6 +185,9 @@ export interface InventoryAdjustmentPostingResultV1 {
   readonly transactionId: string;
   readonly trust: InventoryPostingTrustLinksV1;
 }
+
+export type InventoryAdjustmentPostingResultV1 = InventoryPostingResultV1;
+export type InventoryTransferPostingResultV1 = InventoryPostingResultV1;
 
 export type InventoryPostingErrorCode =
   | 'INVENTORY_ADJUSTMENT_APPROVAL_REQUIRED'
@@ -160,6 +207,8 @@ export type InventoryPostingErrorCode =
   | 'INVENTORY_POSTING_STORAGE_INVALID'
   | 'INVENTORY_POSTING_STORAGE_REJECTED'
   | 'INVENTORY_STOCK_NEGATIVE'
+  | 'INVENTORY_TRANSFER_APPROVAL_REQUIRED'
+  | 'INVENTORY_TRANSFER_REASON_REQUIRED'
   | 'INVENTORY_TRANSACTION_STATE_CONFLICT';
 
 export class InventoryPostingError extends Error {
@@ -199,6 +248,7 @@ interface PostingStorageBinding {
   movement: EntityBinding;
   movementBusinessPeriodColumn: string;
   movementPostingRoleAdjustment: string;
+  movementPostingRoleTransfer: string;
   movementRelationToLineColumn: string;
   movementRelationToTransactionColumn: string;
   movementStockVersionV1: string;
@@ -207,6 +257,7 @@ interface PostingStorageBinding {
   schemaName: string;
   transaction: EntityBinding;
   transactionAdjustmentType: string;
+  transactionTransferType: string;
   transactionDraftState: string;
   transactionPostedState: string;
   transactionStateColumn: string;
@@ -229,6 +280,7 @@ interface PlannedMovement {
   readonly itemId: string;
   readonly locationId: string;
   readonly movementId: string;
+  readonly postingRole: InventoryPostingRoleV1;
   readonly quantityDelta: string;
   readonly quantityScaled: bigint;
   readonly recordedAt: string;
@@ -247,7 +299,7 @@ interface RecordedReceiptRow {
   domain_event_id: string;
   input_digest: string;
   invocation_id: string;
-  mutation_result: InventoryAdjustmentPostingResultV1;
+  mutation_result: InventoryPostingResultV1;
   outbox_id: string;
   principal_id: string;
   recorded_at: Date;
@@ -260,6 +312,16 @@ interface EvidenceIds {
   invocationId: string;
   outboxId: string;
 }
+
+type ParsedPosting =
+  | {
+      readonly command: InventoryAdjustmentPostingCommandV1;
+      readonly postingRole: 'adjustment';
+    }
+  | {
+      readonly command: InventoryTransferPostingCommandV1;
+      readonly postingRole: 'transfer';
+    };
 
 /**
  * Capability-local posting adapter admitted by ADR-0026. It owns the complete
@@ -285,14 +347,34 @@ export class PostgresInventoryPostingService {
     actorEnvelope: TrustedActorEnvelope,
     command: InventoryAdjustmentPostingCommandV1,
   ): Promise<InventoryAdjustmentPostingResultV1> {
+    return this.#post(context, actorEnvelope, {
+      command: validateAdjustmentCommand(command),
+      postingRole: 'adjustment',
+    });
+  }
+
+  async postTransfer(
+    context: TrustedRequestContext,
+    actorEnvelope: TrustedActorEnvelope,
+    command: InventoryTransferPostingCommandV1,
+  ): Promise<InventoryTransferPostingResultV1> {
+    return this.#post(context, actorEnvelope, {
+      command: validateTransferCommand(command),
+      postingRole: 'transfer',
+    });
+  }
+
+  async #post(
+    context: TrustedRequestContext,
+    actorEnvelope: TrustedActorEnvelope,
+    posting: ParsedPosting,
+  ): Promise<InventoryPostingResultV1> {
     assertTrustedRequestContext(context);
     assertTrustedActorEnvelope(actorEnvelope);
     assertActorContext(context, actorEnvelope);
-    const parsed = validateCommand(command);
-    const inputDigest = digestCommand(parsed);
-    const movements = parsed.lines.map((line) =>
-      plannedMovement(parsed, line, this.mintUuid),
-    );
+    const parsed = posting.command;
+    const inputDigest = digestCommand(posting);
+    const movements = plannedMovements(posting, this.mintUuid);
     const identities = movements.map((movement) =>
       stockIdentity(context, parsed.legalEntityId, movement),
     );
@@ -372,27 +454,27 @@ export class PostgresInventoryPostingService {
       }
       const ordered = movements
         .map((movement) => ({ ...movement, businessPeriod, recordedAt }))
-        .toSorted(comparePlannedMovements);
+        .toSorted(compareInventoryMovementOrderEntries);
 
       await assumeModuleRole(client);
-      await lockAdjustmentTransactionHeader(
+      await lockInventoryTransactionHeader(
         client,
         this.#binding,
         context,
         parsed,
       );
-      const lineSetDigest = await captureAdjustmentLineSetDigest(
+      const lineSetDigest = await captureInventoryLineSetDigest(
         client,
         this.#binding,
         context,
         parsed,
       );
-      await assertAdjustmentLineSet(client, this.#binding, context, parsed);
+      await assertInventoryLineSet(client, this.#binding, context, posting);
       const naturalReplay = await findNaturalReplay(
         client,
         this.#binding,
         context,
-        parsed,
+        posting,
         ordered,
       );
       if (naturalReplay) {
@@ -410,7 +492,7 @@ export class PostgresInventoryPostingService {
         return replay;
       }
 
-      await assertAdjustmentDraftHeader(client, this.#binding, context, parsed);
+      await assertInventoryDraftHeader(client, this.#binding, context, posting);
       await assertPostingMasters(
         client,
         this.#binding,
@@ -426,7 +508,7 @@ export class PostgresInventoryPostingService {
         configuration,
         ordered,
       );
-      enforceReasonAndApproval(configuration, actorEnvelope.actor, parsed);
+      enforceReasonAndApproval(configuration, actorEnvelope.actor, posting);
       enforceBackdate(configuration, businessPeriod, recordedPeriod);
       await enforcePeriodLock(
         client,
@@ -445,7 +527,7 @@ export class PostgresInventoryPostingService {
             this.#binding,
             context,
             actorEnvelope,
-            parsed,
+            posting,
             movement,
           );
         }
@@ -453,7 +535,7 @@ export class PostgresInventoryPostingService {
           client,
           this.#binding,
           context,
-          parsed,
+          posting,
           lineSetDigest,
         );
         await client.query('RELEASE SAVEPOINT inventory_posting_write');
@@ -464,7 +546,7 @@ export class PostgresInventoryPostingService {
           client,
           this.#binding,
           context,
-          parsed,
+          posting,
           ordered,
         );
         if (!racedReplay) {
@@ -509,7 +591,7 @@ export class PostgresInventoryPostingService {
         client,
         context,
         actorEnvelope.actor,
-        parsed,
+        posting,
         this.registration,
         configuration,
         resultWithoutTrust,
@@ -712,6 +794,10 @@ function resolvePostingStorage(
       movementPostingRole,
       'adjustment',
     ),
+    movementPostingRoleTransfer: requiredEnumOption(
+      movementPostingRole,
+      'transfer',
+    ),
     movementRelationToLineColumn: requiredRelationColumn(
       target,
       movementEntity,
@@ -732,6 +818,7 @@ function resolvePostingStorage(
       transactionType,
       'adjustment',
     ),
+    transactionTransferType: requiredEnumOption(transactionType, 'transfer'),
     transactionDraftState: requiredEnumOption(transactionState, 'draft'),
     transactionPostedState: requiredEnumOption(transactionState, 'posted'),
     transactionStateColumn: transactionState.name,
@@ -821,6 +908,36 @@ function requiredEnumOption(field: FieldBinding, suffix: string): string {
   return matches[0]!;
 }
 
+function movementPostingRole(
+  binding: PostingStorageBinding,
+  postingRole: InventoryPostingRoleV1,
+): string {
+  return postingRole === 'adjustment'
+    ? binding.movementPostingRoleAdjustment
+    : binding.movementPostingRoleTransfer;
+}
+
+function postingRoleFromStorage(
+  binding: PostingStorageBinding,
+  value: string,
+): InventoryPostingRoleV1 {
+  if (value === binding.movementPostingRoleAdjustment) return 'adjustment';
+  if (value === binding.movementPostingRoleTransfer) return 'transfer';
+  throw postingError(
+    'INVENTORY_POSTING_STORAGE_REJECTED',
+    `movement read-back returned unsupported posting role ${value}`,
+  );
+}
+
+function transactionType(
+  binding: PostingStorageBinding,
+  postingRole: InventoryPostingRoleV1,
+): string {
+  return postingRole === 'adjustment'
+    ? binding.transactionAdjustmentType
+    : binding.transactionTransferType;
+}
+
 function requiredRelationColumn(
   target: StorageTargetPayloadV1,
   source: StorageEntityTarget,
@@ -841,9 +958,89 @@ function requiredRelationColumn(
   return safeIdentifier(relations[0]!.relationColumn.physicalName);
 }
 
-function validateCommand(
+function validateAdjustmentCommand(
   command: InventoryAdjustmentPostingCommandV1,
 ): InventoryAdjustmentPostingCommandV1 {
+  validateCommandEnvelope(command);
+  if (!Array.isArray(command.lines) || command.lines.length === 0) {
+    throw inputError('an adjustment requires at least one line');
+  }
+  const naturalKeys = new Set<string>();
+  for (const line of command.lines) {
+    exactKeys(line, [
+      'itemId',
+      'locationId',
+      'quantityDelta',
+      'sourceLine',
+      'transactionLineId',
+      'unitId',
+    ]);
+    validateLineIdentity(line);
+    requiredUuid(line.locationId, 'line.locationId');
+    const quantity = decimalToScaled(line.quantityDelta, 'line.quantityDelta');
+    if (quantity === 0n) throw inputError('quantityDelta must not be zero');
+    assertUniqueSourceLine(naturalKeys, line.sourceLine, 'adjustment');
+  }
+  const parsed = structuredClone(command);
+  return {
+    ...normalizeCommandEnvelope(parsed),
+    lines: parsed.lines.map((line) => ({
+      ...line,
+      itemId: line.itemId.toLowerCase(),
+      locationId: line.locationId.toLowerCase(),
+      quantityDelta: normalizeDecimal(line.quantityDelta),
+      transactionLineId: line.transactionLineId.toLowerCase(),
+    })),
+  };
+}
+
+function validateTransferCommand(
+  command: InventoryTransferPostingCommandV1,
+): InventoryTransferPostingCommandV1 {
+  validateCommandEnvelope(command);
+  if (!Array.isArray(command.lines) || command.lines.length === 0) {
+    throw inputError('a transfer requires at least one line');
+  }
+  const naturalKeys = new Set<string>();
+  for (const line of command.lines) {
+    exactKeys(line, [
+      'fromLocationId',
+      'itemId',
+      'quantity',
+      'sourceLine',
+      'toLocationId',
+      'transactionLineId',
+      'unitId',
+    ]);
+    validateLineIdentity(line, 76);
+    requiredUuid(line.fromLocationId, 'line.fromLocationId');
+    requiredUuid(line.toLocationId, 'line.toLocationId');
+    if (line.fromLocationId.toLowerCase() === line.toLocationId.toLowerCase()) {
+      throw inputError(
+        'transfer fromLocationId and toLocationId must be distinct',
+      );
+    }
+    const quantity = decimalToScaled(line.quantity, 'line.quantity');
+    if (quantity <= 0n) {
+      throw inputError('transfer quantity must be greater than zero');
+    }
+    assertUniqueSourceLine(naturalKeys, line.sourceLine, 'transfer');
+  }
+  const parsed = structuredClone(command);
+  return {
+    ...normalizeCommandEnvelope(parsed),
+    lines: parsed.lines.map((line) => ({
+      ...line,
+      fromLocationId: line.fromLocationId.toLowerCase(),
+      itemId: line.itemId.toLowerCase(),
+      quantity: normalizeDecimal(line.quantity),
+      toLocationId: line.toLocationId.toLowerCase(),
+      transactionLineId: line.transactionLineId.toLowerCase(),
+    })),
+  };
+}
+
+function validateCommandEnvelope(command: InventoryPostingCommandV1): void {
   exactKeys(command, [
     'authorization',
     'channel',
@@ -889,57 +1086,91 @@ function validateCommand(
   if (command.reason.narrative !== null) {
     boundedText(command.reason.narrative, 'reason.narrative', 1000);
   }
-  if (!Array.isArray(command.lines) || command.lines.length === 0) {
-    throw inputError('an adjustment requires at least one line');
-  }
-  const naturalKeys = new Set<string>();
-  for (const line of command.lines) {
-    exactKeys(line, [
-      'itemId',
-      'locationId',
-      'quantityDelta',
-      'sourceLine',
-      'transactionLineId',
-      'unitId',
-    ]);
-    requiredUuid(line.itemId, 'line.itemId');
-    requiredUuid(line.locationId, 'line.locationId');
-    requiredUuid(line.transactionLineId, 'line.transactionLineId');
-    requiredText(line.sourceLine, 'line.sourceLine', 80);
-    requiredText(line.unitId, 'line.unitId', 32);
-    const quantity = decimalToScaled(line.quantityDelta, 'line.quantityDelta');
-    if (quantity === 0n) throw inputError('quantityDelta must not be zero');
-    const natural = [
-      command.sourceType,
-      command.sourceId,
-      line.sourceLine,
-      String(command.sourceRevision),
-      'adjustment',
-    ].join('\u001f');
-    if (naturalKeys.has(natural)) {
-      throw inputError('adjustment lines repeat the natural effect identity');
-    }
-    naturalKeys.add(natural);
-  }
-  const parsed = structuredClone(command);
+}
+
+function normalizeCommandEnvelope<T extends InventoryPostingCommandV1>(
+  parsed: T,
+): T {
   return {
     ...parsed,
     idempotencyKey: parsed.idempotencyKey.toLowerCase(),
     legalEntityId: parsed.legalEntityId.toLowerCase(),
-    lines: parsed.lines.map((line) => ({
-      ...line,
-      itemId: line.itemId.toLowerCase(),
-      locationId: line.locationId.toLowerCase(),
-      quantityDelta: normalizeDecimal(line.quantityDelta),
-      transactionLineId: line.transactionLineId.toLowerCase(),
-    })),
     transactionId: parsed.transactionId.toLowerCase(),
   };
 }
 
+function validateLineIdentity(
+  line: {
+    readonly itemId: string;
+    readonly sourceLine: string;
+    readonly transactionLineId: string;
+    readonly unitId: string;
+  },
+  maximumSourceLineLength = 80,
+): void {
+  requiredUuid(line.itemId, 'line.itemId');
+  requiredUuid(line.transactionLineId, 'line.transactionLineId');
+  requiredText(line.sourceLine, 'line.sourceLine', maximumSourceLineLength);
+  requiredText(line.unitId, 'line.unitId', 32);
+}
+
+function assertUniqueSourceLine(
+  sourceLines: Set<string>,
+  sourceLine: string,
+  postingRole: InventoryPostingRoleV1,
+): void {
+  if (sourceLines.has(sourceLine)) {
+    throw inputError(`${postingRole} lines repeat the natural effect identity`);
+  }
+  sourceLines.add(sourceLine);
+}
+
+function plannedMovements(
+  posting: ParsedPosting,
+  mintUuid: () => string,
+): PlannedMovement[] {
+  if (posting.postingRole === 'adjustment') {
+    return posting.command.lines.map((line) =>
+      plannedMovement(
+        posting.command,
+        line,
+        line.locationId,
+        line.quantityDelta,
+        line.sourceLine,
+        posting.postingRole,
+        mintUuid,
+      ),
+    );
+  }
+  return posting.command.lines.flatMap((line) => [
+    plannedMovement(
+      posting.command,
+      line,
+      line.fromLocationId,
+      `-${line.quantity}`,
+      transferEffectSourceLine(line.sourceLine, 'out'),
+      posting.postingRole,
+      mintUuid,
+    ),
+    plannedMovement(
+      posting.command,
+      line,
+      line.toLocationId,
+      line.quantity,
+      transferEffectSourceLine(line.sourceLine, 'in'),
+      posting.postingRole,
+      mintUuid,
+    ),
+  ]);
+}
+
 function plannedMovement(
-  command: InventoryAdjustmentPostingCommandV1,
-  line: InventoryAdjustmentLineV1,
+  command: InventoryPostingCommandV1,
+  line: InventoryAdjustmentLineV1 | InventoryTransferLineV1,
+  locationId: string,
+  quantityDelta: string,
+  sourceLine: string,
+  postingRole: InventoryPostingRoleV1,
   mintUuid: () => string,
 ): PlannedMovement {
   const movementId = mintUuid();
@@ -948,19 +1179,27 @@ function plannedMovement(
     businessPeriod: '',
     effectiveAt: command.effectiveAt,
     itemId: line.itemId,
-    locationId: line.locationId,
+    locationId,
     movementId,
-    quantityDelta: normalizeDecimal(line.quantityDelta),
-    quantityScaled: decimalToScaled(line.quantityDelta, 'line.quantityDelta'),
+    postingRole,
+    quantityDelta: normalizeDecimal(quantityDelta),
+    quantityScaled: decimalToScaled(quantityDelta, 'movement.quantityDelta'),
     recordedAt: '',
     sourceId: command.sourceId,
-    sourceLine: line.sourceLine,
+    sourceLine,
     sourceRevision: command.sourceRevision,
     sourceType: command.sourceType,
     stockDimensionSetVersion: command.stockDimensionSetVersion,
     transactionLineId: line.transactionLineId,
     unitId: line.unitId,
   };
+}
+
+function transferEffectSourceLine(
+  sourceLine: string,
+  side: 'in' | 'out',
+): string {
+  return `${sourceLine}:${side}`;
 }
 
 function stockIdentity(
@@ -977,9 +1216,9 @@ function stockIdentity(
   };
 }
 
-function comparePlannedMovements(
-  left: PlannedMovement,
-  right: PlannedMovement,
+export function compareInventoryMovementOrderEntries(
+  left: InventoryMovementOrderEntryV1,
+  right: InventoryMovementOrderEntryV1,
 ): number {
   for (const [a, b] of [
     [left.effectiveAt, right.effectiveAt],
@@ -987,7 +1226,7 @@ function comparePlannedMovements(
     [left.sourceType, right.sourceType],
     [left.sourceId, right.sourceId],
     [left.sourceLine, right.sourceLine],
-    ['adjustment', 'adjustment'],
+    [left.postingRole, right.postingRole],
     [left.movementId, right.movementId],
   ] as const) {
     if (a !== b) return a < b ? -1 : 1;
@@ -1236,31 +1475,44 @@ async function assertPostingMasters(
 function enforceReasonAndApproval(
   configuration: InventoryPostingConfiguration,
   actor: ResolvedActorAttribution,
-  command: InventoryAdjustmentPostingCommandV1,
+  posting: ParsedPosting,
 ): void {
-  const reason = configuration.reasonRequirements.adjustment;
+  const { command, postingRole } = posting;
+  const reason = configuration.reasonRequirements[postingRole];
   if (
     command.reason.code.trim().length === 0 ||
     (reason === 'codeAndNarrative' &&
       (command.reason.narrative === null ||
         command.reason.narrative.trim().length === 0))
   ) {
-    throw postingError(
-      'INVENTORY_ADJUSTMENT_REASON_REQUIRED',
-      `adjustment requires ${reason}`,
-    );
+    const code =
+      postingRole === 'adjustment'
+        ? 'INVENTORY_ADJUSTMENT_REASON_REQUIRED'
+        : 'INVENTORY_TRANSFER_REASON_REQUIRED';
+    throw postingError(code, `${postingRole} requires ${reason}`);
   }
-  const threshold = configuration.approvalThresholds.adjustment;
+  const threshold = configuration.approvalThresholds[postingRole];
   if (threshold === null) return;
   const scaledThreshold = decimalToScaled(threshold, 'approval threshold');
-  const exceeds = command.lines.some((line) => {
-    const quantity = decimalToScaled(line.quantityDelta, 'quantityDelta');
-    return absolute(quantity) > scaledThreshold;
-  });
+  const exceeds =
+    posting.postingRole === 'adjustment'
+      ? posting.command.lines.some(
+          (line) =>
+            absolute(decimalToScaled(line.quantityDelta, 'quantity')) >
+            scaledThreshold,
+        )
+      : posting.command.lines.some(
+          (line) =>
+            decimalToScaled(line.quantity, 'quantity') > scaledThreshold,
+        );
   if (exceeds && actor.approvingHumanId === null) {
+    const code =
+      postingRole === 'adjustment'
+        ? 'INVENTORY_ADJUSTMENT_APPROVAL_REQUIRED'
+        : 'INVENTORY_TRANSFER_APPROVAL_REQUIRED';
     throw postingError(
-      'INVENTORY_ADJUSTMENT_APPROVAL_REQUIRED',
-      `adjustment exceeds approval threshold ${threshold}`,
+      code,
+      `${postingRole} exceeds approval threshold ${threshold}`,
       { threshold },
     );
   }
@@ -1370,7 +1622,7 @@ async function enforceNegativeStock(
       ...identityMovements.map((movement) => ({
         effectiveAt: movement.effectiveAt,
         movementId: movement.movementId,
-        postingRole: binding.movementPostingRoleAdjustment,
+        postingRole: movementPostingRole(binding, movement.postingRole),
         quantityDelta: movement.quantityDelta,
         quantityScaled: movement.quantityScaled,
         recordedAt: movement.recordedAt,
@@ -1378,7 +1630,7 @@ async function enforceNegativeStock(
         sourceLine: movement.sourceLine,
         sourceType: movement.sourceType,
       })),
-    ].toSorted(compareMovementOrderEntries);
+    ].toSorted(compareInventoryMovementOrderEntries);
     let projected = 0n;
     for (const movement of ordered) {
       projected += movement.quantityScaled;
@@ -1401,48 +1653,15 @@ async function enforceNegativeStock(
   return flagged;
 }
 
-function compareMovementOrderEntries(
-  left: {
-    effectiveAt: string;
-    movementId: string;
-    postingRole: string;
-    recordedAt: string;
-    sourceId: string;
-    sourceLine: string;
-    sourceType: string;
-  },
-  right: {
-    effectiveAt: string;
-    movementId: string;
-    postingRole: string;
-    recordedAt: string;
-    sourceId: string;
-    sourceLine: string;
-    sourceType: string;
-  },
-): number {
-  for (const [a, b] of [
-    [left.effectiveAt, right.effectiveAt],
-    [left.recordedAt, right.recordedAt],
-    [left.sourceType, right.sourceType],
-    [left.sourceId, right.sourceId],
-    [left.sourceLine, right.sourceLine],
-    [left.postingRole, right.postingRole],
-    [left.movementId, right.movementId],
-  ] as const) {
-    if (a !== b) return a < b ? -1 : 1;
-  }
-  return 0;
-}
-
 async function insertMovement(
   client: PoolClient,
   binding: PostingStorageBinding,
   context: TrustedRequestContext,
   actorEnvelope: TrustedActorEnvelope,
-  command: InventoryAdjustmentPostingCommandV1,
+  posting: ParsedPosting,
   movement: PlannedMovement,
 ): Promise<void> {
+  const { command } = posting;
   const fields = [
     [
       'inventory_movement_stock_dimension_set_version',
@@ -1458,7 +1677,10 @@ async function insertMovement(
     ['inventory_movement_source_id', movement.sourceId],
     ['inventory_movement_source_line', movement.sourceLine],
     ['inventory_movement_source_revision', movement.sourceRevision],
-    ['inventory_movement_posting_role', binding.movementPostingRoleAdjustment],
+    [
+      'inventory_movement_posting_role',
+      movementPostingRole(binding, movement.postingRole),
+    ],
     ['inventory_movement_reason_code', command.reason.code],
     ['inventory_movement_reason_narrative', command.reason.narrative],
     [
@@ -1495,11 +1717,11 @@ async function insertMovement(
   );
 }
 
-async function lockAdjustmentTransactionHeader(
+async function lockInventoryTransactionHeader(
   client: PoolClient,
   binding: PostingStorageBinding,
   context: TrustedRequestContext,
-  command: InventoryAdjustmentPostingCommandV1,
+  command: InventoryPostingCommandV1,
 ): Promise<void> {
   const header = await client.query<{ present: boolean }>(
     `SELECT true AS present
@@ -1525,12 +1747,13 @@ async function lockAdjustmentTransactionHeader(
   }
 }
 
-async function assertAdjustmentDraftHeader(
+async function assertInventoryDraftHeader(
   client: PoolClient,
   binding: PostingStorageBinding,
   context: TrustedRequestContext,
-  command: InventoryAdjustmentPostingCommandV1,
+  posting: ParsedPosting,
 ): Promise<void> {
+  const { command } = posting;
   const effectiveAtColumn = requiredField(
     binding.transaction,
     'inventory_transaction_effective_at',
@@ -1572,7 +1795,7 @@ async function assertAdjustmentDraftHeader(
       command.legalEntityId,
       command.transactionId,
       binding.transactionDraftState,
-      binding.transactionAdjustmentType,
+      transactionType(binding, posting.postingRole),
       command.sourceRevision,
       command.effectiveAt,
       command.reason.code || null,
@@ -1590,14 +1813,14 @@ async function assertAdjustmentDraftHeader(
   }
 }
 
-async function captureAdjustmentLineSetDigest(
+async function captureInventoryLineSetDigest(
   client: PoolClient,
   binding: PostingStorageBinding,
   context: TrustedRequestContext,
-  command: InventoryAdjustmentPostingCommandV1,
+  command: InventoryPostingCommandV1,
 ): Promise<string> {
   const result = await client.query<{ lineSetDigest: string }>(
-    `SELECT ${adjustmentLineSetDigestSql(binding, '$1', '$2', '$3', '$4')}
+    `SELECT ${inventoryLineSetDigestSql(binding, '$1', '$2', '$3', '$4')}
               AS "lineSetDigest"`,
     [
       context.tenantId,
@@ -1617,12 +1840,13 @@ async function captureAdjustmentLineSetDigest(
   return digest;
 }
 
-async function assertAdjustmentLineSet(
+async function assertInventoryLineSet(
   client: PoolClient,
   binding: PostingStorageBinding,
   context: TrustedRequestContext,
-  command: InventoryAdjustmentPostingCommandV1,
+  posting: ParsedPosting,
 ): Promise<void> {
+  const { command } = posting;
   const result = await client.query<Record<string, unknown>>(
     `SELECT ${quoted(binding.transactionLine.recordIdColumn)}::text AS "transactionLineId",
             ${quoted(binding.transactionLineItemColumn)}::text AS "itemId",
@@ -1656,43 +1880,81 @@ async function assertAdjustmentLineSet(
       row,
     ]),
   );
-  for (const line of command.lines) {
-    const row = byId.get(line.transactionLineId);
-    const negative = line.quantityDelta.startsWith('-');
-    if (
-      !row ||
-      String(row.itemId).toLowerCase() !== line.itemId ||
-      normalizeDatabaseDecimal(String(row.quantity)) !== line.quantityDelta ||
-      String(row.unitId) !== line.unitId ||
-      String(row.lineNumber) !== line.sourceLine ||
-      (row.fromLocationId === null
-        ? null
-        : String(row.fromLocationId).toLowerCase()) !==
-        (negative ? line.locationId : null) ||
-      (row.toLocationId === null
-        ? null
-        : String(row.toLocationId).toLowerCase()) !==
-        (negative ? null : line.locationId)
-    ) {
-      throw postingError(
-        'INVENTORY_TRANSACTION_STATE_CONFLICT',
-        `transaction line ${line.transactionLineId} differs from the posting command`,
-        {
-          transactionId: command.transactionId,
-          transactionLineId: line.transactionLineId,
-        },
+  if (posting.postingRole === 'adjustment') {
+    for (const line of posting.command.lines) {
+      assertInventoryLineMatches(
+        adjustmentLineMatches(byId.get(line.transactionLineId), line),
+        command.transactionId,
+        line.transactionLineId,
+      );
+    }
+  } else {
+    for (const line of posting.command.lines) {
+      assertInventoryLineMatches(
+        transferLineMatches(byId.get(line.transactionLineId), line),
+        command.transactionId,
+        line.transactionLineId,
       );
     }
   }
+}
+
+function assertInventoryLineMatches(
+  matches: boolean,
+  transactionId: string,
+  transactionLineId: string,
+): void {
+  if (matches) return;
+  throw postingError(
+    'INVENTORY_TRANSACTION_STATE_CONFLICT',
+    `transaction line ${transactionLineId} differs from the posting command`,
+    { transactionId, transactionLineId },
+  );
+}
+
+function adjustmentLineMatches(
+  row: Record<string, unknown> | undefined,
+  line: InventoryAdjustmentLineV1,
+): boolean {
+  const negative = line.quantityDelta.startsWith('-');
+  return (
+    row !== undefined &&
+    String(row.itemId).toLowerCase() === line.itemId &&
+    normalizeDatabaseDecimal(String(row.quantity)) === line.quantityDelta &&
+    String(row.unitId) === line.unitId &&
+    String(row.lineNumber) === line.sourceLine &&
+    nullableUuid(row.fromLocationId) === (negative ? line.locationId : null) &&
+    nullableUuid(row.toLocationId) === (negative ? null : line.locationId)
+  );
+}
+
+function transferLineMatches(
+  row: Record<string, unknown> | undefined,
+  line: InventoryTransferLineV1,
+): boolean {
+  return (
+    row !== undefined &&
+    String(row.itemId).toLowerCase() === line.itemId &&
+    normalizeDatabaseDecimal(String(row.quantity)) === line.quantity &&
+    String(row.unitId) === line.unitId &&
+    String(row.lineNumber) === line.sourceLine &&
+    nullableUuid(row.fromLocationId) === line.fromLocationId &&
+    nullableUuid(row.toLocationId) === line.toLocationId
+  );
+}
+
+function nullableUuid(value: unknown): string | null {
+  return value === null ? null : String(value).toLowerCase();
 }
 
 async function transitionTransactionToPosted(
   client: PoolClient,
   binding: PostingStorageBinding,
   context: TrustedRequestContext,
-  command: InventoryAdjustmentPostingCommandV1,
+  posting: ParsedPosting,
   lineSetDigest: string,
 ): Promise<number> {
+  const { command } = posting;
   const effectiveAtColumn = requiredField(
     binding.transaction,
     'inventory_transaction_effective_at',
@@ -1729,7 +1991,7 @@ async function transitionTransactionToPosted(
         AND ${quoted(sourceIdColumn)} = $12
         AND ${quoted(binding.transaction.revisionColumn)} = $13
         AND ${quoted(binding.transaction.archiveColumn)} IS NULL
-        AND ${adjustmentLineSetDigestSql(binding, '$1', '$2', '$3', '$5')} = $14
+        AND ${inventoryLineSetDigestSql(binding, '$1', '$2', '$3', '$5')} = $14
       RETURNING ${quoted(binding.transaction.revisionColumn)}::integer AS revision`,
     [
       context.tenantId,
@@ -1738,7 +2000,7 @@ async function transitionTransactionToPosted(
       binding.transactionPostedState,
       command.transactionId,
       binding.transactionDraftState,
-      binding.transactionAdjustmentType,
+      transactionType(binding, posting.postingRole),
       command.effectiveAt,
       command.reason.code || null,
       command.reason.narrative,
@@ -1769,7 +2031,7 @@ async function transitionTransactionToPosted(
   return revision;
 }
 
-function adjustmentLineSetDigestSql(
+function inventoryLineSetDigestSql(
   binding: PostingStorageBinding,
   tenantParameter: string,
   environmentParameter: string,
@@ -1813,6 +2075,7 @@ async function readBackMovements(
             ${quoted(requiredField(binding.movement, 'inventory_movement_source_id').name)} AS "sourceId",
             ${quoted(requiredField(binding.movement, 'inventory_movement_source_line').name)} AS "sourceLine",
             ${quoted(requiredField(binding.movement, 'inventory_movement_source_revision').name)}::integer AS "sourceRevision",
+            ${quoted(requiredField(binding.movement, 'inventory_movement_posting_role').name)} AS "postingRole",
             ${quoted(binding.movementRelationToLineColumn)}::text AS "transactionLineId"
        FROM ${table(binding, binding.movement)}
       WHERE tenant_id = $1 AND environment_id = $2
@@ -1842,6 +2105,7 @@ async function readBackMovements(
         itemId: String(row.itemId),
         locationId: String(row.locationId),
         movementId: String(row.movementId),
+        postingRole: postingRoleFromStorage(binding, String(row.postingRole)),
         quantityDelta: normalizeDatabaseDecimal(String(row.quantityDelta)),
         recordedAt: String(row.recordedAt),
         sourceId: String(row.sourceId),
@@ -1860,9 +2124,10 @@ async function findNaturalReplay(
   client: PoolClient,
   binding: PostingStorageBinding,
   context: TrustedRequestContext,
-  command: InventoryAdjustmentPostingCommandV1,
+  posting: ParsedPosting,
   movements: readonly PlannedMovement[],
-): Promise<InventoryAdjustmentPostingResultV1 | null> {
+): Promise<InventoryPostingResultV1 | null> {
+  const { command } = posting;
   const found: Array<{ expected: PlannedMovement; movementId: string }> = [];
   for (const movement of movements) {
     const result = await client.query<Record<string, unknown>>(
@@ -1892,7 +2157,7 @@ async function findNaturalReplay(
         movement.sourceId,
         movement.sourceLine,
         movement.sourceRevision,
-        binding.movementPostingRoleAdjustment,
+        movementPostingRole(binding, movement.postingRole),
       ],
     );
     const row = result.rows[0];
@@ -1925,7 +2190,7 @@ async function findNaturalReplay(
       'only part of the natural effect set already exists',
     );
   }
-  const deduplicationKey = effectDeduplicationKey(command);
+  const deduplicationKey = effectDeduplicationKey(posting);
   // Managed movement reads run under the module role. Trust evidence is in the
   // platform plane and is read only after restoring the trusted runtime role.
   await resetModuleRole(client);
@@ -1984,7 +2249,7 @@ function validateReceiptReplay(
   context: TrustedRequestContext,
   inputDigest: string,
   idempotencyKey: string,
-): InventoryAdjustmentPostingResultV1 {
+): InventoryPostingResultV1 {
   if (
     receipt.principal_id.toLowerCase() !== context.principalId.toLowerCase() ||
     receipt.input_digest !== inputDigest
@@ -2004,8 +2269,8 @@ async function persistAdditionalReceipt(
   registration: InventoryPostingRegistrationV1,
   idempotencyKey: string,
   inputDigest: string,
-  replay: InventoryAdjustmentPostingResultV1,
-): Promise<InventoryAdjustmentPostingResultV1> {
+  replay: InventoryPostingResultV1,
+): Promise<InventoryPostingResultV1> {
   const existing = await findReceipt(
     client,
     context,
@@ -2037,7 +2302,7 @@ async function insertReceipt(
   registration: InventoryPostingRegistrationV1,
   idempotencyKey: string,
   inputDigest: string,
-  result: InventoryAdjustmentPostingResultV1,
+  result: InventoryPostingResultV1,
 ): Promise<void> {
   await client.query(
     `INSERT INTO platform.semantic_operation_receipts (
@@ -2070,17 +2335,18 @@ async function persistAcceptedEvidence(
   client: PoolClient,
   context: TrustedRequestContext,
   actor: ResolvedActorAttribution,
-  command: InventoryAdjustmentPostingCommandV1,
+  posting: ParsedPosting,
   registration: InventoryPostingRegistrationV1,
   configuration: InventoryPostingConfiguration,
-  result: Omit<InventoryAdjustmentPostingResultV1, 'trust'>,
+  result: Omit<InventoryPostingResultV1, 'trust'>,
   ids: EvidenceIds,
   transactionRevision: number,
 ): Promise<InventoryPostingTrustLinksV1> {
+  const { command, postingRole } = posting;
   const namespace = capabilityNamespace(registration.capabilityId);
-  const eventType = `${namespace}:event.adjustment_posted`;
-  const eventVersion = `${namespace}-adjustment-posted/v1`;
-  const recordType = `${namespace}:record.adjustment`;
+  const eventType = `${namespace}:event.${postingRole}_posted`;
+  const eventVersion = `${namespace}-${postingRole}-posted/v1`;
+  const recordType = `${namespace}:record.${postingRole}`;
   const metadata = redactEvidenceMetadata({
     capabilityVersion: classified(
       'INTERNAL',
@@ -2093,11 +2359,11 @@ async function persistAcceptedEvidence(
     configurationRevision: classified('INTERNAL', configuration.revision),
     lineCount: classified('INTERNAL', command.lines.length),
     negativeStockFlag: classified('INTERNAL', result.negativeStockFlag),
-    requestKind: classified('INTERNAL', 'inventory-adjustment-posting'),
+    requestKind: classified('INTERNAL', `inventory-${postingRole}-posting`),
   });
   const policyInputs = redactEvidenceMetadata({
     legalEntityId: classified('INTERNAL', command.legalEntityId),
-    postingRole: classified('INTERNAL', 'adjustment'),
+    postingRole: classified('INTERNAL', postingRole),
   });
   const changesInput: BusinessFieldChangeInput[] = [
     businessChange('state', 'draft', 'posted'),
@@ -2265,7 +2531,7 @@ async function persistAcceptedEvidence(
       registration.releaseContentHash,
       eventType,
       eventVersion,
-      effectDeduplicationKey(command),
+      effectDeduplicationKey(posting),
       result.recordedAt,
     ],
   );
@@ -2334,17 +2600,16 @@ function capabilityNamespace(capabilityId: string): string {
   return capabilityId.slice(0, capabilityId.indexOf(':'));
 }
 
-function effectDeduplicationKey(
-  command: InventoryAdjustmentPostingCommandV1,
-): string {
-  const natural = command.lines
-    .map((line) => [
+function effectDeduplicationKey(posting: ParsedPosting): string {
+  const { command } = posting;
+  const natural = naturalEffects(posting)
+    .map((effect) => [
       command.legalEntityId,
       command.sourceType,
       command.sourceId,
-      line.sourceLine,
+      effect.sourceLine,
       command.sourceRevision,
-      'adjustment',
+      posting.postingRole,
     ])
     .toSorted((left, right) => {
       const a = left.join('\u001f');
@@ -2356,10 +2621,32 @@ function effectDeduplicationKey(
     .digest('hex')}`;
 }
 
-function digestCommand(command: InventoryAdjustmentPostingCommandV1): string {
+function naturalEffects(
+  posting: ParsedPosting,
+): readonly { readonly sourceLine: string }[] {
+  if (posting.postingRole === 'adjustment') {
+    return posting.command.lines.map((line) => ({
+      sourceLine: line.sourceLine,
+    }));
+  }
+  return posting.command.lines.flatMap((line) => [
+    { sourceLine: transferEffectSourceLine(line.sourceLine, 'out') },
+    { sourceLine: transferEffectSourceLine(line.sourceLine, 'in') },
+  ]);
+}
+
+function digestCommand(posting: ParsedPosting): string {
+  const { command } = posting;
   const { idempotencyKey, ...semanticInput } = command;
   void idempotencyKey;
-  return createHash('sha256').update(canonicalize(semanticInput)).digest('hex');
+  return createHash('sha256')
+    .update(
+      canonicalize({
+        postingRole: posting.postingRole,
+        ...semanticInput,
+      }),
+    )
+    .digest('hex');
 }
 
 function assertActorContext(
