@@ -47,8 +47,8 @@ import {
 import {
   legalEntityIdsFromIssuedReadScope,
   type ImmutableJsonValue,
-  type RequestRuntimeView,
 } from '../../runtime/src/request-runtime-view.js';
+import type { RequestRuntimeView } from '../../runtime/src/request-runtime-view.js';
 import {
   encodeSharedListCursor,
   SHARED_LIST_RESULT_VERSION,
