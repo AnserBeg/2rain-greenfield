@@ -991,15 +991,11 @@ test('v3 inventory reads require issued legal-entity scope and preserve generic 
           assert.equal(row.closed_through, null);
         }
         assert.deepEqual(
-          [...locksByLegalEntity.entries()].toSorted(([left], [right]) =>
-            left < right ? -1 : left > right ? 1 : 0,
-          ),
-          [
+          locksByLegalEntity,
+          new Map([
             [legalEntityId, 1],
             [secondLegalEntityId, 1],
-          ].toSorted(([left], [right]) =>
-            left < right ? -1 : left > right ? 1 : 0,
-          ),
+          ]),
         );
         assert.equal(
           new Set(provisioned.rows.map((row) => row.record_id)).size,
