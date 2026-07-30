@@ -1944,20 +1944,16 @@ async function assertBaseUnitBound(
   movementId: string,
 ): Promise<void> {
   await assert.rejects(
-    withModuleRole(
-      database.runtimePool,
-      database.context,
-      async (client) => {
-        await client.query(
-          `UPDATE ${table(database.binding, database.binding.item)}
+    withModuleRole(database.runtimePool, database.context, async (client) => {
+      await client.query(
+        `UPDATE ${table(database.binding, database.binding.item)}
             SET ${quoted(field(database.binding.item, 'item_base_unit').physicalName)}='BOX',
                 ${quoted(database.binding.item.revisionColumn)}=${quoted(database.binding.item.revisionColumn)}+1
           WHERE tenant_id=$1 AND environment_id=$2
             AND ${quoted(database.binding.item.recordIdColumn)}=$3`,
-          [tenantId, environmentId, itemId],
-        );
-      },
-    ).catch((error: unknown) => {
+        [tenantId, environmentId, itemId],
+      );
+    }).catch((error: unknown) => {
       throw translateInventoryPostingError(error);
     }),
     (error: unknown) => {

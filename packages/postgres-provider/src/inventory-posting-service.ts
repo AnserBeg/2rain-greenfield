@@ -2559,8 +2559,7 @@ export function translateInventoryPostingError(error: unknown): unknown {
   const code = postgresCode(error);
   if (
     code === 'P0001' &&
-    postgresErrorProperty(error, 'message') ===
-      'INVENTORY_BASE_UNIT_IMMUTABLE'
+    postgresErrorProperty(error, 'message') === 'INVENTORY_BASE_UNIT_IMMUTABLE'
   ) {
     const details = baseUnitImmutableDetails(error);
     if (details) {
