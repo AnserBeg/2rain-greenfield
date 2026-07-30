@@ -331,7 +331,7 @@ test(
         legalEntityId: legalReject,
         locationId: locationPrimary,
         quantityDelta: '1',
-        reason: { code: '', narrative: null },
+        reason: { code: '', narrative: 'Controlled inventory adjustment' },
         sourceId: 'missing-reason',
       });
       await seedDraft(database, missingReason);
@@ -350,6 +350,40 @@ test(
           ),
       );
       assert.equal(await movementCountBySource(database, 'missing-reason'), 0);
+
+      assert.deepEqual(
+        await adjustmentReasonConfiguration(database, legalReject),
+        {
+          contractReleaseRoot: database.registration.releaseContentHash,
+          reasonRequirement: 'codeAndNarrative',
+        },
+      );
+      const missingReasonNarrative = command({
+        legalEntityId: legalReject,
+        locationId: locationPrimary,
+        quantityDelta: '1',
+        reason: { code: 'COUNT-CORRECTION', narrative: null },
+        sourceId: 'missing-reason-narrative',
+      });
+      await seedDraft(database, missingReasonNarrative);
+      await assert.rejects(
+        database.service.postAdjustment(
+          database.context,
+          database.actor,
+          missingReasonNarrative,
+        ),
+        (error: unknown) =>
+          observePostingError(
+            testContext,
+            'reason-narrative-dial',
+            error,
+            'INVENTORY_ADJUSTMENT_REASON_REQUIRED',
+          ),
+      );
+      assert.equal(
+        await movementCountBySource(database, 'missing-reason-narrative'),
+        0,
+      );
 
       await updatePostingConfiguration(database, legalAllow, {
         adjustmentReasonRequirement: 'codeOnly',
@@ -652,7 +686,11 @@ test(
         await trustCountByRequest(database, database.context.requestId),
         trustBeforeClosed,
       );
-      await assertPostingLockTimeoutIsTransactionLocal(testContext, database);
+      await assertPostingLockTimeoutScopeMechanism(testContext, database);
+      await assertPostingLockTimeoutDoesNotLeakToNextBorrower(
+        testContext,
+        database,
+      );
     });
   },
 );
@@ -867,24 +905,162 @@ async function assertProtectedReadRaces(
   await assertConcurrentChildInsert(testContext, database);
 }
 
-async function assertPostingLockTimeoutIsTransactionLocal(
+async function assertPostingLockTimeoutScopeMechanism(
   testContext: TestContext,
   database: PostingDatabase,
 ): Promise<void> {
   const posting = command({
     legalEntityId: legalAllow,
-    sourceId: 'posting-lock-timeout-scope',
+    sourceId: 'posting-lock-timeout-transaction-local',
   });
   await seedDraft(database, posting);
   const singleConnectionPool = new pg.Pool({
     ...database.connection,
-    application_name: `${postingApplicationName}-lock-timeout-scope`,
+    application_name: `${postingApplicationName}-lock-timeout-mechanism`,
+    max: 1,
+    user: 'north_star_runtime',
+  });
+  try {
+    const mechanismClient = await singleConnectionPool.connect();
+    let sessionScopeNeedsReset = false;
+    let transactionOpen = false;
+    let mechanismBackendPid = -1;
+    try {
+      const before = await readLockTimeoutSetting(mechanismClient);
+      assert.equal(before.milliseconds, '0');
+      mechanismBackendPid = before.backendPid;
+
+      await mechanismClient.query('BEGIN');
+      transactionOpen = true;
+      await mechanismClient.query(
+        "SELECT set_config('lock_timeout', '15000', true)",
+      );
+      const localInside = await readLockTimeoutSetting(mechanismClient);
+      assert.equal(localInside.backendPid, mechanismBackendPid);
+      assert.equal(localInside.milliseconds, '15000');
+      await mechanismClient.query('COMMIT');
+      transactionOpen = false;
+      const localAfterCommit = await readLockTimeoutSetting(mechanismClient);
+      assert.equal(localAfterCommit.backendPid, mechanismBackendPid);
+      assert.equal(localAfterCommit.milliseconds, '0');
+
+      await mechanismClient.query('BEGIN');
+      transactionOpen = true;
+      await mechanismClient.query(
+        "SELECT set_config('lock_timeout', '15000', false)",
+      );
+      sessionScopeNeedsReset = true;
+      const sessionInside = await readLockTimeoutSetting(mechanismClient);
+      assert.equal(sessionInside.backendPid, mechanismBackendPid);
+      assert.equal(sessionInside.milliseconds, '15000');
+      await mechanismClient.query('COMMIT');
+      transactionOpen = false;
+      const sessionAfterCommit = await readLockTimeoutSetting(mechanismClient);
+      assert.equal(sessionAfterCommit.backendPid, mechanismBackendPid);
+      assert.equal(sessionAfterCommit.milliseconds, '15000');
+      testContext.diagnostic(
+        `posting-lock-timeout-mechanism: backend ${String(mechanismBackendPid)} local=true reverted 15000ms to 0ms at COMMIT; local=false retained 15000ms`,
+      );
+
+      await mechanismClient.query('RESET lock_timeout');
+      sessionScopeNeedsReset = false;
+      const afterCleanup = await readLockTimeoutSetting(mechanismClient);
+      assert.equal(afterCleanup.backendPid, mechanismBackendPid);
+      assert.equal(afterCleanup.milliseconds, '0');
+    } finally {
+      if (transactionOpen) {
+        await mechanismClient.query('ROLLBACK').catch(() => undefined);
+      }
+      if (sessionScopeNeedsReset) {
+        await mechanismClient
+          .query('RESET lock_timeout')
+          .catch(() => undefined);
+      }
+      mechanismClient.release();
+    }
+
+    const instrumentedClient = await singleConnectionPool.connect();
+    const serviceBackend = await readLockTimeoutSetting(instrumentedClient);
+    assert.equal(serviceBackend.backendPid, mechanismBackendPid);
+    let serviceInsideTransaction: LockTimeoutSetting | undefined;
+    let serviceAfterCommit: LockTimeoutSetting | undefined;
+    instrumentedClient.query = new Proxy(instrumentedClient.query, {
+      apply: async (target, thisArgument, argumentsList) => {
+        const queryText =
+          typeof argumentsList[0] === 'string' ? argumentsList[0] : null;
+        const result: unknown = await Reflect.apply(
+          target,
+          thisArgument,
+          argumentsList,
+        );
+        if (queryText?.includes("set_config('lock_timeout'")) {
+          serviceInsideTransaction =
+            await readLockTimeoutSetting(instrumentedClient);
+        } else if (queryText === 'COMMIT') {
+          serviceAfterCommit = await readLockTimeoutSetting(instrumentedClient);
+        }
+        return result;
+      },
+    });
+    instrumentedClient.release();
+
+    const service = new PostgresInventoryPostingService(
+      singleConnectionPool,
+      database.registration,
+      { currentInstant: () => recordedAt },
+    );
+    const posted = await service.postAdjustment(
+      database.context,
+      database.actor,
+      posting,
+    );
+    assert.equal(posted.replayed, false);
+
+    assert.equal(
+      serviceInsideTransaction?.backendPid,
+      mechanismBackendPid,
+      'the service lock_timeout call was not observed on its posting backend',
+    );
+    assert.equal(serviceInsideTransaction?.milliseconds, '15000');
+    assert.equal(serviceAfterCommit?.backendPid, mechanismBackendPid);
+    assert.equal(
+      serviceAfterCommit?.milliseconds,
+      '0',
+      'the service lock_timeout did not revert at COMMIT before RESET ALL',
+    );
+    testContext.diagnostic(
+      `posting-lock-timeout-service-scope: backend ${String(mechanismBackendPid)} observed 15000ms inside the service transaction and 0ms immediately after COMMIT before RESET ALL`,
+    );
+  } finally {
+    await singleConnectionPool.end();
+  }
+}
+
+async function assertPostingLockTimeoutDoesNotLeakToNextBorrower(
+  testContext: TestContext,
+  database: PostingDatabase,
+): Promise<void> {
+  const posting = command({
+    legalEntityId: legalAllow,
+    sourceId: 'posting-lock-timeout-no-leak',
+  });
+  await seedDraft(database, posting);
+  const singleConnectionPool = new pg.Pool({
+    ...database.connection,
+    application_name: `${postingApplicationName}-lock-timeout-no-leak`,
     max: 1,
     user: 'north_star_runtime',
   });
   try {
     const before = await borrowLockTimeoutSetting(singleConnectionPool);
-    assert.equal(before.lockTimeout, '0');
+    assert.equal(before.milliseconds, '0');
+    const preexistingSessionSetting = await setSessionLockTimeout(
+      singleConnectionPool,
+      '7000',
+    );
+    assert.equal(preexistingSessionSetting.backendPid, before.backendPid);
+    assert.equal(preexistingSessionSetting.milliseconds, '7000');
+
     const service = new PostgresInventoryPostingService(
       singleConnectionPool,
       database.registration,
@@ -899,9 +1075,9 @@ async function assertPostingLockTimeoutIsTransactionLocal(
 
     const after = await borrowLockTimeoutSetting(singleConnectionPool);
     assert.equal(after.backendPid, before.backendPid);
-    assert.equal(after.lockTimeout, before.lockTimeout);
+    assert.equal(after.milliseconds, '0');
     testContext.diagnostic(
-      `posting-lock-timeout-scope: backend ${String(after.backendPid)} returned to default lock_timeout=${after.lockTimeout}`,
+      `posting-lock-timeout-no-leak: backend ${String(after.backendPid)} entered posting with a 7000ms session setting and the next borrower observed the default ${after.milliseconds}ms after service cleanup`,
     );
   } finally {
     await singleConnectionPool.end();
@@ -2346,6 +2522,27 @@ async function updatePostingConfiguration(
   );
 }
 
+async function adjustmentReasonConfiguration(
+  database: PostingDatabase,
+  legalEntityId: string,
+): Promise<{
+  contractReleaseRoot: string;
+  reasonRequirement: string;
+}> {
+  const result = await database.adminPool.query<{
+    contractReleaseRoot: string;
+    reasonRequirement: string;
+  }>(
+    `SELECT contract_release_root AS "contractReleaseRoot",
+            adjustment_reason_requirement AS "reasonRequirement"
+       FROM platform.inventory_posting_configurations
+      WHERE tenant_id=$1 AND environment_id=$2 AND legal_entity_id=$3`,
+    [tenantId, environmentId, legalEntityId],
+  );
+  assert.equal(result.rows.length, 1);
+  return result.rows[0]!;
+}
+
 async function installLateRollbackProbe(
   database: PostingDatabase,
   transactionId: string,
@@ -2701,20 +2898,47 @@ function unsignedInt32(value: number): number {
   return value < 0 ? value + 2 ** 32 : value;
 }
 
+interface LockTimeoutSetting {
+  backendPid: number;
+  lockTimeout: string;
+  milliseconds: string;
+}
+
+async function readLockTimeoutSetting(
+  client: PoolClient,
+): Promise<LockTimeoutSetting> {
+  const result = await client.query<LockTimeoutSetting>(
+    `SELECT pg_backend_pid() AS "backendPid",
+            current_setting('lock_timeout') AS "lockTimeout",
+            setting AS milliseconds
+       FROM pg_catalog.pg_settings
+      WHERE name='lock_timeout'`,
+  );
+  assert.equal(result.rows.length, 1);
+  return result.rows[0]!;
+}
+
 async function borrowLockTimeoutSetting(
   pool: Pool,
-): Promise<{ backendPid: number; lockTimeout: string }> {
+): Promise<LockTimeoutSetting> {
   const client = await pool.connect();
   try {
-    const result = await client.query<{
-      backendPid: number;
-      lockTimeout: string;
-    }>(
-      `SELECT pg_backend_pid() AS "backendPid",
-              current_setting('lock_timeout') AS "lockTimeout"`,
-    );
-    assert.equal(result.rows.length, 1);
-    return result.rows[0]!;
+    return await readLockTimeoutSetting(client);
+  } finally {
+    client.release();
+  }
+}
+
+async function setSessionLockTimeout(
+  pool: Pool,
+  milliseconds: string,
+): Promise<LockTimeoutSetting> {
+  const client = await pool.connect();
+  try {
+    await client.query("SELECT set_config('lock_timeout', $1::text, false)", [
+      milliseconds,
+    ]);
+    return await readLockTimeoutSetting(client);
   } finally {
     client.release();
   }
