@@ -95,6 +95,13 @@ const INVENTORY_STORAGE_REFERENCE_RULES = Object.freeze([
     targetFamilyId: 'location',
   },
 ] as const);
+const REQUIRED_INVENTORY_MODULE_FAMILIES = Object.freeze([
+  'legal_entity',
+  'inventory_transaction',
+  'inventory_transaction_line',
+  'inventory_period_lock',
+  'inventory_movement',
+] as const);
 const INVENTORY_PERIOD_LOCK_STORAGE_RULE = Object.freeze({
   advanceOperationLocalId: 'advance_period_lock',
   familyId: 'inventory_period_lock',
@@ -585,6 +592,75 @@ function inventoryMovementFieldShapeMatches(
   }
 }
 
+function activeTextFieldShapeMatches(
+  field: NormalizedApplicationPackage['fields'][number],
+  presence: 'optional' | 'required',
+  maximumLength: number,
+): boolean {
+  return (
+    field.lifecycle === 'active' &&
+    field.presence === presence &&
+    field.fieldType.kind === 'textFieldType' &&
+    field.fieldType.maximumLength === maximumLength
+  );
+}
+
+function validateRequiredInventoryEntitySet(
+  packageRevision: NormalizedApplicationPackage,
+  diagnostics: CompilerDiagnostic[],
+): void {
+  const observedFamilies = new Set(
+    packageRevision.entities
+      .filter((entity) => entity.lifecycle === 'active')
+      .map((entity) => canonicalFamilyId(entity.entityId))
+      .filter((familyId): familyId is string => familyId !== null),
+  );
+  const packageFamily = canonicalPackageLocalId(
+    packageRevision.package.packageId,
+  );
+  if (
+    packageFamily !== 'inventory' &&
+    !REQUIRED_INVENTORY_MODULE_FAMILIES.some((familyId) =>
+      observedFamilies.has(familyId),
+    )
+  ) {
+    return;
+  }
+  for (const familyId of REQUIRED_INVENTORY_MODULE_FAMILIES) {
+    if (observedFamilies.has(familyId)) continue;
+    diagnostics.push(
+      inventoryModuleDiagnostic(
+        'INVENTORY_CONTRACT_INVALID',
+        `$.entities.${familyId}`,
+        `${packageRevision.package.namespace}:entity.${familyId}`,
+      ),
+    );
+  }
+}
+
+function validateRecordedTimeProjectionRetention(
+  packageRevision: NormalizedApplicationPackage,
+  diagnostics: CompilerDiagnostic[],
+): void {
+  const recordedAtFieldId = `${packageRevision.package.namespace}:field.inventory_movement_recorded_at`;
+  const missingRecordedAt = packageRevision.queries.some(
+    (query) =>
+      query.lifecycle === 'active' &&
+      canonicalFamilyId(query.sourceEntity.targetId) === 'inventory_movement' &&
+      !query.selections.some(
+        (selection) => selection.field.targetId === recordedAtFieldId,
+      ),
+  );
+  if (!missingRecordedAt) return;
+  diagnostics.push(
+    inventoryModuleDiagnostic(
+      'INVENTORY_CONTRACT_INVALID',
+      '$.queries.inventory_movement_recorded_at',
+      recordedAtFieldId,
+    ),
+  );
+}
+
 function validatePinnedInventoryMovementEntity(
   packageRevision: NormalizedApplicationPackage,
   entityId: string,
@@ -695,6 +771,8 @@ export function validateModuleConformance(
 ): CompilerDiagnostic[] {
   if (packageRevision.languageVersion !== LANGUAGE_VERSION) return [];
   const diagnostics: CompilerDiagnostic[] = [];
+  validateRequiredInventoryEntitySet(packageRevision, diagnostics);
+  validateRecordedTimeProjectionRetention(packageRevision, diagnostics);
   const storageById = new Map(
     packageRevision.storageMappings.map((mapping) => [
       mapping.storageMappingId,
@@ -789,6 +867,22 @@ export function validateModuleConformance(
           'MODULE_CLASSIFICATION_UNSUPPORTED',
           'wholeModelValidation',
           '$.fields.classification',
+          field.fieldId,
+        ),
+      );
+    }
+    if (
+      isPinnedInventoryBaseUnitField(
+        packageRevision.package.packageId,
+        field.entity.targetId,
+        field.fieldId,
+      ) &&
+      !activeTextFieldShapeMatches(field, 'required', 32)
+    ) {
+      diagnostics.push(
+        inventoryModuleDiagnostic(
+          'INVENTORY_CONTRACT_INVALID',
+          '$.fields.item_base_unit',
           field.fieldId,
         ),
       );
@@ -950,6 +1044,31 @@ export function validateModuleConformance(
       ) {
         missing(diagnostics, entity.entityId, 'operation.periodLockLifecycle');
       }
+      for (const [operationLocalId, permissionLocalId] of [
+        [
+          periodLockStorage.advanceOperationLocalId,
+          periodLockStorage.advanceOperationLocalId,
+        ],
+        [
+          periodLockStorage.reopenOperationLocalId,
+          periodLockStorage.reopenOperationLocalId,
+        ],
+      ] as const) {
+        const operationId = `${packageRevision.package.namespace}:operation.${operationLocalId}`;
+        const permissionId = `${packageRevision.package.namespace}:permission.${permissionLocalId}`;
+        const operation = entityOperations.find(
+          (candidate) => candidate.operationId === operationId,
+        );
+        if (operation && operation.permission.targetId !== permissionId) {
+          diagnostics.push(
+            inventoryModuleDiagnostic(
+              'INVENTORY_CONTRACT_INVALID',
+              `$.operations.${operationLocalId}.permission`,
+              operationId,
+            ),
+          );
+        }
+      }
     }
 
     const surfaceRoles = new Set(
@@ -991,13 +1110,18 @@ export function validateModuleConformance(
         );
         if (
           !field ||
-          (rule.required && field.presence !== 'required') ||
-          (!rule.required && field.presence !== 'optional')
+          !activeTextFieldShapeMatches(
+            field,
+            rule.required ? 'required' : 'optional',
+            80,
+          )
         ) {
-          missing(
-            diagnostics,
-            entity.entityId,
-            `field.inventoryReference.${rule.fieldLocalId}`,
+          diagnostics.push(
+            inventoryModuleDiagnostic(
+              'INVENTORY_CONTRACT_INVALID',
+              `$.fields.${rule.fieldLocalId}`,
+              `${packageRevision.package.namespace}:field.${rule.fieldLocalId}`,
+            ),
           );
         }
       }
@@ -2595,6 +2719,14 @@ function canonicalFamilyId(entityId: string): string | null {
   if (offset < 1) return null;
   const familyId = entityId.slice(offset + marker.length);
   return familyId.length > 0 ? familyId : null;
+}
+
+function canonicalPackageLocalId(packageId: string): string | null {
+  const marker = ':package.';
+  const offset = packageId.lastIndexOf(marker);
+  if (offset < 1) return null;
+  const localId = packageId.slice(offset + marker.length);
+  return localId.length > 0 ? localId : null;
 }
 
 function canonicalFieldLocalId(fieldId: string): string | null {

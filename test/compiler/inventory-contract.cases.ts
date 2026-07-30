@@ -30,6 +30,7 @@ import {
   LEGAL_ENTITY_RELATION_SEMANTICS_V1,
   inventoryModuleDefinition,
 } from '../../packages/domain/src/inventory/index.js';
+import { catalogModuleDefinition } from '../../packages/domain/src/catalog/definition.js';
 import { partyModuleDefinition } from '../../packages/domain/src/party/definition.js';
 
 interface MutableInventoryContract {
@@ -492,6 +493,146 @@ export function registerInventoryContractCases(
       );
     },
   );
+
+  for (const familyLocalId of [
+    'legal_entity',
+    'inventory_transaction',
+    'inventory_transaction_line',
+    'inventory_period_lock',
+    'inventory_movement',
+  ] as const) {
+    register(
+      `the Inventory module requires the ${familyLocalId} family`,
+      () => {
+        const result = compileApplication(
+          moduleInput(inventoryDefinitionWithoutFamily(familyLocalId)),
+        );
+        assertCompileDiagnostic(
+          result,
+          'INVENTORY_CONTRACT_INVALID',
+          `$.entities.${familyLocalId}`,
+          `northstar.inventory:entity.${familyLocalId}`,
+        );
+      },
+    );
+  }
+
+  for (const fieldLocalId of [
+    'inventory_transaction_line_item_id',
+    'inventory_transaction_line_from_location_id',
+    'inventory_transaction_line_to_location_id',
+  ] as const) {
+    for (const mutation of ['retired', 'boolean'] as const) {
+      register(
+        `the Inventory ${fieldLocalId} reference rejects a ${mutation} field`,
+        () => {
+          const definition = structuredClone(inventoryModuleDefinition()) as {
+            fields: Array<Record<string, unknown>>;
+          };
+          const field = definition.fields.find((candidate) =>
+            String(candidate.fieldId).endsWith(`:field.${fieldLocalId}`),
+          );
+          assert.ok(field);
+          if (mutation === 'retired') field.lifecycle = 'retired';
+          else {
+            field.fieldType = {
+              kind: 'booleanFieldType',
+              schemaVersion: 'v3',
+            };
+          }
+          const result = compileApplication(moduleInput(definition));
+          assertCompileDiagnostic(
+            result,
+            'INVENTORY_CONTRACT_INVALID',
+            `$.fields.${fieldLocalId}`,
+            `northstar.inventory:field.${fieldLocalId}`,
+          );
+        },
+      );
+    }
+  }
+
+  for (const mutation of ['retired', 'boolean'] as const) {
+    register(
+      `the Catalog base-unit binding rejects a ${mutation} field`,
+      () => {
+        const definition = structuredClone(catalogModuleDefinition()) as {
+          fields: Array<Record<string, unknown>>;
+        };
+        const field = definition.fields.find((candidate) =>
+          String(candidate.fieldId).endsWith(':field.item_base_unit'),
+        );
+        assert.ok(field);
+        if (mutation === 'retired') field.lifecycle = 'retired';
+        else {
+          field.fieldType = {
+            kind: 'booleanFieldType',
+            schemaVersion: 'v3',
+          };
+        }
+        const result = compileApplication(moduleInput(definition));
+        assertCompileDiagnostic(
+          result,
+          'INVENTORY_CONTRACT_INVALID',
+          '$.fields.item_base_unit',
+          'northstar.catalog:field.item_base_unit',
+        );
+      },
+    );
+  }
+
+  register('every Inventory movement query retains recordedAt', () => {
+    const definition = structuredClone(inventoryModuleDefinition()) as {
+      queries: Array<{
+        selections: Array<{ field: { targetId: string } }>;
+        sourceEntity: { targetId: string };
+      }>;
+    };
+    let changedQueries = 0;
+    for (const query of definition.queries) {
+      if (!query.sourceEntity.targetId.endsWith(':entity.inventory_movement')) {
+        continue;
+      }
+      const retained = query.selections.filter(
+        (selection) =>
+          !selection.field.targetId.endsWith(
+            ':field.inventory_movement_recorded_at',
+          ),
+      );
+      if (retained.length !== query.selections.length) changedQueries += 1;
+      query.selections = retained;
+    }
+    assert.equal(changedQueries, 4);
+    const result = compileApplication(moduleInput(definition));
+    assertCompileDiagnostic(
+      result,
+      'INVENTORY_CONTRACT_INVALID',
+      '$.queries.inventory_movement_recorded_at',
+      'northstar.inventory:field.inventory_movement_recorded_at',
+    );
+  });
+
+  register('period-lock advance is bound to its matching permission', () => {
+    const definition = structuredClone(inventoryModuleDefinition()) as {
+      operations: Array<{
+        operationId: string;
+        permission: { targetId: string };
+      }>;
+    };
+    const advance = definition.operations.find((operation) =>
+      operation.operationId.endsWith(':operation.advance_period_lock'),
+    );
+    assert.ok(advance);
+    advance.permission.targetId =
+      'northstar.inventory:permission.reopen_period';
+    const result = compileApplication(moduleInput(definition));
+    assertCompileDiagnostic(
+      result,
+      'INVENTORY_CONTRACT_INVALID',
+      '$.operations.advance_period_lock.permission',
+      'northstar.inventory:operation.advance_period_lock',
+    );
+  });
 
   register(
     'period locks expose only the named advance and reopen mutation authority',
@@ -1250,6 +1391,129 @@ function inventoryDefinitionWithoutMovementField(
     );
   }
   return definition;
+}
+
+function inventoryDefinitionWithoutFamily(
+  familyLocalId: string,
+): Record<string, unknown> {
+  const definition = structuredClone(inventoryModuleDefinition()) as Record<
+    string,
+    unknown
+  >;
+  const entityId = `northstar.inventory:entity.${familyLocalId}`;
+  const fields = definition.fields as Array<Record<string, unknown>>;
+  const storageMappings = definition.storageMappings as Array<
+    Record<string, unknown>
+  >;
+  const queries = definition.queries as Array<Record<string, unknown>>;
+  const operations = definition.operations as Array<Record<string, unknown>>;
+  const permissions = definition.permissions as Array<Record<string, unknown>>;
+
+  const fieldIds = new Set(
+    fields
+      .filter((field) => referenceTarget(field.entity) === entityId)
+      .map((field) => String(field.fieldId)),
+  );
+  const storageIds = new Set(
+    storageMappings
+      .filter((mapping) => referenceTarget(mapping.entity) === entityId)
+      .map((mapping) => String(mapping.storageMappingId)),
+  );
+  const queryIds = new Set(
+    queries
+      .filter((query) => referenceTarget(query.sourceEntity) === entityId)
+      .map((query) => String(query.queryId)),
+  );
+  const operationIds = new Set(
+    operations
+      .filter(
+        (operation) =>
+          typeof operation.effect === 'object' &&
+          operation.effect !== null &&
+          referenceTarget(
+            (operation.effect as Record<string, unknown>).entity,
+          ) === entityId,
+      )
+      .map((operation) => String(operation.operationId)),
+  );
+  const permissionIds = new Set(
+    permissions
+      .filter((permission) => referenceTarget(permission.resource) === entityId)
+      .map((permission) => String(permission.permissionId)),
+  );
+  const removedIds = new Set<string>([
+    entityId,
+    ...fieldIds,
+    ...storageIds,
+    ...queryIds,
+    ...operationIds,
+    ...permissionIds,
+  ]);
+  for (const collection of [
+    'assertions',
+    'entities',
+    'fields',
+    'operations',
+    'permissions',
+    'queries',
+    'relations',
+    'stateMachines',
+    'storageMappings',
+    'surfaces',
+  ]) {
+    definition[collection] = (
+      definition[collection] as Array<Record<string, unknown>>
+    ).filter((entry) => !containsAnyExactString(entry, removedIds));
+  }
+  return definition;
+}
+
+function referenceTarget(value: unknown): string | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const targetId = (value as Record<string, unknown>).targetId;
+  return typeof targetId === 'string' ? targetId : null;
+}
+
+function containsAnyExactString(
+  value: unknown,
+  removedIds: ReadonlySet<string>,
+): boolean {
+  if (typeof value === 'string') return removedIds.has(value);
+  if (Array.isArray(value)) {
+    return value.some((entry) => containsAnyExactString(entry, removedIds));
+  }
+  if (typeof value === 'object' && value !== null) {
+    return Object.values(value).some((entry) =>
+      containsAnyExactString(entry, removedIds),
+    );
+  }
+  return false;
+}
+
+function assertCompileDiagnostic(
+  result: ReturnType<typeof compileApplication>,
+  code: string,
+  path: string,
+  subjectId: string,
+): void {
+  assert.equal(
+    result.status,
+    'failed',
+    result.status === 'compiled'
+      ? JSON.stringify(result.diagnostics)
+      : undefined,
+  );
+  if (result.status !== 'failed') return;
+  assert.equal(
+    result.diagnostics.some(
+      (diagnostic) =>
+        diagnostic.code === code &&
+        diagnostic.path === path &&
+        diagnostic.subjectId === subjectId,
+    ),
+    true,
+    JSON.stringify(result.diagnostics),
+  );
 }
 
 function replaceExactString(value: unknown, from: string, to: string): unknown {
