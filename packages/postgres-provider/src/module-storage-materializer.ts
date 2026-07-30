@@ -1426,7 +1426,12 @@ async function createManagedTable(
       `REVOKE INSERT, UPDATE ON north_star_module.${quoted(entity.physicalTableName)} FROM north_star_module_runtime`,
     );
     await client.query(
-      `GRANT UPDATE (${quoted(entity.periodLock.closedThroughColumn)})
+      `GRANT UPDATE (${[
+        entity.periodLock.closedThroughColumn,
+        entity.optimisticRevision.column,
+      ]
+        .map(quoted)
+        .join(', ')})
          ON north_star_module.${quoted(entity.physicalTableName)}
          TO north_star_module_runtime`,
     );
@@ -3871,7 +3876,10 @@ function buildExpectedColumnGrants(
 ) {
   return [...tables.values()].flatMap((entity) =>
     entity.periodLock
-      ? [entity.periodLock.closedThroughColumn].map((columnName) => ({
+      ? [
+          entity.periodLock.closedThroughColumn,
+          entity.optimisticRevision.column,
+        ].map((columnName) => ({
           columnName,
           grantee: 'north_star_module_runtime',
           isGrantable: false,
