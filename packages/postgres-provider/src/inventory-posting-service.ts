@@ -43,6 +43,8 @@ export const INVENTORY_POSTING_DEPENDENCY_SET_ROOT =
 const inventoryPostingLockTimeoutMilliseconds = 15_000;
 const requestKeyLockDerivationVersion =
   'northstar.inventory-posting-request-lock/v1';
+const legacyInventoryPostingInputDigestVersion = 1 as const;
+const currentInventoryPostingInputDigestVersion = 2 as const;
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const sha256Pattern = /^[0-9a-f]{64}$/u;
@@ -189,6 +191,18 @@ export interface InventoryPostingResultV1 {
 export type InventoryAdjustmentPostingResultV1 = InventoryPostingResultV1;
 export type InventoryTransferPostingResultV1 = InventoryPostingResultV1;
 
+type RecordedInventoryPostingResult = Omit<
+  InventoryPostingResultV1,
+  'movements'
+> & {
+  readonly movements: readonly (Omit<
+    PostedInventoryMovementV1,
+    'postingRole'
+  > & {
+    readonly postingRole?: InventoryPostingRoleV1;
+  })[];
+};
+
 export type InventoryPostingErrorCode =
   | 'INVENTORY_ADJUSTMENT_APPROVAL_REQUIRED'
   | 'INVENTORY_ADJUSTMENT_REASON_REQUIRED'
@@ -298,11 +312,17 @@ interface RecordedReceiptRow {
   correlation_id: string;
   domain_event_id: string;
   input_digest: string;
+  input_digest_version: number;
   invocation_id: string;
-  mutation_result: InventoryPostingResultV1;
+  mutation_result: RecordedInventoryPostingResult;
   outbox_id: string;
   principal_id: string;
   recorded_at: Date;
+}
+
+interface VersionedInputDigest {
+  readonly value: string;
+  readonly version: typeof currentInventoryPostingInputDigestVersion;
 }
 
 interface EvidenceIds {
@@ -373,7 +393,7 @@ export class PostgresInventoryPostingService {
     assertTrustedActorEnvelope(actorEnvelope);
     assertActorContext(context, actorEnvelope);
     const parsed = posting.command;
-    const inputDigest = digestCommand(posting);
+    const inputDigest = currentCommandDigest(posting);
     const movements = plannedMovements(posting, this.mintUuid);
     const identities = movements.map((movement) =>
       stockIdentity(context, parsed.legalEntityId, movement),
@@ -411,7 +431,7 @@ export class PostgresInventoryPostingService {
         const replay = validateReceiptReplay(
           receipt,
           context,
-          inputDigest,
+          posting,
           parsed.idempotencyKey,
         );
         await client.query('COMMIT');
@@ -484,6 +504,7 @@ export class PostgresInventoryPostingService {
           context,
           this.registration,
           parsed.idempotencyKey,
+          posting,
           inputDigest,
           naturalReplay,
         );
@@ -561,6 +582,7 @@ export class PostgresInventoryPostingService {
           context,
           this.registration,
           parsed.idempotencyKey,
+          posting,
           inputDigest,
           racedReplay,
         );
@@ -2196,7 +2218,8 @@ async function findNaturalReplay(
   await resetModuleRole(client);
   const receipt = await client.query<RecordedReceiptRow>(
     `SELECT receipt.principal_id, receipt.input_digest, receipt.mutation_result,
-            receipt.invocation_id, receipt.correlation_id,
+            receipt.input_digest_version, receipt.invocation_id,
+            receipt.correlation_id,
             receipt.change_document_id, receipt.domain_event_id,
             receipt.outbox_id, receipt.recorded_at
        FROM platform.trust_outbox AS outbox
@@ -2223,7 +2246,7 @@ async function findNaturalReplay(
       'existing natural effects belong to another principal',
     );
   }
-  return Object.freeze({ ...row.mutation_result, replayed: true });
+  return recordedResultForReplay(row);
 }
 
 async function findReceipt(
@@ -2233,9 +2256,9 @@ async function findReceipt(
   idempotencyKey: string,
 ): Promise<RecordedReceiptRow | null> {
   const result = await client.query<RecordedReceiptRow>(
-    `SELECT principal_id, input_digest, mutation_result, invocation_id,
-            correlation_id, change_document_id, domain_event_id, outbox_id,
-            recorded_at
+    `SELECT principal_id, input_digest, input_digest_version, mutation_result,
+            invocation_id, correlation_id, change_document_id,
+            domain_event_id, outbox_id, recorded_at
        FROM platform.semantic_operation_receipts
       WHERE tenant_id = $1 AND environment_id = $2
         AND action_id = $3 AND idempotency_key = $4`,
@@ -2247,9 +2270,10 @@ async function findReceipt(
 function validateReceiptReplay(
   receipt: RecordedReceiptRow,
   context: TrustedRequestContext,
-  inputDigest: string,
+  posting: ParsedPosting,
   idempotencyKey: string,
 ): InventoryPostingResultV1 {
+  const inputDigest = digestCommand(posting, receipt.input_digest_version);
   if (
     receipt.principal_id.toLowerCase() !== context.principalId.toLowerCase() ||
     receipt.input_digest !== inputDigest
@@ -2260,7 +2284,7 @@ function validateReceiptReplay(
       { idempotencyKey },
     );
   }
-  return Object.freeze({ ...receipt.mutation_result, replayed: true });
+  return recordedResultForReplay(receipt);
 }
 
 async function persistAdditionalReceipt(
@@ -2268,7 +2292,8 @@ async function persistAdditionalReceipt(
   context: TrustedRequestContext,
   registration: InventoryPostingRegistrationV1,
   idempotencyKey: string,
-  inputDigest: string,
+  posting: ParsedPosting,
+  inputDigest: VersionedInputDigest,
   replay: InventoryPostingResultV1,
 ): Promise<InventoryPostingResultV1> {
   const existing = await findReceipt(
@@ -2278,12 +2303,7 @@ async function persistAdditionalReceipt(
     idempotencyKey,
   );
   if (existing)
-    return validateReceiptReplay(
-      existing,
-      context,
-      inputDigest,
-      idempotencyKey,
-    );
+    return validateReceiptReplay(existing, context, posting, idempotencyKey);
   const result = Object.freeze({ ...replay, replayed: true });
   await insertReceipt(
     client,
@@ -2301,16 +2321,16 @@ async function insertReceipt(
   context: TrustedRequestContext,
   registration: InventoryPostingRegistrationV1,
   idempotencyKey: string,
-  inputDigest: string,
+  inputDigest: VersionedInputDigest,
   result: InventoryPostingResultV1,
 ): Promise<void> {
   await client.query(
     `INSERT INTO platform.semantic_operation_receipts (
        tenant_id, environment_id, principal_id, release_id,
        release_content_hash, action_id, idempotency_key, input_digest,
-       mutation_result, invocation_id, correlation_id, change_document_id,
-       domain_event_id, outbox_id, recorded_at
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11,$12,$13,$14,$15)`,
+       input_digest_version, mutation_result, invocation_id, correlation_id,
+       change_document_id, domain_event_id, outbox_id, recorded_at
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13,$14,$15,$16)`,
     [
       context.tenantId,
       context.environmentId,
@@ -2319,7 +2339,8 @@ async function insertReceipt(
       registration.releaseContentHash,
       registration.capabilityId,
       idempotencyKey,
-      inputDigest,
+      inputDigest.value,
+      inputDigest.version,
       JSON.stringify(result),
       result.trust.invocationId,
       result.trust.correlationId,
@@ -2635,18 +2656,70 @@ function naturalEffects(
   ]);
 }
 
-function digestCommand(posting: ParsedPosting): string {
+function currentCommandDigest(posting: ParsedPosting): VersionedInputDigest {
+  return Object.freeze({
+    value: digestCommand(posting, currentInventoryPostingInputDigestVersion),
+    version: currentInventoryPostingInputDigestVersion,
+  });
+}
+
+function digestCommand(posting: ParsedPosting, version: number): string {
   const { command } = posting;
   const { idempotencyKey, ...semanticInput } = command;
   void idempotencyKey;
-  return createHash('sha256')
-    .update(
-      canonicalize({
-        postingRole: posting.postingRole,
-        ...semanticInput,
-      }),
-    )
-    .digest('hex');
+  const digestInput =
+    version === legacyInventoryPostingInputDigestVersion
+      ? semanticInput
+      : version === currentInventoryPostingInputDigestVersion
+        ? { postingRole: posting.postingRole, ...semanticInput }
+        : unsupportedReceiptVersion(version);
+  return createHash('sha256').update(canonicalize(digestInput)).digest('hex');
+}
+
+function recordedResultForReplay(
+  receipt: RecordedReceiptRow,
+): InventoryPostingResultV1 {
+  const version = receipt.input_digest_version;
+  if (
+    version !== legacyInventoryPostingInputDigestVersion &&
+    version !== currentInventoryPostingInputDigestVersion
+  ) {
+    return unsupportedReceiptVersion(version);
+  }
+  const movements = receipt.mutation_result.movements.map((movement) =>
+    Object.freeze({
+      ...movement,
+      postingRole:
+        version === legacyInventoryPostingInputDigestVersion
+          ? 'adjustment'
+          : requiredRecordedPostingRole(movement.postingRole),
+    }),
+  );
+  return Object.freeze({
+    ...receipt.mutation_result,
+    movements,
+    replayed: true,
+  });
+}
+
+function requiredRecordedPostingRole(
+  postingRole: InventoryPostingRoleV1 | undefined,
+): InventoryPostingRoleV1 {
+  if (postingRole === 'adjustment' || postingRole === 'transfer') {
+    return postingRole;
+  }
+  throw postingError(
+    'INVENTORY_POSTING_IDEMPOTENCY_CONFLICT',
+    'persisted posting receipt has no valid posting role',
+  );
+}
+
+function unsupportedReceiptVersion(version: number): never {
+  throw postingError(
+    'INVENTORY_POSTING_IDEMPOTENCY_CONFLICT',
+    `persisted posting receipt uses unsupported input digest version ${String(version)}`,
+    { inputDigestVersion: String(version) },
+  );
 }
 
 function assertActorContext(

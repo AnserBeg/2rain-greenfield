@@ -38,10 +38,14 @@ outbox, and receipt reads and appends. A transfer derives its source and
 destination quantity deltas and stock identities from those existing inputs.
 It introduces no authoritative access outside that plan.
 
-The G3-P4a draft adds no canonical definition, contract, dependency-set,
-storage-target, migration, or serializer change. Transfer therefore needs an
-authorization decision, but it does not need a capability-version,
-dependency-set, canonical-language, storage-target, or migration version event.
+The G3-P4a implementation adds no canonical definition, contract,
+dependency-set, storage-target, or serializer change. It does change one
+persisted receipt input: the posting command digest now includes
+`postingRole`, where the accepted G3-P3 digest did not. It also adds
+`postingRole` to each movement in the persisted `mutation_result`. Transfer
+therefore needs both this authorization decision and an explicit receipt
+artifact version event. It does not need a capability-version, dependency-set,
+canonical-language, or storage-target version event.
 
 ## Decision
 
@@ -61,6 +65,28 @@ active release content hash, and
 the current active release has no persisted posting-capability declaration.
 This decision does not manufacture a second admission authority and does not
 claim release-persisted capability admission.
+
+The receipt boundary is versioned additively by migration 0017:
+
+- existing `semantic_operation_receipts` rows receive
+  `input_digest_version = 1` without changing `input_digest`;
+- v1 replay hashes `canonicalize(semanticInput)`, matching G3-P3;
+- new Inventory posting receipts explicitly write
+  `input_digest_version = 2` and hash
+  `canonicalize({ postingRole, ...semanticInput })`; and
+- replay selects the digest algorithm from the stored
+  `input_digest_version`, never from the current writer constant.
+
+The stored version also closes the adjacent result-shape boundary. Every v1
+Inventory receipt predates transfer authorization and therefore represents an
+adjustment. Its replay reader adds `postingRole: 'adjustment'` to the returned
+movement shape. A v2 receipt requires its persisted movement role. The
+immutable v1 `mutation_result` is not rewritten.
+
+Migration 0017 is one additive column and one bounded check. It preserves every
+existing digest byte-for-byte. It changes no canonical bytes, release golden,
+dependency-set root, storage-target root, or content hash; there is therefore
+no before/after digest, golden, or root value to record.
 
 Each transfer line carries one strictly positive exact-base-unit quantity and
 two distinct locations. The adapter derives exactly two append-only movements
@@ -108,7 +134,7 @@ transaction calls the existing `acquireStockIdentityLocks` immediately after
 
 The transfer-specific production control is
 `assertConcurrentOppositeTransfers` in
-`test/postgres/inventory-posting.test.ts:1265`. It starts real concurrent
+`test/postgres/inventory-posting.test.ts:1402`. It starts real concurrent
 A-to-B and B-to-A postings in opposite caller order. Its query proxy pauses
 each backend after its first successful NSST acquisition; the control requires
 both callers to converge on the same first physical key, observes the other
@@ -118,9 +144,12 @@ pause holding different first keys and PostgreSQL constructs the real
 deadlock. This is an execution-observing control, not an elapsed-time or
 source-text proxy.
 
-That control is authored but was not run in this ADR-authoring sandbox. Its
-green runtime verdict is therefore a condition of packet acceptance, not a
-result claimed by this document.
+At reviewed candidate `41ceb638`, the orchestrator reports that the full matrix
+was green. Fable max independently ran the opposite-transfer removal red in a
+scratch copy and reproduced the expected failure
+`opposite callers acquired different first stock keys`. Those are
+orchestrator/reviewer records, not author-run evidence for the uncommitted
+round-4 fixes.
 
 ## Boundaries
 
@@ -166,21 +195,27 @@ current upstream ALLOW decision while the real policy kernel remains deferred.
 ## Verification
 
 The controls below are the evidence obligations for ratification. Source facts
-were inspected at `6e47017`; Docker-backed controls and the full matrix remain
-for the orchestrator.
+were inspected at draft `6e47017`; the orchestrator reports the full matrix
+green at reviewed candidate `41ceb638`. The new round-4 controls remain for the
+orchestrator to run after freezing a replacement candidate.
 
 | Claim | Control or observation | What it proves, and current status |
 |---|---|---|
-| Transfer fits the frozen contract with no version event | Exact inspection of `definition.ts:223,456`, `contracts.ts:435,443,465-469`, the v3 dependency plan at `contracts.ts:359-428`, and the packet diff | The required type, role, defaults, dependency version, root, and accesses already exist, and the draft changes no contract or migration file. Verified in this authoring round. |
-| Transfer uses one posting implementation and the G3-P3 transaction order | `postAdjustment` and `postTransfer` both enter the private `#post`; `#post` calls the unchanged serializer at `inventory-posting-service.ts:394` before business reads and before its caller savepoint | Structural source evidence verifies there is one coordinator. It does not by itself prove PostgreSQL atomicity. |
-| A transfer persists one balanced pair and exact retries do not duplicate it | `assertTransferPosting` at `inventory-posting.test.ts:984` | Requires observed `-2`/`+2` transfer movements, source/destination balances `3`/`2`, one posted draft transition, request and natural replay of the original pair, and typed rejection of same-key/different-input. Authored; not run in this sandbox. |
-| Transfer movements, read-back, effect companions, and trust/outbox evidence remain quantity-only | Transfer invocation of `assertQuantityOnlyEvidence` at `inventory-posting.test.ts:1071`, with the control at `inventory-posting.test.ts:3094` | Requires the two returned movements, both persisted movement rows, both effect-companion rows, one business-change document, one domain-event payload, and one outbox row to exist before recursively rejecting monetary keys across all eight documents. Authored; not run in this sandbox. |
-| A source movement cannot commit without its destination or trust aggregate | `assertTransferRollbackIsAtomic` at `inventory-posting.test.ts:1221` | A non-transactional sequence proves the first INSERT executed; rejection of the second side must leave no transfer movement, effect companion, new trust row, or draft transition. Authored; not run in this sandbox. |
-| Transfer consumes its frozen reason, approval, and period-lock decisions | Transfer branches within `assertTransferPosting` at `inventory-posting.test.ts:1102-1186` | Requires typed blank-code, approval-threshold, and closed-period rejections, plus code-only and approving-human success. Authored; not run in this sandbox. |
-| Opposite real transfers consume the deterministic multi-identity order without deadlocking | `assertConcurrentOppositeTransfers` at `inventory-posting.test.ts:1268` | Requires a common granted first key, an observed ungranted waiter, two fulfilled postings, and no `40P01`; ordering removal constructs the real deadlock. Authored; not run in this sandbox. |
-| Serialized negative-stock evaluation consumes the frozen global movement order | `assertPersistedPlannedOrderIsDecisive` at `inventory-posting.test.ts:1429` | A same-instant planned debit must sort before a persisted credit and reject; deleting the production persisted-plus-planned sort changes the verdict to commit. Authored; not run in this sandbox. |
-| The final `movementId` branch of the global order is load-bearing | Top-level pure control `the global same-instant order reaches its movementId tie-break` at `inventory-posting.test.ts:158` | The production comparator sorts a pair differing only in `movementId`; the author previously executed the passing control and its branch-deletion red. This is not PostgreSQL or full-matrix evidence. |
+| Transfer fits the frozen domain contract without a domain-artifact version event | Exact inspection of `definition.ts:223,456`, `contracts.ts:435,443,465-469`, the v3 dependency plan at `contracts.ts:359-428`, and the packet diff | The required type, role, defaults, dependency version, root, and accesses already exist. The receipt change is separately versioned by migration 0017; the domain artifacts remain unchanged. |
+| A pre-G3-P4 adjustment receipt remains replayable | `cloneLegacyAdjustmentReceipt` plus the request replay in `inventory-posting.test.ts` | Clones a real receipt into the persisted v1 digest and result shape, then requires the stored version to select the v1 digest and restore `postingRole: 'adjustment'` in the returned movement. Authored in round 4; not PostgreSQL-run by the author. |
+| Transfer uses one posting implementation and the G3-P3 transaction order | `postAdjustment` and `postTransfer` both enter the private `#post`; `#post` calls the unchanged serializer at `inventory-posting-service.ts:414` before business reads and before its caller savepoint | Structural source evidence verifies there is one coordinator. It does not by itself prove PostgreSQL atomicity. |
+| A transfer persists one balanced pair and exact retries do not duplicate it | `assertTransferPosting` in `inventory-posting.test.ts` | Requires observed `-2`/`+2` transfer movements, source/destination balances `3`/`2`, one posted draft transition, request and natural replay of the original pair, and typed rejection of same-key/different-input. The orchestrator reports it green at `41ceb638`. |
+| Transfer movements, read-back, effect companions, and trust/outbox evidence remain quantity-only | Transfer invocation of `assertQuantityOnlyEvidence` in `inventory-posting.test.ts` | Requires the two returned movements, both persisted movement rows, both effect-companion rows, one business-change document, one domain-event payload, and one outbox row to exist before rejecting monetary keys and semantic `fieldId` values across all eight documents. The new actual-shape `fieldId: 'unitCost'` red is authored in round 4 and not PostgreSQL-run by the author. |
+| A source movement cannot commit without its destination or trust aggregate | `assertTransferRollbackIsAtomic` at `inventory-posting.test.ts:1355` | A non-transactional sequence proves the first INSERT executed; rejection of the second side must leave no transfer movement, effect companion, new trust row, or draft transition. The orchestrator reports it green at `41ceb638`. |
+| Transfer consumes its frozen reason, approval, and period-lock decisions | Transfer branches within `assertTransferPosting` in `inventory-posting.test.ts` | Uses adjustment threshold `1` and transfer threshold `3`: an unapproved quantity-2 transfer must post, while quantity 4 must reject without and post with an approving human. This catches a regression to `approvalThresholds.adjustment`. Authored in round 4; not PostgreSQL-run by the author. |
+| Opposite real transfers consume the deterministic multi-identity order without deadlocking | `assertConcurrentOppositeTransfers` at `inventory-posting.test.ts:1402` | Requires a common granted first key, an observed ungranted waiter, two fulfilled postings, and no `40P01`; Fable max reproduced the ordering-removal red at `41ceb638`. |
+| Serialized negative-stock evaluation consumes the frozen global movement order | `assertPersistedPlannedOrderIsDecisive` at `inventory-posting.test.ts:1563` | A same-instant planned debit must sort before a persisted credit and reject; Fable max reproduced the persisted-plus-planned sort-removal red at `41ceb638`. |
+| The final `movementId` branch of the global order is load-bearing | Top-level pure control `the global same-instant order reaches its movementId tie-break` in `inventory-posting.test.ts` | The production comparator sorts a pair differing only in `movementId`; Fable max reproduced the comparator-branch deletion red at `41ceb638`. |
 
-This ADR deliberately does not claim that the G3-P4a PostgreSQL controls, the
-opposite-transfer no-deadlock outcome, the full CI matrix, or the Critical
-review chain have passed. None was run in this authoring round.
+Review evidence at `41ceb638` is recorded with its actual provenance: the
+orchestrator reports a green full matrix; Fable max returned CONFIRM and
+executed the three ordering reds above; Codex xhigh returned REVISE with the
+unversioned receipt and monetary-scan findings. The orchestrator adjudicated
+both findings as correct. The uncommitted round-4 changes address those two
+findings and the approval observation gap, but have not yet been frozen,
+PostgreSQL-gated, matrix-gated, or re-reviewed.

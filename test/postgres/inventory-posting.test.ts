@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import test, { type TestContext } from 'node:test';
 
@@ -208,6 +208,10 @@ test(
       assert.equal(posted.movements[0]?.recordedAt, recordedAt);
       assert.equal(await movementCount(database), 1);
       assert.equal(await companionCount(database), 1);
+      assert.equal(
+        await receiptInputDigestVersion(database, first.idempotencyKey),
+        2,
+      );
 
       const sameRequestReplay = await database.service.postAdjustment(
         database.context,
@@ -228,6 +232,27 @@ test(
       assert.deepEqual(naturalEffectReplay.movements, posted.movements);
       assert.equal(await movementCount(database), 1);
       assert.equal(await companionCount(database), 1);
+
+      const legacyReplayCommand = {
+        ...first,
+        idempotencyKey: randomUUID(),
+      };
+      await cloneLegacyAdjustmentReceipt(
+        database,
+        first.idempotencyKey,
+        legacyReplayCommand,
+      );
+      const legacyReplay = await database.service.postAdjustment(
+        database.context,
+        database.actor,
+        legacyReplayCommand,
+      );
+      assert.equal(legacyReplay.replayed, true);
+      assert.deepEqual(legacyReplay.movements, posted.movements);
+      assert.deepEqual(
+        legacyReplay.movements.map((movement) => movement.postingRole),
+        ['adjustment'],
+      );
 
       await assert.rejects(
         database.service.postAdjustment(database.context, database.actor, {
@@ -1137,16 +1162,51 @@ async function assertTransferPosting(
     '00-transfer-approval-seed-b',
   );
   await updatePostingConfiguration(database, legalApproval, {
-    transferApprovalThreshold: '1',
+    transferApprovalThreshold: '3',
   });
-  const approval = transferCommand({
+  const belowTransferApproval = transferCommand({
     legalEntityId: legalApproval,
     quantity: '2',
-    sourceId: '10-transfer-approval',
+    sourceId: '10-transfer-below-approval',
   });
-  await seedTransferDraft(database, approval);
+  await seedTransferDraft(database, belowTransferApproval);
+  assert.equal(
+    (
+      await database.service.postTransfer(
+        database.context,
+        database.actor,
+        belowTransferApproval,
+      )
+    ).replayed,
+    false,
+  );
+  for (const sourceId of [
+    '11-transfer-approval-seed-a',
+    '11-transfer-approval-seed-b',
+    '11-transfer-approval-seed-c',
+    '11-transfer-approval-seed-d',
+  ]) {
+    await seedAdjustmentBalance(
+      database,
+      legalApproval,
+      transferItemId,
+      transferLocationA,
+      '1',
+      sourceId,
+    );
+  }
+  const approvalRequired = transferCommand({
+    legalEntityId: legalApproval,
+    quantity: '4',
+    sourceId: '12-transfer-approval-required',
+  });
+  await seedTransferDraft(database, approvalRequired);
   await assert.rejects(
-    database.service.postTransfer(database.context, database.actor, approval),
+    database.service.postTransfer(
+      database.context,
+      database.actor,
+      approvalRequired,
+    ),
     (error: unknown) =>
       observePostingError(
         testContext,
@@ -1160,7 +1220,7 @@ async function assertTransferPosting(
       await database.service.postTransfer(
         database.context,
         database.approvedActor,
-        approval,
+        approvalRequired,
       )
     ).replayed,
     false,
@@ -1216,6 +1276,80 @@ async function seedAdjustmentBalance(
     database.actor,
     posting,
   );
+}
+
+async function cloneLegacyAdjustmentReceipt(
+  database: PostingDatabase,
+  sourceIdempotencyKey: string,
+  command: InventoryAdjustmentPostingCommandV1,
+): Promise<void> {
+  const { idempotencyKey, ...semanticInput } = command;
+  const inputDigest = createHash('sha256')
+    .update(canonicalize(semanticInput))
+    .digest('hex');
+  const inserted = await database.adminPool.query(
+    `INSERT INTO platform.semantic_operation_receipts (
+       tenant_id, environment_id, principal_id, release_id,
+       release_content_hash, action_id, idempotency_key, input_digest,
+       input_digest_version, mutation_result, invocation_id, correlation_id,
+       change_document_id, domain_event_id, outbox_id, recorded_at
+     )
+     SELECT receipt.tenant_id, receipt.environment_id, receipt.principal_id,
+            receipt.release_id, receipt.release_content_hash, receipt.action_id,
+            $5, $6, 1,
+            jsonb_set(
+              receipt.mutation_result,
+              '{movements}',
+              (
+                SELECT jsonb_agg(movement - 'postingRole')
+                  FROM jsonb_array_elements(
+                    receipt.mutation_result->'movements'
+                  ) AS movement
+              ),
+              false
+            ),
+            receipt.invocation_id, receipt.correlation_id,
+            receipt.change_document_id, receipt.domain_event_id,
+            receipt.outbox_id, receipt.recorded_at
+       FROM platform.semantic_operation_receipts AS receipt
+      WHERE receipt.tenant_id=$1 AND receipt.environment_id=$2
+        AND receipt.action_id=$3 AND receipt.idempotency_key=$4`,
+    [
+      tenantId,
+      environmentId,
+      postingCapabilityId,
+      sourceIdempotencyKey,
+      idempotencyKey,
+      inputDigest,
+    ],
+  );
+  assert.equal(inserted.rowCount, 1);
+  const stored = await database.adminPool.query<{
+    inputDigest: string;
+    inputDigestVersion: number;
+    movementRoleCount: number;
+  }>(
+    `SELECT input_digest AS "inputDigest",
+            input_digest_version AS "inputDigestVersion",
+            (
+              SELECT count(*)::integer
+                FROM jsonb_array_elements(
+                  receipt.mutation_result->'movements'
+                ) AS movement
+               WHERE movement ? 'postingRole'
+            ) AS "movementRoleCount"
+       FROM platform.semantic_operation_receipts AS receipt
+      WHERE receipt.tenant_id=$1 AND receipt.environment_id=$2
+        AND receipt.action_id=$3 AND receipt.idempotency_key=$4`,
+    [tenantId, environmentId, postingCapabilityId, idempotencyKey],
+  );
+  assert.deepEqual(stored.rows, [
+    {
+      inputDigest,
+      inputDigestVersion: 1,
+      movementRoleCount: 0,
+    },
+  ]);
 }
 
 async function assertTransferRollbackIsAtomic(
@@ -3146,13 +3280,26 @@ async function assertQuantityOnlyEvidence(
     assertNoMonetaryKeys(document);
   }
   assert.throws(() => assertNoMonetaryKeys({ unitCost: '1.00' }), /unitCost/u);
+  assert.throws(
+    () =>
+      assertNoMonetaryKeys({
+        classification: 'INTERNAL',
+        fieldId: 'unitCost',
+        newState: { state: 'VALUE', value: '1.00' },
+        oldState: { state: 'ABSENT' },
+      }),
+    /unitCost/u,
+  );
   testContext.diagnostic(
-    'quantity-only parser red: ERR_ASSERTION monetary keys: unitCost',
+    'quantity-only parser reds: key and business-change fieldId both reject unitCost',
   );
 }
 
 function assertNoMonetaryKeys(document: unknown): void {
-  const forbidden = objectKeys(document).filter((key) =>
+  const forbidden = [
+    ...objectKeys(document),
+    ...semanticFieldIds(document),
+  ].filter((key) =>
     /(?:amount|money|cost|price|currency|valuation)/iu.test(key),
   );
   assert.deepEqual(forbidden, [], `monetary keys: ${forbidden.join(',')}`);
@@ -3401,6 +3548,23 @@ async function movementCountBySource(
     [sourceId],
   );
   return Number(result.rows[0]?.count ?? '-1');
+}
+
+async function receiptInputDigestVersion(
+  database: PostingDatabase,
+  idempotencyKey: string,
+): Promise<number> {
+  const result = await database.adminPool.query<{
+    inputDigestVersion: number;
+  }>(
+    `SELECT input_digest_version AS "inputDigestVersion"
+       FROM platform.semantic_operation_receipts
+      WHERE tenant_id=$1 AND environment_id=$2
+        AND action_id=$3 AND idempotency_key=$4`,
+    [tenantId, environmentId, postingCapabilityId, idempotencyKey],
+  );
+  assert.equal(result.rows.length, 1);
+  return result.rows[0]!.inputDigestVersion;
 }
 
 async function transferMovementRows(
@@ -4131,6 +4295,15 @@ function objectKeys(value: unknown): string[] {
   if (Array.isArray(value)) return value.flatMap(objectKeys);
   if (!isRecord(value)) return [];
   return [...Object.keys(value), ...Object.values(value).flatMap(objectKeys)];
+}
+
+function semanticFieldIds(value: unknown): string[] {
+  if (Array.isArray(value)) return value.flatMap(semanticFieldIds);
+  if (!isRecord(value)) return [];
+  return [
+    ...(typeof value.fieldId === 'string' ? [value.fieldId] : []),
+    ...Object.values(value).flatMap(semanticFieldIds),
+  ];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
