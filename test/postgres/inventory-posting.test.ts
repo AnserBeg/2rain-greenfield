@@ -1025,7 +1025,7 @@ async function assertHeldStockLockTimeout(
       assert.equal(postingDetail(outcome.reason, 'sqlstate'), '55P03');
       assert.equal(
         postingDetail(outcome.reason, 'lockTimeoutMilliseconds'),
-        '3000',
+        '15000',
       );
     }
     assert.equal(
@@ -1196,21 +1196,33 @@ async function assertConcurrentChildInsert(
   const insertedLine = line('1', '2', locationPrimary);
   await seedDraft(database, posting);
   await installLineRaceBlocker(database, posting.sourceId);
+  const preparedChildInsert = prepareDraftLineInsert(
+    database,
+    posting,
+    insertedLine,
+  );
   const trustBefore = await trustCountByRequest(
     database,
     database.context.requestId,
   );
   const blocker = await database.adminPool.connect();
   let blockerOpen = false;
+  let childInserter: PoolClient | undefined;
+  let childInserterOpen = false;
   let outcomePromise: Promise<PostingOutcome> | undefined;
   try {
+    // Resolve the INSERT and establish the module-role transaction before
+    // taking the barrier. Once posting is parked, the child mutation needs
+    // exactly one INSERT and its COMMIT before the barrier can be released.
+    childInserter = await beginModuleTransaction(database);
+    childInserterOpen = true;
     await beginBoundedControlTransaction(blocker);
     blockerOpen = true;
+    const blockerPid = await backendPid(blocker);
     await blocker.query(
       'SELECT pg_advisory_xact_lock($1::integer, $2::integer)',
       [lineRaceLockNamespace, lineRaceLockKey],
     );
-    const blockerPid = await backendPid(blocker);
     outcomePromise = settlePosting(
       database.service.postAdjustment(
         database.context,
@@ -1224,19 +1236,18 @@ async function assertConcurrentChildInsert(
       'test movement-insert barrier',
     );
     await assertStockLockHeld(database.adminPool, blocked.pid, [posting]);
-    await withModuleRole(
-      database.runtimePool,
-      database.context,
-      async (client) => {
-        await insertDraftLine(client, database, posting, insertedLine);
-      },
+    await childInserter.query(
+      preparedChildInsert.text,
+      preparedChildInsert.values,
     );
-    assert.equal(await activeTransactionLineCount(database, posting), 2);
+    await childInserter.query('COMMIT');
+    childInserterOpen = false;
     testContext.diagnostic(
       'concurrent-child-insert residual: the generic child insert committed while the draft header was row-locked; the posting digest must abort the transition',
     );
     await blocker.query('COMMIT');
     blockerOpen = false;
+    assert.equal(await activeTransactionLineCount(database, posting), 2);
     const outcome = await outcomePromise;
     assertRejectedPosting(
       testContext,
@@ -1257,6 +1268,10 @@ async function assertConcurrentChildInsert(
       ),
     });
   } finally {
+    if (childInserterOpen && childInserter) {
+      await childInserter.query('ROLLBACK');
+    }
+    childInserter?.release();
     if (blockerOpen) await blocker.query('ROLLBACK');
     blocker.release();
     if (outcomePromise) await outcomePromise;
@@ -1742,9 +1757,17 @@ async function insertDraftLine(
   input: InventoryAdjustmentPostingCommandV1,
   postingLine: InventoryAdjustmentLineV1,
 ): Promise<void> {
+  const prepared = prepareDraftLineInsert(database, input, postingLine);
+  await client.query(prepared.text, prepared.values);
+}
+
+function prepareDraftLineInsert(
+  database: PostingDatabase,
+  input: InventoryAdjustmentPostingCommandV1,
+  postingLine: InventoryAdjustmentLineV1,
+): { text: string; values: unknown[] } {
   const negative = postingLine.quantityDelta.startsWith('-');
-  await insertEntity(
-    client,
+  return prepareEntityInsert(
     database.binding,
     database.binding.transactionLine,
     {
@@ -1776,6 +1799,25 @@ async function insertEntity(
   legalEntityId: string | null,
   relationIds: Record<string, string>,
 ): Promise<void> {
+  const prepared = prepareEntityInsert(
+    binding,
+    entity,
+    overrides,
+    recordId,
+    legalEntityId,
+    relationIds,
+  );
+  await client.query(prepared.text, prepared.values);
+}
+
+function prepareEntityInsert(
+  binding: TestStorageBinding,
+  entity: TestEntityBinding,
+  overrides: Record<string, unknown>,
+  recordId: string,
+  legalEntityId: string | null,
+  relationIds: Record<string, string>,
+): { text: string; values: unknown[] } {
   const relationColumns = bindingRelations(binding, entity).filter(
     (relation) => relation.relationColumn.origin !== 'field',
   );
@@ -1803,11 +1845,11 @@ async function insertEntity(
       return value;
     }),
   ];
-  await client.query(
-    `INSERT INTO ${table(binding, entity)} (${columns.map(quoted).join(',')})
+  return {
+    text: `INSERT INTO ${table(binding, entity)} (${columns.map(quoted).join(',')})
      VALUES (${values.map((_, index) => `$${String(index + 1)}`).join(',')})`,
     values,
-  );
+  };
 }
 
 function bindingRelations(

@@ -37,7 +37,10 @@ export const INVENTORY_POSTING_CAPABILITY_ID =
   `${'northstar'}.${'inventory'}:capability.posting` as const;
 export const INVENTORY_POSTING_DEPENDENCY_SET_ROOT =
   '35fc38eaca7fbe47d8da5030ceefce8211a2194a25d233c45282ef0450d553ad' as const;
-const inventoryPostingLockTimeoutMilliseconds = 3_000;
+// Finite hang-prevention bound, not a posting-latency budget or SLA. Fifteen
+// seconds leaves room for lock-holder coordination while still terminating an
+// acyclic lock convoy that PostgreSQL's deadlock detector cannot break.
+const inventoryPostingLockTimeoutMilliseconds = 15_000;
 const requestKeyLockDerivationVersion =
   'northstar.inventory-posting-request-lock/v1';
 const uuidPattern =
