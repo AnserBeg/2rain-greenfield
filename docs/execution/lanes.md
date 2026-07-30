@@ -12,15 +12,19 @@ writer is holding those paths right now.
 
 ## The lanes
 
-| Lane | Theme | Current packet | Status |
-|---|---|---|---|
-| **KERNEL** | Canonical language and the query tier | `G3-P2b-4` **accepted** 2026-07-29 — runtime payload family; posting unblocked | **idle** |
-| **DEPLOY** | Release lifecycle and runtime infrastructure | `1g2` **accepted** 2026-07-29 (ADR-0024) | **HELD IDLE 2026-07-29 — deliberate.** `G2-P9` is gated behind `G2-P8` (import), which carries the durable-execution substrate decision, and both fail the inventory-first filter. More importantly, **full matrices serialize**: a DEPLOY matrix now queues ahead of FIX's and delays inventory. Leaving it idle is the faster choice, not the idle one. |
-| **FIX** | Correctness defects → stage cutting → inventory build | `G3-P2b-3` **accepted** 2026-07-29 — contract bound, 15/15 clauses | **idle** |
-| **BUILD** | Inventory contracts | `G3-P2b-2` **accepted** 2026-07-29 — serializer proven; **every `G3-P3` prerequisite is on main** | **idle** |
+| Lane | Current packet | Status |
+|---|---|---|
+| **FIX** | `Q1-P4` — issued legal-entity read scope | **matrix-green at `29ba2ae`, both review arms PASS.** Owes a merge of main and a re-run before integration: main advanced 26 files / 3,967 insertions with `G3-P4a` and `G3-P6c`, so the docs-only exception does not apply. |
+| **BUILD** | `G3-P6a` — mount inventory, read-only views | **active.** Has found five structural defects, all real: three fixture double-mounts, provisioning ordered after materialization, `abiFunctionChecks` omitted from the additive strip list, preparation filtering on kind instead of classification, and generic fixture generation ignoring compiled constraints. |
+| **CANON** *(Opus)* | `Q1-P5` — the legal-entity query operand, canonical v4 | **active, added 2026-07-30.** First non-Codex writer lane. Same review chain: Codex for everything, Fable on Critical. Holding its frozen candidate while `Q1-P4` takes the slot; authoring the deferred gateway binding meanwhile. |
+| **KERNEL** | — | idle since `G3-P2b-4` (2026-07-29). |
+| **DEPLOY** | — | idle since `1g2` (2026-07-29). |
 
-Lane identity is stable across packets. When a lane's packet is accepted, the
-next packet inherits the lane and its partition.
+**Lane identity is per packet, not per theme.** The earlier model assigned
+standing themes (KERNEL owns canonical, FIX owns correctness). That broke on
+2026-07-30: `CANON` took canonical work while `KERNEL` sat idle, and `FIX` ran a
+query-tier packet. Themes rot as the queue reorders; the packet is the real unit.
+
 
 ## DEPLOY stays idle until 4c lands — decided 2026-07-28
 
@@ -56,10 +60,60 @@ the one needing a canonical concept** — migration 0012 scopes saved-filter RLS
 anywhere in the compiled path. Full finding, with the discriminator answer, is in
 `current-plan.md` row 1c. **Do not re-derive it from this file; read that row.**
 
-## Path partition — binding
+## Disjointness is VERIFIED, not predicted — corrected 2026-07-30
 
-Disjointness is enforced at prompt time by the orchestrator, not discovered at
-merge time. `packages/compiler/src/` in particular is **split**, because F7 and
+**Before granting any path, run the check. Do not consult the table below as
+authority.**
+
+```bash
+for b in $(git branch --list 'packet/*' --format='%(refname:short)'); do
+  printf '%s: ' "$b"; git diff --name-only main...$b | tr '\n' ' '; echo
+done
+```
+
+**Why this replaced the table as the binding mechanism.** The table is a
+hand-maintained *prediction* of ownership. It rots on every acceptance, and on
+2026-07-30 it was stale in every row — it still listed
+`packages/runtime/src/semantic-query-gateway.ts` as KERNEL's while KERNEL was
+idle, `FIX` actually held it through `Q1-P4`, and the orchestrator granted it to
+a third lane. Three errors in one row.
+
+The empirical check was correct every time it was run that day, including when it
+refuted a lane's own good-faith claim that a file was unheld — `G3-P4b` did hold
+`repository-hygiene.test.ts`.
+
+**The table below is now a LOG OF GRANTED CLAIMS AND THEIR REASONS, not a
+forecast.** Its reasoning is worth keeping; its ownership column is not
+authoritative. When a grant is made, append the reason; never trust a row older
+than the packet it names.
+
+## BRIDGES ARE THE NORMAL CASE, not the exception — recorded 2026-07-30
+
+Roughly ten lane stops occurred on 2026-07-30 and **every one was correct**.
+Nearly all were "I need a path you did not grant." Three were caused by
+orchestrator prompts omitting paths the work obviously needed —
+`packages/domain/src/app/builder.ts`, `docs/decisions/**`, and a gateway granted
+twice.
+
+Owned paths **cannot be fully predicted** before a packet discovers what it
+needs. So every packet prompt should say plainly: *this lease is incomplete by
+construction; stop and ask when you need more.* A lane that stops is doing the
+protocol correctly, not failing it.
+
+## Keep active lanes at THREE or fewer — recorded 2026-07-30
+
+The full matrix is serial, so lane count beyond about three buys queue depth
+rather than throughput. Four-plus lanes on 2026-07-30 all waited on one gate
+while adding rebase cost.
+
+**Avoid stacking branches.** `G3-P4b` and `G3-P6a` were both branched from
+`packet/g3-p4` rather than main; both needed rebasing when it merged. Branch from
+main and accept a later merge, or serialize.
+
+## Path partition — historical claims log
+
+Recorded grants and their reasons. **Not authoritative for current ownership** —
+run the empirical check above. `packages/compiler/src/` in particular is **split**, because F7 and
 the query tier both live there.
 
 | Path | Lane |
@@ -259,9 +313,9 @@ costs the rule PR-1 exists to enforce.
 Every report back to the orchestrator opens with one line, so a paste is
 unambiguous without context:
 
-    LANE: <KERNEL|DEPLOY|FIX> · PACKET: <id> · SHA: <frozen sha> · BASE: <base sha>
+    LANE: <FIX|BUILD|CANON|KERNEL|DEPLOY> · PACKET: <id> · SHA: <frozen sha> · BASE: <base sha>
 
-Bridge requests open with the same line. The orchestrator adjudicates three
+Bridge requests open with the same line. The orchestrator adjudicates several
 streams; an unlabelled SHA is the single easiest way to mis-grant a lease.
 
 ## What does not change
