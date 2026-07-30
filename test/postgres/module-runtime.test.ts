@@ -1037,8 +1037,17 @@ test('v3 inventory reads require issued legal-entity scope and preserve generic 
         const movementAId = randomUUID();
         const movementBId = randomUUID();
         const adversarialMovementId = randomUUID();
-        const sharedItemId = 'same-item';
-        const sharedLocationId = 'same-location';
+        const sharedItemId = randomUUID();
+        const sharedLocationId = randomUUID();
+        const entityAStockIdentity = Object.freeze({
+          itemId: sharedItemId,
+          locationId: sharedLocationId,
+        });
+        const entityBStockIdentity = Object.freeze({
+          itemId: sharedItemId,
+          locationId: sharedLocationId,
+        });
+        assert.deepEqual(entityAStockIdentity, entityBStockIdentity);
 
         await insertScopedTestRecord(
           pool,
@@ -1083,7 +1092,7 @@ test('v3 inventory reads require issued legal-entity scope and preserve generic 
           {
             [applicationInventoryId(
               INVENTORY_IDS.fieldIds.transactionLine.itemId,
-            )]: sharedItemId,
+            )]: entityAStockIdentity.itemId,
           },
           { [transaction.entityId]: transactionAId },
         );
@@ -1098,7 +1107,7 @@ test('v3 inventory reads require issued legal-entity scope and preserve generic 
           {
             [applicationInventoryId(
               INVENTORY_IDS.fieldIds.transactionLine.itemId,
-            )]: sharedItemId,
+            )]: entityBStockIdentity.itemId,
           },
           { [transaction.entityId]: transactionBId },
         );
@@ -1110,7 +1119,11 @@ test('v3 inventory reads require issued legal-entity scope and preserve generic 
           environment,
           legalEntityId,
           movementAId,
-          movementScopeProbeValues(sharedItemId, sharedLocationId, '5'),
+          movementScopeProbeValues(
+            entityAStockIdentity.itemId,
+            entityAStockIdentity.locationId,
+            '5',
+          ),
           {
             [transaction.entityId]: transactionAId,
             [transactionLine.entityId]: lineAId,
@@ -1125,7 +1138,11 @@ test('v3 inventory reads require issued legal-entity scope and preserve generic 
           environment,
           secondLegalEntityId,
           movementBId,
-          movementScopeProbeValues(sharedItemId, sharedLocationId, '7'),
+          movementScopeProbeValues(
+            entityBStockIdentity.itemId,
+            entityBStockIdentity.locationId,
+            '7',
+          ),
           {
             [transaction.entityId]: transactionBId,
             [transactionLine.entityId]: lineBId,
