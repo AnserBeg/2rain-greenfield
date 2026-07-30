@@ -18,6 +18,53 @@
     }
   },
   "configurationScope": "legalEntity",
+  "countEvidence": {
+    "correctionBehavior": "appendCompensatingSession",
+    "hardDelete": "forbidden",
+    "lineEntityFamilyId": "stock_count_line",
+    "lineFields": [
+      {
+        "fieldId": "expectedQuantity",
+        "presence": "required",
+        "semantic": "expectedPhysicalQuantity",
+        "valueShape": {
+          "precision": 38,
+          "representation": "canonicalDecimalStringV2",
+          "scale": 18,
+          "signed": true,
+          "unitFieldId": "unitId"
+        }
+      },
+      {
+        "fieldId": "countedQuantity",
+        "presence": "required",
+        "semantic": "countedPhysicalQuantity",
+        "valueShape": {
+          "precision": 38,
+          "representation": "canonicalDecimalStringV2",
+          "scale": 18,
+          "signed": true,
+          "unitFieldId": "unitId"
+        }
+      },
+      {
+        "fieldId": "varianceQuantity",
+        "presence": "required",
+        "semantic": "countedMinusExpectedVariance",
+        "valueShape": {
+          "precision": 38,
+          "representation": "canonicalDecimalStringV2",
+          "scale": 18,
+          "signed": true,
+          "unitFieldId": "unitId"
+        }
+      }
+    ],
+    "movementLink": "stockCountLineToTransactionLineToInventoryMovement",
+    "reversalBehavior": "appendCompensatingSession",
+    "sessionEntityFamilyId": "stock_count",
+    "sessionTransition": "draftToPostedWithMovement"
+  },
   "dependencySet": [
     "read:northstar.context:tenant_id",
     "read:northstar.context:environment_id",
@@ -41,7 +88,10 @@
     "read:northstar.inventory:posting_configuration",
     "read:northstar.inventory:movement.quantity_delta",
     "read:northstar.inventory:transaction_line",
+    "read:northstar.inventory:stock_count",
+    "read:northstar.inventory:stock_count_line",
     "transition:northstar.inventory:transaction.state",
+    "transition:northstar.inventory:stock_count.state",
     "append:northstar.inventory:movement",
     "read:northstar.trust:semantic_operation_receipt",
     "read:northstar.trust:outbox_event",
@@ -52,8 +102,8 @@
     "append:northstar.trust:outbox_event",
     "append:northstar.trust:semantic_operation_receipt"
   ],
-  "dependencySetRoot": "35fc38eaca7fbe47d8da5030ceefce8211a2194a25d233c45282ef0450d553ad",
-  "dependencySetVersion": 3,
+  "dependencySetRoot": "ffd4e9f6103b5c6053c39b62fe64e69dd255cb0c86cfd349ae465ab25179b3d3",
+  "dependencySetVersion": 4,
   "legalEntity": {
     "families": [
       {
@@ -135,6 +185,26 @@
         "semantics": "sameEntity",
         "sourceFamilyId": "inventory_transaction_line",
         "targetFamilyId": "inventory_transaction"
+      },
+      {
+        "semantics": "sameEntity",
+        "sourceFamilyId": "stock_count",
+        "targetFamilyId": "inventory_transaction"
+      },
+      {
+        "semantics": "sameEntity",
+        "sourceFamilyId": "stock_count",
+        "targetFamilyId": "stock_count"
+      },
+      {
+        "semantics": "sameEntity",
+        "sourceFamilyId": "stock_count_line",
+        "targetFamilyId": "stock_count"
+      },
+      {
+        "semantics": "sameEntity",
+        "sourceFamilyId": "stock_count_line",
+        "targetFamilyId": "inventory_transaction_line"
       }
     ],
     "undeclaredFamily": {
@@ -192,7 +262,7 @@
     ],
     "kind": "quantityOnlyMovement"
   },
-  "releaseRoot": "3a50e80ba684cef8049a70be7fff13b3da063df4a93f2a759c7ca6d63b40bf85",
+  "releaseRoot": "a1edd1824515e38d1dc0c7678a9a881198082c0977e07bd7569edc54947d7c94",
   "storageTargetPayloadVersions": {
     "entityOwned": "northstar.storage-target-payload/v3",
     "tenantShared": "northstar.storage-target-payload/v1"

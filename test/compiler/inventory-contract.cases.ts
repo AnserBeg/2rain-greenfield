@@ -44,6 +44,9 @@ interface MutableInventoryContract {
   configuration: {
     dials: Record<string, unknown>;
   };
+  countEvidence: {
+    lineFields: Array<Record<string, unknown>>;
+  };
   legalEntity: {
     families: Array<Record<string, unknown>>;
     relations: Array<Record<string, unknown>>;
@@ -292,6 +295,13 @@ export function registerInventoryContractCases(
         undeclaredAccess: string;
         version: number;
       };
+      const countEvidence = contract.countEvidence as {
+        correctionBehavior: string;
+        hardDelete: string;
+        lineFields: Array<{ fieldId: string; semantic: string }>;
+        movementLink: string;
+        reversalBehavior: string;
+      };
 
       assert.deepEqual(stock, {
         dimensions: ['legalEntityId', 'itemId', 'locationId'],
@@ -338,8 +348,32 @@ export function registerInventoryContractCases(
       );
       assert.equal(dependencies.exhaustiveByConstruction, true);
       assert.equal(dependencies.undeclaredAccess, 'compileFailure');
-      assert.equal(dependencies.version, 3);
-      assert.equal(dependencies.dependencies.length, 32);
+      assert.equal(dependencies.version, 4);
+      assert.equal(dependencies.dependencies.length, 35);
+      assert.deepEqual(
+        countEvidence.lineFields.map((field) => [
+          field.fieldId,
+          field.semantic,
+        ]),
+        [
+          ['expectedQuantity', 'expectedPhysicalQuantity'],
+          ['countedQuantity', 'countedPhysicalQuantity'],
+          ['varianceQuantity', 'countedMinusExpectedVariance'],
+        ],
+      );
+      assert.equal(
+        countEvidence.movementLink,
+        'stockCountLineToTransactionLineToInventoryMovement',
+      );
+      assert.equal(
+        countEvidence.correctionBehavior,
+        'appendCompensatingSession',
+      );
+      assert.equal(
+        countEvidence.reversalBehavior,
+        'appendCompensatingSession',
+      );
+      assert.equal(countEvidence.hardDelete, 'forbidden');
       assert.deepEqual(contract.legalEntity, INVENTORY_CONTRACT_V1.legalEntity);
 
       const golden = JSON.parse(
@@ -349,6 +383,57 @@ export function registerInventoryContractCases(
         ),
       ) as unknown;
       assert.deepEqual(releaseSummary(first), golden);
+    },
+  );
+
+  register(
+    'stock-count evidence preserves expected, counted, and variance as three distinct physical quantities',
+    () => {
+      for (const fieldLocalId of [
+        'stock_count_line_expected_quantity',
+        'stock_count_line_counted_quantity',
+        'stock_count_line_variance_quantity',
+      ] as const) {
+        const result = compileApplication(
+          moduleInput(inventoryDefinitionWithoutMovementField(fieldLocalId)),
+        );
+        assertCompileDiagnostic(
+          result,
+          'INVENTORY_COUNT_EVIDENCE_INVALID',
+          `$.fields.${fieldLocalId}`,
+          `northstar.inventory:field.${fieldLocalId}`,
+        );
+      }
+
+      const aliasedValues = mutableContract();
+      const expected = aliasedValues.countEvidence.lineFields.find(
+        (field) => field.fieldId === 'expectedQuantity',
+      );
+      assert.ok(expected);
+      expected.semantic = 'countedPhysicalQuantity';
+      const aliasedResult = compileInventoryContract(aliasedValues);
+      assert.equal(aliasedResult.status, 'failed');
+      assertHasDiagnostic(
+        aliasedResult.diagnostics,
+        'INVENTORY_COUNT_EVIDENCE_INVALID',
+        '$.countEvidence.lineFields.expectedQuantity',
+        'expectedQuantity',
+      );
+
+      const monetarySemantic = mutableContract();
+      const monetaryField = monetarySemantic.countEvidence.lineFields.find(
+        (field) => field.fieldId === 'expectedQuantity',
+      );
+      assert.ok(monetaryField);
+      monetaryField.semantic = 'unitCost';
+      const monetaryResult = compileInventoryContract(monetarySemantic);
+      assert.equal(monetaryResult.status, 'failed');
+      assertHasDiagnostic(
+        monetaryResult.diagnostics,
+        'INVENTORY_COUNT_EVIDENCE_MONEY_FORBIDDEN',
+        '$.countEvidence.lineFields.expectedQuantity',
+        'expectedQuantity',
+      );
     },
   );
 
@@ -504,6 +589,8 @@ export function registerInventoryContractCases(
     'inventory_transaction_line',
     'inventory_period_lock',
     'inventory_movement',
+    'stock_count',
+    'stock_count_line',
   ] as const) {
     register(
       `the Inventory module requires the ${familyLocalId} family`,
@@ -525,6 +612,8 @@ export function registerInventoryContractCases(
     'inventory_transaction_line_item_id',
     'inventory_transaction_line_from_location_id',
     'inventory_transaction_line_to_location_id',
+    'stock_count_line_item_id',
+    'stock_count_line_location_id',
   ] as const) {
     for (const mutation of ['retired', 'boolean'] as const) {
       register(
@@ -1220,6 +1309,9 @@ export function registerInventoryContractCases(
     for (const dependencyId of [
       'northstar.inventory:transaction_line',
       'northstar.trust:outbox_event',
+      'northstar.inventory:stock_count',
+      'northstar.inventory:stock_count_line',
+      'northstar.inventory:stock_count.state',
     ]) {
       const missingRequiredRead = mutableContract();
       for (const key of ['dependencies', 'accessPlan'] as const) {
@@ -1238,6 +1330,32 @@ export function registerInventoryContractCases(
         'dependencies',
       );
     }
+
+    const priorDependencyProtocol = mutableContract();
+    for (const key of ['dependencies', 'accessPlan'] as const) {
+      priorDependencyProtocol.authoritativeDependencies[key] =
+        priorDependencyProtocol.authoritativeDependencies[key].filter(
+          (entry) =>
+            ![
+              'northstar.inventory:stock_count',
+              'northstar.inventory:stock_count_line',
+              'northstar.inventory:stock_count.state',
+            ].includes(String(entry.dependencyId)),
+        );
+    }
+    priorDependencyProtocol.authoritativeDependencies.version = 3;
+    priorDependencyProtocol.authoritativeDependencies.dependencySetRoot =
+      '35fc38eaca7fbe47d8da5030ceefce8211a2194a25d233c45282ef0450d553ad';
+    const priorDependencyProtocolResult = compileInventoryContract(
+      priorDependencyProtocol,
+    );
+    assert.equal(priorDependencyProtocolResult.status, 'failed');
+    assertHasDiagnostic(
+      priorDependencyProtocolResult.diagnostics,
+      'INVENTORY_CONTRACT_INVALID',
+      '$.authoritativeDependencies.version',
+      'version',
+    );
 
     const oldDependencyProtocol = mutableContract();
     for (const key of ['dependencies', 'accessPlan'] as const) {
@@ -1621,9 +1739,25 @@ function releaseSummary(compiled: CompiledInventoryContractV1): unknown {
     dependencies: Array<{ access: string; dependencyId: string }>;
     version: number;
   };
+  const countEvidence = contract.countEvidence as {
+    correctionBehavior: string;
+    hardDelete: string;
+    lineEntityFamilyId: string;
+    lineFields: Array<{
+      fieldId: string;
+      presence: string;
+      semantic: string;
+      valueShape: Record<string, unknown>;
+    }>;
+    movementLink: string;
+    reversalBehavior: string;
+    sessionEntityFamilyId: string;
+    sessionTransition: string;
+  };
   return {
     configuration: compiled.release.configuration,
     configurationScope: compiled.release.configurationScope,
+    countEvidence,
     dependencySet: dependencies.dependencies.map(
       (entry) => `${entry.access}:${entry.dependencyId}`,
     ),
