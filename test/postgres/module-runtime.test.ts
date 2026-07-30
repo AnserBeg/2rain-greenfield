@@ -833,6 +833,12 @@ test('v3 inventory reads require issued legal-entity scope and preserve generic 
   const legalEntityMaster = storage.entities.find(
     (entity) => entity.legalEntityMaster !== undefined,
   );
+  const item = storage.entities.find(
+    (entity) => entity.entityId === `${APPLICATION_NAMESPACE}:entity.item`,
+  );
+  const location = storage.entities.find(
+    (entity) => entity.entityId === `${APPLICATION_NAMESPACE}:entity.location`,
+  );
   const movement = storage.entities.find(
     (entity) =>
       entity.entityId ===
@@ -852,6 +858,10 @@ test('v3 inventory reads require issued legal-entity scope and preserve generic 
     legalEntityMaster?.legalEntityMaster,
     'compiled target has no legal-entity master',
   );
+  assert.ok(item, 'compiled target has no Item entity');
+  assert.ok(location, 'compiled target has no Location entity');
+  assert.equal(item.legalEntity, undefined);
+  assert.equal(location.legalEntity, undefined);
   const legalEntityMasterStorage = legalEntityMaster.legalEntityMaster;
   assert.ok(movement?.legalEntity?.column);
   assert.ok(transaction?.legalEntity?.column);
@@ -1049,6 +1059,21 @@ test('v3 inventory reads require issued legal-entity scope and preserve generic 
         });
         assert.deepEqual(entityAStockIdentity, entityBStockIdentity);
 
+        await insertTenantSharedTestRecord(
+          pool,
+          item,
+          tenant,
+          environment,
+          sharedItemId,
+        );
+        await insertTenantSharedTestRecord(
+          pool,
+          location,
+          tenant,
+          environment,
+          sharedLocationId,
+        );
+
         await insertScopedTestRecord(
           pool,
           storage,
@@ -1189,13 +1214,15 @@ test('v3 inventory reads require issued legal-entity scope and preserve generic 
           ).value.value,
           '12',
         );
-        const unscopedDefect = await pool.query<{ quantity: string }>(
+        const unscopedDefect = await pool.query<{
+          contains_combined_quantity: boolean;
+        }>(
           `SELECT COALESCE(SUM(${
             requiredStorageColumn(
               movement,
               INVENTORY_IDS.fieldIds.movement.quantityDelta,
             ).physicalName
-          }), 0)::text AS quantity
+          }), 0) = 12::numeric AS contains_combined_quantity
              FROM north_star_module.${movement.physicalTableName}
             WHERE tenant_id = $1 AND environment_id = $2
               AND ${
@@ -1212,7 +1239,7 @@ test('v3 inventory reads require issued legal-entity scope and preserve generic 
               } = $4`,
           [tenant, environment, sharedItemId, sharedLocationId],
         );
-        assert.equal(unscopedDefect.rows[0]?.quantity, '12');
+        assert.equal(unscopedDefect.rows[0]?.contains_combined_quantity, true);
 
         await assert.rejects(
           aggregateQuery(queryGateway, view, aggregateArguments),
@@ -3181,6 +3208,34 @@ async function insertScopedTestRecord(
       assert.ok(targetId, `missing relation target ${relation.relationId}`);
       return targetId;
     }),
+  ];
+  await client.query(
+    `INSERT INTO north_star_module.${quoteTestIdentifier(entity.physicalTableName)}
+       (${columns.map(quoteTestIdentifier).join(', ')})
+     VALUES (${values.map((_, index) => `$${String(index + 1)}`).join(', ')})`,
+    values,
+  );
+}
+
+async function insertTenantSharedTestRecord(
+  client: pg.Pool | pg.PoolClient,
+  entity: StorageTargetPayloadV1['entities'][number],
+  tenantId: string,
+  environmentId: string,
+  recordId: string,
+): Promise<void> {
+  assert.equal(entity.legalEntity, undefined);
+  const columns = [
+    'tenant_id',
+    'environment_id',
+    entity.recordIdentity.column,
+    ...entity.columns.map((column) => column.physicalName),
+  ];
+  const values = [
+    tenantId,
+    environmentId,
+    recordId,
+    ...entity.columns.map((column) => scopeProbeDefaultValue(column, recordId)),
   ];
   await client.query(
     `INSERT INTO north_star_module.${quoteTestIdentifier(entity.physicalTableName)}
