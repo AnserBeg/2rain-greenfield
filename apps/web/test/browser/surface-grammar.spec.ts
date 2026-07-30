@@ -15,6 +15,8 @@ import {
 import {
   DEFAULT_COMPILER_LIMITS,
   DEFAULT_COMPILER_PROFILE,
+  FLAT_SURFACE_MANIFEST_PAYLOAD_VERSION,
+  GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION,
   PROJECTION_FAMILY_IDS,
   compileApplication,
   type CompileSuccess,
@@ -36,9 +38,11 @@ type SurfaceArchetype = (typeof SURFACE_ARCHETYPES)[number];
 let baseUrl: string;
 let incompleteBaseUrl: string;
 let navigationBudgetBaseUrl: string;
+let invalidNavigationBaseUrl: string;
 let server: Server;
 let incompleteServer: Server;
 let navigationBudgetServer: Server;
+let invalidNavigationServer: Server;
 let fixtureDirectory: string;
 let surfaces: readonly FixtureCompiledSurface[];
 
@@ -52,6 +56,10 @@ test.beforeAll(async () => {
   const navigationBudgetFixturePath = join(
     fixtureDirectory,
     'compiled-navigation-budget.json',
+  );
+  const invalidNavigationFixturePath = join(
+    fixtureDirectory,
+    'compiled-navigation-invalid.json',
   );
   writeFileSync(
     fixturePath,
@@ -69,7 +77,11 @@ test.beforeAll(async () => {
   );
   writeFileSync(
     navigationBudgetFixturePath,
-    `${JSON.stringify(sixNavigationSurfaceRuntimeFixture(), null, 2)}\n`,
+    `${JSON.stringify(groupedNavigationRuntimeFixture(), null, 2)}\n`,
+  );
+  writeFileSync(
+    invalidNavigationFixturePath,
+    `${JSON.stringify(v0GroupedNavigationRuntimeFixture(), null, 2)}\n`,
   );
   surfaces = compiledSurfaceGrammarSurfaces();
   server = createSurfaceRuntimeServer(demoEntry(fixturePath));
@@ -79,10 +91,19 @@ test.beforeAll(async () => {
   navigationBudgetServer = createSurfaceRuntimeServer(
     demoEntry(navigationBudgetFixturePath),
   );
-  [baseUrl, incompleteBaseUrl, navigationBudgetBaseUrl] = await Promise.all([
+  invalidNavigationServer = createSurfaceRuntimeServer(
+    demoEntry(invalidNavigationFixturePath),
+  );
+  [
+    baseUrl,
+    incompleteBaseUrl,
+    navigationBudgetBaseUrl,
+    invalidNavigationBaseUrl,
+  ] = await Promise.all([
     listen(server),
     listen(incompleteServer),
     listen(navigationBudgetServer),
+    listen(invalidNavigationServer),
   ]);
 });
 
@@ -91,6 +112,7 @@ test.afterAll(async () => {
     close(server),
     close(incompleteServer),
     close(navigationBudgetServer),
+    close(invalidNavigationServer),
   ]);
   rmSync(fixtureDirectory, { force: true, recursive: true });
 });
@@ -136,7 +158,7 @@ test('compact journey red: a compiler-produced list missing bulkActions is obser
   );
 });
 
-test('compact navigation renders at most five entries while desktop preserves all six', async ({
+test('compiled groups keep six list surfaces reachable through five primary entries', async ({
   page,
 }) => {
   await page.setViewportSize({ height: 844, width: 390 });
@@ -144,11 +166,74 @@ test('compact navigation renders at most five entries while desktop preserves al
   const navigation = page.getByRole('navigation', {
     name: 'Release navigation',
   });
-  await expect(navigation.locator('a')).toHaveCount(6);
-  await expect(navigation.getByRole('link')).toHaveCount(5);
+  const primaryEntries = navigation.locator('.navigation-tree > li');
+  await expect(primaryEntries).toHaveCount(5);
+  await expect(primaryEntries.getByRole('link')).toHaveCount(4);
+  const more = primaryEntries.getByRole('group').filter({ hasText: 'More' });
+  await expect(more).toHaveCount(1);
+
+  const primaryTargets = await primaryEntries
+    .locator(':scope > a, :scope > details > summary')
+    .evaluateAll((elements) =>
+      elements.map((element, index) => {
+        const rectangle = element.getBoundingClientRect();
+        return {
+          height: rectangle.height,
+          subjectId: `grouped-compact-navigation-${index}`,
+          width: rectangle.width,
+        };
+      }),
+    );
+  assert.equal(primaryTargets.length, 5);
+  assert.deepEqual(observeAccessibility([], primaryTargets).violations, []);
+  await expect(page.locator('.sidebar')).toHaveCSS('position', 'fixed');
+  await expect(page.locator('.sidebar')).toHaveCSS('bottom', '0px');
+  await page.keyboard.press('Tab');
+  await expect(page.locator('.skip-link')).toBeFocused();
+  for (let index = 0; index < 5; index += 1) {
+    await page.keyboard.press('Tab');
+  }
+  await expect(more.locator('summary')).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(more.locator('a > span:nth-child(2)')).toHaveText([
+    'Module 5',
+    'Module 6',
+  ]);
+  await assertNoHorizontalDocumentScroll(page);
+
+  const expectedSurfaceLabels = Array.from(
+    { length: 6 },
+    (_, index) => `Budget item ${index + 1} list`,
+  );
+  for (let index = 0; index < expectedSurfaceLabels.length; index += 1) {
+    if (index >= 4) {
+      await more.getByText('More', { exact: true }).click();
+    }
+    const link =
+      index < 4
+        ? primaryEntries.nth(index).getByRole('link')
+        : more.getByRole('link', { name: `Module ${index + 1}` });
+    await link.click();
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText(
+      expectedSurfaceLabels[index]!,
+    );
+  }
 
   await page.setViewportSize({ height: 720, width: 1280 });
+  await expect(primaryEntries).toHaveCount(5);
+  await more.getByText('More', { exact: true }).click();
   await expect(navigation.getByRole('link')).toHaveCount(6);
+});
+
+test('version boundary red: a v0 reader refuses grouped navigation instead of degrading', async ({
+  page,
+}) => {
+  const response = await page.goto(invalidNavigationBaseUrl);
+  expect(response?.status()).toBe(422);
+  await expect(page.getByRole('alert')).toHaveAttribute(
+    'data-diagnostic-code',
+    'INVALID_SURFACE_NAVIGATION',
+  );
 });
 
 async function requireCompactJourney(
@@ -238,6 +323,14 @@ async function requireCompactJourney(
   await expect(page.locator('.skip-link')).toBeFocused();
   await page.keyboard.press('Tab');
   await expect(links.first()).toBeFocused();
+  const documentWidths = await page.evaluate(() => ({
+    client: document.documentElement.clientWidth,
+    scroll: document.documentElement.scrollWidth,
+  }));
+  assert.equal(documentWidths.scroll, documentWidths.client);
+}
+
+async function assertNoHorizontalDocumentScroll(page: Page): Promise<void> {
   const documentWidths = await page.evaluate(() => ({
     client: document.documentElement.clientWidth,
     scroll: document.documentElement.scrollWidth,
@@ -400,9 +493,7 @@ function surfaceGrammarRuntimeFixture(
   });
 }
 
-function sixNavigationSurfaceRuntimeFixture(): Readonly<
-  Record<string, unknown>
-> {
+function groupedNavigationRuntimeFixture(): Readonly<Record<string, unknown>> {
   const fixture = structuredClone(surfaceGrammarRuntimeFixture()) as Record<
     string,
     unknown
@@ -415,11 +506,54 @@ function sixNavigationSurfaceRuntimeFixture(): Readonly<
     (surface) => surface.archetype === 'list',
   );
   assert.ok(listSurface);
-  payload.surfaces = Array.from({ length: 6 }, (_, index) => ({
+  const navigationSurfaces = Array.from({ length: 6 }, (_, index) => ({
     ...structuredClone(listSurface),
     label: `Budget item ${index + 1} list`,
     surfaceId: `${String(listSurface.surfaceId)}.budget_${index + 1}`,
   }));
+  payload.surfaces = navigationSurfaces;
+  surfaceProjection.payloadSchemaVersion =
+    GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION;
+  payload.schemaVersion = GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION;
+  const moduleGroup = (index: number) => ({
+    children: [
+      {
+        kind: 'navigationSurface',
+        surfaceId: navigationSurfaces[index]!.surfaceId,
+      },
+    ],
+    kind: 'navigationGroup',
+    label: `Module ${index + 1}`,
+    navigationId: `northstar.grammar:module.budget_${index + 1}`,
+  });
+  payload.navigation = {
+    entries: [
+      ...Array.from({ length: 4 }, (_, index) => moduleGroup(index)),
+      {
+        children: [moduleGroup(4), moduleGroup(5)],
+        kind: 'navigationGroup',
+        label: 'More',
+        navigationId: 'northstar.grammar:navigation.more',
+      },
+    ],
+    kind: 'navigationTree',
+  };
+  return fixture;
+}
+
+function v0GroupedNavigationRuntimeFixture(): Readonly<
+  Record<string, unknown>
+> {
+  const fixture = structuredClone(groupedNavigationRuntimeFixture()) as Record<
+    string,
+    unknown
+  >;
+  const projections = fixture.projections as Record<string, unknown>;
+  const surfaceProjection = projections.surface as Record<string, unknown>;
+  const payload = surfaceProjection.payload as Record<string, unknown>;
+  surfaceProjection.payloadSchemaVersion =
+    FLAT_SURFACE_MANIFEST_PAYLOAD_VERSION;
+  payload.schemaVersion = FLAT_SURFACE_MANIFEST_PAYLOAD_VERSION;
   return fixture;
 }
 

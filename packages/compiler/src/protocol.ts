@@ -32,6 +32,14 @@ export const SUPPORTED_STORAGE_TARGET_PAYLOAD_VERSIONS = Object.freeze([
   STORAGE_TARGET_PAYLOAD_V2_VERSION,
   STORAGE_TARGET_PAYLOAD_V3_VERSION,
 ] as const);
+export const FLAT_SURFACE_MANIFEST_PAYLOAD_VERSION =
+  'northstar.surface-manifest-payload/v0-provisional' as const;
+export const GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION =
+  'northstar.surface-manifest-payload/v1' as const;
+export const SUPPORTED_SURFACE_MANIFEST_PAYLOAD_VERSIONS = Object.freeze([
+  FLAT_SURFACE_MANIFEST_PAYLOAD_VERSION,
+  GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION,
+] as const);
 export const MODULE_FIELD_CONTRACT_VERSION =
   'northstar.module-field-contract/v1' as const;
 export const MODULE_INPUT_CONTRACT_VERSION =
