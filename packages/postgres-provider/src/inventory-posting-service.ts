@@ -51,6 +51,8 @@ const canonicalDecimalPattern =
 const instantPattern =
   /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z$/u;
 const identifierPattern = /^[a-z][a-z0-9_]{0,62}$/u;
+const baseUnitImmutableDetailPattern =
+  /^itemId=(\S+) bindingMovementId=(\S+) bindingUnitId=(\S+) requestedUnitId=(\S+)$/u;
 
 export interface InventoryRecordedAtAuthority {
   currentInstant(): string;
@@ -144,6 +146,7 @@ export type InventoryPostingErrorCode =
   | 'INVENTORY_ADJUSTMENT_APPROVAL_REQUIRED'
   | 'INVENTORY_ADJUSTMENT_REASON_REQUIRED'
   | 'INVENTORY_BACKDATE_LIMIT_EXCEEDED'
+  | 'INVENTORY_BASE_UNIT_IMMUTABLE'
   | 'INVENTORY_ITEM_INACTIVE'
   | 'INVENTORY_ITEM_UNIT_MISMATCH'
   | 'INVENTORY_LEGAL_ENTITY_INACTIVE'
@@ -531,12 +534,12 @@ export class PostgresInventoryPostingService {
           await client.query('ROLLBACK');
         } catch (rollbackError) {
           throw new AggregateError(
-            [translatePostingError(error), rollbackError],
+            [translateInventoryPostingError(error), rollbackError],
             'inventory posting and rollback both failed',
           );
         }
       }
-      throw translatePostingError(error);
+      throw translateInventoryPostingError(error);
     } finally {
       try {
         await client.query('RESET ROLE');
@@ -2524,14 +2527,50 @@ function inputError(message: string): InventoryPostingError {
 }
 
 function postgresCode(error: unknown): string | undefined {
-  if (typeof error !== 'object' || error === null || !('code' in error))
-    return undefined;
-  return typeof error.code === 'string' ? error.code : undefined;
+  return postgresErrorProperty(error, 'code');
 }
 
-function translatePostingError(error: unknown): unknown {
+function postgresErrorProperty(
+  error: unknown,
+  property: 'code' | 'detail' | 'message',
+): string | undefined {
+  if (typeof error !== 'object' || error === null || !(property in error))
+    return undefined;
+  return typeof error[property] === 'string' ? error[property] : undefined;
+}
+
+function baseUnitImmutableDetails(
+  error: unknown,
+): Readonly<Record<string, string>> | null {
+  const detail = postgresErrorProperty(error, 'detail');
+  if (!detail) return null;
+  const match = baseUnitImmutableDetailPattern.exec(detail);
+  if (!match) return null;
+  return Object.freeze({
+    bindingMovementId: match[2]!,
+    bindingUnitId: match[3]!,
+    itemId: match[1]!,
+    requestedUnitId: match[4]!,
+  });
+}
+
+export function translateInventoryPostingError(error: unknown): unknown {
   if (error instanceof InventoryPostingError) return error;
   const code = postgresCode(error);
+  if (
+    code === 'P0001' &&
+    postgresErrorProperty(error, 'message') ===
+      'INVENTORY_BASE_UNIT_IMMUTABLE'
+  ) {
+    const details = baseUnitImmutableDetails(error);
+    if (details) {
+      return postingError(
+        'INVENTORY_BASE_UNIT_IMMUTABLE',
+        'item base unit cannot change after its first referenced movement',
+        details,
+      );
+    }
+  }
   if (code === '55P03') {
     return postingError(
       'INVENTORY_POSTING_LOCK_TIMEOUT',

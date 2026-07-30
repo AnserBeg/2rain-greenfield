@@ -40,6 +40,7 @@ import {
   InventoryPostingError,
   planInventoryPostingRequestLock,
   PostgresInventoryPostingService,
+  translateInventoryPostingError,
   type InventoryAdjustmentLineV1,
   type InventoryAdjustmentPostingCommandV1,
   type InventoryPostingRegistrationV1,
@@ -1943,24 +1944,35 @@ async function assertBaseUnitBound(
   movementId: string,
 ): Promise<void> {
   await assert.rejects(
-    withModuleRole(database.runtimePool, database.context, async (client) => {
-      await client.query(
-        `UPDATE ${table(database.binding, database.binding.item)}
+    withModuleRole(
+      database.runtimePool,
+      database.context,
+      async (client) => {
+        await client.query(
+          `UPDATE ${table(database.binding, database.binding.item)}
             SET ${quoted(field(database.binding.item, 'item_base_unit').physicalName)}='BOX',
                 ${quoted(database.binding.item.revisionColumn)}=${quoted(database.binding.item.revisionColumn)}+1
           WHERE tenant_id=$1 AND environment_id=$2
             AND ${quoted(database.binding.item.recordIdColumn)}=$3`,
-        [tenantId, environmentId, itemId],
-      );
+          [tenantId, environmentId, itemId],
+        );
+      },
+    ).catch((error: unknown) => {
+      throw translateInventoryPostingError(error);
     }),
     (error: unknown) => {
-      const detail = String((error as { detail?: string }).detail);
+      const details =
+        error instanceof InventoryPostingError ? error.details : {};
       testContext.diagnostic(
-        `base-unit-after-post: ${postgresCode(error) ?? 'unknown'} ${String(error)} detail=${detail}`,
+        `base-unit-after-post: ${postingCode(error) ?? 'unknown'} ${String(error)} details=${JSON.stringify(details)}`,
       );
       return (
-        postgresCode(error) === 'P0001' &&
-        detail.includes(`bindingMovementId=${movementId}`)
+        error instanceof InventoryPostingError &&
+        error.code === 'INVENTORY_BASE_UNIT_IMMUTABLE' &&
+        error.details.itemId === itemId &&
+        error.details.bindingMovementId === movementId &&
+        error.details.bindingUnitId === 'EA' &&
+        error.details.requestedUnitId === 'BOX'
       );
     },
   );
