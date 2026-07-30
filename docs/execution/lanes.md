@@ -17,7 +17,7 @@ writer is holding those paths right now.
 | **KERNEL** | Canonical language and the query tier | `G3-P2b-4` **accepted** 2026-07-29 — runtime payload family; posting unblocked | **idle** |
 | **DEPLOY** | Release lifecycle and runtime infrastructure | `1g2` **accepted** 2026-07-29 (ADR-0024) | **HELD IDLE 2026-07-29 — deliberate.** `G2-P9` is gated behind `G2-P8` (import), which carries the durable-execution substrate decision, and both fail the inventory-first filter. More importantly, **full matrices serialize**: a DEPLOY matrix now queues ahead of FIX's and delays inventory. Leaving it idle is the faster choice, not the idle one. |
 | **FIX** | Correctness defects → stage cutting → inventory build | `G3-P2b-3` **accepted** 2026-07-29 — contract bound, 15/15 clauses | **idle** |
-| **BUILD** | Inventory contracts | `G3-P2b-2` — serializer proven 4/4 against real storage; **UNBLOCKED 2026-07-29**, merge main and run the real matrix | **active** |
+| **BUILD** | Inventory contracts | `G3-P2b-2` **accepted** 2026-07-29 — serializer proven; **every `G3-P3` prerequisite is on main** | **idle** |
 
 Lane identity is stable across packets. When a lane's packet is accepted, the
 next packet inherits the lane and its partition.
