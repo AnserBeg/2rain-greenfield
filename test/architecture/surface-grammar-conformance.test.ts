@@ -29,6 +29,8 @@ import {
 import {
   DEFAULT_COMPILER_LIMITS,
   DEFAULT_COMPILER_PROFILE,
+  FLAT_SURFACE_MANIFEST_PAYLOAD_VERSION,
+  GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION,
   MODULE_COMPILER_PROFILE,
   PROJECTION_FAMILY_IDS,
   compileApplication,
@@ -216,6 +218,11 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   );
   assert.equal(flatManifest.surfaces.length, 12);
   assert.equal(flatManifest.navigation, null);
+  assert.equal(
+    flatManifest.payloadSchemaVersion,
+    FLAT_SURFACE_MANIFEST_PAYLOAD_VERSION,
+  );
+  assert.equal(flatManifest.requiredRuntimeCapability.minimumVersion, 1);
   assert.equal(flatCompact.navigationEntryIds.length, 4);
   assert.deepEqual(
     navigationRuleIds(
@@ -235,6 +242,11 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   assert.ok(grouped);
   const compact = projectCompactSurfaces(groupedManifest.surfaces, grouped);
   assert.equal(groupedManifest.surfaces.length, 25);
+  assert.equal(
+    groupedManifest.payloadSchemaVersion,
+    GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION,
+  );
+  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 2);
   assert.equal(navigationSurfaceIds(grouped.entries).length, 9);
   assert.deepEqual(
     grouped.entries.map((entry) => entry.label),
@@ -274,6 +286,11 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   );
   const overflow = overflowManifest.navigation;
   assert.ok(overflow);
+  assert.equal(
+    overflowManifest.payloadSchemaVersion,
+    GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION,
+  );
+  assert.equal(overflowManifest.requiredRuntimeCapability.minimumVersion, 2);
   assert.equal(navigationSurfaceIds(overflow.entries).length, 6);
   assert.deepEqual(
     overflow.entries.map((entry) => entry.label),
@@ -576,6 +593,11 @@ function compileProductSurfaceGrammarObservations(): ProductSurfaceGrammarObserv
 
 interface ConformanceSurfaceManifest {
   readonly navigation: ConformanceNavigationTree | null;
+  readonly payloadSchemaVersion: string;
+  readonly requiredRuntimeCapability: {
+    readonly capabilityId: string;
+    readonly minimumVersion: number;
+  };
   readonly surfaces: readonly ConformanceSurface[];
 }
 
@@ -593,10 +615,14 @@ function compiledSurfaceManifest(
   assert.ok(chunkHash);
   const payload = decodeArtifact<{
     navigation?: ConformanceNavigationTree;
+    schemaVersion: string;
     surfaces: ConformanceSurface[];
   }>(artifact(compiled, chunkHash));
+  assert.equal(payload.schemaVersion, reference.payloadSchemaVersion);
   return {
     navigation: payload.navigation ?? null,
+    payloadSchemaVersion: reference.payloadSchemaVersion,
+    requiredRuntimeCapability: reference.requiredRuntimeCapability,
     surfaces: payload.surfaces,
   };
 }

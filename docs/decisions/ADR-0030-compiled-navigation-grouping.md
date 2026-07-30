@@ -61,6 +61,16 @@ surface exactly once and requires the compact projection to retain every
 compiled top-level entry. Thus grouping cannot pass the budget by dropping,
 duplicating, or CSS-hiding a List.
 
+This is a surface **output payload-version** event. Flat manifests retain
+`northstar.surface-manifest-payload/v0-provisional` and require surface runtime
+capability 1. A grouped manifest emits
+`northstar.surface-manifest-payload/v1` and requires capability 2. V1 requires
+the tree; v0 forbids it. The compiler exports the exact supported-version set,
+and the production loader reads the selected version from the persisted
+projection manifest, verifies that the release reference, projection manifest,
+and payload agree, and propagates that observed version into RequestRuntimeView.
+An unknown or mismatched version fails visibly.
+
 No canonical language-version event is created. The compiler derives this
 projection solely from already-normalized Module and Surface structure. This
 follows the existing compiler-contract pattern used by Inventory's
@@ -82,10 +92,10 @@ five.
 
 The current three-module composed application has only four navigable
 surfaces, so it retains the existing flat payload and checked-in release bytes.
-The grouped field is additive within the provisional surface-manifest payload;
-old flat payloads remain readable. The first over-budget composed release will
-move its release artifacts because its compiled surface payload gains the
-tree.
+Old flat v0 payloads remain readable. The first over-budget composed release
+will move its release artifacts because its compiled surface payload becomes v1
+and gains the tree. An old v0-only reader refuses v1 by version instead of
+silently ignoring the tree and reconstructing unreachable flat overflow.
 
 Module labels become top-level navigation labels when grouping activates.
 Entity List labels remain visible as children. This is a generated default,
@@ -112,7 +122,10 @@ groups, and exact reachability of all nine leaves.
 - The compiler surface projection emits the tree generically from module
   ownership and never names a product module.
 - The surface runtime rejects malformed trees, unknown leaves, duplicate
-  leaves, and incomplete reachability.
+  leaves, incomplete reachability, and a grouped tree mislabeled as v0.
+- The production projection loader imports the compiler-owned supported surface
+  versions, propagates the artifact-declared version, and rejects unknown or
+  cross-layer-mismatched versions.
 - Surface-grammar conformance measures compiled top-level entries and exact
   leaf coverage; executed reds remove a leaf, duplicate a leaf, omit the tree,
   and exceed the top-level budget.

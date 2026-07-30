@@ -15,6 +15,8 @@ import {
 import {
   DEFAULT_COMPILER_LIMITS,
   DEFAULT_COMPILER_PROFILE,
+  FLAT_SURFACE_MANIFEST_PAYLOAD_VERSION,
+  GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION,
   PROJECTION_FAMILY_IDS,
   compileApplication,
   type CompileSuccess,
@@ -79,7 +81,7 @@ test.beforeAll(async () => {
   );
   writeFileSync(
     invalidNavigationFixturePath,
-    `${JSON.stringify(ungroupedOverBudgetRuntimeFixture(), null, 2)}\n`,
+    `${JSON.stringify(v0GroupedNavigationRuntimeFixture(), null, 2)}\n`,
   );
   surfaces = compiledSurfaceGrammarSurfaces();
   server = createSurfaceRuntimeServer(demoEntry(fixturePath));
@@ -223,7 +225,7 @@ test('compiled groups keep six list surfaces reachable through five primary entr
   await expect(navigation.getByRole('link')).toHaveCount(6);
 });
 
-test('over-budget projection red: the runtime refuses a manifest without compiled grouping', async ({
+test('version boundary red: a v0 reader refuses grouped navigation instead of degrading', async ({
   page,
 }) => {
   const response = await page.goto(invalidNavigationBaseUrl);
@@ -510,6 +512,9 @@ function groupedNavigationRuntimeFixture(): Readonly<Record<string, unknown>> {
     surfaceId: `${String(listSurface.surfaceId)}.budget_${index + 1}`,
   }));
   payload.surfaces = navigationSurfaces;
+  surfaceProjection.payloadSchemaVersion =
+    GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION;
+  payload.schemaVersion = GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION;
   const moduleGroup = (index: number) => ({
     children: [
       {
@@ -536,7 +541,7 @@ function groupedNavigationRuntimeFixture(): Readonly<Record<string, unknown>> {
   return fixture;
 }
 
-function ungroupedOverBudgetRuntimeFixture(): Readonly<
+function v0GroupedNavigationRuntimeFixture(): Readonly<
   Record<string, unknown>
 > {
   const fixture = structuredClone(groupedNavigationRuntimeFixture()) as Record<
@@ -546,7 +551,9 @@ function ungroupedOverBudgetRuntimeFixture(): Readonly<
   const projections = fixture.projections as Record<string, unknown>;
   const surfaceProjection = projections.surface as Record<string, unknown>;
   const payload = surfaceProjection.payload as Record<string, unknown>;
-  delete payload.navigation;
+  surfaceProjection.payloadSchemaVersion =
+    FLAT_SURFACE_MANIFEST_PAYLOAD_VERSION;
+  payload.schemaVersion = FLAT_SURFACE_MANIFEST_PAYLOAD_VERSION;
   return fixture;
 }
 

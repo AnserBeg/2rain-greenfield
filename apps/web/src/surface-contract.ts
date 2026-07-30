@@ -1,13 +1,22 @@
 import { assertRequestRuntimeView } from '@north-star/runtime/request-runtime-view';
 import type * as RuntimeViewContract from '@north-star/runtime/request-runtime-view';
+import {
+  FLAT_SURFACE_MANIFEST_PAYLOAD_VERSION,
+  GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION,
+  SUPPORTED_SURFACE_MANIFEST_PAYLOAD_VERSIONS,
+} from '../../../packages/compiler/src/protocol.js';
 import type { RegisteredOperationDefinition } from '../../../packages/runtime/src/semantic-operation-gateway.js';
 import {
   registeredQueryFromPinnedView,
   type RegisteredQueryDefinition,
 } from '../../../packages/runtime/src/semantic-query-gateway.js';
 
-export const SURFACE_MANIFEST_PAYLOAD_VERSION =
-  'northstar.surface-manifest-payload/v0-provisional' as const;
+export {
+  FLAT_SURFACE_MANIFEST_PAYLOAD_VERSION,
+  GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION,
+};
+type SurfaceManifestPayloadVersion =
+  (typeof SUPPORTED_SURFACE_MANIFEST_PAYLOAD_VERSIONS)[number];
 
 const archetypes = ['builder', 'home', 'list', 'record', 'task'] as const;
 const lifecycleValues = ['active', 'retired'] as const;
@@ -97,7 +106,7 @@ export interface CompiledSurfaceDataBinding {
 export interface CompiledSurfaceManifest {
   readonly kind: 'surfaceManifestPayload';
   readonly navigation: CompiledNavigationTree | null;
-  readonly schemaVersion: typeof SURFACE_MANIFEST_PAYLOAD_VERSION;
+  readonly schemaVersion: SurfaceManifestPayloadVersion;
   readonly surfaces: readonly CompiledSurfaceDefinition[];
 }
 
@@ -264,18 +273,24 @@ export function readCompiledSurfaceManifest(
 ): CompiledSurfaceManifest {
   assertRequestRuntimeView(view);
   const projection = view.projections.surface;
-  if (projection.payloadSchemaVersion !== SURFACE_MANIFEST_PAYLOAD_VERSION) {
+  if (
+    !SUPPORTED_SURFACE_MANIFEST_PAYLOAD_VERSIONS.some(
+      (version) => version === projection.payloadSchemaVersion,
+    )
+  ) {
     throw new SurfaceProjectionError(
       'UNSUPPORTED_SURFACE_VERSION',
       `unsupported surface payload version ${projection.payloadSchemaVersion}`,
     );
   }
+  const payloadSchemaVersion =
+    projection.payloadSchemaVersion as SurfaceManifestPayloadVersion;
 
   const payload = projection.payload;
   if (
     !isRecord(payload) ||
     payload.kind !== 'surfaceManifestPayload' ||
-    payload.schemaVersion !== SURFACE_MANIFEST_PAYLOAD_VERSION ||
+    payload.schemaVersion !== payloadSchemaVersion ||
     !Array.isArray(payload.surfaces)
   ) {
     throw new SurfaceProjectionError(
@@ -296,16 +311,32 @@ export function readCompiledSurfaceManifest(
     seenSurfaceIds.add(surface.surfaceId);
     return surface;
   });
-  const navigation =
+  if (
+    payloadSchemaVersion === FLAT_SURFACE_MANIFEST_PAYLOAD_VERSION &&
+    payload.navigation !== undefined
+  ) {
+    throw invalidNavigation(
+      'a flat v0 surface manifest cannot contain compiled navigation grouping',
+    );
+  }
+  if (
+    payloadSchemaVersion === GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION &&
     payload.navigation === undefined
-      ? null
-      : parseNavigationTree(payload.navigation, surfaces);
+  ) {
+    throw invalidNavigation(
+      'a grouped v1 surface manifest is missing compiled navigation grouping',
+    );
+  }
+  const navigation =
+    payloadSchemaVersion === GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION
+      ? parseNavigationTree(payload.navigation, surfaces)
+      : null;
   validateNavigationReachability(navigation, surfaces);
 
   return Object.freeze({
     kind: 'surfaceManifestPayload' as const,
     navigation,
-    schemaVersion: SURFACE_MANIFEST_PAYLOAD_VERSION,
+    schemaVersion: payloadSchemaVersion,
     surfaces: Object.freeze(surfaces),
   });
 }

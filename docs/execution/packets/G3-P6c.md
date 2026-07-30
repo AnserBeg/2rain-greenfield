@@ -30,7 +30,9 @@ runtime renders that exact tree, and conformance independently verifies that
 every active navigable surface occurs exactly once.
 
 This is an output derivation from existing Module and Surface fields. It adds
-no canonical property and requires no language-version event.
+no canonical property and requires no language-version event. It does require a
+surface output payload-version event: flat manifests stay v0/capability 1;
+grouped manifests are v1/capability 2.
 
 The current three-module application remains byte-for-byte unchanged: its four
 List entries fit the compact budget, so the optional tree is absent. The
@@ -50,11 +52,18 @@ counts those exact compiled parents. CSS no longer truncates the sixth rendered
 link. Runtime parsing rejects an over-budget flat manifest and rejects a tree
 that loses or repeats an active List.
 
-The tree is an optional field in the provisional surface-manifest payload and is
-derived from existing normalized Module and Surface data. No canonical spelling
-or v4 event is needed. The precedent is the compiler-owned legal-entity family
-map: pinned compiler semantics may derive projection structure without creating
-a redundant authored property.
+The tree is required in surface payload v1 and forbidden in v0. Both are derived
+from existing normalized Module and Surface data. No canonical spelling or v4
+event is needed. The precedent is the compiler-owned legal-entity family map:
+pinned compiler semantics may derive projection structure without creating a
+redundant authored property.
+
+The first Critical review found that emitting the tree under unchanged v0 would
+let the parent reader ignore it, reconstruct nine flat entries, and hide compact
+overflow. The finding was accepted as material. The bridge adds the production
+projection loader and its PostgreSQL control: one compiler-owned supported set,
+artifact-selected version propagation, and exact reference/manifest/payload
+agreement.
 
 ## Navigation observations
 
@@ -75,6 +84,10 @@ the unchanged compact maximum of five.
 - `apps/web/src/**` for navigation rendering
 - `test/architecture/surface-grammar-conformance.test.ts`
 - `apps/web/test/browser/**`
+- `packages/postgres-provider/src/request-runtime-view-service.ts` (granted
+  compatibility bridge)
+- `test/postgres/request-runtime-view.test.ts` (granted persistent-loader
+  control)
 - `docs/decisions/ADR-0030-compiled-navigation-grouping.md`
 - `docs/execution/packets/G3-P6c.md`
 
@@ -89,6 +102,10 @@ remain out of scope.
 | Vacuity vector | Control | Observed result |
 |---|---|---|
 | grouping could be presentation-only | compile the application plus Inventory and read the surface artifact | four compiled module parents and nine exact leaves |
+| grouped output could be mislabeled as v0 | present a v0 envelope containing the tree to SurfaceRuntime | `INVALID_SURFACE_NAVIGATION`; no flat fallback |
+| a persisted version could come from a loader constant | activate and load a grouped release | RequestRuntimeView propagates surface payload v1 from the artifact |
+| an unknown persisted version could be accepted | activate a fully rehashed release whose surface reference/manifest/payload agree on an unknown version | `MALFORMED_REQUIRED_PROJECTION` at manifest support validation |
+| cross-layer version mismatch could be hidden | activate a fully rehashed release whose manifest says v1 and payload says v0 | `MALFORMED_REQUIRED_PROJECTION` at payload agreement validation |
 | grouping could drop a List | remove one Inventory leaf | `SG012_NAVIGATION_REACHABILITY` |
 | grouping could count a List twice | duplicate one Inventory leaf | `SG012_NAVIGATION_REACHABILITY` |
 | compact could silently omit a parent | remove one compiled parent from the compact projection | `SG012_NAVIGATION_REACHABILITY` |
@@ -108,6 +125,7 @@ The final focused development run before freezing observed:
 - integration: 59 / 59;
 - architecture: 100 / 100;
 - grouped-navigation browser file: 8 / 8; and
+- persistent RequestRuntimeView loader: 9 / 9; and
 - checked-in application release: unchanged and green.
 
 The first required formatting attempt was honestly red on five touched
@@ -118,10 +136,11 @@ was rerun from the beginning:
 corepack pnpm format && corepack pnpm typecheck && corepack pnpm lint
 ```
 
-Freeze and commit the candidate, obtain the serialized matrix lease, and run:
+After the candidate passes Critical review, obtain the serialized matrix lease
+before running:
 
 ```bash
-corepack pnpm test
+~/2rain-missions/run-matrix.sh
 ```
 
 ## Test it yourself
@@ -130,15 +149,15 @@ Run the compiled-projection and compact-browser controls:
 
 ```bash
 corepack pnpm test:architecture
-corepack pnpm exec playwright test apps/web/test/browser/surface-grammar.spec.ts --grep "compiled groups|over-budget projection red"
+corepack pnpm exec playwright test apps/web/test/browser/surface-grammar.spec.ts --grep "compiled groups|version boundary red"
 ```
 
 You should see architecture 100 / 100 and browser 2 / 2. The architecture test
 observes the mounted-Inventory shape as four parents and nine leaves. The browser
 opens a five-item bottom bar at 390x844; `More` reveals Module 5 and Module 6,
-and every one of the six links loads its own List heading. The red control loads
-an over-budget manifest with no tree and observes
-`INVALID_SURFACE_NAVIGATION`.
+and every one of the six links loads its own List heading. The red control labels
+a grouped tree as v0 and observes `INVALID_SURFACE_NAVIGATION` instead of a flat
+fallback.
 
 ## Recorded limits
 
