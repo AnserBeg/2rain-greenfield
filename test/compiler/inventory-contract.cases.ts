@@ -338,8 +338,8 @@ export function registerInventoryContractCases(
       );
       assert.equal(dependencies.exhaustiveByConstruction, true);
       assert.equal(dependencies.undeclaredAccess, 'compileFailure');
-      assert.equal(dependencies.version, 2);
-      assert.equal(dependencies.dependencies.length, 31);
+      assert.equal(dependencies.version, 3);
+      assert.equal(dependencies.dependencies.length, 32);
       assert.deepEqual(contract.legalEntity, INVENTORY_CONTRACT_V1.legalEntity);
 
       const golden = JSON.parse(
@@ -1217,29 +1217,42 @@ export function registerInventoryContractCases(
       'accessPlan',
     );
 
-    const missingTransactionLineRead = mutableContract();
-    for (const key of ['dependencies', 'accessPlan'] as const) {
-      missingTransactionLineRead.authoritativeDependencies[key] =
-        missingTransactionLineRead.authoritativeDependencies[key].filter(
-          (entry) =>
-            entry.dependencyId !== 'northstar.inventory:transaction_line',
-        );
+    for (const dependencyId of [
+      'northstar.inventory:transaction_line',
+      'northstar.trust:outbox_event',
+    ]) {
+      const missingRequiredRead = mutableContract();
+      for (const key of ['dependencies', 'accessPlan'] as const) {
+        missingRequiredRead.authoritativeDependencies[key] =
+          missingRequiredRead.authoritativeDependencies[key].filter(
+            (entry) => entry.dependencyId !== dependencyId,
+          );
+      }
+      const missingRequiredReadResult =
+        compileInventoryContract(missingRequiredRead);
+      assert.equal(missingRequiredReadResult.status, 'failed');
+      assertHasDiagnostic(
+        missingRequiredReadResult.diagnostics,
+        'INVENTORY_CONTRACT_INVALID',
+        '$.authoritativeDependencies.dependencies',
+        'dependencies',
+      );
     }
-    const missingTransactionLineResult = compileInventoryContract(
-      missingTransactionLineRead,
-    );
-    assert.equal(missingTransactionLineResult.status, 'failed');
-    assertHasDiagnostic(
-      missingTransactionLineResult.diagnostics,
-      'INVENTORY_CONTRACT_INVALID',
-      '$.authoritativeDependencies.dependencies',
-      'dependencies',
-    );
 
     const oldDependencyProtocol = mutableContract();
-    oldDependencyProtocol.authoritativeDependencies.version = 1;
+    for (const key of ['dependencies', 'accessPlan'] as const) {
+      oldDependencyProtocol.authoritativeDependencies[key] =
+        oldDependencyProtocol.authoritativeDependencies[key].filter(
+          (entry) =>
+            !(
+              entry.dependencyId === 'northstar.trust:outbox_event' &&
+              entry.access === 'read'
+            ),
+        );
+    }
+    oldDependencyProtocol.authoritativeDependencies.version = 2;
     oldDependencyProtocol.authoritativeDependencies.dependencySetRoot =
-      '7ef50e86732818a0ec4ec2a03a001066ac59408ea260c65bf018646e4377a63d';
+      '2eb1de635331ee5781fe928a37d3664e3d4f8ccfe56ca44e231a652a806eca05';
     const oldDependencyProtocolResult = compileInventoryContract(
       oldDependencyProtocol,
     );

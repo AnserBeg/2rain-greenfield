@@ -39,9 +39,14 @@ import {
   INVENTORY_POSTING_DEPENDENCY_SET_ROOT,
   InventoryPostingError,
   PostgresInventoryPostingService,
+  type InventoryAdjustmentLineV1,
   type InventoryAdjustmentPostingCommandV1,
   type InventoryPostingRegistrationV1,
 } from '../../packages/postgres-provider/src/inventory-posting-service.js';
+import {
+  planStockIdentityLocks,
+  STOCK_IDENTITY_LOCK_NAMESPACE,
+} from '../../packages/postgres-provider/src/stock-serializer.js';
 import {
   loadMigrations,
   runMigrations,
@@ -79,6 +84,9 @@ const locationRace = '55000000-0000-4000-8000-000000000003';
 const recordedAt = '2026-07-29T13:00:00.000Z';
 const effectiveAt = '2026-07-29T12:00:00.000Z';
 const postingCapabilityId = INVENTORY_CONTRACT_V1.capabilityId;
+const postingApplicationName = 'g3p3-inventory-posting';
+const lineRaceLockNamespace = 0x47335033;
+const lineRaceLockKey = 1;
 
 type StorageEntityTarget = StorageTargetPayloadV1['entities'][number];
 
@@ -134,6 +142,7 @@ test(
       assert.equal(INVENTORY_POSTING_CAPABILITY_ID, postingCapabilityId);
       await assertRegistrationHardening(testContext, database);
       await assertDraftBinding(testContext, database);
+      await assertProtectedReadRaces(testContext, database);
 
       const first = command({
         legalEntityId: legalReject,
@@ -189,6 +198,7 @@ test(
           ),
       );
       assert.equal(await movementCount(database), 1);
+      await assertConcurrentRequestKeyConflict(testContext, database);
 
       await assertBaseUnitBound(
         testContext,
@@ -831,6 +841,361 @@ async function assertDraftBinding(
   );
 }
 
+type PostingResult = Awaited<
+  ReturnType<PostgresInventoryPostingService['postAdjustment']>
+>;
+type PostingOutcome =
+  | { status: 'fulfilled'; value: PostingResult }
+  | { reason: unknown; status: 'rejected' };
+
+async function assertProtectedReadRaces(
+  testContext: TestContext,
+  database: PostingDatabase,
+): Promise<void> {
+  await assertConcurrentBaseUnitChange(testContext, database);
+  await assertConcurrentPeriodClose(testContext, database);
+  await assertConcurrentChildInsert(testContext, database);
+}
+
+async function assertConcurrentBaseUnitChange(
+  testContext: TestContext,
+  database: PostingDatabase,
+): Promise<void> {
+  const posting = command({
+    legalEntityId: legalReject,
+    sourceId: 'concurrent-base-unit-change',
+  });
+  await seedDraft(database, posting);
+  const trustBefore = await trustCountByRequest(
+    database,
+    database.context.requestId,
+  );
+  const mutator = await beginModuleTransaction(database);
+  let mutatorOpen = true;
+  let outcomePromise: Promise<PostingOutcome> | undefined;
+  try {
+    const blockerPid = await backendPid(mutator);
+    await mutator.query(
+      `UPDATE ${table(database.binding, database.binding.item)}
+          SET ${quoted(field(database.binding.item, 'item_base_unit').physicalName)}='BOX',
+              ${quoted(database.binding.item.revisionColumn)}=${quoted(database.binding.item.revisionColumn)}+1
+        WHERE tenant_id=$1 AND environment_id=$2
+          AND ${quoted(database.binding.item.recordIdColumn)}=$3`,
+      [tenantId, environmentId, itemId],
+    );
+    outcomePromise = settlePosting(
+      database.service.postAdjustment(
+        database.context,
+        database.actor,
+        posting,
+      ),
+    );
+    const blocked = await waitForPostingBlockedBy(
+      database.adminPool,
+      blockerPid,
+      'base-unit row',
+    );
+    await assertStockLockHeld(database.adminPool, blocked.pid, [posting]);
+    await mutator.query('COMMIT');
+    mutatorOpen = false;
+    const outcome = await outcomePromise;
+    assertRejectedPosting(
+      testContext,
+      'concurrent-base-unit-change',
+      outcome,
+      'INVENTORY_ITEM_UNIT_MISMATCH',
+    );
+    assert.equal(await movementCountBySource(database, posting.sourceId), 0);
+    assert.equal(
+      await trustCountByRequest(database, database.context.requestId),
+      trustBefore,
+    );
+  } finally {
+    if (mutatorOpen) await mutator.query('ROLLBACK');
+    mutator.release();
+    if (outcomePromise) await outcomePromise;
+  }
+  await withModuleRole(
+    database.runtimePool,
+    database.context,
+    async (client) => {
+      await client.query(
+        `UPDATE ${table(database.binding, database.binding.item)}
+          SET ${quoted(field(database.binding.item, 'item_base_unit').physicalName)}='EA',
+              ${quoted(database.binding.item.revisionColumn)}=${quoted(database.binding.item.revisionColumn)}+1
+        WHERE tenant_id=$1 AND environment_id=$2
+          AND ${quoted(database.binding.item.recordIdColumn)}=$3`,
+        [tenantId, environmentId, itemId],
+      );
+    },
+  );
+}
+
+async function assertConcurrentPeriodClose(
+  testContext: TestContext,
+  database: PostingDatabase,
+): Promise<void> {
+  const posting = command({
+    legalEntityId: legalReject,
+    sourceId: 'concurrent-period-close',
+  });
+  await seedDraft(database, posting);
+  const trustBefore = await trustCountByRequest(
+    database,
+    database.context.requestId,
+  );
+  const mutator = await beginModuleTransaction(database);
+  let mutatorOpen = true;
+  let outcomePromise: Promise<PostingOutcome> | undefined;
+  try {
+    const blockerPid = await backendPid(mutator);
+    await mutator.query(
+      `UPDATE ${table(database.binding, database.binding.periodLock)}
+          SET ${quoted(database.binding.periodLockClosedThroughColumn)}=$4,
+              ${quoted(database.binding.periodLock.revisionColumn)}=${quoted(database.binding.periodLock.revisionColumn)}+1
+        WHERE tenant_id=$1 AND environment_id=$2
+          AND ${quoted(database.binding.periodLock.legalEntityColumn!)}=$3`,
+      [tenantId, environmentId, legalReject, effectiveAt],
+    );
+    outcomePromise = settlePosting(
+      database.service.postAdjustment(
+        database.context,
+        database.actor,
+        posting,
+      ),
+    );
+    const blocked = await waitForPostingBlockedBy(
+      database.adminPool,
+      blockerPid,
+      'period-lock row',
+    );
+    await assertStockLockHeld(database.adminPool, blocked.pid, [posting]);
+    await mutator.query('COMMIT');
+    mutatorOpen = false;
+    const outcome = await outcomePromise;
+    assertRejectedPosting(
+      testContext,
+      'concurrent-period-close',
+      outcome,
+      'INVENTORY_PERIOD_CLOSED',
+    );
+    assert.equal(await movementCountBySource(database, posting.sourceId), 0);
+    assert.equal(
+      await trustCountByRequest(database, database.context.requestId),
+      trustBefore,
+    );
+  } finally {
+    if (mutatorOpen) await mutator.query('ROLLBACK');
+    mutator.release();
+    if (outcomePromise) await outcomePromise;
+  }
+  await setPeriodLock(database, legalReject, null);
+}
+
+async function assertConcurrentChildInsert(
+  testContext: TestContext,
+  database: PostingDatabase,
+): Promise<void> {
+  const posting = command({
+    legalEntityId: legalReject,
+    sourceId: 'concurrent-child-insert',
+  });
+  const insertedLine = line('1', '2', locationPrimary);
+  await seedDraft(database, posting);
+  await installLineRaceBlocker(database, posting.sourceId);
+  const trustBefore = await trustCountByRequest(
+    database,
+    database.context.requestId,
+  );
+  const blocker = await database.adminPool.connect();
+  let blockerOpen = false;
+  let outcomePromise: Promise<PostingOutcome> | undefined;
+  try {
+    await blocker.query('BEGIN');
+    blockerOpen = true;
+    await blocker.query(
+      'SELECT pg_advisory_xact_lock($1::integer, $2::integer)',
+      [lineRaceLockNamespace, lineRaceLockKey],
+    );
+    const blockerPid = await backendPid(blocker);
+    outcomePromise = settlePosting(
+      database.service.postAdjustment(
+        database.context,
+        database.actor,
+        posting,
+      ),
+    );
+    const blocked = await waitForPostingBlockedBy(
+      database.adminPool,
+      blockerPid,
+      'test movement-insert barrier',
+    );
+    await assertStockLockHeld(database.adminPool, blocked.pid, [posting]);
+    await withModuleRole(
+      database.runtimePool,
+      database.context,
+      async (client) => {
+        await insertDraftLine(client, database, posting, insertedLine);
+      },
+    );
+    assert.equal(await activeTransactionLineCount(database, posting), 2);
+    testContext.diagnostic(
+      'concurrent-child-insert residual: the generic child insert committed while the draft header was row-locked; the posting digest must abort the transition',
+    );
+    await blocker.query('COMMIT');
+    blockerOpen = false;
+    const outcome = await outcomePromise;
+    assertRejectedPosting(
+      testContext,
+      'concurrent-child-insert',
+      outcome,
+      'INVENTORY_TRANSACTION_STATE_CONFLICT',
+    );
+    assert.equal(await movementCountBySource(database, posting.sourceId), 0);
+    assert.equal(
+      await trustCountByRequest(database, database.context.requestId),
+      trustBefore,
+    );
+    assert.deepEqual(await transactionState(database, posting.transactionId), {
+      revision: 1,
+      state: enumOption(
+        field(database.binding.transaction, 'inventory_transaction_state'),
+        'draft',
+      ),
+    });
+  } finally {
+    if (blockerOpen) await blocker.query('ROLLBACK');
+    blocker.release();
+    if (outcomePromise) await outcomePromise;
+    await removeLineRaceBlocker(database);
+  }
+}
+
+async function assertConcurrentRequestKeyConflict(
+  testContext: TestContext,
+  database: PostingDatabase,
+): Promise<void> {
+  const idempotencyKey = randomUUID();
+  const commandA = command({
+    idempotencyKey,
+    legalEntityId: legalAllow,
+    locationId: locationPrimary,
+    sourceId: 'request-key-race-a',
+  });
+  const commandB = command({
+    idempotencyKey,
+    legalEntityId: legalAllow,
+    locationId: locationTie,
+    sourceId: 'request-key-race-b',
+  });
+  await seedDraft(database, commandA);
+  await seedDraft(database, commandB);
+  const trustBefore = await trustCountByRequest(
+    database,
+    database.context.requestId,
+  );
+  const blocker = await beginModuleTransaction(database);
+  let blockerOpen = true;
+  let outcomesPromise: Promise<PostingOutcome[]> | undefined;
+  try {
+    await blocker.query(
+      `UPDATE ${table(database.binding, database.binding.item)}
+          SET ${quoted(field(database.binding.item, 'item_base_unit').physicalName)}=${quoted(field(database.binding.item, 'item_base_unit').physicalName)}
+        WHERE tenant_id=$1 AND environment_id=$2
+          AND ${quoted(database.binding.item.recordIdColumn)}=$3`,
+      [tenantId, environmentId, itemId],
+    );
+    outcomesPromise = Promise.all([
+      settlePosting(
+        database.service.postAdjustment(
+          database.context,
+          database.actor,
+          commandA,
+        ),
+      ),
+      settlePosting(
+        database.service.postAdjustment(
+          database.context,
+          database.actor,
+          commandB,
+        ),
+      ),
+    ]);
+    const waiters = await waitForPostingLockWaiters(database.adminPool, 2);
+    const requestWaiters: number[] = [];
+    for (const waiter of waiters) {
+      if (
+        waiter.waitEvent === 'advisory' &&
+        (await holdsNsstLock(database.adminPool, waiter.pid, false))
+      ) {
+        requestWaiters.push(waiter.pid);
+      }
+      await assertStockLockHeld(database.adminPool, waiter.pid, [
+        commandA,
+        commandB,
+      ]);
+    }
+    assert.equal(requestWaiters.length, 1, JSON.stringify(waiters));
+    await blocker.query('ROLLBACK');
+    blockerOpen = false;
+    const outcomes = await outcomesPromise;
+    const fulfilled = outcomes.filter(
+      (outcome): outcome is Extract<PostingOutcome, { status: 'fulfilled' }> =>
+        outcome.status === 'fulfilled',
+    );
+    const rejected = outcomes.filter(
+      (outcome): outcome is Extract<PostingOutcome, { status: 'rejected' }> =>
+        outcome.status === 'rejected',
+    );
+    assert.equal(fulfilled.length, 1, JSON.stringify(outcomes));
+    assert.equal(fulfilled[0]!.value.replayed, false);
+    assert.equal(rejected.length, 1, JSON.stringify(outcomes));
+    assertRejectedPosting(
+      testContext,
+      'concurrent-request-key-conflict',
+      rejected[0]!,
+      'INVENTORY_POSTING_IDEMPOTENCY_CONFLICT',
+    );
+    assert.equal(
+      (await movementCountBySource(database, commandA.sourceId)) +
+        (await movementCountBySource(database, commandB.sourceId)),
+      1,
+    );
+    assert.equal(await receiptCountByKey(database, idempotencyKey), 1);
+    assert.equal(
+      await trustCountByRequest(database, database.context.requestId),
+      trustBefore + 1,
+    );
+  } finally {
+    if (blockerOpen) await blocker.query('ROLLBACK');
+    blocker.release();
+    if (outcomesPromise) await outcomesPromise;
+  }
+}
+
+function settlePosting(
+  promise: Promise<PostingResult>,
+): Promise<PostingOutcome> {
+  return promise.then(
+    (value) => ({ status: 'fulfilled' as const, value }),
+    (reason: unknown) => ({ reason, status: 'rejected' as const }),
+  );
+}
+
+function assertRejectedPosting(
+  testContext: TestContext,
+  label: string,
+  outcome: PostingOutcome,
+  expectedCode: string,
+): void {
+  assert.equal(outcome.status, 'rejected', JSON.stringify(outcome));
+  if (outcome.status !== 'rejected') return;
+  assert.equal(
+    observePostingError(testContext, label, outcome.reason, expectedCode),
+    true,
+  );
+}
+
 function uppercaseUuidCommand(
   input: InventoryAdjustmentPostingCommandV1,
 ): InventoryAdjustmentPostingCommandV1 {
@@ -902,6 +1267,7 @@ async function withPostingDatabase(
     await migrateAndProvision(database.pool, fixture.inventory.releaseRoot);
     const runtimePool = new pg.Pool({
       ...database.connection,
+      application_name: postingApplicationName,
       max: 8,
       user: 'north_star_runtime',
     });
@@ -1133,32 +1499,39 @@ async function seedDraft(
         {},
       );
       for (const postingLine of input.lines) {
-        const negative = postingLine.quantityDelta.startsWith('-');
-        await insertEntity(
-          client,
-          database.binding,
-          database.binding.transactionLine,
-          {
-            inventory_transaction_line_from_location_id: negative
-              ? postingLine.locationId
-              : null,
-            inventory_transaction_line_item_id: postingLine.itemId,
-            inventory_transaction_line_line_number: Number(
-              postingLine.sourceLine,
-            ),
-            inventory_transaction_line_quantity: postingLine.quantityDelta,
-            inventory_transaction_line_to_location_id: negative
-              ? null
-              : postingLine.locationId,
-            inventory_transaction_line_unit_id: postingLine.unitId,
-          },
-          postingLine.transactionLineId,
-          input.legalEntityId,
-          {
-            [database.binding.transaction.entity.entityId]: input.transactionId,
-          },
-        );
+        await insertDraftLine(client, database, input, postingLine);
       }
+    },
+  );
+}
+
+async function insertDraftLine(
+  client: PoolClient,
+  database: PostingDatabase,
+  input: InventoryAdjustmentPostingCommandV1,
+  postingLine: InventoryAdjustmentLineV1,
+): Promise<void> {
+  const negative = postingLine.quantityDelta.startsWith('-');
+  await insertEntity(
+    client,
+    database.binding,
+    database.binding.transactionLine,
+    {
+      inventory_transaction_line_from_location_id: negative
+        ? postingLine.locationId
+        : null,
+      inventory_transaction_line_item_id: postingLine.itemId,
+      inventory_transaction_line_line_number: Number(postingLine.sourceLine),
+      inventory_transaction_line_quantity: postingLine.quantityDelta,
+      inventory_transaction_line_to_location_id: negative
+        ? null
+        : postingLine.locationId,
+      inventory_transaction_line_unit_id: postingLine.unitId,
+    },
+    postingLine.transactionLineId,
+    input.legalEntityId,
+    {
+      [database.binding.transaction.entity.entityId]: input.transactionId,
     },
   );
 }
@@ -1579,6 +1952,235 @@ async function trustCountByRequest(
     [requestId, postingCapabilityId],
   );
   return Number(result.rows[0]?.count ?? '-1');
+}
+
+async function receiptCountByKey(
+  database: PostingDatabase,
+  idempotencyKey: string,
+): Promise<number> {
+  const result = await database.adminPool.query<{ count: string }>(
+    `SELECT count(*)::text AS count
+       FROM platform.semantic_operation_receipts
+      WHERE tenant_id=$1 AND environment_id=$2
+        AND action_id=$3 AND idempotency_key=$4`,
+    [tenantId, environmentId, postingCapabilityId, idempotencyKey],
+  );
+  return Number(result.rows[0]?.count ?? '-1');
+}
+
+async function activeTransactionLineCount(
+  database: PostingDatabase,
+  command: InventoryAdjustmentPostingCommandV1,
+): Promise<number> {
+  const result = await database.adminPool.query<{ count: string }>(
+    `SELECT count(*)::text AS count
+       FROM ${table(database.binding, database.binding.transactionLine)}
+      WHERE tenant_id=$1 AND environment_id=$2
+        AND ${quoted(database.binding.transactionLine.legalEntityColumn!)}=$3
+        AND ${quoted(bindingRelationToTransaction(database.binding))}=$4
+        AND ${quoted(database.binding.transactionLine.archiveColumn)} IS NULL`,
+    [tenantId, environmentId, command.legalEntityId, command.transactionId],
+  );
+  return Number(result.rows[0]?.count ?? '-1');
+}
+
+async function transactionState(
+  database: PostingDatabase,
+  transactionId: string,
+): Promise<{ revision: number; state: string }> {
+  const result = await database.adminPool.query<{
+    revision: number;
+    state: string;
+  }>(
+    `SELECT ${quoted(database.binding.transaction.revisionColumn)}::integer AS revision,
+            ${quoted(field(database.binding.transaction, 'inventory_transaction_state').physicalName)} AS state
+       FROM ${table(database.binding, database.binding.transaction)}
+      WHERE tenant_id=$1 AND environment_id=$2
+        AND ${quoted(database.binding.transaction.recordIdColumn)}=$3`,
+    [tenantId, environmentId, transactionId],
+  );
+  assert.equal(result.rows.length, 1);
+  return result.rows[0]!;
+}
+
+function bindingRelationToTransaction(binding: TestStorageBinding): string {
+  const relations = bindingRelations(binding, binding.transactionLine).filter(
+    (relation) =>
+      relation.targetEntityId === binding.transaction.entity.entityId &&
+      relation.relationColumn.origin !== 'field',
+  );
+  assert.equal(relations.length, 1);
+  return relations[0]!.relationColumn.physicalName;
+}
+
+async function installLineRaceBlocker(
+  database: PostingDatabase,
+  sourceId: string,
+): Promise<void> {
+  const sourceIdColumn = field(
+    database.binding.movement,
+    'inventory_movement_source_id',
+  ).physicalName;
+  await database.adminPool.query(
+    `CREATE FUNCTION public.g3p3_wait_for_line_race()
+       RETURNS trigger LANGUAGE plpgsql AS $body$
+       BEGIN
+         IF NEW.${quoted(sourceIdColumn)} = TG_ARGV[0] THEN
+           PERFORM pg_advisory_xact_lock(${String(lineRaceLockNamespace)}, ${String(lineRaceLockKey)});
+         END IF;
+         RETURN NEW;
+       END
+       $body$;
+     CREATE TRIGGER g3p3_wait_for_line_race
+       BEFORE INSERT ON ${table(database.binding, database.binding.movement)}
+       FOR EACH ROW EXECUTE FUNCTION public.g3p3_wait_for_line_race('${sourceId}')`,
+  );
+}
+
+async function removeLineRaceBlocker(database: PostingDatabase): Promise<void> {
+  await database.adminPool.query(
+    `DROP TRIGGER IF EXISTS g3p3_wait_for_line_race
+       ON ${table(database.binding, database.binding.movement)};
+     DROP FUNCTION IF EXISTS public.g3p3_wait_for_line_race()`,
+  );
+}
+
+async function beginModuleTransaction(
+  database: PostingDatabase,
+): Promise<PoolClient> {
+  const client = await database.runtimePool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      `SELECT set_config('north_star.tenant_id',$1,true),
+              set_config('north_star.environment_id',$2,true),
+              set_config('north_star.principal_id',$3,true),
+              set_config('north_star.request_id',$4,true)`,
+      [
+        database.context.tenantId,
+        database.context.environmentId,
+        database.context.principalId,
+        database.context.requestId,
+      ],
+    );
+    await client.query('SET LOCAL ROLE north_star_module_runtime');
+    return client;
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    client.release();
+    throw error;
+  }
+}
+
+async function backendPid(client: PoolClient): Promise<number> {
+  const result = await client.query<{ pid: number }>(
+    'SELECT pg_backend_pid() AS pid',
+  );
+  const pid = result.rows[0]?.pid;
+  assert.ok(Number.isInteger(pid));
+  return pid!;
+}
+
+async function waitForPostingBlockedBy(
+  observer: Pool,
+  blockerPid: number,
+  subject: string,
+): Promise<{ pid: number; query: string; waitEvent: string }> {
+  const deadline = process.hrtime.bigint() + 10_000_000_000n;
+  while (process.hrtime.bigint() < deadline) {
+    const result = await observer.query<{
+      pid: number;
+      query: string;
+      waitEvent: string;
+    }>(
+      `SELECT activity.pid, activity.query,
+              activity.wait_event AS "waitEvent"
+         FROM pg_catalog.pg_stat_activity AS activity
+        WHERE activity.application_name=$1
+          AND activity.wait_event_type='Lock'
+          AND $2::integer = ANY(pg_catalog.pg_blocking_pids(activity.pid))
+        ORDER BY activity.pid
+        LIMIT 1`,
+      [postingApplicationName, blockerPid],
+    );
+    if (result.rows[0]) return result.rows[0];
+    await new Promise<void>((resolveTurn) => setImmediate(resolveTurn));
+  }
+  throw new Error(`posting did not block on ${subject}`);
+}
+
+async function waitForPostingLockWaiters(
+  observer: Pool,
+  expected: number,
+): Promise<Array<{ pid: number; query: string; waitEvent: string }>> {
+  const deadline = process.hrtime.bigint() + 10_000_000_000n;
+  while (process.hrtime.bigint() < deadline) {
+    const result = await observer.query<{
+      pid: number;
+      query: string;
+      waitEvent: string;
+    }>(
+      `SELECT activity.pid, activity.query,
+              activity.wait_event AS "waitEvent"
+         FROM pg_catalog.pg_stat_activity AS activity
+        WHERE activity.application_name=$1
+          AND activity.wait_event_type='Lock'
+        ORDER BY activity.pid`,
+      [postingApplicationName],
+    );
+    if (result.rows.length >= expected) return result.rows;
+    await new Promise<void>((resolveTurn) => setImmediate(resolveTurn));
+  }
+  throw new Error(
+    `expected ${String(expected)} concurrent posting lock waiters`,
+  );
+}
+
+async function assertStockLockHeld(
+  observer: Pool,
+  postingPid: number,
+  commands: readonly InventoryAdjustmentPostingCommandV1[],
+): Promise<void> {
+  const expectedKeys = planStockIdentityLocks(
+    commands.flatMap((command) =>
+      command.lines.map((postingLine) => ({
+        environmentId,
+        itemId: postingLine.itemId,
+        legalEntityId: command.legalEntityId,
+        locationId: postingLine.locationId,
+        tenantId,
+      })),
+    ),
+  ).map((target) => unsignedInt32(target.identityKey));
+  const result = await observer.query<{ count: string }>(
+    `SELECT count(*)::text AS count
+       FROM pg_catalog.pg_locks
+      WHERE pid=$1 AND locktype='advisory' AND granted
+        AND objsubid=2 AND classid::bigint=$2::bigint
+        AND objid::bigint=ANY($3::bigint[])`,
+    [postingPid, unsignedInt32(STOCK_IDENTITY_LOCK_NAMESPACE), expectedKeys],
+  );
+  assert.ok(Number(result.rows[0]?.count ?? 0) >= 1);
+}
+
+async function holdsNsstLock(
+  observer: Pool,
+  postingPid: number,
+  granted: boolean,
+): Promise<boolean> {
+  const result = await observer.query<{ present: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1 FROM pg_catalog.pg_locks
+        WHERE pid=$1 AND locktype='advisory' AND granted=$2
+          AND objsubid=2 AND classid::bigint=$3::bigint
+     ) AS present`,
+    [postingPid, granted, unsignedInt32(STOCK_IDENTITY_LOCK_NAMESPACE)],
+  );
+  return result.rows[0]?.present ?? false;
+}
+
+function unsignedInt32(value: number): number {
+  return value < 0 ? value + 2 ** 32 : value;
 }
 
 async function withModuleRole<T>(

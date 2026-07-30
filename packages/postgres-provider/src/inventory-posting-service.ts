@@ -27,6 +27,7 @@ import {
 } from './migrations.js';
 import {
   acquireStockIdentityLocks,
+  STOCK_IDENTITY_LOCK_NAMESPACE,
   type ScopedStockIdentityV1,
 } from './stock-serializer.js';
 import { assertTrustedActorEnvelope } from './trust/trusted-actor-envelope.js';
@@ -35,7 +36,9 @@ export const INVENTORY_POSTING_CAPABILITY_VERSION = 1 as const;
 export const INVENTORY_POSTING_CAPABILITY_ID =
   `${'northstar'}.${'inventory'}:capability.posting` as const;
 export const INVENTORY_POSTING_DEPENDENCY_SET_ROOT =
-  '2eb1de635331ee5781fe928a37d3664e3d4f8ccfe56ca44e231a652a806eca05' as const;
+  '35fc38eaca7fbe47d8da5030ceefce8211a2194a25d233c45282ef0450d553ad' as const;
+const requestKeyLockDerivationVersion =
+  'northstar.inventory-posting-request-lock/v1';
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const sha256Pattern = /^[0-9a-f]{64}$/u;
@@ -290,6 +293,12 @@ export class PostgresInventoryPostingService {
       await acquireStockIdentityLocks(client, identities);
       await assertRuntimeLogin(client);
       await setTrustedContext(client, context);
+      await acquirePostingRequestKeyLock(
+        client,
+        context,
+        this.registration.capabilityId,
+        parsed.idempotencyKey,
+      );
 
       const receipt = await findReceipt(
         client,
@@ -347,6 +356,18 @@ export class PostgresInventoryPostingService {
         .toSorted(comparePlannedMovements);
 
       await assumeModuleRole(client);
+      await lockAdjustmentTransactionHeader(
+        client,
+        this.#binding,
+        context,
+        parsed,
+      );
+      const lineSetDigest = await captureAdjustmentLineSetDigest(
+        client,
+        this.#binding,
+        context,
+        parsed,
+      );
       await assertAdjustmentLineSet(client, this.#binding, context, parsed);
       const naturalReplay = await findNaturalReplay(
         client,
@@ -414,6 +435,7 @@ export class PostgresInventoryPostingService {
           this.#binding,
           context,
           parsed,
+          lineSetDigest,
         );
         await client.query('RELEASE SAVEPOINT inventory_posting_write');
       } catch (error) {
@@ -508,6 +530,32 @@ export class PostgresInventoryPostingService {
       }
     }
   }
+}
+
+async function acquirePostingRequestKeyLock(
+  client: PoolClient,
+  context: TrustedRequestContext,
+  capabilityId: string,
+  idempotencyKey: string,
+): Promise<void> {
+  const requestKey = createHash('sha256')
+    .update(requestKeyLockDerivationVersion)
+    .update('\0')
+    .update(context.tenantId)
+    .update('\0')
+    .update(context.environmentId)
+    .update('\0')
+    .update(capabilityId)
+    .update('\0')
+    .update(idempotencyKey)
+    .digest()
+    .readInt32BE(0);
+  // All stock locks are already held. Sharing NSST makes a hash collision
+  // conservatively serialize unrelated work; it cannot bypass idempotency.
+  await client.query('SELECT pg_advisory_xact_lock($1::integer, $2::integer)', [
+    STOCK_IDENTITY_LOCK_NAMESPACE,
+    requestKey,
+  ]);
 }
 
 function validateRegistration(
@@ -1069,6 +1117,23 @@ async function assertPostingMasters(
   legalEntityId: string,
   movements: readonly PlannedMovement[],
 ): Promise<void> {
+  const itemIds = [
+    ...new Set(movements.map((movement) => movement.itemId)),
+  ].toSorted();
+  const items = await client.query<{ baseUnit: string; itemId: string }>(
+    `SELECT ${quoted(binding.item.recordIdColumn)}::text AS "itemId",
+            ${quoted(binding.itemBaseUnitColumn)}::text AS "baseUnit"
+       FROM ${table(binding, binding.item)}
+      WHERE tenant_id = $1 AND environment_id = $2
+        AND ${quoted(binding.item.recordIdColumn)} = ANY($3::uuid[])
+        AND ${quoted(binding.item.archiveColumn)} IS NULL
+      ORDER BY ${quoted(binding.item.recordIdColumn)}
+      FOR UPDATE`,
+    [context.tenantId, context.environmentId, itemIds],
+  );
+  const checkedItems = new Map(
+    items.rows.map((item) => [item.itemId.toLowerCase(), item.baseUnit]),
+  );
   const legal = await client.query<{ status: string }>(
     `SELECT ${quoted(binding.legalEntityStatusColumn)} AS status
        FROM ${table(binding, binding.legalEntity)}
@@ -1084,28 +1149,15 @@ async function assertPostingMasters(
       { legalEntityId },
     );
   }
-  const checkedItems = new Map<string, string>();
   const checkedLocations = new Set<string>();
   for (const movement of movements) {
     const baseUnit = checkedItems.get(movement.itemId);
     if (baseUnit === undefined) {
-      const item = await client.query<{ baseUnit: string }>(
-        `SELECT ${quoted(binding.itemBaseUnitColumn)}::text AS "baseUnit"
-           FROM ${table(binding, binding.item)}
-          WHERE tenant_id = $1 AND environment_id = $2
-            AND ${quoted(binding.item.recordIdColumn)} = $3
-            AND ${quoted(binding.item.archiveColumn)} IS NULL`,
-        [context.tenantId, context.environmentId, movement.itemId],
+      throw postingError(
+        'INVENTORY_ITEM_INACTIVE',
+        `item ${movement.itemId} is missing or archived`,
+        { itemId: movement.itemId },
       );
-      const found = item.rows[0]?.baseUnit;
-      if (!found) {
-        throw postingError(
-          'INVENTORY_ITEM_INACTIVE',
-          `item ${movement.itemId} is missing or archived`,
-          { itemId: movement.itemId },
-        );
-      }
-      checkedItems.set(movement.itemId, found);
     }
     const expectedUnit = checkedItems.get(movement.itemId)!;
     if (expectedUnit !== movement.unitId) {
@@ -1201,7 +1253,8 @@ async function enforcePeriodLock(
        FROM ${table(binding, binding.periodLock)}
       WHERE tenant_id = $1 AND environment_id = $2
         AND ${quoted(binding.periodLock.legalEntityColumn!)} = $3
-        AND ${quoted(binding.periodLock.archiveColumn)} IS NULL`,
+        AND ${quoted(binding.periodLock.archiveColumn)} IS NULL
+      FOR UPDATE`,
     [context.tenantId, context.environmentId, legalEntityId],
   );
   if (result.rows.length !== 1) {
@@ -1401,6 +1454,36 @@ async function insertMovement(
   );
 }
 
+async function lockAdjustmentTransactionHeader(
+  client: PoolClient,
+  binding: PostingStorageBinding,
+  context: TrustedRequestContext,
+  command: InventoryAdjustmentPostingCommandV1,
+): Promise<void> {
+  const header = await client.query<{ present: boolean }>(
+    `SELECT true AS present
+       FROM ${table(binding, binding.transaction)}
+      WHERE tenant_id = $1 AND environment_id = $2
+        AND ${quoted(binding.transaction.legalEntityColumn!)} = $3
+        AND ${quoted(binding.transaction.recordIdColumn)} = $4
+        AND ${quoted(binding.transaction.archiveColumn)} IS NULL
+      FOR NO KEY UPDATE`,
+    [
+      context.tenantId,
+      context.environmentId,
+      command.legalEntityId,
+      command.transactionId,
+    ],
+  );
+  if (!header.rows[0]?.present) {
+    throw postingError(
+      'INVENTORY_TRANSACTION_STATE_CONFLICT',
+      `transaction ${command.transactionId} is missing or archived`,
+      { transactionId: command.transactionId },
+    );
+  }
+}
+
 async function assertAdjustmentDraftHeader(
   client: PoolClient,
   binding: PostingStorageBinding,
@@ -1464,6 +1547,33 @@ async function assertAdjustmentDraftHeader(
       { transactionId: command.transactionId },
     );
   }
+}
+
+async function captureAdjustmentLineSetDigest(
+  client: PoolClient,
+  binding: PostingStorageBinding,
+  context: TrustedRequestContext,
+  command: InventoryAdjustmentPostingCommandV1,
+): Promise<string> {
+  const result = await client.query<{ lineSetDigest: string }>(
+    `SELECT ${adjustmentLineSetDigestSql(binding, '$1', '$2', '$3', '$4')}
+              AS "lineSetDigest"`,
+    [
+      context.tenantId,
+      context.environmentId,
+      command.legalEntityId,
+      command.transactionId,
+    ],
+  );
+  const digest = result.rows[0]?.lineSetDigest;
+  if (!digest || !/^[0-9a-f]{32}$/u.test(digest)) {
+    throw postingError(
+      'INVENTORY_POSTING_STORAGE_INVALID',
+      'transaction line-set digest could not be captured',
+      { transactionId: command.transactionId },
+    );
+  }
+  return digest;
 }
 
 async function assertAdjustmentLineSet(
@@ -1540,6 +1650,7 @@ async function transitionTransactionToPosted(
   binding: PostingStorageBinding,
   context: TrustedRequestContext,
   command: InventoryAdjustmentPostingCommandV1,
+  lineSetDigest: string,
 ): Promise<number> {
   const effectiveAtColumn = requiredField(
     binding.transaction,
@@ -1577,6 +1688,7 @@ async function transitionTransactionToPosted(
         AND ${quoted(sourceIdColumn)} = $12
         AND ${quoted(binding.transaction.revisionColumn)} = $13
         AND ${quoted(binding.transaction.archiveColumn)} IS NULL
+        AND ${adjustmentLineSetDigestSql(binding, '$1', '$2', '$3', '$5')} = $14
       RETURNING ${quoted(binding.transaction.revisionColumn)}::integer AS revision`,
     [
       context.tenantId,
@@ -1592,6 +1704,7 @@ async function transitionTransactionToPosted(
       command.sourceType,
       command.sourceId,
       command.sourceRevision,
+      lineSetDigest,
     ],
   );
   if (result.rowCount !== 1) {
@@ -1613,6 +1726,29 @@ async function transitionTransactionToPosted(
     );
   }
   return revision;
+}
+
+function adjustmentLineSetDigestSql(
+  binding: PostingStorageBinding,
+  tenantParameter: string,
+  environmentParameter: string,
+  legalEntityParameter: string,
+  transactionParameter: string,
+): string {
+  const alias = 'active_transaction_line';
+  return `(SELECT md5(COALESCE(
+              jsonb_agg(
+                to_jsonb(${alias})
+                ORDER BY ${alias}.${quoted(binding.transactionLine.recordIdColumn)}::text
+              )::text,
+              '[]'
+            ))
+       FROM ${table(binding, binding.transactionLine)} AS ${alias}
+      WHERE ${alias}.tenant_id = ${tenantParameter}
+        AND ${alias}.environment_id = ${environmentParameter}
+        AND ${alias}.${quoted(binding.transactionLine.legalEntityColumn!)} = ${legalEntityParameter}
+        AND ${alias}.${quoted(binding.transactionLineRelationToTransactionColumn)} = ${transactionParameter}
+        AND ${alias}.${quoted(binding.transactionLine.archiveColumn)} IS NULL)`;
 }
 
 async function readBackMovements(

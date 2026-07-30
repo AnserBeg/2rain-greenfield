@@ -45,8 +45,8 @@ must match all of:
 
 - capability ID `northstar.inventory:capability.posting`;
 - capability version `1`;
-- dependency-set version `2` and root
-  `2eb1de635331ee5781fe928a37d3664e3d4f8ccfe56ca44e231a652a806eca05`;
+- dependency-set version `3` and root
+  `35fc38eaca7fbe47d8da5030ceefce8211a2194a25d233c45282ef0450d553ad`;
 - an active tenant release with the same immutable content hash; and
 - the compiler-emitted `northstar.storage-target-payload/v3` managed-storage
   contract.
@@ -74,7 +74,11 @@ The dependency set evolves before first posting from v1/30 entries/root
 to v2/31 entries/root
 `2eb1de635331ee5781fe928a37d3664e3d4f8ccfe56ca44e231a652a806eca05`.
 The added `read:northstar.inventory:transaction_line` authority binds the
-command to the complete persisted draft line set. This is a protocol version
+command to the complete persisted draft line set. Natural replay also reads the
+outbox row that owns the effect-deduplication key, so the set then evolves to
+v3/32 entries/root
+`35fc38eaca7fbe47d8da5030ceefce8211a2194a25d233c45282ef0450d553ad`
+by adding `read:northstar.trust:outbox_event`. Each change is a protocol version
 event before the first fact, not a rewrite of posted history.
 
 The capability also owns its atomic trust write as one closed aggregate. The
@@ -95,17 +99,22 @@ The adapter owns one top-level PostgreSQL transaction. Its order is binding:
 1. `BEGIN`;
 2. acquire every affected v1 stock identity with G3-P2b-2's serializer,
    immediately and before any caller savepoint;
-3. read and bind the complete adjustment draft line set and revision, then read
-   serialized movement state and evaluate `negativeStock` inside that transaction;
-4. load and enforce the release-recorded reason, approval, and backdate dials,
-   and enforce the per-legal-entity period lock in the same transaction;
-5. append each movement; its compiled `AFTER INSERT` trigger claims the natural
+3. acquire the scoped request-key lock in the same NSST advisory namespace,
+   before the first semantic-receipt read;
+4. row-lock the transaction header, every referenced base-unit row, and the
+   period-lock row; capture a digest of the complete active draft line set under
+   the header lock;
+5. validate the draft and read serialized movement state, then evaluate
+   `negativeStock` inside that transaction; load and enforce the release-recorded
+   reason, approval, and backdate dials and the locked period close;
+6. append each movement; its compiled `AFTER INSERT` trigger claims the natural
    effect identity atomically;
-6. transition the existing adjustment draft to posted, write invocation,
+7. transition the existing adjustment draft to posted only if its line-set
+   digest still matches, write invocation,
    business-change, domain-event, outbox, and immutable receipt evidence; and
-7. commit all of it or roll back all of it.
+8. commit all of it or roll back all of it.
 
-No caller preflight may substitute for steps 2 through 4. In particular, a
+No caller preflight may substitute for steps 2 through 5. In particular, a
 balance read before stock-lock acquisition has no authority. The adapter may
 create a savepoint only after the stock locks exist; rolling back to it cannot
 release those earlier locks.
@@ -142,7 +151,10 @@ This ADR does not:
   reservation writer;
 - authorize transfer, count correction, purchasing, valuation, or a mutable
   balance;
-- add any posting dependency beyond the ratified v2 31-entry set; or
+- change generic transaction-line create lifecycle: the digest closes a line
+  inserted during posting, while a parent-draft guard on generic child creation
+  remains separately routed press work;
+- add any posting dependency beyond the ratified v3 32-entry set; or
 - replace the policy kernel. The current adapter requires an upstream ALLOW
   decision and persists it; real policy narrowing remains owned by row 7.
 
@@ -157,9 +169,11 @@ single-press rule: ordinary entities remain generic, while the fact writer is a
 closed capability the ordinary press deliberately cannot represent.
 
 G3-P3 must prove on real compiled storage that the stock lock precedes all
-business reads; negative stock, period close, reason, approval, and backdate
-decisions occur transactionally; a duplicate natural effect does not double
-post; base-unit mutation after posting names the binding movement; trusted
-recorded time has no update path; and movement, read-back, audit, event, and
-outbox evidence contain no monetary amount. The full matrix and Critical review
-chain run on the identical integrated SHA.
+business reads; request-key conflicts, base-unit changes, period close, and a
+phantom child insert each lose a real concurrent race with a typed abort and no
+loser evidence; negative stock, reason, approval, and backdate decisions occur
+transactionally; a duplicate natural effect does not double post; base-unit
+mutation after posting names the binding movement; trusted recorded time has no
+update path; and movement, read-back, audit, event, and outbox evidence contain
+no monetary amount. The full matrix and Critical review chain run on the
+identical integrated SHA.
