@@ -38,6 +38,7 @@ import {
   INVENTORY_POSTING_CAPABILITY_ID,
   INVENTORY_POSTING_DEPENDENCY_SET_ROOT,
   InventoryPostingError,
+  planInventoryPostingRequestLock,
   PostgresInventoryPostingService,
   type InventoryAdjustmentLineV1,
   type InventoryAdjustmentPostingCommandV1,
@@ -85,8 +86,11 @@ const recordedAt = '2026-07-29T13:00:00.000Z';
 const effectiveAt = '2026-07-29T12:00:00.000Z';
 const postingCapabilityId = INVENTORY_CONTRACT_V1.capabilityId;
 const postingApplicationName = 'g3p3-inventory-posting';
+const concurrencyControlLockTimeout = '3s';
 const lineRaceLockNamespace = 0x47335033;
 const lineRaceLockKey = 1;
+const requestKeyRaceIdempotencyKey = '99000000-0000-4000-8000-000000000009';
+const requestKeyRaceExpectedKey = -364_379_365;
 
 type StorageEntityTarget = StorageTargetPayloadV1['entities'][number];
 
@@ -852,9 +856,155 @@ async function assertProtectedReadRaces(
   testContext: TestContext,
   database: PostingDatabase,
 ): Promise<void> {
+  await assertBoundedConcurrencyControl(testContext, database);
+  await assertHeldStockLockTimeout(testContext, database);
   await assertConcurrentBaseUnitChange(testContext, database);
   await assertConcurrentPeriodClose(testContext, database);
   await assertConcurrentChildInsert(testContext, database);
+}
+
+async function assertBoundedConcurrencyControl(
+  testContext: TestContext,
+  database: PostingDatabase,
+): Promise<void> {
+  const holder = await database.adminPool.connect();
+  const waiter = await database.adminPool.connect();
+  let holderOpen = false;
+  let waiterOpen = false;
+  let waitingAcquire: Promise<unknown> | undefined;
+  try {
+    await beginBoundedControlTransaction(holder);
+    holderOpen = true;
+    await beginBoundedControlTransaction(waiter);
+    waiterOpen = true;
+    const waiterPid = await backendPid(waiter);
+    await holder.query(
+      'SELECT pg_advisory_xact_lock($1::integer, $2::integer)',
+      [lineRaceLockNamespace, lineRaceLockKey],
+    );
+    waitingAcquire = waiter.query(
+      'SELECT pg_advisory_xact_lock($1::integer, $2::integer)',
+      [lineRaceLockNamespace, lineRaceLockKey],
+    );
+    void waitingAcquire.catch(() => undefined);
+    assert.equal(
+      await waitForExactAdvisoryLock(
+        database.adminPool,
+        waiterPid,
+        lineRaceLockNamespace,
+        lineRaceLockKey,
+        false,
+      ),
+      true,
+    );
+    await assert.rejects(waitingAcquire, (error: unknown) =>
+      observePostgresError(
+        testContext,
+        'bounded-concurrency-control',
+        error,
+        '55P03',
+      ),
+    );
+  } finally {
+    if (waiterOpen) await waiter.query('ROLLBACK');
+    if (holderOpen) await holder.query('ROLLBACK');
+    waiter.release();
+    holder.release();
+  }
+}
+
+async function assertHeldStockLockTimeout(
+  testContext: TestContext,
+  database: PostingDatabase,
+): Promise<void> {
+  const posting = command({
+    legalEntityId: legalReject,
+    sourceId: 'held-stock-lock-timeout',
+  });
+  await seedDraft(database, posting);
+  const trustBefore = await trustCountByRequest(
+    database,
+    database.context.requestId,
+  );
+  const target = planStockIdentityLocks([
+    {
+      environmentId,
+      itemId,
+      legalEntityId: posting.legalEntityId,
+      locationId: posting.lines[0]!.locationId,
+      tenantId,
+    },
+  ])[0];
+  assert.ok(target);
+  const holder = await database.adminPool.connect();
+  let holderOpen = false;
+  let outcomePromise: Promise<PostingOutcome> | undefined;
+  try {
+    await beginBoundedControlTransaction(holder);
+    holderOpen = true;
+    const holderPid = await backendPid(holder);
+    await holder.query(
+      'SELECT pg_advisory_xact_lock($1::integer, $2::integer)',
+      [STOCK_IDENTITY_LOCK_NAMESPACE, target.identityKey],
+    );
+    outcomePromise = settlePosting(
+      database.service.postAdjustment(
+        database.context,
+        database.actor,
+        posting,
+      ),
+    );
+    const blocked = await waitForPostingBlockedBy(
+      database.adminPool,
+      holderPid,
+      'held stock identity',
+    );
+    assert.equal(blocked.waitEvent, 'advisory');
+    assert.equal(
+      await holdsExactAdvisoryLock(
+        database.adminPool,
+        blocked.pid,
+        STOCK_IDENTITY_LOCK_NAMESPACE,
+        target.identityKey,
+        false,
+      ),
+      true,
+    );
+    const outcome = await outcomePromise;
+    assertRejectedPosting(
+      testContext,
+      'held-stock-lock-timeout',
+      outcome,
+      'INVENTORY_POSTING_LOCK_TIMEOUT',
+    );
+    assert.equal(outcome.status, 'rejected');
+    if (outcome.status === 'rejected') {
+      assert.equal(postingDetail(outcome.reason, 'sqlstate'), '55P03');
+      assert.equal(
+        postingDetail(outcome.reason, 'lockTimeoutMilliseconds'),
+        '3000',
+      );
+    }
+    assert.equal(
+      await holdsExactAdvisoryLock(
+        database.adminPool,
+        holderPid,
+        STOCK_IDENTITY_LOCK_NAMESPACE,
+        target.identityKey,
+        true,
+      ),
+      true,
+    );
+    assert.equal(await movementCountBySource(database, posting.sourceId), 0);
+    assert.equal(
+      await trustCountByRequest(database, database.context.requestId),
+      trustBefore,
+    );
+  } finally {
+    if (holderOpen) await holder.query('ROLLBACK');
+    holder.release();
+    if (outcomePromise) await outcomePromise;
+  }
 }
 
 async function assertConcurrentBaseUnitChange(
@@ -1011,7 +1161,7 @@ async function assertConcurrentChildInsert(
   let blockerOpen = false;
   let outcomePromise: Promise<PostingOutcome> | undefined;
   try {
-    await blocker.query('BEGIN');
+    await beginBoundedControlTransaction(blocker);
     blockerOpen = true;
     await blocker.query(
       'SELECT pg_advisory_xact_lock($1::integer, $2::integer)',
@@ -1075,7 +1225,16 @@ async function assertConcurrentRequestKeyConflict(
   testContext: TestContext,
   database: PostingDatabase,
 ): Promise<void> {
-  const idempotencyKey = randomUUID();
+  const idempotencyKey = requestKeyRaceIdempotencyKey;
+  const requestLock = planInventoryPostingRequestLock(
+    database.context,
+    database.registration.capabilityId,
+    idempotencyKey,
+  );
+  assert.deepEqual(requestLock, {
+    namespace: STOCK_IDENTITY_LOCK_NAMESPACE,
+    requestKey: requestKeyRaceExpectedKey,
+  });
   const commandA = command({
     idempotencyKey,
     legalEntityId: legalAllow,
@@ -1123,12 +1282,30 @@ async function assertConcurrentRequestKeyConflict(
     ]);
     const waiters = await waitForPostingLockWaiters(database.adminPool, 2);
     const requestWaiters: number[] = [];
+    const requestHolders: number[] = [];
     for (const waiter of waiters) {
       if (
         waiter.waitEvent === 'advisory' &&
-        (await holdsNsstLock(database.adminPool, waiter.pid, false))
+        (await holdsExactAdvisoryLock(
+          database.adminPool,
+          waiter.pid,
+          requestLock.namespace,
+          requestLock.requestKey,
+          false,
+        ))
       ) {
         requestWaiters.push(waiter.pid);
+      }
+      if (
+        await holdsExactAdvisoryLock(
+          database.adminPool,
+          waiter.pid,
+          requestLock.namespace,
+          requestLock.requestKey,
+          true,
+        )
+      ) {
+        requestHolders.push(waiter.pid);
       }
       await assertStockLockHeld(database.adminPool, waiter.pid, [
         commandA,
@@ -1136,6 +1313,16 @@ async function assertConcurrentRequestKeyConflict(
       ]);
     }
     assert.equal(requestWaiters.length, 1, JSON.stringify(waiters));
+    assert.equal(requestHolders.length, 1, JSON.stringify(waiters));
+    assert.notEqual(requestLock.requestKey, lineRaceLockKey);
+    testContext.diagnostic(
+      `request-key derivation: ${JSON.stringify({
+        derivation:
+          'sha256(v1\\0tenant\\0environment\\0capability\\0idempotencyKey)[0..4]::int32be',
+        namespace: requestLock.namespace,
+        requestKey: requestLock.requestKey,
+      })}`,
+    );
     await blocker.query('ROLLBACK');
     blockerOpen = false;
     const outcomes = await outcomesPromise;
@@ -2050,7 +2237,7 @@ async function beginModuleTransaction(
 ): Promise<PoolClient> {
   const client = await database.runtimePool.connect();
   try {
-    await client.query('BEGIN');
+    await beginBoundedControlTransaction(client);
     await client.query(
       `SELECT set_config('north_star.tenant_id',$1,true),
               set_config('north_star.environment_id',$2,true),
@@ -2136,6 +2323,25 @@ async function waitForPostingLockWaiters(
   );
 }
 
+async function waitForExactAdvisoryLock(
+  observer: Pool,
+  pid: number,
+  namespace: number,
+  key: number,
+  granted: boolean,
+): Promise<boolean> {
+  const deadline = process.hrtime.bigint() + 10_000_000_000n;
+  while (process.hrtime.bigint() < deadline) {
+    if (await holdsExactAdvisoryLock(observer, pid, namespace, key, granted)) {
+      return true;
+    }
+    await new Promise<void>((resolveTurn) => setImmediate(resolveTurn));
+  }
+  throw new Error(
+    `backend ${String(pid)} did not expose advisory lock ${String(namespace)}/${String(key)} granted=${String(granted)}`,
+  );
+}
+
 async function assertStockLockHeld(
   observer: Pool,
   postingPid: number,
@@ -2163,9 +2369,11 @@ async function assertStockLockHeld(
   assert.ok(Number(result.rows[0]?.count ?? 0) >= 1);
 }
 
-async function holdsNsstLock(
+async function holdsExactAdvisoryLock(
   observer: Pool,
   postingPid: number,
+  namespace: number,
+  key: number,
   granted: boolean,
 ): Promise<boolean> {
   const result = await observer.query<{ present: boolean }>(
@@ -2173,14 +2381,24 @@ async function holdsNsstLock(
        SELECT 1 FROM pg_catalog.pg_locks
         WHERE pid=$1 AND locktype='advisory' AND granted=$2
           AND objsubid=2 AND classid::bigint=$3::bigint
+          AND objid::bigint=$4::bigint
      ) AS present`,
-    [postingPid, granted, unsignedInt32(STOCK_IDENTITY_LOCK_NAMESPACE)],
+    [postingPid, granted, unsignedInt32(namespace), unsignedInt32(key)],
   );
   return result.rows[0]?.present ?? false;
 }
 
 function unsignedInt32(value: number): number {
   return value < 0 ? value + 2 ** 32 : value;
+}
+
+async function beginBoundedControlTransaction(
+  client: PoolClient,
+): Promise<void> {
+  await client.query('BEGIN');
+  await client.query("SELECT set_config('lock_timeout', $1::text, true)", [
+    concurrencyControlLockTimeout,
+  ]);
 }
 
 async function withModuleRole<T>(
@@ -2190,7 +2408,7 @@ async function withModuleRole<T>(
 ): Promise<T> {
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
+    await beginBoundedControlTransaction(client);
     await client.query(
       `SELECT set_config('north_star.tenant_id',$1,true),
               set_config('north_star.environment_id',$2,true),

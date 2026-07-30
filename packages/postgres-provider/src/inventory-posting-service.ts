@@ -37,6 +37,7 @@ export const INVENTORY_POSTING_CAPABILITY_ID =
   `${'northstar'}.${'inventory'}:capability.posting` as const;
 export const INVENTORY_POSTING_DEPENDENCY_SET_ROOT =
   '35fc38eaca7fbe47d8da5030ceefce8211a2194a25d233c45282ef0450d553ad' as const;
+const inventoryPostingLockTimeoutMilliseconds = 3_000;
 const requestKeyLockDerivationVersion =
   'northstar.inventory-posting-request-lock/v1';
 const uuidPattern =
@@ -120,6 +121,11 @@ export interface InventoryPostingTrustLinksV1 {
   readonly outboxId: string;
 }
 
+export interface InventoryPostingRequestLockTargetV1 {
+  readonly namespace: typeof STOCK_IDENTITY_LOCK_NAMESPACE;
+  readonly requestKey: number;
+}
+
 export interface InventoryAdjustmentPostingResultV1 {
   readonly capabilityId: string;
   readonly capabilityVersion: typeof INVENTORY_POSTING_CAPABILITY_VERSION;
@@ -143,6 +149,7 @@ export type InventoryPostingErrorCode =
   | 'INVENTORY_POSTING_CAPABILITY_MISMATCH'
   | 'INVENTORY_POSTING_IDEMPOTENCY_CONFLICT'
   | 'INVENTORY_POSTING_INPUT_INVALID'
+  | 'INVENTORY_POSTING_LOCK_TIMEOUT'
   | 'INVENTORY_POSTING_RELEASE_MISMATCH'
   | 'INVENTORY_POSTING_STORAGE_INVALID'
   | 'INVENTORY_POSTING_STORAGE_REJECTED'
@@ -286,6 +293,12 @@ export class PostgresInventoryPostingService {
     const client = await this.pool.connect();
     let transactionOpen = false;
     try {
+      // Session-scoped so the stock lock remains the first operation after
+      // BEGIN. RESET ALL in finally prevents the budget leaking through the
+      // pool. Every later PostgreSQL lock acquisition is bounded as well.
+      await client.query("SELECT set_config('lock_timeout', $1::text, false)", [
+        `${String(inventoryPostingLockTimeoutMilliseconds)}ms`,
+      ]);
       await client.query('BEGIN');
       transactionOpen = true;
       // Load-bearing placement: no query and no caller savepoint occurs between
@@ -538,6 +551,30 @@ async function acquirePostingRequestKeyLock(
   capabilityId: string,
   idempotencyKey: string,
 ): Promise<void> {
+  const target = planInventoryPostingRequestLock(
+    context,
+    capabilityId,
+    idempotencyKey,
+  );
+  // All stock locks are already held. Sharing NSST makes a hash collision
+  // conservatively serialize unrelated work; it cannot bypass idempotency.
+  await client.query('SELECT pg_advisory_xact_lock($1::integer, $2::integer)', [
+    target.namespace,
+    target.requestKey,
+  ]);
+}
+
+/**
+ * Derives the request-key serializer in the reserved NSST two-int namespace.
+ * The versioned, NUL-delimited SHA-256 preimage keeps request keys distributed
+ * independently of stock identities; PostgreSQL consumes the first signed
+ * int32 because that is the width of the namespace's second key.
+ */
+export function planInventoryPostingRequestLock(
+  context: Pick<TrustedRequestContext, 'environmentId' | 'tenantId'>,
+  capabilityId: string,
+  idempotencyKey: string,
+): InventoryPostingRequestLockTargetV1 {
   const requestKey = createHash('sha256')
     .update(requestKeyLockDerivationVersion)
     .update('\0')
@@ -550,12 +587,10 @@ async function acquirePostingRequestKeyLock(
     .update(idempotencyKey)
     .digest()
     .readInt32BE(0);
-  // All stock locks are already held. Sharing NSST makes a hash collision
-  // conservatively serialize unrelated work; it cannot bypass idempotency.
-  await client.query('SELECT pg_advisory_xact_lock($1::integer, $2::integer)', [
-    STOCK_IDENTITY_LOCK_NAMESPACE,
+  return Object.freeze({
+    namespace: STOCK_IDENTITY_LOCK_NAMESPACE,
     requestKey,
-  ]);
+  });
 }
 
 function validateRegistration(
@@ -2494,6 +2529,18 @@ function postgresCode(error: unknown): string | undefined {
 function translatePostingError(error: unknown): unknown {
   if (error instanceof InventoryPostingError) return error;
   const code = postgresCode(error);
+  if (code === '55P03') {
+    return postingError(
+      'INVENTORY_POSTING_LOCK_TIMEOUT',
+      `a required posting lock was not acquired within ${String(inventoryPostingLockTimeoutMilliseconds)} ms`,
+      {
+        lockTimeoutMilliseconds: String(
+          inventoryPostingLockTimeoutMilliseconds,
+        ),
+        sqlstate: code,
+      },
+    );
+  }
   if (code) {
     return postingError(
       'INVENTORY_POSTING_STORAGE_REJECTED',

@@ -237,3 +237,8 @@ How to apply: when behavior adds a read or write, cut a new exhaustive dependenc
 Date: 2026-07-30
 Why: Different-stock G3-P3 commands could share a request key, both observe no receipt, then expose a generic receipt constraint failure for the loser.
 How to apply: after all domain locks, acquire a scoped request-key lock before receipt lookup and prove one commit, one typed conflict, and no loser evidence under real concurrency. See `docs/execution/packets/G3-P3.md`.
+
+## Bound blocking locks in production and their controls
+Date: 2026-07-30
+Why: G3-P3's matrix hung behind an idle lock holder in an acyclic wait chain, so PostgreSQL's deadlock detector had no cycle to break and neither the product nor its control could make progress.
+How to apply: keep deliberate blocking semantics, but set an explicit lock timeout, translate it to a domain-typed concurrency error, and make every real lock control assert the database timeout rather than an absence of progress. See `docs/execution/packets/G3-P3.md`.
