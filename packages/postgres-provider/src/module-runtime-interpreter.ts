@@ -219,11 +219,7 @@ export class PostgresModuleRuntimeInterpreter
         async (client) => {
           const storage = await loadPinnedStorageTarget(client, request);
           return withModuleRuntimeRole(client, () =>
-            executeQueryOnClient(
-              client,
-              storage,
-              request,
-            ),
+            executeQueryOnClient(client, storage, request),
           );
         },
       );
@@ -707,8 +703,7 @@ async function executeQueryOnClient(
   client: PoolClient,
   storage: StorageTargetPayloadV1,
   request:
-    | SemanticAggregateQueryExecutionRequest
-    | SemanticQueryExecutionRequest,
+    SemanticAggregateQueryExecutionRequest | SemanticQueryExecutionRequest,
 ): Promise<SemanticAggregateResultEnvelope | SemanticQueryResultEnvelope> {
   const {
     arguments: argumentValue,
@@ -2690,7 +2685,9 @@ async function verifyLegalEntityReadScope(
     [[...legalEntityIds]],
   );
   const existingIds = new Set(
-    result.rows.map((row) => requiredUuid(row.legal_entity_id, 'legalEntityId')),
+    result.rows.map((row) =>
+      requiredUuid(row.legal_entity_id, 'legalEntityId'),
+    ),
   );
   const missingId = legalEntityIds.find(
     (legalEntityId) => !existingIds.has(legalEntityId),

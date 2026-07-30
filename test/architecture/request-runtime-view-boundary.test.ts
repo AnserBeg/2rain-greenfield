@@ -160,16 +160,10 @@ test('issued legal-entity read scope is generic, explicit, and complete across r
     [...interpreter.matchAll(/appendLegalEntityReadScopePredicate\(/gu)]
       .length >= 7,
   );
-  assert.match(
-    savedFilters,
-    /this\.#requiredFallback\(\)\.execute\(request\)/,
-  );
+  assert.match(savedFilters, /this\.#requiredFallback\(\)\.execute\(request\)/);
   assert.match(savedFilters, /return fallback\.executeAggregate\(request\)/);
   assert.doesNotMatch(savedFilters, /FROM north_star_module/u);
-  assert.doesNotMatch(
-    requestContext,
-    /set_config\('north_star\.legal_entity/u,
-  );
+  assert.doesNotMatch(requestContext, /set_config\('north_star\.legal_entity/u);
   assert.match(
     compiler,
     /legalEntity\?: \{[\s\S]*familyClassification: 'entityOwned'/u,

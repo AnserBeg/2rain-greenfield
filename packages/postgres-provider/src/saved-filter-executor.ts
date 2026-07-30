@@ -128,9 +128,9 @@ export class PostgresSavedFilterExecutor
     if ('arguments' in request) {
       return this.#isSavedFilterQuery(request.definition.queryId)
         ? this.#executeQuery(request)
-        // Forward the exact execution request: issued legal-entity scope is a
-        // capability, so reconstructing a caller-settable substitute is invalid.
-        : this.#requiredFallback().execute(request);
+        : // Forward the exact execution request: issued legal-entity scope is a
+          // capability, so reconstructing a caller-settable substitute is invalid.
+          this.#requiredFallback().execute(request);
     }
     return this.#isSavedFilterOperation(request.definition.operationId)
       ? this.#executeOperation(request)

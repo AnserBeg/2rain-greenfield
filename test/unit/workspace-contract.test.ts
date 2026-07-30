@@ -3,9 +3,7 @@ import test from 'node:test';
 
 import { platformContract } from '../../packages/canonical-model/src/index.js';
 import type { StorageTargetPayloadV1 } from '../../packages/compiler/src/index.js';
-import {
-  legalEntityReadScopeRequirement,
-} from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
+import { legalEntityReadScopeRequirement } from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
 
 test('the scaffold exposes a canonical workspace contract', () => {
   assert.deepEqual(platformContract, {

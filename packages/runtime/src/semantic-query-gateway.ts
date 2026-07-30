@@ -450,8 +450,7 @@ export class SemanticQueryGateway {
           context: trustedContextForRequestRuntimeView(view),
           definition,
           filterPlans: Object.freeze(filterPlans),
-          legalEntityReadScope:
-            executionContext.legalEntityReadScope ?? null,
+          legalEntityReadScope: executionContext.legalEntityReadScope ?? null,
           list: null,
           parameterValues,
           view,
@@ -464,8 +463,7 @@ export class SemanticQueryGateway {
           context: trustedContextForRequestRuntimeView(view),
           definition,
           filterPlans: Object.freeze(filterPlans),
-          legalEntityReadScope:
-            executionContext.legalEntityReadScope ?? null,
+          legalEntityReadScope: executionContext.legalEntityReadScope ?? null,
           list,
           parameterValues,
           view,
