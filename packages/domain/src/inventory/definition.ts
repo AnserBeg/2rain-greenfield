@@ -911,22 +911,10 @@ function surfaces(
     readonly [string, string, readonly string[], 'form' | 'list' | 'record']
   > = [
     ['list', 'list', ['title', 'dataGrid'], 'list'],
-    [
-      'detail',
-      'record',
-      ['breadcrumb', 'titleStatus', 'commandBar', 'keyFacts'],
-      'record',
-    ],
+    ['detail', 'record', ['breadcrumb', 'titleStatus', 'keyFacts'], 'record'],
     ...(readOnly
       ? []
-      : ([
-          [
-            'form',
-            'record',
-            ['breadcrumb', 'titleStatus', 'commandBar', 'sections'],
-            'form',
-          ],
-        ] as const)),
+      : ([['form', 'record', ['breadcrumb', 'titleStatus'], 'form']] as const)),
   ];
   return descriptors.map(([suffix, archetype, slots, surfaceRole]) => ({
     archetype,

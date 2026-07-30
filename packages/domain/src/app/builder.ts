@@ -1,4 +1,5 @@
 import { catalogModuleDefinition } from '../catalog/definition.js';
+import { inventoryModuleDefinition } from '../inventory/definition.js';
 import { locationModuleDefinition } from '../location/definition.js';
 import { partyModuleDefinition } from '../party/definition.js';
 
@@ -23,38 +24,41 @@ type CollectionName =
 
 /**
  * The product application is one canonical package containing the same Party,
- * Catalog, and Location definitions their standalone harnesses compile. The
- * factories are instantiated under one package namespace; no definition body
- * is copied and no separately namespaced package is composed.
+ * Catalog, Location, and Inventory definitions their standalone harnesses
+ * compile. The factories are instantiated under one package namespace; no
+ * definition body is copied and no separately namespaced package is composed.
  */
 export function composedApplicationDefinition(): Record<string, unknown> {
   const definitions = [
     partyModuleDefinition(APPLICATION_NAMESPACE),
     catalogModuleDefinition(APPLICATION_NAMESPACE),
     locationModuleDefinition(APPLICATION_NAMESPACE),
+    inventoryModuleDefinition(APPLICATION_NAMESPACE),
   ];
-  const [party, catalog, location] = definitions;
-  if (!party || !catalog || !location) {
-    throw new TypeError('the composed application requires three modules');
+  const [party, catalog, location, inventory] = definitions;
+  if (!party || !catalog || !location || !inventory) {
+    throw new TypeError('the composed application requires four modules');
   }
 
-  const modules = [party, catalog, location].map((definition, index) => {
-    const [module] = collection(definition, 'modules');
-    if (!isRecord(module)) {
-      throw new TypeError('a composed module definition is missing');
-    }
-    return {
-      ...module,
-      orderKey: (index + 1) * 10,
-      ownerPackageId: packageId,
-    };
-  });
+  const modules = [party, catalog, location, inventory].map(
+    (definition, index) => {
+      const [module] = collection(definition, 'modules');
+      if (!isRecord(module)) {
+        throw new TypeError('a composed module definition is missing');
+      }
+      return {
+        ...module,
+        orderKey: (index + 1) * 10,
+        ownerPackageId: packageId,
+      };
+    },
+  );
 
   const sharedCapability = collection(party, 'capabilityRequirements')[0];
   if (!isRecord(sharedCapability)) {
     throw new TypeError('the standard surface capability is missing');
   }
-  for (const definition of [catalog, location]) {
+  for (const definition of [catalog, location, inventory]) {
     const capability = collection(definition, 'capabilityRequirements')[0];
     if (JSON.stringify(capability) !== JSON.stringify(sharedCapability)) {
       throw new TypeError('module surface capability requirements diverged');

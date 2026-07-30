@@ -30,6 +30,7 @@ import { escapeHtml, shortIdentity } from './html.js';
 import {
   readCompiledSurfaceManifest,
   readCompiledSurfaceDataBinding,
+  surfaceSupportsMutation,
   SurfaceProjectionError,
   type CompiledNavigationEntry,
   type CompiledNavigationTree,
@@ -68,6 +69,19 @@ export function renderSurfaceRuntime(
   assertRequestRuntimeView(view);
   const selection = selectSurface(view, requestUrl);
   if ('statusCode' in selection) return selection;
+  if (
+    selection.selected.surfaceRole === 'form' &&
+    !surfaceSupportsMutation(selection.selected)
+  ) {
+    return renderSelectedSurface(
+      view,
+      selection,
+      { code: 'SURFACE_GRAMMAR_INCOMPLETE', status: 'DIAGNOSTIC' },
+      null,
+      [],
+      422,
+    );
+  }
   return renderSelectedSurface(
     view,
     selection,
@@ -87,6 +101,19 @@ export async function renderSurfaceRuntimeWithData(
   assertRequestRuntimeView(view);
   const selection = selectSurface(view, requestUrl);
   if ('statusCode' in selection) return selection;
+  if (
+    selection.selected.surfaceRole === 'form' &&
+    !surfaceSupportsMutation(selection.selected)
+  ) {
+    return renderSelectedSurface(
+      view,
+      selection,
+      { code: 'SURFACE_GRAMMAR_INCOMPLETE', status: 'DIAGNOSTIC' },
+      feedback,
+      [],
+      422,
+    );
+  }
   let binding: CompiledSurfaceDataBinding;
   try {
     binding = readCompiledSurfaceDataBinding(view, selection.selected);
@@ -447,9 +474,11 @@ function surfaceAllowsIntent(
   intent: SurfaceOperationIntent,
 ): boolean {
   return surface.surfaceRole === 'form'
-    ? intent === 'create' || intent === 'update'
+    ? surfaceSupportsMutation(surface) &&
+        (intent === 'create' || intent === 'update')
     : surface.surfaceRole === 'record'
-      ? intent === 'archive' || intent === 'restore'
+      ? surfaceSupportsMutation(surface) &&
+        (intent === 'archive' || intent === 'restore')
       : false;
 }
 

@@ -8,7 +8,10 @@ import type {
 
 import { escapeHtml, shortIdentity } from './html.js';
 import { sharedListView } from './list-runtime.js';
-import { readCompiledSurfaceDataBinding } from './surface-contract.js';
+import {
+  readCompiledSurfaceDataBinding,
+  surfaceSupportsMutation,
+} from './surface-contract.js';
 import type {
   CompiledSurfaceDefinition,
   CompiledSurfaceOperationBinding,
@@ -47,7 +50,8 @@ export type SurfaceDataRenderState =
         | 'QUERY_NOT_FOUND'
         | 'QUERY_PERMISSION_DENIED'
         | 'QUERY_UNAVAILABLE'
-        | 'QUERY_UNSUPPORTED';
+        | 'QUERY_UNSUPPORTED'
+        | 'SURFACE_GRAMMAR_INCOMPLETE';
       readonly status: 'DIAGNOSTIC';
     };
 
@@ -549,6 +553,10 @@ function dataDiagnostic(
       'Capability unavailable',
       'The pinned release does not provide this semantic data capability.',
     ],
+    SURFACE_GRAMMAR_INCOMPLETE: [
+      'Surface incomplete',
+      'The pinned release does not declare the complete grammar required for this screen.',
+    ],
   } as const;
   const [title, message] = copy[code];
   return diagnostic(title, message, code);
@@ -606,6 +614,7 @@ function relatedSurface(
       if (candidate.lifecycle !== 'active' || candidate.surfaceRole !== role) {
         return false;
       }
+      if (role === 'form' && !surfaceSupportsMutation(candidate)) return false;
       try {
         return (
           readCompiledSurfaceDataBinding(context.view, candidate).query
