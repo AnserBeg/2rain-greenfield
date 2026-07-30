@@ -15,7 +15,7 @@ export const PRODUCT_SURFACE_GRAMMAR_BASELINE = Object.freeze([
     moduleId: 'northstar.inventory:module.inventory',
     packageId: 'northstar.inventory:package.inventory',
     sourceDirectory: 'inventory',
-    violationCount: 71,
+    violationCount: 104,
   }),
   Object.freeze({
     moduleId: 'northstar.location:module.location',

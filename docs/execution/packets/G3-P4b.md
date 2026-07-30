@@ -50,6 +50,13 @@ helpers derive the ordinary generated storage/query/operation/surface
 scaffolding from the entity list; this packet did not alter the surface
 grammar or add a UI concern.
 
+The reviewed surface-grammar debt increase is 33: 32 ordinary per-entity
+violations (16 each for `stock_count` and `stock_count_line`) plus one new
+`SG008_COMPACT_NAVIGATION_BUDGET` violation as Inventory grows from five to
+seven compact-navigation lists. G3-P6c owns that SG008 debt and is expected to
+remove it when navigation grouping lands; the two-way baseline ratchet will
+then require Inventory's recorded count to move down again.
+
 ## Posting behavior
 
 `postStockCount` validates one closed session and line set, then delegates to
