@@ -45,6 +45,7 @@ import {
   type InventoryAdjustmentLineV1,
   type InventoryAdjustmentPostingCommandV1,
   type InventoryMovementOrderEntryV1,
+  type InventoryPostingResultV1,
   type InventoryPostingRegistrationV1,
   type InventoryTransferLineV1,
   type InventoryTransferPostingCommandV1,
@@ -140,6 +141,7 @@ interface TestEntityBinding {
 }
 
 interface TestStorageBinding {
+  companionMovementIdColumn: string;
   companionTableName: string;
   item: TestEntityBinding;
   legalEntity: TestEntityBinding;
@@ -245,7 +247,7 @@ test(
 
       await assertBaseUnitBound(testContext, database);
       await assertSameInstantMovementIdTieBreak(testContext, database);
-      await assertQuantityOnlyEvidence(testContext, database, posted);
+      await assertQuantityOnlyEvidence(testContext, database, posted, 1);
       await assert.rejects(
         database.service.postAdjustment(database.context, database.actor, {
           ...first,
@@ -1066,6 +1068,7 @@ async function assertTransferPosting(
       sourceLine: '1:out',
     },
   ]);
+  await assertQuantityOnlyEvidence(testContext, database, posted, 2);
 
   const requestReplay = await database.service.postTransfer(
     database.context,
@@ -2751,11 +2754,23 @@ function testStorageBinding(
   };
   const item = bind('item');
   const movement = bind('inventory_movement');
-  assert.ok(movement.entity.factStorage);
+  const factStorage = movement.entity.factStorage;
+  assert.ok(factStorage);
+  const companionMovementIdIndex =
+    factStorage.companion.movementForeignKey.targetColumns.indexOf(
+      movement.recordIdColumn,
+    );
+  assert.notEqual(companionMovementIdIndex, -1);
+  const companionMovementIdColumn =
+    factStorage.companion.movementForeignKey.sourceColumns[
+      companionMovementIdIndex
+    ];
+  assert.ok(companionMovementIdColumn);
   const periodLock = bind('inventory_period_lock');
   assert.ok(periodLock.entity.periodLock);
   return {
-    companionTableName: movement.entity.factStorage.companion.physicalTableName,
+    companionMovementIdColumn,
+    companionTableName: factStorage.companion.physicalTableName,
     item,
     legalEntity: bind('legal_entity'),
     location: bind('location'),
@@ -3079,15 +3094,22 @@ async function assertMovementCannotUpdate(
 async function assertQuantityOnlyEvidence(
   testContext: TestContext,
   database: PostingDatabase,
-  result: Awaited<
-    ReturnType<PostgresInventoryPostingService['postAdjustment']>
-  >,
+  result: InventoryPostingResultV1,
+  expectedMovementCount: number,
 ): Promise<void> {
-  const movement = await database.adminPool.query<{ document: unknown }>(
+  assert.equal(result.movements.length, expectedMovementCount);
+  const movementIds = result.movements.map((movement) => movement.movementId);
+  const movements = await database.adminPool.query<{ document: unknown }>(
     `SELECT to_jsonb(fact) AS document
        FROM ${table(database.binding, database.binding.movement)} AS fact
-      WHERE record_id=$1`,
-    [result.movements[0]!.movementId],
+      WHERE ${quoted(database.binding.movement.recordIdColumn)}=ANY($1::uuid[])`,
+    [movementIds],
+  );
+  const companions = await database.adminPool.query<{ document: unknown }>(
+    `SELECT to_jsonb(companion) AS document
+       FROM ${quoted(database.binding.schemaName)}.${quoted(database.binding.companionTableName)} AS companion
+      WHERE ${quoted(database.binding.companionMovementIdColumn)}=ANY($1::uuid[])`,
+    [movementIds],
   );
   const audit = await database.adminPool.query<{ document: unknown }>(
     `SELECT changes AS document
@@ -3105,13 +3127,21 @@ async function assertQuantityOnlyEvidence(
       WHERE outbox_id=$1`,
     [result.trust.outboxId],
   );
-  for (const document of [
-    movement.rows[0]?.document,
+  assert.equal(movements.rows.length, expectedMovementCount);
+  assert.equal(companions.rows.length, expectedMovementCount);
+  assert.equal(audit.rows.length, 1);
+  assert.equal(event.rows.length, 1);
+  assert.equal(outbox.rows.length, 1);
+  const evidenceDocuments = [
+    ...movements.rows.map((row) => row.document),
+    ...companions.rows.map((row) => row.document),
     result,
     audit.rows[0]?.document,
     event.rows[0]?.document,
     outbox.rows[0]?.document,
-  ]) {
+  ];
+  assert.equal(evidenceDocuments.length, expectedMovementCount * 2 + 4);
+  for (const document of evidenceDocuments) {
     assert.ok(document !== undefined);
     assertNoMonetaryKeys(document);
   }
