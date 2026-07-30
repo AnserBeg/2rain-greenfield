@@ -827,7 +827,9 @@ test('v3 inventory reads require issued legal-entity scope and preserve generic 
       applicationInventoryId(INVENTORY_IDS.entityIds.periodLock),
   );
   assert.ok(periodLock?.periodLock);
+  assert.ok(periodLock.legalEntity?.column);
   const periodLockStorage = periodLock.periodLock;
+  const periodLockLegalEntityColumn = periodLock.legalEntity.column;
   const legalEntityMaster = storage.entities.find(
     (entity) => entity.legalEntityMaster !== undefined,
   );
@@ -965,23 +967,45 @@ test('v3 inventory reads require issued legal-entity scope and preserve generic 
 
         const provisioned = await pool.query<{
           closed_through: Date | null;
+          legal_entity_id: string;
           record_id: string;
           revision: string;
         }>(
-          `SELECT ${periodLock.recordIdentity.column} AS record_id,
+          `SELECT ${periodLockLegalEntityColumn} AS legal_entity_id,
+                  ${periodLock.recordIdentity.column} AS record_id,
                   ${periodLock.optimisticRevision.column}::text AS revision,
                   ${periodLockStorage.closedThroughColumn} AS closed_through
              FROM north_star_module.${periodLock.physicalTableName}
             WHERE tenant_id = $1 AND environment_id = $2`,
           [tenant, environment],
         );
-        assert.equal(provisioned.rowCount, 1);
-        assert.equal(provisioned.rows[0]?.revision, '1');
-        assert.equal(provisioned.rows[0]?.closed_through, null);
-        const recordId = provisioned.rows[0]!.record_id;
-        assert.ok(
-          recordId === legalEntityId || recordId === secondLegalEntityId,
+        assert.equal(provisioned.rowCount, 2);
+        const locksByLegalEntity = new Map<string, number>();
+        for (const row of provisioned.rows) {
+          locksByLegalEntity.set(
+            row.legal_entity_id,
+            (locksByLegalEntity.get(row.legal_entity_id) ?? 0) + 1,
+          );
+          assert.equal(row.record_id, row.legal_entity_id);
+          assert.equal(row.revision, '1');
+          assert.equal(row.closed_through, null);
+        }
+        assert.deepEqual(
+          [...locksByLegalEntity.entries()].toSorted(([left], [right]) =>
+            left < right ? -1 : left > right ? 1 : 0,
+          ),
+          [
+            [legalEntityId, 1],
+            [secondLegalEntityId, 1],
+          ].toSorted(([left], [right]) =>
+            left < right ? -1 : left > right ? 1 : 0,
+          ),
         );
+        assert.equal(
+          new Set(provisioned.rows.map((row) => row.record_id)).size,
+          2,
+        );
+        const recordId = legalEntityId;
 
         const policy = new AllowPolicy();
         const interpreter = new PostgresModuleRuntimeInterpreter(
