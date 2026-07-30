@@ -1,8 +1,7 @@
 # ADR-0031: The legal-entity query operand and canonical language v4
 
 Date: 2026-07-30
-Status: accepted (packet `Q1-P5`; the gateway half is explicitly deferred — see "What
-this ADR does not decide")
+Status: accepted (packet `Q1-P5`)
 Tier: Critical (review per `review-tiers`)
 
 ## Context
@@ -148,27 +147,28 @@ reasons:
    `NO_SUCH_REGISTERED_QUERY`, a different code; the probe requires the specific refusal,
    so a query that silently vanished from the catalog fails rather than passes.
 
+### 6. One authority per query at the gateway
+
+When the compiled query declares `legalEntityScope`, the gateway issues the scope from the
+caller's argument. A separately supplied `SemanticQueryExecutionContext.legalEntityReadScope`
+for that same query is **refused, not ranked**: two answers to one question is exactly the
+second-authority failure this ADR spends its other rulings avoiding. Queries that declare
+no operand keep Q1-P4's execution-context path unchanged.
+
+No port was introduced. The gateway calls `issueLegalEntityReadScope` directly.
+
 ## What this ADR does not decide
 
-**The gateway half is not implemented in this packet, by orchestrator ruling.**
-`packages/runtime/src/semantic-query-gateway.ts` is concurrently held by `Q1-P4`, which
-adds a `SemanticQueryExecutionContext` argument and a `legalEntityReadScope` field to both
-execution requests. Defining an issuance port here would have been an abstraction chosen
-to route around a merge rather than because the gateway needs the seam. The follow-on
-packet rebases onto integrated `Q1-P4` and calls its real issuer.
+The following are **owed and not shipped**:
 
-Consequently the following are **owed and not shipped**:
-
-- gateway binding of the declared operand to the bound argument, and issuance from an
-  accepted kernel receipt;
-- the typed omission refusal at the gateway, and therefore the executable
-  release-verification probe ruled above;
-- five `schemaVersion !== 'v3'` comparisons in `semantic-query-gateway.ts` (`:926`,
-  `:958`, `:974`, `:1174`, `:1197`) that reject v4 aggregate catalog nodes. This is
-  fail-closed and harmless today because no package is at v4, and it must be widened
-  before one is;
-- `release-verification-service.ts`, which reads only `get|list|resolve|search` contracts
-  and must learn the probe;
+- five `schemaVersion !== 'v3'` comparisons in `semantic-query-gateway.ts` that reject v4
+  aggregate catalog nodes. Fail-closed and harmless today because no package is at v4;
+  must be widened before one is. The row-query path this packet exercises does not reach
+  them;
+- `release-verification-service.ts:691-700`, whose `VerificationQueryContract` covers only
+  `get|list|resolve|search` and must learn to run the omission probe ruled in §5. The
+  probe's refusal is implemented and controlled at the gateway; the verification call site
+  is not yet wired;
 - migrating any package to v4, which is the artifact event, deliberately deferred exactly
   as `4c` was deferred from `4a`/`4b`.
 
