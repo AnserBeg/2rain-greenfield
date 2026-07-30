@@ -60,12 +60,12 @@ const identities = new Map<string, AuthenticatedIdentity>([
   ['human-b', identity(tenantB, environmentB, humanB)],
 ]);
 
-test('migrations 0006-0015 upgrade accepted G1 and converge with the checked-in snapshot', async () => {
+test('migrations 0006-0016 upgrade accepted G1 and converge with the checked-in snapshot', async () => {
   await withEphemeralPostgres('trust-upgrade', async ({ pool }) => {
     const migrations = await loadMigrations(checkedInMigrations);
     assert.equal(
       migrations.at(-1)?.name,
-      '0015_inventory_storage_foundation.sql',
+      '0016_inventory_posting_receipt_digest_version.sql',
     );
     const admin = await pool.connect();
     try {
@@ -92,6 +92,7 @@ test('migrations 0006-0015 upgrade accepted G1 and converge with the checked-in 
         '0013_release_verification_evidence.sql',
         '0014_archive_excluding_module_uniqueness.sql',
         '0015_inventory_storage_foundation.sql',
+        '0016_inventory_posting_receipt_digest_version.sql',
       ]);
       assert.equal(upgraded.verified.length, migrations.length);
       await assertSchemaMatchesSnapshot(admin, checkedInSnapshot);
