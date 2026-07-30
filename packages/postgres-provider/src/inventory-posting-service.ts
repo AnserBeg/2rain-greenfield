@@ -293,16 +293,16 @@ export class PostgresInventoryPostingService {
     const client = await this.pool.connect();
     let transactionOpen = false;
     try {
-      // Session-scoped so the stock lock remains the first operation after
-      // BEGIN. RESET ALL in finally prevents the budget leaking through the
-      // pool. Every later PostgreSQL lock acquisition is bounded as well.
-      await client.query("SELECT set_config('lock_timeout', $1::text, false)", [
-        `${String(inventoryPostingLockTimeoutMilliseconds)}ms`,
-      ]);
       await client.query('BEGIN');
       transactionOpen = true;
-      // Load-bearing placement: no query and no caller savepoint occurs between
-      // BEGIN and this acquisition.
+      // Transaction-local so the bounded wait cannot leak through the pool.
+      // This precedes every lock acquisition and caller savepoint, preserving
+      // the serializer's top-level transaction placement contract.
+      await client.query("SELECT set_config('lock_timeout', $1::text, true)", [
+        `${String(inventoryPostingLockTimeoutMilliseconds)}ms`,
+      ]);
+      // Load-bearing placement: no posting work, lock acquisition, or caller
+      // savepoint occurs before this acquisition.
       await acquireStockIdentityLocks(client, identities);
       await assertRuntimeLogin(client);
       await setTrustedContext(client, context);

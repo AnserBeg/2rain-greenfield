@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import test, { type TestContext } from 'node:test';
 
 import pg from 'pg';
-import type { Pool, PoolClient } from 'pg';
+import type { Pool, PoolClient, PoolConfig } from 'pg';
 
 import {
   CANONICALIZATION_PROFILE_VERSION,
@@ -108,6 +108,7 @@ interface PostingDatabase {
   adminPool: Pool;
   approvedActor: Awaited<ReturnType<TrustedActorEnvelopeIssuer['issue']>>;
   binding: TestStorageBinding;
+  connection: PoolConfig;
   context: TrustedRequestContext;
   runtimePool: Pool;
   registration: InventoryPostingRegistrationV1;
@@ -649,6 +650,7 @@ test(
         await trustCountByRequest(database, database.context.requestId),
         trustBeforeClosed,
       );
+      await assertPostingLockTimeoutIsTransactionLocal(testContext, database);
     });
   },
 );
@@ -861,6 +863,47 @@ async function assertProtectedReadRaces(
   await assertConcurrentBaseUnitChange(testContext, database);
   await assertConcurrentPeriodClose(testContext, database);
   await assertConcurrentChildInsert(testContext, database);
+}
+
+async function assertPostingLockTimeoutIsTransactionLocal(
+  testContext: TestContext,
+  database: PostingDatabase,
+): Promise<void> {
+  const posting = command({
+    legalEntityId: legalAllow,
+    sourceId: 'posting-lock-timeout-scope',
+  });
+  await seedDraft(database, posting);
+  const singleConnectionPool = new pg.Pool({
+    ...database.connection,
+    application_name: `${postingApplicationName}-lock-timeout-scope`,
+    max: 1,
+    user: 'north_star_runtime',
+  });
+  try {
+    const before = await borrowLockTimeoutSetting(singleConnectionPool);
+    assert.equal(before.lockTimeout, '0');
+    const service = new PostgresInventoryPostingService(
+      singleConnectionPool,
+      database.registration,
+      { currentInstant: () => recordedAt },
+    );
+    const posted = await service.postAdjustment(
+      database.context,
+      database.actor,
+      posting,
+    );
+    assert.equal(posted.replayed, false);
+
+    const after = await borrowLockTimeoutSetting(singleConnectionPool);
+    assert.equal(after.backendPid, before.backendPid);
+    assert.equal(after.lockTimeout, before.lockTimeout);
+    testContext.diagnostic(
+      `posting-lock-timeout-scope: backend ${String(after.backendPid)} returned to default lock_timeout=${after.lockTimeout}`,
+    );
+  } finally {
+    await singleConnectionPool.end();
+  }
 }
 
 async function assertBoundedConcurrencyControl(
@@ -1518,6 +1561,7 @@ async function withPostingDatabase(
         adminPool: database.pool,
         approvedActor,
         binding,
+        connection: database.connection,
         context,
         registration,
         runtimePool,
@@ -2213,8 +2257,6 @@ async function installLineRaceBlocker(
        RETURNS trigger LANGUAGE plpgsql AS $body$
        BEGIN
          IF NEW.${quoted(sourceIdColumn)} = TG_ARGV[0] THEN
-           -- This control exercises the digest-conflict path, not the lock-timeout path, so let its barrier complete.
-           PERFORM set_config('lock_timeout', '30s', true);
            PERFORM pg_advisory_xact_lock(${String(lineRaceLockNamespace)}, ${String(lineRaceLockKey)});
          END IF;
          RETURN NEW;
@@ -2392,6 +2434,25 @@ async function holdsExactAdvisoryLock(
 
 function unsignedInt32(value: number): number {
   return value < 0 ? value + 2 ** 32 : value;
+}
+
+async function borrowLockTimeoutSetting(
+  pool: Pool,
+): Promise<{ backendPid: number; lockTimeout: string }> {
+  const client = await pool.connect();
+  try {
+    const result = await client.query<{
+      backendPid: number;
+      lockTimeout: string;
+    }>(
+      `SELECT pg_backend_pid() AS "backendPid",
+              current_setting('lock_timeout') AS "lockTimeout"`,
+    );
+    assert.equal(result.rows.length, 1);
+    return result.rows[0]!;
+  } finally {
+    client.release();
+  }
 }
 
 async function beginBoundedControlTransaction(
