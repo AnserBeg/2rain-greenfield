@@ -80,8 +80,13 @@ export function planStockIdentityLocks(
 /**
  * Acquires every affected stock identity inside the caller's open posting
  * transaction. The function never starts, commits, retries, or probes a lock.
- * Blocking is the concurrency contract; transaction completion releases every
- * acquired lock.
+ * Blocking is the concurrency contract.
+ *
+ * The caller MUST invoke this immediately after BEGIN, before establishing any
+ * caller savepoint. PostgreSQL releases transaction-level locks acquired after
+ * a savepoint when the caller rolls back to that savepoint, even though the
+ * outer transaction remains open. Savepoints established after this function
+ * returns are safe: the locks predate them. G3-P3 owns this top-level placement.
  *
  * A SAVEPOINT is deliberately used as a transaction-contract assertion.
  * PostgreSQL rejects it in autocommit mode, preventing a transaction-scoped
@@ -89,7 +94,7 @@ export function planStockIdentityLocks(
  * preflight and reads no posting state.
  */
 export async function acquireStockIdentityLocks(
-  transaction: PoolClient,
+  topLevelTransaction: PoolClient,
   identities: readonly ScopedStockIdentityV1[],
 ): Promise<readonly StockIdentityLockTargetV1[]> {
   const targets = planStockIdentityLocks(identities);
@@ -97,10 +102,12 @@ export async function acquireStockIdentityLocks(
     throw new TypeError('at least one stock identity is required');
   }
 
-  await transaction.query(`SAVEPOINT ${transactionContractSavepoint}`);
-  await transaction.query(`RELEASE SAVEPOINT ${transactionContractSavepoint}`);
+  await topLevelTransaction.query(`SAVEPOINT ${transactionContractSavepoint}`);
+  await topLevelTransaction.query(
+    `RELEASE SAVEPOINT ${transactionContractSavepoint}`,
+  );
   for (const target of targets) {
-    await transaction.query(
+    await topLevelTransaction.query(
       'SELECT pg_advisory_xact_lock($1::integer, $2::integer)',
       [STOCK_IDENTITY_LOCK_NAMESPACE, target.identityKey],
     );

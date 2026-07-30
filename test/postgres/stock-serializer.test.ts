@@ -414,6 +414,35 @@ test(
           ),
           undefined,
         );
+
+        // Executed contract red: a caller savepoint created before the
+        // serializer would let ROLLBACK TO release its lock without ending the
+        // outer transaction. G3-P3 must therefore acquire immediately after
+        // BEGIN; the production helper documents that placement explicitly.
+        await stockClient.query('BEGIN');
+        const transactionIdBefore = await currentTransactionId(stockClient);
+        await stockClient.query('SAVEPOINT caller_scope');
+        await acquireStockIdentityLocks(stockClient, [stockA]);
+        assert.equal(
+          (await advisoryLock(observer, stockPid, target.identityKey, true))
+            ?.granted,
+          true,
+        );
+        await stockClient.query('ROLLBACK TO SAVEPOINT caller_scope');
+        const transactionIdAfter = await currentTransactionId(stockClient);
+        assert.equal(transactionIdAfter, transactionIdBefore);
+        assert.equal(
+          await advisoryLock(observer, stockPid, target.identityKey, true),
+          undefined,
+        );
+        context.diagnostic(
+          `caller savepoint red: ${JSON.stringify({
+            lockAfterRollback: false,
+            lockBeforeRollback: true,
+            outerTransactionId: transactionIdAfter,
+          })}`,
+        );
+        await stockClient.query('COMMIT');
       } finally {
         await rollbackQuietly(stockClient);
         await rollbackQuietly(bigintClient);
@@ -1012,6 +1041,15 @@ async function backendPid(client: PoolClient): Promise<number> {
   const pid = result.rows[0]?.pid;
   assert.ok(pid);
   return pid;
+}
+
+async function currentTransactionId(client: PoolClient): Promise<string> {
+  const result = await client.query<{ transactionId: string }>(
+    'SELECT txid_current()::text AS "transactionId"',
+  );
+  const transactionId = result.rows[0]?.transactionId;
+  assert.ok(transactionId);
+  return transactionId;
 }
 
 interface ObservedAdvisoryLock {
