@@ -5,7 +5,7 @@ export const INVENTORY_CONTRACT_RELEASE_VERSION =
 export const STOCK_DIMENSION_SET_ID =
   'northstar.stock-dimension-set/v1' as const;
 export const INVENTORY_POSTING_DEPENDENCY_SET_ROOT =
-  '7ef50e86732818a0ec4ec2a03a001066ac59408ea260c65bf018646e4377a63d' as const;
+  '35fc38eaca7fbe47d8da5030ceefce8211a2194a25d233c45282ef0450d553ad' as const;
 export const LEGAL_ENTITY_FAMILY_CONTRACT_VERSION =
   'northstar.legal-entity-family-contract/v1' as const;
 
@@ -181,7 +181,7 @@ export interface InventoryContractDefinitionV1 {
     readonly dependencies: readonly InventoryAuthoritativeDependencyV1[];
     readonly exhaustiveByConstruction: true;
     readonly undeclaredAccess: 'compileFailure';
-    readonly version: 1;
+    readonly version: 3;
   };
   readonly baseUnit: {
     readonly bindingFact: 'firstPostedMovement';
@@ -410,6 +410,7 @@ const AUTHORITATIVE_DEPENDENCIES = Object.freeze([
     'read',
     'inventory',
   ),
+  dependency('northstar.inventory:transaction_line', 'read', 'inventory'),
   dependency(
     'northstar.inventory:transaction.state',
     'transition',
@@ -417,6 +418,7 @@ const AUTHORITATIVE_DEPENDENCIES = Object.freeze([
   ),
   dependency('northstar.inventory:movement', 'append', 'inventory'),
   dependency('northstar.trust:semantic_operation_receipt', 'read', 'trust'),
+  dependency('northstar.trust:outbox_event', 'read', 'trust'),
   dependency('northstar.trust:operation_invocation', 'append', 'trust'),
   dependency('northstar.trust:business_change_document', 'append', 'trust'),
   dependency('northstar.trust:domain_event', 'append', 'trust'),
@@ -464,7 +466,7 @@ export const INVENTORY_CONTRACT_V1 = Object.freeze({
     dependencies: AUTHORITATIVE_DEPENDENCIES.map((entry) => ({ ...entry })),
     exhaustiveByConstruction: true,
     undeclaredAccess: 'compileFailure',
-    version: 1,
+    version: 3,
   },
   baseUnit: {
     bindingFact: 'firstPostedMovement',

@@ -222,3 +222,23 @@ Date: 2026-07-28
 Status: Unadjudicated pending acceptance of packet 1d.
 Why: One business key emitted a semantic unique index and a case-insensitive index; changing only one left the other invisibly enforcing the old archive scope.
 How to apply: before changing uniqueness semantics, enumerate and test every physical index the key produces; see `docs/execution/packets/1d.md`.
+
+## Lock mutable authorities through the decisive write
+Date: 2026-07-30
+Why: G3-P3 validated draft, base-unit, and period rows without locks, so a concurrent committed change could invalidate the posted fact after validation.
+How to apply: acquire row locks after the domain serializer and retain them through the decisive write; cover child phantoms with a captured complete-set digest rechecked by the transition. See `docs/execution/packets/G3-P3.md`.
+
+## Version every newly consumed authority
+Date: 2026-07-30
+Why: G3-P3 natural replay read the trust outbox while dependency protocol v2 declared only outbox append authority.
+How to apply: when behavior adds a read or write, cut a new exhaustive dependency protocol/root and record before/after; never widen frozen history in place. See `docs/execution/packets/G3-P3.md`.
+
+## Serialize idempotency before reading its receipt
+Date: 2026-07-30
+Why: Different-stock G3-P3 commands could share a request key, both observe no receipt, then expose a generic receipt constraint failure for the loser.
+How to apply: after all domain locks, acquire a scoped request-key lock before receipt lookup and prove one commit, one typed conflict, and no loser evidence under real concurrency. See `docs/execution/packets/G3-P3.md`.
+
+## Bound blocking locks in production and their controls
+Date: 2026-07-30
+Why: G3-P3's matrix hung behind an idle lock holder in an acyclic wait chain, so PostgreSQL's deadlock detector had no cycle to break and neither the product nor its control could make progress.
+How to apply: keep deliberate blocking semantics, but set an explicit lock timeout, translate it to a domain-typed concurrency error, and make every real lock control assert the database timeout rather than an absence of progress. See `docs/execution/packets/G3-P3.md`.

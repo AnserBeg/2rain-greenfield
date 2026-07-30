@@ -87,6 +87,7 @@ const suiteDefinitions = [
     expectedFiles: [
       'test/postgres/catalog-runtime.test.ts',
       'test/postgres/composed-application.test.ts',
+      'test/postgres/inventory-posting.test.ts',
       'test/postgres/inventory-storage.test.ts',
       'test/postgres/location-runtime.test.ts',
       'test/postgres/migrations.test.ts',
