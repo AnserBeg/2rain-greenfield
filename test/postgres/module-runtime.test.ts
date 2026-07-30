@@ -1284,9 +1284,11 @@ test('v3 inventory reads require issued legal-entity scope and preserve generic 
             legalEntityReadScope: staleScope,
           }),
           (error: unknown) =>
-            error instanceof LegalEntityReadScopeIntegrityError &&
-            error.message ===
+            assertLegalEntityReadScopeIntegrityError(
+              error,
+              movement.entityId,
               'issued legal-entity read scope policy is no longer current',
+            ),
         );
         assert.deepEqual(advancedPolicy.legalEntityAuthorizationCalls, [
           legalEntityId,
@@ -1351,10 +1353,10 @@ test('v3 inventory reads require issued legal-entity scope and preserve generic 
             legalEntityReadScope: copiedScope,
           }),
           (error: unknown) =>
-            assertModuleError(
+            assertLegalEntityReadScopeIntegrityError(
               error,
-              'MODULE_LEGAL_ENTITY_READ_SCOPE_INVALID',
               movement.entityId,
+              'legal-entity read scope must be issued for this request runtime view',
             ),
         );
         const otherView = await issuedCandidateView(
@@ -1377,10 +1379,10 @@ test('v3 inventory reads require issued legal-entity scope and preserve generic 
             legalEntityReadScope: otherViewScope,
           }),
           (error: unknown) =>
-            assertModuleError(
+            assertLegalEntityReadScopeIntegrityError(
               error,
-              'MODULE_LEGAL_ENTITY_READ_SCOPE_INVALID',
               movement.entityId,
+              'legal-entity read scope must be issued for this request runtime view',
             ),
         );
         await assert.rejects(
@@ -3505,6 +3507,18 @@ function assertModuleError(
     message: error.message,
     subjectId: error.subjectId,
   });
+  return true;
+}
+
+function assertLegalEntityReadScopeIntegrityError(
+  error: unknown,
+  subjectId: string,
+  message: string,
+): true {
+  assert.ok(error instanceof LegalEntityReadScopeIntegrityError);
+  assert.equal(error.code, 'LEGAL_ENTITY_READ_SCOPE_INTEGRITY_INVALID');
+  assert.equal(error.subjectId, subjectId);
+  assert.equal(error.message, message);
   return true;
 }
 

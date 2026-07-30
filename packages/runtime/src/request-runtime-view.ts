@@ -197,6 +197,13 @@ export class InvalidLegalEntityReadScopeSelectionError extends Error {
 export class LegalEntityReadScopeIntegrityError extends Error {
   readonly code = 'LEGAL_ENTITY_READ_SCOPE_INTEGRITY_INVALID' as const;
   override readonly name = 'LegalEntityReadScopeIntegrityError';
+
+  constructor(
+    message: string,
+    readonly subjectId: string | null = null,
+  ) {
+    super(message);
+  }
 }
 
 export class LegalEntityReadScopePolicyDeniedError extends Error {
@@ -385,8 +392,17 @@ export async function verifyLegalEntityReadScope(
   gateway: CurrentPolicyGateway,
   value: unknown,
   view: RequestRuntimeView,
+  subjectId: string,
 ): Promise<LegalEntityReadScope> {
-  const legalEntityIds = legalEntityIdsFromIssuedReadScope(value, view);
+  let legalEntityIds: readonly string[];
+  try {
+    legalEntityIds = legalEntityIdsFromIssuedReadScope(value, view);
+  } catch (error) {
+    if (error instanceof LegalEntityReadScopeIntegrityError) {
+      throw new LegalEntityReadScopeIntegrityError(error.message, subjectId);
+    }
+    throw error;
+  }
   const scope = value as LegalEntityReadScope;
   assertNonBlank(scope.policyVersion, 'policyVersion');
 
@@ -407,6 +423,7 @@ export async function verifyLegalEntityReadScope(
     ) {
       throw new LegalEntityReadScopeIntegrityError(
         'current policy version changed while legal-entity scope was verified',
+        subjectId,
       );
     }
     decisionPolicyVersion = decision.policyVersion;
@@ -417,11 +434,13 @@ export async function verifyLegalEntityReadScope(
   if (decisionPolicyVersion !== currentPolicy.policyVersion) {
     throw new LegalEntityReadScopeIntegrityError(
       'current policy version changed while legal-entity scope was verified',
+      subjectId,
     );
   }
   if (currentPolicy.policyVersion !== scope.policyVersion) {
     throw new LegalEntityReadScopeIntegrityError(
       'issued legal-entity read scope policy is no longer current',
+      subjectId,
     );
   }
   return scope;

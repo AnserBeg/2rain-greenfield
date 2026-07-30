@@ -44,11 +44,10 @@ import {
   SEMANTIC_AGGREGATE_RESULT_VERSION,
   SEMANTIC_QUERY_RESULT_VERSION,
 } from '../../runtime/src/semantic-query-gateway.js';
-import {
-  legalEntityIdsFromIssuedReadScope,
-  type ImmutableJsonValue,
+import type {
+  ImmutableJsonValue,
+  LegalEntityReadScope,
 } from '../../runtime/src/request-runtime-view.js';
-import type { RequestRuntimeView } from '../../runtime/src/request-runtime-view.js';
 import {
   encodeSharedListCursor,
   SHARED_LIST_RESULT_VERSION,
@@ -722,7 +721,6 @@ async function executeQueryOnClient(
   const readScope = await verifyLegalEntityReadScope(
     client,
     storage,
-    request.view,
     request.legalEntityReadScope,
     [entity, ...relationPlans.map((plan) => plan.target)],
   );
@@ -2632,8 +2630,7 @@ export function legalEntityReadScopeRequirement(
 async function verifyLegalEntityReadScope(
   client: PoolClient,
   storage: StorageTargetPayloadV1,
-  view: RequestRuntimeView,
-  value: unknown,
+  value: LegalEntityReadScope | null,
   readEntities: readonly StorageEntity[],
 ): Promise<VerifiedLegalEntityReadScope | null> {
   const required: Array<{
@@ -2653,16 +2650,7 @@ async function verifyLegalEntityReadScope(
     );
   }
 
-  let legalEntityIds: readonly string[];
-  try {
-    legalEntityIds = legalEntityIdsFromIssuedReadScope(value, view);
-  } catch {
-    throw failure(
-      'MODULE_LEGAL_ENTITY_READ_SCOPE_INVALID',
-      'legal-entity read scope was not issued for this request view',
-      required[0]!.entity.entityId,
-    );
-  }
+  const legalEntityIds = value.legalEntityIds;
 
   const masters = storage.entities.filter(
     (entity) => entity.legalEntityMaster !== undefined,

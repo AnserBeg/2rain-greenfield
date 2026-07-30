@@ -445,6 +445,7 @@ export class SemanticQueryGateway {
             this.currentPolicy,
             executionContext.legalEntityReadScope,
             view,
+            definition.sourceEntityId,
           );
     let result: SemanticAggregateResultEnvelope | SemanticQueryResultEnvelope;
     if (definition.queryType === 'aggregate') {

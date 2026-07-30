@@ -247,3 +247,8 @@ How to apply: keep deliberate blocking semantics, but set an explicit lock timeo
 Date: 2026-07-30
 Why: Q1-P4 sealed a legal-entity scope to one request view but let policy-v1 authority survive a policy-v2 change for the rest of that request.
 How to apply: immediately before execution, reauthorize every capability member and compare its issued policy version with live policy; test version advance and an allowed-first/denied-second set independently. See `docs/execution/packets/Q1-P4.md`.
+
+## Pin controls to the first reachable authority
+Date: 2026-07-30
+Why: Q1-P4 moved capability refusal to the gateway, leaving a provider error assertion aimed at a guard no application path could reach.
+How to apply: trace every ingress after moving enforcement, remove unreachable duplicate validation, and make the executed control pin the first refusing layer's typed error and subject. See `docs/execution/packets/Q1-P4.md`.

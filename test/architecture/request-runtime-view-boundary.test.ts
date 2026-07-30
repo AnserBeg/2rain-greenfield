@@ -141,7 +141,7 @@ test('issued legal-entity read scope is generic, explicit, and complete across r
   assert.match(runtime, /issuedLegalEntityReadScopes\.get\(value\) !== view/);
   assert.match(
     gateway,
-    /await verifyLegalEntityReadScope\(\s*this\.currentPolicy,\s*executionContext\.legalEntityReadScope,\s*view,\s*\)/u,
+    /await verifyLegalEntityReadScope\(\s*this\.currentPolicy,\s*executionContext\.legalEntityReadScope,\s*view,\s*definition\.sourceEntityId,\s*\)/u,
   );
   assert.match(scopeMechanism, /Object\.hasOwn\(entity, 'legalEntity'\)/);
   assert.match(scopeMechanism, /MODULE_LEGAL_ENTITY_READ_SCOPE_REQUIRED/);
