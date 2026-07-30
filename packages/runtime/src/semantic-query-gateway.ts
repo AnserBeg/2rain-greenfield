@@ -20,8 +20,10 @@ import {
   assertRequestRuntimeView,
   authorizeCurrentPolicy,
   trustedContextForRequestRuntimeView,
+  verifyLegalEntityReadScope,
   type CurrentPolicyGateway,
   type ImmutableJsonValue,
+  type LegalEntityReadScope,
 } from './request-runtime-view.js';
 import type { RequestRuntimeView as IssuedRequestRuntimeView } from './request-runtime-view.js';
 import {
@@ -165,11 +167,16 @@ export interface RegisteredAggregateQueryDefinition extends RegisteredQueryDefin
 export type RegisteredSemanticQueryDefinition =
   RegisteredAggregateQueryDefinition | RegisteredQueryDefinition;
 
+export interface SemanticQueryExecutionContext {
+  readonly legalEntityReadScope?: LegalEntityReadScope;
+}
+
 export interface SemanticQueryExecutionRequest {
   readonly arguments: ImmutableJsonValue;
   readonly context: TrustedRequestContext;
   readonly definition: RegisteredQueryDefinition;
   readonly filterPlans: readonly QueryFilterLoweringPlan[];
+  readonly legalEntityReadScope: LegalEntityReadScope | null;
   readonly list: AuthorizedSharedListRequest | null;
   readonly parameterValues: Readonly<Record<string, ImmutableJsonValue>>;
   readonly view: IssuedRequestRuntimeView;
@@ -180,6 +187,7 @@ export interface SemanticAggregateQueryExecutionRequest {
   readonly context: TrustedRequestContext;
   readonly definition: RegisteredAggregateQueryDefinition;
   readonly filterPlans: readonly QueryFilterLoweringPlan[];
+  readonly legalEntityReadScope: LegalEntityReadScope | null;
   readonly list: AuthorizedSharedListRequest | null;
   readonly parameterValues: Readonly<Record<string, ImmutableJsonValue>>;
   readonly view: IssuedRequestRuntimeView;
@@ -273,8 +281,14 @@ export class SemanticQueryGateway {
   async invoke(
     view: IssuedRequestRuntimeView,
     requestInput: unknown,
+    executionContext: SemanticQueryExecutionContext = Object.freeze({}),
   ): Promise<SemanticQueryResultEnvelope> {
-    const result = await this.#invoke(view, requestInput, 'records');
+    const result = await this.#invoke(
+      view,
+      requestInput,
+      'records',
+      executionContext,
+    );
     if (result.kind !== 'semanticQueryResult') {
       throw new MalformedPinnedQueryCatalogError(
         'record query returned an aggregate result',
@@ -286,8 +300,14 @@ export class SemanticQueryGateway {
   async invokeAggregate(
     view: IssuedRequestRuntimeView,
     requestInput: unknown,
+    executionContext: SemanticQueryExecutionContext = Object.freeze({}),
   ): Promise<SemanticAggregateResultEnvelope> {
-    const result = await this.#invoke(view, requestInput, 'aggregate');
+    const result = await this.#invoke(
+      view,
+      requestInput,
+      'aggregate',
+      executionContext,
+    );
     if (result.kind !== 'semanticAggregateResult') {
       throw new MalformedPinnedQueryCatalogError(
         'aggregate query returned a record result',
@@ -300,6 +320,7 @@ export class SemanticQueryGateway {
     view: IssuedRequestRuntimeView,
     requestInput: unknown,
     expectedResult: 'aggregate' | 'records',
+    executionContext: SemanticQueryExecutionContext,
   ): Promise<SemanticAggregateResultEnvelope | SemanticQueryResultEnvelope> {
     assertRequestRuntimeView(view);
     const request = parseSemanticQueryRequest(requestInput);
@@ -417,6 +438,15 @@ export class SemanticQueryGateway {
       );
     }
     const parameterValues = bindQueryParameters(definition, request.arguments);
+    const legalEntityReadScope =
+      executionContext.legalEntityReadScope === undefined
+        ? null
+        : await verifyLegalEntityReadScope(
+            this.currentPolicy,
+            executionContext.legalEntityReadScope,
+            view,
+            definition.sourceEntityId,
+          );
     let result: SemanticAggregateResultEnvelope | SemanticQueryResultEnvelope;
     if (definition.queryType === 'aggregate') {
       if (!this.executor.executeAggregate) {
@@ -430,6 +460,7 @@ export class SemanticQueryGateway {
           context: trustedContextForRequestRuntimeView(view),
           definition,
           filterPlans: Object.freeze(filterPlans),
+          legalEntityReadScope,
           list: null,
           parameterValues,
           view,
@@ -442,6 +473,7 @@ export class SemanticQueryGateway {
           context: trustedContextForRequestRuntimeView(view),
           definition,
           filterPlans: Object.freeze(filterPlans),
+          legalEntityReadScope,
           list,
           parameterValues,
           view,
