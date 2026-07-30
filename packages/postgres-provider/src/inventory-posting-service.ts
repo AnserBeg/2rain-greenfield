@@ -2536,7 +2536,8 @@ function postgresErrorProperty(
 ): string | undefined {
   if (typeof error !== 'object' || error === null || !(property in error))
     return undefined;
-  return typeof error[property] === 'string' ? error[property] : undefined;
+  const value = (error as Readonly<Record<string, unknown>>)[property];
+  return typeof value === 'string' ? value : undefined;
 }
 
 function baseUnitImmutableDetails(
