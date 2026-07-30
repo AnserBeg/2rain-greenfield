@@ -1391,11 +1391,19 @@ test('v3 inventory reads require issued legal-entity scope and preserve generic 
           normalJoined?.relationLabels?.[relationId]?.label,
           'ENTITY-A-TRANSACTION',
         );
+        assert.equal(
+          normalJoined?.relationLabels?.[relationId]?.recordId,
+          transactionAId,
+        );
         assert.deepEqual(adversarialJoined?.relationLabels?.[relationId], {
           label: null,
           recordId: null,
         });
         assert.doesNotMatch(JSON.stringify(joined), /ENTITY-B-SECRET/u);
+        assert.doesNotMatch(
+          JSON.stringify(joined),
+          new RegExp(transactionBId, 'u'),
+        );
 
         const result = await operation(
           gateway,

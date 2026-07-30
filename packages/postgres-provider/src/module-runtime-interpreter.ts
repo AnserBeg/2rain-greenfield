@@ -1252,7 +1252,7 @@ function listSelectList(
       `${visibleFieldExpression(column, sourceAlias)} AS ${quoted(`nsm_table_display_${String(index)}`)}`,
   );
   const relationValues = relations.flatMap((plan) => [
-    `${qualified(sourceAlias, plan.relation.relationColumn.physicalName)} AS ${quoted(plan.recordAlias)}`,
+    `${qualified(plan.tableAlias, plan.target.recordIdentity.column)} AS ${quoted(plan.recordAlias)}`,
     `${visibleFieldExpression(plan.labelColumn, plan.tableAlias)} AS ${quoted(plan.labelAlias)}`,
   ]);
   return [...rawColumns, ...displays, ...relationValues].join(', ');
