@@ -66,7 +66,7 @@ the current active release has no persisted posting-capability declaration.
 This decision does not manufacture a second admission authority and does not
 claim release-persisted capability admission.
 
-The receipt boundary is versioned additively by migration 0017:
+The receipt boundary is versioned additively by migration 0016:
 
 - existing `semantic_operation_receipts` rows receive
   `input_digest_version = 1` without changing `input_digest`;
@@ -83,7 +83,7 @@ adjustment. Its replay reader adds `postingRole: 'adjustment'` to the returned
 movement shape. A v2 receipt requires its persisted movement role. The
 immutable v1 `mutation_result` is not rewritten.
 
-Migration 0017 is one additive column and one bounded check. It preserves every
+Migration 0016 is one additive column and one bounded check. It preserves every
 existing digest byte-for-byte. It changes no canonical bytes, release golden,
 dependency-set root, storage-target root, or content hash; there is therefore
 no before/after digest, golden, or root value to record.
@@ -201,7 +201,7 @@ orchestrator to run after freezing a replacement candidate.
 
 | Claim | Control or observation | What it proves, and current status |
 |---|---|---|
-| Transfer fits the frozen domain contract without a domain-artifact version event | Exact inspection of `definition.ts:223,456`, `contracts.ts:435,443,465-469`, the v3 dependency plan at `contracts.ts:359-428`, and the packet diff | The required type, role, defaults, dependency version, root, and accesses already exist. The receipt change is separately versioned by migration 0017; the domain artifacts remain unchanged. |
+| Transfer fits the frozen domain contract without a domain-artifact version event | Exact inspection of `definition.ts:223,456`, `contracts.ts:435,443,465-469`, the v3 dependency plan at `contracts.ts:359-428`, and the packet diff | The required type, role, defaults, dependency version, root, and accesses already exist. The receipt change is separately versioned by migration 0016; the domain artifacts remain unchanged. |
 | A pre-G3-P4 adjustment receipt remains replayable | `cloneLegacyAdjustmentReceipt` plus the request replay in `inventory-posting.test.ts` | Clones a real receipt into the persisted v1 digest and result shape, then requires the stored version to select the v1 digest and restore `postingRole: 'adjustment'` in the returned movement. Authored in round 4; not PostgreSQL-run by the author. |
 | Transfer uses one posting implementation and the G3-P3 transaction order | `postAdjustment` and `postTransfer` both enter the private `#post`; `#post` calls the unchanged serializer at `inventory-posting-service.ts:414` before business reads and before its caller savepoint | Structural source evidence verifies there is one coordinator. It does not by itself prove PostgreSQL atomicity. |
 | A transfer persists one balanced pair and exact retries do not duplicate it | `assertTransferPosting` in `inventory-posting.test.ts` | Requires observed `-2`/`+2` transfer movements, source/destination balances `3`/`2`, one posted draft transition, request and natural replay of the original pair, and typed rejection of same-key/different-input. The orchestrator reports it green at `41ceb638`. |
