@@ -1,4 +1,4 @@
-# ADR-0027: Issued legal-entity read scope
+# ADR-0028: Issued legal-entity read scope
 
 Date: 2026-07-30
 Status: proposed by packet Q1-P4; ratified when that packet is accepted
