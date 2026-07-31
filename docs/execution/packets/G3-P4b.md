@@ -1,6 +1,7 @@
 # G3-P4b — Stock-count correction posting
 
-Status: revision partially gated; parked on post-posting evidence immutability
+Status: revision candidate; post-posting evidence immutability accepted as an
+unmounted-product sequencing condition
 Tier: Critical
 Lane: FIX
 Base: `ebea719` (`packet/g3-p4`)
@@ -86,9 +87,26 @@ accepts only an already-persisted reviewed session and complete line set. The
 generic semantic-operation API is therefore the only declared business path
 for draft mutation, while the PostgreSQL fixture seeds those rows directly.
 Removing the generic operations would close the post-posting hole by also
-removing the declared draft/counting writer. G3-P4b remains parked pending the
-orchestrator's lifecycle-owner ruling; no partial inventory-specific runtime
-guard is admitted.
+removing the declared draft/counting writer. Inventory is not mounted in the
+composed application, so neither that authoring path nor the post-posting
+mutation hole is reachable by a user of the running product today.
+
+**Hard sequencing dependency, owned by queue row `5g3-ui` (`G3-P6a`):
+`G3-P6a` MUST NOT INTEGRATE BEFORE the terminal-state mechanism lands.** The
+moment Inventory mounts, the ordinary semantic-operation API makes posted
+count sessions and lines rewritable and archivable. The `5g3-ui` integration
+gate must therefore remain closed until the orchestrator-routed mechanism has
+its own owning row and enforces terminal-state immutability; this is a binding
+prerequisite, not deferred advice. No partial inventory-specific runtime guard
+is admitted.
+
+That routed work also owns the separate completeness ruling exposed here:
+G3-P4b supplies a posting path that consumes pre-existing reviewed evidence,
+but the running product has no path that authors a count session or its lines.
+Freeze M requires that evidence, so the mechanism packet must decide whether
+draft authoring remains a lifecycle-restricted generic operation or moves into
+a capability-owned lifecycle before `5g3-ui` can integrate. This packet does
+not claim a usable count-authoring path.
 
 Receipt digest/result version 3 is used only for stock count. Readers continue
 to select v1, v2, or v3 from the persisted artifact version. Migration 0017
@@ -134,9 +152,10 @@ misclassified; approval threshold hardcoded to the count role; and absolute
 variance removed. Every mutation turned the focused control red at its intended
 assertion, and the unmutated control passed again afterward.
 
-No full matrix or review rerun is claimed for this revision. The packet is
-parked before that serialized evidence because the Critical immutability finding
-is unresolved.
+No full matrix or review rerun is claimed in this pre-matrix record. The
+Critical immutability finding is accepted only under the hard `5g3-ui`
+sequencing dependency above; the exact descendant SHA containing this record
+must pass the serialized matrix before review reruns.
 
 The program-review triggers were evaluated at this checkpoint. This packet
 extends the already-established Inventory posting correctness domain; it is
@@ -160,5 +179,5 @@ compensations, an inexact reversal, inconsistent variance, a missing count
 reason, and unapproved absolute variance; and proves the monetary scan catches a
 semantic `fieldId` value.
 
-Do not run the full matrix until the orchestrator rules the lifecycle owner and
-grants the serial matrix slot.
+The lifecycle disposition and serial matrix slot were granted after the
+focused run recorded above.
