@@ -51,7 +51,8 @@ speed. That last point is why this ADR does not simply mandate skeletons.
 | 100–400 ms | Nothing. Render. **Target band for every registered query.** | Doherty |
 | 400 ms – 1 s | Inline pending state on the pressed control only. No skeleton. | Nielsen flow limit |
 | 1 s – 3 s | **Skeleton** for a page or a slot; **inline loader** for a small local task | User ruling |
-| > 3 s | **Determinate progress bar** where duration is knowable; indeterminate with step and elapsed text where it is not. Plus cancel or background-handoff | User ruling; Nielsen; Goal-Gradient |
+| 3 s – 10 s | **Indeterminate indicator with context** — a spinner or inline loader that says what is running. **No progress bar.** | NN/g; Nielsen |
+| > 10 s | **Determinate progress** where the total is knowable; indeterminate with step and elapsed text where it is not. **Plus cancel or background-handoff.** | Nielsen 10 s attention limit; NN/g; Goal-Gradient |
 
 ### 2. Loading states are an exception path, not a default
 
@@ -76,6 +77,38 @@ why the band ends rather than extending to 10 s.
 
 This divergence is recorded rather than silently adopted so that a future reader
 finds the reason instead of assuming the source was misread.
+
+### 3a. Above 3 s there are two axes, not one — refined 2026-07-31
+
+The first draft of this ADR collapsed everything past 3 s into a single band and
+made *determinacy* the only axis. That was wrong, and the correction restores
+the sources rather than departing from them.
+
+**Duration decides whether progress is owed at all.** Between 3 and 10 seconds a
+spinner that says what is running is the right answer. Ten seconds is Nielsen's
+**limit of attention** — the point at which a user stops waiting and starts doing
+something else — and NN/g independently puts "determinate progress plus cancel"
+at *over* 10 s, not over 3 s. So the 3–10 s band gets an informative
+indeterminate indicator, and only past 10 s is progress owed.
+
+**Knowability decides whether that progress can be determinate.** Many ERP
+operations know their total — posting 200 lines, importing 5,000 rows — and can
+fill a real bar. Others genuinely cannot, such as a long verification. Those get
+step and elapsed text instead.
+
+> **Never render a determinate progress bar without real progress data.** A bar
+> that animates on a timer rather than on work completed is a fabricated claim
+> about how far along the operation is. It is the same class of defect as an
+> optimistic transition on a posting: showing the user an outcome the system
+> does not actually know.
+
+**Cancel or background-handoff belongs at the 10 s boundary,** not at 3 s. Past
+the attention limit the user should be able to leave — that is what the limit
+means. Below it, offering to cancel a 4-second operation invites a decision the
+user did not need to make.
+
+The proposal document's Part I carries the earlier single-band table. Where they
+differ, **this ADR governs**.
 
 ### 4. Optimistic UI is a closed, compiled allow-list
 
