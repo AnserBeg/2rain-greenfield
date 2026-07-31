@@ -8,6 +8,7 @@ import {
   type CompileSuccess,
   type ExecutedVerificationResult,
   type ProjectionManifestEnvelope,
+  type StorageTargetPayloadV1,
   type VerificationPlanPayloadV1,
   type VerificationScenario,
   type VerificationScenarioExecutor,
@@ -59,6 +60,7 @@ const uuidPattern =
 
 export interface ReleaseVerificationBinding {
   readonly artifactClosureDigest: string;
+  readonly findings: readonly VerificationConstructibilityFinding[];
   readonly plan: VerificationPlanPayloadV1;
   readonly releaseRoot: string;
   readonly verificationPlanArtifactRoot: string;
@@ -71,6 +73,7 @@ export interface DurableReleaseVerificationEvidence {
   readonly executedEnvironmentId: string;
   readonly executedEvidenceId: MintedUuid;
   readonly executedTenantId: string;
+  readonly findings: readonly VerificationConstructibilityFinding[];
   readonly provider: 'realPostgresql';
   readonly providerRunId: string;
   readonly releaseRoot: string;
@@ -80,6 +83,14 @@ export interface DurableReleaseVerificationEvidence {
   readonly verificationPlanArtifactRoot: string;
   readonly verificationPlanDigest: string;
   readonly verificationPlanSemanticDigest: string;
+}
+
+export interface VerificationConstructibilityFinding {
+  readonly code: 'VERIFICATION_OPERATION_INPUT_UNCONSTRUCTABLE';
+  readonly entityId: string;
+  readonly message: string;
+  readonly operationId: string;
+  readonly requiredStorageColumn: string;
 }
 
 export interface ExecuteReleaseVerificationCommand {
@@ -326,6 +337,7 @@ export class PostgresReleaseVerificationService {
         view,
         command.compiledRelease,
         binding.plan,
+        binding.findings,
         operationGateway,
         mediation,
         queryGateway,
@@ -565,11 +577,104 @@ export function releaseVerificationBinding(
       'northstar.release-artifact-closure/v1',
       [...compiledRelease.bundle.releaseManifest.artifactClosure].toSorted(),
     ),
+    findings: verificationConstructibilityFindings(compiledRelease),
     plan,
     releaseRoot: compiledRelease.releaseRoot,
     verificationPlanArtifactRoot: reference.artifactRoot,
     verificationPlanSemanticDigest: reference.semanticDigest,
   });
+}
+
+export function verificationConstructibilityFindings(
+  compiledRelease: CompileSuccess,
+): readonly VerificationConstructibilityFinding[] {
+  const storage = compiledProjectionPayload<StorageTargetPayloadV1>(
+    compiledRelease,
+    PROJECTION_FAMILY_IDS.storageTarget,
+  );
+  const operations = compiledProjectionPayload<{
+    readonly operations: readonly VerificationOperationContract[];
+  }>(compiledRelease, PROJECTION_FAMILY_IDS.operationCatalog).operations;
+  const queries = compiledProjectionPayload<{
+    readonly queries: readonly VerificationQueryContract[];
+  }>(compiledRelease, PROJECTION_FAMILY_IDS.queryCatalog).queries;
+  const searchableEntityIds = new Set(
+    queries
+      .filter((query) => query.queryType === 'search')
+      .map((query) => query.sourceEntityId),
+  );
+  const findings: VerificationConstructibilityFinding[] = [];
+  for (const operation of operations) {
+    if (
+      operation.effect.kind !== 'createRecordEffect' ||
+      !searchableEntityIds.has(operation.effect.entity.targetId)
+    ) {
+      continue;
+    }
+    const entity = storage.entities.find(
+      (candidate) => candidate.entityId === operation.effect.entity.targetId,
+    );
+    if (!entity) {
+      throw failure(
+        'VERIFICATION_STORAGE_ENTITY_MISSING',
+        `compiled verification entity has no storage target: ${operation.effect.entity.targetId}`,
+      );
+    }
+    const constructibleColumns = new Set<string>();
+    for (const field of operation.inputContract.fields) {
+      const column = entity.columns.find(
+        (candidate) => candidate.canonicalFieldId === field.fieldId,
+      );
+      if (column) constructibleColumns.add(column.physicalName);
+    }
+    for (const relationInput of operation.inputContract.relationInputs) {
+      const relation = storage.relations.find(
+        (candidate) =>
+          candidate.sourceEntityId === entity.entityId &&
+          candidate.relationId === relationInput.relationId,
+      );
+      if (relation) {
+        constructibleColumns.add(relation.relationColumn.physicalName);
+      }
+    }
+    const requiredColumns = new Set(
+      entity.columns
+        .filter(
+          (column) => !column.nullable && column.defaultSemantics === 'none',
+        )
+        .map((column) => column.physicalName),
+    );
+    for (const relation of storage.relations) {
+      if (
+        relation.sourceEntityId === entity.entityId &&
+        !relation.relationColumn.nullable
+      ) {
+        requiredColumns.add(relation.relationColumn.physicalName);
+      }
+    }
+    if (entity.legalEntity) {
+      requiredColumns.add(entity.legalEntity.column);
+    }
+    for (const requiredStorageColumn of requiredColumns) {
+      if (constructibleColumns.has(requiredStorageColumn)) continue;
+      findings.push(
+        Object.freeze({
+          code: 'VERIFICATION_OPERATION_INPUT_UNCONSTRUCTABLE' as const,
+          entityId: entity.entityId,
+          message: `verification could not construct inputs for operation ${operation.operationId} because required storage column ${requiredStorageColumn} has no declared input`,
+          operationId: operation.operationId,
+          requiredStorageColumn,
+        }),
+      );
+    }
+  }
+  return Object.freeze(
+    findings.toSorted(
+      (left, right) =>
+        compare(left.operationId, right.operationId) ||
+        compare(left.requiredStorageColumn, right.requiredStorageColumn),
+    ),
+  );
 }
 
 export async function readDurableVerificationEvidence(
@@ -651,6 +756,7 @@ export async function readDurableVerificationEvidence(
     executedEnvironmentId: row.executed_environment_id,
     executedEvidenceId: row.executed_evidence_id,
     executedTenantId: row.executed_tenant_id,
+    findings: binding.findings,
   });
 }
 
@@ -804,12 +910,14 @@ class SemanticVerificationExecutor {
   readonly #operations: readonly VerificationOperationContract[];
   readonly #queries: readonly VerificationQueryContract[];
   readonly #relations: readonly VerificationRelationContract[];
+  readonly #storageEntities: readonly StorageTargetPayloadV1['entities'][number][];
   #ordinal = 0;
 
   constructor(
     private readonly view: IssuedRequestRuntimeView,
     compiled: CompileSuccess,
     plan: VerificationPlanPayloadV1,
+    private readonly constructibilityFindings: readonly VerificationConstructibilityFinding[],
     private readonly operationGateway: SemanticOperationGateway,
     private readonly mediation: SemanticOperationMediationAuthority,
     private readonly queryGateway: SemanticQueryGateway,
@@ -824,9 +932,12 @@ class SemanticVerificationExecutor {
         queries: readonly VerificationQueryContract[];
       }
     ).queries;
-    this.#relations = compiledProjectionPayload<{
-      relations: readonly VerificationRelationContract[];
-    }>(compiled, PROJECTION_FAMILY_IDS.storageTarget).relations;
+    const storage = compiledProjectionPayload<StorageTargetPayloadV1>(
+      compiled,
+      PROJECTION_FAMILY_IDS.storageTarget,
+    );
+    this.#relations = storage.relations;
+    this.#storageEntities = storage.entities;
     for (const scenario of plan.scenarios) {
       if (scenario.kind !== 'searchableExclusion') continue;
       const excluded = this.#excludedFieldsByEntity.get(scenario.entityId);
@@ -1001,6 +1112,9 @@ class SemanticVerificationExecutor {
     }
     const positiveCandidate = this.#queries
       .filter((query) => query.queryType === 'search')
+      .filter((query) =>
+        this.#hasConstructibleCreateOperation(query.sourceEntityId),
+      )
       .flatMap((query) =>
         query.selections.map((selection) => ({
           entityId: query.sourceEntityId,
@@ -1043,7 +1157,17 @@ class SemanticVerificationExecutor {
         `searchable field ${positiveCandidate.field.fieldId} did not return record ${positiveRecord.recordId}: ${canonicalize(included)}`,
       );
     }
-    return { negativeProbe: excluded, positiveProbe: included };
+    return {
+      negativeProbe: excluded,
+      positiveProbe: {
+        constructibilityFindings: this.constructibilityFindings,
+        searchWitness: {
+          entityId: positiveCandidate.entityId,
+          fieldId: positiveCandidate.field.fieldId,
+          recordObserved: true,
+        },
+      },
+    };
   }
 
   async #typedErrorSurface(scenario: VerificationScenario, token: string) {
@@ -1084,7 +1208,13 @@ class SemanticVerificationExecutor {
         'uniqueness-fold scenario does not name a text input field',
       );
     }
-    const upper = String(verificationFieldValue(field, token)).toUpperCase();
+    const upper = String(
+      verificationFieldValue(
+        field,
+        token,
+        this.#requiredStorageEntity(scenario.entityId),
+      ),
+    ).toUpperCase();
     const accepted = await this.#create(scenario.entityId, `${token}-upper`, {
       [scenario.subjectId]: upper,
     });
@@ -1159,6 +1289,7 @@ class SemanticVerificationExecutor {
     relationOverrides: Readonly<Record<string, string>> = {},
   ): Promise<Record<string, unknown>> {
     const operation = this.#createOperation(entityId);
+    const storageEntity = this.#requiredStorageEntity(entityId);
     const values = Object.fromEntries(
       operation.inputContract.fields
         .filter((field) => field.writable)
@@ -1166,7 +1297,7 @@ class SemanticVerificationExecutor {
           field.fieldId,
           Object.hasOwn(overrides, field.fieldId)
             ? overrides[field.fieldId]
-            : verificationFieldValue(field, token),
+            : verificationFieldValue(field, token, storageEntity),
         ]),
     );
     const relations: Record<string, string> = { ...relationOverrides };
@@ -1323,6 +1454,20 @@ class SemanticVerificationExecutor {
     return operation;
   }
 
+  #hasConstructibleCreateOperation(entityId: string): boolean {
+    const operation = this.#operations.find(
+      (candidate) =>
+        candidate.effect.entity.targetId === entityId &&
+        candidate.effect.kind === 'createRecordEffect',
+    );
+    return (
+      operation !== undefined &&
+      !this.constructibilityFindings.some(
+        (finding) => finding.operationId === operation.operationId,
+      )
+    );
+  }
+
   #requiredOperation(operationId: string): VerificationOperationContract {
     const operation = this.#operations.find(
       (candidate) => candidate.operationId === operationId,
@@ -1334,6 +1479,21 @@ class SemanticVerificationExecutor {
       );
     }
     return operation;
+  }
+
+  #requiredStorageEntity(
+    entityId: string,
+  ): StorageTargetPayloadV1['entities'][number] {
+    const entity = this.#storageEntities.find(
+      (candidate) => candidate.entityId === entityId,
+    );
+    if (!entity) {
+      throw failure(
+        'VERIFICATION_STORAGE_ENTITY_MISSING',
+        `compiled verification entity has no storage target: ${entityId}`,
+      );
+    }
+    return entity;
   }
 
   #requiredField(entityId: string, fieldId: string): VerificationFieldContract {
@@ -1481,10 +1641,11 @@ function compiledProjectionPayload<T>(
 function verificationFieldValue(
   field: VerificationFieldContract,
   token: string,
+  entity: StorageTargetPayloadV1['entities'][number],
 ): unknown {
   switch (field.fieldKind) {
     case 'booleanFieldType':
-      return true;
+      return verificationBooleanFieldValue(entity, field.fieldId);
     case 'enumFieldType':
       if (!field.enumOptionIds[0]) {
         throw failure(
@@ -1523,6 +1684,84 @@ function verificationFieldValue(
         `verification field kind is unsupported: ${field.fieldKind}`,
       );
   }
+}
+
+function verificationBooleanFieldValue(
+  entity: StorageTargetPayloadV1['entities'][number],
+  fieldId: string,
+): boolean {
+  const column = entity.columns.find(
+    (candidate) => candidate.canonicalFieldId === fieldId,
+  );
+  if (!column) {
+    throw failure(
+      'VERIFICATION_STORAGE_FIELD_MISSING',
+      `compiled verification field has no storage column: ${fieldId}`,
+    );
+  }
+  const predicates = [
+    ...entity.uniqueKeys.map((unique) => unique.predicate),
+    ...(entity.legalEntityMaster
+      ? [entity.legalEntityMaster.defaultUniqueIndex.predicate]
+      : []),
+  ];
+  const constrainedValues = new Set<boolean>();
+  for (const predicate of predicates) {
+    const constrainedValue = booleanPredicateValue(
+      predicate,
+      column.physicalName,
+    );
+    if (constrainedValue !== null) constrainedValues.add(constrainedValue);
+  }
+  if (constrainedValues.size === 0) return true;
+  if (constrainedValues.size === 1) {
+    return !constrainedValues.values().next().value;
+  }
+  throw failure(
+    'VERIFICATION_CONSTRAINED_DOMAIN_EXHAUSTED',
+    `compiled partial uniqueness constraints admit no collision-free boolean probe: ${fieldId}`,
+  );
+}
+
+function booleanPredicateValue(
+  predicate: string,
+  physicalColumnName: string,
+): boolean | null {
+  const normalizedTerms = predicate
+    .split(/\s+AND\s+/iu)
+    .map((term) => term.trim().replace(/^\(+|\)+$/gu, ''));
+  const fieldTerm = normalizedTerms.find(
+    (term) =>
+      term.split(/\s+/u)[0]?.toLowerCase() === physicalColumnName.toLowerCase(),
+  );
+  if (!fieldTerm) {
+    if (
+      predicate
+        .split(/[^a-z0-9_]+/iu)
+        .some(
+          (token) => token.toLowerCase() === physicalColumnName.toLowerCase(),
+        )
+    ) {
+      throw failure(
+        'VERIFICATION_PARTIAL_UNIQUE_PREDICATE_UNSUPPORTED',
+        `compiled partial uniqueness predicate is not a boolean conjunction: ${physicalColumnName}`,
+      );
+    }
+    return null;
+  }
+  const tokens = fieldTerm.split(/\s+/u);
+  if (
+    tokens.length !== 3 ||
+    tokens[1]?.toUpperCase() !== 'IS' ||
+    (tokens[2]?.toUpperCase() !== 'TRUE' &&
+      tokens[2]?.toUpperCase() !== 'FALSE')
+  ) {
+    throw failure(
+      'VERIFICATION_PARTIAL_UNIQUE_PREDICATE_UNSUPPORTED',
+      `compiled partial uniqueness predicate is not a boolean conjunction: ${physicalColumnName}`,
+    );
+  }
+  return tokens[2].toUpperCase() === 'TRUE';
 }
 
 function verificationNumericValue(fieldId: string, token: string): string {

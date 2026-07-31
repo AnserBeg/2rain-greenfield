@@ -23,7 +23,7 @@ import { SHARED_LIST_QUERY_VERSION } from '../../../packages/runtime/src/list-be
 import {
   renderRegisteredSurfaceComponent,
   renderSurfaceDataComponent,
-  surfaceHasUnsupportedComponent,
+  surfaceSupportsRuntimeIntent,
   type SurfaceDataRenderState,
   type SurfaceOperationFeedback,
 } from './component-registry.js';
@@ -169,7 +169,12 @@ export async function submitSurfaceRuntimeIntent(
   if (
     !intent ||
     !operation ||
-    !surfaceAllowsIntent(selection.selected, intent)
+    !surfaceSupportsRuntimeIntent(
+      view,
+      selection.selected,
+      selection.surfaces,
+      intent,
+    )
   ) {
     return operationDiagnostic('OPERATION_UNSUPPORTED', 422);
   }
@@ -441,18 +446,6 @@ function operationIntent(
     value === 'update'
     ? value
     : null;
-}
-
-function surfaceAllowsIntent(
-  surface: CompiledSurfaceDefinition,
-  intent: SurfaceOperationIntent,
-): boolean {
-  if (surfaceHasUnsupportedComponent(surface)) return false;
-  return surface.surfaceRole === 'form'
-    ? intent === 'create' || intent === 'update'
-    : surface.surfaceRole === 'record'
-      ? intent === 'archive' || intent === 'restore'
-      : false;
 }
 
 function operationDiagnostic(

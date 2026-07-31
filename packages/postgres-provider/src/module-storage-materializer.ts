@@ -373,10 +373,13 @@ export class PostgresModuleStorageMaterializer {
           source.target,
           target.target,
         ]),
-        new Set(
+        new Map(
           remaining
-            .filter((element) => element.kind === 'addNotValidConstraint')
-            .map((element) => element.physicalObjectName),
+            .filter(
+              (element) =>
+                element.classification.preparationValidity === 'inAttemptOnly',
+            )
+            .map((element) => [element.physicalObjectName, element.elementId]),
         ),
         allowedMissingDeferredOnlineObjects(target.target, remaining),
       );
@@ -1888,7 +1891,7 @@ function requiredStorageColumn(
 async function verifyCatalogOnClient(
   client: PoolClient,
   targets: readonly StorageTargetPayloadV1[],
-  pendingConstraintNames: ReadonlySet<string> = new Set(),
+  pendingConstraintElements: ReadonlyMap<string, string> = new Map(),
   allowedMissing: AllowedMissingCatalogObjects = {
     columns: new Set(),
     indexes: new Set(),
@@ -2166,7 +2169,9 @@ async function verifyCatalogOnClient(
         AND constraint_record.conparentid = 0
       ORDER BY source.relname, constraint_record.conname`,
   );
-  const effectivePendingConstraintNames = new Set(pendingConstraintNames);
+  const effectivePendingConstraintNames = new Set(
+    pendingConstraintElements.keys(),
+  );
   if (effectivePendingConstraintNames.size > 0) {
     const appliedConstraints = await client.query<{
       physical_object_name: string;
@@ -2175,10 +2180,9 @@ async function verifyCatalogOnClient(
          FROM north_star_internal.module_storage_elements AS element
          JOIN north_star_internal.module_storage_element_applications AS application
            ON application.element_id = element.element_id
-        WHERE element.element_kind = 'addNotValidConstraint'
-          AND element.physical_object_name = ANY($1::text[])
+        WHERE element.element_id = ANY($1::text[])
           AND application.application_state = 'APPLIED'`,
-      [[...effectivePendingConstraintNames]],
+      [[...pendingConstraintElements.values()]],
     );
     for (const applied of appliedConstraints.rows) {
       effectivePendingConstraintNames.delete(applied.physical_object_name);
@@ -3353,7 +3357,6 @@ function buildExpectedConstraints(
   }
   for (const entity of tables.values()) {
     for (const check of entity.checkConstraints ?? []) {
-      if (pendingConstraintNames.has(check.physicalName)) continue;
       result.push({
         columns: [
           requiredStorageColumn(entity, check.canonicalFieldId).physicalName,
@@ -3375,11 +3378,13 @@ function buildExpectedConstraints(
       });
     }
   }
-  return result.toSorted((left, right) =>
-    `${left.tableName}.${left.name}`.localeCompare(
-      `${right.tableName}.${right.name}`,
-    ),
-  );
+  return result
+    .filter((constraint) => !pendingConstraintNames.has(constraint.name))
+    .toSorted((left, right) =>
+      `${left.tableName}.${left.name}`.localeCompare(
+        `${right.tableName}.${right.name}`,
+      ),
+    );
 }
 
 function buildExpectedIndexes(
@@ -4092,6 +4097,7 @@ function mergeCompatibleEntity(
 ): StorageEntityTarget {
   const withoutAdditive = (entity: StorageEntityTarget) => {
     const {
+      abiFunctionChecks: _abiFunctionChecks,
       columns: _columns,
       checkConstraints: _checkConstraints,
       consumerWriterRoots: _consumerWriterRoots,
@@ -4101,6 +4107,7 @@ function mergeCompatibleEntity(
       uniqueKeys: _uniqueKeys,
       ...base
     } = entity;
+    void _abiFunctionChecks;
     void _columns;
     void _checkConstraints;
     void _consumerWriterRoots;
@@ -4246,6 +4253,11 @@ function mergeCompatibleEntity(
   };
   return {
     ...next,
+    abiFunctionChecks: mergeNamed(
+      prior.abiFunctionChecks ?? [],
+      next.abiFunctionChecks ?? [],
+      (value) => value.physicalName,
+    ),
     checkConstraints: mergeNamed(
       prior.checkConstraints ?? [],
       next.checkConstraints ?? [],

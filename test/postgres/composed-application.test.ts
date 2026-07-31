@@ -9,7 +9,10 @@ import { promisify } from 'node:util';
 
 import pg from 'pg';
 
-import { startComposedApplication } from '../../apps/api/src/composition-root.js';
+import {
+  COMPOSED_APPLICATION_INVENTORY_SCOPE,
+  startComposedApplication,
+} from '../../apps/api/src/composition-root.js';
 import {
   canonicalize,
   normalizeApplicationPackage,
@@ -45,7 +48,10 @@ import { PostgresReleaseActivationService } from '../../packages/postgres-provid
 import { PostgresReleaseApprovalService } from '../../packages/postgres-provider/src/release-approval-service.js';
 import { PostgresImmutableReleaseRepository } from '../../packages/postgres-provider/src/release-repository.js';
 import { ReleaseReverseTransitionRefusal } from '../../packages/postgres-provider/src/release-reverse-transition-policy.js';
-import { PostgresReleaseVerificationService } from '../../packages/postgres-provider/src/release-verification-service.js';
+import {
+  PostgresReleaseVerificationService,
+  releaseVerificationBinding,
+} from '../../packages/postgres-provider/src/release-verification-service.js';
 import { withTrustedRequestTransaction } from '../../packages/postgres-provider/src/request-context.js';
 import {
   AuthenticatedRequestEntryAdapter,
@@ -75,7 +81,7 @@ test('composed product does not invent a verification evidence identity', async 
 test(
   'composed product activates through the kernel and persists tenant-scoped gateway data',
   { timeout: 120_000 },
-  async () => {
+  async (context) => {
     await withEphemeralPostgres(
       'g2-p5e-composed-application',
       async ({ connection, pool }) => {
@@ -102,6 +108,15 @@ test(
           await assertExactSwapTriggerEnabled(pool);
           await assertRealProductDefinition(tenantA);
           await assertDurableProductEvidence(pool, tenantA);
+          await context.test(
+            'semantic verification keeps constrained-domain probes outside compiled partial uniqueness',
+            () =>
+              assertConstrainedDomainVerificationCompleted(
+                pool,
+                tenantA,
+                compiledApplication,
+              ),
+          );
 
           const recordId = randomUUID();
           const created = await tenantA.entry.run(
@@ -1468,8 +1483,15 @@ function partyFieldColumn(
 }
 
 function storageTarget(compiled: CompileSuccess): StorageTargetPayloadV1 {
+  return projectionPayload<StorageTargetPayloadV1>(
+    compiled,
+    PROJECTION_FAMILY_IDS.storageTarget,
+  );
+}
+
+function projectionPayload<T>(compiled: CompileSuccess, familyId: string): T {
   const reference = compiled.bundle.releaseManifest.projections.find(
-    (projection) => projection.familyId === PROJECTION_FAMILY_IDS.storageTarget,
+    (projection) => projection.familyId === familyId,
   );
   assert.ok(reference);
   const manifestArtifact = compiled.bundle.artifacts.find(
@@ -1488,9 +1510,7 @@ function storageTarget(compiled: CompileSuccess): StorageTargetPayloadV1 {
       artifact.contentHash === manifest.chunks[0]?.contentHash,
   );
   assert.ok(chunk);
-  return JSON.parse(
-    new TextDecoder().decode(chunk.canonicalBytes),
-  ) as StorageTargetPayloadV1;
+  return JSON.parse(new TextDecoder().decode(chunk.canonicalBytes)) as T;
 }
 
 async function assertApprovedActivationRecorded(
@@ -1754,6 +1774,209 @@ async function assertDurableProductEvidence(
   assert.equal(evidence.result_rows, evidence.result_count);
 }
 
+async function assertConstrainedDomainVerificationCompleted(
+  pool: pg.Pool,
+  runtime: ComposedApplicationRuntime,
+  compiledApplication: unknown,
+): Promise<void> {
+  const compiled =
+    parseCompiledApplication(compiledApplication).application.compiled;
+  const storage = storageTarget(compiled);
+  const entity = storage.entities.find(
+    (candidate) => candidate.legalEntityMaster !== undefined,
+  );
+  assert.ok(entity?.legalEntityMaster);
+  const constrainedColumn = entity.columns.find(
+    (column) =>
+      column.physicalName === entity.legalEntityMaster?.fieldColumns.isDefault,
+  );
+  assert.ok(constrainedColumn);
+  const scenario = releaseVerificationBinding(compiled).plan.scenarios.find(
+    (candidate) =>
+      candidate.kind === 'searchableExclusion' &&
+      candidate.entityId === entity.entityId &&
+      candidate.subjectId === constrainedColumn.canonicalFieldId,
+  );
+  assert.ok(
+    scenario,
+    'the compiled plan contains the partial-unique boolean exclusion probe',
+  );
+  const constructibilityFindings =
+    releaseVerificationBinding(compiled).findings;
+  const operations = projectionPayload<{
+    operations: readonly {
+      effect: { entity: { targetId: string }; kind: string };
+      inputContract: {
+        fields: readonly {
+          fieldId: string;
+          fieldKind: string;
+          writable: boolean;
+        }[];
+      };
+      operationId: string;
+    }[];
+  }>(compiled, PROJECTION_FAMILY_IDS.operationCatalog).operations;
+  const queries = projectionPayload<{
+    queries: readonly {
+      queryType: string;
+      selections: readonly { fieldId: string }[];
+      sourceEntityId: string;
+    }[];
+  }>(compiled, PROJECTION_FAMILY_IDS.queryCatalog).queries;
+  const createOperations = new Map(
+    operations
+      .filter((operation) => operation.effect.kind === 'createRecordEffect')
+      .map((operation) => [operation.effect.entity.targetId, operation]),
+  );
+  const excludedFields = new Map<string, Set<string>>();
+  for (const excludedScenario of releaseVerificationBinding(compiled).plan
+    .scenarios) {
+    if (excludedScenario.kind !== 'searchableExclusion') continue;
+    const fields = excludedFields.get(excludedScenario.entityId) ?? new Set();
+    fields.add(excludedScenario.subjectId);
+    excludedFields.set(excludedScenario.entityId, fields);
+  }
+  const searchQueries = queries.filter((query) => query.queryType === 'search');
+  assert.ok(
+    searchQueries.some((query) => !createOperations.has(query.sourceEntityId)),
+    'the compiled product includes an append-only searchable source without a generic create operation',
+  );
+  assert.ok(
+    constructibilityFindings.some(
+      (finding) =>
+        finding.code === 'VERIFICATION_OPERATION_INPUT_UNCONSTRUCTABLE' &&
+        finding.operationId ===
+          'northstar.app:operation.inventory_transaction_create' &&
+        finding.requiredStorageColumn === 'legal_entity_id' &&
+        finding.message ===
+          'verification could not construct inputs for operation northstar.app:operation.inventory_transaction_create because required storage column legal_entity_id has no declared input',
+    ),
+    'the unconstructable entity-owned create operation surfaces an exact finding',
+  );
+  const unconstructableOperationIds = new Set(
+    constructibilityFindings.map((finding) => finding.operationId),
+  );
+  const constructiblePositiveCandidate = searchQueries
+    .flatMap((query) => {
+      const createOperation = createOperations.get(query.sourceEntityId);
+      if (
+        !createOperation ||
+        unconstructableOperationIds.has(createOperation.operationId)
+      ) {
+        return [];
+      }
+      return query.selections.map((selection) => ({
+        entityId: query.sourceEntityId,
+        field: createOperation.inputContract.fields.find(
+          (field) =>
+            field.fieldId === selection.fieldId &&
+            field.fieldKind === 'textFieldType' &&
+            !excludedFields.get(query.sourceEntityId)?.has(field.fieldId),
+        ),
+      }));
+    })
+    .find((candidate) => candidate.field);
+  assert.ok(
+    constructiblePositiveCandidate?.field,
+    'the compiled product retains a constructible searchable source for the positive witness',
+  );
+  for (const identifier of [
+    entity.physicalTableName,
+    entity.archive.archivedAtColumn,
+    constrainedColumn.physicalName,
+  ]) {
+    assert.match(identifier, /^[a-z][a-z0-9_]{0,62}$/u);
+  }
+  const rows = await pool.query<{
+    active_constrained_rows: string;
+    archived_unconstrained_probes: string;
+  }>(
+    `SELECT count(*) FILTER (
+              WHERE ${constrainedColumn.physicalName} IS TRUE
+                AND ${entity.archive.archivedAtColumn} IS NULL
+            )::text AS active_constrained_rows,
+            count(*) FILTER (
+              WHERE ${constrainedColumn.physicalName} IS FALSE
+                AND ${entity.archive.archivedAtColumn} IS NOT NULL
+            )::text AS archived_unconstrained_probes
+       FROM north_star_module.${entity.physicalTableName}
+      WHERE tenant_id = $1 AND environment_id = $2`,
+    [runtime.identity.tenantId, runtime.identity.environmentId],
+  );
+  assert.equal(
+    rows.rows[0]?.active_constrained_rows,
+    '1',
+    'the legitimate seeded member remains the only active row inside the partial-unique predicate',
+  );
+  assert.ok(
+    Number(rows.rows[0]?.archived_unconstrained_probes) > 0,
+    'semantic verification generated and archived a boolean probe outside the partial-unique predicate',
+  );
+  const result = await pool.query<{ positive_probe_digest: string }>(
+    `SELECT result.positive_probe_digest
+       FROM platform.tenant_release_admissions AS admission
+       JOIN platform.release_verification_results AS result
+         ON result.tenant_id = admission.tenant_id
+        AND result.environment_id = admission.environment_id
+        AND result.verification_evidence_id = admission.verification_evidence_id
+      WHERE admission.tenant_id = $1
+        AND admission.environment_id = $2
+        AND admission.release_id = $3
+        AND result.scenario_id = $4`,
+    [
+      runtime.identity.tenantId,
+      runtime.identity.environmentId,
+      runtime.activeReleaseId,
+      scenario.scenarioId,
+    ],
+  );
+  const expectedPositiveProbeDigest = createHash('sha256')
+    .update('northstar.verification-proof/v1', 'utf8')
+    .update(Uint8Array.of(0))
+    .update(
+      canonicalize({
+        constructibilityFindings,
+        searchWitness: {
+          entityId: constructiblePositiveCandidate.entityId,
+          fieldId: constructiblePositiveCandidate.field.fieldId,
+          recordObserved: true,
+        },
+      }),
+      'utf8',
+    )
+    .digest('hex');
+  assert.equal(
+    result.rows[0]?.positive_probe_digest,
+    expectedPositiveProbeDigest,
+    'the executed searchable-exclusion proof binds every constructibility finding rather than silently skipping an unconstructable operation',
+  );
+  const admission = await pool.query<{ verification_evidence_id: string }>(
+    `SELECT verification_evidence_id
+       FROM platform.tenant_release_admissions
+      WHERE tenant_id = $1 AND environment_id = $2 AND release_id = $3`,
+    [
+      runtime.identity.tenantId,
+      runtime.identity.environmentId,
+      runtime.activeReleaseId,
+    ],
+  );
+  const evidenceId = admission.rows[0]?.verification_evidence_id;
+  assert.ok(evidenceId);
+  const context = await new AuthenticatedRequestEntryAdapter(
+    async () => runtime.identity,
+  ).enter({});
+  const evidence = await new PostgresReleaseVerificationService(pool).read(
+    context,
+    evidenceId as MintedUuid,
+    compiled,
+  );
+  assert.deepEqual(
+    evidence?.findings,
+    constructibilityFindings,
+    'durable verification evidence reports every witness-selection constructibility finding',
+  );
+}
+
 function createRuntime(
   compiledApplication: unknown,
   databaseUrl: string,
@@ -1766,6 +1989,7 @@ function createRuntime(
   return createComposedApplicationRuntime({
     compiledApplication,
     databaseUrl,
+    inventoryScopeProvisioning: COMPOSED_APPLICATION_INVENTORY_SCOPE,
     migrationsDirectory,
     ...(releaseSelection ? { releaseSelection } : {}),
     tenantSlug,

@@ -13,6 +13,7 @@ import type {
   CompiledSurfaceDefinition,
   CompiledSurfaceOperationBinding,
   CompiledSurfaceSlot,
+  SurfaceOperationIntent,
 } from './surface-contract.js';
 
 export interface SurfaceComponentContext {
@@ -88,6 +89,14 @@ export function renderSurfaceDataComponent({
 }
 
 type SurfaceComponentRenderer = (context: SurfaceComponentContext) => string;
+type MutationSurfaceRole = 'form' | 'record';
+
+interface SurfaceSlotRegistration {
+  readonly mutationIntents?: Partial<
+    Readonly<Record<MutationSurfaceRole, readonly SurfaceOperationIntent[]>>
+  >;
+  readonly renderer: SurfaceComponentRenderer;
+}
 
 const componentRegistry: Readonly<Record<string, SurfaceComponentRenderer>> =
   Object.freeze({
@@ -96,16 +105,25 @@ const componentRegistry: Readonly<Record<string, SurfaceComponentRenderer>> =
     'northstar.shell:component.setup_checklist': renderSetupChecklist,
   });
 
-const surfaceSlotRegistry: Readonly<Record<string, SurfaceComponentRenderer>> =
+const surfaceSlotRegistry: Readonly<Record<string, SurfaceSlotRegistration>> =
   Object.freeze({
-    'list:bulkActions': renderBulkActions,
-    'list:dataGrid': renderDataGrid,
-    'list:title': renderListTitle,
-    'record:breadcrumb': renderBreadcrumb,
-    'record:commandBar': renderCommandBar,
-    'record:keyFacts': renderKeyFacts,
-    'record:sections': renderSections,
-    'record:titleStatus': renderTitleStatus,
+    'list:bulkActions': { renderer: renderBulkActions },
+    'list:dataGrid': { renderer: renderDataGrid },
+    'list:title': { renderer: renderListTitle },
+    'record:breadcrumb': { renderer: renderBreadcrumb },
+    'record:commandBar': {
+      mutationIntents: { record: ['archive', 'restore'] },
+      renderer: renderCommandBar,
+    },
+    'record:keyFacts': {
+      mutationIntents: { record: ['archive', 'restore'] },
+      renderer: renderKeyFacts,
+    },
+    'record:sections': {
+      mutationIntents: { form: ['create', 'update'] },
+      renderer: renderSections,
+    },
+    'record:titleStatus': { renderer: renderTitleStatus },
   });
 
 export const REGISTERED_SURFACE_COMPONENT_IDS = Object.freeze(
@@ -119,6 +137,34 @@ export function surfaceHasUnsupportedComponent(
   return surface.slots.some(
     (slot) => surfaceComponentRenderer(surface, slot) === undefined,
   );
+}
+
+/**
+ * The registry entries that render mutation controls also authorize their
+ * submissions. Record lifecycle controls additionally require a writable form
+ * for the same entity, so a visibly inert entity cannot be mutated by posting
+ * around its release-defined UI.
+ */
+export function surfaceSupportsRuntimeIntent(
+  view: RuntimeViewContract.RequestRuntimeView,
+  surface: CompiledSurfaceDefinition,
+  surfaces: readonly CompiledSurfaceDefinition[],
+  intent: SurfaceOperationIntent,
+): boolean {
+  if (
+    surfaceHasUnsupportedComponent(surface) ||
+    !surface.slots.some((slot) =>
+      slotRegistrationSupportsIntent(surface, slot, intent),
+    )
+  ) {
+    return false;
+  }
+  if (surface.surfaceRole !== 'record') return true;
+  const form = findRelatedSurface(view, surface, surfaces, 'form');
+  return form
+    ? surfaceSupportsRuntimeIntent(view, form, surfaces, 'create') ||
+        surfaceSupportsRuntimeIntent(view, form, surfaces, 'update')
+    : false;
 }
 
 /** Closed lookup: there is deliberately no register/override escape hatch. */
@@ -147,7 +193,7 @@ function surfaceComponentRenderer(
 ): SurfaceComponentRenderer | undefined {
   const slotKey = `${surface.archetype}:${slot.slot}`;
   if (Object.hasOwn(surfaceSlotRegistry, slotKey)) {
-    return surfaceSlotRegistry[slotKey];
+    return surfaceSlotRegistry[slotKey]?.renderer;
   }
   return Object.hasOwn(componentRegistry, slot.contentReferenceId)
     ? componentRegistry[slot.contentReferenceId]
@@ -294,9 +340,17 @@ function recordTitle(
 function renderCommandBar(context: SurfaceComponentContext): string {
   const record = recordFrom(context.data);
   if (context.surface.surfaceRole === 'form') {
+    const intent = record ? 'update' : 'create';
     return slotPanel(
       context,
-      `<div class="command-bar" aria-label="Record commands"><button type="submit" form="surface-record-form">Save</button></div>`,
+      surfaceSupportsRuntimeIntent(
+        context.view,
+        context.surface,
+        context.surfaces ?? [],
+        intent,
+      )
+        ? `<div class="command-bar" aria-label="Record commands"><button type="submit" form="surface-record-form">Save</button></div>`
+        : '',
       'command-bar-slot',
     );
   }
@@ -373,6 +427,16 @@ function renderSections(context: SurfaceComponentContext): string {
     );
   }
   const intent = record ? 'update' : 'create';
+  if (
+    !surfaceSupportsRuntimeIntent(
+      context.view,
+      context.surface,
+      context.surfaces ?? [],
+      intent,
+    )
+  ) {
+    return slotPanel(context, '', 'sections-slot');
+  }
   const operation = (context.operations ?? []).find(
     (binding) => binding.intent === intent,
   );
@@ -515,6 +579,16 @@ function renderLifecycleForm(
   record: SemanticRecordDto,
 ): string {
   const intent = record.archived ? 'restore' : 'archive';
+  if (
+    !surfaceSupportsRuntimeIntent(
+      context.view,
+      context.surface,
+      context.surfaces ?? [],
+      intent,
+    )
+  ) {
+    return '';
+  }
   const operation = (context.operations ?? []).find(
     (binding) => binding.intent === intent,
   );
@@ -608,21 +682,45 @@ function relatedSurface(
   context: SurfaceComponentContext,
   role: CompiledSurfaceDefinition['surfaceRole'],
 ): CompiledSurfaceDefinition | undefined {
-  try {
-    const entityId = readCompiledSurfaceDataBinding(
+  const related = findRelatedSurface(
+    context.view,
+    context.surface,
+    context.surfaces ?? [],
+    role,
+  );
+  if (!related || role !== 'form') return related;
+  return surfaceSupportsRuntimeIntent(
+    context.view,
+    related,
+    context.surfaces ?? [],
+    'create',
+  ) ||
+    surfaceSupportsRuntimeIntent(
       context.view,
-      context.surface,
-    ).query.sourceEntityId;
-    return context.surfaces?.find((candidate) => {
+      related,
+      context.surfaces ?? [],
+      'update',
+    )
+    ? related
+    : undefined;
+}
+
+function findRelatedSurface(
+  view: RuntimeViewContract.RequestRuntimeView,
+  surface: CompiledSurfaceDefinition,
+  surfaces: readonly CompiledSurfaceDefinition[],
+  role: CompiledSurfaceDefinition['surfaceRole'],
+): CompiledSurfaceDefinition | undefined {
+  try {
+    const entityId = readCompiledSurfaceDataBinding(view, surface).query
+      .sourceEntityId;
+    return surfaces.find((candidate) => {
       if (candidate.lifecycle !== 'active' || candidate.surfaceRole !== role) {
-        return false;
-      }
-      if (role === 'form' && surfaceHasUnsupportedComponent(candidate)) {
         return false;
       }
       try {
         return (
-          readCompiledSurfaceDataBinding(context.view, candidate).query
+          readCompiledSurfaceDataBinding(view, candidate).query
             .sourceEntityId === entityId
         );
       } catch {
@@ -632,6 +730,21 @@ function relatedSurface(
   } catch {
     return undefined;
   }
+}
+
+function slotRegistrationSupportsIntent(
+  surface: CompiledSurfaceDefinition,
+  slot: CompiledSurfaceSlot,
+  intent: SurfaceOperationIntent,
+): boolean {
+  if (surface.surfaceRole !== 'form' && surface.surfaceRole !== 'record') {
+    return false;
+  }
+  const registration = surfaceSlotRegistry[`${surface.archetype}:${slot.slot}`];
+  return (
+    registration?.mutationIntents?.[surface.surfaceRole]?.includes(intent) ??
+    false
+  );
 }
 
 function surfaceHref(
