@@ -36,7 +36,9 @@ import type {
 import {
   INVENTORY_POSTING_CAPABILITY_VERSION,
   INVENTORY_POSTING_DEPENDENCY_SET_ROOT,
+  InventoryPostingError,
   PostgresInventoryPostingService,
+  type InventoryPostingErrorCode,
   type InventoryPostingRegistrationV1,
   type InventoryStockCountPostingCommandV1,
 } from '../../packages/postgres-provider/src/inventory-posting-service.js';
@@ -196,6 +198,11 @@ test('stock-count posting preserves three-value evidence and appends correction 
       );
       assertThreeValues(initialResult.stockCountEvidence, '0', '5', '5');
       assert.equal(initialResult.movements[0]?.quantityDelta, '5');
+      assert.equal(
+        initialResult.movements[0]?.postingRole,
+        'count',
+        "hardcoding the initial stock-count role to 'correction' must fail here",
+      );
       assertProtocolTrace(trace.splice(0), binding);
 
       const correction = countCommand({
@@ -338,6 +345,14 @@ test('stock-count posting preserves three-value evidence and appends correction 
         ['unitCost'],
         'the scan must inspect semantic fieldId values, not only property names',
       );
+      await assertRejectedStockCountCommands({
+        actor,
+        adminPool: database.pool,
+        binding,
+        context,
+        runtimePool,
+        service,
+      });
     } finally {
       await Promise.all([
         runtimePool.end(),
@@ -420,6 +435,222 @@ function assertThreeValues(
     variance,
     'deleting the varianceQuantity persistence/read-back line must fail here',
   );
+}
+
+type StockCountActor = Awaited<
+  ReturnType<InstanceType<typeof TrustedActorEnvelopeIssuer>['issue']>
+>;
+
+async function assertRejectedStockCountCommands(input: {
+  actor: StockCountActor;
+  adminPool: Pool;
+  binding: StorageBinding;
+  context: TrustedRequestContext;
+  runtimePool: Pool;
+  service: PostgresInventoryPostingService;
+}): Promise<void> {
+  const { actor, adminPool, binding, context, runtimePool, service } = input;
+
+  const inconsistentVariance = countCommand({
+    countedQuantity: '5',
+    expectedQuantity: '0',
+    kind: 'initial',
+    sequence: 4,
+    supersedesStockCountId: null,
+    varianceQuantity: '4',
+  });
+  await seedReviewedCount(runtimePool, context, binding, inconsistentVariance);
+  await assertCountPostingRejected(
+    () => service.postStockCount(context, actor, inconsistentVariance),
+    'INVENTORY_POSTING_INPUT_INVALID',
+    /varianceQuantity must equal counted minus expected/u,
+    'deleting the counted-minus-expected comparison must make this command post',
+  );
+
+  const firstPrior = countCommand({
+    countedQuantity: '1',
+    expectedQuantity: '0',
+    kind: 'initial',
+    sequence: 5,
+    supersedesStockCountId: null,
+    varianceQuantity: '1',
+  });
+  const secondPrior = countCommand({
+    countedQuantity: '1',
+    expectedQuantity: '0',
+    kind: 'initial',
+    sequence: 6,
+    supersedesStockCountId: null,
+    varianceQuantity: '1',
+  });
+  for (const prior of [firstPrior, secondPrior]) {
+    await seedReviewedCount(runtimePool, context, binding, prior);
+    await service.postStockCount(context, actor, prior);
+  }
+  const persistedSupersedes = countCommand({
+    countedQuantity: '2',
+    expectedQuantity: '1',
+    kind: 'correction',
+    sequence: 7,
+    supersedesStockCountId: firstPrior.stockCountId,
+    varianceQuantity: '1',
+  });
+  await seedReviewedCount(runtimePool, context, binding, persistedSupersedes);
+  await assertCountPostingRejected(
+    () =>
+      service.postStockCount(context, actor, {
+        ...persistedSupersedes,
+        supersedesStockCountId: secondPrior.stockCountId,
+      }),
+    'INVENTORY_COUNT_EVIDENCE_CONFLICT',
+    /does not exactly match the reviewed evidence/u,
+    'deleting the persisted supersedes comparison must move this command past evidence validation',
+  );
+
+  const reviewedPrior = countCommand({
+    countedQuantity: '1',
+    expectedQuantity: '0',
+    kind: 'initial',
+    sequence: 8,
+    supersedesStockCountId: null,
+    varianceQuantity: '1',
+  });
+  await seedReviewedCount(runtimePool, context, binding, reviewedPrior);
+  const correctionOfUnposted = countCommand({
+    countedQuantity: '2',
+    expectedQuantity: '1',
+    kind: 'correction',
+    sequence: 9,
+    supersedesStockCountId: reviewedPrior.stockCountId,
+    varianceQuantity: '1',
+  });
+  await seedReviewedCount(runtimePool, context, binding, correctionOfUnposted);
+  await assertCountPostingRejected(
+    () => service.postStockCount(context, actor, correctionOfUnposted),
+    'INVENTORY_COUNT_COMPENSATION_CONFLICT',
+    /must supersede one posted count at the same location/u,
+    'deleting the posted-prior state comparison must make this correction post',
+  );
+
+  const inversePrior = countCommand({
+    countedQuantity: '3',
+    expectedQuantity: '0',
+    kind: 'initial',
+    sequence: 10,
+    supersedesStockCountId: null,
+    varianceQuantity: '3',
+  });
+  await seedReviewedCount(runtimePool, context, binding, inversePrior);
+  await service.postStockCount(context, actor, inversePrior);
+  const inverseCorrection = countCommand({
+    countedQuantity: '5',
+    expectedQuantity: '3',
+    kind: 'correction',
+    sequence: 11,
+    supersedesStockCountId: inversePrior.stockCountId,
+    varianceQuantity: '2',
+  });
+  await seedReviewedCount(runtimePool, context, binding, inverseCorrection);
+  const inverseCorrectionResult = await service.postStockCount(
+    context,
+    actor,
+    inverseCorrection,
+  );
+  const inexactReversal = countCommand({
+    countedQuantity: '4',
+    expectedQuantity: '5',
+    kind: 'reversal',
+    reversalOfMovementId: inverseCorrectionResult.movements[0]!.movementId,
+    sequence: 12,
+    supersedesStockCountId: inverseCorrection.stockCountId,
+    varianceQuantity: '-1',
+  });
+  await seedReviewedCount(runtimePool, context, binding, inexactReversal);
+  await assertCountPostingRejected(
+    () => service.postStockCount(context, actor, inexactReversal),
+    'INVENTORY_COUNT_COMPENSATION_CONFLICT',
+    /is not the exact inverse of its superseded movement/u,
+    'deleting the exact-inverse comparison must make this reversal post',
+  );
+
+  const missingNarrative = {
+    ...countCommand({
+      countedQuantity: '1',
+      expectedQuantity: '0',
+      kind: 'initial',
+      sequence: 13,
+      supersedesStockCountId: null,
+      varianceQuantity: '1',
+    }),
+    reason: { code: 'PHYSICAL_COUNT', narrative: null },
+  };
+  await seedReviewedCount(runtimePool, context, binding, missingNarrative);
+  await assertCountPostingRejected(
+    () => service.postStockCount(context, actor, missingNarrative),
+    'INVENTORY_COUNT_REASON_REQUIRED',
+    /count requires codeAndNarrative/u,
+    'deleting the stock-count reason arm must make this reasonless count post',
+  );
+
+  const configured = await adminPool.query(
+    `UPDATE platform.inventory_posting_configurations
+        SET count_approval_threshold = 10,
+            correction_approval_threshold = 1,
+            revision = revision + 1
+      WHERE tenant_id=$1 AND environment_id=$2 AND legal_entity_id=$3`,
+    [tenantId, environmentId, legalEntityId],
+  );
+  assert.equal(configured.rowCount, 1);
+  const belowCountThreshold = countCommand({
+    countedQuantity: '5',
+    expectedQuantity: '0',
+    kind: 'initial',
+    sequence: 14,
+    supersedesStockCountId: null,
+    varianceQuantity: '5',
+  });
+  await seedReviewedCount(runtimePool, context, binding, belowCountThreshold);
+  assert.equal(
+    (await service.postStockCount(context, actor, belowCountThreshold))
+      .replayed,
+    false,
+    'the count role must read its distinct threshold of 10, not correction threshold 1',
+  );
+  const negativeCorrectionAboveThreshold = countCommand({
+    countedQuantity: '3',
+    expectedQuantity: '5',
+    kind: 'correction',
+    sequence: 15,
+    supersedesStockCountId: belowCountThreshold.stockCountId,
+    varianceQuantity: '-2',
+  });
+  await seedReviewedCount(
+    runtimePool,
+    context,
+    binding,
+    negativeCorrectionAboveThreshold,
+  );
+  await assertCountPostingRejected(
+    () =>
+      service.postStockCount(context, actor, negativeCorrectionAboveThreshold),
+    'INVENTORY_COUNT_APPROVAL_REQUIRED',
+    /correction exceeds approval threshold 1/u,
+    'deleting absolute variance or reading the count threshold for correction must make this unapproved correction post',
+  );
+}
+
+async function assertCountPostingRejected(
+  action: () => Promise<unknown>,
+  expectedCode: InventoryPostingErrorCode,
+  expectedMessage: RegExp,
+  victim: string,
+): Promise<void> {
+  await assert.rejects(action, (error: unknown) => {
+    assert.ok(error instanceof InventoryPostingError, victim);
+    assert.equal(error.code, expectedCode, victim);
+    assert.match(error.message, expectedMessage, victim);
+    return true;
+  });
 }
 
 function tracingPool(pool: Pool, trace: TraceEntry[]): Pool {

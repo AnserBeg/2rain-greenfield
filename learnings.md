@@ -257,3 +257,8 @@ How to apply: immediately before execution, reauthorize every capability member 
 Date: 2026-07-30
 Why: Q1-P4 moved capability refusal to the gateway, leaving a provider error assertion aimed at a guard no application path could reach.
 How to apply: trace every ingress after moving enforcement, remove unreachable duplicate validation, and make the executed control pin the first refusing layer's typed error and subject. See `docs/execution/packets/Q1-P4.md`.
+
+## Do not mistake declared state machines for runtime enforcement
+Date: 2026-07-30
+Why: Party, Catalog, Location, and Inventory all declare empty `stateMachines` arrays, while the generic module runtime consumes no state-machine definition at all; the language concept therefore supplies no terminal-state protection today.
+How to apply: before relying on a canonical lifecycle declaration, trace it into an executed runtime consumer and prove terminal-state mutation is refused. Treat declaration without consumption as a hollow contract, not enforcement.
