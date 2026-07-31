@@ -54,6 +54,7 @@ import {
   type SemanticOperationExecutor,
 } from '../../runtime/src/semantic-operation-gateway.js';
 import {
+  MalformedLegalEntityScopeArgumentError,
   SEMANTIC_QUERY_REQUEST_VERSION,
   SemanticQueryGateway,
   type SemanticQueryExecutor,
@@ -287,13 +288,6 @@ export class PostgresReleaseVerificationService {
     const snapshot = snapshotExecutionCommand(command);
     const binding = releaseVerificationBinding(snapshot.compiledRelease);
     await this.assertStagedCandidate(context, snapshot, binding);
-    if (binding.plan.scenarios.length === 0) {
-      return executeVerificationPlan(
-        binding.plan,
-        executionBinding(binding),
-        () => ({ positiveProbe: { emptyPlanExecuted: true } }),
-      );
-    }
     const derive = verificationScenarioDeriver(
       snapshot.compiledRelease,
       binding,
@@ -327,11 +321,6 @@ export class PostgresReleaseVerificationService {
     executorProvider: SemanticOperationExecutor & SemanticQueryExecutor,
   ): Promise<DurableReleaseVerificationEvidence> {
     const binding = releaseVerificationBinding(command.compiledRelease);
-    if (binding.plan.scenarios.length === 0) {
-      return this.#executeAndPersist(context, command, () => ({
-        positiveProbe: { emptyPlanExecuted: true },
-      }));
-    }
     return this.#executeSemanticCandidateWithExecutor(
       context,
       command,
@@ -384,6 +373,7 @@ export class PostgresReleaseVerificationService {
       );
       return (async () => {
         try {
+          await executor.verifyLegalEntityScopeOmissions();
           return await execute(executor);
         } finally {
           await executor.archiveProbeRecords();
@@ -942,6 +932,16 @@ interface VerificationOperationContract {
 }
 
 interface VerificationQueryContract {
+  readonly legalEntityScope?: {
+    readonly cardinality: 'exactlyOne' | 'nonEmptySet';
+    readonly kind: 'queryLegalEntityScope';
+    readonly operand: {
+      readonly kind: 'queryParameterReference';
+      readonly parameterId: string;
+      readonly schemaVersion: 'v4';
+    };
+    readonly schemaVersion: 'v4';
+  };
   readonly queryId: string;
   readonly queryType: 'get' | 'list' | 'resolve' | 'search';
   readonly resolveMatchKeys: readonly {
@@ -1115,6 +1115,34 @@ class SemanticVerificationExecutor {
         return this.#uniquenessFold(scenario, token);
       case 'archiveRestrict':
         return this.#archiveRestrict(scenario, token);
+    }
+  }
+
+  /**
+   * ADR-0031 §5: verification asks no business question. It invokes every
+   * scope-declaring query through the real pinned gateway with the operand
+   * omitted and requires that contract's exact typed refusal before scenario
+   * execution or derivation can admit the candidate.
+   */
+  async verifyLegalEntityScopeOmissions(): Promise<void> {
+    for (const query of this.#queries) {
+      if (!query.legalEntityScope) continue;
+      try {
+        await this.#invokeQuery(query, {});
+      } catch (error) {
+        if (
+          error instanceof MalformedLegalEntityScopeArgumentError &&
+          error.code === 'SEMANTIC_QUERY_LEGAL_ENTITY_SCOPE_INVALID' &&
+          error.reason === 'selection-omitted'
+        ) {
+          continue;
+        }
+        throw error;
+      }
+      throw failure(
+        'VERIFICATION_LEGAL_ENTITY_SCOPE_OMISSION_NOT_REFUSED',
+        `scope-declaring query accepted an omitted legal-entity operand: ${query.queryId}`,
+      );
     }
   }
 

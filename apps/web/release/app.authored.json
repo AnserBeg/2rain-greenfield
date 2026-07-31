@@ -894,10 +894,7 @@
         "targetId": "northstar.app:entity.legal_entity"
       },
       "fieldId": "northstar.app:field.legal_entity_is_default",
-      "fieldType": {
-        "kind": "booleanFieldType",
-        "schemaVersion": "v4"
-      },
+      "fieldType": { "kind": "booleanFieldType", "schemaVersion": "v4" },
       "kind": "fieldDefinition",
       "label": "Default entity",
       "orderKey": 40,
@@ -5432,6 +5429,24 @@
     },
     {
       "kind": "queryDefinition",
+      "legalEntityScope": {
+        "cardinality": "exactlyOne",
+        "kind": "queryLegalEntityScope",
+        "operand": {
+          "kind": "queryParameterReference",
+          "parameterId": "northstar.app:parameter.inventory_transaction_get_legal_entity_scope",
+          "schemaVersion": "v4"
+        },
+        "schemaVersion": "v4"
+      },
+      "parameters": [
+        {
+          "kind": "queryParameterDefinition",
+          "orderKey": 10,
+          "parameterId": "northstar.app:parameter.inventory_transaction_get_legal_entity_scope",
+          "schemaVersion": "v4"
+        }
+      ],
       "maximumResultCount": 1,
       "module": {
         "kind": "moduleReference",
@@ -5567,6 +5582,24 @@
     },
     {
       "kind": "queryDefinition",
+      "legalEntityScope": {
+        "cardinality": "exactlyOne",
+        "kind": "queryLegalEntityScope",
+        "operand": {
+          "kind": "queryParameterReference",
+          "parameterId": "northstar.app:parameter.inventory_transaction_list_legal_entity_scope",
+          "schemaVersion": "v4"
+        },
+        "schemaVersion": "v4"
+      },
+      "parameters": [
+        {
+          "kind": "queryParameterDefinition",
+          "orderKey": 10,
+          "parameterId": "northstar.app:parameter.inventory_transaction_list_legal_entity_scope",
+          "schemaVersion": "v4"
+        }
+      ],
       "maximumResultCount": 100,
       "module": {
         "kind": "moduleReference",
@@ -5702,6 +5735,24 @@
     },
     {
       "kind": "queryDefinition",
+      "legalEntityScope": {
+        "cardinality": "exactlyOne",
+        "kind": "queryLegalEntityScope",
+        "operand": {
+          "kind": "queryParameterReference",
+          "parameterId": "northstar.app:parameter.inventory_transaction_search_legal_entity_scope",
+          "schemaVersion": "v4"
+        },
+        "schemaVersion": "v4"
+      },
+      "parameters": [
+        {
+          "kind": "queryParameterDefinition",
+          "orderKey": 10,
+          "parameterId": "northstar.app:parameter.inventory_transaction_search_legal_entity_scope",
+          "schemaVersion": "v4"
+        }
+      ],
       "maximumResultCount": 100,
       "module": {
         "kind": "moduleReference",
@@ -5837,6 +5888,24 @@
     },
     {
       "kind": "queryDefinition",
+      "legalEntityScope": {
+        "cardinality": "exactlyOne",
+        "kind": "queryLegalEntityScope",
+        "operand": {
+          "kind": "queryParameterReference",
+          "parameterId": "northstar.app:parameter.inventory_transaction_resolve_legal_entity_scope",
+          "schemaVersion": "v4"
+        },
+        "schemaVersion": "v4"
+      },
+      "parameters": [
+        {
+          "kind": "queryParameterDefinition",
+          "orderKey": 10,
+          "parameterId": "northstar.app:parameter.inventory_transaction_resolve_legal_entity_scope",
+          "schemaVersion": "v4"
+        }
+      ],
       "maximumResultCount": 100,
       "module": {
         "kind": "moduleReference",
@@ -5986,6 +6055,24 @@
     },
     {
       "kind": "queryDefinition",
+      "legalEntityScope": {
+        "cardinality": "exactlyOne",
+        "kind": "queryLegalEntityScope",
+        "operand": {
+          "kind": "queryParameterReference",
+          "parameterId": "northstar.app:parameter.inventory_transaction_line_get_legal_entity_scope",
+          "schemaVersion": "v4"
+        },
+        "schemaVersion": "v4"
+      },
+      "parameters": [
+        {
+          "kind": "queryParameterDefinition",
+          "orderKey": 10,
+          "parameterId": "northstar.app:parameter.inventory_transaction_line_get_legal_entity_scope",
+          "schemaVersion": "v4"
+        }
+      ],
       "maximumResultCount": 1,
       "module": {
         "kind": "moduleReference",
@@ -6077,6 +6164,24 @@
     },
     {
       "kind": "queryDefinition",
+      "legalEntityScope": {
+        "cardinality": "exactlyOne",
+        "kind": "queryLegalEntityScope",
+        "operand": {
+          "kind": "queryParameterReference",
+          "parameterId": "northstar.app:parameter.inventory_transaction_line_list_legal_entity_scope",
+          "schemaVersion": "v4"
+        },
+        "schemaVersion": "v4"
+      },
+      "parameters": [
+        {
+          "kind": "queryParameterDefinition",
+          "orderKey": 10,
+          "parameterId": "northstar.app:parameter.inventory_transaction_line_list_legal_entity_scope",
+          "schemaVersion": "v4"
+        }
+      ],
       "maximumResultCount": 100,
       "module": {
         "kind": "moduleReference",
@@ -6168,6 +6273,24 @@
     },
     {
       "kind": "queryDefinition",
+      "legalEntityScope": {
+        "cardinality": "exactlyOne",
+        "kind": "queryLegalEntityScope",
+        "operand": {
+          "kind": "queryParameterReference",
+          "parameterId": "northstar.app:parameter.inventory_transaction_line_search_legal_entity_scope",
+          "schemaVersion": "v4"
+        },
+        "schemaVersion": "v4"
+      },
+      "parameters": [
+        {
+          "kind": "queryParameterDefinition",
+          "orderKey": 10,
+          "parameterId": "northstar.app:parameter.inventory_transaction_line_search_legal_entity_scope",
+          "schemaVersion": "v4"
+        }
+      ],
       "maximumResultCount": 100,
       "module": {
         "kind": "moduleReference",
@@ -6259,6 +6382,24 @@
     },
     {
       "kind": "queryDefinition",
+      "legalEntityScope": {
+        "cardinality": "exactlyOne",
+        "kind": "queryLegalEntityScope",
+        "operand": {
+          "kind": "queryParameterReference",
+          "parameterId": "northstar.app:parameter.inventory_transaction_line_resolve_legal_entity_scope",
+          "schemaVersion": "v4"
+        },
+        "schemaVersion": "v4"
+      },
+      "parameters": [
+        {
+          "kind": "queryParameterDefinition",
+          "orderKey": 10,
+          "parameterId": "northstar.app:parameter.inventory_transaction_line_resolve_legal_entity_scope",
+          "schemaVersion": "v4"
+        }
+      ],
       "maximumResultCount": 100,
       "module": {
         "kind": "moduleReference",
@@ -6364,6 +6505,24 @@
     },
     {
       "kind": "queryDefinition",
+      "legalEntityScope": {
+        "cardinality": "exactlyOne",
+        "kind": "queryLegalEntityScope",
+        "operand": {
+          "kind": "queryParameterReference",
+          "parameterId": "northstar.app:parameter.inventory_period_lock_get_legal_entity_scope",
+          "schemaVersion": "v4"
+        },
+        "schemaVersion": "v4"
+      },
+      "parameters": [
+        {
+          "kind": "queryParameterDefinition",
+          "orderKey": 10,
+          "parameterId": "northstar.app:parameter.inventory_period_lock_get_legal_entity_scope",
+          "schemaVersion": "v4"
+        }
+      ],
       "maximumResultCount": 1,
       "module": {
         "kind": "moduleReference",
@@ -6400,6 +6559,24 @@
     },
     {
       "kind": "queryDefinition",
+      "legalEntityScope": {
+        "cardinality": "exactlyOne",
+        "kind": "queryLegalEntityScope",
+        "operand": {
+          "kind": "queryParameterReference",
+          "parameterId": "northstar.app:parameter.inventory_period_lock_list_legal_entity_scope",
+          "schemaVersion": "v4"
+        },
+        "schemaVersion": "v4"
+      },
+      "parameters": [
+        {
+          "kind": "queryParameterDefinition",
+          "orderKey": 10,
+          "parameterId": "northstar.app:parameter.inventory_period_lock_list_legal_entity_scope",
+          "schemaVersion": "v4"
+        }
+      ],
       "maximumResultCount": 100,
       "module": {
         "kind": "moduleReference",
@@ -6436,6 +6613,24 @@
     },
     {
       "kind": "queryDefinition",
+      "legalEntityScope": {
+        "cardinality": "exactlyOne",
+        "kind": "queryLegalEntityScope",
+        "operand": {
+          "kind": "queryParameterReference",
+          "parameterId": "northstar.app:parameter.inventory_period_lock_search_legal_entity_scope",
+          "schemaVersion": "v4"
+        },
+        "schemaVersion": "v4"
+      },
+      "parameters": [
+        {
+          "kind": "queryParameterDefinition",
+          "orderKey": 10,
+          "parameterId": "northstar.app:parameter.inventory_period_lock_search_legal_entity_scope",
+          "schemaVersion": "v4"
+        }
+      ],
       "maximumResultCount": 100,
       "module": {
         "kind": "moduleReference",
@@ -6472,6 +6667,24 @@
     },
     {
       "kind": "queryDefinition",
+      "legalEntityScope": {
+        "cardinality": "exactlyOne",
+        "kind": "queryLegalEntityScope",
+        "operand": {
+          "kind": "queryParameterReference",
+          "parameterId": "northstar.app:parameter.inventory_period_lock_resolve_legal_entity_scope",
+          "schemaVersion": "v4"
+        },
+        "schemaVersion": "v4"
+      },
+      "parameters": [
+        {
+          "kind": "queryParameterDefinition",
+          "orderKey": 10,
+          "parameterId": "northstar.app:parameter.inventory_period_lock_resolve_legal_entity_scope",
+          "schemaVersion": "v4"
+        }
+      ],
       "maximumResultCount": 100,
       "module": {
         "kind": "moduleReference",
@@ -6522,6 +6735,24 @@
     },
     {
       "kind": "queryDefinition",
+      "legalEntityScope": {
+        "cardinality": "exactlyOne",
+        "kind": "queryLegalEntityScope",
+        "operand": {
+          "kind": "queryParameterReference",
+          "parameterId": "northstar.app:parameter.stock_count_get_legal_entity_scope",
+          "schemaVersion": "v4"
+        },
+        "schemaVersion": "v4"
+      },
+      "parameters": [
+        {
+          "kind": "queryParameterDefinition",
+          "orderKey": 10,
+          "parameterId": "northstar.app:parameter.stock_count_get_legal_entity_scope",
+          "schemaVersion": "v4"
+        }
+      ],
       "maximumResultCount": 1,
       "module": {
         "kind": "moduleReference",
@@ -6646,6 +6877,24 @@
     },
     {
       "kind": "queryDefinition",
+      "legalEntityScope": {
+        "cardinality": "exactlyOne",
+        "kind": "queryLegalEntityScope",
+        "operand": {
+          "kind": "queryParameterReference",
+          "parameterId": "northstar.app:parameter.stock_count_list_legal_entity_scope",
+          "schemaVersion": "v4"
+        },
+        "schemaVersion": "v4"
+      },
+      "parameters": [
+        {
+          "kind": "queryParameterDefinition",
+          "orderKey": 10,
+          "parameterId": "northstar.app:parameter.stock_count_list_legal_entity_scope",
+          "schemaVersion": "v4"
+        }
+      ],
       "maximumResultCount": 100,
       "module": {
         "kind": "moduleReference",
@@ -6770,6 +7019,24 @@
     },
     {
       "kind": "queryDefinition",
+      "legalEntityScope": {
+        "cardinality": "exactlyOne",
+        "kind": "queryLegalEntityScope",
+        "operand": {
+          "kind": "queryParameterReference",
+          "parameterId": "northstar.app:parameter.stock_count_search_legal_entity_scope",
+          "schemaVersion": "v4"
+        },
+        "schemaVersion": "v4"
+      },
+      "parameters": [
+        {
+          "kind": "queryParameterDefinition",
+          "orderKey": 10,
+          "parameterId": "northstar.app:parameter.stock_count_search_legal_entity_scope",
+          "schemaVersion": "v4"
+        }
+      ],
       "maximumResultCount": 100,
       "module": {
         "kind": "moduleReference",
@@ -6894,6 +7161,24 @@
     },
     {
       "kind": "queryDefinition",
+      "legalEntityScope": {
+        "cardinality": "exactlyOne",
+        "kind": "queryLegalEntityScope",
+        "operand": {
+          "kind": "queryParameterReference",
+          "parameterId": "northstar.app:parameter.stock_count_resolve_legal_entity_scope",
+          "schemaVersion": "v4"
+        },
+        "schemaVersion": "v4"
+      },
+      "parameters": [
+        {
+          "kind": "queryParameterDefinition",
+          "orderKey": 10,
+          "parameterId": "northstar.app:parameter.stock_count_resolve_legal_entity_scope",
+          "schemaVersion": "v4"
+        }
+      ],
       "maximumResultCount": 100,
       "module": {
         "kind": "moduleReference",
@@ -7032,6 +7317,24 @@
     },
     {
       "kind": "queryDefinition",
+      "legalEntityScope": {
+        "cardinality": "exactlyOne",
+        "kind": "queryLegalEntityScope",
+        "operand": {
+          "kind": "queryParameterReference",
+          "parameterId": "northstar.app:parameter.stock_count_line_get_legal_entity_scope",
+          "schemaVersion": "v4"
+        },
+        "schemaVersion": "v4"
+      },
+      "parameters": [
+        {
+          "kind": "queryParameterDefinition",
+          "orderKey": 10,
+          "parameterId": "northstar.app:parameter.stock_count_line_get_legal_entity_scope",
+          "schemaVersion": "v4"
+        }
+      ],
       "maximumResultCount": 1,
       "module": {
         "kind": "moduleReference",
@@ -7134,6 +7437,24 @@
     },
     {
       "kind": "queryDefinition",
+      "legalEntityScope": {
+        "cardinality": "exactlyOne",
+        "kind": "queryLegalEntityScope",
+        "operand": {
+          "kind": "queryParameterReference",
+          "parameterId": "northstar.app:parameter.stock_count_line_list_legal_entity_scope",
+          "schemaVersion": "v4"
+        },
+        "schemaVersion": "v4"
+      },
+      "parameters": [
+        {
+          "kind": "queryParameterDefinition",
+          "orderKey": 10,
+          "parameterId": "northstar.app:parameter.stock_count_line_list_legal_entity_scope",
+          "schemaVersion": "v4"
+        }
+      ],
       "maximumResultCount": 100,
       "module": {
         "kind": "moduleReference",
@@ -7236,6 +7557,24 @@
     },
     {
       "kind": "queryDefinition",
+      "legalEntityScope": {
+        "cardinality": "exactlyOne",
+        "kind": "queryLegalEntityScope",
+        "operand": {
+          "kind": "queryParameterReference",
+          "parameterId": "northstar.app:parameter.stock_count_line_search_legal_entity_scope",
+          "schemaVersion": "v4"
+        },
+        "schemaVersion": "v4"
+      },
+      "parameters": [
+        {
+          "kind": "queryParameterDefinition",
+          "orderKey": 10,
+          "parameterId": "northstar.app:parameter.stock_count_line_search_legal_entity_scope",
+          "schemaVersion": "v4"
+        }
+      ],
       "maximumResultCount": 100,
       "module": {
         "kind": "moduleReference",
@@ -7338,6 +7677,24 @@
     },
     {
       "kind": "queryDefinition",
+      "legalEntityScope": {
+        "cardinality": "exactlyOne",
+        "kind": "queryLegalEntityScope",
+        "operand": {
+          "kind": "queryParameterReference",
+          "parameterId": "northstar.app:parameter.stock_count_line_resolve_legal_entity_scope",
+          "schemaVersion": "v4"
+        },
+        "schemaVersion": "v4"
+      },
+      "parameters": [
+        {
+          "kind": "queryParameterDefinition",
+          "orderKey": 10,
+          "parameterId": "northstar.app:parameter.stock_count_line_resolve_legal_entity_scope",
+          "schemaVersion": "v4"
+        }
+      ],
       "maximumResultCount": 100,
       "module": {
         "kind": "moduleReference",
@@ -7454,6 +7811,24 @@
     },
     {
       "kind": "queryDefinition",
+      "legalEntityScope": {
+        "cardinality": "exactlyOne",
+        "kind": "queryLegalEntityScope",
+        "operand": {
+          "kind": "queryParameterReference",
+          "parameterId": "northstar.app:parameter.inventory_movement_get_legal_entity_scope",
+          "schemaVersion": "v4"
+        },
+        "schemaVersion": "v4"
+      },
+      "parameters": [
+        {
+          "kind": "queryParameterDefinition",
+          "orderKey": 10,
+          "parameterId": "northstar.app:parameter.inventory_movement_get_legal_entity_scope",
+          "schemaVersion": "v4"
+        }
+      ],
       "maximumResultCount": 1,
       "module": {
         "kind": "moduleReference",
@@ -7655,6 +8030,24 @@
     },
     {
       "kind": "queryDefinition",
+      "legalEntityScope": {
+        "cardinality": "exactlyOne",
+        "kind": "queryLegalEntityScope",
+        "operand": {
+          "kind": "queryParameterReference",
+          "parameterId": "northstar.app:parameter.inventory_movement_list_legal_entity_scope",
+          "schemaVersion": "v4"
+        },
+        "schemaVersion": "v4"
+      },
+      "parameters": [
+        {
+          "kind": "queryParameterDefinition",
+          "orderKey": 10,
+          "parameterId": "northstar.app:parameter.inventory_movement_list_legal_entity_scope",
+          "schemaVersion": "v4"
+        }
+      ],
       "maximumResultCount": 100,
       "module": {
         "kind": "moduleReference",
@@ -7856,6 +8249,24 @@
     },
     {
       "kind": "queryDefinition",
+      "legalEntityScope": {
+        "cardinality": "exactlyOne",
+        "kind": "queryLegalEntityScope",
+        "operand": {
+          "kind": "queryParameterReference",
+          "parameterId": "northstar.app:parameter.inventory_movement_search_legal_entity_scope",
+          "schemaVersion": "v4"
+        },
+        "schemaVersion": "v4"
+      },
+      "parameters": [
+        {
+          "kind": "queryParameterDefinition",
+          "orderKey": 10,
+          "parameterId": "northstar.app:parameter.inventory_movement_search_legal_entity_scope",
+          "schemaVersion": "v4"
+        }
+      ],
       "maximumResultCount": 100,
       "module": {
         "kind": "moduleReference",
@@ -8057,6 +8468,24 @@
     },
     {
       "kind": "queryDefinition",
+      "legalEntityScope": {
+        "cardinality": "exactlyOne",
+        "kind": "queryLegalEntityScope",
+        "operand": {
+          "kind": "queryParameterReference",
+          "parameterId": "northstar.app:parameter.inventory_movement_resolve_legal_entity_scope",
+          "schemaVersion": "v4"
+        },
+        "schemaVersion": "v4"
+      },
+      "parameters": [
+        {
+          "kind": "queryParameterDefinition",
+          "orderKey": 10,
+          "parameterId": "northstar.app:parameter.inventory_movement_resolve_legal_entity_scope",
+          "schemaVersion": "v4"
+        }
+      ],
       "maximumResultCount": 100,
       "module": {
         "kind": "moduleReference",

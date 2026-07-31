@@ -125,6 +125,15 @@ const defaultIds = ids(INVENTORY_NAMESPACE);
 
 export const INVENTORY_IDS = Object.freeze(defaultIds);
 
+const ENTITY_OWNED_QUERY_FAMILIES = new Set([
+  'inventory_movement',
+  'inventory_period_lock',
+  'inventory_transaction',
+  'inventory_transaction_line',
+  'stock_count',
+  'stock_count_line',
+]);
+
 /**
  * The inventory module owns business records in the same canonical module
  * plane as every other first-party domain. The movement is intentionally
@@ -965,41 +974,66 @@ function queries(
   selectedFieldIds: readonly string[],
   resolveFieldId: string,
 ): Array<Record<string, unknown>> {
-  return ['get', 'list', 'search', 'resolve'].map((queryType) => ({
-    kind: 'queryDefinition',
-    maximumResultCount: queryType === 'get' ? 1 : 100,
-    module: reference('moduleReference', ids.moduleId),
-    permission: reference(
-      'permissionReference',
-      `${ids.namespace}:permission.${local}_read`,
-    ),
-    queryId: `${ids.namespace}:query.${local}_${queryType}`,
-    queryType,
-    ...(queryType === 'resolve'
-      ? {
-          resolveMatchKeys: [
-            {
-              authority: 'identifier',
-              field: reference('fieldReference', resolveFieldId),
-              kind: 'resolveMatchKey',
-              matchKeyId: `${ids.namespace}:resolve-key.${local}`,
-              orderKey: 10,
+  return (['get', 'list', 'search', 'resolve'] as const).map((queryType) => {
+    const legalEntityScopeParameterId = `${ids.namespace}:parameter.${local}_${queryType}_legal_entity_scope`;
+    return {
+      kind: 'queryDefinition',
+      ...(ENTITY_OWNED_QUERY_FAMILIES.has(local)
+        ? {
+            legalEntityScope: {
+              cardinality: 'exactlyOne',
+              kind: 'queryLegalEntityScope',
+              operand: {
+                kind: 'queryParameterReference',
+                parameterId: legalEntityScopeParameterId,
+                schemaVersion: version,
+              },
               schemaVersion: version,
             },
-          ],
-        }
-      : {}),
-    schemaVersion: version,
-    selections: selectedFieldIds.map((fieldId, index) => ({
-      field: reference('fieldReference', fieldId),
-      kind: 'querySelection',
-      orderKey: (index + 1) * 10,
+            parameters: [
+              {
+                kind: 'queryParameterDefinition',
+                orderKey: 10,
+                parameterId: legalEntityScopeParameterId,
+                schemaVersion: version,
+              },
+            ],
+          }
+        : {}),
+      maximumResultCount: queryType === 'get' ? 1 : 100,
+      module: reference('moduleReference', ids.moduleId),
+      permission: reference(
+        'permissionReference',
+        `${ids.namespace}:permission.${local}_read`,
+      ),
+      queryId: `${ids.namespace}:query.${local}_${queryType}`,
+      queryType,
+      ...(queryType === 'resolve'
+        ? {
+            resolveMatchKeys: [
+              {
+                authority: 'identifier',
+                field: reference('fieldReference', resolveFieldId),
+                kind: 'resolveMatchKey',
+                matchKeyId: `${ids.namespace}:resolve-key.${local}`,
+                orderKey: 10,
+                schemaVersion: version,
+              },
+            ],
+          }
+        : {}),
       schemaVersion: version,
-      selectionId: `${ids.namespace}:selection.${local}_${queryType}_${String(index + 1)}`,
-    })),
-    sourceEntity: reference('entityReference', entityId),
-    tier: 'q0',
-  }));
+      selections: selectedFieldIds.map((fieldId, index) => ({
+        field: reference('fieldReference', fieldId),
+        kind: 'querySelection',
+        orderKey: (index + 1) * 10,
+        schemaVersion: version,
+        selectionId: `${ids.namespace}:selection.${local}_${queryType}_${String(index + 1)}`,
+      })),
+      sourceEntity: reference('entityReference', entityId),
+      tier: 'q0',
+    };
+  });
 }
 
 function operations(

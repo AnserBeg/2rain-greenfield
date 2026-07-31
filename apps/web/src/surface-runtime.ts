@@ -12,6 +12,7 @@ import type {
   SemanticOperationMediationAuthority,
 } from '../../../packages/runtime/src/semantic-operation-gateway.js';
 import {
+  MalformedLegalEntityScopeArgumentError,
   NoSuchRegisteredQueryError,
   SEMANTIC_QUERY_REQUEST_VERSION,
   SemanticQueryPolicyDeniedError,
@@ -103,6 +104,17 @@ export async function renderSurfaceRuntimeWithData(
   }
 
   const url = new URL(requestUrl, 'http://surface-runtime.local');
+  const legalEntitySelection = legalEntitySelectionForSurface(binding, url);
+  if (binding.query.legalEntityScope && legalEntitySelection.length === 0) {
+    return renderSelectedSurface(
+      view,
+      selection,
+      { code: 'QUERY_LEGAL_ENTITY_SCOPE_REQUIRED', status: 'DIAGNOSTIC' },
+      feedback,
+      binding.operations,
+      422,
+    );
+  }
   const queryArguments = argumentsForSurface(binding, url);
   if (queryArguments === null) {
     const state: SurfaceDataRenderState =
@@ -115,10 +127,13 @@ export async function renderSurfaceRuntimeWithData(
       state,
       feedback,
       binding.operations,
+      200,
+      legalEntitySelection,
     );
   }
 
   let data: SurfaceDataRenderState;
+  let statusCode = 200;
   try {
     const result = await gateways.queryGateway.invoke(view, {
       arguments: queryArguments,
@@ -131,11 +146,16 @@ export async function renderSurfaceRuntimeWithData(
       code:
         error instanceof SemanticQueryPolicyDeniedError
           ? 'QUERY_PERMISSION_DENIED'
-          : error instanceof NoSuchRegisteredQueryError
-            ? 'QUERY_UNSUPPORTED'
-            : 'QUERY_UNAVAILABLE',
+          : error instanceof MalformedLegalEntityScopeArgumentError
+            ? 'QUERY_LEGAL_ENTITY_SCOPE_REQUIRED'
+            : error instanceof NoSuchRegisteredQueryError
+              ? 'QUERY_UNSUPPORTED'
+              : 'QUERY_UNAVAILABLE',
       status: 'DIAGNOSTIC',
     };
+    if (error instanceof MalformedLegalEntityScopeArgumentError) {
+      statusCode = 422;
+    }
   }
   return renderSelectedSurface(
     view,
@@ -143,6 +163,8 @@ export async function renderSurfaceRuntimeWithData(
     data,
     feedback,
     binding.operations,
+    statusCode,
+    legalEntitySelection,
   );
 }
 
@@ -240,6 +262,11 @@ export async function submitSurfaceRuntimeIntent(
       trustLinked: result.trust !== null,
     },
     binding.operations,
+    200,
+    legalEntitySelectionForSurface(
+      binding,
+      new URL(requestUrl, 'http://surface-runtime.local'),
+    ),
   );
 }
 
@@ -250,6 +277,7 @@ function renderSelectedSurface(
   feedback: SurfaceOperationFeedback | null,
   operations: CompiledSurfaceDataBinding['operations'],
   statusCode = 200,
+  legalEntitySelection: readonly string[] = [],
 ): SurfaceRuntimeResponse {
   const recordResolutionFailed =
     selected.archetype === 'record' && data.status === 'DIAGNOSTIC';
@@ -261,6 +289,7 @@ function renderSelectedSurface(
         renderRegisteredSurfaceComponent({
           data,
           feedback,
+          legalEntitySelection,
           operations,
           slot,
           surface: selected,
@@ -360,10 +389,11 @@ function argumentsForSurface(
   url: URL,
 ): RuntimeViewContract.ImmutableJsonValue | null {
   const includeArchived = url.searchParams.get('archived') === 'yes';
+  const scopeArguments = legalEntityScopeArguments(binding, url);
   switch (binding.query.queryType) {
     case 'get': {
       const recordId = url.searchParams.get('record');
-      return recordId ? { includeArchived, recordId } : null;
+      return recordId ? { includeArchived, recordId, ...scopeArguments } : null;
     }
     case 'list':
       return {
@@ -377,6 +407,7 @@ function argumentsForSurface(
           search: url.searchParams.get('q') ?? '',
           sort: [],
         },
+        ...scopeArguments,
       };
     case 'resolve':
     case 'search': {
@@ -386,10 +417,33 @@ function argumentsForSurface(
             includeArchived,
             limit: binding.query.maximumResultCount,
             text,
+            ...scopeArguments,
           }
         : null;
     }
   }
+}
+
+function legalEntityScopeArguments(
+  binding: CompiledSurfaceDataBinding,
+  url: URL,
+): Readonly<Record<string, RuntimeViewContract.ImmutableJsonValue>> {
+  const scope = binding.query.legalEntityScope;
+  if (!scope) return {};
+  const parameterId = scope.operand.parameterId;
+  const selections = url.searchParams.getAll(parameterId);
+  return {
+    [parameterId]:
+      scope.cardinality === 'exactlyOne' ? (selections[0] ?? '') : selections,
+  };
+}
+
+function legalEntitySelectionForSurface(
+  binding: CompiledSurfaceDataBinding,
+  url: URL,
+): readonly string[] {
+  const scope = binding.query.legalEntityScope;
+  return scope ? url.searchParams.getAll(scope.operand.parameterId) : [];
 }
 
 function dataState(

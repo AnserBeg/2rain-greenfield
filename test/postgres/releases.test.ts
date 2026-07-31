@@ -27,6 +27,18 @@ import {
   type ProjectionReference,
   type VerificationPlanPayloadV1,
 } from '../../packages/compiler/src/index.js';
+import {
+  type SemanticOperationExecutionRequest,
+  type SemanticOperationExecutor,
+  type SemanticOperationNonAcceptedRequest,
+  type SemanticOperationResultEnvelope,
+} from '../../packages/runtime/src/semantic-operation-gateway.js';
+import {
+  MalformedPinnedQueryCatalogError,
+  type SemanticQueryExecutionRequest,
+  type SemanticQueryExecutor,
+  type SemanticQueryResultEnvelope,
+} from '../../packages/runtime/src/semantic-query-gateway.js';
 import type {
   ExecutedVerificationResultSet,
   PartitionedVerificationResultSet,
@@ -40,6 +52,7 @@ import type {
   StoreAppPackageRevisionCommand,
   VerificationEvidenceIdentity,
 } from '../../packages/platform-runtime/src/index.js';
+import { inventoryModuleDefinition } from '../../packages/domain/src/inventory/index.js';
 import {
   PostgresImmutableReleaseRepository,
   ReleasePersistenceIdentityError,
@@ -62,7 +75,11 @@ import {
   type AuthenticatedIdentity,
   type TrustedRequestContext,
 } from '../../packages/runtime/src/request-context.js';
-import { compilerInput, fixtureBytes } from '../compiler/helpers.js';
+import {
+  compilerInput,
+  fixtureBytes,
+  normalizedBytes,
+} from '../compiler/helpers.js';
 import { withEphemeralPostgres } from '../helpers/postgres.js';
 
 const checkedInMigrations = resolve('db/migrations');
@@ -243,6 +260,108 @@ test('verification results admit an exact executed-and-derived partition while f
     ],
     status: 'failed',
   });
+});
+
+test('scope omission verification runs for an empty plan and refuses a malformed pinned contract', async () => {
+  const revisionBytes = normalizedBytes(inventoryModuleDefinition());
+  const emptyPlan = rewriteProjectionPayload(
+    mustCompile(revisionBytes),
+    PROJECTION_FAMILY_IDS.verificationPlan,
+    (payload) => {
+      payload.scenarios = [];
+    },
+  );
+  assert.equal(releaseVerificationBinding(emptyPlan).plan.scenarios.length, 0);
+  const malformedScope = rewriteProjectionPayload(
+    emptyPlan,
+    PROJECTION_FAMILY_IDS.queryCatalog,
+    (payload) => {
+      const queries = payload.queries as Array<Record<string, unknown>>;
+      const query = queries.find(
+        (candidate) => candidate.legalEntityScope !== undefined,
+      );
+      assert.ok(query);
+      const scope = query.legalEntityScope as {
+        operand: { parameterId: string };
+      };
+      scope.operand.parameterId =
+        'northstar.bootstrap:parameter.absent_scope_contract';
+    },
+  );
+
+  await withEphemeralPostgres(
+    'release-verification-scope-empty-plan',
+    async ({ connection, pool }) => {
+      const admin = await pool.connect();
+      try {
+        await runMigrations(admin, await loadMigrations(checkedInMigrations));
+        await seedTenants(admin);
+      } finally {
+        admin.release();
+      }
+      const runtimePool = new pg.Pool({
+        ...connection,
+        max: 1,
+        user: 'north_star_runtime',
+      });
+      try {
+        const repository = new PostgresImmutableReleaseRepository(runtimePool);
+        const verification = new PostgresReleaseVerificationService(
+          runtimePool,
+        );
+        const context = await contextFor(requestEntry(), 'session-a');
+        const executor = new ScopeOmissionProbeExecutor();
+
+        const execute = async (
+          compiledRelease: CompileSuccess,
+          revisionId: MintedUuid,
+          releaseId: MintedUuid,
+        ) => {
+          await repository.storeAppPackageRevision(
+            context,
+            revisionCommand(context, revisionId, revisionBytes),
+          );
+          const staged = await repository.stageTenantReleaseCandidate(context, {
+            appPackageRevisionId: revisionId,
+            compiledRelease,
+            createdBy: context.principalId,
+            environmentId: context.environmentId,
+            releaseId,
+            tenantId: context.tenantId,
+          });
+          return verification.executeSemanticCandidateWithExecutor(
+            context,
+            {
+              compiledRelease,
+              evidenceId: staged.verificationEvidenceId,
+              releaseId,
+            },
+            executor,
+          );
+        };
+
+        const result = await execute(
+          emptyPlan,
+          minted('a3000000-0000-4000-8000-000000000301'),
+          minted('a4000000-0000-4000-8000-000000000301'),
+        );
+        assert.equal(result.results.length, 0);
+        assert.equal(executor.calls, 0);
+
+        await assert.rejects(
+          execute(
+            malformedScope,
+            minted('a3000000-0000-4000-8000-000000000302'),
+            minted('a4000000-0000-4000-8000-000000000302'),
+          ),
+          (error: unknown) => error instanceof MalformedPinnedQueryCatalogError,
+        );
+        assert.equal(executor.calls, 0);
+      } finally {
+        await runtimePool.end();
+      }
+    },
+  );
 });
 
 for (const forbidden of [
@@ -1788,6 +1907,35 @@ function partitionVerificationPlan(): VerificationPlanPayloadV1 {
   });
 }
 
+class ScopeOmissionProbeExecutor
+  implements SemanticOperationExecutor, SemanticQueryExecutor
+{
+  calls = 0;
+
+  execute(
+    request: SemanticQueryExecutionRequest,
+  ): Promise<SemanticQueryResultEnvelope>;
+  execute(
+    request: SemanticOperationExecutionRequest,
+  ): Promise<SemanticOperationResultEnvelope>;
+  execute(
+    _request: SemanticOperationExecutionRequest | SemanticQueryExecutionRequest,
+  ): Promise<never> {
+    void _request;
+    this.calls += 1;
+    return Promise.reject(
+      new Error('scope omission reached the semantic executor'),
+    );
+  }
+
+  recordNonAccepted(
+    _request: SemanticOperationNonAcceptedRequest,
+  ): Promise<void> {
+    void _request;
+    return Promise.resolve();
+  }
+}
+
 function partitionVerificationCommand(): VerificationExecutionCommand {
   return Object.freeze({
     artifactClosureDigest: 'd'.repeat(64),
@@ -1980,6 +2128,98 @@ function wrongProjectionLink(compiled: CompileSuccess): CompileSuccess {
   const projection = clone.bundle.releaseManifest.projections[0];
   assert.ok(projection);
   projection.artifactRoot = '0'.repeat(64);
+  return rebuildReleaseRoot(clone);
+}
+
+function rewriteProjectionPayload(
+  compiled: CompileSuccess,
+  familyId: string,
+  mutate: (payload: Record<string, unknown>) => void,
+): CompileSuccess {
+  const clone = structuredClone(compiled);
+  const reference = clone.bundle.releaseManifest.projections.find(
+    (candidate) => candidate.familyId === familyId,
+  );
+  assert.ok(reference);
+  const priorManifestRoot = reference.artifactRoot;
+  const manifestArtifact = clone.bundle.artifacts.find(
+    (candidate) => candidate.contentHash === priorManifestRoot,
+  );
+  assert.ok(manifestArtifact);
+  const manifest = JSON.parse(
+    new TextDecoder().decode(manifestArtifact.canonicalBytes),
+  ) as ProjectionManifestEnvelope;
+  const descriptor = manifest.chunks[0];
+  assert.ok(descriptor);
+  const priorChunkRoot = descriptor.contentHash;
+  const chunkArtifact = clone.bundle.artifacts.find(
+    (candidate) => candidate.contentHash === priorChunkRoot,
+  );
+  assert.ok(chunkArtifact);
+  const payload = JSON.parse(
+    new TextDecoder().decode(chunkArtifact.canonicalBytes),
+  ) as Record<string, unknown>;
+  mutate(payload);
+  const payloadBytes = new TextEncoder().encode(canonicalize(payload));
+  const semanticDigest = hashBytes(
+    `${HASH_DOMAINS.projectionSemantic}/${familyId}`,
+    payloadBytes,
+  );
+  const chunkReplacement: ContentAddressedArtifact = {
+    ...chunkArtifact,
+    canonicalBytes: payloadBytes,
+    contentHash: hashBytes(
+      `${HASH_DOMAINS.projectionChunk}/${familyId}`,
+      payloadBytes,
+    ),
+  };
+  descriptor.byteLength = payloadBytes.byteLength;
+  descriptor.contentHash = chunkReplacement.contentHash;
+  manifest.semanticDigest = semanticDigest;
+  const manifestBytes = new TextEncoder().encode(canonicalize(manifest));
+  const manifestReplacement: ContentAddressedArtifact = {
+    ...manifestArtifact,
+    canonicalBytes: manifestBytes,
+    contentHash: hashBytes(
+      `${HASH_DOMAINS.projectionManifest}/${familyId}`,
+      manifestBytes,
+    ),
+  };
+  reference.artifactRoot = manifestReplacement.contentHash;
+  reference.semanticDigest = semanticDigest;
+  clone.bundle.releaseManifest.artifactClosure =
+    clone.bundle.releaseManifest.artifactClosure
+      .map((contentHash) =>
+        contentHash === priorChunkRoot
+          ? chunkReplacement.contentHash
+          : contentHash === priorManifestRoot
+            ? manifestReplacement.contentHash
+            : contentHash,
+      )
+      .toSorted();
+  clone.bundle.artifacts = replaceArtifact(
+    replaceArtifact(clone.bundle.artifacts, priorChunkRoot, chunkReplacement),
+    priorManifestRoot,
+    manifestReplacement,
+  );
+  clone.stagedArtifacts = replaceArtifact(
+    replaceArtifact(clone.stagedArtifacts, priorChunkRoot, chunkReplacement),
+    priorManifestRoot,
+    manifestReplacement,
+  );
+  const node = clone.bundle.nodeContracts.find(
+    (candidate) => candidate.stableNodeId === `${reference.instanceId}.node`,
+  );
+  assert.ok(node);
+  node.outputFingerprint = hashBytes(
+    HASH_DOMAINS.nodeOutput,
+    new TextEncoder().encode(
+      canonicalize({
+        artifactRoot: reference.artifactRoot,
+        semanticDigest,
+      }),
+    ),
+  );
   return rebuildReleaseRoot(clone);
 }
 

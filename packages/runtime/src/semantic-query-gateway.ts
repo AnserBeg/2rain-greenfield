@@ -451,6 +451,8 @@ export class SemanticQueryGateway {
       filterPlans.push(parsePolicyNarrowing(contributed));
     }
     const listQuery = parseSharedListArguments(request.arguments, {
+      declaredParameterIds:
+        definition.parameters?.map((parameter) => parameter.parameterId) ?? [],
       maximumResultCount: definition.maximumResultCount,
       queryId: definition.queryId,
     });

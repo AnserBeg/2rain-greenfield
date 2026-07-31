@@ -66,6 +66,21 @@ test('composed Party, Catalog, Location, and Inventory product reads a real post
 });
 
 async function productJourney(page: Page, baseUrl: string): Promise<void> {
+  const inventoryScopeParameters = {
+    movementDetail: await loadSurfaceScopeParameterId(
+      'inventory_movement_detail',
+    ),
+    movementList: await loadSurfaceScopeParameterId('inventory_movement_list'),
+    transactionDetail: await loadSurfaceScopeParameterId(
+      'inventory_transaction_detail',
+    ),
+    transactionForm: await loadSurfaceScopeParameterId(
+      'inventory_transaction_form',
+    ),
+    transactionList: await loadSurfaceScopeParameterId(
+      'inventory_transaction_list',
+    ),
+  } as const;
   await page.goto(surfaceUrl(baseUrl, 'party_list'));
   const navigation = page.getByRole('navigation', {
     name: 'Release navigation',
@@ -203,7 +218,19 @@ async function productJourney(page: Page, baseUrl: string): Promise<void> {
     page.locator('[data-diagnostic-code="UNSUPPORTED_COMPONENT"]'),
   ).toHaveCount(0);
 
-  await page.goto(surfaceUrl(baseUrl, 'inventory_movement_list'));
+  const unscopedMovementUrl = surfaceUrl(baseUrl, 'inventory_movement_list');
+  const unscopedMovementResponse = await page.goto(unscopedMovementUrl);
+  expect(unscopedMovementResponse?.status()).toBe(422);
+  await expect(
+    page.locator('[data-diagnostic-code="QUERY_LEGAL_ENTITY_SCOPE_REQUIRED"]'),
+  ).toBeVisible();
+  const movementListUrl = scopedSurfaceUrl(
+    baseUrl,
+    'inventory_movement_list',
+    inventoryScopeParameters.movementList,
+    browserLegalEntityId,
+  );
+  await page.goto(movementListUrl);
   await expect(
     page.getByRole('heading', { level: 1, name: 'Inventory movement list' }),
   ).toBeVisible();
@@ -215,6 +242,11 @@ async function productJourney(page: Page, baseUrl: string): Promise<void> {
     page.getByRole('link', { name: 'New', exact: true }),
   ).toHaveCount(0);
   await movementRow.getByRole('link').click();
+  expect(
+    new URL(page.url()).searchParams.get(
+      inventoryScopeParameters.movementDetail,
+    ),
+  ).toBe(browserLegalEntityId);
   await expect(
     page.getByRole('heading', { level: 1, name: 'browser-posted-adjustment' }),
   ).toBeVisible();
@@ -222,15 +254,27 @@ async function productJourney(page: Page, baseUrl: string): Promise<void> {
     page.locator('[data-platform-slot="record:commandBar"]'),
   ).toHaveCount(0);
 
-  await page.goto(surfaceUrl(baseUrl, 'inventory_transaction_list'));
+  await page.goto(
+    scopedSurfaceUrl(
+      baseUrl,
+      'inventory_transaction_list',
+      inventoryScopeParameters.transactionList,
+      browserLegalEntityId,
+    ),
+  );
   const transactionRow = page.locator('tr', { hasText: 'ADJ-BROWSER-001' });
   await expect(transactionRow).toBeVisible();
   await expect(
     page.getByRole('link', { name: 'New', exact: true }),
   ).toHaveCount(0);
   await transactionRow.getByRole('link').click();
+  expect(new URL(page.url()).searchParams.get('record')).toBe(
+    browserTransactionId,
+  );
   await expect(
-    page.getByRole('heading', { level: 1, name: 'ADJ-BROWSER-001' }),
+    page.locator('main code', {
+      hasText: `${browserTransactionId.slice(0, 8)}…${browserTransactionId.slice(-4)}`,
+    }),
   ).toBeVisible();
   await expect(
     page.locator('[data-platform-slot="record:commandBar"]'),
@@ -238,7 +282,12 @@ async function productJourney(page: Page, baseUrl: string): Promise<void> {
   await expect(
     page.getByRole('button', { name: /Archive|Restore/ }),
   ).toHaveCount(0);
-  const inventoryTransactionDetailUrl = `${surfaceUrl(baseUrl, 'inventory_transaction_detail')}&record=${encodeURIComponent(browserTransactionId)}`;
+  const inventoryTransactionDetailUrl = `${scopedSurfaceUrl(
+    baseUrl,
+    'inventory_transaction_detail',
+    inventoryScopeParameters.transactionDetail,
+    browserLegalEntityId,
+  )}&record=${encodeURIComponent(browserTransactionId)}`;
   for (const [intent, idempotencyKey] of [
     ['archive', '74000000-0000-4000-8000-000000000007'],
     ['restore', '74000000-0000-4000-8000-000000000008'],
@@ -261,24 +310,29 @@ async function productJourney(page: Page, baseUrl: string): Promise<void> {
   }
   await page.goto(inventoryTransactionDetailUrl);
   await expect(
-    page.getByRole('heading', { level: 1, name: 'ADJ-BROWSER-001' }),
+    page.locator('main code', {
+      hasText: `${browserTransactionId.slice(0, 8)}…${browserTransactionId.slice(-4)}`,
+    }),
   ).toBeVisible();
-  await page.goto(surfaceUrl(baseUrl, 'inventory_transaction_form'));
+  const inventoryTransactionFormUrl = scopedSurfaceUrl(
+    baseUrl,
+    'inventory_transaction_form',
+    inventoryScopeParameters.transactionForm,
+    browserLegalEntityId,
+  );
+  await page.goto(inventoryTransactionFormUrl);
   await expect(
     page.locator('[data-diagnostic-code="UNSUPPORTED_COMPONENT"]'),
   ).toBeVisible();
   await expect(page.getByRole('textbox')).toHaveCount(0);
   await expect(page.getByRole('button')).toHaveCount(0);
-  const refusedWrite = await page.request.post(
-    surfaceUrl(baseUrl, 'inventory_transaction_form'),
-    {
-      form: {
-        idempotencyKey: '74000000-0000-4000-8000-000000000005',
-        intent: 'create',
-        recordId: '74000000-0000-4000-8000-000000000006',
-      },
+  const refusedWrite = await page.request.post(inventoryTransactionFormUrl, {
+    form: {
+      idempotencyKey: '74000000-0000-4000-8000-000000000005',
+      intent: 'create',
+      recordId: '74000000-0000-4000-8000-000000000006',
     },
-  );
+  });
   expect(refusedWrite.status()).toBe(422);
   expect(await refusedWrite.text()).toContain('OPERATION_UNSUPPORTED');
 
@@ -900,8 +954,93 @@ interface CompiledApplicationRelease {
   readonly releaseRoot: string;
 }
 
+async function loadSurfaceScopeParameterId(
+  localSurface: string,
+): Promise<string> {
+  const compiled = JSON.parse(
+    await readFile(
+      new URL('../../release/app.compiled.json', import.meta.url),
+      'utf8',
+    ),
+  ) as { readonly applications: readonly CompiledApplicationRelease[] };
+  const application = compiled.applications.at(-1);
+  if (!application) throw new TypeError('compiled application is missing');
+  const surfacePayload = projectionPayload(
+    application,
+    PROJECTION_FAMILY_IDS.surfaceManifest,
+  ) as {
+    readonly surfaces: readonly {
+      readonly dataSourceQueryId: string;
+      readonly surfaceId: string;
+    }[];
+  };
+  const surfaceId = `${applicationNamespace}:surface.${localSurface}`;
+  const surface = surfacePayload.surfaces.find(
+    (candidate) => candidate.surfaceId === surfaceId,
+  );
+  if (!surface)
+    throw new TypeError(`compiled surface is missing: ${surfaceId}`);
+  const queryPayload = projectionPayload(
+    application,
+    PROJECTION_FAMILY_IDS.queryCatalog,
+  ) as {
+    readonly queries: readonly {
+      readonly legalEntityScope?: {
+        readonly operand: { readonly parameterId: string };
+      };
+      readonly queryId: string;
+    }[];
+  };
+  const query = queryPayload.queries.find(
+    (candidate) => candidate.queryId === surface.dataSourceQueryId,
+  );
+  const parameterId = query?.legalEntityScope?.operand.parameterId;
+  if (!parameterId) {
+    throw new TypeError(`compiled surface scope is missing: ${surfaceId}`);
+  }
+  return parameterId;
+}
+
+function projectionPayload(
+  application: CompiledApplicationRelease,
+  familyId: string,
+): unknown {
+  const projection = application.releaseManifest.projections.find(
+    (candidate) => candidate.familyId === familyId,
+  );
+  if (!projection) throw new TypeError(`projection is missing: ${familyId}`);
+  const manifest = application.artifacts.find(
+    (candidate) => candidate.contentHash === projection.artifactRoot,
+  );
+  if (!manifest)
+    throw new TypeError(`projection manifest is missing: ${familyId}`);
+  const descriptor = (
+    JSON.parse(
+      Buffer.from(manifest.canonicalBytesBase64, 'base64').toString('utf8'),
+    ) as { readonly chunks: readonly { readonly contentHash: string }[] }
+  ).chunks[0];
+  const chunk = application.artifacts.find(
+    (candidate) => candidate.contentHash === descriptor?.contentHash,
+  );
+  if (!chunk) throw new TypeError(`projection chunk is missing: ${familyId}`);
+  return JSON.parse(
+    Buffer.from(chunk.canonicalBytesBase64, 'base64').toString('utf8'),
+  ) as unknown;
+}
+
 function surfaceUrl(baseUrl: string, localSurface: string): string {
   return `${baseUrl}/?surface=${encodeURIComponent(`${applicationNamespace}:surface.${localSurface}`)}`;
+}
+
+function scopedSurfaceUrl(
+  baseUrl: string,
+  localSurface: string,
+  scopeParameterId: string,
+  legalEntityId: string,
+): string {
+  const url = new URL(surfaceUrl(baseUrl, localSurface));
+  url.searchParams.set(scopeParameterId, legalEntityId);
+  return url.href;
 }
 
 async function assertSeedTrust(
