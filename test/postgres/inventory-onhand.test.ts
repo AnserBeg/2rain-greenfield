@@ -277,7 +277,7 @@ test('omitting the exactly-one legal-entity operand is a typed refusal, never ze
   );
 });
 
-test('registered onHand is temporal, policy-and-archive narrowed, and backed by a load-bearing independently checked anchor', async () => {
+test('registered onHand is temporal, narrowed, and atomically invalidates a same-key anchor after an append', async () => {
   const fixture = buildFixture();
   const binding = storageBinding(fixture.storage);
   await withEphemeralPostgres('inventory-onhand', async (database) => {
@@ -300,6 +300,24 @@ test('registered onHand is temporal, policy-and-archive narrowed, and backed by 
     });
     try {
       const context = await trustedContext();
+      await assert.rejects(
+        withModuleRole(runtimePool, context, (client) =>
+          client.query(
+            'SELECT north_star_internal.advance_semantic_aggregate_generation($1,$2)',
+            [otherItemId, legalEntityId],
+          ),
+        ),
+        (error: unknown) => {
+          assert.ok(error instanceof Error);
+          assert.equal((error as { code?: string }).code, 'P0001');
+          assert.match(
+            error.message,
+            /SEMANTIC_AGGREGATE_GENERATION_SCOPE_MISMATCH/u,
+          );
+          return true;
+        },
+        'the definer-backed generation advance must reject a caller-selected tenant and environment',
+      );
       const releases = await persistSequence(runtimePool, context, [
         [fixture.empty, fixture.emptyDefinition],
         [fixture.inventory, fixture.inventoryDefinition],
@@ -350,6 +368,10 @@ test('registered onHand is temporal, policy-and-archive narrowed, and backed by 
         (observation) => observations.push(observation),
       );
       const gateway = new SemanticQueryGateway(policy, interpreter);
+      const sameKeyAppendArguments = onHandArguments(
+        earlyEffectiveHorizon,
+        firstRecordedHorizon,
+      );
 
       const empty = await invokeOnHand(
         gateway,
@@ -366,7 +388,7 @@ test('registered onHand is temporal, policy-and-archive narrowed, and backed by 
       const historical = await invokeOnHand(
         gateway,
         view,
-        onHandArguments(earlyEffectiveHorizon, firstRecordedHorizon),
+        sameKeyAppendArguments,
       );
       assertAggregateValue(historical, '5');
       assert.deepEqual(
@@ -389,7 +411,7 @@ test('registered onHand is temporal, policy-and-archive narrowed, and backed by 
       const cachedHistorical = await invokeOnHand(
         gateway,
         view,
-        onHandArguments(earlyEffectiveHorizon, firstRecordedHorizon),
+        sameKeyAppendArguments,
       );
       assertAggregateValue(cachedHistorical, '5');
       assert.deepEqual(
@@ -397,13 +419,111 @@ test('registered onHand is temporal, policy-and-archive narrowed, and backed by 
         ['cache-hit'],
         'deleting the consistent-anchor return in executeAggregateQuery makes this observe a ledger recomputation',
       );
+      assert.equal(observations[0]?.cacheKey, historicalAnchor.cache_key);
+
+      await seedMovement(runtimePool, context, binding, {
+        effectiveAt: '2026-01-20T00:00:00.000Z',
+        ordinal: 4,
+        quantity: '2',
+        recordedAt: '2026-01-21T00:00:00.000Z',
+      });
+      observations.length = 0;
+      const correctedHistorical = await invokeOnHand(
+        gateway,
+        view,
+        sameKeyAppendArguments,
+      );
+      assertAggregateValue(
+        correctedHistorical,
+        '7',
+        'the identical request after an in-horizon append must not return its intact stale anchor',
+      );
+      assert.deepEqual(
+        observations.map((entry) => entry.kind),
+        ['ledger-recomputation'],
+        'the append must invalidate the prior anchor instead of preserving a cache hit',
+      );
+      const correctedAnchor = await readOnlyAnchor(
+        runtimePool,
+        context,
+        inventoryIds.queryIds.onHand,
+        earlyEffectiveHorizon,
+        firstRecordedHorizon,
+      );
+      assert.equal(
+        BigInt(correctedAnchor.movement_generation),
+        BigInt(historicalAnchor.movement_generation) + 1n,
+        'one movement append must advance the generation exactly once',
+      );
+      assert.notEqual(
+        correctedAnchor.cache_key,
+        historicalAnchor.cache_key,
+        'the stable request identity must resolve under the newly posted movement generation',
+      );
+      assert.equal(observations[0]?.cacheKey, correctedAnchor.cache_key);
+      assert.equal(
+        await independentLedgerSum(database.pool, binding, {
+          atTime: earlyEffectiveHorizon,
+          includeArchived: false,
+          recordedAtHorizon: firstRecordedHorizon,
+        }),
+        '7',
+        'the independent ledger oracle must observe the appended correction inside both unchanged horizons',
+      );
+
+      observations.length = 0;
+      const cachedCorrection = await invokeOnHand(
+        gateway,
+        view,
+        sameKeyAppendArguments,
+      );
+      assertAggregateValue(cachedCorrection, '7');
+      assert.deepEqual(
+        observations.map((entry) => entry.kind),
+        ['cache-hit'],
+        'a genuinely repeated query after invalidation must still hit the cache',
+      );
+      assert.equal(observations[0]?.cacheKey, correctedAnchor.cache_key);
+
+      const rollbackMarker = new Error('ROLLBACK_GENERATION_CONTROL');
+      await assert.rejects(
+        withModuleRole(runtimePool, context, async (client) => {
+          await insertMovement(client, binding, {
+            effectiveAt: '2026-01-25T00:00:00.000Z',
+            ordinal: 6,
+            quantity: '1000',
+            recordedAt: '2026-01-26T00:00:00.000Z',
+          });
+          assert.equal(
+            BigInt(await readMovementGenerationOnClient(client)),
+            BigInt(correctedAnchor.movement_generation) + 1n,
+            'the trigger must advance the generation inside the movement transaction',
+          );
+          throw rollbackMarker;
+        }),
+        (error: unknown) => error === rollbackMarker,
+      );
+      assert.equal(
+        await readMovementGeneration(runtimePool, context),
+        correctedAnchor.movement_generation,
+        'rolling back the movement must roll back its generation advance',
+      );
+      assert.equal(
+        await independentLedgerSum(database.pool, binding, {
+          atTime: earlyEffectiveHorizon,
+          includeArchived: false,
+          recordedAtHorizon: firstRecordedHorizon,
+        }),
+        '7',
+        'the rolled-back movement and its generation must remain jointly invisible',
+      );
 
       const current = await invokeOnHand(
         gateway,
         view,
         onHandArguments(lateEffectiveHorizon, firstRecordedHorizon),
       );
-      assertAggregateValue(current, '8');
+      assertAggregateValue(current, '10');
       assert.notDeepEqual(current.value.value, historical.value.value);
       assert.equal(
         await independentLedgerSum(database.pool, binding, {
@@ -411,7 +531,7 @@ test('registered onHand is temporal, policy-and-archive narrowed, and backed by 
           includeArchived: true,
           recordedAtHorizon: firstRecordedHorizon,
         }),
-        '108',
+        '110',
         'removing the provider archive predicate would return the independently observed wrong balance',
       );
 
@@ -437,11 +557,11 @@ test('registered onHand is temporal, policy-and-archive narrowed, and backed by 
         view,
         onHandArguments(lateEffectiveHorizon, firstRecordedHorizon),
       );
-      assertAggregateValue(withoutPolicy, '8');
+      assertAggregateValue(withoutPolicy, '10');
 
       await seedMovement(runtimePool, context, binding, {
         effectiveAt: '2026-01-20T00:00:00.000Z',
-        ordinal: 4,
+        ordinal: 5,
         quantity: '2',
         recordedAt: '2026-07-01T00:00:00.000Z',
       });
@@ -450,13 +570,13 @@ test('registered onHand is temporal, policy-and-archive narrowed, and backed by 
         view,
         onHandArguments(earlyEffectiveHorizon, firstRecordedHorizon),
       );
-      assertAggregateValue(unchangedBelief, '5');
+      assertAggregateValue(unchangedBelief, '7');
       const revisedHistory = await invokeOnHand(
         gateway,
         view,
         onHandArguments(earlyEffectiveHorizon, secondRecordedHorizon),
       );
-      assertAggregateValue(revisedHistory, '7');
+      assertAggregateValue(revisedHistory, '9');
 
       const independent = await independentLedgerSum(database.pool, binding, {
         atTime: earlyEffectiveHorizon,
@@ -1133,11 +1253,12 @@ function invokeOnHand(
 function assertAggregateValue(
   result: SemanticAggregateResultEnvelope,
   expected: string,
+  message?: string,
 ): void {
   assert.equal(result.kind, 'semanticAggregateResult');
   assert.equal(result.outcome, 'exact');
   assert.equal(result.value.kind, 'exactDecimalResult');
-  assert.equal(result.value.value, expected);
+  assert.equal(result.value.value, expected, message);
 }
 
 class AllowPolicy implements CurrentPolicyGateway {
@@ -1386,101 +1507,111 @@ async function seedMovement(
   pool: Pool,
   context: TrustedRequestContext,
   binding: InventoryStorageBinding,
-  input: {
-    readonly archived?: boolean;
-    readonly effectiveAt: string;
-    readonly ordinal: number;
-    readonly quantity: string;
-    readonly recordedAt: string;
-  },
+  input: MovementSeedInput,
+): Promise<void> {
+  await withModuleRole(pool, context, (client) =>
+    insertMovement(client, binding, input),
+  );
+}
+
+interface MovementSeedInput {
+  readonly archived?: boolean;
+  readonly effectiveAt: string;
+  readonly ordinal: number;
+  readonly quantity: string;
+  readonly recordedAt: string;
+}
+
+async function insertMovement(
+  client: PoolClient,
+  binding: InventoryStorageBinding,
+  input: MovementSeedInput,
 ): Promise<void> {
   const transactionId = stableId(10 + input.ordinal);
   const transactionLineId = stableId(30 + input.ordinal);
   const movementId = stableId(50 + input.ordinal);
-  await withModuleRole(pool, context, async (client) => {
-    await insertEntity(
-      client,
-      binding,
-      binding.transaction,
-      {
-        inventory_transaction_actor_id: principalId,
-        inventory_transaction_effective_at: input.effectiveAt,
-        inventory_transaction_number: `OH-TXN-${String(input.ordinal).padStart(3, '0')}`,
-        inventory_transaction_reason_code: 'ON_HAND_TEST',
-        inventory_transaction_reason_narrative: null,
-        inventory_transaction_recorded_at: input.recordedAt,
-        inventory_transaction_source_id: transactionId,
-        inventory_transaction_source_type: 'onHandControl',
-        inventory_transaction_state: enumOption(
-          field(binding.transaction, 'inventory_transaction_state'),
-          'posted',
+  await insertEntity(
+    client,
+    binding,
+    binding.transaction,
+    {
+      inventory_transaction_actor_id: principalId,
+      inventory_transaction_effective_at: input.effectiveAt,
+      inventory_transaction_number: `OH-TXN-${String(input.ordinal).padStart(3, '0')}`,
+      inventory_transaction_reason_code: 'ON_HAND_TEST',
+      inventory_transaction_reason_narrative: null,
+      inventory_transaction_recorded_at: input.recordedAt,
+      inventory_transaction_source_id: transactionId,
+      inventory_transaction_source_type: 'onHandControl',
+      inventory_transaction_state: enumOption(
+        field(binding.transaction, 'inventory_transaction_state'),
+        'posted',
+      ),
+      inventory_transaction_type: enumOption(
+        field(binding.transaction, 'inventory_transaction_type'),
+        'adjustment',
+      ),
+    },
+    transactionId,
+    legalEntityId,
+    {},
+  );
+  await insertEntity(
+    client,
+    binding,
+    binding.transactionLine,
+    {
+      inventory_transaction_line_from_location_id: null,
+      inventory_transaction_line_item_id: itemId,
+      inventory_transaction_line_line_number: input.ordinal,
+      inventory_transaction_line_quantity: input.quantity,
+      inventory_transaction_line_to_location_id: locationId,
+      inventory_transaction_line_unit_id: 'EA',
+    },
+    transactionLineId,
+    legalEntityId,
+    { [binding.transaction.entity.entityId]: transactionId },
+  );
+  await insertEntity(
+    client,
+    binding,
+    binding.movement,
+    {
+      inventory_movement_actor_id: principalId,
+      inventory_movement_effective_at: input.effectiveAt,
+      inventory_movement_item_id: itemId,
+      inventory_movement_location_id: locationId,
+      inventory_movement_posting_role: enumOption(
+        field(binding.movement, 'inventory_movement_posting_role'),
+        'adjustment',
+      ),
+      inventory_movement_quantity_delta: input.quantity,
+      inventory_movement_reason_code: 'ON_HAND_TEST',
+      inventory_movement_reason_narrative: null,
+      inventory_movement_recorded_at: input.recordedAt,
+      inventory_movement_reversal_of_movement_id: null,
+      inventory_movement_source_id: transactionId,
+      inventory_movement_source_line: String(input.ordinal),
+      inventory_movement_source_revision: 1,
+      inventory_movement_source_type: 'onHandControl',
+      inventory_movement_stock_dimension_set_version: enumOption(
+        field(
+          binding.movement,
+          'inventory_movement_stock_dimension_set_version',
         ),
-        inventory_transaction_type: enumOption(
-          field(binding.transaction, 'inventory_transaction_type'),
-          'adjustment',
-        ),
-      },
-      transactionId,
-      legalEntityId,
-      {},
-    );
-    await insertEntity(
-      client,
-      binding,
-      binding.transactionLine,
-      {
-        inventory_transaction_line_from_location_id: null,
-        inventory_transaction_line_item_id: itemId,
-        inventory_transaction_line_line_number: input.ordinal,
-        inventory_transaction_line_quantity: input.quantity,
-        inventory_transaction_line_to_location_id: locationId,
-        inventory_transaction_line_unit_id: 'EA',
-      },
-      transactionLineId,
-      legalEntityId,
-      { [binding.transaction.entity.entityId]: transactionId },
-    );
-    await insertEntity(
-      client,
-      binding,
-      binding.movement,
-      {
-        inventory_movement_actor_id: principalId,
-        inventory_movement_effective_at: input.effectiveAt,
-        inventory_movement_item_id: itemId,
-        inventory_movement_location_id: locationId,
-        inventory_movement_posting_role: enumOption(
-          field(binding.movement, 'inventory_movement_posting_role'),
-          'adjustment',
-        ),
-        inventory_movement_quantity_delta: input.quantity,
-        inventory_movement_reason_code: 'ON_HAND_TEST',
-        inventory_movement_reason_narrative: null,
-        inventory_movement_recorded_at: input.recordedAt,
-        inventory_movement_reversal_of_movement_id: null,
-        inventory_movement_source_id: transactionId,
-        inventory_movement_source_line: String(input.ordinal),
-        inventory_movement_source_revision: 1,
-        inventory_movement_source_type: 'onHandControl',
-        inventory_movement_stock_dimension_set_version: enumOption(
-          field(
-            binding.movement,
-            'inventory_movement_stock_dimension_set_version',
-          ),
-          'v1',
-        ),
-        inventory_movement_unit_id: 'EA',
-      },
-      movementId,
-      legalEntityId,
-      {
-        [binding.transaction.entity.entityId]: transactionId,
-        [binding.transactionLine.entity.entityId]: transactionLineId,
-      },
-      input.effectiveAt.slice(0, 10),
-      input.archived ? input.recordedAt : null,
-    );
-  });
+        'v1',
+      ),
+      inventory_movement_unit_id: 'EA',
+    },
+    movementId,
+    legalEntityId,
+    {
+      [binding.transaction.entity.entityId]: transactionId,
+      [binding.transactionLine.entity.entityId]: transactionLineId,
+    },
+    input.effectiveAt.slice(0, 10),
+    input.archived ? input.recordedAt : null,
+  );
 }
 
 async function seedFoundation(
@@ -1734,6 +1865,26 @@ async function independentLedgerSum(
   return normalizeDatabaseDecimal(result.rows[0]?.balance ?? '0');
 }
 
+async function readMovementGeneration(
+  pool: Pool,
+  context: TrustedRequestContext,
+): Promise<string> {
+  return withModuleRole(pool, context, readMovementGenerationOnClient);
+}
+
+async function readMovementGenerationOnClient(
+  client: PoolClient,
+): Promise<string> {
+  const result = await client.query<{ movement_generation: string }>(
+    `SELECT movement_generation::text AS movement_generation
+       FROM north_star_internal.semantic_aggregate_generations
+      WHERE tenant_id = $1 AND environment_id = $2`,
+    [tenantId, environmentId],
+  );
+  assert.equal(result.rowCount, 1);
+  return result.rows[0]!.movement_generation;
+}
+
 async function readOnlyAnchor(
   pool: Pool,
   context: TrustedRequestContext,
@@ -1743,6 +1894,7 @@ async function readOnlyAnchor(
 ): Promise<{
   balance_value: string;
   cache_key: string;
+  movement_generation: string;
   temporal_horizons: Record<string, unknown>;
 }> {
   return withModuleRole(pool, context, async (client) => {
@@ -1759,14 +1911,18 @@ async function readOnlyAnchor(
     const result = await client.query<{
       balance_value: string;
       cache_key: string;
+      movement_generation: string;
       temporal_horizons: Record<string, unknown>;
     }>(
-      `SELECT balance_value, cache_key, temporal_horizons
+      `SELECT balance_value,
+              cache_key,
+              movement_generation::text AS movement_generation,
+              temporal_horizons
          FROM north_star_internal.semantic_aggregate_anchors
         WHERE tenant_id = $1 AND environment_id = $2 AND query_id = $3
           AND temporal_horizons ->> $4 = $5
           ${recordedPredicate}
-        ORDER BY computed_at DESC
+        ORDER BY movement_generation DESC
         LIMIT 1`,
       [
         tenantId,

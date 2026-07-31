@@ -1,7 +1,22 @@
+CREATE TABLE north_star_internal.semantic_aggregate_generations (
+  tenant_id uuid NOT NULL,
+  environment_id uuid NOT NULL,
+  movement_generation bigint NOT NULL,
+  PRIMARY KEY (tenant_id, environment_id),
+  CONSTRAINT semantic_aggregate_generations_environment_fkey
+    FOREIGN KEY (tenant_id, environment_id)
+    REFERENCES platform.environments (tenant_id, id)
+    ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT semantic_aggregate_generations_shape CHECK (
+    movement_generation > 0
+  )
+);
+
 CREATE TABLE north_star_internal.semantic_aggregate_anchors (
   tenant_id uuid NOT NULL,
   environment_id uuid NOT NULL,
   cache_key text NOT NULL,
+  movement_generation bigint NOT NULL,
   query_id text NOT NULL,
   principal_id uuid NOT NULL,
   release_content_hash text NOT NULL,
@@ -24,6 +39,7 @@ CREATE TABLE north_star_internal.semantic_aggregate_anchors (
     ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT semantic_aggregate_anchors_shape CHECK (
     cache_key ~ '^[0-9a-f]{64}$'
+    AND movement_generation >= 0
     AND query_id ~ '^[a-z][a-z0-9]*(\.[a-z][a-z0-9]*)+:[a-z][a-z0-9]*(\.[a-z0-9_-]+)*$'
     AND release_content_hash ~ '^[0-9a-f]{64}$'
     AND cardinality(legal_entity_ids) BETWEEN 1 AND 64
@@ -48,6 +64,87 @@ CREATE TABLE north_star_internal.semantic_aggregate_anchors (
     AND anchor_digest ~ '^[0-9a-f]{64}$'
   )
 );
+
+CREATE FUNCTION north_star_internal.advance_semantic_aggregate_generation(
+  requested_tenant_id uuid,
+  requested_environment_id uuid
+) RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, north_star_internal
+AS $advance_semantic_aggregate_generation$ BEGIN
+  IF session_user IN (
+       'north_star_runtime',
+       'north_star_module_runtime',
+       'north_star_module_materializer'
+     )
+     AND (
+       requested_tenant_id IS DISTINCT FROM
+         nullif(current_setting('north_star.tenant_id', true), '')::uuid
+       OR requested_environment_id IS DISTINCT FROM
+         nullif(current_setting('north_star.environment_id', true), '')::uuid
+     )
+  THEN
+    RAISE EXCEPTION 'SEMANTIC_AGGREGATE_GENERATION_SCOPE_MISMATCH'
+      USING ERRCODE = 'P0001',
+            DETAIL = format(
+              'tenantId=%s environmentId=%s',
+              requested_tenant_id,
+              requested_environment_id
+            ); END IF;
+
+  INSERT INTO north_star_internal.semantic_aggregate_generations AS generation (
+    tenant_id,
+    environment_id,
+    movement_generation
+  ) VALUES (
+    requested_tenant_id,
+    requested_environment_id,
+    1
+  )
+  ON CONFLICT (tenant_id, environment_id) DO UPDATE
+    SET movement_generation = generation.movement_generation + 1; END
+$advance_semantic_aggregate_generation$;
+
+CREATE OR REPLACE FUNCTION north_star_internal.reserve_inventory_movement_effect()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = pg_catalog
+AS $reserve_inventory_movement_effect$ DECLARE
+  companion_columns text;
+  companion_relation regclass;
+  companion_values text; BEGIN
+  companion_relation := TG_ARGV[0]::regclass;
+  SELECT
+    string_agg(format('%I', attribute.attname), ', ' ORDER BY attribute.attnum),
+    string_agg(
+      format(
+        '(to_jsonb($1)->>%L)::%s',
+        attribute.attname,
+        format_type(attribute.atttypid, attribute.atttypmod)
+      ),
+      ', ' ORDER BY attribute.attnum
+    )
+    INTO companion_columns, companion_values
+    FROM pg_attribute AS attribute
+   WHERE attribute.attrelid = companion_relation
+     AND attribute.attnum > 0
+     AND NOT attribute.attisdropped;
+  IF companion_columns IS NULL OR companion_values IS NULL THEN
+    RAISE EXCEPTION 'INVENTORY_MOVEMENT_EFFECT_TARGET_INVALID'
+      USING ERRCODE = 'P0001'; END IF;
+  EXECUTE format(
+    'INSERT INTO %s (%s) SELECT %s',
+    companion_relation,
+    companion_columns,
+    companion_values
+  ) USING NEW;
+  PERFORM north_star_internal.advance_semantic_aggregate_generation(
+    NEW.tenant_id,
+    NEW.environment_id
+  );
+  RETURN NEW; END
+$reserve_inventory_movement_effect$;
 
 CREATE TABLE north_star_internal.semantic_aggregate_anchor_discrepancies (
   tenant_id uuid NOT NULL,
@@ -103,12 +200,24 @@ DO INSTEAD
   INSERT INTO platform.trust_immutable_write_guard (attempted_relation)
   VALUES ('semantic_aggregate_anchor_discrepancies');
 
+ALTER TABLE north_star_internal.semantic_aggregate_generations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE north_star_internal.semantic_aggregate_generations FORCE ROW LEVEL SECURITY;
 ALTER TABLE north_star_internal.semantic_aggregate_anchors ENABLE ROW LEVEL SECURITY;
 ALTER TABLE north_star_internal.semantic_aggregate_anchors FORCE ROW LEVEL SECURITY;
 ALTER TABLE north_star_internal.semantic_aggregate_anchor_discrepancies
   ENABLE ROW LEVEL SECURITY;
 ALTER TABLE north_star_internal.semantic_aggregate_anchor_discrepancies
   FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY semantic_aggregate_generations_select_trusted_context
+  ON north_star_internal.semantic_aggregate_generations
+  AS PERMISSIVE
+  FOR SELECT
+  TO north_star_module_runtime
+  USING (
+    tenant_id = nullif(current_setting('north_star.tenant_id', true), '')::uuid
+    AND environment_id = nullif(current_setting('north_star.environment_id', true), '')::uuid
+  );
 
 CREATE POLICY semantic_aggregate_anchors_select_trusted_context
   ON north_star_internal.semantic_aggregate_anchors
@@ -150,8 +259,17 @@ CREATE POLICY semantic_aggregate_anchor_discrepancies_insert_trusted_context
     AND environment_id = nullif(current_setting('north_star.environment_id', true), '')::uuid
   );
 
+REVOKE ALL ON FUNCTION
+  north_star_internal.advance_semantic_aggregate_generation(uuid, uuid)
+  FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION
+  north_star_internal.advance_semantic_aggregate_generation(uuid, uuid)
+  TO north_star_module_materializer, north_star_module_runtime;
+REVOKE ALL ON north_star_internal.semantic_aggregate_generations FROM PUBLIC;
 REVOKE ALL ON north_star_internal.semantic_aggregate_anchors FROM PUBLIC;
 REVOKE ALL ON north_star_internal.semantic_aggregate_anchor_discrepancies FROM PUBLIC;
+GRANT SELECT ON north_star_internal.semantic_aggregate_generations
+  TO north_star_module_runtime;
 GRANT SELECT, INSERT ON north_star_internal.semantic_aggregate_anchors
   TO north_star_module_runtime;
 GRANT SELECT, INSERT ON north_star_internal.semantic_aggregate_anchor_discrepancies

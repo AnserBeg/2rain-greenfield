@@ -1,7 +1,7 @@
 {
   "schemaVersion": "northstar.tenant-completeness-manifest/v1",
   "tenantIndependentDefinition": "A table is tenant-independent only when its rows represent a database-wide kernel mechanism or immutable content deliberately shared across tenants; business records are never tenant-independent, and absence of a tenant column is not evidence.",
-  "expectedTableCount": 53,
+  "expectedTableCount": 54,
   "tables": [
     {
       "schema": "north_star_internal",
@@ -81,6 +81,12 @@
     {
       "schema": "north_star_internal",
       "table": "semantic_aggregate_anchors",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "north_star_internal",
+      "table": "semantic_aggregate_generations",
       "classification": "tenant-scoped",
       "tenantColumn": "tenant_id"
     },

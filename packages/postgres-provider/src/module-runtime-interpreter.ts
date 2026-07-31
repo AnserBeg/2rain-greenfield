@@ -918,7 +918,16 @@ async function executeAggregateQuery(
     );
   }
 
-  const identity = aggregateCacheIdentity(request, readScope);
+  const movementGeneration = await loadAggregateMovementGeneration(
+    client,
+    request.context.tenantId,
+    request.context.environmentId,
+  );
+  const identity = aggregateCacheIdentity(
+    request,
+    readScope,
+    movementGeneration,
+  );
   await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [
     identity.cacheKey,
   ]);
@@ -1085,6 +1094,7 @@ interface AggregateCacheIdentity {
   readonly environmentId: string;
   readonly filterPlanDigest: string;
   readonly legalEntityIds: readonly string[];
+  readonly movementGeneration: string;
   readonly parameterValues: Readonly<Record<string, ImmutableJsonValue>>;
   readonly principalId: string;
   readonly queryId: string;
@@ -1101,6 +1111,7 @@ interface AggregateAnchorRow {
   readonly environment_id: string;
   readonly filter_plan_digest: string;
   readonly legal_entity_ids: string[];
+  readonly movement_generation: string;
   readonly parameter_values: Record<string, ImmutableJsonValue>;
   readonly principal_id: string;
   readonly query_id: string;
@@ -1116,6 +1127,7 @@ interface AggregateAnchorRow {
 function aggregateCacheIdentity(
   request: SemanticAggregateQueryExecutionRequest,
   readScope: VerifiedLegalEntityReadScope,
+  movementGeneration: string,
 ): AggregateCacheIdentity {
   const temporalHorizons = Object.fromEntries(
     request.definition.parameters
@@ -1135,22 +1147,24 @@ function aggregateCacheIdentity(
     environmentId: request.context.environmentId,
     filterPlanDigest,
     legalEntityIds: readScope.legalEntityIds,
+    movementGeneration,
     parameterValues: request.parameterValues,
     principalId: request.context.principalId,
     queryId: request.definition.queryId,
     releaseContentHash: request.view.release.contentHash,
-    schemaVersion: 'northstar.semantic-aggregate-anchor-key/v1',
+    schemaVersion: 'northstar.semantic-aggregate-anchor-key/v2',
     tenantId: request.context.tenantId,
     temporalHorizons,
   });
   return Object.freeze({
     cacheKey: aggregateCacheDigest(
-      'northstar.semantic-aggregate-anchor-key/v1',
+      'northstar.semantic-aggregate-anchor-key/v2',
       keyInput,
     ),
     environmentId: request.context.environmentId,
     filterPlanDigest,
     legalEntityIds: readScope.legalEntityIds,
+    movementGeneration,
     parameterValues: request.parameterValues,
     principalId: request.context.principalId,
     queryId: request.definition.queryId,
@@ -1173,22 +1187,49 @@ function aggregateAnchorDigest(
   result: SemanticAggregateResultEnvelope,
 ): string {
   return aggregateCacheDigest(
-    'northstar.semantic-aggregate-anchor-integrity/v1',
+    'northstar.semantic-aggregate-anchor-integrity/v2',
     Object.freeze({
       cacheKey: identity.cacheKey,
       environmentId: identity.environmentId,
       filterPlanDigest: identity.filterPlanDigest,
       legalEntityIds: identity.legalEntityIds,
+      movementGeneration: identity.movementGeneration,
       parameterValues: identity.parameterValues,
       principalId: identity.principalId,
       queryId: identity.queryId,
       releaseContentHash: identity.releaseContentHash,
       result,
-      schemaVersion: 'northstar.semantic-aggregate-anchor-integrity/v1',
+      schemaVersion: 'northstar.semantic-aggregate-anchor-integrity/v2',
       tenantId: identity.tenantId,
       temporalHorizons: identity.temporalHorizons,
     }),
   );
+}
+
+async function loadAggregateMovementGeneration(
+  client: PoolClient,
+  tenantId: string,
+  environmentId: string,
+): Promise<string> {
+  const result = await client.query<{ movement_generation: string }>(
+    `SELECT movement_generation::text AS movement_generation
+       FROM north_star_internal.semantic_aggregate_generations
+      WHERE tenant_id = $1 AND environment_id = $2`,
+    [tenantId, environmentId],
+  );
+  if (result.rowCount === 0) return '0';
+  const movementGeneration = result.rows[0]?.movement_generation;
+  if (
+    result.rowCount !== 1 ||
+    typeof movementGeneration !== 'string' ||
+    !/^[1-9][0-9]*$/u.test(movementGeneration)
+  ) {
+    throw failure(
+      'MODULE_AGGREGATE_GENERATION_INVALID',
+      'aggregate movement generation is not one positive integer',
+    );
+  }
+  return movementGeneration;
 }
 
 async function loadAggregateAnchor(
@@ -1199,6 +1240,7 @@ async function loadAggregateAnchor(
     `SELECT tenant_id::text AS tenant_id,
             environment_id::text AS environment_id,
             cache_key,
+            movement_generation::text AS movement_generation,
             query_id,
             principal_id::text AS principal_id,
             release_content_hash,
@@ -1238,6 +1280,7 @@ function aggregateAnchorMatchesIdentity(
     anchor.tenant_id === identity.tenantId &&
     anchor.environment_id === identity.environmentId &&
     anchor.cache_key === identity.cacheKey &&
+    anchor.movement_generation === identity.movementGeneration &&
     anchor.query_id === identity.queryId &&
     anchor.principal_id === identity.principalId &&
     anchor.release_content_hash === identity.releaseContentHash &&
@@ -1290,6 +1333,7 @@ async function insertAggregateAnchor(
        tenant_id,
        environment_id,
        cache_key,
+       movement_generation,
        query_id,
        principal_id,
        release_content_hash,
@@ -1305,13 +1349,14 @@ async function insertAggregateAnchor(
        base_unit_id,
        anchor_digest
      ) VALUES (
-       $1, $2, $3, $4, $5, $6, $7::uuid[], $8::jsonb, $9::jsonb,
-       $10, $11, $12, $13, $14, $15, $16, $17
+       $1, $2, $3, $4, $5, $6, $7, $8::uuid[], $9::jsonb, $10::jsonb,
+       $11, $12, $13, $14, $15, $16, $17, $18
      )`,
     [
       identity.tenantId,
       identity.environmentId,
       identity.cacheKey,
+      identity.movementGeneration,
       identity.queryId,
       identity.principalId,
       identity.releaseContentHash,
