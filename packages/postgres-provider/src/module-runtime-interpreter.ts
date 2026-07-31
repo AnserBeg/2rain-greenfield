@@ -1138,6 +1138,20 @@ function aggregateCacheIdentity(
   readScope: VerifiedLegalEntityReadScope,
   movementGeneration: string,
 ): AggregateCacheIdentity {
+  const environmentId = canonicalAggregateUuid(
+    request.context.environmentId,
+    'environmentId',
+  );
+  const legalEntityIds = Object.freeze(
+    readScope.legalEntityIds.map((legalEntityId) =>
+      canonicalAggregateUuid(legalEntityId, 'legalEntityId'),
+    ),
+  );
+  const principalId = canonicalAggregateUuid(
+    request.context.principalId,
+    'principalId',
+  );
+  const tenantId = canonicalAggregateUuid(request.context.tenantId, 'tenantId');
   const temporalHorizons = Object.fromEntries(
     request.definition.parameters
       .filter(
@@ -1153,16 +1167,16 @@ function aggregateCacheIdentity(
     request.filterPlans,
   );
   const keyInput = Object.freeze({
-    environmentId: request.context.environmentId,
+    environmentId,
     filterPlanDigest,
-    legalEntityIds: readScope.legalEntityIds,
+    legalEntityIds,
     movementGeneration,
     parameterValues: request.parameterValues,
-    principalId: request.context.principalId,
+    principalId,
     queryId: request.definition.queryId,
     releaseContentHash: request.view.release.contentHash,
     schemaVersion: 'northstar.semantic-aggregate-anchor-key/v2',
-    tenantId: request.context.tenantId,
+    tenantId,
     temporalHorizons,
   });
   return Object.freeze({
@@ -1170,16 +1184,16 @@ function aggregateCacheIdentity(
       'northstar.semantic-aggregate-anchor-key/v2',
       keyInput,
     ),
-    environmentId: request.context.environmentId,
+    environmentId,
     filterPlanDigest,
-    legalEntityIds: readScope.legalEntityIds,
+    legalEntityIds,
     movementGeneration,
     parameterValues: request.parameterValues,
-    principalId: request.context.principalId,
+    principalId,
     queryId: request.definition.queryId,
     releaseContentHash: request.view.release.contentHash,
     temporalHorizons: Object.freeze(temporalHorizons),
-    tenantId: request.context.tenantId,
+    tenantId,
   });
 }
 
@@ -1195,7 +1209,17 @@ function aggregateGenerationLockKey(
   tenantId: string,
   environmentId: string,
 ): string {
-  return `northstar.semantic-aggregate-generation/v1:${tenantId}:${environmentId}`;
+  return `northstar.semantic-aggregate-generation/v1:${canonicalAggregateUuid(tenantId, 'tenantId')}:${canonicalAggregateUuid(environmentId, 'environmentId')}`;
+}
+
+function canonicalAggregateUuid(value: string, field: string): string {
+  if (!uuidPattern.test(value)) {
+    throw failure(
+      'MODULE_AGGREGATE_IDENTITY_INVALID',
+      `aggregate ${field} must be a UUID`,
+    );
+  }
+  return value.toLowerCase();
 }
 
 function aggregateAnchorDigest(
@@ -1344,7 +1368,7 @@ async function insertAggregateAnchor(
   identity: AggregateCacheIdentity,
   result: SemanticAggregateResultEnvelope,
 ): Promise<void> {
-  await client.query(
+  const inserted = await client.query(
     `INSERT INTO north_star_internal.semantic_aggregate_anchors (
        tenant_id,
        environment_id,
@@ -1397,6 +1421,13 @@ async function insertAggregateAnchor(
       aggregateAnchorDigest(identity, result),
     ],
   );
+  if (inserted.rowCount !== 1) {
+    throw failure(
+      'MODULE_AGGREGATE_GENERATION_CHANGED',
+      'aggregate generation changed before the anchor could be persisted',
+      identity.queryId,
+    );
+  }
 }
 
 async function recordAggregateAnchorDiscrepancy(

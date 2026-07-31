@@ -82,13 +82,13 @@ import {
 import { withEphemeralPostgres } from '../helpers/postgres.js';
 
 const migrations = resolve('db/migrations');
-const tenantId = '15000000-0000-4000-8000-000000000001';
-const environmentId = '25000000-0000-4000-8000-000000000002';
-const legalEntityId = '35000000-0000-4000-8000-000000000003';
-const principalId = '45000000-0000-4000-8000-000000000004';
-const itemId = '55000000-0000-4000-8000-000000000005';
-const locationId = '65000000-0000-4000-8000-000000000006';
-const otherItemId = '75000000-0000-4000-8000-000000000007';
+const tenantId = '15a00000-0000-4000-8000-0000000000a1';
+const environmentId = '25b00000-0000-4000-8000-0000000000b2';
+const legalEntityId = '35c00000-0000-4000-8000-0000000000c3';
+const principalId = '45d00000-0000-4000-8000-0000000000d4';
+const itemId = '55e00000-0000-4000-8000-0000000000e5';
+const locationId = '65f00000-0000-4000-8000-0000000000f6';
+const otherItemId = '75a00000-0000-4000-8000-0000000000a7';
 const inventoryIds = Object.freeze({
   namespace: APPLICATION_NAMESPACE,
   queryIds: {
@@ -359,8 +359,12 @@ test('registered onHand is temporal, narrowed, and atomically invalidates a same
       });
 
       const policy = new AllowPolicy();
-      const entry = runtimeEntry(runtimePool, policy);
+      const lowerCaseView = await issuedView(runtimeEntry(runtimePool, policy));
+      const entry = mixedCaseRuntimeEntry(lowerCaseView, policy);
       const view = await issuedView(entry);
+      assert.equal(view.tenantId, tenantId.toUpperCase());
+      assert.equal(view.environmentId, environmentId.toUpperCase());
+      assert.equal(view.principalId, principalId.toUpperCase());
       const observations: AggregateCacheObservation[] = [];
       const interpreter = new PostgresModuleRuntimeInterpreter(
         runtimePool,
@@ -1560,6 +1564,32 @@ function runtimeEntry(
   return new AuthenticatedRequestRuntimeEntryAdapter(
     new AuthenticatedRequestEntryAdapter(async () => identity),
     new PostgresRequestRuntimeViewService(pool),
+    policy,
+  );
+}
+
+function mixedCaseRuntimeEntry(
+  source: RequestRuntimeView,
+  policy: CurrentPolicyGateway,
+): AuthenticatedRequestRuntimeEntryAdapter {
+  const identity: AuthenticatedIdentity = {
+    environmentId: environmentId.toUpperCase(),
+    principalId: principalId.toUpperCase(),
+    tenantId: tenantId.toUpperCase(),
+  };
+  return new AuthenticatedRequestRuntimeEntryAdapter(
+    new AuthenticatedRequestEntryAdapter(async () => identity),
+    {
+      async load(): Promise<LoadedRequestRuntimeDefinition> {
+        return {
+          environmentId: identity.environmentId,
+          pointer: source.pointer,
+          projections: source.projections,
+          release: source.release,
+          tenantId: identity.tenantId,
+        };
+      },
+    },
     policy,
   );
 }
