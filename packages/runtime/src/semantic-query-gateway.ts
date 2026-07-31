@@ -4,10 +4,14 @@ import {
   PREDICATE_LOWERING_PLAN_VERSION,
   PREDICATE_POSITION_PROFILE_VERSION,
   QUERY_AGGREGATE_LOWERING_PLAN_VERSION,
+  LEGAL_ENTITY_SCOPE_CONTRACT_V1,
+  LEGAL_ENTITY_SCOPE_PROFILE_VERSION,
   STRUCTURAL_LIMITS_V0,
   VersionedPredicateExpressionSchema,
   canonicalizeAndHash,
+  evaluateLegalEntityScopeSelection,
   inspectPredicateForExecution,
+  type LegalEntityScopeCardinality,
   type PredicateCostClass,
   type PredicateKernelReceipt,
   type QueryAggregateLoweringPlan,
@@ -20,6 +24,7 @@ import {
   assertRequestRuntimeView,
   authorizeCurrentPolicy,
   trustedContextForRequestRuntimeView,
+  issueLegalEntityReadScope,
   verifyLegalEntityReadScope,
   type CurrentPolicyGateway,
   type ImmutableJsonValue,
@@ -122,8 +127,20 @@ interface RegisteredQueryAggregateSelection {
   readonly selectionId: string;
 }
 
+export interface RegisteredLegalEntityScope {
+  readonly cardinality: LegalEntityScopeCardinality;
+  readonly kind: 'queryLegalEntityScope';
+  readonly operand: {
+    readonly kind: 'queryParameterReference';
+    readonly parameterId: string;
+    readonly schemaVersion: 'v4';
+  };
+  readonly schemaVersion: 'v4';
+}
+
 interface RegisteredQueryDefinitionBase {
   readonly filter: Readonly<Record<string, ImmutableJsonValue>>;
+  readonly legalEntityScope?: RegisteredLegalEntityScope;
   readonly filterPlan?: QueryFilterLoweringPlan;
   readonly lifecycle: 'active' | 'retired';
   readonly maximumResultCount: number;
@@ -134,6 +151,7 @@ interface RegisteredQueryDefinitionBase {
 }
 
 export interface RegisteredQueryDefinition extends RegisteredQueryDefinitionBase {
+  readonly parameters?: readonly RegisteredQueryParameterDefinition[];
   readonly infrastructure?: {
     readonly archive: 'nullableArchivedAt';
     readonly optimisticRevision: 'requiredOnMutation';
@@ -370,6 +388,25 @@ export class SemanticQueryGateway {
     if (queryDecision.decision === 'DENY') {
       throw new SemanticQueryPolicyDeniedError(request.queryId, view);
     }
+    // The operand is part of the REQUEST contract, so it is validated before
+    // any branch that can return an `unsupported` envelope. Issuance stays
+    // below, next to execution. Validating late let a retired or
+    // unsupported-filter query answer `unsupported` to a malformed operand,
+    // which breaks ADR-0031's typed-omission probe: verification would read
+    // that envelope as "the query is fine".
+    const declaredScope = definition.legalEntityScope;
+    if (declaredScope && executionContext.legalEntityReadScope !== undefined) {
+      throw new MalformedSemanticQueryRequestError(
+        'query declares a legal-entity operand and cannot also take an issued scope',
+      );
+    }
+    const scopeSelection = declaredScope
+      ? acceptedLegalEntityScopeSelection(
+          definition,
+          declaredScope,
+          request.arguments,
+        )
+      : null;
     if (definition.lifecycle !== 'active') {
       if (definition.queryType === 'aggregate') {
         throw new UnsupportedSemanticAggregateQueryError(
@@ -438,8 +475,15 @@ export class SemanticQueryGateway {
       );
     }
     const parameterValues = bindQueryParameters(definition, request.arguments);
-    const legalEntityReadScope =
-      executionContext.legalEntityReadScope === undefined
+    // One authority per query: the declared operand or a supplied capability,
+    // never both. The conflict is refused above, with the validation.
+    const legalEntityReadScope = scopeSelection
+      ? await issueLegalEntityReadScope(
+          this.currentPolicy,
+          view,
+          scopeSelection,
+        )
+      : executionContext.legalEntityReadScope === undefined
         ? null
         : await verifyLegalEntityReadScope(
             this.currentPolicy,
@@ -497,6 +541,51 @@ export class SemanticQueryGateway {
       requireSemanticAggregateResult(definition, result);
     }
     return result;
+  }
+}
+
+/**
+ * Rules the caller's ordinary query argument against the query's declared
+ * cardinality, returning the members an issued capability may carry.
+ *
+ * The caller supplies an untrusted UUID or nonempty UUID array under the
+ * declared parameter id and never touches the capability, which is why the
+ * two-argument API adapter carries this without a new transport. The canonical
+ * kernel is the single authority on what the selection means; issuance
+ * authorizes it per member against live policy. Every failure is a refusal:
+ * an unreadable operand must never become a narrower scope, a wider scope, or
+ * tenant-wide execution.
+ */
+function acceptedLegalEntityScopeSelection(
+  definition: RegisteredSemanticQueryDefinition,
+  declaredScope: RegisteredLegalEntityScope,
+  argumentsValue: ImmutableJsonValue,
+): readonly string[] {
+  const receipt = evaluateLegalEntityScopeSelection({
+    cardinality: declaredScope.cardinality,
+    profileVersion: LEGAL_ENTITY_SCOPE_PROFILE_VERSION,
+    selection: isRecord(argumentsValue)
+      ? argumentsValue[declaredScope.operand.parameterId]
+      : undefined,
+  });
+  if (receipt.outcome !== 'accepted') {
+    throw new MalformedLegalEntityScopeArgumentError(
+      definition.queryId,
+      receipt.reason,
+    );
+  }
+  return receipt.members;
+}
+
+/** Refused before any executor runs, so an unreadable operand never executes. */
+export class MalformedLegalEntityScopeArgumentError extends Error {
+  readonly code = 'SEMANTIC_QUERY_LEGAL_ENTITY_SCOPE_INVALID' as const;
+  override readonly name = 'MalformedLegalEntityScopeArgumentError';
+  readonly reason: string;
+
+  constructor(queryId: string, reason: string) {
+    super(`legal-entity scope argument for query ${queryId} is ${reason}`);
+    this.reason = reason;
   }
 }
 
@@ -693,6 +782,8 @@ function parseQueryDefinition(
     'sourceEntityId',
     'tier',
   ];
+  const hasLegalEntityScope = Object.hasOwn(value, 'legalEntityScope');
+  const hasParameters = !aggregate && Object.hasOwn(value, 'parameters');
   const hasFilterPlan = Object.hasOwn(value, 'filterPlan');
   const hasInfrastructure = Object.hasOwn(value, 'infrastructure');
   const hasResolveMatchKeys = Object.hasOwn(value, 'resolveMatchKeys');
@@ -700,6 +791,8 @@ function parseQueryDefinition(
     value,
     [
       ...expectedKeys,
+      ...(hasLegalEntityScope ? ['legalEntityScope'] : []),
+      ...(hasParameters ? ['parameters'] : []),
       ...(hasFilterPlan ? ['filterPlan'] : []),
       ...(hasInfrastructure ? ['infrastructure'] : []),
       ...(hasResolveMatchKeys ? ['resolveMatchKeys'] : []),
@@ -737,6 +830,12 @@ function parseQueryDefinition(
     );
   } else if (hasFilterPlan) {
     throw invalid('q0 query cannot carry a predicate lowering plan');
+  }
+  if (hasParameters) {
+    assertRowQueryParameters(value.parameters, invalid);
+  }
+  if (hasLegalEntityScope) {
+    assertLegalEntityScopeContract(value.legalEntityScope, value, invalid);
   }
   if (value.queryType === 'search' && !hasInfrastructure) {
     throw invalid('search requires the v1 infrastructure contract');
@@ -1007,6 +1106,110 @@ function assertAggregateResultType(
     ) {
       throw invalid('quantity aggregate base unit is invalid');
     }
+  }
+}
+
+/**
+ * Row queries carry declared parameters from v4. They are validated with the
+ * same closed contract the aggregate branch already applies, because an
+ * unvalidated declaration is a hole in a closed pinned catalog.
+ */
+function assertRowQueryParameters(
+  value: unknown,
+  invalid: (message: string) => Error,
+): void {
+  if (!Array.isArray(value)) {
+    throw invalid('query parameters must be an array');
+  }
+  const parameterIds = new Set<string>();
+  for (const parameter of value) {
+    if (!isRecord(parameter)) {
+      throw invalid('query parameter must be an object');
+    }
+    assertExactKeys(
+      parameter,
+      ['orderKey', 'parameterId', 'parameterType'],
+      invalid,
+    );
+    assertCanonicalId(parameter.parameterId, 'parameterId', invalid);
+    if (
+      !Number.isSafeInteger(parameter.orderKey) ||
+      Number(parameter.orderKey) < 0 ||
+      Number(parameter.orderKey) > 1_000_000 ||
+      parameterIds.has(parameter.parameterId) ||
+      !isRecord(parameter.parameterType)
+    ) {
+      throw invalid('query parameter contract is invalid');
+    }
+    const parameterType = parameter.parameterType;
+    const legalEntityReference =
+      parameterType.kind === 'legalEntityReferenceParameterType' &&
+      parameterType.schemaVersion === 'v4';
+    if (
+      !legalEntityReference &&
+      FieldTypeSchema.safeParse(parameterType).success === false
+    ) {
+      throw invalid('query parameter type is not admitted');
+    }
+    if (legalEntityReference) {
+      assertExactKeys(parameterType, ['kind', 'schemaVersion'], invalid);
+    }
+    parameterIds.add(parameter.parameterId);
+  }
+}
+
+function assertLegalEntityScopeContract(
+  value: unknown,
+  query: Record<string, unknown>,
+  invalid: (message: string) => Error,
+): void {
+  if (!isRecord(value)) {
+    throw invalid('legal-entity scope must be an object');
+  }
+  assertExactKeys(
+    value,
+    ['cardinality', 'kind', 'operand', 'schemaVersion'],
+    invalid,
+  );
+  if (
+    value.kind !== 'queryLegalEntityScope' ||
+    value.schemaVersion !== 'v4' ||
+    !LEGAL_ENTITY_SCOPE_CONTRACT_V1.admittedCardinalities.includes(
+      value.cardinality as 'exactlyOne',
+    ) ||
+    !isRecord(value.operand)
+  ) {
+    throw invalid('legal-entity scope contract is invalid');
+  }
+  const operand = value.operand;
+  assertExactKeys(operand, ['kind', 'parameterId', 'schemaVersion'], invalid);
+  assertCanonicalId(operand.parameterId, 'parameterId', invalid);
+  if (
+    operand.kind !== 'queryParameterReference' ||
+    operand.schemaVersion !== 'v4'
+  ) {
+    throw invalid('legal-entity scope operand is invalid');
+  }
+  // The operand must name a declared parameter carrying the derived
+  // legal-entity type. Checking only that the id exists would admit a catalog
+  // the canonical model could not have produced -- normalization derives this
+  // type for exactly the parameter a scope names, so a scope pointing at an
+  // ordinary field-typed parameter is a forged contract.
+  const parameters = Array.isArray(query.parameters) ? query.parameters : [];
+  const operandParameter = parameters.find(
+    (parameter) =>
+      isRecord(parameter) && parameter.parameterId === operand.parameterId,
+  );
+  if (!isRecord(operandParameter)) {
+    throw invalid('legal-entity scope operand names no declared parameter');
+  }
+  if (
+    !isRecord(operandParameter.parameterType) ||
+    operandParameter.parameterType.kind !==
+      'legalEntityReferenceParameterType' ||
+    operandParameter.parameterType.schemaVersion !== 'v4'
+  ) {
+    throw invalid('legal-entity scope operand has the wrong parameter type');
   }
 }
 
@@ -1379,6 +1582,11 @@ function queryParameterValueMatches(
   value: ImmutableJsonValue | undefined,
 ): boolean {
   switch (type.kind) {
+    case 'legalEntityReferenceParameterType':
+      // Ruled by the canonical selection kernel against the query's declared
+      // cardinality, not by field-type matching. Accepting here and refusing
+      // there keeps one authority over what a scope argument means.
+      return value !== undefined;
     case 'booleanFieldType':
       return typeof value === 'boolean';
     case 'textFieldType':

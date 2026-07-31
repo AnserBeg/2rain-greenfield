@@ -260,8 +260,72 @@ an obvious timeout.
 
 **A green matrix produced while another lane's matrix was running is not
 evidence.** Before running the full matrix, check that no other lane is running
-one; if one is, wait. A lane may keep authoring and running focused suites
-throughout — only the full matrix serializes.
+one; if one is, wait.
+
+### The "only the full matrix serializes" carve-out was too generous — corrected 2026-07-30
+
+This section used to end: *"A lane may keep authoring and running focused suites
+throughout — only the full matrix serializes."* **That is wrong, and the
+orchestrator fell through the loophole three times in one evening.**
+
+  - Started the running app during a matrix → a 120 s `testTimeoutFailure`. The
+    same SHA passed clean and quiet.
+  - Committed to a worktree and merged `main` into it **while that worktree's
+    own matrix was executing**, so the run was testing a tree that moved under
+    it.
+  - Launched a **read-only Fable review** — no builds, no Docker, just reads and
+    greps — during a matrix, and
+    `test/compiler/performance-budget.test.ts` failed at **17,672 ms against a
+    5,000 ms budget**. That test is a wall-clock `process.hrtime` assertion over
+    a synthetic maximum-field fixture, so it measures the machine, not the
+    product.
+
+**The corrected rule: while a full matrix is running, nothing else runs.** Not a
+review, not an authoring lane, not the app, not a focused suite, and no git
+operation in the worktree under test. A reviewer process is not "just reading" —
+it is a model doing sustained tool calls on a WSL VM capped at 8 GB and 8
+processors, and it competes for exactly the resource the timing gates measure.
+
+**"Nothing else" INCLUDES THE ORCHESTRATOR'S OWN TOOL CALLS.** This was written
+once exempting the orchestrator by omission, and the omission immediately cost
+two wasted matrix runs. Measured at the same SHA on the same machine:
+
+| Run | What the orchestrator was doing | Unit suite (46 tests) | Budget test |
+|---|---|---|---|
+| 1 | blocked on a watcher, idle | 2,991 ms | **ok**, 4,333 ms |
+| 2 | launched a review, edited docs, committed | 13,246 ms | fail, 17,672 ms |
+| 3 | read files, edited, committed, grepped | (same order) | fail, 17,073 ms |
+| isolated, idle | nothing | 2,714 ms | **ok**, 3,025 ms |
+
+**A 4.4× systemic slowdown across an entire unrelated suite**, tracking nothing
+but orchestrator activity. `ps` confirms why: the agent runtime sits at ~12 %
+CPU sustained while working, on 8 processors, alongside its own tool
+subprocesses.
+
+The trap is that the failure looks like a code regression at the integrated
+SHA — a compile budget blown by 3.5× is exactly what a genuine performance
+regression looks like, and the tempting "fix" is to raise the budget. It took
+three runs and two wrong diagnoses (first "load from a concurrent reviewer",
+then "the machine is degrading") before measuring the test in isolation, where
+it passed in 3,025 ms against a 5,000 ms budget.
+
+**So: start the matrix, then stop. Do not read, grep, edit, commit, or launch
+anything until it returns.** Block on the verdict and do nothing else. If work
+must happen during a matrix, the matrix is not ready to run yet.
+
+**Why this matters more than it looks:** a loaded run does not fail honestly. It
+produces a *wrong verdict* — either a red on a timing-sensitive gate that would
+pass quiet, or the far worse case of an environmental red that gets mistaken for
+a product defect and "fixed". The standing prohibition on raising a bound to
+make a loaded run pass exists precisely because that is the tempting move here.
+**Re-run quiet; never widen the budget.**
+
+**A killed matrix does not clean up after itself.** Killing one left an orphaned
+`north-star-*` ephemeral container, which then prevented the *next* run's
+ephemeral PostgreSQL from becoming ready within 30 s — an environmental red that
+looked nothing like its cause. After killing a matrix, check `docker ps` and
+remove orphaned `north-star-*` containers before the next run. Never touch the
+user's `2rain-*` containers.
 
 This is a real cost of parallelism and it caps useful lane count: past roughly
 four lanes, matrix queueing dominates and additional lanes buy nothing.

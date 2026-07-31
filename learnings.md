@@ -243,6 +243,15 @@ Date: 2026-07-30
 Why: G3-P3's matrix hung behind an idle lock holder in an acyclic wait chain, so PostgreSQL's deadlock detector had no cycle to break and neither the product nor its control could make progress.
 How to apply: keep deliberate blocking semantics, but set an explicit lock timeout, translate it to a domain-typed concurrency error, and make every real lock control assert the database timeout rather than an absence of progress. See `docs/execution/packets/G3-P3.md`.
 
+## A fixture takes its version from what it is, never from "current"
+Date: 2026-07-30
+Why: `test/fixtures/g2/module-conformance/definitions.ts` derived its authored `languageVersion` from `LATEST_LANGUAGE_VERSION`, so cutting v4 silently re-authored v3 content at v4 and turned **32 compiler tests red at once** — none of them naming the fixture, so the cost was a debugging pass before the cause was visible. Switching to an `ADOPTED_*` constant would only have narrowed the blast radius: it moves too, one event later.
+How to apply: pin any version-specific fixture to a literal (`LANGUAGE_VERSIONS.v3`), and derive nodes built *into* a fixture from that fixture's own exported version, not from a constant. Advancing a fixture is a deliberate edit, like the migration inventory and the surface-debt baseline. The inverse case is legitimate and different: a test that asserts `LATEST_LANGUAGE_VERSION === LANGUAGE_VERSIONS.v4` is a ratchet pinning what the constant *is*, and should fail loudly on the next cut. This is the version-from-artifact rule in fixture clothing; see `docs/execution/packets/Q1-P5.md`.
+
+## A negative control must not probe with a value the language can later gain
+Date: 2026-07-30
+Why: `negative-contracts.test.ts:76` asserted that an unknown node version fails closed, using the literal `'v4'`. When v4 became real the probe stopped observing its own claim — the document was still refused, but for a different reason (`CANON_VERSION_MIXED`, not `CANON_VERSION_UNSUPPORTED`), so a genuinely unsupported version was no longer covered.
+How to apply: probe one past the newest readable version, and re-read every negative control whose subject is a *value* rather than a *shape* when that value space is extended. See `docs/execution/packets/Q1-P5.md`.
 ## Keep negative fixtures valid until the target rule
 Date: 2026-07-30
 Why: G3-P4b removed a required evidence field but left canonical query references behind, so normalization failed before the intended inventory conformance rule ran.

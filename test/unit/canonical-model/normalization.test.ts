@@ -9,8 +9,12 @@ import {
   CanonicalModelError,
   LANGUAGE_VERSION,
   LANGUAGE_VERSIONS,
+  ADOPTED_LANGUAGE_VERSION,
+  ADOPTED_NORMALIZATION_PROFILE_VERSION,
   LATEST_LANGUAGE_VERSION,
   LATEST_NORMALIZATION_PROFILE_VERSION,
+  languageHasLegalEntityQueryScope,
+  languageHasV3Features,
   NORMALIZATION_PROFILE_VERSION,
   NORMALIZATION_PROFILE_VERSIONS,
   VersionedAuthoredApplicationPackageSchema,
@@ -120,15 +124,23 @@ test('v0, v1, and v2 readers retain their exact normalized bytes', () => {
   }
 });
 
-test('v3 selects its profile, rejects mixed nodes, and leaves adopted v2 explicit', () => {
+test('v3 and v4 select their profiles, reject mixed nodes, and leave adoption explicit', () => {
   assert.equal(LANGUAGE_VERSION, LANGUAGE_VERSIONS.v2);
   assert.equal(
     NORMALIZATION_PROFILE_VERSION,
     NORMALIZATION_PROFILE_VERSIONS.v2,
   );
-  assert.equal(LATEST_LANGUAGE_VERSION, LANGUAGE_VERSIONS.v3);
+  // The newest readable version and the version packages are compiled at are
+  // deliberately apart while v4 is cut and unadopted. Collapsing them would
+  // make every artifact move on the next cut.
+  assert.equal(LATEST_LANGUAGE_VERSION, LANGUAGE_VERSIONS.v4);
   assert.equal(
     LATEST_NORMALIZATION_PROFILE_VERSION,
+    NORMALIZATION_PROFILE_VERSIONS.v4,
+  );
+  assert.equal(ADOPTED_LANGUAGE_VERSION, LANGUAGE_VERSIONS.v3);
+  assert.equal(
+    ADOPTED_NORMALIZATION_PROFILE_VERSION,
     NORMALIZATION_PROFILE_VERSIONS.v3,
   );
   assert.deepEqual(SUPPORTED_LANGUAGE_VERSIONS, [
@@ -136,13 +148,22 @@ test('v3 selects its profile, rejects mixed nodes, and leaves adopted v2 explici
     LANGUAGE_VERSIONS.v1,
     LANGUAGE_VERSIONS.v2,
     LANGUAGE_VERSIONS.v3,
+    LANGUAGE_VERSIONS.v4,
   ]);
   assert.deepEqual(SUPPORTED_NORMALIZATION_PROFILE_VERSIONS, [
     NORMALIZATION_PROFILE_VERSIONS.experimentalV0,
     NORMALIZATION_PROFILE_VERSIONS.v1,
     NORMALIZATION_PROFILE_VERSIONS.v2,
     NORMALIZATION_PROFILE_VERSIONS.v3,
+    NORMALIZATION_PROFILE_VERSIONS.v4,
   ]);
+  // Feature levels are cumulative in both directions that matter: v4 answers
+  // yes to every v3 question, and only v4 answers yes to the operand question.
+  assert.equal(languageHasV3Features(LANGUAGE_VERSIONS.v3), true);
+  assert.equal(languageHasV3Features(LANGUAGE_VERSIONS.v4), true);
+  assert.equal(languageHasV3Features(LANGUAGE_VERSION), false);
+  assert.equal(languageHasLegalEntityQueryScope(LANGUAGE_VERSIONS.v4), true);
+  assert.equal(languageHasLegalEntityQueryScope(LANGUAGE_VERSIONS.v3), false);
 
   const authored = parseAuthoredApplicationPackageJson(
     readFileSync(fixturePath),
@@ -178,25 +199,24 @@ test('v3 selects its profile, rejects mixed nodes, and leaves adopted v2 explici
       ),
   );
 
-  // Structural proxy for the append-only design: a future entry extends the
-  // catalog without changing any stable existing binding.
-  const hypotheticalV4 = { ...LANGUAGE_VERSIONS, v4: 'v4' as const };
-  const hypotheticalProfileV4 = {
-    ...NORMALIZATION_PROFILE_VERSIONS,
-    v4: 'northstar.normalization/v4' as const,
-  };
-  assert.deepEqual(
-    Object.fromEntries(
-      Object.entries(hypotheticalV4).filter(([name]) => name !== 'v4'),
-    ),
-    LANGUAGE_VERSIONS,
-  );
-  assert.deepEqual(
-    Object.fromEntries(
-      Object.entries(hypotheticalProfileV4).filter(([name]) => name !== 'v4'),
-    ),
-    NORMALIZATION_PROFILE_VERSIONS,
-  );
+  // This was a structural proxy modelling a hypothetical v4. v4 is now real,
+  // so the control observes the append itself: every binding that existed
+  // before the cut holds its exact prior literal, and v4 is the only addition.
+  // Renaming or retargeting any released version fails here.
+  assert.deepEqual(LANGUAGE_VERSIONS, {
+    experimentalV0: 'v0-experimental',
+    v1: 'v1',
+    v2: 'v2',
+    v3: 'v3',
+    v4: 'v4',
+  });
+  assert.deepEqual(NORMALIZATION_PROFILE_VERSIONS, {
+    experimentalV0: 'northstar.normalization/v0-experimental',
+    v1: 'northstar.normalization/v1',
+    v2: 'northstar.normalization/v2',
+    v3: 'northstar.normalization/v3',
+    v4: 'northstar.normalization/v4',
+  });
 });
 
 test('v3 gates aggregate nodes, typed parameters, signed decimals, and the D2 reservation', () => {
