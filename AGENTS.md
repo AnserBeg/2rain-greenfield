@@ -37,64 +37,58 @@ stop and surface it — do not improvise.
 Day-scale autonomous campaigns are retired in this repository. The user
 tests at every step.
 
+*Renumbered 2026-07-31 when the duplicated mechanics moved to
+`mission-cadence`. Older records citing "§3.5" for the grow-beyond-scope rule
+mean point 3 below.*
+
 1. One packet at a time, selected by the user. Never continue to another
    packet autonomously — even when the next step is obvious. Propose, stop,
    wait.
-2. A packet is one coherent outcome sized for one sitting (roughly 1-4
-   hours of agent work) that leaves the repository runnable.
-3. Every packet ends with, in order: a frozen candidate SHA; gates run with
-   honest results (a red gate is reported, never hidden); a "Test it
-   yourself" section (exact copy-paste commands, what to click, what you
-   should see, under 10 minutes); a ledger update; and a proposal of 1-3
-   candidate next packets. Then STOP.
-4. Prefer thin vertical slices over broad horizontal layers so every step
-   produces something the user can observe.
-5. If a packet grows beyond its scope, stop at a safe boundary and report
-   rather than pushing on.
+2. Prefer thin vertical slices over broad horizontal layers, so every step
+   produces something the user can observe rather than something they must
+   take on trust.
+3. If a packet grows beyond its scope, stop at a safe boundary and report
+   rather than pushing on. A correct stop is good work — but three stops on
+   one packet means the charter was mis-scoped, and the answer is to re-scope,
+   not to write a fourth continuation.
 
-Details and the packet template: `.agents/skills/mission-cadence/SKILL.md`.
+**`.agents/skills/mission-cadence/SKILL.md` is binding on the mechanics** — the
+propose/select/execute/checkpoint loop, what a packet must define, the
+packet-completion block, stop conditions, and stop convergence. It is the only
+place those are written down, for the same reason as §4: a second copy drifts
+and reads authoritative while being subordinate.
 
 ## 4. Seats, models, and review tiers
 
-Classify every packet by its final diff:
+Every packet carries a tier — Mechanical, Behavioral, or Critical — set by
+what its final diff **does**, not by where the diff lives.
 
-- **Mechanical** — docs, config, renames, test-only work; no behavior
-  change.
-- **Behavioral** — product behavior, but not the spine.
-- **Critical** — release kernel, compiler, semantic gateways, inventory
-  ledger/posting, tenant isolation and policy, trust substrate, migrations.
+Two principles govern all review, and only these two live here:
 
-The tier sets review INTENSITY only (how strong a reviewer, how many). Review
-SCOPE is bounded by a mandatory charter, review is proportionate to what the
-deterministic gates already prove, findings are triaged (in-scope + material
-only), and rounds converge (max two REVISE rounds, then surface). A high tier
-never means infinite scrutiny. The `review-tiers` skill is binding on all of
-this; read it before launching any review.
+- **Tier sets INTENSITY; the charter sets SCOPE.** A higher tier means a
+  stronger reviewer applied to the same bounded charter. It never means
+  unbounded scrutiny, and "find any way this could fail" is never a valid
+  framing.
+- **Review is proportionate to what the deterministic gates already prove.**
+  Where a gate settles correctness, the review IS verification against that
+  gate. Under-reviewing risky logic and over-reviewing settled mechanics are
+  equally wrong; most of this program's pain has come from the second.
+- **Any code change after a review invalidates it: new SHA, fresh review.**
+  Never resume or extend a prior reviewer. (Kept here because other records
+  cite this section for it; the surrounding procedure is in `review-tiers`.)
 
-| Tier | Writer | Review chain |
-|---|---|---|
-| Mechanical | codex `gpt-5.6-sol` high, or the orchestrator directly for trivial diffs | one fresh reviewer, or orchestrator verification with evidence |
-| Behavioral | codex `gpt-5.6-sol` high | one fresh naive codex xhigh review + writer fix loop; every re-review is a fresh spawn |
-| Critical | codex `gpt-5.6-sol` xhigh | fresh naive codex xhigh review to PASS, then Fable max confirm on the identical unchanged SHA. If Fable is unavailable, the result remains unaccepted evidence |
+**The `review-tiers` skill is binding on every mechanic** — the seat/model
+matrix, tier calibration, the mandatory charter's five elements, findings
+triage, and round convergence. Read it before launching any review. It is
+deliberately the only place those mechanics are written down: this section
+used to restate them and the two copies drifted (2026-07-31 — they disagreed
+on the Mechanical review default and on Fable's effort level). Per the
+authority order in §1, the skill outranks this file's operational detail, so a
+restatement here would read authoritative while being subordinate. Do not
+reintroduce one.
 
-Rules:
-
-- Reviewers are always fresh, naive spawns: no planning context, only the
-  frozen diff, owned paths, and the charter (gates-green, in-scope,
-  out-of-scope, threat model, bounded decisive questions). A review prompt
-  with no explicit charter is invalid. Never resume a prior reviewer.
-- Never frame a review as "find any way this could fail/be evaded" — that is
-  the unbounded hunt that caused the P3 spiral. Ask specific, bounded
-  questions and stop.
-- A finding is actionable only if in-scope, material, and proportionate;
-  valid-but-out-of-scope findings are recorded as future work, not chased. A
-  fix that would balloon the packet is a stop-and-surface, never a silent
-  scope expansion.
-- Any code change after a review invalidates it: new SHA, fresh review.
-- Fable runs via the WSL claude binary: `claude -p --model fable --effort
-  max` (use `high` for lower-risk confirms).
-- Codex launcher templates live in `~/2rain-missions`; model policy is
-  `gpt-5.6-sol`, effort per the table (codex maximum effort is xhigh).
+Codex launcher templates and captured review results live in
+`~/2rain-missions`.
 
 Packet review is not the only review. A **program review** is a separate,
 trigger-gated whole-app instrument that packet reviews cannot substitute for:
@@ -122,6 +116,11 @@ silently.
   exact integrated SHA — never from a packet-selected subset. Focused tests
   may shorten the development loop but cannot replace the full matrix. The
   packet's ledger row records the integrated SHA and that full-matrix run.
+  The matrix must be green *for the integrated tree*; it does not have to be
+  re-run after the merge commit exists. When `git diff --quiet <reviewed>
+  <integrated>` reports identical trees, the reviewed run is the acceptance
+  run — a second pass over the same bytes observes nothing. `git-workflow`
+  holds the procedure.
 - Every `*.test.ts` and `*.spec.ts` file must be proven reachable by executed-file evidence from successful CI-invoked suites.
 - A gate must **observe** the fact it asserts, never a proxy for it. Parsing a
   tool's output, inferring from a declaration, and matching a string are proxies;

@@ -77,3 +77,33 @@ Stop mid-packet and report when: the packet needs an out-of-scope change
 (issue a bridge request); a gate cannot be made green honestly; a design
 fork appears that the plan does not settle; or the work exceeds the size
 budget. Never widen scope silently, never continue past the checkpoint.
+
+## Stop convergence — at most two, then RE-SCOPE (binding)
+
+A correct stop is good work. A *third* stop on one packet is not a fourth
+continuation waiting to be written — it is the charter telling you it was
+mis-scoped.
+
+**On the third stop, the orchestrator does not issue another continuation.** It
+splits the packet: land what is already green as its own reviewable increment,
+and move the unfinished seam into a charter of its own with the discovered
+constraints written in from the start.
+
+This mirrors the two-REVISE cap in `review-tiers`, and for the same reason —
+"a review that keeps finding more of the same class is a signal the charter is
+mis-scoped, not that the code is wrong." Stops carry that signal even more
+clearly, because each one is a constraint the charter's author did not know
+existed.
+
+**Recorded 2026-07-31 by `G3-P6a`.** It stopped four times: once on
+unconstructible verification input, then three times on successive
+implementation holes in one accepted ADR — a closed shared-list root contract,
+a verification call site, and an unbound row-query parameter path. Every stop
+was correct and every one found a real defect, so the stops were not the
+failure. The failure was that nothing in this skill said "three means
+re-scope," so the packet absorbed an ADR-completion workstream that deserved
+its own charter, and each stop cost a full orchestrator round trip.
+
+Count stops per packet, in the packet record. The cap is on stops that reveal
+NEW scope; a lane pausing for a ruling on work already inside its charter is
+not a stop for this purpose.
