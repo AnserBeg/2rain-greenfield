@@ -1480,15 +1480,22 @@ function validMovementCandidate(): InventoryMovementCandidateV1 {
 }
 
 function moduleInput(definition: unknown): CompilerInput {
+  const normalized = normalizeApplicationPackage(definition);
   return {
     dependencies: [],
     expectedActiveRelease: null,
     kind: 'compilerInput',
     limits: { ...DEFAULT_COMPILER_LIMITS },
     normalizedDefinitionBytes: new TextEncoder().encode(
-      canonicalize(normalizeApplicationPackage(definition)),
+      canonicalize(normalized),
     ),
-    profile: { ...MODULE_COMPILER_PROFILE },
+    // Version-from-artifact: the profile follows the definition's own declared
+    // version, never a pinned constant.
+    profile: {
+      ...MODULE_COMPILER_PROFILE,
+      languageVersion: normalized.languageVersion,
+      normalizationProfileVersion: normalized.normalizationProfileVersion,
+    },
   };
 }
 
