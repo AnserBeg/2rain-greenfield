@@ -1,7 +1,8 @@
 # G3-P7a — verification derivations for unarrangeable scenarios
 
-Status: implementation complete; candidate awaiting migration 0017, the serial
-full-matrix slot, and Critical review
+Status: implementation complete; migration 0017 landed and merged; awaiting the
+serial full-matrix slot after round-1 Critical review returned REVISE on one
+missed migration inventory (corrected below)
 Tier: Critical
 Base after doctrine refresh: `5a86e5a73d91c5dcfccb05f76135ea371872de19`
 Branch: `packet/g3-p7a`
@@ -157,10 +158,27 @@ None weakens an assertion. The snapshot constraint text was captured from a
 real PostgreSQL database after applying 0018, not transcribed speculatively.
 
 Migration 0018 was reassigned from parked G3-P5 to this packet to break the
-reservation cycle; G3-P5 now owns 0019. This branch still lacks migration 0017,
-which is on G3-P4b. The production loader correctly refuses the temporary
-`0016 -> 0018` gap. All migration inventories are discarded and re-derived
-from main after 0017 integrates.
+reservation cycle; G3-P5 now owns 0019.
+
+**Resolved 2026-07-30.** `G3-P4b` integrated, so migration `0017` is on `main`
+and this branch merged it at `150cd57`. The stream is contiguous at
+`0001…0018` (18 files) and the temporary `0016 -> 0018` gap no longer exists.
+
+**One inventory was missed in that merge and is corrected here — recorded
+rather than silently fixed, because the packet claimed all five were
+re-derived and that claim was false at the reviewed SHA.** The orchestrator
+resolved four conflict sites by reading their context but applied a blanket
+keep-ours rule to `test/postgres/module-storage-transition.test.ts:145-157`,
+whose hunk was a **full expected-applied list** rather than a last-migration
+assertion. The result omitted `0017` and would have failed the matrix
+deterministically — `runMigrations` applies twelve entries against an
+eleven-entry `deepEqual`. Found by the Critical review arm before a matrix slot
+was spent on it. All five inventories were then re-swept individually: the
+three explicit lists (`release-persistence-boundary`, `trust-substrate`,
+`module-storage-transition`) each carry both `0017` and `0018`;
+`inventory-storage.test.ts` pins last = `0018` with `verified.length` 18; and
+`migrations.test.ts` resolves its subject **by name** (`0015`) rather than by
+position — the form that does not rot as the stream grows, and the one to copy.
 
 ## Current evidence
 
@@ -180,6 +198,7 @@ from main after 0017 integrates.
 - `git diff --check`: PASS; and
 - full matrix: not started and not permitted without a serial slot.
 
-The standard PostgreSQL suite cannot run from this branch until migration 0017
-exists on its integration base. This is recorded dependency sequencing, not an
-assertion relaxation.
+The standard PostgreSQL suite could not run from this branch until migration
+0017 existed on its integration base. That blocker is cleared as of the
+`150cd57` merge; the suite is now runnable and the packet awaits only the
+serial full-matrix slot.
