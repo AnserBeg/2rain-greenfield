@@ -45,13 +45,28 @@ test('compiler core is hermetic and contains no ambient coordinator inputs', () 
 });
 
 test('compiler boundary and deterministic output are process-serializable data', () => {
+  const normalizedDefinitionBytes = fixtureBytes('bootstrap');
+  // This control is about serializability and determinism, not versions, so it
+  // compiles the fixture at the version the fixture declares. Pinning the
+  // default profile made it fail the moment adoption moved, for a reason that
+  // has nothing to do with what it measures.
+  const declared = JSON.parse(
+    new TextDecoder().decode(normalizedDefinitionBytes),
+  ) as {
+    languageVersion: (typeof DEFAULT_COMPILER_PROFILE)['languageVersion'];
+    normalizationProfileVersion: (typeof DEFAULT_COMPILER_PROFILE)['normalizationProfileVersion'];
+  };
   const input = {
     dependencies: [],
     expectedActiveRelease: null,
     kind: 'compilerInput' as const,
     limits: { ...DEFAULT_COMPILER_LIMITS },
-    normalizedDefinitionBytes: fixtureBytes('bootstrap'),
-    profile: { ...DEFAULT_COMPILER_PROFILE },
+    normalizedDefinitionBytes,
+    profile: {
+      ...DEFAULT_COMPILER_PROFILE,
+      languageVersion: declared.languageVersion,
+      normalizationProfileVersion: declared.normalizationProfileVersion,
+    },
   };
   const clonedInput = structuredClone(input);
   const result = compileApplication(clonedInput);

@@ -1788,6 +1788,11 @@ async function compileCandidateEnvelope(
   >;
   packageDefinition.version = storageChange ? '1.0.2' : '1.0.1';
   if (storageChange) {
+    // Version-from-artifact: a node spliced into this candidate must declare
+    // the candidate's own version, not a literal.
+    const candidateNodeVersion = (
+      candidateDefinition as unknown as { languageVersion: string }
+    ).languageVersion;
     const fields = candidateDefinition.fields as Array<Record<string, unknown>>;
     fields.push({
       classification: 'internal',
@@ -1795,21 +1800,21 @@ async function compileCandidateEnvelope(
       defaultSemantics: 'nullable',
       entity: {
         kind: 'entityReference',
-        schemaVersion: 'v3',
+        schemaVersion: candidateNodeVersion,
         targetId: 'northstar.app:entity.party',
       },
       fieldId: rollbackFieldId,
       fieldType: {
         kind: 'textFieldType',
         maximumLength: 160,
-        schemaVersion: 'v3',
+        schemaVersion: candidateNodeVersion,
       },
       kind: 'fieldDefinition',
       label: 'Rollback note',
       orderKey: 40,
       presence: 'optional',
       reportable: true,
-      schemaVersion: 'v3',
+      schemaVersion: candidateNodeVersion,
       searchable: false,
     });
   }
@@ -1907,7 +1912,7 @@ function compileSuccessor(
     kind: 'compilerInput',
     limits: { ...DEFAULT_COMPILER_LIMITS },
     normalizedDefinitionBytes,
-    profile: { ...MODULE_COMPILER_PROFILE },
+    profile: profileForNormalizedBytes(normalizedDefinitionBytes),
   });
   assert.equal(result.status, 'compiled');
   return result as CompileSuccess;
@@ -1939,5 +1944,31 @@ function serializedRelease(
     stagedArtifactHashes: compiled.stagedArtifacts.map(
       (artifact) => artifact.contentHash,
     ),
+  };
+}
+
+/**
+ * Version-from-artifact: compile a fixture at the version it declares rather
+ * than at whichever version is currently adopted. A pinned profile makes every
+ * control here fail the moment adoption moves, for reasons unrelated to what
+ * they measure.
+ */
+function profileForNormalizedBytes(
+  bytes: Uint8Array,
+): typeof MODULE_COMPILER_PROFILE {
+  const declared = JSON.parse(new TextDecoder().decode(bytes)) as {
+    languageVersion?: (typeof MODULE_COMPILER_PROFILE)['languageVersion'];
+    normalizationProfileVersion?: (typeof MODULE_COMPILER_PROFILE)['normalizationProfileVersion'];
+  };
+  return {
+    ...MODULE_COMPILER_PROFILE,
+    ...(declared.languageVersion === undefined
+      ? {}
+      : { languageVersion: declared.languageVersion }),
+    ...(declared.normalizationProfileVersion === undefined
+      ? {}
+      : {
+          normalizationProfileVersion: declared.normalizationProfileVersion,
+        }),
   };
 }

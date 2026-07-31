@@ -511,7 +511,14 @@ function compileFixture(withPartialAnatomy = true): CompileSuccess {
     normalizedDefinitionBytes: new TextEncoder().encode(
       canonicalize(normalized),
     ),
-    profile: { ...MODULE_COMPILER_PROFILE },
+    // Version-from-artifact, matching what the production compile scripts in
+    // apps/web/scripts already do. This was the only site under apps/ still
+    // pinning the profile.
+    profile: {
+      ...MODULE_COMPILER_PROFILE,
+      languageVersion: normalized.languageVersion,
+      normalizationProfileVersion: normalized.normalizationProfileVersion,
+    },
   });
   assert.equal(result.status, 'compiled');
   return result as CompileSuccess;

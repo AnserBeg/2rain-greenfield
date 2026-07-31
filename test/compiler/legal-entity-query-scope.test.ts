@@ -14,6 +14,7 @@ import {
   VersionedAuthoredApplicationPackageSchema,
   VersionedNormalizedApplicationPackageSchema,
   ADOPTED_LANGUAGE_VERSION,
+  ADOPTED_NORMALIZATION_PROFILE_VERSION,
   type LegalEntityScopeSelectionReceipt,
 } from '../../packages/canonical-model/src/index.js';
 import {
@@ -428,22 +429,32 @@ test('cutting v4 leaves v3 output byte-identical', () => {
   );
   assert.equal(
     DEFAULT_COMPILER_PROFILE.normalizationProfileVersion,
-    'northstar.normalization/v3',
+    ADOPTED_NORMALIZATION_PROFILE_VERSION,
   );
 
   const v3 = normalizedBytesFor(v3AggregateModule());
-  // The unmodified default profile still compiles an adopted-version package.
+  // The unmodified default profile still compiles an ADOPTED-version package.
+  // LANG-ADOPT moved adoption to v4, so the adopted-version fixture is the v4
+  // one; using the v3 module here would assert that the default profile
+  // compiles an UNADOPTED version, which is the opposite of this control.
   assert.equal(
     compileApplication({
       dependencies: [],
       expectedActiveRelease: null,
       kind: 'compilerInput',
       limits: { ...DEFAULT_COMPILER_LIMITS },
-      normalizedDefinitionBytes: v3,
+      normalizedDefinitionBytes: normalizedBytesFor(v4ScopedModule()),
       profile: { ...DEFAULT_COMPILER_PROFILE },
     }).status,
     'compiled',
   );
+  // Frozen expected digest, measured on BOTH sides of the v4 adoption boundary
+  // and found identical: pre-adoption main and this branch both produce
+  // 921ee278... Comparing two fresh compiles to each other, as this control did
+  // before, proves DETERMINISM, not identity with the pre-v4 output -- a
+  // deterministic change to the v3 manifest would move both and stay green.
+  const V3_RELEASE_MANIFEST_DIGEST =
+    '921ee2781fabdf5fd93f93cf07db9b27e6f41e8ad6163dbbd714da58dd9e6290';
   const before = canonicalizeAndHash(
     mustCompile(compilerInput(v3)).bundle.releaseManifest,
   ).contentHash;
@@ -451,6 +462,7 @@ test('cutting v4 leaves v3 output byte-identical', () => {
     mustCompile(compilerInput(v3)).bundle.releaseManifest,
   ).contentHash;
   assert.equal(before, again);
+  assert.equal(before, V3_RELEASE_MANIFEST_DIGEST);
 
   const manifest = mustCompile(compilerInput(v3)).bundle.releaseManifest;
   assert.equal(manifest.languageVersion, LANGUAGE_VERSIONS.v3);
