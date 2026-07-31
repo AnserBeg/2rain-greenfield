@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import {
+  ADOPTED_LANGUAGE_VERSION,
   CanonicalModelError,
   LANGUAGE_VERSION,
   LANGUAGE_VERSIONS,
@@ -552,7 +553,7 @@ test('reporting is a sanctioned required family and has per-entity lineage', () 
   );
 });
 
-test('v3 adoption retains the explicit v2 and v1 compatibility authorities', () => {
+test('adoption retains the explicit v2 and v1 compatibility authorities', () => {
   assert.equal(PREVIOUS_LANGUAGE_VERSION, 'v1');
   assert.equal(
     PREVIOUS_NORMALIZATION_PROFILE_VERSION,
@@ -560,7 +561,13 @@ test('v3 adoption retains the explicit v2 and v1 compatibility authorities', () 
   );
   assert.equal(LANGUAGE_VERSION, 'v2');
   assert.equal(NORMALIZATION_PROFILE_VERSION, 'northstar.normalization/v2');
-  assert.equal(MODULE_COMPILER_PROFILE.languageVersion, 'v3');
+  // Derived, not pinned: this control is about adoption LEAVING the older
+  // authorities alone, so it must not itself name the adopted version. The
+  // adopted value is pinned once, in normalization.test.ts's adoption ratchet.
+  assert.equal(
+    MODULE_COMPILER_PROFILE.languageVersion,
+    ADOPTED_LANGUAGE_VERSION,
+  );
   const legacy = replaceVersion(
     ordinaryModuleV1(),
     FIXTURE_LANGUAGE_VERSION,

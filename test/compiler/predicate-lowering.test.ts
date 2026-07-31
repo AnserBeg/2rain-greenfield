@@ -176,8 +176,15 @@ function q1PartyDefinition(filter: unknown): Record<string, unknown> {
 }
 
 function legacyV2PartyDefinition(): Record<string, unknown> {
-  const definition = replaceVersion(partyModuleDefinition(), 'v3', 'v2') as
-    Record<string, unknown> | undefined;
+  // Downgrade from the module's OWN declared version rather than a literal.
+  // Party moved to v4 with adoption; a pinned 'v3' source silently matched
+  // nothing and left v2 nodes inside a v4 package.
+  const party = partyModuleDefinition();
+  const definition = replaceVersion(
+    party,
+    (party as { languageVersion: string }).languageVersion,
+    'v2',
+  ) as Record<string, unknown> | undefined;
   if (!definition) throw new TypeError('party definition is missing');
   delete definition.impactAnalyses;
   definition.normalizationProfileVersion = 'northstar.normalization/v2';

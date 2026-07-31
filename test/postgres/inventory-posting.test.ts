@@ -4111,7 +4111,7 @@ function moduleInput(
     kind: 'compilerInput',
     limits: { ...DEFAULT_COMPILER_LIMITS },
     normalizedDefinitionBytes: definitionBytes(definition),
-    profile: { ...MODULE_COMPILER_PROFILE },
+    profile: profileForNormalizedBytes(definitionBytes(definition)),
   };
 }
 
@@ -4344,4 +4344,30 @@ function observePostgresError(
 function postgresCode(error: unknown): string | undefined {
   if (!isRecord(error)) return undefined;
   return typeof error.code === 'string' ? error.code : undefined;
+}
+
+/**
+ * Version-from-artifact: compile a fixture at the version it declares rather
+ * than at whichever version is currently adopted. A pinned profile makes every
+ * control here fail the moment adoption moves, for reasons unrelated to what
+ * they measure.
+ */
+function profileForNormalizedBytes(
+  bytes: Uint8Array,
+): typeof MODULE_COMPILER_PROFILE {
+  const declared = JSON.parse(new TextDecoder().decode(bytes)) as {
+    languageVersion?: (typeof MODULE_COMPILER_PROFILE)['languageVersion'];
+    normalizationProfileVersion?: (typeof MODULE_COMPILER_PROFILE)['normalizationProfileVersion'];
+  };
+  return {
+    ...MODULE_COMPILER_PROFILE,
+    ...(declared.languageVersion === undefined
+      ? {}
+      : { languageVersion: declared.languageVersion }),
+    ...(declared.normalizationProfileVersion === undefined
+      ? {}
+      : {
+          normalizationProfileVersion: declared.normalizationProfileVersion,
+        }),
+  };
 }

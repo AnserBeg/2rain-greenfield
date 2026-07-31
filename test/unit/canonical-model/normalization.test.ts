@@ -130,18 +130,20 @@ test('v3 and v4 select their profiles, reject mixed nodes, and leave adoption ex
     NORMALIZATION_PROFILE_VERSION,
     NORMALIZATION_PROFILE_VERSIONS.v2,
   );
-  // The newest readable version and the version packages are compiled at are
-  // deliberately apart while v4 is cut and unadopted. Collapsing them would
-  // make every artifact move on the next cut.
+  // Newest-readable and compiled-at are deliberately apart while a version is
+  // cut and unadopted. LANG-ADOPT adopted v4, so they are equal RIGHT NOW and
+  // reopen at the next cut -- that is the normal cycle, not a collapse. This
+  // pair is the adoption ratchet: it must fail loudly on every adoption event
+  // so the artifact churn is absorbed deliberately rather than discovered.
   assert.equal(LATEST_LANGUAGE_VERSION, LANGUAGE_VERSIONS.v4);
   assert.equal(
     LATEST_NORMALIZATION_PROFILE_VERSION,
     NORMALIZATION_PROFILE_VERSIONS.v4,
   );
-  assert.equal(ADOPTED_LANGUAGE_VERSION, LANGUAGE_VERSIONS.v3);
+  assert.equal(ADOPTED_LANGUAGE_VERSION, LANGUAGE_VERSIONS.v4);
   assert.equal(
     ADOPTED_NORMALIZATION_PROFILE_VERSION,
-    NORMALIZATION_PROFILE_VERSIONS.v3,
+    NORMALIZATION_PROFILE_VERSIONS.v4,
   );
   assert.deepEqual(SUPPORTED_LANGUAGE_VERSIONS, [
     LANGUAGE_VERSIONS.experimentalV0,
