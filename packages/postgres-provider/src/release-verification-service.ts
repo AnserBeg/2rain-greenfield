@@ -1057,6 +1057,7 @@ class SemanticVerificationExecutor {
   readonly #operations: readonly VerificationOperationContract[];
   readonly #queries: readonly VerificationQueryContract[];
   readonly #relations: readonly VerificationRelationContract[];
+  readonly #requiredLegalEntityScopeQueryIds: readonly string[];
   readonly #storageEntities: readonly StorageTargetPayloadV1['entities'][number][];
   #ordinal = 0;
 
@@ -1085,6 +1086,26 @@ class SemanticVerificationExecutor {
     );
     this.#relations = storage.relations;
     this.#storageEntities = storage.entities;
+    // The immutable application lineage includes releases compiled before any
+    // query elected ADR-0031's v4 operand. Once a release elects the contract,
+    // storage becomes the independent authority for the complete required set:
+    // removing one elected query from the catalog cannot remove its storage
+    // reader root from this probe.
+    this.#requiredLegalEntityScopeQueryIds = Object.freeze(
+      this.#queries.some((query) => query.legalEntityScope !== undefined)
+        ? [
+            ...new Set(
+              storage.entities
+                .filter(
+                  (entity) =>
+                    entity.lifecycle === 'active' &&
+                    entity.legalEntity?.familyClassification === 'entityOwned',
+                )
+                .flatMap((entity) => entity.consumerWriterRoots.readerQueryIds),
+            ),
+          ].toSorted(compare)
+        : [],
+    );
     for (const scenario of plan.scenarios) {
       if (scenario.kind !== 'searchableExclusion') continue;
       const excluded = this.#excludedFieldsByEntity.get(scenario.entityId);
@@ -1125,8 +1146,32 @@ class SemanticVerificationExecutor {
    * execution or derivation can admit the candidate.
    */
   async verifyLegalEntityScopeOmissions(): Promise<void> {
-    for (const query of this.#queries) {
-      if (!query.legalEntityScope) continue;
+    const queriesToProbe = new Map(
+      this.#queries
+        .filter((query) => query.legalEntityScope !== undefined)
+        .map((query) => [query.queryId, query]),
+    );
+    for (const queryId of this.#requiredLegalEntityScopeQueryIds) {
+      const query = this.#queries.find(
+        (candidate) => candidate.queryId === queryId,
+      );
+      if (!query) {
+        throw failure(
+          'VERIFICATION_LEGAL_ENTITY_SCOPE_QUERY_MISSING',
+          `entity-owned storage requires a scoped query that is absent from the compiled catalog: ${queryId}`,
+        );
+      }
+      if (!query.legalEntityScope) {
+        throw failure(
+          'VERIFICATION_LEGAL_ENTITY_SCOPE_CONTRACT_MISSING',
+          `entity-owned storage query does not declare a legal-entity scope: ${queryId}`,
+        );
+      }
+      queriesToProbe.set(query.queryId, query);
+    }
+    for (const query of [...queriesToProbe.values()].toSorted((left, right) =>
+      compare(left.queryId, right.queryId),
+    )) {
       try {
         await this.#invokeQuery(query, {});
       } catch (error) {

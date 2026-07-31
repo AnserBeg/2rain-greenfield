@@ -25,6 +25,7 @@ import {
   type ContentAddressedArtifact,
   type ProjectionManifestEnvelope,
   type ProjectionReference,
+  type StorageTargetPayloadV1,
   type VerificationPlanPayloadV1,
 } from '../../packages/compiler/src/index.js';
 import {
@@ -262,7 +263,7 @@ test('verification results admit an exact executed-and-derived partition while f
   });
 });
 
-test('scope omission verification runs for an empty plan and refuses a malformed pinned contract', async () => {
+test('scope omission verification runs for an empty plan and refuses malformed or missing pinned contracts', async () => {
   const revisionBytes = normalizedBytes(inventoryModuleDefinition());
   const emptyPlan = rewriteProjectionPayload(
     mustCompile(revisionBytes),
@@ -272,6 +273,18 @@ test('scope omission verification runs for an empty plan and refuses a malformed
     },
   );
   assert.equal(releaseVerificationBinding(emptyPlan).plan.scenarios.length, 0);
+  const storage = projectionPayload<StorageTargetPayloadV1>(
+    emptyPlan,
+    PROJECTION_FAMILY_IDS.storageTarget,
+  );
+  const requiredScopedQueryId = storage.entities
+    .find(
+      (entity) =>
+        entity.lifecycle === 'active' &&
+        entity.legalEntity?.familyClassification === 'entityOwned',
+    )
+    ?.consumerWriterRoots.readerQueryIds.at(0);
+  assert.ok(requiredScopedQueryId);
   const malformedScope = rewriteProjectionPayload(
     emptyPlan,
     PROJECTION_FAMILY_IDS.queryCatalog,
@@ -286,6 +299,20 @@ test('scope omission verification runs for an empty plan and refuses a malformed
       };
       scope.operand.parameterId =
         'northstar.bootstrap:parameter.absent_scope_contract';
+    },
+  );
+  const missingScopedQuery = rewriteProjectionPayload(
+    emptyPlan,
+    PROJECTION_FAMILY_IDS.queryCatalog,
+    (payload) => {
+      const queries = payload.queries as Array<Record<string, unknown>>;
+      const requiredQuery = queries.find(
+        (query) => query.queryId === requiredScopedQueryId,
+      );
+      assert.ok(requiredQuery?.legalEntityScope);
+      payload.queries = queries.filter(
+        (query) => query.queryId !== requiredScopedQueryId,
+      );
     },
   );
 
@@ -362,6 +389,31 @@ test('scope omission verification runs for an empty plan and refuses a malformed
           (error: unknown) => error instanceof MalformedPinnedQueryCatalogError,
         );
         assert.equal(executor.calls, 0);
+
+        await assert.rejects(
+          execute(
+            missingScopedQuery,
+            minted('a3000000-0000-4000-8000-000000000303'),
+            minted('a4000000-0000-4000-8000-000000000303'),
+          ),
+          (error: unknown) => {
+            assert.ok(error instanceof ReleaseVerificationIntegrityError);
+            assert.equal(
+              error.code,
+              'VERIFICATION_LEGAL_ENTITY_SCOPE_QUERY_MISSING',
+            );
+            assert.equal(
+              error.message,
+              `entity-owned storage requires a scoped query that is absent from the compiled catalog: ${requiredScopedQueryId}`,
+            );
+            return true;
+          },
+        );
+        assert.equal(
+          executor.calls,
+          0,
+          'a storage-required query missing from the catalog refuses before scenario execution',
+        );
       } finally {
         await runtimePool.end();
       }
@@ -2226,6 +2278,29 @@ function rewriteProjectionPayload(
     ),
   );
   return rebuildReleaseRoot(clone);
+}
+
+function projectionPayload<T>(compiled: CompileSuccess, familyId: string): T {
+  const reference = compiled.bundle.releaseManifest.projections.find(
+    (candidate) => candidate.familyId === familyId,
+  );
+  assert.ok(reference);
+  const manifestArtifact = compiled.bundle.artifacts.find(
+    (candidate) => candidate.contentHash === reference.artifactRoot,
+  );
+  assert.ok(manifestArtifact);
+  const manifest = JSON.parse(
+    new TextDecoder().decode(manifestArtifact.canonicalBytes),
+  ) as ProjectionManifestEnvelope;
+  const descriptor = manifest.chunks[0];
+  assert.ok(descriptor);
+  const chunkArtifact = compiled.bundle.artifacts.find(
+    (candidate) => candidate.contentHash === descriptor.contentHash,
+  );
+  assert.ok(chunkArtifact);
+  return JSON.parse(
+    new TextDecoder().decode(chunkArtifact.canonicalBytes),
+  ) as T;
 }
 
 function wrongArtifactDomain(compiled: CompileSuccess): CompileSuccess {

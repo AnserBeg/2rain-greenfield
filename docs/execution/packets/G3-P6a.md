@@ -182,6 +182,15 @@ an archived verification probe outside the predicate, an append-only searchable
 source, a constructible positive witness, the exact unconstructable-operation
 findings, and durable evidence for the searchable-exclusion scenario.
 
+The composed-release control independently reconstructs constructibility from
+the compiled storage target and operation input contracts, then requires the
+entire executed/derived partition to match and rejects a well-formed derivation
+that mislabels a constructible scenario. This remains test evidence, not runtime
+admission authority: the compiler verifier still does not independently
+recompute derivation eligibility, so it cannot prove that property for releases
+outside the controls that exercise them. Critical hardening is recorded as
+`5g3-derivcheck` rather than expanding this UI packet across that layer boundary.
+
 Whether capability-mediated entities should declare generic create operations
 at all remains an open contract question owned by a future packet. Today
 verification cannot execute Inventory Transaction's generic create because its

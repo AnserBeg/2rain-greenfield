@@ -290,3 +290,8 @@ How to apply: trace every ingress after moving enforcement, remove unreachable d
 Date: 2026-07-30
 Why: Party, Catalog, Location, and Inventory all declare empty `stateMachines` arrays, while the generic module runtime consumes no state-machine definition at all; the language concept therefore supplies no terminal-state protection today.
 How to apply: before relying on a canonical lifecycle declaration, trace it into an executed runtime consumer and prove terminal-state mutation is refused. Treat declaration without consumption as a hollow contract, not enforcement.
+
+## Audit from an authority independent of the subject
+Date: 2026-07-31
+Why: G3-P6a's omission probe enumerated the query catalog it audited, so a dropped query vanished from the probe; derivation admission likewise trusted the producer's eligibility claim.
+How to apply: derive mandatory subjects from an independent compiled artifact and recompute exclusion eligibility in a negative control; never let the producer or collection under test certify its own completeness. See `docs/execution/packets/G3-P6a.md`.

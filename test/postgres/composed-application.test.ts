@@ -2282,6 +2282,7 @@ async function assertConstrainedDomainVerificationCompleted(
   );
   assert.ok(evidence);
   await assertExactPartitionEvidence(pool, runtime, evidenceId, evidence, {
+    compiled,
     plan: releaseVerificationBinding(compiled).plan,
   });
 }
@@ -2296,7 +2297,10 @@ async function assertExactPartitionEvidence(
   runtime: ComposedApplicationRuntime,
   evidenceId: string,
   evidence: DurableReleaseVerificationEvidence,
-  binding: Readonly<{ plan: VerificationPlanPayloadV1 }>,
+  binding: Readonly<{
+    compiled: CompileSuccess;
+    plan: VerificationPlanPayloadV1;
+  }>,
 ): Promise<void> {
   assert.equal(evidence.schemaVersion, 'northstar.verification-result-set/v2');
   assert.ok(
@@ -2321,6 +2325,50 @@ async function assertExactPartitionEvidence(
     new Set([...executedScenarioIds, ...derivedScenarioIds]).size,
     binding.plan.scenarios.length,
     'no scenario is both executed and derived',
+  );
+  assertIndependentConstructibilityPartition(
+    binding.compiled,
+    binding.plan,
+    evidence,
+  );
+  const constructibleResult = evidence.results[0];
+  const derivationTemplate = derivations[0];
+  assert.ok(constructibleResult);
+  assert.ok(derivationTemplate);
+  const constructibleScenario = binding.plan.scenarios.find(
+    (scenario) => scenario.scenarioId === constructibleResult.scenarioId,
+  );
+  assert.ok(constructibleScenario);
+  const mislabelledPartition = {
+    derivations: [
+      ...derivations,
+      {
+        reason: {
+          code: 'VERIFICATION_NO_GENERIC_CREATE_OPERATION' as const,
+          entityId: constructibleScenario.entityId,
+          message: 'well-formed but false no-create derivation',
+        },
+        scenarioFingerprint: constructibleScenario.scenarioFingerprint,
+        scenarioId: constructibleScenario.scenarioId,
+        schemaVersion: derivationTemplate.schemaVersion,
+      },
+    ],
+    results: evidence.results.filter(
+      (result) => result.scenarioId !== constructibleScenario.scenarioId,
+    ),
+  };
+  assert.throws(
+    () =>
+      assertIndependentConstructibilityPartition(
+        binding.compiled,
+        binding.plan,
+        mislabelledPartition,
+      ),
+    new RegExp(
+      `constructible scenario ${constructibleScenario.scenarioId} was recorded as derived`,
+      'u',
+    ),
+    'the independent oracle rejects a structurally valid derivation that mislabels a constructible scenario',
   );
   assert.ok(
     derivations.some(
@@ -2392,6 +2440,188 @@ async function assertExactPartitionEvidence(
     header.rows[0]?.result_count,
     header.rows[0]?.derived_count,
     'the executed counter and the derivation count are separate durable facts',
+  );
+}
+
+interface ConstructibilityPartition {
+  readonly derivations?: readonly {
+    readonly reason: {
+      readonly code: string;
+      readonly entityId: string;
+      readonly operationId?: string;
+      readonly requiredStorageColumn?: string;
+    };
+    readonly scenarioId: string;
+  }[];
+  readonly results: readonly { readonly scenarioId: string }[];
+}
+
+type IndependentUnconstructibleReason =
+  | Readonly<{ kind: 'noCreateOperation' }>
+  | Readonly<{
+      kind: 'unconstructableInput';
+      missingStorageColumns: ReadonlySet<string>;
+      operationId: string;
+    }>;
+
+/**
+ * Test-owned oracle for ADR-0020 derivations. It deliberately recomputes from
+ * storage and operation contracts instead of calling the provider's findings
+ * or scenario deriver, so the producer cannot certify its own exclusions.
+ */
+function assertIndependentConstructibilityPartition(
+  compiled: CompileSuccess,
+  plan: VerificationPlanPayloadV1,
+  partition: ConstructibilityPartition,
+): void {
+  const storage = storageTarget(compiled);
+  const operations = projectionPayload<{
+    readonly operations: readonly {
+      readonly effect: {
+        readonly entity: { readonly targetId: string };
+        readonly kind: string;
+      };
+      readonly inputContract: {
+        readonly fields: readonly { readonly fieldId: string }[];
+        readonly relationInputs: readonly {
+          readonly relationId: string;
+        }[];
+      };
+      readonly operationId: string;
+    }[];
+  }>(compiled, PROJECTION_FAMILY_IDS.operationCatalog).operations;
+  const createOperations = new Map(
+    operations
+      .filter((operation) => operation.effect.kind === 'createRecordEffect')
+      .map((operation) => [operation.effect.entity.targetId, operation]),
+  );
+  const unconstructibleByEntity = new Map<
+    string,
+    IndependentUnconstructibleReason
+  >();
+  for (const entity of storage.entities) {
+    const createOperation = createOperations.get(entity.entityId);
+    if (!createOperation) {
+      unconstructibleByEntity.set(entity.entityId, {
+        kind: 'noCreateOperation',
+      });
+      continue;
+    }
+    const constructibleColumns = new Set<string>();
+    for (const field of createOperation.inputContract.fields) {
+      const column = entity.columns.find(
+        (candidate) => candidate.canonicalFieldId === field.fieldId,
+      );
+      if (column) constructibleColumns.add(column.physicalName);
+    }
+    for (const relationInput of createOperation.inputContract.relationInputs) {
+      const relation = storage.relations.find(
+        (candidate) =>
+          candidate.sourceEntityId === entity.entityId &&
+          candidate.relationId === relationInput.relationId,
+      );
+      if (relation) {
+        constructibleColumns.add(relation.relationColumn.physicalName);
+      }
+    }
+    const requiredColumns = new Set(
+      entity.columns
+        .filter(
+          (column) => !column.nullable && column.defaultSemantics === 'none',
+        )
+        .map((column) => column.physicalName),
+    );
+    for (const relation of storage.relations) {
+      if (
+        relation.sourceEntityId === entity.entityId &&
+        !relation.relationColumn.nullable
+      ) {
+        requiredColumns.add(relation.relationColumn.physicalName);
+      }
+    }
+    if (entity.legalEntity) requiredColumns.add(entity.legalEntity.column);
+    const missingStorageColumns = new Set(
+      [...requiredColumns].filter(
+        (column) => !constructibleColumns.has(column),
+      ),
+    );
+    if (missingStorageColumns.size > 0) {
+      unconstructibleByEntity.set(entity.entityId, {
+        kind: 'unconstructableInput',
+        missingStorageColumns,
+        operationId: createOperation.operationId,
+      });
+    }
+  }
+
+  const resultById = new Map(
+    partition.results.map((result) => [result.scenarioId, result]),
+  );
+  const derivationById = new Map(
+    (partition.derivations ?? []).map((derivation) => [
+      derivation.scenarioId,
+      derivation,
+    ]),
+  );
+  const expectedDerivedScenarioIds: string[] = [];
+  const expectedExecutedScenarioIds: string[] = [];
+  for (const scenario of plan.scenarios) {
+    const reason = unconstructibleByEntity.get(scenario.entityId);
+    const result = resultById.get(scenario.scenarioId);
+    const derivation = derivationById.get(scenario.scenarioId);
+    if (!reason) {
+      assert.equal(
+        derivation,
+        undefined,
+        `constructible scenario ${scenario.scenarioId} was recorded as derived`,
+      );
+      assert.ok(
+        result,
+        `constructible scenario ${scenario.scenarioId} was not executed`,
+      );
+      expectedExecutedScenarioIds.push(scenario.scenarioId);
+      continue;
+    }
+    assert.equal(
+      result,
+      undefined,
+      `underivable scenario ${scenario.scenarioId} was reported as executed`,
+    );
+    assert.ok(
+      derivation,
+      `underivable scenario ${scenario.scenarioId} has no derivation`,
+    );
+    assert.equal(derivation.reason.entityId, scenario.entityId);
+    if (reason.kind === 'noCreateOperation') {
+      assert.equal(
+        derivation.reason.code,
+        'VERIFICATION_NO_GENERIC_CREATE_OPERATION',
+      );
+    } else {
+      assert.equal(
+        derivation.reason.code,
+        'VERIFICATION_OPERATION_INPUT_UNCONSTRUCTABLE',
+      );
+      assert.equal(derivation.reason.operationId, reason.operationId);
+      assert.ok(
+        derivation.reason.requiredStorageColumn !== undefined &&
+          reason.missingStorageColumns.has(
+            derivation.reason.requiredStorageColumn,
+          ),
+        `derivation for ${scenario.scenarioId} does not name an independently missing storage column`,
+      );
+    }
+    expectedDerivedScenarioIds.push(scenario.scenarioId);
+  }
+  assert.deepEqual(
+    [...derivationById.keys()].toSorted(),
+    expectedDerivedScenarioIds.toSorted(),
+    'every and only independently underivable scenarios are derived',
+  );
+  assert.deepEqual(
+    [...resultById.keys()].toSorted(),
+    expectedExecutedScenarioIds.toSorted(),
+    'every and only independently constructible scenarios execute',
   );
 }
 
