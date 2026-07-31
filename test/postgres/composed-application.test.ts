@@ -1907,7 +1907,7 @@ function compileSuccessor(
     kind: 'compilerInput',
     limits: { ...DEFAULT_COMPILER_LIMITS },
     normalizedDefinitionBytes,
-    profile: { ...MODULE_COMPILER_PROFILE },
+    profile: profileForNormalizedBytes(normalizedDefinitionBytes),
   });
   assert.equal(result.status, 'compiled');
   return result as CompileSuccess;
@@ -1939,5 +1939,31 @@ function serializedRelease(
     stagedArtifactHashes: compiled.stagedArtifacts.map(
       (artifact) => artifact.contentHash,
     ),
+  };
+}
+
+/**
+ * Version-from-artifact: compile a fixture at the version it declares rather
+ * than at whichever version is currently adopted. A pinned profile makes every
+ * control here fail the moment adoption moves, for reasons unrelated to what
+ * they measure.
+ */
+function profileForNormalizedBytes(
+  bytes: Uint8Array,
+): typeof MODULE_COMPILER_PROFILE {
+  const declared = JSON.parse(new TextDecoder().decode(bytes)) as {
+    languageVersion?: (typeof MODULE_COMPILER_PROFILE)['languageVersion'];
+    normalizationProfileVersion?: (typeof MODULE_COMPILER_PROFILE)['normalizationProfileVersion'];
+  };
+  return {
+    ...MODULE_COMPILER_PROFILE,
+    ...(declared.languageVersion === undefined
+      ? {}
+      : { languageVersion: declared.languageVersion }),
+    ...(declared.normalizationProfileVersion === undefined
+      ? {}
+      : {
+          normalizationProfileVersion: declared.normalizationProfileVersion,
+        }),
   };
 }
