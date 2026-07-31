@@ -34,6 +34,8 @@ import {
 } from '../../runtime/src/semantic-operation-gateway.js';
 import {
   SEMANTIC_QUERY_RESULT_VERSION,
+  type SemanticAggregateQueryExecutionRequest,
+  type SemanticAggregateResultEnvelope,
   type SemanticQueryExecutionRequest,
   type SemanticQueryExecutor,
   type SemanticQueryResultEnvelope,
@@ -126,11 +128,28 @@ export class PostgresSavedFilterExecutor
     if ('arguments' in request) {
       return this.#isSavedFilterQuery(request.definition.queryId)
         ? this.#executeQuery(request)
-        : this.#requiredFallback().execute(request);
+        : // Forward the exact execution request: issued legal-entity scope is a
+          // capability, so reconstructing a caller-settable substitute is invalid.
+          this.#requiredFallback().execute(request);
     }
     return this.#isSavedFilterOperation(request.definition.operationId)
       ? this.#executeOperation(request)
       : this.#requiredFallback().execute(request);
+  }
+
+  executeAggregate(
+    request: SemanticAggregateQueryExecutionRequest,
+  ): Promise<SemanticAggregateResultEnvelope> {
+    const fallback = this.#requiredFallback();
+    if (!fallback.executeAggregate) {
+      throw new SavedFilterContractError(
+        'SAVED_FILTER_QUERY_INADMISSIBLE',
+        'fallback executor does not support aggregate queries',
+        '$.definition',
+      );
+    }
+    // Preserve the issued scope capability by forwarding the exact request.
+    return fallback.executeAggregate(request);
   }
 
   async recordNonAccepted(

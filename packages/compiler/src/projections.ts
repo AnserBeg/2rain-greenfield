@@ -10,6 +10,8 @@ import {
   type StorageTargetPayloadV1,
 } from './storage.js';
 import {
+  FLAT_SURFACE_MANIFEST_PAYLOAD_VERSION,
+  GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION,
   HASH_DOMAINS,
   MODULE_INPUT_CONTRACT_VERSION,
   OPERATIONS_AGENT_TOOL_IDS,
@@ -49,9 +51,11 @@ const payloadSchemaVersions: Record<
   [PROJECTION_FAMILY_IDS.storageTarget]:
     'northstar.storage-target-payload/v0-provisional',
   [PROJECTION_FAMILY_IDS.surfaceManifest]:
-    'northstar.surface-manifest-payload/v0-provisional',
+    FLAT_SURFACE_MANIFEST_PAYLOAD_VERSION,
   [PROJECTION_FAMILY_IDS.verificationPlan]: VERIFICATION_PLAN_PAYLOAD_VERSION,
 };
+
+const MAX_PRIMARY_NAVIGATION_ENTRIES = 5;
 
 const runtimeCapabilities: Record<
   Exclude<ProjectionFamilyId, typeof PROJECTION_FAMILY_IDS.storageTransition>,
@@ -112,6 +116,7 @@ export function lowerBaseProjectionPayloads(
   const currentStorageTarget = isModuleV1
     ? lowerStorageTargetV1(packageRevision, previousStorageTarget)
     : null;
+  const surfaceManifest = surfaceManifestPayload(packageRevision, queryById);
   const plans = [
     plan(
       PROJECTION_FAMILY_IDS.semanticModel,
@@ -142,7 +147,9 @@ export function lowerBaseProjectionPayloads(
       PROJECTION_FAMILY_IDS.surfaceManifest,
       namespace,
       packageScope,
-      surfaceManifestPayload(packageRevision, queryById),
+      surfaceManifest.payload,
+      surfaceManifest.payloadSchemaVersion,
+      surfaceManifest.requiredRuntimeCapability,
     ),
     plan(
       PROJECTION_FAMILY_IDS.policyReferences,
@@ -201,6 +208,7 @@ function plan(
   logicalScope: LogicalScope,
   payload: unknown,
   payloadSchemaVersion?: string,
+  requiredRuntimeCapability?: RuntimeCapabilityRequirement,
 ): ProjectionPayloadPlan {
   const suffix = familyId.slice(familyId.lastIndexOf('.') + 1);
   return {
@@ -210,7 +218,8 @@ function plan(
     payload,
     payloadSchemaVersion:
       payloadSchemaVersion ?? payloadSchemaVersions[familyId],
-    requiredRuntimeCapability: runtimeCapabilities[familyId],
+    requiredRuntimeCapability:
+      requiredRuntimeCapability ?? runtimeCapabilities[familyId],
   };
 }
 
@@ -428,32 +437,120 @@ function operationCatalogPayload(
 function surfaceManifestPayload(
   packageRevision: NormalizedApplicationPackage,
   queryById: Map<string, NormalizedApplicationPackage['queries'][number]>,
-): unknown {
+): {
+  readonly payload: unknown;
+  readonly payloadSchemaVersion:
+    | typeof FLAT_SURFACE_MANIFEST_PAYLOAD_VERSION
+    | typeof GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION;
+  readonly requiredRuntimeCapability: RuntimeCapabilityRequirement;
+} {
+  const navigation = surfaceNavigationTree(packageRevision);
+  // Load-bearing compatibility fence: labelling grouped output as v0 lets
+  // v0 readers ignore the tree and silently reconstruct unreachable overflow.
+  const payloadSchemaVersion = navigation
+    ? GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION
+    : FLAT_SURFACE_MANIFEST_PAYLOAD_VERSION;
   return {
-    kind: 'surfaceManifestPayload',
-    schemaVersion: payloadSchemaVersions[PROJECTION_FAMILY_IDS.surfaceManifest],
-    surfaces: packageRevision.surfaces.map((surface) => ({
-      archetype: surface.archetype,
-      dataSourceQueryId: surface.dataSource.targetId,
-      fieldIds:
-        queryById
-          .get(surface.dataSource.targetId)
-          ?.selections.map((selection) => selection.field.targetId) ?? [],
-      label: surface.label,
-      lifecycle: surface.lifecycle,
-      slots: surface.slots.map((slot) => ({
-        contentReferenceId: slot.content.targetId,
-        orderKey: slot.orderKey,
-        slot: slot.slot,
-        slotId: slot.slotId,
+    payload: {
+      kind: 'surfaceManifestPayload',
+      ...(navigation ? { navigation } : {}),
+      schemaVersion: payloadSchemaVersion,
+      surfaces: packageRevision.surfaces.map((surface) => ({
+        archetype: surface.archetype,
+        dataSourceQueryId: surface.dataSource.targetId,
+        fieldIds:
+          queryById
+            .get(surface.dataSource.targetId)
+            ?.selections.map((selection) => selection.field.targetId) ?? [],
+        label: surface.label,
+        lifecycle: surface.lifecycle,
+        slots: surface.slots.map((slot) => ({
+          contentReferenceId: slot.content.targetId,
+          orderKey: slot.orderKey,
+          slot: slot.slot,
+          slotId: slot.slotId,
+        })),
+        statusRoles: surface.statusRoles,
+        surfaceId: surface.surfaceId,
+        ...(packageRevision.languageVersion === LANGUAGE_VERSION
+          ? { surfaceRole: surface.surfaceRole ?? null }
+          : {}),
       })),
-      statusRoles: surface.statusRoles,
-      surfaceId: surface.surfaceId,
-      ...(packageRevision.languageVersion === LANGUAGE_VERSION
-        ? { surfaceRole: surface.surfaceRole ?? null }
-        : {}),
-    })),
+    },
+    payloadSchemaVersion,
+    requiredRuntimeCapability: {
+      capabilityId: 'northstar.runtime:capability.surface-manifest',
+      minimumVersion: navigation ? 2 : 1,
+    },
   };
+}
+
+interface SurfaceNavigationLeaf {
+  readonly kind: 'navigationSurface';
+  readonly surfaceId: string;
+}
+
+interface SurfaceNavigationGroup {
+  readonly children: readonly (
+    SurfaceNavigationGroup | SurfaceNavigationLeaf
+  )[];
+  readonly kind: 'navigationGroup';
+  readonly label: string;
+  readonly navigationId: string;
+}
+
+function surfaceNavigationTree(packageRevision: NormalizedApplicationPackage): {
+  readonly entries: readonly SurfaceNavigationGroup[];
+  readonly kind: 'navigationTree';
+} | null {
+  const navigationSurfaces = packageRevision.surfaces.filter(
+    (surface) => surface.lifecycle === 'active' && isNavigationSurface(surface),
+  );
+  if (navigationSurfaces.length <= MAX_PRIMARY_NAVIGATION_ENTRIES) return null;
+
+  const surfaceLeavesByModule = new Map<string, SurfaceNavigationLeaf[]>();
+  for (const surface of navigationSurfaces) {
+    const leaves = surfaceLeavesByModule.get(surface.module.targetId) ?? [];
+    leaves.push({ kind: 'navigationSurface', surfaceId: surface.surfaceId });
+    surfaceLeavesByModule.set(surface.module.targetId, leaves);
+  }
+
+  const moduleGroups = packageRevision.modules.flatMap((module) => {
+    const children = surfaceLeavesByModule.get(module.moduleId);
+    return children
+      ? [
+          {
+            children,
+            kind: 'navigationGroup' as const,
+            label: module.label,
+            navigationId: module.moduleId,
+          },
+        ]
+      : [];
+  });
+  const entries =
+    moduleGroups.length <= MAX_PRIMARY_NAVIGATION_ENTRIES
+      ? moduleGroups
+      : [
+          ...moduleGroups.slice(0, MAX_PRIMARY_NAVIGATION_ENTRIES - 1),
+          {
+            children: moduleGroups.slice(MAX_PRIMARY_NAVIGATION_ENTRIES - 1),
+            kind: 'navigationGroup' as const,
+            label: 'More',
+            navigationId: `${packageRevision.package.namespace}:navigation.more`,
+          },
+        ];
+  return { entries, kind: 'navigationTree' };
+}
+
+function isNavigationSurface(
+  surface: NormalizedApplicationPackage['surfaces'][number],
+): boolean {
+  return (
+    surface.surfaceRole === 'list' ||
+    (surface.surfaceRole === undefined &&
+      (surface.archetype === 'list' || surface.archetype === 'home'))
+  );
 }
 
 function reportingPayload(

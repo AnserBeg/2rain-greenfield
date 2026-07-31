@@ -17,6 +17,8 @@ import {
   formatProductSurfaceGrammarRatchet,
   formatSurfaceGrammarResult,
   projectCompactSurfaces,
+  type ConformanceNavigationEntry,
+  type ConformanceNavigationTree,
   type ConformanceSurface,
   type ProductSurfaceGrammarObservation,
 } from '../../packages/dev-tooling/src/surface-grammar-conformance/index.js';
@@ -27,6 +29,8 @@ import {
 import {
   DEFAULT_COMPILER_LIMITS,
   DEFAULT_COMPILER_PROFILE,
+  FLAT_SURFACE_MANIFEST_PAYLOAD_VERSION,
+  GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION,
   MODULE_COMPILER_PROFILE,
   PROJECTION_FAMILY_IDS,
   compileApplication,
@@ -184,7 +188,7 @@ test('compiler-produced fixtures cover all five archetypes, required slots, focu
   const compiled = compileSurfaceGrammarFixture();
   const surfaces = compiledSurfaceGrammarSurfaces(compiled);
   const compact = projectCompactSurfaces(surfaces);
-  const result = checkSurfaceGrammarConformance(surfaces, compact);
+  const result = checkSurfaceGrammarConformance(surfaces, null, compact);
 
   assert.equal(result.surfacesRead, 5);
   assert.equal(result.compactSurfacesRead, 5);
@@ -204,57 +208,159 @@ test('compiler-produced fixtures cover all five archetypes, required slots, focu
   );
 });
 
-test('entity-scoped navigation observes the composed application and rejects an over-budget application', () => {
-  const normalized = normalizeApplicationPackage(
-    composedApplicationDefinition(),
+test('compiled navigation stays flat within budget and groups mounted modules beyond it', () => {
+  const flatManifest = compiledSurfaceManifest(
+    compileDefinition(composedApplicationDefinition()),
   );
-  const compiled = compileApplication({
-    dependencies: [],
-    expectedActiveRelease: null,
-    kind: 'compilerInput',
-    limits: { ...DEFAULT_COMPILER_LIMITS },
-    normalizedDefinitionBytes: new TextEncoder().encode(
-      canonicalize(normalized),
-    ),
-    profile: { ...MODULE_COMPILER_PROFILE },
-  });
-  assert.equal(compiled.status, 'compiled');
-  const surfaces = compiledSurfaceManifest(compiled);
-  const compact = projectCompactSurfaces(surfaces);
-  const expectedListSurfaceIds = surfaces
-    .filter(
-      (surface) =>
-        surface.lifecycle === 'active' && surface.surfaceRole === 'list',
-    )
-    .map((surface) => surface.surfaceId);
-
-  assert.equal(surfaces.length, 12);
-  assert.deepEqual(compact.navigationSurfaceIds, expectedListSurfaceIds);
-  assert.equal(compact.navigationSurfaceIds.length, 4);
+  const flatCompact = projectCompactSurfaces(
+    flatManifest.surfaces,
+    flatManifest.navigation,
+  );
+  assert.equal(flatManifest.surfaces.length, 12);
+  assert.equal(flatManifest.navigation, null);
+  assert.equal(
+    flatManifest.payloadSchemaVersion,
+    FLAT_SURFACE_MANIFEST_PAYLOAD_VERSION,
+  );
+  assert.equal(flatManifest.requiredRuntimeCapability.minimumVersion, 1);
+  assert.equal(flatCompact.navigationEntryIds.length, 4);
   assert.deepEqual(
-    navigationRuleIds(checkSurfaceGrammarConformance(surfaces, compact)),
+    navigationRuleIds(
+      checkSurfaceGrammarConformance(
+        flatManifest.surfaces,
+        flatManifest.navigation,
+        flatCompact,
+      ),
+    ),
     [],
   );
 
-  const exemplar = surfaces.find((surface) => surface.surfaceRole === 'list');
-  assert.ok(exemplar);
-  const overBudget = [
-    ...surfaces,
-    ...Array.from({ length: 4 }, (_, index) => ({
-      ...structuredClone(exemplar),
-      surfaceId: `${exemplar.surfaceId}_over_budget_${String(index + 1)}`,
-    })),
-  ];
-  const overBudgetRuleIds = navigationRuleIds(
-    checkSurfaceGrammarConformance(overBudget),
+  const groupedManifest = compiledSurfaceManifest(
+    compileDefinition(composedApplicationWithInventory()),
   );
-  console.log(
-    `G2-P5d-nav composed navigation: ${String(compact.navigationSurfaceIds.length)}/7; synthetic navigation: 8/7 -> ${overBudgetRuleIds.join(',')}`,
+  const grouped = groupedManifest.navigation;
+  assert.ok(grouped);
+  const compact = projectCompactSurfaces(groupedManifest.surfaces, grouped);
+  assert.equal(groupedManifest.surfaces.length, 25);
+  assert.equal(
+    groupedManifest.payloadSchemaVersion,
+    GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION,
   );
-  assert.deepEqual(overBudgetRuleIds, [
-    'SG007_DESKTOP_NAVIGATION_BUDGET',
-    'SG008_COMPACT_NAVIGATION_BUDGET',
+  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 2);
+  assert.equal(navigationSurfaceIds(grouped.entries).length, 9);
+  assert.deepEqual(
+    grouped.entries.map((entry) => entry.label),
+    ['Party', 'Catalog', 'Location', 'Inventory'],
+  );
+  assert.deepEqual(compact.navigationEntryIds, [
+    'northstar.app:module.party',
+    'northstar.app:module.catalog',
+    'northstar.app:module.location',
+    'northstar.app:module.inventory',
   ]);
+  assert.deepEqual(
+    navigationRuleIds(
+      checkSurfaceGrammarConformance(
+        groupedManifest.surfaces,
+        grouped,
+        compact,
+      ),
+    ),
+    [],
+  );
+
+  const inventory = grouped.entries.find(
+    (entry) => entry.navigationId === 'northstar.app:module.inventory',
+  );
+  assert.ok(inventory);
+  assert.deepEqual(navigationSurfaceIds([inventory]), [
+    'northstar.app:surface.inventory_movement_list',
+    'northstar.app:surface.inventory_period_lock_list',
+    'northstar.app:surface.inventory_transaction_line_list',
+    'northstar.app:surface.inventory_transaction_list',
+    'northstar.app:surface.legal_entity_list',
+  ]);
+
+  const overflowManifest = compiledSurfaceManifest(
+    compileDefinition(sixModuleNavigationDefinition()),
+  );
+  const overflow = overflowManifest.navigation;
+  assert.ok(overflow);
+  assert.equal(
+    overflowManifest.payloadSchemaVersion,
+    GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION,
+  );
+  assert.equal(overflowManifest.requiredRuntimeCapability.minimumVersion, 2);
+  assert.equal(navigationSurfaceIds(overflow.entries).length, 6);
+  assert.deepEqual(
+    overflow.entries.map((entry) => entry.label),
+    ['Module 1', 'Module 2', 'Module 3', 'Module 4', 'More'],
+  );
+  assert.deepEqual(
+    navigationRuleIds(
+      checkSurfaceGrammarConformance(
+        overflowManifest.surfaces,
+        overflow,
+        projectCompactSurfaces(overflowManifest.surfaces, overflow),
+      ),
+    ),
+    [],
+  );
+});
+
+test('compiled navigation reachability reds reject missing, duplicate, and compact-omitted entries', () => {
+  const manifest = compiledSurfaceManifest(
+    compileDefinition(composedApplicationWithInventory()),
+  );
+  const navigation = manifest.navigation;
+  assert.ok(navigation);
+
+  assert.deepEqual(
+    navigationRuleIds(checkSurfaceGrammarConformance(manifest.surfaces, null)),
+    ['SG007_DESKTOP_NAVIGATION_BUDGET', 'SG008_COMPACT_NAVIGATION_BUDGET'],
+  );
+
+  const missingLeaf: ConformanceNavigationTree = {
+    ...navigation,
+    entries: navigation.entries.map((entry) =>
+      entry.navigationId === 'northstar.app:module.inventory'
+        ? { ...entry, children: entry.children.slice(1) }
+        : entry,
+    ),
+  };
+  assert.deepEqual(
+    navigationRuleIds(
+      checkSurfaceGrammarConformance(manifest.surfaces, missingLeaf),
+    ),
+    ['SG012_NAVIGATION_REACHABILITY'],
+  );
+
+  const duplicateLeaf: ConformanceNavigationTree = {
+    ...navigation,
+    entries: navigation.entries.map((entry) =>
+      entry.navigationId === 'northstar.app:module.inventory' &&
+      entry.children[0]
+        ? { ...entry, children: [...entry.children, entry.children[0]] }
+        : entry,
+    ),
+  };
+  assert.deepEqual(
+    navigationRuleIds(
+      checkSurfaceGrammarConformance(manifest.surfaces, duplicateLeaf),
+    ),
+    ['SG012_NAVIGATION_REACHABILITY'],
+  );
+
+  const compact = projectCompactSurfaces(manifest.surfaces, navigation);
+  assert.deepEqual(
+    navigationRuleIds(
+      checkSurfaceGrammarConformance(manifest.surfaces, navigation, {
+        ...compact,
+        navigationEntryIds: compact.navigationEntryIds.slice(1),
+      }),
+    ),
+    ['SG012_NAVIGATION_REACHABILITY'],
+  );
 });
 
 test('compiler vocabulary red: unknown archetype is rejected', () => {
@@ -321,19 +427,20 @@ test('desktop navigation budget red: an eighth navigation item fails the seven-i
   const surfaces = addClonedSurfaces(mutableCompiledSurfaces(), 6);
   const projected = projectCompactSurfaces(surfaces);
   const compact = {
-    navigationSurfaceIds: projected.navigationSurfaceIds.slice(0, 5),
+    navigationEntryIds: projected.navigationEntryIds.slice(0, 5),
     surfaces: projected.surfaces,
   };
-  assert.deepEqual(ruleIds(checkSurfaceGrammarConformance(surfaces, compact)), [
-    'SG007_DESKTOP_NAVIGATION_BUDGET',
-  ]);
+  assert.deepEqual(
+    ruleIds(checkSurfaceGrammarConformance(surfaces, null, compact)),
+    ['SG007_DESKTOP_NAVIGATION_BUDGET', 'SG012_NAVIGATION_REACHABILITY'],
+  );
 });
 
 test('compact projection red: omitting a required mobile slot fails the projection gate', () => {
   const surfaces = compiledSurfaceGrammarSurfaces();
   const projected = projectCompactSurfaces(surfaces);
   const compact = {
-    navigationSurfaceIds: [...projected.navigationSurfaceIds],
+    navigationEntryIds: [...projected.navigationEntryIds],
     surfaces: projected.surfaces.map((surface) => ({
       slots: [...surface.slots],
       surfaceId: surface.surfaceId,
@@ -345,9 +452,10 @@ test('compact projection red: omitting a required mobile slot fails the projecti
   );
   assert.ok(list);
   list.slots = list.slots.filter((slot) => slot !== 'bulkActions');
-  assert.deepEqual(ruleIds(checkSurfaceGrammarConformance(surfaces, compact)), [
-    'SG009_COMPACT_SLOT',
-  ]);
+  assert.deepEqual(
+    ruleIds(checkSurfaceGrammarConformance(surfaces, null, compact)),
+    ['SG009_COMPACT_SLOT'],
+  );
 });
 
 test('zero-input red reports that zero active and compact surfaces were read', () => {
@@ -471,18 +579,31 @@ function compileProductSurfaceGrammarObservations(): ProductSurfaceGrammarObserv
     });
     assert.equal(compiled.status, 'compiled');
     const identity = definitionIdentity(normalized);
-    const surfaces = compiledSurfaceManifest(compiled);
+    const manifest = compiledSurfaceManifest(compiled);
     return {
       ...identity,
-      result: checkSurfaceGrammarConformance(surfaces),
+      result: checkSurfaceGrammarConformance(
+        manifest.surfaces,
+        manifest.navigation,
+      ),
       sourceDirectory,
     };
   });
 }
 
+interface ConformanceSurfaceManifest {
+  readonly navigation: ConformanceNavigationTree | null;
+  readonly payloadSchemaVersion: string;
+  readonly requiredRuntimeCapability: {
+    readonly capabilityId: string;
+    readonly minimumVersion: number;
+  };
+  readonly surfaces: readonly ConformanceSurface[];
+}
+
 function compiledSurfaceManifest(
   compiled: CompileSuccess,
-): readonly ConformanceSurface[] {
+): ConformanceSurfaceManifest {
   const reference = compiled.bundle.releaseManifest.projections.find(
     (candidate) => candidate.familyId === PROJECTION_FAMILY_IDS.surfaceManifest,
   );
@@ -492,10 +613,205 @@ function compiledSurfaceManifest(
   );
   const chunkHash = manifest.chunks[0]?.contentHash;
   assert.ok(chunkHash);
-  const payload = decodeArtifact<{ surfaces: ConformanceSurface[] }>(
-    artifact(compiled, chunkHash),
+  const payload = decodeArtifact<{
+    navigation?: ConformanceNavigationTree;
+    schemaVersion: string;
+    surfaces: ConformanceSurface[];
+  }>(artifact(compiled, chunkHash));
+  assert.equal(payload.schemaVersion, reference.payloadSchemaVersion);
+  return {
+    navigation: payload.navigation ?? null,
+    payloadSchemaVersion: reference.payloadSchemaVersion,
+    requiredRuntimeCapability: reference.requiredRuntimeCapability,
+    surfaces: payload.surfaces,
+  };
+}
+
+function compileDefinition(
+  definition: Record<string, unknown>,
+): CompileSuccess {
+  const normalized = normalizeApplicationPackage(definition);
+  const compiled = compileApplication({
+    dependencies: [],
+    expectedActiveRelease: null,
+    kind: 'compilerInput',
+    limits: { ...DEFAULT_COMPILER_LIMITS },
+    normalizedDefinitionBytes: new TextEncoder().encode(
+      canonicalize(normalized),
+    ),
+    profile: {
+      ...DEFAULT_COMPILER_PROFILE,
+      languageVersion: normalized.languageVersion,
+      normalizationProfileVersion: normalized.normalizationProfileVersion,
+    },
+  });
+  if (compiled.status !== 'compiled') {
+    throw new Error(JSON.stringify(compiled.diagnostics));
+  }
+  return compiled;
+}
+
+function composedApplicationWithInventory(): Record<string, unknown> {
+  const composed = structuredClone(composedApplicationDefinition());
+  const inventory = inventoryModuleDefinition('northstar.app');
+  for (const collectionName of [
+    'assertions',
+    'entities',
+    'fields',
+    'operations',
+    'permissions',
+    'queries',
+    'relations',
+    'stateMachines',
+    'storageMappings',
+    'surfaces',
+  ] as const) {
+    const target = composed[collectionName];
+    const source = inventory[collectionName];
+    assert.ok(Array.isArray(target));
+    assert.ok(Array.isArray(source));
+    target.push(...source);
+  }
+  const modules = composed.modules;
+  const inventoryModules = inventory.modules;
+  assert.ok(Array.isArray(modules));
+  assert.ok(Array.isArray(inventoryModules));
+  const inventoryModule = inventoryModules[0];
+  assert.ok(inventoryModule && typeof inventoryModule === 'object');
+  modules.push({
+    ...inventoryModule,
+    orderKey: 40,
+    ownerPackageId: 'northstar.app:package.application',
+  });
+  return composed;
+}
+
+function sixModuleNavigationDefinition(): Record<string, unknown> {
+  const definition = authoredSurfaceGrammarFixture();
+  const modules = definition.modules;
+  const entities = definition.entities;
+  const fields = definition.fields;
+  const permissions = definition.permissions;
+  const queries = definition.queries;
+  const storageMappings = definition.storageMappings;
+  const surfaces = definition.surfaces;
+  assert.ok(Array.isArray(modules));
+  assert.ok(Array.isArray(entities));
+  assert.ok(Array.isArray(fields));
+  assert.ok(Array.isArray(permissions));
+  assert.ok(Array.isArray(queries));
+  assert.ok(Array.isArray(storageMappings));
+  assert.ok(Array.isArray(surfaces));
+  const module = modules[0];
+  const entity = entities[0];
+  const field = fields[0];
+  const permission = permissions[0];
+  const query = queries[0];
+  const storageMapping = storageMappings[0];
+  const list = surfaces.find(
+    (candidate) =>
+      candidate &&
+      typeof candidate === 'object' &&
+      'archetype' in candidate &&
+      candidate.archetype === 'list',
   );
-  return payload.surfaces;
+  assert.ok(module && typeof module === 'object');
+  assert.ok(entity && typeof entity === 'object');
+  assert.ok(field && typeof field === 'object');
+  assert.ok(permission && typeof permission === 'object');
+  assert.ok(query && typeof query === 'object');
+  assert.ok(storageMapping && typeof storageMapping === 'object');
+  assert.ok(list && typeof list === 'object');
+
+  const families = Array.from({ length: 6 }, (_, index) => {
+    const suffix = String(index + 1);
+    const ids = {
+      entity: `northstar.shell:entity.navigation_${suffix}`,
+      field: `northstar.shell:field.navigation_${suffix}_name`,
+      module: `northstar.shell:module.navigation_${suffix}`,
+      permission: `northstar.shell:permission.navigation_${suffix}_read`,
+      query: `northstar.shell:query.navigation_${suffix}_get`,
+      storage: `northstar.shell:storage.navigation_${suffix}`,
+      surface: `northstar.shell:surface.navigation_${suffix}`,
+    };
+    const nextEntity = mutableRecord(structuredClone(entity));
+    nextEntity.entityId = ids.entity;
+    mutableRecord(nextEntity.module).targetId = ids.module;
+    mutableRecord(nextEntity.storage).targetId = ids.storage;
+
+    const nextField = mutableRecord(structuredClone(field));
+    nextField.fieldId = ids.field;
+    mutableRecord(nextField.entity).targetId = ids.entity;
+
+    const nextPermission = mutableRecord(structuredClone(permission));
+    nextPermission.permissionId = ids.permission;
+    mutableRecord(nextPermission.resource).targetId = ids.entity;
+
+    const nextQuery = mutableRecord(structuredClone(query));
+    nextQuery.queryId = ids.query;
+    mutableRecord(nextQuery.module).targetId = ids.module;
+    mutableRecord(nextQuery.permission).targetId = ids.permission;
+    mutableRecord(nextQuery.sourceEntity).targetId = ids.entity;
+    const selections = nextQuery.selections;
+    assert.ok(Array.isArray(selections));
+    const selection = mutableRecord(selections[0]);
+    selection.selectionId = `northstar.shell:selection.navigation_${suffix}_name`;
+    mutableRecord(selection.field).targetId = ids.field;
+
+    const nextStorage = mutableRecord(structuredClone(storageMapping));
+    nextStorage.storageMappingId = ids.storage;
+    mutableRecord(nextStorage.entity).targetId = ids.entity;
+
+    const nextSurface = mutableRecord(structuredClone(list));
+    nextSurface.label = `Navigation ${suffix}`;
+    nextSurface.surfaceId = ids.surface;
+    mutableRecord(nextSurface.module).targetId = ids.module;
+    mutableRecord(nextSurface.dataSource).targetId = ids.query;
+    const slots = nextSurface.slots;
+    assert.ok(Array.isArray(slots));
+    for (const slotValue of slots) {
+      const slot = mutableRecord(slotValue);
+      slot.slotId = `${String(slot.slotId)}_${suffix}`;
+    }
+
+    return {
+      entity: nextEntity,
+      field: nextField,
+      module: {
+        ...structuredClone(module),
+        label: `Module ${suffix}`,
+        moduleId: ids.module,
+        orderKey: (index + 1) * 10,
+      },
+      permission: nextPermission,
+      query: nextQuery,
+      storage: nextStorage,
+      surface: nextSurface,
+    };
+  });
+  definition.modules = families.map((family) => family.module);
+  definition.entities = families.map((family) => family.entity);
+  definition.fields = families.map((family) => family.field);
+  definition.permissions = families.map((family) => family.permission);
+  definition.queries = families.map((family) => family.query);
+  definition.storageMappings = families.map((family) => family.storage);
+  definition.surfaces = families.map((family) => family.surface);
+  return definition;
+}
+
+function mutableRecord(value: unknown): Record<string, unknown> {
+  assert.ok(value && typeof value === 'object' && !Array.isArray(value));
+  return value as Record<string, unknown>;
+}
+
+function navigationSurfaceIds(
+  entries: readonly ConformanceNavigationEntry[],
+): string[] {
+  return entries.flatMap((entry) =>
+    entry.kind === 'navigationSurface'
+      ? [entry.surfaceId]
+      : navigationSurfaceIds(entry.children),
+  );
 }
 
 function artifact(
@@ -658,6 +974,7 @@ function navigationRuleIds(result: {
   return ruleIds(result).filter(
     (ruleId) =>
       ruleId === 'SG007_DESKTOP_NAVIGATION_BUDGET' ||
-      ruleId === 'SG008_COMPACT_NAVIGATION_BUDGET',
+      ruleId === 'SG008_COMPACT_NAVIGATION_BUDGET' ||
+      ruleId === 'SG012_NAVIGATION_REACHABILITY',
   );
 }
