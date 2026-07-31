@@ -1,104 +1,114 @@
 # G3-Pterm — Terminal-state operation preconditions (queue row `5g3-term`)
 
-Lane: CANON · Tier: Critical · Branch: `packet/g3-term` · Base: `378216a`
-Status: **AUTHOR-ONLY, UNCOMMITTED, PARTIAL BY RULING.** The orchestrator commits, gates
-and reviews. The matrix was not run — another lane is repairing the compile-budget gate.
+Lane: BUILD · Tier: Critical · Branch: `packet/g3-term` · Initial base: `378216a`
 
-## What was authorized and what was built
+Status: **AUTHORING AND FOCUSED EVIDENCE COMPLETE; FULL MATRIX AND REVIEW PENDING.**
+The orchestrator owns the remaining commit, matrix, and review steps.
 
-The design is `docs/execution/debates/g3-terminal-state-design-ruling.md` (Option A),
-recorded as [ADR-0034](../../decisions/ADR-0034-terminal-state-operation-preconditions.md).
-I did not re-open it.
+## Outcome
 
-The packet was split because the ruling sequences it **after `G3-P5`**, which owns
-`module-runtime-interpreter.ts` — where `prepareMutation` lives and where the enforcement
-authority belongs. `G3-P5` is not on main (no `onHand`, migrations stop at `0017`, no
-`0019`), so its interpreter diff is unreadable from here and the ruling's own §7 records
-that anchors will need mechanical rebasing onto it.
+Generic operations can no longer rewrite, archive, or restore posted stock-count
+evidence. `stock_count` declares the same exact not-posted precondition on create,
+update, archive, and restore. The generic PostgreSQL interpreter evaluates it against
+the candidate image on create, the prior image on every existing-record mutation, and
+the separately projected image on update.
 
-**Authored:**
+The terminal rule also protects aggregate children. The semantic-operation gateway
+passes the pinned catalog's active O0 update preconditions as `parentGuards`; the
+interpreter resolves and evaluates the matching parent guard only for storage relations
+classified `parentScopedChild`. A `reference` relation remains exempt, so a correction
+session may still supersede posted evidence without acquiring aggregate-child semantics.
 
-| File | Change |
+`schemas.ts` and `normalize.ts` remain unchanged. This is enforcement of an existing
+canonical operation-precondition concept, not a language-version event. `stateMachines`
+remain untouched and belong to row `5g3-sm`.
+
+## The wider compiler defect this packet exposed
+
+Before this packet, whole-model conformance received only
+`projectionDispatchRevision(packageRevision)`. That internal compatibility revision
+replaces **every operation precondition** with a literal-true `booleanPredicate` in
+`compiler.ts`. Consequently, any conformance rule intended to pin an authored operation
+precondition was structurally blind: it could never observe the declaration it claimed
+to ratchet. A guard could therefore be malformed or absent while the rule inspected a
+manufactured `true` instead. This is a general fail-open conformance defect, not an
+Inventory-specific mismatch.
+
+The repair keeps both authorities distinct:
+
+- compatibility conformance continues to receive the dispatch revision for the v2
+  structural shape;
+- `validateModuleConformance` also receives the authored normalized package revision;
+- the stock-count ratchet checks lifecycle/effect/entity structure in the compatibility
+  view, but compares the canonical root of the **authored normalized precondition**.
+
+The literal-true compatibility value is not the persisted operation catalog consumed at
+runtime. `decorateV3ProjectionPlans` restores authored preconditions into the single
+operation-catalog plan before `emitScheduledProjections` emits or persists anything. The
+request-runtime loader accepts that content-addressed operation-catalog family from the
+release manifest; it has no alternate path that resolves operations directly from the
+internal dispatch revision. C1–C7 additionally observe the authored guard through the
+real persisted gateway/interpreter path, so this conclusion is not based only on source
+inspection.
+
+## Implemented boundaries
+
+| Boundary | Result |
 |---|---|
-| `packages/canonical-model/src/predicate-kernel.ts` | `admitPredicateForExecution` — parse-only structural admission, plus the `admitted` receipt variant |
-| `packages/canonical-model/src/index.ts` | export it |
-| `packages/runtime/src/semantic-operation-gateway.ts` | the one-argument fence widened to parse-only admission |
-| `test/unit/canonical-model/predicate-admission.test.ts` | kernel controls (new file) |
-| `docs/decisions/ADR-0034-…md` | the decision record |
-| this file | the packet record |
+| Canonical predicate kernel | Parse-only `admitPredicateForExecution`; its `admitted` receipt remains deliberately distinct from `accepted`, so un-migrated callers fail closed |
+| Gateway | Selected preconditions must return `admitted`; unparseable shapes refuse before execution; active O0 update guards are carried in `parentGuards` |
+| Interpreter | Candidate, prior, projected, and parent images are evaluated generically; undecidable comparisons are errors, never semantic absence |
+| Domain | `operations()` accepts an optional precondition; only the `stock_count` call site supplies the exact not-posted predicate |
+| Compiler | `stock_count.state` stays required and all four fixed operation IDs must carry the exact authored predicate |
+| Aggregate ownership | Only `parentScopedChild` relations inherit the parent guard; `reference` relations do not |
 
-**Deferred until `G3-P5` lands:** `definition.ts` (the declaration),
-`module-runtime-interpreter.ts` (evaluation + parent-aggregate rule), and
-`test/postgres/inventory-terminal-state.test.ts` (controls C1–C7).
+The Inventory declaration edit is confined to the `operations()` helper and its
+`stock_count` call site. No entity, field, relation, state-machine, posting-service, or
+surface declaration changed.
 
-**`conformance.ts` deferred by my choice**, though the orchestrator released it. Two
-reasons. The pin must assert **exactly** the authored predicate, and that predicate's
-authored form lives in the deferred `definition.ts` — pinning a guess would create a
-second authority on the spelling, which is the thing this ruling exists to avoid. And an
-intentionally-red rule in an uncommitted tree destroys my ability to tell "red because
-deferred" from "red because I broke something", with no matrix to fall back on.
+## Controls and non-vacuity victims
 
-**Untouched, and the diff proves it:** `schemas.ts` and `normalize.ts` have zero changes
-— the no-language-event invariant. Also untouched: `semantic-query-gateway.ts`,
-`release-verification-service.ts`, `module-storage-materializer.ts`, `apps/web/**`,
-`builder.ts`, `performance-budget.test.ts`, `inventory-posting-service.ts`. No migration.
-`stateMachines` neither adopted nor extended.
+| Control | Observed behavior | Production victim whose removal turns it red |
+|---|---|---|
+| C1 | Updating a posted session refuses with `MODULE_OPERATION_PRECONDITION_REFUSED` | prior-image evaluation in `prepareMutation` |
+| C2 | The identical update on a counting session succeeds | comparison resolution against the real record image |
+| C3 | Reviewed-to-posted update and create-as-posted both refuse | the separate projected- and candidate-image evaluations |
+| C4 | Archive of a posted session and restore of an archived line under a posted session refuse | existing-record evaluation plus the parent guard on restore |
+| C5 | Creating a line under a posted session refuses | parent-guard evaluation in `requireRelationTarget` |
+| C6 | Updating and archiving an existing line under a posted session refuse | `requireExistingParentGuards`, which resolves the stored parent ID |
+| C7 | Updating a seeded correction session whose `supersedes` reference targets a posted session succeeds | the `ownership === 'parentScopedChild'` filter; treating references as parents makes this red |
+| C8 | Missing guard, wrong option, and optional state each fail with `INVENTORY_TERMINAL_GUARD_MISSING` | authored-revision input to the conformance ratchet |
+| C9 | A malformed registered precondition refuses before the executor | gateway guard `preconditionReceipt.outcome !== 'admitted'` |
+| C10 | The full stock-count and posting suites stay green | regression boundary proving generic press enforcement does not enter `#post`'s direct-SQL path |
 
-## The fail-open window is real, demonstrated, and blocks merge
+C7 uses an already-seeded correction session because the current generic create contract
+cannot construct the non-null legal-entity storage input for an entity-owned stock count.
+The control still observes the intended ownership distinction end to end: widening the
+existing-parent relation filter to include `reference` makes it refuse against the posted
+superseded session. Whether capability-mediated entities should expose unconstructable
+generic create operations remains a separate routed contract question.
 
-The ruling says the only fail-open partial order is
-gateway-widened-before-interpreter-evaluates. **That is now the state of this branch**,
-and it is not theoretical:
+Kernel controls also prove that parse-only admission does not evaluate truth, every
+unparseable shape refuses, and `admitted` cannot be mistaken for the legacy `accepted`
+receipt.
 
-`test/integration/module-runtime.test.ts` goes **8 pass / 5 fail** with the fence widened
-and no evaluator. The load-bearing one is *"unsupported compiled predicates fail closed
-before the generic executor"*: a literal-`false` precondition previously refused with
-`operation-precondition-unsupported`, and now returns
-`operation-read-back-unsupported` — the operation still refused, **but only because a
-second, unrelated fence happened to catch it** (that fixture's read-back filter is also
-literal `false`). The precondition fence itself no longer refuses a parseable-but-false
-predicate, which is correct once the interpreter evaluates and unsafe until then.
+## Focused evidence
 
-I did not edit those expectations. They legitimately change when the interpreter lands —
-refusal moves to `MODULE_OPERATION_PRECONDITION_REFUSED` — and encoding that now would
-assert something nothing satisfies.
+The orchestrator observed:
 
-**This branch must not merge before the interpreter evaluates.** The red suite is the
-evidence, not an accident to be tidied.
+- C1–C7: pass through the real gateway and PostgreSQL interpreter;
+- C8: pass for exact guard and required-state ratchets;
+- C9: pass for fail-closed parse admission;
+- C10: both `inventory-stock-count` and `inventory-posting` suites pass;
+- `test/integration/module-runtime.test.ts`: 13/13, with the gateway correctly encoding
+  admission only rather than a verdict;
+- all 34 existing G3-P3/G3-P4a posting controls continue to execute.
 
-## Controls, with the victim whose deletion turns each red
+`predicate-admission.test.ts` is registered in both the explicit `test:unit` command and
+the repository-hygiene inventory, so its controls are CI-reachable rather than merely
+present on disk.
 
-| # | Control | Victim | Recorded red |
-|---|---|---|---|
-| K1 | Admission parses an executable predicate **without evaluating it**, and `true`/`false` admit identically | the `admitted` receipt construction — a receipt varying with truth would be an evaluation | — (positive) |
-| K2 | **THE FAIL-OPEN DIRECTION.** Admission refuses every unparseable shape: non-record, missing key, non-Boolean literal, unknown kind, unknown version, unknown binding position | `if (parsed.outcome === 'rejected') return parsed;` in `admitPredicateForExecution` | disabled → **2/3 — red** |
-| K3 | `admitted` is not `accepted`, so unmigrated callers still refuse; the v0 one-argument fence still admits only literal `true` | the separate `admitted` outcome — collapsing it into `accepted` turns this red | — (positive) |
-| G1 | **The gateway still refuses an unparseable precondition.** This is the one thing this half can get wrong alone | `if (preconditionReceipt.outcome !== 'admitted')` in `semantic-operation-gateway.ts` | deleted → integration **6/13 — red** |
+## Remaining acceptance work
 
-**The named fail-open victim you asked for: `semantic-operation-gateway.ts`, the
-`if (preconditionReceipt.outcome !== 'admitted') { … }` refusal guarding
-`SEMANTIC_OPERATION_PRECONDITION_UNSUPPORTED`.** Deleting it admits an unparseable
-predicate silently; the recorded red is integration 6 pass / 7 fail.
-
-Written `!== 'admitted'` rather than `=== 'rejected'` deliberately: only an explicit
-admission proceeds, so any receipt shape this gateway does not recognise refuses instead
-of falling through. `=== 'rejected'` would admit a future variant by default.
-
-## Gates run
-
-`node_modules/.bin/tsc --project tsconfig.json --noEmit` — clean.
-`test/unit/canonical-model/predicate-admission.test.ts` — 3/3.
-`test/integration/module-runtime.test.ts` — 8/13, **expected and explained above**.
-No matrix, no commit, per instruction.
-
-## Owed before this can land
-
-1. `G3-P5` integrates; rebase the interpreter anchors onto its `prepareMutation`.
-2. Interpreter evaluation + parent-aggregate rule; the declaration in `definition.ts`;
-   the conformance pin.
-3. `test/integration/module-runtime.test.ts` expectations updated to
-   `MODULE_OPERATION_PRECONDITION_REFUSED` where the refusal legitimately moves.
-4. Two add-only registrations for the new unit test file: `package.json`'s `test:unit`
-   file list and `test/architecture/repository-hygiene.test.ts`'s unit inventory. **I did
-   not make these** — the file is unregistered as it stands, which `check:reachability`
-   will catch.
+The full matrix and Critical review chain have not yet been recorded for the final tree.
+No packet integration claim is made by this document.

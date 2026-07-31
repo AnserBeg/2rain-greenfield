@@ -462,29 +462,42 @@ test('C9 an unparseable operation precondition still refuses before execution', 
     compiled,
     REQUEST_RUNTIME_PROJECTION_FAMILIES.operation,
   );
-  const payload = structuredClone(operationProjection.payload) as {
-    operations: Array<Record<string, unknown>>;
-  };
-  const update = payload.operations.find(
-    (candidate) => candidate.operationId === operationId('stock_count_update'),
+  const payload = structuredClone(operationProjection.payload);
+  assertJsonObject(payload);
+  const operations = payload.operations;
+  assert.ok(Array.isArray(operations));
+  let corrupted = false;
+  const corruptedOperations = operations.map((candidate) => {
+    assertJsonObject(candidate);
+    if (candidate.operationId !== operationId('stock_count_update')) {
+      return candidate;
+    }
+    corrupted = true;
+    return Object.freeze({
+      ...candidate,
+      precondition: Object.freeze({
+        kind: 'notPredicate',
+        schemaVersion: compiled.bundle.releaseManifest.languageVersion,
+      }),
+    });
+  });
+  assert.equal(
+    corrupted,
+    true,
+    'stock_count_update must be present in the operation catalog',
   );
-  assert.ok(update);
-  update.precondition = {
-    kind: 'notPredicate',
-    schemaVersion: compiled.bundle.releaseManifest.languageVersion,
-  };
+  const corruptedPayload: ImmutableJsonValue = Object.freeze({
+    ...payload,
+    operations: Object.freeze(corruptedOperations),
+  });
   const view = await issuedCandidateView(
     compiled,
     randomUUID(),
     { fence: 1, pointerId: randomUUID() },
     policy,
-    // `payload` is a structuredClone of this projection's own payload, kept in
-    // a mutable shape only so the precondition can be corrupted above. Casting
-    // back to the projection's payload type restores the immutable-JSON
-    // contract it already satisfies; it asserts no shape the clone did not have.
     Object.freeze({
       ...operationProjection,
-      payload: payload as unknown as typeof operationProjection.payload,
+      payload: corruptedPayload,
     }),
   );
   const result = await invokeOperation(
@@ -549,6 +562,14 @@ class RecordingOperationExecutor implements SemanticOperationExecutor {
   ): Promise<void> {
     this.nonAccepted.push(request);
   }
+}
+
+function assertJsonObject(
+  value: ImmutableJsonValue,
+): asserts value is { readonly [key: string]: ImmutableJsonValue } {
+  assert.equal(typeof value, 'object');
+  assert.notEqual(value, null);
+  assert.equal(Array.isArray(value), false);
 }
 
 async function assertOperationRefused(
