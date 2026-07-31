@@ -716,7 +716,7 @@ test('q1 required sum executes through the real gateway with typed parameters an
           parameter.parameterType = {
             kind: 'textFieldType',
             maximumLength: 40,
-            schemaVersion: 'v3',
+            schemaVersion: query.schemaVersion as string,
           };
         },
       );
@@ -741,13 +741,13 @@ test('q1 required sum executes through the real gateway with typed parameters an
           query.aggregate.resultType = {
             baseUnit: {
               kind: 'unitReference',
-              schemaVersion: 'v3',
+              schemaVersion: query.schemaVersion as string,
               targetId: `${PARTY_IDS.namespace}:unit.review_mismatch`,
             },
             kind: 'quantityAggregateResultType',
             precision: 38,
             scale: 6,
-            schemaVersion: 'v3',
+            schemaVersion: query.schemaVersion as string,
           };
         },
       );
@@ -768,12 +768,12 @@ test('q1 required sum executes through the real gateway with typed parameters an
           (query) => {
             const declaredBaseUnit = {
               kind: 'unitReference',
-              schemaVersion: 'v3',
+              schemaVersion: query.schemaVersion as string,
               targetId: `${PARTY_IDS.namespace}:unit.declared`,
             };
             const relabelledBaseUnit = {
               kind: 'unitReference',
-              schemaVersion: 'v3',
+              schemaVersion: query.schemaVersion as string,
               targetId: `${PARTY_IDS.namespace}:unit.relabelled`,
             };
             assert.ok(isRecord(query.aggregate));
@@ -783,14 +783,14 @@ test('q1 required sum executes through the real gateway with typed parameters an
               precision: 20,
               representation: 'canonicalString',
               scale: 6,
-              schemaVersion: 'v3',
+              schemaVersion: query.schemaVersion as string,
             };
             query.aggregate.resultType = {
               baseUnit: relabelledBaseUnit,
               kind: 'quantityAggregateResultType',
               precision: 38,
               scale: 6,
-              schemaVersion: 'v3',
+              schemaVersion: query.schemaVersion as string,
             };
             assert.ok(isRecord(query.aggregatePlan));
             query.aggregatePlan.sourceFieldType = {
@@ -799,7 +799,7 @@ test('q1 required sum executes through the real gateway with typed parameters an
               precision: 20,
               representation: 'canonicalString',
               scale: 6,
-              schemaVersion: 'v3',
+              schemaVersion: query.schemaVersion as string,
             };
           },
         );
@@ -832,7 +832,7 @@ test('q1 required sum executes through the real gateway with typed parameters an
             const textType = {
               kind: 'textFieldType',
               maximumLength: 40,
-              schemaVersion: 'v3',
+              schemaVersion: query.schemaVersion as string,
             };
             parameter.parameterType = textType;
             const comparison = requiredAggregatePlanComparison(
@@ -864,7 +864,7 @@ test('q1 required sum executes through the real gateway with typed parameters an
           (query) => {
             const baseUnit = {
               kind: 'unitReference',
-              schemaVersion: 'v3',
+              schemaVersion: query.schemaVersion as string,
               targetId: `${PARTY_IDS.namespace}:unit.review_mismatch`,
             };
             assert.ok(isRecord(query.aggregate));
@@ -874,7 +874,7 @@ test('q1 required sum executes through the real gateway with typed parameters an
               precision: 20,
               representation: 'canonicalString',
               scale: 6,
-              schemaVersion: 'v3',
+              schemaVersion: query.schemaVersion as string,
             };
             query.aggregate.measureFieldType = sourceFieldType;
             query.aggregate.resultType = {
@@ -882,7 +882,7 @@ test('q1 required sum executes through the real gateway with typed parameters an
               kind: 'quantityAggregateResultType',
               precision: 38,
               scale: 6,
-              schemaVersion: 'v3',
+              schemaVersion: query.schemaVersion as string,
             };
             assert.ok(isRecord(query.aggregatePlan));
             query.aggregatePlan.sourceFieldType = sourceFieldType;

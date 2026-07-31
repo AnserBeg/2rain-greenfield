@@ -1788,6 +1788,11 @@ async function compileCandidateEnvelope(
   >;
   packageDefinition.version = storageChange ? '1.0.2' : '1.0.1';
   if (storageChange) {
+    // Version-from-artifact: a node spliced into this candidate must declare
+    // the candidate's own version, not a literal.
+    const candidateNodeVersion = (
+      candidateDefinition as unknown as { languageVersion: string }
+    ).languageVersion;
     const fields = candidateDefinition.fields as Array<Record<string, unknown>>;
     fields.push({
       classification: 'internal',
@@ -1795,21 +1800,21 @@ async function compileCandidateEnvelope(
       defaultSemantics: 'nullable',
       entity: {
         kind: 'entityReference',
-        schemaVersion: 'v3',
+        schemaVersion: candidateNodeVersion,
         targetId: 'northstar.app:entity.party',
       },
       fieldId: rollbackFieldId,
       fieldType: {
         kind: 'textFieldType',
         maximumLength: 160,
-        schemaVersion: 'v3',
+        schemaVersion: candidateNodeVersion,
       },
       kind: 'fieldDefinition',
       label: 'Rollback note',
       orderKey: 40,
       presence: 'optional',
       reportable: true,
-      schemaVersion: 'v3',
+      schemaVersion: candidateNodeVersion,
       searchable: false,
     });
   }

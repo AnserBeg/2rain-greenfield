@@ -3180,12 +3180,12 @@ function inventoryApplicationDefinition(): Record<string, unknown> {
       ),
       kind: 'queryAggregateSelection',
       operator: 'sum',
-      schemaVersion: 'v3',
+      schemaVersion: nodeVersion,
       selectionId: inventoryScopeProbeIds.selection,
     },
     filter: {
       kind: 'allPredicate',
-      schemaVersion: 'v3',
+      schemaVersion: nodeVersion,
       terms: [
         {
           field: applicationReference(
@@ -3194,11 +3194,11 @@ function inventoryApplicationDefinition(): Record<string, unknown> {
           ),
           kind: 'fieldComparisonPredicate',
           operator: 'equals',
-          schemaVersion: 'v3',
+          schemaVersion: nodeVersion,
           value: {
             kind: 'queryParameterReference',
             parameterId: inventoryScopeProbeIds.itemParameter,
-            schemaVersion: 'v3',
+            schemaVersion: nodeVersion,
           },
         },
         {
@@ -3208,11 +3208,11 @@ function inventoryApplicationDefinition(): Record<string, unknown> {
           ),
           kind: 'fieldComparisonPredicate',
           operator: 'equals',
-          schemaVersion: 'v3',
+          schemaVersion: nodeVersion,
           value: {
             kind: 'queryParameterReference',
             parameterId: inventoryScopeProbeIds.locationParameter,
-            schemaVersion: 'v3',
+            schemaVersion: nodeVersion,
           },
         },
       ],
@@ -3225,13 +3225,13 @@ function inventoryApplicationDefinition(): Record<string, unknown> {
         kind: 'queryParameterDefinition',
         orderKey: 10,
         parameterId: inventoryScopeProbeIds.itemParameter,
-        schemaVersion: 'v3',
+        schemaVersion: nodeVersion,
       },
       {
         kind: 'queryParameterDefinition',
         orderKey: 20,
         parameterId: inventoryScopeProbeIds.locationParameter,
-        schemaVersion: 'v3',
+        schemaVersion: nodeVersion,
       },
     ],
     permission: applicationReference(
@@ -3240,7 +3240,7 @@ function inventoryApplicationDefinition(): Record<string, unknown> {
     ),
     queryId: inventoryScopeProbeIds.query,
     queryType: 'aggregate',
-    schemaVersion: 'v3',
+    schemaVersion: nodeVersion,
     sourceEntity: applicationReference(
       'entityReference',
       INVENTORY_IDS.entityIds.movement,
@@ -3259,10 +3259,17 @@ function inventoryApplicationDefinition(): Record<string, unknown> {
   return application;
 }
 
+// Version-from-artifact: nodes spliced into the composed application must
+// declare that application's own version, never a literal. Inventory adoption
+// moved it to v4, and a pinned 'v3' here mixes node versions.
+const nodeVersion = (
+  composedApplicationDefinition() as { languageVersion: string }
+).languageVersion;
+
 function applicationReference(kind: string, inventoryId: string) {
   return {
     kind,
-    schemaVersion: 'v3',
+    schemaVersion: nodeVersion,
     targetId: applicationInventoryId(inventoryId),
   };
 }
