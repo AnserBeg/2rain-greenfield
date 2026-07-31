@@ -41,6 +41,7 @@ import {
   type SemanticOperationExecutor,
 } from '../../runtime/src/semantic-operation-gateway.js';
 import {
+  MalformedLegalEntityScopeArgumentError,
   SEMANTIC_QUERY_REQUEST_VERSION,
   SemanticQueryGateway,
   type SemanticQueryExecutor,
@@ -689,8 +690,11 @@ interface VerificationOperationContract {
 }
 
 interface VerificationQueryContract {
+  readonly legalEntityScope?: {
+    readonly kind: 'queryLegalEntityScope';
+  };
   readonly queryId: string;
-  readonly queryType: 'get' | 'list' | 'resolve' | 'search';
+  readonly queryType: 'aggregate' | 'get' | 'list' | 'resolve' | 'search';
   readonly resolveMatchKeys: readonly {
     readonly authority: string;
     readonly fieldId: string;
@@ -882,6 +886,17 @@ class SemanticVerificationExecutor {
   }
 
   async #declaredEvidence(scenario: VerificationScenario, token: string) {
+    const invocation = scenario.invocation as
+      { operation?: { targetId?: string } } | { query?: { targetId?: string } };
+    const queryId = 'query' in invocation ? invocation.query?.targetId : null;
+    if (queryId) {
+      const query = this.#requiredQuery(queryId);
+      if (query.legalEntityScope) {
+        return {
+          positiveProbe: await this.#probeLegalEntityScopeOmission(query),
+        };
+      }
+    }
     const record = await this.#create(scenario.entityId, token);
     if (scenario.evidenceKind === 'recovery') {
       const archived = await this.#invokeEffect(
@@ -896,9 +911,6 @@ class SemanticVerificationExecutor {
       );
       return { positiveProbe: { archived, restored } };
     }
-    const invocation = scenario.invocation as
-      { operation?: { targetId?: string } } | { query?: { targetId?: string } };
-    const queryId = 'query' in invocation ? invocation.query?.targetId : null;
     if (queryId) {
       return {
         positiveProbe: await this.#invokeQueryById(queryId, record, token),
@@ -1260,6 +1272,39 @@ class SemanticVerificationExecutor {
       });
     }
     return this.#invokeQuery(query, {});
+  }
+
+  async #probeLegalEntityScopeOmission(query: VerificationQueryContract) {
+    const request = {
+      arguments: {},
+      queryId: query.queryId,
+      schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+    };
+    try {
+      if (query.queryType === 'aggregate') {
+        await this.queryGateway.invokeAggregate(this.view, request);
+      } else {
+        await this.queryGateway.invoke(this.view, request);
+      }
+    } catch (error) {
+      if (
+        error instanceof MalformedLegalEntityScopeArgumentError &&
+        error.reason === 'selection-omitted'
+      ) {
+        return Object.freeze({
+          kind: 'legalEntityScopeOmissionRefusal',
+          queryId: query.queryId,
+          reason: error.reason,
+          schemaVersion:
+            'northstar.release-verification-query-scope-probe/v1' as const,
+        });
+      }
+      throw error;
+    }
+    throw failure(
+      'VERIFICATION_QUERY_SCOPE_OMISSION_NOT_REFUSED',
+      `scope-declaring query did not refuse an omitted operand: ${query.queryId}`,
+    );
   }
 
   #invokeQuery(

@@ -105,6 +105,12 @@ export interface StorageLegalEntityReadScopeRequirement {
   readonly kind: 'legalEntity';
 }
 
+export interface AggregateCacheObservation {
+  readonly cacheKey: string;
+  readonly kind: 'anchor-discrepancy' | 'cache-hit' | 'ledger-recomputation';
+  readonly queryId: string;
+}
+
 interface VerifiedLegalEntityReadScope {
   readonly legalEntityIds: readonly string[];
 }
@@ -133,6 +139,9 @@ export class PostgresModuleRuntimeInterpreter
   constructor(
     private readonly pool: Pool,
     private readonly actorIssuer: TrustedActorEnvelopeIssuer,
+    private readonly observeAggregateCache:
+      | ((observation: AggregateCacheObservation) => void)
+      | undefined = undefined,
   ) {
     this.#trust = new PostgresTrustService(pool);
   }
@@ -218,7 +227,12 @@ export class PostgresModuleRuntimeInterpreter
         async (client) => {
           const storage = await loadPinnedStorageTarget(client, request);
           return withModuleRuntimeRole(client, () =>
-            executeQueryOnClient(client, storage, request),
+            executeQueryOnClient(
+              client,
+              storage,
+              request,
+              this.observeAggregateCache,
+            ),
           );
         },
       );
@@ -703,14 +717,10 @@ async function executeQueryOnClient(
   storage: StorageTargetPayloadV1,
   request:
     SemanticAggregateQueryExecutionRequest | SemanticQueryExecutionRequest,
+  observeAggregateCache:
+    ((observation: AggregateCacheObservation) => void) | undefined,
 ): Promise<SemanticAggregateResultEnvelope | SemanticQueryResultEnvelope> {
-  const {
-    arguments: argumentValue,
-    definition,
-    filterPlans,
-    list,
-    parameterValues,
-  } = request;
+  const { arguments: argumentValue, definition, filterPlans, list } = request;
   const entity = requiredEntity(storage, definition.sourceEntityId);
   const relationPlans =
     definition.queryType === 'list' && list
@@ -728,10 +738,9 @@ async function executeQueryOnClient(
     return executeAggregateQuery(
       client,
       entity,
-      definition,
-      filterPlans,
-      parameterValues,
+      request as SemanticAggregateQueryExecutionRequest,
       readScope,
+      observeAggregateCache,
     );
   }
   if (!definition.infrastructure) {
@@ -850,11 +859,12 @@ async function executeQueryOnClient(
 async function executeAggregateQuery(
   client: PoolClient,
   entity: StorageEntity,
-  definition: RegisteredAggregateQueryDefinition,
-  filterPlans: readonly QueryFilterLoweringPlan[],
-  parameterValues: Readonly<Record<string, ImmutableJsonValue>>,
+  request: SemanticAggregateQueryExecutionRequest,
   readScope: VerifiedLegalEntityReadScope | null,
+  observeAggregateCache:
+    ((observation: AggregateCacheObservation) => void) | undefined,
 ): Promise<SemanticAggregateResultEnvelope> {
+  const { definition, filterPlans, parameterValues } = request;
   const aggregate = definition.aggregate;
   if (
     !aggregate ||
@@ -891,6 +901,111 @@ async function executeAggregateQuery(
     throw failure(
       'MODULE_AGGREGATE_CONTRACT_INVALID',
       'aggregate source does not match the compiled required exact-numeric contract',
+      aggregate.fieldId,
+    );
+  }
+
+  // The anchor contract is scoped by an issued business dimension. Existing
+  // tenant-shared aggregates retain their uncached behavior.
+  if (!readScope) {
+    return executeAggregateLedgerQuery(
+      client,
+      entity,
+      definition,
+      filterPlans,
+      parameterValues,
+      readScope,
+    );
+  }
+
+  const identity = aggregateCacheIdentity(request, readScope);
+  await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [
+    identity.cacheKey,
+  ]);
+  const anchor = await loadAggregateAnchor(client, identity);
+  if (anchor) {
+    const cached = aggregateResultFromAnchor(definition, anchor);
+    const expectedAnchorDigest = aggregateAnchorDigest(identity, cached);
+    const anchorIntegrityMatches =
+      aggregateAnchorMatchesIdentity(anchor, identity) &&
+      anchor.anchor_digest === expectedAnchorDigest;
+    if (anchorIntegrityMatches) {
+      observeAggregateCacheSafely(observeAggregateCache, {
+        cacheKey: identity.cacheKey,
+        kind: 'cache-hit',
+        queryId: definition.queryId,
+      });
+      // Victim for the cache-hit control: deleting this return makes every
+      // consistent anchor fall through to a ledger recomputation.
+      return cached;
+    }
+    const recomputed = await executeAggregateLedgerQuery(
+      client,
+      entity,
+      definition,
+      filterPlans,
+      parameterValues,
+      readScope,
+    );
+    observeAggregateCacheSafely(observeAggregateCache, {
+      cacheKey: identity.cacheKey,
+      kind: 'ledger-recomputation',
+      queryId: definition.queryId,
+    });
+    await recordAggregateAnchorDiscrepancy(
+      client,
+      identity,
+      anchor,
+      expectedAnchorDigest,
+      recomputed,
+    );
+    observeAggregateCacheSafely(observeAggregateCache, {
+      cacheKey: identity.cacheKey,
+      kind: 'anchor-discrepancy',
+      queryId: definition.queryId,
+    });
+    if (!anchorIntegrityMatches) {
+      // Victim for the no-stale-answer control: deleting this line falls
+      // through to the preserved (and deliberately bad) cached value.
+      return recomputed;
+    }
+    return cached;
+  }
+
+  const recomputed = await executeAggregateLedgerQuery(
+    client,
+    entity,
+    definition,
+    filterPlans,
+    parameterValues,
+    readScope,
+  );
+  observeAggregateCacheSafely(observeAggregateCache, {
+    cacheKey: identity.cacheKey,
+    kind: 'ledger-recomputation',
+    queryId: definition.queryId,
+  });
+  await insertAggregateAnchor(client, identity, recomputed);
+  return recomputed;
+}
+
+async function executeAggregateLedgerQuery(
+  client: PoolClient,
+  entity: StorageEntity,
+  definition: RegisteredAggregateQueryDefinition,
+  filterPlans: readonly QueryFilterLoweringPlan[],
+  parameterValues: Readonly<Record<string, ImmutableJsonValue>>,
+  readScope: VerifiedLegalEntityReadScope | null,
+): Promise<SemanticAggregateResultEnvelope> {
+  const aggregate = definition.aggregate;
+  const column = entity.columns.find(
+    (candidate) => candidate.canonicalFieldId === aggregate.fieldId,
+  );
+  const scale = Number(aggregate.resultType.scale);
+  if (!column) {
+    throw failure(
+      'MODULE_AGGREGATE_CONTRACT_INVALID',
+      'aggregate source has no compiled storage column',
       aggregate.fieldId,
     );
   }
@@ -963,6 +1078,298 @@ async function executeAggregateQuery(
           kind: 'exactDecimalResult' as const,
         }),
   });
+}
+
+interface AggregateCacheIdentity {
+  readonly cacheKey: string;
+  readonly environmentId: string;
+  readonly filterPlanDigest: string;
+  readonly legalEntityIds: readonly string[];
+  readonly parameterValues: Readonly<Record<string, ImmutableJsonValue>>;
+  readonly principalId: string;
+  readonly queryId: string;
+  readonly releaseContentHash: string;
+  readonly temporalHorizons: Readonly<Record<string, ImmutableJsonValue>>;
+  readonly tenantId: string;
+}
+
+interface AggregateAnchorRow {
+  readonly anchor_digest: string;
+  readonly balance_value: string;
+  readonly base_unit_id: string | null;
+  readonly cache_key: string;
+  readonly environment_id: string;
+  readonly filter_plan_digest: string;
+  readonly legal_entity_ids: string[];
+  readonly parameter_values: Record<string, ImmutableJsonValue>;
+  readonly principal_id: string;
+  readonly query_id: string;
+  readonly release_content_hash: string;
+  readonly result_kind: 'exactDecimalResult' | 'quantityResult';
+  readonly result_precision: number;
+  readonly result_scale: number;
+  readonly selection_id: string;
+  readonly temporal_horizons: Record<string, ImmutableJsonValue>;
+  readonly tenant_id: string;
+}
+
+function aggregateCacheIdentity(
+  request: SemanticAggregateQueryExecutionRequest,
+  readScope: VerifiedLegalEntityReadScope,
+): AggregateCacheIdentity {
+  const temporalHorizons = Object.fromEntries(
+    request.definition.parameters
+      .filter(
+        (parameter) => parameter.parameterType.kind === 'dateTimeFieldType',
+      )
+      .map((parameter) => [
+        parameter.parameterId,
+        request.parameterValues[parameter.parameterId]!,
+      ]),
+  );
+  const filterPlanDigest = aggregateCacheDigest(
+    'northstar.semantic-aggregate-filter-plans/v1',
+    request.filterPlans,
+  );
+  const keyInput = Object.freeze({
+    environmentId: request.context.environmentId,
+    filterPlanDigest,
+    legalEntityIds: readScope.legalEntityIds,
+    parameterValues: request.parameterValues,
+    principalId: request.context.principalId,
+    queryId: request.definition.queryId,
+    releaseContentHash: request.view.release.contentHash,
+    schemaVersion: 'northstar.semantic-aggregate-anchor-key/v1',
+    tenantId: request.context.tenantId,
+    temporalHorizons,
+  });
+  return Object.freeze({
+    cacheKey: aggregateCacheDigest(
+      'northstar.semantic-aggregate-anchor-key/v1',
+      keyInput,
+    ),
+    environmentId: request.context.environmentId,
+    filterPlanDigest,
+    legalEntityIds: readScope.legalEntityIds,
+    parameterValues: request.parameterValues,
+    principalId: request.context.principalId,
+    queryId: request.definition.queryId,
+    releaseContentHash: request.view.release.contentHash,
+    temporalHorizons: Object.freeze(temporalHorizons),
+    tenantId: request.context.tenantId,
+  });
+}
+
+function aggregateCacheDigest(domain: string, value: unknown): string {
+  return createHash('sha256')
+    .update(domain, 'utf8')
+    .update(Uint8Array.of(0))
+    .update(canonicalize(value), 'utf8')
+    .digest('hex');
+}
+
+function aggregateAnchorDigest(
+  identity: AggregateCacheIdentity,
+  result: SemanticAggregateResultEnvelope,
+): string {
+  return aggregateCacheDigest(
+    'northstar.semantic-aggregate-anchor-integrity/v1',
+    Object.freeze({
+      cacheKey: identity.cacheKey,
+      environmentId: identity.environmentId,
+      filterPlanDigest: identity.filterPlanDigest,
+      legalEntityIds: identity.legalEntityIds,
+      parameterValues: identity.parameterValues,
+      principalId: identity.principalId,
+      queryId: identity.queryId,
+      releaseContentHash: identity.releaseContentHash,
+      result,
+      schemaVersion: 'northstar.semantic-aggregate-anchor-integrity/v1',
+      tenantId: identity.tenantId,
+      temporalHorizons: identity.temporalHorizons,
+    }),
+  );
+}
+
+async function loadAggregateAnchor(
+  client: PoolClient,
+  identity: AggregateCacheIdentity,
+): Promise<AggregateAnchorRow | null> {
+  const result = await client.query<AggregateAnchorRow>(
+    `SELECT tenant_id::text AS tenant_id,
+            environment_id::text AS environment_id,
+            cache_key,
+            query_id,
+            principal_id::text AS principal_id,
+            release_content_hash,
+            legal_entity_ids::text[] AS legal_entity_ids,
+            parameter_values,
+            temporal_horizons,
+            filter_plan_digest,
+            result_kind,
+            selection_id,
+            balance_value,
+            result_precision,
+            result_scale,
+            base_unit_id,
+            anchor_digest
+       FROM platform.semantic_aggregate_anchors
+      WHERE tenant_id = $1
+        AND environment_id = $2
+        AND cache_key = $3`,
+    [identity.tenantId, identity.environmentId, identity.cacheKey],
+  );
+  if (result.rowCount === 0) return null;
+  if (result.rowCount !== 1 || !result.rows[0]) {
+    throw failure(
+      'MODULE_AGGREGATE_ANCHOR_INVALID',
+      'aggregate cache key resolved more than one anchor',
+      identity.queryId,
+    );
+  }
+  return result.rows[0];
+}
+
+function aggregateAnchorMatchesIdentity(
+  anchor: AggregateAnchorRow,
+  identity: AggregateCacheIdentity,
+): boolean {
+  return (
+    anchor.tenant_id === identity.tenantId &&
+    anchor.environment_id === identity.environmentId &&
+    anchor.cache_key === identity.cacheKey &&
+    anchor.query_id === identity.queryId &&
+    anchor.principal_id === identity.principalId &&
+    anchor.release_content_hash === identity.releaseContentHash &&
+    canonicalize(anchor.legal_entity_ids) ===
+      canonicalize(identity.legalEntityIds) &&
+    canonicalize(anchor.parameter_values) ===
+      canonicalize(identity.parameterValues) &&
+    canonicalize(anchor.temporal_horizons) ===
+      canonicalize(identity.temporalHorizons) &&
+    anchor.filter_plan_digest === identity.filterPlanDigest
+  );
+}
+
+function aggregateResultFromAnchor(
+  definition: RegisteredAggregateQueryDefinition,
+  anchor: AggregateAnchorRow,
+): SemanticAggregateResultEnvelope {
+  const common = Object.freeze({
+    precision: anchor.result_precision as 38,
+    scale: anchor.result_scale,
+    selectionId: anchor.selection_id,
+    value: canonicalAggregateDecimal(anchor.balance_value),
+  });
+  return Object.freeze({
+    kind: 'semanticAggregateResult',
+    outcome: 'exact',
+    queryId: definition.queryId,
+    schemaVersion: SEMANTIC_AGGREGATE_RESULT_VERSION,
+    value:
+      anchor.result_kind === 'quantityResult'
+        ? Object.freeze({
+            ...common,
+            baseUnitId: String(anchor.base_unit_id),
+            kind: 'quantityResult' as const,
+          })
+        : Object.freeze({
+            ...common,
+            kind: 'exactDecimalResult' as const,
+          }),
+  });
+}
+
+async function insertAggregateAnchor(
+  client: PoolClient,
+  identity: AggregateCacheIdentity,
+  result: SemanticAggregateResultEnvelope,
+): Promise<void> {
+  await client.query(
+    `INSERT INTO platform.semantic_aggregate_anchors (
+       tenant_id,
+       environment_id,
+       cache_key,
+       query_id,
+       principal_id,
+       release_content_hash,
+       legal_entity_ids,
+       parameter_values,
+       temporal_horizons,
+       filter_plan_digest,
+       result_kind,
+       selection_id,
+       balance_value,
+       result_precision,
+       result_scale,
+       base_unit_id,
+       anchor_digest
+     ) VALUES (
+       $1, $2, $3, $4, $5, $6, $7::uuid[], $8::jsonb, $9::jsonb,
+       $10, $11, $12, $13, $14, $15, $16, $17
+     )`,
+    [
+      identity.tenantId,
+      identity.environmentId,
+      identity.cacheKey,
+      identity.queryId,
+      identity.principalId,
+      identity.releaseContentHash,
+      [...identity.legalEntityIds],
+      JSON.stringify(identity.parameterValues),
+      JSON.stringify(identity.temporalHorizons),
+      identity.filterPlanDigest,
+      result.value.kind,
+      result.value.selectionId,
+      result.value.value,
+      result.value.precision,
+      result.value.scale,
+      result.value.kind === 'quantityResult' ? result.value.baseUnitId : null,
+      aggregateAnchorDigest(identity, result),
+    ],
+  );
+}
+
+async function recordAggregateAnchorDiscrepancy(
+  client: PoolClient,
+  identity: AggregateCacheIdentity,
+  anchor: AggregateAnchorRow,
+  expectedAnchorDigest: string,
+  recomputed: SemanticAggregateResultEnvelope,
+): Promise<void> {
+  await client.query(
+    `INSERT INTO platform.semantic_aggregate_anchor_discrepancies (
+       tenant_id,
+       environment_id,
+       discrepancy_id,
+       cache_key,
+       stored_anchor_digest,
+       expected_anchor_digest,
+       cached_balance_value,
+       recomputed_balance_value
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [
+      identity.tenantId,
+      identity.environmentId,
+      randomUUID(),
+      identity.cacheKey,
+      anchor.anchor_digest,
+      expectedAnchorDigest,
+      anchor.balance_value,
+      recomputed.value.value,
+    ],
+  );
+}
+
+function observeAggregateCacheSafely(
+  observer: ((observation: AggregateCacheObservation) => void) | undefined,
+  observation: AggregateCacheObservation,
+): void {
+  try {
+    observer?.(Object.freeze(observation));
+  } catch {
+    // Instrumentation is evidence, never query authority.
+  }
 }
 
 function canonicalAggregateDecimal(value: string): string {

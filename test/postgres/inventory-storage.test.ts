@@ -41,9 +41,9 @@ test('inventory platform authority is limited to calendars and release-recorded 
         const migrated = await runMigrations(admin, migrations);
         assert.equal(
           migrated.applied.at(-1),
-          '0017_inventory_stock_count_receipt_digest_version.sql',
+          '0019_semantic_aggregate_anchors.sql',
         );
-        assert.equal(migrated.verified.length, 17);
+        assert.equal(migrated.verified.length, 19);
         await seedTenant(admin, tenantA, environmentA, 'tenant-a');
         await seedTenant(admin, tenantB, environmentB, 'tenant-b');
         await provision(
