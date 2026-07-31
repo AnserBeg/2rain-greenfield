@@ -17,6 +17,7 @@ const suiteDefinitions = [
       'test/unit/location-definition.test.ts',
       'test/unit/observability.test.ts',
       'test/unit/party-definition.test.ts',
+      'test/unit/web-surface-hex-literal-ratchet.test.ts',
       'test/unit/workspace-contract.test.ts',
     ],
     script: 'test:unit',
