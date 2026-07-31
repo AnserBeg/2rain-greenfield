@@ -280,7 +280,7 @@ for (const forbidden of [
   });
 }
 
-test('migration 0019 durably admits full execution and exact executed-derived evidence only', async () => {
+test('migration 0018 durably admits full execution and exact executed-derived evidence only', async () => {
   await withEphemeralPostgres(
     'release-verification-derived-evidence',
     async ({ pool }) => {

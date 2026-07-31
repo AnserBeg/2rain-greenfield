@@ -1,7 +1,7 @@
 # G3-P7a — verification derivations for unarrangeable scenarios
 
-Status: implementation complete; candidate awaiting migrations 0017 and 0018,
-the serial full-matrix slot, and Critical review
+Status: implementation complete; candidate awaiting migration 0017, the serial
+full-matrix slot, and Critical review
 Tier: Critical
 Base after doctrine refresh: `5a86e5a73d91c5dcfccb05f76135ea371872de19`
 Branch: `packet/g3-p7a`
@@ -16,7 +16,7 @@ missing and never both.
 This packet owns:
 
 - the compiler result and conformance contract;
-- durable schema enablement by migration 0019;
+- durable schema enablement by migration 0018;
 - release admission's existing verification-reader boundary;
 - PostgreSQL and architecture controls; and
 - ADR-0033 and this record.
@@ -79,7 +79,7 @@ either bucket.
 
 ## Durable widening
 
-Migration `0019_release_verification_derivations.sql` replaces only the two
+Migration `0018_release_verification_derivations.sql` replaces only the two
 existing header checks. It adds no table, column, data rewrite, grant, mutable
 path, or second reader.
 
@@ -108,10 +108,10 @@ reader boundary.
 | Sampling fails closed | `sampleSize` rejects before the execution counter advances from zero. | `packages/compiler/src/verification.ts:522` allowed-key array; adding `sampleSize` makes the control fail. |
 | Time box fails closed | `timeBoxMs` rejects before the execution counter advances from zero. | `packages/compiler/src/verification.ts:522` allowed-key array; adding `timeBoxMs` makes the control fail. |
 | Full execution is unchanged | The same plan executed through the original three-argument API returns v1, has no derivations property, and validates. Existing v1 serialization/conformance remains green. | `packages/compiler/src/verification.ts:232` full-path `schemaVersion`; changing it to v2 fails the compatibility assertion. |
-| Durable derivation exists | PostgreSQL accepts v2/EXACT_PARTITION with one versioned derivation and reads its stored count as one. | `db/migrations/0019_release_verification_derivations.sql:26` v2 exact-partition branch. |
-| Durable missing derivation is refused | PostgreSQL rejects a v2 document with an empty derivation array using SQLSTATE `23514`. | `db/migrations/0019_release_verification_derivations.sql:38` non-empty derivation predicate. |
-| Durable skip remains forbidden | PostgreSQL rejects otherwise-valid v2 evidence with a non-empty skipped-ID array using SQLSTATE `23514`. | `db/migrations/0019_release_verification_derivations.sql:17` empty skipped-ID predicate. |
-| Durable full evidence survives | PostgreSQL accepts an unchanged v1/FULL/null-impact row. | `db/migrations/0019_release_verification_derivations.sql:20` v1 compatibility branch. |
+| Durable derivation exists | PostgreSQL accepts v2/EXACT_PARTITION with one versioned derivation and reads its stored count as one. | `db/migrations/0018_release_verification_derivations.sql:26` v2 exact-partition branch. |
+| Durable missing derivation is refused | PostgreSQL rejects a v2 document with an empty derivation array using SQLSTATE `23514`. | `db/migrations/0018_release_verification_derivations.sql:38` non-empty derivation predicate. |
+| Durable skip remains forbidden | PostgreSQL rejects otherwise-valid v2 evidence with a non-empty skipped-ID array using SQLSTATE `23514`. | `db/migrations/0018_release_verification_derivations.sql:17` empty skipped-ID predicate. |
+| Durable full evidence survives | PostgreSQL accepts an unchanged v1/FULL/null-impact row. | `db/migrations/0018_release_verification_derivations.sql:20` v1 compatibility branch. |
 
 The independently re-signed negative fixtures recompute the v2 result-set
 digest outside compiler production code. Missing and overlap controls therefore
@@ -140,10 +140,10 @@ restored and their focused controls rerun green.
 
 ## Migration fallout classification
 
-The 0019 addition moves exact inventories and newest-migration pins. Each file
+The 0018 addition moves exact inventories and newest-migration pins. Each file
 was read before editing:
 
-- `release-persistence-boundary.test.ts`: add only the 0019 filename;
+- `release-persistence-boundary.test.ts`: add only the 0018 filename;
 - `trust-substrate.test.ts`: advance the upgrade endpoint and applied list;
 - `inventory-storage.test.ts`: advance the observed stream endpoint/count;
 - `module-storage-transition.test.ts`: append the observed applied filename;
@@ -151,16 +151,16 @@ was read before editing:
   and
 - `migrations.test.ts`: preserve migration 0015 as the DDL subject by locating
   it by exact name and slicing around its index, rather than repointing the test
-  to 0019.
+  to 0018.
 
 None weakens an assertion. The snapshot constraint text was captured from a
-real PostgreSQL database after applying 0019, not transcribed speculatively.
+real PostgreSQL database after applying 0018, not transcribed speculatively.
 
-The branch currently lacks migrations 0017 and 0018 because 0017 is still on
-G3-P4b and 0018 is reserved for parked G3-P5. The production loader correctly
-refuses this temporary `0016 -> 0019` gap. No placeholder or renumbering is
-introduced. All migration inventories are discarded and re-derived from main
-after those ordinals integrate.
+Migration 0018 was reassigned from parked G3-P5 to this packet to break the
+reservation cycle; G3-P5 now owns 0019. This branch still lacks migration 0017,
+which is on G3-P4b. The production loader correctly refuses the temporary
+`0016 -> 0018` gap. All migration inventories are discarded and re-derived
+from main after 0017 integrates.
 
 ## Current evidence
 
@@ -180,6 +180,6 @@ after those ordinals integrate.
 - `git diff --check`: PASS; and
 - full matrix: not started and not permitted without a serial slot.
 
-The standard PostgreSQL suite cannot run from this branch until migrations 0017
-and 0018 exist on its integration base. This is recorded dependency sequencing,
-not an assertion relaxation.
+The standard PostgreSQL suite cannot run from this branch until migration 0017
+exists on its integration base. This is recorded dependency sequencing, not an
+assertion relaxation.

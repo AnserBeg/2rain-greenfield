@@ -68,7 +68,7 @@ derivation; callers use v1 when every scenario executes.
 
 ## Durable representation
 
-Migration 0019 only widens the existing immutable evidence header. It creates
+Migration 0018 only widens the existing immutable evidence header. It creates
 no relation, column, mutable path, or second verification reader.
 
 - v1 evidence retains `execution_scope = 'FULL'` and a null
@@ -124,4 +124,4 @@ cannot derive a new partition in the target environment.
 - `packages/compiler/src/verification.ts`, the sole plan/result conformance
   authority.
 - `db/migrations/0013_release_verification_evidence.sql`, the original
-  full-execution-only durable constraint widened by migration 0019.
+  full-execution-only durable constraint widened by migration 0018.
