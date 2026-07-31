@@ -660,7 +660,7 @@ export function registerInventoryContractCases(
   register('every Inventory movement query retains recordedAt', () => {
     const definition = structuredClone(inventoryModuleDefinition()) as {
       queries: Array<{
-        selections: Array<{ field: { targetId: string } }>;
+        selections?: Array<{ field: { targetId: string } }>;
         sourceEntity: { targetId: string };
       }>;
     };
@@ -669,6 +669,12 @@ export function registerInventoryContractCases(
       if (!query.sourceEntity.targetId.endsWith(':entity.inventory_movement')) {
         continue;
       }
+      // Aggregates have no selections to strip. They retain recorded time by
+      // ANCHORING to a recorded horizon in their filter, which G3-P0 item 5
+      // requires ("discards"), not by projecting the column. The separate
+      // aggregate case below is what keeps this a skip rather than an
+      // exemption.
+      if (query.selections === undefined) continue;
       const retained = query.selections.filter(
         (selection) =>
           !selection.field.targetId.endsWith(
@@ -687,6 +693,38 @@ export function registerInventoryContractCases(
       'northstar.inventory:field.inventory_movement_recorded_at',
     );
   });
+
+  register(
+    'every Inventory movement aggregate anchors to a recorded horizon',
+    () => {
+      const definition = structuredClone(inventoryModuleDefinition()) as {
+        queries: Array<{
+          aggregate?: unknown;
+          filter?: unknown;
+          queryId: string;
+          selections?: unknown;
+          sourceEntity: { targetId: string };
+        }>;
+      };
+      const aggregates = definition.queries.filter(
+        (query) =>
+          query.sourceEntity.targetId.endsWith(':entity.inventory_movement') &&
+          query.selections === undefined,
+      );
+      assert.ok(
+        aggregates.length > 0,
+        'no movement aggregate found; this control would be vacuous',
+      );
+      for (const aggregate of aggregates) {
+        assert.ok(
+          JSON.stringify(aggregate.filter ?? null).includes(
+            ':field.inventory_movement_recorded_at',
+          ),
+          `${aggregate.queryId} does not anchor to a recorded horizon`,
+        );
+      }
+    },
+  );
 
   register('period-lock advance is bound to its matching permission', () => {
     const definition = structuredClone(inventoryModuleDefinition()) as {
@@ -1548,17 +1586,43 @@ function inventoryDefinitionWithoutMovementField(
   fieldLocalId: string,
 ): Record<string, unknown> {
   const definition = structuredClone(inventoryModuleDefinition()) as {
+    assertions: Array<Record<string, unknown>>;
     fields: Array<{ fieldId: string }>;
     queries: Array<{
-      selections: Array<{ field: { targetId: string } }>;
+      queryId: string;
+      selections?: Array<{ field: { targetId: string } }>;
     }>;
   };
   const suffix = `:field.${fieldLocalId}`;
   definition.fields = definition.fields.filter(
     (field) => !field.fieldId.endsWith(suffix),
   );
+  // An aggregate references the removed field through its aggregate and filter
+  // rather than through selections, so stripping selections alone leaves a
+  // dangling reference and normalization fails with CANON_REFERENCE_UNRESOLVED
+  // BEFORE the inventory contract rule this fixture exists to provoke. Drop the
+  // referencing aggregate so the fixture stays valid until its target rule --
+  // the discipline G3-P4b recorded after the same trap.
+  const droppedQueryIds = definition.queries
+    .filter(
+      (query) =>
+        query.selections === undefined &&
+        JSON.stringify(query).includes(suffix),
+    )
+    .map((query) => query.queryId);
+  definition.queries = definition.queries.filter(
+    (query) => !droppedQueryIds.includes(query.queryId),
+  );
+  // Dropping a query orphans whatever referenced it, so removal must be
+  // transitive or normalization fails on the orphaned assertion instead of on
+  // the field this fixture exists to remove.
+  definition.assertions = definition.assertions.filter(
+    (assertion) =>
+      !droppedQueryIds.some((queryId) =>
+        JSON.stringify(assertion).includes(queryId),
+      ),
+  );
   for (const query of definition.queries) {
-    // Aggregate queries carry no `selections`; skip them rather than throw.
     if (query.selections === undefined) continue;
     query.selections = query.selections.filter(
       (selection) => !selection.field.targetId.endsWith(suffix),
