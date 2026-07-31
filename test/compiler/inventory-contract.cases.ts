@@ -1556,6 +1556,8 @@ function inventoryDefinitionWithoutMovementField(
     (field) => !field.fieldId.endsWith(suffix),
   );
   for (const query of definition.queries) {
+    // Aggregate queries carry no `selections`; skip them rather than throw.
+    if (query.selections === undefined) continue;
     query.selections = query.selections.filter(
       (selection) => !selection.field.targetId.endsWith(suffix),
     );
@@ -1582,11 +1584,16 @@ function inventoryDefinitionWithoutCountEvidenceField(
   let removedSelections = 0;
   let replacedMatchKeys = 0;
   for (const query of definition.queries) {
-    const retained = query.selections.filter(
-      (selection) => selection.field.targetId !== fieldId,
-    );
-    removedSelections += query.selections.length - retained.length;
-    query.selections = retained;
+    // Aggregate queries carry no `selections`. Inventory's first aggregate
+    // arrived with onHand, so a helper that assumed every query is a row query
+    // would throw here rather than mutate the fixture it was asked to mutate.
+    if (query.selections !== undefined) {
+      const retained = query.selections.filter(
+        (selection) => selection.field.targetId !== fieldId,
+      );
+      removedSelections += query.selections.length - retained.length;
+      query.selections = retained;
+    }
     for (const matchKey of query.resolveMatchKeys ?? []) {
       if (matchKey.field.targetId !== fieldId) continue;
       matchKey.field.targetId = matchKeyFallbackId;
