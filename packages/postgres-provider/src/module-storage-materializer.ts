@@ -1368,6 +1368,15 @@ async function createManagedTable(
          (${columns.join(', ')}) WHERE ${predicate}`,
     );
   }
+  // Row-level security is a property of the table, not of the tenant that
+  // created it. The first tenant to materialize this table seeds it before
+  // ENABLE ROW LEVEL SECURITY below, so its seeds slip through unguarded; every
+  // later tenant seeds a table on which RLS is already enabled and forced. The
+  // seed INSERT policy therefore has to exist before the seeds run, and it is
+  // granted only to the two table classes that are seeded at all.
+  if (entity.legalEntityMaster || entity.periodLock) {
+    await ensureMaterializerSeedInsertPolicy(client, entity.physicalTableName);
+  }
   if (entity.legalEntityMaster) {
     await provisionDefaultLegalEntity(client, entity);
   }
@@ -1700,6 +1709,38 @@ async function ensureMaterializerSelectPolicy(
     `CREATE POLICY ${quoted(policyName)} ON north_star_module.${quoted(tableName)}
        FOR SELECT TO north_star_module_materializer
        USING (
+         tenant_id = nullif(current_setting('north_star.tenant_id', true), '')::uuid
+         AND environment_id = nullif(current_setting('north_star.environment_id', true), '')::uuid
+       )`,
+  );
+}
+
+/**
+ * Seeding companion to {@link ensureMaterializerSelectPolicy}, and just as
+ * narrow. Only the legal-entity master and the period-lock table are seeded by
+ * the materializer, so only those two receive it; the materializer never gains
+ * blanket INSERT on module tables. The predicate is the same trusted
+ * tenant/environment pair the runtime policies bind to, inlined for the same
+ * reason the SELECT policy inlines it: `north_star_internal.trusted_tenant_id`
+ * is executable by `north_star_module_runtime` only.
+ */
+async function ensureMaterializerSeedInsertPolicy(
+  client: PoolClient,
+  tableName: string,
+): Promise<void> {
+  const policyName = managedMaterializerSeedInsertPolicyName(tableName);
+  const exists = await client.query<{ present: boolean }>(
+    `SELECT EXISTS (SELECT 1 FROM pg_policies
+      WHERE schemaname = 'north_star_module'
+        AND tablename = $1
+        AND policyname = $2) AS present`,
+    [tableName, policyName],
+  );
+  if (exists.rows[0]?.present) return;
+  await client.query(
+    `CREATE POLICY ${quoted(policyName)} ON north_star_module.${quoted(tableName)}
+       FOR INSERT TO north_star_module_materializer
+       WITH CHECK (
          tenant_id = nullif(current_setting('north_star.tenant_id', true), '')::uuid
          AND environment_id = nullif(current_setting('north_star.environment_id', true), '')::uuid
        )`,
@@ -3834,6 +3875,23 @@ function buildExpectedPolicies(
         tableName,
         withCheck: null,
       })),
+      // Seeding is confined to the legal-entity master and the period-lock
+      // table, so only those two carry a materializer INSERT policy.
+      ...(entity.legalEntityMaster || entity.periodLock
+        ? [
+            {
+              command: 'INSERT' as const,
+              name: managedMaterializerSeedInsertPolicyName(
+                entity.physicalTableName,
+              ),
+              permissive: true,
+              qual: null,
+              roles: ['north_star_module_materializer'],
+              tableName: entity.physicalTableName,
+              withCheck: materializerPredicate,
+            },
+          ]
+        : []),
     ];
   });
 }
@@ -3987,6 +4045,15 @@ function managedMaterializerPolicyName(tableName: string): string {
     .update(tableName)
     .update('\0')
     .update('MATERIALIZER_SELECT')
+    .digest('hex')
+    .slice(0, 32)}`;
+}
+
+function managedMaterializerSeedInsertPolicyName(tableName: string): string {
+  return `nsm_p_${createHash('sha256')
+    .update(tableName)
+    .update('\0')
+    .update('MATERIALIZER_SEED_INSERT')
     .digest('hex')
     .slice(0, 32)}`;
 }

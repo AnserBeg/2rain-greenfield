@@ -488,28 +488,34 @@ test('migration 0018 durably admits full execution and exact executed-derived ev
             label,
           );
         }
-        // Recorded gap, not a guard. A CHECK constraint admits a NULL
-        // expression, so the exact-partition arm evaluates to NULL rather than
-        // FALSE when impact_analysis_derivation is NULL and migration 0018
-        // accepts the row. The provider writer cannot reach that state -- it
-        // derives execution_scope FROM the document it is about to store -- and
-        // the federated and composed-application controls observe the emitted
-        // header directly. Closing the database-side gap needs a new migration,
-        // which this packet does not own.
-        await insertEvidence(
-          'a5000000-0000-4000-8000-000000000096',
-          'northstar.verification-result-set/v2',
-          'EXACT_PARTITION',
-          [],
-          null,
+        // A CHECK admits a NULL expression, so before migration 0019 the
+        // exact-partition arm evaluated to NULL rather than FALSE when
+        // impact_analysis_derivation was NULL, the v1 arm was FALSE, and
+        // `FALSE OR NULL` let an EXACT_PARTITION header with no derivation
+        // document store cleanly. The arm now opens with IS NOT NULL.
+        await assert.rejects(
+          insertEvidence(
+            'a5000000-0000-4000-8000-000000000096',
+            'northstar.verification-result-set/v2',
+            'EXACT_PARTITION',
+            [],
+            null,
+          ),
+          (error: unknown) =>
+            error instanceof Error &&
+            (error as Error & { code?: string }).code === '23514' &&
+            /release_verification_evidence_exact_partition/u.test(
+              error.message,
+            ),
+          'v2 evidence carrying no derivation document at all',
         );
-        const nullDocument = await admin.query<{ derivation: unknown }>(
-          `SELECT impact_analysis_derivation AS derivation
+        const nullDocument = await admin.query<{ present: string }>(
+          `SELECT count(*)::text AS present
              FROM platform.release_verification_evidence
             WHERE verification_evidence_id = $1`,
           ['a5000000-0000-4000-8000-000000000096'],
         );
-        assert.deepEqual(nullDocument.rows[0], { derivation: null });
+        assert.deepEqual(nullDocument.rows[0], { present: '0' });
       } finally {
         admin.release();
       }

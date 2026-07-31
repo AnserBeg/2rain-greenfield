@@ -176,6 +176,17 @@ test(
           const isolated = await listParty(tenantB);
           assert.equal(isolated.listCoverage?.totalCount, 0);
           assert.deepEqual(isolated.records, []);
+          await context.test(
+            'materializer seeding survives a second tenant without a blanket insert',
+            () =>
+              assertMaterializerSeedingIsNarrowlyScoped(
+                pool,
+                connection,
+                tenantA,
+                tenantB as ComposedApplicationRuntime,
+                compiledApplication,
+              ),
+          );
           await assertApprovalEnforcementAndApprovedActivation(
             tenantA,
             compiledApplication,
@@ -1719,6 +1730,256 @@ async function setLatestForwardTransitionRecoveryMode(
     rule.rows[0]?.enabled,
     'O',
     'the immutable receipt update rule is restored after the control',
+  );
+}
+
+/**
+ * Row-level security is a table property, so the tenant that first materializes
+ * a seeded table seeds it before RLS is enabled and every later tenant does not.
+ * The materializer therefore needs a real INSERT policy, and that policy must
+ * stay as narrow as the SELECT policy it mirrors: only the two seeded table
+ * classes, only the trusted tenant and environment.
+ */
+async function assertMaterializerSeedingIsNarrowlyScoped(
+  pool: pg.Pool,
+  connection: pg.PoolConfig,
+  tenantA: ComposedApplicationRuntime,
+  tenantB: ComposedApplicationRuntime,
+  compiledApplication: unknown,
+): Promise<void> {
+  const storage = storageTarget(
+    parseCompiledApplication(compiledApplication).application.compiled,
+  );
+  const master = storage.entities.find(
+    (candidate) => candidate.legalEntityMaster !== undefined,
+  );
+  const periodLock = storage.entities.find(
+    (candidate) => candidate.periodLock !== undefined,
+  );
+  const ordinary = storage.entities.find(
+    (candidate) => candidate.entityId === 'northstar.app:entity.party',
+  );
+  assert.ok(master?.legalEntityMaster);
+  assert.ok(periodLock?.periodLock);
+  assert.ok(ordinary);
+
+  // The second tenant reached the same seeded state as the first.
+  const periodLockScope = periodLock.legalEntity;
+  assert.ok(periodLockScope);
+  for (const [runtime, tenantLabel] of [
+    [tenantA, 'first'],
+    [tenantB, 'second'],
+  ] as const) {
+    const seeded: pg.QueryResult<{ record_id: string }> = await pool.query(
+      `SELECT "${master.recordIdentity.column}"::text AS record_id
+         FROM north_star_module.${master.physicalTableName}
+        WHERE tenant_id = $1 AND environment_id = $2
+          AND "${master.legalEntityMaster.fieldColumns.code}" = 'DEFAULT'
+          AND "${master.legalEntityMaster.fieldColumns.isDefault}" IS TRUE
+          AND "${master.archive.archivedAtColumn}" IS NULL`,
+      [runtime.identity.tenantId, runtime.identity.environmentId],
+    );
+    assert.equal(
+      seeded.rows.length,
+      1,
+      `the ${tenantLabel} tenant carries its seeded default legal entity`,
+    );
+    const seededLegalEntityId = seeded.rows[0]?.record_id;
+    const locks: pg.QueryResult<{ count: string }> = await pool.query(
+      `SELECT count(*)::text AS count
+         FROM north_star_module.${periodLock.physicalTableName}
+        WHERE tenant_id = $1 AND environment_id = $2
+          AND "${periodLockScope.column}" = $3`,
+      [
+        runtime.identity.tenantId,
+        runtime.identity.environmentId,
+        seededLegalEntityId,
+      ],
+    );
+    assert.equal(
+      locks.rows[0]?.count,
+      '1',
+      `the ${tenantLabel} tenant carries its seeded period-lock row`,
+    );
+  }
+
+  // The insert policy exists for exactly the two seeded table classes.
+  const insertPolicies = await pool.query<{ tablename: string }>(
+    `SELECT tablename
+       FROM pg_catalog.pg_policies
+      WHERE schemaname = 'north_star_module'
+        AND cmd = 'INSERT'
+        AND 'north_star_module_materializer' = ANY (roles::text[])
+      ORDER BY tablename`,
+  );
+  assert.deepEqual(
+    insertPolicies.rows.map((row) => row.tablename),
+    [master.physicalTableName, periodLock.physicalTableName].toSorted(),
+    'only the seeded table classes carry a materializer insert policy',
+  );
+
+  const materializerPool = new pg.Pool({
+    ...connection,
+    max: 1,
+    user: 'north_star_module_materializer',
+  });
+  try {
+    const client = await materializerPool.connect();
+    try {
+      const legalEntityMaster = master.legalEntityMaster;
+      const seedColumns = [
+        'tenant_id',
+        'environment_id',
+        master.recordIdentity.column,
+        master.optimisticRevision.column,
+        legalEntityMaster.fieldColumns.code,
+        legalEntityMaster.fieldColumns.name,
+        legalEntityMaster.fieldColumns.status,
+        legalEntityMaster.fieldColumns.isDefault,
+      ]
+        .map((column) => `"${column}"`)
+        .join(', ');
+      const seedInsert = `INSERT INTO north_star_module.${master.physicalTableName}
+           (${seedColumns})
+         VALUES ($1, $2, $3, 1, 'CONTROL', 'Control legal entity', $4, false)`;
+
+      // The predicate binds: the trusted pair is accepted and the other
+      // tenant's pair is refused by the same statement in the same session.
+      await client.query('BEGIN');
+      await setTrustedScope(client, tenantB);
+      await client.query(seedInsert, [
+        tenantB.identity.tenantId,
+        tenantB.identity.environmentId,
+        randomUUID(),
+        legalEntityMaster.activeStatusValue,
+      ]);
+      await assertRefusedByRowLevelSecurity(
+        client.query(seedInsert, [
+          tenantA.identity.tenantId,
+          tenantA.identity.environmentId,
+          randomUUID(),
+          legalEntityMaster.activeStatusValue,
+        ]),
+        'a seed row for another tenant is refused',
+      );
+      await client.query('ROLLBACK');
+
+      // The policy is not blanket: an ordinary business entity table stays
+      // closed to the materializer even for its own trusted tenant. The row is
+      // built from the physical catalog so no NOT NULL or CHECK violation can
+      // stand in for the refusal under test.
+      await client.query('BEGIN');
+      await setTrustedScope(client, tenantB);
+      await assertRefusedByRowLevelSecurity(
+        satisfiableInsert(client, ordinary.physicalTableName, {
+          environment_id: tenantB.identity.environmentId,
+          tenant_id: tenantB.identity.tenantId,
+        }),
+        'an ordinary business entity table refuses the materializer',
+      );
+      await client.query('ROLLBACK');
+    } finally {
+      client.release();
+    }
+  } finally {
+    await materializerPool.end();
+  }
+}
+
+/**
+ * Inserts one row whose every mandatory physical column is populated, so the
+ * only thing left that can refuse it is a policy.
+ */
+async function satisfiableInsert(
+  client: pg.PoolClient,
+  tableName: string,
+  overrides: Readonly<Record<string, string>>,
+): Promise<unknown> {
+  const columns = await client.query<{
+    column_name: string;
+    data_type: string;
+  }>(
+    `SELECT column_name, data_type
+       FROM information_schema.columns
+      WHERE table_schema = 'north_star_module'
+        AND table_name = $1
+        AND is_nullable = 'NO'
+        AND column_default IS NULL
+        AND is_generated = 'NEVER'
+      ORDER BY ordinal_position`,
+    [tableName],
+  );
+  assert.ok(columns.rows.length > 0);
+  const names: string[] = [];
+  const expressions: string[] = [];
+  const values: string[] = [];
+  for (const [index, column] of columns.rows.entries()) {
+    names.push(`"${column.column_name}"`);
+    const override = overrides[column.column_name];
+    if (override !== undefined) {
+      values.push(override);
+      expressions.push(`$${String(values.length)}`);
+      continue;
+    }
+    expressions.push(defaultLiteral(column.data_type, index));
+  }
+  return client.query(
+    `INSERT INTO north_star_module.${tableName} (${names.join(', ')})
+     VALUES (${expressions.join(', ')})`,
+    values,
+  );
+}
+
+function defaultLiteral(dataType: string, seed: number): string {
+  const unique = String(seed).padStart(2, '0');
+  switch (dataType) {
+    case 'boolean':
+      return 'false';
+    case 'bigint':
+    case 'double precision':
+    case 'integer':
+    case 'numeric':
+    case 'smallint':
+      return '1';
+    case 'character varying':
+    case 'text':
+      return `'control-${unique}'`;
+    case 'date':
+      return 'current_date';
+    case 'time without time zone':
+      return `'00:00:00'::time`;
+    case 'timestamp with time zone':
+    case 'timestamp without time zone':
+      return 'now()';
+    case 'uuid':
+      return `'000000${unique}-0000-4000-8000-000000000000'::uuid`;
+    default:
+      throw new Error(`unhandled physical column type ${dataType}`);
+  }
+}
+
+async function setTrustedScope(
+  client: pg.PoolClient,
+  runtime: ComposedApplicationRuntime,
+): Promise<void> {
+  await client.query(
+    `SELECT set_config('north_star.tenant_id', $1, true),
+            set_config('north_star.environment_id', $2, true)`,
+    [runtime.identity.tenantId, runtime.identity.environmentId],
+  );
+}
+
+async function assertRefusedByRowLevelSecurity(
+  attempt: Promise<unknown>,
+  message: string,
+): Promise<void> {
+  await assert.rejects(
+    attempt,
+    (error: unknown) =>
+      error instanceof Error &&
+      (error as Error & { code?: string }).code === '42501' &&
+      /row-level security policy/u.test(error.message),
+    message,
   );
 }
 

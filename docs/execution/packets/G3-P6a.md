@@ -189,6 +189,50 @@ input omits the legal-entity value required by storage. The constructibility
 finding keeps that contract gap visible without teaching the generic press to
 inject scope or widening Inventory's direct-write capability.
 
+## Provenance, seeding, and the NULL-admitting CHECK (migration 0019)
+
+Three further defects surfaced in adjudication, all in the last line of defence
+rather than in the read/write path this packet added.
+
+1. `platform.provision_inventory_scope` asserted every stored column identical,
+   including `contract_release_root`. That is right for business policy and
+   wrong for provenance: an already-provisioned tenant could never advance to a
+   newly compiled contract. The first repair read the stored root and passed it
+   back, which makes the parameter unfalsifiable — the equality it feeds can
+   never disagree. Migration 0019 instead removes the column from the
+   assert-identical set and UPDATEs it, so the row stays truthful by advancing.
+   Policy fields gain no update path, the `'^[0-9a-f]{64}$'` format check
+   stands, and `INVENTORY_POSTING_CONFIGURATION_CONFLICT` keeps its errcode and
+   DETAIL. The assertion runs before the advancement, so a conflicting request
+   raises with the stored provenance untouched.
+2. The materializer seeded the default legal entity and the period-lock rows
+   before `ENABLE ROW LEVEL SECURITY`. Because RLS is a table property, the
+   first tenant's seeds slipped through and every later tenant hit 42501: the
+   only INSERT policy was created for `north_star_module_runtime`. A seed INSERT
+   policy for `north_star_module_materializer` now mirrors the existing narrow
+   `ensureMaterializerSelectPolicy` precedent, carries the same trusted
+   tenant/environment predicate, and is created only for the legal-entity master
+   and the period-lock table. RLS enablement was not reordered.
+3. Migration 0018's exact-partition CHECK compared
+   `jsonb_typeof(impact_analysis_derivation)` without first establishing the
+   column is non-NULL, so a v2 `EXACT_PARTITION` header carrying no derivation
+   document evaluated to `FALSE OR NULL` and stored cleanly. The v2 arm now
+   opens with `IS NOT NULL`; the v1 arm is unchanged.
+
+## Surface-grammar debt movement
+
+`test/architecture/surface-grammar-conformance.baseline.ts` moves Inventory from
+103 to 127 in the same commit as the declaration that causes it. The whole delta
+is the read-only boundary above, in two blocks:
+
+- Seven Record surfaces dropped `commandBar`, each adding one `SG003` and one
+  `SG009` violation: +14.
+- Five Form surfaces traded `commandBar`/`sections` for `activity`, each losing
+  one missing-`activity` violation and gaining two: +10.
+
+No other rule, module, or surface moves. G3-P6b owns the anatomy burn-down that
+takes this back down.
+
 ## Release artifact movement
 
 | Artifact | Before packet | First mounted candidate | Corrected candidate | After G3-P6c grouping |
