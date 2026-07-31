@@ -5,6 +5,7 @@ import {
   PREDICATE_LOWERING_PLAN_VERSION,
   PREDICATE_POSITION_PROFILE_VERSION,
   canonicalize,
+  inspectPredicateForExecution,
   unicodeCaseFold,
   type CanonicalScalar,
   type QueryFilterLoweringPlan,
@@ -311,6 +312,9 @@ async function prepareMutation(
 ): Promise<MutationPreparation> {
   const kind = request.definition.effect.kind;
   if (kind === 'createRecordEffect') {
+    // Candidate image. A create that would forge a terminal state must refuse
+    // on the record it is about to write, not on one that does not exist yet.
+    requirePrecondition(request.definition, input.patch, 'candidate');
     return {
       changes: createChanges(request.definition.inputContract, input),
       expectedRevision: null,
@@ -326,6 +330,19 @@ async function prepareMutation(
     throw failure(
       'MODULE_REVISION_CONFLICT',
       'module record revision does not match expectedRevision',
+    );
+  }
+  // Prior image, for every effect that consumes an existing record. This is
+  // what stops a mutation of already-terminal evidence.
+  requirePrecondition(request.definition, prior.values, 'prior');
+  if (kind === 'updateRecordEffect') {
+    // Projected image, a SEPARATE obligation. Without it an update could move
+    // a record INTO the guarded state -- the prior image passes, and the row
+    // lands terminal by press rather than by the sanctioned writer.
+    requirePrecondition(
+      request.definition,
+      { ...prior.values, ...input.patch },
+      'projected',
     );
   }
   const changes =
@@ -345,6 +362,96 @@ async function prepareMutation(
     projectedRevision: prior.revision + 1,
     recordId: input.recordId,
   };
+}
+
+/**
+ * Evaluates a compiled operation precondition against one record image.
+ *
+ * The kernel owns Boolean composition and absence; this resolver supplies only
+ * present-value truth, so the provider cannot fork F1. A comparison this
+ * resolver cannot decide is an ERROR, never `absent` -- absence is a real
+ * semantic answer (`false` under the position profile), and quietly reporting
+ * it for an unreadable value would turn `not(equals)` into a pass. That is the
+ * fail-open direction for exactly the guard this exists to enforce.
+ */
+function requirePrecondition(
+  definition: SemanticOperationExecutionRequest['definition'],
+  image: Readonly<Record<string, ImmutableJsonValue>>,
+  imageLabel: 'candidate' | 'prior' | 'projected',
+): void {
+  let receipt;
+  try {
+    receipt = inspectPredicateForExecution(definition.precondition, {
+      bindingPosition: 'operationPrecondition',
+      resolveComparison: (comparison) => resolveAgainstImage(comparison, image),
+    });
+  } catch {
+    throw failure(
+      'MODULE_OPERATION_PRECONDITION_UNSUPPORTED',
+      `operation precondition could not be evaluated on the ${imageLabel} image`,
+    );
+  }
+  if (receipt.outcome !== 'evaluated') {
+    throw failure(
+      'MODULE_OPERATION_PRECONDITION_UNSUPPORTED',
+      `operation precondition is not executable on the ${imageLabel} image`,
+    );
+  }
+  if (!receipt.result) {
+    throw failure(
+      'MODULE_OPERATION_PRECONDITION_REFUSED',
+      `operation precondition does not hold on the ${imageLabel} image`,
+    );
+  }
+}
+
+function resolveAgainstImage(
+  comparison: { field: { targetId: string }; operator: string; value: unknown },
+  image: Readonly<Record<string, ImmutableJsonValue>>,
+): { presence: 'absent' } | { presence: 'present'; result: boolean } {
+  const actual = Object.hasOwn(image, comparison.field.targetId)
+    ? image[comparison.field.targetId]
+    : undefined;
+  if (actual === undefined || actual === null) return { presence: 'absent' };
+  if (
+    typeof comparison.value !== 'object' ||
+    comparison.value === null ||
+    !('value' in comparison.value)
+  ) {
+    throw new TypeError('precondition comparison operand is not a scalar');
+  }
+  const expected = (comparison.value as { value: unknown }).value;
+  switch (comparison.operator) {
+    case 'equals':
+      return { presence: 'present', result: actual === expected };
+    case 'notEquals':
+      return { presence: 'present', result: actual !== expected };
+    case 'lessThan':
+    case 'greaterThan':
+    case 'lessThanOrEqual':
+    case 'greaterThanOrEqual': {
+      if (
+        (typeof actual !== 'string' && typeof actual !== 'number') ||
+        typeof expected !== typeof actual
+      ) {
+        throw new TypeError('precondition ordering operands are not ordered');
+      }
+      const ordered = expected as string | number;
+      return {
+        presence: 'present',
+        result:
+          comparison.operator === 'lessThan'
+            ? actual < ordered
+            : comparison.operator === 'greaterThan'
+              ? actual > ordered
+              : comparison.operator === 'lessThanOrEqual'
+                ? actual <= ordered
+                : actual >= ordered,
+      };
+    }
+    default:
+      throw new TypeError('precondition comparison operator is not admitted');
+  }
 }
 
 function acceptedCommand(
