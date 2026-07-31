@@ -489,7 +489,8 @@ export type InventoryContractDiagnosticCode =
   | 'INVENTORY_STOCK_DIMENSION_MEMBER_REQUIRED'
   | 'INVENTORY_STOCK_DIMENSION_UNSPECIFIED_FORBIDDEN'
   | 'INVENTORY_STOCK_DIMENSION_VERSION_REQUIRED'
-  | 'INVENTORY_STOCK_DIMENSION_VERSION_UNKNOWN';
+  | 'INVENTORY_STOCK_DIMENSION_VERSION_UNKNOWN'
+  | 'INVENTORY_TERMINAL_GUARD_MISSING';
 
 export interface InventoryContractDiagnostic {
   bindingMovementId: string | null;
@@ -924,6 +925,82 @@ function validatePinnedInventoryCountEntity(
   }
 }
 
+function validatePinnedStockCountTerminalGuard(
+  packageRevision: NormalizedApplicationPackage,
+  entityId: string,
+  authoredOperations: AuthoredOperationConformanceInput,
+  diagnostics: CompilerDiagnostic[],
+): void {
+  const namespace = packageRevision.package.namespace;
+  const stateFieldId = `${namespace}:field.stock_count_state`;
+  const stateField = packageRevision.fields.find(
+    (candidate) => candidate.fieldId === stateFieldId,
+  );
+  if (!stateField || stateField.presence !== 'required') {
+    diagnostics.push(
+      inventoryModuleDiagnostic(
+        'INVENTORY_TERMINAL_GUARD_MISSING',
+        '$.fields.stock_count_state.presence',
+        stateFieldId,
+      ),
+    );
+  }
+
+  const expectedPrecondition = {
+    kind: 'notPredicate',
+    schemaVersion: authoredOperations.languageVersion,
+    term: {
+      field: {
+        kind: 'fieldReference',
+        schemaVersion: authoredOperations.languageVersion,
+        targetId: stateFieldId,
+      },
+      kind: 'fieldComparisonPredicate',
+      operator: 'equals',
+      schemaVersion: authoredOperations.languageVersion,
+      value: {
+        kind: 'textValue',
+        schemaVersion: authoredOperations.languageVersion,
+        value: `${namespace}:option.stock_count_state_posted`,
+      },
+    },
+  };
+  const expectedPreconditionRoot = inventoryCanonicalRoot(expectedPrecondition);
+  for (const [action, effectKind] of [
+    ['archive', 'archiveRecordEffect'],
+    ['create', 'createRecordEffect'],
+    ['restore', 'restoreRecordEffect'],
+    ['update', 'updateRecordEffect'],
+  ] as const) {
+    const operationId = `${namespace}:operation.stock_count_${action}`;
+    const operation = packageRevision.operations.find(
+      (candidate) => candidate.operationId === operationId,
+    );
+    const authoredOperation = authoredOperations.operations.find(
+      (candidate) => candidate.operationId === operationId,
+    );
+    if (
+      !operation ||
+      !authoredOperation ||
+      operation.lifecycle !== 'active' ||
+      operation.tier !== 'o0' ||
+      operation.effect.kind !== effectKind ||
+      !('entity' in operation.effect) ||
+      operation.effect.entity.targetId !== entityId ||
+      inventoryCanonicalRoot(authoredOperation.precondition) !==
+        expectedPreconditionRoot
+    ) {
+      diagnostics.push(
+        inventoryModuleDiagnostic(
+          'INVENTORY_TERMINAL_GUARD_MISSING',
+          `$.operations.stock_count_${action}.precondition`,
+          operationId,
+        ),
+      );
+    }
+  }
+}
+
 function validatePinnedInventoryCountRelations(
   packageRevision: NormalizedApplicationPackage,
   diagnostics: CompilerDiagnostic[],
@@ -1035,8 +1112,17 @@ export function resolvePinnedLegalEntityRelationSemantics(
   );
 }
 
+export interface AuthoredOperationConformanceInput {
+  readonly languageVersion: string;
+  readonly operations: readonly {
+    readonly operationId: string;
+    readonly precondition: unknown;
+  }[];
+}
+
 export function validateModuleConformance(
   packageRevision: NormalizedApplicationPackage,
+  authoredOperations: AuthoredOperationConformanceInput = packageRevision,
 ): CompilerDiagnostic[] {
   if (packageRevision.languageVersion !== LANGUAGE_VERSION) return [];
   const diagnostics: CompilerDiagnostic[] = [];
@@ -1085,6 +1171,12 @@ export function validateModuleConformance(
         packageRevision,
         entity.entityId,
         STOCK_COUNT_MODULE_FIELD_RULES,
+        diagnostics,
+      );
+      validatePinnedStockCountTerminalGuard(
+        packageRevision,
+        entity.entityId,
+        authoredOperations,
         diagnostics,
       );
     } else if (family.familyId === 'stock_count_line') {
@@ -3255,6 +3347,8 @@ const INVENTORY_DIAGNOSTIC_RULES: Readonly<
     'every inventory movement declares the stock-dimension-set version it uses',
   INVENTORY_STOCK_DIMENSION_VERSION_UNKNOWN:
     'an inventory movement uses only a known released stock-dimension-set version',
+  INVENTORY_TERMINAL_GUARD_MISSING:
+    'stock-count generic operations refuse terminal posted evidence through one exact required-state precondition',
 });
 
 function inventoryModuleDiagnostic(
@@ -3265,7 +3359,8 @@ function inventoryModuleDiagnostic(
     | 'INVENTORY_LEGAL_ENTITY_FAMILY_UNDECLARED'
     | 'INVENTORY_MOVEMENT_MONEY_FORBIDDEN'
     | 'INVENTORY_RELATION_ENTITY_SEMANTICS_UNDECLARED'
-    | 'INVENTORY_STOCK_DIMENSION_VERSION_REQUIRED',
+    | 'INVENTORY_STOCK_DIMENSION_VERSION_REQUIRED'
+    | 'INVENTORY_TERMINAL_GUARD_MISSING',
   path: string,
   subjectId: string | null,
 ): CompilerDiagnostic {
@@ -3285,6 +3380,8 @@ function inventoryModuleDiagnostic(
         'add the canonical endpoint pair to the pinned inventory relation-semantics contract before compiling it',
       INVENTORY_STOCK_DIMENSION_VERSION_REQUIRED:
         'declare the required exactly-v1 stock-dimension-set version field on every inventory movement',
+      INVENTORY_TERMINAL_GUARD_MISSING:
+        'declare the exact not-posted precondition on all four stock-count generic operations and keep stock_count_state required',
     });
   return {
     acceptedAlternative: acceptedAlternative[code],
