@@ -34,7 +34,7 @@ const INVENTORY_CONTRACT_RELEASE_VERSION =
   'northstar.inventory-contract-release/v1' as const;
 const STOCK_DIMENSION_SET_ID = 'northstar.stock-dimension-set/v1' as const;
 const INVENTORY_POSTING_DEPENDENCY_SET_ROOT =
-  '35fc38eaca7fbe47d8da5030ceefce8211a2194a25d233c45282ef0450d553ad' as const;
+  'ffd4e9f6103b5c6053c39b62fe64e69dd255cb0c86cfd349ae465ab25179b3d3' as const;
 const LEGAL_ENTITY_FAMILY_CONTRACT_VERSION =
   'northstar.legal-entity-family-contract/v1' as const;
 const LEGAL_ENTITY_FAMILY_RULES = Object.freeze([
@@ -94,6 +94,20 @@ const INVENTORY_STORAGE_REFERENCE_RULES = Object.freeze([
     sourceFamilyId: 'inventory_movement',
     targetFamilyId: 'location',
   },
+  {
+    fieldLocalId: 'stock_count_location_id',
+    required: true,
+    semantics: 'sameEntity',
+    sourceFamilyId: 'stock_count',
+    targetFamilyId: 'location',
+  },
+  {
+    fieldLocalId: 'stock_count_line_item_id',
+    required: true,
+    semantics: 'crossEntityAllowed',
+    sourceFamilyId: 'stock_count_line',
+    targetFamilyId: 'item',
+  },
 ] as const);
 const REQUIRED_INVENTORY_MODULE_FAMILIES = Object.freeze([
   'legal_entity',
@@ -101,6 +115,8 @@ const REQUIRED_INVENTORY_MODULE_FAMILIES = Object.freeze([
   'inventory_transaction_line',
   'inventory_period_lock',
   'inventory_movement',
+  'stock_count',
+  'stock_count_line',
 ] as const);
 const INVENTORY_PERIOD_LOCK_STORAGE_RULE = Object.freeze({
   advanceOperationLocalId: 'advance_period_lock',
@@ -157,6 +173,26 @@ const LEGAL_ENTITY_RELATION_RULES = Object.freeze([
     sourceFamilyId: 'inventory_transaction_line',
     targetFamilyId: 'inventory_transaction',
   },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'stock_count',
+    targetFamilyId: 'inventory_transaction',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'stock_count',
+    targetFamilyId: 'stock_count',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'stock_count_line',
+    targetFamilyId: 'stock_count',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'stock_count_line',
+    targetFamilyId: 'inventory_transaction_line',
+  },
 ] as const);
 const LEGAL_ENTITY_GOVERNED_PACKAGES = Object.freeze([
   'catalog',
@@ -183,6 +219,8 @@ const REASON_REQUIREMENTS = Object.freeze([
 const CANONICAL_DECIMAL_V2 = /^(?:0|-[1-9]\d*|[1-9]\d*)(?:\.\d*[1-9])?$/;
 const MOVEMENT_MONEY_TOKEN =
   /(?:amount|money|monetary|value|cost|price|currency)/iu;
+const COUNT_EVIDENCE_MONEY_TOKEN =
+  /(?:amount|money|monetary|valuation|cost|price|currency)/iu;
 type InventoryMovementModuleFieldShape =
   | { kind: 'dateTime'; precision: 'millisecond'; timezone: 'utcInstant' }
   | { kind: 'decimal'; precision: 38; scale: 18 }
@@ -310,6 +348,111 @@ const INVENTORY_MOVEMENT_MODULE_FIELD_RULES = Object.freeze([
     shape: { kind: 'text', maximumLength: 80 },
   },
 ] as const satisfies readonly InventoryMovementModuleFieldRule[]);
+const STOCK_COUNT_MODULE_FIELD_RULES = Object.freeze([
+  {
+    fieldLocalId: 'stock_count_number',
+    presence: 'required',
+    shape: { kind: 'text', maximumLength: 60 },
+  },
+  {
+    fieldLocalId: 'stock_count_kind',
+    presence: 'required',
+    shape: {
+      kind: 'enum',
+      options: [
+        { label: 'initial', optionLocalId: 'stock_count_kind_initial' },
+        { label: 'correction', optionLocalId: 'stock_count_kind_correction' },
+        { label: 'reversal', optionLocalId: 'stock_count_kind_reversal' },
+      ],
+    },
+  },
+  {
+    fieldLocalId: 'stock_count_state',
+    presence: 'required',
+    shape: {
+      kind: 'enum',
+      options: [
+        { label: 'draft', optionLocalId: 'stock_count_state_draft' },
+        { label: 'counting', optionLocalId: 'stock_count_state_counting' },
+        { label: 'reviewed', optionLocalId: 'stock_count_state_reviewed' },
+        { label: 'posted', optionLocalId: 'stock_count_state_posted' },
+      ],
+    },
+  },
+  {
+    fieldLocalId: 'stock_count_location_id',
+    presence: 'required',
+    shape: { kind: 'text', maximumLength: 80 },
+  },
+  {
+    fieldLocalId: 'stock_count_counted_at',
+    presence: 'required',
+    shape: {
+      kind: 'dateTime',
+      precision: 'millisecond',
+      timezone: 'utcInstant',
+    },
+  },
+  {
+    fieldLocalId: 'stock_count_recorded_at',
+    presence: 'optional',
+    shape: {
+      kind: 'dateTime',
+      precision: 'millisecond',
+      timezone: 'utcInstant',
+    },
+  },
+  {
+    fieldLocalId: 'stock_count_actor_id',
+    presence: 'optional',
+    shape: { kind: 'text', maximumLength: 80 },
+  },
+  {
+    fieldLocalId: 'stock_count_reason_code',
+    presence: 'optional',
+    shape: { kind: 'text', maximumLength: 80 },
+  },
+  {
+    fieldLocalId: 'stock_count_reason_narrative',
+    presence: 'optional',
+    shape: { kind: 'text', maximumLength: 1000 },
+  },
+] as const satisfies readonly InventoryMovementModuleFieldRule[]);
+const STOCK_COUNT_LINE_MODULE_FIELD_RULES = Object.freeze([
+  {
+    fieldLocalId: 'stock_count_line_line_number',
+    presence: 'required',
+    shape: { kind: 'integer' },
+  },
+  {
+    fieldLocalId: 'stock_count_line_item_id',
+    presence: 'required',
+    shape: { kind: 'text', maximumLength: 80 },
+  },
+  ...[
+    'stock_count_line_expected_quantity',
+    'stock_count_line_counted_quantity',
+    'stock_count_line_variance_quantity',
+  ].map((fieldLocalId) => ({
+    fieldLocalId,
+    presence: 'required' as const,
+    shape: {
+      kind: 'decimal' as const,
+      precision: 38 as const,
+      scale: 18 as const,
+    },
+  })),
+  {
+    fieldLocalId: 'stock_count_line_unit_id',
+    presence: 'required',
+    shape: { kind: 'text', maximumLength: 32 },
+  },
+  {
+    fieldLocalId: 'stock_count_line_reversal_of_movement_id',
+    presence: 'optional',
+    shape: { kind: 'text', maximumLength: 80 },
+  },
+] as const satisfies readonly InventoryMovementModuleFieldRule[]);
 const INVENTORY_MOVEMENT_CANDIDATE_FIELDS = Object.freeze([
   'movementId',
   'stockDimensionSetVersion',
@@ -336,6 +479,8 @@ export type InventoryContractDiagnosticCode =
   | 'INVENTORY_CONFIGURATION_OUT_OF_RANGE'
   | 'INVENTORY_CONFIGURATION_REQUIRED'
   | 'INVENTORY_CONTRACT_INVALID'
+  | 'INVENTORY_COUNT_EVIDENCE_INVALID'
+  | 'INVENTORY_COUNT_EVIDENCE_MONEY_FORBIDDEN'
   | 'INVENTORY_LEGAL_ENTITY_FAMILY_UNDECLARED'
   | 'INVENTORY_MOVEMENT_MONEY_FORBIDDEN'
   | 'INVENTORY_MOVEMENT_VALUE_DERIVATION_FORBIDDEN'
@@ -725,6 +870,130 @@ function validatePinnedInventoryMovementEntity(
   }
 }
 
+function validatePinnedInventoryCountEntity(
+  packageRevision: NormalizedApplicationPackage,
+  entityId: string,
+  rules: readonly InventoryMovementModuleFieldRule[],
+  diagnostics: CompilerDiagnostic[],
+): void {
+  const expected = new Map(rules.map((rule) => [rule.fieldLocalId, rule]));
+  const observed = new Set<string>();
+  for (const field of packageRevision.fields.filter(
+    (candidate) => candidate.entity.targetId === entityId,
+  )) {
+    const localId = canonicalFieldLocalId(field.fieldId);
+    const rule = localId ? expected.get(localId) : undefined;
+    if (!rule) {
+      diagnostics.push(
+        inventoryModuleDiagnostic(
+          COUNT_EVIDENCE_MONEY_TOKEN.test(field.fieldId)
+            ? 'INVENTORY_COUNT_EVIDENCE_MONEY_FORBIDDEN'
+            : 'INVENTORY_COUNT_EVIDENCE_INVALID',
+          `$.fields.${localId ?? field.fieldId}`,
+          field.fieldId,
+        ),
+      );
+      continue;
+    }
+    observed.add(rule.fieldLocalId);
+    if (
+      !inventoryMovementFieldShapeMatches(
+        field,
+        rule,
+        packageRevision.package.namespace,
+      )
+    ) {
+      diagnostics.push(
+        inventoryModuleDiagnostic(
+          'INVENTORY_COUNT_EVIDENCE_INVALID',
+          `$.fields.${rule.fieldLocalId}`,
+          field.fieldId,
+        ),
+      );
+    }
+  }
+  for (const rule of rules) {
+    if (observed.has(rule.fieldLocalId)) continue;
+    diagnostics.push(
+      inventoryModuleDiagnostic(
+        'INVENTORY_COUNT_EVIDENCE_INVALID',
+        `$.fields.${rule.fieldLocalId}`,
+        `${packageRevision.package.namespace}:field.${rule.fieldLocalId}`,
+      ),
+    );
+  }
+}
+
+function validatePinnedInventoryCountRelations(
+  packageRevision: NormalizedApplicationPackage,
+  diagnostics: CompilerDiagnostic[],
+): void {
+  const namespace = packageRevision.package.namespace;
+  if (
+    canonicalPackageLocalId(packageRevision.package.packageId) !==
+      'inventory' &&
+    !packageRevision.entities.some((entity) =>
+      ['stock_count', 'stock_count_line'].includes(
+        canonicalFamilyId(entity.entityId) ?? '',
+      ),
+    )
+  ) {
+    return;
+  }
+  const rules = [
+    [
+      'stock_count_transaction',
+      'stock_count',
+      'inventory_transaction',
+      'reference',
+      true,
+    ],
+    [
+      'stock_count_supersedes',
+      'stock_count',
+      'stock_count',
+      'reference',
+      false,
+    ],
+    [
+      'stock_count_line_session',
+      'stock_count_line',
+      'stock_count',
+      'parentScopedChild',
+      true,
+    ],
+    [
+      'stock_count_line_transaction_line',
+      'stock_count_line',
+      'inventory_transaction_line',
+      'reference',
+      true,
+    ],
+  ] as const;
+  for (const [localId, source, target, ownership, required] of rules) {
+    const relationId = `${namespace}:relation.${localId}`;
+    const relation = packageRevision.relations.find(
+      (candidate) => candidate.relationId === relationId,
+    );
+    if (
+      relation?.lifecycle !== 'active' ||
+      relation.cardinality !== 'manyToOne' ||
+      relation.ownership !== ownership ||
+      relation.required !== required ||
+      relation.sourceEntity.targetId !== `${namespace}:entity.${source}` ||
+      relation.targetEntity.targetId !== `${namespace}:entity.${target}`
+    ) {
+      diagnostics.push(
+        inventoryModuleDiagnostic(
+          'INVENTORY_COUNT_EVIDENCE_INVALID',
+          `$.relations.${localId}`,
+          relationId,
+        ),
+      );
+    }
+  }
+}
+
 export type LegalEntityMasterFieldRole =
   keyof typeof LEGAL_ENTITY_MASTER_FIELD_ROLES;
 
@@ -773,6 +1042,7 @@ export function validateModuleConformance(
   const diagnostics: CompilerDiagnostic[] = [];
   validateRequiredInventoryEntitySet(packageRevision, diagnostics);
   validateRecordedTimeProjectionRetention(packageRevision, diagnostics);
+  validatePinnedInventoryCountRelations(packageRevision, diagnostics);
   const storageById = new Map(
     packageRevision.storageMappings.map((mapping) => [
       mapping.storageMappingId,
@@ -785,26 +1055,46 @@ export function validateModuleConformance(
       packageRevision.package.packageId,
       entity.entityId,
     );
-    if (
-      family.status !== 'classified' ||
-      family.familyId !== 'inventory_movement'
-    ) {
+    if (family.status !== 'classified') {
       continue;
     }
-    if (entity.lifecycle !== 'active') {
+    if (
+      ['inventory_movement', 'stock_count', 'stock_count_line'].includes(
+        family.familyId,
+      ) &&
+      entity.lifecycle !== 'active'
+    ) {
       diagnostics.push(
         inventoryModuleDiagnostic(
-          'INVENTORY_CONTRACT_INVALID',
-          '$.entities.inventory_movement.lifecycle',
+          family.familyId === 'inventory_movement'
+            ? 'INVENTORY_CONTRACT_INVALID'
+            : 'INVENTORY_COUNT_EVIDENCE_INVALID',
+          `$.entities.${family.familyId}.lifecycle`,
           entity.entityId,
         ),
       );
     }
-    validatePinnedInventoryMovementEntity(
-      packageRevision,
-      entity.entityId,
-      diagnostics,
-    );
+    if (family.familyId === 'inventory_movement') {
+      validatePinnedInventoryMovementEntity(
+        packageRevision,
+        entity.entityId,
+        diagnostics,
+      );
+    } else if (family.familyId === 'stock_count') {
+      validatePinnedInventoryCountEntity(
+        packageRevision,
+        entity.entityId,
+        STOCK_COUNT_MODULE_FIELD_RULES,
+        diagnostics,
+      );
+    } else if (family.familyId === 'stock_count_line') {
+      validatePinnedInventoryCountEntity(
+        packageRevision,
+        entity.entityId,
+        STOCK_COUNT_LINE_MODULE_FIELD_RULES,
+        diagnostics,
+      );
+    }
   }
 
   for (const mapping of packageRevision.storageMappings.filter(
@@ -1445,6 +1735,7 @@ function validateInventoryContractDefinition(
   validateLegalEntityContract(diagnostics, definition);
   validateStockDimensionSet(diagnostics, definition);
   validateMovementContract(diagnostics, definition);
+  validateCountEvidenceContract(diagnostics, definition);
   validateBaseUnitContract(diagnostics, definition);
   validateTemporalContract(diagnostics, definition);
   validateMonetaryBoundary(diagnostics, definition);
@@ -1454,6 +1745,141 @@ function validateInventoryContractDefinition(
   validateV2DecimalLimit(diagnostics, definition);
 
   return sortInventoryDiagnostics(diagnostics);
+}
+
+function validateCountEvidenceContract(
+  diagnostics: InventoryContractDiagnostic[],
+  definition: Record<string, unknown>,
+): void {
+  const countEvidence = nestedRecord(definition, ['countEvidence']);
+  const expectations: Array<[readonly string[], string]> = [
+    [['countEvidence', 'correctionBehavior'], 'appendCompensatingCount'],
+    [['countEvidence', 'hardDelete'], 'forbidden'],
+    [['countEvidence', 'lineEntityFamilyId'], 'stock_count_line'],
+    [
+      ['countEvidence', 'movementLink'],
+      'stockCountLineToTransactionLineToInventoryMovement',
+    ],
+    [['countEvidence', 'preservation'], 'threeDistinctPersistedValues'],
+    [['countEvidence', 'reversalBehavior'], 'appendExactInverseMovement'],
+    [['countEvidence', 'sessionEntityFamilyId'], 'stock_count'],
+    [['countEvidence', 'sessionTransition'], 'reviewedToPostedWithMovement'],
+  ];
+  for (const [path, value] of expectations) {
+    expectInventoryLiteral(diagnostics, definition, path, value);
+  }
+  if (
+    !countEvidence ||
+    !hasExactKeys(countEvidence, [
+      'correctionBehavior',
+      'hardDelete',
+      'lineEntityFamilyId',
+      'lineValues',
+      'movementLink',
+      'preservation',
+      'reversalBehavior',
+      'sessionEntityFamilyId',
+      'sessionTransition',
+    ])
+  ) {
+    diagnostics.push(
+      inventoryDiagnostic(
+        'INVENTORY_COUNT_EVIDENCE_INVALID',
+        '$.countEvidence',
+        'countEvidence',
+      ),
+    );
+  }
+
+  const lineValues = countEvidence?.lineValues;
+  const expectedValues = [
+    ['expectedQuantity', 'expectedPhysicalQuantity'],
+    ['countedQuantity', 'countedPhysicalQuantity'],
+    ['varianceQuantity', 'countedMinusExpectedVariance'],
+  ] as const;
+  if (
+    !Array.isArray(lineValues) ||
+    lineValues.length !== expectedValues.length
+  ) {
+    diagnostics.push(
+      inventoryDiagnostic(
+        'INVENTORY_COUNT_EVIDENCE_INVALID',
+        '$.countEvidence.lineValues',
+        null,
+      ),
+    );
+  } else {
+    for (const [index, [fieldId, semantic]] of expectedValues.entries()) {
+      const value = lineValues[index];
+      const shape = isRecord(value) ? value.valueShape : undefined;
+      if (
+        !isRecord(value) ||
+        !hasExactKeys(value, [
+          'fieldId',
+          'presence',
+          'semantic',
+          'valueShape',
+        ]) ||
+        value.fieldId !== fieldId ||
+        value.presence !== 'required' ||
+        value.semantic !== semantic ||
+        !isRecord(shape) ||
+        !hasExactKeys(shape, [
+          'precision',
+          'representation',
+          'scale',
+          'signed',
+          'unitFieldId',
+        ]) ||
+        shape.precision !== 38 ||
+        shape.representation !== 'canonicalDecimalStringV2' ||
+        shape.scale !== 18 ||
+        shape.signed !== true ||
+        shape.unitFieldId !== 'unitId'
+      ) {
+        diagnostics.push(
+          inventoryDiagnostic(
+            'INVENTORY_COUNT_EVIDENCE_INVALID',
+            `$.countEvidence.lineValues.${index}`,
+            fieldId,
+          ),
+        );
+      }
+    }
+  }
+
+  const inspect = (value: unknown, path: string): void => {
+    if (typeof value === 'string') {
+      if (COUNT_EVIDENCE_MONEY_TOKEN.test(value)) {
+        diagnostics.push(
+          inventoryDiagnostic(
+            'INVENTORY_COUNT_EVIDENCE_MONEY_FORBIDDEN',
+            path,
+            value,
+          ),
+        );
+      }
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.forEach((entry, index) => inspect(entry, `${path}.${index}`));
+      return;
+    }
+    if (!isRecord(value)) return;
+    for (const [key, entry] of Object.entries(value)) {
+      if (COUNT_EVIDENCE_MONEY_TOKEN.test(key)) {
+        diagnostics.push(
+          inventoryDiagnostic(
+            'INVENTORY_COUNT_EVIDENCE_MONEY_FORBIDDEN',
+            `${path}.${key}`,
+            key,
+          ),
+        );
+      }
+      inspect(entry, `${path}.${key}`);
+    }
+  };
+  inspect(countEvidence, '$.countEvidence');
 }
 
 function validateLegalEntityContract(
@@ -1987,6 +2413,7 @@ function validateMonetaryBoundary(
   definition: Record<string, unknown>,
 ): void {
   const expectations: Array<[readonly string[], string]> = [
+    [['monetaryBoundary', 'countEvidenceMonetaryFields'], 'forbidden'],
     [['monetaryBoundary', 'movementAmountFields'], 'forbidden'],
     [
       ['monetaryBoundary', 'movementDerivedMonetaryArtifacts'],
@@ -2076,7 +2503,7 @@ function validateAuthoritativeDependencies(
     diagnostics,
     definition,
     ['authoritativeDependencies', 'version'],
-    3,
+    4,
   );
   expectInventoryLiteral(
     diagnostics,
@@ -2806,6 +3233,10 @@ const INVENTORY_DIAGNOSTIC_RULES: Readonly<
     'every required inventory posting dial declares its type and release-recorded default',
   INVENTORY_CONTRACT_INVALID:
     'the inventory posting capability compiles only its frozen v1 declaration shape',
+  INVENTORY_COUNT_EVIDENCE_INVALID:
+    'stock-count evidence preserves its reviewed session, line linkage, and expected, counted, and variance quantities as distinct facts',
+  INVENTORY_COUNT_EVIDENCE_MONEY_FORBIDDEN:
+    'stock-count evidence is physical-quantity evidence and contains no monetary member',
   INVENTORY_LEGAL_ENTITY_FAMILY_UNDECLARED:
     'every governed family has one explicit entityOwned or tenantShared classification and no default',
   INVENTORY_MOVEMENT_MONEY_FORBIDDEN:
@@ -2829,6 +3260,8 @@ const INVENTORY_DIAGNOSTIC_RULES: Readonly<
 function inventoryModuleDiagnostic(
   code:
     | 'INVENTORY_CONTRACT_INVALID'
+    | 'INVENTORY_COUNT_EVIDENCE_INVALID'
+    | 'INVENTORY_COUNT_EVIDENCE_MONEY_FORBIDDEN'
     | 'INVENTORY_LEGAL_ENTITY_FAMILY_UNDECLARED'
     | 'INVENTORY_MOVEMENT_MONEY_FORBIDDEN'
     | 'INVENTORY_RELATION_ENTITY_SEMANTICS_UNDECLARED'
@@ -2840,6 +3273,10 @@ function inventoryModuleDiagnostic(
     Object.freeze({
       INVENTORY_CONTRACT_INVALID:
         'make the compiled inventory movement entity match the pinned quantity-only movement declaration exactly',
+      INVENTORY_COUNT_EVIDENCE_INVALID:
+        'declare the complete stock-count session and line evidence shape, including all three distinct quantity values and its posting links',
+      INVENTORY_COUNT_EVIDENCE_MONEY_FORBIDDEN:
+        'keep stock-count evidence physical-quantity-only; financial value belongs to G4',
       INVENTORY_LEGAL_ENTITY_FAMILY_UNDECLARED:
         'add the family to the pinned inventory legal-entity map before compiling it; no ownership default exists',
       INVENTORY_MOVEMENT_MONEY_FORBIDDEN:

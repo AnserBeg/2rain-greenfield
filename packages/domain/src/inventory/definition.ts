@@ -21,6 +21,8 @@ function ids(namespace: string) {
       legalEntity: entity('legal_entity'),
       movement: entity('inventory_movement'),
       periodLock: entity('inventory_period_lock'),
+      stockCount: entity('stock_count'),
+      stockCountLine: entity('stock_count_line'),
       transaction: entity('inventory_transaction'),
       transactionLine: entity('inventory_transaction_line'),
     },
@@ -58,6 +60,29 @@ function ids(namespace: string) {
       periodLock: {
         closedThrough: field('inventory_period_lock', 'closed_through'),
       },
+      stockCount: {
+        actorId: field('stock_count', 'actor_id'),
+        countedAt: field('stock_count', 'counted_at'),
+        kind: field('stock_count', 'kind'),
+        locationId: field('stock_count', 'location_id'),
+        number: field('stock_count', 'number'),
+        reasonCode: field('stock_count', 'reason_code'),
+        reasonNarrative: field('stock_count', 'reason_narrative'),
+        recordedAt: field('stock_count', 'recorded_at'),
+        state: field('stock_count', 'state'),
+      },
+      stockCountLine: {
+        countedQuantity: field('stock_count_line', 'counted_quantity'),
+        expectedQuantity: field('stock_count_line', 'expected_quantity'),
+        itemId: field('stock_count_line', 'item_id'),
+        lineNumber: field('stock_count_line', 'line_number'),
+        reversalOfMovementId: field(
+          'stock_count_line',
+          'reversal_of_movement_id',
+        ),
+        unitId: field('stock_count_line', 'unit_id'),
+        varianceQuantity: field('stock_count_line', 'variance_quantity'),
+      },
       transaction: {
         actorId: field('inventory_transaction', 'actor_id'),
         effectiveAt: field('inventory_transaction', 'effective_at'),
@@ -85,6 +110,10 @@ function ids(namespace: string) {
     relationIds: {
       movementTransaction: `${namespace}:relation.inventory_movement_transaction`,
       movementTransactionLine: `${namespace}:relation.inventory_movement_transaction_line`,
+      stockCountLineSession: `${namespace}:relation.stock_count_line_session`,
+      stockCountLineTransactionLine: `${namespace}:relation.stock_count_line_transaction_line`,
+      stockCountSupersedes: `${namespace}:relation.stock_count_supersedes`,
+      stockCountTransaction: `${namespace}:relation.stock_count_transaction`,
       transactionLineTransaction: `${namespace}:relation.inventory_transaction_line_transaction`,
     },
   } as const;
@@ -115,6 +144,8 @@ export function inventoryModuleDefinition(
       entityIds.transactionLine,
     ],
     ['inventory_period_lock', 'Inventory period lock', entityIds.periodLock],
+    ['stock_count', 'Stock count', entityIds.stockCount],
+    ['stock_count_line', 'Stock count line', entityIds.stockCountLine],
   ] as const;
   const movementFields = Object.values(fieldIds.movement);
 
@@ -152,7 +183,7 @@ export function inventoryModuleDefinition(
         'inventory_movement',
         'Inventory movement',
         entityIds.movement,
-        50,
+        70,
       ),
     ],
     fields: [
@@ -354,6 +385,151 @@ export function inventoryModuleDefinition(
         'Closed through',
         10,
         instant(),
+        { optional: true },
+      ),
+
+      field(
+        definitionIds,
+        entityIds.stockCount,
+        fieldIds.stockCount.number,
+        'Count number',
+        10,
+        text(60),
+        { businessKey: true, searchable: true },
+      ),
+      field(
+        definitionIds,
+        entityIds.stockCount,
+        fieldIds.stockCount.kind,
+        'Count kind',
+        20,
+        enumeration(definitionIds, 'stock_count_kind', [
+          'initial',
+          'correction',
+          'reversal',
+        ]),
+      ),
+      field(
+        definitionIds,
+        entityIds.stockCount,
+        fieldIds.stockCount.state,
+        'Count state',
+        30,
+        enumeration(definitionIds, 'stock_count_state', [
+          'draft',
+          'counting',
+          'reviewed',
+          'posted',
+        ]),
+      ),
+      field(
+        definitionIds,
+        entityIds.stockCount,
+        fieldIds.stockCount.locationId,
+        'Location id',
+        40,
+        text(80),
+      ),
+      field(
+        definitionIds,
+        entityIds.stockCount,
+        fieldIds.stockCount.countedAt,
+        'Counted at',
+        50,
+        instant(),
+      ),
+      field(
+        definitionIds,
+        entityIds.stockCount,
+        fieldIds.stockCount.recordedAt,
+        'Recorded at',
+        60,
+        instant(),
+        { optional: true },
+      ),
+      field(
+        definitionIds,
+        entityIds.stockCount,
+        fieldIds.stockCount.actorId,
+        'Actor id',
+        70,
+        text(80),
+        { optional: true },
+      ),
+      field(
+        definitionIds,
+        entityIds.stockCount,
+        fieldIds.stockCount.reasonCode,
+        'Reason code',
+        80,
+        text(80),
+        { optional: true },
+      ),
+      field(
+        definitionIds,
+        entityIds.stockCount,
+        fieldIds.stockCount.reasonNarrative,
+        'Reason narrative',
+        90,
+        text(1000),
+        { optional: true },
+      ),
+
+      field(
+        definitionIds,
+        entityIds.stockCountLine,
+        fieldIds.stockCountLine.lineNumber,
+        'Line number',
+        10,
+        integer(),
+      ),
+      field(
+        definitionIds,
+        entityIds.stockCountLine,
+        fieldIds.stockCountLine.itemId,
+        'Item id',
+        20,
+        text(80),
+      ),
+      field(
+        definitionIds,
+        entityIds.stockCountLine,
+        fieldIds.stockCountLine.expectedQuantity,
+        'Expected quantity',
+        30,
+        decimal(),
+      ),
+      field(
+        definitionIds,
+        entityIds.stockCountLine,
+        fieldIds.stockCountLine.countedQuantity,
+        'Counted quantity',
+        40,
+        decimal(),
+      ),
+      field(
+        definitionIds,
+        entityIds.stockCountLine,
+        fieldIds.stockCountLine.varianceQuantity,
+        'Variance quantity',
+        50,
+        decimal(),
+      ),
+      field(
+        definitionIds,
+        entityIds.stockCountLine,
+        fieldIds.stockCountLine.unitId,
+        'Unit id',
+        60,
+        text(32),
+      ),
+      field(
+        definitionIds,
+        entityIds.stockCountLine,
+        fieldIds.stockCountLine.reversalOfMovementId,
+        'Reversal of movement id',
+        70,
+        text(80),
         { optional: true },
       ),
 
@@ -580,6 +756,34 @@ export function inventoryModuleDefinition(
         30,
         'reference',
       ),
+      relation(
+        definitionIds.relationIds.stockCountTransaction,
+        entityIds.stockCount,
+        entityIds.transaction,
+        40,
+        'reference',
+      ),
+      relation(
+        definitionIds.relationIds.stockCountSupersedes,
+        entityIds.stockCount,
+        entityIds.stockCount,
+        50,
+        'reference',
+        false,
+      ),
+      relation(
+        definitionIds.relationIds.stockCountLineSession,
+        entityIds.stockCountLine,
+        entityIds.stockCount,
+        60,
+      ),
+      relation(
+        definitionIds.relationIds.stockCountLineTransactionLine,
+        entityIds.stockCountLine,
+        entityIds.transactionLine,
+        70,
+        'reference',
+      ),
     ],
     schemaVersion: version,
     stateMachines: [],
@@ -621,6 +825,10 @@ function fieldsForEntity(
       return Object.values(fieldIds.transactionLine);
     case 'inventory_period_lock':
       return Object.values(fieldIds.periodLock);
+    case 'stock_count':
+      return Object.values(fieldIds.stockCount);
+    case 'stock_count_line':
+      return Object.values(fieldIds.stockCountLine);
     default:
       throw new TypeError(`unknown inventory entity ${local}`);
   }
@@ -862,6 +1070,7 @@ function relation(
   targetEntityId: string,
   orderKey: number,
   ownership: 'parentScopedChild' | 'reference' = 'parentScopedChild',
+  required = true,
 ): Record<string, unknown> {
   return {
     archiveBehavior: 'restrict',
@@ -876,7 +1085,7 @@ function relation(
     orderKey,
     ownership,
     relationId,
-    required: true,
+    required,
     schemaVersion: version,
     sourceEntity: reference('entityReference', sourceEntityId),
     targetEntity: reference('entityReference', targetEntityId),

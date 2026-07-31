@@ -2109,6 +2109,8 @@ test('standalone inventory materialization fails closed when Item and Location t
   assert.deepEqual(externalTargets, [
     'northstar.inventory:entity.item',
     'northstar.inventory:entity.item',
+    'northstar.inventory:entity.item',
+    'northstar.inventory:entity.location',
     'northstar.inventory:entity.location',
     'northstar.inventory:entity.location',
     'northstar.inventory:entity.location',

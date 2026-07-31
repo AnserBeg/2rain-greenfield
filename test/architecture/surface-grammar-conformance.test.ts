@@ -241,13 +241,13 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   const grouped = groupedManifest.navigation;
   assert.ok(grouped);
   const compact = projectCompactSurfaces(groupedManifest.surfaces, grouped);
-  assert.equal(groupedManifest.surfaces.length, 25);
+  assert.equal(groupedManifest.surfaces.length, 31);
   assert.equal(
     groupedManifest.payloadSchemaVersion,
     GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION,
   );
   assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 2);
-  assert.equal(navigationSurfaceIds(grouped.entries).length, 9);
+  assert.equal(navigationSurfaceIds(grouped.entries).length, 11);
   assert.deepEqual(
     grouped.entries.map((entry) => entry.label),
     ['Party', 'Catalog', 'Location', 'Inventory'],
@@ -279,6 +279,8 @@ test('compiled navigation stays flat within budget and groups mounted modules be
     'northstar.app:surface.inventory_transaction_line_list',
     'northstar.app:surface.inventory_transaction_list',
     'northstar.app:surface.legal_entity_list',
+    'northstar.app:surface.stock_count_line_list',
+    'northstar.app:surface.stock_count_list',
   ]);
 
   const overflowManifest = compiledSurfaceManifest(
