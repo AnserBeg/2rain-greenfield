@@ -1,6 +1,6 @@
 # gate-perf — the compile budget measures compiler capacity
 
-Status: author candidate; uncommitted by instruction  
+Status: revision author candidate; prior candidate `d76e6e0`
 Tier: Critical  
 Lane: CANON  
 Base: `378216ab24d3070128862eeeb5ee67771c0a73e6`
@@ -8,10 +8,12 @@ Base: `378216ab24d3070128862eeeb5ee67771c0a73e6`
 ## Outcome
 
 The numeric full-compile objective remains **5,000 ms**. The gate now measures
-the minimum of five complete `compileApplication` executions and reports all
-five samples as test diagnostics. Scheduler contention is one-sided noise: it
-can lengthen an execution, but it cannot make the compiler do less work. A real
-compiler regression therefore raises the best sample as well as the others.
+the minimum of five **first invocations**, each in a fresh child process, and
+reports all five samples as test diagnostics. Scheduler contention is
+one-sided noise: it can lengthen an execution, but it cannot make the compiler
+do less work. Process isolation ensures that first-call lazy initialization,
+JIT, inline caches, module state, and heap state are present in every sample
+rather than only the first.
 
 No dedicated test invocation is added. Serializing the compiler suite is not a
 sufficient repair: the historical serial-in-suite measurement was 5,077 ms,
@@ -27,17 +29,25 @@ the established unit and bound unchanged.
 
 ## What “cold” means
 
-“Cold” remains load-bearing as the distinction between a complete compile from
-normalized bytes and a future incremental or memoized compiler mode. Every
-sample creates a fresh `CompilerInput` and invokes the public full compiler
-path; the compiler has no persistent cache in that path.
+“Cold” is load-bearing in two ways: the invocation uses the complete,
+non-incremental compiler path, and it is the first invocation in its JavaScript
+process. Each child imports the compiler, receives the already-normalized bytes
+over IPC, constructs its `CompilerInput`, then starts the monotonic timer
+immediately around `compileApplication`. Process startup, module loading,
+fixture construction, normalization, IPC, and `compilerInput` setup remain
+outside the interval; first-call work performed by `compileApplication`
+remains inside it.
 
-It does not mean a fresh JavaScript process. The established interval begins
-immediately before `compileApplication`, after Node startup, module loading,
-fixture construction, and normalization. V8 process startup was therefore
-never part of the 5,000 ms objective. Reusing the process does not retire work
-that the old timer measured by contract; it removes scheduler luck from the
-estimator while retaining the cache-cold compiler path.
+**Correction to the first candidate.** It said process reuse did not retire
+work the old timer measured because startup and module loading were already
+outside the interval. That was false. The old first invocation still measured
+lazy V8 compilation, inline-cache initialization, heap state, and any
+compiler-local first-call setup. Same-process samples two through five inherited
+that state. Fresh input objects and complete re-decoding proved that later
+calls still did full compiler work, but they did not make those calls genuine
+first invocations. The minimum could therefore select a warm call and hide a
+cold-only regression. Fresh child processes preserve the SLO's “one cold
+compile” subject for all five samples.
 
 ## Independent reproduction
 
@@ -64,6 +74,20 @@ suite failure, the near-boundary serial result, and the repaired suite's
 7,882-to-3,485 ms spread establish the same one-sided-noise defect without
 claiming identical samples.
 
+That repaired-suite result belongs to the first, same-process candidate and is
+retained as provenance, not as cold-compile evidence. Its full matrix passed at
+`d76e6e0` with samples
+`2402.8, 1727.5, 1662.4, 1712.4, 1753.4` ms, but review correctly invalidated
+the interpretation of samples two through five as cold invocations.
+
+After process isolation, the focused test passed with first-invocation samples
+`1675.7, 1335.9, 1376.8, 1464.0, 1505.9` ms. After the new negative control was
+removed, it passed with
+`1436.5, 1446.5, 1416.8, 1653.6, 1492.5` ms on the final CommonJS-compatible
+child-process entrypoint. The ordinary compiler suite also passed **109/109**
+with first-invocation samples
+`1575.4, 1530.7, 1321.0, 1318.1, 1293.7` ms.
+
 ## Negative control — a real regression remains red
 
 The compiler itself was changed temporarily and restored before handoff. At
@@ -78,17 +102,41 @@ The repaired focused gate failed with samples
 > best of 5 cold full compiles took 6380.5ms; budget is 5000ms
 
 The victim is the budget assertion at
-`test/compiler/performance-budget.test.ts:56-57`, which compares
+`test/compiler/performance-budget.test.ts:117-118`, which compares
 `bestElapsedMilliseconds <= FULL_COMPILE_BUDGET_MILLISECONDS`. Deleting it or
 replacing the measured minimum with an unconditional passing value reopens the
 vacuity this control catches. The temporary recursive call was removed, and a
 clean focused rerun passed with samples
 `5266.0, 4278.5, 3439.8, 3991.6, 3307.2` ms. `packages/compiler/**` is clean.
 
-Applied to the motivating numbers, a set containing the observed 3,025 ms
-quiet compile passes without changing the budget. A real two-times compiler
-regression raises that best case to about 6,050 ms, so all five genuinely
-regressed samples remain above 5,000 ms and the repaired gate fails.
+Applied to the motivating numbers, five isolated cold measurements at the
+observed 3,025 ms capacity pass without changing the budget. A real two-times
+compiler regression raises each comparable cold sample to about 6,050 ms, so
+the repaired gate fails.
+
+## Negative control — a first-invocation-only regression remains red
+
+Review found a distinct vacuity vector that the uniform two-times control did
+not isolate: an expensive first call followed by fast warm calls. The compiler
+was changed temporarily and restored before handoff. A module-local boolean
+made only the first `compileApplication` invocation in each process execute
+four additional complete compiles; every later invocation used the ordinary
+path.
+
+One same-process five-sample probe observed
+`7392.2, 1294.9, 1531.6, 1230.2, 1267.7` ms. The first candidate's minimum
+would have selected 1,230.2 ms and passed even though the cold invocation
+exceeded the budget. The process-isolated gate observed
+`7053.2, 7006.9, 6726.2, 6887.3, 6974.7` ms and failed with:
+
+> best of 5 cold full compiles took 6726.2ms; budget is 5000ms
+
+The isolation victim is the fresh-process call at
+`test/compiler/performance-budget.test.ts:97`. Replacing it with direct
+same-process invocation reopens the demonstrated false pass. The assertion
+victim remains the comparison at lines 117-118; deleting it makes either
+regression control vacuous. The temporary compiler mutation was removed and
+`packages/compiler/**` is clean.
 
 ## Verification boundary
 
