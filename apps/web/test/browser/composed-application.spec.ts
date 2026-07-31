@@ -18,6 +18,7 @@ import {
   INVENTORY_POSTING_CAPABILITY_VERSION,
   INVENTORY_POSTING_DEPENDENCY_SET_ROOT,
   PostgresInventoryPostingService,
+  type InventoryAdjustmentPostingCommandV1,
 } from '../../../../packages/postgres-provider/src/inventory-posting-service.js';
 import { TrustedActorEnvelopeIssuer } from '../../../../packages/postgres-provider/src/trust/trusted-actor-envelope.js';
 import { withEphemeralPostgres } from '../../../../test/helpers/postgres.js';
@@ -86,6 +87,8 @@ async function productJourney(page: Page, baseUrl: string): Promise<void> {
     'Inventory transaction line',
     'Inventory transaction',
     'Legal entity',
+    'Stock count line',
+    'Stock count',
   ]);
   await expect(
     navigation.getByRole('link', { name: /detail|form/i }),
@@ -111,6 +114,8 @@ async function productJourney(page: Page, baseUrl: string): Promise<void> {
       'Inventory transaction line',
       'Inventory transaction',
       'Legal entity',
+      'Stock count line',
+      'Stock count',
     ],
   );
   await inventoryNavigation.getByText('Inventory', { exact: true }).click();
@@ -433,6 +438,11 @@ const browserLegalEntityId = COMPOSED_APPLICATION_INVENTORY_SCOPE.legalEntityId;
 const browserTransactionId = '74000000-0000-4000-8000-000000000002';
 const browserTransactionLineId = '74000000-0000-4000-8000-000000000003';
 const browserPostingIdempotencyKey = '74000000-0000-4000-8000-000000000004';
+const rejectedBrowserTransactionId = '74100000-0000-4000-8000-000000000001';
+const rejectedBrowserTransactionLineId = '74100000-0000-4000-8000-000000000002';
+const rejectedBrowserPostingIdempotencyKey =
+  '74100000-0000-4000-8000-000000000003';
+const rejectedBrowserPostingSourceId = 'browser-rejected-superuser-adjustment';
 const demoItemId = '71000000-0000-4000-8000-000000000011';
 const demoLocationId = '71000000-0000-4000-8000-000000000021';
 const browserPostingInstant = '2026-07-30T12:00:00.000Z';
@@ -474,60 +484,191 @@ async function seedPostedInventory(
           subject: null,
         }),
       }).issue(context);
-      const runtimePool = new pg.Pool({
+      const registration = {
+        capabilityId: INVENTORY_POSTING_CAPABILITY_ID,
+        capabilityVersion: INVENTORY_POSTING_CAPABILITY_VERSION,
+        dependencySetRoot: INVENTORY_POSTING_DEPENDENCY_SET_ROOT,
+        releaseContentHash: application.runtime.releaseRoot,
+        releaseId: application.runtime.activeReleaseId,
+        storageTarget: projection.storageTarget,
+        storageTargetContentHash: projection.contentHash,
+      } as const;
+      const command: InventoryAdjustmentPostingCommandV1 = {
+        authorization: {
+          decision: 'ALLOW',
+          evaluatorVersion: 'browser-inventory-fixture/v1',
+          policyVersion: 'browser-inventory-fixture/v1',
+        },
+        channel: 'SYSTEM',
+        effectiveAt: browserPostingInstant,
+        idempotencyKey: browserPostingIdempotencyKey,
+        legalEntityId: browserLegalEntityId,
+        lines: [
+          {
+            itemId: demoItemId,
+            locationId: demoLocationId,
+            quantityDelta: '5',
+            sourceLine: '1',
+            transactionLineId: browserTransactionLineId,
+            unitId: 'EA',
+          },
+        ],
+        reason: {
+          code: 'browser-seed',
+          narrative: 'Posted through the admitted Inventory capability',
+        },
+        sourceId: 'browser-posted-adjustment',
+        sourceRevision: 1,
+        sourceType: 'browser-checkpoint',
+        stockDimensionSetVersion: 'v1',
+        transactionId: browserTransactionId,
+      };
+      const rejectedCommand: InventoryAdjustmentPostingCommandV1 = {
+        ...command,
+        idempotencyKey: rejectedBrowserPostingIdempotencyKey,
+        lines: [
+          {
+            ...command.lines[0]!,
+            transactionLineId: rejectedBrowserTransactionLineId,
+          },
+        ],
+        sourceId: rejectedBrowserPostingSourceId,
+        transactionId: rejectedBrowserTransactionId,
+      };
+      const privilegedPool = new pg.Pool({
         connectionString: databaseUrl,
-        max: 2,
-        user: 'north_star_runtime',
+        max: 1,
       });
       try {
-        const service = new PostgresInventoryPostingService(
-          runtimePool,
-          {
-            capabilityId: INVENTORY_POSTING_CAPABILITY_ID,
-            capabilityVersion: INVENTORY_POSTING_CAPABILITY_VERSION,
-            dependencySetRoot: INVENTORY_POSTING_DEPENDENCY_SET_ROOT,
-            releaseContentHash: application.runtime.releaseRoot,
-            releaseId: application.runtime.activeReleaseId,
-            storageTarget: projection.storageTarget,
-            storageTargetContentHash: projection.contentHash,
-          },
+        await expectDatabaseRole(privilegedPool, {
+          currentUser: 'postgres',
+          rolsuper: true,
+          sessionUser: 'postgres',
+        });
+        const privilegedService = new PostgresInventoryPostingService(
+          privilegedPool,
+          registration,
           { currentInstant: () => browserPostingInstant },
         );
-        await service.postAdjustment(context, actor, {
-          authorization: {
-            decision: 'ALLOW',
-            evaluatorVersion: 'browser-inventory-fixture/v1',
-            policyVersion: 'browser-inventory-fixture/v1',
-          },
-          channel: 'SYSTEM',
-          effectiveAt: browserPostingInstant,
-          idempotencyKey: browserPostingIdempotencyKey,
-          legalEntityId: browserLegalEntityId,
-          lines: [
-            {
-              itemId: demoItemId,
-              locationId: demoLocationId,
-              quantityDelta: '5',
-              sourceLine: '1',
-              transactionLineId: browserTransactionLineId,
-              unitId: 'EA',
-            },
-          ],
-          reason: {
-            code: 'browser-seed',
-            narrative: 'Posted through the admitted Inventory capability',
-          },
-          sourceId: 'browser-posted-adjustment',
-          sourceRevision: 1,
-          sourceType: 'browser-checkpoint',
-          stockDimensionSetVersion: 'v1',
-          transactionId: browserTransactionId,
+        await expect(
+          privilegedService.postAdjustment(context, actor, rejectedCommand),
+        ).rejects.toMatchObject({
+          code: 'INVENTORY_POSTING_STORAGE_INVALID',
+          message:
+            'INVENTORY_POSTING_STORAGE_INVALID: posting requires the unprivileged trusted runtime login',
+          name: 'InventoryPostingError',
         });
+      } finally {
+        await privilegedPool.end();
+      }
+      await expectRejectedPostingAbsent(
+        adminPool,
+        context,
+        projection.storageTarget,
+      );
+
+      const runtimeConnection = new URL(databaseUrl);
+      runtimeConnection.username = 'north_star_runtime';
+      runtimeConnection.password = '';
+      const runtimePool = new pg.Pool({
+        connectionString: runtimeConnection.href,
+        max: 2,
+      });
+      try {
+        await expectDatabaseRole(runtimePool, {
+          currentUser: 'north_star_runtime',
+          rolsuper: false,
+          sessionUser: 'north_star_runtime',
+        });
+        const service = new PostgresInventoryPostingService(
+          runtimePool,
+          registration,
+          { currentInstant: () => browserPostingInstant },
+        );
+        await service.postAdjustment(context, actor, command);
       } finally {
         await runtimePool.end();
       }
     },
   );
+}
+
+async function expectDatabaseRole(
+  pool: pg.Pool,
+  expected: {
+    readonly currentUser: string;
+    readonly rolsuper: boolean;
+    readonly sessionUser: string;
+  },
+): Promise<void> {
+  const result = await pool.query<{
+    currentUser: string;
+    rolsuper: boolean;
+    sessionUser: string;
+  }>(`SELECT current_user AS "currentUser",
+             session_user AS "sessionUser",
+             role.rolsuper
+        FROM pg_catalog.pg_roles AS role
+       WHERE role.rolname = current_user`);
+  expect(result.rows).toEqual([expected]);
+}
+
+async function expectRejectedPostingAbsent(
+  pool: pg.Pool,
+  context: ReturnType<typeof trustedContextForRequestRuntimeView>,
+  target: StorageTargetPayloadV1,
+): Promise<void> {
+  const transaction = storageEntity(target, 'inventory_transaction');
+  const transactionLine = storageEntity(target, 'inventory_transaction_line');
+  const movement = storageEntity(target, 'inventory_movement');
+  const movementSourceIdColumn = movement.columns.find(
+    (column) => localField(column) === 'inventory_movement_source_id',
+  )?.physicalName;
+  if (!movementSourceIdColumn) {
+    throw new TypeError('inventory movement source id column is missing');
+  }
+  const schema = quoted(target.providerAbi.managedSchema);
+  const result = await pool.query<{
+    movementRows: number;
+    receiptRows: number;
+    transactionLineRows: number;
+    transactionRows: number;
+  }>(
+    `SELECT
+       (SELECT count(*)::integer
+          FROM ${schema}.${quoted(transaction.physicalTableName)}
+         WHERE tenant_id=$1 AND environment_id=$2
+           AND ${quoted(transaction.recordIdentity.column)}=$3) AS "transactionRows",
+       (SELECT count(*)::integer
+          FROM ${schema}.${quoted(transactionLine.physicalTableName)}
+         WHERE tenant_id=$1 AND environment_id=$2
+           AND ${quoted(transactionLine.recordIdentity.column)}=$4) AS "transactionLineRows",
+       (SELECT count(*)::integer
+          FROM ${schema}.${quoted(movement.physicalTableName)}
+         WHERE tenant_id=$1 AND environment_id=$2
+           AND ${quoted(movementSourceIdColumn)}=$5) AS "movementRows",
+       (SELECT count(*)::integer
+          FROM platform.semantic_operation_receipts
+         WHERE tenant_id=$1 AND environment_id=$2
+           AND action_id=$6 AND idempotency_key=$7) AS "receiptRows"`,
+    [
+      context.tenantId,
+      context.environmentId,
+      rejectedBrowserTransactionId,
+      rejectedBrowserTransactionLineId,
+      rejectedBrowserPostingSourceId,
+      INVENTORY_POSTING_CAPABILITY_ID,
+      rejectedBrowserPostingIdempotencyKey,
+    ],
+  );
+  expect(result.rows).toEqual([
+    {
+      movementRows: 0,
+      receiptRows: 0,
+      transactionLineRows: 0,
+      transactionRows: 0,
+    },
+  ]);
 }
 
 async function seedInventoryDraft(
