@@ -419,7 +419,8 @@ test('registered onHand is temporal, narrowed, and atomically invalidates a same
         ['cache-hit'],
         'deleting the consistent-anchor return in executeAggregateQuery makes this observe a ledger recomputation',
       );
-      assert.equal(observations[0]?.cacheKey, historicalAnchor.cache_key);
+      const initialCacheHit = observations[0]!;
+      assert.equal(initialCacheHit.cacheKey, historicalAnchor.cache_key);
 
       await seedMovement(runtimePool, context, binding, {
         effectiveAt: '2026-01-20T00:00:00.000Z',
@@ -483,7 +484,8 @@ test('registered onHand is temporal, narrowed, and atomically invalidates a same
         ['cache-hit'],
         'a genuinely repeated query after invalidation must still hit the cache',
       );
-      assert.equal(observations[0]?.cacheKey, correctedAnchor.cache_key);
+      const correctedCacheHit = observations[0]!;
+      assert.equal(correctedCacheHit.cacheKey, correctedAnchor.cache_key);
 
       const rollbackMarker = new Error('ROLLBACK_GENERATION_CONTROL');
       await assert.rejects(
@@ -518,12 +520,127 @@ test('registered onHand is temporal, narrowed, and atomically invalidates a same
         'the rolled-back movement and its generation must remain jointly invisible',
       );
 
+      const cacheLockHolder = await database.pool.connect();
+      let cacheLockHolderOpen = false;
+      let inFlightCachedRead:
+        Promise<SemanticAggregateResultEnvelope> | undefined;
+      let concurrentAppend: Promise<void> | undefined;
+      let inFlightCachedHistorical: SemanticAggregateResultEnvelope;
+      try {
+        await cacheLockHolder.query('BEGIN');
+        cacheLockHolderOpen = true;
+        const holderPid = await cacheLockHolder.query<{ pid: number }>(
+          'SELECT pg_backend_pid() AS pid',
+        );
+        await cacheLockHolder.query(
+          'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+          [correctedCacheHit.cacheKey],
+        );
+        observations.length = 0;
+        inFlightCachedRead = invokeOnHand(
+          gateway,
+          view,
+          sameKeyAppendArguments,
+        );
+        void inFlightCachedRead.catch(() => undefined);
+        const cachedReadPid = await waitForAggregateCacheLockWaiter(
+          database.pool,
+        );
+        assert.notEqual(cachedReadPid, holderPid.rows[0]?.pid);
+
+        concurrentAppend = seedMovement(runtimePool, context, binding, {
+          effectiveAt: '2026-01-27T00:00:00.000Z',
+          ordinal: 7,
+          quantity: '1',
+          recordedAt: '2026-01-28T00:00:00.000Z',
+        });
+        void concurrentAppend.catch(() => undefined);
+        await waitForAggregatePostingGenerationWaiter(
+          database.pool,
+          cachedReadPid,
+        );
+
+        await cacheLockHolder.query('COMMIT');
+        cacheLockHolderOpen = false;
+        inFlightCachedHistorical = await inFlightCachedRead;
+        await concurrentAppend;
+      } finally {
+        if (cacheLockHolderOpen) await cacheLockHolder.query('ROLLBACK');
+        cacheLockHolder.release();
+        if (inFlightCachedRead) {
+          await inFlightCachedRead.catch(() => undefined);
+        }
+        if (concurrentAppend) {
+          await concurrentAppend.catch(() => undefined);
+        }
+      }
+      assertAggregateValue(
+        inFlightCachedHistorical,
+        '7',
+        'a cache read already holding the shared generation guard linearizes before the waiting append',
+      );
+      assert.deepEqual(
+        observations.map((entry) => entry.kind),
+        ['cache-hit'],
+        'the guarded in-flight read remains a genuine cache hit before the append commits',
+      );
+      observations.length = 0;
+      const concurrentlyCorrectedHistorical = await invokeOnHand(
+        gateway,
+        view,
+        sameKeyAppendArguments,
+      );
+      assertAggregateValue(
+        concurrentlyCorrectedHistorical,
+        '8',
+        'the identical request after the waiting append commits must use the advanced generation',
+      );
+      assert.deepEqual(
+        observations.map((entry) => entry.kind),
+        ['ledger-recomputation'],
+      );
+      const concurrentlyCorrectedAnchor = await readOnlyAnchor(
+        runtimePool,
+        context,
+        inventoryIds.queryIds.onHand,
+        earlyEffectiveHorizon,
+        firstRecordedHorizon,
+      );
+      assert.equal(
+        BigInt(concurrentlyCorrectedAnchor.movement_generation),
+        BigInt(correctedAnchor.movement_generation) + 1n,
+      );
+      assert.equal(
+        await independentLedgerSum(database.pool, binding, {
+          atTime: earlyEffectiveHorizon,
+          includeArchived: false,
+          recordedAtHorizon: firstRecordedHorizon,
+        }),
+        '8',
+      );
+      observations.length = 0;
+      const cachedConcurrentCorrection = await invokeOnHand(
+        gateway,
+        view,
+        sameKeyAppendArguments,
+      );
+      assertAggregateValue(cachedConcurrentCorrection, '8');
+      assert.deepEqual(
+        observations.map((entry) => entry.kind),
+        ['cache-hit'],
+        'the second concurrent invalidation must also leave a reusable refreshed anchor',
+      );
+      assert.equal(
+        observations[0]?.cacheKey,
+        concurrentlyCorrectedAnchor.cache_key,
+      );
+
       const current = await invokeOnHand(
         gateway,
         view,
         onHandArguments(lateEffectiveHorizon, firstRecordedHorizon),
       );
-      assertAggregateValue(current, '10');
+      assertAggregateValue(current, '11');
       assert.notDeepEqual(current.value.value, historical.value.value);
       assert.equal(
         await independentLedgerSum(database.pool, binding, {
@@ -531,7 +648,7 @@ test('registered onHand is temporal, narrowed, and atomically invalidates a same
           includeArchived: true,
           recordedAtHorizon: firstRecordedHorizon,
         }),
-        '110',
+        '111',
         'removing the provider archive predicate would return the independently observed wrong balance',
       );
 
@@ -557,7 +674,7 @@ test('registered onHand is temporal, narrowed, and atomically invalidates a same
         view,
         onHandArguments(lateEffectiveHorizon, firstRecordedHorizon),
       );
-      assertAggregateValue(withoutPolicy, '10');
+      assertAggregateValue(withoutPolicy, '11');
 
       await seedMovement(runtimePool, context, binding, {
         effectiveAt: '2026-01-20T00:00:00.000Z',
@@ -570,13 +687,13 @@ test('registered onHand is temporal, narrowed, and atomically invalidates a same
         view,
         onHandArguments(earlyEffectiveHorizon, firstRecordedHorizon),
       );
-      assertAggregateValue(unchangedBelief, '7');
+      assertAggregateValue(unchangedBelief, '8');
       const revisedHistory = await invokeOnHand(
         gateway,
         view,
         onHandArguments(earlyEffectiveHorizon, secondRecordedHorizon),
       );
-      assertAggregateValue(revisedHistory, '9');
+      assertAggregateValue(revisedHistory, '10');
 
       const independent = await independentLedgerSum(database.pool, binding, {
         atTime: earlyEffectiveHorizon,
@@ -1468,6 +1585,65 @@ function actorIssuer(): TrustedActorEnvelopeIssuer {
       };
     },
   });
+}
+
+async function waitForAggregateCacheLockWaiter(pool: Pool): Promise<number> {
+  const deadline = process.hrtime.bigint() + 15_000_000_000n;
+  while (process.hrtime.bigint() < deadline) {
+    const result = await pool.query<{ pid: number }>(
+      `SELECT activity.pid
+         FROM pg_catalog.pg_stat_activity AS activity
+         JOIN pg_catalog.pg_locks AS lock_record
+           ON lock_record.pid = activity.pid
+        WHERE activity.datname = current_database()
+          AND activity.application_name = 'g3-p5-onhand'
+          AND activity.wait_event_type = 'Lock'
+          AND activity.wait_event = 'advisory'
+          AND lock_record.locktype = 'advisory'
+          AND lock_record.objsubid = 1
+          AND NOT lock_record.granted
+        ORDER BY activity.pid
+        LIMIT 1`,
+    );
+    const pid = result.rows[0]?.pid;
+    if (typeof pid === 'number') return pid;
+    await new Promise<void>((resolveTurn) => setImmediate(resolveTurn));
+  }
+  throw new Error(
+    'the onHand request never waited on its prior-generation cache lock',
+  );
+}
+
+async function waitForAggregatePostingGenerationWaiter(
+  pool: Pool,
+  cachedReadPid: number,
+): Promise<number> {
+  const deadline = process.hrtime.bigint() + 15_000_000_000n;
+  while (process.hrtime.bigint() < deadline) {
+    const result = await pool.query<{ pid: number }>(
+      `SELECT activity.pid
+         FROM pg_catalog.pg_stat_activity AS activity
+         JOIN pg_catalog.pg_locks AS lock_record
+           ON lock_record.pid = activity.pid
+        WHERE activity.datname = current_database()
+          AND activity.application_name = 'g3-p5-onhand'
+          AND activity.wait_event_type = 'Lock'
+          AND activity.wait_event = 'advisory'
+          AND lock_record.locktype = 'advisory'
+          AND lock_record.mode = 'ExclusiveLock'
+          AND NOT lock_record.granted
+          AND $1::integer = ANY(pg_blocking_pids(activity.pid))
+        ORDER BY activity.pid
+        LIMIT 1`,
+      [cachedReadPid],
+    );
+    const pid = result.rows[0]?.pid;
+    if (typeof pid === 'number') return pid;
+    await new Promise<void>((resolveTurn) => setImmediate(resolveTurn));
+  }
+  throw new Error(
+    'the movement append never waited on the in-flight cache read generation guard',
+  );
 }
 
 async function withModuleRole<T>(

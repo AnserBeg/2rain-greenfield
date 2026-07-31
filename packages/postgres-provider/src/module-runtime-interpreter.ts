@@ -918,6 +918,15 @@ async function executeAggregateQuery(
     );
   }
 
+  await client.query(
+    'SELECT pg_advisory_xact_lock_shared(hashtextextended($1, 0))',
+    [
+      aggregateGenerationLockKey(
+        request.context.tenantId,
+        request.context.environmentId,
+      ),
+    ],
+  );
   const movementGeneration = await loadAggregateMovementGeneration(
     client,
     request.context.tenantId,
@@ -1182,6 +1191,13 @@ function aggregateCacheDigest(domain: string, value: unknown): string {
     .digest('hex');
 }
 
+function aggregateGenerationLockKey(
+  tenantId: string,
+  environmentId: string,
+): string {
+  return `northstar.semantic-aggregate-generation/v1:${tenantId}:${environmentId}`;
+}
+
 function aggregateAnchorDigest(
   identity: AggregateCacheIdentity,
   result: SemanticAggregateResultEnvelope,
@@ -1255,10 +1271,10 @@ async function loadAggregateAnchor(
             result_scale,
             base_unit_id,
             anchor_digest
-       FROM north_star_internal.semantic_aggregate_anchors
-      WHERE tenant_id = $1
-        AND environment_id = $2
-        AND cache_key = $3`,
+       FROM north_star_internal.semantic_aggregate_anchors AS anchor
+      WHERE anchor.tenant_id = $1
+        AND anchor.environment_id = $2
+        AND anchor.cache_key = $3`,
     [identity.tenantId, identity.environmentId, identity.cacheKey],
   );
   if (result.rowCount === 0) return null;
@@ -1348,10 +1364,18 @@ async function insertAggregateAnchor(
        result_scale,
        base_unit_id,
        anchor_digest
-     ) VALUES (
+     ) SELECT
        $1, $2, $3, $4, $5, $6, $7, $8::uuid[], $9::jsonb, $10::jsonb,
        $11, $12, $13, $14, $15, $16, $17, $18
-     )`,
+      WHERE COALESCE(
+        (
+          SELECT generation.movement_generation
+            FROM north_star_internal.semantic_aggregate_generations AS generation
+           WHERE generation.tenant_id = $1
+             AND generation.environment_id = $2
+        ),
+        0
+      ) = $4::bigint`,
     [
       identity.tenantId,
       identity.environmentId,

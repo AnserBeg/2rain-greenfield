@@ -93,6 +93,17 @@ AS $advance_semantic_aggregate_generation$ BEGIN
               requested_environment_id
             ); END IF;
 
+  PERFORM pg_advisory_xact_lock(
+    hashtextextended(
+      format(
+        'northstar.semantic-aggregate-generation/v1:%s:%s',
+        requested_tenant_id,
+        requested_environment_id
+      ),
+      0
+    )
+  );
+
   INSERT INTO north_star_internal.semantic_aggregate_generations AS generation (
     tenant_id,
     environment_id,
