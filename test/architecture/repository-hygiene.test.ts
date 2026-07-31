@@ -12,6 +12,7 @@ const suiteDefinitions = [
       'test/unit/canonical-model/diagnostic-ordering.test.ts',
       'test/unit/canonical-model/negative-contracts.test.ts',
       'test/unit/canonical-model/normalization.test.ts',
+      'test/unit/canonical-model/predicate-admission.test.ts',
       'test/unit/catalog-definition.test.ts',
       'test/unit/location-definition.test.ts',
       'test/unit/observability.test.ts',

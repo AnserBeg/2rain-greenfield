@@ -10,8 +10,16 @@ import {
 
 const version = LANGUAGE_VERSIONS.v3;
 
-const literalTrue = { kind: 'booleanPredicate', schemaVersion: version, value: true };
-const literalFalse = { kind: 'booleanPredicate', schemaVersion: version, value: false };
+const literalTrue = {
+  kind: 'booleanPredicate',
+  schemaVersion: version,
+  value: true,
+};
+const literalFalse = {
+  kind: 'booleanPredicate',
+  schemaVersion: version,
+  value: false,
+};
 const notPosted = {
   kind: 'notPredicate',
   schemaVersion: version,
@@ -75,7 +83,10 @@ test('admission refuses everything unparseable, and says why', () => {
   for (const [value, reason] of [
     [null, 'invalid-node-shape'],
     ['true', 'invalid-node-shape'],
-    [{ kind: 'booleanPredicate', schemaVersion: version }, 'invalid-node-shape'],
+    [
+      { kind: 'booleanPredicate', schemaVersion: version },
+      'invalid-node-shape',
+    ],
     // A non-Boolean literal is a shape failure to the structural parser; the
     // one-argument fence calls the same input 'unsupported-literal'. Both
     // refuse — only the reason differs by entry point.
