@@ -602,6 +602,7 @@ export function registerInventoryContractCases(
         () => {
           const definition = structuredClone(inventoryModuleDefinition()) as {
             fields: Array<Record<string, unknown>>;
+            languageVersion: string;
           };
           const field = definition.fields.find((candidate) =>
             String(candidate.fieldId).endsWith(`:field.${fieldLocalId}`),
@@ -611,7 +612,7 @@ export function registerInventoryContractCases(
           else {
             field.fieldType = {
               kind: 'booleanFieldType',
-              schemaVersion: 'v3',
+              schemaVersion: definition.languageVersion,
             };
           }
           const result = compileApplication(moduleInput(definition));
@@ -632,6 +633,7 @@ export function registerInventoryContractCases(
       () => {
         const definition = structuredClone(catalogModuleDefinition()) as {
           fields: Array<Record<string, unknown>>;
+          languageVersion: string;
         };
         const field = definition.fields.find((candidate) =>
           String(candidate.fieldId).endsWith(':field.item_base_unit'),
@@ -641,7 +643,7 @@ export function registerInventoryContractCases(
         else {
           field.fieldType = {
             kind: 'booleanFieldType',
-            schemaVersion: 'v3',
+            schemaVersion: definition.languageVersion,
           };
         }
         const result = compileApplication(moduleInput(definition));
@@ -741,7 +743,7 @@ export function registerInventoryContractCases(
         permissionId,
         resource: {
           kind: 'entityReference',
-          schemaVersion: 'v3',
+          schemaVersion: definition.languageVersion,
           targetId: periodEntityId,
         },
       });
@@ -750,22 +752,22 @@ export function registerInventoryContractCases(
         effect: {
           entity: {
             kind: 'entityReference',
-            schemaVersion: 'v3',
+            schemaVersion: definition.languageVersion,
             targetId: periodEntityId,
           },
           kind: 'createRecordEffect',
-          schemaVersion: 'v3',
+          schemaVersion: definition.languageVersion,
         },
         operationId:
           'northstar.inventory:operation.inventory_period_lock_create',
         permission: {
           kind: 'permissionReference',
-          schemaVersion: 'v3',
+          schemaVersion: definition.languageVersion,
           targetId: permissionId,
         },
         readBack: {
           kind: 'queryReference',
-          schemaVersion: 'v3',
+          schemaVersion: definition.languageVersion,
           targetId: 'northstar.inventory:query.inventory_period_lock_get',
         },
       });
