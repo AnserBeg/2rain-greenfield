@@ -177,9 +177,31 @@ serializes the two packets.
   docs/execution/current-plan.md
   docs/execution/lanes.md
   docs/decisions/**        (except a packet's own new ADR file)
+  docs/greenfield-north-star-erp-platform-plan.md
+  .agents/skills/ux-grammar/SKILL.md
 
 These are the highest-conflict files in the repository and they are all
 narrative. Removing them from every lease removes most merge risk outright.
+
+**The plan and `ux-grammar` were added 2026-07-31**, on the reasoning this list
+already states: both are narrative, both are program-level authority, and both
+were in no partition row at all. Six queued UX rows each proposed amending plan
+§8.5-8.6 *and* the skill, which would have been six lanes editing two
+high-conflict narrative files.
+
+**They carry a complication the other entries do not, and a lane must know it.**
+`checkUxGrammarPin` binds the skill and the plan together with four source files
+— `apps/web/src/app-server.ts`, `component-registry.ts`, `surface-contract.ts`,
+`surface-runtime.ts` — plus `packages/canonical-model/src/constants.ts`
+(`test/architecture/ux-grammar-skill.test.ts`). A vocabulary change therefore
+cannot be made from either side alone: the skill is orchestrator-owned, the code
+is lane-owned, and `UX003_VOCABULARY_DRIFT` fails if they disagree.
+
+So the rule is **the orchestrator owns the vocabulary, and a lane never
+introduces new vocabulary.** A lane that needs a term the grammar does not have
+issues a **stop-and-bridge-request** — the standing procedure for an out-of-lease
+need — and the orchestrator lands the vocabulary first. A lane may still make
+changes that keep the pinned set consistent without inventing terms.
 
 ## Shared files — add-only, re-derive on conflict
 
