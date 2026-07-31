@@ -305,7 +305,9 @@ test('scope omission verification runs for an empty plan and refuses a malformed
         user: 'north_star_runtime',
       });
       try {
-        const repository = new PostgresImmutableReleaseRepository(runtimePool);
+        const candidateRepository = new PostgresImmutableReleaseRepository(
+          runtimePool,
+        );
         const verification = new PostgresReleaseVerificationService(
           runtimePool,
         );
@@ -317,18 +319,21 @@ test('scope omission verification runs for an empty plan and refuses a malformed
           revisionId: MintedUuid,
           releaseId: MintedUuid,
         ) => {
-          await repository.storeAppPackageRevision(
+          await candidateRepository.storeAppPackageRevision(
             context,
             revisionCommand(context, revisionId, revisionBytes),
           );
-          const staged = await repository.stageTenantReleaseCandidate(context, {
-            appPackageRevisionId: revisionId,
-            compiledRelease,
-            createdBy: context.principalId,
-            environmentId: context.environmentId,
-            releaseId,
-            tenantId: context.tenantId,
-          });
+          const staged = await candidateRepository.stageTenantReleaseCandidate(
+            context,
+            {
+              appPackageRevisionId: revisionId,
+              compiledRelease,
+              createdBy: context.principalId,
+              environmentId: context.environmentId,
+              releaseId,
+              tenantId: context.tenantId,
+            },
+          );
           return verification.executeSemanticCandidateWithExecutor(
             context,
             {
