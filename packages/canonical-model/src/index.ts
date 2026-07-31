@@ -1,4 +1,6 @@
 export {
+  ADOPTED_LANGUAGE_VERSION,
+  ADOPTED_NORMALIZATION_PROFILE_VERSION,
   CANONICALIZATION_PROFILE_VERSION,
   CANONICAL_LANGUAGE_PROFILES,
   CONTENT_HASH_ALGORITHM,
@@ -23,6 +25,8 @@ export {
   SURFACE_ARCHETYPES,
   SURFACE_SLOTS,
   canonicalLanguageProfileFor,
+  languageHasLegalEntityQueryScope,
+  languageHasV3Features,
   type CanonicalLanguageProfile,
   type CanonicalLanguageVersion,
   type CanonicalNormalizationProfileVersion,
@@ -53,9 +57,12 @@ export {
   type NormalizedApplicationPackage,
   type PredicateExpression,
   type PredicateExpressionV3,
+  type QueryLegalEntityScope,
   type QueryParameterReference,
   type V3AuthoredApplicationPackage,
   type V3NormalizedApplicationPackage,
+  type V4AuthoredApplicationPackage,
+  type V4NormalizedApplicationPackage,
   type VersionedAuthoredApplicationPackage,
   type VersionedNormalizedApplicationPackage,
   type VersionedPredicateExpression,
@@ -103,6 +110,15 @@ export {
   type QueryAggregateFieldContract,
   type QueryAggregateKernelReceipt,
 } from './query-aggregate-kernel.js';
+export {
+  LEGAL_ENTITY_SCOPE_CONTRACT_V1,
+  LEGAL_ENTITY_SCOPE_KERNEL_RECEIPT_VERSION,
+  LEGAL_ENTITY_SCOPE_PROFILE_VERSION,
+  evaluateLegalEntityScopeSelection,
+  type LegalEntityScopeCardinality,
+  type LegalEntityScopeSelectionReceipt,
+  type LegalEntityScopeSelectionRequest,
+} from './legal-entity-scope-kernel.js';
 export {
   canonicalize,
   canonicalizeAndHash,

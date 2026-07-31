@@ -73,7 +73,10 @@ test('unknown kinds, versions, properties, slots, and status roles fail closed',
   const unknownVersion = structuredClone(fixture()) as unknown as {
     modules: Array<Record<string, unknown>>;
   };
-  unknownVersion.modules[0]!.schemaVersion = 'v4';
+  // Was 'v4' until Q1-P5 cut v4. A control that probes with a version the
+  // language later gains stops observing the fact it asserts, so the probe
+  // tracks one past the newest readable version instead of a fixed literal.
+  unknownVersion.modules[0]!.schemaVersion = 'v5';
   expectDiagnostic(
     () => normalizeApplicationPackage(unknownVersion),
     'CANON_VERSION_UNSUPPORTED',
