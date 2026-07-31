@@ -244,7 +244,7 @@ export class PostgresImmutableReleaseRepository implements ImmutableReleaseRepos
       if (!evidence) {
         throw integrity(
           'VERIFICATION_EVIDENCE_NOT_FOUND',
-          'candidate admission requires durable executed verification evidence',
+          'candidate admission requires durable exact-partition verification evidence',
         );
       }
       const admitted = await client.query<{ admitted: boolean }>(

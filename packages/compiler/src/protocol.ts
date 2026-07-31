@@ -50,6 +50,14 @@ export const VERIFICATION_SCENARIO_VERSION =
   'northstar.verification-scenario/v1' as const;
 export const VERIFICATION_RESULT_VERSION =
   'northstar.verification-result/v1' as const;
+export const VERIFICATION_RESULT_SET_VERSION =
+  'northstar.verification-result-set/v1' as const;
+export const VERIFICATION_PARTITIONED_RESULT_SET_VERSION =
+  'northstar.verification-result-set/v2' as const;
+export const VERIFICATION_DERIVATION_VERSION =
+  'northstar.verification-derivation/v1' as const;
+export const VERIFICATION_IMPACT_ANALYSIS_VERSION =
+  'northstar.verification-impact-analysis/v1' as const;
 export const STORAGE_TRANSITION_ENVELOPE_VERSION =
   'northstar.storage-transition-envelope/v1' as const;
 export const STORAGE_ELEMENT_CONTRACT_VERSION =
