@@ -246,7 +246,11 @@ function corpusPartyDefinition(
     const query = structuredClone(template);
     query.queryId = `${PARTY_IDS.namespace}:query.party_q1p2_${candidate.caseId}`;
     query.tier = 'q1';
-    query.filter = candidate.predicate;
+    // Version-from-artifact: the corpus is DATA describing predicate parity,
+    // authored once at whatever version was current. Re-version its nodes to the
+    // definition they are spliced into, so adoption does not churn a data
+    // fixture and a v3-authored predicate never lands inside a v4 package.
+    query.filter = reversionNodes(candidate.predicate, schemaVersion);
     query.selections = (query.selections as Array<Record<string, unknown>>).map(
       (selection, index) => ({
         ...selection,
@@ -304,4 +308,20 @@ function reference(
 
 function quoted(identifier: string): string {
   return `"${identifier.replaceAll('"', '""')}"`;
+}
+
+function reversionNodes(value: unknown, schemaVersion: string): unknown {
+  if (Array.isArray(value)) {
+    return value.map((entry) => reversionNodes(entry, schemaVersion));
+  }
+  if (typeof value !== 'object' || value === null) return value;
+  const record = value as Record<string, unknown>;
+  return Object.fromEntries(
+    Object.entries(record).map(([key, entry]) => [
+      key,
+      key === 'schemaVersion' && typeof entry === 'string'
+        ? schemaVersion
+        : reversionNodes(entry, schemaVersion),
+    ]),
+  );
 }

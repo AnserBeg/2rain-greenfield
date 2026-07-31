@@ -130,7 +130,7 @@ test('compiled registration data drives both generic gateway ports from one pinn
   );
 });
 
-test('unsupported compiled predicates fail closed before the generic executor', async () => {
+test('gateway admits parseable operation predicates without deciding their truth', async () => {
   const compiled = compileFixture();
   const schemaVersion = compiled.bundle.releaseManifest.languageVersion;
   const policy = new AllowPolicy();
@@ -187,7 +187,7 @@ test('unsupported compiled predicates fail closed before the generic executor', 
     { outcome: operation.outcome, reason: operation.unsupportedReason },
     {
       outcome: 'unsupported',
-      reason: 'operation-precondition-unsupported',
+      reason: 'operation-read-back-unsupported',
     },
   );
   assert.equal(executor.queryCalls.length, 0);
@@ -317,7 +317,7 @@ test('strict predicate receipts route every gateway site and preserve exact outc
       assert.equal(executor.operationCalls.length, 0);
       assert.deepEqual(
         kernel.receipts.map((receipt) => receipt.outcome),
-        ['accepted', 'rejected'],
+        ['admitted', 'rejected'],
       );
     });
   }
@@ -353,7 +353,7 @@ test('predicate receipt observation cannot alter accepted query or operation exe
   assert.equal(executor.operationCalls.length, 1);
   assert.deepEqual(
     kernel.receipts.map((receipt) => receipt.outcome),
-    ['accepted', 'accepted', 'accepted'],
+    ['accepted', 'admitted', 'accepted'],
   );
 });
 
@@ -885,7 +885,12 @@ function compileFixture(): CompileSuccess {
     normalizedDefinitionBytes: new TextEncoder().encode(
       canonicalize(normalized),
     ),
-    profile: { ...MODULE_COMPILER_PROFILE },
+    // Version-from-artifact: compile the fixture at the version it declares.
+    profile: {
+      ...MODULE_COMPILER_PROFILE,
+      languageVersion: normalized.languageVersion,
+      normalizationProfileVersion: normalized.normalizationProfileVersion,
+    },
   });
   assert.equal(result.status, 'compiled');
   return result as CompileSuccess;

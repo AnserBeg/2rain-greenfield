@@ -18,11 +18,15 @@ export const LANGUAGE_VERSION = LANGUAGE_VERSIONS.v2;
 /** The newest readable version. Readable is not the same as adopted. */
 export const LATEST_LANGUAGE_VERSION = LANGUAGE_VERSIONS.v4;
 /**
- * The version the default compiler profile selects. v4 is cut without
- * migrating any package to it, exactly as v3 was, so adoption stays at v3 and
- * every compiled artifact is byte-identical across the version event.
+ * The version the default compiler profile selects. Moved to v4 by the
+ * LANG-ADOPT packet: adoption is an application-wide artifact event, absorbed
+ * exactly once, on the `4c` precedent ("definition was free, only adoption
+ * cost"). Every product module declares v4 together, because node-version
+ * purity is uniform within a package revision -- a v4 module in a v3
+ * application is refused, and so is the reverse. Historical releases keep the
+ * version they were compiled at.
  */
-export const ADOPTED_LANGUAGE_VERSION = LANGUAGE_VERSIONS.v3;
+export const ADOPTED_LANGUAGE_VERSION = LANGUAGE_VERSIONS.v4;
 export const SUPPORTED_LANGUAGE_VERSIONS = Object.freeze([
   LEGACY_LANGUAGE_VERSION,
   PREVIOUS_LANGUAGE_VERSION,
@@ -52,7 +56,7 @@ export const LATEST_NORMALIZATION_PROFILE_VERSION =
   NORMALIZATION_PROFILE_VERSIONS.v4;
 /** Paired with ADOPTED_LANGUAGE_VERSION; see that constant. */
 export const ADOPTED_NORMALIZATION_PROFILE_VERSION =
-  NORMALIZATION_PROFILE_VERSIONS.v3;
+  NORMALIZATION_PROFILE_VERSIONS.v4;
 export const SUPPORTED_NORMALIZATION_PROFILE_VERSIONS = Object.freeze([
   LEGACY_NORMALIZATION_PROFILE_VERSION,
   PREVIOUS_NORMALIZATION_PROFILE_VERSION,

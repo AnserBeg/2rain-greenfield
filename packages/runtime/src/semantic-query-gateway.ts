@@ -6,11 +6,14 @@ import {
   QUERY_AGGREGATE_LOWERING_PLAN_VERSION,
   LEGAL_ENTITY_SCOPE_CONTRACT_V1,
   LEGAL_ENTITY_SCOPE_PROFILE_VERSION,
+  SUPPORTED_LANGUAGE_VERSIONS,
   STRUCTURAL_LIMITS_V0,
   VersionedPredicateExpressionSchema,
   canonicalizeAndHash,
   evaluateLegalEntityScopeSelection,
   inspectPredicateForExecution,
+  languageHasV3Features,
+  type CanonicalLanguageVersion,
   type LegalEntityScopeCardinality,
   type PredicateCostClass,
   type PredicateKernelReceipt,
@@ -964,7 +967,15 @@ function assertAggregateQueryDefinition(
   ) {
     throw invalid('aggregate query selection is invalid');
   }
-  assertAggregateResultType(value.aggregate.resultType, invalid);
+  const aggregateNodeVersion = requiredAggregateNodeVersion(
+    value.aggregate.measureFieldType.schemaVersion,
+    invalid,
+  );
+  assertAggregateResultType(
+    value.aggregate.resultType,
+    aggregateNodeVersion,
+    invalid,
+  );
   assertExactKeys(
     value.aggregatePlan,
     [
@@ -1003,6 +1014,7 @@ function assertAggregateQueryDefinition(
   assertAggregateSourceMatchesResult(
     value.aggregate.measureFieldType,
     value.aggregate.resultType,
+    aggregateNodeVersion,
     invalid,
   );
   assertExactKeys(
@@ -1017,7 +1029,8 @@ function assertAggregateQueryDefinition(
   ) {
     throw invalid('aggregate result contract is invalid');
   }
-  const parameterTypes = new Map<string, Record<string, unknown>>();
+  const fieldParameterTypes = new Map<string, Record<string, unknown>>();
+  const parameterIds = new Set<string>();
   for (const parameter of value.parameters) {
     if (!isRecord(parameter)) {
       throw invalid('aggregate query parameter must be an object');
@@ -1032,29 +1045,39 @@ function assertAggregateQueryDefinition(
       !Number.isSafeInteger(parameter.orderKey) ||
       Number(parameter.orderKey) < 0 ||
       Number(parameter.orderKey) > 1_000_000 ||
-      parameterTypes.has(parameter.parameterId as string) ||
-      FieldTypeSchema.safeParse(parameter.parameterType).success === false ||
+      parameterIds.has(parameter.parameterId as string) ||
       !isRecord(parameter.parameterType)
     ) {
       throw invalid('aggregate query parameter contract is invalid');
     }
-    parameterTypes.set(
-      parameter.parameterId as string,
-      parameter.parameterType,
-    );
+    parameterIds.add(parameter.parameterId as string);
+    const parameterType = parameter.parameterType;
+    if (
+      FieldTypeSchema.safeParse(parameterType).success === false ||
+      parameterType.schemaVersion !== aggregateNodeVersion
+    ) {
+      throw invalid('aggregate query parameter field type is invalid');
+    }
+    fieldParameterTypes.set(parameter.parameterId as string, parameterType);
   }
-  assertParameterizedPlanReferences(value.filterPlan, parameterTypes, invalid);
+  assertParameterizedPlanReferences(
+    value.filterPlan,
+    fieldParameterTypes,
+    aggregateNodeVersion,
+    invalid,
+  );
 }
 
 function assertAggregateSourceMatchesResult(
   sourceFieldType: Record<string, unknown>,
   resultType: Record<string, unknown>,
+  aggregateNodeVersion: CanonicalLanguageVersion,
   invalid: (message: string) => Error,
 ): void {
   const quantity = sourceFieldType.kind === 'quantityFieldType';
   if (
     (sourceFieldType.kind !== 'exactDecimalFieldType' && !quantity) ||
-    sourceFieldType.schemaVersion !== 'v3' ||
+    sourceFieldType.schemaVersion !== aggregateNodeVersion ||
     sourceFieldType.scale !== resultType.scale ||
     (quantity
       ? resultType.kind !== 'quantityAggregateResultType' ||
@@ -1070,6 +1093,7 @@ function assertAggregateSourceMatchesResult(
 
 function assertAggregateResultType(
   value: Record<string, unknown>,
+  aggregateNodeVersion: CanonicalLanguageVersion,
   invalid: (message: string) => Error,
 ): void {
   const quantity = value.kind === 'quantityAggregateResultType';
@@ -1086,7 +1110,7 @@ function assertAggregateResultType(
     !Number.isInteger(value.scale) ||
     Number(value.scale) < 0 ||
     Number(value.scale) > 18 ||
-    value.schemaVersion !== 'v3'
+    value.schemaVersion !== aggregateNodeVersion
   ) {
     throw invalid('aggregate result type is invalid');
   }
@@ -1102,11 +1126,29 @@ function assertAggregateResultType(
     assertCanonicalId(value.baseUnit.targetId, 'baseUnit.targetId', invalid);
     if (
       value.baseUnit.kind !== 'unitReference' ||
-      value.baseUnit.schemaVersion !== 'v3'
+      value.baseUnit.schemaVersion !== aggregateNodeVersion
     ) {
       throw invalid('quantity aggregate base unit is invalid');
     }
   }
+}
+
+/**
+ * Aggregate nodes are cumulative language features. The catalog node declares
+ * which supported language authored it; consumers ask that authority instead
+ * of pinning one compile-time version literal.
+ */
+function requiredAggregateNodeVersion(
+  value: unknown,
+  invalid: (message: string) => Error,
+): CanonicalLanguageVersion {
+  const supported = SUPPORTED_LANGUAGE_VERSIONS.find(
+    (candidate) => candidate === value,
+  );
+  if (!supported || !languageHasV3Features(supported)) {
+    throw invalid('aggregate node language version is unsupported');
+  }
+  return supported;
 }
 
 /**
@@ -1286,11 +1328,15 @@ function assertPredicateLoweringPlan(
       throw error('predicate lowering input is invalid');
     }
   }
+  const aggregateNodeVersion = parameterizedExpected
+    ? requiredAggregateNodeVersion(predicate.schemaVersion, error)
+    : undefined;
   const observed = inspectLoweringNode(
     value.root,
     1,
     error,
     parameterizedExpected,
+    aggregateNodeVersion,
   );
   assertLoweringMatchesPredicate(value.root, predicate, error);
   const expectedCost =
@@ -1367,6 +1413,7 @@ function inspectLoweringNode(
   depth: number,
   error: (message: string) => Error,
   parameterized: boolean,
+  aggregateNodeVersion?: CanonicalLanguageVersion,
   parameterTypes?: Map<string, Record<string, unknown>>,
 ): Readonly<{
   comparisonCosts: PredicateCostClass[];
@@ -1406,7 +1453,7 @@ function inspectLoweringNode(
           (!isRecord(value.sourceFieldType) ||
             FieldTypeSchema.safeParse(value.sourceFieldType).success ===
               false ||
-            value.sourceFieldType.schemaVersion !== 'v3')) ||
+            value.sourceFieldType.schemaVersion !== aggregateNodeVersion)) ||
         !(
           parameterized
             ? [
@@ -1429,7 +1476,7 @@ function inspectLoweringNode(
           error,
         );
         assertCanonicalId(value.value.parameterId, 'parameterId', error);
-        if (value.value.schemaVersion !== 'v3') {
+        if (value.value.schemaVersion !== aggregateNodeVersion) {
           throw error('aggregate lowering parameter reference is invalid');
         }
         const parameterId = value.value.parameterId as string;
@@ -1490,6 +1537,7 @@ function inspectLoweringNode(
         depth + 1,
         error,
         parameterized,
+        aggregateNodeVersion,
         parameterTypes,
       );
     }
@@ -1505,6 +1553,7 @@ function inspectLoweringNode(
           depth + 1,
           error,
           parameterized,
+          aggregateNodeVersion,
           parameterTypes,
         ),
       );
@@ -1520,13 +1569,21 @@ function inspectLoweringNode(
 function assertParameterizedPlanReferences(
   plan: unknown,
   declaredParameterTypes: ReadonlyMap<string, Record<string, unknown>>,
+  aggregateNodeVersion: CanonicalLanguageVersion,
   error: (message: string) => Error,
 ): void {
   if (!isRecord(plan) || !isRecord(plan.root)) {
     throw error('aggregate parameterized lowering plan is invalid');
   }
   const observed = new Map<string, Record<string, unknown>>();
-  inspectLoweringNode(plan.root, 1, error, true, observed);
+  inspectLoweringNode(
+    plan.root,
+    1,
+    error,
+    true,
+    aggregateNodeVersion,
+    observed,
+  );
   if (
     observed.size !== declaredParameterTypes.size ||
     [...declaredParameterTypes].some(

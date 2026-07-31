@@ -1111,15 +1111,23 @@ function input(
   definition: unknown,
   expectedActiveRelease: CompilerInput['expectedActiveRelease'] = null,
 ): CompilerInput {
+  const normalized = normalizeApplicationPackage(definition);
   return {
     dependencies: [],
     expectedActiveRelease,
     kind: 'compilerInput',
     limits: { ...DEFAULT_COMPILER_LIMITS },
     normalizedDefinitionBytes: new TextEncoder().encode(
-      canonicalize(normalizeApplicationPackage(definition)),
+      canonicalize(normalized),
     ),
-    profile: { ...MODULE_COMPILER_PROFILE },
+    // Version-from-artifact: the profile follows the definition's own declared
+    // version, never a pinned constant. Supported profiles differ only in these
+    // two fields, so this reconstructs exactly the supported profile for it.
+    profile: {
+      ...MODULE_COMPILER_PROFILE,
+      languageVersion: normalized.languageVersion,
+      normalizationProfileVersion: normalized.normalizationProfileVersion,
+    },
   };
 }
 

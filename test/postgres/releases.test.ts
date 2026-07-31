@@ -16,12 +16,21 @@ import {
   HASH_ALGORITHM,
   HASH_DOMAINS,
   PROJECTION_FAMILY_IDS,
+  VERIFICATION_PLAN_PAYLOAD_VERSION,
+  VERIFICATION_SCENARIO_VERSION,
   compileApplication,
+  executeVerificationPlan,
+  validateExecutedVerificationPlan,
   type CompileSuccess,
   type ContentAddressedArtifact,
   type ProjectionManifestEnvelope,
   type ProjectionReference,
+  type VerificationPlanPayloadV1,
 } from '../../packages/compiler/src/index.js';
+import type {
+  PartitionedVerificationResultSet,
+  VerificationExecutionCommand,
+} from '../../packages/compiler/src/verification.js';
 import type {
   MintedUuid,
   RegisterTenantReleaseCommand,
@@ -94,6 +103,323 @@ const identities = new Map<string, AuthenticatedIdentity>([
     },
   ],
 ]);
+
+test('verification results admit an exact executed-and-derived partition while full execution stays v1', async () => {
+  const plan = partitionVerificationPlan();
+  const command = partitionVerificationCommand();
+  const executedScenarioIds: string[] = [];
+  const partitioned = await executeVerificationPlan(
+    plan,
+    command,
+    (scenario) => {
+      executedScenarioIds.push(scenario.scenarioId);
+      return {
+        negativeProbe: { observed: 'negative' },
+        positiveProbe: { observed: 'positive' },
+      };
+    },
+    (scenario) => {
+      if (scenario.entityId === 'fixture:entity.fact') {
+        return {
+          code: 'VERIFICATION_NO_GENERIC_CREATE_OPERATION' as const,
+          entityId: scenario.entityId,
+          message: 'append-only fact has no generic create operation',
+        };
+      }
+      if (scenario.entityId === 'fixture:entity.transaction') {
+        return {
+          code: 'VERIFICATION_OPERATION_INPUT_UNCONSTRUCTABLE' as const,
+          entityId: scenario.entityId,
+          message:
+            'create input cannot construct required storage column legal_entity_id',
+          operationId: 'fixture:operation.transaction_create',
+          requiredStorageColumn: 'legal_entity_id',
+        };
+      }
+      return null;
+    },
+  );
+
+  assert.deepEqual(executedScenarioIds, [
+    'fixture:verification-scenario.executable',
+  ]);
+  assert.equal(partitioned.results.length, 1);
+  assert.equal(partitioned.derivations.length, 2);
+  assert.equal(
+    partitioned.results.length + partitioned.derivations.length,
+    plan.scenarios.length,
+  );
+  assert.deepEqual(
+    partitioned.derivations.map((derivation) => derivation.reason),
+    [
+      {
+        code: 'VERIFICATION_NO_GENERIC_CREATE_OPERATION',
+        entityId: 'fixture:entity.fact',
+        message: 'append-only fact has no generic create operation',
+      },
+      {
+        code: 'VERIFICATION_OPERATION_INPUT_UNCONSTRUCTABLE',
+        entityId: 'fixture:entity.transaction',
+        message:
+          'create input cannot construct required storage column legal_entity_id',
+        operationId: 'fixture:operation.transaction_create',
+        requiredStorageColumn: 'legal_entity_id',
+      },
+    ],
+  );
+  assert.deepEqual(validateExecutedVerificationPlan(plan, partitioned), {
+    diagnostics: [],
+    status: 'passed',
+  });
+
+  const full = await executeVerificationPlan(plan, command, (scenario) => ({
+    negativeProbe: { observed: 'negative', scenarioId: scenario.scenarioId },
+    positiveProbe: { observed: 'positive', scenarioId: scenario.scenarioId },
+  }));
+  assert.equal(full.schemaVersion, 'northstar.verification-result-set/v1');
+  assert.equal(Object.hasOwn(full, 'derivations'), false);
+  assert.deepEqual(validateExecutedVerificationPlan(plan, full), {
+    diagnostics: [],
+    status: 'passed',
+  });
+
+  const missing = resignPartitionedResultSet({
+    ...partitioned,
+    derivations: partitioned.derivations.slice(1),
+  });
+  assert.deepEqual(validateExecutedVerificationPlan(plan, missing), {
+    diagnostics: [
+      {
+        code: 'VERIFICATION_SCENARIO_DISPOSITION_MISSING',
+        scenarioId: 'fixture:verification-scenario.fact',
+      },
+    ],
+    status: 'failed',
+  });
+
+  const factResult = full.results.find(
+    (result) => result.scenarioId === 'fixture:verification-scenario.fact',
+  );
+  assert.ok(factResult);
+  const overlap = resignPartitionedResultSet({
+    ...partitioned,
+    results: [...partitioned.results, factResult].toSorted((left, right) =>
+      left.scenarioId.localeCompare(right.scenarioId),
+    ),
+  });
+  assert.deepEqual(validateExecutedVerificationPlan(plan, overlap), {
+    diagnostics: [
+      {
+        code: 'VERIFICATION_SCENARIO_DISPOSITION_OVERLAP',
+        scenarioId: 'fixture:verification-scenario.fact',
+      },
+    ],
+    status: 'failed',
+  });
+
+  const unreasoned = resignPartitionedResultSet({
+    ...partitioned,
+    derivations: partitioned.derivations.map((derivation) =>
+      derivation.reason.code === 'VERIFICATION_OPERATION_INPUT_UNCONSTRUCTABLE'
+        ? {
+            ...derivation,
+            reason: {
+              ...derivation.reason,
+              requiredStorageColumn: '',
+            },
+          }
+        : derivation,
+    ),
+  });
+  assert.deepEqual(validateExecutedVerificationPlan(plan, unreasoned), {
+    diagnostics: [
+      {
+        code: 'VERIFICATION_DERIVATION_INVALID',
+        scenarioId: 'fixture:verification-scenario.transaction',
+      },
+    ],
+    status: 'failed',
+  });
+});
+
+for (const forbidden of [
+  {
+    key: 'skipVerification',
+    label: 'skip flag',
+    value: true,
+  },
+  {
+    key: 'sampleSize',
+    label: 'sampling parameter',
+    value: 1,
+  },
+  {
+    key: 'timeBoxMs',
+    label: 'time-box parameter',
+    value: 1,
+  },
+] as const) {
+  test(`verification execution rejects a ${forbidden.label} before any scenario runs`, async () => {
+    const plan = partitionVerificationPlan();
+    let executionCount = 0;
+    await assert.rejects(
+      executeVerificationPlan(
+        plan,
+        {
+          ...partitionVerificationCommand(),
+          [forbidden.key]: forbidden.value,
+        } as VerificationExecutionCommand,
+        () => {
+          executionCount += 1;
+          return { positiveProbe: true };
+        },
+      ),
+      /verification execution command is closed/,
+    );
+    assert.equal(executionCount, 0);
+  });
+}
+
+test('migration 0018 durably admits full execution and exact executed-derived evidence only', async () => {
+  await withEphemeralPostgres(
+    'release-verification-derived-evidence',
+    async ({ pool }) => {
+      const admin = await pool.connect();
+      try {
+        await runMigrations(admin, await loadMigrations(checkedInMigrations));
+        await seedTenants(admin);
+        const insertEvidence = (
+          evidenceId: string,
+          evidenceVersion: string,
+          executionScope: string,
+          skippedScenarioIds: readonly string[],
+          impactAnalysisDerivation: unknown,
+        ) =>
+          admin.query(
+            `INSERT INTO platform.release_verification_evidence (
+               tenant_id, environment_id, verification_evidence_id,
+               evidence_version, release_root, artifact_closure_digest,
+               verification_plan_artifact_root,
+               verification_plan_semantic_digest, verification_plan_digest,
+               result_set_digest, result_count, provider, provider_run_id,
+               executed_tenant_id, executed_environment_id,
+               executed_evidence_id, execution_scope,
+               skipped_scenario_ids, impact_analysis_derivation, created_by
+             ) VALUES (
+               $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,1,'realPostgresql',$11,
+               $1,$2,$3,$12,$13::jsonb,$14::jsonb,$15
+             )`,
+            [
+              tenantA,
+              environmentA,
+              evidenceId,
+              evidenceVersion,
+              'a'.repeat(64),
+              'b'.repeat(64),
+              'c'.repeat(64),
+              'd'.repeat(64),
+              'e'.repeat(64),
+              'f'.repeat(64),
+              `postgres-verification:${evidenceId}`,
+              executionScope,
+              JSON.stringify(skippedScenarioIds),
+              impactAnalysisDerivation === null
+                ? null
+                : JSON.stringify(impactAnalysisDerivation),
+              principalA,
+            ],
+          );
+
+        const fullEvidenceId = 'a5000000-0000-4000-8000-000000000091';
+        await insertEvidence(
+          fullEvidenceId,
+          'northstar.verification-result-set/v1',
+          'FULL',
+          [],
+          null,
+        );
+
+        const derivedEvidenceId = 'a5000000-0000-4000-8000-000000000092';
+        const impactAnalysisDerivation = {
+          derivations: [
+            {
+              reason: {
+                code: 'VERIFICATION_NO_GENERIC_CREATE_OPERATION',
+                entityId: 'northstar.inventory:entity.inventory_movement',
+                message: 'append-only fact has no generic create operation',
+              },
+              scenarioFingerprint: '1'.repeat(64),
+              scenarioId: 'northstar.inventory:verification-scenario.fixture',
+              schemaVersion: 'northstar.verification-derivation/v1',
+            },
+          ],
+          schemaVersion: 'northstar.verification-impact-analysis/v1',
+        };
+        await insertEvidence(
+          derivedEvidenceId,
+          'northstar.verification-result-set/v2',
+          'EXACT_PARTITION',
+          [],
+          impactAnalysisDerivation,
+        );
+
+        const stored = await admin.query<{
+          derived_count: number;
+          evidence_version: string;
+          execution_scope: string;
+          skipped_scenario_ids: unknown;
+        }>(
+          `SELECT evidence_version, execution_scope, skipped_scenario_ids,
+                  jsonb_array_length(
+                    impact_analysis_derivation -> 'derivations'
+                  ) AS derived_count
+             FROM platform.release_verification_evidence
+            WHERE verification_evidence_id = $1`,
+          [derivedEvidenceId],
+        );
+        assert.deepEqual(stored.rows[0], {
+          derived_count: 1,
+          evidence_version: 'northstar.verification-result-set/v2',
+          execution_scope: 'EXACT_PARTITION',
+          skipped_scenario_ids: [],
+        });
+
+        await assert.rejects(
+          insertEvidence(
+            'a5000000-0000-4000-8000-000000000093',
+            'northstar.verification-result-set/v2',
+            'EXACT_PARTITION',
+            [],
+            { ...impactAnalysisDerivation, derivations: [] },
+          ),
+          (error: unknown) =>
+            error instanceof Error &&
+            (error as Error & { code?: string }).code === '23514' &&
+            /release_verification_evidence_exact_partition/u.test(
+              error.message,
+            ),
+        );
+        await assert.rejects(
+          insertEvidence(
+            'a5000000-0000-4000-8000-000000000094',
+            'northstar.verification-result-set/v2',
+            'EXACT_PARTITION',
+            ['northstar.inventory:verification-scenario.silently-skipped'],
+            impactAnalysisDerivation,
+          ),
+          (error: unknown) =>
+            error instanceof Error &&
+            (error as Error & { code?: string }).code === '23514' &&
+            /release_verification_evidence_exact_partition/u.test(
+              error.message,
+            ),
+        );
+      } finally {
+        admin.release();
+      }
+    },
+  );
+});
 
 test('release admission rejects a staged candidate with missing executed results', async () => {
   const bootstrapBytes = fixtureBytes('bootstrap');
@@ -899,6 +1225,68 @@ test('immutable release persistence verifies bytes, identities, links, RLS, and 
     },
   );
 });
+
+function partitionVerificationPlan(): VerificationPlanPayloadV1 {
+  return Object.freeze({
+    kind: 'verificationPlanPayload',
+    scenarios: Object.freeze([
+      Object.freeze({
+        entityId: 'fixture:entity.executable',
+        kind: 'searchableExclusion' as const,
+        probePolarity: 'positiveAndNegative' as const,
+        provider: 'realPostgresql' as const,
+        scenarioFingerprint: 'a'.repeat(64),
+        scenarioId: 'fixture:verification-scenario.executable',
+        schemaVersion: VERIFICATION_SCENARIO_VERSION,
+        subjectId: 'fixture:field.executable_notes',
+      }),
+      Object.freeze({
+        entityId: 'fixture:entity.fact',
+        kind: 'searchableExclusion' as const,
+        probePolarity: 'positiveAndNegative' as const,
+        provider: 'realPostgresql' as const,
+        scenarioFingerprint: 'b'.repeat(64),
+        scenarioId: 'fixture:verification-scenario.fact',
+        schemaVersion: VERIFICATION_SCENARIO_VERSION,
+        subjectId: 'fixture:field.fact_recorded_at',
+      }),
+      Object.freeze({
+        entityId: 'fixture:entity.transaction',
+        kind: 'searchableExclusion' as const,
+        probePolarity: 'positiveAndNegative' as const,
+        provider: 'realPostgresql' as const,
+        scenarioFingerprint: 'c'.repeat(64),
+        scenarioId: 'fixture:verification-scenario.transaction',
+        schemaVersion: VERIFICATION_SCENARIO_VERSION,
+        subjectId: 'fixture:field.transaction_legal_entity',
+      }),
+    ]),
+    schemaVersion: VERIFICATION_PLAN_PAYLOAD_VERSION,
+  });
+}
+
+function partitionVerificationCommand(): VerificationExecutionCommand {
+  return Object.freeze({
+    artifactClosureDigest: 'd'.repeat(64),
+    providerRunId: 'postgres-verification:partition-control',
+    releaseRoot: 'e'.repeat(64),
+    verificationPlanArtifactRoot: 'f'.repeat(64),
+    verificationPlanSemanticDigest: '1'.repeat(64),
+  });
+}
+
+function resignPartitionedResultSet(
+  value: PartitionedVerificationResultSet,
+): PartitionedVerificationResultSet {
+  const { resultSetDigest: priorDigest, ...payload } = value;
+  void priorDigest;
+  const resultSetDigest = createHash('sha256')
+    .update(payload.schemaVersion, 'utf8')
+    .update(Uint8Array.of(0))
+    .update(canonicalize(payload), 'utf8')
+    .digest('hex');
+  return Object.freeze({ ...payload, resultSetDigest });
+}
 
 function requestEntry(): AuthenticatedRequestEntryAdapter {
   return new AuthenticatedRequestEntryAdapter(async (request) => {

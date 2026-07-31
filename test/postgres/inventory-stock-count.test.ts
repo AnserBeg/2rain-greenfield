@@ -917,7 +917,7 @@ function moduleInput(
     kind: 'compilerInput',
     limits: { ...DEFAULT_COMPILER_LIMITS },
     normalizedDefinitionBytes: definitionBytes(definition),
-    profile: { ...MODULE_COMPILER_PROFILE },
+    profile: profileForNormalizedBytes(definitionBytes(definition)),
   };
 }
 
@@ -1465,4 +1465,30 @@ function normalizeDatabaseDecimal(value: string): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Version-from-artifact: compile a fixture at the version it declares rather
+ * than at whichever version is currently adopted. A pinned profile makes every
+ * control here fail the moment adoption moves, for reasons unrelated to what
+ * they measure.
+ */
+function profileForNormalizedBytes(
+  bytes: Uint8Array,
+): typeof MODULE_COMPILER_PROFILE {
+  const declared = JSON.parse(new TextDecoder().decode(bytes)) as {
+    languageVersion?: (typeof MODULE_COMPILER_PROFILE)['languageVersion'];
+    normalizationProfileVersion?: (typeof MODULE_COMPILER_PROFILE)['normalizationProfileVersion'];
+  };
+  return {
+    ...MODULE_COMPILER_PROFILE,
+    ...(declared.languageVersion === undefined
+      ? {}
+      : { languageVersion: declared.languageVersion }),
+    ...(declared.normalizationProfileVersion === undefined
+      ? {}
+      : {
+          normalizationProfileVersion: declared.normalizationProfileVersion,
+        }),
+  };
 }

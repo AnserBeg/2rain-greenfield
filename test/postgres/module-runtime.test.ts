@@ -3180,12 +3180,12 @@ function inventoryApplicationDefinition(): Record<string, unknown> {
       ),
       kind: 'queryAggregateSelection',
       operator: 'sum',
-      schemaVersion: 'v3',
+      schemaVersion: nodeVersion,
       selectionId: inventoryScopeProbeIds.selection,
     },
     filter: {
       kind: 'allPredicate',
-      schemaVersion: 'v3',
+      schemaVersion: nodeVersion,
       terms: [
         {
           field: applicationReference(
@@ -3194,11 +3194,11 @@ function inventoryApplicationDefinition(): Record<string, unknown> {
           ),
           kind: 'fieldComparisonPredicate',
           operator: 'equals',
-          schemaVersion: 'v3',
+          schemaVersion: nodeVersion,
           value: {
             kind: 'queryParameterReference',
             parameterId: inventoryScopeProbeIds.itemParameter,
-            schemaVersion: 'v3',
+            schemaVersion: nodeVersion,
           },
         },
         {
@@ -3208,11 +3208,11 @@ function inventoryApplicationDefinition(): Record<string, unknown> {
           ),
           kind: 'fieldComparisonPredicate',
           operator: 'equals',
-          schemaVersion: 'v3',
+          schemaVersion: nodeVersion,
           value: {
             kind: 'queryParameterReference',
             parameterId: inventoryScopeProbeIds.locationParameter,
-            schemaVersion: 'v3',
+            schemaVersion: nodeVersion,
           },
         },
       ],
@@ -3225,13 +3225,13 @@ function inventoryApplicationDefinition(): Record<string, unknown> {
         kind: 'queryParameterDefinition',
         orderKey: 10,
         parameterId: inventoryScopeProbeIds.itemParameter,
-        schemaVersion: 'v3',
+        schemaVersion: nodeVersion,
       },
       {
         kind: 'queryParameterDefinition',
         orderKey: 20,
         parameterId: inventoryScopeProbeIds.locationParameter,
-        schemaVersion: 'v3',
+        schemaVersion: nodeVersion,
       },
     ],
     permission: applicationReference(
@@ -3240,7 +3240,7 @@ function inventoryApplicationDefinition(): Record<string, unknown> {
     ),
     queryId: inventoryScopeProbeIds.query,
     queryType: 'aggregate',
-    schemaVersion: 'v3',
+    schemaVersion: nodeVersion,
     sourceEntity: applicationReference(
       'entityReference',
       INVENTORY_IDS.entityIds.movement,
@@ -3259,10 +3259,17 @@ function inventoryApplicationDefinition(): Record<string, unknown> {
   return application;
 }
 
+// Version-from-artifact: nodes spliced into the composed application must
+// declare that application's own version, never a literal. Inventory adoption
+// moved it to v4, and a pinned 'v3' here mixes node versions.
+const nodeVersion = (
+  composedApplicationDefinition() as { languageVersion: string }
+).languageVersion;
+
 function applicationReference(kind: string, inventoryId: string) {
   return {
     kind,
-    schemaVersion: 'v3',
+    schemaVersion: nodeVersion,
     targetId: applicationInventoryId(inventoryId),
   };
 }
@@ -3442,7 +3449,7 @@ function moduleInput(
     kind: 'compilerInput',
     limits: { ...DEFAULT_COMPILER_LIMITS },
     normalizedDefinitionBytes: definitionBytes(definition),
-    profile: { ...MODULE_COMPILER_PROFILE },
+    profile: profileForNormalizedBytes(definitionBytes(definition)),
   };
 }
 
@@ -3697,4 +3704,30 @@ if (localeProbeChild) {
       })}\n`,
     );
   });
+}
+
+/**
+ * Version-from-artifact: compile a fixture at the version it declares rather
+ * than at whichever version is currently adopted. A pinned profile makes every
+ * control here fail the moment adoption moves, for reasons unrelated to what
+ * they measure.
+ */
+function profileForNormalizedBytes(
+  bytes: Uint8Array,
+): typeof MODULE_COMPILER_PROFILE {
+  const declared = JSON.parse(new TextDecoder().decode(bytes)) as {
+    languageVersion?: (typeof MODULE_COMPILER_PROFILE)['languageVersion'];
+    normalizationProfileVersion?: (typeof MODULE_COMPILER_PROFILE)['normalizationProfileVersion'];
+  };
+  return {
+    ...MODULE_COMPILER_PROFILE,
+    ...(declared.languageVersion === undefined
+      ? {}
+      : { languageVersion: declared.languageVersion }),
+    ...(declared.normalizationProfileVersion === undefined
+      ? {}
+      : {
+          normalizationProfileVersion: declared.normalizationProfileVersion,
+        }),
+  };
 }
