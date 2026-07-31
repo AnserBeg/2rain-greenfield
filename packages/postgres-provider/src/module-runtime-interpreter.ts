@@ -426,20 +426,27 @@ function resolveAgainstImage(
     throw new TypeError('precondition comparison operand is not a scalar');
   }
   const expected = (comparison.value as { value: unknown }).value;
-  // Raw `===` is only a sound equality for scalar kinds whose stored form is
-  // canonical. PostgreSQL numeric(p,s) preserves scale, so a persisted
-  // exactDecimal reads back as "1.000000000000000000" while the authored
-  // operand is "1"; equality would report false and `not(equals)` would ADMIT.
-  // That is the fail-OPEN direction for the guard this evaluation exists to
-  // enforce, so scale-bearing kinds refuse rather than guess. Widening this set
-  // requires a canonical comparison for the kind being added, not a cast.
+  // Raw `===` is a sound equality ONLY for kinds whose persisted round trip
+  // returns the canonical operand byte-for-byte. Anything else refuses, because
+  // a false equality makes `not(equals)` ADMIT -- the fail-open direction for
+  // the guard this evaluation exists to enforce.
+  //
+  // Two kinds were admitted here and should not have been, each verified by
+  // reading the codec rather than by reasoning about the kind:
+  //   - exactDecimal / money / quantity: PostgreSQL numeric(p,s) preserves
+  //     scale, so a persisted "1" reads back "1.000000000000000000".
+  //   - dateTime / date / time: a second-precision instant is stored as
+  //     timestamp(0), its canonical operand omits milliseconds
+  //     ("2026-07-30T12:00:00Z"), and the record codec's toISOString() returns
+  //     "2026-07-30T12:00:00.000Z". Temporal kinds cannot be admitted by scalar
+  //     kind alone; they need field-contract-aware canonicalization.
+  //
+  // Widening this set requires proving the round trip for that kind against the
+  // codec, not asserting that the kind looks canonical.
   const comparableScalarKinds = new Set([
     'booleanValue',
-    'dateTimeValue',
-    'dateValue',
     'integerValue',
     'textValue',
-    'timeValue',
   ]);
   const valueKind = (comparison.value as { kind?: unknown }).kind;
   if (typeof valueKind !== 'string' || !comparableScalarKinds.has(valueKind)) {
