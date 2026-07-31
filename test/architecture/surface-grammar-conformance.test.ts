@@ -577,7 +577,14 @@ function compileProductSurfaceGrammarObservations(): ProductSurfaceGrammarObserv
       normalizedDefinitionBytes: new TextEncoder().encode(
         canonicalize(normalized),
       ),
-      profile: { ...MODULE_COMPILER_PROFILE },
+      // Version-from-artifact: each product module compiles under the profile
+      // for the version it declares. Inventory is at v4 while the others remain
+      // v3, so a pinned profile fails one of them whichever version it names.
+      profile: {
+        ...MODULE_COMPILER_PROFILE,
+        languageVersion: normalized.languageVersion,
+        normalizationProfileVersion: normalized.normalizationProfileVersion,
+      },
     });
     assert.equal(compiled.status, 'compiled');
     const identity = definitionIdentity(normalized);

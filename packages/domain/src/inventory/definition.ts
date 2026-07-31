@@ -1,5 +1,5 @@
-const version = 'v3' as const;
-const normalizationProfileVersion = 'northstar.normalization/v3' as const;
+const version = 'v4' as const;
+const normalizationProfileVersion = 'northstar.normalization/v4' as const;
 
 export const INVENTORY_NAMESPACE = 'northstar.inventory' as const;
 

@@ -602,6 +602,7 @@ export function registerInventoryContractCases(
         () => {
           const definition = structuredClone(inventoryModuleDefinition()) as {
             fields: Array<Record<string, unknown>>;
+            languageVersion: string;
           };
           const field = definition.fields.find((candidate) =>
             String(candidate.fieldId).endsWith(`:field.${fieldLocalId}`),
@@ -611,7 +612,7 @@ export function registerInventoryContractCases(
           else {
             field.fieldType = {
               kind: 'booleanFieldType',
-              schemaVersion: 'v3',
+              schemaVersion: definition.languageVersion,
             };
           }
           const result = compileApplication(moduleInput(definition));
@@ -632,6 +633,7 @@ export function registerInventoryContractCases(
       () => {
         const definition = structuredClone(catalogModuleDefinition()) as {
           fields: Array<Record<string, unknown>>;
+          languageVersion: string;
         };
         const field = definition.fields.find((candidate) =>
           String(candidate.fieldId).endsWith(':field.item_base_unit'),
@@ -641,7 +643,7 @@ export function registerInventoryContractCases(
         else {
           field.fieldType = {
             kind: 'booleanFieldType',
-            schemaVersion: 'v3',
+            schemaVersion: definition.languageVersion,
           };
         }
         const result = compileApplication(moduleInput(definition));
@@ -658,7 +660,7 @@ export function registerInventoryContractCases(
   register('every Inventory movement query retains recordedAt', () => {
     const definition = structuredClone(inventoryModuleDefinition()) as {
       queries: Array<{
-        selections: Array<{ field: { targetId: string } }>;
+        selections?: Array<{ field: { targetId: string } }>;
         sourceEntity: { targetId: string };
       }>;
     };
@@ -667,6 +669,12 @@ export function registerInventoryContractCases(
       if (!query.sourceEntity.targetId.endsWith(':entity.inventory_movement')) {
         continue;
       }
+      // Aggregates have no selections to strip. They retain recorded time by
+      // ANCHORING to a recorded horizon in their filter, which G3-P0 item 5
+      // requires ("discards"), not by projecting the column. The separate
+      // aggregate case below is what keeps this a skip rather than an
+      // exemption.
+      if (query.selections === undefined) continue;
       const retained = query.selections.filter(
         (selection) =>
           !selection.field.targetId.endsWith(
@@ -741,7 +749,7 @@ export function registerInventoryContractCases(
         permissionId,
         resource: {
           kind: 'entityReference',
-          schemaVersion: 'v3',
+          schemaVersion: definition.languageVersion,
           targetId: periodEntityId,
         },
       });
@@ -750,22 +758,22 @@ export function registerInventoryContractCases(
         effect: {
           entity: {
             kind: 'entityReference',
-            schemaVersion: 'v3',
+            schemaVersion: definition.languageVersion,
             targetId: periodEntityId,
           },
           kind: 'createRecordEffect',
-          schemaVersion: 'v3',
+          schemaVersion: definition.languageVersion,
         },
         operationId:
           'northstar.inventory:operation.inventory_period_lock_create',
         permission: {
           kind: 'permissionReference',
-          schemaVersion: 'v3',
+          schemaVersion: definition.languageVersion,
           targetId: permissionId,
         },
         readBack: {
           kind: 'queryReference',
-          schemaVersion: 'v3',
+          schemaVersion: definition.languageVersion,
           targetId: 'northstar.inventory:query.inventory_period_lock_get',
         },
       });
@@ -1480,15 +1488,22 @@ function validMovementCandidate(): InventoryMovementCandidateV1 {
 }
 
 function moduleInput(definition: unknown): CompilerInput {
+  const normalized = normalizeApplicationPackage(definition);
   return {
     dependencies: [],
     expectedActiveRelease: null,
     kind: 'compilerInput',
     limits: { ...DEFAULT_COMPILER_LIMITS },
     normalizedDefinitionBytes: new TextEncoder().encode(
-      canonicalize(normalizeApplicationPackage(definition)),
+      canonicalize(normalized),
     ),
-    profile: { ...MODULE_COMPILER_PROFILE },
+    // Version-from-artifact: the profile follows the definition's own declared
+    // version, never a pinned constant.
+    profile: {
+      ...MODULE_COMPILER_PROFILE,
+      languageVersion: normalized.languageVersion,
+      normalizationProfileVersion: normalized.normalizationProfileVersion,
+    },
   };
 }
 
@@ -1539,16 +1554,44 @@ function inventoryDefinitionWithoutMovementField(
   fieldLocalId: string,
 ): Record<string, unknown> {
   const definition = structuredClone(inventoryModuleDefinition()) as {
+    assertions: Array<Record<string, unknown>>;
     fields: Array<{ fieldId: string }>;
     queries: Array<{
-      selections: Array<{ field: { targetId: string } }>;
+      queryId: string;
+      selections?: Array<{ field: { targetId: string } }>;
     }>;
   };
   const suffix = `:field.${fieldLocalId}`;
   definition.fields = definition.fields.filter(
     (field) => !field.fieldId.endsWith(suffix),
   );
+  // An aggregate references the removed field through its aggregate and filter
+  // rather than through selections, so stripping selections alone leaves a
+  // dangling reference and normalization fails with CANON_REFERENCE_UNRESOLVED
+  // BEFORE the inventory contract rule this fixture exists to provoke. Drop the
+  // referencing aggregate so the fixture stays valid until its target rule --
+  // the discipline G3-P4b recorded after the same trap.
+  const droppedQueryIds = definition.queries
+    .filter(
+      (query) =>
+        query.selections === undefined &&
+        JSON.stringify(query).includes(suffix),
+    )
+    .map((query) => query.queryId);
+  definition.queries = definition.queries.filter(
+    (query) => !droppedQueryIds.includes(query.queryId),
+  );
+  // Dropping a query orphans whatever referenced it, so removal must be
+  // transitive or normalization fails on the orphaned assertion instead of on
+  // the field this fixture exists to remove.
+  definition.assertions = definition.assertions.filter(
+    (assertion) =>
+      !droppedQueryIds.some((queryId) =>
+        JSON.stringify(assertion).includes(queryId),
+      ),
+  );
   for (const query of definition.queries) {
+    if (query.selections === undefined) continue;
     query.selections = query.selections.filter(
       (selection) => !selection.field.targetId.endsWith(suffix),
     );
@@ -1575,11 +1618,16 @@ function inventoryDefinitionWithoutCountEvidenceField(
   let removedSelections = 0;
   let replacedMatchKeys = 0;
   for (const query of definition.queries) {
-    const retained = query.selections.filter(
-      (selection) => selection.field.targetId !== fieldId,
-    );
-    removedSelections += query.selections.length - retained.length;
-    query.selections = retained;
+    // Aggregate queries carry no `selections`. Inventory's first aggregate
+    // arrived with onHand, so a helper that assumed every query is a row query
+    // would throw here rather than mutate the fixture it was asked to mutate.
+    if (query.selections !== undefined) {
+      const retained = query.selections.filter(
+        (selection) => selection.field.targetId !== fieldId,
+      );
+      removedSelections += query.selections.length - retained.length;
+      query.selections = retained;
+    }
     for (const matchKey of query.resolveMatchKeys ?? []) {
       if (matchKey.field.targetId !== fieldId) continue;
       matchKey.field.targetId = matchKeyFallbackId;

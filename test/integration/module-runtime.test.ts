@@ -885,7 +885,12 @@ function compileFixture(): CompileSuccess {
     normalizedDefinitionBytes: new TextEncoder().encode(
       canonicalize(normalized),
     ),
-    profile: { ...MODULE_COMPILER_PROFILE },
+    // Version-from-artifact: compile the fixture at the version it declares.
+    profile: {
+      ...MODULE_COMPILER_PROFILE,
+      languageVersion: normalized.languageVersion,
+      normalizationProfileVersion: normalized.normalizationProfileVersion,
+    },
   });
   assert.equal(result.status, 'compiled');
   return result as CompileSuccess;

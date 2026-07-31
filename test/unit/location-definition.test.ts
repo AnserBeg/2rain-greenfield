@@ -104,14 +104,14 @@ test('Location definition compiles into every walking-slice projection with life
       label: 'Warehouse',
       optionId: `${LOCATION_IDS.namespace}:option.warehouse`,
       orderKey: 10,
-      schemaVersion: 'v3',
+      schemaVersion: 'v4',
     },
     {
       kind: 'enumOption',
       label: 'Store',
       optionId: `${LOCATION_IDS.namespace}:option.store`,
       orderKey: 20,
-      schemaVersion: 'v3',
+      schemaVersion: 'v4',
     },
   ]);
   assert.deepEqual(definition.capabilityRequirements, [
@@ -130,7 +130,7 @@ test('Location definition compiles into every walking-slice projection with life
         'reporting',
         'verification',
       ],
-      schemaVersion: 'v3',
+      schemaVersion: 'v4',
       supportStatus: 'supported',
     },
   ]);
