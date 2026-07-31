@@ -3167,10 +3167,16 @@ function inventoryApplicationDefinition(): Record<string, unknown> {
     'storageMappings',
     'surfaces',
   ] as const) {
-    application[collection] = [
-      ...(application[collection] as unknown[]),
-      ...(inventory[collection] as unknown[]),
-    ];
+    const composed = application[collection] as unknown[];
+    for (const entry of inventory[collection] as unknown[]) {
+      assert.equal(
+        composed.filter(
+          (candidate) => JSON.stringify(candidate) === JSON.stringify(entry),
+        ).length,
+        1,
+        `composed application must contain each inventory ${collection} entry exactly once`,
+      );
+    }
   }
   (application.queries as Array<Record<string, unknown>>).push({
     aggregate: {
@@ -3251,11 +3257,13 @@ function inventoryApplicationDefinition(): Record<string, unknown> {
     inventory.modules as Array<Record<string, unknown>>
   )[0];
   assert.ok(inventoryModule);
-  (application.modules as Array<Record<string, unknown>>).push({
-    ...inventoryModule,
-    orderKey: 40,
-    ownerPackageId: (application.package as { packageId: string }).packageId,
-  });
+  assert.equal(
+    (application.modules as Array<Record<string, unknown>>).filter(
+      (candidate) => candidate.moduleId === inventoryModule.moduleId,
+    ).length,
+    1,
+    'composed application must contain the inventory module exactly once',
+  );
   return application;
 }
 

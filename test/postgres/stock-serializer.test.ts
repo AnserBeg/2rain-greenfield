@@ -647,15 +647,28 @@ async function loadInventoryDefinition(): Promise<Record<string, unknown>> {
     'storageMappings',
     'surfaces',
   ]) {
-    const applicationMembers = definition[collection];
-    const inventoryMembers = inventory[collection];
+    const applicationMembers: unknown = definition[collection];
+    const inventoryMembers: unknown = inventory[collection];
     if (
       !Array.isArray(applicationMembers) ||
       !Array.isArray(inventoryMembers)
     ) {
       throw new TypeError(`module collection ${collection} is unavailable`);
     }
-    definition[collection] = [...applicationMembers, ...inventoryMembers];
+    const composedEntries: readonly unknown[] =
+      applicationMembers as readonly unknown[];
+    const inventoryEntries: readonly unknown[] =
+      inventoryMembers as readonly unknown[];
+    for (const inventoryMember of inventoryEntries) {
+      assert.equal(
+        composedEntries.filter(
+          (candidate) =>
+            canonicalize(candidate) === canonicalize(inventoryMember),
+        ).length,
+        1,
+        `composed application must contain each inventory ${collection} entry exactly once`,
+      );
+    }
   }
   const applicationModules = definition.modules;
   const inventoryModules = inventory.modules;
@@ -669,11 +682,15 @@ async function loadInventoryDefinition(): Promise<Record<string, unknown>> {
   ) {
     throw new TypeError('inventory module ownership is unavailable');
   }
-  applicationModules.push({
-    ...inventoryModules[0],
-    orderKey: 40,
-    ownerPackageId: packageDefinition.packageId,
-  });
+  const inventoryModuleId = inventoryModules[0].moduleId;
+  assert.equal(
+    applicationModules.filter(
+      (candidate) =>
+        isRecord(candidate) && candidate.moduleId === inventoryModuleId,
+    ).length,
+    1,
+    'composed application must contain the inventory module exactly once',
+  );
   return definition;
 }
 
