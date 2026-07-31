@@ -188,9 +188,16 @@ resolved by hand-merging:
 
   test/architecture/repository-hygiene.test.ts   (test inventory)
   test/architecture/test-reachability.test.ts    (script recognition)
+  test/architecture/release-persistence-boundary.test.ts  (migration inventory)
   pnpm-lock.yaml                                  (generated)
   package.json (root)                             (scripts)
   .github/workflows/ci.yml                        (steps)
+
+**Added 2026-07-30: the migration inventory.** Three packets needed it in one day —
+`G3-P4a` for 0016, `G3-P4b` for 0017, `G3-P7a` for 0019 — and the third stopped on it
+as an owned-path collision. It is an exact `assert.deepEqual` over migration
+filenames, so every migration-adding packet must register in it. That makes it
+add-only shared, not a lease.
 
 **On rebase conflict: discard your side, take main's, and re-derive your entry.**
 The inventories are mechanical — re-run discovery and re-insert alphabetically.

@@ -252,6 +252,11 @@ How to apply: pin any version-specific fixture to a literal (`LANGUAGE_VERSIONS.
 Date: 2026-07-30
 Why: `negative-contracts.test.ts:76` asserted that an unknown node version fails closed, using the literal `'v4'`. When v4 became real the probe stopped observing its own claim — the document was still refused, but for a different reason (`CANON_VERSION_MIXED`, not `CANON_VERSION_UNSUPPORTED`), so a genuinely unsupported version was no longer covered.
 How to apply: probe one past the newest readable version, and re-read every negative control whose subject is a *value* rather than a *shape* when that value space is extended. See `docs/execution/packets/Q1-P5.md`.
+## Keep negative fixtures valid until the target rule
+Date: 2026-07-30
+Why: G3-P4b removed a required evidence field but left canonical query references behind, so normalization failed before the intended inventory conformance rule ran.
+How to apply: remove or replace every dependent reference with the mutated declaration, prove the fixture still crosses earlier validation layers, and pin the exact downstream diagnostic. See `docs/execution/packets/G3-P4b.md`.
+
 ## Revalidate issued capabilities at every use
 Date: 2026-07-30
 Why: Q1-P4 sealed a legal-entity scope to one request view but let policy-v1 authority survive a policy-v2 change for the rest of that request.
@@ -261,3 +266,8 @@ How to apply: immediately before execution, reauthorize every capability member 
 Date: 2026-07-30
 Why: Q1-P4 moved capability refusal to the gateway, leaving a provider error assertion aimed at a guard no application path could reach.
 How to apply: trace every ingress after moving enforcement, remove unreachable duplicate validation, and make the executed control pin the first refusing layer's typed error and subject. See `docs/execution/packets/Q1-P4.md`.
+
+## Do not mistake declared state machines for runtime enforcement
+Date: 2026-07-30
+Why: Party, Catalog, Location, and Inventory all declare empty `stateMachines` arrays, while the generic module runtime consumes no state-machine definition at all; the language concept therefore supplies no terminal-state protection today.
+How to apply: before relying on a canonical lifecycle declaration, trace it into an executed runtime consumer and prove terminal-state mutation is refused. Treat declaration without consumption as a hollow contract, not enforcement.
