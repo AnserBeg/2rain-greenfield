@@ -565,9 +565,9 @@ why none of this can be done as incremental CSS tidying.
 
 | Destination | Receives |
 |---|---|
-| `docs/decisions/ADR-0028-*` (new) | Feedback ladder; loading states as an exception path; the 400 ms objective |
-| `docs/decisions/ADR-0029-*` (new) | Token layer and visual system; the brand/status separation rule; motion contract |
-| `docs/decisions/ADR-0030-*` (new, after the U3 debate) | Minimum client capability tier |
+| `docs/decisions/ADR-0032-*` (new) | Feedback ladder; loading states as an exception path; the 400 ms objective |
+| `docs/decisions/ADR-0035-*` (new) | Token layer and visual system; the brand/status separation rule; motion contract |
+| `docs/decisions/ADR-0036-*` (new, after the U3 debate) | Minimum client capability tier |
 | Plan **§8.3** | Component registry gains `skeleton`, `progress`, `toast`, `inline-error` as declared components |
 | Plan **§8.4** | The ladder; Postel input doctrine; error routing; success weighting; empty-state rules |
 | Plan **§8.5** | Disclosure tiers; conventions register; Miller→Hick correction; brand/status separation |
