@@ -2,7 +2,7 @@ import { catalogModuleDefinition } from '../catalog/definition.js';
 import { locationModuleDefinition } from '../location/definition.js';
 import { partyModuleDefinition } from '../party/definition.js';
 
-const version = 'v3' as const;
+const version = 'v4' as const;
 const normalizationProfileVersion = 'northstar.normalization/v3' as const;
 
 export const APPLICATION_NAMESPACE = 'northstar.app' as const;
