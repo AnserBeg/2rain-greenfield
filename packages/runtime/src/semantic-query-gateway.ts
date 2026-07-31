@@ -1052,13 +1052,6 @@ function assertAggregateQueryDefinition(
     }
     parameterIds.add(parameter.parameterId as string);
     const parameterType = parameter.parameterType;
-    if (parameterType.kind === 'legalEntityReferenceParameterType') {
-      assertExactKeys(parameterType, ['kind', 'schemaVersion'], invalid);
-      if (parameterType.schemaVersion !== aggregateNodeVersion) {
-        throw invalid('aggregate legal-entity parameter version is invalid');
-      }
-      continue;
-    }
     if (
       FieldTypeSchema.safeParse(parameterType).success === false ||
       parameterType.schemaVersion !== aggregateNodeVersion

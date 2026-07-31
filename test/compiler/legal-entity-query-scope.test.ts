@@ -448,6 +448,13 @@ test('cutting v4 leaves v3 output byte-identical', () => {
     }).status,
     'compiled',
   );
+  // Frozen expected digest, measured on BOTH sides of the v4 adoption boundary
+  // and found identical: pre-adoption main and this branch both produce
+  // 921ee278... Comparing two fresh compiles to each other, as this control did
+  // before, proves DETERMINISM, not identity with the pre-v4 output -- a
+  // deterministic change to the v3 manifest would move both and stay green.
+  const V3_RELEASE_MANIFEST_DIGEST =
+    '921ee2781fabdf5fd93f93cf07db9b27e6f41e8ad6163dbbd714da58dd9e6290';
   const before = canonicalizeAndHash(
     mustCompile(compilerInput(v3)).bundle.releaseManifest,
   ).contentHash;
@@ -455,6 +462,7 @@ test('cutting v4 leaves v3 output byte-identical', () => {
     mustCompile(compilerInput(v3)).bundle.releaseManifest,
   ).contentHash;
   assert.equal(before, again);
+  assert.equal(before, V3_RELEASE_MANIFEST_DIGEST);
 
   const manifest = mustCompile(compilerInput(v3)).bundle.releaseManifest;
   assert.equal(manifest.languageVersion, LANGUAGE_VERSIONS.v3);

@@ -3,7 +3,7 @@ import { locationModuleDefinition } from '../location/definition.js';
 import { partyModuleDefinition } from '../party/definition.js';
 
 const version = 'v4' as const;
-const normalizationProfileVersion = 'northstar.normalization/v3' as const;
+const normalizationProfileVersion = 'northstar.normalization/v4' as const;
 
 export const APPLICATION_NAMESPACE = 'northstar.app' as const;
 

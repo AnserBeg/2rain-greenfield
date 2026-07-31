@@ -56,7 +56,7 @@ test('Party definition compiles into every walking-slice projection with no dele
   assert.equal(definition.languageVersion, 'v4');
   assert.equal(
     definition.normalizationProfileVersion,
-    'northstar.normalization/v3',
+    'northstar.normalization/v4',
   );
   assert.deepEqual(
     new Set(definition.queries.map((query) => query.queryType)),
