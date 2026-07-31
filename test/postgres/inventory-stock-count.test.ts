@@ -863,20 +863,34 @@ async function loadInventoryDefinition(): Promise<Record<string, unknown>> {
   ]) {
     assert.ok(Array.isArray(definition[collection]));
     assert.ok(Array.isArray(inventory[collection]));
-    definition[collection] = [
-      ...(definition[collection] as unknown[]),
-      ...(inventory[collection] as unknown[]),
-    ];
+    const composedEntries = definition[collection] as unknown[];
+    const inventoryEntries: readonly unknown[] = inventory[
+      collection
+    ] as readonly unknown[];
+    for (const inventoryEntry of inventoryEntries) {
+      assert.equal(
+        composedEntries.filter(
+          (candidate) =>
+            JSON.stringify(candidate) === JSON.stringify(inventoryEntry),
+        ).length,
+        1,
+        `composed application must contain each inventory ${collection} entry exactly once`,
+      );
+    }
   }
   assert.ok(Array.isArray(definition.modules));
   assert.ok(Array.isArray(inventory.modules));
   assert.ok(isRecord(inventory.modules[0]));
   assert.ok(isRecord(definition.package));
-  definition.modules.push({
-    ...inventory.modules[0],
-    orderKey: 40,
-    ownerPackageId: definition.package.packageId,
-  });
+  const inventoryModuleId = inventory.modules[0].moduleId;
+  assert.equal(
+    definition.modules.filter(
+      (candidate) =>
+        isRecord(candidate) && candidate.moduleId === inventoryModuleId,
+    ).length,
+    1,
+    'composed application must contain the inventory module exactly once',
+  );
   return definition;
 }
 

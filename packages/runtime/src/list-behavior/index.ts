@@ -88,6 +88,7 @@ export class SharedListContractError extends Error {
 export function parseSharedListArguments(
   argumentsValue: ImmutableJsonValue,
   input: {
+    readonly declaredParameterIds: readonly string[];
     readonly maximumResultCount: number;
     readonly queryId: string;
   },
@@ -95,7 +96,11 @@ export function parseSharedListArguments(
   if (!isRecord(argumentsValue) || !Object.hasOwn(argumentsValue, 'list')) {
     return null;
   }
-  assertExactKeys(argumentsValue, ['includeArchived', 'list'], true);
+  assertExactKeys(
+    argumentsValue,
+    ['includeArchived', 'list', ...input.declaredParameterIds],
+    true,
+  );
   const includeArchived = optionalBoolean(
     argumentsValue.includeArchived,
     'includeArchived',

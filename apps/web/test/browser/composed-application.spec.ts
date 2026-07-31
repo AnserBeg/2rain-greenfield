@@ -1,13 +1,31 @@
+import { readFile } from 'node:fs/promises';
+
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
-import type pg from 'pg';
+import {
+  PROJECTION_FAMILY_IDS,
+  type StorageTargetPayloadV1,
+} from '@north-star/compiler';
+import { trustedContextForRequestRuntimeView } from '@north-star/runtime/request-runtime-view';
+import pg from 'pg';
 
-import { startComposedApplication } from '../../../api/src/composition-root.js';
+import {
+  COMPOSED_APPLICATION_INVENTORY_SCOPE,
+  startComposedApplication,
+} from '../../../api/src/composition-root.js';
+import {
+  INVENTORY_POSTING_CAPABILITY_ID,
+  INVENTORY_POSTING_CAPABILITY_VERSION,
+  INVENTORY_POSTING_DEPENDENCY_SET_ROOT,
+  PostgresInventoryPostingService,
+  type InventoryAdjustmentPostingCommandV1,
+} from '../../../../packages/postgres-provider/src/inventory-posting-service.js';
+import { TrustedActorEnvelopeIssuer } from '../../../../packages/postgres-provider/src/trust/trusted-actor-envelope.js';
 import { withEphemeralPostgres } from '../../../../test/helpers/postgres.js';
 
 const applicationNamespace = 'northstar.app';
 
-test('composed Party, Catalog, and Location product creates and persists a real record', async ({
+test('composed Party, Catalog, Location, and Inventory product reads a real posting and persists a record', async ({
   page,
 }) => {
   test.setTimeout(120_000);
@@ -28,6 +46,7 @@ test('composed Party, Catalog, and Location product creates and persists a real 
       });
       try {
         await assertSeedTrust(pool, application);
+        await seedPostedInventory(pool, databaseUrl, application);
         await productJourney(page, application.baseUrl);
         await application.close();
         application = await startComposedApplication({
@@ -47,28 +66,74 @@ test('composed Party, Catalog, and Location product creates and persists a real 
 });
 
 async function productJourney(page: Page, baseUrl: string): Promise<void> {
+  const inventoryScopeParameters = {
+    movementDetail: await loadSurfaceScopeParameterId(
+      'inventory_movement_detail',
+    ),
+    movementList: await loadSurfaceScopeParameterId('inventory_movement_list'),
+    transactionDetail: await loadSurfaceScopeParameterId(
+      'inventory_transaction_detail',
+    ),
+    transactionForm: await loadSurfaceScopeParameterId(
+      'inventory_transaction_form',
+    ),
+    transactionList: await loadSurfaceScopeParameterId(
+      'inventory_transaction_list',
+    ),
+  } as const;
   await page.goto(surfaceUrl(baseUrl, 'party_list'));
   const navigation = page.getByRole('navigation', {
     name: 'Release navigation',
   });
+  const primaryEntries = navigation.locator('.navigation-tree > li');
+  await expect(primaryEntries).toHaveCount(4);
+  await expect(
+    primaryEntries.locator(
+      ':scope > a > span:nth-child(2), :scope > details > summary > span:nth-child(2)',
+    ),
+  ).toHaveText(['Party', 'Catalog', 'Location', 'Inventory']);
   await expect(navigation.locator('a > span:nth-child(2)')).toHaveText([
-    'Item',
-    'Location',
     'Party',
     'Party role',
+    'Catalog',
+    'Location',
+    'Inventory movement',
+    'Inventory period lock',
+    'Inventory transaction line',
+    'Inventory transaction',
+    'Legal entity',
+    'Stock count line',
+    'Stock count',
   ]);
   await expect(
     navigation.getByRole('link', { name: /detail|form/i }),
   ).toHaveCount(0);
   await expect(
-    navigation.getByRole('link', { name: 'Party', exact: true }),
+    primaryEntries.getByRole('group').filter({ hasText: 'Party' }),
   ).toBeVisible();
   await expect(
-    navigation.getByRole('link', { name: 'Item', exact: true }),
+    navigation.getByRole('link', { name: 'Catalog', exact: true }),
   ).toBeVisible();
   await expect(
     navigation.getByRole('link', { name: 'Location', exact: true }),
   ).toBeVisible();
+  const inventoryNavigation = primaryEntries
+    .getByRole('group')
+    .filter({ hasText: 'Inventory' });
+  await expect(inventoryNavigation).toBeVisible();
+  await inventoryNavigation.getByText('Inventory', { exact: true }).click();
+  await expect(inventoryNavigation.locator('a > span:nth-child(2)')).toHaveText(
+    [
+      'Inventory movement',
+      'Inventory period lock',
+      'Inventory transaction line',
+      'Inventory transaction',
+      'Legal entity',
+      'Stock count line',
+      'Stock count',
+    ],
+  );
+  await inventoryNavigation.getByText('Inventory', { exact: true }).click();
   await expect(
     page.locator('[data-diagnostic-code="UNSUPPORTED_COMPONENT"]'),
   ).toHaveCount(0);
@@ -112,7 +177,19 @@ async function productJourney(page: Page, baseUrl: string): Promise<void> {
   await expect(firstResponsiveRow).toHaveCSS('display', 'grid');
   await expect(page.locator('.sidebar')).toHaveCSS('position', 'fixed');
   await expect(page.locator('.sidebar')).toHaveCSS('bottom', '0px');
-  expect(await navigation.getByRole('link').count()).toBeLessThanOrEqual(5);
+  expect(
+    await navigation.getByRole('link').evaluateAll(
+      (links) =>
+        links.filter((link) => {
+          const item = link.closest('li');
+          return (
+            item !== null &&
+            getComputedStyle(item).display !== 'none' &&
+            getComputedStyle(link).display !== 'none'
+          );
+        }).length,
+    ),
+  ).toBeLessThanOrEqual(5);
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= window.innerWidth,
@@ -120,7 +197,7 @@ async function productJourney(page: Page, baseUrl: string): Promise<void> {
   ).toBe(true);
   await page.setViewportSize({ height: 720, width: 1280 });
 
-  await navigation.getByRole('link', { name: 'Item', exact: true }).click();
+  await navigation.getByRole('link', { name: 'Catalog', exact: true }).click();
   await expect(
     page.getByRole('heading', { level: 1, name: 'Item list' }),
   ).toBeVisible();
@@ -140,6 +217,124 @@ async function productJourney(page: Page, baseUrl: string): Promise<void> {
   await expect(
     page.locator('[data-diagnostic-code="UNSUPPORTED_COMPONENT"]'),
   ).toHaveCount(0);
+
+  const unscopedMovementUrl = surfaceUrl(baseUrl, 'inventory_movement_list');
+  const unscopedMovementResponse = await page.goto(unscopedMovementUrl);
+  expect(unscopedMovementResponse?.status()).toBe(422);
+  await expect(
+    page.locator('[data-diagnostic-code="QUERY_LEGAL_ENTITY_SCOPE_REQUIRED"]'),
+  ).toBeVisible();
+  const movementListUrl = scopedSurfaceUrl(
+    baseUrl,
+    'inventory_movement_list',
+    inventoryScopeParameters.movementList,
+    browserLegalEntityId,
+  );
+  await page.goto(movementListUrl);
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'Inventory movement list' }),
+  ).toBeVisible();
+  const movementRow = page.locator('tr', {
+    hasText: 'browser-posted-adjustment',
+  });
+  await expect(movementRow).toBeVisible();
+  await expect(
+    page.getByRole('link', { name: 'New', exact: true }),
+  ).toHaveCount(0);
+  await movementRow.getByRole('link').click();
+  expect(
+    new URL(page.url()).searchParams.get(
+      inventoryScopeParameters.movementDetail,
+    ),
+  ).toBe(browserLegalEntityId);
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'browser-posted-adjustment' }),
+  ).toBeVisible();
+  await expect(
+    page.locator('[data-platform-slot="record:commandBar"]'),
+  ).toHaveCount(0);
+
+  await page.goto(
+    scopedSurfaceUrl(
+      baseUrl,
+      'inventory_transaction_list',
+      inventoryScopeParameters.transactionList,
+      browserLegalEntityId,
+    ),
+  );
+  const transactionRow = page.locator('tr', { hasText: 'ADJ-BROWSER-001' });
+  await expect(transactionRow).toBeVisible();
+  await expect(
+    page.getByRole('link', { name: 'New', exact: true }),
+  ).toHaveCount(0);
+  await transactionRow.getByRole('link').click();
+  expect(new URL(page.url()).searchParams.get('record')).toBe(
+    browserTransactionId,
+  );
+  await expect(
+    page.locator('main code', {
+      hasText: `${browserTransactionId.slice(0, 8)}…${browserTransactionId.slice(-4)}`,
+    }),
+  ).toBeVisible();
+  await expect(
+    page.locator('[data-platform-slot="record:commandBar"]'),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole('button', { name: /Archive|Restore/ }),
+  ).toHaveCount(0);
+  const inventoryTransactionDetailUrl = `${scopedSurfaceUrl(
+    baseUrl,
+    'inventory_transaction_detail',
+    inventoryScopeParameters.transactionDetail,
+    browserLegalEntityId,
+  )}&record=${encodeURIComponent(browserTransactionId)}`;
+  for (const [intent, idempotencyKey] of [
+    ['archive', '74000000-0000-4000-8000-000000000007'],
+    ['restore', '74000000-0000-4000-8000-000000000008'],
+  ] as const) {
+    const refusedLifecycleWrite = await page.request.post(
+      inventoryTransactionDetailUrl,
+      {
+        form: {
+          expectedRevision: '2',
+          idempotencyKey,
+          intent,
+          recordId: browserTransactionId,
+        },
+      },
+    );
+    expect(refusedLifecycleWrite.status()).toBe(422);
+    expect(await refusedLifecycleWrite.text()).toContain(
+      'OPERATION_UNSUPPORTED',
+    );
+  }
+  await page.goto(inventoryTransactionDetailUrl);
+  await expect(
+    page.locator('main code', {
+      hasText: `${browserTransactionId.slice(0, 8)}…${browserTransactionId.slice(-4)}`,
+    }),
+  ).toBeVisible();
+  const inventoryTransactionFormUrl = scopedSurfaceUrl(
+    baseUrl,
+    'inventory_transaction_form',
+    inventoryScopeParameters.transactionForm,
+    browserLegalEntityId,
+  );
+  await page.goto(inventoryTransactionFormUrl);
+  await expect(
+    page.locator('[data-diagnostic-code="UNSUPPORTED_COMPONENT"]'),
+  ).toBeVisible();
+  await expect(page.getByRole('textbox')).toHaveCount(0);
+  await expect(page.getByRole('button')).toHaveCount(0);
+  const refusedWrite = await page.request.post(inventoryTransactionFormUrl, {
+    form: {
+      idempotencyKey: '74000000-0000-4000-8000-000000000005',
+      intent: 'create',
+      recordId: '74000000-0000-4000-8000-000000000006',
+    },
+  });
+  expect(refusedWrite.status()).toBe(422);
+  expect(await refusedWrite.text()).toContain('OPERATION_UNSUPPORTED');
 
   await page.goto(surfaceUrl(baseUrl, 'party_list'));
   await page.getByRole('link', { name: 'New', exact: true }).click();
@@ -293,8 +488,559 @@ async function productJourney(page: Page, baseUrl: string): Promise<void> {
   ).toBeVisible();
 }
 
+const browserLegalEntityId = COMPOSED_APPLICATION_INVENTORY_SCOPE.legalEntityId;
+const browserTransactionId = '74000000-0000-4000-8000-000000000002';
+const browserTransactionLineId = '74000000-0000-4000-8000-000000000003';
+const browserPostingIdempotencyKey = '74000000-0000-4000-8000-000000000004';
+const rejectedBrowserTransactionId = '74100000-0000-4000-8000-000000000001';
+const rejectedBrowserTransactionLineId = '74100000-0000-4000-8000-000000000002';
+const rejectedBrowserPostingIdempotencyKey =
+  '74100000-0000-4000-8000-000000000003';
+const rejectedBrowserPostingSourceId = 'browser-rejected-superuser-adjustment';
+const demoItemId = '71000000-0000-4000-8000-000000000011';
+const demoLocationId = '71000000-0000-4000-8000-000000000021';
+const browserPostingInstant = '2026-07-30T12:00:00.000Z';
+type StorageEntityTarget = StorageTargetPayloadV1['entities'][number];
+
+async function seedPostedInventory(
+  adminPool: pg.Pool,
+  databaseUrl: string,
+  application: Awaited<ReturnType<typeof startComposedApplication>>,
+): Promise<void> {
+  const projection = await loadPostingProjection(
+    application.runtime.releaseRoot,
+  );
+  const identity = application.runtime.identity;
+  const provisioned = await adminPool.query<{ contract_release_root: string }>(
+    `SELECT contract_release_root
+       FROM platform.inventory_posting_configurations
+      WHERE tenant_id=$1 AND environment_id=$2 AND legal_entity_id=$3`,
+    [identity.tenantId, identity.environmentId, browserLegalEntityId],
+  );
+  expect(provisioned.rows).toEqual([
+    { contract_release_root: application.runtime.releaseRoot },
+  ]);
+
+  await application.runtime.entry.run(
+    { headers: { authorization: 'browser-inventory-posting' } },
+    async (view) => {
+      const context = trustedContextForRequestRuntimeView(view);
+      await seedInventoryDraft(adminPool, context, projection.storageTarget);
+      const actor = await new TrustedActorEnvelopeIssuer({
+        resolve: async () => ({
+          approvingHumanId: null,
+          delegation: null,
+          executionPrincipal: {
+            kind: 'HUMAN',
+            principalId: context.principalId,
+          },
+          initiatingHumanId: context.principalId,
+          subject: null,
+        }),
+      }).issue(context);
+      const registration = {
+        capabilityId: INVENTORY_POSTING_CAPABILITY_ID,
+        capabilityVersion: INVENTORY_POSTING_CAPABILITY_VERSION,
+        dependencySetRoot: INVENTORY_POSTING_DEPENDENCY_SET_ROOT,
+        releaseContentHash: application.runtime.releaseRoot,
+        releaseId: application.runtime.activeReleaseId,
+        storageTarget: projection.storageTarget,
+        storageTargetContentHash: projection.contentHash,
+      } as const;
+      const command: InventoryAdjustmentPostingCommandV1 = {
+        authorization: {
+          decision: 'ALLOW',
+          evaluatorVersion: 'browser-inventory-fixture/v1',
+          policyVersion: 'browser-inventory-fixture/v1',
+        },
+        channel: 'SYSTEM',
+        effectiveAt: browserPostingInstant,
+        idempotencyKey: browserPostingIdempotencyKey,
+        legalEntityId: browserLegalEntityId,
+        lines: [
+          {
+            itemId: demoItemId,
+            locationId: demoLocationId,
+            quantityDelta: '5',
+            sourceLine: '1',
+            transactionLineId: browserTransactionLineId,
+            unitId: 'EA',
+          },
+        ],
+        reason: {
+          code: 'browser-seed',
+          narrative: 'Posted through the admitted Inventory capability',
+        },
+        sourceId: 'browser-posted-adjustment',
+        sourceRevision: 1,
+        sourceType: 'browser-checkpoint',
+        stockDimensionSetVersion: 'v1',
+        transactionId: browserTransactionId,
+      };
+      const rejectedCommand: InventoryAdjustmentPostingCommandV1 = {
+        ...command,
+        idempotencyKey: rejectedBrowserPostingIdempotencyKey,
+        lines: [
+          {
+            ...command.lines[0]!,
+            transactionLineId: rejectedBrowserTransactionLineId,
+          },
+        ],
+        sourceId: rejectedBrowserPostingSourceId,
+        transactionId: rejectedBrowserTransactionId,
+      };
+      const privilegedPool = new pg.Pool({
+        connectionString: databaseUrl,
+        max: 1,
+      });
+      try {
+        await expectDatabaseRole(privilegedPool, {
+          currentUser: 'postgres',
+          rolsuper: true,
+          sessionUser: 'postgres',
+        });
+        const privilegedService = new PostgresInventoryPostingService(
+          privilegedPool,
+          registration,
+          { currentInstant: () => browserPostingInstant },
+        );
+        await expect(
+          privilegedService.postAdjustment(context, actor, rejectedCommand),
+        ).rejects.toMatchObject({
+          code: 'INVENTORY_POSTING_STORAGE_INVALID',
+          message:
+            'INVENTORY_POSTING_STORAGE_INVALID: posting requires the unprivileged trusted runtime login',
+          name: 'InventoryPostingError',
+        });
+      } finally {
+        await privilegedPool.end();
+      }
+      await expectRejectedPostingAbsent(
+        adminPool,
+        context,
+        projection.storageTarget,
+      );
+
+      const runtimeConnection = new URL(databaseUrl);
+      runtimeConnection.username = 'north_star_runtime';
+      runtimeConnection.password = '';
+      const runtimePool = new pg.Pool({
+        connectionString: runtimeConnection.href,
+        max: 2,
+      });
+      try {
+        await expectDatabaseRole(runtimePool, {
+          currentUser: 'north_star_runtime',
+          rolsuper: false,
+          sessionUser: 'north_star_runtime',
+        });
+        const service = new PostgresInventoryPostingService(
+          runtimePool,
+          registration,
+          { currentInstant: () => browserPostingInstant },
+        );
+        await service.postAdjustment(context, actor, command);
+      } finally {
+        await runtimePool.end();
+      }
+    },
+  );
+}
+
+async function expectDatabaseRole(
+  pool: pg.Pool,
+  expected: {
+    readonly currentUser: string;
+    readonly rolsuper: boolean;
+    readonly sessionUser: string;
+  },
+): Promise<void> {
+  const result = await pool.query<{
+    currentUser: string;
+    rolsuper: boolean;
+    sessionUser: string;
+  }>(`SELECT current_user AS "currentUser",
+             session_user AS "sessionUser",
+             role.rolsuper
+        FROM pg_catalog.pg_roles AS role
+       WHERE role.rolname = current_user`);
+  expect(result.rows).toEqual([expected]);
+}
+
+async function expectRejectedPostingAbsent(
+  pool: pg.Pool,
+  context: ReturnType<typeof trustedContextForRequestRuntimeView>,
+  target: StorageTargetPayloadV1,
+): Promise<void> {
+  const transaction = storageEntity(target, 'inventory_transaction');
+  const transactionLine = storageEntity(target, 'inventory_transaction_line');
+  const movement = storageEntity(target, 'inventory_movement');
+  const movementSourceIdColumn = movement.columns.find(
+    (column) => localField(column) === 'inventory_movement_source_id',
+  )?.physicalName;
+  if (!movementSourceIdColumn) {
+    throw new TypeError('inventory movement source id column is missing');
+  }
+  const schema = quoted(target.providerAbi.managedSchema);
+  const result = await pool.query<{
+    movementRows: number;
+    receiptRows: number;
+    transactionLineRows: number;
+    transactionRows: number;
+  }>(
+    `SELECT
+       (SELECT count(*)::integer
+          FROM ${schema}.${quoted(transaction.physicalTableName)}
+         WHERE tenant_id=$1 AND environment_id=$2
+           AND ${quoted(transaction.recordIdentity.column)}=$3) AS "transactionRows",
+       (SELECT count(*)::integer
+          FROM ${schema}.${quoted(transactionLine.physicalTableName)}
+         WHERE tenant_id=$1 AND environment_id=$2
+           AND ${quoted(transactionLine.recordIdentity.column)}=$4) AS "transactionLineRows",
+       (SELECT count(*)::integer
+          FROM ${schema}.${quoted(movement.physicalTableName)}
+         WHERE tenant_id=$1 AND environment_id=$2
+           AND ${quoted(movementSourceIdColumn)}=$5) AS "movementRows",
+       (SELECT count(*)::integer
+          FROM platform.semantic_operation_receipts
+         WHERE tenant_id=$1 AND environment_id=$2
+           AND action_id=$6 AND idempotency_key=$7) AS "receiptRows"`,
+    [
+      context.tenantId,
+      context.environmentId,
+      rejectedBrowserTransactionId,
+      rejectedBrowserTransactionLineId,
+      rejectedBrowserPostingSourceId,
+      INVENTORY_POSTING_CAPABILITY_ID,
+      rejectedBrowserPostingIdempotencyKey,
+    ],
+  );
+  expect(result.rows).toEqual([
+    {
+      movementRows: 0,
+      receiptRows: 0,
+      transactionLineRows: 0,
+      transactionRows: 0,
+    },
+  ]);
+}
+
+async function seedInventoryDraft(
+  pool: pg.Pool,
+  context: ReturnType<typeof trustedContextForRequestRuntimeView>,
+  target: StorageTargetPayloadV1,
+): Promise<void> {
+  const transaction = storageEntity(target, 'inventory_transaction');
+  const transactionLine = storageEntity(target, 'inventory_transaction_line');
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      `SELECT set_config('north_star.tenant_id',$1,true),
+              set_config('north_star.environment_id',$2,true),
+              set_config('north_star.principal_id',$3,true),
+              set_config('north_star.request_id',$4,true)`,
+      [
+        context.tenantId,
+        context.environmentId,
+        context.principalId,
+        context.requestId,
+      ],
+    );
+    await client.query('SET LOCAL ROLE north_star_module_runtime');
+    await insertStorageEntity(client, target, transaction, {
+      legalEntityId: browserLegalEntityId,
+      recordId: browserTransactionId,
+      relations: {},
+      values: {
+        inventory_transaction_actor_id: context.principalId,
+        inventory_transaction_effective_at: browserPostingInstant,
+        inventory_transaction_number: 'ADJ-BROWSER-001',
+        inventory_transaction_reason_code: 'browser-seed',
+        inventory_transaction_reason_narrative:
+          'Posted through the admitted Inventory capability',
+        inventory_transaction_recorded_at: browserPostingInstant,
+        inventory_transaction_source_id: 'browser-posted-adjustment',
+        inventory_transaction_source_type: 'browser-checkpoint',
+        inventory_transaction_state: enumOption(
+          transaction,
+          'inventory_transaction_state',
+          'draft',
+        ),
+        inventory_transaction_type: enumOption(
+          transaction,
+          'inventory_transaction_type',
+          'adjustment',
+        ),
+      },
+      context,
+    });
+    await insertStorageEntity(client, target, transactionLine, {
+      legalEntityId: browserLegalEntityId,
+      recordId: browserTransactionLineId,
+      relations: {
+        'northstar.app:entity.inventory_transaction': browserTransactionId,
+      },
+      values: {
+        inventory_transaction_line_from_location_id: null,
+        inventory_transaction_line_item_id: demoItemId,
+        inventory_transaction_line_line_number: 1,
+        inventory_transaction_line_quantity: '5',
+        inventory_transaction_line_to_location_id: demoLocationId,
+        inventory_transaction_line_unit_id: 'EA',
+      },
+      context,
+    });
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function insertStorageEntity(
+  client: pg.PoolClient,
+  target: StorageTargetPayloadV1,
+  entity: StorageEntityTarget,
+  input: {
+    readonly context: ReturnType<typeof trustedContextForRequestRuntimeView>;
+    readonly legalEntityId: string | null;
+    readonly recordId: string;
+    readonly relations: Readonly<Record<string, string>>;
+    readonly values: Readonly<Record<string, unknown>>;
+  },
+): Promise<void> {
+  const relations = target.relations.filter(
+    (relation) =>
+      relation.sourceEntityId === entity.entityId &&
+      relation.relationColumn.origin !== 'field',
+  );
+  const columns = [
+    'tenant_id',
+    'environment_id',
+    ...(entity.legalEntity ? [entity.legalEntity.column] : []),
+    entity.recordIdentity.column,
+    ...entity.columns.map((column) => column.physicalName),
+    ...relations.map((relation) => relation.relationColumn.physicalName),
+  ];
+  const values = [
+    input.context.tenantId,
+    input.context.environmentId,
+    ...(entity.legalEntity ? [input.legalEntityId] : []),
+    input.recordId,
+    ...entity.columns.map((column) => {
+      const local = localField(column);
+      if (!Object.hasOwn(input.values, local)) {
+        throw new TypeError(`missing browser fixture field ${local}`);
+      }
+      return input.values[local];
+    }),
+    ...relations.map((relation) => {
+      const value = input.relations[relation.targetEntityId];
+      if (!value) {
+        throw new TypeError(
+          `missing browser fixture relation ${relation.relationId}`,
+        );
+      }
+      return value;
+    }),
+  ];
+  await client.query(
+    `INSERT INTO ${quoted(target.providerAbi.managedSchema)}.${quoted(entity.physicalTableName)}
+       (${columns.map(quoted).join(',')})
+     VALUES (${values.map((_, index) => `$${String(index + 1)}`).join(',')})`,
+    values,
+  );
+}
+
+function storageEntity(
+  target: StorageTargetPayloadV1,
+  localId: string,
+): StorageEntityTarget {
+  const entity = target.entities.find((candidate) =>
+    candidate.entityId.endsWith(`:entity.${localId}`),
+  );
+  if (!entity) throw new TypeError(`missing storage entity ${localId}`);
+  return entity;
+}
+
+function enumOption(
+  entity: StorageEntityTarget,
+  localId: string,
+  suffix: string,
+): string {
+  const column = entity.columns.find(
+    (candidate) => localField(candidate) === localId,
+  );
+  const options = column?.fieldContract.enumOptionIds.filter((option) =>
+    option.endsWith(`_${suffix}`),
+  );
+  if (options?.length !== 1) {
+    throw new TypeError(`missing enum option ${localId}.${suffix}`);
+  }
+  return options[0]!;
+}
+
+function localField(column: StorageEntityTarget['columns'][number]): string {
+  return column.canonicalFieldId.split(':field.').at(-1)!;
+}
+
+function quoted(identifier: string): string {
+  if (!/^[a-z][a-z0-9_]{0,62}$/u.test(identifier)) {
+    throw new TypeError(`invalid generated identifier ${identifier}`);
+  }
+  return `"${identifier}"`;
+}
+
+async function loadPostingProjection(releaseRoot: string): Promise<{
+  readonly contentHash: string;
+  readonly storageTarget: StorageTargetPayloadV1;
+}> {
+  const compiled = JSON.parse(
+    await readFile(
+      new URL('../../release/app.compiled.json', import.meta.url),
+      'utf8',
+    ),
+  ) as {
+    readonly applications: readonly CompiledApplicationRelease[];
+  };
+  const application = compiled.applications.find(
+    (candidate) => candidate.releaseRoot === releaseRoot,
+  );
+  if (!application)
+    throw new TypeError('active application release is not checked in');
+  const projection = application.releaseManifest.projections.find(
+    (candidate) => candidate.familyId === PROJECTION_FAMILY_IDS.storageTarget,
+  );
+  if (!projection)
+    throw new TypeError('application storage projection is missing');
+  const manifestArtifact = application.artifacts.find(
+    (candidate) => candidate.contentHash === projection.artifactRoot,
+  );
+  if (!manifestArtifact)
+    throw new TypeError('storage manifest artifact is missing');
+  const manifest = JSON.parse(
+    Buffer.from(manifestArtifact.canonicalBytesBase64, 'base64').toString(
+      'utf8',
+    ),
+  ) as { readonly chunks: readonly { readonly contentHash: string }[] };
+  const contentHash = manifest.chunks[0]?.contentHash;
+  const chunk = application.artifacts.find(
+    (candidate) => candidate.contentHash === contentHash,
+  );
+  if (!chunk || !contentHash)
+    throw new TypeError('storage chunk artifact is missing');
+  return {
+    contentHash,
+    storageTarget: JSON.parse(
+      Buffer.from(chunk.canonicalBytesBase64, 'base64').toString('utf8'),
+    ) as StorageTargetPayloadV1,
+  };
+}
+
+interface CompiledApplicationRelease {
+  readonly artifacts: readonly {
+    readonly canonicalBytesBase64: string;
+    readonly contentHash: string;
+  }[];
+  readonly releaseManifest: {
+    readonly projections: readonly {
+      readonly artifactRoot: string;
+      readonly familyId: string;
+    }[];
+  };
+  readonly releaseRoot: string;
+}
+
+async function loadSurfaceScopeParameterId(
+  localSurface: string,
+): Promise<string> {
+  const compiled = JSON.parse(
+    await readFile(
+      new URL('../../release/app.compiled.json', import.meta.url),
+      'utf8',
+    ),
+  ) as { readonly applications: readonly CompiledApplicationRelease[] };
+  const application = compiled.applications.at(-1);
+  if (!application) throw new TypeError('compiled application is missing');
+  const surfacePayload = projectionPayload(
+    application,
+    PROJECTION_FAMILY_IDS.surfaceManifest,
+  ) as {
+    readonly surfaces: readonly {
+      readonly dataSourceQueryId: string;
+      readonly surfaceId: string;
+    }[];
+  };
+  const surfaceId = `${applicationNamespace}:surface.${localSurface}`;
+  const surface = surfacePayload.surfaces.find(
+    (candidate) => candidate.surfaceId === surfaceId,
+  );
+  if (!surface)
+    throw new TypeError(`compiled surface is missing: ${surfaceId}`);
+  const queryPayload = projectionPayload(
+    application,
+    PROJECTION_FAMILY_IDS.queryCatalog,
+  ) as {
+    readonly queries: readonly {
+      readonly legalEntityScope?: {
+        readonly operand: { readonly parameterId: string };
+      };
+      readonly queryId: string;
+    }[];
+  };
+  const query = queryPayload.queries.find(
+    (candidate) => candidate.queryId === surface.dataSourceQueryId,
+  );
+  const parameterId = query?.legalEntityScope?.operand.parameterId;
+  if (!parameterId) {
+    throw new TypeError(`compiled surface scope is missing: ${surfaceId}`);
+  }
+  return parameterId;
+}
+
+function projectionPayload(
+  application: CompiledApplicationRelease,
+  familyId: string,
+): unknown {
+  const projection = application.releaseManifest.projections.find(
+    (candidate) => candidate.familyId === familyId,
+  );
+  if (!projection) throw new TypeError(`projection is missing: ${familyId}`);
+  const manifest = application.artifacts.find(
+    (candidate) => candidate.contentHash === projection.artifactRoot,
+  );
+  if (!manifest)
+    throw new TypeError(`projection manifest is missing: ${familyId}`);
+  const descriptor = (
+    JSON.parse(
+      Buffer.from(manifest.canonicalBytesBase64, 'base64').toString('utf8'),
+    ) as { readonly chunks: readonly { readonly contentHash: string }[] }
+  ).chunks[0];
+  const chunk = application.artifacts.find(
+    (candidate) => candidate.contentHash === descriptor?.contentHash,
+  );
+  if (!chunk) throw new TypeError(`projection chunk is missing: ${familyId}`);
+  return JSON.parse(
+    Buffer.from(chunk.canonicalBytesBase64, 'base64').toString('utf8'),
+  ) as unknown;
+}
+
 function surfaceUrl(baseUrl: string, localSurface: string): string {
   return `${baseUrl}/?surface=${encodeURIComponent(`${applicationNamespace}:surface.${localSurface}`)}`;
+}
+
+function scopedSurfaceUrl(
+  baseUrl: string,
+  localSurface: string,
+  scopeParameterId: string,
+  legalEntityId: string,
+): string {
+  const url = new URL(surfaceUrl(baseUrl, localSurface));
+  url.searchParams.set(scopeParameterId, legalEntityId);
+  return url.href;
 }
 
 async function assertSeedTrust(
