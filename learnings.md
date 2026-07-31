@@ -271,3 +271,8 @@ How to apply: trace every ingress after moving enforcement, remove unreachable d
 Date: 2026-07-30
 Why: Party, Catalog, Location, and Inventory all declare empty `stateMachines` arrays, while the generic module runtime consumes no state-machine definition at all; the language concept therefore supplies no terminal-state protection today.
 How to apply: before relying on a canonical lifecycle declaration, trace it into an executed runtime consumer and prove terminal-state mutation is refused. Treat declaration without consumption as a hollow contract, not enforcement.
+
+## Keep verification authority out of compatibility aliases
+Date: 2026-07-31
+Why: `ver-agg` passed a v2 physical-family alias into verification-plan lowering, so valid v3/v4 aggregate assertions disappeared even though the original canonical revision retained them.
+How to apply: build verification completeness from the authoritative canonical revision; pass compatibility aliases only to the physical families that require them, and prove every active assertion is emitted or fails with its own typed diagnostic. See `docs/execution/current-plan.md` row `ver-agg`.
