@@ -558,7 +558,7 @@
       "schemaVersion": "v4"
     }
   ],
-  "normalizationProfileVersion": "northstar.normalization/v3",
+  "normalizationProfileVersion": "northstar.normalization/v4",
   "operations": [
     {
       "confirmation": "none",
