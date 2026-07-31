@@ -258,9 +258,14 @@ test('inventory migration owns exactly two platform relations and no managed-mod
         const migrations = await loadMigrations(checkedInMigrations);
         assert.equal(
           migrations.at(-1)?.name,
-          '0016_inventory_posting_receipt_digest_version.sql',
+          '0019_release_verification_derivations.sql',
         );
-        const inventoryMigration = migrations.at(-2);
+        const inventoryMigrationIndex = migrations.findIndex(
+          (migration) =>
+            migration.name === '0015_inventory_storage_foundation.sql',
+        );
+        assert.notEqual(inventoryMigrationIndex, -1);
+        const inventoryMigration = migrations[inventoryMigrationIndex];
         assert.equal(
           inventoryMigration?.name,
           '0015_inventory_storage_foundation.sql',
@@ -270,8 +275,14 @@ test('inventory migration owns exactly two platform relations and no managed-mod
           /(?:CREATE|ALTER|DROP|TRUNCATE)\s+(?:TABLE\s+)?north_star_module\./iu,
         );
 
-        await runMigrations(client, migrations.slice(0, -2));
-        const applied = await runMigrations(client, migrations.slice(0, -1));
+        await runMigrations(
+          client,
+          migrations.slice(0, inventoryMigrationIndex),
+        );
+        const applied = await runMigrations(
+          client,
+          migrations.slice(0, inventoryMigrationIndex + 1),
+        );
         assert.deepEqual(applied.applied, [inventoryMigration.name]);
         const relations = await client.query<{
           name: string;
