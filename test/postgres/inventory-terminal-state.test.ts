@@ -27,11 +27,7 @@ import {
   APPLICATION_NAMESPACE,
   composedApplicationDefinition,
 } from '../../packages/domain/src/app/builder.js';
-import {
-  INVENTORY_IDS,
-  INVENTORY_NAMESPACE,
-  inventoryModuleDefinition,
-} from '../../packages/domain/src/inventory/index.js';
+import { inventoryModuleDefinition } from '../../packages/domain/src/inventory/index.js';
 import type {
   MintedUuid,
   RegisterTenantReleaseCommand,
