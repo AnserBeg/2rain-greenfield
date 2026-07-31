@@ -101,9 +101,7 @@
     {
       "capabilityId": "northstar.app:capability.standard_surface_content",
       "capabilityVersion": 1,
-      "declaredEffects": [
-        "read"
-      ],
+      "declaredEffects": ["read"],
       "kind": "capabilityRequirement",
       "requiredProjections": [
         "storage",
