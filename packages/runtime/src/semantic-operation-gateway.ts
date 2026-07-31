@@ -6,6 +6,7 @@ import {
 } from 'node:crypto';
 
 import {
+  admitPredicateForExecution,
   inspectPredicateForExecution,
   type PredicateKernelReceipt,
 } from '@north-star/canonical-model';
@@ -510,14 +511,24 @@ export class SemanticOperationGateway {
           'operation-tier-unsupported',
         );
       }
-      const preconditionReceipt = inspectPredicateForExecution(
+      // Structural admission only. The gateway answers "is this a predicate
+      // this platform can execute at all"; whether it HOLDS is evaluated by
+      // the generic interpreter against the record image, which the gateway
+      // does not hold. Until that evaluation exists this fence is the only
+      // thing standing between an authored precondition and an unguarded
+      // mutation, so it refuses anything it cannot parse.
+      const preconditionReceipt = admitPredicateForExecution(
         definition.precondition,
+        'operationPrecondition',
       );
       observePredicateReceiptSafely(
         this.observePredicateReceipt,
         preconditionReceipt,
       );
-      if (preconditionReceipt.outcome !== 'accepted') {
+      // Deliberately `!== 'admitted'` rather than `=== 'rejected'`: only an
+      // explicit admission proceeds, so any receipt shape this gateway does
+      // not recognise refuses instead of falling through.
+      if (preconditionReceipt.outcome !== 'admitted') {
         await this.#recordNonAccepted(
           view,
           invocation,
