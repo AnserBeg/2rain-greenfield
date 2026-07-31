@@ -11,6 +11,8 @@ import {
   normalizeApplicationPackage,
   parseAuthoredApplicationPackageJson,
   parseVersionedAuthoredApplicationPackageJson,
+  VersionedAuthoredApplicationPackageSchema,
+  VersionedNormalizedApplicationPackageSchema,
   ADOPTED_LANGUAGE_VERSION,
   type LegalEntityScopeSelectionReceipt,
 } from '../../packages/canonical-model/src/index.js';
@@ -150,6 +152,48 @@ test('a v3 document carrying legalEntityScope is rejected on both query branches
  * Victim: the `assertNodeVersionPurity` call in `parseAuthoredValue`
  * (normalize.ts). Deleting it makes the parse below succeed.
  */
+test('the exported versioned schemas reject a v3 package carrying a v4 node', () => {
+  // The EXPORTED SCHEMAS are public readers in their own right. Round 1 fixed
+  // only the function parsers, which left this path open — every entry point
+  // without its own guard was a hole, so purity now lives on the schema and
+  // there is one authority instead of a guard per caller.
+  const authored = v3AggregateModule() as {
+    queries: Array<Record<string, unknown>>;
+  };
+  const cleanAuthored = structuredClone(authored);
+  authored.queries[0]!.schemaVersion = LANGUAGE_VERSIONS.v4;
+  assert.equal(
+    VersionedAuthoredApplicationPackageSchema.safeParse(authored).success,
+    false,
+  );
+  assert.equal(
+    VersionedAuthoredApplicationPackageSchema.safeParse(cleanAuthored).success,
+    true,
+  );
+
+  const normalized = normalizeApplicationPackage(cleanAuthored) as unknown as {
+    queries: Array<Record<string, unknown>>;
+  };
+  const mixedNormalized = structuredClone(normalized);
+  mixedNormalized.queries[0]!.schemaVersion = LANGUAGE_VERSIONS.v4;
+  assert.equal(
+    VersionedNormalizedApplicationPackageSchema.safeParse(mixedNormalized)
+      .success,
+    false,
+  );
+  assert.equal(
+    VersionedNormalizedApplicationPackageSchema.safeParse(normalized).success,
+    true,
+  );
+
+  // A whole v4 package is admitted, so the guard refuses MIXING, not v4.
+  assert.equal(
+    VersionedAuthoredApplicationPackageSchema.safeParse(v4ScopedModule())
+      .success,
+    true,
+  );
+});
+
 test('the authored parsers reject a v3 package carrying a v4 node', () => {
   const mixed = v3AggregateModule() as {
     queries: Array<Record<string, unknown>>;

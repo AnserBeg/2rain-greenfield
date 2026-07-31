@@ -1125,14 +1125,68 @@ const LegacyNormalizedApplicationPackageSchema = z.strictObject(
 const V3NormalizedApplicationPackageSchema = z.strictObject(v3NormalizedShape);
 const V4NormalizedApplicationPackageSchema = z.strictObject(v4NormalizedShape);
 
-export const VersionedNormalizedApplicationPackageSchema = z.discriminatedUnion(
-  'languageVersion',
-  [
-    LegacyNormalizedApplicationPackageSchema,
-    V3NormalizedApplicationPackageSchema,
-    V4NormalizedApplicationPackageSchema,
-  ],
-);
+/**
+ * Marker carried on the purity issue so a canonical diagnostic can name it.
+ * Node schemas for the v3 family admit v3 and v4 (v4 reads every v3 node), so
+ * "one package uses one language version" cannot be expressed structurally.
+ * It is enforced HERE, on the exported schemas, rather than at each function
+ * parser — every entry point that skipped such a guard was a hole, and adding
+ * a guard per entry point makes the next entry point the next hole.
+ */
+export const MIXED_NODE_VERSION_ISSUE = 'canonical:mixed-node-version';
+
+function collectMixedNodeVersions(
+  value: unknown,
+  languageVersion: string,
+  path: (string | number)[],
+  found: { path: (string | number)[] }[],
+): void {
+  if (Array.isArray(value)) {
+    value.forEach((entry, index) =>
+      collectMixedNodeVersions(entry, languageVersion, [...path, index], found),
+    );
+    return;
+  }
+  if (typeof value !== 'object' || value === null) return;
+  const record = value as Record<string, unknown>;
+  if (
+    typeof record.schemaVersion === 'string' &&
+    record.schemaVersion !== languageVersion
+  ) {
+    found.push({ path: [...path, 'schemaVersion'] });
+  }
+  for (const [key, entry] of Object.entries(record)) {
+    if (key === 'schemaVersion') continue;
+    collectMixedNodeVersions(entry, languageVersion, [...path, key], found);
+  }
+}
+
+function withNodeVersionPurity<T extends z.ZodTypeAny>(schema: T): T {
+  return schema.superRefine((value: unknown, context: z.RefinementCtx) => {
+    if (typeof value !== 'object' || value === null) return;
+    const languageVersion = (value as { languageVersion?: unknown })
+      .languageVersion;
+    if (typeof languageVersion !== 'string') return;
+    const found: { path: (string | number)[] }[] = [];
+    collectMixedNodeVersions(value, languageVersion, [], found);
+    for (const entry of found) {
+      context.addIssue({
+        code: 'custom',
+        message: MIXED_NODE_VERSION_ISSUE,
+        path: entry.path,
+      });
+    }
+  }) as unknown as T;
+}
+
+export const VersionedNormalizedApplicationPackageSchema =
+  withNodeVersionPurity(
+    z.discriminatedUnion('languageVersion', [
+      LegacyNormalizedApplicationPackageSchema,
+      V3NormalizedApplicationPackageSchema,
+      V4NormalizedApplicationPackageSchema,
+    ]),
+  );
 export const NormalizedApplicationPackageSchema =
   LegacyNormalizedApplicationPackageSchema;
 
@@ -1182,13 +1236,12 @@ const LegacyAuthoredApplicationPackageSchema =
 const V3AuthoredApplicationPackageSchema = z.strictObject(v3AuthoredShape);
 const V4AuthoredApplicationPackageSchema = z.strictObject(v4AuthoredShape);
 
-export const VersionedAuthoredApplicationPackageSchema = z.discriminatedUnion(
-  'languageVersion',
-  [
+export const VersionedAuthoredApplicationPackageSchema = withNodeVersionPurity(
+  z.discriminatedUnion('languageVersion', [
     LegacyAuthoredApplicationPackageSchema,
     V3AuthoredApplicationPackageSchema,
     V4AuthoredApplicationPackageSchema,
-  ],
+  ]),
 );
 export const AuthoredApplicationPackageSchema =
   LegacyAuthoredApplicationPackageSchema;
