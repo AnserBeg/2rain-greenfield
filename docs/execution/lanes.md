@@ -260,8 +260,45 @@ an obvious timeout.
 
 **A green matrix produced while another lane's matrix was running is not
 evidence.** Before running the full matrix, check that no other lane is running
-one; if one is, wait. A lane may keep authoring and running focused suites
-throughout — only the full matrix serializes.
+one; if one is, wait.
+
+### The "only the full matrix serializes" carve-out was too generous — corrected 2026-07-30
+
+This section used to end: *"A lane may keep authoring and running focused suites
+throughout — only the full matrix serializes."* **That is wrong, and the
+orchestrator fell through the loophole three times in one evening.**
+
+  - Started the running app during a matrix → a 120 s `testTimeoutFailure`. The
+    same SHA passed clean and quiet.
+  - Committed to a worktree and merged `main` into it **while that worktree's
+    own matrix was executing**, so the run was testing a tree that moved under
+    it.
+  - Launched a **read-only Fable review** — no builds, no Docker, just reads and
+    greps — during a matrix, and
+    `test/compiler/performance-budget.test.ts` failed at **17,672 ms against a
+    5,000 ms budget**. That test is a wall-clock `process.hrtime` assertion over
+    a synthetic maximum-field fixture, so it measures the machine, not the
+    product.
+
+**The corrected rule: while a full matrix is running, nothing else runs.** Not a
+review, not an authoring lane, not the app, not a focused suite, and no git
+operation in the worktree under test. A reviewer process is not "just reading" —
+it is a model doing sustained tool calls on a WSL VM capped at 8 GB and 8
+processors, and it competes for exactly the resource the timing gates measure.
+
+**Why this matters more than it looks:** a loaded run does not fail honestly. It
+produces a *wrong verdict* — either a red on a timing-sensitive gate that would
+pass quiet, or the far worse case of an environmental red that gets mistaken for
+a product defect and "fixed". The standing prohibition on raising a bound to
+make a loaded run pass exists precisely because that is the tempting move here.
+**Re-run quiet; never widen the budget.**
+
+**A killed matrix does not clean up after itself.** Killing one left an orphaned
+`north-star-*` ephemeral container, which then prevented the *next* run's
+ephemeral PostgreSQL from becoming ready within 30 s — an environmental red that
+looked nothing like its cause. After killing a matrix, check `docker ps` and
+remove orphaned `north-star-*` containers before the next run. Never touch the
+user's `2rain-*` containers.
 
 This is a real cost of parallelism and it caps useful lane count: past roughly
 four lanes, matrix queueing dominates and additional lanes buy nothing.
