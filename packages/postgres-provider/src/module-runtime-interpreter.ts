@@ -28,6 +28,7 @@ import type {
   SemanticOperationExecutionRequest,
   SemanticOperationExecutor,
   SemanticOperationNonAcceptedRequest,
+  SemanticOperationParentGuard,
   SemanticOperationResultEnvelope,
 } from '../../runtime/src/semantic-operation-gateway.js';
 import { SEMANTIC_OPERATION_RESULT_VERSION } from '../../runtime/src/semantic-operation-gateway.js';
@@ -269,7 +270,7 @@ export class PostgresModuleRuntimeInterpreter
               client,
               currentStorage,
               currentEntity,
-              request.definition,
+              request,
               input,
               request.readBackDefinition.selections,
             );
@@ -314,7 +315,11 @@ async function prepareMutation(
   if (kind === 'createRecordEffect') {
     // Candidate image. A create that would forge a terminal state must refuse
     // on the record it is about to write, not on one that does not exist yet.
-    requirePrecondition(request.definition, input.patch, 'candidate');
+    requirePrecondition(
+      request.definition.precondition,
+      input.patch,
+      'candidate',
+    );
     return {
       changes: createChanges(request.definition.inputContract, input),
       expectedRevision: null,
@@ -334,13 +339,13 @@ async function prepareMutation(
   }
   // Prior image, for every effect that consumes an existing record. This is
   // what stops a mutation of already-terminal evidence.
-  requirePrecondition(request.definition, prior.values, 'prior');
+  requirePrecondition(request.definition.precondition, prior.values, 'prior');
   if (kind === 'updateRecordEffect') {
     // Projected image, a SEPARATE obligation. Without it an update could move
     // a record INTO the guarded state -- the prior image passes, and the row
     // lands terminal by press rather than by the sanctioned writer.
     requirePrecondition(
-      request.definition,
+      request.definition.precondition,
       { ...prior.values, ...input.patch },
       'projected',
     );
@@ -375,13 +380,13 @@ async function prepareMutation(
  * fail-open direction for exactly the guard this exists to enforce.
  */
 function requirePrecondition(
-  definition: SemanticOperationExecutionRequest['definition'],
+  precondition: Readonly<Record<string, ImmutableJsonValue>>,
   image: Readonly<Record<string, ImmutableJsonValue>>,
-  imageLabel: 'candidate' | 'prior' | 'projected',
+  imageLabel: 'candidate' | 'parent' | 'prior' | 'projected',
 ): void {
   let receipt;
   try {
-    receipt = inspectPredicateForExecution(definition.precondition, {
+    receipt = inspectPredicateForExecution(precondition, {
       bindingPosition: 'operationPrecondition',
       resolveComparison: (comparison) => resolveAgainstImage(comparison, image),
     });
@@ -515,21 +520,43 @@ async function executeMutationOnClient(
   client: PoolClient,
   storage: StorageTargetPayloadV1,
   entity: StorageEntity,
-  definition: RegisteredOperationDefinition,
+  request: SemanticOperationExecutionRequest,
   input: MutationInput,
   readBackSelections: readonly { readonly fieldId: string }[],
 ): Promise<SemanticRecordDto> {
+  const definition = request.definition;
   switch (definition.effect.kind) {
     case 'createRecordEffect':
-      await insertRecord(client, storage, entity, input);
+      await insertRecord(client, storage, entity, input, request.parentGuards);
       break;
     case 'updateRecordEffect':
+      await requireExistingParentGuards(
+        client,
+        storage,
+        entity,
+        input.recordId,
+        request.parentGuards,
+      );
       await updateRecord(client, entity, input);
       break;
     case 'archiveRecordEffect':
+      await requireExistingParentGuards(
+        client,
+        storage,
+        entity,
+        input.recordId,
+        request.parentGuards,
+      );
       await setArchiveState(client, storage, entity, input, true);
       break;
     case 'restoreRecordEffect':
+      await requireExistingParentGuards(
+        client,
+        storage,
+        entity,
+        input.recordId,
+        request.parentGuards,
+      );
       await setArchiveState(client, storage, entity, input, false);
       break;
   }
@@ -548,6 +575,7 @@ async function insertRecord(
   storage: StorageTargetPayloadV1,
   entity: StorageEntity,
   input: MutationInput,
+  parentGuards: readonly SemanticOperationParentGuard[],
 ): Promise<void> {
   const columns = ['tenant_id', 'environment_id', entity.recordIdentity.column];
   const values: unknown[] = [];
@@ -597,7 +625,13 @@ async function insertRecord(
         `unknown relation ${relationId}`,
       );
     }
-    await requireRelationTarget(client, storage, relation, recordId);
+    await requireRelationTarget(
+      client,
+      storage,
+      relation,
+      recordId,
+      parentGuards,
+    );
     columns.push(relation.relationColumn.physicalName);
     parameters.push(parameter(values, recordId));
   }
@@ -620,24 +654,67 @@ async function insertRecord(
   );
 }
 
+async function requireExistingParentGuards(
+  client: PoolClient,
+  storage: StorageTargetPayloadV1,
+  entity: StorageEntity,
+  recordId: string,
+  parentGuards: readonly SemanticOperationParentGuard[],
+): Promise<void> {
+  const relations = storage.relations.filter(
+    (relation) =>
+      relation.sourceEntityId === entity.entityId &&
+      relation.ownership === 'parentScopedChild',
+  );
+  for (const relation of relations) {
+    const result = await client.query<QueryResultRow>(
+      `SELECT ${quoted(relation.relationColumn.physicalName)} AS parent_record_id
+         FROM north_star_module.${quoted(entity.physicalTableName)}
+        WHERE tenant_id = north_star_internal.trusted_tenant_id()
+          AND environment_id = north_star_internal.trusted_environment_id()
+          AND ${quoted(entity.recordIdentity.column)} = $1
+        LIMIT 1`,
+      [recordId],
+    );
+    if (result.rowCount !== 1) {
+      throw failure(
+        'MODULE_RECORD_NOT_FOUND',
+        'module record was not found while resolving its parent guard',
+      );
+    }
+    const parentRecordId = result.rows[0]?.parent_record_id;
+    if (parentRecordId === null && relation.relationColumn.nullable) continue;
+    await requireRelationTarget(
+      client,
+      storage,
+      relation,
+      requiredUuid(parentRecordId, 'parentRecordId'),
+      parentGuards,
+    );
+  }
+}
+
 async function requireRelationTarget(
   client: PoolClient,
   storage: StorageTargetPayloadV1,
   relation: StorageTargetPayloadV1['relations'][number],
   recordId: string,
+  parentGuards: readonly SemanticOperationParentGuard[],
 ): Promise<void> {
   const target = requiredEntity(storage, relation.targetEntityId);
-  const result = await client.query(
-    `SELECT ${quoted(target.archive.archivedAtColumn)} IS NULL AS active
-       FROM north_star_module.${quoted(target.physicalTableName)}
-      WHERE tenant_id = north_star_internal.trusted_tenant_id()
-        AND environment_id = north_star_internal.trusted_environment_id()
-        AND ${quoted(target.recordIdentity.column)} = $1
-      LIMIT 1
-      FOR SHARE`,
-    [recordId],
+  const values: unknown[] = [];
+  const result = await client.query<QueryResultRow>(
+    selectSql(
+      target,
+      [
+        `${quoted(target.recordIdentity.column)} = ${parameter(values, recordId)}`,
+      ],
+      'LIMIT 1 FOR SHARE',
+    ),
+    values,
   );
-  if (result.rowCount !== 1) {
+  const parent = result.rows[0] ? rawRecord(target, result.rows[0]) : null;
+  if (!parent) {
     throw failure(
       'MODULE_RELATION_TARGET_NOT_FOUND',
       'relation target was not found',
@@ -645,13 +722,20 @@ async function requireRelationTarget(
   }
   if (
     relation.archiveBehavior === 'restrict' &&
-    result.rows[0]?.active !== true
+    parent.archivedAt !== null
   ) {
     throw failure(
       'MODULE_RELATION_VIOLATION',
       'relation target cannot accept active dependents',
       relation.relationId,
     );
+  }
+  if (relation.ownership === 'parentScopedChild') {
+    for (const guard of parentGuards.filter(
+      (candidate) => candidate.parentEntityId === target.entityId,
+    )) {
+      requirePrecondition(guard.precondition, parent.values, 'parent');
+    }
   }
 }
 
