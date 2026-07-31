@@ -198,6 +198,92 @@ test('a compiled scope operand must name a declared parameter', async () => {
   assert.equal(fixture.executor.lastRequest, null);
 });
 
+/**
+ * REVIEW FINDING 2. The operand is part of the request contract, so its
+ * refusal must precede every branch that can return an `unsupported` envelope.
+ * A retired query previously answered `unsupported` to a malformed operand,
+ * which release verification's probe would read as "the query is fine".
+ *
+ * Victim: the `scopeSelection` evaluation placed above the lifecycle branch in
+ * `#invoke`. Moving it back below that branch makes this test fail.
+ */
+test('a malformed operand is refused even when the query is not active', async () => {
+  const fixture = createFixture({ retiredQuery: true });
+  await assert.rejects(
+    () =>
+      fixture.queryApi.handle(authenticationInput, {
+        arguments: {},
+        queryId: scopedQueryId,
+        schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+      }),
+    (error: unknown) =>
+      error instanceof MalformedLegalEntityScopeArgumentError &&
+      error.reason === 'selection-omitted',
+  );
+  assert.equal(fixture.executor.lastRequest, null);
+
+  // A retired query with a WELL-FORMED operand still reports unsupported, so
+  // the reordering did not turn lifecycle into a scope error.
+  const wellFormed = createFixture({ retiredQuery: true });
+  const result = await wellFormed.queryApi.handle(authenticationInput, {
+    arguments: { [scopeParameterId]: [ENTITY_A] },
+    queryId: scopedQueryId,
+    schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+  });
+  assert.equal(result.outcome, 'unsupported');
+  assert.equal(wellFormed.executor.lastRequest, null);
+});
+
+/**
+ * REVIEW FINDING 3. A row query's declared parameters are part of the closed
+ * pinned catalog and must be validated like the aggregate branch's are.
+ * Checking only that the operand's id exists admitted a catalog the canonical
+ * model could not have produced.
+ *
+ * Victim: `assertRowQueryParameters`, and the parameter-type check inside
+ * `assertLegalEntityScopeContract`.
+ */
+test('a forged row parameter declaration cannot reach the executor', async () => {
+  for (const declaration of [
+    // Missing the derived type entirely.
+    { orderKey: 10, parameterId: scopeParameterId },
+    // An ordinary field type where the derived legal-entity type belongs.
+    {
+      orderKey: 10,
+      parameterId: scopeParameterId,
+      parameterType: { kind: 'textFieldType', maximumLength: 40 },
+    },
+    // The right kind at a version that never declared it.
+    {
+      orderKey: 10,
+      parameterId: scopeParameterId,
+      parameterType: {
+        kind: 'legalEntityReferenceParameterType',
+        schemaVersion: 'v3',
+      },
+    },
+  ]) {
+    const fixture = createFixture({
+      parameterDeclaration: declaration as ImmutableJsonValue,
+    });
+    await assert.rejects(
+      () =>
+        fixture.queryApi.handle(authenticationInput, {
+          arguments: { [scopeParameterId]: [ENTITY_A] },
+          queryId: scopedQueryId,
+          schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+        }),
+      (error: unknown) => error instanceof MalformedPinnedQueryCatalogError,
+      JSON.stringify(declaration),
+    );
+    assert.equal(
+      fixture.executor.lastRequest,
+      null,
+      JSON.stringify(declaration),
+    );
+  }
+});
+
 class RecordingExecutor implements SemanticQueryExecutor {
   lastRequest: SemanticQueryExecutionRequest | null = null;
 
@@ -241,6 +327,8 @@ class RecordingPolicyGateway implements CurrentPolicyGateway {
 
 interface FixtureOptions {
   readonly dropParameterDeclaration?: boolean;
+  readonly parameterDeclaration?: ImmutableJsonValue;
+  readonly retiredQuery?: boolean;
 }
 
 class FixtureDefinitionLoader implements RequestRuntimeDefinitionLoader {
@@ -309,13 +397,13 @@ function scopedQueryCatalog(options: FixtureOptions): ImmutableJsonValue {
           },
           schemaVersion: 'v4',
         },
-        lifecycle: 'active',
+        lifecycle: options.retiredQuery ? 'retired' : 'active',
         maximumResultCount: 10,
         ...(options.dropParameterDeclaration
           ? {}
           : {
               parameters: [
-                {
+                options.parameterDeclaration ?? {
                   orderKey: 10,
                   parameterId: scopeParameterId,
                   parameterType: {

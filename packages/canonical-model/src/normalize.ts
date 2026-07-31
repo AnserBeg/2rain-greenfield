@@ -515,7 +515,15 @@ function parseAuthoredValue(
   input: unknown,
 ): VersionedAuthoredApplicationPackage {
   try {
-    return VersionedAuthoredApplicationPackageSchema.parse(input);
+    const parsed = VersionedAuthoredApplicationPackageSchema.parse(input);
+    // Node schemas for the v3 family admit v3 and v4, so purity is not a
+    // schema property and must be asserted here. Without this the public
+    // authored parsers would accept a v3 package carrying a v4 node -- a
+    // document every prior reader rejected, which is precisely the
+    // retroactive widening ADR-0021 forbids. Normalization also checks it,
+    // but normalization is not the only public entry point.
+    assertNodeVersionPurity(parsed);
+    return parsed;
   } catch (error) {
     if (error instanceof ZodError) throw schemaError(error, input);
     throw error;
@@ -806,6 +814,30 @@ function deriveQueryParameterTypes(
     }
   }
   return parameterTypes;
+}
+
+function assertNodeVersionPurity(
+  packageRevision:
+    VersionedAuthoredApplicationPackage | VersionedNormalizedApplicationPackage,
+): void {
+  const diagnostics: CanonicalDiagnostic[] = [];
+  visitObjects(packageRevision, (object) => {
+    if (
+      typeof object.schemaVersion === 'string' &&
+      object.schemaVersion !== packageRevision.languageVersion
+    ) {
+      diagnostics.push(
+        diagnostic(
+          'CANON_VERSION_MIXED',
+          '$',
+          'one package uses one language version for its envelope and every nested canonical node',
+          `use ${packageRevision.languageVersion} for every schemaVersion`,
+          findObjectId(object, []),
+        ),
+      );
+    }
+  });
+  if (diagnostics.length > 0) throw new CanonicalModelError(diagnostics);
 }
 
 function validateSemantics(

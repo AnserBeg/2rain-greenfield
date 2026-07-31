@@ -9,6 +9,8 @@ import {
   canonicalizeAndHash,
   evaluateLegalEntityScopeSelection,
   normalizeApplicationPackage,
+  parseAuthoredApplicationPackageJson,
+  parseVersionedAuthoredApplicationPackageJson,
   ADOPTED_LANGUAGE_VERSION,
   type LegalEntityScopeSelectionReceipt,
 } from '../../packages/canonical-model/src/index.js';
@@ -135,6 +137,41 @@ test('a v3 document carrying legalEntityScope is rejected on both query branches
   // Without this, deleting the member from v4 entirely would leave both
   // refusals above green while the packet shipped nothing.
   assert.doesNotThrow(() => normalizeApplicationPackage(v4ScopedModule()));
+});
+
+/**
+ * REVIEW FINDING 1. The v3 family's node schemas admit `v3` and `v4`, so
+ * version purity is not a schema property. Before this control the PUBLIC
+ * authored parsers accepted a v3 package carrying a v4 node — a document every
+ * prior reader rejected — and only `normalizeApplicationPackage` caught it.
+ * Accepting it at the parser is retroactive widening even though
+ * `legalEntityScope` itself stayed rejected.
+ *
+ * Victim: the `assertNodeVersionPurity` call in `parseAuthoredValue`
+ * (normalize.ts). Deleting it makes the parse below succeed.
+ */
+test('the authored parsers reject a v3 package carrying a v4 node', () => {
+  const mixed = v3AggregateModule() as {
+    queries: Array<Record<string, unknown>>;
+  };
+  mixed.queries[0]!.schemaVersion = LANGUAGE_VERSIONS.v4;
+  const wire = canonicalize(mixed);
+  for (const parse of [
+    parseAuthoredApplicationPackageJson,
+    parseVersionedAuthoredApplicationPackageJson,
+  ]) {
+    assert.ok(
+      diagnosticCodes(() => parse(wire)).includes('CANON_VERSION_MIXED'),
+      parse.name,
+    );
+  }
+  // The unmixed document still parses, so the guard refuses mixing rather
+  // than refusing v4.
+  assert.doesNotThrow(() =>
+    parseVersionedAuthoredApplicationPackageJson(
+      canonicalize(v4ScopedModule()),
+    ),
+  );
 });
 
 // Victim: `v4NormalizedShape`/`v4AuthoredShape` in schemas.ts and the v4 entry
