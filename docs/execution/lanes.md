@@ -341,11 +341,11 @@ the **full CI matrix must be green at the exact integrated SHA**.
      — the reviewed SHA and the integrated SHA are then identical and the
      matrix already covers it.
   4. Every other lane then **merges current `main` into its branch**. Whether
-     that integrated SHA needs its own matrix run is decided by the **tree**,
-     not by the SHA: `git diff --quiet <reviewed> <integrated>`. Identical tree,
-     the reviewed matrix already covers it; different tree, re-run at the
-     integrated SHA. Never rebase `main`, never reset it, never squash away the
-     reviewed candidate. See `git-workflow`, which is authoritative here.
+     that integrated SHA needs its own matrix run is decided by whether the
+     tree's **executable content** moved, not by the SHA changing — use the
+     `git diff --name-only … ':!docs' ':!.agents'` check in `git-workflow`,
+     which is authoritative here. Never rebase `main`, never reset it, never
+     squash away the reviewed candidate.
 
 A lane that reports a candidate built on a base `main` has since passed is not
 rejected — it merges and re-runs. Q1-P1 did exactly this and it cost one matrix

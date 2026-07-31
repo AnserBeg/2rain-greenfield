@@ -70,17 +70,24 @@ design (see "Branch model"), so a packet of any length should expect this.
   existing rows record exactly this ("accepted by non-squash integration with
   the reviewed candidate preserved as an ancestor").
 
-**Whether the integrated SHA needs its own matrix run is decided by the TREE,
-not by the SHA** — corrected 2026-07-31.
+**Whether the integrated SHA needs its own matrix run is decided by the TREE's
+EXECUTABLE CONTENT, not by the SHA** — corrected 2026-07-31.
 
-    git diff --quiet <reviewed-sha> <integrated-sha> && echo IDENTICAL
+    git diff --name-only <reviewed-sha> <integrated-sha> -- . \
+      ':!docs' ':!.agents' ':!CLAUDE.md' ':!AGENTS.md'
 
-- **Trees identical** (the common case: `main` advanced only under `docs/`,
-  `.agents/`, `CLAUDE.md`, `AGENTS.md`): the reviewed matrix **is** the
+- **Empty output** — the integrated tree differs from the reviewed tree only in
+  non-executable narrative, or not at all: the reviewed matrix **is** the
   acceptance matrix. Do not re-run. Record the reviewed run against the
-  integrated SHA and note that the trees are identical.
-- **Trees differ:** re-run the full CI matrix at the integrated SHA before
+  integrated SHA, with the command's empty output as the evidence.
+- **Any output** — product code, test, config, migration, lockfile or generated
+  artifact differs: re-run the full CI matrix at the integrated SHA before
   acceptance.
+
+The exclusions are exactly the paths the docs-only exception already names, and
+for the same stated reason: those files are never executed, so a matrix cannot
+observe them. Do not widen the exclusion list — a generated artifact under any
+path voids it, and so does a lockfile.
 
 This was previously written as *"either way the integrated tip is a new SHA, so
 re-run"*, which under the standing `--no-ff` policy meant **every** packet paid

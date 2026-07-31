@@ -117,10 +117,10 @@ silently.
   may shorten the development loop but cannot replace the full matrix. The
   packet's ledger row records the integrated SHA and that full-matrix run.
   The matrix must be green *for the integrated tree*; it does not have to be
-  re-run after the merge commit exists. When `git diff --quiet <reviewed>
-  <integrated>` reports identical trees, the reviewed run is the acceptance
-  run — a second pass over the same bytes observes nothing. `git-workflow`
-  holds the procedure.
+  re-run after the merge commit exists. When the integrated tree's executable
+  content is identical to the reviewed one — narrative paths excluded, per the
+  check in `git-workflow` — the reviewed run is the acceptance run, because a
+  second pass over the same bytes observes nothing.
 - Every `*.test.ts` and `*.spec.ts` file must be proven reachable by executed-file evidence from successful CI-invoked suites.
 - A gate must **observe** the fact it asserts, never a proxy for it. Parsing a
   tool's output, inferring from a declaration, and matching a string are proxies;
