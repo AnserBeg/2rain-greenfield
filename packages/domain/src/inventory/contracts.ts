@@ -5,7 +5,7 @@ export const INVENTORY_CONTRACT_RELEASE_VERSION =
 export const STOCK_DIMENSION_SET_ID =
   'northstar.stock-dimension-set/v1' as const;
 export const INVENTORY_POSTING_DEPENDENCY_SET_ROOT =
-  '35fc38eaca7fbe47d8da5030ceefce8211a2194a25d233c45282ef0450d553ad' as const;
+  'ffd4e9f6103b5c6053c39b62fe64e69dd255cb0c86cfd349ae465ab25179b3d3' as const;
 export const LEGAL_ENTITY_FAMILY_CONTRACT_VERSION =
   'northstar.legal-entity-family-contract/v1' as const;
 
@@ -104,6 +104,20 @@ export const INVENTORY_STORAGE_REFERENCES_V1 = Object.freeze([
     sourceFamilyId: 'inventory_movement',
     targetFamilyId: 'location',
   },
+  {
+    fieldLocalId: 'stock_count_location_id',
+    required: true,
+    semantics: 'sameEntity',
+    sourceFamilyId: 'stock_count',
+    targetFamilyId: 'location',
+  },
+  {
+    fieldLocalId: 'stock_count_line_item_id',
+    required: true,
+    semantics: 'crossEntityAllowed',
+    sourceFamilyId: 'stock_count_line',
+    targetFamilyId: 'item',
+  },
 ] as const satisfies readonly InventoryStorageReferenceRuleV1[]);
 
 export const INVENTORY_PERIOD_LOCK_STORAGE_V1 = Object.freeze({
@@ -159,6 +173,26 @@ export const LEGAL_ENTITY_RELATION_SEMANTICS_V1 = Object.freeze([
     sourceFamilyId: 'inventory_transaction_line',
     targetFamilyId: 'inventory_transaction',
   },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'stock_count',
+    targetFamilyId: 'inventory_transaction',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'stock_count',
+    targetFamilyId: 'stock_count',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'stock_count_line',
+    targetFamilyId: 'stock_count',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'stock_count_line',
+    targetFamilyId: 'inventory_transaction_line',
+  },
 ] as const satisfies readonly LegalEntityRelationRuleV1[]);
 
 export interface InventoryAuthoritativeDependencyV1 {
@@ -181,7 +215,7 @@ export interface InventoryContractDefinitionV1 {
     readonly dependencies: readonly InventoryAuthoritativeDependencyV1[];
     readonly exhaustiveByConstruction: true;
     readonly undeclaredAccess: 'compileFailure';
-    readonly version: 3;
+    readonly version: 4;
   };
   readonly baseUnit: {
     readonly bindingFact: 'firstPostedMovement';
@@ -200,6 +234,32 @@ export interface InventoryContractDefinitionV1 {
     readonly outputSemantic: 'fact' | 'quantity' | 'time' | 'text';
     readonly source: 'inventoryMovement';
   }[];
+  readonly countEvidence: {
+    readonly correctionBehavior: 'appendCompensatingCount';
+    readonly hardDelete: 'forbidden';
+    readonly lineEntityFamilyId: 'stock_count_line';
+    readonly lineValues: readonly {
+      readonly fieldId:
+        'expectedQuantity' | 'countedQuantity' | 'varianceQuantity';
+      readonly presence: 'required';
+      readonly semantic:
+        | 'expectedPhysicalQuantity'
+        | 'countedPhysicalQuantity'
+        | 'countedMinusExpectedVariance';
+      readonly valueShape: {
+        readonly precision: 38;
+        readonly representation: 'canonicalDecimalStringV2';
+        readonly scale: 18;
+        readonly signed: true;
+        readonly unitFieldId: 'unitId';
+      };
+    }[];
+    readonly movementLink: 'stockCountLineToTransactionLineToInventoryMovement';
+    readonly preservation: 'threeDistinctPersistedValues';
+    readonly reversalBehavior: 'appendExactInverseMovement';
+    readonly sessionEntityFamilyId: 'stock_count';
+    readonly sessionTransition: 'reviewedToPostedWithMovement';
+  };
   readonly legalEntity: {
     readonly families: typeof LEGAL_ENTITY_FAMILY_MAP_V1;
     readonly relations: typeof LEGAL_ENTITY_RELATION_SEMANTICS_V1;
@@ -248,6 +308,7 @@ export interface InventoryContractDefinitionV1 {
     readonly version: 1;
   };
   readonly monetaryBoundary: {
+    readonly countEvidenceMonetaryFields: 'forbidden';
     readonly movementAmountFields: 'forbidden';
     readonly movementDerivedMonetaryArtifacts: 'compileFailure';
     readonly receiptCostOwner: 'G4';
@@ -411,8 +472,15 @@ const AUTHORITATIVE_DEPENDENCIES = Object.freeze([
     'inventory',
   ),
   dependency('northstar.inventory:transaction_line', 'read', 'inventory'),
+  dependency('northstar.inventory:stock_count', 'read', 'inventory'),
+  dependency('northstar.inventory:stock_count_line', 'read', 'inventory'),
   dependency(
     'northstar.inventory:transaction.state',
+    'transition',
+    'inventory',
+  ),
+  dependency(
+    'northstar.inventory:stock_count.state',
     'transition',
     'inventory',
   ),
@@ -466,7 +534,7 @@ export const INVENTORY_CONTRACT_V1 = Object.freeze({
     dependencies: AUTHORITATIVE_DEPENDENCIES.map((entry) => ({ ...entry })),
     exhaustiveByConstruction: true,
     undeclaredAccess: 'compileFailure',
-    version: 3,
+    version: 4,
   },
   baseUnit: {
     bindingFact: 'firstPostedMovement',
@@ -492,6 +560,54 @@ export const INVENTORY_CONTRACT_V1 = Object.freeze({
       source: 'inventoryMovement',
     },
   ],
+  countEvidence: {
+    correctionBehavior: 'appendCompensatingCount',
+    hardDelete: 'forbidden',
+    lineEntityFamilyId: 'stock_count_line',
+    lineValues: [
+      {
+        fieldId: 'expectedQuantity',
+        presence: 'required',
+        semantic: 'expectedPhysicalQuantity',
+        valueShape: {
+          precision: 38,
+          representation: 'canonicalDecimalStringV2',
+          scale: 18,
+          signed: true,
+          unitFieldId: 'unitId',
+        },
+      },
+      {
+        fieldId: 'countedQuantity',
+        presence: 'required',
+        semantic: 'countedPhysicalQuantity',
+        valueShape: {
+          precision: 38,
+          representation: 'canonicalDecimalStringV2',
+          scale: 18,
+          signed: true,
+          unitFieldId: 'unitId',
+        },
+      },
+      {
+        fieldId: 'varianceQuantity',
+        presence: 'required',
+        semantic: 'countedMinusExpectedVariance',
+        valueShape: {
+          precision: 38,
+          representation: 'canonicalDecimalStringV2',
+          scale: 18,
+          signed: true,
+          unitFieldId: 'unitId',
+        },
+      },
+    ],
+    movementLink: 'stockCountLineToTransactionLineToInventoryMovement',
+    preservation: 'threeDistinctPersistedValues',
+    reversalBehavior: 'appendExactInverseMovement',
+    sessionEntityFamilyId: 'stock_count',
+    sessionTransition: 'reviewedToPostedWithMovement',
+  },
   legalEntity: {
     families: LEGAL_ENTITY_FAMILY_MAP_V1,
     relations: LEGAL_ENTITY_RELATION_SEMANTICS_V1,
@@ -539,6 +655,7 @@ export const INVENTORY_CONTRACT_V1 = Object.freeze({
     version: 1,
   },
   monetaryBoundary: {
+    countEvidenceMonetaryFields: 'forbidden',
     movementAmountFields: 'forbidden',
     movementDerivedMonetaryArtifacts: 'compileFailure',
     receiptCostOwner: 'G4',
