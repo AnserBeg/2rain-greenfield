@@ -91,16 +91,29 @@ removing the declared draft/counting writer. Inventory is not mounted in the
 composed application, so neither that authoring path nor the post-posting
 mutation hole is reachable by a user of the running product today.
 
-**Hard sequencing dependency, owned by queue row `5g3-ui` (`G3-P6a`):
+**Hard sequencing dependency, owned by queue row `5g3-term`:
 `G3-P6a` MUST NOT INTEGRATE BEFORE the terminal-state mechanism lands.** The
 moment Inventory mounts, the ordinary semantic-operation API makes posted
-count sessions and lines rewritable and archivable. The `5g3-ui` integration
-gate must therefore remain closed until the orchestrator-routed mechanism has
-its own owning row and enforces terminal-state immutability; this is a binding
-prerequisite, not deferred advice. No partial inventory-specific runtime guard
-is admitted.
+count sessions and lines rewritable and archivable. `5g3-term` exists as an
+owning row and `5g3-ui` carries the prerequisite explicitly, so the gate is
+executing rather than advisory; this is a binding prerequisite, not deferred
+advice. No partial inventory-specific runtime guard is admitted.
 
-That routed work also owns the separate completeness ruling exposed here:
+**Round-2 review correction, recorded because the first wording understated
+the exposure.** This packet originally described the hole as an API-layer
+one. It is also a UI one: the `surfaces()` call site passes `readOnly` as
+`local === 'inventory_period_lock'` (`packages/domain/src/inventory/definition.ts:796-804`),
+so period lock is the only read-only entity and both count entities emit form
+surfaces carrying `create`/`update` permissions, bound through the pinned
+operation catalog at `apps/web/src/surface-contract.ts:170`. Once Inventory
+mounts, a user opens a posted count line, presses Edit, and submits changed
+expected or counted values. The round-2 reviewer also found that the
+prerequisite was recorded only here, in prose, while the queue row that
+actually gates integration still permitted the mount — `current-plan.md:184`
+holds that prose without an owning row provides no executing gate. Both are
+now fixed on `main`.
+
+Row `5g3-term` also owns the separate completeness ruling exposed here:
 G3-P4b supplies a posting path that consumes pre-existing reviewed evidence,
 but the running product has no path that authors a count session or its lines.
 Freeze M requires that evidence, so the mechanism packet must decide whether
