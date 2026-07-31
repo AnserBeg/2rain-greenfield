@@ -19,14 +19,14 @@ const routedPlatformDebt: readonly ModulePressLawViolation[] = [
   // Inventory became definition-backed; keep it exact until that row lands.
   {
     file: 'packages/compiler/src/conformance.ts',
-    line: 1441,
+    line: 1731,
     message: 'generic press references inventory identity northstar.inventory',
     moduleDirectory: 'inventory',
     ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
   },
   {
     file: 'packages/postgres-provider/src/saved-filter-executor.ts',
-    line: 101,
+    line: 103,
     message:
       'generic press contains platform-specific PostgresSavedFilterExecutor',
     moduleDirectory: 'platform',
@@ -34,7 +34,7 @@ const routedPlatformDebt: readonly ModulePressLawViolation[] = [
   },
   {
     file: 'packages/postgres-provider/src/saved-filter-executor.ts',
-    line: 994,
+    line: 1013,
     message: 'generic press references platform identity northstar.platform',
     moduleDirectory: 'platform',
     ruleId: 'PRESS006_MODULE_ID_IN_PRESS',

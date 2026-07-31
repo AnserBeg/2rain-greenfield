@@ -12,15 +12,19 @@ writer is holding those paths right now.
 
 ## The lanes
 
-| Lane | Theme | Current packet | Status |
-|---|---|---|---|
-| **KERNEL** | Canonical language and the query tier | `G3-P2b-4` **accepted** 2026-07-29 — runtime payload family; posting unblocked | **idle** |
-| **DEPLOY** | Release lifecycle and runtime infrastructure | `1g2` **accepted** 2026-07-29 (ADR-0024) | **HELD IDLE 2026-07-29 — deliberate.** `G2-P9` is gated behind `G2-P8` (import), which carries the durable-execution substrate decision, and both fail the inventory-first filter. More importantly, **full matrices serialize**: a DEPLOY matrix now queues ahead of FIX's and delays inventory. Leaving it idle is the faster choice, not the idle one. |
-| **FIX** | Correctness defects → stage cutting → inventory build | `G3-P2b-3` **accepted** 2026-07-29 — contract bound, 15/15 clauses | **idle** |
-| **BUILD** | Inventory contracts | `G3-P2b-2` **accepted** 2026-07-29 — serializer proven; **every `G3-P3` prerequisite is on main** | **idle** |
+| Lane | Current packet | Status |
+|---|---|---|
+| **FIX** | `Q1-P4` — issued legal-entity read scope | **matrix-green at `29ba2ae`, both review arms PASS.** Owes a merge of main and a re-run before integration: main advanced 26 files / 3,967 insertions with `G3-P4a` and `G3-P6c`, so the docs-only exception does not apply. |
+| **BUILD** | `G3-P6a` — mount inventory, read-only views | **active.** Has found five structural defects, all real: three fixture double-mounts, provisioning ordered after materialization, `abiFunctionChecks` omitted from the additive strip list, preparation filtering on kind instead of classification, and generic fixture generation ignoring compiled constraints. |
+| **CANON** *(Opus)* | `Q1-P5` — the legal-entity query operand, canonical v4 | **active, added 2026-07-30.** First non-Codex writer lane. Same review chain: Codex for everything, Fable on Critical. Holding its frozen candidate while `Q1-P4` takes the slot; authoring the deferred gateway binding meanwhile. |
+| **KERNEL** | — | idle since `G3-P2b-4` (2026-07-29). |
+| **DEPLOY** | — | idle since `1g2` (2026-07-29). |
 
-Lane identity is stable across packets. When a lane's packet is accepted, the
-next packet inherits the lane and its partition.
+**Lane identity is per packet, not per theme.** The earlier model assigned
+standing themes (KERNEL owns canonical, FIX owns correctness). That broke on
+2026-07-30: `CANON` took canonical work while `KERNEL` sat idle, and `FIX` ran a
+query-tier packet. Themes rot as the queue reorders; the packet is the real unit.
+
 
 ## DEPLOY stays idle until 4c lands — decided 2026-07-28
 
@@ -56,10 +60,60 @@ the one needing a canonical concept** — migration 0012 scopes saved-filter RLS
 anywhere in the compiled path. Full finding, with the discriminator answer, is in
 `current-plan.md` row 1c. **Do not re-derive it from this file; read that row.**
 
-## Path partition — binding
+## Disjointness is VERIFIED, not predicted — corrected 2026-07-30
 
-Disjointness is enforced at prompt time by the orchestrator, not discovered at
-merge time. `packages/compiler/src/` in particular is **split**, because F7 and
+**Before granting any path, run the check. Do not consult the table below as
+authority.**
+
+```bash
+for b in $(git branch --list 'packet/*' --format='%(refname:short)'); do
+  printf '%s: ' "$b"; git diff --name-only main...$b | tr '\n' ' '; echo
+done
+```
+
+**Why this replaced the table as the binding mechanism.** The table is a
+hand-maintained *prediction* of ownership. It rots on every acceptance, and on
+2026-07-30 it was stale in every row — it still listed
+`packages/runtime/src/semantic-query-gateway.ts` as KERNEL's while KERNEL was
+idle, `FIX` actually held it through `Q1-P4`, and the orchestrator granted it to
+a third lane. Three errors in one row.
+
+The empirical check was correct every time it was run that day, including when it
+refuted a lane's own good-faith claim that a file was unheld — `G3-P4b` did hold
+`repository-hygiene.test.ts`.
+
+**The table below is now a LOG OF GRANTED CLAIMS AND THEIR REASONS, not a
+forecast.** Its reasoning is worth keeping; its ownership column is not
+authoritative. When a grant is made, append the reason; never trust a row older
+than the packet it names.
+
+## BRIDGES ARE THE NORMAL CASE, not the exception — recorded 2026-07-30
+
+Roughly ten lane stops occurred on 2026-07-30 and **every one was correct**.
+Nearly all were "I need a path you did not grant." Three were caused by
+orchestrator prompts omitting paths the work obviously needed —
+`packages/domain/src/app/builder.ts`, `docs/decisions/**`, and a gateway granted
+twice.
+
+Owned paths **cannot be fully predicted** before a packet discovers what it
+needs. So every packet prompt should say plainly: *this lease is incomplete by
+construction; stop and ask when you need more.* A lane that stops is doing the
+protocol correctly, not failing it.
+
+## Keep active lanes at THREE or fewer — recorded 2026-07-30
+
+The full matrix is serial, so lane count beyond about three buys queue depth
+rather than throughput. Four-plus lanes on 2026-07-30 all waited on one gate
+while adding rebase cost.
+
+**Avoid stacking branches.** `G3-P4b` and `G3-P6a` were both branched from
+`packet/g3-p4` rather than main; both needed rebasing when it merged. Branch from
+main and accept a later merge, or serialize.
+
+## Path partition — historical claims log
+
+Recorded grants and their reasons. **Not authoritative for current ownership** —
+run the empirical check above. `packages/compiler/src/` in particular is **split**, because F7 and
 the query tier both live there.
 
 | Path | Lane |
@@ -134,9 +188,16 @@ resolved by hand-merging:
 
   test/architecture/repository-hygiene.test.ts   (test inventory)
   test/architecture/test-reachability.test.ts    (script recognition)
+  test/architecture/release-persistence-boundary.test.ts  (migration inventory)
   pnpm-lock.yaml                                  (generated)
   package.json (root)                             (scripts)
   .github/workflows/ci.yml                        (steps)
+
+**Added 2026-07-30: the migration inventory.** Three packets needed it in one day —
+`G3-P4a` for 0016, `G3-P4b` for 0017, `G3-P7a` for 0019 — and the third stopped on it
+as an owned-path collision. It is an exact `assert.deepEqual` over migration
+filenames, so every migration-adding packet must register in it. That makes it
+add-only shared, not a lease.
 
 **On rebase conflict: discard your side, take main's, and re-derive your entry.**
 The inventories are mechanical — re-run discovery and re-insert alphabetically.
@@ -199,8 +260,72 @@ an obvious timeout.
 
 **A green matrix produced while another lane's matrix was running is not
 evidence.** Before running the full matrix, check that no other lane is running
-one; if one is, wait. A lane may keep authoring and running focused suites
-throughout — only the full matrix serializes.
+one; if one is, wait.
+
+### The "only the full matrix serializes" carve-out was too generous — corrected 2026-07-30
+
+This section used to end: *"A lane may keep authoring and running focused suites
+throughout — only the full matrix serializes."* **That is wrong, and the
+orchestrator fell through the loophole three times in one evening.**
+
+  - Started the running app during a matrix → a 120 s `testTimeoutFailure`. The
+    same SHA passed clean and quiet.
+  - Committed to a worktree and merged `main` into it **while that worktree's
+    own matrix was executing**, so the run was testing a tree that moved under
+    it.
+  - Launched a **read-only Fable review** — no builds, no Docker, just reads and
+    greps — during a matrix, and
+    `test/compiler/performance-budget.test.ts` failed at **17,672 ms against a
+    5,000 ms budget**. That test is a wall-clock `process.hrtime` assertion over
+    a synthetic maximum-field fixture, so it measures the machine, not the
+    product.
+
+**The corrected rule: while a full matrix is running, nothing else runs.** Not a
+review, not an authoring lane, not the app, not a focused suite, and no git
+operation in the worktree under test. A reviewer process is not "just reading" —
+it is a model doing sustained tool calls on a WSL VM capped at 8 GB and 8
+processors, and it competes for exactly the resource the timing gates measure.
+
+**"Nothing else" INCLUDES THE ORCHESTRATOR'S OWN TOOL CALLS.** This was written
+once exempting the orchestrator by omission, and the omission immediately cost
+two wasted matrix runs. Measured at the same SHA on the same machine:
+
+| Run | What the orchestrator was doing | Unit suite (46 tests) | Budget test |
+|---|---|---|---|
+| 1 | blocked on a watcher, idle | 2,991 ms | **ok**, 4,333 ms |
+| 2 | launched a review, edited docs, committed | 13,246 ms | fail, 17,672 ms |
+| 3 | read files, edited, committed, grepped | (same order) | fail, 17,073 ms |
+| isolated, idle | nothing | 2,714 ms | **ok**, 3,025 ms |
+
+**A 4.4× systemic slowdown across an entire unrelated suite**, tracking nothing
+but orchestrator activity. `ps` confirms why: the agent runtime sits at ~12 %
+CPU sustained while working, on 8 processors, alongside its own tool
+subprocesses.
+
+The trap is that the failure looks like a code regression at the integrated
+SHA — a compile budget blown by 3.5× is exactly what a genuine performance
+regression looks like, and the tempting "fix" is to raise the budget. It took
+three runs and two wrong diagnoses (first "load from a concurrent reviewer",
+then "the machine is degrading") before measuring the test in isolation, where
+it passed in 3,025 ms against a 5,000 ms budget.
+
+**So: start the matrix, then stop. Do not read, grep, edit, commit, or launch
+anything until it returns.** Block on the verdict and do nothing else. If work
+must happen during a matrix, the matrix is not ready to run yet.
+
+**Why this matters more than it looks:** a loaded run does not fail honestly. It
+produces a *wrong verdict* — either a red on a timing-sensitive gate that would
+pass quiet, or the far worse case of an environmental red that gets mistaken for
+a product defect and "fixed". The standing prohibition on raising a bound to
+make a loaded run pass exists precisely because that is the tempting move here.
+**Re-run quiet; never widen the budget.**
+
+**A killed matrix does not clean up after itself.** Killing one left an orphaned
+`north-star-*` ephemeral container, which then prevented the *next* run's
+ephemeral PostgreSQL from becoming ready within 30 s — an environmental red that
+looked nothing like its cause. After killing a matrix, check `docker ps` and
+remove orphaned `north-star-*` containers before the next run. Never touch the
+user's `2rain-*` containers.
 
 This is a real cost of parallelism and it caps useful lane count: past roughly
 four lanes, matrix queueing dominates and additional lanes buy nothing.
@@ -259,9 +384,9 @@ costs the rule PR-1 exists to enforce.
 Every report back to the orchestrator opens with one line, so a paste is
 unambiguous without context:
 
-    LANE: <KERNEL|DEPLOY|FIX> · PACKET: <id> · SHA: <frozen sha> · BASE: <base sha>
+    LANE: <FIX|BUILD|CANON|KERNEL|DEPLOY> · PACKET: <id> · SHA: <frozen sha> · BASE: <base sha>
 
-Bridge requests open with the same line. The orchestrator adjudicates three
+Bridge requests open with the same line. The orchestrator adjudicates several
 streams; an unlabelled SHA is the single easiest way to mis-grant a lease.
 
 ## What does not change

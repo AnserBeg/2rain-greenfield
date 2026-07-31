@@ -153,6 +153,7 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
           '0014_archive_excluding_module_uniqueness.sql',
           '0015_inventory_storage_foundation.sql',
           '0016_inventory_posting_receipt_digest_version.sql',
+          '0017_inventory_stock_count_receipt_digest_version.sql',
         ]);
         assert.equal(migrationResult.verified.length, allMigrations.length);
         await seedScope(admin);
@@ -2296,6 +2297,8 @@ test('standalone inventory materialization fails closed when Item and Location t
   assert.deepEqual(externalTargets, [
     'northstar.inventory:entity.item',
     'northstar.inventory:entity.item',
+    'northstar.inventory:entity.item',
+    'northstar.inventory:entity.location',
     'northstar.inventory:entity.location',
     'northstar.inventory:entity.location',
     'northstar.inventory:entity.location',

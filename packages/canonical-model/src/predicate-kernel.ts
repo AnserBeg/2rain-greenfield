@@ -285,6 +285,8 @@ export const inspectPredicateForExecution: PredicateKernelEntryPoint = (
       return inspectLiteralForVersion(value, LANGUAGE_VERSION);
     case LANGUAGE_VERSIONS.v3:
       return inspectLiteralForVersion(value, LANGUAGE_VERSIONS.v3);
+    case LANGUAGE_VERSIONS.v4:
+      return inspectLiteralForVersion(value, LANGUAGE_VERSIONS.v4);
     default:
       return rejected(nodeSchemaVersion, 'unsupported-node-version');
   }
@@ -476,6 +478,8 @@ function supportedNodeVersion(value: unknown): CanonicalLanguageVersion | null {
       return LANGUAGE_VERSION;
     case LANGUAGE_VERSIONS.v3:
       return LANGUAGE_VERSIONS.v3;
+    case LANGUAGE_VERSIONS.v4:
+      return LANGUAGE_VERSIONS.v4;
     default:
       return null;
   }

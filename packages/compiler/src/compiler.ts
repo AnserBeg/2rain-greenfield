@@ -1,17 +1,18 @@
 import {
   CANONICALIZATION_PROFILE_VERSION,
   LANGUAGE_VERSION,
-  LANGUAGE_VERSIONS,
-  LATEST_LANGUAGE_VERSION,
-  NORMALIZATION_PROFILE_VERSIONS,
+  ADOPTED_LANGUAGE_VERSION,
   NORMALIZATION_PROFILE_VERSION,
   SUPPORTED_LANGUAGE_VERSIONS,
   CanonicalModelError,
   canonicalLanguageProfileFor,
+  languageHasV3Features,
   canonicalizeAndHash,
   parseNormalizedApplicationPackageJson,
   type CanonicalDiagnostic,
   type NormalizedApplicationPackage,
+  type V3NormalizedApplicationPackage,
+  type V4NormalizedApplicationPackage,
   type VersionedNormalizedApplicationPackage,
 } from '@north-star/canonical-model';
 
@@ -25,7 +26,9 @@ import {
   isSha256,
 } from './hash.js';
 import {
+  legalEntityScopeCatalogEntry,
   lowerBaseProjectionPayloads,
+  queryParameterCatalogEntries,
   requiredProjectionFamily,
   type ProjectionPayloadPlan,
 } from './projections.js';
@@ -103,9 +106,11 @@ const supportedCompilerProfiles: readonly CompilerSemanticProfile[] =
     ),
   );
 
+// Keyed to the ADOPTED version, not the latest readable one. A newly cut but
+// unadopted version must not silently become every caller's default profile.
 export const DEFAULT_COMPILER_PROFILE: CompilerSemanticProfile =
   supportedCompilerProfiles.find(
-    (profile) => profile.languageVersion === LATEST_LANGUAGE_VERSION,
+    (profile) => profile.languageVersion === ADOPTED_LANGUAGE_VERSION,
   )!;
 
 export const MODULE_COMPILER_PROFILE: CompilerSemanticProfile =
@@ -353,16 +358,17 @@ export function compileApplication(
     dependencyClosureDigest,
     hashAlgorithm: HASH_ALGORITHM,
     kind: 'releaseManifest',
-    languageVersion:
-      packageRevision.languageVersion === LANGUAGE_VERSIONS.v3
-        ? LANGUAGE_VERSIONS.v3
-        : LANGUAGE_VERSION,
+    languageVersion: languageHasV3Features(packageRevision.languageVersion)
+      ? packageRevision.languageVersion
+      : LANGUAGE_VERSION,
     limitsDigest,
     manifestVersion: RELEASE_MANIFEST_VERSION,
-    normalizationProfileVersion:
-      packageRevision.languageVersion === LANGUAGE_VERSIONS.v3
-        ? NORMALIZATION_PROFILE_VERSIONS.v3
-        : NORMALIZATION_PROFILE_VERSION,
+    normalizationProfileVersion: languageHasV3Features(
+      packageRevision.languageVersion,
+    )
+      ? canonicalLanguageProfileFor(packageRevision.languageVersion)
+          .normalizationProfileVersion
+      : NORMALIZATION_PROFILE_VERSION,
     normalizedDefinitionDigest,
     outputProtocolVersion: OUTPUT_PROTOCOL_VERSION,
     policyDecisionDependency: 'liveCurrentDenyCapable',
@@ -799,7 +805,9 @@ function languageUsesModuleProjectionShape(
 ): boolean {
   const featureLevel =
     canonicalLanguageProfileFor(languageVersion).featureLevel;
-  return featureLevel === 'v2' || featureLevel === 'v3';
+  return (
+    featureLevel === 'v2' || featureLevel === 'v3' || featureLevel === 'v4'
+  );
 }
 
 /**
@@ -809,16 +817,26 @@ function languageUsesModuleProjectionShape(
  * by decorateV3ProjectionPlans. This alias is never hashed as the normalized
  * definition.
  */
+function isV3PlusRevision(
+  packageRevision: VersionedNormalizedApplicationPackage,
+): packageRevision is
+  V3NormalizedApplicationPackage | V4NormalizedApplicationPackage {
+  return languageHasV3Features(packageRevision.languageVersion);
+}
+
 function projectionDispatchRevision(
   packageRevision: VersionedNormalizedApplicationPackage,
 ): NormalizedApplicationPackage {
-  if (packageRevision.languageVersion !== LANGUAGE_VERSIONS.v3) {
+  if (!isV3PlusRevision(packageRevision)) {
     return packageRevision;
   }
   const common = Object.fromEntries(
     Object.entries(packageRevision).filter(([key]) => key !== 'impactAnalyses'),
   ) as Omit<
-    Extract<VersionedNormalizedApplicationPackage, { languageVersion: 'v3' }>,
+    Extract<
+      VersionedNormalizedApplicationPackage,
+      { languageVersion: 'v3' | 'v4' }
+    >,
     'impactAnalyses'
   >;
   return {
@@ -848,14 +866,25 @@ function projectionDispatchRevision(
     })),
     queries: packageRevision.queries
       .filter((query) => query.queryType !== 'aggregate')
-      .map((query) => ({
-        ...query,
-        filter: {
-          kind: 'booleanPredicate' as const,
-          schemaVersion: LANGUAGE_VERSION,
-          value: true,
-        },
-      })),
+      .map((query) => {
+        // The v2 alias must be a v2 shape. v4 row members are dropped here and
+        // re-attached by the version-aware decoration, exactly as the aggregate
+        // branch already is; leaving them on would let a v2 physical family
+        // read a member no v2 reader knows.
+        const v2 = Object.fromEntries(
+          Object.entries(query).filter(
+            ([key]) => key !== 'legalEntityScope' && key !== 'parameters',
+          ),
+        ) as typeof query;
+        return {
+          ...v2,
+          filter: {
+            kind: 'booleanPredicate' as const,
+            schemaVersion: LANGUAGE_VERSION,
+            value: true,
+          },
+        };
+      }),
   };
 }
 
@@ -881,7 +910,7 @@ function decorateV3ProjectionPlans(
   plans: ProjectionPayloadPlan[],
   packageRevision: VersionedNormalizedApplicationPackage,
 ): ProjectionPayloadPlan[] {
-  if (packageRevision.languageVersion !== LANGUAGE_VERSIONS.v3) return plans;
+  if (!languageHasV3Features(packageRevision.languageVersion)) return plans;
   const dispatchRevision = projectionDispatchRevision(packageRevision);
   const storagePlan = plans.find(
     (plan) => plan.familyId === PROJECTION_FAMILY_IDS.storageTarget,
@@ -917,13 +946,10 @@ function decorateV3ProjectionPlans(
                       selectionId: query.aggregate.selectionId,
                     },
                     filter: query.filter,
+                    ...legalEntityScopeCatalogEntry(query),
                     lifecycle: query.lifecycle,
                     maximumResultCount: query.maximumResultCount,
-                    parameters: query.parameters.map((parameter) => ({
-                      orderKey: parameter.orderKey,
-                      parameterId: parameter.parameterId,
-                      parameterType: parameter.parameterType,
-                    })),
+                    parameters: queryParameterCatalogEntries(query),
                     permissionId: query.permission.targetId,
                     queryId: query.queryId,
                     queryType: query.queryType,
@@ -953,8 +979,12 @@ function decorateV3ProjectionPlans(
                       optimisticRevision: 'requiredOnMutation',
                       recordIdentity: 'canonicalUuid',
                     },
+                    ...legalEntityScopeCatalogEntry(query),
                     lifecycle: query.lifecycle,
                     maximumResultCount: query.maximumResultCount,
+                    ...('parameters' in query
+                      ? { parameters: queryParameterCatalogEntries(query) }
+                      : {}),
                     permissionId: query.permission.targetId,
                     queryId: query.queryId,
                     queryType: query.queryType,

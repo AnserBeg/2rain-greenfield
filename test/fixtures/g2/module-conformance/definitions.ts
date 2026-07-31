@@ -1,9 +1,24 @@
 import {
-  LATEST_LANGUAGE_VERSION,
-  LATEST_NORMALIZATION_PROFILE_VERSION,
+  LANGUAGE_VERSIONS,
+  NORMALIZATION_PROFILE_VERSIONS,
 } from '@north-star/canonical-model';
 
-const version = LATEST_LANGUAGE_VERSION;
+/**
+ * Pinned to a literal, deliberately. This fixture's CONTENT is v3-specific --
+ * it declares `impactAnalyses` and the aggregate query branch, neither of which
+ * exists below v3 -- so its version must come from what it actually is, not
+ * from a constant meaning "current".
+ *
+ * It previously tracked the newest readable version, and cutting v4 silently
+ * re-authored it at v4: 32 compiler tests went red, none of them pointing here.
+ * Tracking the adopted version instead would only narrow the blast radius,
+ * because that constant moves too. Advancing this fixture is a deliberate edit.
+ */
+export const FIXTURE_LANGUAGE_VERSION = LANGUAGE_VERSIONS.v3;
+export const FIXTURE_NORMALIZATION_PROFILE_VERSION =
+  NORMALIZATION_PROFILE_VERSIONS.v3;
+
+const version = FIXTURE_LANGUAGE_VERSION;
 const namespace = 'northstar.modulefixture';
 
 const reference = (kind: string, targetId: string) => ({
@@ -196,7 +211,7 @@ export function ordinaryModuleV1(): Record<string, unknown> {
         schemaVersion: version,
       },
     ],
-    normalizationProfileVersion: LATEST_NORMALIZATION_PROFILE_VERSION,
+    normalizationProfileVersion: FIXTURE_NORMALIZATION_PROFILE_VERSION,
     operations,
     package: {
       kind: 'packageDefinition',

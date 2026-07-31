@@ -61,6 +61,8 @@ export async function withTrustedRequestTransaction<T>(
         'trusted request transactions require the unprivileged north_star_runtime login role',
       );
     }
+    // ADR-0015 keeps legal entity as explicit business scope. Only tenancy,
+    // environment, and request identity are ambient database context axes.
     await client.query(
       `SELECT set_config('north_star.tenant_id', $1, true),
               set_config('north_star.environment_id', $2, true),
