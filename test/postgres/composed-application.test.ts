@@ -25,6 +25,7 @@ import {
   expectedActiveReleaseFrom,
   type CompileSuccess,
   type StorageTargetPayloadV1,
+  type VerificationPlanPayloadV1,
 } from '../../packages/compiler/src/index.js';
 import {
   APPLICATION_IDS,
@@ -51,6 +52,7 @@ import { ReleaseReverseTransitionRefusal } from '../../packages/postgres-provide
 import {
   PostgresReleaseVerificationService,
   releaseVerificationBinding,
+  type DurableReleaseVerificationEvidence,
 } from '../../packages/postgres-provider/src/release-verification-service.js';
 import { withTrustedRequestTransaction } from '../../packages/postgres-provider/src/request-context.js';
 import {
@@ -113,6 +115,7 @@ test(
             () =>
               assertConstrainedDomainVerificationCompleted(
                 pool,
+                connection,
                 tenantA,
                 compiledApplication,
               ),
@@ -525,10 +528,24 @@ async function assertRealProductDefinition(
         surfaces: readonly { surfaceId: string }[];
       }
     ).surfaces.map((surface) => surface.surfaceId);
-    assert.equal(surfaces.length, 12);
+    assert.equal(surfaces.length, 31);
     assert.ok(surfaces.includes(APPLICATION_IDS.party.listSurfaceId));
     assert.ok(surfaces.includes(APPLICATION_IDS.catalog.listSurfaceId));
     assert.ok(surfaces.includes(APPLICATION_IDS.location.listSurfaceId));
+    // Inventory only reaches a mounted runtime once its emitted-but-
+    // unarrangeable verification scenarios are recorded as derivations.
+    for (const inventorySurfaceId of [
+      'northstar.app:surface.inventory_movement_list',
+      'northstar.app:surface.inventory_period_lock_list',
+      'northstar.app:surface.inventory_transaction_list',
+      'northstar.app:surface.legal_entity_list',
+      'northstar.app:surface.stock_count_list',
+    ]) {
+      assert.ok(
+        surfaces.includes(inventorySurfaceId),
+        `the composed product mounts ${inventorySurfaceId}`,
+      );
+    }
   });
 }
 
@@ -1776,6 +1793,7 @@ async function assertDurableProductEvidence(
 
 async function assertConstrainedDomainVerificationCompleted(
   pool: pg.Pool,
+  connection: pg.PoolConfig,
   runtime: ComposedApplicationRuntime,
   compiledApplication: unknown,
 ): Promise<void> {
@@ -1965,15 +1983,141 @@ async function assertConstrainedDomainVerificationCompleted(
   const context = await new AuthenticatedRequestEntryAdapter(
     async () => runtime.identity,
   ).enter({});
-  const evidence = await new PostgresReleaseVerificationService(pool).read(
-    context,
-    evidenceId as MintedUuid,
-    compiled,
-  );
+  // The durable reader runs inside a trusted request transaction, which refuses
+  // any login role other than the unprivileged runtime role.
+  const runtimePool = new pg.Pool({
+    ...connection,
+    max: 2,
+    user: 'north_star_runtime',
+  });
+  runtimePool.on('error', () => undefined);
+  let evidence: DurableReleaseVerificationEvidence | null;
+  try {
+    evidence = await new PostgresReleaseVerificationService(runtimePool).read(
+      context,
+      evidenceId as MintedUuid,
+      compiled,
+    );
+  } finally {
+    await runtimePool.end();
+  }
   assert.deepEqual(
     evidence?.findings,
     constructibilityFindings,
     'durable verification evidence reports every witness-selection constructibility finding',
+  );
+  assert.ok(evidence);
+  await assertExactPartitionEvidence(pool, runtime, evidenceId, evidence, {
+    plan: releaseVerificationBinding(compiled).plan,
+  });
+}
+
+/**
+ * ADR-0033: the admitted composed product records an exact partition of the
+ * compiler-emitted plan. Executed results and derivations are separate durable
+ * counters, and their union is complete and disjoint.
+ */
+async function assertExactPartitionEvidence(
+  pool: pg.Pool,
+  runtime: ComposedApplicationRuntime,
+  evidenceId: string,
+  evidence: DurableReleaseVerificationEvidence,
+  binding: Readonly<{ plan: VerificationPlanPayloadV1 }>,
+): Promise<void> {
+  assert.equal(evidence.schemaVersion, 'northstar.verification-result-set/v2');
+  assert.ok(
+    'derivations' in evidence,
+    'admitted composed evidence carries a derivation array',
+  );
+  const derivations = evidence.derivations;
+  const executedScenarioIds = evidence.results.map(
+    (result) => result.scenarioId,
+  );
+  const derivedScenarioIds = derivations.map(
+    (derivation) => derivation.scenarioId,
+  );
+  assert.ok(evidence.results.length > 0, 'real PostgreSQL probes still ran');
+  assert.ok(derivations.length > 0);
+  assert.deepEqual(
+    [...executedScenarioIds, ...derivedScenarioIds].toSorted(),
+    binding.plan.scenarios.map((scenario) => scenario.scenarioId).toSorted(),
+    'executed results and derivations partition the emitted plan exactly',
+  );
+  assert.equal(
+    new Set([...executedScenarioIds, ...derivedScenarioIds]).size,
+    binding.plan.scenarios.length,
+    'no scenario is both executed and derived',
+  );
+  assert.ok(
+    derivations.some(
+      (derivation) =>
+        derivation.reason.code ===
+          'VERIFICATION_OPERATION_INPUT_UNCONSTRUCTABLE' &&
+        derivation.reason.entityId ===
+          'northstar.app:entity.inventory_transaction' &&
+        derivation.reason.requiredStorageColumn === 'legal_entity_id',
+    ),
+    'the compiler-derived legal-entity column is recorded as an unconstructable-input derivation, not as a passing probe',
+  );
+  assert.ok(
+    derivations.some(
+      (derivation) =>
+        derivation.reason.code === 'VERIFICATION_NO_GENERIC_CREATE_OPERATION' &&
+        derivation.reason.entityId ===
+          'northstar.app:entity.inventory_movement',
+    ),
+    'the append-only fact without a generic create operation is recorded as a derivation',
+  );
+  const header = await pool.query<{
+    closed_document: boolean;
+    derived_count: number;
+    evidence_version: string;
+    execution_scope: string;
+    impact_analysis_version: string;
+    result_count: number;
+    skipped_scenario_ids: unknown;
+    stored_results: string;
+  }>(
+    `SELECT evidence.evidence_version,
+            evidence.execution_scope,
+            evidence.skipped_scenario_ids,
+            evidence.result_count,
+            evidence.impact_analysis_derivation ->> 'schemaVersion'
+              AS impact_analysis_version,
+            jsonb_array_length(
+              evidence.impact_analysis_derivation -> 'derivations'
+            ) AS derived_count,
+            evidence.impact_analysis_derivation
+              - 'schemaVersion' - 'derivations' = '{}'::jsonb
+              AS closed_document,
+            (
+              SELECT count(*)::text
+                FROM platform.release_verification_results AS stored
+               WHERE stored.tenant_id = evidence.tenant_id
+                 AND stored.environment_id = evidence.environment_id
+                 AND stored.verification_evidence_id =
+                     evidence.verification_evidence_id
+            ) AS stored_results
+       FROM platform.release_verification_evidence AS evidence
+      WHERE evidence.tenant_id = $1
+        AND evidence.environment_id = $2
+        AND evidence.verification_evidence_id = $3`,
+    [runtime.identity.tenantId, runtime.identity.environmentId, evidenceId],
+  );
+  assert.deepEqual(header.rows[0], {
+    closed_document: true,
+    derived_count: derivations.length,
+    evidence_version: 'northstar.verification-result-set/v2',
+    execution_scope: 'EXACT_PARTITION',
+    impact_analysis_version: 'northstar.verification-impact-analysis/v1',
+    result_count: evidence.results.length,
+    skipped_scenario_ids: [],
+    stored_results: String(evidence.results.length),
+  });
+  assert.notEqual(
+    header.rows[0]?.result_count,
+    header.rows[0]?.derived_count,
+    'the executed counter and the derivation count are separate durable facts',
   );
 }
 

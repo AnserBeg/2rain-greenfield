@@ -13,7 +13,19 @@ import {
   type VerificationScenario,
   type VerificationScenarioExecutor,
 } from '@north-star/compiler';
-import type { ExecutedVerificationResultSet } from '../../compiler/src/verification.js';
+import {
+  VERIFICATION_IMPACT_ANALYSIS_VERSION,
+  VERIFICATION_PARTITIONED_RESULT_SET_VERSION,
+} from '../../compiler/src/protocol.js';
+import type { VERIFICATION_RESULT_SET_VERSION } from '../../compiler/src/protocol.js';
+import type {
+  ExecutedVerificationResultSet,
+  FullyExecutedVerificationResultSet,
+  PartitionedVerificationResultSet,
+  VerificationDerivationReason,
+  VerificationScenarioDeriver,
+  VerificationScenarioDerivation,
+} from '../../compiler/src/verification.js';
 import type { MintedUuid } from '@north-star/platform-runtime';
 import {
   AuthenticatedRequestEntryAdapter,
@@ -53,7 +65,9 @@ import {
 import { withTrustedRequestTransaction } from './request-context.js';
 import { TrustedActorEnvelopeIssuer } from './trust/trusted-actor-envelope.js';
 
-type ResultSetVersion = 'northstar.verification-result-set/v1';
+type ResultSetVersion =
+  | typeof VERIFICATION_PARTITIONED_RESULT_SET_VERSION
+  | typeof VERIFICATION_RESULT_SET_VERSION;
 const sha256Pattern = /^[0-9a-f]{64}$/u;
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -67,23 +81,33 @@ export interface ReleaseVerificationBinding {
   readonly verificationPlanSemanticDigest: string;
 }
 
-export interface DurableReleaseVerificationEvidence {
-  readonly artifactClosureDigest: string;
+/**
+ * Durable identity carried alongside the compiler-owned result set. It never
+ * participates in the result-set digest and is never handed to the conformance
+ * validator.
+ */
+export interface DurableVerificationEvidenceIdentity {
   readonly evidenceId: MintedUuid;
   readonly executedEnvironmentId: string;
   readonly executedEvidenceId: MintedUuid;
   readonly executedTenantId: string;
   readonly findings: readonly VerificationConstructibilityFinding[];
-  readonly provider: 'realPostgresql';
-  readonly providerRunId: string;
-  readonly releaseRoot: string;
-  readonly resultSetDigest: string;
-  readonly results: readonly ExecutedVerificationResult[];
-  readonly schemaVersion: ResultSetVersion;
-  readonly verificationPlanArtifactRoot: string;
-  readonly verificationPlanDigest: string;
-  readonly verificationPlanSemanticDigest: string;
 }
+
+/**
+ * ADR-0033: a v1 result set is FULLY EXECUTED. That is not the same fact as an
+ * exact partition that happens to derive nothing, so v1 evidence carries no
+ * `derivations` key at all rather than an empty array.
+ */
+export type DurableFullyExecutedVerificationEvidence =
+  DurableVerificationEvidenceIdentity & FullyExecutedVerificationResultSet;
+
+export type DurablePartitionedVerificationEvidence =
+  DurableVerificationEvidenceIdentity & PartitionedVerificationResultSet;
+
+export type DurableReleaseVerificationEvidence =
+  | DurableFullyExecutedVerificationEvidence
+  | DurablePartitionedVerificationEvidence;
 
 export interface VerificationConstructibilityFinding {
   readonly code: 'VERIFICATION_OPERATION_INPUT_UNCONSTRUCTABLE';
@@ -105,6 +129,7 @@ interface EvidenceRow {
   executed_environment_id: string;
   executed_evidence_id: MintedUuid;
   executed_tenant_id: string;
+  impact_analysis_derivation: unknown;
   provider: 'realPostgresql';
   provider_run_id: string;
   release_root: string;
@@ -175,17 +200,19 @@ export class PostgresReleaseVerificationService {
     );
     if (existing) return existing;
 
-    const executed = await executeVerificationPlan(
-      binding.plan,
-      {
-        artifactClosureDigest: binding.artifactClosureDigest,
-        providerRunId: providerRunId(),
-        releaseRoot: binding.releaseRoot,
-        verificationPlanArtifactRoot: binding.verificationPlanArtifactRoot,
-        verificationPlanSemanticDigest: binding.verificationPlanSemanticDigest,
-      },
-      executor,
+    const derive = verificationScenarioDeriver(
+      command.compiledRelease,
+      binding,
     );
+    const executionCommand = executionBinding(binding);
+    const executed = derive
+      ? await executeVerificationPlan(
+          binding.plan,
+          executionCommand,
+          executor,
+          derive,
+        )
+      : await executeVerificationPlan(binding.plan, executionCommand, executor);
     const conformance = validateExecutedVerificationPlan(
       binding.plan,
       executed,
@@ -267,17 +294,30 @@ export class PostgresReleaseVerificationService {
         () => ({ positiveProbe: { emptyPlanExecuted: true } }),
       );
     }
+    const derive = verificationScenarioDeriver(
+      snapshot.compiledRelease,
+      binding,
+    );
     return this.#executeSemanticCandidateWithExecutor(
       context,
       snapshot,
       binding,
       executorProvider,
-      (executor) =>
-        executeVerificationPlan(
-          binding.plan,
-          executionBinding(binding),
-          (scenario) => executor.execute(scenario),
-        ),
+      (executor): Promise<ExecutedVerificationResultSet> => {
+        const executionCommand = executionBinding(binding);
+        return derive
+          ? executeVerificationPlan(
+              binding.plan,
+              executionCommand,
+              (scenario) => executor.execute(scenario),
+              derive,
+            )
+          : executeVerificationPlan(
+              binding.plan,
+              executionCommand,
+              (scenario) => executor.execute(scenario),
+            );
+      },
     );
   }
 
@@ -677,6 +717,70 @@ export function verificationConstructibilityFindings(
   );
 }
 
+/**
+ * ADR-0033: the single derivation authority for this provider. Both live
+ * `executeVerificationPlan` call sites build their callback here so one
+ * candidate can never yield two different exact partitions.
+ *
+ * The compiler keeps iterating the complete emitted plan; a scenario is derived
+ * only when the generic verification executor cannot arrange it at all:
+ *
+ * - the entity's generic create exists but its declared input cannot construct
+ *   a required storage column (the recorded constructibility finding, reused
+ *   verbatim rather than restated); or
+ * - the entity exposes no generic create operation whatsoever.
+ *
+ * Every other scenario returns `null` and runs a real PostgreSQL probe. When no
+ * scenario derives, the deriver is absent and the release stays fully executed
+ * v1 evidence.
+ */
+export function verificationScenarioDeriver(
+  compiledRelease: CompileSuccess,
+  binding: ReleaseVerificationBinding,
+): VerificationScenarioDeriver | undefined {
+  const unconstructableByEntity = new Map<
+    string,
+    VerificationConstructibilityFinding
+  >();
+  for (const finding of binding.findings) {
+    if (!unconstructableByEntity.has(finding.entityId)) {
+      unconstructableByEntity.set(finding.entityId, finding);
+    }
+  }
+  const createOperationEntityIds = new Set(
+    compiledProjectionPayload<{
+      readonly operations: readonly VerificationOperationContract[];
+    }>(compiledRelease, PROJECTION_FAMILY_IDS.operationCatalog)
+      .operations.filter(
+        (operation) => operation.effect.kind === 'createRecordEffect',
+      )
+      .map((operation) => operation.effect.entity.targetId),
+  );
+  const derive = (
+    scenario: VerificationScenario,
+  ): VerificationDerivationReason | null => {
+    const finding = unconstructableByEntity.get(scenario.entityId);
+    if (finding) {
+      return Object.freeze({
+        code: 'VERIFICATION_OPERATION_INPUT_UNCONSTRUCTABLE' as const,
+        entityId: finding.entityId,
+        message: finding.message,
+        operationId: finding.operationId,
+        requiredStorageColumn: finding.requiredStorageColumn,
+      });
+    }
+    if (createOperationEntityIds.has(scenario.entityId)) return null;
+    return Object.freeze({
+      code: 'VERIFICATION_NO_GENERIC_CREATE_OPERATION' as const,
+      entityId: scenario.entityId,
+      message: `verification could not arrange scenario ${scenario.scenarioId} because entity ${scenario.entityId} exposes no generic create operation`,
+    });
+  };
+  return binding.plan.scenarios.some((scenario) => derive(scenario) !== null)
+    ? derive
+    : undefined;
+}
+
 export async function readDurableVerificationEvidence(
   client: PoolClient,
   context: Pick<TrustedRequestContext, 'environmentId' | 'tenantId'>,
@@ -689,7 +793,7 @@ export async function readDurableVerificationEvidence(
             verification_plan_semantic_digest, verification_plan_digest,
             result_set_digest, result_count, provider, provider_run_id,
             executed_tenant_id, executed_environment_id,
-            executed_evidence_id
+            executed_evidence_id, impact_analysis_derivation
        FROM platform.release_verification_evidence
       WHERE tenant_id = $1
         AND environment_id = $2
@@ -715,7 +819,8 @@ export async function readDurableVerificationEvidence(
       'verification evidence header and result count differ',
     );
   }
-  const resultSet = Object.freeze({
+  const evidenceVersion = row.evidence_version;
+  const reconstructed = {
     artifactClosureDigest: row.artifact_closure_digest,
     provider: row.provider,
     providerRunId: row.provider_run_id,
@@ -734,30 +839,72 @@ export async function readDurableVerificationEvidence(
         }),
       ),
     ),
-    schemaVersion: row.evidence_version,
     verificationPlanArtifactRoot: row.verification_plan_artifact_root,
     verificationPlanDigest: row.verification_plan_digest,
     verificationPlanSemanticDigest: row.verification_plan_semantic_digest,
-  });
-  const validation = validateExecutedVerificationPlan(
-    binding.plan,
-    resultSet,
-    binding,
-  );
-  if (validation.status !== 'passed') {
-    throw failure(
-      'VERIFICATION_EVIDENCE_CONFORMANCE_FAILED',
-      `durable verification evidence does not match the candidate: ${JSON.stringify(validation.diagnostics)}`,
-    );
-  }
-  return Object.freeze({
-    ...resultSet,
+  };
+  const identity = {
     evidenceId,
     executedEnvironmentId: row.executed_environment_id,
     executedEvidenceId: row.executed_evidence_id,
     executedTenantId: row.executed_tenant_id,
     findings: binding.findings,
+  };
+  const admit = (resultSet: ExecutedVerificationResultSet): void => {
+    const validation = validateExecutedVerificationPlan(
+      binding.plan,
+      resultSet,
+      binding,
+    );
+    if (validation.status !== 'passed') {
+      throw failure(
+        'VERIFICATION_EVIDENCE_CONFORMANCE_FAILED',
+        `durable verification evidence does not match the candidate: ${JSON.stringify(validation.diagnostics)}`,
+      );
+    }
+  };
+  if (evidenceVersion === VERIFICATION_PARTITIONED_RESULT_SET_VERSION) {
+    const resultSet = Object.freeze({
+      ...reconstructed,
+      derivations: durableVerificationDerivations(
+        row.impact_analysis_derivation,
+      ),
+      schemaVersion: evidenceVersion,
+    });
+    admit(resultSet);
+    return Object.freeze({ ...resultSet, ...identity });
+  }
+  const resultSet = Object.freeze({
+    ...reconstructed,
+    schemaVersion: evidenceVersion,
   });
+  admit(resultSet);
+  return Object.freeze({ ...resultSet, ...identity });
+}
+
+/**
+ * Reconstructs the compiler-owned derivation array from the durable
+ * impact-analysis document without repairing it. Anything the document does not
+ * carry exactly is handed to the conformance validator as-is, so a dropped,
+ * reordered, or rewritten derivation fails admission instead of being healed on
+ * the way out of the database.
+ */
+function durableVerificationDerivations(
+  document: unknown,
+): readonly VerificationScenarioDerivation[] {
+  if (!isRecord(document) || !Array.isArray(document.derivations)) return [];
+  return Object.freeze(
+    document.derivations.map((derivation: unknown) =>
+      isRecord(derivation)
+        ? Object.freeze({
+            ...derivation,
+            ...(isRecord(derivation.reason)
+              ? { reason: Object.freeze({ ...derivation.reason }) }
+              : {}),
+          })
+        : derivation,
+    ) as readonly VerificationScenarioDerivation[],
+  );
 }
 
 interface VerificationFieldContract {
@@ -1874,7 +2021,7 @@ async function insertEvidence(
   client: PoolClient,
   context: TrustedRequestContext,
   evidenceId: MintedUuid,
-  resultSet: Awaited<ReturnType<typeof executeVerificationPlan>>,
+  resultSet: ExecutedVerificationResultSet,
   executionSource: Readonly<{
     environmentId: string;
     evidenceId: MintedUuid;
@@ -1885,6 +2032,16 @@ async function insertEvidence(
     tenantId: context.tenantId,
   },
 ): Promise<void> {
+  // ADR-0033: the impact-analysis document is closed. Migration 0018 subtracts
+  // both declared keys and compares the remainder to '{}', so a third key is
+  // rejected by the database rather than by this writer.
+  const impactAnalysisDerivation =
+    resultSet.schemaVersion === VERIFICATION_PARTITIONED_RESULT_SET_VERSION
+      ? JSON.stringify({
+          derivations: resultSet.derivations,
+          schemaVersion: VERIFICATION_IMPACT_ANALYSIS_VERSION,
+        })
+      : null;
   await client.query(
     `INSERT INTO platform.release_verification_evidence (
        tenant_id, environment_id, verification_evidence_id, evidence_version,
@@ -1896,7 +2053,7 @@ async function insertEvidence(
        impact_analysis_derivation, created_by
      ) VALUES (
        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,
-       'FULL','[]'::jsonb,NULL,$17
+       $17,'[]'::jsonb,$18::jsonb,$19
      )`,
     [
       context.tenantId,
@@ -1909,12 +2066,16 @@ async function insertEvidence(
       resultSet.verificationPlanSemanticDigest,
       resultSet.verificationPlanDigest,
       resultSet.resultSetDigest,
+      // Derived scenarios are evidence, never executions: the executed counter
+      // and the durable derivation array length stay separate facts.
       resultSet.results.length,
       resultSet.provider,
       resultSet.providerRunId,
       executionSource.tenantId,
       executionSource.environmentId,
       executionSource.evidenceId,
+      impactAnalysisDerivation === null ? 'FULL' : 'EXACT_PARTITION',
+      impactAnalysisDerivation,
       context.principalId,
     ],
   );

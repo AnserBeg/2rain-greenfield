@@ -28,6 +28,7 @@ import {
   type VerificationPlanPayloadV1,
 } from '../../packages/compiler/src/index.js';
 import type {
+  ExecutedVerificationResultSet,
   PartitionedVerificationResultSet,
   VerificationExecutionCommand,
 } from '../../packages/compiler/src/verification.js';
@@ -45,8 +46,10 @@ import {
   ReleasePersistenceIntegrityError,
 } from '../../packages/postgres-provider/src/release-repository.js';
 import {
+  PostgresReleaseVerificationFederationService,
   PostgresReleaseVerificationService,
   ReleaseVerificationIntegrityError,
+  releaseVerificationBinding,
   verificationEvidenceIdForCandidate,
 } from '../../packages/postgres-provider/src/release-verification-service.js';
 import {
@@ -414,12 +417,526 @@ test('migration 0018 durably admits full execution and exact executed-derived ev
               error.message,
             ),
         );
+        // A v2 header the writer could reach only by keeping the previous
+        // hardcoded FULL/'[]'/NULL literals, and every way its closed
+        // impact-analysis document could be widened.
+        for (const [label, rejected] of [
+          [
+            'v2 evidence written with the full-execution scope',
+            {
+              evidenceId: 'a5000000-0000-4000-8000-000000000095',
+              executionScope: 'FULL',
+              impactAnalysisDerivation,
+              version: 'northstar.verification-result-set/v2',
+            },
+          ],
+          [
+            'v2 evidence whose derivation document carries a third key',
+            {
+              evidenceId: 'a5000000-0000-4000-8000-000000000097',
+              executionScope: 'EXACT_PARTITION',
+              impactAnalysisDerivation: {
+                ...impactAnalysisDerivation,
+                derivedScenarioCount: 1,
+              },
+              version: 'northstar.verification-result-set/v2',
+            },
+          ],
+          [
+            'v2 evidence whose derivation document is not an object',
+            {
+              evidenceId: 'a5000000-0000-4000-8000-000000000098',
+              executionScope: 'EXACT_PARTITION',
+              impactAnalysisDerivation:
+                impactAnalysisDerivation.derivations as unknown,
+              version: 'northstar.verification-result-set/v2',
+            },
+          ],
+          [
+            'v1 evidence written with the exact-partition scope',
+            {
+              evidenceId: 'a5000000-0000-4000-8000-000000000099',
+              executionScope: 'EXACT_PARTITION',
+              impactAnalysisDerivation: null,
+              version: 'northstar.verification-result-set/v1',
+            },
+          ],
+          [
+            'v1 evidence carrying a derivation document',
+            {
+              evidenceId: 'a5000000-0000-4000-8000-00000000009a',
+              executionScope: 'FULL',
+              impactAnalysisDerivation,
+              version: 'northstar.verification-result-set/v1',
+            },
+          ],
+        ] as const) {
+          await assert.rejects(
+            insertEvidence(
+              rejected.evidenceId,
+              rejected.version,
+              rejected.executionScope,
+              [],
+              rejected.impactAnalysisDerivation,
+            ),
+            (error: unknown) =>
+              error instanceof Error &&
+              (error as Error & { code?: string }).code === '23514' &&
+              /release_verification_evidence_exact_partition/u.test(
+                error.message,
+              ),
+            label,
+          );
+        }
+        // Recorded gap, not a guard. A CHECK constraint admits a NULL
+        // expression, so the exact-partition arm evaluates to NULL rather than
+        // FALSE when impact_analysis_derivation is NULL and migration 0018
+        // accepts the row. The provider writer cannot reach that state -- it
+        // derives execution_scope FROM the document it is about to store -- and
+        // the federated and composed-application controls observe the emitted
+        // header directly. Closing the database-side gap needs a new migration,
+        // which this packet does not own.
+        await insertEvidence(
+          'a5000000-0000-4000-8000-000000000096',
+          'northstar.verification-result-set/v2',
+          'EXACT_PARTITION',
+          [],
+          null,
+        );
+        const nullDocument = await admin.query<{ derivation: unknown }>(
+          `SELECT impact_analysis_derivation AS derivation
+             FROM platform.release_verification_evidence
+            WHERE verification_evidence_id = $1`,
+          ['a5000000-0000-4000-8000-000000000096'],
+        );
+        assert.deepEqual(nullDocument.rows[0], { derivation: null });
       } finally {
         admin.release();
       }
     },
   );
 });
+
+test('durable verification evidence round-trips both partitions and refuses a corrupted derivation', async (t) => {
+  const bootstrapBytes = fixtureBytes('bootstrap');
+  const bootstrap = mustCompile(bootstrapBytes);
+  const verticalBytes = fixtureBytes('vertical-v1');
+  const vertical = mustCompile(verticalBytes);
+  const binding = releaseVerificationBinding(vertical);
+  assert.ok(
+    binding.plan.scenarios.length > 3,
+    'the round-trip fixture needs an emitted plan large enough to partition',
+  );
+  const derivedScenarioIds = new Set(
+    binding.plan.scenarios.slice(0, 3).map((scenario) => scenario.scenarioId),
+  );
+  const executionCommand = {
+    artifactClosureDigest: binding.artifactClosureDigest,
+    providerRunId: 'postgres-verification:durable-exact-partition',
+    releaseRoot: binding.releaseRoot,
+    verificationPlanArtifactRoot: binding.verificationPlanArtifactRoot,
+    verificationPlanSemanticDigest: binding.verificationPlanSemanticDigest,
+  };
+  const probe = (scenario: { scenarioId: string }) => ({
+    negativeProbe: { observed: 'negative', scenarioId: scenario.scenarioId },
+    positiveProbe: { observed: 'positive', scenarioId: scenario.scenarioId },
+  });
+  const partitioned = await executeVerificationPlan(
+    binding.plan,
+    executionCommand,
+    probe,
+    (scenario) =>
+      derivedScenarioIds.has(scenario.scenarioId)
+        ? {
+            code: 'VERIFICATION_NO_GENERIC_CREATE_OPERATION' as const,
+            entityId: scenario.entityId,
+            message: 'fixture entity exposes no generic create operation',
+          }
+        : null,
+  );
+  const full = await executeVerificationPlan(
+    binding.plan,
+    executionCommand,
+    probe,
+  );
+  assert.equal(partitioned.derivations.length, 3);
+  assert.equal(
+    partitioned.results.length,
+    binding.plan.scenarios.length - partitioned.derivations.length,
+  );
+  assert.equal(full.results.length, binding.plan.scenarios.length);
+  assert.notEqual(partitioned.resultSetDigest, full.resultSetDigest);
+
+  const revisionId = minted('a3000000-0000-4000-8000-000000000201');
+  const bootstrapRevisionId = minted('a3000000-0000-4000-8000-000000000202');
+  const partitionReleaseId = minted('a4000000-0000-4000-8000-000000000201');
+  const federatedReleaseId = minted('a4000000-0000-4000-8000-000000000202');
+  const bootstrapReleaseId = minted('a4000000-0000-4000-8000-000000000203');
+  const fullEvidenceId = minted('a5000000-0000-4000-8000-000000000201');
+  const droppedEvidenceId = minted('a5000000-0000-4000-8000-000000000202');
+  const rewrittenEvidenceId = minted('a5000000-0000-4000-8000-000000000203');
+
+  await withEphemeralPostgres(
+    'release-verification-durable-partition',
+    async ({ connection, pool }) => {
+      const admin = await pool.connect();
+      try {
+        await runMigrations(admin, await loadMigrations(checkedInMigrations));
+        await seedTenants(admin);
+      } finally {
+        admin.release();
+      }
+      const runtimePool = new pg.Pool({
+        ...connection,
+        max: 2,
+        user: 'north_star_runtime',
+      });
+      try {
+        const repository = new PostgresImmutableReleaseRepository(runtimePool);
+        const entry = requestEntry();
+        const contextA = await contextFor(entry, 'session-a');
+        const contextAPreview = await contextFor(entry, 'session-a-preview');
+        const verification = new PostgresReleaseVerificationService(
+          runtimePool,
+        );
+        await repository.storeAppPackageRevision(
+          contextA,
+          revisionCommand(contextA, revisionId, verticalBytes),
+        );
+        const staged = await repository.stageTenantReleaseCandidate(contextA, {
+          appPackageRevisionId: revisionId,
+          compiledRelease: vertical,
+          createdBy: contextA.principalId,
+          environmentId: contextA.environmentId,
+          releaseId: partitionReleaseId,
+          tenantId: contextA.tenantId,
+        });
+        const federationTarget = await repository.stageTenantReleaseCandidate(
+          contextAPreview,
+          {
+            appPackageRevisionId: revisionId,
+            compiledRelease: vertical,
+            createdBy: contextAPreview.principalId,
+            environmentId: contextAPreview.environmentId,
+            releaseId: federatedReleaseId,
+            tenantId: contextAPreview.tenantId,
+          },
+        );
+        await insertDurableResultSet(
+          pool,
+          contextA,
+          staged.verificationEvidenceId,
+          partitioned,
+        );
+
+        await t.test('v2 evidence reads back and is admitted', async () => {
+          const evidence = await verification.read(
+            contextA,
+            staged.verificationEvidenceId,
+            vertical,
+          );
+          assert.ok(evidence);
+          assert.equal(
+            evidence.schemaVersion,
+            'northstar.verification-result-set/v2',
+          );
+          assert.ok('derivations' in evidence);
+          assert.deepEqual(
+            evidence.derivations,
+            partitioned.derivations,
+            'the reader reconstructs the derivation array exactly, in order',
+          );
+          assert.equal(evidence.resultSetDigest, partitioned.resultSetDigest);
+          assert.equal(evidence.results.length, partitioned.results.length);
+          assert.notEqual(
+            evidence.results.length,
+            evidence.derivations.length,
+            'executed and derived counts stay distinct facts',
+          );
+          const admitted = await repository.registerTenantRelease(
+            contextA,
+            releaseCommand(
+              contextA,
+              partitionReleaseId,
+              revisionId,
+              staged.verificationEvidenceId,
+              vertical,
+            ),
+          );
+          assert.equal(admitted.release.releaseId, partitionReleaseId);
+        });
+
+        await t.test(
+          'federation rewrites the exact partition through the durable writer',
+          async () => {
+            const federated =
+              await new PostgresReleaseVerificationFederationService(
+                pool,
+              ).federate({
+                compiledRelease: vertical,
+                sourceEnvironmentId: contextA.environmentId,
+                sourceEvidenceId: staged.verificationEvidenceId,
+                sourceTenantId: contextA.tenantId,
+                targetContext: contextAPreview,
+                targetEvidenceId: federationTarget.verificationEvidenceId,
+                targetReleaseId: federatedReleaseId,
+              });
+            assert.equal(
+              federated.schemaVersion,
+              'northstar.verification-result-set/v2',
+            );
+            assert.ok('derivations' in federated);
+            assert.deepEqual(federated.derivations, partitioned.derivations);
+            assert.equal(
+              federated.resultSetDigest,
+              partitioned.resultSetDigest,
+            );
+            assert.deepEqual(
+              await evidenceHeader(
+                pool,
+                federationTarget.verificationEvidenceId,
+              ),
+              {
+                closed_document: true,
+                derived_count: partitioned.derivations.length,
+                evidence_version: 'northstar.verification-result-set/v2',
+                execution_scope: 'EXACT_PARTITION',
+                impact_analysis_version:
+                  'northstar.verification-impact-analysis/v1',
+                result_count: partitioned.results.length,
+                skipped_scenario_ids: [],
+              },
+            );
+          },
+        );
+
+        await t.test(
+          'full execution still writes and reads back as untouched v1 evidence',
+          async () => {
+            await insertDurableResultSet(pool, contextA, fullEvidenceId, full);
+            const evidence = await verification.read(
+              contextA,
+              fullEvidenceId,
+              vertical,
+            );
+            assert.ok(evidence);
+            assert.equal(
+              evidence.schemaVersion,
+              'northstar.verification-result-set/v1',
+            );
+            assert.equal(
+              Object.hasOwn(evidence, 'derivations'),
+              false,
+              'a fully executed set is not a partition with zero derivations',
+            );
+            assert.equal(evidence.resultSetDigest, full.resultSetDigest);
+            assert.deepEqual(await evidenceHeader(pool, fullEvidenceId), {
+              closed_document: null,
+              derived_count: null,
+              evidence_version: 'northstar.verification-result-set/v1',
+              execution_scope: 'FULL',
+              impact_analysis_version: null,
+              result_count: full.results.length,
+              skipped_scenario_ids: [],
+            });
+
+            await repository.storeAppPackageRevision(
+              contextA,
+              revisionCommand(contextA, bootstrapRevisionId, bootstrapBytes),
+            );
+            const bootstrapStaged =
+              await repository.stageTenantReleaseCandidate(contextA, {
+                appPackageRevisionId: bootstrapRevisionId,
+                compiledRelease: bootstrap,
+                createdBy: contextA.principalId,
+                environmentId: contextA.environmentId,
+                releaseId: bootstrapReleaseId,
+                tenantId: contextA.tenantId,
+              });
+            await verification.executeSemanticCandidateAndPersist(contextA, {
+              compiledRelease: bootstrap,
+              evidenceId: bootstrapStaged.verificationEvidenceId,
+              releaseId: bootstrapReleaseId,
+            });
+            assert.deepEqual(
+              await evidenceHeader(
+                pool,
+                bootstrapStaged.verificationEvidenceId,
+              ),
+              {
+                closed_document: null,
+                derived_count: null,
+                evidence_version: 'northstar.verification-result-set/v1',
+                execution_scope: 'FULL',
+                impact_analysis_version: null,
+                result_count: 0,
+                skipped_scenario_ids: [],
+              },
+              'the production writer still emits FULL scope and no derivation document for v1',
+            );
+          },
+        );
+
+        await t.test(
+          'a corrupted derivation document fails conformance instead of admitting',
+          async () => {
+            await insertDurableResultSet(
+              pool,
+              contextAPreview,
+              droppedEvidenceId,
+              partitioned,
+              {
+                derivations: partitioned.derivations.slice(1),
+                schemaVersion: 'northstar.verification-impact-analysis/v1',
+              },
+            );
+            await assert.rejects(
+              verification.read(contextAPreview, droppedEvidenceId, vertical),
+              (error: unknown) => {
+                assert.ok(error instanceof ReleaseVerificationIntegrityError);
+                assert.equal(
+                  error.code,
+                  'VERIFICATION_EVIDENCE_CONFORMANCE_FAILED',
+                );
+                assert.match(
+                  error.message,
+                  /VERIFICATION_SCENARIO_DISPOSITION_MISSING/u,
+                );
+                return true;
+              },
+            );
+            await insertDurableResultSet(
+              pool,
+              contextAPreview,
+              rewrittenEvidenceId,
+              partitioned,
+              {
+                derivations: partitioned.derivations.map((derivation, index) =>
+                  index === 0
+                    ? {
+                        ...derivation,
+                        reason: {
+                          ...derivation.reason,
+                          message: 'rewritten after execution',
+                        },
+                      }
+                    : derivation,
+                ),
+                schemaVersion: 'northstar.verification-impact-analysis/v1',
+              },
+            );
+            await assert.rejects(
+              verification.read(contextAPreview, rewrittenEvidenceId, vertical),
+              (error: unknown) => {
+                assert.ok(error instanceof ReleaseVerificationIntegrityError);
+                assert.equal(
+                  error.code,
+                  'VERIFICATION_EVIDENCE_CONFORMANCE_FAILED',
+                );
+                assert.match(error.message, /VERIFICATION_RESULT_SET_INVALID/u);
+                return true;
+              },
+            );
+          },
+        );
+      } finally {
+        await runtimePool.end();
+      }
+    },
+  );
+});
+
+async function insertDurableResultSet(
+  pool: pg.Pool,
+  context: TrustedRequestContext,
+  evidenceId: MintedUuid,
+  resultSet: ExecutedVerificationResultSet,
+  impactAnalysisDerivation?: unknown,
+): Promise<void> {
+  const partitioned =
+    resultSet.schemaVersion === 'northstar.verification-result-set/v2';
+  const document =
+    impactAnalysisDerivation ??
+    (partitioned
+      ? {
+          derivations: resultSet.derivations,
+          schemaVersion: 'northstar.verification-impact-analysis/v1',
+        }
+      : null);
+  await pool.query(
+    `INSERT INTO platform.release_verification_evidence (
+       tenant_id, environment_id, verification_evidence_id, evidence_version,
+       release_root, artifact_closure_digest,
+       verification_plan_artifact_root, verification_plan_semantic_digest,
+       verification_plan_digest, result_set_digest, result_count, provider,
+       provider_run_id, executed_tenant_id, executed_environment_id,
+       executed_evidence_id, execution_scope, skipped_scenario_ids,
+       impact_analysis_derivation, created_by
+     ) VALUES (
+       $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'realPostgresql',$12,$1,$2,$3,
+       $13,'[]'::jsonb,$14::jsonb,$15
+     )`,
+    [
+      context.tenantId,
+      context.environmentId,
+      evidenceId,
+      resultSet.schemaVersion,
+      resultSet.releaseRoot,
+      resultSet.artifactClosureDigest,
+      resultSet.verificationPlanArtifactRoot,
+      resultSet.verificationPlanSemanticDigest,
+      resultSet.verificationPlanDigest,
+      resultSet.resultSetDigest,
+      resultSet.results.length,
+      resultSet.providerRunId,
+      partitioned ? 'EXACT_PARTITION' : 'FULL',
+      document === null ? null : JSON.stringify(document),
+      context.principalId,
+    ],
+  );
+  for (const result of resultSet.results) {
+    await pool.query(
+      `INSERT INTO platform.release_verification_results (
+         tenant_id, environment_id, verification_evidence_id, scenario_id,
+         scenario_fingerprint, result_version, positive_probe_digest,
+         negative_probe_digest, provider, provider_run_id
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+      [
+        context.tenantId,
+        context.environmentId,
+        evidenceId,
+        result.scenarioId,
+        result.scenarioFingerprint,
+        result.schemaVersion,
+        result.positiveProbeDigest,
+        result.negativeProbeDigest,
+        result.provider,
+        result.providerRunId,
+      ],
+    );
+  }
+}
+
+async function evidenceHeader(
+  pool: pg.Pool,
+  evidenceId: MintedUuid,
+): Promise<Record<string, unknown> | undefined> {
+  const result = await pool.query<Record<string, unknown>>(
+    `SELECT evidence_version, execution_scope, skipped_scenario_ids,
+            result_count,
+            impact_analysis_derivation ->> 'schemaVersion'
+              AS impact_analysis_version,
+            jsonb_array_length(
+              impact_analysis_derivation -> 'derivations'
+            ) AS derived_count,
+            impact_analysis_derivation - 'schemaVersion' - 'derivations'
+              = '{}'::jsonb AS closed_document
+       FROM platform.release_verification_evidence
+      WHERE verification_evidence_id = $1`,
+    [evidenceId],
+  );
+  return result.rows[0];
+}
 
 test('release admission rejects a staged candidate with missing executed results', async () => {
   const bootstrapBytes = fixtureBytes('bootstrap');

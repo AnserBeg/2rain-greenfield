@@ -767,6 +767,21 @@ async function provisionInventoryScope(
   contractReleaseRoot: string,
   provisioning: InventoryScopeProvisioning,
 ): Promise<void> {
+  // `contract_release_root` records the compiled contract this scope was first
+  // provisioned against and migration 0015 gives it no update path. Re-asking
+  // for the newest release root on every start would raise
+  // INVENTORY_POSTING_CONFIGURATION_CONFLICT for an already-provisioned tenant
+  // the moment the product advances a release, so the provisioned root is
+  // carried forward. Every other configuration value is still asserted exactly,
+  // and genuine configuration drift still conflicts.
+  const provisioned = await pool.query<{ contract_release_root: string }>(
+    `SELECT contract_release_root
+       FROM platform.inventory_posting_configurations
+      WHERE tenant_id = $1 AND environment_id = $2 AND legal_entity_id = $3`,
+    [identity.tenantId, identity.environmentId, provisioning.legalEntityId],
+  );
+  const requestedContractReleaseRoot =
+    provisioned.rows[0]?.contract_release_root ?? contractReleaseRoot;
   await pool.query(
     `SELECT platform.provision_inventory_scope(
        $1,$2,$3,$4,$5,$6,$7,$8,$9::smallint,$10,$11,
@@ -780,7 +795,7 @@ async function provisionInventoryScope(
       provisioning.entityName,
       provisioning.timeZone,
       provisioning.businessDayBoundary,
-      contractReleaseRoot,
+      requestedContractReleaseRoot,
       provisioning.configurationVersion,
       provisioning.negativeStock,
       provisioning.maximumBackdateDays,
