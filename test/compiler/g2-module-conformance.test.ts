@@ -1169,7 +1169,32 @@ function inputNormalized(
     normalizedDefinitionBytes: new TextEncoder().encode(
       canonicalize(normalizedDefinition),
     ),
-    profile: { ...MODULE_COMPILER_PROFILE },
+    // Version-from-artifact: when the normalized definition declares its own
+    // version, the profile follows it rather than a pinned constant. The
+    // parameter stays `unknown` because several callers pass deliberately
+    // partial packages to probe tampering; those declare no version, fall back
+    // to the adopted profile, and override `profile` themselves anyway.
+    profile: profileForNormalized(normalizedDefinition),
+  };
+}
+
+function profileForNormalized(
+  normalizedDefinition: unknown,
+): CompilerInput['profile'] {
+  const declared =
+    typeof normalizedDefinition === 'object' && normalizedDefinition !== null
+      ? (normalizedDefinition as Partial<CompilerInput['profile']>)
+      : {};
+  return {
+    ...MODULE_COMPILER_PROFILE,
+    ...(declared.languageVersion === undefined
+      ? {}
+      : { languageVersion: declared.languageVersion }),
+    ...(declared.normalizationProfileVersion === undefined
+      ? {}
+      : {
+          normalizationProfileVersion: declared.normalizationProfileVersion,
+        }),
   };
 }
 
