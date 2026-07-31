@@ -426,6 +426,27 @@ function resolveAgainstImage(
     throw new TypeError('precondition comparison operand is not a scalar');
   }
   const expected = (comparison.value as { value: unknown }).value;
+  // Raw `===` is only a sound equality for scalar kinds whose stored form is
+  // canonical. PostgreSQL numeric(p,s) preserves scale, so a persisted
+  // exactDecimal reads back as "1.000000000000000000" while the authored
+  // operand is "1"; equality would report false and `not(equals)` would ADMIT.
+  // That is the fail-OPEN direction for the guard this evaluation exists to
+  // enforce, so scale-bearing kinds refuse rather than guess. Widening this set
+  // requires a canonical comparison for the kind being added, not a cast.
+  const comparableScalarKinds = new Set([
+    'booleanValue',
+    'dateTimeValue',
+    'dateValue',
+    'integerValue',
+    'textValue',
+    'timeValue',
+  ]);
+  const valueKind = (comparison.value as { kind?: unknown }).kind;
+  if (typeof valueKind !== 'string' || !comparableScalarKinds.has(valueKind)) {
+    throw new TypeError(
+      `precondition comparison operand kind ${String(valueKind)} has no canonical equality`,
+    );
+  }
   switch (comparison.operator) {
     case 'equals':
       return { presence: 'present', result: actual === expected };

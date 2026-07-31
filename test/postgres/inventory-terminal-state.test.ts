@@ -269,11 +269,22 @@ test('C1-C7 terminal stock-count evidence is enforced by the real gateway and Po
           policy,
         );
 
-        // C1: prior-image evaluation refuses a generic update of posted evidence.
+        // C1: prior-image evaluation refuses a generic update of posted
+        // evidence. The patch un-posts the session deliberately, so the
+        // PROJECTED image satisfies not(equals posted) and ONLY the prior-image
+        // check can refuse it. Patching an unrelated field instead would leave
+        // the projected image posted, and the control would stay red even if
+        // prior-image evaluation were removed entirely -- red for the wrong
+        // reason, which is what this control was sent back for.
         await assertOperationRefused(
           invokeOperation(gateway, mediation, view, 'stock_count_update', {
             expectedRevision: 1,
-            patch: { [fieldId('stock_count_number')]: 'POSTED-REWRITE' },
+            patch: {
+              [fieldId('stock_count_number')]: 'POSTED-REWRITE',
+              [fieldId('stock_count_state')]: optionId(
+                'stock_count_state_draft',
+              ),
+            },
             recordId: postedSessionId,
           }),
         );
@@ -407,22 +418,31 @@ test('C8 compiler ratchets the exact stock-count terminal guard and required sta
     label: string;
     mutate(definition: Record<string, unknown>): void;
   }> = [
-    {
-      label: 'missing precondition',
-      mutate(definition) {
-        delete operation(definition, 'stock_count_update').precondition;
-      },
-    },
-    {
-      label: 'wrong terminal option',
-      mutate(definition) {
-        const guard = operation(definition, 'stock_count_update')
-          .precondition as {
-          term: { value: { value: string } };
-        };
-        guard.term.value.value = optionId('stock_count_state_draft');
-      },
-    },
+    // Every one of the four generic operations gets its own missing-guard and
+    // wrong-option mutant. Mutating only stock_count_update left the other
+    // three arms untested: dropping the restore arm from the conformance rule
+    // would have compiled silently, and no runtime control covers it either --
+    // C4 restores a LINE under a guarded parent, not a session.
+    ...(['archive', 'create', 'restore', 'update'] as const).flatMap(
+      (action) => [
+        {
+          label: `missing precondition on stock_count_${action}`,
+          mutate(definition: Record<string, unknown>) {
+            delete operation(definition, `stock_count_${action}`).precondition;
+          },
+        },
+        {
+          label: `wrong terminal option on stock_count_${action}`,
+          mutate(definition: Record<string, unknown>) {
+            const guard = operation(definition, `stock_count_${action}`)
+              .precondition as {
+              term: { value: { value: string } };
+            };
+            guard.term.value.value = optionId('stock_count_state_draft');
+          },
+        },
+      ],
+    ),
     {
       label: 'optional state operand',
       mutate(definition) {
