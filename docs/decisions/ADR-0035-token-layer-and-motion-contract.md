@@ -33,7 +33,7 @@ and it is the reason this is an ADR rather than a stylesheet.
 
 ### 1. The brand colour cannot carry text, and the ramp is therefore load-bearing
 
-`#89CFF0` measures **1.9:1 on white** — far below the 4.5:1 floor. It **cannot**
+`#89CFF0` measures **1.71:1 on white** — far below the 4.5:1 floor. It **cannot**
 be used for text, a primary action, or a link.
 
 This is not a limitation to work around. It is the fact that makes a ramp
@@ -54,11 +54,29 @@ ADR without further discussion.
 | **`--b300`** | **`#89CFF0`** | **Brand.** Mark, active-nav edge, selection edge, focus ring | — |
 | `--b400` | `#4FB4E3` | Primary action **on dark ground** | — |
 | `--b500` | `#2196CF` | Hover on 600 | — |
-| **`--b600`** | **`#1478AE`** | **Primary action, links on light ground** | **4.9:1 AA** |
-| `--b700` | `#0F5F8C` | Pressed; body-weight link text | **7.0:1 AAA** |
-| `--b900` | `#0B3A55` | Rail ground, deep surfaces | — |
+| **`--b600`** | **`#1478AE`** | **Primary action, links on light ground** | **4.85:1 AA** |
+| `--b700` | `#0F5F8C` | Pressed; body-weight link text | **6.92:1 AA** |
+| `--b900` | `#0B3A55` | Rail ground, deep surfaces | 12.00:1 AAA |
 
 `--b300` is the colour actually *seen*. `--b600` does the work.
+
+**Ratios recomputed 2026-07-31** against WCAG 2.x relative luminance, all versus
+`#FFFFFF`. Three figures inherited from the proposal document were wrong, and one
+was wrong in a way that mattered:
+
+| Token | Was recorded | Actually | Effect |
+|---|---|---|---|
+| `#89CFF0` | 1.9:1 | **1.71:1** | None — the conclusion is unchanged and in fact stronger |
+| `--b600` | 4.9:1 | **4.85:1** | None — comfortably AA either way |
+| `--b700` | 7.0:1 **AAA** | **6.92:1 AA** | **Real.** 7.0 is the AAA threshold; this token misses it |
+
+`--b700` clears the 4.5:1 AA floor comfortably and is fine for its stated roles.
+Only the **AAA label** was false. If AAA is wanted for body-weight link text the
+token must move roughly 2% darker, which is a change to an approved visual
+direction and therefore the user's call, not this ADR's.
+
+Where the proposal document's Part II gives different figures, **this ADR
+governs**.
 
 ### 3. Neutrals are chosen, not inherited
 
@@ -203,6 +221,16 @@ contrast floor, reintroducing the exact defect §1 exists to prevent.
   work from contending with the surface packets.
 - **`tabular-nums` is the cheapest item here and the most visible.** It should
   not wait for the rest of the token layer if a smaller slice becomes available.
-- **The contrast figures are claims a gate can check.** `--b600` at 4.9:1 and
-  `--b700` at 7.0:1 are assertions about shipped tokens, so they belong in a
-  test that computes contrast from the token values rather than in a comment.
+- **The contrast figures are claims a gate can check, and the check already
+  earned its keep.** Recomputing them by hand on 2026-07-31 found `--b700`
+  labelled AAA at 7.0:1 when it is 6.92:1 — below the AAA threshold. That figure
+  had been carried unchallenged through the proposal and into the first draft of
+  this ADR. Every ratio in §2 and §4 is an assertion about a shipped token, so
+  `U2` must ship a test that **computes** contrast from the token values, with
+  a negative control that a token moved below its floor fails. A number in a
+  table is exactly the proxy AGENTS.md §6 warns about; the computation is the
+  observation.
+
+  The status roles were audited at the same time and all pass:
+  `success` 7.07:1, `attention` 5.82:1, `blocked` 7.44:1, `inProgress` 8.77:1,
+  each foreground on its own ground.
