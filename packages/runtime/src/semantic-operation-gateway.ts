@@ -6,6 +6,7 @@ import {
 } from 'node:crypto';
 
 import {
+  admitPredicateForExecution,
   inspectPredicateForExecution,
   type PredicateKernelReceipt,
 } from '@north-star/canonical-model';
@@ -151,9 +152,16 @@ export interface SemanticOperationExecutionRequest {
   readonly idempotencyKey: string;
   readonly input: ImmutableJsonValue;
   readonly inputDigest: string;
+  readonly parentGuards: readonly SemanticOperationParentGuard[];
   readonly policyVersion: string;
   readonly readBackDefinition: RegisteredQueryDefinition;
   readonly view: IssuedRequestRuntimeView;
+}
+
+export interface SemanticOperationParentGuard {
+  readonly operationId: string;
+  readonly parentEntityId: string;
+  readonly precondition: Readonly<Record<string, ImmutableJsonValue>>;
 }
 
 export interface SemanticOperationExecutor {
@@ -219,7 +227,9 @@ export class SemanticOperationMediationAuthority {
     input: ImmutableJsonValue,
   ): string {
     assertRequestRuntimeView(view);
-    const definition = findPinnedOperation(view, operationId);
+    const definition = readPinnedOperationCatalog(view).find(
+      (operation) => operation.operationId === operationId,
+    );
     if (
       !definition ||
       definition.lifecycle !== 'active' ||
@@ -467,7 +477,10 @@ export class SemanticOperationGateway {
         throw new SemanticOperationPolicyDeniedError(request.operationId, view);
       }
 
-      const definition = findPinnedOperation(view, request.operationId);
+      const operationCatalog = readPinnedOperationCatalog(view);
+      const definition = operationCatalog.find(
+        (operation) => operation.operationId === request.operationId,
+      );
       if (!definition || !this.executor) {
         throw new NoSuchRegisteredOperationError(request.operationId, view);
       }
@@ -510,14 +523,24 @@ export class SemanticOperationGateway {
           'operation-tier-unsupported',
         );
       }
-      const preconditionReceipt = inspectPredicateForExecution(
+      // Structural admission only. The gateway answers "is this a predicate
+      // this platform can execute at all"; whether it HOLDS is evaluated by
+      // the generic interpreter against the record image, which the gateway
+      // does not hold. Until that evaluation exists this fence is the only
+      // thing standing between an authored precondition and an unguarded
+      // mutation, so it refuses anything it cannot parse.
+      const preconditionReceipt = admitPredicateForExecution(
         definition.precondition,
+        'operationPrecondition',
       );
       observePredicateReceiptSafely(
         this.observePredicateReceipt,
         preconditionReceipt,
       );
-      if (preconditionReceipt.outcome !== 'accepted') {
+      // Deliberately `!== 'admitted'` rather than `=== 'rejected'`: only an
+      // explicit admission proceeds, so any receipt shape this gateway does
+      // not recognise refuses instead of falling through.
+      if (preconditionReceipt.outcome !== 'admitted') {
         await this.#recordNonAccepted(
           view,
           invocation,
@@ -582,6 +605,7 @@ export class SemanticOperationGateway {
           idempotencyKey: request.idempotencyKey,
           input: request.input,
           inputDigest: digestOperationInput(request.input),
+          parentGuards: parentGuardsFromCatalog(operationCatalog),
           policyVersion: operationDecision.policyVersion,
           readBackDefinition,
           view,
@@ -683,10 +707,9 @@ function parseSemanticOperationRequest(
   });
 }
 
-function findPinnedOperation(
+function readPinnedOperationCatalog(
   view: IssuedRequestRuntimeView,
-  operationId: string,
-): RegisteredOperationDefinition | undefined {
+): readonly RegisteredOperationDefinition[] {
   const projection = view.projections.operation;
   if (
     projection.familyId !== REQUEST_RUNTIME_PROJECTION_FAMILIES.operation ||
@@ -717,7 +740,7 @@ function findPinnedOperation(
     );
   }
   const operationIds = new Set<string>();
-  let selected: RegisteredOperationDefinition | undefined;
+  const operations: RegisteredOperationDefinition[] = [];
   for (const operation of payload.operations) {
     assertOperationDefinition(operation);
     if (operationIds.has(operation.operationId)) {
@@ -726,9 +749,30 @@ function findPinnedOperation(
       );
     }
     operationIds.add(operation.operationId);
-    if (operation.operationId === operationId) selected = operation;
+    operations.push(operation);
   }
-  return selected;
+  return Object.freeze(operations);
+}
+
+function parentGuardsFromCatalog(
+  operations: readonly RegisteredOperationDefinition[],
+): readonly SemanticOperationParentGuard[] {
+  return Object.freeze(
+    operations
+      .filter(
+        (operation) =>
+          operation.lifecycle === 'active' &&
+          operation.tier === 'o0' &&
+          operation.effect.kind === 'updateRecordEffect',
+      )
+      .map((operation) =>
+        Object.freeze({
+          operationId: operation.operationId,
+          parentEntityId: operation.effect.entity.targetId,
+          precondition: operation.precondition,
+        }),
+      ),
+  );
 }
 
 function assertOperationDefinition(

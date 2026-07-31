@@ -694,7 +694,31 @@ export function inventoryModuleDefinition(
     operations: standardEntities.flatMap(([local, , entityId]) =>
       local === 'inventory_period_lock'
         ? periodLockOperations(definitionIds, entityId)
-        : operations(definitionIds, local, entityId),
+        : operations(
+            definitionIds,
+            local,
+            entityId,
+            local === 'stock_count'
+              ? {
+                  kind: 'notPredicate',
+                  schemaVersion: version,
+                  term: {
+                    field: reference(
+                      'fieldReference',
+                      fieldIds.stockCount.state,
+                    ),
+                    kind: 'fieldComparisonPredicate',
+                    operator: 'equals',
+                    schemaVersion: version,
+                    value: {
+                      kind: 'textValue',
+                      schemaVersion: version,
+                      value: `${namespace}:option.stock_count_state_posted`,
+                    },
+                  },
+                }
+              : undefined,
+          ),
     ),
     package: {
       kind: 'packageDefinition',
@@ -982,6 +1006,7 @@ function operations(
   ids: InventoryIds,
   local: string,
   entityId: string,
+  precondition?: Record<string, unknown>,
 ): Array<Record<string, unknown>> {
   return (
     [
@@ -1004,6 +1029,7 @@ function operations(
       'permissionReference',
       `${ids.namespace}:permission.${local}_${action}`,
     ),
+    ...(precondition ? { precondition } : {}),
     readBack: reference(
       'queryReference',
       `${ids.namespace}:query.${local}_get`,

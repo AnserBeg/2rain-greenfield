@@ -795,7 +795,10 @@ function validateWholeModel(
     }
   });
   diagnostics.push(
-    ...validateModuleConformance(projectionDispatchRevision(packageRevision)),
+    ...validateModuleConformance(
+      projectionDispatchRevision(packageRevision),
+      packageRevision,
+    ),
   );
   return diagnostics;
 }
