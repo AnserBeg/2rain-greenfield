@@ -14,6 +14,7 @@ import {
   VersionedAuthoredApplicationPackageSchema,
   VersionedNormalizedApplicationPackageSchema,
   ADOPTED_LANGUAGE_VERSION,
+  ADOPTED_NORMALIZATION_PROFILE_VERSION,
   type LegalEntityScopeSelectionReceipt,
 } from '../../packages/canonical-model/src/index.js';
 import {
@@ -428,18 +429,21 @@ test('cutting v4 leaves v3 output byte-identical', () => {
   );
   assert.equal(
     DEFAULT_COMPILER_PROFILE.normalizationProfileVersion,
-    'northstar.normalization/v3',
+    ADOPTED_NORMALIZATION_PROFILE_VERSION,
   );
 
   const v3 = normalizedBytesFor(v3AggregateModule());
-  // The unmodified default profile still compiles an adopted-version package.
+  // The unmodified default profile still compiles an ADOPTED-version package.
+  // LANG-ADOPT moved adoption to v4, so the adopted-version fixture is the v4
+  // one; using the v3 module here would assert that the default profile
+  // compiles an UNADOPTED version, which is the opposite of this control.
   assert.equal(
     compileApplication({
       dependencies: [],
       expectedActiveRelease: null,
       kind: 'compilerInput',
       limits: { ...DEFAULT_COMPILER_LIMITS },
-      normalizedDefinitionBytes: v3,
+      normalizedDefinitionBytes: normalizedBytesFor(v4ScopedModule()),
       profile: { ...DEFAULT_COMPILER_PROFILE },
     }).status,
     'compiled',
