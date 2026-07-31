@@ -478,7 +478,14 @@ test('C9 an unparseable operation precondition still refuses before execution', 
     randomUUID(),
     { fence: 1, pointerId: randomUUID() },
     policy,
-    Object.freeze({ ...operationProjection, payload }),
+    // `payload` is a structuredClone of this projection's own payload, kept in
+    // a mutable shape only so the precondition can be corrupted above. Casting
+    // back to the projection's payload type restores the immutable-JSON
+    // contract it already satisfies; it asserts no shape the clone did not have.
+    Object.freeze({
+      ...operationProjection,
+      payload: payload as unknown as typeof operationProjection.payload,
+    }),
   );
   const result = await invokeOperation(
     gateway,
