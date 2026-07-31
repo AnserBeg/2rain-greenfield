@@ -286,6 +286,33 @@ operation in the worktree under test. A reviewer process is not "just reading" �
 it is a model doing sustained tool calls on a WSL VM capped at 8 GB and 8
 processors, and it competes for exactly the resource the timing gates measure.
 
+**"Nothing else" INCLUDES THE ORCHESTRATOR'S OWN TOOL CALLS.** This was written
+once exempting the orchestrator by omission, and the omission immediately cost
+two wasted matrix runs. Measured at the same SHA on the same machine:
+
+| Run | What the orchestrator was doing | Unit suite (46 tests) | Budget test |
+|---|---|---|---|
+| 1 | blocked on a watcher, idle | 2,991 ms | **ok**, 4,333 ms |
+| 2 | launched a review, edited docs, committed | 13,246 ms | fail, 17,672 ms |
+| 3 | read files, edited, committed, grepped | (same order) | fail, 17,073 ms |
+| isolated, idle | nothing | 2,714 ms | **ok**, 3,025 ms |
+
+**A 4.4× systemic slowdown across an entire unrelated suite**, tracking nothing
+but orchestrator activity. `ps` confirms why: the agent runtime sits at ~12 %
+CPU sustained while working, on 8 processors, alongside its own tool
+subprocesses.
+
+The trap is that the failure looks like a code regression at the integrated
+SHA — a compile budget blown by 3.5× is exactly what a genuine performance
+regression looks like, and the tempting "fix" is to raise the budget. It took
+three runs and two wrong diagnoses (first "load from a concurrent reviewer",
+then "the machine is degrading") before measuring the test in isolation, where
+it passed in 3,025 ms against a 5,000 ms budget.
+
+**So: start the matrix, then stop. Do not read, grep, edit, commit, or launch
+anything until it returns.** Block on the verdict and do nothing else. If work
+must happen during a matrix, the matrix is not ready to run yet.
+
 **Why this matters more than it looks:** a loaded run does not fail honestly. It
 produces a *wrong verdict* — either a red on a timing-sensitive gate that would
 pass quiet, or the far worse case of an environmental red that gets mistaken for
