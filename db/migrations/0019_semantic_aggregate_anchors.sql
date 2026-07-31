@@ -1,4 +1,4 @@
-CREATE TABLE platform.semantic_aggregate_anchors (
+CREATE TABLE north_star_internal.semantic_aggregate_anchors (
   tenant_id uuid NOT NULL,
   environment_id uuid NOT NULL,
   cache_key text NOT NULL,
@@ -49,7 +49,7 @@ CREATE TABLE platform.semantic_aggregate_anchors (
   )
 );
 
-CREATE TABLE platform.semantic_aggregate_anchor_discrepancies (
+CREATE TABLE north_star_internal.semantic_aggregate_anchor_discrepancies (
   tenant_id uuid NOT NULL,
   environment_id uuid NOT NULL,
   discrepancy_id uuid NOT NULL,
@@ -62,7 +62,7 @@ CREATE TABLE platform.semantic_aggregate_anchor_discrepancies (
   PRIMARY KEY (tenant_id, environment_id, discrepancy_id),
   CONSTRAINT semantic_aggregate_anchor_discrepancies_anchor_fkey
     FOREIGN KEY (tenant_id, environment_id, cache_key)
-    REFERENCES platform.semantic_aggregate_anchors (
+    REFERENCES north_star_internal.semantic_aggregate_anchors (
       tenant_id,
       environment_id,
       cache_key
@@ -80,38 +80,38 @@ CREATE TABLE platform.semantic_aggregate_anchor_discrepancies (
 );
 
 CREATE RULE semantic_aggregate_anchors_reject_update
-AS ON UPDATE TO platform.semantic_aggregate_anchors
+AS ON UPDATE TO north_star_internal.semantic_aggregate_anchors
 DO INSTEAD
   INSERT INTO platform.trust_immutable_write_guard (attempted_relation)
   VALUES ('semantic_aggregate_anchors');
 
 CREATE RULE semantic_aggregate_anchors_reject_delete
-AS ON DELETE TO platform.semantic_aggregate_anchors
+AS ON DELETE TO north_star_internal.semantic_aggregate_anchors
 DO INSTEAD
   INSERT INTO platform.trust_immutable_write_guard (attempted_relation)
   VALUES ('semantic_aggregate_anchors');
 
 CREATE RULE semantic_aggregate_anchor_discrepancies_reject_update
-AS ON UPDATE TO platform.semantic_aggregate_anchor_discrepancies
+AS ON UPDATE TO north_star_internal.semantic_aggregate_anchor_discrepancies
 DO INSTEAD
   INSERT INTO platform.trust_immutable_write_guard (attempted_relation)
   VALUES ('semantic_aggregate_anchor_discrepancies');
 
 CREATE RULE semantic_aggregate_anchor_discrepancies_reject_delete
-AS ON DELETE TO platform.semantic_aggregate_anchor_discrepancies
+AS ON DELETE TO north_star_internal.semantic_aggregate_anchor_discrepancies
 DO INSTEAD
   INSERT INTO platform.trust_immutable_write_guard (attempted_relation)
   VALUES ('semantic_aggregate_anchor_discrepancies');
 
-ALTER TABLE platform.semantic_aggregate_anchors ENABLE ROW LEVEL SECURITY;
-ALTER TABLE platform.semantic_aggregate_anchors FORCE ROW LEVEL SECURITY;
-ALTER TABLE platform.semantic_aggregate_anchor_discrepancies
+ALTER TABLE north_star_internal.semantic_aggregate_anchors ENABLE ROW LEVEL SECURITY;
+ALTER TABLE north_star_internal.semantic_aggregate_anchors FORCE ROW LEVEL SECURITY;
+ALTER TABLE north_star_internal.semantic_aggregate_anchor_discrepancies
   ENABLE ROW LEVEL SECURITY;
-ALTER TABLE platform.semantic_aggregate_anchor_discrepancies
+ALTER TABLE north_star_internal.semantic_aggregate_anchor_discrepancies
   FORCE ROW LEVEL SECURITY;
 
 CREATE POLICY semantic_aggregate_anchors_select_trusted_context
-  ON platform.semantic_aggregate_anchors
+  ON north_star_internal.semantic_aggregate_anchors
   AS PERMISSIVE
   FOR SELECT
   TO north_star_module_runtime
@@ -121,7 +121,7 @@ CREATE POLICY semantic_aggregate_anchors_select_trusted_context
   );
 
 CREATE POLICY semantic_aggregate_anchors_insert_trusted_context
-  ON platform.semantic_aggregate_anchors
+  ON north_star_internal.semantic_aggregate_anchors
   AS PERMISSIVE
   FOR INSERT
   TO north_star_module_runtime
@@ -131,7 +131,7 @@ CREATE POLICY semantic_aggregate_anchors_insert_trusted_context
   );
 
 CREATE POLICY semantic_aggregate_anchor_discrepancies_select_trusted_context
-  ON platform.semantic_aggregate_anchor_discrepancies
+  ON north_star_internal.semantic_aggregate_anchor_discrepancies
   AS PERMISSIVE
   FOR SELECT
   TO north_star_module_runtime
@@ -141,7 +141,7 @@ CREATE POLICY semantic_aggregate_anchor_discrepancies_select_trusted_context
   );
 
 CREATE POLICY semantic_aggregate_anchor_discrepancies_insert_trusted_context
-  ON platform.semantic_aggregate_anchor_discrepancies
+  ON north_star_internal.semantic_aggregate_anchor_discrepancies
   AS PERMISSIVE
   FOR INSERT
   TO north_star_module_runtime
@@ -150,10 +150,9 @@ CREATE POLICY semantic_aggregate_anchor_discrepancies_insert_trusted_context
     AND environment_id = nullif(current_setting('north_star.environment_id', true), '')::uuid
   );
 
-REVOKE ALL ON platform.semantic_aggregate_anchors FROM PUBLIC;
-REVOKE ALL ON platform.semantic_aggregate_anchor_discrepancies FROM PUBLIC;
-GRANT USAGE ON SCHEMA platform TO north_star_module_runtime;
-GRANT SELECT, INSERT ON platform.semantic_aggregate_anchors
+REVOKE ALL ON north_star_internal.semantic_aggregate_anchors FROM PUBLIC;
+REVOKE ALL ON north_star_internal.semantic_aggregate_anchor_discrepancies FROM PUBLIC;
+GRANT SELECT, INSERT ON north_star_internal.semantic_aggregate_anchors
   TO north_star_module_runtime;
-GRANT SELECT, INSERT ON platform.semantic_aggregate_anchor_discrepancies
+GRANT SELECT, INSERT ON north_star_internal.semantic_aggregate_anchor_discrepancies
   TO north_star_module_runtime;

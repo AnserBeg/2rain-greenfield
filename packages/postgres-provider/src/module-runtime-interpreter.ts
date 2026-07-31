@@ -1213,7 +1213,7 @@ async function loadAggregateAnchor(
             result_scale,
             base_unit_id,
             anchor_digest
-       FROM platform.semantic_aggregate_anchors
+       FROM north_star_internal.semantic_aggregate_anchors
       WHERE tenant_id = $1
         AND environment_id = $2
         AND cache_key = $3`,
@@ -1286,7 +1286,7 @@ async function insertAggregateAnchor(
   result: SemanticAggregateResultEnvelope,
 ): Promise<void> {
   await client.query(
-    `INSERT INTO platform.semantic_aggregate_anchors (
+    `INSERT INTO north_star_internal.semantic_aggregate_anchors (
        tenant_id,
        environment_id,
        cache_key,
@@ -1338,7 +1338,7 @@ async function recordAggregateAnchorDiscrepancy(
   recomputed: SemanticAggregateResultEnvelope,
 ): Promise<void> {
   await client.query(
-    `INSERT INTO platform.semantic_aggregate_anchor_discrepancies (
+    `INSERT INTO north_star_internal.semantic_aggregate_anchor_discrepancies (
        tenant_id,
        environment_id,
        discrepancy_id,

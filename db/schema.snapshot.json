@@ -1373,6 +1373,384 @@
       "collation": null
     },
     {
+      "schema": "north_star_internal",
+      "relation": "semantic_aggregate_anchor_discrepancies",
+      "ordinal_position": 1,
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "is_nullable": false,
+      "column_default": null,
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "p",
+      "compression": "",
+      "collation": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "semantic_aggregate_anchor_discrepancies",
+      "ordinal_position": 2,
+      "column_name": "environment_id",
+      "data_type": "uuid",
+      "is_nullable": false,
+      "column_default": null,
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "p",
+      "compression": "",
+      "collation": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "semantic_aggregate_anchor_discrepancies",
+      "ordinal_position": 3,
+      "column_name": "discrepancy_id",
+      "data_type": "uuid",
+      "is_nullable": false,
+      "column_default": null,
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "p",
+      "compression": "",
+      "collation": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "semantic_aggregate_anchor_discrepancies",
+      "ordinal_position": 4,
+      "column_name": "cache_key",
+      "data_type": "text",
+      "is_nullable": false,
+      "column_default": null,
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "x",
+      "compression": "",
+      "collation": "pg_catalog.default"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "semantic_aggregate_anchor_discrepancies",
+      "ordinal_position": 5,
+      "column_name": "stored_anchor_digest",
+      "data_type": "text",
+      "is_nullable": false,
+      "column_default": null,
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "x",
+      "compression": "",
+      "collation": "pg_catalog.default"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "semantic_aggregate_anchor_discrepancies",
+      "ordinal_position": 6,
+      "column_name": "expected_anchor_digest",
+      "data_type": "text",
+      "is_nullable": false,
+      "column_default": null,
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "x",
+      "compression": "",
+      "collation": "pg_catalog.default"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "semantic_aggregate_anchor_discrepancies",
+      "ordinal_position": 7,
+      "column_name": "cached_balance_value",
+      "data_type": "text",
+      "is_nullable": false,
+      "column_default": null,
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "x",
+      "compression": "",
+      "collation": "pg_catalog.default"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "semantic_aggregate_anchor_discrepancies",
+      "ordinal_position": 8,
+      "column_name": "recomputed_balance_value",
+      "data_type": "text",
+      "is_nullable": false,
+      "column_default": null,
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "x",
+      "compression": "",
+      "collation": "pg_catalog.default"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "semantic_aggregate_anchor_discrepancies",
+      "ordinal_position": 9,
+      "column_name": "detected_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": false,
+      "column_default": "transaction_timestamp()",
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "p",
+      "compression": "",
+      "collation": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "semantic_aggregate_anchors",
+      "ordinal_position": 1,
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "is_nullable": false,
+      "column_default": null,
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "p",
+      "compression": "",
+      "collation": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "semantic_aggregate_anchors",
+      "ordinal_position": 2,
+      "column_name": "environment_id",
+      "data_type": "uuid",
+      "is_nullable": false,
+      "column_default": null,
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "p",
+      "compression": "",
+      "collation": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "semantic_aggregate_anchors",
+      "ordinal_position": 3,
+      "column_name": "cache_key",
+      "data_type": "text",
+      "is_nullable": false,
+      "column_default": null,
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "x",
+      "compression": "",
+      "collation": "pg_catalog.default"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "semantic_aggregate_anchors",
+      "ordinal_position": 4,
+      "column_name": "query_id",
+      "data_type": "text",
+      "is_nullable": false,
+      "column_default": null,
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "x",
+      "compression": "",
+      "collation": "pg_catalog.default"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "semantic_aggregate_anchors",
+      "ordinal_position": 5,
+      "column_name": "principal_id",
+      "data_type": "uuid",
+      "is_nullable": false,
+      "column_default": null,
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "p",
+      "compression": "",
+      "collation": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "semantic_aggregate_anchors",
+      "ordinal_position": 6,
+      "column_name": "release_content_hash",
+      "data_type": "text",
+      "is_nullable": false,
+      "column_default": null,
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "x",
+      "compression": "",
+      "collation": "pg_catalog.default"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "semantic_aggregate_anchors",
+      "ordinal_position": 7,
+      "column_name": "legal_entity_ids",
+      "data_type": "uuid[]",
+      "is_nullable": false,
+      "column_default": null,
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "x",
+      "compression": "",
+      "collation": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "semantic_aggregate_anchors",
+      "ordinal_position": 8,
+      "column_name": "parameter_values",
+      "data_type": "jsonb",
+      "is_nullable": false,
+      "column_default": null,
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "x",
+      "compression": "",
+      "collation": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "semantic_aggregate_anchors",
+      "ordinal_position": 9,
+      "column_name": "temporal_horizons",
+      "data_type": "jsonb",
+      "is_nullable": false,
+      "column_default": null,
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "x",
+      "compression": "",
+      "collation": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "semantic_aggregate_anchors",
+      "ordinal_position": 10,
+      "column_name": "filter_plan_digest",
+      "data_type": "text",
+      "is_nullable": false,
+      "column_default": null,
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "x",
+      "compression": "",
+      "collation": "pg_catalog.default"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "semantic_aggregate_anchors",
+      "ordinal_position": 11,
+      "column_name": "result_kind",
+      "data_type": "text",
+      "is_nullable": false,
+      "column_default": null,
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "x",
+      "compression": "",
+      "collation": "pg_catalog.default"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "semantic_aggregate_anchors",
+      "ordinal_position": 12,
+      "column_name": "selection_id",
+      "data_type": "text",
+      "is_nullable": false,
+      "column_default": null,
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "x",
+      "compression": "",
+      "collation": "pg_catalog.default"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "semantic_aggregate_anchors",
+      "ordinal_position": 13,
+      "column_name": "balance_value",
+      "data_type": "text",
+      "is_nullable": false,
+      "column_default": null,
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "x",
+      "compression": "",
+      "collation": "pg_catalog.default"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "semantic_aggregate_anchors",
+      "ordinal_position": 14,
+      "column_name": "result_precision",
+      "data_type": "smallint",
+      "is_nullable": false,
+      "column_default": null,
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "p",
+      "compression": "",
+      "collation": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "semantic_aggregate_anchors",
+      "ordinal_position": 15,
+      "column_name": "result_scale",
+      "data_type": "smallint",
+      "is_nullable": false,
+      "column_default": null,
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "p",
+      "compression": "",
+      "collation": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "semantic_aggregate_anchors",
+      "ordinal_position": 16,
+      "column_name": "base_unit_id",
+      "data_type": "text",
+      "is_nullable": true,
+      "column_default": null,
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "x",
+      "compression": "",
+      "collation": "pg_catalog.default"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "semantic_aggregate_anchors",
+      "ordinal_position": 17,
+      "column_name": "anchor_digest",
+      "data_type": "text",
+      "is_nullable": false,
+      "column_default": null,
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "x",
+      "compression": "",
+      "collation": "pg_catalog.default"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "semantic_aggregate_anchors",
+      "ordinal_position": 18,
+      "column_name": "computed_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": false,
+      "column_default": "transaction_timestamp()",
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "p",
+      "compression": "",
+      "collation": null
+    },
+    {
       "schema": "platform",
       "relation": "active_release_pointers",
       "ordinal_position": 1,
@@ -5798,384 +6176,6 @@
     },
     {
       "schema": "platform",
-      "relation": "semantic_aggregate_anchor_discrepancies",
-      "ordinal_position": 1,
-      "column_name": "tenant_id",
-      "data_type": "uuid",
-      "is_nullable": false,
-      "column_default": null,
-      "identity_kind": "",
-      "generated_kind": "",
-      "storage_kind": "p",
-      "compression": "",
-      "collation": null
-    },
-    {
-      "schema": "platform",
-      "relation": "semantic_aggregate_anchor_discrepancies",
-      "ordinal_position": 2,
-      "column_name": "environment_id",
-      "data_type": "uuid",
-      "is_nullable": false,
-      "column_default": null,
-      "identity_kind": "",
-      "generated_kind": "",
-      "storage_kind": "p",
-      "compression": "",
-      "collation": null
-    },
-    {
-      "schema": "platform",
-      "relation": "semantic_aggregate_anchor_discrepancies",
-      "ordinal_position": 3,
-      "column_name": "discrepancy_id",
-      "data_type": "uuid",
-      "is_nullable": false,
-      "column_default": null,
-      "identity_kind": "",
-      "generated_kind": "",
-      "storage_kind": "p",
-      "compression": "",
-      "collation": null
-    },
-    {
-      "schema": "platform",
-      "relation": "semantic_aggregate_anchor_discrepancies",
-      "ordinal_position": 4,
-      "column_name": "cache_key",
-      "data_type": "text",
-      "is_nullable": false,
-      "column_default": null,
-      "identity_kind": "",
-      "generated_kind": "",
-      "storage_kind": "x",
-      "compression": "",
-      "collation": "pg_catalog.default"
-    },
-    {
-      "schema": "platform",
-      "relation": "semantic_aggregate_anchor_discrepancies",
-      "ordinal_position": 5,
-      "column_name": "stored_anchor_digest",
-      "data_type": "text",
-      "is_nullable": false,
-      "column_default": null,
-      "identity_kind": "",
-      "generated_kind": "",
-      "storage_kind": "x",
-      "compression": "",
-      "collation": "pg_catalog.default"
-    },
-    {
-      "schema": "platform",
-      "relation": "semantic_aggregate_anchor_discrepancies",
-      "ordinal_position": 6,
-      "column_name": "expected_anchor_digest",
-      "data_type": "text",
-      "is_nullable": false,
-      "column_default": null,
-      "identity_kind": "",
-      "generated_kind": "",
-      "storage_kind": "x",
-      "compression": "",
-      "collation": "pg_catalog.default"
-    },
-    {
-      "schema": "platform",
-      "relation": "semantic_aggregate_anchor_discrepancies",
-      "ordinal_position": 7,
-      "column_name": "cached_balance_value",
-      "data_type": "text",
-      "is_nullable": false,
-      "column_default": null,
-      "identity_kind": "",
-      "generated_kind": "",
-      "storage_kind": "x",
-      "compression": "",
-      "collation": "pg_catalog.default"
-    },
-    {
-      "schema": "platform",
-      "relation": "semantic_aggregate_anchor_discrepancies",
-      "ordinal_position": 8,
-      "column_name": "recomputed_balance_value",
-      "data_type": "text",
-      "is_nullable": false,
-      "column_default": null,
-      "identity_kind": "",
-      "generated_kind": "",
-      "storage_kind": "x",
-      "compression": "",
-      "collation": "pg_catalog.default"
-    },
-    {
-      "schema": "platform",
-      "relation": "semantic_aggregate_anchor_discrepancies",
-      "ordinal_position": 9,
-      "column_name": "detected_at",
-      "data_type": "timestamp with time zone",
-      "is_nullable": false,
-      "column_default": "transaction_timestamp()",
-      "identity_kind": "",
-      "generated_kind": "",
-      "storage_kind": "p",
-      "compression": "",
-      "collation": null
-    },
-    {
-      "schema": "platform",
-      "relation": "semantic_aggregate_anchors",
-      "ordinal_position": 1,
-      "column_name": "tenant_id",
-      "data_type": "uuid",
-      "is_nullable": false,
-      "column_default": null,
-      "identity_kind": "",
-      "generated_kind": "",
-      "storage_kind": "p",
-      "compression": "",
-      "collation": null
-    },
-    {
-      "schema": "platform",
-      "relation": "semantic_aggregate_anchors",
-      "ordinal_position": 2,
-      "column_name": "environment_id",
-      "data_type": "uuid",
-      "is_nullable": false,
-      "column_default": null,
-      "identity_kind": "",
-      "generated_kind": "",
-      "storage_kind": "p",
-      "compression": "",
-      "collation": null
-    },
-    {
-      "schema": "platform",
-      "relation": "semantic_aggregate_anchors",
-      "ordinal_position": 3,
-      "column_name": "cache_key",
-      "data_type": "text",
-      "is_nullable": false,
-      "column_default": null,
-      "identity_kind": "",
-      "generated_kind": "",
-      "storage_kind": "x",
-      "compression": "",
-      "collation": "pg_catalog.default"
-    },
-    {
-      "schema": "platform",
-      "relation": "semantic_aggregate_anchors",
-      "ordinal_position": 4,
-      "column_name": "query_id",
-      "data_type": "text",
-      "is_nullable": false,
-      "column_default": null,
-      "identity_kind": "",
-      "generated_kind": "",
-      "storage_kind": "x",
-      "compression": "",
-      "collation": "pg_catalog.default"
-    },
-    {
-      "schema": "platform",
-      "relation": "semantic_aggregate_anchors",
-      "ordinal_position": 5,
-      "column_name": "principal_id",
-      "data_type": "uuid",
-      "is_nullable": false,
-      "column_default": null,
-      "identity_kind": "",
-      "generated_kind": "",
-      "storage_kind": "p",
-      "compression": "",
-      "collation": null
-    },
-    {
-      "schema": "platform",
-      "relation": "semantic_aggregate_anchors",
-      "ordinal_position": 6,
-      "column_name": "release_content_hash",
-      "data_type": "text",
-      "is_nullable": false,
-      "column_default": null,
-      "identity_kind": "",
-      "generated_kind": "",
-      "storage_kind": "x",
-      "compression": "",
-      "collation": "pg_catalog.default"
-    },
-    {
-      "schema": "platform",
-      "relation": "semantic_aggregate_anchors",
-      "ordinal_position": 7,
-      "column_name": "legal_entity_ids",
-      "data_type": "uuid[]",
-      "is_nullable": false,
-      "column_default": null,
-      "identity_kind": "",
-      "generated_kind": "",
-      "storage_kind": "x",
-      "compression": "",
-      "collation": null
-    },
-    {
-      "schema": "platform",
-      "relation": "semantic_aggregate_anchors",
-      "ordinal_position": 8,
-      "column_name": "parameter_values",
-      "data_type": "jsonb",
-      "is_nullable": false,
-      "column_default": null,
-      "identity_kind": "",
-      "generated_kind": "",
-      "storage_kind": "x",
-      "compression": "",
-      "collation": null
-    },
-    {
-      "schema": "platform",
-      "relation": "semantic_aggregate_anchors",
-      "ordinal_position": 9,
-      "column_name": "temporal_horizons",
-      "data_type": "jsonb",
-      "is_nullable": false,
-      "column_default": null,
-      "identity_kind": "",
-      "generated_kind": "",
-      "storage_kind": "x",
-      "compression": "",
-      "collation": null
-    },
-    {
-      "schema": "platform",
-      "relation": "semantic_aggregate_anchors",
-      "ordinal_position": 10,
-      "column_name": "filter_plan_digest",
-      "data_type": "text",
-      "is_nullable": false,
-      "column_default": null,
-      "identity_kind": "",
-      "generated_kind": "",
-      "storage_kind": "x",
-      "compression": "",
-      "collation": "pg_catalog.default"
-    },
-    {
-      "schema": "platform",
-      "relation": "semantic_aggregate_anchors",
-      "ordinal_position": 11,
-      "column_name": "result_kind",
-      "data_type": "text",
-      "is_nullable": false,
-      "column_default": null,
-      "identity_kind": "",
-      "generated_kind": "",
-      "storage_kind": "x",
-      "compression": "",
-      "collation": "pg_catalog.default"
-    },
-    {
-      "schema": "platform",
-      "relation": "semantic_aggregate_anchors",
-      "ordinal_position": 12,
-      "column_name": "selection_id",
-      "data_type": "text",
-      "is_nullable": false,
-      "column_default": null,
-      "identity_kind": "",
-      "generated_kind": "",
-      "storage_kind": "x",
-      "compression": "",
-      "collation": "pg_catalog.default"
-    },
-    {
-      "schema": "platform",
-      "relation": "semantic_aggregate_anchors",
-      "ordinal_position": 13,
-      "column_name": "balance_value",
-      "data_type": "text",
-      "is_nullable": false,
-      "column_default": null,
-      "identity_kind": "",
-      "generated_kind": "",
-      "storage_kind": "x",
-      "compression": "",
-      "collation": "pg_catalog.default"
-    },
-    {
-      "schema": "platform",
-      "relation": "semantic_aggregate_anchors",
-      "ordinal_position": 14,
-      "column_name": "result_precision",
-      "data_type": "smallint",
-      "is_nullable": false,
-      "column_default": null,
-      "identity_kind": "",
-      "generated_kind": "",
-      "storage_kind": "p",
-      "compression": "",
-      "collation": null
-    },
-    {
-      "schema": "platform",
-      "relation": "semantic_aggregate_anchors",
-      "ordinal_position": 15,
-      "column_name": "result_scale",
-      "data_type": "smallint",
-      "is_nullable": false,
-      "column_default": null,
-      "identity_kind": "",
-      "generated_kind": "",
-      "storage_kind": "p",
-      "compression": "",
-      "collation": null
-    },
-    {
-      "schema": "platform",
-      "relation": "semantic_aggregate_anchors",
-      "ordinal_position": 16,
-      "column_name": "base_unit_id",
-      "data_type": "text",
-      "is_nullable": true,
-      "column_default": null,
-      "identity_kind": "",
-      "generated_kind": "",
-      "storage_kind": "x",
-      "compression": "",
-      "collation": "pg_catalog.default"
-    },
-    {
-      "schema": "platform",
-      "relation": "semantic_aggregate_anchors",
-      "ordinal_position": 17,
-      "column_name": "anchor_digest",
-      "data_type": "text",
-      "is_nullable": false,
-      "column_default": null,
-      "identity_kind": "",
-      "generated_kind": "",
-      "storage_kind": "x",
-      "compression": "",
-      "collation": "pg_catalog.default"
-    },
-    {
-      "schema": "platform",
-      "relation": "semantic_aggregate_anchors",
-      "ordinal_position": 18,
-      "column_name": "computed_at",
-      "data_type": "timestamp with time zone",
-      "is_nullable": false,
-      "column_default": "transaction_timestamp()",
-      "identity_kind": "",
-      "generated_kind": "",
-      "storage_kind": "p",
-      "compression": "",
-      "collation": null
-    },
-    {
-      "schema": "platform",
       "relation": "semantic_operation_receipts",
       "ordinal_position": 1,
       "column_name": "tenant_id",
@@ -9454,6 +9454,90 @@
       "inheritance_count": 0
     },
     {
+      "schema": "north_star_internal",
+      "relation": "semantic_aggregate_anchor_discrepancies",
+      "domain": null,
+      "name": "semantic_aggregate_anchor_discrepancies_anchor_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, cache_key) REFERENCES north_star_internal.semantic_aggregate_anchors(tenant_id, environment_id, cache_key) ON UPDATE RESTRICT ON DELETE RESTRICT",
+      "deferrable": false,
+      "initially_deferred": false,
+      "validated": true,
+      "no_inherit": true,
+      "is_local": true,
+      "inheritance_count": 0
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "semantic_aggregate_anchor_discrepancies",
+      "domain": null,
+      "name": "semantic_aggregate_anchor_discrepancies_pkey",
+      "type": "p",
+      "definition": "PRIMARY KEY (tenant_id, environment_id, discrepancy_id)",
+      "deferrable": false,
+      "initially_deferred": false,
+      "validated": true,
+      "no_inherit": true,
+      "is_local": true,
+      "inheritance_count": 0
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "semantic_aggregate_anchor_discrepancies",
+      "domain": null,
+      "name": "semantic_aggregate_anchor_discrepancies_shape",
+      "type": "c",
+      "definition": "CHECK (cache_key ~ '^[0-9a-f]{64}$'::text AND stored_anchor_digest ~ '^[0-9a-f]{64}$'::text AND expected_anchor_digest ~ '^[0-9a-f]{64}$'::text AND cached_balance_value ~ '^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$'::text AND recomputed_balance_value ~ '^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$'::text AND cached_balance_value <> '-0'::text AND recomputed_balance_value <> '-0'::text)",
+      "deferrable": false,
+      "initially_deferred": false,
+      "validated": true,
+      "no_inherit": false,
+      "is_local": true,
+      "inheritance_count": 0
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "semantic_aggregate_anchors",
+      "domain": null,
+      "name": "semantic_aggregate_anchors_environment_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id) REFERENCES platform.environments(tenant_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+      "deferrable": false,
+      "initially_deferred": false,
+      "validated": true,
+      "no_inherit": true,
+      "is_local": true,
+      "inheritance_count": 0
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "semantic_aggregate_anchors",
+      "domain": null,
+      "name": "semantic_aggregate_anchors_pkey",
+      "type": "p",
+      "definition": "PRIMARY KEY (tenant_id, environment_id, cache_key)",
+      "deferrable": false,
+      "initially_deferred": false,
+      "validated": true,
+      "no_inherit": true,
+      "is_local": true,
+      "inheritance_count": 0
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "semantic_aggregate_anchors",
+      "domain": null,
+      "name": "semantic_aggregate_anchors_shape",
+      "type": "c",
+      "definition": "CHECK (cache_key ~ '^[0-9a-f]{64}$'::text AND query_id ~ '^[a-z][a-z0-9]*(\\.[a-z][a-z0-9]*)+:[a-z][a-z0-9]*(\\.[a-z0-9_-]+)*$'::text AND release_content_hash ~ '^[0-9a-f]{64}$'::text AND cardinality(legal_entity_ids) >= 1 AND cardinality(legal_entity_ids) <= 64 AND NOT ('00000000-0000-0000-0000-000000000000'::uuid = ANY (legal_entity_ids)) AND jsonb_typeof(parameter_values) = 'object'::text AND jsonb_typeof(temporal_horizons) = 'object'::text AND filter_plan_digest ~ '^[0-9a-f]{64}$'::text AND (result_kind = ANY (ARRAY['exactDecimalResult'::text, 'quantityResult'::text])) AND selection_id ~ '^[a-z][a-z0-9]*(\\.[a-z][a-z0-9]*)+:[a-z][a-z0-9]*(\\.[a-z0-9_-]+)*$'::text AND balance_value ~ '^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$'::text AND balance_value <> '-0'::text AND result_precision = 38 AND result_scale >= 0 AND result_scale <= 18 AND (result_kind = 'exactDecimalResult'::text AND base_unit_id IS NULL OR result_kind = 'quantityResult'::text AND base_unit_id IS NOT NULL AND btrim(base_unit_id) <> ''::text) AND anchor_digest ~ '^[0-9a-f]{64}$'::text)",
+      "deferrable": false,
+      "initially_deferred": false,
+      "validated": true,
+      "no_inherit": false,
+      "is_local": true,
+      "inheritance_count": 0
+    },
+    {
       "schema": "platform",
       "relation": "active_release_pointers",
       "domain": null,
@@ -11681,90 +11765,6 @@
     },
     {
       "schema": "platform",
-      "relation": "semantic_aggregate_anchor_discrepancies",
-      "domain": null,
-      "name": "semantic_aggregate_anchor_discrepancies_anchor_fkey",
-      "type": "f",
-      "definition": "FOREIGN KEY (tenant_id, environment_id, cache_key) REFERENCES platform.semantic_aggregate_anchors(tenant_id, environment_id, cache_key) ON UPDATE RESTRICT ON DELETE RESTRICT",
-      "deferrable": false,
-      "initially_deferred": false,
-      "validated": true,
-      "no_inherit": true,
-      "is_local": true,
-      "inheritance_count": 0
-    },
-    {
-      "schema": "platform",
-      "relation": "semantic_aggregate_anchor_discrepancies",
-      "domain": null,
-      "name": "semantic_aggregate_anchor_discrepancies_pkey",
-      "type": "p",
-      "definition": "PRIMARY KEY (tenant_id, environment_id, discrepancy_id)",
-      "deferrable": false,
-      "initially_deferred": false,
-      "validated": true,
-      "no_inherit": true,
-      "is_local": true,
-      "inheritance_count": 0
-    },
-    {
-      "schema": "platform",
-      "relation": "semantic_aggregate_anchor_discrepancies",
-      "domain": null,
-      "name": "semantic_aggregate_anchor_discrepancies_shape",
-      "type": "c",
-      "definition": "CHECK (cache_key ~ '^[0-9a-f]{64}$'::text AND stored_anchor_digest ~ '^[0-9a-f]{64}$'::text AND expected_anchor_digest ~ '^[0-9a-f]{64}$'::text AND cached_balance_value ~ '^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$'::text AND recomputed_balance_value ~ '^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$'::text AND cached_balance_value <> '-0'::text AND recomputed_balance_value <> '-0'::text)",
-      "deferrable": false,
-      "initially_deferred": false,
-      "validated": true,
-      "no_inherit": false,
-      "is_local": true,
-      "inheritance_count": 0
-    },
-    {
-      "schema": "platform",
-      "relation": "semantic_aggregate_anchors",
-      "domain": null,
-      "name": "semantic_aggregate_anchors_environment_fkey",
-      "type": "f",
-      "definition": "FOREIGN KEY (tenant_id, environment_id) REFERENCES platform.environments(tenant_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-      "deferrable": false,
-      "initially_deferred": false,
-      "validated": true,
-      "no_inherit": true,
-      "is_local": true,
-      "inheritance_count": 0
-    },
-    {
-      "schema": "platform",
-      "relation": "semantic_aggregate_anchors",
-      "domain": null,
-      "name": "semantic_aggregate_anchors_pkey",
-      "type": "p",
-      "definition": "PRIMARY KEY (tenant_id, environment_id, cache_key)",
-      "deferrable": false,
-      "initially_deferred": false,
-      "validated": true,
-      "no_inherit": true,
-      "is_local": true,
-      "inheritance_count": 0
-    },
-    {
-      "schema": "platform",
-      "relation": "semantic_aggregate_anchors",
-      "domain": null,
-      "name": "semantic_aggregate_anchors_shape",
-      "type": "c",
-      "definition": "CHECK (cache_key ~ '^[0-9a-f]{64}$'::text AND query_id ~ '^[a-z][a-z0-9]*(\\.[a-z][a-z0-9]*)+:[a-z][a-z0-9]*(\\.[a-z0-9_-]+)*$'::text AND release_content_hash ~ '^[0-9a-f]{64}$'::text AND cardinality(legal_entity_ids) >= 1 AND cardinality(legal_entity_ids) <= 64 AND NOT ('00000000-0000-0000-0000-000000000000'::uuid = ANY (legal_entity_ids)) AND jsonb_typeof(parameter_values) = 'object'::text AND jsonb_typeof(temporal_horizons) = 'object'::text AND filter_plan_digest ~ '^[0-9a-f]{64}$'::text AND (result_kind = ANY (ARRAY['exactDecimalResult'::text, 'quantityResult'::text])) AND selection_id ~ '^[a-z][a-z0-9]*(\\.[a-z][a-z0-9]*)+:[a-z][a-z0-9]*(\\.[a-z0-9_-]+)*$'::text AND balance_value ~ '^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$'::text AND balance_value <> '-0'::text AND result_precision = 38 AND result_scale >= 0 AND result_scale <= 18 AND (result_kind = 'exactDecimalResult'::text AND base_unit_id IS NULL OR result_kind = 'quantityResult'::text AND base_unit_id IS NOT NULL AND btrim(base_unit_id) <> ''::text) AND anchor_digest ~ '^[0-9a-f]{64}$'::text)",
-      "deferrable": false,
-      "initially_deferred": false,
-      "validated": true,
-      "no_inherit": false,
-      "is_local": true,
-      "inheritance_count": 0
-    },
-    {
-      "schema": "platform",
       "relation": "semantic_operation_receipts",
       "domain": null,
       "name": "semantic_operation_receipts_environment_fkey",
@@ -13577,6 +13577,44 @@
       "predicate": null
     },
     {
+      "schema": "north_star_internal",
+      "relation": "semantic_aggregate_anchor_discrepancies",
+      "name": "semantic_aggregate_anchor_discrepancies_pkey",
+      "owner": "postgres",
+      "access_method": "btree",
+      "definition": "CREATE UNIQUE INDEX semantic_aggregate_anchor_discrepancies_pkey ON north_star_internal.semantic_aggregate_anchor_discrepancies USING btree (tenant_id, environment_id, discrepancy_id)",
+      "is_unique": true,
+      "is_primary": true,
+      "is_exclusion": false,
+      "is_immediate": true,
+      "is_clustered": false,
+      "is_valid": true,
+      "is_ready": true,
+      "is_live": true,
+      "is_replica_identity": false,
+      "expressions": null,
+      "predicate": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "semantic_aggregate_anchors",
+      "name": "semantic_aggregate_anchors_pkey",
+      "owner": "postgres",
+      "access_method": "btree",
+      "definition": "CREATE UNIQUE INDEX semantic_aggregate_anchors_pkey ON north_star_internal.semantic_aggregate_anchors USING btree (tenant_id, environment_id, cache_key)",
+      "is_unique": true,
+      "is_primary": true,
+      "is_exclusion": false,
+      "is_immediate": true,
+      "is_clustered": false,
+      "is_valid": true,
+      "is_ready": true,
+      "is_live": true,
+      "is_replica_identity": false,
+      "expressions": null,
+      "predicate": null
+    },
+    {
       "schema": "platform",
       "relation": "active_release_pointers",
       "name": "active_release_pointers_pkey",
@@ -14585,44 +14623,6 @@
     },
     {
       "schema": "platform",
-      "relation": "semantic_aggregate_anchor_discrepancies",
-      "name": "semantic_aggregate_anchor_discrepancies_pkey",
-      "owner": "postgres",
-      "access_method": "btree",
-      "definition": "CREATE UNIQUE INDEX semantic_aggregate_anchor_discrepancies_pkey ON platform.semantic_aggregate_anchor_discrepancies USING btree (tenant_id, environment_id, discrepancy_id)",
-      "is_unique": true,
-      "is_primary": true,
-      "is_exclusion": false,
-      "is_immediate": true,
-      "is_clustered": false,
-      "is_valid": true,
-      "is_ready": true,
-      "is_live": true,
-      "is_replica_identity": false,
-      "expressions": null,
-      "predicate": null
-    },
-    {
-      "schema": "platform",
-      "relation": "semantic_aggregate_anchors",
-      "name": "semantic_aggregate_anchors_pkey",
-      "owner": "postgres",
-      "access_method": "btree",
-      "definition": "CREATE UNIQUE INDEX semantic_aggregate_anchors_pkey ON platform.semantic_aggregate_anchors USING btree (tenant_id, environment_id, cache_key)",
-      "is_unique": true,
-      "is_primary": true,
-      "is_exclusion": false,
-      "is_immediate": true,
-      "is_clustered": false,
-      "is_valid": true,
-      "is_ready": true,
-      "is_live": true,
-      "is_replica_identity": false,
-      "expressions": null,
-      "predicate": null
-    },
-    {
-      "schema": "platform",
       "relation": "semantic_operation_receipts",
       "name": "semantic_operation_receipts_pkey",
       "owner": "postgres",
@@ -15234,6 +15234,46 @@
       "check_expression": null
     },
     {
+      "schema": "north_star_internal",
+      "relation": "semantic_aggregate_anchor_discrepancies",
+      "name": "semantic_aggregate_anchor_discrepancies_insert_trusted_context",
+      "permissive": true,
+      "roles": ["north_star_module_runtime"],
+      "command": "a",
+      "using_expression": null,
+      "check_expression": "tenant_id = NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text)::uuid AND environment_id = NULLIF(current_setting('north_star.environment_id'::text, true), ''::text)::uuid"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "semantic_aggregate_anchor_discrepancies",
+      "name": "semantic_aggregate_anchor_discrepancies_select_trusted_context",
+      "permissive": true,
+      "roles": ["north_star_module_runtime"],
+      "command": "r",
+      "using_expression": "tenant_id = NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text)::uuid AND environment_id = NULLIF(current_setting('north_star.environment_id'::text, true), ''::text)::uuid",
+      "check_expression": null
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "semantic_aggregate_anchors",
+      "name": "semantic_aggregate_anchors_insert_trusted_context",
+      "permissive": true,
+      "roles": ["north_star_module_runtime"],
+      "command": "a",
+      "using_expression": null,
+      "check_expression": "tenant_id = NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text)::uuid AND environment_id = NULLIF(current_setting('north_star.environment_id'::text, true), ''::text)::uuid"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "semantic_aggregate_anchors",
+      "name": "semantic_aggregate_anchors_select_trusted_context",
+      "permissive": true,
+      "roles": ["north_star_module_runtime"],
+      "command": "r",
+      "using_expression": "tenant_id = NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text)::uuid AND environment_id = NULLIF(current_setting('north_star.environment_id'::text, true), ''::text)::uuid",
+      "check_expression": null
+    },
+    {
       "schema": "platform",
       "relation": "active_release_pointers",
       "name": "active_release_pointers_select_trusted_context",
@@ -15622,46 +15662,6 @@
       "command": "w",
       "using_expression": "tenant_id = NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text)::uuid AND environment_id = NULLIF(current_setting('north_star.environment_id'::text, true), ''::text)::uuid AND owner_principal_id = NULLIF(current_setting('north_star.principal_id'::text, true), ''::text)::uuid",
       "check_expression": "tenant_id = NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text)::uuid AND environment_id = NULLIF(current_setting('north_star.environment_id'::text, true), ''::text)::uuid AND owner_principal_id = NULLIF(current_setting('north_star.principal_id'::text, true), ''::text)::uuid"
-    },
-    {
-      "schema": "platform",
-      "relation": "semantic_aggregate_anchor_discrepancies",
-      "name": "semantic_aggregate_anchor_discrepancies_insert_trusted_context",
-      "permissive": true,
-      "roles": ["north_star_module_runtime"],
-      "command": "a",
-      "using_expression": null,
-      "check_expression": "tenant_id = NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text)::uuid AND environment_id = NULLIF(current_setting('north_star.environment_id'::text, true), ''::text)::uuid"
-    },
-    {
-      "schema": "platform",
-      "relation": "semantic_aggregate_anchor_discrepancies",
-      "name": "semantic_aggregate_anchor_discrepancies_select_trusted_context",
-      "permissive": true,
-      "roles": ["north_star_module_runtime"],
-      "command": "r",
-      "using_expression": "tenant_id = NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text)::uuid AND environment_id = NULLIF(current_setting('north_star.environment_id'::text, true), ''::text)::uuid",
-      "check_expression": null
-    },
-    {
-      "schema": "platform",
-      "relation": "semantic_aggregate_anchors",
-      "name": "semantic_aggregate_anchors_insert_trusted_context",
-      "permissive": true,
-      "roles": ["north_star_module_runtime"],
-      "command": "a",
-      "using_expression": null,
-      "check_expression": "tenant_id = NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text)::uuid AND environment_id = NULLIF(current_setting('north_star.environment_id'::text, true), ''::text)::uuid"
-    },
-    {
-      "schema": "platform",
-      "relation": "semantic_aggregate_anchors",
-      "name": "semantic_aggregate_anchors_select_trusted_context",
-      "permissive": true,
-      "roles": ["north_star_module_runtime"],
-      "command": "r",
-      "using_expression": "tenant_id = NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text)::uuid AND environment_id = NULLIF(current_setting('north_star.environment_id'::text, true), ''::text)::uuid",
-      "check_expression": null
     },
     {
       "schema": "platform",
@@ -16093,6 +16093,44 @@
       "persistence": "p",
       "row_level_security": false,
       "force_row_level_security": false,
+      "is_partition": false,
+      "replica_identity": "d",
+      "access_method": "heap",
+      "tablespace": null,
+      "options": [],
+      "partition_key": null,
+      "partition_bound": null,
+      "view_definition": null,
+      "foreign_server": null,
+      "foreign_options": []
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "semantic_aggregate_anchor_discrepancies",
+      "kind": "r",
+      "owner": "postgres",
+      "persistence": "p",
+      "row_level_security": true,
+      "force_row_level_security": true,
+      "is_partition": false,
+      "replica_identity": "d",
+      "access_method": "heap",
+      "tablespace": null,
+      "options": [],
+      "partition_key": null,
+      "partition_bound": null,
+      "view_definition": null,
+      "foreign_server": null,
+      "foreign_options": []
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "semantic_aggregate_anchors",
+      "kind": "r",
+      "owner": "postgres",
+      "persistence": "p",
+      "row_level_security": true,
+      "force_row_level_security": true,
       "is_partition": false,
       "replica_identity": "d",
       "access_method": "heap",
@@ -16582,44 +16620,6 @@
     {
       "schema": "platform",
       "relation": "saved_master_filters",
-      "kind": "r",
-      "owner": "postgres",
-      "persistence": "p",
-      "row_level_security": true,
-      "force_row_level_security": true,
-      "is_partition": false,
-      "replica_identity": "d",
-      "access_method": "heap",
-      "tablespace": null,
-      "options": [],
-      "partition_key": null,
-      "partition_bound": null,
-      "view_definition": null,
-      "foreign_server": null,
-      "foreign_options": []
-    },
-    {
-      "schema": "platform",
-      "relation": "semantic_aggregate_anchor_discrepancies",
-      "kind": "r",
-      "owner": "postgres",
-      "persistence": "p",
-      "row_level_security": true,
-      "force_row_level_security": true,
-      "is_partition": false,
-      "replica_identity": "d",
-      "access_method": "heap",
-      "tablespace": null,
-      "options": [],
-      "partition_key": null,
-      "partition_bound": null,
-      "view_definition": null,
-      "foreign_server": null,
-      "foreign_options": []
-    },
-    {
-      "schema": "platform",
-      "relation": "semantic_aggregate_anchors",
       "kind": "r",
       "owner": "postgres",
       "persistence": "p",
@@ -17745,1775 +17745,7 @@
       "is_grantable": false
     },
     {
-      "schema": "platform",
-      "relation": "active_release_pointers",
-      "grantor": "postgres",
-      "grantee": "north_star_runtime",
-      "privilege_type": "SELECT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "active_release_pointers",
-      "grantor": "postgres",
-      "grantee": "north_star_runtime",
-      "privilege_type": "UPDATE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "active_release_pointers",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "DELETE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "active_release_pointers",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "INSERT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "active_release_pointers",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "REFERENCES",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "active_release_pointers",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "SELECT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "active_release_pointers",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "TRIGGER",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "active_release_pointers",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "TRUNCATE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "active_release_pointers",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "UPDATE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "app_package_revisions",
-      "grantor": "postgres",
-      "grantee": "north_star_runtime",
-      "privilege_type": "INSERT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "app_package_revisions",
-      "grantor": "postgres",
-      "grantee": "north_star_runtime",
-      "privilege_type": "SELECT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "app_package_revisions",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "DELETE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "app_package_revisions",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "INSERT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "app_package_revisions",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "REFERENCES",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "app_package_revisions",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "SELECT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "app_package_revisions",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "TRIGGER",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "app_package_revisions",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "TRUNCATE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "app_package_revisions",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "UPDATE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "environments",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "DELETE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "environments",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "INSERT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "environments",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "REFERENCES",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "environments",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "SELECT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "environments",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "TRIGGER",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "environments",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "TRUNCATE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "environments",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "UPDATE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "immutable_release_write_guard",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "DELETE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "immutable_release_write_guard",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "INSERT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "immutable_release_write_guard",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "REFERENCES",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "immutable_release_write_guard",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "SELECT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "immutable_release_write_guard",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "TRIGGER",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "immutable_release_write_guard",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "TRUNCATE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "immutable_release_write_guard",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "UPDATE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "inventory_posting_configurations",
-      "grantor": "postgres",
-      "grantee": "north_star_runtime",
-      "privilege_type": "SELECT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "inventory_posting_configurations",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "DELETE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "inventory_posting_configurations",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "INSERT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "inventory_posting_configurations",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "REFERENCES",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "inventory_posting_configurations",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "SELECT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "inventory_posting_configurations",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "TRIGGER",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "inventory_posting_configurations",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "TRUNCATE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "inventory_posting_configurations",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "UPDATE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "inventory_tenant_calendars",
-      "grantor": "postgres",
-      "grantee": "north_star_runtime",
-      "privilege_type": "SELECT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "inventory_tenant_calendars",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "DELETE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "inventory_tenant_calendars",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "INSERT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "inventory_tenant_calendars",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "REFERENCES",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "inventory_tenant_calendars",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "SELECT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "inventory_tenant_calendars",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "TRIGGER",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "inventory_tenant_calendars",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "TRUNCATE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "inventory_tenant_calendars",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "UPDATE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_attempt_outcomes",
-      "grantor": "postgres",
-      "grantee": "north_star_runtime",
-      "privilege_type": "INSERT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_attempt_outcomes",
-      "grantor": "postgres",
-      "grantee": "north_star_runtime",
-      "privilege_type": "SELECT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_attempt_outcomes",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "DELETE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_attempt_outcomes",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "INSERT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_attempt_outcomes",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "REFERENCES",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_attempt_outcomes",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "SELECT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_attempt_outcomes",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "TRIGGER",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_attempt_outcomes",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "TRUNCATE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_attempt_outcomes",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "UPDATE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_attempts",
-      "grantor": "postgres",
-      "grantee": "north_star_runtime",
-      "privilege_type": "INSERT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_attempts",
-      "grantor": "postgres",
-      "grantee": "north_star_runtime",
-      "privilege_type": "SELECT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_attempts",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "DELETE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_attempts",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "INSERT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_attempts",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "REFERENCES",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_attempts",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "SELECT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_attempts",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "TRIGGER",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_attempts",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "TRUNCATE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_attempts",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "UPDATE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_authority_epochs",
-      "grantor": "postgres",
-      "grantee": "north_star_runtime",
-      "privilege_type": "SELECT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_authority_epochs",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "DELETE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_authority_epochs",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "INSERT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_authority_epochs",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "REFERENCES",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_authority_epochs",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "SELECT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_authority_epochs",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "TRIGGER",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_authority_epochs",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "TRUNCATE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_authority_epochs",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "UPDATE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_control_events",
-      "grantor": "postgres",
-      "grantee": "north_star_runtime",
-      "privilege_type": "SELECT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_control_events",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "DELETE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_control_events",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "INSERT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_control_events",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "REFERENCES",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_control_events",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "SELECT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_control_events",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "TRIGGER",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_control_events",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "TRUNCATE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_control_events",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "UPDATE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_history",
-      "grantor": "postgres",
-      "grantee": "north_star_runtime",
-      "privilege_type": "INSERT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_history",
-      "grantor": "postgres",
-      "grantee": "north_star_runtime",
-      "privilege_type": "SELECT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_history",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "DELETE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_history",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "INSERT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_history",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "REFERENCES",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_history",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "SELECT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_history",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "TRIGGER",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_history",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "TRUNCATE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_history",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "UPDATE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_outbox",
-      "grantor": "postgres",
-      "grantee": "north_star_runtime",
-      "privilege_type": "INSERT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_outbox",
-      "grantor": "postgres",
-      "grantee": "north_star_runtime",
-      "privilege_type": "SELECT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_outbox",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "DELETE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_outbox",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "INSERT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_outbox",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "REFERENCES",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_outbox",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "SELECT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_outbox",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "TRIGGER",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_outbox",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "TRUNCATE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_outbox",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "UPDATE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_phase_receipts",
-      "grantor": "postgres",
-      "grantee": "north_star_runtime",
-      "privilege_type": "INSERT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_phase_receipts",
-      "grantor": "postgres",
-      "grantee": "north_star_runtime",
-      "privilege_type": "SELECT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_phase_receipts",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "DELETE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_phase_receipts",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "INSERT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_phase_receipts",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "REFERENCES",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_phase_receipts",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "SELECT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_phase_receipts",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "TRIGGER",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_phase_receipts",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "TRUNCATE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_phase_receipts",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "UPDATE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_preparations",
-      "grantor": "postgres",
-      "grantee": "north_star_runtime",
-      "privilege_type": "INSERT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_preparations",
-      "grantor": "postgres",
-      "grantee": "north_star_runtime",
-      "privilege_type": "SELECT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_preparations",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "DELETE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_preparations",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "INSERT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_preparations",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "REFERENCES",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_preparations",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "SELECT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_preparations",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "TRIGGER",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_preparations",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "TRUNCATE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_preparations",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "UPDATE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_reconciliation_alarms",
-      "grantor": "postgres",
-      "grantee": "north_star_runtime",
-      "privilege_type": "INSERT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_reconciliation_alarms",
-      "grantor": "postgres",
-      "grantee": "north_star_runtime",
-      "privilege_type": "SELECT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_reconciliation_alarms",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "DELETE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_reconciliation_alarms",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "INSERT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_reconciliation_alarms",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "REFERENCES",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_reconciliation_alarms",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "SELECT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_reconciliation_alarms",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "TRIGGER",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_reconciliation_alarms",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "TRUNCATE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_reconciliation_alarms",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "UPDATE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_reconciliation_starts",
-      "grantor": "postgres",
-      "grantee": "north_star_runtime",
-      "privilege_type": "INSERT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_reconciliation_starts",
-      "grantor": "postgres",
-      "grantee": "north_star_runtime",
-      "privilege_type": "SELECT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_reconciliation_starts",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "DELETE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_reconciliation_starts",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "INSERT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_reconciliation_starts",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "REFERENCES",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_reconciliation_starts",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "SELECT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_reconciliation_starts",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "TRIGGER",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_reconciliation_starts",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "TRUNCATE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_reconciliation_starts",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "UPDATE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_swap_receipts",
-      "grantor": "postgres",
-      "grantee": "north_star_runtime",
-      "privilege_type": "INSERT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_swap_receipts",
-      "grantor": "postgres",
-      "grantee": "north_star_runtime",
-      "privilege_type": "SELECT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_swap_receipts",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "DELETE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_swap_receipts",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "INSERT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_swap_receipts",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "REFERENCES",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_swap_receipts",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "SELECT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_swap_receipts",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "TRIGGER",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_swap_receipts",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "TRUNCATE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_swap_receipts",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "UPDATE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_verification_receipts",
-      "grantor": "postgres",
-      "grantee": "north_star_runtime",
-      "privilege_type": "INSERT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_verification_receipts",
-      "grantor": "postgres",
-      "grantee": "north_star_runtime",
-      "privilege_type": "SELECT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_verification_receipts",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "DELETE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_verification_receipts",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "INSERT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_verification_receipts",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "REFERENCES",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_verification_receipts",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "SELECT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_verification_receipts",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "TRIGGER",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_verification_receipts",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "TRUNCATE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_verification_receipts",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "UPDATE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_write_guard",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "DELETE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_write_guard",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "INSERT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_write_guard",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "REFERENCES",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_write_guard",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "SELECT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_write_guard",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "TRIGGER",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_write_guard",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "TRUNCATE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_activation_write_guard",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "UPDATE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_approvals",
-      "grantor": "postgres",
-      "grantee": "north_star_runtime",
-      "privilege_type": "INSERT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_approvals",
-      "grantor": "postgres",
-      "grantee": "north_star_runtime",
-      "privilege_type": "SELECT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_approvals",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "DELETE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_approvals",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "INSERT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_approvals",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "REFERENCES",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_approvals",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "SELECT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_approvals",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "TRIGGER",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_approvals",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "TRUNCATE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_approvals",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "UPDATE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_approver_eligibility_events",
-      "grantor": "postgres",
-      "grantee": "north_star_runtime",
-      "privilege_type": "SELECT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_approver_eligibility_events",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "DELETE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_approver_eligibility_events",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "INSERT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_approver_eligibility_events",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "REFERENCES",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_approver_eligibility_events",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "SELECT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_approver_eligibility_events",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "TRIGGER",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_approver_eligibility_events",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "TRUNCATE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_approver_eligibility_events",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "UPDATE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_artifact_blobs",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "DELETE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_artifact_blobs",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "INSERT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_artifact_blobs",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "REFERENCES",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_artifact_blobs",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "SELECT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_artifact_blobs",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "TRIGGER",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_artifact_blobs",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "TRUNCATE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_artifact_blobs",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "UPDATE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_executor_authority_events",
-      "grantor": "postgres",
-      "grantee": "north_star_runtime",
-      "privilege_type": "SELECT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_executor_authority_events",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "DELETE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_executor_authority_events",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "INSERT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_executor_authority_events",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "REFERENCES",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_executor_authority_events",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "SELECT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_executor_authority_events",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "TRIGGER",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_executor_authority_events",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "TRUNCATE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_executor_authority_events",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "UPDATE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_verification_evidence",
-      "grantor": "postgres",
-      "grantee": "north_star_runtime",
-      "privilege_type": "INSERT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_verification_evidence",
-      "grantor": "postgres",
-      "grantee": "north_star_runtime",
-      "privilege_type": "SELECT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_verification_evidence",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "DELETE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_verification_evidence",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "INSERT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_verification_evidence",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "REFERENCES",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_verification_evidence",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "SELECT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_verification_evidence",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "TRIGGER",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_verification_evidence",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "TRUNCATE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_verification_evidence",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "UPDATE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_verification_results",
-      "grantor": "postgres",
-      "grantee": "north_star_runtime",
-      "privilege_type": "INSERT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_verification_results",
-      "grantor": "postgres",
-      "grantee": "north_star_runtime",
-      "privilege_type": "SELECT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_verification_results",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "DELETE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_verification_results",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "INSERT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_verification_results",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "REFERENCES",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_verification_results",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "SELECT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_verification_results",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "TRIGGER",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_verification_results",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "TRUNCATE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "release_verification_results",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "UPDATE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "saved_master_filters",
-      "grantor": "postgres",
-      "grantee": "north_star_runtime",
-      "privilege_type": "INSERT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "saved_master_filters",
-      "grantor": "postgres",
-      "grantee": "north_star_runtime",
-      "privilege_type": "SELECT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "saved_master_filters",
-      "grantor": "postgres",
-      "grantee": "north_star_runtime",
-      "privilege_type": "UPDATE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "saved_master_filters",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "DELETE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "saved_master_filters",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "INSERT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "saved_master_filters",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "REFERENCES",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "saved_master_filters",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "SELECT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "saved_master_filters",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "TRIGGER",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "saved_master_filters",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "TRUNCATE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "saved_master_filters",
-      "grantor": "postgres",
-      "grantee": "postgres",
-      "privilege_type": "UPDATE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
+      "schema": "north_star_internal",
       "relation": "semantic_aggregate_anchor_discrepancies",
       "grantor": "postgres",
       "grantee": "north_star_module_runtime",
@@ -19521,7 +17753,7 @@
       "is_grantable": false
     },
     {
-      "schema": "platform",
+      "schema": "north_star_internal",
       "relation": "semantic_aggregate_anchor_discrepancies",
       "grantor": "postgres",
       "grantee": "north_star_module_runtime",
@@ -19529,7 +17761,7 @@
       "is_grantable": false
     },
     {
-      "schema": "platform",
+      "schema": "north_star_internal",
       "relation": "semantic_aggregate_anchor_discrepancies",
       "grantor": "postgres",
       "grantee": "postgres",
@@ -19537,7 +17769,7 @@
       "is_grantable": false
     },
     {
-      "schema": "platform",
+      "schema": "north_star_internal",
       "relation": "semantic_aggregate_anchor_discrepancies",
       "grantor": "postgres",
       "grantee": "postgres",
@@ -19545,7 +17777,7 @@
       "is_grantable": false
     },
     {
-      "schema": "platform",
+      "schema": "north_star_internal",
       "relation": "semantic_aggregate_anchor_discrepancies",
       "grantor": "postgres",
       "grantee": "postgres",
@@ -19553,7 +17785,7 @@
       "is_grantable": false
     },
     {
-      "schema": "platform",
+      "schema": "north_star_internal",
       "relation": "semantic_aggregate_anchor_discrepancies",
       "grantor": "postgres",
       "grantee": "postgres",
@@ -19561,7 +17793,7 @@
       "is_grantable": false
     },
     {
-      "schema": "platform",
+      "schema": "north_star_internal",
       "relation": "semantic_aggregate_anchor_discrepancies",
       "grantor": "postgres",
       "grantee": "postgres",
@@ -19569,7 +17801,7 @@
       "is_grantable": false
     },
     {
-      "schema": "platform",
+      "schema": "north_star_internal",
       "relation": "semantic_aggregate_anchor_discrepancies",
       "grantor": "postgres",
       "grantee": "postgres",
@@ -19577,7 +17809,7 @@
       "is_grantable": false
     },
     {
-      "schema": "platform",
+      "schema": "north_star_internal",
       "relation": "semantic_aggregate_anchor_discrepancies",
       "grantor": "postgres",
       "grantee": "postgres",
@@ -19585,7 +17817,7 @@
       "is_grantable": false
     },
     {
-      "schema": "platform",
+      "schema": "north_star_internal",
       "relation": "semantic_aggregate_anchors",
       "grantor": "postgres",
       "grantee": "north_star_module_runtime",
@@ -19593,7 +17825,7 @@
       "is_grantable": false
     },
     {
-      "schema": "platform",
+      "schema": "north_star_internal",
       "relation": "semantic_aggregate_anchors",
       "grantor": "postgres",
       "grantee": "north_star_module_runtime",
@@ -19601,7 +17833,7 @@
       "is_grantable": false
     },
     {
-      "schema": "platform",
+      "schema": "north_star_internal",
       "relation": "semantic_aggregate_anchors",
       "grantor": "postgres",
       "grantee": "postgres",
@@ -19609,7 +17841,7 @@
       "is_grantable": false
     },
     {
-      "schema": "platform",
+      "schema": "north_star_internal",
       "relation": "semantic_aggregate_anchors",
       "grantor": "postgres",
       "grantee": "postgres",
@@ -19617,7 +17849,7 @@
       "is_grantable": false
     },
     {
-      "schema": "platform",
+      "schema": "north_star_internal",
       "relation": "semantic_aggregate_anchors",
       "grantor": "postgres",
       "grantee": "postgres",
@@ -19625,7 +17857,7 @@
       "is_grantable": false
     },
     {
-      "schema": "platform",
+      "schema": "north_star_internal",
       "relation": "semantic_aggregate_anchors",
       "grantor": "postgres",
       "grantee": "postgres",
@@ -19633,7 +17865,7 @@
       "is_grantable": false
     },
     {
-      "schema": "platform",
+      "schema": "north_star_internal",
       "relation": "semantic_aggregate_anchors",
       "grantor": "postgres",
       "grantee": "postgres",
@@ -19641,7 +17873,7 @@
       "is_grantable": false
     },
     {
-      "schema": "platform",
+      "schema": "north_star_internal",
       "relation": "semantic_aggregate_anchors",
       "grantor": "postgres",
       "grantee": "postgres",
@@ -19649,8 +17881,1776 @@
       "is_grantable": false
     },
     {
-      "schema": "platform",
+      "schema": "north_star_internal",
       "relation": "semantic_aggregate_anchors",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "UPDATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "active_release_pointers",
+      "grantor": "postgres",
+      "grantee": "north_star_runtime",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "active_release_pointers",
+      "grantor": "postgres",
+      "grantee": "north_star_runtime",
+      "privilege_type": "UPDATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "active_release_pointers",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "DELETE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "active_release_pointers",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "INSERT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "active_release_pointers",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "REFERENCES",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "active_release_pointers",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "active_release_pointers",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRIGGER",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "active_release_pointers",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRUNCATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "active_release_pointers",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "UPDATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "app_package_revisions",
+      "grantor": "postgres",
+      "grantee": "north_star_runtime",
+      "privilege_type": "INSERT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "app_package_revisions",
+      "grantor": "postgres",
+      "grantee": "north_star_runtime",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "app_package_revisions",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "DELETE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "app_package_revisions",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "INSERT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "app_package_revisions",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "REFERENCES",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "app_package_revisions",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "app_package_revisions",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRIGGER",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "app_package_revisions",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRUNCATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "app_package_revisions",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "UPDATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "environments",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "DELETE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "environments",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "INSERT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "environments",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "REFERENCES",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "environments",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "environments",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRIGGER",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "environments",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRUNCATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "environments",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "UPDATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "immutable_release_write_guard",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "DELETE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "immutable_release_write_guard",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "INSERT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "immutable_release_write_guard",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "REFERENCES",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "immutable_release_write_guard",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "immutable_release_write_guard",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRIGGER",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "immutable_release_write_guard",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRUNCATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "immutable_release_write_guard",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "UPDATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "inventory_posting_configurations",
+      "grantor": "postgres",
+      "grantee": "north_star_runtime",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "inventory_posting_configurations",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "DELETE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "inventory_posting_configurations",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "INSERT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "inventory_posting_configurations",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "REFERENCES",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "inventory_posting_configurations",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "inventory_posting_configurations",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRIGGER",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "inventory_posting_configurations",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRUNCATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "inventory_posting_configurations",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "UPDATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "inventory_tenant_calendars",
+      "grantor": "postgres",
+      "grantee": "north_star_runtime",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "inventory_tenant_calendars",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "DELETE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "inventory_tenant_calendars",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "INSERT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "inventory_tenant_calendars",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "REFERENCES",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "inventory_tenant_calendars",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "inventory_tenant_calendars",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRIGGER",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "inventory_tenant_calendars",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRUNCATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "inventory_tenant_calendars",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "UPDATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempt_outcomes",
+      "grantor": "postgres",
+      "grantee": "north_star_runtime",
+      "privilege_type": "INSERT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempt_outcomes",
+      "grantor": "postgres",
+      "grantee": "north_star_runtime",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempt_outcomes",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "DELETE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempt_outcomes",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "INSERT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempt_outcomes",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "REFERENCES",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempt_outcomes",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempt_outcomes",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRIGGER",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempt_outcomes",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRUNCATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempt_outcomes",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "UPDATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempts",
+      "grantor": "postgres",
+      "grantee": "north_star_runtime",
+      "privilege_type": "INSERT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempts",
+      "grantor": "postgres",
+      "grantee": "north_star_runtime",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempts",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "DELETE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempts",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "INSERT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempts",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "REFERENCES",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempts",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempts",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRIGGER",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempts",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRUNCATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_attempts",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "UPDATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_authority_epochs",
+      "grantor": "postgres",
+      "grantee": "north_star_runtime",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_authority_epochs",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "DELETE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_authority_epochs",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "INSERT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_authority_epochs",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "REFERENCES",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_authority_epochs",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_authority_epochs",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRIGGER",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_authority_epochs",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRUNCATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_authority_epochs",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "UPDATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_control_events",
+      "grantor": "postgres",
+      "grantee": "north_star_runtime",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_control_events",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "DELETE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_control_events",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "INSERT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_control_events",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "REFERENCES",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_control_events",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_control_events",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRIGGER",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_control_events",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRUNCATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_control_events",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "UPDATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_history",
+      "grantor": "postgres",
+      "grantee": "north_star_runtime",
+      "privilege_type": "INSERT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_history",
+      "grantor": "postgres",
+      "grantee": "north_star_runtime",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_history",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "DELETE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_history",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "INSERT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_history",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "REFERENCES",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_history",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_history",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRIGGER",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_history",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRUNCATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_history",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "UPDATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_outbox",
+      "grantor": "postgres",
+      "grantee": "north_star_runtime",
+      "privilege_type": "INSERT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_outbox",
+      "grantor": "postgres",
+      "grantee": "north_star_runtime",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_outbox",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "DELETE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_outbox",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "INSERT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_outbox",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "REFERENCES",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_outbox",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_outbox",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRIGGER",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_outbox",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRUNCATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_outbox",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "UPDATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_phase_receipts",
+      "grantor": "postgres",
+      "grantee": "north_star_runtime",
+      "privilege_type": "INSERT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_phase_receipts",
+      "grantor": "postgres",
+      "grantee": "north_star_runtime",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_phase_receipts",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "DELETE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_phase_receipts",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "INSERT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_phase_receipts",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "REFERENCES",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_phase_receipts",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_phase_receipts",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRIGGER",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_phase_receipts",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRUNCATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_phase_receipts",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "UPDATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "grantor": "postgres",
+      "grantee": "north_star_runtime",
+      "privilege_type": "INSERT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "grantor": "postgres",
+      "grantee": "north_star_runtime",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "DELETE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "INSERT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "REFERENCES",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRIGGER",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRUNCATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_preparations",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "UPDATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_reconciliation_alarms",
+      "grantor": "postgres",
+      "grantee": "north_star_runtime",
+      "privilege_type": "INSERT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_reconciliation_alarms",
+      "grantor": "postgres",
+      "grantee": "north_star_runtime",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_reconciliation_alarms",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "DELETE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_reconciliation_alarms",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "INSERT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_reconciliation_alarms",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "REFERENCES",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_reconciliation_alarms",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_reconciliation_alarms",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRIGGER",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_reconciliation_alarms",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRUNCATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_reconciliation_alarms",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "UPDATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_reconciliation_starts",
+      "grantor": "postgres",
+      "grantee": "north_star_runtime",
+      "privilege_type": "INSERT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_reconciliation_starts",
+      "grantor": "postgres",
+      "grantee": "north_star_runtime",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_reconciliation_starts",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "DELETE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_reconciliation_starts",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "INSERT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_reconciliation_starts",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "REFERENCES",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_reconciliation_starts",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_reconciliation_starts",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRIGGER",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_reconciliation_starts",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRUNCATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_reconciliation_starts",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "UPDATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_swap_receipts",
+      "grantor": "postgres",
+      "grantee": "north_star_runtime",
+      "privilege_type": "INSERT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_swap_receipts",
+      "grantor": "postgres",
+      "grantee": "north_star_runtime",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_swap_receipts",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "DELETE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_swap_receipts",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "INSERT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_swap_receipts",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "REFERENCES",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_swap_receipts",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_swap_receipts",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRIGGER",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_swap_receipts",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRUNCATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_swap_receipts",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "UPDATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_verification_receipts",
+      "grantor": "postgres",
+      "grantee": "north_star_runtime",
+      "privilege_type": "INSERT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_verification_receipts",
+      "grantor": "postgres",
+      "grantee": "north_star_runtime",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_verification_receipts",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "DELETE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_verification_receipts",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "INSERT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_verification_receipts",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "REFERENCES",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_verification_receipts",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_verification_receipts",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRIGGER",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_verification_receipts",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRUNCATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_verification_receipts",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "UPDATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_write_guard",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "DELETE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_write_guard",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "INSERT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_write_guard",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "REFERENCES",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_write_guard",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_write_guard",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRIGGER",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_write_guard",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRUNCATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_activation_write_guard",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "UPDATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "grantor": "postgres",
+      "grantee": "north_star_runtime",
+      "privilege_type": "INSERT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "grantor": "postgres",
+      "grantee": "north_star_runtime",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "DELETE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "INSERT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "REFERENCES",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRIGGER",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRUNCATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "UPDATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approver_eligibility_events",
+      "grantor": "postgres",
+      "grantee": "north_star_runtime",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approver_eligibility_events",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "DELETE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approver_eligibility_events",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "INSERT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approver_eligibility_events",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "REFERENCES",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approver_eligibility_events",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approver_eligibility_events",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRIGGER",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approver_eligibility_events",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRUNCATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approver_eligibility_events",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "UPDATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_artifact_blobs",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "DELETE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_artifact_blobs",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "INSERT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_artifact_blobs",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "REFERENCES",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_artifact_blobs",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_artifact_blobs",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRIGGER",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_artifact_blobs",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRUNCATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_artifact_blobs",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "UPDATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_executor_authority_events",
+      "grantor": "postgres",
+      "grantee": "north_star_runtime",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_executor_authority_events",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "DELETE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_executor_authority_events",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "INSERT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_executor_authority_events",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "REFERENCES",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_executor_authority_events",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_executor_authority_events",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRIGGER",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_executor_authority_events",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRUNCATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_executor_authority_events",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "UPDATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_verification_evidence",
+      "grantor": "postgres",
+      "grantee": "north_star_runtime",
+      "privilege_type": "INSERT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_verification_evidence",
+      "grantor": "postgres",
+      "grantee": "north_star_runtime",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_verification_evidence",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "DELETE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_verification_evidence",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "INSERT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_verification_evidence",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "REFERENCES",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_verification_evidence",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_verification_evidence",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRIGGER",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_verification_evidence",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRUNCATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_verification_evidence",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "UPDATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_verification_results",
+      "grantor": "postgres",
+      "grantee": "north_star_runtime",
+      "privilege_type": "INSERT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_verification_results",
+      "grantor": "postgres",
+      "grantee": "north_star_runtime",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_verification_results",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "DELETE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_verification_results",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "INSERT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_verification_results",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "REFERENCES",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_verification_results",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_verification_results",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRIGGER",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_verification_results",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRUNCATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_verification_results",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "UPDATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "saved_master_filters",
+      "grantor": "postgres",
+      "grantee": "north_star_runtime",
+      "privilege_type": "INSERT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "saved_master_filters",
+      "grantor": "postgres",
+      "grantee": "north_star_runtime",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "saved_master_filters",
+      "grantor": "postgres",
+      "grantee": "north_star_runtime",
+      "privilege_type": "UPDATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "saved_master_filters",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "DELETE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "saved_master_filters",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "INSERT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "saved_master_filters",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "REFERENCES",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "saved_master_filters",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "saved_master_filters",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRIGGER",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "saved_master_filters",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRUNCATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "saved_master_filters",
       "grantor": "postgres",
       "grantee": "postgres",
       "privilege_type": "UPDATE",
@@ -21814,6 +21814,42 @@
       "event_type": "4"
     },
     {
+      "schema": "north_star_internal",
+      "relation": "semantic_aggregate_anchor_discrepancies",
+      "name": "semantic_aggregate_anchor_discrepancies_reject_delete",
+      "definition": "CREATE RULE semantic_aggregate_anchor_discrepancies_reject_delete AS\n    ON DELETE TO north_star_internal.semantic_aggregate_anchor_discrepancies DO INSTEAD  INSERT INTO platform.trust_immutable_write_guard (attempted_relation)\n  VALUES ('semantic_aggregate_anchor_discrepancies'::text);",
+      "enabled": "O",
+      "is_instead": true,
+      "event_type": "4"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "semantic_aggregate_anchor_discrepancies",
+      "name": "semantic_aggregate_anchor_discrepancies_reject_update",
+      "definition": "CREATE RULE semantic_aggregate_anchor_discrepancies_reject_update AS\n    ON UPDATE TO north_star_internal.semantic_aggregate_anchor_discrepancies DO INSTEAD  INSERT INTO platform.trust_immutable_write_guard (attempted_relation)\n  VALUES ('semantic_aggregate_anchor_discrepancies'::text);",
+      "enabled": "O",
+      "is_instead": true,
+      "event_type": "2"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "semantic_aggregate_anchors",
+      "name": "semantic_aggregate_anchors_reject_delete",
+      "definition": "CREATE RULE semantic_aggregate_anchors_reject_delete AS\n    ON DELETE TO north_star_internal.semantic_aggregate_anchors DO INSTEAD  INSERT INTO platform.trust_immutable_write_guard (attempted_relation)\n  VALUES ('semantic_aggregate_anchors'::text);",
+      "enabled": "O",
+      "is_instead": true,
+      "event_type": "4"
+    },
+    {
+      "schema": "north_star_internal",
+      "relation": "semantic_aggregate_anchors",
+      "name": "semantic_aggregate_anchors_reject_update",
+      "definition": "CREATE RULE semantic_aggregate_anchors_reject_update AS\n    ON UPDATE TO north_star_internal.semantic_aggregate_anchors DO INSTEAD  INSERT INTO platform.trust_immutable_write_guard (attempted_relation)\n  VALUES ('semantic_aggregate_anchors'::text);",
+      "enabled": "O",
+      "is_instead": true,
+      "event_type": "2"
+    },
+    {
       "schema": "platform",
       "relation": "active_release_pointers",
       "name": "active_release_pointers_reject_delete",
@@ -22157,42 +22193,6 @@
     },
     {
       "schema": "platform",
-      "relation": "semantic_aggregate_anchor_discrepancies",
-      "name": "semantic_aggregate_anchor_discrepancies_reject_delete",
-      "definition": "CREATE RULE semantic_aggregate_anchor_discrepancies_reject_delete AS\n    ON DELETE TO platform.semantic_aggregate_anchor_discrepancies DO INSTEAD  INSERT INTO platform.trust_immutable_write_guard (attempted_relation)\n  VALUES ('semantic_aggregate_anchor_discrepancies'::text);",
-      "enabled": "O",
-      "is_instead": true,
-      "event_type": "4"
-    },
-    {
-      "schema": "platform",
-      "relation": "semantic_aggregate_anchor_discrepancies",
-      "name": "semantic_aggregate_anchor_discrepancies_reject_update",
-      "definition": "CREATE RULE semantic_aggregate_anchor_discrepancies_reject_update AS\n    ON UPDATE TO platform.semantic_aggregate_anchor_discrepancies DO INSTEAD  INSERT INTO platform.trust_immutable_write_guard (attempted_relation)\n  VALUES ('semantic_aggregate_anchor_discrepancies'::text);",
-      "enabled": "O",
-      "is_instead": true,
-      "event_type": "2"
-    },
-    {
-      "schema": "platform",
-      "relation": "semantic_aggregate_anchors",
-      "name": "semantic_aggregate_anchors_reject_delete",
-      "definition": "CREATE RULE semantic_aggregate_anchors_reject_delete AS\n    ON DELETE TO platform.semantic_aggregate_anchors DO INSTEAD  INSERT INTO platform.trust_immutable_write_guard (attempted_relation)\n  VALUES ('semantic_aggregate_anchors'::text);",
-      "enabled": "O",
-      "is_instead": true,
-      "event_type": "4"
-    },
-    {
-      "schema": "platform",
-      "relation": "semantic_aggregate_anchors",
-      "name": "semantic_aggregate_anchors_reject_update",
-      "definition": "CREATE RULE semantic_aggregate_anchors_reject_update AS\n    ON UPDATE TO platform.semantic_aggregate_anchors DO INSTEAD  INSERT INTO platform.trust_immutable_write_guard (attempted_relation)\n  VALUES ('semantic_aggregate_anchors'::text);",
-      "enabled": "O",
-      "is_instead": true,
-      "event_type": "2"
-    },
-    {
-      "schema": "platform",
       "relation": "semantic_operation_receipts",
       "name": "semantic_operation_receipts_reject_delete",
       "definition": "CREATE RULE semantic_operation_receipts_reject_delete AS\n    ON DELETE TO platform.semantic_operation_receipts DO INSTEAD  INSERT INTO platform.trust_immutable_write_guard (attempted_relation)\n  VALUES ('semantic_operation_receipts'::text);",
@@ -22433,13 +22433,6 @@
       "schema": "north_star_internal",
       "grantor": "postgres",
       "grantee": "postgres",
-      "privilege_type": "USAGE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "grantor": "postgres",
-      "grantee": "north_star_module_runtime",
       "privilege_type": "USAGE",
       "is_grantable": false
     },

@@ -73,6 +73,18 @@
       "reason": "Records which ordered platform migrations were applied to the database as a whole, independently of business tenants."
     },
     {
+      "schema": "north_star_internal",
+      "table": "semantic_aggregate_anchor_discrepancies",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "north_star_internal",
+      "table": "semantic_aggregate_anchors",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
       "schema": "platform",
       "table": "active_release_pointers",
       "classification": "tenant-scoped",
@@ -228,18 +240,6 @@
     {
       "schema": "platform",
       "table": "saved_master_filters",
-      "classification": "tenant-scoped",
-      "tenantColumn": "tenant_id"
-    },
-    {
-      "schema": "platform",
-      "table": "semantic_aggregate_anchor_discrepancies",
-      "classification": "tenant-scoped",
-      "tenantColumn": "tenant_id"
-    },
-    {
-      "schema": "platform",
-      "table": "semantic_aggregate_anchors",
       "classification": "tenant-scoped",
       "tenantColumn": "tenant_id"
     },

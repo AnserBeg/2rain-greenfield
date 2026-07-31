@@ -488,7 +488,7 @@ test('registered onHand is temporal, policy-and-archive narrowed, and backed by 
         balance_value: string;
       }>(
         `SELECT balance_value
-           FROM platform.semantic_aggregate_anchors
+           FROM north_star_internal.semantic_aggregate_anchors
           WHERE tenant_id = $1 AND environment_id = $2 AND cache_key = $3`,
         [tenantId, environmentId, revisedAnchor.cache_key],
       );
@@ -498,7 +498,7 @@ test('registered onHand is temporal, policy-and-archive narrowed, and backed by 
         recomputed_balance_value: string;
       }>(
         `SELECT cached_balance_value, recomputed_balance_value
-           FROM platform.semantic_aggregate_anchor_discrepancies
+           FROM north_star_internal.semantic_aggregate_anchor_discrepancies
           WHERE tenant_id = $1 AND environment_id = $2 AND cache_key = $3`,
         [tenantId, environmentId, revisedAnchor.cache_key],
       );
@@ -1525,11 +1525,11 @@ async function corruptAnchor(
 ): Promise<void> {
   const rule = 'semantic_aggregate_anchors_reject_update';
   await administrativePool.query(
-    `ALTER TABLE platform.semantic_aggregate_anchors DISABLE RULE ${rule}`,
+    `ALTER TABLE north_star_internal.semantic_aggregate_anchors DISABLE RULE ${rule}`,
   );
   try {
     const updated = await administrativePool.query(
-      `UPDATE platform.semantic_aggregate_anchors
+      `UPDATE north_star_internal.semantic_aggregate_anchors
           SET balance_value = $4
         WHERE tenant_id = $1 AND environment_id = $2 AND cache_key = $3`,
       [tenantId, environmentId, cacheKey, balance],
@@ -1537,7 +1537,7 @@ async function corruptAnchor(
     assert.equal(updated.rowCount, 1);
   } finally {
     await administrativePool.query(
-      `ALTER TABLE platform.semantic_aggregate_anchors ENABLE RULE ${rule}`,
+      `ALTER TABLE north_star_internal.semantic_aggregate_anchors ENABLE RULE ${rule}`,
     );
   }
 }
@@ -1762,7 +1762,7 @@ async function readOnlyAnchor(
       temporal_horizons: Record<string, unknown>;
     }>(
       `SELECT balance_value, cache_key, temporal_horizons
-         FROM platform.semantic_aggregate_anchors
+         FROM north_star_internal.semantic_aggregate_anchors
         WHERE tenant_id = $1 AND environment_id = $2 AND query_id = $3
           AND temporal_horizons ->> $4 = $5
           ${recordedPredicate}
