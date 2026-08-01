@@ -1128,38 +1128,9 @@ function inventoryDefinitionForTest(options: {
   readonly removeOnHandScope?: boolean;
 }): Record<string, unknown> {
   const definition = structuredClone(composedApplicationDefinition());
-  const inventory = inventoryModuleDefinition(APPLICATION_NAMESPACE);
   adoptCanonicalLanguageV4(definition);
   definition.languageVersion = 'v4';
   definition.normalizationProfileVersion = 'northstar.normalization/v4';
-  for (const collection of [
-    'assertions',
-    'entities',
-    'fields',
-    'operations',
-    'permissions',
-    'queries',
-    'relations',
-    'stateMachines',
-    'storageMappings',
-    'surfaces',
-  ]) {
-    assert.ok(Array.isArray(definition[collection]));
-    assert.ok(Array.isArray(inventory[collection]));
-    definition[collection] = [
-      ...(definition[collection] as unknown[]),
-      ...(inventory[collection] as unknown[]),
-    ];
-  }
-  assert.ok(Array.isArray(definition.modules));
-  assert.ok(Array.isArray(inventory.modules));
-  assert.ok(isRecord(inventory.modules[0]));
-  assert.ok(isRecord(definition.package));
-  definition.modules.push({
-    ...inventory.modules[0],
-    orderKey: 40,
-    ownerPackageId: definition.package.packageId,
-  });
   assert.ok(Array.isArray(definition.queries));
   const onHand = definition.queries.find(
     (query) =>
