@@ -675,6 +675,20 @@ export function verificationConstructibilityFindings(
         constructibleColumns.add(relation.relationColumn.physicalName);
       }
     }
+    const systemInput = operation.inputContract.systemInput;
+    if (
+      systemInput &&
+      entity.legalEntity &&
+      systemInput.argumentKey === 'legalEntityId' &&
+      systemInput.classification === 'INTERNAL' &&
+      systemInput.immutableAfterCreate ===
+        entity.legalEntity.immutableAfterCreate &&
+      systemInput.physicalColumn === entity.legalEntity.column &&
+      systemInput.required === !entity.legalEntity.nullable &&
+      systemInput.valueKind === entity.legalEntity.postgresqlType
+    ) {
+      constructibleColumns.add(systemInput.physicalColumn);
+    }
     const requiredColumns = new Set(
       entity.columns
         .filter(
@@ -935,6 +949,15 @@ interface VerificationOperationContract {
       readonly relationId: string;
       readonly required: boolean;
     }[];
+    readonly schemaVersion: string;
+    readonly systemInput?: {
+      readonly argumentKey: string;
+      readonly classification: string;
+      readonly immutableAfterCreate: boolean;
+      readonly physicalColumn: string;
+      readonly required: boolean;
+      readonly valueKind: string;
+    };
   };
   readonly operationId: string;
 }
@@ -1079,6 +1102,7 @@ class SemanticVerificationExecutor {
   readonly #relations: readonly VerificationRelationContract[];
   readonly #requiredLegalEntityScopeQueryIds: readonly string[];
   readonly #storageEntities: readonly StorageTargetPayloadV1['entities'][number][];
+  readonly #systemInputValues = new Map<string, Promise<string>>();
   #ordinal = 0;
 
   constructor(
@@ -1568,7 +1592,46 @@ class SemanticVerificationExecutor {
       );
       relations[relationInput.relationId] = target.recordId;
     }
-    return { recordId: stableUuid(`verification:${token}`), relations, values };
+    const systemInput = operation.inputContract.systemInput;
+    const systemArguments = systemInput
+      ? {
+          [systemInput.argumentKey]: await this.#systemInputValue(
+            systemInput,
+            token,
+          ),
+        }
+      : {};
+    return {
+      ...systemArguments,
+      recordId: stableUuid(`verification:${token}`),
+      relations,
+      values,
+    };
+  }
+
+  #systemInputValue(
+    input: NonNullable<
+      VerificationOperationContract['inputContract']['systemInput']
+    >,
+    token: string,
+  ): Promise<string> {
+    const key = `${input.argumentKey}:${input.physicalColumn}`;
+    const existing = this.#systemInputValues.get(key);
+    if (existing) return existing;
+    const master = this.#storageEntities.find(
+      (candidate) => candidate.legalEntityMaster !== undefined,
+    );
+    if (!master) {
+      throw failure(
+        'VERIFICATION_SYSTEM_INPUT_TARGET_MISSING',
+        'compiled system input has no constructible target entity',
+      );
+    }
+    const created = this.#create(master.entityId, `${token}-system-input`).then(
+      (record) => record.recordId,
+    );
+    this.#systemInputValues.set(key, created);
+    return created;
   }
 
   #invokeEffect(

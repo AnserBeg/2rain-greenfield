@@ -126,8 +126,19 @@ export interface RegisteredOperationInputContract {
     readonly relationId: string;
     readonly required: boolean;
   }[];
-  readonly schemaVersion: 'northstar.module-input-contract/v1';
+  readonly schemaVersion:
+    'northstar.module-input-contract/v1' | 'northstar.module-input-contract/v2';
+  readonly systemInput?: RegisteredOperationSystemInput;
   readonly writableFieldIds: readonly string[];
+}
+
+export interface RegisteredOperationSystemInput {
+  readonly argumentKey: 'legalEntityId';
+  readonly classification: 'INTERNAL';
+  readonly immutableAfterCreate: true;
+  readonly physicalColumn: 'legal_entity_id';
+  readonly required: true;
+  readonly valueKind: 'uuid';
 }
 
 export interface SemanticOperationResultEnvelope {
@@ -856,7 +867,18 @@ function assertOperationDefinition(
       throw invalid('pinned operation infrastructure is unsupported');
     }
   }
-  if (hasInputContract) assertOperationInputContract(value.inputContract);
+  if (hasInputContract) {
+    assertOperationInputContract(value.inputContract);
+    if (
+      value.inputContract.schemaVersion ===
+        'northstar.module-input-contract/v2' &&
+      value.effect.kind !== 'createRecordEffect'
+    ) {
+      throw invalid(
+        'pinned operation system input is admitted only on create effects',
+      );
+    }
+  }
 }
 
 function assertOperationInputContract(
@@ -867,6 +889,7 @@ function assertOperationInputContract(
   if (!isRecord(value)) {
     throw invalid('pinned operation input contract must be an object');
   }
+  const hasSystemInput = Object.hasOwn(value, 'systemInput');
   assertExactKeys(
     value,
     [
@@ -874,12 +897,16 @@ function assertOperationInputContract(
       'fields',
       'relationInputs',
       'schemaVersion',
+      ...(hasSystemInput ? ['systemInput'] : []),
       'writableFieldIds',
     ],
     invalid,
   );
   if (
-    value.schemaVersion !== 'northstar.module-input-contract/v1' ||
+    (value.schemaVersion !== 'northstar.module-input-contract/v1' &&
+      value.schemaVersion !== 'northstar.module-input-contract/v2') ||
+    hasSystemInput !==
+      (value.schemaVersion === 'northstar.module-input-contract/v2') ||
     !Array.isArray(value.closedArgumentKeys) ||
     !Array.isArray(value.fields) ||
     !Array.isArray(value.relationInputs) ||
@@ -978,6 +1005,34 @@ function assertOperationInputContract(
       typeof relation.required !== 'boolean'
     ) {
       throw invalid('pinned relation input contract has an invalid shape');
+    }
+  }
+  if (hasSystemInput) {
+    if (!isRecord(value.systemInput)) {
+      throw invalid('pinned operation system input must be an object');
+    }
+    assertExactKeys(
+      value.systemInput,
+      [
+        'argumentKey',
+        'classification',
+        'immutableAfterCreate',
+        'physicalColumn',
+        'required',
+        'valueKind',
+      ],
+      invalid,
+    );
+    if (
+      value.systemInput.argumentKey !== 'legalEntityId' ||
+      value.systemInput.classification !== 'INTERNAL' ||
+      value.systemInput.immutableAfterCreate !== true ||
+      value.systemInput.physicalColumn !== 'legal_entity_id' ||
+      value.systemInput.required !== true ||
+      value.systemInput.valueKind !== 'uuid' ||
+      !value.closedArgumentKeys.includes(value.systemInput.argumentKey)
+    ) {
+      throw invalid('pinned operation system input has an invalid shape');
     }
   }
 }

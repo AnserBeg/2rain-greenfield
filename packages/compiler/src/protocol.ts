@@ -44,6 +44,12 @@ export const MODULE_FIELD_CONTRACT_VERSION =
   'northstar.module-field-contract/v1' as const;
 export const MODULE_INPUT_CONTRACT_VERSION =
   'northstar.module-input-contract/v1' as const;
+export const MODULE_INPUT_CONTRACT_V2_VERSION =
+  'northstar.module-input-contract/v2' as const;
+export const SUPPORTED_MODULE_INPUT_CONTRACT_VERSIONS = Object.freeze([
+  MODULE_INPUT_CONTRACT_VERSION,
+  MODULE_INPUT_CONTRACT_V2_VERSION,
+] as const);
 export const VERIFICATION_PLAN_PAYLOAD_VERSION =
   'northstar.verification-plan-payload/v1' as const;
 export const VERIFICATION_SCENARIO_VERSION =

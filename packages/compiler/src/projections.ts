@@ -15,6 +15,7 @@ import {
   GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION,
   HASH_DOMAINS,
   MODULE_INPUT_CONTRACT_VERSION,
+  MODULE_INPUT_CONTRACT_V2_VERSION,
   OPERATIONS_AGENT_TOOL_IDS,
   POLICY_MODEL_VERSION,
   PROJECTION_FAMILY_IDS,
@@ -143,7 +144,7 @@ export function lowerBaseProjectionPayloads(
       PROJECTION_FAMILY_IDS.operationCatalog,
       namespace,
       packageScope,
-      operationCatalogPayload(packageRevision),
+      operationCatalogPayload(packageRevision, currentStorageTarget),
     ),
     plan(
       PROJECTION_FAMILY_IDS.surfaceManifest,
@@ -423,6 +424,7 @@ function queryCatalogPayload(
 
 function operationCatalogPayload(
   packageRevision: NormalizedApplicationPackage,
+  storageTarget: StorageTargetPayloadV1 | null,
 ): unknown {
   const fieldsByEntity = groupBy(
     packageRevision.fields.filter((field) => field.lifecycle === 'active'),
@@ -433,6 +435,9 @@ function operationCatalogPayload(
       (relation) => relation.lifecycle === 'active',
     ),
     (relation) => relation.sourceEntity.targetId,
+  );
+  const storageByEntity = new Map(
+    (storageTarget?.entities ?? []).map((entity) => [entity.entityId, entity]),
   );
   return {
     kind: 'operationCatalogPayload',
@@ -456,6 +461,9 @@ function operationCatalogPayload(
                 ? (relationsByEntity.get(operation.effect.entity.targetId) ??
                     [])
                 : [],
+              'entity' in operation.effect
+                ? storageByEntity.get(operation.effect.entity.targetId)
+                : undefined,
             ),
             infrastructure: {
               archiveRepresentation: 'nullableArchivedAt',
@@ -798,14 +806,31 @@ function operationInputContract(
   operation: NormalizedApplicationPackage['operations'][number],
   fields: NormalizedApplicationPackage['fields'],
   relations: NormalizedApplicationPackage['relations'],
+  storageEntity: StorageTargetPayloadV1['entities'][number] | undefined,
 ): unknown {
   const effectKind = operation.effect.kind;
   const writesFields =
     effectKind === 'createRecordEffect' || effectKind === 'updateRecordEffect';
+  const systemInput =
+    effectKind === 'createRecordEffect' && storageEntity?.legalEntity
+      ? {
+          argumentKey: 'legalEntityId' as const,
+          classification: 'INTERNAL' as const,
+          immutableAfterCreate: storageEntity.legalEntity.immutableAfterCreate,
+          physicalColumn: storageEntity.legalEntity.column,
+          required: !storageEntity.legalEntity.nullable,
+          valueKind: storageEntity.legalEntity.postgresqlType,
+        }
+      : null;
   return {
     closedArgumentKeys:
       effectKind === 'createRecordEffect'
-        ? ['recordId', 'relations', 'values']
+        ? [
+            ...(systemInput ? [systemInput.argumentKey] : []),
+            'recordId',
+            'relations',
+            'values',
+          ]
         : effectKind === 'updateRecordEffect'
           ? ['expectedRevision', 'patch', 'recordId']
           : ['expectedRevision', 'recordId'],
@@ -864,7 +889,10 @@ function operationInputContract(
             required: relation.required,
           }))
         : [],
-    schemaVersion: MODULE_INPUT_CONTRACT_VERSION,
+    schemaVersion: systemInput
+      ? MODULE_INPUT_CONTRACT_V2_VERSION
+      : MODULE_INPUT_CONTRACT_VERSION,
+    ...(systemInput ? { systemInput } : {}),
     writableFieldIds: writesFields
       ? fields.map((field) => field.fieldId).sort(compare)
       : [],
