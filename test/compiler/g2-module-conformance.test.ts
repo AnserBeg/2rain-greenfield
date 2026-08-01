@@ -898,6 +898,166 @@ test('v3 aggregate catalog metadata is derived from one canonical source', () =>
   );
 });
 
+test('aggregate assertions emit declared-evidence verification scenarios', () => {
+  const assertionId = `${FIXTURE_IDS.namespace}:assertion.aggregate_verification`;
+  const withoutAssertion = mustCompile(input(v3AggregateModule()));
+  const withoutPlan = projectionPayload<VerificationPlanPayloadV1>(
+    withoutAssertion,
+    PROJECTION_FAMILY_IDS.verificationPlan,
+  );
+  assert.deepEqual(declaredEvidenceFor(withoutPlan, assertionId), []);
+
+  const definition = v3AggregateModule() as {
+    assertions: Array<Record<string, unknown>>;
+  } & Record<string, unknown>;
+  definition.assertions.push(
+    queryAssertion(assertionId, V3_AGGREGATE_IDS.aggregateQuery),
+  );
+  const compiled = mustCompile(input(definition));
+  const plan = projectionPayload<VerificationPlanPayloadV1>(
+    compiled,
+    PROJECTION_FAMILY_IDS.verificationPlan,
+  );
+  assert.deepEqual(
+    declaredEvidenceFor(plan, assertionId).map((scenario) => ({
+      assertionId: scenario.assertionId,
+      entityId: scenario.entityId,
+      evidenceKind: scenario.evidenceKind,
+      invocation: scenario.invocation,
+      kind: scenario.kind,
+      subjectId: scenario.subjectId,
+    })),
+    [
+      {
+        assertionId,
+        entityId: FIXTURE_IDS.entityIds.parent,
+        evidenceKind: 'provider',
+        invocation: {
+          kind: 'queryInvocation',
+          query: {
+            kind: 'queryReference',
+            schemaVersion: LANGUAGE_VERSIONS.v3,
+            targetId: V3_AGGREGATE_IDS.aggregateQuery,
+          },
+          schemaVersion: LANGUAGE_VERSIONS.v3,
+        },
+        kind: 'declaredEvidence',
+        subjectId: FIXTURE_IDS.entityIds.parent,
+      },
+    ],
+  );
+});
+
+test('unresolvable assertion queries fail compilation with the assertion identity', () => {
+  const assertionId = `${FIXTURE_IDS.namespace}:assertion.unresolvable_query`;
+  const valid = v3AggregateModule() as {
+    assertions: Array<Record<string, unknown>>;
+  } & Record<string, unknown>;
+  valid.assertions.push(
+    queryAssertion(assertionId, `${FIXTURE_IDS.namespace}:query.master_get`),
+  );
+  const validCompiled = mustCompile(input(valid));
+  const validPlan = projectionPayload<VerificationPlanPayloadV1>(
+    validCompiled,
+    PROJECTION_FAMILY_IDS.verificationPlan,
+  );
+  assert.equal(declaredEvidenceFor(validPlan, assertionId).length, 1);
+
+  const unresolved = structuredClone(
+    normalizeApplicationPackage(valid),
+  ) as unknown as {
+    assertions: Array<{
+      assertionId: string;
+      invocation: { query: { targetId: string } };
+    }>;
+  };
+  unresolved.assertions.find(
+    (assertion) => assertion.assertionId === assertionId,
+  )!.invocation.query.targetId = `${FIXTURE_IDS.namespace}:query.missing`;
+  const rejected = compileApplication(inputNormalized(unresolved));
+  assert.equal(rejected.status, 'failed');
+  assert.deepEqual(structuralDiagnostics(rejected), [
+    {
+      code: 'CANON_REFERENCE_UNRESOLVED',
+      path: '$.assertions.invocation.query',
+      subjectId: assertionId,
+    },
+  ]);
+});
+
+test('subjectless operation assertions fail instead of disappearing from verification', () => {
+  const assertionId = `${FIXTURE_IDS.namespace}:assertion.subjectless_operation`;
+  const operationId = `${FIXTURE_IDS.namespace}:operation.subjectless_verification`;
+  const definition = v3AggregateModule() as {
+    assertions: Array<Record<string, unknown>>;
+    operations: Array<Record<string, unknown>>;
+  } & Record<string, unknown>;
+  const operation = structuredClone(definition.operations[0]!);
+  operation.operationId = operationId;
+  operation.effect = {
+    capability: {
+      kind: 'capabilityReference',
+      schemaVersion: LANGUAGE_VERSIONS.v3,
+      targetId: `${FIXTURE_IDS.namespace}:capability.standard_surface_content`,
+    },
+    kind: 'registeredCapabilityEffect',
+    schemaVersion: LANGUAGE_VERSIONS.v3,
+  };
+  definition.operations.push(operation);
+  definition.assertions.push(operationAssertion(assertionId, operationId));
+
+  const rejected = compileApplication(input(definition));
+  assert.equal(rejected.status, 'failed');
+  assert.ok(
+    structuralDiagnostics(rejected).some(
+      (diagnostic) =>
+        diagnostic.code ===
+          'COMPILER_VERIFICATION_ASSERTION_INVOCATION_UNRESOLVED' &&
+        diagnostic.path === '$.assertions.invocation.operation' &&
+        diagnostic.subjectId === assertionId,
+    ),
+  );
+});
+
+test('aggregate verification registration preserves row-query assertion scenarios', () => {
+  const rowAssertionId = `${FIXTURE_IDS.namespace}:assertion.row_regression`;
+  const aggregateAssertionId = `${FIXTURE_IDS.namespace}:assertion.aggregate_regression`;
+  const definition = v3AggregateModule() as {
+    assertions: Array<Record<string, unknown>>;
+  } & Record<string, unknown>;
+  definition.assertions.push(
+    queryAssertion(rowAssertionId, `${FIXTURE_IDS.namespace}:query.master_get`),
+    queryAssertion(aggregateAssertionId, V3_AGGREGATE_IDS.aggregateQuery),
+  );
+  const compiled = mustCompile(input(definition));
+  const plan = projectionPayload<VerificationPlanPayloadV1>(
+    compiled,
+    PROJECTION_FAMILY_IDS.verificationPlan,
+  );
+  const rowScenario = declaredEvidenceFor(plan, rowAssertionId);
+  assert.equal(rowScenario.length, 1);
+  assert.equal(rowScenario[0]!.entityId, FIXTURE_IDS.entityIds.parent);
+
+  const retargeted = structuredClone(definition);
+  const rowAssertion = (
+    retargeted.assertions as Array<{
+      assertionId: string;
+      invocation: { query: { targetId: string } };
+    }>
+  ).find((assertion) => assertion.assertionId === rowAssertionId)!;
+  rowAssertion.invocation.query.targetId = `${FIXTURE_IDS.namespace}:query.master_role_get`;
+  const retargetedPlan = projectionPayload<VerificationPlanPayloadV1>(
+    mustCompile(input(retargeted)),
+    PROJECTION_FAMILY_IDS.verificationPlan,
+  );
+  const retargetedScenario = declaredEvidenceFor(
+    retargetedPlan,
+    rowAssertionId,
+  );
+  assert.equal(retargetedScenario.length, 1);
+  assert.equal(retargetedScenario[0]!.entityId, FIXTURE_IDS.entityIds.child);
+});
+
 test('compiler rejects a v2 resolve query with no declared match authority', () => {
   const normalized = structuredClone(
     normalizeApplicationPackage(ordinaryModuleV1()),
@@ -1241,6 +1401,63 @@ function structuralDiagnostics(result: CompileResult): Array<{
     path,
     subjectId,
   }));
+}
+
+function declaredEvidenceFor(
+  plan: VerificationPlanPayloadV1,
+  assertionId: string,
+): VerificationPlanPayloadV1['scenarios'][number][] {
+  return plan.scenarios.filter(
+    (scenario) =>
+      scenario.kind === 'declaredEvidence' &&
+      scenario.assertionId === assertionId,
+  );
+}
+
+function queryAssertion(
+  assertionId: string,
+  queryId: string,
+): Record<string, unknown> {
+  return {
+    assertionId,
+    evidenceKinds: ['provider'],
+    expectedDiagnosticCode: null,
+    expectedOutcome: 'succeeds',
+    invocation: {
+      kind: 'queryInvocation',
+      query: {
+        kind: 'queryReference',
+        schemaVersion: LANGUAGE_VERSIONS.v3,
+        targetId: queryId,
+      },
+      schemaVersion: LANGUAGE_VERSIONS.v3,
+    },
+    kind: 'assertionDefinition',
+    schemaVersion: LANGUAGE_VERSIONS.v3,
+  };
+}
+
+function operationAssertion(
+  assertionId: string,
+  operationId: string,
+): Record<string, unknown> {
+  return {
+    assertionId,
+    evidenceKinds: ['provider'],
+    expectedDiagnosticCode: null,
+    expectedOutcome: 'succeeds',
+    invocation: {
+      kind: 'operationInvocation',
+      operation: {
+        kind: 'operationReference',
+        schemaVersion: LANGUAGE_VERSIONS.v3,
+        targetId: operationId,
+      },
+      schemaVersion: LANGUAGE_VERSIONS.v3,
+    },
+    kind: 'assertionDefinition',
+    schemaVersion: LANGUAGE_VERSIONS.v3,
+  };
 }
 
 function assertCanonicalRoundTrip(definition: unknown): void {

@@ -1,6 +1,7 @@
 import {
   LANGUAGE_VERSION,
   type NormalizedApplicationPackage,
+  type VersionedNormalizedApplicationPackage,
 } from '@north-star/canonical-model';
 
 import { hashCanonical } from './hash.js';
@@ -102,6 +103,7 @@ const runtimeCapabilities: Record<
 export function lowerBaseProjectionPayloads(
   packageRevision: NormalizedApplicationPackage,
   previousStorageTarget: StorageTargetPayloadV1 | null = null,
+  verificationPackageRevision: VersionedNormalizedApplicationPackage = packageRevision,
 ): ProjectionPayloadPlan[] {
   const namespace = packageRevision.package.namespace;
   const packageScope: LogicalScope = {
@@ -167,7 +169,7 @@ export function lowerBaseProjectionPayloads(
       PROJECTION_FAMILY_IDS.verificationPlan,
       namespace,
       packageScope,
-      verificationPlanPayload(packageRevision),
+      verificationPlanPayload(verificationPackageRevision),
     ),
   ];
   if (isModuleV1) {
@@ -654,7 +656,7 @@ function agentDiscoveryPayload(
 }
 
 function verificationPlanPayload(
-  packageRevision: NormalizedApplicationPackage,
+  packageRevision: VersionedNormalizedApplicationPackage,
 ): unknown {
   const queryById = new Map(
     packageRevision.queries.map((query) => [query.queryId, query] as const),
@@ -692,7 +694,11 @@ function verificationPlanPayload(
               ? operation.effect.entity.targetId
               : undefined;
           })();
-    if (!entityId) continue;
+    if (!entityId) {
+      throw new TypeError(
+        `verification assertion invocation was not resolved before lowering: ${assertion.assertionId}`,
+      );
+    }
     for (const evidenceKind of assertion.evidenceKinds) {
       addScenario({
         assertionId: assertion.assertionId,
