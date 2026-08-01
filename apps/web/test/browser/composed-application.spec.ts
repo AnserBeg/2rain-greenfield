@@ -25,18 +25,19 @@ import { withEphemeralPostgres } from '../../../../test/helpers/postgres.js';
 
 const applicationNamespace = 'northstar.app';
 
-test('composed Party, Catalog, Location, and Inventory product reads a real posting and persists a record', async ({
+test('composed product selects a legal entity, reads Inventory, and persists Party', async ({
   page,
 }) => {
   test.setTimeout(120_000);
   const externalBaseUrl = process.env.COMPOSED_APPLICATION_BASE_URL;
   if (externalBaseUrl) {
-    await productJourney(page, externalBaseUrl);
+    await inventoryJourney(page, externalBaseUrl);
+    await partyPersistenceJourney(page, externalBaseUrl);
     return;
   }
 
   await withEphemeralPostgres(
-    'g2-p5da-browser',
+    'g3-p6b-picker-browser',
     async ({ connection, pool }) => {
       const databaseUrl = `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`;
       let application = await startComposedApplication({
@@ -47,7 +48,8 @@ test('composed Party, Catalog, Location, and Inventory product reads a real post
       try {
         await assertSeedTrust(pool, application);
         await seedPostedInventory(pool, databaseUrl, application);
-        await productJourney(page, application.baseUrl);
+        await inventoryJourney(page, application.baseUrl);
+        await partyPersistenceJourney(page, application.baseUrl);
         await application.close();
         application = await startComposedApplication({
           databaseUrl,
@@ -65,7 +67,7 @@ test('composed Party, Catalog, Location, and Inventory product reads a real post
   );
 });
 
-async function productJourney(page: Page, baseUrl: string): Promise<void> {
+async function inventoryJourney(page: Page, baseUrl: string): Promise<void> {
   const inventoryScopeParameters = {
     movementDetail: await loadSurfaceScopeParameterId(
       'inventory_movement_detail',
@@ -224,19 +226,60 @@ async function productJourney(page: Page, baseUrl: string): Promise<void> {
   await expect(
     page.locator('[data-diagnostic-code="QUERY_LEGAL_ENTITY_SCOPE_REQUIRED"]'),
   ).toBeVisible();
-  const movementListUrl = scopedSurfaceUrl(
-    baseUrl,
-    'inventory_movement_list',
+  const legalEntityPicker = page.getByRole('navigation', {
+    name: 'Legal entity',
+  });
+  await expect(legalEntityPicker).toBeVisible();
+  await expect(legalEntityPicker).toHaveAttribute(
+    'data-scope-parameter-id',
     inventoryScopeParameters.movementList,
-    browserLegalEntityId,
   );
-  await page.goto(movementListUrl);
+  await expect(legalEntityPicker.locator('[aria-current="true"]')).toHaveCount(
+    0,
+  );
+  const defaultLegalEntity = legalEntityPicker.getByRole('link', {
+    name: COMPOSED_APPLICATION_INVENTORY_SCOPE.entityCode,
+  });
+  const defaultLegalEntityHref = await defaultLegalEntity.getAttribute('href');
+  expect(defaultLegalEntityHref).not.toBeNull();
+  expect(
+    new URL(defaultLegalEntityHref ?? '', baseUrl).searchParams.get(
+      inventoryScopeParameters.movementList,
+    ),
+  ).toBe(browserLegalEntityId);
+  await page.setViewportSize({ height: 844, width: 390 });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
+  await page.setViewportSize({ height: 720, width: 1280 });
+  await defaultLegalEntity.click();
   await expect(
     page.getByRole('heading', { level: 1, name: 'Inventory movement list' }),
   ).toBeVisible();
-  const movementRow = page.locator('tr', {
+  let movementRow = page.locator('tr', {
     hasText: 'browser-posted-adjustment',
   });
+  await expect(movementRow).toBeVisible();
+  await page
+    .getByRole('navigation', { name: 'Legal entity' })
+    .getByRole('link', { name: browserAlternateInventoryScope.entityCode })
+    .click();
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'Inventory movement list' }),
+  ).toBeVisible();
+  await expect(movementRow).toHaveCount(0);
+  expect(
+    new URL(page.url()).searchParams.get(inventoryScopeParameters.movementList),
+  ).toBe(browserAlternateLegalEntityId);
+  await page
+    .getByRole('navigation', { name: 'Legal entity' })
+    .getByRole('link', {
+      name: COMPOSED_APPLICATION_INVENTORY_SCOPE.entityCode,
+    })
+    .click();
+  movementRow = page.locator('tr', { hasText: 'browser-posted-adjustment' });
   await expect(movementRow).toBeVisible();
   await expect(
     page.getByRole('link', { name: 'New', exact: true }),
@@ -254,14 +297,22 @@ async function productJourney(page: Page, baseUrl: string): Promise<void> {
     page.locator('[data-platform-slot="record:commandBar"]'),
   ).toHaveCount(0);
 
-  await page.goto(
-    scopedSurfaceUrl(
-      baseUrl,
-      'inventory_transaction_list',
+  const scopedInventoryNavigation = page
+    .getByRole('navigation', { name: 'Release navigation' })
+    .locator('.navigation-tree > li')
+    .getByRole('group')
+    .filter({ hasText: 'Inventory' });
+  await scopedInventoryNavigation
+    .getByText('Inventory', { exact: true })
+    .click();
+  await scopedInventoryNavigation
+    .getByRole('link', { name: 'Inventory transaction', exact: true })
+    .click();
+  expect(
+    new URL(page.url()).searchParams.get(
       inventoryScopeParameters.transactionList,
-      browserLegalEntityId,
     ),
-  );
+  ).toBe(browserLegalEntityId);
   const transactionRow = page.locator('tr', { hasText: 'ADJ-BROWSER-001' });
   await expect(transactionRow).toBeVisible();
   await expect(
@@ -335,7 +386,12 @@ async function productJourney(page: Page, baseUrl: string): Promise<void> {
   });
   expect(refusedWrite.status()).toBe(422);
   expect(await refusedWrite.text()).toContain('OPERATION_UNSUPPORTED');
+}
 
+async function partyPersistenceJourney(
+  page: Page,
+  baseUrl: string,
+): Promise<void> {
   await page.goto(surfaceUrl(baseUrl, 'party_list'));
   await page.getByRole('link', { name: 'New', exact: true }).click();
   await expect(
@@ -449,7 +505,9 @@ async function productJourney(page: Page, baseUrl: string): Promise<void> {
   ).toHaveCount(1);
   await expect(page.locator('[data-platform-slot^="record:"]')).toHaveCount(0);
 
-  await page.goto(surfaceUrl(baseUrl, 'party_list'));
+  await page.goto(
+    `${surfaceUrl(baseUrl, 'party_list')}&q=${encodeURIComponent('Browser-persisted Party')}`,
+  );
   await expect(
     page.locator('tr', { hasText: 'Browser-persisted Party' }),
   ).toHaveCount(0);
@@ -489,6 +547,13 @@ async function productJourney(page: Page, baseUrl: string): Promise<void> {
 }
 
 const browserLegalEntityId = COMPOSED_APPLICATION_INVENTORY_SCOPE.legalEntityId;
+const browserAlternateLegalEntityId = '74000000-0000-4000-8000-000000000009';
+const browserAlternateInventoryScope = Object.freeze({
+  ...COMPOSED_APPLICATION_INVENTORY_SCOPE,
+  entityCode: 'SECOND',
+  entityName: 'Second legal entity',
+  legalEntityId: browserAlternateLegalEntityId,
+});
 const browserTransactionId = '74000000-0000-4000-8000-000000000002';
 const browserTransactionLineId = '74000000-0000-4000-8000-000000000003';
 const browserPostingIdempotencyKey = '74000000-0000-4000-8000-000000000004';
@@ -520,6 +585,7 @@ async function seedPostedInventory(
   expect(provisioned.rows).toEqual([
     { contract_release_root: application.runtime.releaseRoot },
   ]);
+  await provisionBrowserLegalEntity(adminPool, application);
 
   await application.runtime.entry.run(
     { headers: { authorization: 'browser-inventory-posting' } },
@@ -647,6 +713,43 @@ async function seedPostedInventory(
   );
 }
 
+async function provisionBrowserLegalEntity(
+  pool: pg.Pool,
+  application: Awaited<ReturnType<typeof startComposedApplication>>,
+): Promise<void> {
+  const identity = application.runtime.identity;
+  const scope = browserAlternateInventoryScope;
+  await pool.query(
+    `SELECT platform.provision_inventory_scope(
+       $1,$2,$3,$4,$5,$6,$7,$8,$9::smallint,$10,$11,
+       $12,$13,$14,$15,$16,$17,$18,$19,$20,$21
+     )`,
+    [
+      identity.tenantId,
+      identity.environmentId,
+      scope.legalEntityId,
+      scope.entityCode,
+      scope.entityName,
+      scope.timeZone,
+      scope.businessDayBoundary,
+      application.runtime.releaseRoot,
+      scope.configurationVersion,
+      scope.negativeStock,
+      scope.maximumBackdateDays,
+      scope.adjustmentReasonRequirement,
+      scope.transferReasonRequirement,
+      scope.countReasonRequirement,
+      scope.correctionReasonRequirement,
+      scope.rebaselineReasonRequirement,
+      scope.adjustmentApprovalThreshold,
+      scope.transferApprovalThreshold,
+      scope.countApprovalThreshold,
+      scope.correctionApprovalThreshold,
+      scope.rebaselineApprovalThreshold,
+    ],
+  );
+}
+
 async function expectDatabaseRole(
   pool: pg.Pool,
   expected: {
@@ -730,6 +833,7 @@ async function seedInventoryDraft(
   context: ReturnType<typeof trustedContextForRequestRuntimeView>,
   target: StorageTargetPayloadV1,
 ): Promise<void> {
+  const legalEntity = storageEntity(target, 'legal_entity');
   const transaction = storageEntity(target, 'inventory_transaction');
   const transactionLine = storageEntity(target, 'inventory_transaction_line');
   const client = await pool.connect();
@@ -748,6 +852,22 @@ async function seedInventoryDraft(
       ],
     );
     await client.query('SET LOCAL ROLE north_star_module_runtime');
+    await insertStorageEntity(client, target, legalEntity, {
+      legalEntityId: null,
+      recordId: browserAlternateLegalEntityId,
+      relations: {},
+      values: {
+        legal_entity_code: browserAlternateInventoryScope.entityCode,
+        legal_entity_is_default: false,
+        legal_entity_name: browserAlternateInventoryScope.entityName,
+        legal_entity_status: enumOption(
+          legalEntity,
+          'legal_entity_status',
+          'active',
+        ),
+      },
+      context,
+    });
     await insertStorageEntity(client, target, transaction, {
       legalEntityId: browserLegalEntityId,
       recordId: browserTransactionId,
