@@ -2,8 +2,8 @@
 
 Lane: FIX · Tier: Behavioral · Branch: `packet/berr` · Initial base: `718b668`
 
-Status: implementation, required packet gates, and Behavioral review complete;
-full matrix pending.
+Status: implementation, required packet gates, Behavioral review, and full
+matrix complete; evidence ready for the user checkpoint.
 
 ## Outcome
 
@@ -75,5 +75,7 @@ producer inventory.
   `4b420c3f76c3e44f22f0cf652a5f558655eb19f7`: **VERDICT: PASS**, no in-scope
   material findings. Result:
   `~/2rain-missions/5g3-berr-codex-review-4b420c3.last-message.txt`.
-
-Full-matrix evidence will be added at the final docs-only descendant SHA.
+- The shared machine was confirmed free of another matrix before measurement;
+  this lane ran no other gate, review, or authoring process during its matrix.
+- Full matrix on the executable-identical docs descendant:
+  `FULL_MATRIX_PASS_SHA=a708f49ae7d788b843b9b5a67af0bbc6e5be509b`.
