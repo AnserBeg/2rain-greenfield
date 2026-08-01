@@ -31,12 +31,13 @@ and performs its restart before asserting persisted state.
 ## Assertion parity
 
 The source contains 140 `expect(...)` call sites before and after the split.
-An AST comparison also extracted 134 complete matcher-call expressions from
-`main` and the working tree and found the sorted normalized multisets identical;
-no assertion subject or matcher changed. The six-call difference is chained
-syntax that still contains an `expect(...)` source call. The only formerly
-top-level assertion was the Party readback after restart; it moved into the
-Party test after the fixture's restart callback.
+The fresh reviewer independently extracted all 140 complete matcher-call
+expressions from `main` and the candidate; both sorted normalized multisets
+have SHA-256
+`c414a087dae36d20b89379037bd53a70623f28bd9bfa7fee1849a08ee580f490`.
+No assertion subject or matcher changed. The only formerly top-level assertion
+was the Party readback after restart; it moved into the Party test after the
+fixture's restart callback.
 
 ## Measured controls
 
