@@ -931,17 +931,17 @@ interface VerificationOperationContract {
   readonly operationId: string;
 }
 
-  interface VerificationQueryContract {
-    readonly legalEntityScope?: {
-      readonly cardinality: 'exactlyOne' | 'nonEmptySet';
-      readonly kind: 'queryLegalEntityScope';
-      readonly operand: {
-        readonly kind: 'queryParameterReference';
-        readonly parameterId: string;
-        readonly schemaVersion: 'v4';
-      };
+interface VerificationQueryContract {
+  readonly legalEntityScope?: {
+    readonly cardinality: 'exactlyOne' | 'nonEmptySet';
+    readonly kind: 'queryLegalEntityScope';
+    readonly operand: {
+      readonly kind: 'queryParameterReference';
+      readonly parameterId: string;
       readonly schemaVersion: 'v4';
     };
+    readonly schemaVersion: 'v4';
+  };
   readonly queryId: string;
   readonly queryType: 'aggregate' | 'get' | 'list' | 'resolve' | 'search';
   readonly resolveMatchKeys: readonly {
