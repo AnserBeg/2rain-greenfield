@@ -444,17 +444,14 @@ class ValidatedPinnedStorageTargetCache {
     }
 
     this.#notify(key, 'cacheMiss');
-    let loading!: Promise<StorageTargetPayloadV1>;
-    loading = (async () => {
+    const loading = (async () => {
       try {
         const target = await load((kind) => this.#notify(key, kind));
         this.#validated.set(identity, target);
         this.#notify(key, 'cachePopulated');
         return target;
       } finally {
-        if (this.#inFlight.get(identity) === loading) {
-          this.#inFlight.delete(identity);
-        }
+        this.#inFlight.delete(identity);
       }
     })();
     this.#inFlight.set(identity, loading);
