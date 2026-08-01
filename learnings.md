@@ -281,3 +281,8 @@ How to apply: build verification completeness from the authoritative canonical r
 Date: 2026-07-31
 Why: `ver-agg` first restored aggregate scenarios to the authoritative plan, but the provider still dispatched them through the row-query ingress, so the new scenarios could never execute successfully.
 How to apply: trace each scenario through its production dispatcher and require an observed positive or exact typed refusal; pair plan-emission controls with downstream execution controls and a non-refusing negative arm.
+
+## Classify unreachable guards as backstops
+Date: 2026-07-31
+Why: `ver-agg` credited compile-failure controls to a lowering throw, but two earlier fail-closed validators made that throw unreachable through the production compiler entry point.
+How to apply: trace the complete ingress order before naming a victim; if earlier authority prevents reachability, retain the guard as defence in depth and record what cannot be observed rather than bypassing validators to manufacture a red.
