@@ -60,6 +60,7 @@ import {
   type SemanticQueryExecutor,
 } from '../../runtime/src/semantic-query-gateway.js';
 import {
+  type ModuleProviderErrorMapping,
   ModuleRuntimeInterpreterError,
   PostgresModuleRuntimeInterpreter,
 } from './module-runtime-interpreter.js';
@@ -182,7 +183,10 @@ export class ReleaseVerificationIntegrityError extends Error {
 }
 
 export class PostgresReleaseVerificationService {
-  constructor(private readonly pool: Pool) {}
+  constructor(
+    private readonly pool: Pool,
+    private readonly providerErrorMappings: readonly ModuleProviderErrorMapping[] = [],
+  ) {}
 
   async #executeAndPersist(
     context: TrustedRequestContext,
@@ -272,6 +276,7 @@ export class PostgresReleaseVerificationService {
     const interpreter = new PostgresModuleRuntimeInterpreter(
       this.pool,
       verificationActorIssuer(),
+      this.providerErrorMappings,
     );
     return this.#executeSemanticCandidateWithExecutorAndPersist(
       context,

@@ -295,3 +295,8 @@ How to apply: before relying on a canonical lifecycle declaration, trace it into
 Date: 2026-07-31
 Why: G3-P6a's omission probe enumerated the query catalog it audited, so a dropped query vanished from the probe; derivation admission likewise trusted the producer's eligibility claim.
 How to apply: derive mandatory subjects from an independent compiled artifact and recompute exclusion eligibility in a negative control; never let the producer or collection under test certify its own completeness. See `docs/execution/packets/G3-P6a.md`.
+
+## Preserve safe provider diagnostics at translation boundaries
+Date: 2026-07-31
+Why: Unrecognised PostgreSQL failures were flattened to generic codes, making composed-product failures undiagnosable without temporary instrumentation.
+How to apply: retain stable refusal codes while carrying only allowlisted schema metadata (SQLSTATE, relation, constraint, column); inject domain-typed mappings from modules and prove raw messages, DETAIL, rows, queries, and parameters cannot escape. See `docs/execution/packets/5g3-berr.md`.
