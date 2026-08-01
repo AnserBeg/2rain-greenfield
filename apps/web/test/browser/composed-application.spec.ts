@@ -45,7 +45,7 @@ interface ComposedWorkerFixtures {
 
 const composedTest = test.extend<object, ComposedWorkerFixtures>({
   composedApplication: [
-    async (_fixtures, use) => {
+    async ({ browserName }, use) => {
       const externalBaseUrl = process.env.COMPOSED_APPLICATION_BASE_URL;
       if (externalBaseUrl) {
         await use({
@@ -56,7 +56,7 @@ const composedTest = test.extend<object, ComposedWorkerFixtures>({
       }
 
       await withEphemeralPostgres(
-        'composed-browser-journeys',
+        `composed-${browserName}-journeys`,
         async ({ connection, pool }) => {
           const databaseUrl = `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`;
           let application: ComposedApplication | undefined =

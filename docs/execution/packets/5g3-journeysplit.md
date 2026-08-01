@@ -88,4 +88,11 @@ packet it is intended to unblock.
 - `corepack pnpm typecheck`: PASS.
 - `corepack pnpm test:browser`: PASS (22 tests in 108.64 s).
 - `corepack pnpm test:architecture`: PASS (101 tests).
-- Full matrix and Behavioral review: pending.
+- Fresh Behavioral Codex xhigh review: PASS on `34942772`; the subsequent
+  assertion-evidence correction was docs-only.
+- Full matrix `1b3abc37`: FAILED after 139/139 PostgreSQL tests when CI-mode
+  Playwright rejected a named fixture argument rather than its required object
+  destructuring pattern. The replacement destructures the built-in
+  worker-scoped `browserName`, uses it in the ephemeral resource label, and
+  passes the exact `CI=1 corepack pnpm test:browser` path (22 tests).
+- Replacement full matrix and fresh review: pending.
