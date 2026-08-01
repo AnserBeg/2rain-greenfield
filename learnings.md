@@ -291,10 +291,30 @@ Date: 2026-07-30
 Why: Party, Catalog, Location, and Inventory all declare empty `stateMachines` arrays, while the generic module runtime consumes no state-machine definition at all; the language concept therefore supplies no terminal-state protection today.
 How to apply: before relying on a canonical lifecycle declaration, trace it into an executed runtime consumer and prove terminal-state mutation is refused. Treat declaration without consumption as a hollow contract, not enforcement.
 
+## Keep verification authority out of compatibility aliases
+Date: 2026-07-31
+Why: `ver-agg` passed a v2 physical-family alias into verification-plan lowering, so valid v3/v4 aggregate assertions disappeared even though the original canonical revision retained them.
+How to apply: build verification completeness from the authoritative canonical revision; pass compatibility aliases only to the physical families that require them, and prove every active assertion is emitted or fails with its own typed diagnostic. See `docs/execution/current-plan.md` row `ver-agg`.
+
+## Prove verification scenarios execute, not merely emit
+Date: 2026-07-31
+Why: `ver-agg` first restored aggregate scenarios to the authoritative plan, but the provider still dispatched them through the row-query ingress, so the new scenarios could never execute successfully.
+How to apply: trace each scenario through its production dispatcher and require an observed positive or exact typed refusal; pair plan-emission controls with downstream execution controls and a non-refusing negative arm.
+
+## Classify unreachable guards as backstops
+Date: 2026-07-31
+Why: `ver-agg` credited compile-failure controls to a lowering throw, but earlier fail-closed decode and validation barriers made that throw unreachable through the production compiler entry point.
+How to apply: trace the complete ingress order before naming a victim; if earlier authority prevents reachability, retain the guard as defence in depth and record what cannot be observed rather than bypassing validators to manufacture a red.
+
 ## Audit from an authority independent of the subject
 Date: 2026-07-31
 Why: G3-P6a's omission probe enumerated the query catalog it audited, so a dropped query vanished from the probe; derivation admission likewise trusted the producer's eligibility claim.
 How to apply: derive mandatory subjects from an independent compiled artifact and recompute exclusion eligibility in a negative control; never let the producer or collection under test certify its own completeness. See `docs/execution/packets/G3-P6a.md`.
+
+## Preserve safe provider diagnostics at translation boundaries
+Date: 2026-07-31
+Why: Unrecognised PostgreSQL failures were flattened to generic codes, making composed-product failures undiagnosable without temporary instrumentation.
+How to apply: retain stable refusal codes while carrying only allowlisted schema metadata (SQLSTATE, relation, constraint, column); inject domain-typed mappings from modules and prove raw messages, DETAIL, rows, queries, and parameters cannot escape. See `docs/execution/packets/5g3-berr.md`.
 
 ## Measure process work, and serialize the measurement mechanically
 Date: 2026-07-31
@@ -325,3 +345,8 @@ How to apply: admit timing work from a short direct `/proc/stat` CPU-idle delta;
 Date: 2026-08-01
 Why: a matrix bounded its initial lock acquisition but converted exclusive to shared with an unbounded call; a live exclusive waiter can win the non-atomic conversion gap and stall the runner indefinitely.
 How to apply: bound and execute-control every acquisition and conversion path. Treat terminated holders as released by the kernel; diagnose waits on live holders, not stale lock files. See `docs/execution/packets/gate-perf.md`.
+
+## Preserve operand multiplicity until canonical validation
+Date: 2026-08-01
+Why: G3-P6b-2 collapsed a repeated legal-entity URL operand to its first value, letting a malformed two-entity request answer as one entity instead of reaching ADR-0031's cardinality refusal.
+How to apply: carry every transport value to the canonical argument kernel, render no choice as selected when multiplicity is invalid, and prove the collapse mutation returns a value where the control requires a typed refusal.

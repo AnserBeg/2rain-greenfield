@@ -264,7 +264,9 @@ async function requireCompactJourney(
   const expectedNavigation = surfaces
     .filter(
       (candidate) =>
-        candidate.archetype === 'home' || candidate.archetype === 'list',
+        candidate.archetype === 'home' ||
+        candidate.archetype === 'list' ||
+        candidate.archetype === 'task',
     )
     .map((candidate) =>
       candidate.archetype === 'list'

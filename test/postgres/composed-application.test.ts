@@ -45,6 +45,7 @@ import {
   parseCompiledApplication,
   type ComposedApplicationRuntime,
 } from '../../packages/postgres-provider/src/composed-application-runtime.js';
+import { INVENTORY_PROVIDER_ERROR_MAPPINGS } from '../../packages/postgres-provider/src/inventory-provider-error-mappings.js';
 import { PostgresReleaseActivationService } from '../../packages/postgres-provider/src/release-activation-service.js';
 import { PostgresReleaseApprovalService } from '../../packages/postgres-provider/src/release-approval-service.js';
 import { PostgresImmutableReleaseRepository } from '../../packages/postgres-provider/src/release-repository.js';
@@ -552,7 +553,7 @@ async function assertRealProductDefinition(
         surfaces: readonly { surfaceId: string }[];
       }
     ).surfaces.map((surface) => surface.surfaceId);
-    assert.equal(surfaces.length, 31);
+    assert.equal(surfaces.length, 32);
     assert.ok(surfaces.includes(APPLICATION_IDS.party.listSurfaceId));
     assert.ok(surfaces.includes(APPLICATION_IDS.catalog.listSurfaceId));
     assert.ok(surfaces.includes(APPLICATION_IDS.location.listSurfaceId));
@@ -560,6 +561,7 @@ async function assertRealProductDefinition(
     // unarrangeable verification scenarios are recorded as derivations.
     for (const inventorySurfaceId of [
       'northstar.app:surface.inventory_movement_list',
+      'northstar.app:surface.inventory_on_hand_lookup',
       'northstar.app:surface.inventory_period_lock_list',
       'northstar.app:surface.inventory_transaction_list',
       'northstar.app:surface.legal_entity_list',
@@ -2639,6 +2641,7 @@ function createRuntime(
     databaseUrl,
     inventoryScopeProvisioning: COMPOSED_APPLICATION_INVENTORY_SCOPE,
     migrationsDirectory,
+    providerErrorMappings: INVENTORY_PROVIDER_ERROR_MAPPINGS,
     ...(releaseSelection ? { releaseSelection } : {}),
     tenantSlug,
   });

@@ -165,6 +165,11 @@ export const COMPILER_DIAGNOSTIC_COPY = Object.freeze({
       'compile first-party input only until the tracked sandbox release gate is satisfied',
     rule: 'tenant-authored or AI-authored definitions require the deferred sandbox release gate',
   },
+  COMPILER_VERIFICATION_ASSERTION_INVOCATION_UNRESOLVED: {
+    acceptedAlternative:
+      'reference a query or entity-backed operation that can produce a verification scenario, or add a governed per-scenario derivation',
+    rule: 'every active assertion resolves to exactly one compiler-emitted verification scenario subject',
+  },
 } as const);
 
 export type CompilerDiagnosticCode = keyof typeof COMPILER_DIAGNOSTIC_COPY;

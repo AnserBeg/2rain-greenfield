@@ -7,8 +7,9 @@ import {
 } from '../../../packages/compiler/src/protocol.js';
 import type { RegisteredOperationDefinition } from '../../../packages/runtime/src/semantic-operation-gateway.js';
 import {
-  registeredQueryFromPinnedView,
+  registeredSemanticQueryFromPinnedView,
   type RegisteredQueryDefinition,
+  type RegisteredSemanticQueryDefinition,
 } from '../../../packages/runtime/src/semantic-query-gateway.js';
 
 export {
@@ -100,7 +101,7 @@ export interface CompiledSurfaceOperationBinding {
 export interface CompiledSurfaceDataBinding {
   readonly displayFieldId: string | null;
   readonly operations: readonly CompiledSurfaceOperationBinding[];
-  readonly query: RegisteredQueryDefinition;
+  readonly query: RegisteredSemanticQueryDefinition;
 }
 
 export interface CompiledSurfaceManifest {
@@ -137,18 +138,24 @@ export function readCompiledSurfaceDataBinding(
   surface: CompiledSurfaceDefinition,
 ): CompiledSurfaceDataBinding {
   assertRequestRuntimeView(view);
-  const query = registeredQueryFromPinnedView(view, surface.dataSourceQueryId);
+  const query = registeredSemanticQueryFromPinnedView(
+    view,
+    surface.dataSourceQueryId,
+  );
   if (!query) {
     throw invalidBinding(
       'surface query is not registered in the pinned release',
     );
   }
-  if (!surfaceRoleAcceptsQuery(surface.surfaceRole, query.queryType)) {
+  if (!surfaceAcceptsQuery(surface, query.queryType)) {
     throw invalidBinding(
       'surface role is incompatible with the pinned data-source query kind',
     );
   }
-  const queryFieldIds = query.selections.map((selection) => selection.fieldId);
+  const queryFieldIds =
+    query.queryType === 'aggregate'
+      ? []
+      : query.selections.map((selection) => selection.fieldId);
   if (
     queryFieldIds.length !== surface.fieldIds.length ||
     queryFieldIds.some((fieldId, index) => fieldId !== surface.fieldIds[index])
@@ -156,6 +163,14 @@ export function readCompiledSurfaceDataBinding(
     throw invalidBinding(
       'surface fields do not match the pinned data-source query selections',
     );
+  }
+
+  if (query.queryType === 'aggregate') {
+    return Object.freeze({
+      displayFieldId: null,
+      operations: Object.freeze([]),
+      query,
+    });
   }
 
   const projection = view.projections.operation;
@@ -253,15 +268,17 @@ function displayFieldIdFromPinnedQueries(
   return keys[0]?.fieldId ?? null;
 }
 
-function surfaceRoleAcceptsQuery(
-  surfaceRole: CompiledSurfaceRole | null,
-  queryType: RegisteredQueryDefinition['queryType'],
+function surfaceAcceptsQuery(
+  surface: CompiledSurfaceDefinition,
+  queryType: RegisteredSemanticQueryDefinition['queryType'],
 ): boolean {
-  return surfaceRole === 'list'
-    ? queryType === 'list' || queryType === 'search'
-    : surfaceRole === 'form' || surfaceRole === 'record'
-      ? queryType === 'get' || queryType === 'resolve'
-      : false;
+  return surface.archetype === 'task' && surface.surfaceRole === null
+    ? queryType === 'aggregate'
+    : surface.surfaceRole === 'list'
+      ? queryType === 'list' || queryType === 'search'
+      : surface.surfaceRole === 'form' || surface.surfaceRole === 'record'
+        ? queryType === 'get' || queryType === 'resolve'
+        : false;
 }
 
 /**
@@ -466,7 +483,9 @@ function isNavigationSurface(surface: CompiledSurfaceDefinition): boolean {
   return (
     surface.surfaceRole === 'list' ||
     (surface.surfaceRole === null &&
-      (surface.archetype === 'list' || surface.archetype === 'home'))
+      (surface.archetype === 'list' ||
+        surface.archetype === 'home' ||
+        surface.archetype === 'task'))
   );
 }
 

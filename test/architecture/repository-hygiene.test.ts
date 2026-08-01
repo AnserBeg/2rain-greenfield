@@ -28,6 +28,7 @@ const suiteDefinitions = [
       'test/unit/canonical-model/predicate-admission.test.ts',
       'test/unit/catalog-definition.test.ts',
       'test/unit/location-definition.test.ts',
+      'test/unit/module-provider-error-mappings.test.ts',
       'test/unit/observability.test.ts',
       'test/unit/party-definition.test.ts',
       'test/unit/web-surface-hex-literal-ratchet.test.ts',
@@ -109,6 +110,7 @@ const suiteDefinitions = [
     expectedFiles: [
       'test/postgres/catalog-runtime.test.ts',
       'test/postgres/composed-application.test.ts',
+      'test/postgres/inventory-onhand.test.ts',
       'test/postgres/inventory-posting.test.ts',
       'test/postgres/inventory-stock-count.test.ts',
       'test/postgres/inventory-storage.test.ts',

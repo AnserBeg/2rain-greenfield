@@ -107,19 +107,62 @@ export interface StorageLegalEntityReadScopeRequirement {
   readonly kind: 'legalEntity';
 }
 
+export interface AggregateCacheObservation {
+  readonly cacheKey: string;
+  readonly kind: 'anchor-discrepancy' | 'cache-hit' | 'ledger-recomputation';
+  readonly queryId: string;
+}
+
+export interface ModuleProviderErrorMetadata {
+  readonly columnName: string | null;
+  readonly constraintName: string | null;
+  readonly relationName: string | null;
+  readonly sqlstate: string;
+}
+
+export interface ModuleProviderErrorMappingInput {
+  readonly detail: string | null;
+  readonly metadata: ModuleProviderErrorMetadata;
+  readonly providerMessage: string;
+  readonly subjectId: string;
+}
+
+export interface ModuleProviderErrorMappingResult {
+  readonly code: string;
+  readonly details: Readonly<Record<string, string>>;
+  readonly message: string;
+  readonly subjectId: string | null;
+}
+
+export interface ModuleProviderErrorMapping {
+  readonly providerMessage: string;
+  readonly sqlstate: string;
+  translate(
+    input: ModuleProviderErrorMappingInput,
+  ): ModuleProviderErrorMappingResult | null;
+}
+
 interface VerifiedLegalEntityReadScope {
   readonly legalEntityIds: readonly string[];
 }
 
 export class ModuleRuntimeInterpreterError extends Error {
   override readonly name = 'ModuleRuntimeInterpreterError';
+  readonly details: Readonly<Record<string, string>>;
+  readonly providerMetadata: ModuleProviderErrorMetadata | null;
 
   constructor(
     readonly code: string,
     message: string,
     readonly subjectId: string | null = null,
+    details: Readonly<Record<string, string>> = Object.freeze({}),
+    providerMetadata: ModuleProviderErrorMetadata | null = null,
   ) {
     super(message);
+    this.details = Object.freeze({ ...details });
+    this.providerMetadata = providerMetadata
+      ? Object.freeze({ ...providerMetadata })
+      : null;
   }
 }
 
@@ -130,12 +173,20 @@ export class ModuleRuntimeInterpreterError extends Error {
 export class PostgresModuleRuntimeInterpreter
   implements SemanticQueryExecutor, SemanticOperationExecutor
 {
+  readonly #providerErrorMappings: readonly ModuleProviderErrorMapping[];
   readonly #trust: PostgresTrustService;
 
   constructor(
     private readonly pool: Pool,
     private readonly actorIssuer: TrustedActorEnvelopeIssuer,
+    providerErrorMappings: readonly ModuleProviderErrorMapping[] = [],
+    private readonly observeAggregateCache:
+      | ((observation: AggregateCacheObservation) => void)
+      | undefined = undefined,
   ) {
+    this.#providerErrorMappings = validatedProviderErrorMappings(
+      providerErrorMappings,
+    );
     this.#trust = new PostgresTrustService(pool);
   }
 
@@ -220,12 +271,21 @@ export class PostgresModuleRuntimeInterpreter
         async (client) => {
           const storage = await loadPinnedStorageTarget(client, request);
           return withModuleRuntimeRole(client, () =>
-            executeQueryOnClient(client, storage, request),
+            executeQueryOnClient(
+              client,
+              storage,
+              request,
+              this.observeAggregateCache,
+            ),
           );
         },
       );
     } catch (error) {
-      throw providerBoundaryFailure(error, request.definition.sourceEntityId);
+      throw providerBoundaryFailure(
+        error,
+        request.definition.sourceEntityId,
+        this.#providerErrorMappings,
+      );
     }
   }
 
@@ -283,6 +343,7 @@ export class PostgresModuleRuntimeInterpreter
               error,
               currentStorage,
               currentEntity.entityId,
+              this.#providerErrorMappings,
             );
           }
         });
@@ -919,14 +980,10 @@ async function executeQueryOnClient(
   storage: StorageTargetPayloadV1,
   request:
     SemanticAggregateQueryExecutionRequest | SemanticQueryExecutionRequest,
+  observeAggregateCache:
+    ((observation: AggregateCacheObservation) => void) | undefined,
 ): Promise<SemanticAggregateResultEnvelope | SemanticQueryResultEnvelope> {
-  const {
-    arguments: argumentValue,
-    definition,
-    filterPlans,
-    list,
-    parameterValues,
-  } = request;
+  const { arguments: argumentValue, definition, filterPlans, list } = request;
   const entity = requiredEntity(storage, definition.sourceEntityId);
   const relationPlans =
     definition.queryType === 'list' && list
@@ -944,10 +1001,9 @@ async function executeQueryOnClient(
     return executeAggregateQuery(
       client,
       entity,
-      definition,
-      filterPlans,
-      parameterValues,
+      request as SemanticAggregateQueryExecutionRequest,
       readScope,
+      observeAggregateCache,
     );
   }
   if (!definition.infrastructure) {
@@ -1066,11 +1122,12 @@ async function executeQueryOnClient(
 async function executeAggregateQuery(
   client: PoolClient,
   entity: StorageEntity,
-  definition: RegisteredAggregateQueryDefinition,
-  filterPlans: readonly QueryFilterLoweringPlan[],
-  parameterValues: Readonly<Record<string, ImmutableJsonValue>>,
+  request: SemanticAggregateQueryExecutionRequest,
   readScope: VerifiedLegalEntityReadScope | null,
+  observeAggregateCache:
+    ((observation: AggregateCacheObservation) => void) | undefined,
 ): Promise<SemanticAggregateResultEnvelope> {
+  const { definition, filterPlans, parameterValues } = request;
   const aggregate = definition.aggregate;
   if (
     !aggregate ||
@@ -1107,6 +1164,129 @@ async function executeAggregateQuery(
     throw failure(
       'MODULE_AGGREGATE_CONTRACT_INVALID',
       'aggregate source does not match the compiled required exact-numeric contract',
+      aggregate.fieldId,
+    );
+  }
+
+  // The anchor contract is scoped by an issued business dimension. Existing
+  // tenant-shared aggregates retain their uncached behavior.
+  if (!readScope) {
+    return executeAggregateLedgerQuery(
+      client,
+      entity,
+      definition,
+      filterPlans,
+      parameterValues,
+      readScope,
+    );
+  }
+
+  await client.query(
+    'SELECT pg_advisory_xact_lock_shared(hashtextextended($1, 0))',
+    [
+      aggregateGenerationLockKey(
+        request.context.tenantId,
+        request.context.environmentId,
+      ),
+    ],
+  );
+  const movementGeneration = await loadAggregateMovementGeneration(
+    client,
+    request.context.tenantId,
+    request.context.environmentId,
+  );
+  const identity = aggregateCacheIdentity(
+    request,
+    readScope,
+    movementGeneration,
+  );
+  await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [
+    identity.cacheKey,
+  ]);
+  const anchor = await loadAggregateAnchor(client, identity);
+  if (anchor) {
+    const cached = aggregateResultFromAnchor(definition, anchor);
+    const expectedAnchorDigest = aggregateAnchorDigest(identity, cached);
+    const anchorIntegrityMatches =
+      aggregateAnchorMatchesIdentity(anchor, identity) &&
+      anchor.anchor_digest === expectedAnchorDigest;
+    if (anchorIntegrityMatches) {
+      observeAggregateCacheSafely(observeAggregateCache, {
+        cacheKey: identity.cacheKey,
+        kind: 'cache-hit',
+        queryId: definition.queryId,
+      });
+      // Victim for the cache-hit control: deleting this return makes every
+      // consistent anchor fall through to a ledger recomputation.
+      return cached;
+    }
+    const recomputed = await executeAggregateLedgerQuery(
+      client,
+      entity,
+      definition,
+      filterPlans,
+      parameterValues,
+      readScope,
+    );
+    observeAggregateCacheSafely(observeAggregateCache, {
+      cacheKey: identity.cacheKey,
+      kind: 'ledger-recomputation',
+      queryId: definition.queryId,
+    });
+    await recordAggregateAnchorDiscrepancy(
+      client,
+      identity,
+      anchor,
+      expectedAnchorDigest,
+      recomputed,
+    );
+    observeAggregateCacheSafely(observeAggregateCache, {
+      cacheKey: identity.cacheKey,
+      kind: 'anchor-discrepancy',
+      queryId: definition.queryId,
+    });
+    if (!anchorIntegrityMatches) {
+      // Victim for the no-stale-answer control: deleting this line falls
+      // through to the preserved (and deliberately bad) cached value.
+      return recomputed;
+    }
+    return cached;
+  }
+
+  const recomputed = await executeAggregateLedgerQuery(
+    client,
+    entity,
+    definition,
+    filterPlans,
+    parameterValues,
+    readScope,
+  );
+  observeAggregateCacheSafely(observeAggregateCache, {
+    cacheKey: identity.cacheKey,
+    kind: 'ledger-recomputation',
+    queryId: definition.queryId,
+  });
+  await insertAggregateAnchor(client, identity, recomputed);
+  return recomputed;
+}
+
+async function executeAggregateLedgerQuery(
+  client: PoolClient,
+  entity: StorageEntity,
+  definition: RegisteredAggregateQueryDefinition,
+  filterPlans: readonly QueryFilterLoweringPlan[],
+  parameterValues: Readonly<Record<string, ImmutableJsonValue>>,
+  readScope: VerifiedLegalEntityReadScope | null,
+): Promise<SemanticAggregateResultEnvelope> {
+  const aggregate = definition.aggregate;
+  const column = entity.columns.find(
+    (candidate) => candidate.canonicalFieldId === aggregate.fieldId,
+  );
+  const scale = Number(aggregate.resultType.scale);
+  if (!column) {
+    throw failure(
+      'MODULE_AGGREGATE_CONTRACT_INVALID',
+      'aggregate source has no compiled storage column',
       aggregate.fieldId,
     );
   }
@@ -1179,6 +1359,380 @@ async function executeAggregateQuery(
           kind: 'exactDecimalResult' as const,
         }),
   });
+}
+
+interface AggregateCacheIdentity {
+  readonly cacheKey: string;
+  readonly environmentId: string;
+  readonly filterPlanDigest: string;
+  readonly legalEntityIds: readonly string[];
+  readonly movementGeneration: string;
+  readonly parameterValues: Readonly<Record<string, ImmutableJsonValue>>;
+  readonly principalId: string;
+  readonly queryId: string;
+  readonly releaseContentHash: string;
+  readonly temporalHorizons: Readonly<Record<string, ImmutableJsonValue>>;
+  readonly tenantId: string;
+}
+
+interface AggregateAnchorRow {
+  readonly anchor_digest: string;
+  readonly balance_value: string;
+  readonly base_unit_id: string | null;
+  readonly cache_key: string;
+  readonly environment_id: string;
+  readonly filter_plan_digest: string;
+  readonly legal_entity_ids: string[];
+  readonly movement_generation: string;
+  readonly parameter_values: Record<string, ImmutableJsonValue>;
+  readonly principal_id: string;
+  readonly query_id: string;
+  readonly release_content_hash: string;
+  readonly result_kind: 'exactDecimalResult' | 'quantityResult';
+  readonly result_precision: number;
+  readonly result_scale: number;
+  readonly selection_id: string;
+  readonly temporal_horizons: Record<string, ImmutableJsonValue>;
+  readonly tenant_id: string;
+}
+
+function aggregateCacheIdentity(
+  request: SemanticAggregateQueryExecutionRequest,
+  readScope: VerifiedLegalEntityReadScope,
+  movementGeneration: string,
+): AggregateCacheIdentity {
+  const environmentId = canonicalAggregateUuid(
+    request.context.environmentId,
+    'environmentId',
+  );
+  const legalEntityIds = Object.freeze(
+    readScope.legalEntityIds.map((legalEntityId) =>
+      canonicalAggregateUuid(legalEntityId, 'legalEntityId'),
+    ),
+  );
+  const principalId = canonicalAggregateUuid(
+    request.context.principalId,
+    'principalId',
+  );
+  const tenantId = canonicalAggregateUuid(request.context.tenantId, 'tenantId');
+  const temporalHorizons = Object.fromEntries(
+    request.definition.parameters
+      .filter(
+        (parameter) => parameter.parameterType.kind === 'dateTimeFieldType',
+      )
+      .map((parameter) => [
+        parameter.parameterId,
+        request.parameterValues[parameter.parameterId]!,
+      ]),
+  );
+  const filterPlanDigest = aggregateCacheDigest(
+    'northstar.semantic-aggregate-filter-plans/v1',
+    request.filterPlans,
+  );
+  const keyInput = Object.freeze({
+    environmentId,
+    filterPlanDigest,
+    legalEntityIds,
+    movementGeneration,
+    parameterValues: request.parameterValues,
+    principalId,
+    queryId: request.definition.queryId,
+    releaseContentHash: request.view.release.contentHash,
+    schemaVersion: 'northstar.semantic-aggregate-anchor-key/v2',
+    tenantId,
+    temporalHorizons,
+  });
+  return Object.freeze({
+    cacheKey: aggregateCacheDigest(
+      'northstar.semantic-aggregate-anchor-key/v2',
+      keyInput,
+    ),
+    environmentId,
+    filterPlanDigest,
+    legalEntityIds,
+    movementGeneration,
+    parameterValues: request.parameterValues,
+    principalId,
+    queryId: request.definition.queryId,
+    releaseContentHash: request.view.release.contentHash,
+    temporalHorizons: Object.freeze(temporalHorizons),
+    tenantId,
+  });
+}
+
+function aggregateCacheDigest(domain: string, value: unknown): string {
+  return createHash('sha256')
+    .update(domain, 'utf8')
+    .update(Uint8Array.of(0))
+    .update(canonicalize(value), 'utf8')
+    .digest('hex');
+}
+
+function aggregateGenerationLockKey(
+  tenantId: string,
+  environmentId: string,
+): string {
+  return `northstar.semantic-aggregate-generation/v1:${canonicalAggregateUuid(tenantId, 'tenantId')}:${canonicalAggregateUuid(environmentId, 'environmentId')}`;
+}
+
+function canonicalAggregateUuid(value: string, field: string): string {
+  if (!uuidPattern.test(value)) {
+    throw failure(
+      'MODULE_AGGREGATE_IDENTITY_INVALID',
+      `aggregate ${field} must be a UUID`,
+    );
+  }
+  return value.toLowerCase();
+}
+
+function aggregateAnchorDigest(
+  identity: AggregateCacheIdentity,
+  result: SemanticAggregateResultEnvelope,
+): string {
+  return aggregateCacheDigest(
+    'northstar.semantic-aggregate-anchor-integrity/v2',
+    Object.freeze({
+      cacheKey: identity.cacheKey,
+      environmentId: identity.environmentId,
+      filterPlanDigest: identity.filterPlanDigest,
+      legalEntityIds: identity.legalEntityIds,
+      movementGeneration: identity.movementGeneration,
+      parameterValues: identity.parameterValues,
+      principalId: identity.principalId,
+      queryId: identity.queryId,
+      releaseContentHash: identity.releaseContentHash,
+      result,
+      schemaVersion: 'northstar.semantic-aggregate-anchor-integrity/v2',
+      tenantId: identity.tenantId,
+      temporalHorizons: identity.temporalHorizons,
+    }),
+  );
+}
+
+async function loadAggregateMovementGeneration(
+  client: PoolClient,
+  tenantId: string,
+  environmentId: string,
+): Promise<string> {
+  const result = await client.query<{ movement_generation: string }>(
+    `SELECT movement_generation::text AS movement_generation
+       FROM north_star_internal.semantic_aggregate_generations
+      WHERE tenant_id = $1 AND environment_id = $2`,
+    [tenantId, environmentId],
+  );
+  if (result.rowCount === 0) return '0';
+  const movementGeneration = result.rows[0]?.movement_generation;
+  if (
+    result.rowCount !== 1 ||
+    typeof movementGeneration !== 'string' ||
+    !/^[1-9][0-9]*$/u.test(movementGeneration)
+  ) {
+    throw failure(
+      'MODULE_AGGREGATE_GENERATION_INVALID',
+      'aggregate movement generation is not one positive integer',
+    );
+  }
+  return movementGeneration;
+}
+
+async function loadAggregateAnchor(
+  client: PoolClient,
+  identity: AggregateCacheIdentity,
+): Promise<AggregateAnchorRow | null> {
+  const result = await client.query<AggregateAnchorRow>(
+    `SELECT tenant_id::text AS tenant_id,
+            environment_id::text AS environment_id,
+            cache_key,
+            movement_generation::text AS movement_generation,
+            query_id,
+            principal_id::text AS principal_id,
+            release_content_hash,
+            legal_entity_ids::text[] AS legal_entity_ids,
+            parameter_values,
+            temporal_horizons,
+            filter_plan_digest,
+            result_kind,
+            selection_id,
+            balance_value,
+            result_precision,
+            result_scale,
+            base_unit_id,
+            anchor_digest
+       FROM north_star_internal.semantic_aggregate_anchors AS anchor
+      WHERE anchor.tenant_id = $1
+        AND anchor.environment_id = $2
+        AND anchor.cache_key = $3`,
+    [identity.tenantId, identity.environmentId, identity.cacheKey],
+  );
+  if (result.rowCount === 0) return null;
+  if (result.rowCount !== 1 || !result.rows[0]) {
+    throw failure(
+      'MODULE_AGGREGATE_ANCHOR_INVALID',
+      'aggregate cache key resolved more than one anchor',
+      identity.queryId,
+    );
+  }
+  return result.rows[0];
+}
+
+function aggregateAnchorMatchesIdentity(
+  anchor: AggregateAnchorRow,
+  identity: AggregateCacheIdentity,
+): boolean {
+  return (
+    anchor.tenant_id === identity.tenantId &&
+    anchor.environment_id === identity.environmentId &&
+    anchor.cache_key === identity.cacheKey &&
+    anchor.movement_generation === identity.movementGeneration &&
+    anchor.query_id === identity.queryId &&
+    anchor.principal_id === identity.principalId &&
+    anchor.release_content_hash === identity.releaseContentHash &&
+    canonicalize(anchor.legal_entity_ids) ===
+      canonicalize(identity.legalEntityIds) &&
+    canonicalize(anchor.parameter_values) ===
+      canonicalize(identity.parameterValues) &&
+    canonicalize(anchor.temporal_horizons) ===
+      canonicalize(identity.temporalHorizons) &&
+    anchor.filter_plan_digest === identity.filterPlanDigest
+  );
+}
+
+function aggregateResultFromAnchor(
+  definition: RegisteredAggregateQueryDefinition,
+  anchor: AggregateAnchorRow,
+): SemanticAggregateResultEnvelope {
+  const common = Object.freeze({
+    precision: anchor.result_precision as 38,
+    scale: anchor.result_scale,
+    selectionId: anchor.selection_id,
+    value: canonicalAggregateDecimal(anchor.balance_value),
+  });
+  return Object.freeze({
+    kind: 'semanticAggregateResult',
+    outcome: 'exact',
+    queryId: definition.queryId,
+    schemaVersion: SEMANTIC_AGGREGATE_RESULT_VERSION,
+    value:
+      anchor.result_kind === 'quantityResult'
+        ? Object.freeze({
+            ...common,
+            baseUnitId: String(anchor.base_unit_id),
+            kind: 'quantityResult' as const,
+          })
+        : Object.freeze({
+            ...common,
+            kind: 'exactDecimalResult' as const,
+          }),
+  });
+}
+
+async function insertAggregateAnchor(
+  client: PoolClient,
+  identity: AggregateCacheIdentity,
+  result: SemanticAggregateResultEnvelope,
+): Promise<void> {
+  const inserted = await client.query(
+    `INSERT INTO north_star_internal.semantic_aggregate_anchors (
+       tenant_id,
+       environment_id,
+       cache_key,
+       movement_generation,
+       query_id,
+       principal_id,
+       release_content_hash,
+       legal_entity_ids,
+       parameter_values,
+       temporal_horizons,
+       filter_plan_digest,
+       result_kind,
+       selection_id,
+       balance_value,
+       result_precision,
+       result_scale,
+       base_unit_id,
+       anchor_digest
+     ) SELECT
+       $1, $2, $3, $4, $5, $6, $7, $8::uuid[], $9::jsonb, $10::jsonb,
+       $11, $12, $13, $14, $15, $16, $17, $18
+      WHERE COALESCE(
+        (
+          SELECT generation.movement_generation
+            FROM north_star_internal.semantic_aggregate_generations AS generation
+           WHERE generation.tenant_id = $1
+             AND generation.environment_id = $2
+        ),
+        0
+      ) = $4::bigint`,
+    [
+      identity.tenantId,
+      identity.environmentId,
+      identity.cacheKey,
+      identity.movementGeneration,
+      identity.queryId,
+      identity.principalId,
+      identity.releaseContentHash,
+      [...identity.legalEntityIds],
+      JSON.stringify(identity.parameterValues),
+      JSON.stringify(identity.temporalHorizons),
+      identity.filterPlanDigest,
+      result.value.kind,
+      result.value.selectionId,
+      result.value.value,
+      result.value.precision,
+      result.value.scale,
+      result.value.kind === 'quantityResult' ? result.value.baseUnitId : null,
+      aggregateAnchorDigest(identity, result),
+    ],
+  );
+  if (inserted.rowCount !== 1) {
+    throw failure(
+      'MODULE_AGGREGATE_GENERATION_CHANGED',
+      'aggregate generation changed before the anchor could be persisted',
+      identity.queryId,
+    );
+  }
+}
+
+async function recordAggregateAnchorDiscrepancy(
+  client: PoolClient,
+  identity: AggregateCacheIdentity,
+  anchor: AggregateAnchorRow,
+  expectedAnchorDigest: string,
+  recomputed: SemanticAggregateResultEnvelope,
+): Promise<void> {
+  await client.query(
+    `INSERT INTO north_star_internal.semantic_aggregate_anchor_discrepancies (
+       tenant_id,
+       environment_id,
+       discrepancy_id,
+       cache_key,
+       stored_anchor_digest,
+       expected_anchor_digest,
+       cached_balance_value,
+       recomputed_balance_value
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [
+      identity.tenantId,
+      identity.environmentId,
+      randomUUID(),
+      identity.cacheKey,
+      anchor.anchor_digest,
+      expectedAnchorDigest,
+      anchor.balance_value,
+      recomputed.value.value,
+    ],
+  );
+}
+
+function observeAggregateCacheSafely(
+  observer: ((observation: AggregateCacheObservation) => void) | undefined,
+  observation: AggregateCacheObservation,
+): void {
+  try {
+    observer?.(Object.freeze(observation));
+  } catch {
+    // Instrumentation is evidence, never query authority.
+  }
 }
 
 function canonicalAggregateDecimal(value: string): string {
@@ -3253,6 +3807,7 @@ export function translateModuleProviderError(
   error: unknown,
   storage: StorageTargetPayloadV1,
   entityId: string,
+  providerErrorMappings: readonly ModuleProviderErrorMapping[] = [],
 ): ModuleRuntimeInterpreterError {
   const entity = requiredEntity(storage, entityId);
   if (error instanceof ModuleRuntimeInterpreterError) return error;
@@ -3284,18 +3839,15 @@ export function translateModuleProviderError(
       relation?.relationId ?? entity.entityId,
     );
   }
-  if (code && /^[0-9A-Z]{5}$/u.test(code)) {
-    return failure(
-      'MODULE_PROVIDER_FAILURE',
-      'module provider rejected the operation',
-      entity.entityId,
-    );
-  }
-  return failure(
-    'MODULE_PROVIDER_FAILURE',
-    'module provider rejected the operation',
+  const registered = registeredProviderFailure(
+    error,
     entity.entityId,
+    providerErrorMappings,
   );
+  if (registered) {
+    return registered;
+  }
+  return unregisteredProviderFailure(error, entity.entityId);
 }
 
 function canonicalUniqueSubject(
@@ -3312,7 +3864,7 @@ function canonicalUniqueSubject(
 
 function providerErrorProperty(
   error: unknown,
-  property: 'code' | 'constraint',
+  property: 'code' | 'column' | 'constraint' | 'detail' | 'message' | 'table',
 ): string | null {
   if (typeof error !== 'object' || error === null) return null;
   const value = (error as Record<string, unknown>)[property];
@@ -3322,21 +3874,134 @@ function providerErrorProperty(
 function providerBoundaryFailure(
   error: unknown,
   subjectId: string,
+  providerErrorMappings: readonly ModuleProviderErrorMapping[],
 ): ModuleRuntimeInterpreterError | SharedListContractError {
-  return error instanceof ModuleRuntimeInterpreterError ||
+  if (
+    error instanceof ModuleRuntimeInterpreterError ||
     error instanceof SharedListContractError
-    ? error
-    : failure(
-        'MODULE_PROVIDER_FAILURE',
-        'module provider rejected the operation',
-        subjectId,
-      );
+  ) {
+    return error;
+  }
+  return (
+    registeredProviderFailure(error, subjectId, providerErrorMappings) ??
+    unregisteredProviderFailure(error, subjectId)
+  );
 }
 
 function failure(
   code: string,
   message: string,
   subjectId: string | null = null,
+  details: Readonly<Record<string, string>> = Object.freeze({}),
+  providerMetadata: ModuleProviderErrorMetadata | null = null,
 ): ModuleRuntimeInterpreterError {
-  return new ModuleRuntimeInterpreterError(code, message, subjectId);
+  return new ModuleRuntimeInterpreterError(
+    code,
+    message,
+    subjectId,
+    details,
+    providerMetadata,
+  );
+}
+
+function registeredProviderFailure(
+  error: unknown,
+  subjectId: string,
+  providerErrorMappings: readonly ModuleProviderErrorMapping[],
+): ModuleRuntimeInterpreterError | null {
+  const metadata = providerErrorMetadata(error);
+  const providerMessage = providerErrorProperty(error, 'message');
+  if (!metadata || !providerMessage) return null;
+  const registration = providerErrorMappings.find(
+    (candidate) =>
+      candidate.sqlstate === metadata.sqlstate &&
+      candidate.providerMessage === providerMessage,
+  );
+  if (!registration) return null;
+  let mapped: ModuleProviderErrorMappingResult | null;
+  try {
+    mapped = registration.translate(
+      Object.freeze({
+        detail: providerErrorProperty(error, 'detail'),
+        metadata,
+        providerMessage,
+        subjectId,
+      }),
+    );
+  } catch {
+    return failure(
+      'MODULE_PROVIDER_ERROR_MAPPING_INVALID',
+      'registered module provider error mapping failed',
+      subjectId,
+    );
+  }
+  if (mapped === null) return null;
+  if (
+    !/^[A-Z][A-Z0-9_]{1,79}$/u.test(mapped.code) ||
+    mapped.message.trim() === '' ||
+    (mapped.subjectId !== null && mapped.subjectId.trim() === '') ||
+    Object.values(mapped.details).some((value) => typeof value !== 'string')
+  ) {
+    return failure(
+      'MODULE_PROVIDER_ERROR_MAPPING_INVALID',
+      'registered module provider error mapping returned an invalid result',
+      subjectId,
+    );
+  }
+  return failure(mapped.code, mapped.message, mapped.subjectId, mapped.details);
+}
+
+function unregisteredProviderFailure(
+  error: unknown,
+  subjectId: string,
+): ModuleRuntimeInterpreterError {
+  const metadata = providerErrorMetadata(error);
+  return failure(
+    'MODULE_PROVIDER_FAILURE',
+    metadata
+      ? `module provider rejected the operation (sqlstate=${metadata.sqlstate} relation=${metadata.relationName ?? 'unknown'} constraint=${metadata.constraintName ?? 'unknown'} column=${metadata.columnName ?? 'unknown'})`
+      : 'module provider rejected the operation',
+    subjectId,
+    Object.freeze({}),
+    metadata,
+  );
+}
+
+function providerErrorMetadata(
+  error: unknown,
+): ModuleProviderErrorMetadata | null {
+  const sqlstate = providerErrorProperty(error, 'code');
+  if (!sqlstate || !/^[0-9A-Z]{5}$/u.test(sqlstate)) return null;
+  return Object.freeze({
+    columnName: providerErrorProperty(error, 'column'),
+    constraintName: providerErrorProperty(error, 'constraint'),
+    relationName: providerErrorProperty(error, 'table'),
+    sqlstate,
+  });
+}
+
+function validatedProviderErrorMappings(
+  mappings: readonly ModuleProviderErrorMapping[],
+): readonly ModuleProviderErrorMapping[] {
+  const keys = new Set<string>();
+  return Object.freeze(
+    mappings.map((mapping) => {
+      if (
+        !/^[0-9A-Z]{5}$/u.test(mapping.sqlstate) ||
+        mapping.providerMessage.trim() === ''
+      ) {
+        throw new TypeError('module provider error mapping is invalid');
+      }
+      const key = `${mapping.sqlstate}\0${mapping.providerMessage}`;
+      if (keys.has(key)) {
+        throw new TypeError('module provider error mapping is duplicated');
+      }
+      keys.add(key);
+      return Object.freeze({
+        providerMessage: mapping.providerMessage,
+        sqlstate: mapping.sqlstate,
+        translate: mapping.translate,
+      });
+    }),
+  );
 }

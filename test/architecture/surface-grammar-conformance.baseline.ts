@@ -21,9 +21,10 @@ export const PRODUCT_SURFACE_GRAMMAR_BASELINE = Object.freeze([
     // slot whose component this runtime deliberately does not register. Seven
     // Record surfaces each report one more missing `commandBar` (+14 across
     // SG003 and SG009) and five Form surfaces each trade one missing
-    // `activity` for a missing `commandBar` and `sections` (+10). G3-P6b owns
-    // the anatomy burn-down that takes this back down.
-    violationCount: 127,
+    // `activity` for a missing `commandBar` and `sections` (+10). G3-P6b-2's
+    // complete on-hand Task closes the one missing-archetype violation; the
+    // remaining anatomy debt is unchanged.
+    violationCount: 126,
   }),
   Object.freeze({
     moduleId: 'northstar.location:module.location',

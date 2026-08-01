@@ -50,7 +50,9 @@ import {
 } from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
 import { PostgresModuleStorageMaterializer } from '../../packages/postgres-provider/src/module-storage-materializer.js';
 import {
+  executeAggregateVerificationProbe,
   PostgresReleaseVerificationService,
+  ReleaseVerificationIntegrityError,
   releaseVerificationBinding,
 } from '../../packages/postgres-provider/src/release-verification-service.js';
 import {
@@ -75,6 +77,7 @@ import {
 } from '../../packages/runtime/src/semantic-operation-gateway.js';
 import { SHARED_LIST_QUERY_VERSION } from '../../packages/runtime/src/list-behavior/index.js';
 import {
+  MalformedLegalEntityScopeArgumentError,
   MalformedSemanticQueryRequestError,
   SEMANTIC_QUERY_REQUEST_VERSION,
   SemanticQueryGateway,
@@ -99,6 +102,10 @@ import {
   type RequestRuntimeView,
   type RuntimeProjection,
 } from '../../packages/runtime/src/request-runtime-view.js';
+import {
+  V3_AGGREGATE_IDS,
+  v3AggregateModule,
+} from '../compiler/v3-definition.js';
 import {
   FIXTURE_IDS,
   ordinaryModuleV1,
@@ -126,6 +133,85 @@ const inventoryScopeProbeIds = Object.freeze({
   locationParameter: `${APPLICATION_NAMESPACE}:parameter.scope_probe_location`,
   query: `${APPLICATION_NAMESPACE}:query.inventory_movement_scope_probe_sum`,
   selection: `${APPLICATION_NAMESPACE}:selection.inventory_movement_scope_probe_sum`,
+});
+
+test('aggregate verification requires the exact typed omission refusal', async () => {
+  const parameterizedQuery = {
+    parameters: [{ parameterId: V3_AGGREGATE_IDS.stockParameter }],
+    queryId: V3_AGGREGATE_IDS.aggregateQuery,
+  };
+  let aggregateCalls = 0;
+  const refusal = await executeAggregateVerificationProbe(
+    parameterizedQuery,
+    async () => {
+      aggregateCalls += 1;
+      throw new MalformedSemanticQueryRequestError(
+        'aggregate query arguments do not match the declared parameters',
+      );
+    },
+  );
+  assert.deepEqual(refusal, {
+    code: 'MALFORMED_SEMANTIC_QUERY_REQUEST',
+    kind: 'aggregateParameterOmissionRefusal',
+    queryId: V3_AGGREGATE_IDS.aggregateQuery,
+    reason: 'aggregate query arguments do not match the declared parameters',
+    schemaVersion: 'northstar.release-verification-aggregate-probe/v1',
+  });
+  assert.equal(aggregateCalls, 1);
+
+  const scopedRefusal = await executeAggregateVerificationProbe(
+    {
+      ...parameterizedQuery,
+      legalEntityScope: {
+        cardinality: 'exactlyOne',
+        kind: 'queryLegalEntityScope',
+        operand: {
+          kind: 'queryParameterReference',
+          parameterId: V3_AGGREGATE_IDS.stockParameter,
+          schemaVersion: 'v4',
+        },
+        schemaVersion: 'v4',
+      },
+    },
+    async () => {
+      throw new MalformedLegalEntityScopeArgumentError(
+        V3_AGGREGATE_IDS.aggregateQuery,
+        'selection-omitted',
+      );
+    },
+  );
+  assert.deepEqual(scopedRefusal, {
+    code: 'SEMANTIC_QUERY_LEGAL_ENTITY_SCOPE_INVALID',
+    kind: 'aggregateParameterOmissionRefusal',
+    queryId: V3_AGGREGATE_IDS.aggregateQuery,
+    reason: 'selection-omitted',
+    schemaVersion: 'northstar.release-verification-aggregate-probe/v1',
+  });
+
+  await assert.rejects(
+    executeAggregateVerificationProbe(
+      parameterizedQuery,
+      async () => ({}) as SemanticAggregateResultEnvelope,
+    ),
+    (error: unknown) => {
+      assert.ok(error instanceof ReleaseVerificationIntegrityError);
+      assert.equal(
+        error.code,
+        'VERIFICATION_AGGREGATE_PARAMETER_OMISSION_NOT_REFUSED',
+      );
+      return true;
+    },
+  );
+
+  const wrongReason = new MalformedSemanticQueryRequestError(
+    'aggregate query arguments must be an object',
+  );
+  await assert.rejects(
+    executeAggregateVerificationProbe(parameterizedQuery, async () => {
+      throw wrongReason;
+    }),
+    (error: unknown) => error === wrongReason,
+  );
 });
 
 test('accepted pre-PR-2 semantic metadata fails closed before module DML', () => {
@@ -162,6 +248,129 @@ test('accepted pre-PR-2 semantic metadata fails closed before module DML', () =>
       assert.ok(error instanceof ModuleRuntimeInterpreterError);
       assert.equal(error.code, 'MODULE_SEMANTIC_CONTRACT_UNSUPPORTED');
       return true;
+    },
+  );
+});
+
+test('release verification executes a parameterized aggregate assertion as an omission probe', async () => {
+  const assertionId = `${FIXTURE_IDS.namespace}:assertion.aggregate_execution`;
+  const definition = v3AggregateModule() as {
+    assertions: Array<Record<string, unknown>>;
+    languageVersion: string;
+  } & Record<string, unknown>;
+  definition.assertions.push({
+    assertionId,
+    evidenceKinds: ['provider'],
+    expectedDiagnosticCode: null,
+    expectedOutcome: 'succeeds',
+    invocation: {
+      kind: 'queryInvocation',
+      query: {
+        kind: 'queryReference',
+        schemaVersion: definition.languageVersion,
+        targetId: V3_AGGREGATE_IDS.aggregateQuery,
+      },
+      schemaVersion: definition.languageVersion,
+    },
+    kind: 'assertionDefinition',
+    schemaVersion: definition.languageVersion,
+  });
+  const emptyDefinition_ = emptyDefinition(definition);
+  const empty = mustCompile(moduleInput(emptyDefinition_));
+  const compiled = mustCompile(
+    moduleInput(definition, expectedActiveReleaseFrom(empty)),
+  );
+  const plan = releaseVerificationBinding(compiled).plan;
+  const aggregateScenario = plan.scenarios.find(
+    (scenario) =>
+      scenario.kind === 'declaredEvidence' &&
+      scenario.assertionId === assertionId,
+  );
+  assert.ok(aggregateScenario);
+
+  const tenant = 'e1000000-0000-4000-8000-000000000001';
+  const environment = 'e2000000-0000-4000-8000-000000000002';
+  const principal = 'e3000000-0000-4000-8000-000000000003';
+  await withEphemeralPostgres(
+    'module-aggregate-verification',
+    async ({ connection, pool }) => {
+      await migrateAndSeed(pool, [
+        [tenant, environment, 'aggregate-verification'],
+      ]);
+      const runtimePool = new pg.Pool({
+        ...connection,
+        max: 3,
+        user: 'north_star_runtime',
+      });
+      const materializerPool = new pg.Pool({
+        ...connection,
+        max: 2,
+        user: 'north_star_module_materializer',
+      });
+      const modulePool = new pg.Pool({
+        ...connection,
+        max: 1,
+        user: 'north_star_module_runtime',
+      });
+      try {
+        const context = (
+          await contextsFor([['aggregate', tenant, environment, principal]])
+        ).aggregate!;
+        const releases = await persistSequence(runtimePool, context, [
+          [empty, emptyDefinition_],
+          [compiled, definition],
+        ]);
+        await setPointer(pool, tenant, environment, releases[0]!);
+        await grantExecutorAuthority(pool, [[tenant, principal]]);
+        const materializer = new PostgresModuleStorageMaterializer(
+          materializerPool,
+          modulePool,
+        );
+        await prepare(materializer, context, principal, releases[1]!);
+        const staged = await withTrustedRequestTransaction(
+          runtimePool,
+          context,
+          async (client) => {
+            const result = await client.query<{
+              verification_evidence_id: MintedUuid;
+            }>(
+              `SELECT verification_evidence_id
+                 FROM platform.tenant_releases
+                WHERE tenant_id = $1
+                  AND environment_id = $2
+                  AND release_id = $3`,
+              [tenant, environment, releases[1]],
+            );
+            const row = result.rows[0];
+            assert.ok(row);
+            return row;
+          },
+        );
+        const resultSet = await new PostgresReleaseVerificationService(
+          runtimePool,
+        ).executeSemanticCandidateWithExecutor(
+          context,
+          {
+            compiledRelease: compiled,
+            evidenceId: staged.verification_evidence_id,
+            releaseId: releases[1]!,
+          },
+          new PostgresModuleRuntimeInterpreter(runtimePool, humanActorIssuer()),
+        );
+        assert.equal(resultSet.results.length, plan.scenarios.length);
+        assert.equal(
+          resultSet.results.some(
+            (result) => result.scenarioId === aggregateScenario.scenarioId,
+          ),
+          true,
+        );
+      } finally {
+        await Promise.all([
+          runtimePool.end(),
+          materializerPool.end(),
+          modulePool.end(),
+        ]);
+      }
     },
   );
 });

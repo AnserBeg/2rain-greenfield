@@ -343,13 +343,14 @@ function navigationSurfaceIds(entry: ConformanceNavigationEntry): string[] {
 }
 
 function isNavigationSurface(surface: ConformanceSurface): boolean {
-  // Product navigation is entity-scoped: List is the entry and its Record and
-  // form siblings stay reachable from within it. Home remains a shell entry so
-  // diagnostic and future application-home surfaces cannot disappear.
+  // Product navigation is workflow-scoped: List is an entity entry and its
+  // Record and form siblings stay reachable from within it. Home and Task are
+  // direct shell entries because neither has an in-surface parent route.
   return (
     surface.surfaceRole === 'list' ||
     (surface.archetype === 'list' && surface.surfaceRole == null) ||
-    (surface.archetype === 'home' && surface.surfaceRole == null)
+    (surface.archetype === 'home' && surface.surfaceRole == null) ||
+    (surface.archetype === 'task' && surface.surfaceRole == null)
   );
 }
 

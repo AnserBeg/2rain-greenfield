@@ -246,6 +246,7 @@ export function compileApplication(
     lowerBaseProjectionPayloads(
       projectionDispatchRevision(packageRevision),
       isStorageTargetV1(previousStorageTarget) ? previousStorageTarget : null,
+      packageRevision,
     ),
     packageRevision,
   );
@@ -795,11 +796,54 @@ function validateWholeModel(
     }
   });
   diagnostics.push(
+    ...validateVerificationAssertionInvocations(packageRevision),
+  );
+  diagnostics.push(
     ...validateModuleConformance(
       projectionDispatchRevision(packageRevision),
       packageRevision,
     ),
   );
+  return diagnostics;
+}
+
+function validateVerificationAssertionInvocations(
+  packageRevision: VersionedNormalizedApplicationPackage,
+): CompilerDiagnostic[] {
+  const queryById = new Map(
+    packageRevision.queries.map((query) => [query.queryId, query] as const),
+  );
+  const operationById = new Map(
+    packageRevision.operations.map(
+      (operation) => [operation.operationId, operation] as const,
+    ),
+  );
+  const diagnostics: CompilerDiagnostic[] = [];
+  for (const assertion of packageRevision.assertions.filter(
+    (entry) => entry.lifecycle === 'active',
+  )) {
+    const resolved =
+      assertion.invocation.kind === 'queryInvocation'
+        ? queryById.has(assertion.invocation.query.targetId)
+        : (() => {
+            const operation = operationById.get(
+              assertion.invocation.operation.targetId,
+            );
+            return operation !== undefined && 'entity' in operation.effect;
+          })();
+    if (!resolved) {
+      diagnostics.push(
+        compilerDiagnostic(
+          'COMPILER_VERIFICATION_ASSERTION_INVOCATION_UNRESOLVED',
+          'wholeModelValidation',
+          assertion.invocation.kind === 'queryInvocation'
+            ? '$.assertions.invocation.query'
+            : '$.assertions.invocation.operation',
+          assertion.assertionId,
+        ),
+      );
+    }
+  }
   return diagnostics;
 }
 

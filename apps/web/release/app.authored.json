@@ -263,6 +263,23 @@
       },
       "kind": "assertionDefinition",
       "schemaVersion": "v4"
+    },
+    {
+      "assertionId": "northstar.app:assertion.inventory_movement_on_hand_scope",
+      "evidenceKinds": ["structure", "provider"],
+      "expectedDiagnosticCode": null,
+      "expectedOutcome": "succeeds",
+      "invocation": {
+        "kind": "queryInvocation",
+        "query": {
+          "kind": "queryReference",
+          "schemaVersion": "v4",
+          "targetId": "northstar.app:query.inventory_movement_on_hand"
+        },
+        "schemaVersion": "v4"
+      },
+      "kind": "assertionDefinition",
+      "schemaVersion": "v4"
     }
   ],
   "capabilityRequirements": [
@@ -8698,6 +8715,148 @@
         "targetId": "northstar.app:entity.inventory_movement"
       },
       "tier": "q0"
+    },
+    {
+      "aggregate": {
+        "field": {
+          "kind": "fieldReference",
+          "schemaVersion": "v4",
+          "targetId": "northstar.app:field.inventory_movement_quantity_delta"
+        },
+        "kind": "queryAggregateSelection",
+        "operator": "sum",
+        "schemaVersion": "v4",
+        "selectionId": "northstar.app:selection.inventory_movement_on_hand"
+      },
+      "filter": {
+        "kind": "allPredicate",
+        "schemaVersion": "v4",
+        "terms": [
+          {
+            "field": {
+              "kind": "fieldReference",
+              "schemaVersion": "v4",
+              "targetId": "northstar.app:field.inventory_movement_item_id"
+            },
+            "kind": "fieldComparisonPredicate",
+            "operator": "equals",
+            "schemaVersion": "v4",
+            "value": {
+              "kind": "queryParameterReference",
+              "parameterId": "northstar.app:parameter.on_hand_item_id",
+              "schemaVersion": "v4"
+            }
+          },
+          {
+            "field": {
+              "kind": "fieldReference",
+              "schemaVersion": "v4",
+              "targetId": "northstar.app:field.inventory_movement_location_id"
+            },
+            "kind": "fieldComparisonPredicate",
+            "operator": "equals",
+            "schemaVersion": "v4",
+            "value": {
+              "kind": "queryParameterReference",
+              "parameterId": "northstar.app:parameter.on_hand_location_id",
+              "schemaVersion": "v4"
+            }
+          },
+          {
+            "field": {
+              "kind": "fieldReference",
+              "schemaVersion": "v4",
+              "targetId": "northstar.app:field.inventory_movement_effective_at"
+            },
+            "kind": "fieldComparisonPredicate",
+            "operator": "lessThanOrEqual",
+            "schemaVersion": "v4",
+            "value": {
+              "kind": "queryParameterReference",
+              "parameterId": "northstar.app:parameter.on_hand_at_time",
+              "schemaVersion": "v4"
+            }
+          },
+          {
+            "field": {
+              "kind": "fieldReference",
+              "schemaVersion": "v4",
+              "targetId": "northstar.app:field.inventory_movement_recorded_at"
+            },
+            "kind": "fieldComparisonPredicate",
+            "operator": "lessThanOrEqual",
+            "schemaVersion": "v4",
+            "value": {
+              "kind": "queryParameterReference",
+              "parameterId": "northstar.app:parameter.on_hand_recorded_at_horizon",
+              "schemaVersion": "v4"
+            }
+          }
+        ]
+      },
+      "kind": "queryDefinition",
+      "legalEntityScope": {
+        "cardinality": "exactlyOne",
+        "kind": "queryLegalEntityScope",
+        "operand": {
+          "kind": "queryParameterReference",
+          "parameterId": "northstar.app:parameter.on_hand_legal_entity_id",
+          "schemaVersion": "v4"
+        },
+        "schemaVersion": "v4"
+      },
+      "maximumResultCount": 1,
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v4",
+        "targetId": "northstar.app:module.inventory"
+      },
+      "parameters": [
+        {
+          "kind": "queryParameterDefinition",
+          "orderKey": 10,
+          "parameterId": "northstar.app:parameter.on_hand_legal_entity_id",
+          "schemaVersion": "v4"
+        },
+        {
+          "kind": "queryParameterDefinition",
+          "orderKey": 20,
+          "parameterId": "northstar.app:parameter.on_hand_item_id",
+          "schemaVersion": "v4"
+        },
+        {
+          "kind": "queryParameterDefinition",
+          "orderKey": 30,
+          "parameterId": "northstar.app:parameter.on_hand_location_id",
+          "schemaVersion": "v4"
+        },
+        {
+          "kind": "queryParameterDefinition",
+          "orderKey": 40,
+          "parameterId": "northstar.app:parameter.on_hand_at_time",
+          "schemaVersion": "v4"
+        },
+        {
+          "kind": "queryParameterDefinition",
+          "orderKey": 50,
+          "parameterId": "northstar.app:parameter.on_hand_recorded_at_horizon",
+          "schemaVersion": "v4"
+        }
+      ],
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v4",
+        "targetId": "northstar.app:permission.inventory_movement_read"
+      },
+      "queryId": "northstar.app:query.inventory_movement_on_hand",
+      "queryType": "aggregate",
+      "schemaVersion": "v4",
+      "sourceEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v4",
+        "targetId": "northstar.app:entity.inventory_movement"
+      },
+      "tier": "q1"
     }
   ],
   "relations": [
@@ -10910,6 +11069,62 @@
       "statusRoles": [],
       "surfaceId": "northstar.app:surface.inventory_movement_detail",
       "surfaceRole": "record"
+    },
+    {
+      "archetype": "task",
+      "dataSource": {
+        "kind": "queryReference",
+        "schemaVersion": "v4",
+        "targetId": "northstar.app:query.inventory_movement_on_hand"
+      },
+      "kind": "surfaceDefinition",
+      "label": "On-hand lookup",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v4",
+        "targetId": "northstar.app:module.inventory"
+      },
+      "schemaVersion": "v4",
+      "slots": [
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v4",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 10,
+          "schemaVersion": "v4",
+          "slot": "decision",
+          "slotId": "northstar.app:slot.inventory_on_hand_lookup_decision"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v4",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 20,
+          "schemaVersion": "v4",
+          "slot": "scanInput",
+          "slotId": "northstar.app:slot.inventory_on_hand_lookup_scan_input"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v4",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 30,
+          "schemaVersion": "v4",
+          "slot": "primaryAction",
+          "slotId": "northstar.app:slot.inventory_on_hand_lookup_primary_action"
+        }
+      ],
+      "statusRoles": [],
+      "surfaceId": "northstar.app:surface.inventory_on_hand_lookup"
     }
   ]
 }

@@ -99,6 +99,12 @@ const recognizedDispatches: Readonly<Record<string, readonly PredicateKind[]>> =
       'anyPredicate',
       'fieldComparisonPredicate',
     ]),
+    'packages/domain/src/inventory/definition.ts': signature([
+      'notPredicate',
+      'fieldComparisonPredicate',
+      'fieldComparisonPredicate',
+      'allPredicate',
+    ]),
     'packages/postgres-provider/src/module-runtime-interpreter.ts': signature([
       'booleanPredicate',
       'notPredicate',
