@@ -241,13 +241,13 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   const grouped = groupedManifest.navigation;
   assert.ok(grouped);
   const compact = projectCompactSurfaces(groupedManifest.surfaces, grouped);
-  assert.equal(groupedManifest.surfaces.length, 31);
+  assert.equal(groupedManifest.surfaces.length, 32);
   assert.equal(
     groupedManifest.payloadSchemaVersion,
     GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION,
   );
   assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 2);
-  assert.equal(navigationSurfaceIds(grouped.entries).length, 11);
+  assert.equal(navigationSurfaceIds(grouped.entries).length, 12);
   assert.deepEqual(
     grouped.entries.map((entry) => entry.label),
     ['Party', 'Catalog', 'Location', 'Inventory'],
@@ -275,6 +275,7 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   assert.ok(inventory);
   assert.deepEqual(navigationSurfaceIds([inventory]), [
     'northstar.app:surface.inventory_movement_list',
+    'northstar.app:surface.inventory_on_hand_lookup',
     'northstar.app:surface.inventory_period_lock_list',
     'northstar.app:surface.inventory_transaction_line_list',
     'northstar.app:surface.inventory_transaction_list',

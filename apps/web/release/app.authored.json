@@ -11069,6 +11069,62 @@
       "statusRoles": [],
       "surfaceId": "northstar.app:surface.inventory_movement_detail",
       "surfaceRole": "record"
+    },
+    {
+      "archetype": "task",
+      "dataSource": {
+        "kind": "queryReference",
+        "schemaVersion": "v4",
+        "targetId": "northstar.app:query.inventory_movement_on_hand"
+      },
+      "kind": "surfaceDefinition",
+      "label": "On-hand lookup",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v4",
+        "targetId": "northstar.app:module.inventory"
+      },
+      "schemaVersion": "v4",
+      "slots": [
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v4",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 10,
+          "schemaVersion": "v4",
+          "slot": "decision",
+          "slotId": "northstar.app:slot.inventory_on_hand_lookup_decision"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v4",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 20,
+          "schemaVersion": "v4",
+          "slot": "scanInput",
+          "slotId": "northstar.app:slot.inventory_on_hand_lookup_scan_input"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v4",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 30,
+          "schemaVersion": "v4",
+          "slot": "primaryAction",
+          "slotId": "northstar.app:slot.inventory_on_hand_lookup_primary_action"
+        }
+      ],
+      "statusRoles": [],
+      "surfaceId": "northstar.app:surface.inventory_on_hand_lookup"
     }
   ]
 }

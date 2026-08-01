@@ -1,9 +1,11 @@
 import { randomUUID } from 'node:crypto';
 
 import type * as RuntimeViewContract from '@north-star/runtime/request-runtime-view';
-import type {
-  SemanticQueryResultEnvelope,
-  SemanticRecordDto,
+import {
+  registeredSemanticQueryFromPinnedView,
+  type SemanticAggregateResultEnvelope,
+  type SemanticQueryResultEnvelope,
+  type SemanticRecordDto,
 } from '../../../packages/runtime/src/semantic-query-gateway.js';
 
 import { escapeHtml, shortIdentity } from './html.js';
@@ -21,6 +23,7 @@ export interface SurfaceComponentContext {
   readonly feedback?: SurfaceOperationFeedback | null;
   readonly legalEntitySelection?: readonly string[];
   readonly operations?: readonly CompiledSurfaceOperationBinding[];
+  readonly queryParameterValues?: Readonly<Record<string, string>>;
   readonly slot: CompiledSurfaceSlot;
   readonly surface: CompiledSurfaceDefinition;
   readonly surfaces?: readonly CompiledSurfaceDefinition[];
@@ -38,6 +41,10 @@ export type SurfaceComponentRenderResult =
 export type SurfaceDataRenderState =
   | { readonly status: 'UNBOUND' }
   | {
+      readonly aggregate: SemanticAggregateResultEnvelope;
+      readonly status: 'AGGREGATE_READY';
+    }
+  | {
       readonly records: readonly SemanticRecordDto[];
       readonly result?: SemanticQueryResultEnvelope;
       readonly status: 'READY';
@@ -48,6 +55,7 @@ export type SurfaceDataRenderState =
         | 'QUERY_AMBIGUOUS'
         | 'QUERY_LEGAL_ENTITY_SCOPE_REQUIRED'
         | 'QUERY_NOT_FOUND'
+        | 'QUERY_PARAMETER_REQUIRED'
         | 'QUERY_PERMISSION_DENIED'
         | 'QUERY_UNAVAILABLE'
         | 'QUERY_UNSUPPORTED';
@@ -79,6 +87,9 @@ export function renderSurfaceDataComponent({
   if (data.status === 'UNBOUND') return '';
   if (data.status === 'DIAGNOSTIC') {
     return `${feedbackHtml(feedback)}${dataDiagnostic(data.code)}`;
+  }
+  if (data.status === 'AGGREGATE_READY') {
+    return `${feedbackHtml(feedback)}${dataDiagnostic('QUERY_UNSUPPORTED')}`;
   }
   if (data.status === 'EMPTY') {
     return `${feedbackHtml(feedback)}${emptyDataPanel()}`;
@@ -126,6 +137,9 @@ const surfaceSlotRegistry: Readonly<Record<string, SurfaceSlotRegistration>> =
       renderer: renderSections,
     },
     'record:titleStatus': { renderer: renderTitleStatus },
+    'task:decision': { renderer: renderTaskDecision },
+    'task:primaryAction': { renderer: renderTaskPrimaryAction },
+    'task:scanInput': { renderer: renderTaskScanInput },
   });
 
 export const REGISTERED_SURFACE_COMPONENT_IDS = Object.freeze(
@@ -275,6 +289,121 @@ function renderBulkActions(context: SurfaceComponentContext): string {
     `<form class="bulk-bar" id="${escapeHtml(formId)}" data-bulk-selection-form><div><p class="eyebrow">Bulk actions</p><strong class="bulk-empty">Select records to begin</strong><strong class="bulk-ready">Selection ready</strong><p>This release keeps business actions record-scoped.</p></div><button class="secondary-action bulk-ready" type="reset">Clear selection</button></form>`,
     'bulk-actions-slot',
   );
+}
+
+function renderTaskDecision(context: SurfaceComponentContext): string {
+  if (!taskUsesAggregateQuery(context)) {
+    return renderReferencedComponent(context);
+  }
+  const data = context.data ?? { status: 'UNBOUND' as const };
+  if (data.status === 'DIAGNOSTIC') {
+    return slotPanel(context, dataDiagnostic(data.code), 'task-decision-slot');
+  }
+  if (data.status === 'AGGREGATE_READY') {
+    const result = data.aggregate.value;
+    const unit = 'baseUnitId' in result ? shortIdentity(result.baseUnitId) : '';
+    return slotPanel(
+      context,
+      `<section class="panel task-decision" data-data-state="exact"><p class="eyebrow">Decision</p><h2>${escapeHtml(context.surface.label)}</h2><output aria-label="Lookup result" data-aggregate-selection-id="${escapeHtml(result.selectionId)}" data-aggregate-value="${escapeHtml(result.value)}">${escapeHtml(result.value)}</output>${unit ? `<p class="muted">Base unit ${escapeHtml(unit)}</p>` : ''}</section>`,
+      'task-decision-slot',
+    );
+  }
+  return slotPanel(
+    context,
+    `<section class="panel task-decision" data-data-state="unasked"><p class="eyebrow">Decision</p><h2>${escapeHtml(context.surface.label)}</h2><p class="lede">Choose the workspace context and complete every lookup input before asking for a result.</p></section>`,
+    'task-decision-slot',
+  );
+}
+
+function renderTaskScanInput(context: SurfaceComponentContext): string {
+  if (!taskUsesAggregateQuery(context)) {
+    return renderReferencedComponent(context);
+  }
+  const binding = readCompiledSurfaceDataBinding(context.view, context.surface);
+  if (binding.query.queryType !== 'aggregate') {
+    throw new TypeError('task scan input requires an aggregate query');
+  }
+  const scopeParameterId = binding.query.legalEntityScope?.operand.parameterId;
+  const parameters = binding.query.parameters
+    .filter((parameter) => parameter.parameterId !== scopeParameterId)
+    .sort((left, right) => left.orderKey - right.orderKey);
+  const labels = taskParameterLabels(
+    parameters.map((item) => item.parameterId),
+  );
+  const fields = parameters
+    .map((parameter, index) => {
+      const label = labels[index]!;
+      const value = context.queryParameterValues?.[parameter.parameterId] ?? '';
+      const isDateTime = parameter.parameterType.kind === 'dateTimeFieldType';
+      return `<label><span>${escapeHtml(label)}</span><input ${index === 0 ? 'data-scan-input="true" ' : ''}name="${escapeHtml(parameter.parameterId)}" value="${escapeHtml(value)}" autocomplete="off" inputmode="text" placeholder="${escapeHtml(isDateTime ? 'UTC instant, for example 2026-07-30T12:00:00.000Z' : `Enter or scan ${label.toLowerCase()}`)}" required></label>`;
+    })
+    .join('');
+  const legalEntityId = context.legalEntitySelection?.[0];
+  const hiddenScope =
+    scopeParameterId && legalEntityId
+      ? `<input type="hidden" name="${escapeHtml(scopeParameterId)}" value="${escapeHtml(legalEntityId)}">`
+      : '';
+  return slotPanel(
+    context,
+    `<section class="panel task-input"><p class="eyebrow">Scan input</p><h2>Lookup inputs</h2><form id="${escapeHtml(taskLookupFormId(context.surface))}" method="get" action="/"><input type="hidden" name="surface" value="${escapeHtml(context.surface.surfaceId)}">${hiddenScope}<div class="form-fields">${fields}</div></form></section>`,
+    'task-scan-input-slot',
+  );
+}
+
+function renderTaskPrimaryAction(context: SurfaceComponentContext): string {
+  if (!taskUsesAggregateQuery(context)) {
+    return renderReferencedComponent(context);
+  }
+  return slotPanel(
+    context,
+    `<div class="task-primary-action"><button type="submit" form="${escapeHtml(taskLookupFormId(context.surface))}">Look up</button></div>`,
+    'task-primary-action-slot',
+  );
+}
+
+function taskUsesAggregateQuery(context: SurfaceComponentContext): boolean {
+  return (
+    registeredSemanticQueryFromPinnedView(
+      context.view,
+      context.surface.dataSourceQueryId,
+    )?.queryType === 'aggregate'
+  );
+}
+
+function renderReferencedComponent(context: SurfaceComponentContext): string {
+  const renderer = componentRegistry[context.slot.contentReferenceId];
+  if (!renderer) {
+    throw new TypeError('task slot has no registered referenced component');
+  }
+  return renderer(context);
+}
+
+function taskParameterLabels(parameterIds: readonly string[]): string[] {
+  const parts = parameterIds.map((parameterId) =>
+    parameterId
+      .slice(parameterId.lastIndexOf('.') + 1)
+      .split('_')
+      .filter(Boolean),
+  );
+  let shared = 0;
+  const shortest = Math.min(...parts.map((tokens) => tokens.length));
+  while (
+    parts.length > 0 &&
+    shared < shortest &&
+    parts.every((tokens) => tokens[shared] === parts[0]?.[shared])
+  ) {
+    shared += 1;
+  }
+  return parts.map((tokens) =>
+    tokens
+      .slice(shared)
+      .map((part) => part.slice(0, 1).toUpperCase() + part.slice(1))
+      .join(' '),
+  );
+}
+
+function taskLookupFormId(surface: CompiledSurfaceDefinition): string {
+  return `task-lookup-${surface.surfaceId}`;
 }
 
 function renderBreadcrumb(context: SurfaceComponentContext): string {
@@ -633,6 +762,10 @@ function dataDiagnostic(
     QUERY_NOT_FOUND: [
       'Record not found',
       'No visible record matched this request in the pinned release.',
+    ],
+    QUERY_PARAMETER_REQUIRED: [
+      'Lookup parameters required',
+      'Complete every lookup input before asking for a result.',
     ],
     QUERY_PERMISSION_DENIED: [
       'Access denied',
