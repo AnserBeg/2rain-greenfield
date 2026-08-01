@@ -48,7 +48,10 @@ import {
 } from '../../runtime/src/semantic-operation-gateway.js';
 import { SemanticQueryGateway } from '../../runtime/src/semantic-query-gateway.js';
 import { loadMigrations, runMigrations } from './migrations.js';
-import { PostgresModuleRuntimeInterpreter } from './module-runtime-interpreter.js';
+import {
+  PostgresModuleRuntimeInterpreter,
+  type ModuleProviderErrorMapping,
+} from './module-runtime-interpreter.js';
 import { PostgresModuleStorageMaterializer } from './module-storage-materializer.js';
 import { PostgresReleaseActivationService } from './release-activation-service.js';
 import { PostgresReleaseApprovalService } from './release-approval-service.js';
@@ -77,6 +80,7 @@ export interface ComposedApplicationRuntimeOptions {
   readonly environmentSlug?: string;
   readonly inventoryScopeProvisioning?: InventoryScopeProvisioning;
   readonly migrationsDirectory: string;
+  readonly providerErrorMappings: readonly ModuleProviderErrorMapping[];
   readonly releaseSelection?: Readonly<{
     readonly kind: 'rollback';
     readonly targetReleaseRoot: string;
@@ -230,6 +234,7 @@ export async function createComposedApplicationRuntime(
         runtimeContext,
         bootstrapIdentity,
         releases.bootstrap,
+        options.providerErrorMappings,
       );
       await assertExactSwapTriggerEnabled(adminPool);
       const attemptId = await approveInitialRelease(
@@ -268,6 +273,7 @@ export async function createComposedApplicationRuntime(
       runtimeContext,
       lineage[activeLineageIndex]!,
       releaseLineage[activeLineageIndex]!,
+      options.providerErrorMappings,
     );
     const materializer = new PostgresModuleStorageMaterializer(
       materializerPool,
@@ -294,6 +300,7 @@ export async function createComposedApplicationRuntime(
         runtimeContext,
         targetIdentity,
         target,
+        options.providerErrorMappings,
       );
       const reverseAuthorization = await withTrustedRequestTransaction(
         runtimePool,
@@ -358,6 +365,7 @@ export async function createComposedApplicationRuntime(
             runtimeContext,
             targetIdentity,
             target,
+            options.providerErrorMappings,
           );
           attemptId = await approveReleaseWithoutStorageTransition(
             runtimePool,
@@ -382,6 +390,7 @@ export async function createComposedApplicationRuntime(
             runtimeContext,
             targetIdentity,
             target,
+            options.providerErrorMappings,
           );
           attemptId = await approveModuleRelease(
             runtimePool,
@@ -433,6 +442,7 @@ export async function createComposedApplicationRuntime(
     const interpreter = new PostgresModuleRuntimeInterpreter(
       runtimePool,
       humanActorIssuer(),
+      options.providerErrorMappings,
     );
     const queryGateway = new SemanticQueryGateway(policy, interpreter);
     const operationMediation = new SemanticOperationMediationAuthority();
@@ -952,11 +962,13 @@ async function ensureReleaseAdmitted(
   context: TrustedRequestContext,
   identity: PersistedReleaseIdentity,
   release: ParsedRelease,
+  providerErrorMappings: readonly ModuleProviderErrorMapping[],
 ): Promise<void> {
   const repository = new PostgresImmutableReleaseRepository(pool);
   if (await repository.getTenantRelease(context, identity.releaseId)) return;
   await new PostgresReleaseVerificationService(
     pool,
+    providerErrorMappings,
   ).executeSemanticCandidateAndPersist(context, {
     compiledRelease: release.compiled,
     evidenceId: identity.evidenceId,

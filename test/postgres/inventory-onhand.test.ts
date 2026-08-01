@@ -369,6 +369,7 @@ test('registered onHand is temporal, narrowed, and atomically invalidates a same
       const interpreter = new PostgresModuleRuntimeInterpreter(
         runtimePool,
         actorIssuer(),
+        [],
         (observation) => observations.push(observation),
       );
       const gateway = new SemanticQueryGateway(policy, interpreter);
@@ -761,9 +762,6 @@ test('registered onHand is temporal, narrowed, and atomically invalidates a same
 
 test(
   'release verification executes a scoped aggregate probe and records the typed omission refusal',
-  {
-    skip: 'BLOCKED(ver-agg): compiler.ts filters aggregates before building the authoritative verification plan',
-  },
   async () => {
     const fixture = buildVerificationFixture();
     await withEphemeralPostgres(

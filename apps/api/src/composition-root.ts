@@ -6,6 +6,7 @@ import {
   type ComposedApplicationRuntime,
   type InventoryScopeProvisioning,
 } from '@north-star/postgres-provider/composed-application-runtime';
+import { INVENTORY_PROVIDER_ERROR_MAPPINGS } from '@north-star/postgres-provider/inventory-provider-error-mappings';
 import { createSurfaceRuntimeServer } from '@north-star/web/app-server';
 
 export interface ComposedApplicationServerOptions {
@@ -72,6 +73,7 @@ export async function startComposedApplication(
     inventoryScopeProvisioning: COMPOSED_APPLICATION_INVENTORY_SCOPE,
     migrationsDirectory: new URL('../../../db/migrations/', import.meta.url)
       .pathname,
+    providerErrorMappings: INVENTORY_PROVIDER_ERROR_MAPPINGS,
     ...(options.rollbackReleaseRoot !== undefined
       ? {
           releaseSelection: {
