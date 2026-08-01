@@ -155,7 +155,7 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
           '0016_inventory_posting_receipt_digest_version.sql',
           '0017_inventory_stock_count_receipt_digest_version.sql',
           '0018_release_verification_derivations.sql',
-          '0019_semantic_aggregate_anchors.sql',
+          '0019_inventory_release_provenance_and_partition_null_safety.sql',
         ]);
         assert.equal(migrationResult.verified.length, allMigrations.length);
         await seedScope(admin);
@@ -1992,6 +1992,194 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
               new RegExp(`missing managed relation ${tableName}`),
             );
           },
+        );
+      } finally {
+        await Promise.all([
+          runtimePool.end(),
+          materializerPool.end(),
+          moduleRuntimePool.end(),
+        ]);
+      }
+    },
+  );
+});
+
+test('ABI function checks compose additively across live roots and conflicting duplicate names fail closed', async () => {
+  const emptyDefinition = emptyModuleDefinition();
+  const empty = mustCompile(moduleInput(emptyDefinition));
+  const priorDefinition = composedApplicationWithoutInventoryForTransition();
+  const prior = mustCompile(
+    moduleInput(priorDefinition, expectedActiveReleaseFrom(empty)),
+  );
+  const mountedDefinition = composedApplicationDefinition();
+  const mounted = mustCompile(
+    moduleInput(mountedDefinition, expectedActiveReleaseFrom(prior)),
+  );
+  const conflicting = withConflictingAbiFunctionCheck(mounted);
+  const mountedStorage = projectionPayload<StorageTargetPayloadV1>(
+    mounted,
+    PROJECTION_FAMILY_IDS.storageTarget,
+  );
+  const item = mountedStorage.entities.find((entity) =>
+    entity.entityId.endsWith(':entity.item'),
+  );
+  const baseUnitCheck = item?.abiFunctionChecks?.[0];
+  assert.ok(item);
+  assert.ok(baseUnitCheck);
+
+  await withEphemeralPostgres(
+    'module-storage-additive-abi-check',
+    async ({ connection, pool }) => {
+      const admin = await pool.connect();
+      try {
+        await runMigrations(admin, await loadMigrations(migrations));
+        await seedScope(admin);
+        await admin.query(
+          `SELECT platform.provision_inventory_scope(
+             $1, $2, $3, 'LE-A', 'Legal Entity A', 'America/Edmonton',
+             '06:00:00', $4, 1::smallint, 'reject', 0,
+             'codeAndNarrative', 'codeOnly', 'codeAndNarrative',
+             'codeAndNarrative', 'codeAndNarrative',
+             NULL, NULL, NULL, NULL, NULL
+           )`,
+          [tenantA, environmentA, randomUUID(), inventoryContractReleaseRoot],
+        );
+      } finally {
+        admin.release();
+      }
+      const runtimePool = new pg.Pool({
+        ...connection,
+        max: 2,
+        user: 'north_star_runtime',
+      });
+      const materializerPool = new pg.Pool({
+        ...connection,
+        max: 2,
+        user: 'north_star_module_materializer',
+      });
+      const moduleRuntimePool = new pg.Pool({
+        ...connection,
+        max: 1,
+        user: 'north_star_module_runtime',
+      });
+      materializerPool.on('error', () => undefined);
+      moduleRuntimePool.on('error', () => undefined);
+      try {
+        const contexts = await trustedContexts();
+        const releases = await persistPairForBothTenants(
+          runtimePool,
+          contexts,
+          empty,
+          definitionBytes(emptyDefinition),
+          prior,
+          definitionBytes(priorDefinition),
+        );
+        const mountedRelease = await persistNextRelease(
+          runtimePool,
+          contexts.a,
+          releases.a.target,
+          mounted,
+          definitionBytes(mountedDefinition),
+        );
+        const conflictingRelease = await persistNextRelease(
+          runtimePool,
+          contexts.a,
+          releases.a.target,
+          conflicting,
+          definitionBytes(mountedDefinition),
+        );
+        await installSourcePointers(pool, releases);
+        await grantExecutorAuthority(pool);
+        const materializer = new PostgresModuleStorageMaterializer(
+          materializerPool,
+          moduleRuntimePool,
+        );
+
+        const priorPreparation = await materializer.prepare({
+          context: contexts.a,
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+          generationId: randomUUID(),
+          initiatedBy: principalA,
+          preparationId: randomUUID(),
+          targetReleaseId: releases.a.target,
+        });
+        assert.equal(priorPreparation.schemaState, 'APPLIED');
+        await setActiveReleasePointer(pool, releases.a.target);
+
+        const mountedGenerationId = randomUUID();
+        const mountedPreparationId = randomUUID();
+        const mountedPreparation = await materializer.prepare({
+          context: contexts.a,
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+          generationId: mountedGenerationId,
+          initiatedBy: principalA,
+          preparationId: mountedPreparationId,
+          targetReleaseId: mountedRelease.target,
+        });
+        assert.equal(mountedPreparation.schemaState, 'APPLIED');
+        assert.equal(mountedPreparation.dataState, 'PENDING_IN_ATTEMPT');
+        assert.equal(
+          mountedPreparation.diff.elements.find(
+            (element) =>
+              element.kind === 'addAbiFunctionCheck' &&
+              element.physicalObjectName === baseUnitCheck.physicalName,
+          )?.disposition,
+          'PENDING_IN_ATTEMPT',
+        );
+        const constraintPresent = async () =>
+          (
+            await pool.query<{ present: boolean }>(
+              `SELECT EXISTS (
+                 SELECT 1
+                   FROM pg_constraint AS constraint_record
+                   JOIN pg_class AS relation
+                     ON relation.oid = constraint_record.conrelid
+                   JOIN pg_namespace AS namespace
+                     ON namespace.oid = relation.relnamespace
+                  WHERE namespace.nspname = 'north_star_module'
+                    AND relation.relname = $1
+                    AND constraint_record.conname = $2
+               ) AS present`,
+              [item.physicalTableName, baseUnitCheck.physicalName],
+            )
+          ).rows[0]?.present;
+        assert.equal(await constraintPresent(), false);
+        const attemptId = await createV2Approval(
+          runtimePool,
+          pool,
+          contexts,
+          mountedRelease,
+          mounted,
+          mountedPreparation,
+          mountedPreparationId,
+        );
+        const executed = await materializer.executeApprovedAttempt({
+          activationAttemptId: attemptId,
+          context: contexts.a,
+          coordinatorId: randomUUID(),
+          generationId: mountedGenerationId,
+        });
+        assert.equal(executed.disposition, 'READY_TO_SWAP');
+        assert.equal(await constraintPresent(), true);
+        assert.deepEqual(
+          (await materializer.verifyLiveCatalog(contexts.a)).drift,
+          [],
+        );
+        await assert.rejects(
+          materializer.prepare({
+            context: contexts.a,
+            expiresAt: new Date(Date.now() + 60_000).toISOString(),
+            generationId: randomUUID(),
+            initiatedBy: principalA,
+            preparationId: randomUUID(),
+            targetReleaseId: conflictingRelease.target,
+          }),
+          (error: unknown) =>
+            error instanceof ModuleStorageMaterializationError &&
+            error.code === 'LIVE_SET_SHAPE_CONFLICT' &&
+            error.message.includes(
+              `${item.physicalTableName}.${baseUnitCheck.physicalName}`,
+            ),
         );
       } finally {
         await Promise.all([
@@ -4107,7 +4295,7 @@ function emptyModuleDefinition(): Record<string, unknown> {
 function inventoryOwnedModuleDefinition(): Record<string, unknown> {
   const application = composedApplicationDefinition();
   const inventory = inventoryModuleDefinition(APPLICATION_NAMESPACE);
-  const mergedCollections = [
+  for (const collection of [
     'assertions',
     'entities',
     'fields',
@@ -4118,22 +4306,96 @@ function inventoryOwnedModuleDefinition(): Record<string, unknown> {
     'stateMachines',
     'storageMappings',
     'surfaces',
-  ] as const;
-  for (const collection of mergedCollections) {
-    application[collection] = [
-      ...(application[collection] as unknown[]),
-      ...(inventory[collection] as unknown[]),
-    ];
+  ] as const) {
+    const target = application[collection];
+    const source = inventory[collection];
+    assert.ok(Array.isArray(target));
+    assert.ok(Array.isArray(source));
+    for (const sourceEntry of source) {
+      assert.equal(
+        target.filter(
+          (candidate) => canonicalize(candidate) === canonicalize(sourceEntry),
+        ).length,
+        1,
+        `composed application must contain each inventory ${collection} entry exactly once`,
+      );
+    }
   }
-  const inventoryModule = (
-    inventory.modules as Array<Record<string, unknown>>
-  )[0];
-  assert.ok(inventoryModule);
-  (application.modules as Array<Record<string, unknown>>).push({
-    ...inventoryModule,
-    orderKey: 40,
-    ownerPackageId: (application.package as { packageId: string }).packageId,
-  });
+  const modules = application.modules;
+  const inventoryModules = inventory.modules;
+  assert.ok(Array.isArray(modules));
+  assert.ok(Array.isArray(inventoryModules));
+  const inventoryModule = inventoryModules[0];
+  assert.ok(inventoryModule && typeof inventoryModule === 'object');
+  assert.ok('moduleId' in inventoryModule);
+  assert.equal(
+    modules.filter(
+      (candidate) =>
+        candidate !== null &&
+        typeof candidate === 'object' &&
+        'moduleId' in candidate &&
+        candidate.moduleId === inventoryModule.moduleId,
+    ).length,
+    1,
+    'composed application must contain the inventory module exactly once',
+  );
+  return application;
+}
+
+function composedApplicationWithoutInventoryForTransition(): Record<
+  string,
+  unknown
+> {
+  const application = structuredClone(inventoryOwnedModuleDefinition());
+  const inventory = inventoryModuleDefinition(APPLICATION_NAMESPACE);
+  for (const collection of [
+    'assertions',
+    'entities',
+    'fields',
+    'operations',
+    'permissions',
+    'queries',
+    'relations',
+    'stateMachines',
+    'storageMappings',
+    'surfaces',
+  ] as const) {
+    const target = application[collection];
+    const source = inventory[collection];
+    assert.ok(Array.isArray(target));
+    assert.ok(Array.isArray(source));
+    application[collection] = target.filter(
+      (candidate) =>
+        !source.some(
+          (sourceEntry) =>
+            canonicalize(candidate) === canonicalize(sourceEntry),
+        ),
+    );
+    assert.equal(
+      target.length - (application[collection] as unknown[]).length,
+      source.length,
+      `transition fixture must remove every inventory ${collection} entry exactly once`,
+    );
+  }
+  const modules = application.modules;
+  const inventoryModules = inventory.modules;
+  assert.ok(Array.isArray(modules));
+  assert.ok(Array.isArray(inventoryModules));
+  const inventoryModule = inventoryModules[0];
+  assert.ok(inventoryModule && typeof inventoryModule === 'object');
+  assert.ok('moduleId' in inventoryModule);
+  application.modules = modules.filter(
+    (candidate) =>
+      candidate === null ||
+      typeof candidate !== 'object' ||
+      !('moduleId' in candidate) ||
+      candidate.moduleId !== inventoryModule.moduleId,
+  );
+  assert.equal(
+    modules.length - (application.modules as unknown[]).length,
+    1,
+    'transition fixture must remove the inventory module exactly once',
+  );
   return application;
 }
 
@@ -4268,6 +4530,43 @@ function withoutRelationIndexes(compiled: CompileSuccess): CompileSuccess {
     (element) =>
       element.kind !== 'createIndex' ||
       !relationIndexNames.has(element.physicalObjectName),
+  );
+  transition.toStorageTargetArtifactRoot = storageReference.artifactRoot;
+  transition.toStorageTargetSemanticDigest = storageReference.semanticDigest;
+  rewriteProjectionPayload(
+    clone,
+    PROJECTION_FAMILY_IDS.storageTransition,
+    transition,
+  );
+  rebuildReleaseRoot(clone);
+  return clone;
+}
+
+function withConflictingAbiFunctionCheck(
+  compiled: CompileSuccess,
+): CompileSuccess {
+  const clone = structuredClone(compiled);
+  const storage = projectionPayload<StorageTargetPayloadV1>(
+    clone,
+    PROJECTION_FAMILY_IDS.storageTarget,
+  );
+  const item = storage.entities.find((entity) =>
+    entity.entityId.endsWith(':entity.item'),
+  );
+  const check = item?.abiFunctionChecks?.[0];
+  assert.ok(check);
+  check.movementRecordIdColumn = check.movementItemIdColumn;
+  rewriteProjectionPayload(clone, PROJECTION_FAMILY_IDS.storageTarget, storage);
+  const storageReference = clone.bundle.releaseManifest.projections.find(
+    (reference) => reference.familyId === PROJECTION_FAMILY_IDS.storageTarget,
+  );
+  assert.ok(storageReference);
+  const transition = projectionPayload<StorageTransitionEnvelope>(
+    clone,
+    PROJECTION_FAMILY_IDS.storageTransition,
+  );
+  transition.elements = transition.elements.filter(
+    (element) => element.classification.preparationValidity === 'inAttemptOnly',
   );
   transition.toStorageTargetArtifactRoot = storageReference.artifactRoot;
   transition.toStorageTargetSemanticDigest = storageReference.semanticDigest;

@@ -5,6 +5,7 @@ import {
   PREDICATE_LOWERING_PLAN_VERSION,
   PREDICATE_POSITION_PROFILE_VERSION,
   canonicalize,
+  inspectPredicateForExecution,
   unicodeCaseFold,
   type CanonicalScalar,
   type QueryFilterLoweringPlan,
@@ -27,6 +28,7 @@ import type {
   SemanticOperationExecutionRequest,
   SemanticOperationExecutor,
   SemanticOperationNonAcceptedRequest,
+  SemanticOperationParentGuard,
   SemanticOperationResultEnvelope,
 } from '../../runtime/src/semantic-operation-gateway.js';
 import { SEMANTIC_OPERATION_RESULT_VERSION } from '../../runtime/src/semantic-operation-gateway.js';
@@ -282,7 +284,7 @@ export class PostgresModuleRuntimeInterpreter
               client,
               currentStorage,
               currentEntity,
-              request.definition,
+              request,
               input,
               request.readBackDefinition.selections,
             );
@@ -325,6 +327,13 @@ async function prepareMutation(
 ): Promise<MutationPreparation> {
   const kind = request.definition.effect.kind;
   if (kind === 'createRecordEffect') {
+    // Candidate image. A create that would forge a terminal state must refuse
+    // on the record it is about to write, not on one that does not exist yet.
+    requirePrecondition(
+      request.definition.precondition,
+      input.patch,
+      'candidate',
+    );
     return {
       changes: createChanges(request.definition.inputContract, input),
       expectedRevision: null,
@@ -340,6 +349,19 @@ async function prepareMutation(
     throw failure(
       'MODULE_REVISION_CONFLICT',
       'module record revision does not match expectedRevision',
+    );
+  }
+  // Prior image, for every effect that consumes an existing record. This is
+  // what stops a mutation of already-terminal evidence.
+  requirePrecondition(request.definition.precondition, prior.values, 'prior');
+  if (kind === 'updateRecordEffect') {
+    // Projected image, a SEPARATE obligation. Without it an update could move
+    // a record INTO the guarded state -- the prior image passes, and the row
+    // lands terminal by press rather than by the sanctioned writer.
+    requirePrecondition(
+      request.definition.precondition,
+      { ...prior.values, ...input.patch },
+      'projected',
     );
   }
   const changes =
@@ -359,6 +381,124 @@ async function prepareMutation(
     projectedRevision: prior.revision + 1,
     recordId: input.recordId,
   };
+}
+
+/**
+ * Evaluates a compiled operation precondition against one record image.
+ *
+ * The kernel owns Boolean composition and absence; this resolver supplies only
+ * present-value truth, so the provider cannot fork F1. A comparison this
+ * resolver cannot decide is an ERROR, never `absent` -- absence is a real
+ * semantic answer (`false` under the position profile), and quietly reporting
+ * it for an unreadable value would turn `not(equals)` into a pass. That is the
+ * fail-open direction for exactly the guard this exists to enforce.
+ */
+function requirePrecondition(
+  precondition: Readonly<Record<string, ImmutableJsonValue>>,
+  image: Readonly<Record<string, ImmutableJsonValue>>,
+  imageLabel: 'candidate' | 'parent' | 'prior' | 'projected',
+): void {
+  let receipt;
+  try {
+    receipt = inspectPredicateForExecution(precondition, {
+      bindingPosition: 'operationPrecondition',
+      resolveComparison: (comparison) => resolveAgainstImage(comparison, image),
+    });
+  } catch {
+    throw failure(
+      'MODULE_OPERATION_PRECONDITION_UNSUPPORTED',
+      `operation precondition could not be evaluated on the ${imageLabel} image`,
+    );
+  }
+  if (receipt.outcome !== 'evaluated') {
+    throw failure(
+      'MODULE_OPERATION_PRECONDITION_UNSUPPORTED',
+      `operation precondition is not executable on the ${imageLabel} image`,
+    );
+  }
+  if (!receipt.result) {
+    throw failure(
+      'MODULE_OPERATION_PRECONDITION_REFUSED',
+      `operation precondition does not hold on the ${imageLabel} image`,
+    );
+  }
+}
+
+function resolveAgainstImage(
+  comparison: { field: { targetId: string }; operator: string; value: unknown },
+  image: Readonly<Record<string, ImmutableJsonValue>>,
+): { presence: 'absent' } | { presence: 'present'; result: boolean } {
+  const actual = Object.hasOwn(image, comparison.field.targetId)
+    ? image[comparison.field.targetId]
+    : undefined;
+  if (actual === undefined || actual === null) return { presence: 'absent' };
+  if (
+    typeof comparison.value !== 'object' ||
+    comparison.value === null ||
+    !('value' in comparison.value)
+  ) {
+    throw new TypeError('precondition comparison operand is not a scalar');
+  }
+  const expected = (comparison.value as { value: unknown }).value;
+  // Raw `===` is a sound equality ONLY for kinds whose persisted round trip
+  // returns the canonical operand byte-for-byte. Anything else refuses, because
+  // a false equality makes `not(equals)` ADMIT -- the fail-open direction for
+  // the guard this evaluation exists to enforce.
+  //
+  // Two kinds were admitted here and should not have been, each verified by
+  // reading the codec rather than by reasoning about the kind:
+  //   - exactDecimal / money / quantity: PostgreSQL numeric(p,s) preserves
+  //     scale, so a persisted "1" reads back "1.000000000000000000".
+  //   - dateTime / date / time: a second-precision instant is stored as
+  //     timestamp(0), its canonical operand omits milliseconds
+  //     ("2026-07-30T12:00:00Z"), and the record codec's toISOString() returns
+  //     "2026-07-30T12:00:00.000Z". Temporal kinds cannot be admitted by scalar
+  //     kind alone; they need field-contract-aware canonicalization.
+  //
+  // Widening this set requires proving the round trip for that kind against the
+  // codec, not asserting that the kind looks canonical.
+  const comparableScalarKinds = new Set([
+    'booleanValue',
+    'integerValue',
+    'textValue',
+  ]);
+  const valueKind = (comparison.value as { kind?: unknown }).kind;
+  if (typeof valueKind !== 'string' || !comparableScalarKinds.has(valueKind)) {
+    throw new TypeError(
+      `precondition comparison operand kind ${String(valueKind)} has no canonical equality`,
+    );
+  }
+  switch (comparison.operator) {
+    case 'equals':
+      return { presence: 'present', result: actual === expected };
+    case 'notEquals':
+      return { presence: 'present', result: actual !== expected };
+    case 'lessThan':
+    case 'greaterThan':
+    case 'lessThanOrEqual':
+    case 'greaterThanOrEqual': {
+      if (
+        (typeof actual !== 'string' && typeof actual !== 'number') ||
+        typeof expected !== typeof actual
+      ) {
+        throw new TypeError('precondition ordering operands are not ordered');
+      }
+      const ordered = expected as string | number;
+      return {
+        presence: 'present',
+        result:
+          comparison.operator === 'lessThan'
+            ? actual < ordered
+            : comparison.operator === 'greaterThan'
+              ? actual > ordered
+              : comparison.operator === 'lessThanOrEqual'
+                ? actual <= ordered
+                : actual >= ordered,
+      };
+    }
+    default:
+      throw new TypeError('precondition comparison operator is not admitted');
+  }
 }
 
 function acceptedCommand(
@@ -422,21 +562,43 @@ async function executeMutationOnClient(
   client: PoolClient,
   storage: StorageTargetPayloadV1,
   entity: StorageEntity,
-  definition: RegisteredOperationDefinition,
+  request: SemanticOperationExecutionRequest,
   input: MutationInput,
   readBackSelections: readonly { readonly fieldId: string }[],
 ): Promise<SemanticRecordDto> {
+  const definition = request.definition;
   switch (definition.effect.kind) {
     case 'createRecordEffect':
-      await insertRecord(client, storage, entity, input);
+      await insertRecord(client, storage, entity, input, request.parentGuards);
       break;
     case 'updateRecordEffect':
+      await requireExistingParentGuards(
+        client,
+        storage,
+        entity,
+        input.recordId,
+        request.parentGuards,
+      );
       await updateRecord(client, entity, input);
       break;
     case 'archiveRecordEffect':
+      await requireExistingParentGuards(
+        client,
+        storage,
+        entity,
+        input.recordId,
+        request.parentGuards,
+      );
       await setArchiveState(client, storage, entity, input, true);
       break;
     case 'restoreRecordEffect':
+      await requireExistingParentGuards(
+        client,
+        storage,
+        entity,
+        input.recordId,
+        request.parentGuards,
+      );
       await setArchiveState(client, storage, entity, input, false);
       break;
   }
@@ -455,6 +617,7 @@ async function insertRecord(
   storage: StorageTargetPayloadV1,
   entity: StorageEntity,
   input: MutationInput,
+  parentGuards: readonly SemanticOperationParentGuard[],
 ): Promise<void> {
   const columns = ['tenant_id', 'environment_id', entity.recordIdentity.column];
   const values: unknown[] = [];
@@ -504,7 +667,13 @@ async function insertRecord(
         `unknown relation ${relationId}`,
       );
     }
-    await requireRelationTarget(client, storage, relation, recordId);
+    await requireRelationTarget(
+      client,
+      storage,
+      relation,
+      recordId,
+      parentGuards,
+    );
     columns.push(relation.relationColumn.physicalName);
     parameters.push(parameter(values, recordId));
   }
@@ -527,38 +696,85 @@ async function insertRecord(
   );
 }
 
+async function requireExistingParentGuards(
+  client: PoolClient,
+  storage: StorageTargetPayloadV1,
+  entity: StorageEntity,
+  recordId: string,
+  parentGuards: readonly SemanticOperationParentGuard[],
+): Promise<void> {
+  const relations = storage.relations.filter(
+    (relation) =>
+      relation.sourceEntityId === entity.entityId &&
+      relation.ownership === 'parentScopedChild',
+  );
+  for (const relation of relations) {
+    const result = await client.query<QueryResultRow>(
+      `SELECT ${quoted(relation.relationColumn.physicalName)} AS parent_record_id
+         FROM north_star_module.${quoted(entity.physicalTableName)}
+        WHERE tenant_id = north_star_internal.trusted_tenant_id()
+          AND environment_id = north_star_internal.trusted_environment_id()
+          AND ${quoted(entity.recordIdentity.column)} = $1
+        LIMIT 1`,
+      [recordId],
+    );
+    if (result.rowCount !== 1) {
+      throw failure(
+        'MODULE_RECORD_NOT_FOUND',
+        'module record was not found while resolving its parent guard',
+      );
+    }
+    const parentRecordId = result.rows[0]?.parent_record_id;
+    if (parentRecordId === null && relation.relationColumn.nullable) continue;
+    await requireRelationTarget(
+      client,
+      storage,
+      relation,
+      requiredUuid(parentRecordId, 'parentRecordId'),
+      parentGuards,
+    );
+  }
+}
+
 async function requireRelationTarget(
   client: PoolClient,
   storage: StorageTargetPayloadV1,
   relation: StorageTargetPayloadV1['relations'][number],
   recordId: string,
+  parentGuards: readonly SemanticOperationParentGuard[],
 ): Promise<void> {
   const target = requiredEntity(storage, relation.targetEntityId);
-  const result = await client.query(
-    `SELECT ${quoted(target.archive.archivedAtColumn)} IS NULL AS active
-       FROM north_star_module.${quoted(target.physicalTableName)}
-      WHERE tenant_id = north_star_internal.trusted_tenant_id()
-        AND environment_id = north_star_internal.trusted_environment_id()
-        AND ${quoted(target.recordIdentity.column)} = $1
-      LIMIT 1
-      FOR SHARE`,
-    [recordId],
+  const values: unknown[] = [];
+  const result = await client.query<QueryResultRow>(
+    selectSql(
+      target,
+      [
+        `${quoted(target.recordIdentity.column)} = ${parameter(values, recordId)}`,
+      ],
+      'LIMIT 1 FOR SHARE',
+    ),
+    values,
   );
-  if (result.rowCount !== 1) {
+  const parent = result.rows[0] ? rawRecord(target, result.rows[0]) : null;
+  if (!parent) {
     throw failure(
       'MODULE_RELATION_TARGET_NOT_FOUND',
       'relation target was not found',
     );
   }
-  if (
-    relation.archiveBehavior === 'restrict' &&
-    result.rows[0]?.active !== true
-  ) {
+  if (relation.archiveBehavior === 'restrict' && parent.archivedAt !== null) {
     throw failure(
       'MODULE_RELATION_VIOLATION',
       'relation target cannot accept active dependents',
       relation.relationId,
     );
+  }
+  if (relation.ownership === 'parentScopedChild') {
+    for (const guard of parentGuards.filter(
+      (candidate) => candidate.parentEntityId === target.entityId,
+    )) {
+      requirePrecondition(guard.precondition, parent.values, 'parent');
+    }
   }
 }
 

@@ -64,15 +64,43 @@ design (see "Branch model"), so a packet of any length should expect this.
   accepted branch tip. This preserves the exact reviewed SHA on `main` and
   keeps history linear — one readable stretch per packet.
 - **`main` moved:** rebase the packet branch onto current `main`, or merge it
-  with `git merge --no-ff`. Either way the integrated tip is a **new SHA**, so
-  re-run the **full CI matrix at that integrated SHA** and record both SHAs in
-  the ledger row — the reviewed candidate and the integrated result. This is
-  not extra ceremony: AGENTS.md §6 already requires the full matrix green at
-  the exact integrated SHA, and a rebase or merge *is* the integration it
-  refers to. Prefer `--no-ff` when the reviewed candidate must remain literally
-  retrievable as an ancestor; the ledger's existing rows record exactly this
-  ("accepted by non-squash integration with the reviewed candidate preserved as
-  an ancestor").
+  with `git merge --no-ff`. Record both SHAs in the ledger row — the reviewed
+  candidate and the integrated result. Prefer `--no-ff` when the reviewed
+  candidate must remain literally retrievable as an ancestor; the ledger's
+  existing rows record exactly this ("accepted by non-squash integration with
+  the reviewed candidate preserved as an ancestor").
+
+**Whether the integrated SHA needs its own matrix run is decided by the TREE's
+EXECUTABLE CONTENT, not by the SHA** — corrected 2026-07-31.
+
+    git diff --name-only <reviewed-sha> <integrated-sha> -- . \
+      ':!docs' ':!.agents' ':!CLAUDE.md' ':!AGENTS.md'
+
+- **Empty output** — the integrated tree differs from the reviewed tree only in
+  non-executable narrative, or not at all: the reviewed matrix **is** the
+  acceptance matrix. Do not re-run. Record the reviewed run against the
+  integrated SHA, with the command's empty output as the evidence.
+- **Any output** — product code, test, config, migration, lockfile or generated
+  artifact differs: re-run the full CI matrix at the integrated SHA before
+  acceptance.
+
+The exclusions are exactly the paths the docs-only exception already names, and
+for the same stated reason: those files are never executed, so a matrix cannot
+observe them. Do not widen the exclusion list — a generated artifact under any
+path voids it, and so does a lockfile.
+
+This was previously written as *"either way the integrated tip is a new SHA, so
+re-run"*, which under the standing `--no-ff` policy meant **every** packet paid
+for a second 10-25 minute matrix — including packets whose integrated tree was
+byte-identical to the reviewed one. AGENTS.md §6 requires the matrix to be green
+at the integrated SHA; it does not require the *run* to have happened after the
+merge commit existed. A run over an identical tree observes nothing new, which is
+the same reasoning `lanes.md` already uses for the docs-only exception and the
+same reasoning behind fast-forward integration ("the matrix already covers it").
+
+**The identical-tree claim is verified, never assumed.** Run the `git diff
+--quiet` above and record the result. A merge that silently resolved a conflict
+changes the tree even when every incoming commit looked like documentation.
 - Parallel packets: use a real merge commit (`git merge --no-ff`), never a
   squash. Squashing an accepted packet detaches `main` from the reviewed SHA
   and breaks the evidence link. Do not squash accepted work.

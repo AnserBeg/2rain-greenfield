@@ -231,6 +231,14 @@ export type PredicateKernelReceipt =
     }>
   | Readonly<{
       kind: 'predicateKernelReceipt';
+      outcome: 'admitted';
+      position: PredicateBindingPosition;
+      positionProfileVersion: typeof PREDICATE_POSITION_PROFILE_VERSION;
+      reason: 'parsed-expression';
+      schemaVersion: typeof PREDICATE_KERNEL_RECEIPT_VERSION;
+    }>
+  | Readonly<{
+      kind: 'predicateKernelReceipt';
       nodeSchemaVersion: string | null;
       outcome: 'rejected';
       reason:
@@ -291,6 +299,40 @@ export const inspectPredicateForExecution: PredicateKernelEntryPoint = (
       return rejected(nodeSchemaVersion, 'unsupported-node-version');
   }
 };
+
+/**
+ * Structural admission without evaluation.
+ *
+ * A caller that will evaluate a predicate LATER, against a record image it does
+ * not hold yet, still has to refuse an unreadable predicate BEFORE anything
+ * runs. That is this entry point: it answers "is this a predicate this platform
+ * can execute at all", and nothing about whether it holds.
+ *
+ * It is deliberately NOT a third truth value. `admitted` is not `accepted` —
+ * `accepted` means the v0 literal-`true` fence was satisfied and no evaluation
+ * is owed. Every existing caller tests `outcome !== 'accepted'` and therefore
+ * treats an admitted receipt as a refusal, which is the fail-closed direction:
+ * opening the fence requires opting in, and forgetting to opt in refuses.
+ */
+export function admitPredicateForExecution(
+  value: unknown,
+  bindingPosition: PredicateBindingPosition,
+): PredicateKernelReceipt {
+  const parsed = parsePredicate(value, 1);
+  if (parsed.outcome === 'rejected') return parsed;
+  if (!Object.hasOwn(PREDICATE_POSITION_PROFILES, bindingPosition as string)) {
+    return rejected(parsed.predicate.schemaVersion, 'invalid-binding-position');
+  }
+  const profile = PREDICATE_POSITION_PROFILES[bindingPosition];
+  return Object.freeze({
+    kind: 'predicateKernelReceipt' as const,
+    outcome: 'admitted' as const,
+    position: profile.position,
+    positionProfileVersion: profile.schemaVersion,
+    reason: 'parsed-expression' as const,
+    schemaVersion: PREDICATE_KERNEL_RECEIPT_VERSION,
+  });
+}
 
 type RejectedPredicateReceipt = Extract<
   PredicateKernelReceipt,

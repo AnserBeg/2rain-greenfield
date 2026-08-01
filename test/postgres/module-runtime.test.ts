@@ -75,6 +75,7 @@ import {
 } from '../../packages/runtime/src/semantic-operation-gateway.js';
 import { SHARED_LIST_QUERY_VERSION } from '../../packages/runtime/src/list-behavior/index.js';
 import {
+  MalformedSemanticQueryRequestError,
   SEMANTIC_QUERY_REQUEST_VERSION,
   SemanticQueryGateway,
   type SemanticAggregateResultEnvelope,
@@ -1427,34 +1428,67 @@ test('v3 inventory reads require issued legal-entity scope and preserve generic 
           );
           adversarialClient.release();
         }
+        const movementListQueryId = `${APPLICATION_NAMESPACE}:query.inventory_movement_list`;
+        const queryCatalog = view.projections.query.payload;
+        assert.ok(isImmutableJsonObject(queryCatalog));
+        assert.ok(Array.isArray(queryCatalog.queries));
+        const movementListDefinition = queryCatalog.queries.find(
+          (candidate) =>
+            isImmutableJsonObject(candidate) &&
+            candidate.queryId === movementListQueryId,
+        );
+        assert.ok(isImmutableJsonObject(movementListDefinition));
+        const movementListScope = movementListDefinition.legalEntityScope;
+        assert.ok(isImmutableJsonObject(movementListScope));
+        const movementListScopeOperand = movementListScope.operand;
+        assert.ok(isImmutableJsonObject(movementListScopeOperand));
+        const movementListScopeParameterId =
+          movementListScopeOperand.parameterId;
+        assert.ok(typeof movementListScopeParameterId === 'string');
+        const movementListArguments = {
+          [movementListScopeParameterId]: legalEntityId,
+          includeArchived: false,
+          list: {
+            cursor: null,
+            matchMode: 'substring',
+            pageSize: 10,
+            relationLabels: [
+              {
+                fieldId: applicationInventoryId(
+                  INVENTORY_IDS.fieldIds.transaction.number,
+                ),
+                queryId: `${APPLICATION_NAMESPACE}:query.inventory_transaction_list`,
+                relationId: applicationInventoryId(
+                  INVENTORY_IDS.relationIds.movementTransaction,
+                ),
+              },
+            ],
+            schemaVersion: SHARED_LIST_QUERY_VERSION,
+            search: '',
+            sort: [],
+          },
+        };
+        await assert.rejects(
+          query(
+            queryGateway,
+            view,
+            'inventory_movement_list',
+            movementListArguments,
+            APPLICATION_NAMESPACE,
+            { legalEntityReadScope: scopeA },
+          ),
+          (error: unknown) =>
+            error instanceof MalformedSemanticQueryRequestError &&
+            error.code === 'MALFORMED_SEMANTIC_QUERY_REQUEST' &&
+            error.message ===
+              'query declares a legal-entity operand and cannot also take an issued scope',
+        );
         const joined = await query(
           queryGateway,
           view,
           'inventory_movement_list',
-          {
-            includeArchived: false,
-            list: {
-              cursor: null,
-              matchMode: 'substring',
-              pageSize: 10,
-              relationLabels: [
-                {
-                  fieldId: applicationInventoryId(
-                    INVENTORY_IDS.fieldIds.transaction.number,
-                  ),
-                  queryId: `${APPLICATION_NAMESPACE}:query.inventory_transaction_list`,
-                  relationId: applicationInventoryId(
-                    INVENTORY_IDS.relationIds.movementTransaction,
-                  ),
-                },
-              ],
-              schemaVersion: SHARED_LIST_QUERY_VERSION,
-              search: '',
-              sort: [],
-            },
-          },
+          movementListArguments,
           APPLICATION_NAMESPACE,
-          { legalEntityReadScope: scopeA },
         );
         assert.equal(joined.records.length, 2);
         const normalJoined = joined.records.find(
@@ -2428,6 +2462,12 @@ function legalEntityIdFromPolicyInput(
     : null;
 }
 
+function isImmutableJsonObject(
+  value: ImmutableJsonValue | undefined,
+): value is Readonly<Record<string, ImmutableJsonValue>> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 async function operation(
   gateway: SemanticOperationGateway,
   view: RequestRuntimeView,
@@ -3167,10 +3207,16 @@ function inventoryApplicationDefinition(): Record<string, unknown> {
     'storageMappings',
     'surfaces',
   ] as const) {
-    application[collection] = [
-      ...(application[collection] as unknown[]),
-      ...(inventory[collection] as unknown[]),
-    ];
+    const composed = application[collection] as unknown[];
+    for (const entry of inventory[collection] as unknown[]) {
+      assert.equal(
+        composed.filter(
+          (candidate) => JSON.stringify(candidate) === JSON.stringify(entry),
+        ).length,
+        1,
+        `composed application must contain each inventory ${collection} entry exactly once`,
+      );
+    }
   }
   (application.queries as Array<Record<string, unknown>>).push({
     aggregate: {
@@ -3251,11 +3297,13 @@ function inventoryApplicationDefinition(): Record<string, unknown> {
     inventory.modules as Array<Record<string, unknown>>
   )[0];
   assert.ok(inventoryModule);
-  (application.modules as Array<Record<string, unknown>>).push({
-    ...inventoryModule,
-    orderKey: 40,
-    ownerPackageId: (application.package as { packageId: string }).packageId,
-  });
+  assert.equal(
+    (application.modules as Array<Record<string, unknown>>).filter(
+      (candidate) => candidate.moduleId === inventoryModule.moduleId,
+    ).length,
+    1,
+    'composed application must contain the inventory module exactly once',
+  );
   return application;
 }
 

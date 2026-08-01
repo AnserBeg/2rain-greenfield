@@ -8,11 +8,24 @@ import {
   type CompileSuccess,
   type ExecutedVerificationResult,
   type ProjectionManifestEnvelope,
+  type StorageTargetPayloadV1,
   type VerificationPlanPayloadV1,
   type VerificationScenario,
   type VerificationScenarioExecutor,
 } from '@north-star/compiler';
-import type { ExecutedVerificationResultSet } from '../../compiler/src/verification.js';
+import {
+  VERIFICATION_IMPACT_ANALYSIS_VERSION,
+  VERIFICATION_PARTITIONED_RESULT_SET_VERSION,
+} from '../../compiler/src/protocol.js';
+import type { VERIFICATION_RESULT_SET_VERSION } from '../../compiler/src/protocol.js';
+import type {
+  ExecutedVerificationResultSet,
+  FullyExecutedVerificationResultSet,
+  PartitionedVerificationResultSet,
+  VerificationDerivationReason,
+  VerificationScenarioDeriver,
+  VerificationScenarioDerivation,
+} from '../../compiler/src/verification.js';
 import type { MintedUuid } from '@north-star/platform-runtime';
 import {
   AuthenticatedRequestEntryAdapter,
@@ -53,34 +66,56 @@ import {
 import { withTrustedRequestTransaction } from './request-context.js';
 import { TrustedActorEnvelopeIssuer } from './trust/trusted-actor-envelope.js';
 
-type ResultSetVersion = 'northstar.verification-result-set/v1';
+type ResultSetVersion =
+  | typeof VERIFICATION_PARTITIONED_RESULT_SET_VERSION
+  | typeof VERIFICATION_RESULT_SET_VERSION;
 const sha256Pattern = /^[0-9a-f]{64}$/u;
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
 export interface ReleaseVerificationBinding {
   readonly artifactClosureDigest: string;
+  readonly findings: readonly VerificationConstructibilityFinding[];
   readonly plan: VerificationPlanPayloadV1;
   readonly releaseRoot: string;
   readonly verificationPlanArtifactRoot: string;
   readonly verificationPlanSemanticDigest: string;
 }
 
-export interface DurableReleaseVerificationEvidence {
-  readonly artifactClosureDigest: string;
+/**
+ * Durable identity carried alongside the compiler-owned result set. It never
+ * participates in the result-set digest and is never handed to the conformance
+ * validator.
+ */
+export interface DurableVerificationEvidenceIdentity {
   readonly evidenceId: MintedUuid;
   readonly executedEnvironmentId: string;
   readonly executedEvidenceId: MintedUuid;
   readonly executedTenantId: string;
-  readonly provider: 'realPostgresql';
-  readonly providerRunId: string;
-  readonly releaseRoot: string;
-  readonly resultSetDigest: string;
-  readonly results: readonly ExecutedVerificationResult[];
-  readonly schemaVersion: ResultSetVersion;
-  readonly verificationPlanArtifactRoot: string;
-  readonly verificationPlanDigest: string;
-  readonly verificationPlanSemanticDigest: string;
+  readonly findings: readonly VerificationConstructibilityFinding[];
+}
+
+/**
+ * ADR-0033: a v1 result set is FULLY EXECUTED. That is not the same fact as an
+ * exact partition that happens to derive nothing, so v1 evidence carries no
+ * `derivations` key at all rather than an empty array.
+ */
+export type DurableFullyExecutedVerificationEvidence =
+  DurableVerificationEvidenceIdentity & FullyExecutedVerificationResultSet;
+
+export type DurablePartitionedVerificationEvidence =
+  DurableVerificationEvidenceIdentity & PartitionedVerificationResultSet;
+
+export type DurableReleaseVerificationEvidence =
+  | DurableFullyExecutedVerificationEvidence
+  | DurablePartitionedVerificationEvidence;
+
+export interface VerificationConstructibilityFinding {
+  readonly code: 'VERIFICATION_OPERATION_INPUT_UNCONSTRUCTABLE';
+  readonly entityId: string;
+  readonly message: string;
+  readonly operationId: string;
+  readonly requiredStorageColumn: string;
 }
 
 export interface ExecuteReleaseVerificationCommand {
@@ -95,6 +130,7 @@ interface EvidenceRow {
   executed_environment_id: string;
   executed_evidence_id: MintedUuid;
   executed_tenant_id: string;
+  impact_analysis_derivation: unknown;
   provider: 'realPostgresql';
   provider_run_id: string;
   release_root: string;
@@ -165,17 +201,19 @@ export class PostgresReleaseVerificationService {
     );
     if (existing) return existing;
 
-    const executed = await executeVerificationPlan(
-      binding.plan,
-      {
-        artifactClosureDigest: binding.artifactClosureDigest,
-        providerRunId: providerRunId(),
-        releaseRoot: binding.releaseRoot,
-        verificationPlanArtifactRoot: binding.verificationPlanArtifactRoot,
-        verificationPlanSemanticDigest: binding.verificationPlanSemanticDigest,
-      },
-      executor,
+    const derive = verificationScenarioDeriver(
+      command.compiledRelease,
+      binding,
     );
+    const executionCommand = executionBinding(binding);
+    const executed = derive
+      ? await executeVerificationPlan(
+          binding.plan,
+          executionCommand,
+          executor,
+          derive,
+        )
+      : await executeVerificationPlan(binding.plan, executionCommand, executor);
     const conformance = validateExecutedVerificationPlan(
       binding.plan,
       executed,
@@ -250,24 +288,30 @@ export class PostgresReleaseVerificationService {
     const snapshot = snapshotExecutionCommand(command);
     const binding = releaseVerificationBinding(snapshot.compiledRelease);
     await this.assertStagedCandidate(context, snapshot, binding);
-    if (binding.plan.scenarios.length === 0) {
-      return executeVerificationPlan(
-        binding.plan,
-        executionBinding(binding),
-        () => ({ positiveProbe: { emptyPlanExecuted: true } }),
-      );
-    }
+    const derive = verificationScenarioDeriver(
+      snapshot.compiledRelease,
+      binding,
+    );
     return this.#executeSemanticCandidateWithExecutor(
       context,
       snapshot,
       binding,
       executorProvider,
-      (executor) =>
-        executeVerificationPlan(
-          binding.plan,
-          executionBinding(binding),
-          (scenario) => executor.execute(scenario),
-        ),
+      (executor): Promise<ExecutedVerificationResultSet> => {
+        const executionCommand = executionBinding(binding);
+        return derive
+          ? executeVerificationPlan(
+              binding.plan,
+              executionCommand,
+              (scenario) => executor.execute(scenario),
+              derive,
+            )
+          : executeVerificationPlan(
+              binding.plan,
+              executionCommand,
+              (scenario) => executor.execute(scenario),
+            );
+      },
     );
   }
 
@@ -277,11 +321,6 @@ export class PostgresReleaseVerificationService {
     executorProvider: SemanticOperationExecutor & SemanticQueryExecutor,
   ): Promise<DurableReleaseVerificationEvidence> {
     const binding = releaseVerificationBinding(command.compiledRelease);
-    if (binding.plan.scenarios.length === 0) {
-      return this.#executeAndPersist(context, command, () => ({
-        positiveProbe: { emptyPlanExecuted: true },
-      }));
-    }
     return this.#executeSemanticCandidateWithExecutor(
       context,
       command,
@@ -327,12 +366,14 @@ export class PostgresReleaseVerificationService {
         view,
         command.compiledRelease,
         binding.plan,
+        binding.findings,
         operationGateway,
         mediation,
         queryGateway,
       );
       return (async () => {
         try {
+          await executor.verifyLegalEntityScopeOmissions();
           return await execute(executor);
         } finally {
           await executor.archiveProbeRecords();
@@ -566,11 +607,168 @@ export function releaseVerificationBinding(
       'northstar.release-artifact-closure/v1',
       [...compiledRelease.bundle.releaseManifest.artifactClosure].toSorted(),
     ),
+    findings: verificationConstructibilityFindings(compiledRelease),
     plan,
     releaseRoot: compiledRelease.releaseRoot,
     verificationPlanArtifactRoot: reference.artifactRoot,
     verificationPlanSemanticDigest: reference.semanticDigest,
   });
+}
+
+export function verificationConstructibilityFindings(
+  compiledRelease: CompileSuccess,
+): readonly VerificationConstructibilityFinding[] {
+  const storage = compiledProjectionPayload<StorageTargetPayloadV1>(
+    compiledRelease,
+    PROJECTION_FAMILY_IDS.storageTarget,
+  );
+  const operations = compiledProjectionPayload<{
+    readonly operations: readonly VerificationOperationContract[];
+  }>(compiledRelease, PROJECTION_FAMILY_IDS.operationCatalog).operations;
+  const queries = compiledProjectionPayload<{
+    readonly queries: readonly VerificationQueryContract[];
+  }>(compiledRelease, PROJECTION_FAMILY_IDS.queryCatalog).queries;
+  const searchableEntityIds = new Set(
+    queries
+      .filter((query) => query.queryType === 'search')
+      .map((query) => query.sourceEntityId),
+  );
+  const findings: VerificationConstructibilityFinding[] = [];
+  for (const operation of operations) {
+    if (
+      operation.effect.kind !== 'createRecordEffect' ||
+      !searchableEntityIds.has(operation.effect.entity.targetId)
+    ) {
+      continue;
+    }
+    const entity = storage.entities.find(
+      (candidate) => candidate.entityId === operation.effect.entity.targetId,
+    );
+    if (!entity) {
+      throw failure(
+        'VERIFICATION_STORAGE_ENTITY_MISSING',
+        `compiled verification entity has no storage target: ${operation.effect.entity.targetId}`,
+      );
+    }
+    const constructibleColumns = new Set<string>();
+    for (const field of operation.inputContract.fields) {
+      const column = entity.columns.find(
+        (candidate) => candidate.canonicalFieldId === field.fieldId,
+      );
+      if (column) constructibleColumns.add(column.physicalName);
+    }
+    for (const relationInput of operation.inputContract.relationInputs) {
+      const relation = storage.relations.find(
+        (candidate) =>
+          candidate.sourceEntityId === entity.entityId &&
+          candidate.relationId === relationInput.relationId,
+      );
+      if (relation) {
+        constructibleColumns.add(relation.relationColumn.physicalName);
+      }
+    }
+    const requiredColumns = new Set(
+      entity.columns
+        .filter(
+          (column) => !column.nullable && column.defaultSemantics === 'none',
+        )
+        .map((column) => column.physicalName),
+    );
+    for (const relation of storage.relations) {
+      if (
+        relation.sourceEntityId === entity.entityId &&
+        !relation.relationColumn.nullable
+      ) {
+        requiredColumns.add(relation.relationColumn.physicalName);
+      }
+    }
+    if (entity.legalEntity) {
+      requiredColumns.add(entity.legalEntity.column);
+    }
+    for (const requiredStorageColumn of requiredColumns) {
+      if (constructibleColumns.has(requiredStorageColumn)) continue;
+      findings.push(
+        Object.freeze({
+          code: 'VERIFICATION_OPERATION_INPUT_UNCONSTRUCTABLE' as const,
+          entityId: entity.entityId,
+          message: `verification could not construct inputs for operation ${operation.operationId} because required storage column ${requiredStorageColumn} has no declared input`,
+          operationId: operation.operationId,
+          requiredStorageColumn,
+        }),
+      );
+    }
+  }
+  return Object.freeze(
+    findings.toSorted(
+      (left, right) =>
+        compare(left.operationId, right.operationId) ||
+        compare(left.requiredStorageColumn, right.requiredStorageColumn),
+    ),
+  );
+}
+
+/**
+ * ADR-0033: the single derivation authority for this provider. Both live
+ * `executeVerificationPlan` call sites build their callback here so one
+ * candidate can never yield two different exact partitions.
+ *
+ * The compiler keeps iterating the complete emitted plan; a scenario is derived
+ * only when the generic verification executor cannot arrange it at all:
+ *
+ * - the entity's generic create exists but its declared input cannot construct
+ *   a required storage column (the recorded constructibility finding, reused
+ *   verbatim rather than restated); or
+ * - the entity exposes no generic create operation whatsoever.
+ *
+ * Every other scenario returns `null` and runs a real PostgreSQL probe. When no
+ * scenario derives, the deriver is absent and the release stays fully executed
+ * v1 evidence.
+ */
+export function verificationScenarioDeriver(
+  compiledRelease: CompileSuccess,
+  binding: ReleaseVerificationBinding,
+): VerificationScenarioDeriver | undefined {
+  const unconstructableByEntity = new Map<
+    string,
+    VerificationConstructibilityFinding
+  >();
+  for (const finding of binding.findings) {
+    if (!unconstructableByEntity.has(finding.entityId)) {
+      unconstructableByEntity.set(finding.entityId, finding);
+    }
+  }
+  const createOperationEntityIds = new Set(
+    compiledProjectionPayload<{
+      readonly operations: readonly VerificationOperationContract[];
+    }>(compiledRelease, PROJECTION_FAMILY_IDS.operationCatalog)
+      .operations.filter(
+        (operation) => operation.effect.kind === 'createRecordEffect',
+      )
+      .map((operation) => operation.effect.entity.targetId),
+  );
+  const derive = (
+    scenario: VerificationScenario,
+  ): VerificationDerivationReason | null => {
+    const finding = unconstructableByEntity.get(scenario.entityId);
+    if (finding) {
+      return Object.freeze({
+        code: 'VERIFICATION_OPERATION_INPUT_UNCONSTRUCTABLE' as const,
+        entityId: finding.entityId,
+        message: finding.message,
+        operationId: finding.operationId,
+        requiredStorageColumn: finding.requiredStorageColumn,
+      });
+    }
+    if (createOperationEntityIds.has(scenario.entityId)) return null;
+    return Object.freeze({
+      code: 'VERIFICATION_NO_GENERIC_CREATE_OPERATION' as const,
+      entityId: scenario.entityId,
+      message: `verification could not arrange scenario ${scenario.scenarioId} because entity ${scenario.entityId} exposes no generic create operation`,
+    });
+  };
+  return binding.plan.scenarios.some((scenario) => derive(scenario) !== null)
+    ? derive
+    : undefined;
 }
 
 export async function readDurableVerificationEvidence(
@@ -585,7 +783,7 @@ export async function readDurableVerificationEvidence(
             verification_plan_semantic_digest, verification_plan_digest,
             result_set_digest, result_count, provider, provider_run_id,
             executed_tenant_id, executed_environment_id,
-            executed_evidence_id
+            executed_evidence_id, impact_analysis_derivation
        FROM platform.release_verification_evidence
       WHERE tenant_id = $1
         AND environment_id = $2
@@ -611,7 +809,8 @@ export async function readDurableVerificationEvidence(
       'verification evidence header and result count differ',
     );
   }
-  const resultSet = Object.freeze({
+  const evidenceVersion = row.evidence_version;
+  const reconstructed = {
     artifactClosureDigest: row.artifact_closure_digest,
     provider: row.provider,
     providerRunId: row.provider_run_id,
@@ -630,29 +829,72 @@ export async function readDurableVerificationEvidence(
         }),
       ),
     ),
-    schemaVersion: row.evidence_version,
     verificationPlanArtifactRoot: row.verification_plan_artifact_root,
     verificationPlanDigest: row.verification_plan_digest,
     verificationPlanSemanticDigest: row.verification_plan_semantic_digest,
-  });
-  const validation = validateExecutedVerificationPlan(
-    binding.plan,
-    resultSet,
-    binding,
-  );
-  if (validation.status !== 'passed') {
-    throw failure(
-      'VERIFICATION_EVIDENCE_CONFORMANCE_FAILED',
-      `durable verification evidence does not match the candidate: ${JSON.stringify(validation.diagnostics)}`,
-    );
-  }
-  return Object.freeze({
-    ...resultSet,
+  };
+  const identity = {
     evidenceId,
     executedEnvironmentId: row.executed_environment_id,
     executedEvidenceId: row.executed_evidence_id,
     executedTenantId: row.executed_tenant_id,
+    findings: binding.findings,
+  };
+  const admit = (resultSet: ExecutedVerificationResultSet): void => {
+    const validation = validateExecutedVerificationPlan(
+      binding.plan,
+      resultSet,
+      binding,
+    );
+    if (validation.status !== 'passed') {
+      throw failure(
+        'VERIFICATION_EVIDENCE_CONFORMANCE_FAILED',
+        `durable verification evidence does not match the candidate: ${JSON.stringify(validation.diagnostics)}`,
+      );
+    }
+  };
+  if (evidenceVersion === VERIFICATION_PARTITIONED_RESULT_SET_VERSION) {
+    const resultSet = Object.freeze({
+      ...reconstructed,
+      derivations: durableVerificationDerivations(
+        row.impact_analysis_derivation,
+      ),
+      schemaVersion: evidenceVersion,
+    });
+    admit(resultSet);
+    return Object.freeze({ ...resultSet, ...identity });
+  }
+  const resultSet = Object.freeze({
+    ...reconstructed,
+    schemaVersion: evidenceVersion,
   });
+  admit(resultSet);
+  return Object.freeze({ ...resultSet, ...identity });
+}
+
+/**
+ * Reconstructs the compiler-owned derivation array from the durable
+ * impact-analysis document without repairing it. Anything the document does not
+ * carry exactly is handed to the conformance validator as-is, so a dropped,
+ * reordered, or rewritten derivation fails admission instead of being healed on
+ * the way out of the database.
+ */
+function durableVerificationDerivations(
+  document: unknown,
+): readonly VerificationScenarioDerivation[] {
+  if (!isRecord(document) || !Array.isArray(document.derivations)) return [];
+  return Object.freeze(
+    document.derivations.map((derivation: unknown) =>
+      isRecord(derivation)
+        ? Object.freeze({
+            ...derivation,
+            ...(isRecord(derivation.reason)
+              ? { reason: Object.freeze({ ...derivation.reason }) }
+              : {}),
+          })
+        : derivation,
+    ) as readonly VerificationScenarioDerivation[],
+  );
 }
 
 interface VerificationFieldContract {
@@ -689,10 +931,17 @@ interface VerificationOperationContract {
   readonly operationId: string;
 }
 
-interface VerificationQueryContract {
-  readonly legalEntityScope?: {
-    readonly kind: 'queryLegalEntityScope';
-  };
+  interface VerificationQueryContract {
+    readonly legalEntityScope?: {
+      readonly cardinality: 'exactlyOne' | 'nonEmptySet';
+      readonly kind: 'queryLegalEntityScope';
+      readonly operand: {
+        readonly kind: 'queryParameterReference';
+        readonly parameterId: string;
+        readonly schemaVersion: 'v4';
+      };
+      readonly schemaVersion: 'v4';
+    };
   readonly queryId: string;
   readonly queryType: 'aggregate' | 'get' | 'list' | 'resolve' | 'search';
   readonly resolveMatchKeys: readonly {
@@ -808,12 +1057,15 @@ class SemanticVerificationExecutor {
   readonly #operations: readonly VerificationOperationContract[];
   readonly #queries: readonly VerificationQueryContract[];
   readonly #relations: readonly VerificationRelationContract[];
+  readonly #requiredLegalEntityScopeQueryIds: readonly string[];
+  readonly #storageEntities: readonly StorageTargetPayloadV1['entities'][number][];
   #ordinal = 0;
 
   constructor(
     private readonly view: IssuedRequestRuntimeView,
     compiled: CompileSuccess,
     plan: VerificationPlanPayloadV1,
+    private readonly constructibilityFindings: readonly VerificationConstructibilityFinding[],
     private readonly operationGateway: SemanticOperationGateway,
     private readonly mediation: SemanticOperationMediationAuthority,
     private readonly queryGateway: SemanticQueryGateway,
@@ -828,9 +1080,32 @@ class SemanticVerificationExecutor {
         queries: readonly VerificationQueryContract[];
       }
     ).queries;
-    this.#relations = compiledProjectionPayload<{
-      relations: readonly VerificationRelationContract[];
-    }>(compiled, PROJECTION_FAMILY_IDS.storageTarget).relations;
+    const storage = compiledProjectionPayload<StorageTargetPayloadV1>(
+      compiled,
+      PROJECTION_FAMILY_IDS.storageTarget,
+    );
+    this.#relations = storage.relations;
+    this.#storageEntities = storage.entities;
+    // The immutable application lineage includes releases compiled before any
+    // query elected ADR-0031's v4 operand. Once a release elects the contract,
+    // storage becomes the independent authority for the complete required set:
+    // removing one elected query from the catalog cannot remove its storage
+    // reader root from this probe.
+    this.#requiredLegalEntityScopeQueryIds = Object.freeze(
+      this.#queries.some((query) => query.legalEntityScope !== undefined)
+        ? [
+            ...new Set(
+              storage.entities
+                .filter(
+                  (entity) =>
+                    entity.lifecycle === 'active' &&
+                    entity.legalEntity?.familyClassification === 'entityOwned',
+                )
+                .flatMap((entity) => entity.consumerWriterRoots.readerQueryIds),
+            ),
+          ].toSorted(compare)
+        : [],
+    );
     for (const scenario of plan.scenarios) {
       if (scenario.kind !== 'searchableExclusion') continue;
       const excluded = this.#excludedFieldsByEntity.get(scenario.entityId);
@@ -861,6 +1136,58 @@ class SemanticVerificationExecutor {
         return this.#uniquenessFold(scenario, token);
       case 'archiveRestrict':
         return this.#archiveRestrict(scenario, token);
+    }
+  }
+
+  /**
+   * ADR-0031 §5: verification asks no business question. It invokes every
+   * scope-declaring query through the real pinned gateway with the operand
+   * omitted and requires that contract's exact typed refusal before scenario
+   * execution or derivation can admit the candidate.
+   */
+  async verifyLegalEntityScopeOmissions(): Promise<void> {
+    const queriesToProbe = new Map(
+      this.#queries
+        .filter((query) => query.legalEntityScope !== undefined)
+        .map((query) => [query.queryId, query]),
+    );
+    for (const queryId of this.#requiredLegalEntityScopeQueryIds) {
+      const query = this.#queries.find(
+        (candidate) => candidate.queryId === queryId,
+      );
+      if (!query) {
+        throw failure(
+          'VERIFICATION_LEGAL_ENTITY_SCOPE_QUERY_MISSING',
+          `entity-owned storage requires a scoped query that is absent from the compiled catalog: ${queryId}`,
+        );
+      }
+      if (!query.legalEntityScope) {
+        throw failure(
+          'VERIFICATION_LEGAL_ENTITY_SCOPE_CONTRACT_MISSING',
+          `entity-owned storage query does not declare a legal-entity scope: ${queryId}`,
+        );
+      }
+      queriesToProbe.set(query.queryId, query);
+    }
+    for (const query of [...queriesToProbe.values()].toSorted((left, right) =>
+      compare(left.queryId, right.queryId),
+    )) {
+      try {
+        await this.#invokeQuery(query, {});
+      } catch (error) {
+        if (
+          error instanceof MalformedLegalEntityScopeArgumentError &&
+          error.code === 'SEMANTIC_QUERY_LEGAL_ENTITY_SCOPE_INVALID' &&
+          error.reason === 'selection-omitted'
+        ) {
+          continue;
+        }
+        throw error;
+      }
+      throw failure(
+        'VERIFICATION_LEGAL_ENTITY_SCOPE_OMISSION_NOT_REFUSED',
+        `scope-declaring query accepted an omitted legal-entity operand: ${query.queryId}`,
+      );
     }
   }
 
@@ -1013,6 +1340,9 @@ class SemanticVerificationExecutor {
     }
     const positiveCandidate = this.#queries
       .filter((query) => query.queryType === 'search')
+      .filter((query) =>
+        this.#hasConstructibleCreateOperation(query.sourceEntityId),
+      )
       .flatMap((query) =>
         query.selections.map((selection) => ({
           entityId: query.sourceEntityId,
@@ -1055,7 +1385,17 @@ class SemanticVerificationExecutor {
         `searchable field ${positiveCandidate.field.fieldId} did not return record ${positiveRecord.recordId}: ${canonicalize(included)}`,
       );
     }
-    return { negativeProbe: excluded, positiveProbe: included };
+    return {
+      negativeProbe: excluded,
+      positiveProbe: {
+        constructibilityFindings: this.constructibilityFindings,
+        searchWitness: {
+          entityId: positiveCandidate.entityId,
+          fieldId: positiveCandidate.field.fieldId,
+          recordObserved: true,
+        },
+      },
+    };
   }
 
   async #typedErrorSurface(scenario: VerificationScenario, token: string) {
@@ -1096,7 +1436,13 @@ class SemanticVerificationExecutor {
         'uniqueness-fold scenario does not name a text input field',
       );
     }
-    const upper = String(verificationFieldValue(field, token)).toUpperCase();
+    const upper = String(
+      verificationFieldValue(
+        field,
+        token,
+        this.#requiredStorageEntity(scenario.entityId),
+      ),
+    ).toUpperCase();
     const accepted = await this.#create(scenario.entityId, `${token}-upper`, {
       [scenario.subjectId]: upper,
     });
@@ -1171,6 +1517,7 @@ class SemanticVerificationExecutor {
     relationOverrides: Readonly<Record<string, string>> = {},
   ): Promise<Record<string, unknown>> {
     const operation = this.#createOperation(entityId);
+    const storageEntity = this.#requiredStorageEntity(entityId);
     const values = Object.fromEntries(
       operation.inputContract.fields
         .filter((field) => field.writable)
@@ -1178,7 +1525,7 @@ class SemanticVerificationExecutor {
           field.fieldId,
           Object.hasOwn(overrides, field.fieldId)
             ? overrides[field.fieldId]
-            : verificationFieldValue(field, token),
+            : verificationFieldValue(field, token, storageEntity),
         ]),
     );
     const relations: Record<string, string> = { ...relationOverrides };
@@ -1368,6 +1715,20 @@ class SemanticVerificationExecutor {
     return operation;
   }
 
+  #hasConstructibleCreateOperation(entityId: string): boolean {
+    const operation = this.#operations.find(
+      (candidate) =>
+        candidate.effect.entity.targetId === entityId &&
+        candidate.effect.kind === 'createRecordEffect',
+    );
+    return (
+      operation !== undefined &&
+      !this.constructibilityFindings.some(
+        (finding) => finding.operationId === operation.operationId,
+      )
+    );
+  }
+
   #requiredOperation(operationId: string): VerificationOperationContract {
     const operation = this.#operations.find(
       (candidate) => candidate.operationId === operationId,
@@ -1379,6 +1740,21 @@ class SemanticVerificationExecutor {
       );
     }
     return operation;
+  }
+
+  #requiredStorageEntity(
+    entityId: string,
+  ): StorageTargetPayloadV1['entities'][number] {
+    const entity = this.#storageEntities.find(
+      (candidate) => candidate.entityId === entityId,
+    );
+    if (!entity) {
+      throw failure(
+        'VERIFICATION_STORAGE_ENTITY_MISSING',
+        `compiled verification entity has no storage target: ${entityId}`,
+      );
+    }
+    return entity;
   }
 
   #requiredField(entityId: string, fieldId: string): VerificationFieldContract {
@@ -1526,10 +1902,11 @@ function compiledProjectionPayload<T>(
 function verificationFieldValue(
   field: VerificationFieldContract,
   token: string,
+  entity: StorageTargetPayloadV1['entities'][number],
 ): unknown {
   switch (field.fieldKind) {
     case 'booleanFieldType':
-      return true;
+      return verificationBooleanFieldValue(entity, field.fieldId);
     case 'enumFieldType':
       if (!field.enumOptionIds[0]) {
         throw failure(
@@ -1568,6 +1945,84 @@ function verificationFieldValue(
         `verification field kind is unsupported: ${field.fieldKind}`,
       );
   }
+}
+
+function verificationBooleanFieldValue(
+  entity: StorageTargetPayloadV1['entities'][number],
+  fieldId: string,
+): boolean {
+  const column = entity.columns.find(
+    (candidate) => candidate.canonicalFieldId === fieldId,
+  );
+  if (!column) {
+    throw failure(
+      'VERIFICATION_STORAGE_FIELD_MISSING',
+      `compiled verification field has no storage column: ${fieldId}`,
+    );
+  }
+  const predicates = [
+    ...entity.uniqueKeys.map((unique) => unique.predicate),
+    ...(entity.legalEntityMaster
+      ? [entity.legalEntityMaster.defaultUniqueIndex.predicate]
+      : []),
+  ];
+  const constrainedValues = new Set<boolean>();
+  for (const predicate of predicates) {
+    const constrainedValue = booleanPredicateValue(
+      predicate,
+      column.physicalName,
+    );
+    if (constrainedValue !== null) constrainedValues.add(constrainedValue);
+  }
+  if (constrainedValues.size === 0) return true;
+  if (constrainedValues.size === 1) {
+    return !constrainedValues.values().next().value;
+  }
+  throw failure(
+    'VERIFICATION_CONSTRAINED_DOMAIN_EXHAUSTED',
+    `compiled partial uniqueness constraints admit no collision-free boolean probe: ${fieldId}`,
+  );
+}
+
+function booleanPredicateValue(
+  predicate: string,
+  physicalColumnName: string,
+): boolean | null {
+  const normalizedTerms = predicate
+    .split(/\s+AND\s+/iu)
+    .map((term) => term.trim().replace(/^\(+|\)+$/gu, ''));
+  const fieldTerm = normalizedTerms.find(
+    (term) =>
+      term.split(/\s+/u)[0]?.toLowerCase() === physicalColumnName.toLowerCase(),
+  );
+  if (!fieldTerm) {
+    if (
+      predicate
+        .split(/[^a-z0-9_]+/iu)
+        .some(
+          (token) => token.toLowerCase() === physicalColumnName.toLowerCase(),
+        )
+    ) {
+      throw failure(
+        'VERIFICATION_PARTIAL_UNIQUE_PREDICATE_UNSUPPORTED',
+        `compiled partial uniqueness predicate is not a boolean conjunction: ${physicalColumnName}`,
+      );
+    }
+    return null;
+  }
+  const tokens = fieldTerm.split(/\s+/u);
+  if (
+    tokens.length !== 3 ||
+    tokens[1]?.toUpperCase() !== 'IS' ||
+    (tokens[2]?.toUpperCase() !== 'TRUE' &&
+      tokens[2]?.toUpperCase() !== 'FALSE')
+  ) {
+    throw failure(
+      'VERIFICATION_PARTIAL_UNIQUE_PREDICATE_UNSUPPORTED',
+      `compiled partial uniqueness predicate is not a boolean conjunction: ${physicalColumnName}`,
+    );
+  }
+  return tokens[2].toUpperCase() === 'TRUE';
 }
 
 function verificationNumericValue(fieldId: string, token: string): string {
@@ -1680,7 +2135,7 @@ async function insertEvidence(
   client: PoolClient,
   context: TrustedRequestContext,
   evidenceId: MintedUuid,
-  resultSet: Awaited<ReturnType<typeof executeVerificationPlan>>,
+  resultSet: ExecutedVerificationResultSet,
   executionSource: Readonly<{
     environmentId: string;
     evidenceId: MintedUuid;
@@ -1691,6 +2146,16 @@ async function insertEvidence(
     tenantId: context.tenantId,
   },
 ): Promise<void> {
+  // ADR-0033: the impact-analysis document is closed. Migration 0018 subtracts
+  // both declared keys and compares the remainder to '{}', so a third key is
+  // rejected by the database rather than by this writer.
+  const impactAnalysisDerivation =
+    resultSet.schemaVersion === VERIFICATION_PARTITIONED_RESULT_SET_VERSION
+      ? JSON.stringify({
+          derivations: resultSet.derivations,
+          schemaVersion: VERIFICATION_IMPACT_ANALYSIS_VERSION,
+        })
+      : null;
   await client.query(
     `INSERT INTO platform.release_verification_evidence (
        tenant_id, environment_id, verification_evidence_id, evidence_version,
@@ -1702,7 +2167,7 @@ async function insertEvidence(
        impact_analysis_derivation, created_by
      ) VALUES (
        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,
-       'FULL','[]'::jsonb,NULL,$17
+       $17,'[]'::jsonb,$18::jsonb,$19
      )`,
     [
       context.tenantId,
@@ -1715,12 +2180,16 @@ async function insertEvidence(
       resultSet.verificationPlanSemanticDigest,
       resultSet.verificationPlanDigest,
       resultSet.resultSetDigest,
+      // Derived scenarios are evidence, never executions: the executed counter
+      // and the durable derivation array length stay separate facts.
       resultSet.results.length,
       resultSet.provider,
       resultSet.providerRunId,
       executionSource.tenantId,
       executionSource.environmentId,
       executionSource.evidenceId,
+      impactAnalysisDerivation === null ? 'FULL' : 'EXACT_PARTITION',
+      impactAnalysisDerivation,
       context.principalId,
     ],
   );

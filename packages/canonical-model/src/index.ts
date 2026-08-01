@@ -81,6 +81,7 @@ export {
   PREDICATE_POSITION_PROFILES,
   PREDICATE_POSITION_PROFILE_VERSION,
   QUERY_AGGREGATE_LOWERING_PLAN_VERSION,
+  admitPredicateForExecution,
   inspectPredicateForExecution,
   type LiteralTruePredicate,
   type PredicateBindingPosition,

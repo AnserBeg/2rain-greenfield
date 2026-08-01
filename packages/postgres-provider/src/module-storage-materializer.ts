@@ -373,10 +373,13 @@ export class PostgresModuleStorageMaterializer {
           source.target,
           target.target,
         ]),
-        new Set(
+        new Map(
           remaining
-            .filter((element) => element.kind === 'addNotValidConstraint')
-            .map((element) => element.physicalObjectName),
+            .filter(
+              (element) =>
+                element.classification.preparationValidity === 'inAttemptOnly',
+            )
+            .map((element) => [element.physicalObjectName, element.elementId]),
         ),
         allowedMissingDeferredOnlineObjects(target.target, remaining),
       );
@@ -1365,6 +1368,15 @@ async function createManagedTable(
          (${columns.join(', ')}) WHERE ${predicate}`,
     );
   }
+  // Row-level security is a property of the table, not of the tenant that
+  // created it. The first tenant to materialize this table seeds it before
+  // ENABLE ROW LEVEL SECURITY below, so its seeds slip through unguarded; every
+  // later tenant seeds a table on which RLS is already enabled and forced. The
+  // seed INSERT policy therefore has to exist before the seeds run, and it is
+  // granted only to the two table classes that are seeded at all.
+  if (entity.legalEntityMaster || entity.periodLock) {
+    await ensureMaterializerSeedInsertPolicy(client, entity.physicalTableName);
+  }
   if (entity.legalEntityMaster) {
     await provisionDefaultLegalEntity(client, entity);
   }
@@ -1703,6 +1715,38 @@ async function ensureMaterializerSelectPolicy(
   );
 }
 
+/**
+ * Seeding companion to {@link ensureMaterializerSelectPolicy}, and just as
+ * narrow. Only the legal-entity master and the period-lock table are seeded by
+ * the materializer, so only those two receive it; the materializer never gains
+ * blanket INSERT on module tables. The predicate is the same trusted
+ * tenant/environment pair the runtime policies bind to, inlined for the same
+ * reason the SELECT policy inlines it: `north_star_internal.trusted_tenant_id`
+ * is executable by `north_star_module_runtime` only.
+ */
+async function ensureMaterializerSeedInsertPolicy(
+  client: PoolClient,
+  tableName: string,
+): Promise<void> {
+  const policyName = managedMaterializerSeedInsertPolicyName(tableName);
+  const exists = await client.query<{ present: boolean }>(
+    `SELECT EXISTS (SELECT 1 FROM pg_policies
+      WHERE schemaname = 'north_star_module'
+        AND tablename = $1
+        AND policyname = $2) AS present`,
+    [tableName, policyName],
+  );
+  if (exists.rows[0]?.present) return;
+  await client.query(
+    `CREATE POLICY ${quoted(policyName)} ON north_star_module.${quoted(tableName)}
+       FOR INSERT TO north_star_module_materializer
+       WITH CHECK (
+         tenant_id = nullif(current_setting('north_star.tenant_id', true), '')::uuid
+         AND environment_id = nullif(current_setting('north_star.environment_id', true), '')::uuid
+       )`,
+  );
+}
+
 async function ensureRejectMutationTrigger(
   client: PoolClient,
   tableName: string,
@@ -1888,7 +1932,7 @@ function requiredStorageColumn(
 async function verifyCatalogOnClient(
   client: PoolClient,
   targets: readonly StorageTargetPayloadV1[],
-  pendingConstraintNames: ReadonlySet<string> = new Set(),
+  pendingConstraintElements: ReadonlyMap<string, string> = new Map(),
   allowedMissing: AllowedMissingCatalogObjects = {
     columns: new Set(),
     indexes: new Set(),
@@ -2166,7 +2210,9 @@ async function verifyCatalogOnClient(
         AND constraint_record.conparentid = 0
       ORDER BY source.relname, constraint_record.conname`,
   );
-  const effectivePendingConstraintNames = new Set(pendingConstraintNames);
+  const effectivePendingConstraintNames = new Set(
+    pendingConstraintElements.keys(),
+  );
   if (effectivePendingConstraintNames.size > 0) {
     const appliedConstraints = await client.query<{
       physical_object_name: string;
@@ -2175,10 +2221,9 @@ async function verifyCatalogOnClient(
          FROM north_star_internal.module_storage_elements AS element
          JOIN north_star_internal.module_storage_element_applications AS application
            ON application.element_id = element.element_id
-        WHERE element.element_kind = 'addNotValidConstraint'
-          AND element.physical_object_name = ANY($1::text[])
+        WHERE element.element_id = ANY($1::text[])
           AND application.application_state = 'APPLIED'`,
-      [[...effectivePendingConstraintNames]],
+      [[...pendingConstraintElements.values()]],
     );
     for (const applied of appliedConstraints.rows) {
       effectivePendingConstraintNames.delete(applied.physical_object_name);
@@ -3353,7 +3398,6 @@ function buildExpectedConstraints(
   }
   for (const entity of tables.values()) {
     for (const check of entity.checkConstraints ?? []) {
-      if (pendingConstraintNames.has(check.physicalName)) continue;
       result.push({
         columns: [
           requiredStorageColumn(entity, check.canonicalFieldId).physicalName,
@@ -3375,11 +3419,13 @@ function buildExpectedConstraints(
       });
     }
   }
-  return result.toSorted((left, right) =>
-    `${left.tableName}.${left.name}`.localeCompare(
-      `${right.tableName}.${right.name}`,
-    ),
-  );
+  return result
+    .filter((constraint) => !pendingConstraintNames.has(constraint.name))
+    .toSorted((left, right) =>
+      `${left.tableName}.${left.name}`.localeCompare(
+        `${right.tableName}.${right.name}`,
+      ),
+    );
 }
 
 function buildExpectedIndexes(
@@ -3829,6 +3875,23 @@ function buildExpectedPolicies(
         tableName,
         withCheck: null,
       })),
+      // Seeding is confined to the legal-entity master and the period-lock
+      // table, so only those two carry a materializer INSERT policy.
+      ...(entity.legalEntityMaster || entity.periodLock
+        ? [
+            {
+              command: 'INSERT' as const,
+              name: managedMaterializerSeedInsertPolicyName(
+                entity.physicalTableName,
+              ),
+              permissive: true,
+              qual: null,
+              roles: ['north_star_module_materializer'],
+              tableName: entity.physicalTableName,
+              withCheck: materializerPredicate,
+            },
+          ]
+        : []),
     ];
   });
 }
@@ -3986,6 +4049,15 @@ function managedMaterializerPolicyName(tableName: string): string {
     .slice(0, 32)}`;
 }
 
+function managedMaterializerSeedInsertPolicyName(tableName: string): string {
+  return `nsm_p_${createHash('sha256')
+    .update(tableName)
+    .update('\0')
+    .update('MATERIALIZER_SEED_INSERT')
+    .digest('hex')
+    .slice(0, 32)}`;
+}
+
 function catalogType(postgresqlType: string): string {
   return postgresqlType.replace(/^varchar\(/, 'character varying(');
 }
@@ -4092,6 +4164,7 @@ function mergeCompatibleEntity(
 ): StorageEntityTarget {
   const withoutAdditive = (entity: StorageEntityTarget) => {
     const {
+      abiFunctionChecks: _abiFunctionChecks,
       columns: _columns,
       checkConstraints: _checkConstraints,
       consumerWriterRoots: _consumerWriterRoots,
@@ -4101,6 +4174,7 @@ function mergeCompatibleEntity(
       uniqueKeys: _uniqueKeys,
       ...base
     } = entity;
+    void _abiFunctionChecks;
     void _columns;
     void _checkConstraints;
     void _consumerWriterRoots;
@@ -4246,6 +4320,11 @@ function mergeCompatibleEntity(
   };
   return {
     ...next,
+    abiFunctionChecks: mergeNamed(
+      prior.abiFunctionChecks ?? [],
+      next.abiFunctionChecks ?? [],
+      (value) => value.physicalName,
+    ),
     checkConstraints: mergeNamed(
       prior.checkConstraints ?? [],
       next.checkConstraints ?? [],

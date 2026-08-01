@@ -43,8 +43,34 @@ applied to the same bounded charter.
   compiler, semantic gateways, inventory posting, tenant isolation/policy,
   trust substrate, migrations.
 
-Tier is set by what the diff touched; when in doubt take the higher. But a
-higher tier raises reviewer strength, not scope — the charter still bounds it.
+Tier is set by what the diff **does**, not by where it lives; when genuinely in
+doubt take the higher. A higher tier raises reviewer strength, not scope — the
+charter still bounds it.
+
+**Location is not tier — calibrated 2026-07-31.** Touching a Critical subsystem
+is not the same as changing its logic. In a platform whose product *is* a
+compiler, a release kernel and a posting engine, the subsystem list above covers
+almost every file, so read it as naming where high-consequence logic tends to
+live, not as an address filter.
+
+Inside a Critical subsystem, these are **Behavioral**:
+
+- registering a file, script, or test in an inventory;
+- adding or repairing a test or control without changing the code under test;
+- wiring an existing, already-reviewed mechanism into a new call site;
+- renames, moves, and type-only changes with no behavioural delta;
+- regenerating a compiled artifact from an unchanged generator.
+
+These stay **Critical** wherever they live: new or changed invariants, privilege
+and tenancy boundaries, migrations, anything altering what a gate proves, and
+anything whose failure mode is a silently wrong answer rather than a crash.
+
+**Why this needed saying.** A ledger count on 2026-07-31 read **59 Critical, 18
+Mechanical, 13 Behavioral** — Critical was 66% of all tiered work. A tier
+carrying two-thirds of the load is the default, not a tier, and Critical is the
+expensive one: two sequential model reviews on a frozen SHA. The cost of
+mis-tiering upward is not zero, and spending Critical review everywhere spends
+it nowhere in particular.
 
 | Tier | Writer | Review |
 |---|---|---|

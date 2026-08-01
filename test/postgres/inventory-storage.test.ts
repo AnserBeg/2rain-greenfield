@@ -16,6 +16,10 @@ import { withEphemeralPostgres } from '../helpers/postgres.js';
 const checkedInMigrations = resolve('db/migrations');
 const contractReleaseRoot =
   'bd977ff0a00db745e79b7d8e158cb55863319f9f37f7674d77b618e85272d116';
+const successorReleaseRoot =
+  '4f2c1d0e9b8a7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d';
+const thirdReleaseRoot =
+  '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 
 const tenantA = 'a1000000-1000-4000-8000-000000000001';
 const environmentA = 'a2000000-2000-4000-8000-000000000002';
@@ -41,7 +45,7 @@ test('inventory platform authority is limited to calendars and release-recorded 
         const migrated = await runMigrations(admin, migrations);
         assert.equal(
           migrated.applied.at(-1),
-          '0019_semantic_aggregate_anchors.sql',
+          '0019_inventory_release_provenance_and_partition_null_safety.sql',
         );
         assert.equal(migrated.verified.length, 19);
         await seedTenant(admin, tenantA, environmentA, 'tenant-a');
@@ -176,6 +180,98 @@ test('inventory platform authority is limited to calendars and release-recorded 
         );
 
         await t.test(
+          'release provenance advances while policy stays assert-identical',
+          async () => {
+            const storedRoot = async (): Promise<string | undefined> => {
+              const row = await admin.query<{ root: string }>(
+                `SELECT contract_release_root AS root
+                   FROM platform.inventory_posting_configurations
+                  WHERE tenant_id = $1 AND environment_id = $2
+                    AND legal_entity_id = $3`,
+                [tenantA, environmentA, legalEntityA],
+              );
+              return row.rows[0]?.root;
+            };
+            assert.equal(await storedRoot(), contractReleaseRoot);
+
+            // Provenance, not policy: an already-provisioned tenant advancing
+            // to a newly compiled contract must succeed, and the stored row
+            // must actually carry the new root. Reading the stored value back
+            // and re-requesting it would satisfy "no throw" while leaving the
+            // row stale, so the row itself is the assertion.
+            await provision(
+              admin,
+              tenantA,
+              environmentA,
+              legalEntityA,
+              'LE-A',
+              'America/Edmonton',
+              '06:00:00',
+              { releaseRoot: successorReleaseRoot },
+            );
+            assert.equal(await storedRoot(), successorReleaseRoot);
+
+            // Policy drift under a further-advanced root still conflicts, and
+            // the failed call advances nothing: the update path is confined to
+            // provenance.
+            for (const drift of [
+              { negativeStock: 'allow' as const },
+              { countApprovalThreshold: '999.5' },
+            ]) {
+              await assert.rejects(
+                provision(
+                  admin,
+                  tenantA,
+                  environmentA,
+                  legalEntityA,
+                  'LE-A',
+                  'America/Edmonton',
+                  '06:00:00',
+                  { ...drift, releaseRoot: thirdReleaseRoot },
+                ),
+                (error: unknown) =>
+                  error instanceof Error &&
+                  (error as Error & { code?: string }).code === 'P0001' &&
+                  error.message === 'INVENTORY_POSTING_CONFIGURATION_CONFLICT',
+              );
+              assert.equal(await storedRoot(), successorReleaseRoot);
+            }
+
+            // The requested root is still format-validated.
+            await assert.rejects(
+              provision(
+                admin,
+                tenantA,
+                environmentA,
+                legalEntityA,
+                'LE-A',
+                'America/Edmonton',
+                '06:00:00',
+                { releaseRoot: 'not-a-release-root' },
+              ),
+              (error: unknown) =>
+                error instanceof Error &&
+                (error as Error & { code?: string }).code === 'P0001' &&
+                error.message === 'INVENTORY_PROVISIONING_INPUT_INVALID',
+            );
+            assert.equal(await storedRoot(), successorReleaseRoot);
+
+            // Restore the provisioned root so later subtests read the value
+            // the rest of this file was written against.
+            await provision(
+              admin,
+              tenantA,
+              environmentA,
+              legalEntityA,
+              'LE-A',
+              'America/Edmonton',
+              '06:00:00',
+            );
+            assert.equal(await storedRoot(), contractReleaseRoot);
+          },
+        );
+
+        await t.test(
           'calendar derives the tenant business period without a UTC fallback',
           async () => {
             const periods = await admin.query<{
@@ -271,7 +367,11 @@ async function provision(
   entityCode: string,
   timeZone: string,
   boundary: string,
-  overrides: { negativeStock?: 'allow' | 'allowWithFlag' | 'reject' } = {},
+  overrides: {
+    countApprovalThreshold?: string | null;
+    negativeStock?: 'allow' | 'allowWithFlag' | 'reject';
+    releaseRoot?: string;
+  } = {},
 ): Promise<void> {
   await client.query(
     `SELECT platform.provision_inventory_scope(
@@ -287,7 +387,7 @@ async function provision(
       `${entityCode} Legal Entity`,
       timeZone,
       boundary,
-      contractReleaseRoot,
+      overrides.releaseRoot ?? contractReleaseRoot,
       1,
       overrides.negativeStock ??
         (entityCode === 'LE-A' ? 'allowWithFlag' : 'reject'),
@@ -299,7 +399,11 @@ async function provision(
       'codeOnly',
       entityCode === 'LE-A' ? '100' : null,
       null,
-      entityCode === 'LE-A' ? '250.5' : null,
+      overrides.countApprovalThreshold !== undefined
+        ? overrides.countApprovalThreshold
+        : entityCode === 'LE-A'
+          ? '250.5'
+          : null,
       entityCode === 'LE-A' ? '10' : null,
       entityCode === 'LE-A' ? '1000' : null,
     ],

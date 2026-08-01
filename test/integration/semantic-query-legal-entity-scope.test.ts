@@ -24,6 +24,11 @@ import {
 } from '../../packages/runtime/src/request-runtime-view.js';
 import { AuthenticatedSemanticQueryApiAdapter } from '../../packages/runtime/src/semantic-gateway-api-adapters.js';
 import {
+  SHARED_LIST_QUERY_VERSION,
+  SHARED_LIST_RESULT_VERSION,
+  SharedListContractError,
+} from '../../packages/runtime/src/list-behavior/index.js';
+import {
   MalformedLegalEntityScopeArgumentError,
   MalformedPinnedQueryCatalogError,
   SEMANTIC_QUERY_REQUEST_VERSION,
@@ -100,6 +105,92 @@ test('an ordinary API caller supplies the legal-entity operand end to end', asyn
     2,
     'each selected entity must receive its own live policy decision',
   );
+});
+
+/**
+ * G3-P6a CONTROL A. ADR-0031's original journey omitted the real `list`
+ * member, so shared-list parsing returned early and never tested its closed
+ * root beside a declared row parameter.
+ *
+ * Victim: the `declaredParameterIds` supplied to `parseSharedListArguments`
+ * in `SemanticQueryGateway.#invoke`. Removing it restores
+ * LIST_INPUT_MALFORMED before the executor observes either contract.
+ */
+test('a declared legal-entity operand coexists with real shared-list arguments', async () => {
+  const fixture = createFixture();
+  const result = await fixture.queryApi.handle(authenticationInput, {
+    arguments: {
+      [scopeParameterId]: [ENTITY_A],
+      includeArchived: false,
+      list: sharedListArguments(),
+    },
+    queryId: scopedQueryId,
+    schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+  });
+  assert.equal(result.outcome, 'exact');
+  const request = fixture.executor.lastRequest;
+  assert.ok(request?.list);
+  assert.equal(request.list.query.requestedPageSize, 7);
+  assert.equal(request.list.query.search, 'counted stock');
+  assert.deepEqual(request.list.query.sort, [
+    {
+      direction: 'ascending',
+      fieldId: 'northstar.bootstrap:field.id',
+    },
+  ]);
+  assert.ok(request.legalEntityReadScope);
+  assert.deepEqual(
+    legalEntityIdsFromIssuedReadScope(
+      request.legalEntityReadScope,
+      request.view,
+    ),
+    [ENTITY_A],
+  );
+});
+
+/** G3-P6a CONTROL B: v0-v3 unparameterized list roots remain unchanged. */
+test('an unparameterized list still admits exactly the original root contract', async () => {
+  const fixture = createFixture({ unscopedQuery: true });
+  const result = await fixture.queryApi.handle(authenticationInput, {
+    arguments: {
+      includeArchived: true,
+      list: sharedListArguments(),
+    },
+    queryId: scopedQueryId,
+    schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+  });
+  assert.equal(result.outcome, 'exact');
+  assert.deepEqual(
+    Object.keys(fixture.executor.lastRequest?.arguments ?? {}).sort(),
+    ['includeArchived', 'list'],
+  );
+  assert.equal(fixture.executor.lastRequest?.list?.query.includeArchived, true);
+});
+
+/**
+ * G3-P6a CONTROL C. The request cannot register its own root keys.
+ *
+ * Victim: the root `assertExactKeys` in `parseSharedListArguments`. Removing
+ * it lets this undeclared value reach the semantic executor.
+ */
+test('a shared-list root still refuses every undeclared query argument', async () => {
+  const fixture = createFixture({ unscopedQuery: true });
+  await assert.rejects(
+    () =>
+      fixture.queryApi.handle(authenticationInput, {
+        arguments: {
+          'northstar.bootstrap:parameter.undeclared': ENTITY_A,
+          includeArchived: false,
+          list: sharedListArguments(),
+        },
+        queryId: scopedQueryId,
+        schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+      }),
+    (error: unknown) =>
+      error instanceof SharedListContractError &&
+      error.code === 'LIST_INPUT_MALFORMED',
+  );
+  assert.equal(fixture.executor.lastRequest, null);
 });
 
 /**
@@ -293,6 +384,26 @@ class RecordingExecutor implements SemanticQueryExecutor {
     this.lastRequest = request;
     return Promise.resolve({
       kind: 'semanticQueryResult',
+      ...(request.list
+        ? {
+            listCoverage: {
+              effectivePageSize: request.list.query.effectivePageSize,
+              hasMore: false,
+              includeArchived: request.list.query.includeArchived,
+              matchMode: request.list.query.matchMode,
+              nextCursor: null,
+              pageOffset: request.list.query.pageOffset,
+              projectedSearchValueCount: 0,
+              requestedPageSize: request.list.query.requestedPageSize,
+              returnedCount: 0,
+              schemaVersion: SHARED_LIST_RESULT_VERSION,
+              search: request.list.query.search,
+              sort: request.list.query.sort,
+              totalCount: 0,
+              truncatedByMaximum: request.list.query.truncatedByMaximum,
+            },
+          }
+        : {}),
       outcome: 'exact',
       queryId: request.definition.queryId,
       records: Object.freeze([]),
@@ -329,6 +440,7 @@ interface FixtureOptions {
   readonly dropParameterDeclaration?: boolean;
   readonly parameterDeclaration?: ImmutableJsonValue;
   readonly retiredQuery?: boolean;
+  readonly unscopedQuery?: boolean;
 }
 
 class FixtureDefinitionLoader implements RequestRuntimeDefinitionLoader {
@@ -387,19 +499,23 @@ function scopedQueryCatalog(options: FixtureOptions): ImmutableJsonValue {
           schemaVersion: 'v0-experimental',
           value: true,
         },
-        legalEntityScope: {
-          cardinality: 'nonEmptySet',
-          kind: 'queryLegalEntityScope',
-          operand: {
-            kind: 'queryParameterReference',
-            parameterId: scopeParameterId,
-            schemaVersion: 'v4',
-          },
-          schemaVersion: 'v4',
-        },
+        ...(options.unscopedQuery
+          ? {}
+          : {
+              legalEntityScope: {
+                cardinality: 'nonEmptySet',
+                kind: 'queryLegalEntityScope',
+                operand: {
+                  kind: 'queryParameterReference',
+                  parameterId: scopeParameterId,
+                  schemaVersion: 'v4',
+                },
+                schemaVersion: 'v4',
+              },
+            }),
         lifecycle: options.retiredQuery ? 'retired' : 'active',
         maximumResultCount: 10,
-        ...(options.dropParameterDeclaration
+        ...(options.dropParameterDeclaration || options.unscopedQuery
           ? {}
           : {
               parameters: [
@@ -428,6 +544,23 @@ function scopedQueryCatalog(options: FixtureOptions): ImmutableJsonValue {
       },
     ],
     schemaVersion: 'northstar.query-catalog-payload/v0-provisional',
+  };
+}
+
+function sharedListArguments(): ImmutableJsonValue {
+  return {
+    cursor: null,
+    matchMode: 'substring',
+    pageSize: 7,
+    relationLabels: [],
+    schemaVersion: SHARED_LIST_QUERY_VERSION,
+    search: 'counted stock',
+    sort: [
+      {
+        direction: 'ascending',
+        fieldId: 'northstar.bootstrap:field.id',
+      },
+    ],
   };
 }
 

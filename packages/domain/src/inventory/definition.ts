@@ -140,6 +140,15 @@ const defaultIds = ids(INVENTORY_NAMESPACE);
 
 export const INVENTORY_IDS = Object.freeze(defaultIds);
 
+const ENTITY_OWNED_QUERY_FAMILIES = new Set([
+  'inventory_movement',
+  'inventory_period_lock',
+  'inventory_transaction',
+  'inventory_transaction_line',
+  'stock_count',
+  'stock_count_line',
+]);
+
 /**
  * The inventory module owns business records in the same canonical module
  * plane as every other first-party domain. The movement is intentionally
@@ -710,7 +719,31 @@ export function inventoryModuleDefinition(
     operations: standardEntities.flatMap(([local, , entityId]) =>
       local === 'inventory_period_lock'
         ? periodLockOperations(definitionIds, entityId)
-        : operations(definitionIds, local, entityId),
+        : operations(
+            definitionIds,
+            local,
+            entityId,
+            local === 'stock_count'
+              ? {
+                  kind: 'notPredicate',
+                  schemaVersion: version,
+                  term: {
+                    field: reference(
+                      'fieldReference',
+                      fieldIds.stockCount.state,
+                    ),
+                    kind: 'fieldComparisonPredicate',
+                    operator: 'equals',
+                    schemaVersion: version,
+                    value: {
+                      kind: 'textValue',
+                      schemaVersion: version,
+                      value: `${namespace}:option.stock_count_state_posted`,
+                    },
+                  },
+                }
+              : undefined,
+          ),
     ),
     package: {
       kind: 'packageDefinition',
@@ -1059,47 +1092,73 @@ function queries(
   selectedFieldIds: readonly string[],
   resolveFieldId: string,
 ): Array<Record<string, unknown>> {
-  return ['get', 'list', 'search', 'resolve'].map((queryType) => ({
-    kind: 'queryDefinition',
-    maximumResultCount: queryType === 'get' ? 1 : 100,
-    module: reference('moduleReference', ids.moduleId),
-    permission: reference(
-      'permissionReference',
-      `${ids.namespace}:permission.${local}_read`,
-    ),
-    queryId: `${ids.namespace}:query.${local}_${queryType}`,
-    queryType,
-    ...(queryType === 'resolve'
-      ? {
-          resolveMatchKeys: [
-            {
-              authority: 'identifier',
-              field: reference('fieldReference', resolveFieldId),
-              kind: 'resolveMatchKey',
-              matchKeyId: `${ids.namespace}:resolve-key.${local}`,
-              orderKey: 10,
+  return (['get', 'list', 'search', 'resolve'] as const).map((queryType) => {
+    const legalEntityScopeParameterId = `${ids.namespace}:parameter.${local}_${queryType}_legal_entity_scope`;
+    return {
+      kind: 'queryDefinition',
+      ...(ENTITY_OWNED_QUERY_FAMILIES.has(local)
+        ? {
+            legalEntityScope: {
+              cardinality: 'exactlyOne',
+              kind: 'queryLegalEntityScope',
+              operand: {
+                kind: 'queryParameterReference',
+                parameterId: legalEntityScopeParameterId,
+                schemaVersion: version,
+              },
               schemaVersion: version,
             },
-          ],
-        }
-      : {}),
-    schemaVersion: version,
-    selections: selectedFieldIds.map((fieldId, index) => ({
-      field: reference('fieldReference', fieldId),
-      kind: 'querySelection',
-      orderKey: (index + 1) * 10,
+            parameters: [
+              {
+                kind: 'queryParameterDefinition',
+                orderKey: 10,
+                parameterId: legalEntityScopeParameterId,
+                schemaVersion: version,
+              },
+            ],
+          }
+        : {}),
+      maximumResultCount: queryType === 'get' ? 1 : 100,
+      module: reference('moduleReference', ids.moduleId),
+      permission: reference(
+        'permissionReference',
+        `${ids.namespace}:permission.${local}_read`,
+      ),
+      queryId: `${ids.namespace}:query.${local}_${queryType}`,
+      queryType,
+      ...(queryType === 'resolve'
+        ? {
+            resolveMatchKeys: [
+              {
+                authority: 'identifier',
+                field: reference('fieldReference', resolveFieldId),
+                kind: 'resolveMatchKey',
+                matchKeyId: `${ids.namespace}:resolve-key.${local}`,
+                orderKey: 10,
+                schemaVersion: version,
+              },
+            ],
+          }
+        : {}),
       schemaVersion: version,
-      selectionId: `${ids.namespace}:selection.${local}_${queryType}_${String(index + 1)}`,
-    })),
-    sourceEntity: reference('entityReference', entityId),
-    tier: 'q0',
-  }));
+      selections: selectedFieldIds.map((fieldId, index) => ({
+        field: reference('fieldReference', fieldId),
+        kind: 'querySelection',
+        orderKey: (index + 1) * 10,
+        schemaVersion: version,
+        selectionId: `${ids.namespace}:selection.${local}_${queryType}_${String(index + 1)}`,
+      })),
+      sourceEntity: reference('entityReference', entityId),
+      tier: 'q0',
+    };
+  });
 }
 
 function operations(
   ids: InventoryIds,
   local: string,
   entityId: string,
+  precondition?: Record<string, unknown>,
 ): Array<Record<string, unknown>> {
   return (
     [
@@ -1122,6 +1181,7 @@ function operations(
       'permissionReference',
       `${ids.namespace}:permission.${local}_${action}`,
     ),
+    ...(precondition ? { precondition } : {}),
     readBack: reference(
       'queryReference',
       `${ids.namespace}:query.${local}_get`,
@@ -1238,21 +1298,11 @@ function surfaces(
     readonly [string, string, readonly string[], 'form' | 'list' | 'record']
   > = [
     ['list', 'list', ['title', 'dataGrid'], 'list'],
-    [
-      'detail',
-      'record',
-      ['breadcrumb', 'titleStatus', 'commandBar', 'keyFacts'],
-      'record',
-    ],
+    ['detail', 'record', ['breadcrumb', 'titleStatus', 'keyFacts'], 'record'],
     ...(readOnly
       ? []
       : ([
-          [
-            'form',
-            'record',
-            ['breadcrumb', 'titleStatus', 'commandBar', 'sections'],
-            'form',
-          ],
+          ['form', 'record', ['breadcrumb', 'titleStatus', 'activity'], 'form'],
         ] as const)),
   ];
   return descriptors.map(([suffix, archetype, slots, surfaceRole]) => ({

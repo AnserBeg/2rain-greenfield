@@ -8,6 +8,7 @@ import test from 'node:test';
 import {
   REGISTERED_SURFACE_COMPONENT_IDS,
   renderRegisteredSurfaceComponent,
+  surfaceHasUnsupportedComponent,
 } from '../src/component-registry.js';
 import { readDemoCompiledFixture } from '../src/demo-runtime.js';
 import { renderSurfaceRuntime } from '../src/surface-runtime.js';
@@ -106,6 +107,8 @@ test('closed registry returns diagnostics for unknown and failing components', a
     );
     assert.ok(unsupported?.slots[0]);
     assert.ok(failing?.slots[0]);
+    assert.equal(surfaceHasUnsupportedComponent(unsupported), true);
+    assert.equal(surfaceHasUnsupportedComponent(failing), false);
     const unsupportedResult = renderRegisteredSurfaceComponent({
       slot: unsupported.slots[0],
       surface: unsupported,

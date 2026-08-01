@@ -75,12 +75,34 @@ export interface ComposedApplicationRuntimeOptions {
   readonly compiledApplication: unknown;
   readonly databaseUrl: string;
   readonly environmentSlug?: string;
+  readonly inventoryScopeProvisioning?: InventoryScopeProvisioning;
   readonly migrationsDirectory: string;
   readonly releaseSelection?: Readonly<{
     readonly kind: 'rollback';
     readonly targetReleaseRoot: string;
   }>;
   readonly tenantSlug: string;
+}
+
+export interface InventoryScopeProvisioning {
+  readonly adjustmentApprovalThreshold: string | null;
+  readonly adjustmentReasonRequirement: 'codeOnly' | 'codeAndNarrative';
+  readonly businessDayBoundary: string;
+  readonly configurationVersion: number;
+  readonly correctionApprovalThreshold: string | null;
+  readonly correctionReasonRequirement: 'codeOnly' | 'codeAndNarrative';
+  readonly countApprovalThreshold: string | null;
+  readonly countReasonRequirement: 'codeOnly' | 'codeAndNarrative';
+  readonly entityCode: string;
+  readonly entityName: string;
+  readonly legalEntityId: string;
+  readonly maximumBackdateDays: number;
+  readonly negativeStock: 'allow' | 'allowWithFlag' | 'reject';
+  readonly rebaselineApprovalThreshold: string | null;
+  readonly rebaselineReasonRequirement: 'codeOnly' | 'codeAndNarrative';
+  readonly timeZone: string;
+  readonly transferApprovalThreshold: string | null;
+  readonly transferReasonRequirement: 'codeOnly' | 'codeAndNarrative';
 }
 
 export interface ComposedApplicationRuntime {
@@ -160,6 +182,14 @@ export async function createComposedApplicationRuntime(
       options.tenantSlug,
       options.environmentSlug ?? 'production',
     );
+    if (options.inventoryScopeProvisioning) {
+      await provisionInventoryScope(
+        adminPool,
+        identities.runtime,
+        releases.application.compiled.releaseRoot,
+        options.inventoryScopeProvisioning,
+      );
+    }
     await ensureAuthority(adminPool, identities);
 
     runtimePool = rolePool(options.databaseUrl, 'north_star_runtime', 6);
@@ -729,6 +759,49 @@ async function ensureScope(
       tenantId,
     }),
   });
+}
+
+async function provisionInventoryScope(
+  pool: pg.Pool,
+  identity: AuthenticatedIdentity,
+  contractReleaseRoot: string,
+  provisioning: InventoryScopeProvisioning,
+): Promise<void> {
+  // `contract_release_root` is provenance, not policy: it records which
+  // compiled contract this scope runs against and advances with the product.
+  // The runtime always asks for the root it is actually activating, so the
+  // stored value stays truthful by advancing (migration 0019) rather than by
+  // being read back and echoed. Every policy field is still asserted exactly,
+  // so genuine configuration drift still conflicts.
+  await pool.query(
+    `SELECT platform.provision_inventory_scope(
+       $1,$2,$3,$4,$5,$6,$7,$8,$9::smallint,$10,$11,
+       $12,$13,$14,$15,$16,$17,$18,$19,$20,$21
+     )`,
+    [
+      identity.tenantId,
+      identity.environmentId,
+      provisioning.legalEntityId,
+      provisioning.entityCode,
+      provisioning.entityName,
+      provisioning.timeZone,
+      provisioning.businessDayBoundary,
+      contractReleaseRoot,
+      provisioning.configurationVersion,
+      provisioning.negativeStock,
+      provisioning.maximumBackdateDays,
+      provisioning.adjustmentReasonRequirement,
+      provisioning.transferReasonRequirement,
+      provisioning.countReasonRequirement,
+      provisioning.correctionReasonRequirement,
+      provisioning.rebaselineReasonRequirement,
+      provisioning.adjustmentApprovalThreshold,
+      provisioning.transferApprovalThreshold,
+      provisioning.countApprovalThreshold,
+      provisioning.correctionApprovalThreshold,
+      provisioning.rebaselineApprovalThreshold,
+    ],
+  );
 }
 
 async function ensureAuthority(

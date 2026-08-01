@@ -1655,9 +1655,15 @@ Shell contract:
 - one three-part shell: left navigation, main canvas, one contextual right
   rail. The rail has exactly one tenant at a time: the assistant dock in
   operate mode, the properties drawer in customize mode;
-- navigation is role-shaped, task-named, and budgeted to roughly seven
-  entries; saved views are page tabs, never navigation nodes; everything else
-  is reached through search;
+- within the workspace, above the canvas, a platform-owned **context bar**
+  carrying explicit business-dimension selection and nothing else — see
+  [ADR-0037](decisions/ADR-0037-workspace-context-bar.md). It is shell furniture,
+  not a fourth part; it holds no state, writes every selection to the URL, and
+  never selects on the user's behalf even when one option exists;
+- navigation is role-shaped, task-named, and budgeted to seven **top-level**
+  entries on desktop and five in compact — a budget on entries *after* module
+  grouping, never on total leaf count; saved views are page tabs, never
+  navigation nodes; everything else is reached through search;
 - one global command palette combines navigate, create, and ask;
 - records open as full pages (deep-linkable units of work); quick create and
   peek use drawers; master data allows inline grid editing, posted documents
