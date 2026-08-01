@@ -173,6 +173,7 @@ export class ModuleRuntimeInterpreterError extends Error {
 export class PostgresModuleRuntimeInterpreter
   implements SemanticQueryExecutor, SemanticOperationExecutor
 {
+  readonly #pinnedStorageTargets: ValidatedPinnedStorageTargetCache;
   readonly #providerErrorMappings: readonly ModuleProviderErrorMapping[];
   readonly #trust: PostgresTrustService;
 
@@ -183,7 +184,13 @@ export class PostgresModuleRuntimeInterpreter
     private readonly observeAggregateCache:
       | ((observation: AggregateCacheObservation) => void)
       | undefined = undefined,
+    observePinnedStorageTargetCache:
+      | ((observation: PinnedStorageTargetCacheObservation) => void)
+      | undefined = undefined,
   ) {
+    this.#pinnedStorageTargets = new ValidatedPinnedStorageTargetCache(
+      observePinnedStorageTargetCache,
+    );
     this.#providerErrorMappings = validatedProviderErrorMappings(
       providerErrorMappings,
     );
@@ -269,7 +276,7 @@ export class PostgresModuleRuntimeInterpreter
         this.pool,
         request.context,
         async (client) => {
-          const storage = await loadPinnedStorageTarget(client, request);
+          const storage = await this.#loadPinnedStorageTarget(client, request);
           return withModuleRuntimeRole(client, () =>
             executeQueryOnClient(
               client,
@@ -305,8 +312,10 @@ export class PostgresModuleRuntimeInterpreter
         releaseId: request.view.release.releaseId,
       }),
       async (client) => {
-        const currentStorage = await loadPinnedStorageTarget(client, request);
-        assertModuleSemanticStorageContract(currentStorage);
+        const currentStorage = await this.#loadPinnedStorageTarget(
+          client,
+          request,
+        );
         const currentEntity = requiredEntity(
           currentStorage,
           request.definition.effect.entity.targetId,
@@ -364,6 +373,125 @@ export class PostgresModuleRuntimeInterpreter
       unsupportedReason: null,
     });
   }
+
+  #loadPinnedStorageTarget(
+    client: PoolClient,
+    request:
+      | SemanticAggregateQueryExecutionRequest
+      | SemanticOperationExecutionRequest
+      | SemanticQueryExecutionRequest,
+  ): Promise<StorageTargetPayloadV1> {
+    const key = pinnedStorageTargetCacheKey(request);
+    return this.#pinnedStorageTargets.get(key, (observeValidation) =>
+      loadPinnedStorageTarget(client, request, observeValidation),
+    );
+  }
+}
+
+export interface PinnedStorageTargetCacheKey {
+  readonly contentHash: string;
+  readonly environmentId: string;
+  readonly releaseId: string;
+  readonly tenantId: string;
+}
+
+export interface PinnedStorageTargetCacheObservation {
+  readonly key: PinnedStorageTargetCacheKey;
+  readonly kind:
+    | 'cacheCoalesced'
+    | 'cacheHit'
+    | 'cacheMiss'
+    | 'cachePopulated'
+    | 'canonicalArtifactsDecoded'
+    | 'schemaValidated'
+    | 'tenantVisibleArtifactsRead'
+    | 'artifactHashesVerified';
+}
+
+type PinnedStorageTargetValidationObservation = (
+  kind:
+    | 'canonicalArtifactsDecoded'
+    | 'schemaValidated'
+    | 'tenantVisibleArtifactsRead'
+    | 'artifactHashesVerified',
+) => void;
+
+class ValidatedPinnedStorageTargetCache {
+  readonly #inFlight = new Map<string, Promise<StorageTargetPayloadV1>>();
+  readonly #validated = new Map<string, StorageTargetPayloadV1>();
+
+  constructor(
+    private readonly observe:
+      ((observation: PinnedStorageTargetCacheObservation) => void) | undefined,
+  ) {}
+
+  get(
+    key: PinnedStorageTargetCacheKey,
+    load: (
+      observeValidation: PinnedStorageTargetValidationObservation,
+    ) => Promise<StorageTargetPayloadV1>,
+  ): Promise<StorageTargetPayloadV1> {
+    const identity = pinnedStorageTargetCacheIdentity(key);
+    const validated = this.#validated.get(identity);
+    if (validated) {
+      this.#notify(key, 'cacheHit');
+      return Promise.resolve(validated);
+    }
+    const inFlight = this.#inFlight.get(identity);
+    if (inFlight) {
+      this.#notify(key, 'cacheCoalesced');
+      return inFlight;
+    }
+
+    this.#notify(key, 'cacheMiss');
+    let loading!: Promise<StorageTargetPayloadV1>;
+    loading = (async () => {
+      try {
+        const target = await load((kind) => this.#notify(key, kind));
+        this.#validated.set(identity, target);
+        this.#notify(key, 'cachePopulated');
+        return target;
+      } finally {
+        if (this.#inFlight.get(identity) === loading) {
+          this.#inFlight.delete(identity);
+        }
+      }
+    })();
+    this.#inFlight.set(identity, loading);
+    return loading;
+  }
+
+  #notify(
+    key: PinnedStorageTargetCacheKey,
+    kind: PinnedStorageTargetCacheObservation['kind'],
+  ): void {
+    this.observe?.(Object.freeze({ key, kind }));
+  }
+}
+
+function pinnedStorageTargetCacheKey(
+  request:
+    | SemanticAggregateQueryExecutionRequest
+    | SemanticOperationExecutionRequest
+    | SemanticQueryExecutionRequest,
+): PinnedStorageTargetCacheKey {
+  return Object.freeze({
+    contentHash: request.view.release.contentHash,
+    environmentId: request.context.environmentId,
+    releaseId: request.view.release.releaseId,
+    tenantId: request.context.tenantId,
+  });
+}
+
+function pinnedStorageTargetCacheIdentity(
+  key: PinnedStorageTargetCacheKey,
+): string {
+  return JSON.stringify([
+    key.tenantId,
+    key.environmentId,
+    key.releaseId,
+    key.contentHash,
+  ]);
 }
 
 async function prepareMutation(
@@ -2871,14 +2999,17 @@ async function loadPinnedStorageTarget(
     | SemanticAggregateQueryExecutionRequest
     | SemanticOperationExecutionRequest
     | SemanticQueryExecutionRequest,
+  observeValidation: PinnedStorageTargetValidationObservation,
 ): Promise<StorageTargetPayloadV1> {
   const result = await client.query<ArtifactRow>(
     `SELECT artifact_kind, content_hash, domain_tag, media_type, canonical_bytes
        FROM platform.read_tenant_release_artifacts($1)`,
     [request.view.release.releaseId],
   );
+  observeValidation('tenantVisibleArtifactsRead');
   const artifacts = new Map(result.rows.map((row) => [row.content_hash, row]));
   for (const artifact of artifacts.values()) verifyArtifact(artifact);
+  observeValidation('artifactHashesVerified');
   const root = artifacts.get(request.view.release.contentHash);
   if (!root || root.artifact_kind !== 'releaseManifest') {
     throw failure(
@@ -2931,6 +3062,7 @@ async function loadPinnedStorageTarget(
     );
   }
   const target = decodeCanonical(chunk.canonical_bytes);
+  observeValidation('canonicalArtifactsDecoded');
   assertSupportedStorageTargetArtifactVersions({
     projectionPayloadSchemaVersion: projection.payloadSchemaVersion,
     referencePayloadSchemaVersion: reference.payloadSchemaVersion,
@@ -2949,7 +3081,10 @@ async function loadPinnedStorageTarget(
       'storage target does not match the provider ABI',
     );
   }
-  return target as unknown as StorageTargetPayloadV1;
+  const validated = target as unknown as StorageTargetPayloadV1;
+  assertModuleSemanticStorageContract(validated);
+  observeValidation('schemaValidated');
+  return validated;
 }
 
 export function assertSupportedStorageTargetArtifactVersions(versions: {
