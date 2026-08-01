@@ -760,111 +760,105 @@ test('registered onHand is temporal, narrowed, and atomically invalidates a same
   });
 });
 
-test(
-  'release verification executes a scoped aggregate probe and records the typed omission refusal',
-  async () => {
-    const fixture = buildVerificationFixture();
-    await withEphemeralPostgres(
-      'inventory-onhand-verification',
-      async (database) => {
-        await migrateAndProvision(database.pool, fixture.inventory.releaseRoot);
-        const runtimePool = new pg.Pool({
+test('release verification executes a scoped aggregate probe and records the typed omission refusal', async () => {
+  const fixture = buildVerificationFixture();
+  await withEphemeralPostgres(
+    'inventory-onhand-verification',
+    async (database) => {
+      await migrateAndProvision(database.pool, fixture.inventory.releaseRoot);
+      const runtimePool = new pg.Pool({
+        ...database.connection,
+        max: 2,
+        user: 'north_star_runtime',
+      });
+      try {
+        const context = await trustedContext();
+        const releases = await persistSequence(runtimePool, context, [
+          [fixture.empty, fixture.emptyDefinition],
+          [fixture.inventory, fixture.inventoryDefinition],
+        ]);
+        await setPointer(database.pool, releases[0]!.releaseId);
+        await grantExecutorAuthority(database.pool);
+        const materializerPool = new pg.Pool({
           ...database.connection,
-          max: 2,
-          user: 'north_star_runtime',
+          max: 1,
+          user: 'north_star_module_materializer',
+        });
+        const modulePool = new pg.Pool({
+          ...database.connection,
+          max: 1,
+          user: 'north_star_module_runtime',
         });
         try {
-          const context = await trustedContext();
-          const releases = await persistSequence(runtimePool, context, [
-            [fixture.empty, fixture.emptyDefinition],
-            [fixture.inventory, fixture.inventoryDefinition],
-          ]);
-          await setPointer(database.pool, releases[0]!.releaseId);
-          await grantExecutorAuthority(database.pool);
-          const materializerPool = new pg.Pool({
-            ...database.connection,
-            max: 1,
-            user: 'north_star_module_materializer',
+          const prepared = await new PostgresModuleStorageMaterializer(
+            materializerPool,
+            modulePool,
+          ).prepare({
+            context,
+            expiresAt: '2099-01-01T00:00:00.000Z',
+            generationId: randomUUID(),
+            initiatedBy: principalId,
+            preparationId: randomUUID(),
+            targetReleaseId: releases[1]!.releaseId,
           });
-          const modulePool = new pg.Pool({
-            ...database.connection,
-            max: 1,
-            user: 'north_star_module_runtime',
-          });
-          try {
-            const prepared = await new PostgresModuleStorageMaterializer(
-              materializerPool,
-              modulePool,
-            ).prepare({
-              context,
-              expiresAt: '2099-01-01T00:00:00.000Z',
-              generationId: randomUUID(),
-              initiatedBy: principalId,
-              preparationId: randomUUID(),
-              targetReleaseId: releases[1]!.releaseId,
-            });
-            assert.equal(prepared.schemaState, 'APPLIED');
-            await setPointer(database.pool, releases[1]!.releaseId);
-            const verification = new PostgresReleaseVerificationService(
-              runtimePool,
-            );
-            const command = {
-              compiledRelease: fixture.inventory,
-              evidenceId: releases[1]!.command.verificationEvidenceId,
-              releaseId: releases[1]!.releaseId,
-            };
-            const results =
-              await verification.executeSemanticCandidateAndPersist(
-                context,
-                command,
-              );
-            const plan = releaseVerificationBinding(fixture.inventory).plan;
-            const scopeScenario = plan.scenarios.find(
-              (scenario) =>
-                scenario.assertionId === verificationScopeAssertionId,
-            );
-            assert.ok(scopeScenario);
-            const invocation = scopeScenario.invocation;
-            assert.ok(isRecord(invocation));
-            assert.ok(isRecord(invocation.query));
-            const scopeResult = results.results.find(
+          assert.equal(prepared.schemaState, 'APPLIED');
+          await setPointer(database.pool, releases[1]!.releaseId);
+          const verification = new PostgresReleaseVerificationService(
+            runtimePool,
+          );
+          const command = {
+            compiledRelease: fixture.inventory,
+            evidenceId: releases[1]!.command.verificationEvidenceId,
+            releaseId: releases[1]!.releaseId,
+          };
+          const results = await verification.executeSemanticCandidateAndPersist(
+            context,
+            command,
+          );
+          const plan = releaseVerificationBinding(fixture.inventory).plan;
+          const scopeScenario = plan.scenarios.find(
+            (scenario) => scenario.assertionId === verificationScopeAssertionId,
+          );
+          assert.ok(scopeScenario);
+          const invocation = scopeScenario.invocation;
+          assert.ok(isRecord(invocation));
+          assert.ok(isRecord(invocation.query));
+          const scopeResult = results.results.find(
+            (result) => result.scenarioId === scopeScenario.scenarioId,
+          );
+          assert.ok(scopeResult);
+          const expectedProbe = {
+            code: 'SEMANTIC_QUERY_LEGAL_ENTITY_SCOPE_INVALID',
+            kind: 'aggregateParameterOmissionRefusal',
+            queryId: invocation.query.targetId,
+            reason: 'selection-omitted',
+            schemaVersion: 'northstar.release-verification-aggregate-probe/v1',
+          };
+          assert.equal(
+            scopeResult.positiveProbeDigest,
+            verificationProofDigest(expectedProbe),
+          );
+          const durable = await verification.read(
+            context,
+            command.evidenceId,
+            fixture.inventory,
+          );
+          assert.ok(durable);
+          assert.equal(
+            durable.results.find(
               (result) => result.scenarioId === scopeScenario.scenarioId,
-            );
-            assert.ok(scopeResult);
-            const expectedProbe = {
-              code: 'SEMANTIC_QUERY_LEGAL_ENTITY_SCOPE_INVALID',
-              kind: 'aggregateParameterOmissionRefusal',
-              queryId: invocation.query.targetId,
-              reason: 'selection-omitted',
-              schemaVersion:
-                'northstar.release-verification-aggregate-probe/v1',
-            };
-            assert.equal(
-              scopeResult.positiveProbeDigest,
-              verificationProofDigest(expectedProbe),
-            );
-            const durable = await verification.read(
-              context,
-              command.evidenceId,
-              fixture.inventory,
-            );
-            assert.ok(durable);
-            assert.equal(
-              durable.results.find(
-                (result) => result.scenarioId === scopeScenario.scenarioId,
-              )?.positiveProbeDigest,
-              verificationProofDigest(expectedProbe),
-            );
-          } finally {
-            await Promise.all([materializerPool.end(), modulePool.end()]);
-          }
+            )?.positiveProbeDigest,
+            verificationProofDigest(expectedProbe),
+          );
         } finally {
-          await runtimePool.end();
+          await Promise.all([materializerPool.end(), modulePool.end()]);
         }
-      },
-    );
-  },
-);
+      } finally {
+        await runtimePool.end();
+      }
+    },
+  );
+});
 
 interface MutableAggregateCatalogQuery {
   aggregate: {
