@@ -41,8 +41,11 @@ import {
   type SemanticOperationExecutor,
 } from '../../runtime/src/semantic-operation-gateway.js';
 import {
+  MalformedLegalEntityScopeArgumentError,
+  MalformedSemanticQueryRequestError,
   SEMANTIC_QUERY_REQUEST_VERSION,
   SemanticQueryGateway,
+  type SemanticAggregateResultEnvelope,
   type SemanticQueryExecutor,
 } from '../../runtime/src/semantic-query-gateway.js';
 import {
@@ -689,8 +692,19 @@ interface VerificationOperationContract {
 }
 
 interface VerificationQueryContract {
+  readonly legalEntityScope?: {
+    readonly cardinality: 'exactlyOne' | 'nonEmptySet';
+    readonly kind: 'queryLegalEntityScope';
+    readonly operand: {
+      readonly kind: 'queryParameterReference';
+      readonly parameterId: string;
+      readonly schemaVersion: 'v4';
+    };
+    readonly schemaVersion: 'v4';
+  };
+  readonly parameters?: readonly { readonly parameterId: string }[];
   readonly queryId: string;
-  readonly queryType: 'get' | 'list' | 'resolve' | 'search';
+  readonly queryType: 'aggregate' | 'get' | 'list' | 'resolve' | 'search';
   readonly resolveMatchKeys: readonly {
     readonly authority: string;
     readonly fieldId: string;
@@ -882,6 +896,21 @@ class SemanticVerificationExecutor {
   }
 
   async #declaredEvidence(scenario: VerificationScenario, token: string) {
+    const invocation = scenario.invocation as
+      { operation?: { targetId?: string } } | { query?: { targetId?: string } };
+    const queryId = 'query' in invocation ? invocation.query?.targetId : null;
+    if (queryId) {
+      const query = this.#requiredQuery(queryId);
+      if (query.queryType === 'aggregate') {
+        return {
+          positiveProbe: await executeAggregateVerificationProbe(
+            this.queryGateway,
+            this.view,
+            query,
+          ),
+        };
+      }
+    }
     const record = await this.#create(scenario.entityId, token);
     if (scenario.evidenceKind === 'recovery') {
       const archived = await this.#invokeEffect(
@@ -896,9 +925,6 @@ class SemanticVerificationExecutor {
       );
       return { positiveProbe: { archived, restored } };
     }
-    const invocation = scenario.invocation as
-      { operation?: { targetId?: string } } | { query?: { targetId?: string } };
-    const queryId = 'query' in invocation ? invocation.query?.targetId : null;
     if (queryId) {
       return {
         positiveProbe: await this.#invokeQueryById(queryId, record, token),
@@ -1439,6 +1465,78 @@ function runtimeProjection<TFamily extends RequestRuntimeProjectionFamily>(
     payloadSchemaVersion: reference.payloadSchemaVersion,
     semanticDigest: reference.semanticDigest,
   });
+}
+
+const aggregateParameterMismatchReason =
+  'aggregate query arguments do not match the declared parameters';
+
+/**
+ * Verification has no authority to invent aggregate parameter values. It
+ * therefore traverses the real registered aggregate ingress with every
+ * declared parameter omitted and records only the exact typed contract
+ * refusal. A parameterless aggregate asks no caller-specific business
+ * question, so it is executed normally instead.
+ */
+export async function executeAggregateVerificationProbe(
+  queryGateway: Pick<SemanticQueryGateway, 'invokeAggregate'>,
+  view: IssuedRequestRuntimeView,
+  query: Pick<
+    VerificationQueryContract,
+    'legalEntityScope' | 'parameters' | 'queryId'
+  >,
+): Promise<
+  | SemanticAggregateResultEnvelope
+  | Readonly<{
+      code:
+        | 'MALFORMED_SEMANTIC_QUERY_REQUEST'
+        | 'SEMANTIC_QUERY_LEGAL_ENTITY_SCOPE_INVALID';
+      kind: 'aggregateParameterOmissionRefusal';
+      queryId: string;
+      reason: string;
+      schemaVersion: 'northstar.release-verification-aggregate-probe/v1';
+    }>
+> {
+  if (!Array.isArray(query.parameters)) {
+    throw failure(
+      'VERIFICATION_AGGREGATE_PARAMETER_CONTRACT_MISSING',
+      `compiled aggregate query has no parameter contract: ${query.queryId}`,
+    );
+  }
+  const request = {
+    arguments: {},
+    queryId: query.queryId,
+    schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+  };
+  if (query.parameters.length === 0) {
+    return queryGateway.invokeAggregate(view, request);
+  }
+  try {
+    await queryGateway.invokeAggregate(view, request);
+  } catch (error) {
+    const refusal = query.legalEntityScope
+      ? error instanceof MalformedLegalEntityScopeArgumentError &&
+        error.code === 'SEMANTIC_QUERY_LEGAL_ENTITY_SCOPE_INVALID' &&
+        error.reason === 'selection-omitted'
+        ? { code: error.code, reason: error.reason }
+        : null
+      : error instanceof MalformedSemanticQueryRequestError &&
+          error.code === 'MALFORMED_SEMANTIC_QUERY_REQUEST' &&
+          error.message === aggregateParameterMismatchReason
+        ? { code: error.code, reason: error.message }
+        : null;
+    if (!refusal) throw error;
+    return Object.freeze({
+      ...refusal,
+      kind: 'aggregateParameterOmissionRefusal' as const,
+      queryId: query.queryId,
+      schemaVersion:
+        'northstar.release-verification-aggregate-probe/v1' as const,
+    });
+  }
+  throw failure(
+    'VERIFICATION_AGGREGATE_PARAMETER_OMISSION_NOT_REFUSED',
+    `parameterized aggregate query accepted omitted arguments: ${query.queryId}`,
+  );
 }
 
 function compiledProjectionPayload<T>(

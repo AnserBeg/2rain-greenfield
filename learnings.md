@@ -276,3 +276,8 @@ How to apply: before relying on a canonical lifecycle declaration, trace it into
 Date: 2026-07-31
 Why: `ver-agg` passed a v2 physical-family alias into verification-plan lowering, so valid v3/v4 aggregate assertions disappeared even though the original canonical revision retained them.
 How to apply: build verification completeness from the authoritative canonical revision; pass compatibility aliases only to the physical families that require them, and prove every active assertion is emitted or fails with its own typed diagnostic. See `docs/execution/current-plan.md` row `ver-agg`.
+
+## Prove verification scenarios execute, not merely emit
+Date: 2026-07-31
+Why: `ver-agg` first restored aggregate scenarios to the authoritative plan, but the provider still dispatched them through the row-query ingress, so the new scenarios could never execute successfully.
+How to apply: trace each scenario through its production dispatcher and require an observed positive or exact typed refusal; pair plan-emission controls with downstream execution controls and a non-refusing negative arm.
