@@ -135,24 +135,20 @@ const inventoryScopeProbeIds = Object.freeze({
   selection: `${APPLICATION_NAMESPACE}:selection.inventory_movement_scope_probe_sum`,
 });
 
-test('aggregate verification dispatch requires the exact typed omission refusal', async () => {
-  const view = {} as RequestRuntimeView;
+test('aggregate verification requires the exact typed omission refusal', async () => {
   const parameterizedQuery = {
     parameters: [{ parameterId: V3_AGGREGATE_IDS.stockParameter }],
     queryId: V3_AGGREGATE_IDS.aggregateQuery,
   };
   let aggregateCalls = 0;
   const refusal = await executeAggregateVerificationProbe(
-    {
-      async invokeAggregate() {
-        aggregateCalls += 1;
-        throw new MalformedSemanticQueryRequestError(
-          'aggregate query arguments do not match the declared parameters',
-        );
-      },
-    },
-    view,
     parameterizedQuery,
+    async () => {
+      aggregateCalls += 1;
+      throw new MalformedSemanticQueryRequestError(
+        'aggregate query arguments do not match the declared parameters',
+      );
+    },
   );
   assert.deepEqual(refusal, {
     code: 'MALFORMED_SEMANTIC_QUERY_REQUEST',
@@ -164,15 +160,6 @@ test('aggregate verification dispatch requires the exact typed omission refusal'
   assert.equal(aggregateCalls, 1);
 
   const scopedRefusal = await executeAggregateVerificationProbe(
-    {
-      async invokeAggregate() {
-        throw new MalformedLegalEntityScopeArgumentError(
-          V3_AGGREGATE_IDS.aggregateQuery,
-          'selection-omitted',
-        );
-      },
-    },
-    view,
     {
       ...parameterizedQuery,
       legalEntityScope: {
@@ -186,6 +173,12 @@ test('aggregate verification dispatch requires the exact typed omission refusal'
         schemaVersion: 'v4',
       },
     },
+    async () => {
+      throw new MalformedLegalEntityScopeArgumentError(
+        V3_AGGREGATE_IDS.aggregateQuery,
+        'selection-omitted',
+      );
+    },
   );
   assert.deepEqual(scopedRefusal, {
     code: 'SEMANTIC_QUERY_LEGAL_ENTITY_SCOPE_INVALID',
@@ -197,13 +190,8 @@ test('aggregate verification dispatch requires the exact typed omission refusal'
 
   await assert.rejects(
     executeAggregateVerificationProbe(
-      {
-        async invokeAggregate() {
-          return {} as SemanticAggregateResultEnvelope;
-        },
-      },
-      view,
       parameterizedQuery,
+      async () => ({}) as SemanticAggregateResultEnvelope,
     ),
     (error: unknown) => {
       assert.ok(error instanceof ReleaseVerificationIntegrityError);
@@ -219,15 +207,9 @@ test('aggregate verification dispatch requires the exact typed omission refusal'
     'aggregate query arguments must be an object',
   );
   await assert.rejects(
-    executeAggregateVerificationProbe(
-      {
-        async invokeAggregate() {
-          throw wrongReason;
-        },
-      },
-      view,
-      parameterizedQuery,
-    ),
+    executeAggregateVerificationProbe(parameterizedQuery, async () => {
+      throw wrongReason;
+    }),
     (error: unknown) => error === wrongReason,
   );
 });

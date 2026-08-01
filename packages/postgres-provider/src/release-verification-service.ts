@@ -47,6 +47,7 @@ import {
   SemanticQueryGateway,
   type SemanticAggregateResultEnvelope,
   type SemanticQueryExecutor,
+  type SemanticQueryResultEnvelope,
 } from '../../runtime/src/semantic-query-gateway.js';
 import {
   ModuleRuntimeInterpreterError,
@@ -691,7 +692,7 @@ interface VerificationOperationContract {
   readonly operationId: string;
 }
 
-interface VerificationQueryContract {
+interface VerificationQueryContractBase {
   readonly legalEntityScope?: {
     readonly cardinality: 'exactlyOne' | 'nonEmptySet';
     readonly kind: 'queryLegalEntityScope';
@@ -704,7 +705,6 @@ interface VerificationQueryContract {
   };
   readonly parameters?: readonly { readonly parameterId: string }[];
   readonly queryId: string;
-  readonly queryType: 'aggregate' | 'get' | 'list' | 'resolve' | 'search';
   readonly resolveMatchKeys: readonly {
     readonly authority: string;
     readonly fieldId: string;
@@ -712,6 +712,18 @@ interface VerificationQueryContract {
   readonly selections: readonly { readonly fieldId: string }[];
   readonly sourceEntityId: string;
 }
+
+interface VerificationAggregateQueryContract extends VerificationQueryContractBase {
+  readonly parameters: readonly { readonly parameterId: string }[];
+  readonly queryType: 'aggregate';
+}
+
+interface VerificationRowQueryContract extends VerificationQueryContractBase {
+  readonly queryType: 'get' | 'list' | 'resolve' | 'search';
+}
+
+type VerificationQueryContract =
+  VerificationAggregateQueryContract | VerificationRowQueryContract;
 
 interface VerificationRelationContract {
   readonly archiveBehavior: string;
@@ -903,10 +915,8 @@ class SemanticVerificationExecutor {
       const query = this.#requiredQuery(queryId);
       if (query.queryType === 'aggregate') {
         return {
-          positiveProbe: await executeAggregateVerificationProbe(
-            this.queryGateway,
-            this.view,
-            query,
+          positiveProbe: await executeAggregateVerificationProbe(query, () =>
+            this.#invokeQuery(query, {}),
           ),
         };
       }
@@ -1289,14 +1299,25 @@ class SemanticVerificationExecutor {
   }
 
   #invokeQuery(
+    query: VerificationQueryContract & { readonly queryType: 'aggregate' },
+    arguments_: Record<string, unknown>,
+  ): Promise<SemanticAggregateResultEnvelope>;
+  #invokeQuery(
     query: VerificationQueryContract,
     arguments_: Record<string, unknown>,
-  ) {
-    return this.queryGateway.invoke(this.view, {
+  ): Promise<SemanticAggregateResultEnvelope | SemanticQueryResultEnvelope>;
+  #invokeQuery(
+    query: VerificationQueryContract,
+    arguments_: Record<string, unknown>,
+  ): Promise<SemanticAggregateResultEnvelope | SemanticQueryResultEnvelope> {
+    const request = {
       arguments: arguments_,
       queryId: query.queryId,
       schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
-    });
+    };
+    return query.queryType === 'aggregate'
+      ? this.queryGateway.invokeAggregate(this.view, request)
+      : this.queryGateway.invoke(this.view, request);
   }
 
   async #captureRejection(
@@ -1478,12 +1499,11 @@ const aggregateParameterMismatchReason =
  * question, so it is executed normally instead.
  */
 export async function executeAggregateVerificationProbe(
-  queryGateway: Pick<SemanticQueryGateway, 'invokeAggregate'>,
-  view: IssuedRequestRuntimeView,
   query: Pick<
     VerificationQueryContract,
     'legalEntityScope' | 'parameters' | 'queryId'
   >,
+  invoke: () => Promise<SemanticAggregateResultEnvelope>,
 ): Promise<
   | SemanticAggregateResultEnvelope
   | Readonly<{
@@ -1502,16 +1522,11 @@ export async function executeAggregateVerificationProbe(
       `compiled aggregate query has no parameter contract: ${query.queryId}`,
     );
   }
-  const request = {
-    arguments: {},
-    queryId: query.queryId,
-    schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
-  };
   if (query.parameters.length === 0) {
-    return queryGateway.invokeAggregate(view, request);
+    return invoke();
   }
   try {
-    await queryGateway.invokeAggregate(view, request);
+    await invoke();
   } catch (error) {
     const refusal = query.legalEntityScope
       ? error instanceof MalformedLegalEntityScopeArgumentError &&
