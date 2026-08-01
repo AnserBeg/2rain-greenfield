@@ -2,7 +2,7 @@
 
 Lane: FIX · Tier: Behavioral · Branch: `packet/berr` · Initial base: `718b668`
 
-Status: implementation and required packet gates complete; Behavioral review and
+Status: implementation, required packet gates, and Behavioral review complete;
 full matrix pending.
 
 ## Outcome
@@ -71,6 +71,9 @@ producer inventory.
 - `corepack pnpm test:postgres`: **133/133 PASS**.
 - `corepack pnpm lint`: **PASS**.
 - `corepack pnpm format`: **PASS**.
+- Fresh Codex Behavioral review of frozen SHA
+  `4b420c3f76c3e44f22f0cf652a5f558655eb19f7`: **VERDICT: PASS**, no in-scope
+  material findings. Result:
+  `~/2rain-missions/5g3-berr-codex-review-4b420c3.last-message.txt`.
 
-Behavioral review and full-matrix evidence will be added at the frozen candidate
-SHA.
+Full-matrix evidence will be added at the final docs-only descendant SHA.
