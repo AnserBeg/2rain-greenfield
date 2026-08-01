@@ -1,7 +1,17 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { globSync, readFileSync } from 'node:fs';
+import {
+  chmodSync,
+  globSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { PassThrough } from 'node:stream';
 import test from 'node:test';
 
 const workflowPath = '.github/workflows/ci.yml';
@@ -388,6 +398,88 @@ test('shared gate holders coexist and exclude an exclusive gate', async () => {
   assert.equal(exclusiveOutput, 'EXCLUSIVE_ADMITTED');
 });
 
+test('matrix lock and legacy-process waits fail busy at their bounded deadline', () => {
+  const lockPath = `/tmp/north-star-matrix-lock-control-${process.pid}`;
+  const baseEnvironment = { ...process.env };
+  delete baseEnvironment.NORTH_STAR_TEST_LOCK_HELD;
+  const environment = {
+    ...baseEnvironment,
+    NORTH_STAR_TEST_LOCK_PATH: lockPath,
+    NORTH_STAR_TEST_LOCK_TIMEOUT_SECONDS: '0',
+  };
+  const holder = spawn(
+    process.execPath,
+    [
+      testLockRunnerPath,
+      'shared',
+      '--',
+      process.execPath,
+      '-e',
+      "process.stdout.write('LOCK_READY\\n'); process.stdin.resume()",
+    ],
+    { env: environment, stdio: ['pipe', 'pipe', 'pipe'] },
+  );
+
+  return waitForOutput(holder.stdout, 'LOCK_READY')
+    .then(() => {
+      assert.throws(
+        () =>
+          execFileSync(
+            'bash',
+            ['scripts/run-matrix.sh', 'LOCK-CONTROL', process.cwd()],
+            { encoding: 'utf8', env: environment },
+          ),
+        (error: unknown) =>
+          commandFailedWith(error, 'TEST_GATE_LOCK_BUSY: exclusive access'),
+      );
+    })
+    .finally(async () => {
+      holder.stdin.end();
+      const [exitCode] = (await once(holder, 'exit')) as [number | null];
+      assert.equal(exitCode, 0);
+      rmSync(lockPath, { force: true });
+    })
+    .then(() => {
+      const fakeBin = mkdtempSync(join(tmpdir(), 'north-star-fake-ps-'));
+      try {
+        const fakePs = join(fakeBin, 'ps');
+        writeFileSync(
+          fakePs,
+          "#!/usr/bin/env bash\nprintf '99999 corepack pnpm test:compiler\\n'\n",
+        );
+        chmodSync(fakePs, 0o755);
+        assert.throws(
+          () =>
+            execFileSync(
+              'bash',
+              ['scripts/run-matrix.sh', 'FOREIGN-CONTROL', process.cwd()],
+              {
+                encoding: 'utf8',
+                env: { ...environment, PATH: `${fakeBin}:${process.env.PATH}` },
+              },
+            ),
+          (error: unknown) =>
+            commandFailedWith(
+              error,
+              'TEST_GATE_LOCK_BUSY: a lock-unaware test process remained active',
+            ),
+        );
+      } finally {
+        rmSync(fakeBin, { force: true, recursive: true });
+        rmSync(lockPath, { force: true });
+      }
+    });
+});
+
+test('lock-holder readiness has a bounded failure instead of hanging', async () => {
+  const silentStream = new PassThrough();
+  await assert.rejects(
+    waitForOutput(silentStream, 'NEVER_EMITTED', 0),
+    /stream did not emit NEVER_EMITTED within 0ms/u,
+  );
+  silentStream.destroy();
+});
+
 test('CI runs every scaffold gate from a frozen install', () => {
   const workflow = readFileSync(workflowPath, 'utf8');
   const requiredCommands = [
@@ -439,10 +531,19 @@ function containsGlob(value: string): boolean {
 function waitForOutput(
   stream: NodeJS.ReadableStream,
   expected: string,
+  timeoutMilliseconds = 5_000,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     let output = '';
     stream.setEncoding('utf8');
+    const deadline = setTimeout(() => {
+      cleanup();
+      reject(
+        new Error(
+          `stream did not emit ${expected} within ${timeoutMilliseconds}ms`,
+        ),
+      );
+    }, timeoutMilliseconds);
     const onError = (error: Error) => {
       cleanup();
       reject(error);
@@ -459,6 +560,7 @@ function waitForOutput(
       }
     };
     const cleanup = () => {
+      clearTimeout(deadline);
       stream.off('data', onData);
       stream.off('error', onError);
       stream.off('end', onEnd);
@@ -467,6 +569,16 @@ function waitForOutput(
     stream.once('error', onError);
     stream.once('end', onEnd);
   });
+}
+
+function commandFailedWith(error: unknown, expected: string): boolean {
+  return (
+    error instanceof Error &&
+    'status' in error &&
+    error.status === 75 &&
+    'stderr' in error &&
+    String(error.stderr).includes(expected)
+  );
 }
 
 test('CI third-party actions use immutable commit refs', () => {

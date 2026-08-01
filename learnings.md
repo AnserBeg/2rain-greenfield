@@ -300,3 +300,13 @@ How to apply: derive mandatory subjects from an independent compiled artifact an
 Date: 2026-07-31
 Why: A wall-clock compiler budget varied 26% while quiet and doubled under lane contention, producing wrong verdicts about unchanged compiler work.
 How to apply: measure process CPU, report saturated hosts as indeterminate, isolate timing gates from load-tolerant suites, and enforce shared/exclusive access with one lock rather than operator memory. See `docs/execution/packets/gate-perf.md`.
+
+## Re-derive a bound when its measurement unit changes
+Date: 2026-07-31
+Why: gate-perf retained a wall-time-calibrated 5,000 ms numeral after moving the verdict to the smaller CPU-time quantity, silently allowing a 2× compiler regression.
+How to apply: take repeated quiet samples in the new unit, derive an anti-flake margin from their spread, and prove the intended regression exceeds the new bound. See `docs/execution/packets/gate-perf.md`.
+
+## Calibrate admission and budget as one instrument
+Date: 2026-07-31
+Why: gate-perf initially mixed low-load and degraded-host CPU samples, making the new unit appear too noisy to gate; the admission threshold was part of the calibration, not a fixed precondition.
+How to apply: group measurements by the admission signal, derive the fence between populations, re-sample under the real exclusive lock, and record self-load indeterminates before deriving the budget. See `docs/execution/packets/gate-perf.md`.

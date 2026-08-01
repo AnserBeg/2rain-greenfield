@@ -4,8 +4,15 @@ set -uo pipefail
 
 LABEL="${1:?usage: run-matrix.sh <lane-label> [worktree-dir]}"
 WORKTREE="${2:-$PWD}"
-LOCK=/tmp/north-star-matrix.lock
+LOCK="${NORTH_STAR_TEST_LOCK_PATH:-/tmp/north-star-matrix.lock}"
+LOCK_TIMEOUT_SECONDS="${NORTH_STAR_TEST_LOCK_TIMEOUT_SECONDS:-300}"
+FOREIGN_POLL_SECONDS=1
 cd "$WORKTREE" || exit 2
+
+if ! [[ "$LOCK_TIMEOUT_SECONDS" =~ ^[0-9]+$ ]]; then
+  echo "Invalid NORTH_STAR_TEST_LOCK_TIMEOUT_SECONDS: $LOCK_TIMEOUT_SECONDS" >&2
+  exit 2
+fi
 
 SHA="$(git rev-parse HEAD)"
 LOG="/tmp/matrix-${LABEL}-${SHA:0:8}.log"
@@ -13,7 +20,16 @@ touch "$LOCK"
 
 echo "[$(date +%H:%M:%S)] $LABEL waiting for the matrix slot (sha ${SHA:0:8})..."
 exec 9>"$LOCK"
-flock 9
+flock --conflict-exit-code 75 --timeout "$LOCK_TIMEOUT_SECONDS" 9
+LOCK_RC="$?"
+if [ "$LOCK_RC" -ne 0 ]; then
+  if [ "$LOCK_RC" -eq 75 ]; then
+    echo "TEST_GATE_LOCK_BUSY: exclusive access to $LOCK was unavailable for ${LOCK_TIMEOUT_SECONDS}s" >&2
+  else
+    echo "TEST_GATE_LOCK_ERROR: flock failed with exit code $LOCK_RC for $LOCK" >&2
+  fi
+  exit "$LOCK_RC"
+fi
 echo "[$(date +%H:%M:%S)] $LABEL ACQUIRED the lock."
 
 foreign_matrix() {
@@ -23,9 +39,18 @@ foreign_matrix() {
     | grep -vE "^[[:space:]]*($$|$PPID)[[:space:]]" \
     | grep -Eq '[c]orepack pnpm (test|check:boundaries|check:schema)|[p]laywright test|[r]un-security-scans\.sh'
 }
+foreign_wait_attempts=0
+maximum_foreign_wait_attempts=$((
+  (LOCK_TIMEOUT_SECONDS + FOREIGN_POLL_SECONDS - 1) / FOREIGN_POLL_SECONDS
+))
 while foreign_matrix; do
-  echo "[$(date +%H:%M:%S)] $LABEL: lock held, but a lock-unaware matrix is still running. Waiting 60s..."
-  sleep 60
+  if [ "$foreign_wait_attempts" -ge "$maximum_foreign_wait_attempts" ]; then
+    echo "TEST_GATE_LOCK_BUSY: a lock-unaware test process remained active for ${LOCK_TIMEOUT_SECONDS}s" >&2
+    exit 75
+  fi
+  foreign_wait_attempts=$((foreign_wait_attempts + 1))
+  echo "[$(date +%H:%M:%S)] $LABEL: lock held, but a lock-unaware test process is still running. Waiting ${FOREIGN_POLL_SECONDS}s (${foreign_wait_attempts}/${maximum_foreign_wait_attempts})..."
+  sleep "$FOREIGN_POLL_SECONDS"
 done
 echo "[$(date +%H:%M:%S)] $LABEL starting. Log: $LOG"
 

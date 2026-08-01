@@ -7,8 +7,8 @@ import { STRUCTURAL_LIMITS_V0 } from '../../packages/canonical-model/src/index.j
 import { compileApplication } from '../../packages/compiler/src/index.js';
 import { authoredFixture, compilerInput, normalizedBytes } from './helpers.js';
 
-const FULL_COMPILE_BUDGET_MILLISECONDS = 5_000;
-const MAXIMUM_NORMALIZED_SYSTEM_LOAD = 0.5;
+const FULL_COMPILE_BUDGET_MILLISECONDS = 3_800;
+const MAXIMUM_NORMALIZED_SYSTEM_LOAD = 0.08;
 const maximumSystemLoad =
   availableParallelism() * MAXIMUM_NORMALIZED_SYSTEM_LOAD;
 
@@ -101,14 +101,20 @@ test('system saturation makes the compile budget indeterminate, never green', ()
   );
 });
 
-test('four cold compiles exceed the unchanged single-compile CPU budget', () => {
-  const measurement = measureCpuBudget(() => {
-    let result: ReturnType<typeof compileApplication> | undefined;
-    for (let iteration = 0; iteration < 4; iteration += 1) {
-      result = compileApplication(maximumFieldInput);
-    }
-    return result;
-  }, defaultOptions);
+test('two cold compiles exceed the derived single-compile CPU budget', () => {
+  const measurement = measureCpuBudget(
+    () => {
+      let result: ReturnType<typeof compileApplication> | undefined;
+      for (let iteration = 0; iteration < 2; iteration += 1) {
+        result = compileApplication(maximumFieldInput);
+      }
+      return result;
+    },
+    {
+      ...defaultOptions,
+      readSystemLoad: () => 0,
+    },
+  );
 
   assert.equal(measurement.status, 'measured');
   process.stdout.write(
