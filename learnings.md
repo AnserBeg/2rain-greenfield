@@ -310,3 +310,13 @@ How to apply: take repeated quiet samples in the new unit, derive an anti-flake 
 Date: 2026-07-31
 Why: gate-perf initially mixed low-load and degraded-host CPU samples, making the new unit appear too noisy to gate; the admission threshold was part of the calibration, not a fixed precondition.
 How to apply: group measurements by the admission signal, derive the fence between populations, re-sample under the real exclusive lock, and record self-load indeterminates before deriving the budget. See `docs/execution/packets/gate-perf.md`.
+
+## Separate contention control from measurement calibration
+Date: 2026-08-01
+Why: exclusive CPU samples and the matrix still disagreed by roughly 30%, while an in-process repeated compile was not a repeatable cold-workload witness.
+How to apply: land mechanical isolation independently, but require a stable baseline and independently repeatable regression witness before changing a timing unit or budget. Supersedes the CPU-measurement recommendation in "Measure process work, and serialize the measurement mechanically"; its serialization rule remains binding. See `docs/execution/packets/gate-perf.md`.
+
+## Observe current capacity, not load-average echo
+Date: 2026-08-01
+Why: the one-minute load average remained elevated while the CPU was 96.4% idle, so a timing gate refused current quiet based on its own decaying prior work.
+How to apply: admit timing work from a short direct `/proc/stat` CPU-idle delta; use load average only as historical telemetry. Supersedes the load-average admission guidance in "Calibrate admission and budget as one instrument". See `docs/execution/packets/gate-perf.md`.

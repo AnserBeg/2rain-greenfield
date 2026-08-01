@@ -1,42 +1,42 @@
 import assert from 'node:assert/strict';
-import { availableParallelism, loadavg } from 'node:os';
+import { readFileSync } from 'node:fs';
 import { performance } from 'node:perf_hooks';
+import { setTimeout as delay } from 'node:timers/promises';
 import test from 'node:test';
 
 import { STRUCTURAL_LIMITS_V0 } from '../../packages/canonical-model/src/index.js';
 import { compileApplication } from '../../packages/compiler/src/index.js';
 import { authoredFixture, compilerInput, normalizedBytes } from './helpers.js';
 
-const FULL_COMPILE_BUDGET_MILLISECONDS = 3_800;
-const MAXIMUM_NORMALIZED_SYSTEM_LOAD = 0.08;
-const maximumSystemLoad =
-  availableParallelism() * MAXIMUM_NORMALIZED_SYSTEM_LOAD;
+const FULL_COMPILE_BUDGET_MILLISECONDS = 5_000;
+const MINIMUM_CPU_IDLE_FRACTION = 0.9;
+const CPU_AVAILABILITY_SAMPLE_MILLISECONDS = 300;
 
-interface CpuBudgetOptions {
-  readonly maximumSystemLoad: number;
+interface CompileBudgetOptions {
+  readonly minimumCpuIdleFraction: number;
   readonly readCpuUsage: (previousValue?: NodeJS.CpuUsage) => NodeJS.CpuUsage;
-  readonly readSystemLoad: () => number;
+  readonly readCpuIdleFraction: () => Promise<number>;
   readonly readWallMilliseconds: () => number;
 }
 
-type CpuBudgetMeasurement<Value> =
+type CompileBudgetMeasurement<Value> =
   | {
-      readonly beforeSystemLoad: number;
+      readonly beforeCpuIdleFraction: number;
       readonly cpuMilliseconds: number;
       readonly status: 'measured';
       readonly value: Value;
       readonly wallMilliseconds: number;
     }
   | {
-      readonly maximumSystemLoad: number;
-      readonly observedSystemLoad: number;
+      readonly minimumCpuIdleFraction: number;
+      readonly observedCpuIdleFraction: number;
       readonly status: 'indeterminate';
     };
 
-const defaultOptions: CpuBudgetOptions = {
-  maximumSystemLoad,
+const defaultOptions: CompileBudgetOptions = {
+  minimumCpuIdleFraction: MINIMUM_CPU_IDLE_FRACTION,
   readCpuUsage: (previousValue) => process.cpuUsage(previousValue),
-  readSystemLoad: () => loadavg()[0]!,
+  readCpuIdleFraction: observeCurrentCpuIdleFraction,
   readWallMilliseconds: () => performance.now(),
 };
 
@@ -62,8 +62,8 @@ const maximumFieldInput = (() => {
   return compilerInput(bytes);
 })();
 
-test('cold full compile stays within the numeric v0 maximum-field CPU budget', () => {
-  const measurement = measureCpuBudget(
+test('cold full compile stays within the numeric v0 maximum-field budget', async () => {
+  const measurement = await measureCompileBudget(
     () => compileApplication(maximumFieldInput),
     defaultOptions,
   );
@@ -71,28 +71,28 @@ test('cold full compile stays within the numeric v0 maximum-field CPU budget', (
 
   assert.equal(result.value.status, 'compiled');
   process.stdout.write(
-    `compile-budget: cpu_ms=${result.cpuMilliseconds.toFixed(1)} wall_ms=${result.wallMilliseconds.toFixed(1)} load=${result.beforeSystemLoad.toFixed(2)} budget_ms=${FULL_COMPILE_BUDGET_MILLISECONDS}\n`,
+    `compile-budget: cpu_ms=${result.cpuMilliseconds.toFixed(1)} wall_ms=${result.wallMilliseconds.toFixed(1)} cpu_idle_pct=${(result.beforeCpuIdleFraction * 100).toFixed(1)} budget_ms=${FULL_COMPILE_BUDGET_MILLISECONDS}\n`,
   );
 });
 
-test('system saturation makes the compile budget indeterminate, never green', () => {
+test('current CPU saturation makes the compile budget indeterminate, never green', async () => {
   let operationRan = false;
-  const overloaded = maximumSystemLoad + 0.01;
-  const measurement = measureCpuBudget(
+  const saturated = MINIMUM_CPU_IDLE_FRACTION - 0.01;
+  const measurement = await measureCompileBudget(
     () => {
       operationRan = true;
       return 'unreachable';
     },
     {
       ...defaultOptions,
-      readSystemLoad: () => overloaded,
+      readCpuIdleFraction: async () => saturated,
     },
   );
 
   assert.equal(operationRan, false);
   assert.deepEqual(measurement, {
-    maximumSystemLoad,
-    observedSystemLoad: overloaded,
+    minimumCpuIdleFraction: MINIMUM_CPU_IDLE_FRACTION,
+    observedCpuIdleFraction: saturated,
     status: 'indeterminate',
   });
   assert.throws(
@@ -101,24 +101,25 @@ test('system saturation makes the compile budget indeterminate, never green', ()
   );
 });
 
-test('two cold compiles exceed the derived single-compile CPU budget', () => {
-  const measurement = measureCpuBudget(
-    () => {
-      let result: ReturnType<typeof compileApplication> | undefined;
-      for (let iteration = 0; iteration < 2; iteration += 1) {
-        result = compileApplication(maximumFieldInput);
-      }
-      return result;
-    },
+test('an over-budget controlled wall sample fails the compile budget', async () => {
+  const wallSamples = [0, FULL_COMPILE_BUDGET_MILLISECONDS + 0.1];
+  const measurement = await measureCompileBudget(
+    () => compileApplication(maximumFieldInput),
     {
       ...defaultOptions,
-      readSystemLoad: () => 0,
+      readCpuIdleFraction: async () => 1,
+      readWallMilliseconds: () => wallSamples.shift()!,
     },
   );
 
   assert.equal(measurement.status, 'measured');
+  assert.equal(measurement.value.status, 'compiled');
+  assert.equal(
+    measurement.wallMilliseconds,
+    FULL_COMPILE_BUDGET_MILLISECONDS + 0.1,
+  );
   process.stdout.write(
-    `compile-budget-negative: cpu_ms=${measurement.cpuMilliseconds.toFixed(1)} budget_ms=${FULL_COMPILE_BUDGET_MILLISECONDS}\n`,
+    `compile-budget-negative: controlled_wall_ms=${measurement.wallMilliseconds.toFixed(1)} budget_ms=${FULL_COMPILE_BUDGET_MILLISECONDS}\n`,
   );
   assert.throws(
     () => requireMeasuredWithinBudget(measurement),
@@ -126,15 +127,15 @@ test('two cold compiles exceed the derived single-compile CPU budget', () => {
   );
 });
 
-function measureCpuBudget<Value>(
+async function measureCompileBudget<Value>(
   operation: () => Value,
-  options: CpuBudgetOptions,
-): CpuBudgetMeasurement<Value> {
-  const beforeSystemLoad = options.readSystemLoad();
-  if (beforeSystemLoad > options.maximumSystemLoad) {
+  options: CompileBudgetOptions,
+): Promise<CompileBudgetMeasurement<Value>> {
+  const beforeCpuIdleFraction = await options.readCpuIdleFraction();
+  if (beforeCpuIdleFraction < options.minimumCpuIdleFraction) {
     return {
-      maximumSystemLoad: options.maximumSystemLoad,
-      observedSystemLoad: beforeSystemLoad,
+      minimumCpuIdleFraction: options.minimumCpuIdleFraction,
+      observedCpuIdleFraction: beforeCpuIdleFraction,
       status: 'indeterminate',
     };
   }
@@ -146,7 +147,7 @@ function measureCpuBudget<Value>(
   const elapsedCpu = options.readCpuUsage(startedCpu);
 
   return {
-    beforeSystemLoad,
+    beforeCpuIdleFraction,
     cpuMilliseconds: (elapsedCpu.system + elapsedCpu.user) / 1_000,
     status: 'measured',
     value,
@@ -155,16 +156,64 @@ function measureCpuBudget<Value>(
 }
 
 function requireMeasuredWithinBudget<Value>(
-  measurement: CpuBudgetMeasurement<Value>,
-): Extract<CpuBudgetMeasurement<Value>, { readonly status: 'measured' }> {
+  measurement: CompileBudgetMeasurement<Value>,
+): Extract<CompileBudgetMeasurement<Value>, { readonly status: 'measured' }> {
   if (measurement.status === 'indeterminate') {
     assert.fail(
-      `COMPILE_BUDGET_INDETERMINATE: system load ${measurement.observedSystemLoad.toFixed(2)} exceeds ${measurement.maximumSystemLoad.toFixed(2)}; rerun the exclusive gate`,
+      `COMPILE_BUDGET_INDETERMINATE: observed CPU idle ${(measurement.observedCpuIdleFraction * 100).toFixed(1)}% is below required ${(measurement.minimumCpuIdleFraction * 100).toFixed(1)}%; rerun the exclusive gate`,
     );
   }
   assert.ok(
-    measurement.cpuMilliseconds <= FULL_COMPILE_BUDGET_MILLISECONDS,
-    `COMPILE_BUDGET_EXCEEDED: cold full compile used ${measurement.cpuMilliseconds.toFixed(1)}ms CPU; budget is ${FULL_COMPILE_BUDGET_MILLISECONDS}ms`,
+    measurement.wallMilliseconds <= FULL_COMPILE_BUDGET_MILLISECONDS,
+    `COMPILE_BUDGET_EXCEEDED: cold full compile took ${measurement.wallMilliseconds.toFixed(1)}ms; budget is ${FULL_COMPILE_BUDGET_MILLISECONDS}ms`,
   );
   return measurement;
+}
+
+interface CpuStatSample {
+  readonly idleTicks: number;
+  readonly totalTicks: number;
+}
+
+async function observeCurrentCpuIdleFraction(): Promise<number> {
+  const before = readCpuStat();
+  await delay(CPU_AVAILABILITY_SAMPLE_MILLISECONDS);
+  const after = readCpuStat();
+  const idleTicks = after.idleTicks - before.idleTicks;
+  const totalTicks = after.totalTicks - before.totalTicks;
+  assert.ok(
+    totalTicks > 0,
+    'CPU_AVAILABILITY_SAMPLE_INVALID: no CPU ticks elapsed',
+  );
+  assert.ok(
+    idleTicks >= 0 && idleTicks <= totalTicks,
+    'CPU_AVAILABILITY_SAMPLE_INVALID: idle CPU ticks are outside the elapsed total',
+  );
+  return idleTicks / totalTicks;
+}
+
+function readCpuStat(): CpuStatSample {
+  const aggregate = readFileSync('/proc/stat', 'utf8').split('\n')[0] ?? '';
+  assert.ok(
+    aggregate?.startsWith('cpu '),
+    'CPU_AVAILABILITY_SAMPLE_INVALID: /proc/stat has no aggregate CPU row',
+  );
+  const ticks = aggregate
+    .trim()
+    .split(/\s+/u)
+    .slice(1, 9)
+    .map((value) => Number(value));
+  assert.equal(
+    ticks.length,
+    8,
+    'CPU_AVAILABILITY_SAMPLE_INVALID: aggregate CPU row is incomplete',
+  );
+  assert.ok(
+    ticks.every((value) => Number.isSafeInteger(value) && value >= 0),
+    'CPU_AVAILABILITY_SAMPLE_INVALID: aggregate CPU ticks are malformed',
+  );
+  return {
+    idleTicks: ticks[3]!,
+    totalTicks: ticks.reduce((total, value) => total + value, 0),
+  };
 }

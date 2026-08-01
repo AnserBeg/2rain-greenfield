@@ -1,41 +1,80 @@
-# gate-perf — honest compiler budget measurement
+# gate-perf — isolate compiler timing from contended gates
 
-Date: 2026-07-31
+Date: 2026-08-01
 Tier: Behavioral
 Status: candidate
 
 ## Outcome
 
-The full-compile budget measures process CPU rather than elapsed wall time. The
-timing test is no longer part of `test:compiler`; it is the sole member of
-`test:performance`, an explicitly exclusive producer with its own CI job and
-executed-file evidence.
+The compile-budget test is the sole member of `test:performance`, an
+explicitly exclusive producer. It no longer runs late in `test:compiler` after
+the compiler suite has loaded the host. The tracked matrix runner executes the
+performance producer first, emits `PERFORMANCE_GATE_PASS_SHA=<sha>`, downgrades
+its lease to shared, and only then runs the load-tolerant main matrix.
 
-The tracked matrix runner executes the exclusive producer first, records
-`PERFORMANCE_GATE_PASS_SHA=<sha>`, downgrades its lease to shared, then runs the
-main matrix without the timing file. A second matrix remains queued because it
-requires exclusive entry, while load-tolerant focused suites and reviews can
-proceed. Final reachability aggregates the performance evidence with every main
-matrix producer, so omitting the separated gate is a hard failure rather than
-an invisible scheduling convention.
+CI has a required performance job. Executed-file evidence records the producer,
+and final reachability aggregates that evidence with every main-matrix suite.
+An architecture control requires exactly one matrix invocation, so extraction
+cannot silently turn into omission.
 
-## Instrument and derived bounds
+This rescope deliberately does not claim to repair the timing instrument. The
+verdict is restored to the shipped monotonic wall-clock measurement and the
+unchanged 5,000 ms budget. Process CPU is emitted as telemetry only. A separate
+`gate-instrument` packet owns the unresolved measurement question.
 
-`process.cpuUsage()` measures user plus system CPU consumed during the one
-`compileApplication` call. Wall time is emitted as telemetry only and never
-participates in the verdict. The derived CPU-time budget is 3,800 ms.
+## Restored verdict and fail-closed admission
 
-The host is measurable only when the one-minute load average is at most 0.08
-per `availableParallelism()` processor. The first review used 0.50, or 4.00 on
-this eight-processor host, and admitted a visibly degraded population beginning
-at load 0.89. The prior tight population ended at 0.44. Their midpoint is 0.665;
-normalizing by eight gives 0.083125. Rounding down to 0.08 derives a 0.64 host
-threshold, leaving 0.20 above the prior quiet maximum and refusing the earlier
-degraded population. Above it the gate fails with
-`COMPILE_BUDGET_INDETERMINATE` and reports no CPU-budget verdict.
+The real maximum-field compile is measured with `performance.now()`. The budget
+assertion reads only `wallMilliseconds`; `cpuMilliseconds` remains in the
+diagnostic line and never participates in pass/fail.
 
-Ten fresh-process samples were then collected through the actual exclusive lock
-with no overlapping matrix or test process:
+Admission now observes current CPU availability directly. The gate reads the
+aggregate CPU counters in `/proc/stat`, waits 300 ms, reads them again, and
+admits only when at least 90% of elapsed ticks were idle. On an eight-processor
+host that refuses the presence of even one fully busy core. Below the floor the
+compile does not run and the gate raises `COMPILE_BUDGET_INDETERMINATE`; it never
+passes or skips.
+
+Controls observe both refusal modes:
+
+- an injected 89% idle observation refuses before the operation callback runs;
+- a real compile paired with a controlled 5,000.1 ms monotonic wall sample is
+  rejected with `COMPILE_BUDGET_EXCEEDED`.
+
+The controlled red proves the restored verdict rejects an observed over-budget
+duration without sleeping or relying on host load. It does not prove that a
+future compiler regression will yield a stable real-host duration; that is the
+open `gate-instrument` finding below.
+
+## Lock protocol and bounded waits
+
+`scripts/run-with-test-lock.mjs` is the local lock client over
+`/tmp/north-star-matrix.lock`:
+
+- ordinary `test:*` commands and reviewer launches acquire shared access;
+- `test:performance` acquires exclusive access;
+- the matrix enters exclusively for performance, emits its pass SHA, then
+  downgrades to shared for the main matrix;
+- nested commands inherit `NORTH_STAR_TEST_LOCK_HELD`, avoiding self-deadlock;
+- an unavailable lease fails with `TEST_GATE_LOCK_BUSY` rather than running
+  concurrently.
+
+All waits are finite. The shared wrapper, the matrix's initial exclusive lock,
+and the compatibility wait for lock-unaware test processes default to 300 s.
+The holder-readiness handshake has a separate 5 s deadline. Zero-deadline
+negative controls observe both matrix busy paths returning exit 75, and a silent
+readiness stream observes the bounded handshake refusal.
+
+The lock is cooperative harnessing, not a security boundary. The architecture
+gate proves declared test commands and the binding review launcher participate;
+it cannot govern an arbitrary process that deliberately bypasses repository
+entry points.
+
+## Instrument findings and direct-idle samples
+
+CPU timing reduced contention sensitivity but did not produce a stable baseline
+while the admission signal was the one-minute load average. Ten admitted,
+fresh-process samples taken through the exclusive lock were:
 
 | Sample | CPU ms | Wall telemetry ms | Load |
 |---:|---:|---:|---:|
@@ -50,103 +89,61 @@ with no overlapping matrix or test process:
 | 9 | 2,564.6 | 2,046.4 | 0.54 |
 | 10 | 2,681.5 | 2,037.4 | 0.49 |
 
-The CPU minimum is 2,373.2 ms, median 2,499.9 ms, maximum 3,068.3 ms,
-and range 695.1 ms (29.29% of the minimum). The anti-flake floor is the maximum
-plus one full observed range: 3,763.4 ms. Rounding that floor up to the next 100
-ms derives the 3,800 ms budget and leaves 731.7 ms, or 23.85%, above the
-observed maximum. Constraint (a), quiet-noise margin, binds. Constraint (b)
-remains looser: twice even the fastest admitted baseline is 4,746.4 ms, 946.4
-ms above the budget. The focused two-compile control used 4,892.1 ms CPU and was
-rejected, 1,092.1 ms over the budget.
+That population spans 2,373.2–3,068.3 ms CPU. The frozen matrix then admitted
+the same compile at load 0.35 and measured 1,851.8 ms CPU, roughly 30% below the
+sampled minimum. The discrepancy exposed that one-minute load was a lagging
+proxy: it continued reporting prior work after the CPU was idle, including the
+timing gate's own earlier samples.
 
-Three controls make the outcomes observable:
+The attempted regression arm was also invalid. Two compiles in one process are
+not two cold compiles: the arm consumed 4,892.1 ms CPU in one focused run but
+only 3,196.4 ms in the frozen matrix. Against the matrix's 1,851.8 ms single
+compile, a literal 2× value is 3,703.6 ms, still below the attempted 3,800 ms
+budget. The full matrix correctly failed because the expected red did not fire.
 
-- the real maximum-field compile must pass the derived budget;
-- an injected over-threshold load sample refuses before the operation runs;
-- two real cold compiles under the single-compile budget fail with
-  `COMPILE_BUDGET_EXCEEDED`. Removing the extra compile reopens that red.
+The obsolete load-admission derivation remains historical evidence for Packet
+B. Earlier samples appeared to separate cleanly: load 0.10–0.44 produced
+1,587.7–1,798.4 ms CPU, while load 0.89–1.43 produced 2,232.2–3,145.4 ms. The
+midpoint divided by eight processors produced the normalized 0.08 threshold.
+That threshold was not a current-availability observation and is no longer used.
 
-The real gate uses the host load. The two-compile negative control injects an
-admitted load sample of zero while retaining the real CPU clock and real
-compiler calls. This keeps the regression red observable even when the positive
-test raises the one-minute average before the control runs; it cannot make the
-production verdict green.
+Ten new runs admitted by direct `/proc/stat` observation were:
 
-## Self-load interaction
+| Sample | CPU telemetry ms | Wall verdict ms | CPU idle |
+|---:|---:|---:|---:|
+| 1 | 2,535.5 | 2,044.5 | 99.2% |
+| 2 | 2,506.3 | 1,992.0 | 91.2% |
+| 3 | 2,490.1 | 1,986.3 | 98.3% |
+| 4 | 2,527.3 | 2,065.9 | 98.8% |
+| 5 | 2,386.2 | 1,900.1 | 97.9% |
+| 6 | 2,358.6 | 1,875.4 | 97.1% |
+| 7 | 2,428.5 | 1,956.5 | 96.7% |
+| 8 | 2,422.2 | 1,950.2 | 95.5% |
+| 9 | 2,263.0 | 1,829.2 | 93.6% |
+| 10 | 2,423.4 | 1,916.9 | 97.9% |
 
-The one-minute load average deliberately makes recent work visible after the
-process exits. Repeated calibration crossed the new fence: after eight admitted
-exclusive samples, the next attempt observed 0.74 and failed
-`COMPILE_BUDGET_INDETERMINATE`. Earlier, six consecutive attempts crossed at
-0.65. No compile ran in those attempts. The average remained elevated for
-several minutes despite no test process, so a re-run may require a quiet decay
-window.
+The retained ten-sample CPU range is 272.5 ms, or 12.04% of its 2,263.0 ms
+minimum. Wall range is 236.7 ms, or 12.94% of its 1,829.2 ms minimum. A separate
+pre-batch validation measured CPU 2,859.4 ms and wall 2,238.1 ms at 97.9% idle;
+including it still leaves the two numerical constraints compatible. The
+conservative CPU anti-flake floor of maximum plus the full observed range is
+3,455.8 ms, below twice the fastest baseline at 4,526.0 ms. The corresponding
+wall values are 2,647.0 ms and 3,658.4 ms.
 
-Test-runner startup can also move a near-threshold external sample: one focused
-run started after `/proc/loadavg` reported 0.40 but the instrument observed 0.66
-and refused before compiling. Callers must treat the instrument's own sample as
-authoritative; a pre-run shell sample is only scheduling guidance.
-
-That cost is accepted. Indeterminate is a typed fail-closed result, not a pass,
-skip, or budget verdict. Raising the threshold to make back-to-back runs
-convenient would re-admit the degraded population and undo the instrument.
-
-A discarded five-sample batch is not part of the derivation: KERNEL began a
-legacy, lock-unaware matrix after the precheck while the calibration command had
-bypassed the wrapper. The overlap was discovered, the values were rejected, and
-all ten recorded samples above were rerun through the exclusive lock.
-
-## Lock protocol and bounded waits
-
-`scripts/run-with-test-lock.mjs` is the single local lock client over
-`/tmp/north-star-matrix.lock`:
-
-- ordinary `test:*` commands and reviewer launches acquire shared access;
-- `test:performance` acquires exclusive access; `scripts/run-matrix.sh` enters
-  exclusively for that gate, then downgrades to shared for the main matrix;
-- nested commands inherit the current `NORTH_STAR_TEST_LOCK_HELD`, so the
-  matrix cannot deadlock itself;
-- a lease unavailable for the configured wait fails with
-  `TEST_GATE_LOCK_BUSY` rather than running concurrently.
-
-The shared wrapper, the matrix's initial exclusive acquisition, and its
-compatibility wait for lock-unaware processes all default to a finite 300 s
-deadline controlled by `NORTH_STAR_TEST_LOCK_TIMEOUT_SECONDS`. The compatibility
-poll is one second, so it cannot overrun the configured whole-second deadline.
-The test holder's readiness handshake has a separate 5 s deadline.
-
-Executed controls hold one shared lease, observe another shared command
-complete, observe an exclusive command refused, release the holder, and then
-observe exclusive admission. Additional zero-deadline controls observe both
-matrix busy paths return `TEST_GATE_LOCK_BUSY`; a silent readiness stream
-separately observes its bounded refusal.
-
-## Earlier calibration evidence
-
-The prompt's wall-clock baseline for the same maximum-field compile was
-2,903–3,165 ms quiet and 5,993 ms loaded on one branch, and 3,787–4,779 ms quiet
-and 5,798 ms loaded on another.
-
-The first CPU implementation observed 1,931.5 ms quiet and 2,801.1 ms with four
-controlled CPU workers. CPU spread was 45%, versus 70% wall spread. A 4.50 load
-sample refused as indeterminate. Review round 1 then correctly found that
-retaining the old 5,000 ms wall-time numeral silently weakened the CPU-time
-gate, which prompted the threshold and budget calibration above.
+The budget question is therefore reopened for Packet B, but not answered here.
+The shipped 5,000 ms wall bound remains unchanged, and CPU remains telemetry.
+Packet B still owes an independently repeatable cold-regression witness because
+the in-process repeated compile remains invalid even though the direct-idle
+baseline is materially tighter.
 
 ## Scope, review, and limits
 
-No compiler, canonical model, release artifact, product behavior, baseline,
-migration, allowlist, or unrelated budget changed. The local lock is cooperative
-CI harnessing, not a security boundary: commands that deliberately bypass the
-repository entry points can still contend. The architecture gate proves every
-declared test command and the binding review skill use the wrapper; it cannot
-govern arbitrary raw processes.
+No product code, compiler behavior, canonical model, release artifact,
+migration, baseline, allowlist, or unrelated budget changed. The Behavioral
+review of `0902fe60` passed extraction, fail-closed INDETERMINATE behavior,
+non-execution under load, CI invocation, and reachability. Its revision exposed
+that CPU-time calibration and the in-process negative control were not honest;
+those findings are routed rather than hidden.
 
-The Behavioral review of `0902fe60` returned REVISE on the wall-calibrated
-numeral and the unbounded waits. Its other four questions passed and were not
-revisited. This revision addresses only those two findings; a fresh review is
-required on the new frozen SHA.
-
-Program-review triggers do not fire: this changes one gate instrument and its
-harness, not a product capability, correctness domain, stage boundary, or
-fan-out point.
+Program-review triggers do not fire: this changes one gate harness, not a
+product capability, correctness domain, stage boundary, or fan-out point.
