@@ -24,68 +24,133 @@ import { TrustedActorEnvelopeIssuer } from '../../../../packages/postgres-provid
 import { withEphemeralPostgres } from '../../../../test/helpers/postgres.js';
 
 const applicationNamespace = 'northstar.app';
+const journeyTimeoutMilliseconds = Object.freeze({
+  inventoryNavigation: 20_000,
+  onHandLookup: 20_000,
+  partyLifecycle: 20_000,
+  scopedInventory: 20_000,
+});
+const sharedSetupTimeoutMilliseconds = 180_000;
 
-test('composed product selects a legal entity, reads Inventory, and persists Party', async ({
-  page,
-}) => {
-  // A fresh database admits the complete immutable application lineage before
-  // this journey starts, including the additional on-hand surface revision.
-  test.setTimeout(180_000);
-  const externalBaseUrl = process.env.COMPOSED_APPLICATION_BASE_URL;
-  if (externalBaseUrl) {
-    await inventoryJourney(page, externalBaseUrl);
-    await partyPersistenceJourney(page, externalBaseUrl);
-    return;
-  }
+type ComposedApplication = Awaited<ReturnType<typeof startComposedApplication>>;
 
-  await withEphemeralPostgres(
-    'g3-p6b-picker-browser',
-    async ({ connection, pool }) => {
-      const databaseUrl = `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`;
-      let application = await startComposedApplication({
-        databaseUrl,
-        port: 0,
-        tenantSlug: 'composed-browser-tenant',
-      });
-      try {
-        await assertSeedTrust(pool, application);
-        await seedPostedInventory(pool, databaseUrl, application);
-        await inventoryJourney(page, application.baseUrl);
-        await partyPersistenceJourney(page, application.baseUrl);
-        await application.close();
-        application = await startComposedApplication({
-          databaseUrl,
-          port: 0,
-          tenantSlug: 'composed-browser-tenant',
+interface ComposedApplicationFixture {
+  readonly currentBaseUrl: () => string;
+  readonly restart: (() => Promise<void>) | undefined;
+}
+
+interface ComposedWorkerFixtures {
+  readonly composedApplication: ComposedApplicationFixture;
+}
+
+const composedTest = test.extend<object, ComposedWorkerFixtures>({
+  composedApplication: [
+    async (_fixtures, use) => {
+      const externalBaseUrl = process.env.COMPOSED_APPLICATION_BASE_URL;
+      if (externalBaseUrl) {
+        await use({
+          currentBaseUrl: () => externalBaseUrl,
+          restart: undefined,
         });
-        await page.goto(surfaceUrl(application.baseUrl, 'party_list'));
-        await expect(
-          page.getByRole('cell', { name: 'Browser-persisted Party' }),
-        ).toBeVisible();
-      } finally {
-        await application.close();
+        return;
       }
+
+      await withEphemeralPostgres(
+        'composed-browser-journeys',
+        async ({ connection, pool }) => {
+          const databaseUrl = `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`;
+          let application: ComposedApplication | undefined =
+            await startComposedApplication({
+              databaseUrl,
+              port: 0,
+              tenantSlug: 'composed-browser-tenant',
+            });
+          try {
+            // A fresh database admits the complete immutable application lineage
+            // once, including the additional on-hand surface revision.
+            await assertSeedTrust(pool, application);
+            await seedPostedInventory(pool, databaseUrl, application);
+            await use({
+              currentBaseUrl: () => {
+                if (!application) {
+                  throw new Error('the composed application is not running');
+                }
+                return application.baseUrl;
+              },
+              restart: async () => {
+                const currentApplication = application;
+                if (!currentApplication) {
+                  throw new Error('the composed application is not running');
+                }
+                application = undefined;
+                await currentApplication.close();
+                application = await startComposedApplication({
+                  databaseUrl,
+                  port: 0,
+                  tenantSlug: 'composed-browser-tenant',
+                });
+              },
+            });
+          } finally {
+            await application?.close();
+          }
+        },
+      );
+    },
+    { scope: 'worker', timeout: sharedSetupTimeoutMilliseconds },
+  ],
+});
+
+composedTest.describe('composed application journeys', () => {
+  composedTest(
+    'navigates grouped Inventory and responsive lists',
+    async ({ composedApplication, page }) => {
+      composedTest.setTimeout(journeyTimeoutMilliseconds.inventoryNavigation);
+      await inventoryNavigationJourney(
+        page,
+        composedApplication.currentBaseUrl(),
+      );
+    },
+  );
+
+  composedTest(
+    'looks up on-hand stock in the selected legal entity',
+    async ({ composedApplication, page }) => {
+      composedTest.setTimeout(journeyTimeoutMilliseconds.onHandLookup);
+      await onHandLookupJourney(page, composedApplication.currentBaseUrl());
+    },
+  );
+
+  composedTest(
+    'scopes immutable Inventory records and refuses writes',
+    async ({ composedApplication, page }) => {
+      composedTest.setTimeout(journeyTimeoutMilliseconds.scopedInventory);
+      await scopedInventoryJourney(page, composedApplication.currentBaseUrl());
+    },
+  );
+
+  composedTest(
+    'persists the Party lifecycle across restart',
+    async ({ composedApplication, page }) => {
+      composedTest.setTimeout(journeyTimeoutMilliseconds.partyLifecycle);
+      await partyLifecycleJourney(page, composedApplication.currentBaseUrl());
+      if (!composedApplication.restart) return;
+
+      await composedApplication.restart();
+      await page.goto(
+        surfaceUrl(composedApplication.currentBaseUrl(), 'party_list'),
+      );
+      await expect(
+        page.getByRole('cell', { name: 'Browser-persisted Party' }),
+      ).toBeVisible();
     },
   );
 });
 
-async function inventoryJourney(page: Page, baseUrl: string): Promise<void> {
-  const onHandLookup = await loadOnHandLookupProjection();
-  const inventoryScopeParameters = {
-    movementDetail: await loadSurfaceScopeParameterId(
-      'inventory_movement_detail',
-    ),
-    movementList: await loadSurfaceScopeParameterId('inventory_movement_list'),
-    transactionDetail: await loadSurfaceScopeParameterId(
-      'inventory_transaction_detail',
-    ),
-    transactionForm: await loadSurfaceScopeParameterId(
-      'inventory_transaction_form',
-    ),
-    transactionList: await loadSurfaceScopeParameterId(
-      'inventory_transaction_list',
-    ),
-  } as const;
+async function inventoryNavigationJourney(
+  page: Page,
+  baseUrl: string,
+): Promise<void> {
   await page.goto(surfaceUrl(baseUrl, 'party_list'));
   const navigation = page.getByRole('navigation', {
     name: 'Release navigation',
@@ -224,7 +289,10 @@ async function inventoryJourney(page: Page, baseUrl: string): Promise<void> {
   await expect(
     page.locator('[data-diagnostic-code="UNSUPPORTED_COMPONENT"]'),
   ).toHaveCount(0);
+}
 
+async function onHandLookupJourney(page: Page, baseUrl: string): Promise<void> {
+  const onHandLookup = await loadOnHandLookupProjection();
   const onHandValues = new Map<string, string>([
     [onHandLookup.legalEntityParameterId, browserLegalEntityId],
     [onHandLookup.inputParameters[0]!.parameterId, demoItemId],
@@ -377,7 +445,27 @@ async function inventoryJourney(page: Page, baseUrl: string): Promise<void> {
     })
     .click();
   await expect(balance).toHaveText('5');
+}
 
+async function scopedInventoryJourney(
+  page: Page,
+  baseUrl: string,
+): Promise<void> {
+  const inventoryScopeParameters = {
+    movementDetail: await loadSurfaceScopeParameterId(
+      'inventory_movement_detail',
+    ),
+    movementList: await loadSurfaceScopeParameterId('inventory_movement_list'),
+    transactionDetail: await loadSurfaceScopeParameterId(
+      'inventory_transaction_detail',
+    ),
+    transactionForm: await loadSurfaceScopeParameterId(
+      'inventory_transaction_form',
+    ),
+    transactionList: await loadSurfaceScopeParameterId(
+      'inventory_transaction_list',
+    ),
+  } as const;
   const unscopedMovementUrl = surfaceUrl(baseUrl, 'inventory_movement_list');
   const unscopedMovementResponse = await page.goto(unscopedMovementUrl);
   expect(unscopedMovementResponse?.status()).toBe(422);
@@ -546,7 +634,7 @@ async function inventoryJourney(page: Page, baseUrl: string): Promise<void> {
   expect(await refusedWrite.text()).toContain('OPERATION_UNSUPPORTED');
 }
 
-async function partyPersistenceJourney(
+async function partyLifecycleJourney(
   page: Page,
   baseUrl: string,
 ): Promise<void> {
