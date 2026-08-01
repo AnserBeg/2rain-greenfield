@@ -1,3 +1,5 @@
+// Canonical language v4 is the query-operand language. This is unrelated to
+// Inventory dependency-set v4, which versions the posting capability inputs.
 const version = 'v4' as const;
 const normalizationProfileVersion = 'northstar.normalization/v4' as const;
 
@@ -107,6 +109,19 @@ function ids(namespace: string) {
     moduleId: `${namespace}:module.inventory`,
     namespace,
     packageId: `${namespace}:package.inventory`,
+    queryIds: {
+      onHand: `${namespace}:query.inventory_movement_on_hand`,
+    },
+    queryParameterIds: {
+      onHandAtTime: `${namespace}:parameter.on_hand_at_time`,
+      onHandItemId: `${namespace}:parameter.on_hand_item_id`,
+      onHandLegalEntityId: `${namespace}:parameter.on_hand_legal_entity_id`,
+      onHandLocationId: `${namespace}:parameter.on_hand_location_id`,
+      onHandRecordedAtHorizon: `${namespace}:parameter.on_hand_recorded_at_horizon`,
+    },
+    querySelectionIds: {
+      onHand: `${namespace}:selection.inventory_movement_on_hand`,
+    },
     relationIds: {
       movementTransaction: `${namespace}:relation.inventory_movement_transaction`,
       movementTransactionLine: `${namespace}:relation.inventory_movement_transaction_line`,
@@ -162,6 +177,7 @@ export function inventoryModuleDefinition(
     assertions: [
       ...standardEntities.map(([local]) => assertion(definitionIds, local)),
       assertion(definitionIds, 'inventory_movement'),
+      onHandScopeAssertion(definitionIds),
     ],
     capabilityRequirements: [
       {
@@ -768,6 +784,7 @@ export function inventoryModuleDefinition(
         movementFields,
         fieldIds.movement.sourceId,
       ),
+      onHandQuery(definitionIds),
     ],
     relations: [
       relation(
@@ -842,6 +859,107 @@ export function inventoryModuleDefinition(
         true,
       ),
     ],
+  };
+}
+
+/**
+ * Freeze N's one scalar authority. Both temporal horizons narrow the movement
+ * set before ADR-0022's sum; neither is a post-aggregate filter. A movement is
+ * a posted fact by construction -- the module exposes no generic create path
+ * and the posting capability appends it only when a transaction posts.
+ */
+function onHandQuery(ids: InventoryIds): Record<string, unknown> {
+  const parameters = ids.queryParameterIds;
+  const comparison = (
+    fieldId: string,
+    parameterId: string,
+    operator: 'equals' | 'lessThanOrEqual',
+  ) => ({
+    field: reference('fieldReference', fieldId),
+    kind: 'fieldComparisonPredicate',
+    operator,
+    schemaVersion: version,
+    value: {
+      kind: 'queryParameterReference',
+      parameterId,
+      schemaVersion: version,
+    },
+  });
+  return {
+    aggregate: {
+      field: reference('fieldReference', ids.fieldIds.movement.quantityDelta),
+      kind: 'queryAggregateSelection',
+      operator: 'sum',
+      schemaVersion: version,
+      selectionId: ids.querySelectionIds.onHand,
+    },
+    filter: {
+      kind: 'allPredicate',
+      schemaVersion: version,
+      terms: [
+        comparison(
+          ids.fieldIds.movement.itemId,
+          parameters.onHandItemId,
+          'equals',
+        ),
+        comparison(
+          ids.fieldIds.movement.locationId,
+          parameters.onHandLocationId,
+          'equals',
+        ),
+        comparison(
+          ids.fieldIds.movement.effectiveAt,
+          parameters.onHandAtTime,
+          'lessThanOrEqual',
+        ),
+        comparison(
+          ids.fieldIds.movement.recordedAt,
+          parameters.onHandRecordedAtHorizon,
+          'lessThanOrEqual',
+        ),
+      ],
+    },
+    kind: 'queryDefinition',
+    legalEntityScope: {
+      cardinality: 'exactlyOne',
+      kind: 'queryLegalEntityScope',
+      operand: {
+        kind: 'queryParameterReference',
+        parameterId: parameters.onHandLegalEntityId,
+        schemaVersion: version,
+      },
+      schemaVersion: version,
+    },
+    maximumResultCount: 1,
+    module: reference('moduleReference', ids.moduleId),
+    parameters: [
+      queryParameter(parameters.onHandLegalEntityId, 10),
+      queryParameter(parameters.onHandItemId, 20),
+      queryParameter(parameters.onHandLocationId, 30),
+      queryParameter(parameters.onHandAtTime, 40),
+      queryParameter(parameters.onHandRecordedAtHorizon, 50),
+    ],
+    permission: reference(
+      'permissionReference',
+      `${ids.namespace}:permission.inventory_movement_read`,
+    ),
+    queryId: ids.queryIds.onHand,
+    queryType: 'aggregate',
+    schemaVersion: version,
+    sourceEntity: reference('entityReference', ids.entityIds.movement),
+    tier: 'q1',
+  };
+}
+
+function queryParameter(
+  parameterId: string,
+  orderKey: number,
+): Record<string, unknown> {
+  return {
+    kind: 'queryParameterDefinition',
+    orderKey,
+    parameterId,
+    schemaVersion: version,
   };
 }
 
@@ -1244,6 +1362,22 @@ function assertion(ids: InventoryIds, local: string): Record<string, unknown> {
     invocation: {
       kind: 'queryInvocation',
       query: reference('queryReference', `${ids.namespace}:query.${local}_get`),
+      schemaVersion: version,
+    },
+    kind: 'assertionDefinition',
+    schemaVersion: version,
+  };
+}
+
+function onHandScopeAssertion(ids: InventoryIds): Record<string, unknown> {
+  return {
+    assertionId: `${ids.namespace}:assertion.inventory_movement_on_hand_scope`,
+    evidenceKinds: ['structure', 'provider'],
+    expectedDiagnosticCode: null,
+    expectedOutcome: 'succeeds',
+    invocation: {
+      kind: 'queryInvocation',
+      query: reference('queryReference', ids.queryIds.onHand),
       schemaVersion: version,
     },
     kind: 'assertionDefinition',

@@ -1054,6 +1054,17 @@ function assertAggregateQueryDefinition(
     }
     parameterIds.add(parameter.parameterId as string);
     const parameterType = parameter.parameterType;
+    // This branch ENABLES the v4 legal-entity scope operand, so it belongs to
+    // this packet rather than to adoption. LANG-ADOPT deliberately removed it
+    // to keep adoption semantically inert, on its review's finding; G3-P5
+    // restores it as the feature it is.
+    if (parameterType.kind === 'legalEntityReferenceParameterType') {
+      assertExactKeys(parameterType, ['kind', 'schemaVersion'], invalid);
+      if (parameterType.schemaVersion !== aggregateNodeVersion) {
+        throw invalid('aggregate legal-entity parameter version is invalid');
+      }
+      continue;
+    }
     if (
       FieldTypeSchema.safeParse(parameterType).success === false ||
       parameterType.schemaVersion !== aggregateNodeVersion
