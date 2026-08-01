@@ -338,7 +338,10 @@ function renderTaskScanInput(context: SurfaceComponentContext): string {
       return `<label><span>${escapeHtml(label)}</span><input ${index === 0 ? 'data-scan-input="true" ' : ''}name="${escapeHtml(parameter.parameterId)}" value="${escapeHtml(value)}" autocomplete="off" inputmode="text" placeholder="${escapeHtml(isDateTime ? 'UTC instant, for example 2026-07-30T12:00:00.000Z' : `Enter or scan ${label.toLowerCase()}`)}" required></label>`;
     })
     .join('');
-  const legalEntityId = context.legalEntitySelection?.[0];
+  const legalEntityId =
+    context.legalEntitySelection?.length === 1
+      ? context.legalEntitySelection[0]
+      : undefined;
   const hiddenScope =
     scopeParameterId && legalEntityId
       ? `<input type="hidden" name="${escapeHtml(scopeParameterId)}" value="${escapeHtml(legalEntityId)}">`

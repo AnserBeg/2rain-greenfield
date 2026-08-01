@@ -462,14 +462,21 @@ function argumentsForSurface(
   const scopeArguments = legalEntityScopeArguments(binding, url);
   switch (binding.query.queryType) {
     case 'aggregate':
-      return Object.freeze(
-        Object.fromEntries(
-          binding.query.parameters.map((parameter) => [
-            parameter.parameterId,
-            url.searchParams.get(parameter.parameterId) ?? '',
-          ]),
+      return Object.freeze({
+        ...Object.fromEntries(
+          binding.query.parameters
+            .filter(
+              (parameter) =>
+                parameter.parameterId !==
+                binding.query.legalEntityScope?.operand.parameterId,
+            )
+            .map((parameter) => [
+              parameter.parameterId,
+              url.searchParams.get(parameter.parameterId) ?? '',
+            ]),
         ),
-      );
+        ...scopeArguments,
+      });
     case 'get': {
       const recordId = url.searchParams.get('record');
       return recordId ? { includeArchived, recordId, ...scopeArguments } : null;
@@ -528,7 +535,9 @@ function legalEntityScopeArguments(
   const selections = url.searchParams.getAll(parameterId);
   return {
     [parameterId]:
-      scope.cardinality === 'exactlyOne' ? (selections[0] ?? '') : selections,
+      scope.cardinality === 'exactlyOne' && selections.length <= 1
+        ? (selections[0] ?? '')
+        : selections,
   };
 }
 
@@ -644,7 +653,8 @@ async function loadWorkspaceContextBar(
           })
         : [],
     ),
-    selectedRecordId: legalEntitySelection[0] ?? null,
+    selectedRecordId:
+      legalEntitySelection.length === 1 ? legalEntitySelection[0]! : null,
     targetSurfaceId: targetSurface.surface.surfaceId,
   });
 }

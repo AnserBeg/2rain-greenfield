@@ -254,6 +254,28 @@ async function inventoryJourney(page: Page, baseUrl: string): Promise<void> {
     await expect(page.locator('[data-aggregate-value]')).toHaveCount(0);
   }
 
+  const duplicateScopeUrl = new URL(
+    surfaceUrl(baseUrl, 'inventory_on_hand_lookup'),
+  );
+  for (const [parameterId, value] of onHandValues) {
+    duplicateScopeUrl.searchParams.set(parameterId, value);
+  }
+  duplicateScopeUrl.searchParams.append(
+    onHandLookup.legalEntityParameterId,
+    browserAlternateLegalEntityId,
+  );
+  const duplicateScopeResponse = await page.goto(duplicateScopeUrl.href);
+  expect(duplicateScopeResponse?.status()).toBe(422);
+  expect(
+    new URL(page.url()).searchParams.getAll(
+      onHandLookup.legalEntityParameterId,
+    ),
+  ).toEqual([browserLegalEntityId, browserAlternateLegalEntityId]);
+  await expect(
+    page.locator('[data-diagnostic-code="QUERY_LEGAL_ENTITY_SCOPE_REQUIRED"]'),
+  ).toBeVisible();
+  await expect(page.locator('[data-aggregate-value]')).toHaveCount(0);
+
   await page.goto(surfaceUrl(baseUrl, 'inventory_on_hand_lookup'));
   await page
     .getByRole('navigation', { name: 'Legal entity' })
