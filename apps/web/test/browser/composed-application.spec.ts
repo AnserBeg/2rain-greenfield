@@ -25,18 +25,19 @@ import { withEphemeralPostgres } from '../../../../test/helpers/postgres.js';
 
 const applicationNamespace = 'northstar.app';
 
-test('composed Party, Catalog, Location, and Inventory product reads a real posting and persists a record', async ({
+test('composed product selects a legal entity, reads Inventory, and persists Party', async ({
   page,
 }) => {
   test.setTimeout(120_000);
   const externalBaseUrl = process.env.COMPOSED_APPLICATION_BASE_URL;
   if (externalBaseUrl) {
-    await productJourney(page, externalBaseUrl);
+    await inventoryJourney(page, externalBaseUrl);
+    await partyPersistenceJourney(page, externalBaseUrl);
     return;
   }
 
   await withEphemeralPostgres(
-    'g2-p5da-browser',
+    'g3-p6b-picker-browser',
     async ({ connection, pool }) => {
       const databaseUrl = `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`;
       let application = await startComposedApplication({
@@ -47,7 +48,8 @@ test('composed Party, Catalog, Location, and Inventory product reads a real post
       try {
         await assertSeedTrust(pool, application);
         await seedPostedInventory(pool, databaseUrl, application);
-        await productJourney(page, application.baseUrl);
+        await inventoryJourney(page, application.baseUrl);
+        await partyPersistenceJourney(page, application.baseUrl);
         await application.close();
         application = await startComposedApplication({
           databaseUrl,
@@ -65,7 +67,7 @@ test('composed Party, Catalog, Location, and Inventory product reads a real post
   );
 });
 
-async function productJourney(page: Page, baseUrl: string): Promise<void> {
+async function inventoryJourney(page: Page, baseUrl: string): Promise<void> {
   const inventoryScopeParameters = {
     movementDetail: await loadSurfaceScopeParameterId(
       'inventory_movement_detail',
@@ -384,7 +386,12 @@ async function productJourney(page: Page, baseUrl: string): Promise<void> {
   });
   expect(refusedWrite.status()).toBe(422);
   expect(await refusedWrite.text()).toContain('OPERATION_UNSUPPORTED');
+}
 
+async function partyPersistenceJourney(
+  page: Page,
+  baseUrl: string,
+): Promise<void> {
   await page.goto(surfaceUrl(baseUrl, 'party_list'));
   await page.getByRole('link', { name: 'New', exact: true }).click();
   await expect(
