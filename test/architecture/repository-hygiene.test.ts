@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { globSync, readFileSync } from 'node:fs';
 import test from 'node:test';
 
 const workflowPath = '.github/workflows/ci.yml';
 const packagePath = 'package.json';
+const testLockRunnerPath = 'scripts/run-with-test-lock.mjs';
 const suiteDefinitions = [
   {
     discoveryPattern: 'test/unit/**/*.test.ts',
@@ -24,6 +26,7 @@ const suiteDefinitions = [
   },
   {
     discoveryPattern: 'test/compiler/**/*.test.ts',
+    excludedFiles: ['test/compiler/performance-budget.test.ts'],
     expectedFiles: [
       'test/compiler/determinism.test.ts',
       'test/compiler/freeze-b.test.ts',
@@ -31,11 +34,15 @@ const suiteDefinitions = [
       'test/compiler/g2-module-storage.test.ts',
       'test/compiler/golden-vectors.test.ts',
       'test/compiler/legal-entity-query-scope.test.ts',
-      'test/compiler/performance-budget.test.ts',
       'test/compiler/predicate-lowering.test.ts',
       'test/compiler/publish-path-breadth-envelope.test.ts',
     ],
     script: 'test:compiler',
+  },
+  {
+    discoveryPattern: 'test/compiler/performance-budget.test.ts',
+    expectedFiles: ['test/compiler/performance-budget.test.ts'],
+    script: 'test:performance',
   },
   {
     discoveryPattern: 'test/integration/**/*.test.ts',
@@ -200,7 +207,12 @@ test('suite commands exactly cover all independently discovered test files', () 
     const command = scripts[suite.script];
     assert.ok(command, `package.json is missing ${suite.script}`);
 
-    const discoveredFiles = globSync(suite.discoveryPattern).sort();
+    const excludedFiles = new Set<string>(
+      'excludedFiles' in suite ? suite.excludedFiles : [],
+    );
+    const discoveredFiles = globSync(suite.discoveryPattern)
+      .filter((path) => !excludedFiles.has(path))
+      .sort();
     assert.ok(
       discoveredFiles.length > 0,
       `${suite.discoveryPattern} discovered no tests`,
@@ -247,6 +259,135 @@ test('every test-script glob is quoted before the shell can expand it', () => {
   }
 });
 
+test('test entry points participate in the shared/exclusive gate lock', () => {
+  const packageJson = JSON.parse(readFileSync(packagePath, 'utf8')) as {
+    scripts?: Record<string, string>;
+  };
+  const webPackageJson = JSON.parse(
+    readFileSync('apps/web/package.json', 'utf8'),
+  ) as { scripts?: Record<string, string> };
+  const rootScripts = packageJson.scripts ?? {};
+  for (const [script, command] of Object.entries(rootScripts)) {
+    if (!script.startsWith('test:')) continue;
+    const expectedMode = script === 'test:performance' ? 'exclusive' : 'shared';
+    assert.match(
+      command,
+      new RegExp(
+        `(?:^|&& )node ${testLockRunnerPath.replaceAll('.', '\\.')}` +
+          ` ${expectedMode} --`,
+        'u',
+      ),
+      `${script} does not acquire the ${expectedMode} test lock`,
+    );
+  }
+  assert.match(
+    webPackageJson.scripts?.['test:contracts'] ?? '',
+    /run-with-test-lock\.mjs shared --/u,
+  );
+
+  const matrixRunner = readFileSync('scripts/run-matrix.sh', 'utf8');
+  assert.match(matrixRunner, /NORTH_STAR_TEST_LOCK_HELD=exclusive/u);
+  assert.match(matrixRunner, /flock --shared 9/u);
+  assert.match(matrixRunner, /NORTH_STAR_TEST_LOCK_HELD=shared/u);
+  assert.ok(
+    matrixRunner.indexOf('corepack pnpm test:performance') <
+      matrixRunner.indexOf('# The main matrix deliberately excludes'),
+    'the exclusive performance gate must run before the main matrix',
+  );
+  assert.equal(
+    matrixRunner.match(/corepack pnpm test:performance/gu)?.length,
+    1,
+    'the matrix runner must invoke the separated performance gate exactly once',
+  );
+  assert.doesNotMatch(
+    matrixRunner,
+    /^\s*corepack pnpm test\s*(?:&&|$)/mu,
+    'the main matrix must not re-enter the aggregate that includes performance',
+  );
+});
+
+test('shared gate holders coexist and exclude an exclusive gate', async () => {
+  const lockPath = `/tmp/north-star-test-lock-control-${process.pid}`;
+  const baseEnvironment = { ...process.env };
+  delete baseEnvironment.NORTH_STAR_TEST_LOCK_HELD;
+  const environment = {
+    ...baseEnvironment,
+    NORTH_STAR_TEST_LOCK_PATH: lockPath,
+    NORTH_STAR_TEST_LOCK_TIMEOUT_SECONDS: '0',
+  };
+  const holder = spawn(
+    process.execPath,
+    [
+      testLockRunnerPath,
+      'shared',
+      '--',
+      process.execPath,
+      '-e',
+      "process.stdout.write('LOCK_READY\\n'); process.stdin.resume()",
+    ],
+    { env: environment, stdio: ['pipe', 'pipe', 'pipe'] },
+  );
+  let holderError = '';
+  holder.stderr.setEncoding('utf8');
+  holder.stderr.on('data', (chunk: string) => {
+    holderError += chunk;
+  });
+  await waitForOutput(holder.stdout, 'LOCK_READY');
+
+  try {
+    const sharedOutput = execFileSync(
+      process.execPath,
+      [
+        testLockRunnerPath,
+        'shared',
+        '--',
+        process.execPath,
+        '-e',
+        "process.stdout.write('SHARED_ADMITTED')",
+      ],
+      { encoding: 'utf8', env: environment },
+    );
+    assert.equal(sharedOutput, 'SHARED_ADMITTED');
+    assert.throws(
+      () =>
+        execFileSync(
+          process.execPath,
+          [
+            testLockRunnerPath,
+            'exclusive',
+            '--',
+            process.execPath,
+            '-e',
+            "process.stdout.write('EXCLUSIVE_WRONGLY_ADMITTED')",
+          ],
+          { encoding: 'utf8', env: environment },
+        ),
+      (error: unknown) =>
+        error instanceof Error &&
+        'stderr' in error &&
+        String(error.stderr).includes('TEST_GATE_LOCK_BUSY'),
+    );
+  } finally {
+    holder.stdin.end();
+    const [exitCode] = (await once(holder, 'exit')) as [number | null];
+    assert.equal(exitCode, 0, holderError);
+  }
+
+  const exclusiveOutput = execFileSync(
+    process.execPath,
+    [
+      testLockRunnerPath,
+      'exclusive',
+      '--',
+      process.execPath,
+      '-e',
+      "process.stdout.write('EXCLUSIVE_ADMITTED')",
+    ],
+    { encoding: 'utf8', env: environment },
+  );
+  assert.equal(exclusiveOutput, 'EXCLUSIVE_ADMITTED');
+});
+
 test('CI runs every scaffold gate from a frozen install', () => {
   const workflow = readFileSync(workflowPath, 'utf8');
   const requiredCommands = [
@@ -257,6 +398,7 @@ test('CI runs every scaffold gate from a frozen install', () => {
     'corepack pnpm build',
     'corepack pnpm test:unit',
     'corepack pnpm test:compiler',
+    'corepack pnpm test:performance',
     'corepack pnpm test:integration',
     'corepack pnpm test:agent',
     'corepack pnpm test:architecture',
@@ -274,6 +416,7 @@ test('CI runs every scaffold gate from a frozen install', () => {
   }
   assert.match(workflow, /^permissions:\n {2}contents: read$/mu);
   assert.match(workflow, /^ {2}quality:$/mu);
+  assert.match(workflow, /^ {2}performance:$/mu);
   assert.match(workflow, /^ {2}postgres:$/mu);
   assert.match(workflow, /^ {2}browser:$/mu);
   assert.match(workflow, /uses: actions\/upload-artifact@/u);
@@ -291,6 +434,39 @@ function shellTokens(command: string): readonly ShellToken[] {
 
 function containsGlob(value: string): boolean {
   return value.includes('*') || value.includes('?') || value.includes('[');
+}
+
+function waitForOutput(
+  stream: NodeJS.ReadableStream,
+  expected: string,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let output = '';
+    stream.setEncoding('utf8');
+    const onError = (error: Error) => {
+      cleanup();
+      reject(error);
+    };
+    const onEnd = () => {
+      cleanup();
+      reject(new Error(`stream ended before emitting ${expected}`));
+    };
+    const onData = (chunk: string) => {
+      output += chunk;
+      if (output.includes(expected)) {
+        cleanup();
+        resolve();
+      }
+    };
+    const cleanup = () => {
+      stream.off('data', onData);
+      stream.off('error', onError);
+      stream.off('end', onEnd);
+    };
+    stream.on('data', onData);
+    stream.once('error', onError);
+    stream.once('end', onEnd);
+  });
 }
 
 test('CI third-party actions use immutable commit refs', () => {

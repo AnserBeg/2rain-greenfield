@@ -39,7 +39,17 @@ export const reachabilityProducers = [
     'test/unit/workspace-contract.test.ts',
   ]),
   nodeProducer('compiler', 'quality', 'test:compiler', [
-    'test/compiler/**/*.test.ts',
+    'test/compiler/determinism.test.ts',
+    'test/compiler/freeze-b.test.ts',
+    'test/compiler/g2-module-conformance.test.ts',
+    'test/compiler/g2-module-storage.test.ts',
+    'test/compiler/golden-vectors.test.ts',
+    'test/compiler/legal-entity-query-scope.test.ts',
+    'test/compiler/predicate-lowering.test.ts',
+    'test/compiler/publish-path-breadth-envelope.test.ts',
+  ]),
+  nodeProducer('performance', 'performance', 'test:performance', [
+    'test/compiler/performance-budget.test.ts',
   ]),
   nodeProducer('integration', 'quality', 'test:integration', [
     'test/integration/**/*.test.ts',

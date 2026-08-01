@@ -295,3 +295,8 @@ How to apply: before relying on a canonical lifecycle declaration, trace it into
 Date: 2026-07-31
 Why: G3-P6a's omission probe enumerated the query catalog it audited, so a dropped query vanished from the probe; derivation admission likewise trusted the producer's eligibility claim.
 How to apply: derive mandatory subjects from an independent compiled artifact and recompute exclusion eligibility in a negative control; never let the producer or collection under test certify its own completeness. See `docs/execution/packets/G3-P6a.md`.
+
+## Measure process work, and serialize the measurement mechanically
+Date: 2026-07-31
+Why: A wall-clock compiler budget varied 26% while quiet and doubled under lane contention, producing wrong verdicts about unchanged compiler work.
+How to apply: measure process CPU, report saturated hosts as indeterminate, isolate timing gates from load-tolerant suites, and enforce shared/exclusive access with one lock rather than operator memory. See `docs/execution/packets/gate-perf.md`.

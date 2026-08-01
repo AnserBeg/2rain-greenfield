@@ -11,7 +11,7 @@
     "build:demo-release": "node --import tsx scripts/compile-demo-release.ts",
     "check:demo-release": "node --import tsx scripts/compile-demo-release.ts --check",
     "dev": "node --import tsx src/demo-server.ts",
-    "test:contracts": "node --import tsx ../../test/helpers/prepare-reachability-evidence.ts contracts && REACHABILITY_SUITE_ID=contracts node --import tsx --test --test-reporter=../../test/helpers/node-test-evidence-reporter.mjs --test-reporter-destination=../../test-results/reachability/contracts.json --test-reporter=tap --test-reporter-destination=stdout test/surface-runtime-contract.test.ts"
+    "test:contracts": "node --import tsx ../../test/helpers/prepare-reachability-evidence.ts contracts && node ../../scripts/run-with-test-lock.mjs shared -- env REACHABILITY_SUITE_ID=contracts node --import tsx --test --test-reporter=../../test/helpers/node-test-evidence-reporter.mjs --test-reporter-destination=../../test-results/reachability/contracts.json --test-reporter=tap --test-reporter-destination=stdout test/surface-runtime-contract.test.ts"
   },
   "dependencies": {
     "@north-star/observability": "workspace:*",
