@@ -28,7 +28,9 @@ const applicationNamespace = 'northstar.app';
 test('composed product selects a legal entity, reads Inventory, and persists Party', async ({
   page,
 }) => {
-  test.setTimeout(120_000);
+  // A fresh database admits the complete immutable application lineage before
+  // this journey starts, including the additional on-hand surface revision.
+  test.setTimeout(180_000);
   const externalBaseUrl = process.env.COMPOSED_APPLICATION_BASE_URL;
   if (externalBaseUrl) {
     await inventoryJourney(page, externalBaseUrl);
@@ -68,6 +70,7 @@ test('composed product selects a legal entity, reads Inventory, and persists Par
 });
 
 async function inventoryJourney(page: Page, baseUrl: string): Promise<void> {
+  const onHandLookup = await loadOnHandLookupProjection();
   const inventoryScopeParameters = {
     movementDetail: await loadSurfaceScopeParameterId(
       'inventory_movement_detail',
@@ -100,6 +103,7 @@ async function inventoryJourney(page: Page, baseUrl: string): Promise<void> {
     'Catalog',
     'Location',
     'Inventory movement',
+    'On-hand lookup',
     'Inventory period lock',
     'Inventory transaction line',
     'Inventory transaction',
@@ -127,6 +131,7 @@ async function inventoryJourney(page: Page, baseUrl: string): Promise<void> {
   await expect(inventoryNavigation.locator('a > span:nth-child(2)')).toHaveText(
     [
       'Inventory movement',
+      'On-hand lookup',
       'Inventory period lock',
       'Inventory transaction line',
       'Inventory transaction',
@@ -219,6 +224,159 @@ async function inventoryJourney(page: Page, baseUrl: string): Promise<void> {
   await expect(
     page.locator('[data-diagnostic-code="UNSUPPORTED_COMPONENT"]'),
   ).toHaveCount(0);
+
+  const onHandValues = new Map<string, string>([
+    [onHandLookup.legalEntityParameterId, browserLegalEntityId],
+    [onHandLookup.inputParameters[0]!.parameterId, demoItemId],
+    [onHandLookup.inputParameters[1]!.parameterId, demoLocationId],
+    [onHandLookup.inputParameters[2]!.parameterId, browserPostingInstant],
+    [onHandLookup.inputParameters[3]!.parameterId, browserPostingInstant],
+  ]);
+  for (const missingParameterId of onHandLookup.parameterIds) {
+    const missingUrl = new URL(surfaceUrl(baseUrl, 'inventory_on_hand_lookup'));
+    for (const [parameterId, value] of onHandValues) {
+      if (parameterId !== missingParameterId) {
+        missingUrl.searchParams.set(parameterId, value);
+      }
+    }
+    const response = await page.goto(missingUrl.href);
+    expect(response?.status()).toBe(422);
+    const diagnosticCode =
+      missingParameterId === onHandLookup.legalEntityParameterId
+        ? 'QUERY_LEGAL_ENTITY_SCOPE_REQUIRED'
+        : 'QUERY_PARAMETER_REQUIRED';
+    await expect(
+      page.locator(`[data-diagnostic-code="${diagnosticCode}"]`),
+    ).toBeVisible();
+    await expect(
+      page.locator('[data-platform-slot="task:scanInput"]'),
+    ).toBeVisible();
+    await expect(page.locator('[data-aggregate-value]')).toHaveCount(0);
+  }
+
+  const duplicateScopeUrl = new URL(
+    surfaceUrl(baseUrl, 'inventory_on_hand_lookup'),
+  );
+  for (const [parameterId, value] of onHandValues) {
+    duplicateScopeUrl.searchParams.set(parameterId, value);
+  }
+  duplicateScopeUrl.searchParams.append(
+    onHandLookup.legalEntityParameterId,
+    browserAlternateLegalEntityId,
+  );
+  const duplicateScopeResponse = await page.goto(duplicateScopeUrl.href);
+  expect(duplicateScopeResponse?.status()).toBe(422);
+  expect(
+    new URL(page.url()).searchParams.getAll(
+      onHandLookup.legalEntityParameterId,
+    ),
+  ).toEqual([browserLegalEntityId, browserAlternateLegalEntityId]);
+  await expect(
+    page.locator('[data-diagnostic-code="QUERY_LEGAL_ENTITY_SCOPE_REQUIRED"]'),
+  ).toBeVisible();
+  await expect(page.locator('[data-aggregate-value]')).toHaveCount(0);
+
+  const blankFirstDuplicateScopeUrl = new URL(
+    surfaceUrl(baseUrl, 'inventory_on_hand_lookup'),
+  );
+  for (const [parameterId, value] of onHandValues) {
+    if (parameterId !== onHandLookup.legalEntityParameterId) {
+      blankFirstDuplicateScopeUrl.searchParams.set(parameterId, value);
+    }
+  }
+  blankFirstDuplicateScopeUrl.searchParams.set(
+    onHandLookup.legalEntityParameterId,
+    '',
+  );
+  blankFirstDuplicateScopeUrl.searchParams.append(
+    onHandLookup.legalEntityParameterId,
+    browserLegalEntityId,
+  );
+  const blankFirstDuplicateScopeResponse = await page.goto(
+    blankFirstDuplicateScopeUrl.href,
+  );
+  expect(blankFirstDuplicateScopeResponse?.status()).toBe(422);
+  expect(
+    new URL(page.url()).searchParams.getAll(
+      onHandLookup.legalEntityParameterId,
+    ),
+  ).toEqual(['', browserLegalEntityId]);
+  await expect(
+    page.locator('[data-diagnostic-code="QUERY_LEGAL_ENTITY_SCOPE_REQUIRED"]'),
+  ).toBeVisible();
+  await expect(
+    page
+      .getByRole('navigation', { name: 'Legal entity' })
+      .locator('[aria-current="true"]'),
+  ).toHaveCount(0);
+  await expect(
+    page
+      .locator('[data-platform-slot="task:scanInput"] form')
+      .locator(`input[name="${onHandLookup.legalEntityParameterId}"]`),
+  ).toHaveCount(0);
+  await expect(page.locator('[data-aggregate-value]')).toHaveCount(0);
+
+  await page.goto(surfaceUrl(baseUrl, 'inventory_on_hand_lookup'));
+  await page
+    .getByRole('navigation', { name: 'Legal entity' })
+    .getByRole('link', {
+      name: COMPOSED_APPLICATION_INVENTORY_SCOPE.entityCode,
+    })
+    .click();
+  const onHandForm = page.locator('[data-platform-slot="task:scanInput"] form');
+  await expect(
+    page.locator('[data-platform-slot="task:decision"]'),
+  ).toBeVisible();
+  await expect(
+    page.locator('[data-platform-slot="task:primaryAction"]'),
+  ).toBeVisible();
+  expect(
+    await onHandForm
+      .locator('input[name]')
+      .evaluateAll((inputs) =>
+        inputs
+          .map((input) => input.getAttribute('name'))
+          .filter(
+            (name): name is string => name !== null && name !== 'surface',
+          ),
+      ),
+  ).toEqual(onHandLookup.parameterIds);
+  await expect(
+    page.getByRole('navigation', { name: 'Legal entity' }),
+  ).toHaveAttribute(
+    'data-scope-parameter-id',
+    onHandLookup.legalEntityParameterId,
+  );
+  for (const parameter of onHandLookup.inputParameters) {
+    await onHandForm
+      .locator(`input[name="${parameter.parameterId}"]`)
+      .fill(onHandValues.get(parameter.parameterId) ?? '');
+  }
+  await page.getByRole('button', { name: 'Look up' }).click();
+  const balance = page.getByRole('status', { name: 'Lookup result' });
+  await expect(balance).toHaveText('5');
+  await expect(balance).toHaveAttribute('data-aggregate-value', '5');
+
+  await page
+    .getByRole('navigation', { name: 'Legal entity' })
+    .getByRole('link', { name: browserAlternateInventoryScope.entityCode })
+    .click();
+  await expect(balance).toHaveText('0');
+  expect(
+    new URL(page.url()).searchParams.get(onHandLookup.legalEntityParameterId),
+  ).toBe(browserAlternateLegalEntityId);
+  for (const parameter of onHandLookup.inputParameters) {
+    expect(new URL(page.url()).searchParams.get(parameter.parameterId)).toBe(
+      onHandValues.get(parameter.parameterId),
+    );
+  }
+  await page
+    .getByRole('navigation', { name: 'Legal entity' })
+    .getByRole('link', {
+      name: COMPOSED_APPLICATION_INVENTORY_SCOPE.entityCode,
+    })
+    .click();
+  await expect(balance).toHaveText('5');
 
   const unscopedMovementUrl = surfaceUrl(baseUrl, 'inventory_movement_list');
   const unscopedMovementResponse = await page.goto(unscopedMovementUrl);
@@ -1072,6 +1230,88 @@ interface CompiledApplicationRelease {
     }[];
   };
   readonly releaseRoot: string;
+}
+
+interface CompiledOnHandLookupProjection {
+  readonly inputParameters: readonly {
+    readonly orderKey: number;
+    readonly parameterId: string;
+  }[];
+  readonly legalEntityParameterId: string;
+  readonly parameterIds: readonly string[];
+}
+
+async function loadOnHandLookupProjection(): Promise<CompiledOnHandLookupProjection> {
+  const compiled = JSON.parse(
+    await readFile(
+      new URL('../../release/app.compiled.json', import.meta.url),
+      'utf8',
+    ),
+  ) as { readonly applications: readonly CompiledApplicationRelease[] };
+  const application = compiled.applications.at(-1);
+  if (!application) throw new TypeError('compiled application is missing');
+  const surfacePayload = projectionPayload(
+    application,
+    PROJECTION_FAMILY_IDS.surfaceManifest,
+  ) as {
+    readonly surfaces: readonly {
+      readonly archetype: string;
+      readonly dataSourceQueryId: string;
+      readonly surfaceId: string;
+    }[];
+  };
+  const surface = surfacePayload.surfaces.find(
+    (candidate) =>
+      candidate.surfaceId ===
+      `${applicationNamespace}:surface.inventory_on_hand_lookup`,
+  );
+  if (!surface || surface.archetype !== 'task') {
+    throw new TypeError('compiled on-hand task surface is missing');
+  }
+  const queryPayload = projectionPayload(
+    application,
+    PROJECTION_FAMILY_IDS.queryCatalog,
+  ) as {
+    readonly queries: readonly {
+      readonly legalEntityScope?: {
+        readonly operand: { readonly parameterId: string };
+      };
+      readonly parameters?: readonly {
+        readonly orderKey: number;
+        readonly parameterId: string;
+      }[];
+      readonly queryId: string;
+      readonly queryType: string;
+    }[];
+  };
+  const query = queryPayload.queries.find(
+    (candidate) => candidate.queryId === surface.dataSourceQueryId,
+  );
+  const legalEntityParameterId = query?.legalEntityScope?.operand.parameterId;
+  const parameters = [...(query?.parameters ?? [])].sort(
+    (left, right) => left.orderKey - right.orderKey,
+  );
+  if (
+    query?.queryType !== 'aggregate' ||
+    !legalEntityParameterId ||
+    parameters.length !== 5 ||
+    !parameters.some(
+      (parameter) => parameter.parameterId === legalEntityParameterId,
+    )
+  ) {
+    throw new TypeError('compiled on-hand parameter contract is malformed');
+  }
+  return Object.freeze({
+    inputParameters: Object.freeze(
+      parameters.filter(
+        (parameter) => parameter.parameterId !== legalEntityParameterId,
+      ),
+    ),
+    legalEntityParameterId,
+    parameterIds: Object.freeze(
+      parameters.map((parameter) => parameter.parameterId),
+    ),
+  });
 }
 
 async function loadSurfaceScopeParameterId(

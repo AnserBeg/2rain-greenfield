@@ -717,7 +717,7 @@ export function registeredQueryFromPinnedView(
   return definition?.queryType === 'aggregate' ? undefined : definition;
 }
 
-function registeredSemanticQueryFromPinnedView(
+export function registeredSemanticQueryFromPinnedView(
   view: IssuedRequestRuntimeView,
   queryId: string,
 ): RegisteredSemanticQueryDefinition | undefined {

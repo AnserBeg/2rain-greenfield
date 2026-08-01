@@ -585,7 +585,9 @@ function isNavigationSurface(
   return (
     surface.surfaceRole === 'list' ||
     (surface.surfaceRole === undefined &&
-      (surface.archetype === 'list' || surface.archetype === 'home'))
+      (surface.archetype === 'list' ||
+        surface.archetype === 'home' ||
+        surface.archetype === 'task'))
   );
 }
 

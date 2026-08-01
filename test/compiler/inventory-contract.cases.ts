@@ -1667,6 +1667,7 @@ function inventoryDefinitionWithoutMovementField(
       queryId: string;
       selections?: Array<{ field: { targetId: string } }>;
     }>;
+    surfaces: Array<Record<string, unknown>>;
   };
   const suffix = `:field.${fieldLocalId}`;
   definition.fields = definition.fields.filter(
@@ -1689,12 +1690,18 @@ function inventoryDefinitionWithoutMovementField(
     (query) => !droppedQueryIds.includes(query.queryId),
   );
   // Dropping a query orphans whatever referenced it, so removal must be
-  // transitive or normalization fails on the orphaned assertion instead of on
-  // the field this fixture exists to remove.
+  // transitive or normalization fails on an orphaned assertion or surface
+  // instead of on the field this fixture exists to remove.
   definition.assertions = definition.assertions.filter(
     (assertion) =>
       !droppedQueryIds.some((queryId) =>
         JSON.stringify(assertion).includes(queryId),
+      ),
+  );
+  definition.surfaces = definition.surfaces.filter(
+    (surface) =>
+      !droppedQueryIds.some((queryId) =>
+        JSON.stringify(surface).includes(queryId),
       ),
   );
   for (const query of definition.queries) {

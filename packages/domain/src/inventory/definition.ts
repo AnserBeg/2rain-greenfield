@@ -858,6 +858,7 @@ export function inventoryModuleDefinition(
         'Inventory movement',
         true,
       ),
+      onHandSurface(definitionIds),
     ],
   };
 }
@@ -1330,6 +1331,30 @@ function surfaces(
     surfaceId: `${ids.namespace}:surface.${local}_${suffix}`,
     surfaceRole,
   }));
+}
+
+function onHandSurface(ids: InventoryIds): Record<string, unknown> {
+  return {
+    archetype: 'task',
+    dataSource: reference('queryReference', ids.queryIds.onHand),
+    kind: 'surfaceDefinition',
+    label: 'On-hand lookup',
+    module: reference('moduleReference', ids.moduleId),
+    schemaVersion: version,
+    slots: ['decision', 'scanInput', 'primaryAction'].map((slot, index) => ({
+      content: reference(
+        'opaqueSurfaceContentReference',
+        ids.contentCapabilityId,
+      ),
+      kind: 'surfaceSlot',
+      orderKey: (index + 1) * 10,
+      schemaVersion: version,
+      slot,
+      slotId: `${ids.namespace}:slot.inventory_on_hand_lookup_${slot.replace(/[A-Z]/g, (character) => `_${character.toLowerCase()}`)}`,
+    })),
+    statusRoles: [],
+    surfaceId: `${ids.namespace}:surface.inventory_on_hand_lookup`,
+  };
 }
 
 function storageMapping(

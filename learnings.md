@@ -315,3 +315,8 @@ How to apply: derive mandatory subjects from an independent compiled artifact an
 Date: 2026-07-31
 Why: Unrecognised PostgreSQL failures were flattened to generic codes, making composed-product failures undiagnosable without temporary instrumentation.
 How to apply: retain stable refusal codes while carrying only allowlisted schema metadata (SQLSTATE, relation, constraint, column); inject domain-typed mappings from modules and prove raw messages, DETAIL, rows, queries, and parameters cannot escape. See `docs/execution/packets/5g3-berr.md`.
+
+## Preserve operand multiplicity until canonical validation
+Date: 2026-08-01
+Why: G3-P6b-2 collapsed a repeated legal-entity URL operand to its first value, letting a malformed two-entity request answer as one entity instead of reaching ADR-0031's cardinality refusal.
+How to apply: carry every transport value to the canonical argument kernel, render no choice as selected when multiplicity is invalid, and prove the collapse mutation returns a value where the control requires a typed refusal.
