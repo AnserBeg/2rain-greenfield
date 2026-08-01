@@ -320,3 +320,8 @@ How to apply: retain stable refusal codes while carrying only allowlisted schema
 Date: 2026-08-01
 Why: G3-P6b-2 collapsed a repeated legal-entity URL operand to its first value, letting a malformed two-entity request answer as one entity instead of reaching ADR-0031's cardinality refusal.
 How to apply: carry every transport value to the canonical argument kernel, render no choice as selected when multiplicity is invalid, and prove the collapse mutation returns a value where the control requires a typed refusal.
+
+## Name every semantic authority
+Date: 2026-08-01
+Why: Inventory selected resolve authority through the first field in an object, so a harmless declaration order exposed an actor UUID as the transaction title.
+How to apply: bind semantic authorities to named ids and pin the emitted artifact; never infer a business decision from collection position. See `docs/execution/packets/5g3-txtitle.md`.
