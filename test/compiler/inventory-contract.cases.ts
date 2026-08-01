@@ -24,6 +24,7 @@ import {
 import {
   INVENTORY_CONTRACT_V1,
   INVENTORY_FACT_STORAGE_V1,
+  INVENTORY_NAMESPACE,
   INVENTORY_PERIOD_LOCK_STORAGE_V1,
   INVENTORY_STORAGE_REFERENCES_V1,
   LEGAL_ENTITY_FAMILY_MAP_V1,
@@ -75,15 +76,21 @@ export function registerInventoryContractCases(
             operand: { parameterId: string };
           };
           parameters?: Array<{
+            orderKey: number;
             parameterId: string;
             parameterType: { kind: string; schemaVersion: string };
           }>;
           queryId: string;
+          queryType: string;
         }>;
       }>(compiled, PROJECTION_FAMILY_IDS.queryCatalog).queries;
       const scoped = queries.filter((query) => query.legalEntityScope);
-      assert.equal(scoped.length, 24);
-      for (const query of scoped) {
+      assert.equal(scoped.length, 25);
+      const scopedRowQueries = scoped.filter(
+        (query) => query.queryType !== 'aggregate',
+      );
+      assert.equal(scopedRowQueries.length, 24);
+      for (const query of scopedRowQueries) {
         assert.equal(query.legalEntityScope?.cardinality, 'exactlyOne');
         assert.deepEqual(query.parameters, [
           {
@@ -96,6 +103,33 @@ export function registerInventoryContractCases(
           },
         ]);
       }
+      const scopedAggregateQueries = scoped.filter(
+        (query) => query.queryType === 'aggregate',
+      );
+      assert.equal(scopedAggregateQueries.length, 1);
+      const onHand = scopedAggregateQueries[0]!;
+      assert.equal(
+        onHand.queryId,
+        `${INVENTORY_NAMESPACE}:query.inventory_movement_on_hand`,
+      );
+      assert.equal(onHand.legalEntityScope?.cardinality, 'exactlyOne');
+      assert.deepEqual(
+        onHand.parameters?.filter(
+          (parameter) =>
+            parameter.parameterId ===
+            onHand.legalEntityScope?.operand.parameterId,
+        ),
+        [
+          {
+            orderKey: 10,
+            parameterId: `${INVENTORY_NAMESPACE}:parameter.on_hand_legal_entity_id`,
+            parameterType: {
+              kind: 'legalEntityReferenceParameterType',
+              schemaVersion: 'v4',
+            },
+          },
+        ],
+      );
       assert.equal(
         queries
           .filter((query) => query.queryId.includes(':query.legal_entity_'))
