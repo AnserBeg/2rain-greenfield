@@ -104,18 +104,67 @@ Rules that follow:
 - Three parts: left navigation, main canvas, one contextual right rail.
 - The right rail has exactly one tenant at a time: assistant dock (operate)
   or properties drawer (customize). Never both, never a second sidebar.
+- **The workspace context bar** sits above the canvas and answers one question:
+  *which slice of the business am I looking at?* Legal entity today; further
+  dimensions need their own justification.
+  ([ADR-0037](../../../docs/decisions/ADR-0037-workspace-context-bar.md).)
+
+  It is **shell furniture, not a fourth part** — same class as the command
+  palette and the New button. It is platform-owned, never an archetype slot and
+  never tenant-customizable. It **holds no state**: every selection is written to
+  the URL and read back from it, per ADR-0015:38's ban on ambient session state.
+  It **never selects for the user**, not even when exactly one option exists —
+  ADR-0031 §3, omission is a refusal, not a default.
+
+  Never a place for actions, a second command surface, a notification host, or a
+  breadcrumb. Each has a home already, and each is how a context bar becomes a
+  toolbar.
 - Navigation is role-shaped, task-named ("Receiving", not "Procurement
-  Module"), budgeted to roughly seven entries. Beyond that: search.
+  Module"), budgeted to **seven top-level entries on desktop, five in
+  compact**. Beyond that: group, then search.
+
+  **The budget counts top-level entries after grouping, not leaves.** Its
+  authority is [ADR-0030](../../../docs/decisions/ADR-0030-compiler-derived-navigation-grouping.md):
+  these are *physical* constraints — the compact limit is paired with a fixed
+  bottom bar at 390 px and a no-horizontal-scroll requirement — not a cognitive
+  rule of thumb and not a debt ratchet. Presentation-only truncation is
+  inadmissible: hiding links with CSS leaves the compiled projection over budget
+  and can make a surface unreachable.
+
+  *Corrected 2026-07-31.* This number previously appeared in three places with
+  **no citation at all** — here, in the decision log below, and in plan §8.5. A
+  prior note claimed it cited Miller and should cite Hick; neither is right.
+  Nothing cited Miller, and the governing constraint is spatial rather than
+  cognitive. `G3-P6a` is the first real test: mounting Inventory took the
+  composed application to **eleven leaves under four top-level groups** — within
+  budget precisely because ADR-0030's grouping is doing the work.
 - One global command palette (navigate + create + ask). One New button.
 - Draft vs published state is always visible (banner in customize mode).
 
 ## Status grammar
 
 One global color grammar: `success` (green), `attention` (amber), `blocked`
-(red), and `inProgress` (blue). Modules may add states, but every rendered
+(red), and `inProgress` (**indigo**). Modules may add states, but every rendered
 state must resolve to one of these closed semantic roles; they may never
 recolor meanings. Status colors resolve only from role tokens — a hex literal
 in surface code is a defect.
+
+**Brand and status hues must remain separable.** The brand hue is reserved. No
+status role may resolve to a token within it. Status is the most
+information-dense colour on screen and must never compete with identity.
+
+That rule is why `inProgress` reads *indigo* rather than *blue*: the brand is now
+baby blue ([ADR-0035](../../../docs/decisions/ADR-0035-token-layer-and-motion-contract.md)),
+so a blue `inProgress` would put the strongest signal on screen in direct
+competition with the identity colour. **The pinned contract is unaffected** — it
+records role *names* only, which are unchanged, and plan §8.5 names roles without
+binding hues. Indigo is a blue, so this narrows the prose rather than
+contradicting it.
+
+**Every status renders colour + dot + word on a tinted ground. Never colour
+alone.** Three independent reasons, any one sufficient: colour-vision deficiency
+and low vision, the WCAG 2.2 AA floor plan §8.4 already claims, and legibility at
+arm's length on a warehouse tablet.
 
 ## Weight matches consequence
 

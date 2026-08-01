@@ -210,7 +210,7 @@ test('compiler-produced fixtures cover all five archetypes, required slots, focu
 
 test('compiled navigation stays flat within budget and groups mounted modules beyond it', () => {
   const flatManifest = compiledSurfaceManifest(
-    compileDefinition(composedApplicationDefinition()),
+    compileDefinition(composedApplicationWithoutInventory()),
   );
   const flatCompact = projectCompactSurfaces(
     flatManifest.surfaces,
@@ -679,7 +679,16 @@ function composedApplicationWithInventory(): Record<string, unknown> {
     const source = inventory[collectionName];
     assert.ok(Array.isArray(target));
     assert.ok(Array.isArray(source));
-    target.push(...source);
+    for (const sourceEntry of source) {
+      assert.equal(
+        target.filter(
+          (candidate) =>
+            JSON.stringify(candidate) === JSON.stringify(sourceEntry),
+        ).length,
+        1,
+        `composed application must contain each inventory ${collectionName} entry exactly once`,
+      );
+    }
   }
   const modules = composed.modules;
   const inventoryModules = inventory.modules;
@@ -687,11 +696,72 @@ function composedApplicationWithInventory(): Record<string, unknown> {
   assert.ok(Array.isArray(inventoryModules));
   const inventoryModule = inventoryModules[0];
   assert.ok(inventoryModule && typeof inventoryModule === 'object');
-  modules.push({
-    ...inventoryModule,
-    orderKey: 40,
-    ownerPackageId: 'northstar.app:package.application',
-  });
+  assert.equal(
+    modules.filter(
+      (candidate) =>
+        candidate !== null &&
+        typeof candidate === 'object' &&
+        'moduleId' in candidate &&
+        'moduleId' in inventoryModule &&
+        candidate.moduleId === inventoryModule.moduleId,
+    ).length,
+    1,
+    'composed application must contain the inventory module exactly once',
+  );
+  return composed;
+}
+
+function composedApplicationWithoutInventory(): Record<string, unknown> {
+  const composed = composedApplicationWithInventory();
+  const inventory = inventoryModuleDefinition('northstar.app');
+  for (const collectionName of [
+    'assertions',
+    'entities',
+    'fields',
+    'operations',
+    'permissions',
+    'queries',
+    'relations',
+    'stateMachines',
+    'storageMappings',
+    'surfaces',
+  ] as const) {
+    const target = composed[collectionName];
+    const source = inventory[collectionName];
+    assert.ok(Array.isArray(target));
+    assert.ok(Array.isArray(source));
+    composed[collectionName] = target.filter(
+      (candidate) =>
+        !source.some(
+          (sourceEntry) =>
+            JSON.stringify(candidate) === JSON.stringify(sourceEntry),
+        ),
+    );
+    assert.equal(
+      target.length - (composed[collectionName] as unknown[]).length,
+      source.length,
+      `flat fixture must remove every inventory ${collectionName} entry exactly once`,
+    );
+  }
+  const modules = composed.modules;
+  const inventoryModules = inventory.modules;
+  assert.ok(Array.isArray(modules));
+  assert.ok(Array.isArray(inventoryModules));
+  const inventoryModule = inventoryModules[0];
+  assert.ok(inventoryModule && typeof inventoryModule === 'object');
+  assert.ok('moduleId' in inventoryModule);
+  composed.modules = modules.filter(
+    (candidate) =>
+      candidate === null ||
+      typeof candidate !== 'object' ||
+      !('moduleId' in candidate) ||
+      candidate.moduleId !== inventoryModule.moduleId,
+  );
+  assert.equal(
+    modules.length - (composed.modules as unknown[]).length,
+    1,
+    'flat fixture must remove the inventory module exactly once',
+  );
   return composed;
 }
 

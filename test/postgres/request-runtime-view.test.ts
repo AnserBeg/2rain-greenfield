@@ -1175,7 +1175,15 @@ function groupedNavigationDefinitionBytes(): Uint8Array {
     const source = inventory[collectionName];
     assert.ok(Array.isArray(target));
     assert.ok(Array.isArray(source));
-    target.push(...source);
+    for (const entry of source) {
+      assert.equal(
+        target.filter(
+          (candidate) => canonicalize(candidate) === canonicalize(entry),
+        ).length,
+        1,
+        `composed application must contain each inventory ${collectionName} entry exactly once`,
+      );
+    }
   }
   const modules = definition.modules;
   const inventoryModules = inventory.modules;
@@ -1183,11 +1191,18 @@ function groupedNavigationDefinitionBytes(): Uint8Array {
   assert.ok(Array.isArray(inventoryModules));
   const inventoryModule = inventoryModules[0];
   assert.ok(inventoryModule && typeof inventoryModule === 'object');
-  modules.push({
-    ...inventoryModule,
-    orderKey: 40,
-    ownerPackageId: 'northstar.app:package.application',
-  });
+  assert.ok('moduleId' in inventoryModule);
+  assert.equal(
+    modules.filter(
+      (candidate) =>
+        candidate !== null &&
+        typeof candidate === 'object' &&
+        'moduleId' in candidate &&
+        candidate.moduleId === inventoryModule.moduleId,
+    ).length,
+    1,
+    'composed application must contain the inventory module exactly once',
+  );
   return new TextEncoder().encode(
     canonicalize(normalizeApplicationPackage(definition)),
   );

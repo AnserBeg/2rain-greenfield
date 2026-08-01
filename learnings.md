@@ -243,6 +243,25 @@ Date: 2026-07-30
 Why: G3-P3's matrix hung behind an idle lock holder in an acyclic wait chain, so PostgreSQL's deadlock detector had no cycle to break and neither the product nor its control could make progress.
 How to apply: keep deliberate blocking semantics, but set an explicit lock timeout, translate it to a domain-typed concurrency error, and make every real lock control assert the database timeout rather than an absence of progress. See `docs/execution/packets/G3-P3.md`.
 
+## Key generic machinery on declared properties
+Date: 2026-07-30
+Why: G3-P6a exposed the same defect twice: omitting `abiFunctionChecks` from an additive strip list made a second module's shared-Item contribution look identity-defining, while enumerating one pending element kind made another `inAttemptOnly` kind fail preparation. Single-module and single-kind tests could not reveal either omission.
+How to apply: drive generic comparison, merging, and scheduling from declared semantic properties rather than remembered kind lists; test a second contributor or sibling kind, retain exact-byte duplicate rejection, and keep final verification unrelaxed. See `docs/execution/packets/G3-P6a.md`.
+
+## Generate verification fixtures from compiled constraints
+Date: 2026-07-30
+Why: G3-P6a's generic boolean verifier always chose `true`, which collided with a legitimately seeded row occupying the `TRUE` member of a compiled partial-unique domain before the intended searchable-exclusion probe could execute.
+How to apply: derive small-domain verification values from the compiled constraints of their physical columns, choose outside partial-unique predicates, and fail closed when the predicate shape is unsupported or every value is constrained. Observe both the retained legitimate row and the completed exact scenario in real PostgreSQL. See `docs/execution/packets/G3-P6a.md`.
+
+## Do not infer one capability from another
+Date: 2026-07-30
+Why: G3-P6a mounted append-only and entity-owned Inventory shapes for the first time; searchable entities were not always creatable, and declared create operations were not always constructible from their input contracts.
+How to apply: derive each capability independently from its compiled contract, report exclusions as structured findings rather than silent skips, and retain a terminal diagnostic when no eligible verification witness remains. See `docs/execution/packets/G3-P6a.md`.
+
+## A verification scenario needs execution or a bound derivation
+Date: 2026-07-30
+Why: G3-P6a showed that compiler emission did not imply runtime arrangeability: 32 of 39 composed searchable-exclusion scenarios targeted either append-only entities or create operations that could not satisfy storage.
+How to apply: execute a scenario against an observed subject, or record a durable candidate-bound impact-analysis derivation per unexecuted scenario and report executed and derived counts separately. Never substitute a skip flag, sampling, a time box, or a provider-local validator for the compiler-owned verification contract. See ADR-0020 and `docs/execution/packets/G3-P6a.md`.
 ## A fixture takes its version from what it is, never from "current"
 Date: 2026-07-30
 Why: `test/fixtures/g2/module-conformance/definitions.ts` derived its authored `languageVersion` from `LATEST_LANGUAGE_VERSION`, so cutting v4 silently re-authored v3 content at v4 and turned **32 compiler tests red at once** — none of them naming the fixture, so the cost was a debugging pass before the cause was visible. Switching to an `ADOPTED_*` constant would only have narrowed the blast radius: it moves too, one event later.
@@ -284,5 +303,15 @@ How to apply: trace each scenario through its production dispatcher and require 
 
 ## Classify unreachable guards as backstops
 Date: 2026-07-31
-Why: `ver-agg` credited compile-failure controls to a lowering throw, but two earlier fail-closed validators made that throw unreachable through the production compiler entry point.
+Why: `ver-agg` credited compile-failure controls to a lowering throw, but earlier fail-closed decode and validation barriers made that throw unreachable through the production compiler entry point.
 How to apply: trace the complete ingress order before naming a victim; if earlier authority prevents reachability, retain the guard as defence in depth and record what cannot be observed rather than bypassing validators to manufacture a red.
+
+## Audit from an authority independent of the subject
+Date: 2026-07-31
+Why: G3-P6a's omission probe enumerated the query catalog it audited, so a dropped query vanished from the probe; derivation admission likewise trusted the producer's eligibility claim.
+How to apply: derive mandatory subjects from an independent compiled artifact and recompute exclusion eligibility in a negative control; never let the producer or collection under test certify its own completeness. See `docs/execution/packets/G3-P6a.md`.
+
+## Preserve safe provider diagnostics at translation boundaries
+Date: 2026-07-31
+Why: Unrecognised PostgreSQL failures were flattened to generic codes, making composed-product failures undiagnosable without temporary instrumentation.
+How to apply: retain stable refusal codes while carrying only allowlisted schema metadata (SQLSTATE, relation, constraint, column); inject domain-typed mappings from modules and prove raw messages, DETAIL, rows, queries, and parameters cannot escape. See `docs/execution/packets/5g3-berr.md`.

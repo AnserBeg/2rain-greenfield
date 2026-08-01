@@ -48,7 +48,10 @@ import {
 } from '../../runtime/src/semantic-operation-gateway.js';
 import { SemanticQueryGateway } from '../../runtime/src/semantic-query-gateway.js';
 import { loadMigrations, runMigrations } from './migrations.js';
-import { PostgresModuleRuntimeInterpreter } from './module-runtime-interpreter.js';
+import {
+  PostgresModuleRuntimeInterpreter,
+  type ModuleProviderErrorMapping,
+} from './module-runtime-interpreter.js';
 import { PostgresModuleStorageMaterializer } from './module-storage-materializer.js';
 import { PostgresReleaseActivationService } from './release-activation-service.js';
 import { PostgresReleaseApprovalService } from './release-approval-service.js';
@@ -75,12 +78,35 @@ export interface ComposedApplicationRuntimeOptions {
   readonly compiledApplication: unknown;
   readonly databaseUrl: string;
   readonly environmentSlug?: string;
+  readonly inventoryScopeProvisioning?: InventoryScopeProvisioning;
   readonly migrationsDirectory: string;
+  readonly providerErrorMappings: readonly ModuleProviderErrorMapping[];
   readonly releaseSelection?: Readonly<{
     readonly kind: 'rollback';
     readonly targetReleaseRoot: string;
   }>;
   readonly tenantSlug: string;
+}
+
+export interface InventoryScopeProvisioning {
+  readonly adjustmentApprovalThreshold: string | null;
+  readonly adjustmentReasonRequirement: 'codeOnly' | 'codeAndNarrative';
+  readonly businessDayBoundary: string;
+  readonly configurationVersion: number;
+  readonly correctionApprovalThreshold: string | null;
+  readonly correctionReasonRequirement: 'codeOnly' | 'codeAndNarrative';
+  readonly countApprovalThreshold: string | null;
+  readonly countReasonRequirement: 'codeOnly' | 'codeAndNarrative';
+  readonly entityCode: string;
+  readonly entityName: string;
+  readonly legalEntityId: string;
+  readonly maximumBackdateDays: number;
+  readonly negativeStock: 'allow' | 'allowWithFlag' | 'reject';
+  readonly rebaselineApprovalThreshold: string | null;
+  readonly rebaselineReasonRequirement: 'codeOnly' | 'codeAndNarrative';
+  readonly timeZone: string;
+  readonly transferApprovalThreshold: string | null;
+  readonly transferReasonRequirement: 'codeOnly' | 'codeAndNarrative';
 }
 
 export interface ComposedApplicationRuntime {
@@ -160,6 +186,14 @@ export async function createComposedApplicationRuntime(
       options.tenantSlug,
       options.environmentSlug ?? 'production',
     );
+    if (options.inventoryScopeProvisioning) {
+      await provisionInventoryScope(
+        adminPool,
+        identities.runtime,
+        releases.application.compiled.releaseRoot,
+        options.inventoryScopeProvisioning,
+      );
+    }
     await ensureAuthority(adminPool, identities);
 
     runtimePool = rolePool(options.databaseUrl, 'north_star_runtime', 6);
@@ -200,6 +234,7 @@ export async function createComposedApplicationRuntime(
         runtimeContext,
         bootstrapIdentity,
         releases.bootstrap,
+        options.providerErrorMappings,
       );
       await assertExactSwapTriggerEnabled(adminPool);
       const attemptId = await approveInitialRelease(
@@ -238,6 +273,7 @@ export async function createComposedApplicationRuntime(
       runtimeContext,
       lineage[activeLineageIndex]!,
       releaseLineage[activeLineageIndex]!,
+      options.providerErrorMappings,
     );
     const materializer = new PostgresModuleStorageMaterializer(
       materializerPool,
@@ -264,6 +300,7 @@ export async function createComposedApplicationRuntime(
         runtimeContext,
         targetIdentity,
         target,
+        options.providerErrorMappings,
       );
       const reverseAuthorization = await withTrustedRequestTransaction(
         runtimePool,
@@ -328,6 +365,7 @@ export async function createComposedApplicationRuntime(
             runtimeContext,
             targetIdentity,
             target,
+            options.providerErrorMappings,
           );
           attemptId = await approveReleaseWithoutStorageTransition(
             runtimePool,
@@ -352,6 +390,7 @@ export async function createComposedApplicationRuntime(
             runtimeContext,
             targetIdentity,
             target,
+            options.providerErrorMappings,
           );
           attemptId = await approveModuleRelease(
             runtimePool,
@@ -403,6 +442,7 @@ export async function createComposedApplicationRuntime(
     const interpreter = new PostgresModuleRuntimeInterpreter(
       runtimePool,
       humanActorIssuer(),
+      options.providerErrorMappings,
     );
     const queryGateway = new SemanticQueryGateway(policy, interpreter);
     const operationMediation = new SemanticOperationMediationAuthority();
@@ -731,6 +771,49 @@ async function ensureScope(
   });
 }
 
+async function provisionInventoryScope(
+  pool: pg.Pool,
+  identity: AuthenticatedIdentity,
+  contractReleaseRoot: string,
+  provisioning: InventoryScopeProvisioning,
+): Promise<void> {
+  // `contract_release_root` is provenance, not policy: it records which
+  // compiled contract this scope runs against and advances with the product.
+  // The runtime always asks for the root it is actually activating, so the
+  // stored value stays truthful by advancing (migration 0019) rather than by
+  // being read back and echoed. Every policy field is still asserted exactly,
+  // so genuine configuration drift still conflicts.
+  await pool.query(
+    `SELECT platform.provision_inventory_scope(
+       $1,$2,$3,$4,$5,$6,$7,$8,$9::smallint,$10,$11,
+       $12,$13,$14,$15,$16,$17,$18,$19,$20,$21
+     )`,
+    [
+      identity.tenantId,
+      identity.environmentId,
+      provisioning.legalEntityId,
+      provisioning.entityCode,
+      provisioning.entityName,
+      provisioning.timeZone,
+      provisioning.businessDayBoundary,
+      contractReleaseRoot,
+      provisioning.configurationVersion,
+      provisioning.negativeStock,
+      provisioning.maximumBackdateDays,
+      provisioning.adjustmentReasonRequirement,
+      provisioning.transferReasonRequirement,
+      provisioning.countReasonRequirement,
+      provisioning.correctionReasonRequirement,
+      provisioning.rebaselineReasonRequirement,
+      provisioning.adjustmentApprovalThreshold,
+      provisioning.transferApprovalThreshold,
+      provisioning.countApprovalThreshold,
+      provisioning.correctionApprovalThreshold,
+      provisioning.rebaselineApprovalThreshold,
+    ],
+  );
+}
+
 async function ensureAuthority(
   pool: pg.Pool,
   identities: ScopeIdentities,
@@ -879,11 +962,13 @@ async function ensureReleaseAdmitted(
   context: TrustedRequestContext,
   identity: PersistedReleaseIdentity,
   release: ParsedRelease,
+  providerErrorMappings: readonly ModuleProviderErrorMapping[],
 ): Promise<void> {
   const repository = new PostgresImmutableReleaseRepository(pool);
   if (await repository.getTenantRelease(context, identity.releaseId)) return;
   await new PostgresReleaseVerificationService(
     pool,
+    providerErrorMappings,
   ).executeSemanticCandidateAndPersist(context, {
     compiledRelease: release.compiled,
     evidenceId: identity.evidenceId,

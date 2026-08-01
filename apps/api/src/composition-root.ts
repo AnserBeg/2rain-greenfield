@@ -4,7 +4,9 @@ import type { Server } from 'node:http';
 import {
   createComposedApplicationRuntime,
   type ComposedApplicationRuntime,
+  type InventoryScopeProvisioning,
 } from '@north-star/postgres-provider/composed-application-runtime';
+import { INVENTORY_PROVIDER_ERROR_MAPPINGS } from '@north-star/postgres-provider/inventory-provider-error-mappings';
 import { createSurfaceRuntimeServer } from '@north-star/web/app-server';
 
 export interface ComposedApplicationServerOptions {
@@ -34,6 +36,27 @@ export interface ComposedApplicationSeedReceipt {
   };
 }
 
+export const COMPOSED_APPLICATION_INVENTORY_SCOPE = Object.freeze({
+  adjustmentApprovalThreshold: null,
+  adjustmentReasonRequirement: 'codeAndNarrative',
+  businessDayBoundary: '00:00:00',
+  configurationVersion: 1,
+  correctionApprovalThreshold: null,
+  correctionReasonRequirement: 'codeAndNarrative',
+  countApprovalThreshold: null,
+  countReasonRequirement: 'codeAndNarrative',
+  entityCode: 'DEFAULT',
+  entityName: 'Default legal entity',
+  legalEntityId: '74000000-0000-4000-8000-000000000001',
+  maximumBackdateDays: 0,
+  negativeStock: 'reject',
+  rebaselineApprovalThreshold: null,
+  rebaselineReasonRequirement: 'codeAndNarrative',
+  timeZone: 'UTC',
+  transferApprovalThreshold: null,
+  transferReasonRequirement: 'codeOnly',
+} as const satisfies InventoryScopeProvisioning);
+
 /** Thin transport root: provider assembly owns persistence and runtime wiring. */
 export async function startComposedApplication(
   options: ComposedApplicationServerOptions,
@@ -47,8 +70,10 @@ export async function startComposedApplication(
   const runtime = await createComposedApplicationRuntime({
     compiledApplication,
     databaseUrl: options.databaseUrl,
+    inventoryScopeProvisioning: COMPOSED_APPLICATION_INVENTORY_SCOPE,
     migrationsDirectory: new URL('../../../db/migrations/', import.meta.url)
       .pathname,
+    providerErrorMappings: INVENTORY_PROVIDER_ERROR_MAPPINGS,
     ...(options.rollbackReleaseRoot !== undefined
       ? {
           releaseSelection: {

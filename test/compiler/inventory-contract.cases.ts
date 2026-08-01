@@ -65,6 +65,47 @@ export function registerInventoryContractCases(
   register: InventoryContractCase,
 ): void {
   register(
+    'entity-owned Inventory reads declare one legal-entity operand while the master stays tenant-shared',
+    () => {
+      const compiled = mustCompileModule(inventoryModuleDefinition());
+      const queries = projectionPayload<{
+        queries: Array<{
+          legalEntityScope?: {
+            cardinality: string;
+            operand: { parameterId: string };
+          };
+          parameters?: Array<{
+            parameterId: string;
+            parameterType: { kind: string; schemaVersion: string };
+          }>;
+          queryId: string;
+        }>;
+      }>(compiled, PROJECTION_FAMILY_IDS.queryCatalog).queries;
+      const scoped = queries.filter((query) => query.legalEntityScope);
+      assert.equal(scoped.length, 24);
+      for (const query of scoped) {
+        assert.equal(query.legalEntityScope?.cardinality, 'exactlyOne');
+        assert.deepEqual(query.parameters, [
+          {
+            orderKey: 10,
+            parameterId: query.legalEntityScope?.operand.parameterId,
+            parameterType: {
+              kind: 'legalEntityReferenceParameterType',
+              schemaVersion: 'v4',
+            },
+          },
+        ]);
+      }
+      assert.equal(
+        queries
+          .filter((query) => query.queryId.includes(':query.legal_entity_'))
+          .some((query) => query.legalEntityScope),
+        false,
+      );
+    },
+  );
+
+  register(
     'inventory fact storage lowers to payload v3 with compiled partitions and an append-only companion',
     () => {
       assert.deepEqual(INVENTORY_FACT_STORAGE_V1, [

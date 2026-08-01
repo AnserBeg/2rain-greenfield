@@ -15,13 +15,16 @@ omits business parameters it has no authority to invent.
 
 Unresolvable assertion invocations fail closed before projection lowering:
 
-1. `compileApplication` calls `resolveReferences` at `compiler.ts:198` and
-   returns its diagnostics at `:199-200`. A missing query stops here.
-2. Inputs that resolve but cannot name a verification subject reach
+1. Canonical decode begins at `compiler.ts:171` and returns its diagnostics
+   at `:172-174`. The missing-query control observes
+   `CANON_REFERENCE_UNRESOLVED` from this barrier.
+2. Compiler reference resolution at `compiler.ts:198-200` is a second
+   fail-closed barrier.
+3. Inputs that resolve but cannot name a verification subject reach
    `validateWholeModel` at `compiler.ts:207`; its
    `validateVerificationAssertionInvocations` check rejects them, and the
    compiler returns at `:208-210`. A subjectless operation stops here.
-3. Projection lowering begins only at `compiler.ts:245-250`.
+4. Projection lowering begins only at `compiler.ts:245-250`.
 
 Consequently, no admitted input through the compile entry point reaches the
 unresolved-invocation throw in `projections.ts:697-700`. That throw is retained
@@ -32,7 +35,7 @@ canonical revision to verification-plan lowering at `compiler.ts:249`.
 
 This corrects the earlier packet claim that replacing the lowering throw with
 `continue` was controlled by the compile-failure tests. It is not: those tests
-observe the two earlier fail-closed validators. AGENTS.md section 6 therefore
+observe the earlier fail-closed barriers. AGENTS.md section 6 therefore
 requires the limit to be recorded rather than manufactured by disabling the
 validators. Current-plan row `5g3-lowerguard` owns the residual backstop
 observability question.
@@ -41,7 +44,8 @@ observability question.
 
 - An aggregate assertion changes the emitted plan from no matching scenario to
   one scenario bound to its assertion and source entity.
-- A missing query fails reference resolution with the assertion identity.
+- A missing query fails canonical decode with
+  `CANON_REFERENCE_UNRESOLVED` and the assertion identity.
 - A subjectless operation fails whole-model validation with
   `COMPILER_VERIFICATION_ASSERTION_INVOCATION_UNRESOLVED` and the assertion
   identity.

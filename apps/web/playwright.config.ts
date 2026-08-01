@@ -11,6 +11,17 @@ export default defineConfig({
     ],
     ['../../test/helpers/playwright-unfiltered-reporter.ts'],
   ],
+  projects: [
+    {
+      name: 'browser',
+      testIgnore: /composed-application\.spec\.ts/u,
+    },
+    {
+      dependencies: ['browser'],
+      name: 'composed-application',
+      testMatch: /composed-application\.spec\.ts/u,
+    },
+  ],
   testDir: './test/browser',
   timeout: 20_000,
   use: {
