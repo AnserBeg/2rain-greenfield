@@ -302,15 +302,22 @@ orchestrator fell through the loophole three times in one evening.**
     a synthetic maximum-field fixture, so it measures the machine, not the
     product.
 
-**The corrected rule: while a full matrix is running, nothing else runs.** Not a
-review, not an authoring lane, not the app, not a focused suite, and no git
-operation in the worktree under test. A reviewer process is not "just reading" —
-it is a model doing sustained tool calls on a WSL VM capped at 8 GB and 8
-processors, and it competes for exactly the resource the timing gates measure.
+**The corrected rule is now mechanical.** Test entry points and reviewer
+launches acquire a shared lease on `/tmp/north-star-matrix.lock`. The full
+matrix enters exclusively, runs the separated performance gate, and then
+downgrades its lease to shared for the load-tolerant matrix. A second matrix or
+performance gate still waits for exclusive access; focused suites and reviews
+can proceed after the downgrade. A conflicting launch therefore waits or fails
+with `TEST_GATE_LOCK_BUSY` rather than corrupting a timing verdict. No git
+operation may move the worktree under test. A reviewer process is not "just
+reading" — it is a model doing sustained tool calls on a WSL VM capped at 8 GB
+and 8 processors, so review launch commands use the same shared-lock wrapper as
+focused suites.
 
-**"Nothing else" INCLUDES THE ORCHESTRATOR'S OWN TOOL CALLS.** This was written
-once exempting the orchestrator by omission, and the omission immediately cost
-two wasted matrix runs. Measured at the same SHA on the same machine:
+**During the exclusive measurement, "nothing else" includes the orchestrator's
+own tool calls.** This was written once exempting the orchestrator by omission,
+and the omission immediately cost two wasted matrix runs. Measured at the same
+SHA on the same machine:
 
 | Run | What the orchestrator was doing | Unit suite (46 tests) | Budget test |
 |---|---|---|---|
@@ -331,9 +338,12 @@ three runs and two wrong diagnoses (first "load from a concurrent reviewer",
 then "the machine is degrading") before measuring the test in isolation, where
 it passed in 3,025 ms against a 5,000 ms budget.
 
-**So: start the matrix, then stop. Do not read, grep, edit, commit, or launch
-anything until it returns.** Block on the verdict and do nothing else. If work
-must happen during a matrix, the matrix is not ready to run yet.
+**The lane that owns the frozen candidate still starts the matrix, then
+stops.** Do not read, grep, edit, commit, or launch anything in that worktree
+until it returns. Other lanes may proceed after the runner reports its shared
+downgrade, but their suites and reviews use the shared wrapper. This preserves
+the frozen-tree invariant while keeping the load-tolerant phase from becoming
+a repository-wide queue.
 
 **Why this matters more than it looks:** a loaded run does not fail honestly. It
 produces a *wrong verdict* — either a red on a timing-sensitive gate that would

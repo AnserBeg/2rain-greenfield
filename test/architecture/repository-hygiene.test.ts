@@ -1,10 +1,23 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
-import { globSync, readFileSync } from 'node:fs';
+import { execFileSync, spawn } from 'node:child_process';
+import { once } from 'node:events';
+import {
+  chmodSync,
+  globSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { PassThrough } from 'node:stream';
 import test from 'node:test';
 
 const workflowPath = '.github/workflows/ci.yml';
 const packagePath = 'package.json';
+const testLockRunnerPath = 'scripts/run-with-test-lock.mjs';
+const testLockDowngradePath = 'scripts/downgrade-test-lock.sh';
 const suiteDefinitions = [
   {
     discoveryPattern: 'test/unit/**/*.test.ts',
@@ -25,6 +38,7 @@ const suiteDefinitions = [
   },
   {
     discoveryPattern: 'test/compiler/**/*.test.ts',
+    excludedFiles: ['test/compiler/performance-budget.test.ts'],
     expectedFiles: [
       'test/compiler/determinism.test.ts',
       'test/compiler/freeze-b.test.ts',
@@ -32,11 +46,15 @@ const suiteDefinitions = [
       'test/compiler/g2-module-storage.test.ts',
       'test/compiler/golden-vectors.test.ts',
       'test/compiler/legal-entity-query-scope.test.ts',
-      'test/compiler/performance-budget.test.ts',
       'test/compiler/predicate-lowering.test.ts',
       'test/compiler/publish-path-breadth-envelope.test.ts',
     ],
     script: 'test:compiler',
+  },
+  {
+    discoveryPattern: 'test/compiler/performance-budget.test.ts',
+    expectedFiles: ['test/compiler/performance-budget.test.ts'],
+    script: 'test:performance',
   },
   {
     discoveryPattern: 'test/integration/**/*.test.ts',
@@ -202,7 +220,12 @@ test('suite commands exactly cover all independently discovered test files', () 
     const command = scripts[suite.script];
     assert.ok(command, `package.json is missing ${suite.script}`);
 
-    const discoveredFiles = globSync(suite.discoveryPattern).sort();
+    const excludedFiles = new Set<string>(
+      'excludedFiles' in suite ? suite.excludedFiles : [],
+    );
+    const discoveredFiles = globSync(suite.discoveryPattern)
+      .filter((path) => !excludedFiles.has(path))
+      .sort();
     assert.ok(
       discoveredFiles.length > 0,
       `${suite.discoveryPattern} discovered no tests`,
@@ -249,6 +272,301 @@ test('every test-script glob is quoted before the shell can expand it', () => {
   }
 });
 
+test('test entry points participate in the shared/exclusive gate lock', () => {
+  const packageJson = JSON.parse(readFileSync(packagePath, 'utf8')) as {
+    scripts?: Record<string, string>;
+  };
+  const webPackageJson = JSON.parse(
+    readFileSync('apps/web/package.json', 'utf8'),
+  ) as { scripts?: Record<string, string> };
+  const rootScripts = packageJson.scripts ?? {};
+  for (const [script, command] of Object.entries(rootScripts)) {
+    if (!script.startsWith('test:')) continue;
+    const expectedMode = script === 'test:performance' ? 'exclusive' : 'shared';
+    assert.match(
+      command,
+      new RegExp(
+        `(?:^|&& )node ${testLockRunnerPath.replaceAll('.', '\\.')}` +
+          ` ${expectedMode} --`,
+        'u',
+      ),
+      `${script} does not acquire the ${expectedMode} test lock`,
+    );
+  }
+  assert.match(
+    webPackageJson.scripts?.['test:contracts'] ?? '',
+    /run-with-test-lock\.mjs shared --/u,
+  );
+
+  const matrixRunner = readFileSync('scripts/run-matrix.sh', 'utf8');
+  assert.match(matrixRunner, /NORTH_STAR_TEST_LOCK_HELD=exclusive/u);
+  assert.match(
+    matrixRunner,
+    /bash scripts\/downgrade-test-lock\.sh "\$LOCK" "\$LOCK_TIMEOUT_SECONDS" 9/u,
+  );
+  assert.match(matrixRunner, /NORTH_STAR_TEST_LOCK_HELD=shared/u);
+  assert.ok(
+    matrixRunner.indexOf('corepack pnpm test:performance') <
+      matrixRunner.indexOf('# The main matrix deliberately excludes'),
+    'the exclusive performance gate must run before the main matrix',
+  );
+  assert.equal(
+    matrixRunner.match(/corepack pnpm test:performance/gu)?.length,
+    1,
+    'the matrix runner must invoke the separated performance gate exactly once',
+  );
+  assert.doesNotMatch(
+    matrixRunner,
+    /^\s*corepack pnpm test\s*(?:&&|$)/mu,
+    'the main matrix must not re-enter the aggregate that includes performance',
+  );
+});
+
+test('shared gate holders coexist and exclude an exclusive gate', async () => {
+  const lockPath = `/tmp/north-star-test-lock-control-${process.pid}`;
+  const baseEnvironment = { ...process.env };
+  delete baseEnvironment.NORTH_STAR_TEST_LOCK_HELD;
+  const environment = {
+    ...baseEnvironment,
+    NORTH_STAR_TEST_LOCK_PATH: lockPath,
+    NORTH_STAR_TEST_LOCK_TIMEOUT_SECONDS: '0',
+  };
+  const holder = spawn(
+    process.execPath,
+    [
+      testLockRunnerPath,
+      'shared',
+      '--',
+      process.execPath,
+      '-e',
+      "process.stdout.write('LOCK_READY\\n'); process.stdin.resume()",
+    ],
+    { env: environment, stdio: ['pipe', 'pipe', 'pipe'] },
+  );
+  let holderError = '';
+  holder.stderr.setEncoding('utf8');
+  holder.stderr.on('data', (chunk: string) => {
+    holderError += chunk;
+  });
+  await waitForOutput(holder.stdout, 'LOCK_READY');
+
+  try {
+    const sharedOutput = execFileSync(
+      process.execPath,
+      [
+        testLockRunnerPath,
+        'shared',
+        '--',
+        process.execPath,
+        '-e',
+        "process.stdout.write('SHARED_ADMITTED')",
+      ],
+      { encoding: 'utf8', env: environment },
+    );
+    assert.equal(sharedOutput, 'SHARED_ADMITTED');
+    assert.throws(
+      () =>
+        execFileSync(
+          process.execPath,
+          [
+            testLockRunnerPath,
+            'exclusive',
+            '--',
+            process.execPath,
+            '-e',
+            "process.stdout.write('EXCLUSIVE_WRONGLY_ADMITTED')",
+          ],
+          { encoding: 'utf8', env: environment },
+        ),
+      (error: unknown) =>
+        error instanceof Error &&
+        'stderr' in error &&
+        String(error.stderr).includes('TEST_GATE_LOCK_BUSY'),
+    );
+  } finally {
+    holder.stdin.end();
+    const [exitCode] = (await once(holder, 'exit')) as [number | null];
+    assert.equal(exitCode, 0, holderError);
+  }
+
+  const exclusiveOutput = execFileSync(
+    process.execPath,
+    [
+      testLockRunnerPath,
+      'exclusive',
+      '--',
+      process.execPath,
+      '-e',
+      "process.stdout.write('EXCLUSIVE_ADMITTED')",
+    ],
+    { encoding: 'utf8', env: environment },
+  );
+  assert.equal(exclusiveOutput, 'EXCLUSIVE_ADMITTED');
+});
+
+test('matrix lock and legacy-process waits fail busy at their bounded deadline', () => {
+  const lockPath = `/tmp/north-star-matrix-lock-control-${process.pid}`;
+  const baseEnvironment = { ...process.env };
+  delete baseEnvironment.NORTH_STAR_TEST_LOCK_HELD;
+  const environment = {
+    ...baseEnvironment,
+    NORTH_STAR_TEST_LOCK_PATH: lockPath,
+    NORTH_STAR_TEST_LOCK_TIMEOUT_SECONDS: '0',
+  };
+  const holder = spawn(
+    process.execPath,
+    [
+      testLockRunnerPath,
+      'shared',
+      '--',
+      process.execPath,
+      '-e',
+      "process.stdout.write('LOCK_READY\\n'); process.stdin.resume()",
+    ],
+    { env: environment, stdio: ['pipe', 'pipe', 'pipe'] },
+  );
+
+  return waitForOutput(holder.stdout, 'LOCK_READY')
+    .then(() => {
+      assert.throws(
+        () =>
+          execFileSync(
+            'bash',
+            ['scripts/run-matrix.sh', 'LOCK-CONTROL', process.cwd()],
+            { encoding: 'utf8', env: environment },
+          ),
+        (error: unknown) =>
+          commandFailedWith(error, 'TEST_GATE_LOCK_BUSY: exclusive access'),
+      );
+    })
+    .finally(async () => {
+      holder.stdin.end();
+      const [exitCode] = (await once(holder, 'exit')) as [number | null];
+      assert.equal(exitCode, 0);
+      rmSync(lockPath, { force: true });
+    })
+    .then(() => {
+      const fakeBin = mkdtempSync(join(tmpdir(), 'north-star-fake-ps-'));
+      try {
+        const fakePs = join(fakeBin, 'ps');
+        writeFileSync(
+          fakePs,
+          "#!/usr/bin/env bash\nprintf '99999 corepack pnpm test:compiler\\n'\n",
+        );
+        chmodSync(fakePs, 0o755);
+        assert.throws(
+          () =>
+            execFileSync(
+              'bash',
+              ['scripts/run-matrix.sh', 'FOREIGN-CONTROL', process.cwd()],
+              {
+                encoding: 'utf8',
+                env: { ...environment, PATH: `${fakeBin}:${process.env.PATH}` },
+              },
+            ),
+          (error: unknown) =>
+            commandFailedWith(
+              error,
+              'TEST_GATE_LOCK_BUSY: a lock-unaware test process remained active',
+            ),
+        );
+      } finally {
+        rmSync(fakeBin, { force: true, recursive: true });
+        rmSync(lockPath, { force: true });
+      }
+    });
+});
+
+test('matrix lock conversion fails busy at its bounded deadline', async () => {
+  const lockPath = `/tmp/north-star-matrix-conversion-control-${process.pid}`;
+  const owner = spawn(
+    'bash',
+    [
+      '-c',
+      [
+        'exec 9>"$1"',
+        'flock --exclusive 9',
+        "printf 'CONVERSION_OWNER_READY\\n'",
+        'IFS= read -r _',
+        'flock --unlock 9',
+        "printf 'CONVERSION_WINDOW_OPEN\\n'",
+        'IFS= read -r _',
+        'exec bash "$2" "$1" 0 9',
+      ].join('; '),
+      'matrix-conversion-owner',
+      lockPath,
+      testLockDowngradePath,
+    ],
+    { stdio: ['pipe', 'pipe', 'pipe'] },
+  );
+  let ownerError = '';
+  owner.stderr.setEncoding('utf8');
+  owner.stderr.on('data', (chunk: string) => {
+    ownerError += chunk;
+  });
+  let contender: typeof owner | undefined;
+
+  try {
+    await waitForOutput(owner.stdout, 'CONVERSION_OWNER_READY');
+    contender = spawn(
+      'flock',
+      [
+        '--no-fork',
+        '--exclusive',
+        lockPath,
+        process.execPath,
+        '-e',
+        "process.stdout.write('CONTENDER_ACQUIRED\\n'); process.stdin.resume()",
+      ],
+      { stdio: ['pipe', 'pipe', 'pipe'] },
+    );
+    assert.ok(contender.pid !== undefined);
+    await waitForKernelLockWait(contender.pid);
+
+    const conversionWindow = waitForOutput(
+      owner.stdout,
+      'CONVERSION_WINDOW_OPEN',
+    );
+    const contenderAcquired = waitForOutput(
+      contender.stdout,
+      'CONTENDER_ACQUIRED',
+    );
+    owner.stdin.write('RELEASE\n');
+    await Promise.all([conversionWindow, contenderAcquired]);
+
+    const ownerClosed = waitForProcessClose(owner, 1_000);
+    owner.stdin.end('CONVERT\n');
+    const [exitCode, signal] = await ownerClosed;
+    assert.equal(signal, null);
+    assert.equal(exitCode, 75);
+    assert.match(
+      ownerError,
+      /TEST_GATE_LOCK_BUSY: shared conversion .* was unavailable for 0s/u,
+    );
+  } finally {
+    owner.stdin.destroy();
+    if (owner.exitCode === null && owner.signalCode === null) {
+      owner.kill('SIGTERM');
+    }
+    if (contender !== undefined) {
+      const contenderClosed = waitForProcessClose(contender, 1_000);
+      contender.stdin.end();
+      const [exitCode] = await contenderClosed;
+      assert.equal(exitCode, 0);
+    }
+    rmSync(lockPath, { force: true });
+  }
+});
+
+test('lock-holder readiness has a bounded failure instead of hanging', async () => {
+  const silentStream = new PassThrough();
+  await assert.rejects(
+    waitForOutput(silentStream, 'NEVER_EMITTED', 0),
+    /stream did not emit NEVER_EMITTED within 0ms/u,
+  );
+  silentStream.destroy();
+});
+
 test('CI runs every scaffold gate from a frozen install', () => {
   const workflow = readFileSync(workflowPath, 'utf8');
   const requiredCommands = [
@@ -259,6 +577,7 @@ test('CI runs every scaffold gate from a frozen install', () => {
     'corepack pnpm build',
     'corepack pnpm test:unit',
     'corepack pnpm test:compiler',
+    'corepack pnpm test:performance',
     'corepack pnpm test:integration',
     'corepack pnpm test:agent',
     'corepack pnpm test:architecture',
@@ -276,6 +595,7 @@ test('CI runs every scaffold gate from a frozen install', () => {
   }
   assert.match(workflow, /^permissions:\n {2}contents: read$/mu);
   assert.match(workflow, /^ {2}quality:$/mu);
+  assert.match(workflow, /^ {2}performance:$/mu);
   assert.match(workflow, /^ {2}postgres:$/mu);
   assert.match(workflow, /^ {2}browser:$/mu);
   assert.match(workflow, /uses: actions\/upload-artifact@/u);
@@ -293,6 +613,119 @@ function shellTokens(command: string): readonly ShellToken[] {
 
 function containsGlob(value: string): boolean {
   return value.includes('*') || value.includes('?') || value.includes('[');
+}
+
+function waitForOutput(
+  stream: NodeJS.ReadableStream,
+  expected: string,
+  timeoutMilliseconds = 5_000,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let output = '';
+    stream.setEncoding('utf8');
+    const deadline = setTimeout(() => {
+      cleanup();
+      reject(
+        new Error(
+          `stream did not emit ${expected} within ${timeoutMilliseconds}ms`,
+        ),
+      );
+    }, timeoutMilliseconds);
+    const onError = (error: Error) => {
+      cleanup();
+      reject(error);
+    };
+    const onEnd = () => {
+      cleanup();
+      reject(new Error(`stream ended before emitting ${expected}`));
+    };
+    const onData = (chunk: string) => {
+      output += chunk;
+      if (output.includes(expected)) {
+        cleanup();
+        resolve();
+      }
+    };
+    const cleanup = () => {
+      clearTimeout(deadline);
+      stream.off('data', onData);
+      stream.off('error', onError);
+      stream.off('end', onEnd);
+    };
+    stream.on('data', onData);
+    stream.once('error', onError);
+    stream.once('end', onEnd);
+  });
+}
+
+function waitForKernelLockWait(
+  processId: number,
+  timeoutMilliseconds = 5_000,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const deadline = setTimeout(() => {
+      clearInterval(poll);
+      reject(
+        new Error(
+          `process ${processId} did not enter the kernel lock wait within ${timeoutMilliseconds}ms`,
+        ),
+      );
+    }, timeoutMilliseconds);
+    const poll = setInterval(() => {
+      let waitChannel = '';
+      try {
+        waitChannel = readFileSync(`/proc/${processId}/wchan`, 'utf8').trim();
+      } catch {
+        // The deadline reports a process that exits before reaching the wait.
+      }
+      if (waitChannel === 'locks_lock_inode_wait') {
+        clearTimeout(deadline);
+        clearInterval(poll);
+        resolve();
+      }
+    }, 10);
+  });
+}
+
+function waitForProcessClose(
+  child: ReturnType<typeof spawn>,
+  timeoutMilliseconds: number,
+): Promise<readonly [number | null, NodeJS.Signals | null]> {
+  return new Promise((resolve, reject) => {
+    const deadline = setTimeout(() => {
+      cleanup();
+      reject(
+        new Error(
+          `process ${child.pid ?? 'unknown'} did not close within ${timeoutMilliseconds}ms`,
+        ),
+      );
+    }, timeoutMilliseconds);
+    const onClose = (code: number | null, signal: NodeJS.Signals | null) => {
+      cleanup();
+      resolve([code, signal] as const);
+    };
+    const onError = (error: Error) => {
+      cleanup();
+      reject(error);
+    };
+    const cleanup = () => {
+      clearTimeout(deadline);
+      child.off('close', onClose);
+      child.off('error', onError);
+    };
+    child.once('close', onClose);
+    child.once('error', onError);
+  });
+}
+
+function commandFailedWith(error: unknown, expected: string): boolean {
+  return (
+    error instanceof Error &&
+    'status' in error &&
+    error.status === 75 &&
+    'stderr' in error &&
+    String(error.stderr).includes(expected)
+  );
 }
 
 test('CI third-party actions use immutable commit refs', () => {
