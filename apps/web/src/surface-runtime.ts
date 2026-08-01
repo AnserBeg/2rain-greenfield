@@ -144,10 +144,13 @@ export async function renderSurfaceRuntimeWithData(
     );
   }
   if (binding.query.queryType === 'aggregate') {
+    const scopeParameterId =
+      binding.query.legalEntityScope?.operand.parameterId;
     const missingParameterIds = binding.query.parameters
       .map((parameter) => parameter.parameterId)
       .filter(
         (parameterId) =>
+          parameterId !== scopeParameterId &&
           (queryParameterValues[parameterId] ?? '').trim() === '',
       );
     if (missingParameterIds.length > 0) {

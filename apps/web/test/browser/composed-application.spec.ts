@@ -276,6 +276,46 @@ async function inventoryJourney(page: Page, baseUrl: string): Promise<void> {
   ).toBeVisible();
   await expect(page.locator('[data-aggregate-value]')).toHaveCount(0);
 
+  const blankFirstDuplicateScopeUrl = new URL(
+    surfaceUrl(baseUrl, 'inventory_on_hand_lookup'),
+  );
+  for (const [parameterId, value] of onHandValues) {
+    if (parameterId !== onHandLookup.legalEntityParameterId) {
+      blankFirstDuplicateScopeUrl.searchParams.set(parameterId, value);
+    }
+  }
+  blankFirstDuplicateScopeUrl.searchParams.set(
+    onHandLookup.legalEntityParameterId,
+    '',
+  );
+  blankFirstDuplicateScopeUrl.searchParams.append(
+    onHandLookup.legalEntityParameterId,
+    browserLegalEntityId,
+  );
+  const blankFirstDuplicateScopeResponse = await page.goto(
+    blankFirstDuplicateScopeUrl.href,
+  );
+  expect(blankFirstDuplicateScopeResponse?.status()).toBe(422);
+  expect(
+    new URL(page.url()).searchParams.getAll(
+      onHandLookup.legalEntityParameterId,
+    ),
+  ).toEqual(['', browserLegalEntityId]);
+  await expect(
+    page.locator('[data-diagnostic-code="QUERY_LEGAL_ENTITY_SCOPE_REQUIRED"]'),
+  ).toBeVisible();
+  await expect(
+    page
+      .getByRole('navigation', { name: 'Legal entity' })
+      .locator('[aria-current="true"]'),
+  ).toHaveCount(0);
+  await expect(
+    page
+      .locator('[data-platform-slot="task:scanInput"] form')
+      .locator(`input[name="${onHandLookup.legalEntityParameterId}"]`),
+  ).toHaveCount(0);
+  await expect(page.locator('[data-aggregate-value]')).toHaveCount(0);
+
   await page.goto(surfaceUrl(baseUrl, 'inventory_on_hand_lookup'));
   await page
     .getByRole('navigation', { name: 'Legal entity' })
