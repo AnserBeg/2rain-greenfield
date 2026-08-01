@@ -17,6 +17,7 @@ import test from 'node:test';
 const workflowPath = '.github/workflows/ci.yml';
 const packagePath = 'package.json';
 const testLockRunnerPath = 'scripts/run-with-test-lock.mjs';
+const testLockDowngradePath = 'scripts/downgrade-test-lock.sh';
 const suiteDefinitions = [
   {
     discoveryPattern: 'test/unit/**/*.test.ts',
@@ -297,7 +298,10 @@ test('test entry points participate in the shared/exclusive gate lock', () => {
 
   const matrixRunner = readFileSync('scripts/run-matrix.sh', 'utf8');
   assert.match(matrixRunner, /NORTH_STAR_TEST_LOCK_HELD=exclusive/u);
-  assert.match(matrixRunner, /flock --shared 9/u);
+  assert.match(
+    matrixRunner,
+    /bash scripts\/downgrade-test-lock\.sh "\$LOCK" "\$LOCK_TIMEOUT_SECONDS" 9/u,
+  );
   assert.match(matrixRunner, /NORTH_STAR_TEST_LOCK_HELD=shared/u);
   assert.ok(
     matrixRunner.indexOf('corepack pnpm test:performance') <
@@ -471,6 +475,87 @@ test('matrix lock and legacy-process waits fail busy at their bounded deadline',
     });
 });
 
+test('matrix lock conversion fails busy at its bounded deadline', async () => {
+  const lockPath = `/tmp/north-star-matrix-conversion-control-${process.pid}`;
+  const owner = spawn(
+    'bash',
+    [
+      '-c',
+      [
+        'exec 9>"$1"',
+        'flock --exclusive 9',
+        "printf 'CONVERSION_OWNER_READY\\n'",
+        'IFS= read -r _',
+        'flock --unlock 9',
+        "printf 'CONVERSION_WINDOW_OPEN\\n'",
+        'IFS= read -r _',
+        'exec bash "$2" "$1" 0 9',
+      ].join('; '),
+      'matrix-conversion-owner',
+      lockPath,
+      testLockDowngradePath,
+    ],
+    { stdio: ['pipe', 'pipe', 'pipe'] },
+  );
+  let ownerError = '';
+  owner.stderr.setEncoding('utf8');
+  owner.stderr.on('data', (chunk: string) => {
+    ownerError += chunk;
+  });
+  let contender: typeof owner | undefined;
+
+  try {
+    await waitForOutput(owner.stdout, 'CONVERSION_OWNER_READY');
+    contender = spawn(
+      'flock',
+      [
+        '--no-fork',
+        '--exclusive',
+        lockPath,
+        process.execPath,
+        '-e',
+        "process.stdout.write('CONTENDER_ACQUIRED\\n'); process.stdin.resume()",
+      ],
+      { stdio: ['pipe', 'pipe', 'pipe'] },
+    );
+    assert.ok(contender.pid !== undefined);
+    await waitForKernelLockWait(contender.pid);
+
+    const conversionWindow = waitForOutput(
+      owner.stdout,
+      'CONVERSION_WINDOW_OPEN',
+    );
+    const contenderAcquired = waitForOutput(
+      contender.stdout,
+      'CONTENDER_ACQUIRED',
+    );
+    owner.stdin.write('RELEASE\n');
+    await Promise.all([conversionWindow, contenderAcquired]);
+
+    const ownerClosed = waitForProcessClose(owner, 1_000);
+    owner.stdin.end('CONVERT\n');
+    const [exitCode, signal] = await ownerClosed;
+    assert.equal(signal, null);
+    assert.equal(exitCode, 75);
+    assert.match(
+      ownerError,
+      /TEST_GATE_LOCK_BUSY: shared conversion .* was unavailable for 0s/u,
+    );
+  } finally {
+    owner.stdin.destroy();
+    if (owner.exitCode === null && owner.signalCode === null) {
+      owner.kill('SIGTERM');
+    }
+    if (contender !== undefined) {
+      const contenderClosed = waitForProcessClose(contender, 1_000);
+      contender.stdin.end();
+      const [exitCode] = await contenderClosed;
+      assert.equal(exitCode, 0);
+    }
+    rmSync(lockPath, { force: true });
+  }
+});
+
 test('lock-holder readiness has a bounded failure instead of hanging', async () => {
   const silentStream = new PassThrough();
   await assert.rejects(
@@ -568,6 +653,66 @@ function waitForOutput(
     stream.on('data', onData);
     stream.once('error', onError);
     stream.once('end', onEnd);
+  });
+}
+
+function waitForKernelLockWait(
+  processId: number,
+  timeoutMilliseconds = 5_000,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const deadline = setTimeout(() => {
+      clearInterval(poll);
+      reject(
+        new Error(
+          `process ${processId} did not enter the kernel lock wait within ${timeoutMilliseconds}ms`,
+        ),
+      );
+    }, timeoutMilliseconds);
+    const poll = setInterval(() => {
+      let waitChannel = '';
+      try {
+        waitChannel = readFileSync(`/proc/${processId}/wchan`, 'utf8').trim();
+      } catch {
+        // The deadline reports a process that exits before reaching the wait.
+      }
+      if (waitChannel === 'locks_lock_inode_wait') {
+        clearTimeout(deadline);
+        clearInterval(poll);
+        resolve();
+      }
+    }, 10);
+  });
+}
+
+function waitForProcessClose(
+  child: ReturnType<typeof spawn>,
+  timeoutMilliseconds: number,
+): Promise<readonly [number | null, NodeJS.Signals | null]> {
+  return new Promise((resolve, reject) => {
+    const deadline = setTimeout(() => {
+      cleanup();
+      reject(
+        new Error(
+          `process ${child.pid ?? 'unknown'} did not close within ${timeoutMilliseconds}ms`,
+        ),
+      );
+    }, timeoutMilliseconds);
+    const onClose = (code: number | null, signal: NodeJS.Signals | null) => {
+      cleanup();
+      resolve([code, signal] as const);
+    };
+    const onError = (error: Error) => {
+      cleanup();
+      reject(error);
+    };
+    const cleanup = () => {
+      clearTimeout(deadline);
+      child.off('close', onClose);
+      child.off('error', onError);
+    };
+    child.once('close', onClose);
+    child.once('error', onError);
   });
 }
 

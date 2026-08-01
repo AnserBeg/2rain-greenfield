@@ -61,9 +61,19 @@ open `gate-instrument` finding below.
 
 All waits are finite. The shared wrapper, the matrix's initial exclusive lock,
 and the compatibility wait for lock-unaware test processes default to 300 s.
-The holder-readiness handshake has a separate 5 s deadline. Zero-deadline
-negative controls observe both matrix busy paths returning exit 75, and a silent
-readiness stream observes the bounded handshake refusal.
+The exclusive-to-shared conversion uses that same 300 s deadline and returns
+exit 75 with `TEST_GATE_LOCK_BUSY` if an exclusive waiter acquires the lease in
+the conversion gap. The holder-readiness handshake has a separate 5 s deadline.
+Zero-deadline negative controls observe all three matrix busy paths returning
+exit 75, and a silent readiness stream observes the bounded handshake refusal.
+
+The conversion control drives the production downgrade helper against an
+external exclusive holder after deliberately exposing the kernel's non-atomic
+release/reacquire boundary. Removing the helper's timeout makes the control miss
+its own 1 s process deadline instead of passing. A terminated holder cannot
+leave a stale lock: the kernel releases the lease when all owning descriptors
+close. The defect repaired here is the unbounded wait on a live holder, not lock
+file leakage.
 
 The lock is cooperative harnessing, not a security boundary. The architecture
 gate proves declared test commands and the binding review launcher participate;

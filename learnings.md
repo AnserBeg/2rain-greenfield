@@ -320,3 +320,8 @@ How to apply: land mechanical isolation independently, but require a stable base
 Date: 2026-08-01
 Why: the one-minute load average remained elevated while the CPU was 96.4% idle, so a timing gate refused current quiet based on its own decaying prior work.
 How to apply: admit timing work from a short direct `/proc/stat` CPU-idle delta; use load average only as historical telemetry. Supersedes the load-average admission guidance in "Calibrate admission and budget as one instrument". See `docs/execution/packets/gate-perf.md`.
+
+## Bound lock conversion, not only acquisition
+Date: 2026-08-01
+Why: a matrix bounded its initial lock acquisition but converted exclusive to shared with an unbounded call; a live exclusive waiter can win the non-atomic conversion gap and stall the runner indefinitely.
+How to apply: bound and execute-control every acquisition and conversion path. Treat terminated holders as released by the kernel; diagnose waits on live holders, not stale lock files. See `docs/execution/packets/gate-perf.md`.

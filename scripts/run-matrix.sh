@@ -95,7 +95,13 @@ echo "PERFORMANCE_GATE_PASS_SHA=$SHA" | tee -a "$LOG"
 # The main matrix deliberately excludes test:performance. Its evidence was
 # produced above under the same run id, so the final reachability aggregation
 # proves both the exclusive gate and the load-tolerant matrix executed.
-flock --shared 9
+bash scripts/downgrade-test-lock.sh "$LOCK" "$LOCK_TIMEOUT_SECONDS" 9
+LOCK_RC="$?"
+if [ "$LOCK_RC" -ne 0 ]; then
+  echo "FULL_MATRIX_FAILED rc=$LOCK_RC sha=$SHA" | tee -a "$LOG"
+  echo "[$(date +%H:%M:%S)] $LABEL released the slot." | tee -a "$LOG"
+  exit "$LOCK_RC"
+fi
 export NORTH_STAR_TEST_LOCK_HELD=shared
 echo "[$(date +%H:%M:%S)] $LABEL downgraded to shared access for the load-tolerant matrix." | tee -a "$LOG"
 {
