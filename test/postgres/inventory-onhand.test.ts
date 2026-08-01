@@ -832,11 +832,12 @@ test(
             );
             assert.ok(scopeResult);
             const expectedProbe = {
-              kind: 'legalEntityScopeOmissionRefusal',
+              code: 'SEMANTIC_QUERY_LEGAL_ENTITY_SCOPE_INVALID',
+              kind: 'aggregateParameterOmissionRefusal',
               queryId: invocation.query.targetId,
               reason: 'selection-omitted',
               schemaVersion:
-                'northstar.release-verification-query-scope-probe/v1',
+                'northstar.release-verification-aggregate-probe/v1',
             };
             assert.equal(
               scopeResult.positiveProbeDigest,
