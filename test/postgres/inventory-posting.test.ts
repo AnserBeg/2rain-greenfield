@@ -50,6 +50,7 @@ import {
   type InventoryTransferLineV1,
   type InventoryTransferPostingCommandV1,
 } from '../../packages/postgres-provider/src/inventory-posting-service.js';
+import { INVENTORY_PROVIDER_ERROR_MAPPINGS } from '../../packages/postgres-provider/src/inventory-provider-error-mappings.js';
 import {
   planStockIdentityLocks,
   STOCK_IDENTITY_LOCK_NAMESPACE,
@@ -58,18 +59,35 @@ import {
   loadMigrations,
   runMigrations,
 } from '../../packages/postgres-provider/src/migrations.js';
+import {
+  ModuleRuntimeInterpreterError,
+  PostgresModuleRuntimeInterpreter,
+} from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
 import { PostgresModuleStorageMaterializer } from '../../packages/postgres-provider/src/module-storage-materializer.js';
 import {
   PostgresReleaseVerificationService,
   releaseVerificationBinding,
 } from '../../packages/postgres-provider/src/release-verification-service.js';
 import { PostgresImmutableReleaseRepository } from '../../packages/postgres-provider/src/release-repository.js';
+import { PostgresRequestRuntimeViewService } from '../../packages/postgres-provider/src/request-runtime-view-service.js';
 import { TrustedActorEnvelopeIssuer } from '../../packages/postgres-provider/src/trust/trusted-actor-envelope.js';
 import {
   AuthenticatedRequestEntryAdapter,
   type AuthenticatedIdentity,
   type TrustedRequestContext,
 } from '../../packages/runtime/src/request-context.js';
+import {
+  SEMANTIC_OPERATION_REQUEST_VERSION,
+  SemanticOperationGateway,
+  SemanticOperationMediationAuthority,
+} from '../../packages/runtime/src/semantic-operation-gateway.js';
+import {
+  AuthenticatedRequestRuntimeEntryAdapter,
+  CURRENT_POLICY_DECISION_VERSION,
+  type CurrentPolicyDecisionRequest,
+  type CurrentPolicyGateway,
+  type CurrentPolicySubject,
+} from '../../packages/runtime/src/request-runtime-view.js';
 import { withEphemeralPostgres } from '../helpers/postgres.js';
 
 const migrations = resolve('db/migrations');
@@ -271,6 +289,7 @@ test(
       await assertConcurrentRequestKeyConflict(testContext, database);
 
       await assertBaseUnitBound(testContext, database);
+      await assertCatalogItemUpdateReportsBoundBaseUnit(database);
       await assertSameInstantMovementIdTieBreak(testContext, database);
       await assertQuantityOnlyEvidence(testContext, database, posted, 1);
       await assert.rejects(
@@ -2988,6 +3007,104 @@ async function assertBaseUnitBound(
       );
     },
   );
+}
+
+async function assertCatalogItemUpdateReportsBoundBaseUnit(
+  database: PostingDatabase,
+): Promise<void> {
+  const expectedBinding = (
+    await bindingMovementsForItem(database, itemId)
+  ).toSorted(compareBindingMovements)[0];
+  assert.ok(expectedBinding);
+  const currentRevision = await database.adminPool.query<{ revision: string }>(
+    `SELECT ${quoted(database.binding.item.revisionColumn)}::text AS revision
+       FROM ${table(database.binding, database.binding.item)}
+      WHERE tenant_id=$1 AND environment_id=$2
+        AND ${quoted(database.binding.item.recordIdColumn)}=$3`,
+    [tenantId, environmentId, itemId],
+  );
+  const currentItem = currentRevision.rows[0];
+  assert.ok(currentItem);
+  const policy = new AllowRuntimePolicy();
+  const interpreter = new PostgresModuleRuntimeInterpreter(
+    database.runtimePool,
+    new TrustedActorEnvelopeIssuer({
+      resolve: async () => ({
+        approvingHumanId: null,
+        delegation: null,
+        executionPrincipal: { kind: 'HUMAN', principalId },
+        initiatingHumanId: principalId,
+        subject: null,
+      }),
+    }),
+    INVENTORY_PROVIDER_ERROR_MAPPINGS,
+  );
+  const mediation = new SemanticOperationMediationAuthority();
+  const gateway = new SemanticOperationGateway(policy, interpreter, mediation);
+  const entry = new AuthenticatedRequestRuntimeEntryAdapter(
+    new AuthenticatedRequestEntryAdapter(async () => ({
+      environmentId,
+      principalId,
+      tenantId,
+    })),
+    new PostgresRequestRuntimeViewService(database.runtimePool),
+    policy,
+  );
+
+  await assert.rejects(
+    entry.run(
+      { headers: { authorization: 'catalog-base-unit-control' } },
+      (view) =>
+        gateway.invoke(
+          view,
+          {
+            confirmationGrant: null,
+            idempotencyKey: randomUUID(),
+            input: {
+              expectedRevision: Number(currentItem.revision),
+              patch: { 'northstar.app:field.item_base_unit': 'BOX' },
+              recordId: itemId,
+            },
+            operationId: 'northstar.app:operation.item_update',
+            schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
+          },
+          mediation.issueInvocation(view, 'UI'),
+        ),
+    ),
+    (error: unknown) => {
+      assert.ok(error instanceof ModuleRuntimeInterpreterError);
+      assert.equal(error.code, 'INVENTORY_BASE_UNIT_IMMUTABLE');
+      assert.deepEqual(error.details, {
+        bindingMovementId: expectedBinding.movementId,
+        bindingUnitId: 'EA',
+        itemId,
+        requestedUnitId: 'BOX',
+      });
+      return true;
+    },
+  );
+}
+
+class AllowRuntimePolicy implements CurrentPolicyGateway {
+  async authorize(_request: CurrentPolicyDecisionRequest): Promise<{
+    decision: 'ALLOW';
+    decisionVersion: typeof CURRENT_POLICY_DECISION_VERSION;
+    policyVersion: string;
+  }> {
+    void _request;
+    return {
+      decision: 'ALLOW',
+      decisionVersion: CURRENT_POLICY_DECISION_VERSION,
+      policyVersion: 'inventory-provider-error-control/v1',
+    };
+  }
+
+  async readCurrentVersion(
+    _subject: CurrentPolicySubject,
+  ): Promise<{ policyVersion: string }> {
+    void _subject;
+    return { policyVersion: 'inventory-provider-error-control/v1' };
+  }
 }
 
 async function assertSameInstantMovementIdTieBreak(

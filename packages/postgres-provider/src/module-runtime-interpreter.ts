@@ -107,19 +107,56 @@ export interface StorageLegalEntityReadScopeRequirement {
   readonly kind: 'legalEntity';
 }
 
+export interface ModuleProviderErrorMetadata {
+  readonly columnName: string | null;
+  readonly constraintName: string | null;
+  readonly relationName: string | null;
+  readonly sqlstate: string;
+}
+
+export interface ModuleProviderErrorMappingInput {
+  readonly detail: string | null;
+  readonly metadata: ModuleProviderErrorMetadata;
+  readonly providerMessage: string;
+  readonly subjectId: string;
+}
+
+export interface ModuleProviderErrorMappingResult {
+  readonly code: string;
+  readonly details: Readonly<Record<string, string>>;
+  readonly message: string;
+  readonly subjectId: string | null;
+}
+
+export interface ModuleProviderErrorMapping {
+  readonly providerMessage: string;
+  readonly sqlstate: string;
+  translate(
+    input: ModuleProviderErrorMappingInput,
+  ): ModuleProviderErrorMappingResult | null;
+}
+
 interface VerifiedLegalEntityReadScope {
   readonly legalEntityIds: readonly string[];
 }
 
 export class ModuleRuntimeInterpreterError extends Error {
   override readonly name = 'ModuleRuntimeInterpreterError';
+  readonly details: Readonly<Record<string, string>>;
+  readonly providerMetadata: ModuleProviderErrorMetadata | null;
 
   constructor(
     readonly code: string,
     message: string,
     readonly subjectId: string | null = null,
+    details: Readonly<Record<string, string>> = Object.freeze({}),
+    providerMetadata: ModuleProviderErrorMetadata | null = null,
   ) {
     super(message);
+    this.details = Object.freeze({ ...details });
+    this.providerMetadata = providerMetadata
+      ? Object.freeze({ ...providerMetadata })
+      : null;
   }
 }
 
@@ -130,12 +167,17 @@ export class ModuleRuntimeInterpreterError extends Error {
 export class PostgresModuleRuntimeInterpreter
   implements SemanticQueryExecutor, SemanticOperationExecutor
 {
+  readonly #providerErrorMappings: readonly ModuleProviderErrorMapping[];
   readonly #trust: PostgresTrustService;
 
   constructor(
     private readonly pool: Pool,
     private readonly actorIssuer: TrustedActorEnvelopeIssuer,
+    providerErrorMappings: readonly ModuleProviderErrorMapping[] = [],
   ) {
+    this.#providerErrorMappings = validatedProviderErrorMappings(
+      providerErrorMappings,
+    );
     this.#trust = new PostgresTrustService(pool);
   }
 
@@ -225,7 +267,11 @@ export class PostgresModuleRuntimeInterpreter
         },
       );
     } catch (error) {
-      throw providerBoundaryFailure(error, request.definition.sourceEntityId);
+      throw providerBoundaryFailure(
+        error,
+        request.definition.sourceEntityId,
+        this.#providerErrorMappings,
+      );
     }
   }
 
@@ -283,6 +329,7 @@ export class PostgresModuleRuntimeInterpreter
               error,
               currentStorage,
               currentEntity.entityId,
+              this.#providerErrorMappings,
             );
           }
         });
@@ -3253,6 +3300,7 @@ export function translateModuleProviderError(
   error: unknown,
   storage: StorageTargetPayloadV1,
   entityId: string,
+  providerErrorMappings: readonly ModuleProviderErrorMapping[] = [],
 ): ModuleRuntimeInterpreterError {
   const entity = requiredEntity(storage, entityId);
   if (error instanceof ModuleRuntimeInterpreterError) return error;
@@ -3284,18 +3332,15 @@ export function translateModuleProviderError(
       relation?.relationId ?? entity.entityId,
     );
   }
-  if (code && /^[0-9A-Z]{5}$/u.test(code)) {
-    return failure(
-      'MODULE_PROVIDER_FAILURE',
-      'module provider rejected the operation',
-      entity.entityId,
-    );
-  }
-  return failure(
-    'MODULE_PROVIDER_FAILURE',
-    'module provider rejected the operation',
+  const registered = registeredProviderFailure(
+    error,
     entity.entityId,
+    providerErrorMappings,
   );
+  if (registered) {
+    return registered;
+  }
+  return unregisteredProviderFailure(error, entity.entityId);
 }
 
 function canonicalUniqueSubject(
@@ -3312,7 +3357,7 @@ function canonicalUniqueSubject(
 
 function providerErrorProperty(
   error: unknown,
-  property: 'code' | 'constraint',
+  property: 'code' | 'column' | 'constraint' | 'detail' | 'message' | 'table',
 ): string | null {
   if (typeof error !== 'object' || error === null) return null;
   const value = (error as Record<string, unknown>)[property];
@@ -3322,21 +3367,134 @@ function providerErrorProperty(
 function providerBoundaryFailure(
   error: unknown,
   subjectId: string,
+  providerErrorMappings: readonly ModuleProviderErrorMapping[],
 ): ModuleRuntimeInterpreterError | SharedListContractError {
-  return error instanceof ModuleRuntimeInterpreterError ||
+  if (
+    error instanceof ModuleRuntimeInterpreterError ||
     error instanceof SharedListContractError
-    ? error
-    : failure(
-        'MODULE_PROVIDER_FAILURE',
-        'module provider rejected the operation',
-        subjectId,
-      );
+  ) {
+    return error;
+  }
+  return (
+    registeredProviderFailure(error, subjectId, providerErrorMappings) ??
+    unregisteredProviderFailure(error, subjectId)
+  );
 }
 
 function failure(
   code: string,
   message: string,
   subjectId: string | null = null,
+  details: Readonly<Record<string, string>> = Object.freeze({}),
+  providerMetadata: ModuleProviderErrorMetadata | null = null,
 ): ModuleRuntimeInterpreterError {
-  return new ModuleRuntimeInterpreterError(code, message, subjectId);
+  return new ModuleRuntimeInterpreterError(
+    code,
+    message,
+    subjectId,
+    details,
+    providerMetadata,
+  );
+}
+
+function registeredProviderFailure(
+  error: unknown,
+  subjectId: string,
+  providerErrorMappings: readonly ModuleProviderErrorMapping[],
+): ModuleRuntimeInterpreterError | null {
+  const metadata = providerErrorMetadata(error);
+  const providerMessage = providerErrorProperty(error, 'message');
+  if (!metadata || !providerMessage) return null;
+  const registration = providerErrorMappings.find(
+    (candidate) =>
+      candidate.sqlstate === metadata.sqlstate &&
+      candidate.providerMessage === providerMessage,
+  );
+  if (!registration) return null;
+  let mapped: ModuleProviderErrorMappingResult | null;
+  try {
+    mapped = registration.translate(
+      Object.freeze({
+        detail: providerErrorProperty(error, 'detail'),
+        metadata,
+        providerMessage,
+        subjectId,
+      }),
+    );
+  } catch {
+    return failure(
+      'MODULE_PROVIDER_ERROR_MAPPING_INVALID',
+      'registered module provider error mapping failed',
+      subjectId,
+    );
+  }
+  if (mapped === null) return null;
+  if (
+    !/^[A-Z][A-Z0-9_]{1,79}$/u.test(mapped.code) ||
+    mapped.message.trim() === '' ||
+    (mapped.subjectId !== null && mapped.subjectId.trim() === '') ||
+    Object.values(mapped.details).some((value) => typeof value !== 'string')
+  ) {
+    return failure(
+      'MODULE_PROVIDER_ERROR_MAPPING_INVALID',
+      'registered module provider error mapping returned an invalid result',
+      subjectId,
+    );
+  }
+  return failure(mapped.code, mapped.message, mapped.subjectId, mapped.details);
+}
+
+function unregisteredProviderFailure(
+  error: unknown,
+  subjectId: string,
+): ModuleRuntimeInterpreterError {
+  const metadata = providerErrorMetadata(error);
+  return failure(
+    'MODULE_PROVIDER_FAILURE',
+    metadata
+      ? `module provider rejected the operation (sqlstate=${metadata.sqlstate} relation=${metadata.relationName ?? 'unknown'} constraint=${metadata.constraintName ?? 'unknown'} column=${metadata.columnName ?? 'unknown'})`
+      : 'module provider rejected the operation',
+    subjectId,
+    Object.freeze({}),
+    metadata,
+  );
+}
+
+function providerErrorMetadata(
+  error: unknown,
+): ModuleProviderErrorMetadata | null {
+  const sqlstate = providerErrorProperty(error, 'code');
+  if (!sqlstate || !/^[0-9A-Z]{5}$/u.test(sqlstate)) return null;
+  return Object.freeze({
+    columnName: providerErrorProperty(error, 'column'),
+    constraintName: providerErrorProperty(error, 'constraint'),
+    relationName: providerErrorProperty(error, 'table'),
+    sqlstate,
+  });
+}
+
+function validatedProviderErrorMappings(
+  mappings: readonly ModuleProviderErrorMapping[],
+): readonly ModuleProviderErrorMapping[] {
+  const keys = new Set<string>();
+  return Object.freeze(
+    mappings.map((mapping) => {
+      if (
+        !/^[0-9A-Z]{5}$/u.test(mapping.sqlstate) ||
+        mapping.providerMessage.trim() === ''
+      ) {
+        throw new TypeError('module provider error mapping is invalid');
+      }
+      const key = `${mapping.sqlstate}\0${mapping.providerMessage}`;
+      if (keys.has(key)) {
+        throw new TypeError('module provider error mapping is duplicated');
+      }
+      keys.add(key);
+      return Object.freeze({
+        providerMessage: mapping.providerMessage,
+        sqlstate: mapping.sqlstate,
+        translate: mapping.translate,
+      });
+    }),
+  );
 }

@@ -45,6 +45,7 @@ import {
   parseCompiledApplication,
   type ComposedApplicationRuntime,
 } from '../../packages/postgres-provider/src/composed-application-runtime.js';
+import { INVENTORY_PROVIDER_ERROR_MAPPINGS } from '../../packages/postgres-provider/src/inventory-provider-error-mappings.js';
 import { PostgresReleaseActivationService } from '../../packages/postgres-provider/src/release-activation-service.js';
 import { PostgresReleaseApprovalService } from '../../packages/postgres-provider/src/release-approval-service.js';
 import { PostgresImmutableReleaseRepository } from '../../packages/postgres-provider/src/release-repository.js';
@@ -2639,6 +2640,7 @@ function createRuntime(
     databaseUrl,
     inventoryScopeProvisioning: COMPOSED_APPLICATION_INVENTORY_SCOPE,
     migrationsDirectory,
+    providerErrorMappings: INVENTORY_PROVIDER_ERROR_MAPPINGS,
     ...(releaseSelection ? { releaseSelection } : {}),
     tenantSlug,
   });
