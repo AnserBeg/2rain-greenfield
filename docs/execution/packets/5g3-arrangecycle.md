@@ -97,12 +97,20 @@ not a cycle: the entity ancestry remains path-scoped and correctly permits a
 diamond.
 
 Recursive tokens now use a domain-separated SHA-256 digest of the parent token
-and the compiled relation ID. Each recursion therefore carries the entire
-relation path deterministically. The mechanism is generic, contains no module,
-entity, or relation literal, and does not use a counter, time, random data, or
-execution order. It creates separate prerequisite records rather than pooling
-or deduplicating them. The existing cycle ancestry and its `finally` cleanup
-are unchanged.
+and the compiled relation ID. For a given parent token, this child-path
+transform is pure and process-independent, and each recursion therefore carries
+the entire relation path. The complete token mechanism is still rooted in
+`#token`, whose incremented ordinal makes root probe tokens order-dependent. The
+path transform introduces no counter, time, random data, or execution-order
+input of its own. It is generic, contains no module, entity, or relation
+literal, and creates separate prerequisite records rather than pooling or
+deduplicating them.
+
+Cycle detection carries an immutable entity-ancestry array per recursive
+branch. Each child receives a copied array extended with its parent entity, so
+sibling branches share no mutable path state and no cleanup is required. The
+executor's separate `finally` archives created records; it is not cycle-path
+cleanup. The existing cycle guard itself is unchanged.
 
 A synthetic four-entity fixture forms `root -> left/right -> shared` with all
 four relation inputs required. It executes the real PostgreSQL verification
@@ -113,6 +121,25 @@ during the second branch. With the path token, every scenario executes and the
 persisted pairs are distinct. A future implementation that silently pools the
 shared prerequisite would therefore fail the control even though verification
 itself did not throw.
+
+## Known limitation owed with output-protocol stabilization
+
+Operation idempotency keys derive from the ordinal-based `#token`. That token is
+stable across retries of the same release when verification follows the same
+scenario order. Arranged record identity is now path-derived and changed in
+this repair. A database retaining receipts from a partially failed pre-fix
+verification and then retried after this change would therefore present the
+same idempotency key with a different canonical input digest. The trust service
+would refuse it with `SEMANTIC_OPERATION_IDEMPOTENCY_CONFLICT`; it would not
+silently admit the changed input.
+
+This retry limitation is immaterial at the current stage on the same premise as
+ADR-0039 §1: there is no production deployment and test databases are
+ephemeral, so the required persisted pre-fix state cannot exist. That premise
+ends when the compiler output protocol leaves experimental. The stabilization
+work already owed by ADR-0039 §4 must therefore include a coordinated
+arranged-record identity/idempotency epoch for any future identity change, and
+must avoid collision with arranged rows persisted under earlier epochs.
 
 ## Gate evidence
 
