@@ -86,7 +86,7 @@ test('v0, v1, and v2 readers retain their exact normalized bytes', () => {
       'v0-experimental',
       {
         digest:
-          '00444e2e40aedea745ea23cc89ac5f2f01f9234dcae2473481b39134f3f036ba',
+          '6eb27fb2b977d50288e3f141b16330c63e381ec05d638295d406ba7a6992af27',
         profile: 'northstar.normalization/v0-experimental',
       },
     ],
@@ -94,7 +94,7 @@ test('v0, v1, and v2 readers retain their exact normalized bytes', () => {
       'v1',
       {
         digest:
-          '7126210813d43a1b8097f8500c8d3ece3ef5966dfdbe27bbfe988f035bcd0231',
+          '5c77f2c3b273e4704c17118c65eb0a1576316c21ac1c67d958ec455acb5c7d58',
         profile: 'northstar.normalization/v1',
       },
     ],
@@ -102,7 +102,7 @@ test('v0, v1, and v2 readers retain their exact normalized bytes', () => {
       'v2',
       {
         digest:
-          '538ed9deca0fed3f2c2340ce05ce65213fbacb02f153544b1d58cc9844d5048a',
+          'dbabd07e6e946eabbb93136cbbd48d46ed35dd646a9b4c83440c32287f5a8cb8',
         profile: 'northstar.normalization/v2',
       },
     ],
@@ -529,7 +529,7 @@ test('representative token counts are pinned telemetry, not a correctness gate',
   };
   assert.deepEqual(telemetry, {
     tokenizer: 'js-tiktoken@1.0.21/cl100k_base',
-    authoredTokens: 3_651,
+    authoredTokens: 3_661,
     normalizedTokens: 2_567,
   });
 });

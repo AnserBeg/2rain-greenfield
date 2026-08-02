@@ -996,6 +996,69 @@ test('parent scope, assertion diagnostics, and reference locality are closed', (
   );
 });
 
+for (const cardinality of ['oneToOne', 'oneToMany']) {
+  test(`relation cardinality ${cardinality} is declined before lowering`, () => {
+    const declined = structuredClone(fixture()) as unknown as {
+      relations: Array<{
+        cardinality: string;
+        ownership: string;
+      }>;
+    };
+    declined.relations[0]!.cardinality = cardinality;
+    declined.relations[0]!.ownership = 'reference';
+    expectDiagnostic(
+      () => normalizeApplicationPackage(declined),
+      'CANON_RELATION_CARDINALITY_UNSUPPORTED',
+      {
+        acceptedAlternative:
+          'use cardinality manyToOne until another cardinality has executing semantics',
+        objectId: 'northstar.inventory:relation.item_alias_parent',
+        path: '$.relations[0].cardinality',
+      },
+    );
+  });
+}
+
+test('relation join eligibility none is declined before lowering', () => {
+  const declinedJoin = structuredClone(fixture()) as unknown as {
+    relations: Array<{
+      joinEligibility?: string;
+      ownership: string;
+    }>;
+  };
+  declinedJoin.relations[0]!.joinEligibility = 'none';
+  declinedJoin.relations[0]!.ownership = 'reference';
+  expectDiagnostic(
+    () => normalizeApplicationPackage(declinedJoin),
+    'CANON_RELATION_JOIN_ELIGIBILITY_UNSUPPORTED',
+    {
+      acceptedAlternative:
+        'declare joinEligibility query; omission and none have no executing semantics',
+      objectId: 'northstar.inventory:relation.item_alias_parent',
+      path: '$.relations[0].joinEligibility',
+    },
+  );
+});
+
+test('relation join eligibility cannot be omitted into a silent default', () => {
+  const omittedJoin = structuredClone(fixture()) as unknown as {
+    relations: Array<{
+      joinEligibility?: string;
+      ownership: string;
+    }>;
+  };
+  delete omittedJoin.relations[0]!.joinEligibility;
+  omittedJoin.relations[0]!.ownership = 'reference';
+  expectDiagnostic(
+    () => normalizeApplicationPackage(omittedJoin),
+    'CANON_RELATION_JOIN_ELIGIBILITY_UNSUPPORTED',
+    {
+      objectId: 'northstar.inventory:relation.item_alias_parent',
+      path: '$.relations[0].joinEligibility',
+    },
+  );
+});
+
 test('state storage is derived and authored state-field authority rejects', () => {
   const authored = fixture();
   const normalized = normalizeApplicationPackage(authored);

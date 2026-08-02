@@ -326,8 +326,6 @@ export function normalizeApplicationPackage(
     }),
     relations: authored.relations.map((entry) => ({
       ...entry,
-      joinEligibility:
-        entry.joinEligibility ?? IMMUTABLE_DEFAULTS_V0.relationJoinEligibility,
       lifecycle: entry.lifecycle ?? IMMUTABLE_DEFAULTS_V0.lifecycle,
       required: entry.required ?? IMMUTABLE_DEFAULTS_V0.relationRequired,
     })),
@@ -463,7 +461,6 @@ export function canonicalAuthoredProjection(
       if (object.searchable === false) delete object.searchable;
     }
     if (object.kind === 'relationDefinition') {
-      if (object.joinEligibility === 'none') delete object.joinEligibility;
       if (object.required === false) delete object.required;
     }
     if (object.kind === 'stateDefinition' && object.terminal === false) {
@@ -534,20 +531,25 @@ function schemaError(error: ZodError, input: unknown): CanonicalModelError {
       .join('')}`;
     const pathParts = issue.path.map(String);
     const finalPart = pathParts.at(-1) ?? '';
+    const relationField = pathParts.includes('relations');
     const code =
       issue.message === MIXED_NODE_VERSION_ISSUE
         ? 'CANON_VERSION_MIXED'
-        : finalPart === 'kind'
-          ? 'CANON_KIND_UNSUPPORTED'
-          : finalPart === 'schemaVersion' || finalPart.endsWith('Version')
-            ? 'CANON_VERSION_UNSUPPORTED'
-            : finalPart === 'archetype'
-              ? 'CANON_SURFACE_ARCHETYPE_UNSUPPORTED'
-              : finalPart === 'slot'
-                ? 'CANON_SURFACE_SLOT_UNSUPPORTED'
-                : pathParts.includes('statusRoles')
-                  ? 'CANON_SURFACE_STATUS_ROLE_UNSUPPORTED'
-                  : 'CANON_SCHEMA_INVALID';
+        : relationField && finalPart === 'cardinality'
+          ? 'CANON_RELATION_CARDINALITY_UNSUPPORTED'
+          : relationField && finalPart === 'joinEligibility'
+            ? 'CANON_RELATION_JOIN_ELIGIBILITY_UNSUPPORTED'
+            : finalPart === 'kind'
+              ? 'CANON_KIND_UNSUPPORTED'
+              : finalPart === 'schemaVersion' || finalPart.endsWith('Version')
+                ? 'CANON_VERSION_UNSUPPORTED'
+                : finalPart === 'archetype'
+                  ? 'CANON_SURFACE_ARCHETYPE_UNSUPPORTED'
+                  : finalPart === 'slot'
+                    ? 'CANON_SURFACE_SLOT_UNSUPPORTED'
+                    : pathParts.includes('statusRoles')
+                      ? 'CANON_SURFACE_STATUS_ROLE_UNSUPPORTED'
+                      : 'CANON_SCHEMA_INVALID';
     return diagnostic(
       code,
       path,
@@ -2225,6 +2227,10 @@ function namespaceOf(id: string): string {
 function acceptedAlternativeFor(code: string): string {
   const alternatives: Record<string, string> = {
     CANON_KIND_UNSUPPORTED: 'use a documented kind discriminator',
+    CANON_RELATION_CARDINALITY_UNSUPPORTED:
+      'use cardinality manyToOne until another cardinality has executing semantics',
+    CANON_RELATION_JOIN_ELIGIBILITY_UNSUPPORTED:
+      'declare joinEligibility query; omission and none have no executing semantics',
     CANON_SCHEMA_INVALID:
       'use the exported authored schema and canonical example',
     CANON_SURFACE_ARCHETYPE_UNSUPPORTED:

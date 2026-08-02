@@ -580,7 +580,7 @@ const authoredV3FieldDefinition = normalizedV3FieldDefinition.extend({
 
 const normalizedRelationDefinition = z.strictObject({
   archiveBehavior: z.enum(['restrict', 'retainReference']),
-  cardinality: z.enum(['oneToOne', 'manyToOne', 'oneToMany']),
+  cardinality: z.literal('manyToOne'),
   foreignKeyActions: z
     .strictObject({
       onDelete: z.literal('restrict'),
@@ -588,7 +588,7 @@ const normalizedRelationDefinition = z.strictObject({
       schemaVersion: nodeVersion,
     })
     .optional(),
-  joinEligibility: z.enum(['none', 'query']),
+  joinEligibility: z.literal('query'),
   kind: z.literal('relationDefinition'),
   lifecycle: z.enum(['active', 'retired']),
   orderKey: boundedOrderKey,
@@ -600,7 +600,6 @@ const normalizedRelationDefinition = z.strictObject({
   targetEntity: CanonicalReferenceSchema,
 });
 const authoredRelationDefinition = normalizedRelationDefinition.extend({
-  joinEligibility: z.enum(['none', 'query']).optional(),
   lifecycle: z.enum(['active', 'retired']).optional(),
   required: z.boolean().optional(),
 });
