@@ -1,6 +1,7 @@
 # 5g3-langnarrow — relation declarations are honoured or refused
 
-Status: implementation candidate; focused gates green, full matrix pending
+Status: evidence-ready implementation candidate; full matrix green, Critical
+review pending
 
 Tier: Critical
 
@@ -114,4 +115,11 @@ semantics and its own negative controls.
 - `corepack pnpm test:integration` — PASS, 68/68.
 - `corepack pnpm test:postgres` — PASS, 147/147 in 471,486.9 ms.
 - Real application release build and `--check` — PASS, zero lineage movement.
-- Full repository matrix — pending candidate freeze and the exclusive slot.
+- The first matrix admission attempt terminated with
+  `COMPILE_BUDGET_INDETERMINATE`: observed CPU idle was 86.4%, below the
+  required 90.0%. This was not treated as a failure or retried while another
+  test process was active.
+- The quiet retry observed 96.7% CPU idle, 1,785.7 ms CPU and 1,377.7 ms wall
+  time for the 5,000 ms compile budget, then completed the full repository
+  matrix with
+  `FULL_MATRIX_PASS_SHA=1fc58e86643adc23233593c25270b0791ab303c4`.
