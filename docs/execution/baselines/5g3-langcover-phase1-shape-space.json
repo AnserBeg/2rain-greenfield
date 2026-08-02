@@ -1,0 +1,365 @@
+{
+  "artifactVersion": "northstar.langcover-derived-shape-space/v1",
+  "constructs": {
+    "authoredRelationDefinition": {
+      "base": {
+        "kind": "reference",
+        "name": "normalizedRelationDefinition"
+      },
+      "fields": {
+        "joinEligibility": {
+          "kind": "optional",
+          "schema": {
+            "kind": "enum",
+            "values": {
+              "kind": "set",
+              "values": [
+                {
+                  "kind": "literal",
+                  "value": "none"
+                },
+                {
+                  "kind": "literal",
+                  "value": "query"
+                }
+              ]
+            }
+          }
+        },
+        "lifecycle": {
+          "kind": "optional",
+          "schema": {
+            "kind": "enum",
+            "values": {
+              "kind": "set",
+              "values": [
+                {
+                  "kind": "literal",
+                  "value": "active"
+                },
+                {
+                  "kind": "literal",
+                  "value": "retired"
+                }
+              ]
+            }
+          }
+        },
+        "required": {
+          "kind": "optional",
+          "schema": {
+            "kind": "boolean"
+          }
+        }
+      },
+      "kind": "extend"
+    },
+    "normalizedRelationDefinition": {
+      "kind": "strictObject",
+      "fields": {
+        "archiveBehavior": {
+          "kind": "enum",
+          "values": {
+            "kind": "set",
+            "values": [
+              {
+                "kind": "literal",
+                "value": "restrict"
+              },
+              {
+                "kind": "literal",
+                "value": "retainReference"
+              }
+            ]
+          }
+        },
+        "cardinality": {
+          "kind": "enum",
+          "values": {
+            "kind": "set",
+            "values": [
+              {
+                "kind": "literal",
+                "value": "manyToOne"
+              },
+              {
+                "kind": "literal",
+                "value": "oneToMany"
+              },
+              {
+                "kind": "literal",
+                "value": "oneToOne"
+              }
+            ]
+          }
+        },
+        "foreignKeyActions": {
+          "kind": "optional",
+          "schema": {
+            "kind": "strictObject",
+            "fields": {
+              "onDelete": {
+                "kind": "literalSchema",
+                "value": "restrict"
+              },
+              "onUpdate": {
+                "kind": "literalSchema",
+                "value": "restrict"
+              },
+              "schemaVersion": {
+                "kind": "reference",
+                "name": "nodeVersion"
+              }
+            }
+          }
+        },
+        "joinEligibility": {
+          "kind": "enum",
+          "values": {
+            "kind": "set",
+            "values": [
+              {
+                "kind": "literal",
+                "value": "none"
+              },
+              {
+                "kind": "literal",
+                "value": "query"
+              }
+            ]
+          }
+        },
+        "kind": {
+          "kind": "literalSchema",
+          "value": "relationDefinition"
+        },
+        "lifecycle": {
+          "kind": "enum",
+          "values": {
+            "kind": "set",
+            "values": [
+              {
+                "kind": "literal",
+                "value": "active"
+              },
+              {
+                "kind": "literal",
+                "value": "retired"
+              }
+            ]
+          }
+        },
+        "orderKey": {
+          "kind": "reference",
+          "name": "boundedOrderKey"
+        },
+        "ownership": {
+          "kind": "enum",
+          "values": {
+            "kind": "set",
+            "values": [
+              {
+                "kind": "literal",
+                "value": "parentScopedChild"
+              },
+              {
+                "kind": "literal",
+                "value": "reference"
+              }
+            ]
+          }
+        },
+        "relationId": {
+          "kind": "reference",
+          "name": "CanonicalIdSchema"
+        },
+        "required": {
+          "kind": "boolean"
+        },
+        "schemaVersion": {
+          "kind": "reference",
+          "name": "nodeVersion"
+        },
+        "sourceEntity": {
+          "kind": "reference",
+          "name": "CanonicalReferenceSchema"
+        },
+        "targetEntity": {
+          "kind": "reference",
+          "name": "CanonicalReferenceSchema"
+        }
+      }
+    },
+    "operationEffect": {
+      "discriminator": "kind",
+      "kind": "discriminatedUnion",
+      "variants": {
+        "kind": "set",
+        "values": [
+          {
+            "kind": "strictObject",
+            "fields": {
+              "entity": {
+                "kind": "reference",
+                "name": "CanonicalReferenceSchema"
+              },
+              "kind": {
+                "kind": "literalSchema",
+                "value": "archiveRecordEffect"
+              },
+              "schemaVersion": {
+                "kind": "reference",
+                "name": "nodeVersion"
+              }
+            }
+          },
+          {
+            "kind": "strictObject",
+            "fields": {
+              "entity": {
+                "kind": "reference",
+                "name": "CanonicalReferenceSchema"
+              },
+              "kind": {
+                "kind": "literalSchema",
+                "value": "createRecordEffect"
+              },
+              "schemaVersion": {
+                "kind": "reference",
+                "name": "nodeVersion"
+              }
+            }
+          },
+          {
+            "kind": "strictObject",
+            "fields": {
+              "entity": {
+                "kind": "reference",
+                "name": "CanonicalReferenceSchema"
+              },
+              "kind": {
+                "kind": "literalSchema",
+                "value": "deleteRecordEffect"
+              },
+              "schemaVersion": {
+                "kind": "reference",
+                "name": "nodeVersion"
+              }
+            }
+          },
+          {
+            "kind": "strictObject",
+            "fields": {
+              "entity": {
+                "kind": "reference",
+                "name": "CanonicalReferenceSchema"
+              },
+              "kind": {
+                "kind": "literalSchema",
+                "value": "destroyRecordEffect"
+              },
+              "schemaVersion": {
+                "kind": "reference",
+                "name": "nodeVersion"
+              }
+            }
+          },
+          {
+            "kind": "strictObject",
+            "fields": {
+              "entity": {
+                "kind": "reference",
+                "name": "CanonicalReferenceSchema"
+              },
+              "kind": {
+                "kind": "literalSchema",
+                "value": "purgeRecordEffect"
+              },
+              "schemaVersion": {
+                "kind": "reference",
+                "name": "nodeVersion"
+              }
+            }
+          },
+          {
+            "kind": "strictObject",
+            "fields": {
+              "capability": {
+                "kind": "reference",
+                "name": "CanonicalReferenceSchema"
+              },
+              "kind": {
+                "kind": "literalSchema",
+                "value": "registeredCapabilityEffect"
+              },
+              "schemaVersion": {
+                "kind": "reference",
+                "name": "nodeVersion"
+              }
+            }
+          },
+          {
+            "kind": "strictObject",
+            "fields": {
+              "entity": {
+                "kind": "reference",
+                "name": "CanonicalReferenceSchema"
+              },
+              "kind": {
+                "kind": "literalSchema",
+                "value": "restoreRecordEffect"
+              },
+              "schemaVersion": {
+                "kind": "reference",
+                "name": "nodeVersion"
+              }
+            }
+          },
+          {
+            "kind": "strictObject",
+            "fields": {
+              "kind": {
+                "kind": "literalSchema",
+                "value": "transitionStateEffect"
+              },
+              "schemaVersion": {
+                "kind": "reference",
+                "name": "nodeVersion"
+              },
+              "transition": {
+                "kind": "reference",
+                "name": "CanonicalReferenceSchema"
+              }
+            }
+          },
+          {
+            "kind": "strictObject",
+            "fields": {
+              "entity": {
+                "kind": "reference",
+                "name": "CanonicalReferenceSchema"
+              },
+              "kind": {
+                "kind": "literalSchema",
+                "value": "updateRecordEffect"
+              },
+              "schemaVersion": {
+                "kind": "reference",
+                "name": "nodeVersion"
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "derivation": {
+    "method": "typescript-ast/v1",
+    "rootDeclarations": [
+      "authoredRelationDefinition",
+      "normalizedRelationDefinition",
+      "operationEffect"
+    ],
+    "sourcePath": "packages/canonical-model/src/schemas.ts"
+  }
+}
