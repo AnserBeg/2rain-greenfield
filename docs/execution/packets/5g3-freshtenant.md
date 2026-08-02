@@ -119,7 +119,12 @@ existence more strongly than its shape constraint. Its fourth finding was
 dismissed: ADR-0020 defines complete semantic verification as the exact,
 disjoint executed-plus-structural-derivation partition; this packet neither
 creates nor reclassifies a derivation. Any executable fix invalidates the first
-matrix and review, so both are being rerun on the new frozen candidate.
+matrix and review. The corrected executable candidate
+`5b2900874bad6e98b7b15028bb6b29b47604a599` passed the full repository matrix
+with
+`FULL_MATRIX_PASS_SHA=5b2900874bad6e98b7b15028bb6b29b47604a599`; its unchanged two-tenant parent
+completed in 53,531.2 ms during that run. Critical review round 2 is performed
+against the final narrative-only descendant of that executable tree.
 
 ## Artifact events
 
