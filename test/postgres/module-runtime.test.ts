@@ -407,6 +407,150 @@ test('release verification refuses a required relation cycle by name', async () 
   );
 });
 
+test('an unset optional restrict relation archives, restores, and verifies through the real operation path', async () => {
+  await withOptionalRestrictRuntime('unset', async (runtime) => {
+    assert.deepEqual(runtime.foreignKey, {
+      deleteAction: 'r',
+      deferrable: false,
+      updateAction: 'r',
+      validated: true,
+    });
+
+    await assert.rejects(
+      operation(
+        runtime.operations,
+        runtime.view,
+        'master_create',
+        {
+          recordId: randomUUID(),
+          relations: { [runtime.relationId]: randomUUID() },
+          values: masterValues(runtime.namespace, 'Dangling target'),
+        },
+        runtime.namespace,
+      ),
+      (error: unknown) =>
+        assertModuleError(error, 'MODULE_RELATION_TARGET_NOT_FOUND', null),
+    );
+
+    const recordId = randomUUID();
+    const created = await operation(
+      runtime.operations,
+      runtime.view,
+      'master_create',
+      {
+        recordId,
+        values: masterValues(runtime.namespace, 'Unset relation'),
+      },
+      runtime.namespace,
+    );
+    assert.equal(created.readBack?.recordId, recordId);
+    assert.equal(await runtime.readRelation(recordId), null);
+
+    const archived = await operation(
+      runtime.operations,
+      runtime.view,
+      'master_archive',
+      { expectedRevision: 1, recordId },
+      runtime.namespace,
+    );
+    assert.equal(archived.readBack?.archived, true);
+
+    const restored = await operation(
+      runtime.operations,
+      runtime.view,
+      'master_restore',
+      { expectedRevision: 2, recordId },
+      runtime.namespace,
+    );
+    assert.equal(restored.readBack?.archived, false);
+    assert.equal(await runtime.readRelation(recordId), null);
+
+    const recoveryScenario = runtime.plan.scenarios.find(
+      (scenario) =>
+        scenario.kind === 'declaredEvidence' &&
+        scenario.entityId === `${runtime.namespace}:entity.master` &&
+        scenario.evidenceKind === 'recovery',
+    );
+    assert.ok(recoveryScenario);
+    const resultSet = await new PostgresReleaseVerificationService(
+      runtime.runtimePool,
+    ).executeSemanticCandidateWithExecutor(
+      runtime.context,
+      {
+        compiledRelease: runtime.compiled,
+        evidenceId: runtime.evidenceId,
+        releaseId: runtime.releaseId,
+      },
+      runtime.interpreter,
+    );
+    assert.equal(
+      resultSet.results.some(
+        (result) => result.scenarioId === recoveryScenario.scenarioId,
+      ),
+      true,
+      'the generic recovery scenario must execute with the optional relation unset',
+    );
+  });
+});
+
+test('restore still refuses when an optional restrict relation names an archived target', async () => {
+  await withOptionalRestrictRuntime('archived-target', async (runtime) => {
+    const targetId = randomUUID();
+    await operation(
+      runtime.operations,
+      runtime.view,
+      'master_create',
+      {
+        recordId: targetId,
+        values: masterValues(runtime.namespace, 'Archived target'),
+      },
+      runtime.namespace,
+    );
+    const sourceId = randomUUID();
+    await operation(
+      runtime.operations,
+      runtime.view,
+      'master_create',
+      {
+        recordId: sourceId,
+        relations: { [runtime.relationId]: targetId },
+        values: masterValues(runtime.namespace, 'Archived source'),
+      },
+      runtime.namespace,
+    );
+    await operation(
+      runtime.operations,
+      runtime.view,
+      'master_archive',
+      { expectedRevision: 1, recordId: sourceId },
+      runtime.namespace,
+    );
+    await operation(
+      runtime.operations,
+      runtime.view,
+      'master_archive',
+      { expectedRevision: 1, recordId: targetId },
+      runtime.namespace,
+    );
+
+    await assert.rejects(
+      operation(
+        runtime.operations,
+        runtime.view,
+        'master_restore',
+        { expectedRevision: 2, recordId: sourceId },
+        runtime.namespace,
+      ),
+      (error: unknown) =>
+        assertModuleError(
+          error,
+          'MODULE_RELATION_VIOLATION',
+          runtime.relationId,
+        ),
+    );
+  });
+});
+
 test('definition-only module is served generically through Q0/O0, trust, RLS, and pinned coexistence', async (context) => {
   const empty = mustCompile(moduleInput(emptyDefinition(ordinaryModuleV1())));
   const v1 = mustCompile(
@@ -3773,6 +3917,206 @@ function assertNoPhysicalDetails(value: unknown): void {
   assert.doesNotMatch(serialized, /north_star_module|nsm_[ctik]_|storageClass/);
 }
 
+type OptionalRestrictRuntime = Readonly<{
+  compiled: CompileSuccess;
+  context: TrustedRequestContext;
+  evidenceId: MintedUuid;
+  foreignKey: Readonly<{
+    deleteAction: string;
+    deferrable: boolean;
+    updateAction: string;
+    validated: boolean;
+  }>;
+  interpreter: PostgresModuleRuntimeInterpreter;
+  namespace: string;
+  operations: SemanticOperationGateway;
+  plan: VerificationPlanPayloadV1;
+  readRelation: (recordId: string) => Promise<string | null>;
+  relationId: string;
+  releaseId: MintedUuid;
+  runtimePool: pg.Pool;
+  view: RequestRuntimeView;
+}>;
+
+async function withOptionalRestrictRuntime(
+  probe: 'archived-target' | 'unset',
+  run: (runtime: OptionalRestrictRuntime) => Promise<void>,
+): Promise<void> {
+  const namespace =
+    probe === 'unset' ? 'northstar.restorenull' : 'northstar.restorearchived';
+  const definition = selfRelationDefinition(namespace, false, 'restrict');
+  const emptyDefinition_ = emptyDefinition(definition);
+  const empty = mustCompile(moduleInput(emptyDefinition_));
+  const compiled = mustCompile(
+    moduleInput(definition, expectedActiveReleaseFrom(empty)),
+  );
+  const plan = releaseVerificationBinding(compiled).plan;
+  const relationId = `${namespace}:relation.master_supersedes`;
+  const storage = compiledProjectionPayload<StorageTargetPayloadV1>(
+    compiled,
+    PROJECTION_FAMILY_IDS.storageTarget,
+  );
+  const relation = storage.relations.find(
+    (candidate) => candidate.relationId === relationId,
+  );
+  assert.ok(relation);
+  const entity = storage.entities.find(
+    (candidate) => candidate.entityId === `${namespace}:entity.master`,
+  );
+  assert.ok(entity);
+
+  const tenant =
+    probe === 'unset'
+      ? 'e4000000-0000-4000-8000-000000000001'
+      : 'f1000000-0000-4000-8000-000000000001';
+  const environment =
+    probe === 'unset'
+      ? 'e5000000-0000-4000-8000-000000000002'
+      : 'f2000000-0000-4000-8000-000000000002';
+  const principal =
+    probe === 'unset'
+      ? 'e6000000-0000-4000-8000-000000000003'
+      : 'f3000000-0000-4000-8000-000000000003';
+  await withEphemeralPostgres(
+    probe === 'unset'
+      ? 'optional-restrict-null-restore'
+      : 'optional-restrict-archived-target',
+    async ({ connection, pool }) => {
+      await migrateAndSeed(pool, [[tenant, environment, probe]]);
+      const runtimePool = new pg.Pool({
+        ...connection,
+        max: 3,
+        user: 'north_star_runtime',
+      });
+      const materializerPool = new pg.Pool({
+        ...connection,
+        max: 2,
+        user: 'north_star_module_materializer',
+      });
+      const modulePool = new pg.Pool({
+        ...connection,
+        max: 1,
+        user: 'north_star_module_runtime',
+      });
+      try {
+        const context = (
+          await contextsFor([['restore', tenant, environment, principal]])
+        ).restore!;
+        const releases = await persistSequence(runtimePool, context, [
+          [empty, emptyDefinition_],
+          [compiled, definition],
+        ]);
+        await setPointer(pool, tenant, environment, releases[0]!);
+        await grantExecutorAuthority(pool, [[tenant, principal]]);
+        const materializer = new PostgresModuleStorageMaterializer(
+          materializerPool,
+          modulePool,
+        );
+        await prepare(materializer, context, principal, releases[1]!);
+        const staged = await pool.query<{
+          verification_evidence_id: MintedUuid;
+        }>(
+          `SELECT verification_evidence_id
+             FROM platform.tenant_releases
+            WHERE tenant_id = $1
+              AND environment_id = $2
+              AND release_id = $3`,
+          [tenant, environment, releases[1]],
+        );
+        const evidenceId = staged.rows[0]?.verification_evidence_id;
+        assert.ok(evidenceId);
+        const foreignKeys = await pool.query<{
+          confdeltype: string;
+          condeferrable: boolean;
+          confupdtype: string;
+          convalidated: boolean;
+        }>(
+          `SELECT constraint_record.confdeltype,
+                  constraint_record.condeferrable,
+                  constraint_record.confupdtype,
+                  constraint_record.convalidated
+             FROM pg_constraint AS constraint_record
+             JOIN pg_class AS relation_record
+               ON relation_record.oid = constraint_record.conrelid
+             JOIN pg_namespace AS namespace_record
+               ON namespace_record.oid = relation_record.relnamespace
+            WHERE namespace_record.nspname = 'north_star_module'
+              AND relation_record.relname = $1
+              AND constraint_record.conname = $2
+              AND constraint_record.contype = 'f'`,
+          [entity.physicalTableName, relation.foreignKey.physicalName],
+        );
+        assert.equal(foreignKeys.rowCount, 1);
+        const foreignKey = foreignKeys.rows[0]!;
+        const candidateIdentity = identity(tenant, environment, principal);
+        const sourceView = await issuedView(
+          runtimeEntry(runtimePool, { restore: candidateIdentity }),
+          'restore',
+        );
+        const policy = new AllowPolicy();
+        const view = await issuedCandidateView(
+          compiled,
+          releases[1]!,
+          candidateIdentity,
+          sourceView.pointer,
+          policy,
+        );
+        const interpreter = new PostgresModuleRuntimeInterpreter(
+          runtimePool,
+          humanActorIssuer(),
+        );
+        await run(
+          Object.freeze({
+            compiled,
+            context,
+            evidenceId,
+            foreignKey: Object.freeze({
+              deleteAction: foreignKey.confdeltype,
+              deferrable: foreignKey.condeferrable,
+              updateAction: foreignKey.confupdtype,
+              validated: foreignKey.convalidated,
+            }),
+            interpreter,
+            namespace,
+            operations: operationGatewayFor(policy, interpreter),
+            plan,
+            readRelation: async (recordId) => {
+              const result = await pool.query<{ target_id: string | null }>(
+                `SELECT ${quoteTestIdentifier(relation.relationColumn.physicalName)} AS target_id
+                   FROM north_star_module.${quoteTestIdentifier(entity.physicalTableName)}
+                  WHERE ${quoteTestIdentifier(entity.recordIdentity.column)} = $1`,
+                [recordId],
+              );
+              assert.equal(result.rowCount, 1);
+              return result.rows[0]!.target_id;
+            },
+            relationId,
+            releaseId: releases[1]!,
+            runtimePool,
+            view,
+          }),
+        );
+      } finally {
+        await Promise.all([
+          runtimePool.end(),
+          materializerPool.end(),
+          modulePool.end(),
+        ]);
+      }
+    },
+  );
+}
+
+function masterValues(
+  namespace: string,
+  name: string,
+): Readonly<Record<string, string>> {
+  return Object.freeze({
+    [`${namespace}:field.master_name`]: name,
+    [`${namespace}:field.master_number`]: `R-${randomUUID()}`,
+  });
+}
+
 async function executeSelfRelationVerification(required: boolean) {
   const namespace = required
     ? 'northstar.requiredcycle'
@@ -3906,6 +4250,7 @@ async function executeSelfRelationVerification(required: boolean) {
 function selfRelationDefinition(
   namespace: string,
   required: boolean,
+  archiveBehavior: 'restrict' | 'retainReference' = 'retainReference',
 ): Record<string, unknown> {
   const definition = ordinaryModuleV1ForNamespace(namespace) as {
     languageVersion: string;
@@ -3914,7 +4259,7 @@ function selfRelationDefinition(
   const version = definition.languageVersion;
   const entityId = `${namespace}:entity.master`;
   definition.relations.push({
-    archiveBehavior: 'retainReference',
+    archiveBehavior,
     cardinality: 'manyToOne',
     foreignKeyActions: {
       onDelete: 'restrict',

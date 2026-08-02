@@ -370,3 +370,8 @@ How to apply: revoke direct writes, derive the closed document and digest from d
 Date: 2026-08-01
 Why: semantic verification recursively created an optional self-reference, exhausting the call stack in a minimal fixture and filling PostgreSQL storage when a required parent was created before each recursion.
 How to apply: arrange only relation inputs declared required, reject cycles in the required-relation path by name, and execute both an optional self-reference and a required-cycle control. See `docs/execution/packets/5g3-arrangecycle.md`.
+
+## Distinguish an unset relation from an absent target
+Date: 2026-08-02
+Why: restore joined a nullable foreign key directly to its target and interpreted zero rows as an archived target, so an ordinary unset optional relation made an archived record permanently unrestorable while verification's invented parent masked the defect.
+How to apply: observe nullable reference presence first, skip only an actual null, and independently lock and validate every non-null target. Control both the null-success direction and the archived-target refusal. See `docs/execution/packets/5g3-restorenull.md`.
