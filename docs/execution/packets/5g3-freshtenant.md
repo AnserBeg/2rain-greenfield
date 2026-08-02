@@ -1,6 +1,6 @@
 # 5g3-freshtenant — bounded fresh-tenant install
 
-Status: implementation candidate; full matrix and Critical review pending
+Status: matrix-green implementation candidate; Critical review pending
 
 Tier: Critical
 
@@ -80,6 +80,10 @@ install and are stored verbatim beside these stable roots.
 
 No scenario is marked derived by this install-path change. Normal upgrades and
 rollbacks retain their prior per-target verification behavior.
+
+The repository matrix passed on the executable candidate at
+`05cd790ba99b72564d337994b86421161cf0f539` with
+`FULL_MATRIX_PASS_SHA=05cd790ba99b72564d337994b86421161cf0f539`.
 
 ## Artifact events
 
