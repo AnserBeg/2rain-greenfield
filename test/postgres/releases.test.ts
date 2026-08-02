@@ -64,6 +64,7 @@ import {
   PostgresReleaseVerificationService,
   ReleaseVerificationIntegrityError,
   releaseVerificationBinding,
+  verificationReadBackArguments,
   verificationEvidenceIdForCandidate,
 } from '../../packages/postgres-provider/src/release-verification-service.js';
 import {
@@ -261,6 +262,66 @@ test('verification results admit an exact executed-and-derived partition while f
     ],
     status: 'failed',
   });
+});
+
+test('verification read-back scope is limited to the exact legal entity it arranged', () => {
+  const arrangedLegalEntityId = 'a5000000-0000-4000-8000-000000000501';
+  const unarrangedLegalEntityId = 'a5000000-0000-4000-8000-000000000502';
+  const query = {
+    legalEntityScope: {
+      cardinality: 'exactlyOne' as const,
+      kind: 'queryLegalEntityScope' as const,
+      operand: {
+        kind: 'queryParameterReference' as const,
+        parameterId: 'northstar.test:parameter.legal_entity',
+        schemaVersion: 'v4' as const,
+      },
+      schemaVersion: 'v4' as const,
+    },
+    queryId: 'northstar.test:query.scoped_read_back',
+  };
+  const arranged = new Set([arrangedLegalEntityId]);
+
+  assert.deepEqual(
+    verificationReadBackArguments(
+      query,
+      { recordId: 'a6000000-0000-4000-8000-000000000601' },
+      arrangedLegalEntityId,
+      arranged,
+    ),
+    {
+      'northstar.test:parameter.legal_entity': arrangedLegalEntityId,
+      recordId: 'a6000000-0000-4000-8000-000000000601',
+    },
+  );
+  assert.throws(
+    () =>
+      verificationReadBackArguments(
+        query,
+        { recordId: 'a6000000-0000-4000-8000-000000000602' },
+        unarrangedLegalEntityId,
+        arranged,
+      ),
+    (error: unknown) => {
+      assert.ok(error instanceof ReleaseVerificationIntegrityError);
+      assert.equal(error.code, 'VERIFICATION_LEGAL_ENTITY_SCOPE_NOT_ARRANGED');
+      return true;
+    },
+  );
+  assert.throws(
+    () =>
+      verificationReadBackArguments(
+        { queryId: 'northstar.test:query.historical_read_back' },
+        { recordId: 'a6000000-0000-4000-8000-000000000603' },
+        unarrangedLegalEntityId,
+        arranged,
+      ),
+    (error: unknown) => {
+      assert.ok(error instanceof ReleaseVerificationIntegrityError);
+      assert.equal(error.code, 'VERIFICATION_LEGAL_ENTITY_SCOPE_NOT_ARRANGED');
+      return true;
+    },
+  );
 });
 
 test('scope omission verification runs for an empty plan and refuses malformed or missing pinned contracts', async () => {

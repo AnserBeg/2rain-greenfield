@@ -36,6 +36,7 @@ import {
   AuthenticatedRequestRuntimeEntryAdapter,
   CURRENT_POLICY_DECISION_VERSION,
   REQUEST_RUNTIME_PROJECTION_FAMILIES,
+  issueLegalEntityReadScope,
   type CurrentPolicyDecisionRequest,
   type CurrentPolicyGateway,
   type CurrentPolicySubject,
@@ -59,6 +60,7 @@ import {
   SEMANTIC_QUERY_REQUEST_VERSION,
   SemanticQueryGateway,
   type SemanticAggregateResultEnvelope,
+  type SemanticQueryExecutionContext,
   type SemanticQueryExecutor,
   type SemanticQueryResultEnvelope,
 } from '../../runtime/src/semantic-query-gateway.js';
@@ -378,6 +380,7 @@ export class PostgresReleaseVerificationService {
         operationGateway,
         mediation,
         queryGateway,
+        policy,
       );
       return (async () => {
         try {
@@ -1003,6 +1006,8 @@ interface VerificationRelationContract {
 }
 
 interface VerificationRecord {
+  readonly entityId: string;
+  readonly legalEntityId: string | null;
   readonly recordId: string;
   readonly relations: Readonly<Record<string, string>>;
   readonly values: Readonly<Record<string, unknown>>;
@@ -1092,10 +1097,8 @@ class VerificationAllowPolicy implements CurrentPolicyGateway {
 }
 
 class SemanticVerificationExecutor {
-  readonly #createdRecords: Array<{
-    readonly entityId: string;
-    readonly recordId: string;
-  }> = [];
+  readonly #arrangedLegalEntityIds = new Set<string>();
+  readonly #createdRecords: VerificationRecord[] = [];
   readonly #excludedFieldsByEntity = new Map<string, Set<string>>();
   readonly #operations: readonly VerificationOperationContract[];
   readonly #queries: readonly VerificationQueryContract[];
@@ -1113,6 +1116,7 @@ class SemanticVerificationExecutor {
     private readonly operationGateway: SemanticOperationGateway,
     private readonly mediation: SemanticOperationMediationAuthority,
     private readonly queryGateway: SemanticQueryGateway,
+    private readonly currentPolicy: CurrentPolicyGateway,
   ) {
     this.#operations = (
       view.projections.operation.payload as unknown as {
@@ -1217,7 +1221,7 @@ class SemanticVerificationExecutor {
       compare(left.queryId, right.queryId),
     )) {
       try {
-        await this.#invokeQuery(query, {});
+        await this.#invokeScopeOmissionQuery(query);
       } catch (error) {
         if (
           error instanceof MalformedLegalEntityScopeArgumentError &&
@@ -1238,9 +1242,11 @@ class SemanticVerificationExecutor {
   async archiveProbeRecords(): Promise<void> {
     for (const record of [...this.#createdRecords].reverse()) {
       const get = this.#queryForEntity(record.entityId, 'get');
-      const current = await this.#invokeQuery(get, {
-        recordId: record.recordId,
-      });
+      const current = await this.#invokeQuery(
+        get,
+        { recordId: record.recordId },
+        record,
+      );
       const row =
         isRecord(current) && Array.isArray(current.records)
           ? current.records.find(
@@ -1265,7 +1271,7 @@ class SemanticVerificationExecutor {
       if (query.queryType === 'aggregate') {
         return {
           positiveProbe: await executeAggregateVerificationProbe(query, () =>
-            this.#invokeQuery(query, {}),
+            this.#invokeScopeOmissionQuery(query),
           ),
         };
       }
@@ -1341,9 +1347,11 @@ class SemanticVerificationExecutor {
         'resolver verification scenario has no compiled match key',
       );
     }
-    const resolved = await this.#invokeQuery(query, {
-      text: String(record.values[match.fieldId]),
-    });
+    const resolved = await this.#invokeQuery(
+      query,
+      { text: String(record.values[match.fieldId]) },
+      record,
+    );
     if (
       !isRecord(resolved) ||
       (resolved.outcome !== 'exact' && resolved.outcome !== 'ambiguous')
@@ -1353,9 +1361,11 @@ class SemanticVerificationExecutor {
         `resolver ${scenario.subjectId} did not return an authoritative positive outcome for ${String(record.values[match.fieldId])}: ${canonicalize(resolved)}`,
       );
     }
-    const missing = await this.#invokeQuery(query, {
-      text: `missing-${token}`,
-    });
+    const missing = await this.#invokeQuery(
+      query,
+      { text: `missing-${token}` },
+      record,
+    );
     if (!isRecord(missing) || missing.outcome !== 'not-found') {
       throw failure(
         'VERIFICATION_RESOLVER_NEGATIVE_FAILED',
@@ -1375,9 +1385,11 @@ class SemanticVerificationExecutor {
         'search exclusion probe could not populate its subject field',
       );
     }
-    const excluded = await this.#invokeQuery(search, {
-      text: String(excludedValue),
-    });
+    const excluded = await this.#invokeQuery(
+      search,
+      { text: String(excludedValue) },
+      record,
+    );
     if (!hasNoRecords(excluded)) {
       throw failure(
         'VERIFICATION_SEARCH_EXCLUSION_FAILED',
@@ -1422,9 +1434,13 @@ class SemanticVerificationExecutor {
       positiveCandidate.entityId,
       'search',
     );
-    const included = await this.#invokeQuery(positiveSearch, {
-      text: String(positiveRecord.values[positiveCandidate.field.fieldId]),
-    });
+    const included = await this.#invokeQuery(
+      positiveSearch,
+      {
+        text: String(positiveRecord.values[positiveCandidate.field.fieldId]),
+      },
+      positiveRecord,
+    );
     if (!hasRecord(included, positiveRecord.recordId)) {
       throw failure(
         'VERIFICATION_SEARCH_POSITIVE_FAILED',
@@ -1449,6 +1465,7 @@ class SemanticVerificationExecutor {
     const get = await this.#invokeQuery(
       this.#queryForEntity(scenario.entityId, 'get'),
       { recordId: record.recordId },
+      record,
     );
     const unique = this.#createOperation(
       scenario.entityId,
@@ -1547,13 +1564,25 @@ class SemanticVerificationExecutor {
       overrides,
       relationOverrides,
     );
-    await this.#invokeOperation(this.#createOperation(entityId), input);
-    this.#createdRecords.push({ entityId, recordId: String(input.recordId) });
-    return Object.freeze({
+    const operation = this.#createOperation(entityId);
+    await this.#invokeOperation(operation, input);
+    const systemInput = operation.inputContract.systemInput;
+    const legalEntityId = systemInput ? input[systemInput.argumentKey] : null;
+    if (legalEntityId !== null && typeof legalEntityId !== 'string') {
+      throw failure(
+        'VERIFICATION_SYSTEM_INPUT_VALUE_INVALID',
+        'verification arranged a record with an invalid system input value',
+      );
+    }
+    const record = Object.freeze({
+      entityId,
+      legalEntityId,
       recordId: String(input.recordId),
       relations: input.relations as Readonly<Record<string, string>>,
       values: input.values as Readonly<Record<string, unknown>>,
     });
+    this.#createdRecords.push(record);
+    return record;
   }
 
   async #createInput(
@@ -1628,7 +1657,10 @@ class SemanticVerificationExecutor {
       );
     }
     const created = this.#create(master.entityId, `${token}-system-input`).then(
-      (record) => record.recordId,
+      (record) => {
+        this.#arrangedLegalEntityIds.add(record.recordId);
+        return record.recordId;
+      },
     );
     this.#systemInputValues.set(key, created);
     return created;
@@ -1689,34 +1721,87 @@ class SemanticVerificationExecutor {
   #invokeQueryById(queryId: string, record: VerificationRecord, token: string) {
     const query = this.#requiredQuery(queryId);
     if (query.queryType === 'get') {
-      return this.#invokeQuery(query, { recordId: record.recordId });
+      return this.#invokeQuery(query, { recordId: record.recordId }, record);
     }
     if (query.queryType === 'resolve') {
       const key = query.resolveMatchKeys[0];
-      return this.#invokeQuery(query, {
-        text: key ? String(record.values[key.fieldId]) : token,
-      });
+      return this.#invokeQuery(
+        query,
+        { text: key ? String(record.values[key.fieldId]) : token },
+        record,
+      );
     }
     if (query.queryType === 'search') {
       const selected = query.selections[0];
-      return this.#invokeQuery(query, {
-        text: selected ? String(record.values[selected.fieldId]) : token,
-      });
+      return this.#invokeQuery(
+        query,
+        { text: selected ? String(record.values[selected.fieldId]) : token },
+        record,
+      );
     }
-    return this.#invokeQuery(query, {});
+    return this.#invokeQuery(query, {}, record);
   }
 
   #invokeQuery(
     query: VerificationQueryContract & { readonly queryType: 'aggregate' },
     arguments_: Record<string, unknown>,
+    record: VerificationRecord,
   ): Promise<SemanticAggregateResultEnvelope>;
   #invokeQuery(
     query: VerificationQueryContract,
     arguments_: Record<string, unknown>,
+    record: VerificationRecord,
   ): Promise<SemanticAggregateResultEnvelope | SemanticQueryResultEnvelope>;
-  #invokeQuery(
+  async #invokeQuery(
     query: VerificationQueryContract,
     arguments_: Record<string, unknown>,
+    record: VerificationRecord,
+  ): Promise<SemanticAggregateResultEnvelope | SemanticQueryResultEnvelope> {
+    const readBackArguments = verificationReadBackArguments(
+      query,
+      arguments_,
+      record.legalEntityId,
+      this.#arrangedLegalEntityIds,
+    );
+    const executionContext: SemanticQueryExecutionContext =
+      record.legalEntityId !== null && query.legalEntityScope === undefined
+        ? {
+            legalEntityReadScope: await issueLegalEntityReadScope(
+              this.currentPolicy,
+              this.view,
+              [record.legalEntityId],
+            ),
+          }
+        : {};
+    return this.#dispatchQuery(query, readBackArguments, executionContext);
+  }
+
+  #invokeScopeOmissionQuery(
+    query: VerificationQueryContract & { readonly queryType: 'aggregate' },
+  ): Promise<SemanticAggregateResultEnvelope>;
+  #invokeScopeOmissionQuery(
+    query: VerificationQueryContract,
+  ): Promise<SemanticAggregateResultEnvelope | SemanticQueryResultEnvelope>;
+  #invokeScopeOmissionQuery(
+    query: VerificationQueryContract,
+  ): Promise<SemanticAggregateResultEnvelope | SemanticQueryResultEnvelope> {
+    return this.#dispatchQuery(query, {});
+  }
+
+  #dispatchQuery(
+    query: VerificationQueryContract & { readonly queryType: 'aggregate' },
+    arguments_: Record<string, unknown>,
+    executionContext?: SemanticQueryExecutionContext,
+  ): Promise<SemanticAggregateResultEnvelope>;
+  #dispatchQuery(
+    query: VerificationQueryContract,
+    arguments_: Record<string, unknown>,
+    executionContext?: SemanticQueryExecutionContext,
+  ): Promise<SemanticAggregateResultEnvelope | SemanticQueryResultEnvelope>;
+  #dispatchQuery(
+    query: VerificationQueryContract,
+    arguments_: Record<string, unknown>,
+    executionContext: SemanticQueryExecutionContext = {},
   ): Promise<SemanticAggregateResultEnvelope | SemanticQueryResultEnvelope> {
     const request = {
       arguments: arguments_,
@@ -1724,8 +1809,8 @@ class SemanticVerificationExecutor {
       schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
     };
     return query.queryType === 'aggregate'
-      ? this.queryGateway.invokeAggregate(this.view, request)
-      : this.queryGateway.invoke(this.view, request);
+      ? this.queryGateway.invokeAggregate(this.view, request, executionContext)
+      : this.queryGateway.invoke(this.view, request, executionContext);
   }
 
   async #captureRejection(
@@ -1927,6 +2012,46 @@ function runtimeProjection<TFamily extends RequestRuntimeProjectionFamily>(
 
 const aggregateParameterMismatchReason =
   'aggregate query arguments do not match the declared parameters';
+
+/**
+ * Verification may read back only a legal entity that its own arrangement
+ * created. The returned operand still travels through SemanticQueryGateway,
+ * where the existing verification policy issues the normal read scope.
+ */
+export function verificationReadBackArguments(
+  query: Pick<VerificationQueryContract, 'legalEntityScope' | 'queryId'>,
+  arguments_: Readonly<Record<string, unknown>>,
+  legalEntityId: string | null,
+  arrangedLegalEntityIds: ReadonlySet<string>,
+): Record<string, unknown> {
+  const scope = query.legalEntityScope;
+  if (legalEntityId !== null && !arrangedLegalEntityIds.has(legalEntityId)) {
+    throw failure(
+      'VERIFICATION_LEGAL_ENTITY_SCOPE_NOT_ARRANGED',
+      `verification query may read back only its arranged legal entity: ${query.queryId}`,
+    );
+  }
+  if (!scope) return { ...arguments_ };
+  if (legalEntityId === null) {
+    throw failure(
+      'VERIFICATION_LEGAL_ENTITY_SCOPE_ARRANGEMENT_MISSING',
+      `verification query requires an arranged legal entity: ${query.queryId}`,
+    );
+  }
+  if (Object.hasOwn(arguments_, scope.operand.parameterId)) {
+    throw failure(
+      'VERIFICATION_LEGAL_ENTITY_SCOPE_ALREADY_SUPPLIED',
+      `verification query read-back scope already has an external value: ${query.queryId}`,
+    );
+  }
+  return {
+    ...arguments_,
+    [scope.operand.parameterId]:
+      scope.cardinality === 'exactlyOne'
+        ? legalEntityId
+        : Object.freeze([legalEntityId]),
+  };
+}
 
 /**
  * Verification has no authority to invent aggregate parameter values. It
