@@ -8,11 +8,13 @@ import { platformModuleDefinition } from '../../packages/domain/src/platform/def
 
 import {
   deriveLanguageCoverageLedger,
+  decodeLanguageCoverageObservationSnapshot,
   evaluateLanguageCoverage,
   observeLanguageCoverage,
   type LanguageCoverageDecision,
   type LanguageCoverageReceipt,
   type LanguageCoverageReceiptClaim,
+  type LanguageCoverageObservationSnapshot,
 } from './language-conformance-ledger.js';
 import { resolveReachabilityRunId } from './reachability-run.mjs';
 
@@ -49,6 +51,11 @@ try {
     decisionsDocument.decisions,
     `${decisionsPath}#decisions`,
   ) as unknown as LanguageCoverageDecision[];
+  const decisionObservedObligationIds =
+    decodeLanguageCoverageObservationSnapshot(
+      ledger,
+      decisionsDocument.observationSnapshot as LanguageCoverageObservationSnapshot,
+    );
   const claims = readArray(
     readObject(resolve(repositoryRoot, claimsPath)).claims,
     `${claimsPath}#claims`,
@@ -61,6 +68,7 @@ try {
   );
   const result = evaluateLanguageCoverage({
     creditedTestFiles: creditedTestFiles(repositoryRoot),
+    decisionObservedObligationIds,
     decisions,
     ledger,
     observedObligationIds,
@@ -70,6 +78,9 @@ try {
   });
   process.stdout.write(
     `language coverage: PASS (${String(result.obligationCount)} obligations; ${String(result.receiptCount)} receipts; ${String(result.decisionCount)} explicit decisions; ${String(observedObligationIds.size)} first-party observations)\n`,
+  );
+  process.stdout.write(
+    `language coverage meaning: ${String(result.receiptCount)}/${String(result.obligationCount)} obligations have execution/refusal receipts; green proves the exact shape and decision partitions have not drifted, not that decision-covered shapes execute\n`,
   );
 } catch (error) {
   process.stderr.write(

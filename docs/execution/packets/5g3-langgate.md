@@ -1,6 +1,6 @@
 # 5g3-langgate — derived language conformance instrument
 
-Status: STOP at the chartered corpus-split boundary
+Status: evidence ready; exhaustive relation corpus split into its own packet
 
 Tier: Critical
 
@@ -40,10 +40,12 @@ the exact current partitions in
 - unused values are exempt only while unused.
 
 Each decision binds both the full ledger digest and the digest of the exact
-obligation set it covers. Adding an axis or value invalidates the ledger
-digest. Using a previously unused existing value moves it between exact sets
-and invalidates both affected decisions. A wildcard label therefore cannot
-inherit coverage.
+obligation set it covers. The decision document also carries an exact compact
+bitset of the observed/unobserved partition that produced those set digests.
+Adding an axis or value invalidates the ledger digest. Using a previously
+unused existing value no longer matches that snapshot, so the old decision
+cannot stretch to cover it. A wildcard label therefore cannot inherit
+coverage.
 
 ## Gate and claims mechanism
 
@@ -55,7 +57,7 @@ exists in the freshly derived ledger, and whose outcome matches the claim's
 declared `executed` or `typedRefusal` kind. The only alternative is one of the
 exact, digest-bound written decisions above.
 
-The four mandatory negative controls are observed in
+The five mandatory negative controls are observed in
 `test/unit/language-conformance-ledger.test.ts`:
 
 - `phantom-axis` refuses `LANGUAGE_COVERAGE_PHANTOM_OBLIGATION`;
@@ -63,11 +65,20 @@ The four mandatory negative controls are observed in
 - `entry-skip` refuses `LANGUAGE_COVERAGE_UNCLAIMED_ENTRY` and names the entry;
 - `refusal-distinguisher` refuses
   `LANGUAGE_COVERAGE_OUTCOME_MISMATCH` when a typed refusal is offered for an
-  execution claim.
+  execution claim; and
+- `first-use-transition` starts with the real first-party obligation
+  `authoredLanguage:$.fields[].classification="public"` in the unobserved
+  partition, changes the composed first-party package to use that value,
+  normalizes and lowers the changed package, and observes
+  `LANGUAGE_COVERAGE_OBSERVATION_CHANGED` naming that exact obligation. The
+  control then moves the snapshot while retaining the old decisions and
+  observes `LANGUAGE_COVERAGE_STALE_DECISION_SET`; the gate returns green only
+  after a new exact decision is recorded.
 
-An additional control proves the unused decision passes while the value is
-absent and fails when the same obligation becomes observed. Another proves a
-written decision cannot survive a ledger digest change.
+A separate mechanism control proves that either a valid execution receipt or
+a stable typed-refusal receipt can instead take over a moved obligation while
+the old decision remains unchanged. Another proves a written decision cannot
+survive a ledger digest change.
 
 ## Why the corpus is split here
 
@@ -85,7 +96,9 @@ fixture was extended and no behavior was baselined.
 The receipt-claims file therefore remains empty. All 1,894 entries are
 explicit decisions at this checkpoint, not execution coverage. This is a real
 gate over obligation and exemption drift, but it is not yet the relation
-execution corpus.
+execution corpus. The gate itself prints this limitation on every successful
+run: green currently proves that the exact shape and decision partitions have
+not drifted; with zero receipts it proves nothing about execution coverage.
 
 ## Calibration against the escaped defects
 
@@ -117,15 +130,19 @@ invariant. Defects 5 and 6 remain outside this instrument.
 - `corepack pnpm test:unit` — first run observed the new ledger control red
   because the authored optional-boolean union was not enumerated; the walker
   was corrected to retain finite members beside `undefined`; final PASS,
-  62/62.
+  63/63. The first-use transition control observed the old exact decision red
+  when a real first-party package first used `classification="public"`, then
+  observed the new explicit decision green. The receipt takeover control
+  separately passed for both execution and typed-refusal receipts.
 - `corepack pnpm test:architecture` — the exhaustion run first exposed the new
   root check missing from the exact aggregate-command inventory; that
   add-only inventory was re-derived; final PASS, 106/106.
 - `corepack pnpm check:language-coverage` — PASS: 1,894 obligations, 0
-  receipts, 1,894 explicit decisions, 376 first-party observations.
+  receipts, 1,894 explicit decisions, 376 first-party observations. Its next
+  line states that green proves exact shape/decision partition stability, not
+  execution coverage.
 - `corepack pnpm format`, `corepack pnpm lint`, and `git diff --check` — PASS.
 
-No matrix was run because the charter orders a stop and report when the second
-derivation source materially grows the packet. The relation corpus requires a
-separate ruling before this packet can replace its relation decisions with
-execution receipts.
+The exhaustive relation corpus is intentionally absent from this packet. It
+was split by ruling after the second derivation source materially grew the
+foundation; this packet matrices the frozen gate and decision mechanism only.

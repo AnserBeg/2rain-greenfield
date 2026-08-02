@@ -82,6 +82,7 @@ export interface LanguageCoverageDecision {
 
 export interface EvaluateLanguageCoverageInput {
   readonly creditedTestFiles: ReadonlySet<string>;
+  readonly decisionObservedObligationIds: ReadonlySet<string>;
   readonly decisions: readonly LanguageCoverageDecision[];
   readonly ledger: LanguageCoverageLedger;
   readonly observedObligationIds: ReadonlySet<string>;
@@ -94,6 +95,14 @@ export interface LanguageCoverageResult {
   readonly decisionCount: number;
   readonly obligationCount: number;
   readonly receiptCount: number;
+}
+
+export interface LanguageCoverageObservationSnapshot {
+  readonly bitmapEncoding: 'sorted-obligation-bitset-msb0-hex/v1';
+  readonly ledgerDigest: string;
+  readonly obligationCount: number;
+  readonly observedBitmap: string;
+  readonly observedCount: number;
 }
 
 interface MutableAxis {
@@ -286,7 +295,7 @@ export function evaluateLanguageCoverage(
       category,
       deriveDecisionSetDigest(
         input.ledger,
-        input.observedObligationIds,
+        input.decisionObservedObligationIds,
         category,
       ),
     ]),
@@ -338,11 +347,20 @@ export function evaluateLanguageCoverage(
       continue;
     }
 
-    const category = decisionCategory(
+    const decisionCategoryAtSnapshot = decisionCategory(
+      obligation,
+      input.decisionObservedObligationIds.has(obligation.id),
+    );
+    const currentCategory = decisionCategory(
       obligation,
       input.observedObligationIds.has(obligation.id),
     );
-    if (!validDecisions.has(category)) {
+    if (currentCategory !== decisionCategoryAtSnapshot) {
+      throw new Error(
+        `LANGUAGE_COVERAGE_OBSERVATION_CHANGED: ${obligation.id} moved from ${decisionCategoryAtSnapshot} to ${currentCategory}; add an execution/refusal receipt or record a new explicit decision`,
+      );
+    }
+    if (!validDecisions.has(decisionCategoryAtSnapshot)) {
       unclaimed.push(obligation.id);
       continue;
     }
@@ -357,6 +375,75 @@ export function evaluateLanguageCoverage(
     decisionCount,
     obligationCount: input.ledger.obligations.length,
     receiptCount,
+  };
+}
+
+export function decodeLanguageCoverageObservationSnapshot(
+  ledger: LanguageCoverageLedger,
+  snapshot: LanguageCoverageObservationSnapshot,
+): ReadonlySet<string> {
+  if (snapshot.ledgerDigest !== ledger.digest) {
+    throw new Error(
+      `LANGUAGE_COVERAGE_STALE_OBSERVATION_SNAPSHOT: snapshot names ${snapshot.ledgerDigest}, current ledger is ${ledger.digest}`,
+    );
+  }
+  if (snapshot.obligationCount !== ledger.obligations.length) {
+    throw new Error(
+      `LANGUAGE_COVERAGE_OBSERVATION_COUNT_MISMATCH: snapshot names ${String(snapshot.obligationCount)}, ledger has ${String(ledger.obligations.length)}`,
+    );
+  }
+  if (!/^(?:[0-9a-f]{2})*$/u.test(snapshot.observedBitmap)) {
+    throw new Error('LANGUAGE_COVERAGE_OBSERVATION_BITMAP_INVALID');
+  }
+  const bytes = Buffer.from(snapshot.observedBitmap, 'hex');
+  if (bytes.length !== Math.ceil(ledger.obligations.length / 8)) {
+    throw new Error('LANGUAGE_COVERAGE_OBSERVATION_BITMAP_LENGTH_MISMATCH');
+  }
+  const observed = new Set<string>();
+  for (const [index, obligation] of ledger.obligations.entries()) {
+    const byte = bytes[Math.floor(index / 8)]!;
+    if ((byte & (1 << (7 - (index % 8)))) !== 0) {
+      observed.add(obligation.id);
+    }
+  }
+  if (observed.size !== snapshot.observedCount) {
+    throw new Error(
+      `LANGUAGE_COVERAGE_OBSERVATION_BITMAP_COUNT_MISMATCH: snapshot names ${String(snapshot.observedCount)}, bitmap contains ${String(observed.size)}`,
+    );
+  }
+  const unusedBits = bytes.length * 8 - ledger.obligations.length;
+  if (unusedBits > 0) {
+    const finalByte = bytes.at(-1)!;
+    const unusedMask = (1 << unusedBits) - 1;
+    if ((finalByte & unusedMask) !== 0) {
+      throw new Error('LANGUAGE_COVERAGE_OBSERVATION_BITMAP_PADDING_SET');
+    }
+  }
+  return observed;
+}
+
+export function encodeLanguageCoverageObservationSnapshot(
+  ledger: LanguageCoverageLedger,
+  observedObligationIds: ReadonlySet<string>,
+): LanguageCoverageObservationSnapshot {
+  const known = new Set(ledger.obligations.map((obligation) => obligation.id));
+  for (const obligationId of observedObligationIds) {
+    if (!known.has(obligationId)) {
+      throw new Error(`LANGUAGE_COVERAGE_PHANTOM_OBSERVATION: ${obligationId}`);
+    }
+  }
+  const bytes = Buffer.alloc(Math.ceil(ledger.obligations.length / 8));
+  for (const [index, obligation] of ledger.obligations.entries()) {
+    if (observedObligationIds.has(obligation.id)) {
+      bytes[Math.floor(index / 8)]! |= 1 << (7 - (index % 8));
+    }
+  }
+  return {
+    bitmapEncoding: 'sorted-obligation-bitset-msb0-hex/v1',
+    ledgerDigest: ledger.digest,
+    obligationCount: ledger.obligations.length,
+    observedBitmap: bytes.toString('hex'),
+    observedCount: observedObligationIds.size,
   };
 }
 
