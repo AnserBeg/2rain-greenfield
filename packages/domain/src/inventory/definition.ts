@@ -774,7 +774,7 @@ export function inventoryModuleDefinition(
           local,
           entityId,
           entityFields,
-          entityFields[0]!,
+          resolveFieldForEntity(fieldIds, local),
         );
       }),
       ...queries(
@@ -986,6 +986,28 @@ function fieldsForEntity(
   }
 }
 
+function resolveFieldForEntity(
+  fieldIds: InventoryIds['fieldIds'],
+  local: string,
+): string | null {
+  switch (local) {
+    case 'legal_entity':
+      return fieldIds.legalEntity.code;
+    case 'inventory_transaction':
+      return fieldIds.transaction.number;
+    case 'inventory_transaction_line':
+      return fieldIds.transactionLine.unitId;
+    case 'inventory_period_lock':
+      return null;
+    case 'stock_count':
+      return fieldIds.stockCount.number;
+    case 'stock_count_line':
+      return fieldIds.stockCountLine.unitId;
+    default:
+      throw new TypeError(`unknown inventory entity ${local}`);
+  }
+}
+
 function entity(
   ids: InventoryIds,
   local: string,
@@ -1091,9 +1113,15 @@ function queries(
   local: string,
   entityId: string,
   selectedFieldIds: readonly string[],
-  resolveFieldId: string,
+  resolveFieldId: string | null,
 ): Array<Record<string, unknown>> {
-  return (['get', 'list', 'search', 'resolve'] as const).map((queryType) => {
+  const queryTypes = [
+    'get',
+    'list',
+    'search',
+    ...(resolveFieldId === null ? [] : (['resolve'] as const)),
+  ] as const;
+  return queryTypes.map((queryType) => {
     const legalEntityScopeParameterId = `${ids.namespace}:parameter.${local}_${queryType}_legal_entity_scope`;
     return {
       kind: 'queryDefinition',
@@ -1127,7 +1155,7 @@ function queries(
       ),
       queryId: `${ids.namespace}:query.${local}_${queryType}`,
       queryType,
-      ...(queryType === 'resolve'
+      ...(queryType === 'resolve' && resolveFieldId !== null
         ? {
             resolveMatchKeys: [
               {

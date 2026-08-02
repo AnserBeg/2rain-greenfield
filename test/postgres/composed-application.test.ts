@@ -47,6 +47,7 @@ import {
   type FreshTenantIntermediateActivationObservation,
 } from '../../packages/postgres-provider/src/composed-application-runtime.js';
 import { INVENTORY_PROVIDER_ERROR_MAPPINGS } from '../../packages/postgres-provider/src/inventory-provider-error-mappings.js';
+import { ModuleRuntimeInterpreterError } from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
 import { captureSchemaSnapshot } from '../../packages/postgres-provider/src/migrations.js';
 import { PostgresReleaseActivationService } from '../../packages/postgres-provider/src/release-activation-service.js';
 import { PostgresReleaseApprovalService } from '../../packages/postgres-provider/src/release-approval-service.js';
@@ -105,7 +106,7 @@ test('fresh-tenant install refuses a failing intermediate transition', async () 
   );
 });
 
-// Harness limit, not a product budget. Each fresh tenant applies all eight
+// Harness limit, not a product budget. Each fresh tenant applies all five
 // immutable application transitions but verifies only the serving release,
 // recording every non-serving release explicitly. The unchanged 256 MiB
 // harness moved from >300s/capacity exhaustion to 54.6s and a 50.30 MiB peak.
@@ -174,6 +175,20 @@ test(
               assertConstrainedDomainVerificationCompleted(
                 pool,
                 connection,
+                tenantA,
+                compiledApplication,
+              ),
+          );
+          await context.test(
+            'entity-owned create takes its derived legal-entity input through the real operation path',
+            () =>
+              assertEntityOwnedCreateInput(pool, tenantA, compiledApplication),
+          );
+          await context.test(
+            'verification persists required field references and leaves optional references unset',
+            () =>
+              assertVerificationFieldOriginCreates(
+                pool,
                 tenantA,
                 compiledApplication,
               ),
@@ -2152,8 +2167,8 @@ async function assertBoundedFreshTenantInstallEvidence(
   ).plan.scenarios.length;
   assert.equal(
     servingScenarioCount,
-    168,
-    'the serving release keeps the pre-bounding semantic scenario count',
+    167,
+    'ADR-0042 removes exactly one resolver-authority scenario with inventory_period_lock_resolve',
   );
 
   const intermediate = await pool.query<{
@@ -2516,17 +2531,13 @@ async function assertConstrainedDomainVerificationCompleted(
     searchQueries.some((query) => !createOperations.has(query.sourceEntityId)),
     'the compiled product includes an append-only searchable source without a generic create operation',
   );
-  assert.ok(
-    constructibilityFindings.some(
+  assert.deepEqual(
+    constructibilityFindings.filter(
       (finding) =>
-        finding.code === 'VERIFICATION_OPERATION_INPUT_UNCONSTRUCTABLE' &&
-        finding.operationId ===
-          'northstar.app:operation.inventory_transaction_create' &&
-        finding.requiredStorageColumn === 'legal_entity_id' &&
-        finding.message ===
-          'verification could not construct inputs for operation northstar.app:operation.inventory_transaction_create because required storage column legal_entity_id has no declared input',
+        finding.code === 'VERIFICATION_OPERATION_INPUT_UNCONSTRUCTABLE',
     ),
-    'the unconstructable entity-owned create operation surfaces an exact finding',
+    [],
+    'every entity-owned create is constructible from its compiled system input',
   );
   const unconstructableOperationIds = new Set(
     constructibilityFindings.map((finding) => finding.operationId),
@@ -2670,6 +2681,200 @@ async function assertConstrainedDomainVerificationCompleted(
   });
 }
 
+async function assertEntityOwnedCreateInput(
+  pool: pg.Pool,
+  runtime: ComposedApplicationRuntime,
+  compiledApplication: unknown,
+): Promise<void> {
+  const compiled =
+    parseCompiledApplication(compiledApplication).application.compiled;
+  const storage = storageTarget(compiled);
+  const master = storage.entities.find(
+    (candidate) => candidate.legalEntityMaster !== undefined,
+  );
+  const transaction = storage.entities.find(
+    (candidate) =>
+      candidate.entityId === 'northstar.app:entity.inventory_transaction',
+  );
+  assert.ok(master?.legalEntityMaster);
+  assert.ok(transaction?.legalEntity);
+  const defaultEntity = await pool.query<{ legal_entity_id: string }>(
+    `SELECT "${master.recordIdentity.column}"::text AS legal_entity_id
+       FROM north_star_module.${master.physicalTableName}
+      WHERE tenant_id = $1 AND environment_id = $2
+        AND "${master.legalEntityMaster.fieldColumns.isDefault}" IS TRUE
+        AND "${master.archive.archivedAtColumn}" IS NULL`,
+    [runtime.identity.tenantId, runtime.identity.environmentId],
+  );
+  assert.equal(defaultEntity.rowCount, 1);
+  const legalEntityId = defaultEntity.rows[0]?.legal_entity_id;
+  assert.ok(legalEntityId);
+
+  const values = {
+    'northstar.app:field.inventory_transaction_actor_id': 'write-scope-control',
+    'northstar.app:field.inventory_transaction_effective_at':
+      '2026-08-01T12:00:00.000Z',
+    'northstar.app:field.inventory_transaction_number': 'DRAFT-SCOPE-001',
+    'northstar.app:field.inventory_transaction_recorded_at':
+      '2026-08-01T12:00:00.000Z',
+    'northstar.app:field.inventory_transaction_source_id':
+      'write-scope-control',
+    'northstar.app:field.inventory_transaction_source_type': 'test',
+    'northstar.app:field.inventory_transaction_state':
+      'northstar.app:option.inventory_transaction_state_draft',
+    'northstar.app:field.inventory_transaction_type':
+      'northstar.app:option.inventory_transaction_type_adjustment',
+  } as const;
+  const invokeCreate = (
+    recordId: string,
+    input: Readonly<Record<string, unknown>>,
+  ) =>
+    runtime.entry.run({ headers: { authorization: 'local' } }, (view) =>
+      runtime.operationGateway.invoke(
+        view,
+        {
+          confirmationGrant: null,
+          idempotencyKey: randomUUID(),
+          input: { recordId, relations: {}, values, ...input },
+          operationId: 'northstar.app:operation.inventory_transaction_create',
+          schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
+        },
+        runtime.operationMediation.issueInvocation(view, 'UI'),
+      ),
+    );
+
+  const omittedRecordId = randomUUID();
+  await assert.rejects(invokeCreate(omittedRecordId, {}), (error: unknown) => {
+    assert.ok(error instanceof ModuleRuntimeInterpreterError);
+    assert.equal(error.code, 'MODULE_REQUIRED_SYSTEM_INPUT_MISSING');
+    assert.equal(error.subjectId, 'legalEntityId');
+    return true;
+  });
+  const omitted = await pool.query<{ count: string }>(
+    `SELECT count(*)::text AS count
+       FROM north_star_module.${transaction.physicalTableName}
+      WHERE tenant_id = $1 AND environment_id = $2
+        AND "${transaction.recordIdentity.column}" = $3`,
+    [
+      runtime.identity.tenantId,
+      runtime.identity.environmentId,
+      omittedRecordId,
+    ],
+  );
+  assert.equal(
+    omitted.rows[0]?.count,
+    '0',
+    'omission neither defaults nor inserts a partial row',
+  );
+
+  const recordId = randomUUID();
+  const created = await invokeCreate(recordId, { legalEntityId });
+  assert.equal(created.outcome, 'succeeded');
+  const stored = await pool.query<{ legal_entity_id: string }>(
+    `SELECT "${transaction.legalEntity.column}"::text AS legal_entity_id
+       FROM north_star_module.${transaction.physicalTableName}
+      WHERE tenant_id = $1 AND environment_id = $2
+        AND "${transaction.recordIdentity.column}" = $3`,
+    [runtime.identity.tenantId, runtime.identity.environmentId, recordId],
+  );
+  assert.deepEqual(stored.rows, [{ legal_entity_id: legalEntityId }]);
+}
+
+async function assertVerificationFieldOriginCreates(
+  pool: pg.Pool,
+  runtime: ComposedApplicationRuntime,
+  compiledApplication: unknown,
+): Promise<void> {
+  const compiled =
+    parseCompiledApplication(compiledApplication).application.compiled;
+  const storage = storageTarget(compiled);
+  const requiredSources = new Set([
+    'northstar.app:entity.inventory_transaction_line',
+    'northstar.app:entity.stock_count',
+    'northstar.app:entity.stock_count_line',
+  ]);
+  const requiredFieldRelations = storage.relations.filter(
+    (relation) =>
+      requiredSources.has(relation.sourceEntityId) &&
+      relation.relationColumn.origin === 'field' &&
+      !relation.relationColumn.nullable,
+  );
+  assert.equal(requiredFieldRelations.length, 3);
+  const quoted = (identifier: string) =>
+    `"${identifier.replaceAll('"', '""')}"`;
+  for (const relation of requiredFieldRelations) {
+    const source = storage.entities.find(
+      (entity) => entity.entityId === relation.sourceEntityId,
+    );
+    const target = storage.entities.find(
+      (entity) => entity.entityId === relation.targetEntityId,
+    );
+    assert.ok(source);
+    assert.ok(target);
+    const join = relation.foreignKey.sourceColumns
+      .map(
+        (sourceColumn, index) =>
+          `target.${quoted(relation.foreignKey.targetColumns[index]!)} = source.${quoted(sourceColumn)}`,
+      )
+      .join(' AND ');
+    const rows = await pool.query<{
+      reference_id: string;
+      target_id: string | null;
+    }>(
+      `SELECT source.${quoted(relation.relationColumn.physicalName)}::text AS reference_id,
+              target.${quoted(target.recordIdentity.column)}::text AS target_id
+         FROM north_star_module.${quoted(source.physicalTableName)} AS source
+         LEFT JOIN north_star_module.${quoted(target.physicalTableName)} AS target
+           ON ${join}
+        WHERE source.tenant_id = $1
+          AND source.environment_id = $2
+          AND source.${quoted(source.archive.archivedAtColumn)} IS NOT NULL
+          AND source.${quoted(relation.relationColumn.physicalName)} IS NOT NULL`,
+      [runtime.identity.tenantId, runtime.identity.environmentId],
+    );
+    assert.ok(
+      rows.rows.length > 0,
+      `${relation.sourceEntityId} produced no archived verification record`,
+    );
+    assert.equal(
+      rows.rows.every((row) => row.reference_id === row.target_id),
+      true,
+      `${relation.relationId} did not persist its arranged target UUID`,
+    );
+  }
+
+  const transactionLine = storage.entities.find(
+    (entity) =>
+      entity.entityId === 'northstar.app:entity.inventory_transaction_line',
+  );
+  assert.ok(transactionLine);
+  const optionalFieldRelations = storage.relations.filter(
+    (relation) =>
+      relation.sourceEntityId === transactionLine.entityId &&
+      relation.relationColumn.origin === 'field' &&
+      relation.relationColumn.nullable,
+  );
+  assert.equal(optionalFieldRelations.length, 2);
+  const unset = await pool.query<{ count: string }>(
+    `SELECT count(*)::text AS count
+       FROM north_star_module.${quoted(transactionLine.physicalTableName)}
+      WHERE tenant_id = $1
+        AND environment_id = $2
+        AND ${quoted(transactionLine.archive.archivedAtColumn)} IS NOT NULL
+        AND ${optionalFieldRelations
+          .map(
+            (relation) =>
+              `${quoted(relation.relationColumn.physicalName)} IS NULL`,
+          )
+          .join(' AND ')}`,
+    [runtime.identity.tenantId, runtime.identity.environmentId],
+  );
+  assert.ok(
+    Number(unset.rows[0]?.count ?? 0) > 0,
+    'ordinary verification creates must persist optional field-origin references as NULL',
+  );
+}
+
 /**
  * ADR-0033: the admitted composed product records an exact partition of the
  * compiler-emitted plan. Executed results and derivations are separate durable
@@ -2699,6 +2904,41 @@ async function assertExactPartitionEvidence(
   );
   assert.ok(evidence.results.length > 0, 'real PostgreSQL probes still ran');
   assert.ok(derivations.length > 0);
+  assert.equal(
+    evidence.results.length,
+    129,
+    '73 formerly unconstructible scenarios moved into executed evidence',
+  );
+  assert.equal(
+    derivations.length,
+    38,
+    'ADR-0042 removes the period-lock resolver rather than deriving it',
+  );
+  assert.equal(
+    binding.plan.scenarios.some(
+      (scenario) =>
+        scenario.kind === 'resolverAuthority' &&
+        scenario.entityId === 'northstar.app:entity.inventory_period_lock',
+    ),
+    false,
+    'inventory_period_lock_resolve is absent from the plan, not reclassified as a derivation',
+  );
+  assert.equal(
+    derivations.filter(
+      (derivation) =>
+        derivation.reason.code ===
+        'VERIFICATION_OPERATION_INPUT_UNCONSTRUCTABLE',
+    ).length,
+    0,
+    'no create-input derivation remains after the derived input is executable',
+  );
+  assert.equal(
+    derivations.filter(
+      (derivation) =>
+        derivation.reason.code === 'VERIFICATION_NO_GENERIC_CREATE_OPERATION',
+    ).length,
+    38,
+  );
   assert.deepEqual(
     [...executedScenarioIds, ...derivedScenarioIds].toSorted(),
     binding.plan.scenarios.map((scenario) => scenario.scenarioId).toSorted(),
@@ -2753,16 +2993,14 @@ async function assertExactPartitionEvidence(
     ),
     'the independent oracle rejects a structurally valid derivation that mislabels a constructible scenario',
   );
-  assert.ok(
+  assert.equal(
     derivations.some(
       (derivation) =>
         derivation.reason.code ===
-          'VERIFICATION_OPERATION_INPUT_UNCONSTRUCTABLE' &&
-        derivation.reason.entityId ===
-          'northstar.app:entity.inventory_transaction' &&
-        derivation.reason.requiredStorageColumn === 'legal_entity_id',
+        'VERIFICATION_OPERATION_INPUT_UNCONSTRUCTABLE',
     ),
-    'the compiler-derived legal-entity column is recorded as an unconstructable-input derivation, not as a passing probe',
+    false,
+    'the compiler-derived system input makes entity-owned scenarios executable',
   );
   assert.ok(
     derivations.some(
@@ -2869,6 +3107,14 @@ function assertIndependentConstructibilityPartition(
         readonly relationInputs: readonly {
           readonly relationId: string;
         }[];
+        readonly systemInput?: {
+          readonly argumentKey: string;
+          readonly classification: string;
+          readonly immutableAfterCreate: boolean;
+          readonly physicalColumn: string;
+          readonly required: boolean;
+          readonly valueKind: string;
+        };
       };
       readonly operationId: string;
     }[];
@@ -2906,6 +3152,18 @@ function assertIndependentConstructibilityPartition(
       if (relation) {
         constructibleColumns.add(relation.relationColumn.physicalName);
       }
+    }
+    const systemInput = createOperation.inputContract.systemInput;
+    if (systemInput) {
+      assert.deepEqual(systemInput, {
+        argumentKey: 'legalEntityId',
+        classification: 'INTERNAL',
+        immutableAfterCreate: true,
+        physicalColumn: entity.legalEntity?.column,
+        required: true,
+        valueKind: 'uuid',
+      });
+      constructibleColumns.add(systemInput.physicalColumn);
     }
     const requiredColumns = new Set(
       entity.columns

@@ -381,6 +381,16 @@ Date: 2026-08-02
 Why: verification named every recursive parent by depth, so two required diamond paths reaching one entity at equal depth generated the same record UUID and collided at the primary key.
 How to apply: derive recursive fixture identities from the parent path plus the current compiled edge, never from depth, order, time, or a counter; prove sibling paths persist distinct records. See `docs/execution/packets/5g3-arrangecycle.md`.
 
+## Check historical lineage before freezing a tighter rule
+Date: 2026-08-02
+Why: ADR-0042 correctly refused unusable resolvers, but the packet discovered only at artifact generation that four historical normalized inputs no longer compiled.
+How to apply: compile every retained lineage input under a proposed conformance rule before freezing it; while the output protocol is experimental, name any ruled truncation and the incremental property it removes. Graduated to ADR-0043.
+
+## Require declared queries to have an executable witness
+Date: 2026-08-02
+Why: three resolve declarations and five search declarations satisfied universal conformance while their lowered storage made the promised lookup impossible.
+How to apply: derive query requirements from executable lowered storage, refuse declarations the runtime cannot honor, and independently require every capability that storage can honestly support. See ADR-0042 and `docs/execution/packets/5g3-write-scope.md`.
+
 ## Derive conformance from authored and synthesized contracts
 Date: 2026-08-02
 Why: a schema-only language inventory could not see compiler-synthesized field-origin relations, so downstream consumers ignored a real output choice and demanded two authorities for one physical column.

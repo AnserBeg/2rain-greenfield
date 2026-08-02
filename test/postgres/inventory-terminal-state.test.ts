@@ -318,6 +318,7 @@ test('C1-C7 terminal stock-count evidence is enforced by the real gateway and Po
         );
         await assertOperationRefused(
           invokeOperation(gateway, mediation, view, 'stock_count_create', {
+            legalEntityId,
             recordId: randomUUID(),
             relations: {
               [relationId('stock_count_transaction')]: transactionId,
@@ -352,6 +353,7 @@ test('C1-C7 terminal stock-count evidence is enforced by the real gateway and Po
         // C5: create resolves and guards a parentScopedChild target.
         await assertOperationRefused(
           invokeOperation(gateway, mediation, view, 'stock_count_line_create', {
+            legalEntityId,
             recordId: randomUUID(),
             relations: {
               [relationId('stock_count_line_session')]: postedSessionId,

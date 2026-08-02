@@ -10,12 +10,7 @@ import {
   type CompilerDiagnostic,
 } from './protocol.js';
 
-const REQUIRED_QUERY_TYPES = Object.freeze([
-  'get',
-  'list',
-  'resolve',
-  'search',
-] as const);
+const REQUIRED_QUERY_TYPES = Object.freeze(['get', 'list', 'search'] as const);
 const REQUIRED_OPERATION_EFFECTS = Object.freeze([
   'archiveRecordEffect',
   'createRecordEffect',

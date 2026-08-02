@@ -25,6 +25,7 @@ import { POLICY_DECISION_EVIDENCE_VERSION } from '../../platform-runtime/src/tru
 import type {
   RegisteredOperationDefinition,
   RegisteredOperationInputContract,
+  RegisteredOperationSystemInput,
   SemanticOperationExecutionRequest,
   SemanticOperationExecutor,
   SemanticOperationNonAcceptedRequest,
@@ -84,6 +85,10 @@ interface MutationInput {
   patch: Readonly<Record<string, ImmutableJsonValue>>;
   recordId: string;
   relations: Readonly<Record<string, string>>;
+  systemInput: Readonly<{
+    contract: RegisteredOperationSystemInput;
+    value: string;
+  }> | null;
 }
 
 interface MutationPreparation {
@@ -319,6 +324,11 @@ export class PostgresModuleRuntimeInterpreter
         const currentEntity = requiredEntity(
           currentStorage,
           request.definition.effect.entity.targetId,
+        );
+        assertOperationSystemInputStorageContract(
+          request.definition,
+          currentEntity,
+          input,
         );
         return withModuleRuntimeRole(client, async () => {
           try {
@@ -798,6 +808,10 @@ async function insertRecord(
     'north_star_internal.trusted_environment_id()',
     parameter(values, input.recordId),
   ];
+  if (input.systemInput) {
+    columns.push(input.systemInput.contract.physicalColumn);
+    parameters.push(parameter(values, input.systemInput.value));
+  }
   const knownFields = new Map(
     entity.columns.map((column) => [column.canonicalFieldId, column]),
   );
@@ -824,7 +838,9 @@ async function insertRecord(
     }
   }
   const relations = storage.relations.filter(
-    (relation) => relation.sourceEntityId === entity.entityId,
+    (relation) =>
+      relation.sourceEntityId === entity.entityId &&
+      relation.relationColumn.origin !== 'field',
   );
   const relationById = new Map(
     relations.map((relation) => [relation.relationId, relation]),
@@ -859,6 +875,13 @@ async function insertRecord(
         `required relation ${relation.relationId} is missing`,
       );
     }
+  }
+  if (new Set(columns).size !== columns.length) {
+    throw failure(
+      'MODULE_STORAGE_COLUMN_AUTHORITY_CONFLICT',
+      'module create input produced more than one authority for a storage column',
+      entity.entityId,
+    );
   }
   await client.query(
     `INSERT INTO north_star_module.${quoted(entity.physicalTableName)}
@@ -3240,6 +3263,7 @@ function parseMutationInput(
         patch: immutableRecord(input.values, 'values'),
         recordId,
         relations: uuidRecord(input.relations, 'relations'),
+        systemInput: requiredSystemInput(contract, input),
       });
     case 'updateRecordEffect':
       assertAllowedKeys(input, contract.closedArgumentKeys);
@@ -3248,6 +3272,7 @@ function parseMutationInput(
         patch: immutableRecord(input.patch, 'patch'),
         recordId,
         relations: Object.freeze({}),
+        systemInput: null,
       });
     case 'archiveRecordEffect':
     case 'restoreRecordEffect':
@@ -3257,6 +3282,7 @@ function parseMutationInput(
         patch: Object.freeze({}),
         recordId,
         relations: Object.freeze({}),
+        systemInput: null,
       });
   }
 }
@@ -3318,6 +3344,66 @@ function validateMutationInput(
     }
   }
   return input;
+}
+
+function requiredSystemInput(
+  contract: RegisteredOperationInputContract,
+  input: Readonly<Record<string, ImmutableJsonValue>>,
+): MutationInput['systemInput'] {
+  const systemInput = contract.systemInput;
+  if (!systemInput) return null;
+  if (!Object.hasOwn(input, systemInput.argumentKey)) {
+    throw failure(
+      'MODULE_REQUIRED_SYSTEM_INPUT_MISSING',
+      'required compiler-derived operation input is missing',
+      systemInput.argumentKey,
+    );
+  }
+  return Object.freeze({
+    contract: systemInput,
+    value: requiredUuid(
+      input[systemInput.argumentKey],
+      systemInput.argumentKey,
+    ),
+  });
+}
+
+function assertOperationSystemInputStorageContract(
+  definition: RegisteredOperationDefinition,
+  entity: StorageEntity,
+  input: MutationInput,
+): void {
+  const contract = definition.inputContract;
+  const systemInput = contract?.systemInput;
+  const storageInput = entity.legalEntity;
+  if (definition.effect.kind !== 'createRecordEffect') {
+    if (systemInput || input.systemInput) {
+      throw failure(
+        'MODULE_SEMANTIC_CONTRACT_UNSUPPORTED',
+        'immutable system input is present on a non-create operation',
+        definition.operationId,
+      );
+    }
+    return;
+  }
+  if (!storageInput && !systemInput && !input.systemInput) return;
+  if (
+    !storageInput ||
+    !systemInput ||
+    !input.systemInput ||
+    systemInput.argumentKey !== 'legalEntityId' ||
+    systemInput.classification !== 'INTERNAL' ||
+    systemInput.immutableAfterCreate !== storageInput.immutableAfterCreate ||
+    systemInput.physicalColumn !== storageInput.column ||
+    systemInput.required !== !storageInput.nullable ||
+    systemInput.valueKind !== storageInput.postgresqlType
+  ) {
+    throw failure(
+      'MODULE_SEMANTIC_CONTRACT_UNSUPPORTED',
+      'pinned operation system input does not match compiled storage',
+      definition.operationId,
+    );
+  }
 }
 
 function validateFieldValue(
@@ -3504,7 +3590,7 @@ export function assertModuleSemanticStorageContract(
 
 /**
  * The compiler-owned marker is the entire dispatch key. Module identity,
- * entity identity, and inventory-specific families are intentionally absent.
+ * entity identity, and domain-specific families are intentionally absent.
  */
 export function legalEntityReadScopeRequirement(
   entity: StorageEntity,
@@ -3648,6 +3734,16 @@ function createChanges(
       oldState: Object.freeze({ state: 'ABSENT' }),
     }),
   ];
+  if (input.systemInput) {
+    changes.push(
+      Object.freeze({
+        classification: input.systemInput.contract.classification,
+        fieldId: input.systemInput.contract.argumentKey,
+        newState: valueState(input.systemInput.value),
+        oldState: Object.freeze({ state: 'ABSENT' }),
+      }),
+    );
+  }
   for (const [fieldId, value] of Object.entries(input.patch).sort(
     compareEntry,
   )) {
