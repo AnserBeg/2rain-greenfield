@@ -176,3 +176,23 @@ a ruling would repeat the timeout mistake in a different unit. Both temporary
 treated as a sample, no budget was re-derived, and no matrix or Critical review
 was run. The packet requires the promised re-scope before changing the
 ephemeral database capacity or continuing measurement.
+
+## Post-fresh-tenant integration measurement — capacity still blocks
+
+Current `main` at `6ecc851` was merged without rebasing. ADR-0039's compiled
+artifact event remained exact: `compile-app-release.ts --check` passed, entries
+0–3 held, entries 4–7 retained the recorded regenerated roots, and the compiled
+artifact SHA remained
+`3b1e813ec6d39d5e9e5345268e4adb43996463ed769061ca1bde40a8651af605`.
+
+Fresh-tenant's bounded lineage replay removed the historical-verification
+multiplier, but did not make the write-scope head verification fit the unchanged
+database capacity. The first composed parent failed after 219,031.439102 ms
+with PostgreSQL SQLSTATE `53100`, `No space left on device`, while archiving
+verification probe records. The 73 newly executable scenarios are all on the
+serving head and therefore remain intentionally inside ADR-0040's full semantic
+verification boundary.
+
+This is not a duration sample: the parent did not complete. No timeout or tmpfs
+was changed, no budget was re-derived, the second parent was not run after the
+shared prerequisite failed, and no full matrix or Critical review was started.
