@@ -1,18 +1,20 @@
 # 5g3-langnarrow — relation declarations are honoured or refused
 
-Status: evidence-ready implementation candidate; full matrix green, Critical
-review pending
+Status: rebased evidence-ready implementation candidate; current-main matrix
+pending
 
 Tier: Critical
 
-Base: `1eb64f1` (the branch absorbed the parallel docs-only ADR-0041 commit
-before candidate freeze)
+Base: `5679cd2` (the reviewed `c9dd152` packet was rebased onto current main;
+its prior matrix is not acceptance evidence for this tree)
 
 Authorities:
 [ADR-0021](../../decisions/ADR-0021-total-absent-value-semantics.md),
 [ADR-0039](../../decisions/ADR-0039-experimental-output-protocol-and-lineage-regeneration.md),
+[ADR-0041](../../decisions/ADR-0041-declared-shapes-must-be-honoured-or-refused.md),
+[ADR-0042](../../decisions/ADR-0042-resolve-is-required-where-a-text-key-exists.md),
 and
-[ADR-0041](../../decisions/ADR-0041-declared-shapes-must-be-honoured-or-refused.md)
+[ADR-0043](../../decisions/ADR-0043-lineage-truncation-and-attributed-count-changes.md).
 
 ## Outcome
 
@@ -37,7 +39,7 @@ default and was made explicit rather than treated as evidence of a needed
 semantic.
 
 The existing parent-scoped-child semantic guard remains in
-`normalize.ts:1444-1461`. With the supported literals present, changing the
+`normalize.ts:1450-1467`. With the supported literals present, changing the
 fixture relation's `required` member to `false` still reaches that guard and
 returns `CANON_RELATION_PARENT_SCOPE_INVALID`. The narrowing therefore does not
 turn the existing guard into dead evidence.
@@ -74,29 +76,35 @@ result.
 Authored-token telemetry moves from 3,651 to 3,661 because the fixture now
 states its join behavior; normalized telemetry remains 2,567.
 
-The checked-in composed application already declares `query` on every
-relation. A real repository recompile with
-`corepack pnpm --filter @north-star/web build:app-release`, followed by
-`node --import tsx apps/web/scripts/compile-app-release.ts --check`, moved
-**zero** lineage entries and left `apps/web/release/app.compiled.json`
-byte-identical. Its bootstrap root remains
-`7619e59cba92a3cc786eae11c0d9f83a6bb344e3d613a3039b53a1d05cfa1a55`;
-the eight application roots remain, in order:
+The current lineage is ADR-0043's truncated sequence: preserved entries 0–3
+plus one consolidated head at entry 4. Before writing any artifact, running
+`node --import tsx apps/web/scripts/compile-app-release.ts --check` under the
+narrowed canonical reader recompiled and accepted all five entries. The
+truncated lineage therefore contains no historical declaration of
+`oneToOne`, `oneToMany`, `joinEligibility: 'none'`, or omitted
+`joinEligibility`; no further truncation is required.
 
-```text
-a9c37c7784e726977cd32cd106ea441cfa5442568726bf04c60a0ec4e261e486
-ba87d2155d9d8fcc2d7c12a058ccc44094857310f6bb2cf4c095955711e7aa05
-bf932f8a4a69edc23c7a62c4191e1e9cf92c9482d38fc8bcef90945461615783
-a8f6e2c14510a687a0eaa1e244d025dedc3062114d42d14861b26417e36e9420
-6bf235d970f0ffb12c676d5925dc18aa01f1ef04ea864f2c1c04aa60712325a1
-57f2649094526e0f7cad7ddca275537b2e41089c90755529bf95914d5a379699
-575ee2c33421dcdded6efba646f41695168e76acc5cabd3895abeb8a8989d66f
-9e3f36df340bc3db500929ca90f14a93238e0027799bcf782a9da6abda27d58d
-```
+A real repository recompile with
+`node --import tsx apps/web/scripts/compile-app-release.ts`, followed by the
+same command with `--check`, moved **zero** lineage entries. The exact event is:
 
-Every entry still declares
-`northstar.compiler-output/v0-experimental`. This is ADR-0039's named
-zero-movement outcome, established by recompilation rather than assumption.
+| Artifact | Before | After |
+| --- | --- | --- |
+| `apps/web/release/app.compiled.json` SHA-256 | `431f15d6a7e76c37641caacdd063f263567eb4079e6785a77c4c57af2e8bcd36` | `431f15d6a7e76c37641caacdd063f263567eb4079e6785a77c4c57af2e8bcd36` |
+| bootstrap root | `7619e59cba92a3cc786eae11c0d9f83a6bb344e3d613a3039b53a1d05cfa1a55` | `7619e59cba92a3cc786eae11c0d9f83a6bb344e3d613a3039b53a1d05cfa1a55` |
+| entry 0 | `a9c37c7784e726977cd32cd106ea441cfa5442568726bf04c60a0ec4e261e486` | `a9c37c7784e726977cd32cd106ea441cfa5442568726bf04c60a0ec4e261e486` |
+| entry 1 | `ba87d2155d9d8fcc2d7c12a058ccc44094857310f6bb2cf4c095955711e7aa05` | `ba87d2155d9d8fcc2d7c12a058ccc44094857310f6bb2cf4c095955711e7aa05` |
+| entry 2 | `bf932f8a4a69edc23c7a62c4191e1e9cf92c9482d38fc8bcef90945461615783` | `bf932f8a4a69edc23c7a62c4191e1e9cf92c9482d38fc8bcef90945461615783` |
+| entry 3 | `a8f6e2c14510a687a0eaa1e244d025dedc3062114d42d14861b26417e36e9420` | `a8f6e2c14510a687a0eaa1e244d025dedc3062114d42d14861b26417e36e9420` |
+| entry 4 (consolidated head) | `ee5d474d50eb5243856fd11c7a3160f915b2fe6e1f85b57f2c443f6792e7e843` | `ee5d474d50eb5243856fd11c7a3160f915b2fe6e1f85b57f2c443f6792e7e843` |
+
+Zero movement is expected for a substantive reason rather than assumed: every
+stored lineage input already states the only supported relation values
+explicitly, while the canonical fixture was the sole omission and is outside
+the application lineage. Every lineage entry retains
+`northstar.compiler-output/v0-experimental`. This replaces the stale
+pre-ADR-0043 eight-entry event with the exact current artifact event required
+by ADR-0039 §2.
 
 ## Scope
 
@@ -107,19 +115,7 @@ semantics and its own negative controls.
 
 ## Gates
 
-- `corepack pnpm typecheck` — PASS.
-- `corepack pnpm lint` — PASS.
-- `corepack pnpm test:unit` — PASS, 58/58.
-- `corepack pnpm test:compiler` — PASS, 114/114.
-- `corepack pnpm test:architecture` — PASS, 106/106.
-- `corepack pnpm test:integration` — PASS, 68/68.
-- `corepack pnpm test:postgres` — PASS, 147/147 in 471,486.9 ms.
-- Real application release build and `--check` — PASS, zero lineage movement.
-- The first matrix admission attempt terminated with
-  `COMPILE_BUDGET_INDETERMINATE`: observed CPU idle was 86.4%, below the
-  required 90.0%. This was not treated as a failure or retried while another
-  test process was active.
-- The quiet retry observed 96.7% CPU idle, 1,785.7 ms CPU and 1,377.7 ms wall
-  time for the 5,000 ms compile budget, then completed the full repository
-  matrix with
-  `FULL_MATRIX_PASS_SHA=1fc58e86643adc23233593c25270b0791ab303c4`.
+The pre-rebase matrix at `1fc58e8` is void because current main changed both
+compiler behavior and the checked-in lineage. The rebased candidate must run
+the repository matrix at its new frozen SHA. Before that run, the real
+application recompile and `--check` passed with the zero-movement event above.
