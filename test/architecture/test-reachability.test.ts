@@ -367,6 +367,7 @@ test('root test aggregate includes every CI-invoked test command and reachabilit
         script.startsWith('test:') ||
         script === 'check:app-release' ||
         script === 'check:demo-release' ||
+        script === 'check:language-coverage' ||
         script === 'check:reachability',
     )
     .sort();

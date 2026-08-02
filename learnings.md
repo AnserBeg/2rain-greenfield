@@ -380,3 +380,8 @@ How to apply: observe nullable reference presence first, skip only an actual nul
 Date: 2026-08-02
 Why: verification named every recursive parent by depth, so two required diamond paths reaching one entity at equal depth generated the same record UUID and collided at the primary key.
 How to apply: derive recursive fixture identities from the parent path plus the current compiled edge, never from depth, order, time, or a counter; prove sibling paths persist distinct records. See `docs/execution/packets/5g3-arrangecycle.md`.
+
+## Derive conformance from authored and synthesized contracts
+Date: 2026-08-02
+Why: a schema-only language inventory could not see compiler-synthesized field-origin relations, so downstream consumers ignored a real output choice and demanded two authorities for one physical column.
+How to apply: derive obligations independently from the authored schema and every lowered output contract; discharge each exact value only with distinguishing execution, stable refusal, or a digest-bound written decision. See `docs/execution/packets/5g3-langgate.md`.

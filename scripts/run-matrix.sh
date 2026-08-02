@@ -124,6 +124,7 @@ echo "[$(date +%H:%M:%S)] $LABEL downgraded to shared access for the load-tolera
   corepack pnpm test:locale &&
   corepack pnpm test:browser &&
   node --import tsx test/helpers/run-observability-producer.ts &&
+  corepack pnpm check:language-coverage &&
   corepack pnpm check:reachability &&
   SECURITY_EVIDENCE_DIR=test-results/security .github/scripts/run-security-scans.sh
 } 2>&1 | tee -a "$LOG"

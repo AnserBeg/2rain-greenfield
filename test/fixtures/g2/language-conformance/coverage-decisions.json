@@ -1,0 +1,30 @@
+{
+  "version": "northstar.language-coverage-decisions/v1",
+  "ledgerDigest": "76a815ca5eee14142ad810ffc47691f8bd8e2d9086fef286788e6c94f12bef47",
+  "decisions": [
+    {
+      "category": "observedRelationScope",
+      "decisionId": "5g3-langgate-relation-corpus-boundary",
+      "ledgerDigest": "76a815ca5eee14142ad810ffc47691f8bd8e2d9086fef286788e6c94f12bef47",
+      "obligationSetDigest": "d521742c75656e8bfa8f072863c1bb5c45ea8d6820aa64097e5f6b5da9aa1422",
+      "rationale": "The first-party relation values are declared and lowered, but declaration is not execution evidence. They remain an explicit coverage debt until the sibling corpus executes each distinguishing value and topology through normalize, lower, materialize, and the real generic runtime.",
+      "revisitCondition": "Replace this decision with execution or stable-refusal receipts from the sibling relation corpus; any change to the exact observed relation obligation set invalidates this decision immediately."
+    },
+    {
+      "category": "observedOutsideRelationScope",
+      "decisionId": "5g3-langgate-whole-language-execution-boundary",
+      "ledgerDigest": "76a815ca5eee14142ad810ffc47691f8bd8e2d9086fef286788e6c94f12bef47",
+      "obligationSetDigest": "03e62c6352079072573a02198eb87cf316fc189309dfecc75121aa872a5ab502",
+      "rationale": "The whole-language ledger intentionally precedes execution coverage outside relations. Existing first-party uses are named evidence debt, not baselined as correct behavior, and this exact-set decision cannot absorb a new value or axis.",
+      "revisitCondition": "Each later language-axis packet replaces the corresponding obligations with execution or stable-refusal receipts; any change to the exact observed non-relation set invalidates this decision immediately."
+    },
+    {
+      "category": "unobserved",
+      "decisionId": "5g3-langgate-unused-shape-standing-exemption",
+      "ledgerDigest": "76a815ca5eee14142ad810ffc47691f8bd8e2d9086fef286788e6c94f12bef47",
+      "obligationSetDigest": "175d5fef226abfae62d2d0919f54adb396d6ca079ed4c2cc6901418a611872f1",
+      "rationale": "These derived values and topologies have no first-party instance. Their exemption is conditional on remaining unused and is not evidence that the platform honors them.",
+      "revisitCondition": "The first first-party occurrence changes the observed partition, invalidates this exact-set decision, and requires execution, stable refusal, or a new explicit ruling before the gate can pass."
+    }
+  ]
+}
