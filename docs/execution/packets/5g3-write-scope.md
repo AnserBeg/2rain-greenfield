@@ -102,3 +102,35 @@ The first full-lineage composed run exposed the separately ruled journey-length
 problem: two parent tests each reached their unchanged 300,000 ms timeout. No
 timeout or budget was changed. Per the orchestrator's ruling, recurrence at the
 full matrix is a stop rather than a write-scope fix.
+
+## Budget re-derivation continuation — stopped before measurement
+
+After the activation cache integrated, the terminal-state integration control
+was repaired to supply the derived `legalEntityId` to both entity-owned create
+arms. Its helper still requires the exact
+`MODULE_OPERATION_PRECONDITION_REFUSED` code, and the focused terminal-state
+suite passed 3/3. Validation remains ahead of precondition evaluation; neither
+refusal was weakened or reordered.
+
+Both composed-parent ceilings were then raised temporarily from 300,000 ms to
+600,000 ms solely to measure the ruled coverage cost. The first parent did not
+complete: on an otherwise quiet exclusive run it failed after 186,364.738 ms
+with `MODULE_LEGAL_ENTITY_READ_SCOPE_REQUIRED` during release verification.
+The temporary ceilings were restored to 300,000 ms. The failed duration is not
+a budget sample, the second parent was not run after the common prerequisite
+failed, and no budget was re-derived.
+
+The newly executable entity-owned scenarios create scoped records and then run
+positive row-query probes through
+`PostgresReleaseVerificationService`'s single `#invokeQuery` dispatch. That
+dispatch carries no issued legal-entity scope. Repairing it is not a test-budget
+change: Q1-P4 records that verification cannot choose a tenant business operand
+or fabricate an all-entities scope, so making the positive probes executable
+requires a ruling about how verification obtains a legitimate scope. This
+continuation expressly forbids product behavior beyond the terminal-state
+control repair.
+
+This is the third write-scope stop that revealed new scope, after the ADR-0039
+compiler-regeneration event and the activation-cost/O(lineage) finding. Per the
+mission-cadence convergence rule, the remaining verification-scope seam must be
+re-scoped rather than absorbed into another continuation of this packet.
