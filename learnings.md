@@ -375,3 +375,8 @@ How to apply: arrange only relation inputs declared required, reject cycles in t
 Date: 2026-08-02
 Why: restore joined a nullable foreign key directly to its target and interpreted zero rows as an archived target, so an ordinary unset optional relation made an archived record permanently unrestorable while verification's invented parent masked the defect.
 How to apply: observe nullable reference presence first, skip only an actual null, and independently lock and validate every non-null target. Control both the null-success direction and the archived-target refusal. See `docs/execution/packets/5g3-restorenull.md`.
+
+## Derive recursive identities from the full path
+Date: 2026-08-02
+Why: verification named every recursive parent by depth, so two required diamond paths reaching one entity at equal depth generated the same record UUID and collided at the primary key.
+How to apply: derive recursive fixture identities from the parent path plus the current compiled edge, never from depth, order, time, or a counter; prove sibling paths persist distinct records. See `docs/execution/packets/5g3-arrangecycle.md`.

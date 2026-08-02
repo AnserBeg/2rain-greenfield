@@ -72,7 +72,7 @@ parent. It creates its parent explicitly and passes the selected relation in
 the child's `relationOverrides`, so the relationship under test remains
 present after optional auto-arrangement is removed.
 
-## Unfixed finding from the coverage sweep
+## Follow-on finding resolved on the combined branch
 
 The generic recovery scenario for an entity with an optional `restrict`
 relation does depend on the former invention for a different reason. With that
@@ -82,15 +82,42 @@ inner join, observes no target row, and refuses restore with
 `stock_count` declares recovery evidence and is the only current first-party
 entity with that shape.
 
-This packet does not alter restore behavior, invent a replacement relation, or
-reclassify the recovery scenario. The finding is reported for a separate
-ruling before write-scope can integrate; it is not needed for this packet's
-matrix on current main because those inventory scenarios remain structural
-derivations there.
+The original arrangecycle candidate did not alter restore behavior, invent a
+replacement relation, or reclassify the recovery scenario. The follow-on
+`5g3-restorenull` packet now resolves it on the combined branch by observing the
+nullable foreign key before validating any target. Its independent controls
+and evidence are recorded in `docs/execution/packets/5g3-restorenull.md`.
+
+## Critical review round 1 — equal-depth arrangement paths
+
+The review found that recursive arrangements derived every parent token as
+`${token}-parent`. Two distinct required paths reaching the same entity at the
+same depth therefore generated the same stable UUID in the same table. This is
+not a cycle: the entity ancestry remains path-scoped and correctly permits a
+diamond.
+
+Recursive tokens now use a domain-separated SHA-256 digest of the parent token
+and the compiled relation ID. Each recursion therefore carries the entire
+relation path deterministically. The mechanism is generic, contains no module,
+entity, or relation literal, and does not use a counter, time, random data, or
+execution order. It creates separate prerequisite records rather than pooling
+or deduplicating them. The existing cycle ancestry and its `finally` cleanup
+are unchanged.
+
+A synthetic four-entity fixture forms `root -> left/right -> shared` with all
+four relation inputs required. It executes the real PostgreSQL verification
+path and then joins the persisted relationship columns, requiring each root's
+left and right legs to name distinct shared-record UUIDs. Against the reviewed
+depth-only token scheme, the control failed with `MODULE_UNIQUE_VIOLATION`
+during the second branch. With the path token, every scenario executes and the
+persisted pairs are distinct. A future implementation that silently pools the
+shared prerequisite would therefore fail the control even though verification
+itself did not throw.
 
 ## Gate evidence
 
-The two focused controls pass together after both repairs. Typecheck passes,
-and the complete PostgreSQL gate passes 149/149. The frozen full-matrix verdict
-is reported in the writer handoff so the candidate can remain byte-identical
+The focused optional-cycle, required-cycle, required-diamond, and restore
+controls pass together after the combined repairs. Typecheck passes. The
+complete PostgreSQL gate passes 152/152. The frozen full-matrix verdict is
+reported in the writer handoff so the candidate can remain byte-identical
 after measurement.

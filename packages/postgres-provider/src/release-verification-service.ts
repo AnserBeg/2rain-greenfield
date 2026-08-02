@@ -1579,7 +1579,7 @@ class SemanticVerificationExecutor {
       if (!relationInput.required) continue;
       const target = await this.#create(
         relation.targetEntityId,
-        `${token}-parent`,
+        arrangementPathToken(token, relationInput.relationId),
         {},
         {},
         nextArrangementPath,
@@ -2195,6 +2195,16 @@ function stableUuid(label: string): string {
   bytes[8] = (bytes[8]! & 0x3f) | 0x80;
   const hex = bytes.toString('hex');
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+function arrangementPathToken(parentToken: string, relationId: string): string {
+  return createHash('sha256')
+    .update('northstar.semantic-verification-arrangement-path/v1', 'utf8')
+    .update(Uint8Array.of(0))
+    .update(parentToken, 'utf8')
+    .update(Uint8Array.of(0))
+    .update(relationId, 'utf8')
+    .digest('hex');
 }
 
 function executionBinding(binding: ReleaseVerificationBinding) {
