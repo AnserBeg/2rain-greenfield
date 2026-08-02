@@ -110,6 +110,7 @@ import {
 import {
   FIXTURE_IDS,
   ordinaryModuleV1,
+  ordinaryModuleV1ForNamespace,
   ordinaryModuleV2,
   ordinaryModuleV2ForNamespace,
 } from '../fixtures/g2/module-conformance/definitions.js';
@@ -372,6 +373,36 @@ test('release verification executes a parameterized aggregate assertion as an om
           modulePool.end(),
         ]);
       }
+    },
+  );
+});
+
+test('release verification leaves an optional self-reference unset and terminates', async () => {
+  const observation = await executeSelfRelationVerification(false);
+  assert.equal(
+    observation.resultSet.results.length,
+    observation.plan.scenarios.length,
+    'every declared scenario must produce an executed result',
+  );
+  assert.equal(
+    observation.relationPopulation.explicit,
+    0,
+    'verification must not invent the optional relation for any scenario',
+  );
+  assert.ok(
+    observation.relationPopulation.unset > 0,
+    'ordinary arrangements must persist without inventing an optional parent',
+  );
+});
+
+test('release verification refuses a required relation cycle by name', async () => {
+  await assert.rejects(
+    executeSelfRelationVerification(true),
+    (error: unknown) => {
+      assert.ok(error instanceof ReleaseVerificationIntegrityError);
+      assert.equal(error.code, 'VERIFICATION_REQUIRED_RELATION_CYCLE');
+      assert.match(error.message, /required relation arrangement cycle/u);
+      return true;
     },
   );
 });
@@ -3740,6 +3771,175 @@ async function trustFactCount(
 function assertNoPhysicalDetails(value: unknown): void {
   const serialized = JSON.stringify(value);
   assert.doesNotMatch(serialized, /north_star_module|nsm_[ctik]_|storageClass/);
+}
+
+async function executeSelfRelationVerification(required: boolean) {
+  const namespace = required
+    ? 'northstar.requiredcycle'
+    : 'northstar.optionalcycle';
+  const definition = selfRelationDefinition(namespace, required);
+  const emptyDefinition_ = emptyDefinition(definition);
+  const empty = mustCompile(moduleInput(emptyDefinition_));
+  const compiled = mustCompile(
+    moduleInput(definition, expectedActiveReleaseFrom(empty)),
+  );
+  const plan = releaseVerificationBinding(compiled).plan;
+  const relationId = `${namespace}:relation.master_supersedes`;
+  const storage = compiledProjectionPayload<StorageTargetPayloadV1>(
+    compiled,
+    PROJECTION_FAMILY_IDS.storageTarget,
+  );
+  const relation = storage.relations.find(
+    (candidate) => candidate.relationId === relationId,
+  );
+  assert.ok(relation);
+  const entity = storage.entities.find(
+    (candidate) => candidate.entityId === `${namespace}:entity.master`,
+  );
+  assert.ok(entity);
+
+  const tenant = required
+    ? 'd1000000-0000-4000-8000-000000000001'
+    : 'c1000000-0000-4000-8000-000000000001';
+  const environment = required
+    ? 'd2000000-0000-4000-8000-000000000002'
+    : 'c2000000-0000-4000-8000-000000000002';
+  const principal = required
+    ? 'd3000000-0000-4000-8000-000000000003'
+    : 'c3000000-0000-4000-8000-000000000003';
+  return withEphemeralPostgres(
+    required ? 'verification-required-cycle' : 'verification-optional-cycle',
+    async ({ connection, pool }) => {
+      await migrateAndSeed(pool, [
+        [tenant, environment, required ? 'required-cycle' : 'optional-cycle'],
+      ]);
+      const runtimePool = new pg.Pool({
+        ...connection,
+        max: 3,
+        user: 'north_star_runtime',
+      });
+      const materializerPool = new pg.Pool({
+        ...connection,
+        max: 2,
+        user: 'north_star_module_materializer',
+      });
+      const modulePool = new pg.Pool({
+        ...connection,
+        max: 1,
+        user: 'north_star_module_runtime',
+      });
+      try {
+        const context = (
+          await contextsFor([['cycle', tenant, environment, principal]])
+        ).cycle!;
+        const releases = await persistSequence(runtimePool, context, [
+          [empty, emptyDefinition_],
+          [compiled, definition],
+        ]);
+        await setPointer(pool, tenant, environment, releases[0]!);
+        await grantExecutorAuthority(pool, [[tenant, principal]]);
+        const materializer = new PostgresModuleStorageMaterializer(
+          materializerPool,
+          modulePool,
+        );
+        await prepare(materializer, context, principal, releases[1]!);
+        const staged = await pool.query<{
+          verification_evidence_id: MintedUuid;
+        }>(
+          `SELECT verification_evidence_id
+             FROM platform.tenant_releases
+            WHERE tenant_id = $1
+              AND environment_id = $2
+              AND release_id = $3`,
+          [tenant, environment, releases[1]],
+        );
+        const evidenceId = staged.rows[0]?.verification_evidence_id;
+        assert.ok(evidenceId);
+        const interpreter = new PostgresModuleRuntimeInterpreter(
+          runtimePool,
+          humanActorIssuer(),
+        );
+        const resultSet = await new PostgresReleaseVerificationService(
+          runtimePool,
+        ).executeSemanticCandidateWithExecutor(
+          context,
+          {
+            compiledRelease: compiled,
+            evidenceId,
+            releaseId: releases[1]!,
+          },
+          interpreter,
+        );
+        const population = await pool.query<{
+          explicit: string;
+          unset: string;
+        }>(
+          `SELECT count(*) FILTER (
+                    WHERE ${quoteTestIdentifier(relation.relationColumn.physicalName)} IS NOT NULL
+                  )::text AS explicit,
+                  count(*) FILTER (
+                    WHERE ${quoteTestIdentifier(relation.relationColumn.physicalName)} IS NULL
+                  )::text AS unset
+             FROM north_star_module.${quoteTestIdentifier(entity.physicalTableName)}`,
+        );
+        const row = population.rows[0];
+        assert.ok(row);
+        return Object.freeze({
+          plan,
+          relationPopulation: Object.freeze({
+            explicit: Number(row.explicit),
+            unset: Number(row.unset),
+          }),
+          resultSet,
+        });
+      } finally {
+        await Promise.all([
+          runtimePool.end(),
+          materializerPool.end(),
+          modulePool.end(),
+        ]);
+      }
+    },
+  );
+}
+
+function selfRelationDefinition(
+  namespace: string,
+  required: boolean,
+): Record<string, unknown> {
+  const definition = ordinaryModuleV1ForNamespace(namespace) as {
+    languageVersion: string;
+    relations: Array<Record<string, unknown>>;
+  } & Record<string, unknown>;
+  const version = definition.languageVersion;
+  const entityId = `${namespace}:entity.master`;
+  definition.relations.push({
+    archiveBehavior: 'retainReference',
+    cardinality: 'manyToOne',
+    foreignKeyActions: {
+      onDelete: 'restrict',
+      onUpdate: 'restrict',
+      schemaVersion: version,
+    },
+    joinEligibility: 'query',
+    kind: 'relationDefinition',
+    orderKey: 20,
+    ownership: 'reference',
+    relationId: `${namespace}:relation.master_supersedes`,
+    required,
+    schemaVersion: version,
+    sourceEntity: {
+      kind: 'entityReference',
+      schemaVersion: version,
+      targetId: entityId,
+    },
+    targetEntity: {
+      kind: 'entityReference',
+      schemaVersion: version,
+      targetId: entityId,
+    },
+  });
+  return definition;
 }
 
 function emptyDefinition(

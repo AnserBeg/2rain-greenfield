@@ -365,3 +365,8 @@ How to apply: bind transitional authority to its exact workflow identity and ste
 Date: 2026-08-01
 Why: immutable row existence closed an install even though a broadly shaped document could have been inserted without proving the facts it claimed.
 How to apply: revoke direct writes, derive the closed document and digest from durable facts inside one database authority, and refuse malformed or incomplete closure before insertion. See `docs/execution/packets/5g3-freshtenant.md`.
+
+## Never invent optional verification prerequisites
+Date: 2026-08-01
+Why: semantic verification recursively created an optional self-reference, exhausting the call stack in a minimal fixture and filling PostgreSQL storage when a required parent was created before each recursion.
+How to apply: arrange only relation inputs declared required, reject cycles in the required-relation path by name, and execute both an optional self-reference and a required-cycle control. See `docs/execution/packets/5g3-arrangecycle.md`.

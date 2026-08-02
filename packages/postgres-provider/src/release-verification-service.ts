@@ -1516,12 +1516,14 @@ class SemanticVerificationExecutor {
     token: string,
     overrides: Readonly<Record<string, unknown>> = {},
     relationOverrides: Readonly<Record<string, string>> = {},
+    arrangementPath: readonly string[] = [],
   ): Promise<VerificationRecord> {
     const input = await this.#createInput(
       entityId,
       token,
       overrides,
       relationOverrides,
+      arrangementPath,
     );
     await this.#invokeOperation(this.#createOperation(entityId), input);
     this.#createdRecords.push({ entityId, recordId: String(input.recordId) });
@@ -1537,7 +1539,19 @@ class SemanticVerificationExecutor {
     token: string,
     overrides: Readonly<Record<string, unknown>> = {},
     relationOverrides: Readonly<Record<string, string>> = {},
+    arrangementPath: readonly string[] = [],
   ): Promise<Record<string, unknown>> {
+    const cycleStart = arrangementPath.indexOf(entityId);
+    if (cycleStart >= 0) {
+      throw failure(
+        'VERIFICATION_REQUIRED_RELATION_CYCLE',
+        `required relation arrangement cycle: ${[
+          ...arrangementPath.slice(cycleStart),
+          entityId,
+        ].join(' -> ')}`,
+      );
+    }
+    const nextArrangementPath = [...arrangementPath, entityId];
     const operation = this.#createOperation(entityId);
     const storageEntity = this.#requiredStorageEntity(entityId);
     const values = Object.fromEntries(
@@ -1562,9 +1576,13 @@ class SemanticVerificationExecutor {
           'operation relation input has no storage relation contract',
         );
       }
+      if (!relationInput.required) continue;
       const target = await this.#create(
         relation.targetEntityId,
         `${token}-parent`,
+        {},
+        {},
+        nextArrangementPath,
       );
       relations[relationInput.relationId] = target.recordId;
     }
