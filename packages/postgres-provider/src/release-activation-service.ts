@@ -1571,6 +1571,22 @@ async function loadAttemptRecord(
                     target.output_protocol_version
               AND approval.verification_evidence_id =
                     target.verification_evidence_id
+              AND (
+                target_admission.release_id IS NOT NULL
+                OR (
+                  intermediate_admission.release_id IS NOT NULL
+                  AND intermediate_admission.source_release_root IS NOT DISTINCT
+                      FROM encode(approval.source_manifest_root, 'hex')
+                  AND NOT EXISTS (
+                    SELECT 1
+                      FROM platform.fresh_tenant_install_evidence
+                     WHERE tenant_id = intermediate_admission.tenant_id
+                       AND environment_id =
+                           intermediate_admission.environment_id
+                       AND install_id = intermediate_admission.install_id
+                  )
+                )
+              )
             ) AS binding_valid,
             ((
               receipt.receipt_version =
@@ -1638,12 +1654,20 @@ async function loadAttemptRecord(
          ON target.tenant_id = approval.tenant_id
         AND target.environment_id = approval.environment_id
         AND target.release_id = approval.target_release_id
-       JOIN platform.tenant_release_admissions AS target_admission
+       LEFT JOIN platform.tenant_release_admissions AS target_admission
          ON target_admission.tenant_id = target.tenant_id
         AND target_admission.environment_id = target.environment_id
         AND target_admission.release_id = target.release_id
         AND target_admission.verification_evidence_id =
             target.verification_evidence_id
+       LEFT JOIN platform.fresh_tenant_intermediate_release_admissions
+         AS intermediate_admission
+         ON intermediate_admission.tenant_id = target.tenant_id
+        AND intermediate_admission.environment_id = target.environment_id
+        AND intermediate_admission.release_id = target.release_id
+        AND intermediate_admission.release_evidence_id =
+            target.verification_evidence_id
+        AND intermediate_admission.release_root = target.content_hash
        LEFT JOIN north_star_internal.module_storage_generations AS generation
          ON generation.tenant_id = receipt.tenant_id
         AND generation.environment_id = receipt.environment_id

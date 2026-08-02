@@ -350,3 +350,8 @@ How to apply: bound and execute-control every acquisition and conversion path. T
 Date: 2026-08-01
 Why: G3-P6b-2 collapsed a repeated legal-entity URL operand to its first value, letting a malformed two-entity request answer as one entity instead of reaching ADR-0031's cardinality refusal.
 How to apply: carry every transport value to the canonical argument kernel, render no choice as selected when multiplicity is invalid, and prove the collapse mutation returns a value where the control requires a typed refusal.
+
+## Bound fresh install by separating transitions from verification
+Date: 2026-08-01
+Why: replaying tenant-invariant semantic scenarios for every historical release made fresh install grow with lineage until it exhausted both time and database space.
+How to apply: apply and assert every pairwise transition, verify only the serving shared release, and persist the exact non-serving set; revisit this rule before G6 permits tenant-divergent releases. Graduated to ADR-0040; see `docs/execution/packets/5g3-freshtenant.md`.
