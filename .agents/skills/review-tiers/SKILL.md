@@ -78,8 +78,10 @@ it nowhere in particular.
 | Behavioral | codex `gpt-5.6-sol` high | one fresh naive codex xhigh review against the charter -> bounded fix loop |
 | Critical | codex `gpt-5.6-sol` xhigh | fresh naive codex xhigh against the charter to PASS, then Fable max confirm on the identical SHA |
 
-- Codex max effort is `xhigh` (there is no valid "ultra"). Fable:
-  `claude -p --model fable --effort max` via the WSL binary.
+- Codex max effort is `xhigh` (there is no valid "ultra"). Fable runs via the
+  WSL binary. Both reviewer commands acquire the repository's shared test lock:
+  `node scripts/run-with-test-lock.mjs shared -- claude -p --model fable
+  --effort max`.
 - The Fable confirm is for Critical **logic**. For document/config packets it
   is optional — the human read or the deterministic gate is the real review.
 - If Fable is unavailable, a Critical-logic result stays `evidence_ready`.
@@ -157,9 +159,11 @@ Otherwise:
   back to the user).
 - The orchestrator adjudicates by reading the code; a finding's survival
   depends on the charter and materiality, not on the reviewer's confidence.
-- Launch reviews with the `codex exec ... -s read-only --output-last-message`
-  subprocess method (it returns a captured verdict); do not use unbounded
-  background-agent polling.
+- Launch reviews with the `node scripts/run-with-test-lock.mjs shared -- codex
+  exec ... -s read-only --output-last-message` subprocess method (it returns a
+  captured verdict); do not use unbounded background-agent polling. The shared
+  lease mechanically prevents a review from competing with a matrix or the
+  exclusive performance gate.
 - Binding design authority a review depends on (debate verdicts, ADRs) lives
   IN-REPO — debate outcomes under `docs/execution/debates/` — so a sandboxed
   reviewer reads the primary source, not a restatement. A charter may summarize
