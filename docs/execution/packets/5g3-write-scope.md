@@ -1,6 +1,6 @@
 # 5g3-write-scope — entity-owned create scope
 
-Status: implementation evidence ready; Critical review and full matrix pending
+Status: parked at the ruled fourth stop; Critical review and full matrix pending
 
 Tier: Critical
 
@@ -134,3 +134,45 @@ This is the third write-scope stop that revealed new scope, after the ADR-0039
 compiler-regeneration event and the activation-cost/O(lineage) finding. Per the
 mission-cadence convergence rule, the remaining verification-scope seam must be
 re-scoped rather than absorbed into another continuation of this packet.
+
+## Arrangement-owned read-back ruling — fourth stop
+
+The user expressly continued the packet once more because leaving the 73
+constructible scenarios derived would violate ADR-0020's rule that a derivation
+is never a skip. Verification now records the legal entity created for its
+derived create input and supplies that exact value when it reads the arranged
+record back. Current query contracts receive the declared ADR-0031 operand;
+historical lineage queries that predate that operand receive an issued
+`LegalEntityReadScope`. Both paths use the same `VerificationAllowPolicy` object
+and converge through `SemanticQueryGateway`; there is no second policy gateway
+or bypass.
+
+The boundary guard runs before either operand insertion or scope issuance. It
+refuses `VERIFICATION_LEGAL_ENTITY_SCOPE_NOT_ARRANGED` when a record names a
+legal entity absent from verification's own arrangement set. Its control was
+observed red (`Missing expected exception`) with the membership predicate
+removed and green after restoration. ADR-0031 §5 remains a separate raw-empty-
+argument dispatch: both the empty-plan row-query omission control and the
+scoped-aggregate omission control pass unchanged with the exact
+`selection-omitted` refusal.
+
+The first operand-only implementation exposed historical lineage and was
+corrected: the first parent reached `MODULE_LEGAL_ENTITY_READ_SCOPE_REQUIRED`
+after 179,892.047 ms because older query catalogs have entity-owned storage but
+no declared operand. With the dual historical/current wiring in place, that
+refusal disappeared. Two subsequent otherwise-quiet, exclusive runs advanced
+to verification cleanup but did not complete: one surfaced a generic operation
+failure after 183,544.308 ms; a metadata-only diagnostic identified the real
+cause on the repeat run after 181,149.176 ms as PostgreSQL SQLSTATE `53100`,
+`No space left on device`, while recording cleanup for the compiled
+`inventory_transaction` entity. The diagnostic was removed immediately.
+
+This is the fourth stop. `withEphemeralPostgres` mounts
+`/var/lib/postgresql/data` on a 256 MiB tmpfs, and the genuinely executed
+verification now exhausts that bound before either composed parent can produce
+an admissible duration sample. Raising a shared database-capacity bound without
+a ruling would repeat the timeout mistake in a different unit. Both temporary
+600,000 ms measurement ceilings were restored to 300,000 ms; no duration was
+treated as a sample, no budget was re-derived, and no matrix or Critical review
+was run. The packet requires the promised re-scope before changing the
+ephemeral database capacity or continuing measurement.
