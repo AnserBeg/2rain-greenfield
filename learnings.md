@@ -355,3 +355,13 @@ How to apply: carry every transport value to the canonical argument kernel, rend
 Date: 2026-08-01
 Why: replaying tenant-invariant semantic scenarios for every historical release made fresh install grow with lineage until it exhausted both time and database space.
 How to apply: apply and assert every pairwise transition, verify only the serving shared release, and persist the exact non-serving set; revisit this rule before G6 permits tenant-divergent releases. Graduated to ADR-0040; see `docs/execution/packets/5g3-freshtenant.md`.
+
+## Keep transition authority out of serving paths
+Date: 2026-08-01
+Why: bounded fresh install needed transition-only admission, but an intermediate active pointer made that narrow authority visible to ordinary request loading.
+How to apply: bind transitional authority to its exact workflow identity and step, and make every serving ingress refuse a subject whose only live authority is transitional. See `docs/execution/packets/5g3-freshtenant.md`.
+
+## Close completion evidence behind one durable writer
+Date: 2026-08-01
+Why: immutable row existence closed an install even though a broadly shaped document could have been inserted without proving the facts it claimed.
+How to apply: revoke direct writes, derive the closed document and digest from durable facts inside one database authority, and refuse malformed or incomplete closure before insertion. See `docs/execution/packets/5g3-freshtenant.md`.

@@ -44,12 +44,14 @@ import {
   createComposedApplicationRuntime,
   parseCompiledApplication,
   type ComposedApplicationRuntime,
+  type FreshTenantIntermediateActivationObservation,
 } from '../../packages/postgres-provider/src/composed-application-runtime.js';
 import { INVENTORY_PROVIDER_ERROR_MAPPINGS } from '../../packages/postgres-provider/src/inventory-provider-error-mappings.js';
 import { captureSchemaSnapshot } from '../../packages/postgres-provider/src/migrations.js';
 import { PostgresReleaseActivationService } from '../../packages/postgres-provider/src/release-activation-service.js';
 import { PostgresReleaseApprovalService } from '../../packages/postgres-provider/src/release-approval-service.js';
 import { PostgresImmutableReleaseRepository } from '../../packages/postgres-provider/src/release-repository.js';
+import { RequestRuntimeViewLoadError } from '../../packages/postgres-provider/src/request-runtime-view-service.js';
 import { ReleaseReverseTransitionRefusal } from '../../packages/postgres-provider/src/release-reverse-transition-policy.js';
 import {
   PostgresReleaseVerificationService,
@@ -126,10 +128,32 @@ test(
           'the checked-in authored artifact is generated from the shared module factories',
         );
         const databaseUrl = connectionUrl(connection);
+        const refusedIntermediateRoots: string[] = [];
         let tenantA = await createRuntime(
           compiledApplication,
           databaseUrl,
           'composed-tenant-a',
+          undefined,
+          async (observation) => {
+            await assert.rejects(
+              observation.loadActiveRuntimeDefinition,
+              (error: unknown) => {
+                assert.ok(error instanceof RequestRuntimeViewLoadError);
+                assert.equal(error.code, 'ACTIVE_RELEASE_NOT_ADMITTED');
+                return true;
+              },
+            );
+            refusedIntermediateRoots.push(observation.releaseRoot);
+          },
+        );
+        const firstTenantLineage =
+          parseCompiledApplication(compiledApplication);
+        assert.deepEqual(
+          refusedIntermediateRoots,
+          [firstTenantLineage.bootstrap, ...firstTenantLineage.applications]
+            .slice(0, -1)
+            .map((release) => release.compiled.releaseRoot),
+          'every active intermediate pointer refuses request serving until semantic admission',
         );
         let tenantB: ComposedApplicationRuntime | undefined;
         try {
@@ -141,6 +165,7 @@ test(
             pool,
             tenantA,
             compiledApplication,
+            connection,
           );
           await assertBoundedInstallMatchesFullReplaySchema(pool);
           await context.test(
@@ -2111,6 +2136,7 @@ async function assertBoundedFreshTenantInstallEvidence(
   pool: pg.Pool,
   runtime: ComposedApplicationRuntime,
   compiledApplication: unknown,
+  connection: pg.PoolConfig,
 ): Promise<void> {
   const compiled = parseCompiledApplication(compiledApplication);
   const lineage = [compiled.bootstrap, ...compiled.applications];
@@ -2131,12 +2157,14 @@ async function assertBoundedFreshTenantInstallEvidence(
   );
 
   const intermediate = await pool.query<{
+    install_id: MintedUuid;
     lineage_ordinal: number;
     release_id: MintedUuid;
     release_root: string;
     source_release_root: string | null;
   }>(
-    `SELECT lineage_ordinal, release_id, release_root, source_release_root
+    `SELECT install_id, lineage_ordinal, release_id, release_root,
+            source_release_root
        FROM platform.fresh_tenant_intermediate_release_admissions
       WHERE tenant_id = $1 AND environment_id = $2
       ORDER BY lineage_ordinal`,
@@ -2146,6 +2174,43 @@ async function assertBoundedFreshTenantInstallEvidence(
     intermediate.rows.map((row) => row.release_root),
     unverifiedRoots,
     'every and only non-serving release is named as lacking scenario execution',
+  );
+  const installId = intermediate.rows[0]?.install_id;
+  assert.ok(installId);
+  assert.ok(
+    intermediate.rows.every((row) => row.install_id === installId),
+    'all intermediate admissions belong to one exact fresh install',
+  );
+  const preparationBindings = await pool.query<{
+    fresh_tenant_install_id: MintedUuid;
+    fresh_tenant_lineage_ordinal: number;
+    release_id: MintedUuid;
+  }>(
+    `SELECT preparation.fresh_tenant_install_id,
+            preparation.fresh_tenant_lineage_ordinal,
+            intermediate.release_id
+       FROM platform.release_activation_preparations AS preparation
+       JOIN platform.fresh_tenant_intermediate_release_admissions
+            AS intermediate
+         ON intermediate.tenant_id = preparation.tenant_id
+        AND intermediate.environment_id = preparation.environment_id
+        AND intermediate.release_id = preparation.target_release_id
+        AND intermediate.install_id = preparation.fresh_tenant_install_id
+        AND intermediate.lineage_ordinal =
+            preparation.fresh_tenant_lineage_ordinal
+      WHERE preparation.tenant_id = $1
+        AND preparation.environment_id = $2
+      ORDER BY preparation.fresh_tenant_lineage_ordinal`,
+    [runtime.identity.tenantId, runtime.identity.environmentId],
+  );
+  assert.deepEqual(
+    preparationBindings.rows,
+    intermediate.rows.map((row) => ({
+      fresh_tenant_install_id: row.install_id,
+      fresh_tenant_lineage_ordinal: row.lineage_ordinal,
+      release_id: row.release_id,
+    })),
+    'every transition-only preparation preserves its exact install and ordinal binding',
   );
   assert.deepEqual(
     intermediate.rows.map((row) => ({
@@ -2228,6 +2293,90 @@ async function assertBoundedFreshTenantInstallEvidence(
   assert.equal(durable.rows[0]?.evidence_version, evidence.schemaVersion);
   assert.equal(durable.rows[0]?.serving_scenario_count, servingScenarioCount);
   assert.deepEqual(durable.rows[0]?.evidence_document, evidence);
+  await assertFreshTenantEvidenceAuthorityRejectsMalformedClosure(
+    connection,
+    runtime,
+    installId,
+    evidence,
+  );
+}
+
+async function assertFreshTenantEvidenceAuthorityRejectsMalformedClosure(
+  connection: pg.PoolConfig,
+  runtime: ComposedApplicationRuntime,
+  installId: MintedUuid,
+  evidence: NonNullable<
+    ComposedApplicationRuntime['freshTenantInstallEvidence']
+  >,
+): Promise<void> {
+  const runtimePool = new pg.Pool({
+    ...connection,
+    max: 2,
+    user: 'north_star_runtime',
+  });
+  runtimePool.on('error', () => undefined);
+  const context = await new AuthenticatedRequestEntryAdapter(
+    async () => runtime.identity,
+  ).enter({});
+  const malformed = {
+    appliedTransitions: [],
+    nonServingReleasesWithoutScenarioExecution: [],
+    schemaVersion: evidence.schemaVersion,
+    servingRelease: {},
+  };
+  try {
+    await assert.rejects(
+      withTrustedRequestTransaction(runtimePool, context, (client) =>
+        client.query(
+          `INSERT INTO platform.fresh_tenant_install_evidence (
+             tenant_id, environment_id, install_id, serving_release_id,
+             serving_release_root, serving_scenario_count, evidence_version,
+             evidence_document, evidence_digest, created_by
+           ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+          [
+            context.tenantId,
+            context.environmentId,
+            installId,
+            runtime.activeReleaseId,
+            runtime.releaseRoot,
+            evidence.servingRelease.scenarioCount,
+            evidence.schemaVersion,
+            malformed,
+            '0'.repeat(64),
+            context.principalId,
+          ],
+        ),
+      ),
+      (error: unknown) => {
+        assert.equal((error as { code?: string }).code, '42501');
+        return true;
+      },
+      'the runtime role has no direct path around the closed evidence recorder',
+    );
+    await assert.rejects(
+      withTrustedRequestTransaction(runtimePool, context, (client) =>
+        client.query(
+          `SELECT platform.record_fresh_tenant_install_evidence(
+             $1,$2,$3,$4,$5
+           )`,
+          [
+            installId,
+            runtime.activeReleaseId,
+            runtime.releaseRoot,
+            evidence.servingRelease.scenarioCount,
+            malformed,
+          ],
+        ),
+      ),
+      (error: unknown) => {
+        assert.equal((error as { code?: string }).code, '23514');
+        return true;
+      },
+      'the only evidence writer refuses a document that omits durable lineage facts',
+    );
+  } finally {
+    await runtimePool.end();
+  }
 }
 
 async function assertBoundedInstallMatchesFullReplaySchema(
@@ -2867,8 +3016,14 @@ function createRuntime(
     kind: 'rollback';
     targetReleaseRoot: string;
   }>,
+  afterFreshTenantIntermediateActivation?: (
+    observation: FreshTenantIntermediateActivationObservation,
+  ) => Promise<void>,
 ) {
   return createComposedApplicationRuntime({
+    ...(afterFreshTenantIntermediateActivation
+      ? { afterFreshTenantIntermediateActivation }
+      : {}),
     compiledApplication,
     databaseUrl,
     inventoryScopeProvisioning: COMPOSED_APPLICATION_INVENTORY_SCOPE,

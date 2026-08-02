@@ -83,6 +83,10 @@ export const FRESH_TENANT_INSTALL_EVIDENCE_VERSION =
   'northstar.fresh-tenant-install-evidence/v1' as const;
 
 export interface ComposedApplicationRuntimeOptions {
+  /** Deterministic observation seam for the non-serving active-pointer window. */
+  readonly afterFreshTenantIntermediateActivation?: (
+    observation: FreshTenantIntermediateActivationObservation,
+  ) => Promise<void>;
   readonly compiledApplication: unknown;
   readonly databaseUrl: string;
   readonly environmentSlug?: string;
@@ -94,6 +98,13 @@ export interface ComposedApplicationRuntimeOptions {
     readonly targetReleaseRoot: string;
   }>;
   readonly tenantSlug: string;
+}
+
+export interface FreshTenantIntermediateActivationObservation {
+  readonly lineageOrdinal: number;
+  readonly releaseId: MintedUuid;
+  readonly releaseRoot: string;
+  loadActiveRuntimeDefinition(): Promise<void>;
 }
 
 export interface InventoryScopeProvisioning {
@@ -175,6 +186,11 @@ interface PointerState {
   readonly fence: number;
   readonly pointerId: MintedUuid;
   readonly releaseId: MintedUuid | null;
+}
+
+interface FreshTenantPreparationBinding {
+  readonly installId: MintedUuid;
+  readonly lineageOrdinal: number;
 }
 
 /**
@@ -288,6 +304,7 @@ export async function createComposedApplicationRuntime(
         pointer,
         bootstrapIdentity,
         releases.bootstrap.compiled,
+        { installId: candidateInstallId, lineageOrdinal: 0 },
       );
       const activated = await activateWithExactSwapTrigger(
         adminPool,
@@ -301,6 +318,14 @@ export async function createComposedApplicationRuntime(
         );
       }
       pointer = await readPointer(runtimePool, runtimeContext);
+      await observeFreshTenantIntermediateActivation(
+        options,
+        runtimePool,
+        runtimeContext,
+        0,
+        bootstrapIdentity,
+        releases.bootstrap.compiled.releaseRoot,
+      );
     }
 
     const activeLineageIndex = lineage.findIndex(
@@ -433,6 +458,10 @@ export async function createComposedApplicationRuntime(
             source,
             targetIdentity,
             target.compiled,
+            undefined,
+            freshInstall && !servingTarget
+              ? { installId: candidateInstallId, lineageOrdinal: targetIndex }
+              : undefined,
           );
         } else {
           const prepared = await materializer.prepare({
@@ -471,6 +500,9 @@ export async function createComposedApplicationRuntime(
             target.compiled,
             prepared,
             preparationId,
+            freshInstall && !servingTarget
+              ? { installId: candidateInstallId, lineageOrdinal: targetIndex }
+              : undefined,
           );
           const executed = await materializer.executeApprovedAttempt({
             activationAttemptId: attemptId,
@@ -502,6 +534,16 @@ export async function createComposedApplicationRuntime(
           );
         }
         servingLineageIndex = targetIndex;
+        if (freshInstall && !servingTarget) {
+          await observeFreshTenantIntermediateActivation(
+            options,
+            runtimePool,
+            runtimeContext,
+            targetIndex,
+            targetIdentity,
+            target.compiled.releaseRoot,
+          );
+        }
       }
     }
     await assertExactSwapTriggerEnabled(adminPool);
@@ -1067,6 +1109,27 @@ async function ensureReleaseAdmitted(
   });
 }
 
+async function observeFreshTenantIntermediateActivation(
+  options: ComposedApplicationRuntimeOptions,
+  pool: pg.Pool,
+  context: TrustedRequestContext,
+  lineageOrdinal: number,
+  identity: PersistedReleaseIdentity,
+  releaseRoot: string,
+): Promise<void> {
+  if (!options.afterFreshTenantIntermediateActivation) return;
+  await options.afterFreshTenantIntermediateActivation(
+    Object.freeze({
+      lineageOrdinal,
+      async loadActiveRuntimeDefinition() {
+        await new PostgresRequestRuntimeViewService(pool).load(context);
+      },
+      releaseId: identity.releaseId,
+      releaseRoot,
+    }),
+  );
+}
+
 async function freshTenantInstallIsIncomplete(
   pool: pg.Pool,
   context: TrustedRequestContext,
@@ -1388,37 +1451,22 @@ async function persistFreshTenantInstallEvidence(
         scenarioCount: binding.plan.scenarios.length,
       }),
     });
-    const evidenceDigest = digest(
-      'fresh-tenant-install-evidence',
-      canonicalize(document),
-    ).toString('hex');
-    await client.query(
-      `INSERT INTO platform.fresh_tenant_install_evidence (
-         tenant_id, environment_id, install_id, serving_release_id,
-         serving_release_root, serving_scenario_count, evidence_version,
-         evidence_document, evidence_digest, created_by
-       )
-       SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10
-        WHERE NOT EXISTS (
-          SELECT 1
-            FROM platform.fresh_tenant_install_evidence
-           WHERE tenant_id = $1
-             AND environment_id = $2
-             AND install_id = $3
-        )`,
+    const recorded = await client.query<{ evidence_digest: string }>(
+      `SELECT platform.record_fresh_tenant_install_evidence(
+         $1,$2,$3,$4,$5
+       ) AS evidence_digest`,
       [
-        context.tenantId,
-        context.environmentId,
         installId,
         servingIdentity.releaseId,
         servingRelease.compiled.releaseRoot,
         binding.plan.scenarios.length,
-        FRESH_TENANT_INSTALL_EVIDENCE_VERSION,
         document,
-        evidenceDigest,
-        context.principalId,
       ],
     );
+    const evidenceDigest = recorded.rows[0]?.evidence_digest;
+    if (!evidenceDigest) {
+      throw new Error('fresh-tenant evidence recorder returned no digest');
+    }
     const stored = await client.query<{
       created_by: string;
       evidence_digest: string;
@@ -1462,6 +1510,7 @@ async function approveInitialRelease(
   pointer: PointerState,
   target: PersistedReleaseIdentity,
   compiled: CompileSuccess,
+  freshTenantBinding: FreshTenantPreparationBinding,
 ): Promise<MintedUuid> {
   const receiptId = minted(randomUUID());
   const preparationId = minted(randomUUID());
@@ -1504,6 +1553,7 @@ async function approveInitialRelease(
       compiled,
       context,
       evidenceId: target.evidenceId,
+      ...(freshTenantBinding ? { freshTenantBinding } : {}),
       pointer,
       preparationId,
       receiptId,
@@ -1530,6 +1580,7 @@ async function approveModuleRelease(
   compiled: CompileSuccess,
   prepared: Awaited<ReturnType<PostgresModuleStorageMaterializer['prepare']>>,
   preparationId: MintedUuid,
+  freshTenantBinding?: FreshTenantPreparationBinding,
 ): Promise<MintedUuid> {
   const receiptId = minted(randomUUID());
   await withTrustedRequestTransaction(pool, context, async (client) => {
@@ -1577,6 +1628,7 @@ async function approveModuleRelease(
       compiled,
       context,
       evidenceId: target.evidenceId,
+      ...(freshTenantBinding ? { freshTenantBinding } : {}),
       pointer,
       preparationId,
       receiptId,
@@ -1603,6 +1655,7 @@ async function approveReleaseWithoutStorageTransition(
   target: PersistedReleaseIdentity,
   compiled: CompileSuccess,
   reverseAuthorization?: ReleaseReverseTransitionAuthorization,
+  freshTenantBinding?: FreshTenantPreparationBinding,
 ): Promise<MintedUuid> {
   if (pointer.releaseId === null) {
     throw new Error('release advancement requires an active source release');
@@ -1678,6 +1731,7 @@ async function approveReleaseWithoutStorageTransition(
       compiled,
       context,
       evidenceId: target.evidenceId,
+      ...(freshTenantBinding ? { freshTenantBinding } : {}),
       pointer,
       preparationId,
       receiptId,
@@ -1703,6 +1757,7 @@ async function insertReleasePreparation(
     readonly compiled: CompileSuccess;
     readonly context: TrustedRequestContext;
     readonly evidenceId: MintedUuid;
+    readonly freshTenantBinding?: FreshTenantPreparationBinding;
     readonly pointer: PointerState;
     readonly preparationId: MintedUuid;
     readonly receiptId: MintedUuid;
@@ -1712,26 +1767,22 @@ async function insertReleasePreparation(
   },
 ): Promise<void> {
   const targetRoot = Buffer.from(input.compiled.releaseRoot, 'hex');
-  const evidence = await client.query<{
-    evidence_version: string;
-    result_set_digest: string;
-  }>(
-    `SELECT evidence_version, result_set_digest
-       FROM (
-         SELECT evidence_version, result_set_digest
-           FROM platform.release_verification_evidence
-          WHERE tenant_id = $1
-            AND environment_id = $2
-            AND verification_evidence_id = $3
-            AND release_root = $4
-         UNION ALL
-         SELECT evidence_version, evidence_digest AS result_set_digest
+  const evidence = input.freshTenantBinding
+    ? await client.query<{
+        evidence_version: string;
+        result_set_digest: string;
+      }>(
+        `SELECT evidence_version, evidence_digest AS result_set_digest
            FROM platform.fresh_tenant_intermediate_release_admissions
                 AS intermediate
           WHERE intermediate.tenant_id = $1
             AND intermediate.environment_id = $2
             AND intermediate.release_evidence_id = $3
             AND intermediate.release_root = $4
+            AND intermediate.release_id = $5
+            AND intermediate.install_id = $6
+            AND intermediate.lineage_ordinal = $7
+            AND intermediate.source_release_root IS NOT DISTINCT FROM $8
             AND NOT EXISTS (
               SELECT 1
                 FROM platform.fresh_tenant_install_evidence
@@ -1746,15 +1797,35 @@ async function insertReleasePreparation(
                  AND environment_id = $2
                  AND verification_evidence_id = $3
                  AND release_root = $4
-            )
-       ) AS release_evidence`,
-    [
-      input.context.tenantId,
-      input.context.environmentId,
-      input.evidenceId,
-      input.compiled.releaseRoot,
-    ],
-  );
+            )`,
+        [
+          input.context.tenantId,
+          input.context.environmentId,
+          input.evidenceId,
+          input.compiled.releaseRoot,
+          input.targetReleaseId,
+          input.freshTenantBinding.installId,
+          input.freshTenantBinding.lineageOrdinal,
+          input.sourceRoot?.toString('hex') ?? null,
+        ],
+      )
+    : await client.query<{
+        evidence_version: string;
+        result_set_digest: string;
+      }>(
+        `SELECT evidence_version, result_set_digest
+           FROM platform.release_verification_evidence
+          WHERE tenant_id = $1
+            AND environment_id = $2
+            AND verification_evidence_id = $3
+            AND release_root = $4`,
+        [
+          input.context.tenantId,
+          input.context.environmentId,
+          input.evidenceId,
+          input.compiled.releaseRoot,
+        ],
+      );
   const verified = evidence.rows.length === 1 ? evidence.rows[0] : undefined;
   if (!verified) {
     throw new Error(
@@ -1774,11 +1845,12 @@ async function insertReleasePreparation(
        verification_evidence_digest, capability_support_version,
        capability_support_digest, capability_support_result, renderer_version,
        view_schema_version, rendered_diff_evidence_digest,
-       transition_preparation_receipt_id
+       transition_preparation_receipt_id, fresh_tenant_install_id,
+       fresh_tenant_lineage_ordinal
      ) VALUES (
        $1,$2,$3,'northstar.release-activation-preparation/v1',$4,$5,$6,$7,$8,$9,
        $10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,
-       'SUPPORTED',$25,$26,$27,$28
+       'SUPPORTED',$25,$26,$27,$28,$29,$30
      )`,
     [
       input.context.tenantId,
@@ -1817,6 +1889,8 @@ async function insertReleasePreparation(
       viewSchemaVersion,
       digest('rendered-diff', input.compiled.releaseRoot),
       input.receiptId,
+      input.freshTenantBinding?.installId ?? null,
+      input.freshTenantBinding?.lineageOrdinal ?? null,
     ],
   );
 }

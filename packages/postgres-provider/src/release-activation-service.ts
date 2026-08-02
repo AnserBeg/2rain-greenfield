@@ -1572,9 +1572,17 @@ async function loadAttemptRecord(
               AND approval.verification_evidence_id =
                     target.verification_evidence_id
               AND (
-                target_admission.release_id IS NOT NULL
+                (
+                  target_admission.release_id IS NOT NULL
+                  AND preparation.fresh_tenant_install_id IS NULL
+                  AND preparation.fresh_tenant_lineage_ordinal IS NULL
+                )
                 OR (
                   intermediate_admission.release_id IS NOT NULL
+                  AND preparation.fresh_tenant_install_id =
+                      intermediate_admission.install_id
+                  AND preparation.fresh_tenant_lineage_ordinal =
+                      intermediate_admission.lineage_ordinal
                   AND intermediate_admission.source_release_root IS NOT DISTINCT
                       FROM encode(approval.source_manifest_root, 'hex')
                   AND NOT EXISTS (
@@ -1668,6 +1676,10 @@ async function loadAttemptRecord(
         AND intermediate_admission.release_evidence_id =
             target.verification_evidence_id
         AND intermediate_admission.release_root = target.content_hash
+        AND intermediate_admission.install_id =
+            preparation.fresh_tenant_install_id
+        AND intermediate_admission.lineage_ordinal =
+            preparation.fresh_tenant_lineage_ordinal
        LEFT JOIN north_star_internal.module_storage_generations AS generation
          ON generation.tenant_id = receipt.tenant_id
         AND generation.environment_id = receipt.environment_id

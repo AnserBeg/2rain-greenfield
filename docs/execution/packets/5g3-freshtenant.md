@@ -1,6 +1,6 @@
 # 5g3-freshtenant — bounded fresh-tenant install
 
-Status: matrix-green implementation candidate; Critical review pending
+Status: implementation candidate; Critical review round 1 addressed, new matrix pending
 
 Tier: Critical
 
@@ -22,6 +22,14 @@ Transition-only admission expires when completed-install evidence exists; a
 historical release selected to serve later must first gain ordinary semantic
 verification admission.
 
+Request entry independently refuses an active release carrying live
+transition-only authority unless it also has ordinary semantic admission. An
+intermediate pointer therefore remains transition authority for the installer
+but cannot serve another request during the install window.
+Every transition-only activation preparation also persists the exact install ID
+and lineage ordinal under a foreign key to its intermediate admission; the
+activation kernel rechecks both fields.
+
 Completion persists `northstar.fresh-tenant-install-evidence/v1`. Its closed
 document contains exactly:
 
@@ -31,6 +39,13 @@ document contains exactly:
 - `appliedTransitions`, with every ordered source/target release-root pair; and
 - `servingRelease`, with its tenant release ID, immutable root, and exact
   scenario count.
+
+The runtime role has no direct INSERT privilege on the completed-evidence
+table. Its only writer is `platform.record_fresh_tenant_install_evidence`, which
+derives the expected document from the exact ordered intermediate admissions,
+activation receipts, active serving pointer, and serving semantic partition;
+requires byte-equivalent JSONB; derives the digest itself; and only then closes
+the install.
 
 The current document names these non-serving roots, in order:
 
@@ -73,6 +88,18 @@ install and are stored verbatim beside these stable roots.
   control makes the immediate historical release serve and observes that it
   gains normal semantic admission rather than reusing expired transition-only
   evidence.
+- **Intermediate releases cannot serve.** A deterministic observation seam
+  pauses after each real intermediate pointer swap. A separate real request
+  loader refuses every one with `ACTIVE_RELEASE_NOT_ADMITTED`; the observed
+  roots equal every and only pre-head lineage root.
+- **Install binding remains load-bearing.** The control joins every
+  transition-only preparation back to its admission and observes exact install
+  ID and ordinal equality. The database foreign key and activation kernel use
+  those same fields, while ordinary semantic preparations require both null.
+- **Completed evidence has one closed writer.** Direct INSERT as
+  `north_star_runtime` is refused with SQLSTATE 42501. Calling the sole recorder
+  with empty release/transition arrays and an empty serving object is refused
+  with SQLSTATE 23514; the valid immutable row remains unchanged.
 - **Skipped-release evidence is exact.** The control derives the expected set
   independently from the entire compiled lineage, observes the persisted JSON
   document, and compares exact roots and transition pairs. Deliberately omitting
@@ -81,9 +108,18 @@ install and are stored verbatim beside these stable roots.
 No scenario is marked derived by this install-path change. Normal upgrades and
 rollbacks retain their prior per-target verification behavior.
 
-The repository matrix passed on the executable candidate at
+The first repository matrix passed on the pre-review executable candidate at
 `05cd790ba99b72564d337994b86421161cf0f539` with
 `FULL_MATRIX_PASS_SHA=05cd790ba99b72564d337994b86421161cf0f539`.
+Critical Codex review round 1 at
+`778055c2e87fa056e8ac3553b7b151b350ecb32b` returned REVISE. Three findings
+were accepted and fixed: the intermediate serving window, missing
+install/ordinal consumption, and a durable completion boundary that trusted row
+existence more strongly than its shape constraint. Its fourth finding was
+dismissed: ADR-0020 defines complete semantic verification as the exact,
+disjoint executed-plus-structural-derivation partition; this packet neither
+creates nor reclassifies a derivation. Any executable fix invalidates the first
+matrix and review, so both are being rerun on the new frozen candidate.
 
 ## Artifact events
 
