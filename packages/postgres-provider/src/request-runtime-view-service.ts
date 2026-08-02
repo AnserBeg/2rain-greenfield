@@ -40,6 +40,7 @@ import { withTrustedRequestTransaction } from './request-context.js';
 
 export type RequestRuntimeViewLoadErrorCode =
   | 'ACTIVE_POINTER_MISSING'
+  | 'ACTIVE_RELEASE_NOT_ADMITTED'
   | 'ACTIVE_RELEASE_NOT_VISIBLE'
   | 'INVALIDATION_AHEAD_OF_AUTHORITY'
   | 'INVALIDATION_CONTEXT_MISMATCH'
@@ -105,7 +106,9 @@ interface SnapshotRow {
   release_content_hash: string | null;
   release_id: MintedUuid | null;
   release_output_protocol_version: string | null;
+  semantic_admission_release_id: MintedUuid | null;
   tenant_id: string;
+  transition_admission_release_id: MintedUuid | null;
 }
 
 interface PointerRow {
@@ -115,7 +118,9 @@ interface PointerRow {
   pointer_release_id: MintedUuid | null;
   release_content_hash: string | null;
   release_id: MintedUuid | null;
+  semantic_admission_release_id: MintedUuid | null;
   tenant_id: string;
+  transition_admission_release_id: MintedUuid | null;
 }
 
 interface ArtifactRecord {
@@ -195,6 +200,8 @@ const authoritativeSnapshotSql = `
          release.compiler_semantic_profile_version
            AS release_compiler_semantic_profile_version,
          release.output_protocol_version AS release_output_protocol_version,
+         admission.release_id AS semantic_admission_release_id,
+         intermediate.release_id AS transition_admission_release_id,
          artifact.artifact_kind,
          artifact.content_hash AS artifact_content_hash,
          artifact.domain_tag AS artifact_domain_tag,
@@ -210,6 +217,24 @@ const authoritativeSnapshotSql = `
       ON release.tenant_id = pointer.tenant_id
      AND release.environment_id = pointer.environment_id
      AND release.release_id = pointer.release_id
+    LEFT JOIN platform.tenant_release_admissions AS admission
+      ON admission.tenant_id = release.tenant_id
+     AND admission.environment_id = release.environment_id
+     AND admission.release_id = release.release_id
+     AND admission.verification_evidence_id = release.verification_evidence_id
+    LEFT JOIN platform.fresh_tenant_intermediate_release_admissions
+         AS intermediate
+      ON intermediate.tenant_id = release.tenant_id
+     AND intermediate.environment_id = release.environment_id
+     AND intermediate.release_id = release.release_id
+     AND intermediate.release_evidence_id = release.verification_evidence_id
+     AND NOT EXISTS (
+       SELECT 1
+         FROM platform.fresh_tenant_install_evidence AS completed_install
+        WHERE completed_install.tenant_id = intermediate.tenant_id
+          AND completed_install.environment_id = intermediate.environment_id
+          AND completed_install.install_id = intermediate.install_id
+     )
     LEFT JOIN LATERAL
       platform.read_tenant_release_artifacts(pointer.release_id) AS artifact
       ON pointer.release_id IS NOT NULL
@@ -238,12 +263,32 @@ const pointerAuthoritySql = `
          pointer.release_id AS pointer_release_id,
          pointer.fence,
          release.release_id,
-         release.content_hash AS release_content_hash
+         release.content_hash AS release_content_hash,
+         admission.release_id AS semantic_admission_release_id
+         ,intermediate.release_id AS transition_admission_release_id
     FROM platform.active_release_pointers AS pointer
     LEFT JOIN platform.tenant_releases AS release
       ON release.tenant_id = pointer.tenant_id
      AND release.environment_id = pointer.environment_id
      AND release.release_id = pointer.release_id
+    LEFT JOIN platform.tenant_release_admissions AS admission
+      ON admission.tenant_id = release.tenant_id
+     AND admission.environment_id = release.environment_id
+     AND admission.release_id = release.release_id
+     AND admission.verification_evidence_id = release.verification_evidence_id
+    LEFT JOIN platform.fresh_tenant_intermediate_release_admissions
+         AS intermediate
+      ON intermediate.tenant_id = release.tenant_id
+     AND intermediate.environment_id = release.environment_id
+     AND intermediate.release_id = release.release_id
+     AND intermediate.release_evidence_id = release.verification_evidence_id
+     AND NOT EXISTS (
+       SELECT 1
+         FROM platform.fresh_tenant_install_evidence AS completed_install
+        WHERE completed_install.tenant_id = intermediate.tenant_id
+          AND completed_install.environment_id = intermediate.environment_id
+          AND completed_install.install_id = intermediate.install_id
+     )
    WHERE pointer.tenant_id = $1
      AND pointer.environment_id = $2
 `;
@@ -482,6 +527,15 @@ function definitionFromSnapshotRows(
       'selected tenant release is missing or invisible in trusted context',
     );
   }
+  if (
+    first.transition_admission_release_id === first.release_id &&
+    first.semantic_admission_release_id !== first.release_id
+  ) {
+    throw loadError(
+      'ACTIVE_RELEASE_NOT_ADMITTED',
+      'selected tenant release has no semantic verification admission',
+    );
+  }
   const fence = safeFence(first.fence);
   const artifacts = new Map<string, ArtifactRecord>();
   const projectionLinks: ProjectionLinkRecord[] = [];
@@ -494,7 +548,11 @@ function definitionFromSnapshotRows(
       row.pointer_release_id !== first.pointer_release_id ||
       row.fence !== first.fence ||
       row.release_id !== first.release_id ||
-      row.release_content_hash !== first.release_content_hash
+      row.release_content_hash !== first.release_content_hash ||
+      row.semantic_admission_release_id !==
+        first.semantic_admission_release_id ||
+      row.transition_admission_release_id !==
+        first.transition_admission_release_id
     ) {
       throw malformedRelease('snapshot rows disagree about release identity');
     }
@@ -808,6 +866,15 @@ function pointerAuthorityFromRows(
     throw loadError(
       'ACTIVE_RELEASE_NOT_VISIBLE',
       'selected tenant release is missing or invisible in trusted context',
+    );
+  }
+  if (
+    row.transition_admission_release_id === row.release_id &&
+    row.semantic_admission_release_id !== row.release_id
+  ) {
+    throw loadError(
+      'ACTIVE_RELEASE_NOT_ADMITTED',
+      'selected tenant release has no semantic verification admission',
     );
   }
   if (!sha256Pattern.test(row.release_content_hash)) {

@@ -180,6 +180,15 @@ was written, each with its source.
     which is §16's customer-fork row. **Owned earlier than G6:** the first Tier B capability
     is G3 inventory posting. (Plan §10.6)
 
+### From bounded fresh-tenant install
+
+31. **Revisit ADR-0040 when tenant-specific release divergence ships.** Its bounded install
+    relies on semantic verification proving the same thing in every tenant because releases
+    are shared and probes arrange their own data. G6 customization breaks that premise: the
+    stage cut must either restore per-tenant verification for divergent releases or rule and
+    prove a replacement before tenant-specific compiled releases can install.
+    ([ADR-0040](../decisions/ADR-0040-bounded-fresh-tenant-install.md))
+
 ## G3 — inventory truth alpha (dispositioned by G3-P0)
 
 All ten inputs below are assigned to named packets, with first-posting deadline

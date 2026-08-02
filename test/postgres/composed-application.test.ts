@@ -44,12 +44,15 @@ import {
   createComposedApplicationRuntime,
   parseCompiledApplication,
   type ComposedApplicationRuntime,
+  type FreshTenantIntermediateActivationObservation,
 } from '../../packages/postgres-provider/src/composed-application-runtime.js';
 import { INVENTORY_PROVIDER_ERROR_MAPPINGS } from '../../packages/postgres-provider/src/inventory-provider-error-mappings.js';
 import { ModuleRuntimeInterpreterError } from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
+import { captureSchemaSnapshot } from '../../packages/postgres-provider/src/migrations.js';
 import { PostgresReleaseActivationService } from '../../packages/postgres-provider/src/release-activation-service.js';
 import { PostgresReleaseApprovalService } from '../../packages/postgres-provider/src/release-approval-service.js';
 import { PostgresImmutableReleaseRepository } from '../../packages/postgres-provider/src/release-repository.js';
+import { RequestRuntimeViewLoadError } from '../../packages/postgres-provider/src/request-runtime-view-service.js';
 import { ReleaseReverseTransitionRefusal } from '../../packages/postgres-provider/src/release-reverse-transition-policy.js';
 import {
   PostgresReleaseVerificationService,
@@ -71,6 +74,9 @@ const compiledArtifactPath = resolve('apps/web/release/app.compiled.json');
 const authoredArtifactPath = resolve('apps/web/release/app.authored.json');
 const compileScriptPath = resolve('apps/web/scripts/compile-app-release.ts');
 const migrationsDirectory = resolve('db/migrations');
+const fullReplaySchemaSnapshotPath = resolve(
+  'test/postgres/fresh-tenant-full-replay-schema.snapshot.json',
+);
 const execFileAsync = promisify(execFile);
 const rollbackFieldId = 'northstar.app:field.party_rollback_note';
 
@@ -82,14 +88,28 @@ test('composed product does not invent a verification evidence identity', async 
   assert.doesNotMatch(source, /evidenceId\s*=\s*minted\(randomUUID\(\)\)/u);
 });
 
-// Harness limit, not a product budget. The compiled application carries eight
-// immutable application releases. Each of the two fresh tenants replays all
-// eight, and the approval control verifies the active release once more. A
-// quiet pre-cache profile took 249.6s, including 224.3s of semantic
-// verification and 4,739 repeated pinned-artifact loads. The validated
-// per-release cache reduced that to 17 verification loads; two quiet runs of
-// this unchanged parent took 80.3s and 96.4s. The append-only lineage cost is
-// tracked separately from this eliminated per-invocation reload tax.
+test('fresh-tenant install refuses a failing intermediate transition', async () => {
+  const compiledApplication = JSON.parse(
+    await readFile(compiledArtifactPath, 'utf8'),
+  ) as { applications: unknown[] };
+  assert.ok(compiledApplication.applications.length > 3);
+  const firstIntermediate = compiledApplication.applications[1]!;
+  compiledApplication.applications[1] = compiledApplication.applications[2]!;
+  compiledApplication.applications[2] = firstIntermediate;
+  await assert.rejects(
+    createRuntime(
+      compiledApplication,
+      'postgresql://postgres@127.0.0.1:1/postgres',
+      'failing-intermediate-transition',
+    ),
+    /transition does not match its declared previous release/u,
+  );
+});
+
+// Harness limit, not a product budget. Each fresh tenant applies all eight
+// immutable application transitions but verifies only the serving release,
+// recording every non-serving release explicitly. The unchanged 256 MiB
+// harness moved from >300s/capacity exhaustion to 54.6s and a 50.30 MiB peak.
 test(
   'composed product activates through the kernel and persists tenant-scoped gateway data',
   { timeout: 300_000 },
@@ -109,10 +129,32 @@ test(
           'the checked-in authored artifact is generated from the shared module factories',
         );
         const databaseUrl = connectionUrl(connection);
+        const refusedIntermediateRoots: string[] = [];
         let tenantA = await createRuntime(
           compiledApplication,
           databaseUrl,
           'composed-tenant-a',
+          undefined,
+          async (observation) => {
+            await assert.rejects(
+              observation.loadActiveRuntimeDefinition,
+              (error: unknown) => {
+                assert.ok(error instanceof RequestRuntimeViewLoadError);
+                assert.equal(error.code, 'ACTIVE_RELEASE_NOT_ADMITTED');
+                return true;
+              },
+            );
+            refusedIntermediateRoots.push(observation.releaseRoot);
+          },
+        );
+        const firstTenantLineage =
+          parseCompiledApplication(compiledApplication);
+        assert.deepEqual(
+          refusedIntermediateRoots,
+          [firstTenantLineage.bootstrap, ...firstTenantLineage.applications]
+            .slice(0, -1)
+            .map((release) => release.compiled.releaseRoot),
+          'every active intermediate pointer refuses request serving until semantic admission',
         );
         let tenantB: ComposedApplicationRuntime | undefined;
         try {
@@ -120,6 +162,13 @@ test(
           await assertExactSwapTriggerEnabled(pool);
           await assertRealProductDefinition(tenantA);
           await assertDurableProductEvidence(pool, tenantA);
+          await assertBoundedFreshTenantInstallEvidence(
+            pool,
+            tenantA,
+            compiledApplication,
+            connection,
+          );
+          await assertBoundedInstallMatchesFullReplaySchema(pool);
           await context.test(
             'semantic verification keeps constrained-domain probes outside compiled partial uniqueness',
             () =>
@@ -191,6 +240,13 @@ test(
           const isolated = await listParty(tenantB);
           assert.equal(isolated.listCoverage?.totalCount, 0);
           assert.deepEqual(isolated.records, []);
+          tenantB = await assertIntermediateBecomesServingOnlyAfterVerification(
+            tenantB,
+            compiledApplication,
+            databaseUrl,
+            pool,
+            'composed-tenant-b',
+          );
           await context.test(
             'materializer seeding survives a second tenant without a blanket insert',
             () =>
@@ -220,9 +276,8 @@ test(
   },
 );
 
-// Same harness limit for the same measured reason: this test brought up its
-// tenant and advanced the lineage in 98.5s under the round-1 matrix, inside a
-// 120_000ms limit it no longer clears reliably.
+// Same harness limit: this parent performs one bounded fresh install and then
+// verifies and activates compiled successors through the normal upgrade path.
 test(
   'composed product advances an existing deployment to an exact compiled successor',
   { timeout: 300_000 },
@@ -1231,11 +1286,23 @@ async function prepareAndApproveCandidate(
       result_set_digest: string;
     }>(
       `SELECT evidence_version, result_set_digest
-         FROM platform.release_verification_evidence
-        WHERE verification_evidence_id = $1`,
+         FROM (
+           SELECT evidence_version, result_set_digest
+             FROM platform.release_verification_evidence
+            WHERE verification_evidence_id = $1
+           UNION ALL
+           SELECT evidence_version, evidence_digest AS result_set_digest
+             FROM platform.fresh_tenant_intermediate_release_admissions
+            WHERE release_evidence_id = $1
+              AND NOT EXISTS (
+                SELECT 1
+                  FROM platform.release_verification_evidence
+                 WHERE verification_evidence_id = $1
+              )
+         ) AS release_evidence`,
       [target.evidenceId],
     );
-    const verified = evidence.rows[0];
+    const verified = evidence.rows.length === 1 ? evidence.rows[0] : undefined;
     assert.ok(verified);
     await client.query(
       `INSERT INTO platform.transition_preparation_receipts (
@@ -2071,6 +2138,322 @@ async function assertDurableProductEvidence(
   assert.equal(evidence.result_rows, evidence.result_count);
 }
 
+async function assertBoundedFreshTenantInstallEvidence(
+  pool: pg.Pool,
+  runtime: ComposedApplicationRuntime,
+  compiledApplication: unknown,
+  connection: pg.PoolConfig,
+): Promise<void> {
+  const compiled = parseCompiledApplication(compiledApplication);
+  const lineage = [compiled.bootstrap, ...compiled.applications];
+  const unverifiedRoots = lineage
+    .slice(0, -1)
+    .map((release) => release.compiled.releaseRoot);
+  const transitionPairs = lineage.slice(1).map((release, index) => ({
+    sourceReleaseRoot: lineage[index]!.compiled.releaseRoot,
+    targetReleaseRoot: release.compiled.releaseRoot,
+  }));
+  const servingScenarioCount = releaseVerificationBinding(
+    compiled.application.compiled,
+  ).plan.scenarios.length;
+  assert.equal(
+    servingScenarioCount,
+    168,
+    'the serving release keeps the pre-bounding semantic scenario count',
+  );
+
+  const intermediate = await pool.query<{
+    install_id: MintedUuid;
+    lineage_ordinal: number;
+    release_id: MintedUuid;
+    release_root: string;
+    source_release_root: string | null;
+  }>(
+    `SELECT install_id, lineage_ordinal, release_id, release_root,
+            source_release_root
+       FROM platform.fresh_tenant_intermediate_release_admissions
+      WHERE tenant_id = $1 AND environment_id = $2
+      ORDER BY lineage_ordinal`,
+    [runtime.identity.tenantId, runtime.identity.environmentId],
+  );
+  assert.deepEqual(
+    intermediate.rows.map((row) => row.release_root),
+    unverifiedRoots,
+    'every and only non-serving release is named as lacking scenario execution',
+  );
+  const installId = intermediate.rows[0]?.install_id;
+  assert.ok(installId);
+  assert.ok(
+    intermediate.rows.every((row) => row.install_id === installId),
+    'all intermediate admissions belong to one exact fresh install',
+  );
+  const preparationBindings = await pool.query<{
+    fresh_tenant_install_id: MintedUuid;
+    fresh_tenant_lineage_ordinal: number;
+    release_id: MintedUuid;
+  }>(
+    `SELECT preparation.fresh_tenant_install_id,
+            preparation.fresh_tenant_lineage_ordinal,
+            intermediate.release_id
+       FROM platform.release_activation_preparations AS preparation
+       JOIN platform.fresh_tenant_intermediate_release_admissions
+            AS intermediate
+         ON intermediate.tenant_id = preparation.tenant_id
+        AND intermediate.environment_id = preparation.environment_id
+        AND intermediate.release_id = preparation.target_release_id
+        AND intermediate.install_id = preparation.fresh_tenant_install_id
+        AND intermediate.lineage_ordinal =
+            preparation.fresh_tenant_lineage_ordinal
+      WHERE preparation.tenant_id = $1
+        AND preparation.environment_id = $2
+      ORDER BY preparation.fresh_tenant_lineage_ordinal`,
+    [runtime.identity.tenantId, runtime.identity.environmentId],
+  );
+  assert.deepEqual(
+    preparationBindings.rows,
+    intermediate.rows.map((row) => ({
+      fresh_tenant_install_id: row.install_id,
+      fresh_tenant_lineage_ordinal: row.lineage_ordinal,
+      release_id: row.release_id,
+    })),
+    'every transition-only preparation preserves its exact install and ordinal binding',
+  );
+  assert.deepEqual(
+    intermediate.rows.map((row) => ({
+      lineageOrdinal: row.lineage_ordinal,
+      sourceReleaseRoot: row.source_release_root,
+      targetReleaseRoot: row.release_root,
+    })),
+    unverifiedRoots.map((releaseRoot, index) => ({
+      lineageOrdinal: index,
+      sourceReleaseRoot:
+        index === 0 ? null : lineage[index - 1]!.compiled.releaseRoot,
+      targetReleaseRoot: releaseRoot,
+    })),
+    'transition-only admissions bind every exact intermediate lineage edge',
+  );
+
+  const semantic = await pool.query<{
+    derived_count: number;
+    release_id: MintedUuid;
+    release_root: string;
+    result_count: number;
+  }>(
+    `SELECT admission.release_id, evidence.release_root, evidence.result_count,
+            CASE
+              WHEN evidence.impact_analysis_derivation IS NULL THEN 0
+              ELSE jsonb_array_length(
+                evidence.impact_analysis_derivation -> 'derivations'
+              )
+            END AS derived_count
+       FROM platform.tenant_release_admissions AS admission
+       JOIN platform.release_verification_evidence AS evidence
+         ON evidence.tenant_id = admission.tenant_id
+        AND evidence.environment_id = admission.environment_id
+        AND evidence.verification_evidence_id =
+            admission.verification_evidence_id
+      WHERE admission.tenant_id = $1 AND admission.environment_id = $2
+      ORDER BY admission.release_id`,
+    [runtime.identity.tenantId, runtime.identity.environmentId],
+  );
+  assert.deepEqual(
+    semantic.rows.map((row) => row.release_root),
+    [runtime.releaseRoot],
+    'only the serving release receives semantic verification admission',
+  );
+  assert.equal(semantic.rows[0]?.release_id, runtime.activeReleaseId);
+  assert.equal(
+    (semantic.rows[0]?.result_count ?? -1) +
+      (semantic.rows[0]?.derived_count ?? -1),
+    servingScenarioCount,
+    'the serving release retains its complete scenario partition',
+  );
+
+  const evidence = runtime.freshTenantInstallEvidence;
+  assert.ok(evidence, 'a fresh install returns its bounded-install evidence');
+  assert.deepEqual(
+    evidence.nonServingReleasesWithoutScenarioExecution.map(
+      ({ releaseRoot }) => releaseRoot,
+    ),
+    unverifiedRoots,
+    'the evidence set changes exactly when the compiled lineage changes',
+  );
+  assert.deepEqual(evidence.appliedTransitions, transitionPairs);
+  assert.deepEqual(evidence.servingRelease, {
+    releaseId: runtime.activeReleaseId,
+    releaseRoot: runtime.releaseRoot,
+    scenarioCount: servingScenarioCount,
+  });
+
+  const durable = await pool.query<{
+    evidence_document: unknown;
+    evidence_version: string;
+    serving_scenario_count: number;
+  }>(
+    `SELECT evidence_document, evidence_version, serving_scenario_count
+       FROM platform.fresh_tenant_install_evidence
+      WHERE tenant_id = $1 AND environment_id = $2`,
+    [runtime.identity.tenantId, runtime.identity.environmentId],
+  );
+  assert.equal(durable.rows.length, 1);
+  assert.equal(durable.rows[0]?.evidence_version, evidence.schemaVersion);
+  assert.equal(durable.rows[0]?.serving_scenario_count, servingScenarioCount);
+  assert.deepEqual(durable.rows[0]?.evidence_document, evidence);
+  await assertFreshTenantEvidenceAuthorityRejectsMalformedClosure(
+    connection,
+    runtime,
+    installId,
+    evidence,
+  );
+}
+
+async function assertFreshTenantEvidenceAuthorityRejectsMalformedClosure(
+  connection: pg.PoolConfig,
+  runtime: ComposedApplicationRuntime,
+  installId: MintedUuid,
+  evidence: NonNullable<
+    ComposedApplicationRuntime['freshTenantInstallEvidence']
+  >,
+): Promise<void> {
+  const runtimePool = new pg.Pool({
+    ...connection,
+    max: 2,
+    user: 'north_star_runtime',
+  });
+  runtimePool.on('error', () => undefined);
+  const context = await new AuthenticatedRequestEntryAdapter(
+    async () => runtime.identity,
+  ).enter({});
+  const malformed = {
+    appliedTransitions: [],
+    nonServingReleasesWithoutScenarioExecution: [],
+    schemaVersion: evidence.schemaVersion,
+    servingRelease: {},
+  };
+  try {
+    await assert.rejects(
+      withTrustedRequestTransaction(runtimePool, context, (client) =>
+        client.query(
+          `INSERT INTO platform.fresh_tenant_install_evidence (
+             tenant_id, environment_id, install_id, serving_release_id,
+             serving_release_root, serving_scenario_count, evidence_version,
+             evidence_document, evidence_digest, created_by
+           ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+          [
+            context.tenantId,
+            context.environmentId,
+            installId,
+            runtime.activeReleaseId,
+            runtime.releaseRoot,
+            evidence.servingRelease.scenarioCount,
+            evidence.schemaVersion,
+            malformed,
+            '0'.repeat(64),
+            context.principalId,
+          ],
+        ),
+      ),
+      (error: unknown) => {
+        assert.equal((error as { code?: string }).code, '42501');
+        return true;
+      },
+      'the runtime role has no direct path around the closed evidence recorder',
+    );
+    await assert.rejects(
+      withTrustedRequestTransaction(runtimePool, context, (client) =>
+        client.query(
+          `SELECT platform.record_fresh_tenant_install_evidence(
+             $1,$2,$3,$4,$5
+           )`,
+          [
+            installId,
+            runtime.activeReleaseId,
+            runtime.releaseRoot,
+            evidence.servingRelease.scenarioCount,
+            malformed,
+          ],
+        ),
+      ),
+      (error: unknown) => {
+        assert.equal((error as { code?: string }).code, '23514');
+        return true;
+      },
+      'the only evidence writer refuses a document that omits durable lineage facts',
+    );
+  } finally {
+    await runtimePool.end();
+  }
+}
+
+async function assertBoundedInstallMatchesFullReplaySchema(
+  pool: pg.Pool,
+): Promise<void> {
+  const expected = JSON.parse(
+    await readFile(fullReplaySchemaSnapshotPath, 'utf8'),
+  ) as unknown;
+  const client = await pool.connect();
+  try {
+    assert.deepEqual(
+      await captureSchemaSnapshot(client, ['north_star_module']),
+      expected,
+      'bounded verification produces the same head schema snapshot as full replay',
+    );
+  } finally {
+    client.release();
+  }
+}
+
+async function assertIntermediateBecomesServingOnlyAfterVerification(
+  runtime: ComposedApplicationRuntime,
+  compiledApplication: unknown,
+  databaseUrl: string,
+  pool: pg.Pool,
+  tenantSlug: string,
+): Promise<ComposedApplicationRuntime> {
+  const compiled = parseCompiledApplication(compiledApplication);
+  const target = compiled.applications.at(-2);
+  assert.ok(target);
+  await runtime.close();
+  const rolledBack = await createRuntime(
+    compiledApplication,
+    databaseUrl,
+    tenantSlug,
+    {
+      kind: 'rollback',
+      targetReleaseRoot: target.compiled.releaseRoot,
+    },
+  );
+  try {
+    assert.equal(rolledBack.releaseRoot, target.compiled.releaseRoot);
+    assert.equal(rolledBack.freshTenantInstallEvidence, null);
+    const semantic = await pool.query<{ release_root: string }>(
+      `SELECT evidence.release_root
+         FROM platform.tenant_release_admissions AS admission
+         JOIN platform.release_verification_evidence AS evidence
+           ON evidence.tenant_id = admission.tenant_id
+          AND evidence.environment_id = admission.environment_id
+          AND evidence.verification_evidence_id =
+              admission.verification_evidence_id
+        WHERE admission.tenant_id = $1
+          AND admission.environment_id = $2
+          AND admission.release_id = $3`,
+      [
+        rolledBack.identity.tenantId,
+        rolledBack.identity.environmentId,
+        rolledBack.activeReleaseId,
+      ],
+    );
+    assert.deepEqual(
+      semantic.rows,
+      [{ release_root: target.compiled.releaseRoot }],
+      'an expired transition-only admission cannot make a historical release serve',
+    );
+  } finally {
+    await rolledBack.close();
+  }
+  return createRuntime(compiledApplication, databaseUrl, tenantSlug);
+}
+
 async function assertConstrainedDomainVerificationCompleted(
   pool: pg.Pool,
   connection: pg.PoolConfig,
@@ -2778,8 +3161,14 @@ function createRuntime(
     kind: 'rollback';
     targetReleaseRoot: string;
   }>,
+  afterFreshTenantIntermediateActivation?: (
+    observation: FreshTenantIntermediateActivationObservation,
+  ) => Promise<void>,
 ) {
   return createComposedApplicationRuntime({
+    ...(afterFreshTenantIntermediateActivation
+      ? { afterFreshTenantIntermediateActivation }
+      : {}),
     compiledApplication,
     databaseUrl,
     inventoryScopeProvisioning: COMPOSED_APPLICATION_INVENTORY_SCOPE,
