@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import {
   CANONICALIZATION_PROFILE_VERSION,
   CONTENT_HASH_ALGORITHM,
+  canonicalize,
   canonicalizeAndHash,
   parseNormalizedApplicationPackageJson,
 } from '@north-star/canonical-model';
@@ -61,7 +62,10 @@ import {
   refuseReverseTransition,
   type ReleaseReverseTransitionAuthorization,
 } from './release-reverse-transition-policy.js';
-import { PostgresReleaseVerificationService } from './release-verification-service.js';
+import {
+  PostgresReleaseVerificationService,
+  releaseVerificationBinding,
+} from './release-verification-service.js';
 import { PostgresRequestRuntimeViewService } from './request-runtime-view-service.js';
 import { withTrustedRequestTransaction } from './request-context.js';
 import { TrustedActorEnvelopeIssuer } from './trust/trusted-actor-envelope.js';
@@ -73,8 +77,16 @@ const compiledApplicationLineageVersion =
 const capabilitySupportVersion = 'northstar.capability-support/v1' as const;
 const rendererVersion = 'northstar.release-diff-renderer/v1' as const;
 const viewSchemaVersion = 'northstar.release-diff-view/v1' as const;
+const freshTenantIntermediateAdmissionVersion =
+  'northstar.fresh-tenant-intermediate-release-admission/v1' as const;
+export const FRESH_TENANT_INSTALL_EVIDENCE_VERSION =
+  'northstar.fresh-tenant-install-evidence/v1' as const;
 
 export interface ComposedApplicationRuntimeOptions {
+  /** Deterministic observation seam for the non-serving active-pointer window. */
+  readonly afterFreshTenantIntermediateActivation?: (
+    observation: FreshTenantIntermediateActivationObservation,
+  ) => Promise<void>;
   readonly compiledApplication: unknown;
   readonly databaseUrl: string;
   readonly environmentSlug?: string;
@@ -86,6 +98,13 @@ export interface ComposedApplicationRuntimeOptions {
     readonly targetReleaseRoot: string;
   }>;
   readonly tenantSlug: string;
+}
+
+export interface FreshTenantIntermediateActivationObservation {
+  readonly lineageOrdinal: number;
+  readonly releaseId: MintedUuid;
+  readonly releaseRoot: string;
+  loadActiveRuntimeDefinition(): Promise<void>;
 }
 
 export interface InventoryScopeProvisioning {
@@ -112,6 +131,7 @@ export interface InventoryScopeProvisioning {
 export interface ComposedApplicationRuntime {
   readonly activeReleaseId: MintedUuid;
   readonly entry: AuthenticatedRequestRuntimeEntryAdapter;
+  readonly freshTenantInstallEvidence: FreshTenantInstallEvidence | null;
   readonly identity: AuthenticatedIdentity;
   readonly operationGateway: SemanticOperationGateway;
   readonly operationMediation: SemanticOperationMediationAuthority;
@@ -119,6 +139,23 @@ export interface ComposedApplicationRuntime {
   readonly releaseRoot: string;
   readonly triggerEnabledDuringActivation: true;
   close(): Promise<void>;
+}
+
+export interface FreshTenantInstallEvidence {
+  readonly appliedTransitions: readonly Readonly<{
+    readonly sourceReleaseRoot: string;
+    readonly targetReleaseRoot: string;
+  }>[];
+  readonly nonServingReleasesWithoutScenarioExecution: readonly Readonly<{
+    readonly releaseId: MintedUuid;
+    readonly releaseRoot: string;
+  }>[];
+  readonly schemaVersion: typeof FRESH_TENANT_INSTALL_EVIDENCE_VERSION;
+  readonly servingRelease: Readonly<{
+    readonly releaseId: MintedUuid;
+    readonly releaseRoot: string;
+    readonly scenarioCount: number;
+  }>;
 }
 
 interface ParsedApplicationRelease {
@@ -149,6 +186,11 @@ interface PointerState {
   readonly fence: number;
   readonly pointerId: MintedUuid;
   readonly releaseId: MintedUuid | null;
+}
+
+interface FreshTenantPreparationBinding {
+  readonly installId: MintedUuid;
+  readonly lineageOrdinal: number;
 }
 
 /**
@@ -228,13 +270,31 @@ export async function createComposedApplicationRuntime(
 
     const activation = new PostgresReleaseActivationService(runtimePool);
     let pointer = await readPointer(runtimePool, runtimeContext);
-    if (pointer.releaseId === null) {
-      await ensureReleaseAdmitted(
+    const lineage = [bootstrapIdentity, ...applicationIdentities];
+    const candidateInstallId = minted(
+      stableUuid(
+        `fresh-tenant-install:${runtimeContext.tenantId}:${runtimeContext.environmentId}:${releases.application.compiled.releaseRoot}`,
+      ),
+    );
+    const freshInstall =
+      pointer.releaseId === null ||
+      (await freshTenantInstallIsIncomplete(
         runtimePool,
         runtimeContext,
+        candidateInstallId,
+        pointer.releaseId,
+        lineage.at(-1)!.releaseId,
+      ));
+    const installId = freshInstall ? candidateInstallId : null;
+    if (pointer.releaseId === null) {
+      await ensureFreshTenantIntermediateReleaseAdmitted(
+        runtimePool,
+        runtimeContext,
+        candidateInstallId,
+        0,
         bootstrapIdentity,
-        releases.bootstrap,
-        options.providerErrorMappings,
+        releaseLineage[0]!,
+        null,
       );
       await assertExactSwapTriggerEnabled(adminPool);
       const attemptId = await approveInitialRelease(
@@ -244,6 +304,7 @@ export async function createComposedApplicationRuntime(
         pointer,
         bootstrapIdentity,
         releases.bootstrap.compiled,
+        { installId: candidateInstallId, lineageOrdinal: 0 },
       );
       const activated = await activateWithExactSwapTrigger(
         adminPool,
@@ -257,9 +318,16 @@ export async function createComposedApplicationRuntime(
         );
       }
       pointer = await readPointer(runtimePool, runtimeContext);
+      await observeFreshTenantIntermediateActivation(
+        options,
+        runtimePool,
+        runtimeContext,
+        0,
+        bootstrapIdentity,
+        releases.bootstrap.compiled.releaseRoot,
+      );
     }
 
-    const lineage = [bootstrapIdentity, ...applicationIdentities];
     const activeLineageIndex = lineage.findIndex(
       (identity) => identity.releaseId === pointer.releaseId,
     );
@@ -268,13 +336,15 @@ export async function createComposedApplicationRuntime(
         'the active pointer names a release outside this composed application lineage',
       );
     }
-    await ensureReleaseAdmitted(
-      runtimePool,
-      runtimeContext,
-      lineage[activeLineageIndex]!,
-      releaseLineage[activeLineageIndex]!,
-      options.providerErrorMappings,
-    );
+    if (!freshInstall || activeLineageIndex === lineage.length - 1) {
+      await ensureReleaseAdmitted(
+        runtimePool,
+        runtimeContext,
+        lineage[activeLineageIndex]!,
+        releaseLineage[activeLineageIndex]!,
+        options.providerErrorMappings,
+      );
+    }
     const materializer = new PostgresModuleStorageMaterializer(
       materializerPool,
       modulePool,
@@ -359,14 +429,27 @@ export async function createComposedApplicationRuntime(
         const generationId = minted(randomUUID());
         const preparationId = minted(randomUUID());
         let attemptId: MintedUuid;
+        const servingTarget = targetIndex === lineage.length - 1;
         if (transition.elements.length === 0) {
-          await ensureReleaseAdmitted(
-            runtimePool,
-            runtimeContext,
-            targetIdentity,
-            target,
-            options.providerErrorMappings,
-          );
+          if (!freshInstall || servingTarget) {
+            await ensureReleaseAdmitted(
+              runtimePool,
+              runtimeContext,
+              targetIdentity,
+              target,
+              options.providerErrorMappings,
+            );
+          } else {
+            await ensureFreshTenantIntermediateReleaseAdmitted(
+              runtimePool,
+              runtimeContext,
+              candidateInstallId,
+              targetIndex,
+              targetIdentity,
+              target,
+              source.compiled.releaseRoot,
+            );
+          }
           attemptId = await approveReleaseWithoutStorageTransition(
             runtimePool,
             runtimeContext,
@@ -375,6 +458,10 @@ export async function createComposedApplicationRuntime(
             source,
             targetIdentity,
             target.compiled,
+            undefined,
+            freshInstall && !servingTarget
+              ? { installId: candidateInstallId, lineageOrdinal: targetIndex }
+              : undefined,
           );
         } else {
           const prepared = await materializer.prepare({
@@ -385,13 +472,25 @@ export async function createComposedApplicationRuntime(
             preparationId,
             targetReleaseId: targetIdentity.releaseId,
           });
-          await ensureReleaseAdmitted(
-            runtimePool,
-            runtimeContext,
-            targetIdentity,
-            target,
-            options.providerErrorMappings,
-          );
+          if (!freshInstall || servingTarget) {
+            await ensureReleaseAdmitted(
+              runtimePool,
+              runtimeContext,
+              targetIdentity,
+              target,
+              options.providerErrorMappings,
+            );
+          } else {
+            await ensureFreshTenantIntermediateReleaseAdmitted(
+              runtimePool,
+              runtimeContext,
+              candidateInstallId,
+              targetIndex,
+              targetIdentity,
+              target,
+              source.compiled.releaseRoot,
+            );
+          }
           attemptId = await approveModuleRelease(
             runtimePool,
             runtimeContext,
@@ -401,6 +500,9 @@ export async function createComposedApplicationRuntime(
             target.compiled,
             prepared,
             preparationId,
+            freshInstall && !servingTarget
+              ? { installId: candidateInstallId, lineageOrdinal: targetIndex }
+              : undefined,
           );
           const executed = await materializer.executeApprovedAttempt({
             activationAttemptId: attemptId,
@@ -432,11 +534,32 @@ export async function createComposedApplicationRuntime(
           );
         }
         servingLineageIndex = targetIndex;
+        if (freshInstall && !servingTarget) {
+          await observeFreshTenantIntermediateActivation(
+            options,
+            runtimePool,
+            runtimeContext,
+            targetIndex,
+            targetIdentity,
+            target.compiled.releaseRoot,
+          );
+        }
       }
     }
     await assertExactSwapTriggerEnabled(adminPool);
     const applicationIdentity = lineage[servingLineageIndex]!;
     const applicationRelease = releaseLineage[servingLineageIndex]!;
+    const freshTenantInstallEvidence = installId
+      ? await persistFreshTenantInstallEvidence(
+          runtimePool,
+          runtimeContext,
+          installId,
+          lineage,
+          releaseLineage,
+          applicationIdentity,
+          applicationRelease,
+        )
+      : null;
 
     const policy = new AllowAllLocalPolicy();
     const interpreter = new PostgresModuleRuntimeInterpreter(
@@ -467,6 +590,7 @@ export async function createComposedApplicationRuntime(
         await Promise.all(pools.map((pool) => pool.end()));
       },
       entry,
+      freshTenantInstallEvidence,
       identity: identities.runtime,
       operationGateway,
       operationMediation,
@@ -985,6 +1109,400 @@ async function ensureReleaseAdmitted(
   });
 }
 
+async function observeFreshTenantIntermediateActivation(
+  options: ComposedApplicationRuntimeOptions,
+  pool: pg.Pool,
+  context: TrustedRequestContext,
+  lineageOrdinal: number,
+  identity: PersistedReleaseIdentity,
+  releaseRoot: string,
+): Promise<void> {
+  if (!options.afterFreshTenantIntermediateActivation) return;
+  await options.afterFreshTenantIntermediateActivation(
+    Object.freeze({
+      lineageOrdinal,
+      async loadActiveRuntimeDefinition() {
+        await new PostgresRequestRuntimeViewService(pool).load(context);
+      },
+      releaseId: identity.releaseId,
+      releaseRoot,
+    }),
+  );
+}
+
+async function freshTenantInstallIsIncomplete(
+  pool: pg.Pool,
+  context: TrustedRequestContext,
+  installId: MintedUuid,
+  activeReleaseId: MintedUuid | null,
+  servingReleaseId: MintedUuid,
+): Promise<boolean> {
+  return withTrustedRequestTransaction(pool, context, async (client) => {
+    const result = await client.query<{
+      completed: boolean;
+      intermediate_count: number;
+      resumes_from_intermediate: boolean;
+    }>(
+      `SELECT EXISTS (
+                SELECT 1
+                  FROM platform.fresh_tenant_install_evidence
+                 WHERE tenant_id = $1
+                   AND environment_id = $2
+                   AND install_id = $3
+              ) AS completed,
+              (
+                SELECT count(*)::integer
+                  FROM platform.fresh_tenant_intermediate_release_admissions
+                 WHERE tenant_id = $1
+                   AND environment_id = $2
+                   AND install_id = $3
+              ) AS intermediate_count,
+              EXISTS (
+                SELECT 1
+                  FROM platform.fresh_tenant_intermediate_release_admissions
+                 WHERE tenant_id = $1
+                   AND environment_id = $2
+                   AND install_id = $3
+                   AND release_id = $4
+              ) AS resumes_from_intermediate`,
+      [context.tenantId, context.environmentId, installId, activeReleaseId],
+    );
+    const state = result.rows[0];
+    if (!state || state.completed || state.intermediate_count === 0)
+      return false;
+    if (
+      state.resumes_from_intermediate ||
+      activeReleaseId === servingReleaseId
+    ) {
+      return true;
+    }
+    throw new Error(
+      'incomplete fresh-tenant install does not bind the active release',
+    );
+  });
+}
+
+async function ensureFreshTenantIntermediateReleaseAdmitted(
+  pool: pg.Pool,
+  context: TrustedRequestContext,
+  installId: MintedUuid,
+  lineageOrdinal: number,
+  identity: PersistedReleaseIdentity,
+  release: ParsedRelease,
+  sourceReleaseRoot: string | null,
+): Promise<void> {
+  const evidenceDigest = digest(
+    'fresh-tenant-intermediate-release-admission',
+    installId,
+    String(lineageOrdinal),
+    identity.releaseId,
+    release.compiled.releaseRoot,
+    sourceReleaseRoot ?? 'INITIAL_ACTIVATION',
+  ).toString('hex');
+  await withTrustedRequestTransaction(pool, context, async (client) => {
+    await client.query(
+      `SELECT pg_catalog.pg_advisory_xact_lock(
+         pg_catalog.hashtextextended(
+           format(
+             'northstar.fresh-tenant-install/v1:%s:%s:%s',
+             $1::uuid,
+             $2::uuid,
+             $3::uuid
+           ),
+           0
+         )
+       )`,
+      [context.tenantId, context.environmentId, installId],
+    );
+    const candidate = await client.query<{
+      content_hash: string;
+      verification_evidence_id: MintedUuid;
+    }>(
+      `SELECT content_hash, verification_evidence_id
+         FROM platform.tenant_releases
+        WHERE tenant_id = $1
+          AND environment_id = $2
+          AND release_id = $3`,
+      [context.tenantId, context.environmentId, identity.releaseId],
+    );
+    const candidateRow = candidate.rows[0];
+    if (
+      !candidateRow ||
+      candidateRow.content_hash !== release.compiled.releaseRoot ||
+      candidateRow.verification_evidence_id !== identity.evidenceId
+    ) {
+      throw new Error(
+        'fresh-tenant intermediate admission does not bind the staged release',
+      );
+    }
+    const verified = await client.query<{ present: boolean }>(
+      `SELECT true AS present
+         FROM platform.tenant_release_admissions
+        WHERE tenant_id = $1
+          AND environment_id = $2
+          AND release_id = $3`,
+      [context.tenantId, context.environmentId, identity.releaseId],
+    );
+    if (verified.rows[0]) {
+      throw new Error(
+        'fresh-tenant intermediate release already has semantic verification admission',
+      );
+    }
+    await client.query(
+      `INSERT INTO platform.fresh_tenant_intermediate_release_admissions (
+         tenant_id, environment_id, release_id, release_evidence_id,
+         install_id, lineage_ordinal, release_root, source_release_root,
+         evidence_version, evidence_digest, admitted_by
+       )
+       SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11
+        WHERE NOT EXISTS (
+          SELECT 1
+            FROM platform.fresh_tenant_intermediate_release_admissions
+           WHERE tenant_id = $1
+             AND environment_id = $2
+             AND release_id = $3
+        )`,
+      [
+        context.tenantId,
+        context.environmentId,
+        identity.releaseId,
+        identity.evidenceId,
+        installId,
+        lineageOrdinal,
+        release.compiled.releaseRoot,
+        sourceReleaseRoot,
+        freshTenantIntermediateAdmissionVersion,
+        evidenceDigest,
+        context.principalId,
+      ],
+    );
+    const stored = await client.query<{
+      admitted_by: string;
+      evidence_digest: string;
+      evidence_version: string;
+      install_id: string;
+      lineage_ordinal: number;
+      release_evidence_id: string;
+      release_root: string;
+      source_release_root: string | null;
+    }>(
+      `SELECT admitted_by, evidence_digest, evidence_version, install_id,
+              lineage_ordinal, release_evidence_id, release_root,
+              source_release_root
+         FROM platform.fresh_tenant_intermediate_release_admissions
+        WHERE tenant_id = $1
+          AND environment_id = $2
+          AND release_id = $3`,
+      [context.tenantId, context.environmentId, identity.releaseId],
+    );
+    const storedRow = stored.rows[0];
+    if (
+      !storedRow ||
+      storedRow.admitted_by !== context.principalId ||
+      storedRow.evidence_digest !== evidenceDigest ||
+      storedRow.evidence_version !== freshTenantIntermediateAdmissionVersion ||
+      storedRow.install_id !== installId ||
+      storedRow.lineage_ordinal !== lineageOrdinal ||
+      storedRow.release_evidence_id !== identity.evidenceId ||
+      storedRow.release_root !== release.compiled.releaseRoot ||
+      storedRow.source_release_root !== sourceReleaseRoot
+    ) {
+      throw new Error(
+        'fresh-tenant intermediate admission differs from the exact install lineage',
+      );
+    }
+  });
+}
+
+async function persistFreshTenantInstallEvidence(
+  pool: pg.Pool,
+  context: TrustedRequestContext,
+  installId: MintedUuid,
+  lineage: readonly PersistedReleaseIdentity[],
+  releases: readonly ParsedRelease[],
+  servingIdentity: PersistedReleaseIdentity,
+  servingRelease: ParsedRelease,
+): Promise<FreshTenantInstallEvidence> {
+  if (
+    lineage.length !== releases.length ||
+    lineage.at(-1)?.releaseId !== servingIdentity.releaseId ||
+    releases.at(-1)?.compiled.releaseRoot !==
+      servingRelease.compiled.releaseRoot
+  ) {
+    throw new Error('fresh-tenant evidence does not bind the serving lineage');
+  }
+  const binding = releaseVerificationBinding(servingRelease.compiled);
+  return withTrustedRequestTransaction(pool, context, async (client) => {
+    await client.query(
+      `SELECT pg_catalog.pg_advisory_xact_lock(
+         pg_catalog.hashtextextended(
+           format(
+             'northstar.fresh-tenant-install/v1:%s:%s:%s',
+             $1::uuid,
+             $2::uuid,
+             $3::uuid
+           ),
+           0
+         )
+       )`,
+      [context.tenantId, context.environmentId, installId],
+    );
+    const verification = await client.query<{
+      derived_count: number;
+      release_root: string;
+      result_count: number;
+    }>(
+      `SELECT evidence.release_root,
+              evidence.result_count,
+              CASE
+                WHEN evidence.impact_analysis_derivation IS NULL THEN 0
+                ELSE jsonb_array_length(
+                  evidence.impact_analysis_derivation -> 'derivations'
+                )
+              END AS derived_count
+         FROM platform.tenant_release_admissions AS admission
+         JOIN platform.release_verification_evidence AS evidence
+           ON evidence.tenant_id = admission.tenant_id
+          AND evidence.environment_id = admission.environment_id
+          AND evidence.verification_evidence_id =
+              admission.verification_evidence_id
+        WHERE admission.tenant_id = $1
+          AND admission.environment_id = $2
+          AND admission.release_id = $3`,
+      [context.tenantId, context.environmentId, servingIdentity.releaseId],
+    );
+    const verified = verification.rows[0];
+    if (
+      !verified ||
+      verified.release_root !== servingRelease.compiled.releaseRoot ||
+      verified.result_count + verified.derived_count !==
+        binding.plan.scenarios.length
+    ) {
+      throw new Error(
+        'fresh-tenant serving release does not carry its complete scenario partition',
+      );
+    }
+
+    const intermediate = await client.query<{
+      lineage_ordinal: number;
+      release_id: MintedUuid;
+      release_root: string;
+      semantic_admission: boolean;
+      source_release_root: string | null;
+    }>(
+      `SELECT intermediate.lineage_ordinal,
+              intermediate.release_id,
+              intermediate.release_root,
+              EXISTS (
+                SELECT 1
+                  FROM platform.tenant_release_admissions AS semantic
+                 WHERE semantic.tenant_id = intermediate.tenant_id
+                   AND semantic.environment_id = intermediate.environment_id
+                   AND semantic.release_id = intermediate.release_id
+              ) AS semantic_admission,
+              intermediate.source_release_root
+         FROM platform.fresh_tenant_intermediate_release_admissions
+              AS intermediate
+        WHERE intermediate.tenant_id = $1
+          AND intermediate.environment_id = $2
+          AND intermediate.install_id = $3
+        ORDER BY intermediate.lineage_ordinal`,
+      [context.tenantId, context.environmentId, installId],
+    );
+    const expectedIntermediate = lineage
+      .slice(0, -1)
+      .map((identity, index) => ({
+        lineage_ordinal: index,
+        release_id: identity.releaseId,
+        release_root: releases[index]!.compiled.releaseRoot,
+        semantic_admission: false,
+        source_release_root:
+          index === 0 ? null : releases[index - 1]!.compiled.releaseRoot,
+      }));
+    if (
+      JSON.stringify(intermediate.rows) !== JSON.stringify(expectedIntermediate)
+    ) {
+      throw new Error(
+        'fresh-tenant intermediate admission set does not match the exact lineage',
+      );
+    }
+
+    const document: FreshTenantInstallEvidence = Object.freeze({
+      appliedTransitions: Object.freeze(
+        releases.slice(1).map((release, index) =>
+          Object.freeze({
+            sourceReleaseRoot: releases[index]!.compiled.releaseRoot,
+            targetReleaseRoot: release.compiled.releaseRoot,
+          }),
+        ),
+      ),
+      nonServingReleasesWithoutScenarioExecution: Object.freeze(
+        expectedIntermediate.map((release) =>
+          Object.freeze({
+            releaseId: release.release_id,
+            releaseRoot: release.release_root,
+          }),
+        ),
+      ),
+      schemaVersion: FRESH_TENANT_INSTALL_EVIDENCE_VERSION,
+      servingRelease: Object.freeze({
+        releaseId: servingIdentity.releaseId,
+        releaseRoot: servingRelease.compiled.releaseRoot,
+        scenarioCount: binding.plan.scenarios.length,
+      }),
+    });
+    const recorded = await client.query<{ evidence_digest: string }>(
+      `SELECT platform.record_fresh_tenant_install_evidence(
+         $1,$2,$3,$4,$5
+       ) AS evidence_digest`,
+      [
+        installId,
+        servingIdentity.releaseId,
+        servingRelease.compiled.releaseRoot,
+        binding.plan.scenarios.length,
+        document,
+      ],
+    );
+    const evidenceDigest = recorded.rows[0]?.evidence_digest;
+    if (!evidenceDigest) {
+      throw new Error('fresh-tenant evidence recorder returned no digest');
+    }
+    const stored = await client.query<{
+      created_by: string;
+      evidence_digest: string;
+      evidence_document: unknown;
+      evidence_version: string;
+      serving_release_id: string;
+      serving_release_root: string;
+      serving_scenario_count: number;
+    }>(
+      `SELECT created_by, evidence_digest, evidence_document, evidence_version,
+              serving_release_id, serving_release_root, serving_scenario_count
+         FROM platform.fresh_tenant_install_evidence
+        WHERE tenant_id = $1
+          AND environment_id = $2
+          AND install_id = $3`,
+      [context.tenantId, context.environmentId, installId],
+    );
+    const storedRow = stored.rows[0];
+    if (
+      !storedRow ||
+      storedRow.created_by !== context.principalId ||
+      storedRow.evidence_digest !== evidenceDigest ||
+      canonicalize(storedRow.evidence_document) !== canonicalize(document) ||
+      storedRow.evidence_version !== FRESH_TENANT_INSTALL_EVIDENCE_VERSION ||
+      storedRow.serving_release_id !== servingIdentity.releaseId ||
+      storedRow.serving_release_root !== servingRelease.compiled.releaseRoot ||
+      storedRow.serving_scenario_count !== binding.plan.scenarios.length
+    ) {
+      throw new Error(
+        'fresh-tenant install evidence differs from the completed lineage',
+      );
+    }
+    return document;
+  });
+}
+
 async function approveInitialRelease(
   pool: pg.Pool,
   context: TrustedRequestContext,
@@ -992,6 +1510,7 @@ async function approveInitialRelease(
   pointer: PointerState,
   target: PersistedReleaseIdentity,
   compiled: CompileSuccess,
+  freshTenantBinding: FreshTenantPreparationBinding,
 ): Promise<MintedUuid> {
   const receiptId = minted(randomUUID());
   const preparationId = minted(randomUUID());
@@ -1034,6 +1553,7 @@ async function approveInitialRelease(
       compiled,
       context,
       evidenceId: target.evidenceId,
+      ...(freshTenantBinding ? { freshTenantBinding } : {}),
       pointer,
       preparationId,
       receiptId,
@@ -1060,6 +1580,7 @@ async function approveModuleRelease(
   compiled: CompileSuccess,
   prepared: Awaited<ReturnType<PostgresModuleStorageMaterializer['prepare']>>,
   preparationId: MintedUuid,
+  freshTenantBinding?: FreshTenantPreparationBinding,
 ): Promise<MintedUuid> {
   const receiptId = minted(randomUUID());
   await withTrustedRequestTransaction(pool, context, async (client) => {
@@ -1107,6 +1628,7 @@ async function approveModuleRelease(
       compiled,
       context,
       evidenceId: target.evidenceId,
+      ...(freshTenantBinding ? { freshTenantBinding } : {}),
       pointer,
       preparationId,
       receiptId,
@@ -1133,6 +1655,7 @@ async function approveReleaseWithoutStorageTransition(
   target: PersistedReleaseIdentity,
   compiled: CompileSuccess,
   reverseAuthorization?: ReleaseReverseTransitionAuthorization,
+  freshTenantBinding?: FreshTenantPreparationBinding,
 ): Promise<MintedUuid> {
   if (pointer.releaseId === null) {
     throw new Error('release advancement requires an active source release');
@@ -1208,6 +1731,7 @@ async function approveReleaseWithoutStorageTransition(
       compiled,
       context,
       evidenceId: target.evidenceId,
+      ...(freshTenantBinding ? { freshTenantBinding } : {}),
       pointer,
       preparationId,
       receiptId,
@@ -1233,6 +1757,7 @@ async function insertReleasePreparation(
     readonly compiled: CompileSuccess;
     readonly context: TrustedRequestContext;
     readonly evidenceId: MintedUuid;
+    readonly freshTenantBinding?: FreshTenantPreparationBinding;
     readonly pointer: PointerState;
     readonly preparationId: MintedUuid;
     readonly receiptId: MintedUuid;
@@ -1242,27 +1767,69 @@ async function insertReleasePreparation(
   },
 ): Promise<void> {
   const targetRoot = Buffer.from(input.compiled.releaseRoot, 'hex');
-  const evidence = await client.query<{
-    evidence_version: string;
-    result_set_digest: string;
-  }>(
-    `SELECT evidence_version, result_set_digest
-       FROM platform.release_verification_evidence
-      WHERE tenant_id = $1
-        AND environment_id = $2
-        AND verification_evidence_id = $3
-        AND release_root = $4`,
-    [
-      input.context.tenantId,
-      input.context.environmentId,
-      input.evidenceId,
-      input.compiled.releaseRoot,
-    ],
-  );
-  const verified = evidence.rows[0];
+  const evidence = input.freshTenantBinding
+    ? await client.query<{
+        evidence_version: string;
+        result_set_digest: string;
+      }>(
+        `SELECT evidence_version, evidence_digest AS result_set_digest
+           FROM platform.fresh_tenant_intermediate_release_admissions
+                AS intermediate
+          WHERE intermediate.tenant_id = $1
+            AND intermediate.environment_id = $2
+            AND intermediate.release_evidence_id = $3
+            AND intermediate.release_root = $4
+            AND intermediate.release_id = $5
+            AND intermediate.install_id = $6
+            AND intermediate.lineage_ordinal = $7
+            AND intermediate.source_release_root IS NOT DISTINCT FROM $8
+            AND NOT EXISTS (
+              SELECT 1
+                FROM platform.fresh_tenant_install_evidence
+               WHERE tenant_id = intermediate.tenant_id
+                 AND environment_id = intermediate.environment_id
+                 AND install_id = intermediate.install_id
+            )
+            AND NOT EXISTS (
+              SELECT 1
+                FROM platform.release_verification_evidence
+               WHERE tenant_id = $1
+                 AND environment_id = $2
+                 AND verification_evidence_id = $3
+                 AND release_root = $4
+            )`,
+        [
+          input.context.tenantId,
+          input.context.environmentId,
+          input.evidenceId,
+          input.compiled.releaseRoot,
+          input.targetReleaseId,
+          input.freshTenantBinding.installId,
+          input.freshTenantBinding.lineageOrdinal,
+          input.sourceRoot?.toString('hex') ?? null,
+        ],
+      )
+    : await client.query<{
+        evidence_version: string;
+        result_set_digest: string;
+      }>(
+        `SELECT evidence_version, result_set_digest
+           FROM platform.release_verification_evidence
+          WHERE tenant_id = $1
+            AND environment_id = $2
+            AND verification_evidence_id = $3
+            AND release_root = $4`,
+        [
+          input.context.tenantId,
+          input.context.environmentId,
+          input.evidenceId,
+          input.compiled.releaseRoot,
+        ],
+      );
+  const verified = evidence.rows.length === 1 ? evidence.rows[0] : undefined;
   if (!verified) {
     throw new Error(
-      'canonical release preparation requires durable verification evidence',
+      'canonical release preparation requires one durable verification or intermediate-install evidence record',
     );
   }
   await client.query(
@@ -1278,11 +1845,12 @@ async function insertReleasePreparation(
        verification_evidence_digest, capability_support_version,
        capability_support_digest, capability_support_result, renderer_version,
        view_schema_version, rendered_diff_evidence_digest,
-       transition_preparation_receipt_id
+       transition_preparation_receipt_id, fresh_tenant_install_id,
+       fresh_tenant_lineage_ordinal
      ) VALUES (
        $1,$2,$3,'northstar.release-activation-preparation/v1',$4,$5,$6,$7,$8,$9,
        $10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,
-       'SUPPORTED',$25,$26,$27,$28
+       'SUPPORTED',$25,$26,$27,$28,$29,$30
      )`,
     [
       input.context.tenantId,
@@ -1321,6 +1889,8 @@ async function insertReleasePreparation(
       viewSchemaVersion,
       digest('rendered-diff', input.compiled.releaseRoot),
       input.receiptId,
+      input.freshTenantBinding?.installId ?? null,
+      input.freshTenantBinding?.lineageOrdinal ?? null,
     ],
   );
 }
