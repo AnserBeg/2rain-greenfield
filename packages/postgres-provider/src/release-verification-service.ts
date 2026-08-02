@@ -1516,12 +1516,14 @@ class SemanticVerificationExecutor {
     token: string,
     overrides: Readonly<Record<string, unknown>> = {},
     relationOverrides: Readonly<Record<string, string>> = {},
+    arrangementPath: readonly string[] = [],
   ): Promise<VerificationRecord> {
     const input = await this.#createInput(
       entityId,
       token,
       overrides,
       relationOverrides,
+      arrangementPath,
     );
     await this.#invokeOperation(this.#createOperation(entityId), input);
     this.#createdRecords.push({ entityId, recordId: String(input.recordId) });
@@ -1537,7 +1539,19 @@ class SemanticVerificationExecutor {
     token: string,
     overrides: Readonly<Record<string, unknown>> = {},
     relationOverrides: Readonly<Record<string, string>> = {},
+    arrangementPath: readonly string[] = [],
   ): Promise<Record<string, unknown>> {
+    const cycleStart = arrangementPath.indexOf(entityId);
+    if (cycleStart >= 0) {
+      throw failure(
+        'VERIFICATION_REQUIRED_RELATION_CYCLE',
+        `required relation arrangement cycle: ${[
+          ...arrangementPath.slice(cycleStart),
+          entityId,
+        ].join(' -> ')}`,
+      );
+    }
+    const nextArrangementPath = [...arrangementPath, entityId];
     const operation = this.#createOperation(entityId);
     const storageEntity = this.#requiredStorageEntity(entityId);
     const values = Object.fromEntries(
@@ -1562,9 +1576,13 @@ class SemanticVerificationExecutor {
           'operation relation input has no storage relation contract',
         );
       }
+      if (!relationInput.required) continue;
       const target = await this.#create(
         relation.targetEntityId,
-        `${token}-parent`,
+        arrangementPathToken(token, relationInput.relationId),
+        {},
+        {},
+        nextArrangementPath,
       );
       relations[relationInput.relationId] = target.recordId;
     }
@@ -2177,6 +2195,16 @@ function stableUuid(label: string): string {
   bytes[8] = (bytes[8]! & 0x3f) | 0x80;
   const hex = bytes.toString('hex');
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+function arrangementPathToken(parentToken: string, relationId: string): string {
+  return createHash('sha256')
+    .update('northstar.semantic-verification-arrangement-path/v1', 'utf8')
+    .update(Uint8Array.of(0))
+    .update(parentToken, 'utf8')
+    .update(Uint8Array.of(0))
+    .update(relationId, 'utf8')
+    .digest('hex');
 }
 
 function executionBinding(binding: ReleaseVerificationBinding) {

@@ -110,6 +110,7 @@ import {
 import {
   FIXTURE_IDS,
   ordinaryModuleV1,
+  ordinaryModuleV1ForNamespace,
   ordinaryModuleV2,
   ordinaryModuleV2ForNamespace,
 } from '../fixtures/g2/module-conformance/definitions.js';
@@ -374,6 +375,200 @@ test('release verification executes a parameterized aggregate assertion as an om
       }
     },
   );
+});
+
+test('release verification leaves an optional self-reference unset and terminates', async () => {
+  const observation = await executeSelfRelationVerification(false);
+  assert.equal(
+    observation.resultSet.results.length,
+    observation.plan.scenarios.length,
+    'every declared scenario must produce an executed result',
+  );
+  assert.equal(
+    observation.relationPopulation.explicit,
+    0,
+    'verification must not invent the optional relation for any scenario',
+  );
+  assert.ok(
+    observation.relationPopulation.unset > 0,
+    'ordinary arrangements must persist without inventing an optional parent',
+  );
+});
+
+test('release verification refuses a required relation cycle by name', async () => {
+  await assert.rejects(
+    executeSelfRelationVerification(true),
+    (error: unknown) => {
+      assert.ok(error instanceof ReleaseVerificationIntegrityError);
+      assert.equal(error.code, 'VERIFICATION_REQUIRED_RELATION_CYCLE');
+      assert.match(error.message, /required relation arrangement cycle/u);
+      return true;
+    },
+  );
+});
+
+test('release verification gives equal-depth required diamond paths distinct records', async () => {
+  const observation = await executeRequiredDiamondVerification();
+  assert.equal(
+    observation.resultSet.results.length,
+    observation.plan.scenarios.length,
+    'every declared scenario must produce an executed result',
+  );
+  assert.ok(
+    observation.parentPairs.length > 0,
+    'verification must persist at least one complete required diamond',
+  );
+  for (const pair of observation.parentPairs) {
+    assert.notEqual(
+      pair.leftSharedRecordId,
+      pair.rightSharedRecordId,
+      `diamond root ${pair.rootRecordId} must receive two distinct shared parents`,
+    );
+  }
+});
+
+test('an unset optional restrict relation archives, restores, and verifies through the real operation path', async () => {
+  await withOptionalRestrictRuntime('unset', async (runtime) => {
+    assert.deepEqual(runtime.foreignKey, {
+      deleteAction: 'r',
+      deferrable: false,
+      updateAction: 'r',
+      validated: true,
+    });
+
+    await assert.rejects(
+      operation(
+        runtime.operations,
+        runtime.view,
+        'master_create',
+        {
+          recordId: randomUUID(),
+          relations: { [runtime.relationId]: randomUUID() },
+          values: masterValues(runtime.namespace, 'Dangling target'),
+        },
+        runtime.namespace,
+      ),
+      (error: unknown) =>
+        assertModuleError(error, 'MODULE_RELATION_TARGET_NOT_FOUND', null),
+    );
+
+    const recordId = randomUUID();
+    const created = await operation(
+      runtime.operations,
+      runtime.view,
+      'master_create',
+      {
+        recordId,
+        values: masterValues(runtime.namespace, 'Unset relation'),
+      },
+      runtime.namespace,
+    );
+    assert.equal(created.readBack?.recordId, recordId);
+    assert.equal(await runtime.readRelation(recordId), null);
+
+    const archived = await operation(
+      runtime.operations,
+      runtime.view,
+      'master_archive',
+      { expectedRevision: 1, recordId },
+      runtime.namespace,
+    );
+    assert.equal(archived.readBack?.archived, true);
+
+    const restored = await operation(
+      runtime.operations,
+      runtime.view,
+      'master_restore',
+      { expectedRevision: 2, recordId },
+      runtime.namespace,
+    );
+    assert.equal(restored.readBack?.archived, false);
+    assert.equal(await runtime.readRelation(recordId), null);
+
+    const recoveryScenario = runtime.plan.scenarios.find(
+      (scenario) =>
+        scenario.kind === 'declaredEvidence' &&
+        scenario.entityId === `${runtime.namespace}:entity.master` &&
+        scenario.evidenceKind === 'recovery',
+    );
+    assert.ok(recoveryScenario);
+    const resultSet = await new PostgresReleaseVerificationService(
+      runtime.runtimePool,
+    ).executeSemanticCandidateWithExecutor(
+      runtime.context,
+      {
+        compiledRelease: runtime.compiled,
+        evidenceId: runtime.evidenceId,
+        releaseId: runtime.releaseId,
+      },
+      runtime.interpreter,
+    );
+    assert.equal(
+      resultSet.results.some(
+        (result) => result.scenarioId === recoveryScenario.scenarioId,
+      ),
+      true,
+      'the generic recovery scenario must execute with the optional relation unset',
+    );
+  });
+});
+
+test('restore still refuses when an optional restrict relation names an archived target', async () => {
+  await withOptionalRestrictRuntime('archived-target', async (runtime) => {
+    const targetId = randomUUID();
+    await operation(
+      runtime.operations,
+      runtime.view,
+      'master_create',
+      {
+        recordId: targetId,
+        values: masterValues(runtime.namespace, 'Archived target'),
+      },
+      runtime.namespace,
+    );
+    const sourceId = randomUUID();
+    await operation(
+      runtime.operations,
+      runtime.view,
+      'master_create',
+      {
+        recordId: sourceId,
+        relations: { [runtime.relationId]: targetId },
+        values: masterValues(runtime.namespace, 'Archived source'),
+      },
+      runtime.namespace,
+    );
+    await operation(
+      runtime.operations,
+      runtime.view,
+      'master_archive',
+      { expectedRevision: 1, recordId: sourceId },
+      runtime.namespace,
+    );
+    await operation(
+      runtime.operations,
+      runtime.view,
+      'master_archive',
+      { expectedRevision: 1, recordId: targetId },
+      runtime.namespace,
+    );
+
+    await assert.rejects(
+      operation(
+        runtime.operations,
+        runtime.view,
+        'master_restore',
+        { expectedRevision: 2, recordId: sourceId },
+        runtime.namespace,
+      ),
+      (error: unknown) =>
+        assertModuleError(
+          error,
+          'MODULE_RELATION_VIOLATION',
+          runtime.relationId,
+        ),
+    );
+  });
 });
 
 test('definition-only module is served generically through Q0/O0, trust, RLS, and pinned coexistence', async (context) => {
@@ -3740,6 +3935,665 @@ async function trustFactCount(
 function assertNoPhysicalDetails(value: unknown): void {
   const serialized = JSON.stringify(value);
   assert.doesNotMatch(serialized, /north_star_module|nsm_[ctik]_|storageClass/);
+}
+
+type OptionalRestrictRuntime = Readonly<{
+  compiled: CompileSuccess;
+  context: TrustedRequestContext;
+  evidenceId: MintedUuid;
+  foreignKey: Readonly<{
+    deleteAction: string;
+    deferrable: boolean;
+    updateAction: string;
+    validated: boolean;
+  }>;
+  interpreter: PostgresModuleRuntimeInterpreter;
+  namespace: string;
+  operations: SemanticOperationGateway;
+  plan: VerificationPlanPayloadV1;
+  readRelation: (recordId: string) => Promise<string | null>;
+  relationId: string;
+  releaseId: MintedUuid;
+  runtimePool: pg.Pool;
+  view: RequestRuntimeView;
+}>;
+
+async function withOptionalRestrictRuntime(
+  probe: 'archived-target' | 'unset',
+  run: (runtime: OptionalRestrictRuntime) => Promise<void>,
+): Promise<void> {
+  const namespace =
+    probe === 'unset' ? 'northstar.restorenull' : 'northstar.restorearchived';
+  const definition = selfRelationDefinition(namespace, false, 'restrict');
+  const emptyDefinition_ = emptyDefinition(definition);
+  const empty = mustCompile(moduleInput(emptyDefinition_));
+  const compiled = mustCompile(
+    moduleInput(definition, expectedActiveReleaseFrom(empty)),
+  );
+  const plan = releaseVerificationBinding(compiled).plan;
+  const relationId = `${namespace}:relation.master_supersedes`;
+  const storage = compiledProjectionPayload<StorageTargetPayloadV1>(
+    compiled,
+    PROJECTION_FAMILY_IDS.storageTarget,
+  );
+  const relation = storage.relations.find(
+    (candidate) => candidate.relationId === relationId,
+  );
+  assert.ok(relation);
+  const entity = storage.entities.find(
+    (candidate) => candidate.entityId === `${namespace}:entity.master`,
+  );
+  assert.ok(entity);
+
+  const tenant =
+    probe === 'unset'
+      ? 'e4000000-0000-4000-8000-000000000001'
+      : 'f1000000-0000-4000-8000-000000000001';
+  const environment =
+    probe === 'unset'
+      ? 'e5000000-0000-4000-8000-000000000002'
+      : 'f2000000-0000-4000-8000-000000000002';
+  const principal =
+    probe === 'unset'
+      ? 'e6000000-0000-4000-8000-000000000003'
+      : 'f3000000-0000-4000-8000-000000000003';
+  await withEphemeralPostgres(
+    probe === 'unset'
+      ? 'optional-restrict-null-restore'
+      : 'optional-restrict-archived-target',
+    async ({ connection, pool }) => {
+      await migrateAndSeed(pool, [[tenant, environment, probe]]);
+      const runtimePool = new pg.Pool({
+        ...connection,
+        max: 3,
+        user: 'north_star_runtime',
+      });
+      const materializerPool = new pg.Pool({
+        ...connection,
+        max: 2,
+        user: 'north_star_module_materializer',
+      });
+      const modulePool = new pg.Pool({
+        ...connection,
+        max: 1,
+        user: 'north_star_module_runtime',
+      });
+      try {
+        const context = (
+          await contextsFor([['restore', tenant, environment, principal]])
+        ).restore!;
+        const releases = await persistSequence(runtimePool, context, [
+          [empty, emptyDefinition_],
+          [compiled, definition],
+        ]);
+        await setPointer(pool, tenant, environment, releases[0]!);
+        await grantExecutorAuthority(pool, [[tenant, principal]]);
+        const materializer = new PostgresModuleStorageMaterializer(
+          materializerPool,
+          modulePool,
+        );
+        await prepare(materializer, context, principal, releases[1]!);
+        const staged = await pool.query<{
+          verification_evidence_id: MintedUuid;
+        }>(
+          `SELECT verification_evidence_id
+             FROM platform.tenant_releases
+            WHERE tenant_id = $1
+              AND environment_id = $2
+              AND release_id = $3`,
+          [tenant, environment, releases[1]],
+        );
+        const evidenceId = staged.rows[0]?.verification_evidence_id;
+        assert.ok(evidenceId);
+        const foreignKeys = await pool.query<{
+          confdeltype: string;
+          condeferrable: boolean;
+          confupdtype: string;
+          convalidated: boolean;
+        }>(
+          `SELECT constraint_record.confdeltype,
+                  constraint_record.condeferrable,
+                  constraint_record.confupdtype,
+                  constraint_record.convalidated
+             FROM pg_constraint AS constraint_record
+             JOIN pg_class AS relation_record
+               ON relation_record.oid = constraint_record.conrelid
+             JOIN pg_namespace AS namespace_record
+               ON namespace_record.oid = relation_record.relnamespace
+            WHERE namespace_record.nspname = 'north_star_module'
+              AND relation_record.relname = $1
+              AND constraint_record.conname = $2
+              AND constraint_record.contype = 'f'`,
+          [entity.physicalTableName, relation.foreignKey.physicalName],
+        );
+        assert.equal(foreignKeys.rowCount, 1);
+        const foreignKey = foreignKeys.rows[0]!;
+        const candidateIdentity = identity(tenant, environment, principal);
+        const sourceView = await issuedView(
+          runtimeEntry(runtimePool, { restore: candidateIdentity }),
+          'restore',
+        );
+        const policy = new AllowPolicy();
+        const view = await issuedCandidateView(
+          compiled,
+          releases[1]!,
+          candidateIdentity,
+          sourceView.pointer,
+          policy,
+        );
+        const interpreter = new PostgresModuleRuntimeInterpreter(
+          runtimePool,
+          humanActorIssuer(),
+        );
+        await run(
+          Object.freeze({
+            compiled,
+            context,
+            evidenceId,
+            foreignKey: Object.freeze({
+              deleteAction: foreignKey.confdeltype,
+              deferrable: foreignKey.condeferrable,
+              updateAction: foreignKey.confupdtype,
+              validated: foreignKey.convalidated,
+            }),
+            interpreter,
+            namespace,
+            operations: operationGatewayFor(policy, interpreter),
+            plan,
+            readRelation: async (recordId) => {
+              const result = await pool.query<{ target_id: string | null }>(
+                `SELECT ${quoteTestIdentifier(relation.relationColumn.physicalName)} AS target_id
+                   FROM north_star_module.${quoteTestIdentifier(entity.physicalTableName)}
+                  WHERE ${quoteTestIdentifier(entity.recordIdentity.column)} = $1`,
+                [recordId],
+              );
+              assert.equal(result.rowCount, 1);
+              return result.rows[0]!.target_id;
+            },
+            relationId,
+            releaseId: releases[1]!,
+            runtimePool,
+            view,
+          }),
+        );
+      } finally {
+        await Promise.all([
+          runtimePool.end(),
+          materializerPool.end(),
+          modulePool.end(),
+        ]);
+      }
+    },
+  );
+}
+
+function masterValues(
+  namespace: string,
+  name: string,
+): Readonly<Record<string, string>> {
+  return Object.freeze({
+    [`${namespace}:field.master_name`]: name,
+    [`${namespace}:field.master_number`]: `R-${randomUUID()}`,
+  });
+}
+
+async function executeSelfRelationVerification(required: boolean) {
+  const namespace = required
+    ? 'northstar.requiredcycle'
+    : 'northstar.optionalcycle';
+  const definition = selfRelationDefinition(namespace, required);
+  const emptyDefinition_ = emptyDefinition(definition);
+  const empty = mustCompile(moduleInput(emptyDefinition_));
+  const compiled = mustCompile(
+    moduleInput(definition, expectedActiveReleaseFrom(empty)),
+  );
+  const plan = releaseVerificationBinding(compiled).plan;
+  const relationId = `${namespace}:relation.master_supersedes`;
+  const storage = compiledProjectionPayload<StorageTargetPayloadV1>(
+    compiled,
+    PROJECTION_FAMILY_IDS.storageTarget,
+  );
+  const relation = storage.relations.find(
+    (candidate) => candidate.relationId === relationId,
+  );
+  assert.ok(relation);
+  const entity = storage.entities.find(
+    (candidate) => candidate.entityId === `${namespace}:entity.master`,
+  );
+  assert.ok(entity);
+
+  const tenant = required
+    ? 'd1000000-0000-4000-8000-000000000001'
+    : 'c1000000-0000-4000-8000-000000000001';
+  const environment = required
+    ? 'd2000000-0000-4000-8000-000000000002'
+    : 'c2000000-0000-4000-8000-000000000002';
+  const principal = required
+    ? 'd3000000-0000-4000-8000-000000000003'
+    : 'c3000000-0000-4000-8000-000000000003';
+  return withEphemeralPostgres(
+    required ? 'verification-required-cycle' : 'verification-optional-cycle',
+    async ({ connection, pool }) => {
+      await migrateAndSeed(pool, [
+        [tenant, environment, required ? 'required-cycle' : 'optional-cycle'],
+      ]);
+      const runtimePool = new pg.Pool({
+        ...connection,
+        max: 3,
+        user: 'north_star_runtime',
+      });
+      const materializerPool = new pg.Pool({
+        ...connection,
+        max: 2,
+        user: 'north_star_module_materializer',
+      });
+      const modulePool = new pg.Pool({
+        ...connection,
+        max: 1,
+        user: 'north_star_module_runtime',
+      });
+      try {
+        const context = (
+          await contextsFor([['cycle', tenant, environment, principal]])
+        ).cycle!;
+        const releases = await persistSequence(runtimePool, context, [
+          [empty, emptyDefinition_],
+          [compiled, definition],
+        ]);
+        await setPointer(pool, tenant, environment, releases[0]!);
+        await grantExecutorAuthority(pool, [[tenant, principal]]);
+        const materializer = new PostgresModuleStorageMaterializer(
+          materializerPool,
+          modulePool,
+        );
+        await prepare(materializer, context, principal, releases[1]!);
+        const staged = await pool.query<{
+          verification_evidence_id: MintedUuid;
+        }>(
+          `SELECT verification_evidence_id
+             FROM platform.tenant_releases
+            WHERE tenant_id = $1
+              AND environment_id = $2
+              AND release_id = $3`,
+          [tenant, environment, releases[1]],
+        );
+        const evidenceId = staged.rows[0]?.verification_evidence_id;
+        assert.ok(evidenceId);
+        const interpreter = new PostgresModuleRuntimeInterpreter(
+          runtimePool,
+          humanActorIssuer(),
+        );
+        const resultSet = await new PostgresReleaseVerificationService(
+          runtimePool,
+        ).executeSemanticCandidateWithExecutor(
+          context,
+          {
+            compiledRelease: compiled,
+            evidenceId,
+            releaseId: releases[1]!,
+          },
+          interpreter,
+        );
+        const population = await pool.query<{
+          explicit: string;
+          unset: string;
+        }>(
+          `SELECT count(*) FILTER (
+                    WHERE ${quoteTestIdentifier(relation.relationColumn.physicalName)} IS NOT NULL
+                  )::text AS explicit,
+                  count(*) FILTER (
+                    WHERE ${quoteTestIdentifier(relation.relationColumn.physicalName)} IS NULL
+                  )::text AS unset
+             FROM north_star_module.${quoteTestIdentifier(entity.physicalTableName)}`,
+        );
+        const row = population.rows[0];
+        assert.ok(row);
+        return Object.freeze({
+          plan,
+          relationPopulation: Object.freeze({
+            explicit: Number(row.explicit),
+            unset: Number(row.unset),
+          }),
+          resultSet,
+        });
+      } finally {
+        await Promise.all([
+          runtimePool.end(),
+          materializerPool.end(),
+          modulePool.end(),
+        ]);
+      }
+    },
+  );
+}
+
+async function executeRequiredDiamondVerification() {
+  const namespace = 'northstar.requireddiamond';
+  const definition = requiredDiamondDefinition(namespace);
+  const emptyDefinition_ = emptyDefinition(definition);
+  const empty = mustCompile(moduleInput(emptyDefinition_));
+  const compiled = mustCompile(
+    moduleInput(definition, expectedActiveReleaseFrom(empty)),
+  );
+  const plan = releaseVerificationBinding(compiled).plan;
+  const storage = compiledProjectionPayload<StorageTargetPayloadV1>(
+    compiled,
+    PROJECTION_FAMILY_IDS.storageTarget,
+  );
+  const entity = (local: string) => {
+    const candidate = storage.entities.find(
+      (entry) => entry.entityId === `${namespace}:entity.${local}`,
+    );
+    assert.ok(candidate);
+    return candidate;
+  };
+  const relation = (local: string) => {
+    const candidate = storage.relations.find(
+      (entry) => entry.relationId === `${namespace}:relation.${local}`,
+    );
+    assert.ok(candidate);
+    return candidate;
+  };
+  const shared = entity('master');
+  const left = entity('master_role');
+  const right = entity('diamond_right');
+  const root = entity('diamond_root');
+  const leftShared = relation('master_role_parent');
+  const rightShared = relation('diamond_right_shared');
+  const rootLeft = relation('diamond_root_left');
+  const rootRight = relation('diamond_root_right');
+  const tenant = 'b1000000-0000-4000-8000-000000000001';
+  const environment = 'b2000000-0000-4000-8000-000000000002';
+  const principal = 'b3000000-0000-4000-8000-000000000003';
+
+  return withEphemeralPostgres(
+    'verification-required-diamond',
+    async ({ connection, pool }) => {
+      await migrateAndSeed(pool, [[tenant, environment, 'required-diamond']]);
+      const runtimePool = new pg.Pool({
+        ...connection,
+        max: 3,
+        user: 'north_star_runtime',
+      });
+      const materializerPool = new pg.Pool({
+        ...connection,
+        max: 2,
+        user: 'north_star_module_materializer',
+      });
+      const modulePool = new pg.Pool({
+        ...connection,
+        max: 1,
+        user: 'north_star_module_runtime',
+      });
+      try {
+        const context = (
+          await contextsFor([['diamond', tenant, environment, principal]])
+        ).diamond!;
+        const releases = await persistSequence(runtimePool, context, [
+          [empty, emptyDefinition_],
+          [compiled, definition],
+        ]);
+        await setPointer(pool, tenant, environment, releases[0]!);
+        await grantExecutorAuthority(pool, [[tenant, principal]]);
+        const materializer = new PostgresModuleStorageMaterializer(
+          materializerPool,
+          modulePool,
+        );
+        await prepare(materializer, context, principal, releases[1]!);
+        const staged = await pool.query<{
+          verification_evidence_id: MintedUuid;
+        }>(
+          `SELECT verification_evidence_id
+             FROM platform.tenant_releases
+            WHERE tenant_id = $1
+              AND environment_id = $2
+              AND release_id = $3`,
+          [tenant, environment, releases[1]],
+        );
+        const evidenceId = staged.rows[0]?.verification_evidence_id;
+        assert.ok(evidenceId);
+        const resultSet = await new PostgresReleaseVerificationService(
+          runtimePool,
+        ).executeSemanticCandidateWithExecutor(
+          context,
+          {
+            compiledRelease: compiled,
+            evidenceId,
+            releaseId: releases[1]!,
+          },
+          new PostgresModuleRuntimeInterpreter(runtimePool, humanActorIssuer()),
+        );
+        const pairs = await pool.query<{
+          left_shared_record_id: string;
+          right_shared_record_id: string;
+          root_record_id: string;
+        }>(
+          `SELECT root.${quoteTestIdentifier(root.recordIdentity.column)} AS root_record_id,
+                  left_parent.${quoteTestIdentifier(leftShared.relationColumn.physicalName)} AS left_shared_record_id,
+                  right_parent.${quoteTestIdentifier(rightShared.relationColumn.physicalName)} AS right_shared_record_id
+             FROM north_star_module.${quoteTestIdentifier(root.physicalTableName)} AS root
+             JOIN north_star_module.${quoteTestIdentifier(left.physicalTableName)} AS left_parent
+               ON left_parent.tenant_id = root.tenant_id
+              AND left_parent.environment_id = root.environment_id
+              AND left_parent.${quoteTestIdentifier(left.recordIdentity.column)} =
+                  root.${quoteTestIdentifier(rootLeft.relationColumn.physicalName)}
+             JOIN north_star_module.${quoteTestIdentifier(right.physicalTableName)} AS right_parent
+               ON right_parent.tenant_id = root.tenant_id
+              AND right_parent.environment_id = root.environment_id
+              AND right_parent.${quoteTestIdentifier(right.recordIdentity.column)} =
+                  root.${quoteTestIdentifier(rootRight.relationColumn.physicalName)}
+             JOIN north_star_module.${quoteTestIdentifier(shared.physicalTableName)} AS left_shared
+               ON left_shared.tenant_id = left_parent.tenant_id
+              AND left_shared.environment_id = left_parent.environment_id
+              AND left_shared.${quoteTestIdentifier(shared.recordIdentity.column)} =
+                  left_parent.${quoteTestIdentifier(leftShared.relationColumn.physicalName)}
+             JOIN north_star_module.${quoteTestIdentifier(shared.physicalTableName)} AS right_shared
+               ON right_shared.tenant_id = right_parent.tenant_id
+              AND right_shared.environment_id = right_parent.environment_id
+              AND right_shared.${quoteTestIdentifier(shared.recordIdentity.column)} =
+                  right_parent.${quoteTestIdentifier(rightShared.relationColumn.physicalName)}
+            ORDER BY root_record_id`,
+        );
+        return Object.freeze({
+          parentPairs: Object.freeze(
+            pairs.rows.map((row) =>
+              Object.freeze({
+                leftSharedRecordId: row.left_shared_record_id,
+                rightSharedRecordId: row.right_shared_record_id,
+                rootRecordId: row.root_record_id,
+              }),
+            ),
+          ),
+          plan,
+          resultSet,
+        });
+      } finally {
+        await Promise.all([
+          runtimePool.end(),
+          materializerPool.end(),
+          modulePool.end(),
+        ]);
+      }
+    },
+  );
+}
+
+function selfRelationDefinition(
+  namespace: string,
+  required: boolean,
+  archiveBehavior: 'restrict' | 'retainReference' = 'retainReference',
+): Record<string, unknown> {
+  const definition = ordinaryModuleV1ForNamespace(namespace) as {
+    languageVersion: string;
+    relations: Array<Record<string, unknown>>;
+  } & Record<string, unknown>;
+  const version = definition.languageVersion;
+  const entityId = `${namespace}:entity.master`;
+  definition.relations.push({
+    archiveBehavior,
+    cardinality: 'manyToOne',
+    foreignKeyActions: {
+      onDelete: 'restrict',
+      onUpdate: 'restrict',
+      schemaVersion: version,
+    },
+    joinEligibility: 'query',
+    kind: 'relationDefinition',
+    orderKey: 20,
+    ownership: 'reference',
+    relationId: `${namespace}:relation.master_supersedes`,
+    required,
+    schemaVersion: version,
+    sourceEntity: {
+      kind: 'entityReference',
+      schemaVersion: version,
+      targetId: entityId,
+    },
+    targetEntity: {
+      kind: 'entityReference',
+      schemaVersion: version,
+      targetId: entityId,
+    },
+  });
+  return definition;
+}
+
+function requiredDiamondDefinition(namespace: string): Record<string, unknown> {
+  const definition = ordinaryModuleV1ForNamespace(namespace) as {
+    assertions: Array<Record<string, unknown>>;
+    entities: Array<Record<string, unknown>>;
+    fields: Array<Record<string, unknown>>;
+    languageVersion: string;
+    operations: Array<Record<string, unknown>>;
+    permissions: Array<Record<string, unknown>>;
+    queries: Array<Record<string, unknown>>;
+    relations: Array<Record<string, unknown>>;
+    storageMappings: Array<Record<string, unknown>>;
+    surfaces: Array<Record<string, unknown>>;
+  } & Record<string, unknown>;
+  cloneFixtureEntityFamily(
+    definition,
+    namespace,
+    'master_role',
+    'diamond_right',
+    30,
+  );
+  cloneFixtureEntityFamily(
+    definition,
+    namespace,
+    'master_role',
+    'diamond_root',
+    40,
+  );
+  const version = definition.languageVersion;
+  const relation = (
+    local: string,
+    sourceLocal: string,
+    targetLocal: string,
+    orderKey: number,
+  ) => ({
+    archiveBehavior: 'retainReference',
+    cardinality: 'manyToOne',
+    foreignKeyActions: {
+      onDelete: 'restrict',
+      onUpdate: 'restrict',
+      schemaVersion: version,
+    },
+    joinEligibility: 'query',
+    kind: 'relationDefinition',
+    orderKey,
+    ownership: 'reference',
+    relationId: `${namespace}:relation.${local}`,
+    required: true,
+    schemaVersion: version,
+    sourceEntity: {
+      kind: 'entityReference',
+      schemaVersion: version,
+      targetId: `${namespace}:entity.${sourceLocal}`,
+    },
+    targetEntity: {
+      kind: 'entityReference',
+      schemaVersion: version,
+      targetId: `${namespace}:entity.${targetLocal}`,
+    },
+  });
+  definition.relations.push(
+    relation('diamond_right_shared', 'diamond_right', 'master', 20),
+    relation('diamond_root_left', 'diamond_root', 'master_role', 30),
+    relation('diamond_root_right', 'diamond_root', 'diamond_right', 40),
+  );
+  return definition;
+}
+
+function cloneFixtureEntityFamily(
+  definition: {
+    assertions: Array<Record<string, unknown>>;
+    entities: Array<Record<string, unknown>>;
+    fields: Array<Record<string, unknown>>;
+    operations: Array<Record<string, unknown>>;
+    permissions: Array<Record<string, unknown>>;
+    queries: Array<Record<string, unknown>>;
+    storageMappings: Array<Record<string, unknown>>;
+    surfaces: Array<Record<string, unknown>>;
+  },
+  namespace: string,
+  sourceLocal: string,
+  targetLocal: string,
+  entityOrderKey: number,
+): void {
+  for (const collection of [
+    'assertions',
+    'entities',
+    'fields',
+    'operations',
+    'permissions',
+    'queries',
+    'storageMappings',
+    'surfaces',
+  ] as const) {
+    const sourceEntries = definition[collection].filter((entry) =>
+      JSON.stringify(entry).includes(sourceLocal),
+    );
+    for (const source of sourceEntries) {
+      const clone = replaceFixtureStrings(source, [
+        [sourceLocal, targetLocal],
+        [
+          `${namespace}:option.owner`,
+          `${namespace}:option.${targetLocal}_owner`,
+        ],
+        [
+          `${namespace}:option.buyer`,
+          `${namespace}:option.${targetLocal}_buyer`,
+        ],
+      ]) as Record<string, unknown>;
+      if (collection === 'entities') clone.orderKey = entityOrderKey;
+      definition[collection].push(clone);
+    }
+  }
+}
+
+function replaceFixtureStrings(
+  value: unknown,
+  replacements: ReadonlyArray<readonly [string, string]>,
+): unknown {
+  if (typeof value === 'string') {
+    return replacements.reduce(
+      (result, [source, target]) => result.replaceAll(source, target),
+      value,
+    );
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) => replaceFixtureStrings(entry, replacements));
+  }
+  if (typeof value === 'object' && value !== null) {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [
+        key,
+        replaceFixtureStrings(entry, replacements),
+      ]),
+    );
+  }
+  return value;
 }
 
 function emptyDefinition(
