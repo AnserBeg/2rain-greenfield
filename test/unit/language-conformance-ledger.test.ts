@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import test from 'node:test';
 
 import { normalizeApplicationPackage } from '../../packages/canonical-model/src/index.js';
@@ -9,12 +11,15 @@ import { platformModuleDefinition } from '../../packages/domain/src/platform/def
 import {
   LANGUAGE_COVERAGE_LEDGER_VERSION,
   LANGUAGE_COVERAGE_RECEIPT_VERSION,
+  compareCodePoints,
+  deriveLanguageCoverageDecisionId,
   deriveLanguageCoverageLedger,
   deriveDecisionSetDigest,
   evaluateLanguageCoverage,
   makeLanguageCoverageReceipt,
   observeLanguageCoverage,
   type LanguageCoverageDecision,
+  type LanguageCoverageDecisionBody,
   type LanguageCoverageLedger,
   type LanguageCoverageObligation,
   type LanguageCoverageReceipt,
@@ -69,6 +74,54 @@ test('the ledger derives authored and lowered closed choices from both specifica
   );
 });
 
+test('missing-axis control retains finite members beside open union members', () => {
+  const ledger = deriveLanguageCoverageLedger();
+
+  assert.deepEqual(
+    axis(ledger, 'authoredLanguage', '$.assertions[].expectedDiagnosticCode')
+      ?.values,
+    [null],
+  );
+  for (const path of [
+    '$.entities[].columns[].fieldContract.bounds.maximumLength',
+    '$.entities[].columns[].fieldContract.bounds.precision',
+    '$.entities[].columns[].fieldContract.bounds.scale',
+    '$.entities[].indexes[].predicate',
+  ]) {
+    assert.deepEqual(
+      axis(ledger, 'loweredStorage', path)?.values,
+      [null],
+      path,
+    );
+  }
+});
+
+test('ledger bytes and code-point ordering do not depend on the ambient locale', () => {
+  assert.deepEqual(['ä', 'z', '😀', 'A'].sort(compareCodePoints), [
+    'A',
+    'z',
+    'ä',
+    '😀',
+  ]);
+
+  const helperPath = resolve('test/helpers/language-conformance-ledger.ts');
+  const script = `const ledger = require(${JSON.stringify(helperPath)}); process.stdout.write(ledger.stableStringify(ledger.deriveLanguageCoverageLedger()));`;
+  const outputs = ['C', 'sv_SE.UTF-8'].map((locale) => {
+    const result = spawnSync(
+      process.execPath,
+      ['--import', 'tsx', '-e', script],
+      {
+        encoding: 'utf8',
+        env: { ...process.env, LC_ALL: locale },
+        maxBuffer: 4 * 1024 * 1024,
+      },
+    );
+    assert.equal(result.status, 0, result.stderr);
+    return result.stdout;
+  });
+  assert.equal(outputs[0], outputs[1]);
+});
+
 test('the language gate is wired into local, matrix, and hosted acceptance paths', () => {
   const packageJson = JSON.parse(readFileSync('package.json', 'utf8')) as {
     scripts: Record<string, string>;
@@ -89,7 +142,7 @@ test('the language gate is wired into local, matrix, and hosted acceptance paths
   assert.match(workflow, /run: corepack pnpm check:language-coverage/u);
   assert.match(
     gate,
-    /green proves the exact shape and decision partitions have not drifted, not that decision-covered shapes execute/u,
+    /green proves the derived specification choices, observed partition, and exact decision identities match their reviewed records, not that decision-covered shapes execute; changing a decision record requires a new identity/u,
   );
 });
 
@@ -327,10 +380,41 @@ test('first use of an unobserved first-party shape requires evidence or a new de
     /LANGUAGE_COVERAGE_STALE_DECISION_SET: first-party-baseline-/u,
   );
 
+  const mechanicallyRetargetedDecisions = baselineDecisions.map((decision) => ({
+    ...decision,
+    obligationSetDigest: deriveDecisionSetDigest(
+      ledger,
+      changedObserved,
+      decision.category,
+    ),
+  }));
+  assert.throws(
+    () =>
+      evaluateLanguageCoverage({
+        creditedTestFiles: new Set(),
+        decisionObservedObligationIds: changedObserved,
+        decisions: mechanicallyRetargetedDecisions,
+        ledger,
+        observedObligationIds: changedObserved,
+        receiptClaims: [],
+        receipts: [],
+        runId,
+      }),
+    /LANGUAGE_COVERAGE_STALE_DECISION_IDENTITY: first-party-baseline-/u,
+  );
+
+  const newDecisions = decisionsFor(
+    ledger,
+    changedObserved,
+    'new-explicit-decision',
+  );
+  for (const [index, decision] of newDecisions.entries()) {
+    assert.notEqual(decision.decisionId, baselineDecisions[index]?.decisionId);
+  }
   const newDecisionResult = evaluateLanguageCoverage({
     creditedTestFiles: new Set(),
     decisionObservedObligationIds: changedObserved,
-    decisions: decisionsFor(ledger, changedObserved, 'new-explicit-decision'),
+    decisions: newDecisions,
     ledger,
     observedObligationIds: changedObserved,
     receiptClaims: [],
@@ -420,15 +504,23 @@ function decisionsFor(
       'observedOutsideRelationScope',
       'unobserved',
     ] as const
-  ).map((category) => ({
-    category,
-    decisionId: `${prefix}-${category}`,
-    ledgerDigest: ledger.digest,
-    obligationSetDigest: deriveDecisionSetDigest(ledger, observed, category),
-    rationale: `The ${category} fixture partition is explicit.`,
-    revisitCondition:
-      'A changed partition requires evidence or a new decision.',
-  }));
+  ).map((category) => {
+    const body = {
+      category,
+      ledgerDigest: ledger.digest,
+      obligationSetDigest: deriveDecisionSetDigest(ledger, observed, category),
+      rationale: `The ${category} fixture partition is explicit.`,
+      revisitCondition:
+        'A changed partition requires evidence or a new decision.',
+    } satisfies LanguageCoverageDecisionBody;
+    return {
+      ...body,
+      decisionId: deriveLanguageCoverageDecisionId(
+        `${prefix}-${category}`,
+        body,
+      ),
+    };
+  });
 }
 
 function firstPartyPackages(): Record<string, unknown>[] {

@@ -80,6 +80,11 @@ export interface LanguageCoverageDecision {
   readonly revisitCondition: string;
 }
 
+export type LanguageCoverageDecisionBody = Omit<
+  LanguageCoverageDecision,
+  'decisionId'
+>;
+
 export interface EvaluateLanguageCoverageInput {
   readonly creditedTestFiles: ReadonlySet<string>;
   readonly decisionObservedObligationIds: ReadonlySet<string>;
@@ -187,7 +192,7 @@ export function deriveLanguageCoverageLedger(
         value,
       })),
     )
-    .sort((left, right) => left.id.localeCompare(right.id));
+    .sort((left, right) => compareCodePoints(left.id, right.id));
   const body = {
     axes,
     obligations,
@@ -245,6 +250,16 @@ export function makeLanguageCoverageReceipt(
     ...body,
     integrityDigest: sha256(stableStringify(body)),
   });
+}
+
+export function deriveLanguageCoverageDecisionId(
+  decisionName: string,
+  body: LanguageCoverageDecisionBody,
+): string {
+  if (!/^[A-Za-z0-9][A-Za-z0-9-]*$/u.test(decisionName)) {
+    throw new Error(`LANGUAGE_COVERAGE_DECISION_NAME_INVALID: ${decisionName}`);
+  }
+  return `${decisionName}@${sha256(stableStringify(body))}`;
 }
 
 export function evaluateLanguageCoverage(
@@ -322,6 +337,24 @@ export function evaluateLanguageCoverage(
     ) {
       throw new Error(
         `LANGUAGE_COVERAGE_STALE_DECISION_SET: ${decision.decisionId} no longer names the exact ${decision.category} obligation set`,
+      );
+    }
+    const separator = decision.decisionId.lastIndexOf('@');
+    const decisionName = decision.decisionId.slice(0, separator);
+    const decisionBody: LanguageCoverageDecisionBody = {
+      category: decision.category,
+      ledgerDigest: decision.ledgerDigest,
+      obligationSetDigest: decision.obligationSetDigest,
+      rationale: decision.rationale,
+      revisitCondition: decision.revisitCondition,
+    };
+    if (
+      separator < 1 ||
+      decision.decisionId !==
+        deriveLanguageCoverageDecisionId(decisionName, decisionBody)
+    ) {
+      throw new Error(
+        `LANGUAGE_COVERAGE_STALE_DECISION_IDENTITY: ${decision.decisionId} must change when its exact decision record changes`,
       );
     }
     validDecisions.set(decision.category, decision);
@@ -463,7 +496,7 @@ export function deriveDecisionSetDigest(
             ) === category,
         )
         .map((obligation) => obligation.id)
-        .sort(),
+        .sort(compareCodePoints),
     ),
   );
 }
@@ -475,7 +508,7 @@ export function stableStringify(value: unknown): string {
   }
   const record = value as Readonly<Record<string, unknown>>;
   return `{${Object.keys(record)
-    .sort()
+    .sort(compareCodePoints)
     .map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`)
     .join(',')}}`;
 }
@@ -513,14 +546,7 @@ function deriveClosedAxes(
         ): entry is { readonly finite: true; readonly value: ClosedValue } =>
           entry.finite,
       );
-      const finiteOrUndefined = type.types.every(
-        (member, index) =>
-          finiteMembers[index]?.finite === true ||
-          Boolean(member.flags & ts.TypeFlags.Undefined),
-      );
-      if (actualFinite.length > 0 && finiteOrUndefined) {
-        for (const entry of actualFinite) add(axis, entry.value, true);
-      }
+      for (const entry of actualFinite) add(axis, entry.value, true);
       for (const member of type.types) {
         if (!finiteValue(member).finite) walk(member, axis, ancestry);
       }
@@ -872,13 +898,24 @@ function compareAxis(
   right: Pick<LanguageCoverageAxis, 'axis' | 'specification'>,
 ): number {
   return (
-    left.specification.localeCompare(right.specification) ||
-    left.axis.localeCompare(right.axis)
+    compareCodePoints(left.specification, right.specification) ||
+    compareCodePoints(left.axis, right.axis)
   );
 }
 
 function compareValue(left: ClosedValue, right: ClosedValue): number {
-  return stableStringify(left).localeCompare(stableStringify(right));
+  return compareCodePoints(stableStringify(left), stableStringify(right));
+}
+
+export function compareCodePoints(left: string, right: string): number {
+  const leftCodePoints = Array.from(left, (value) => value.codePointAt(0)!);
+  const rightCodePoints = Array.from(right, (value) => value.codePointAt(0)!);
+  const sharedLength = Math.min(leftCodePoints.length, rightCodePoints.length);
+  for (let index = 0; index < sharedLength; index += 1) {
+    const difference = leftCodePoints[index]! - rightCodePoints[index]!;
+    if (difference !== 0) return difference;
+  }
+  return leftCodePoints.length - rightCodePoints.length;
 }
 
 function sha256(value: string): string {

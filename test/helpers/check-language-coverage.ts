@@ -80,7 +80,7 @@ try {
     `language coverage: PASS (${String(result.obligationCount)} obligations; ${String(result.receiptCount)} receipts; ${String(result.decisionCount)} explicit decisions; ${String(observedObligationIds.size)} first-party observations)\n`,
   );
   process.stdout.write(
-    `language coverage meaning: ${String(result.receiptCount)}/${String(result.obligationCount)} obligations have execution/refusal receipts; green proves the exact shape and decision partitions have not drifted, not that decision-covered shapes execute\n`,
+    `language coverage meaning: ${String(result.receiptCount)}/${String(result.obligationCount)} obligations have execution/refusal receipts; green proves the derived specification choices, observed partition, and exact decision identities match their reviewed records, not that decision-covered shapes execute; changing a decision record requires a new identity\n`,
   );
 } catch (error) {
   process.stderr.write(

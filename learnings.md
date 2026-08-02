@@ -395,3 +395,8 @@ How to apply: derive query requirements from executable lowered storage, refuse 
 Date: 2026-08-02
 Why: a schema-only language inventory could not see compiler-synthesized field-origin relations, so downstream consumers ignored a real output choice and demanded two authorities for one physical column.
 How to apply: derive obligations independently from the authored schema and every lowered output contract; discharge each exact value only with distinguishing execution, stable refusal, or a digest-bound written decision. See `docs/execution/packets/5g3-langgate.md`.
+
+## Enumerate finite union members independently
+Date: 2026-08-02
+Why: the language ledger dropped `null` whenever it shared a union with open `string` or `number`, omitting exactly the nullable shapes that motivated the instrument.
+How to apply: emit every finite union member before independently traversing non-finite siblings, and retain a missing-axis control grounded in both authored and lowered specifications. See `docs/execution/packets/5g3-langgate.md`.
