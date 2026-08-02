@@ -82,16 +82,14 @@ test('composed product does not invent a verification evidence identity', async 
   assert.doesNotMatch(source, /evidenceId\s*=\s*minted\(randomUUID\(\)\)/u);
 });
 
-// Harness limit, not a product budget. Adopting Inventory into the composed
-// application adds a fifth immutable application release to the lineage, so
-// every tenant bring-up replays one more prepare/verify/approve/activate
-// transition against a larger package. Measured unloaded on this branch: the
-// whole test body is 98.1s and 109.8s across two runs, of which two full
-// tenant bring-ups are ~46s each (transition 1 7.7s, transitions 2-4 ~6.3s
-// each, transition 5 -- the Inventory storage transition -- 14.5s, of which
-// only 0.34s is DDL execution; the rest is per-release semantic verification).
-// The serial matrix runs this alongside the rest of the suite, so 120_000ms
-// left no headroom.
+// Harness limit, not a product budget. The compiled application carries eight
+// immutable application releases. Each of the two fresh tenants replays all
+// eight, and the approval control verifies the active release once more. A
+// quiet pre-cache profile took 249.6s, including 224.3s of semantic
+// verification and 4,739 repeated pinned-artifact loads. The validated
+// per-release cache reduced that to 17 verification loads; two quiet runs of
+// this unchanged parent took 80.3s and 96.4s. The append-only lineage cost is
+// tracked separately from this eliminated per-invocation reload tax.
 test(
   'composed product activates through the kernel and persists tenant-scoped gateway data',
   { timeout: 300_000 },

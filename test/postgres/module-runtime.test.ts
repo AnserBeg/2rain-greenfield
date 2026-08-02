@@ -47,6 +47,7 @@ import {
   assertModuleSemanticStorageContract,
   ModuleRuntimeInterpreterError,
   PostgresModuleRuntimeInterpreter,
+  type PinnedStorageTargetCacheObservation,
 } from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
 import { PostgresModuleStorageMaterializer } from '../../packages/postgres-provider/src/module-storage-materializer.js';
 import {
@@ -375,7 +376,7 @@ test('release verification executes a parameterized aggregate assertion as an om
   );
 });
 
-test('definition-only module is served generically through Q0/O0, trust, RLS, and pinned coexistence', async () => {
+test('definition-only module is served generically through Q0/O0, trust, RLS, and pinned coexistence', async (context) => {
   const empty = mustCompile(moduleInput(emptyDefinition(ordinaryModuleV1())));
   const v1 = mustCompile(
     moduleInput(ordinaryModuleV1(), expectedActiveReleaseFrom(empty)),
@@ -464,6 +465,299 @@ test('definition-only module is served generically through Q0/O0, trust, RLS, an
         const viewA1 = await issuedView(entry, 'a');
         const viewASecond = await issuedView(entry, 'a-second');
         const viewB1 = await issuedView(entry, 'b');
+
+        const candidateView = (
+          compiled: CompileSuccess,
+          releaseId: string,
+          candidateIdentity: AuthenticatedIdentity,
+        ) =>
+          issuedCandidateView(
+            compiled,
+            releaseId,
+            candidateIdentity,
+            viewA1.pointer,
+            new AllowPolicy(),
+          );
+        const sameReleaseDifferentTenant = await candidateView(
+          v1,
+          releasesA[1]!,
+          identity(tenantB, environmentA, principalB),
+        );
+        const sameReleaseDifferentEnvironment = await candidateView(
+          v1,
+          releasesA[1]!,
+          identity(tenantA, environmentB, principalA),
+        );
+        const differentReleaseSameContent = await candidateView(
+          v1,
+          releasesA[3]!,
+          identity(tenantA, environmentA, principalA),
+        );
+        const sameReleaseDifferentContent = await candidateView(
+          v2,
+          releasesA[1]!,
+          identity(tenantA, environmentA, principalA),
+        );
+
+        const assertDimensionMiss = async (
+          dimension: keyof PinnedStorageTargetCacheObservation['key'],
+          changedView: RequestRuntimeView,
+          changedViewSucceeds: boolean,
+        ) => {
+          const observations: PinnedStorageTargetCacheObservation[] = [];
+          const cacheInterpreter = new PostgresModuleRuntimeInterpreter(
+            runtimePool,
+            humanActorIssuer(),
+            [],
+            undefined,
+            (observation) => observations.push(observation),
+          );
+          const gateway = new SemanticQueryGateway(
+            new AllowPolicy(),
+            cacheInterpreter,
+          );
+          const invoke = (view: RequestRuntimeView) =>
+            query(gateway, view, 'master_list', { limit: 20 });
+          await invoke(viewA1);
+          if (changedViewSucceeds) await invoke(changedView);
+          else await assert.rejects(invoke(changedView));
+
+          const misses = observations.filter(
+            (observation) => observation.kind === 'cacheMiss',
+          );
+          assert.equal(misses.length, 2);
+          const first = misses[0]!.key;
+          const second = misses[1]!.key;
+          for (const key of [
+            'tenantId',
+            'environmentId',
+            'releaseId',
+            'contentHash',
+          ] as const) {
+            if (key === dimension) assert.notEqual(second[key], first[key]);
+            else assert.equal(second[key], first[key]);
+          }
+          assert.equal(
+            observations.filter(
+              (observation) =>
+                observation.kind === 'tenantVisibleArtifactsRead',
+            ).length,
+            2,
+          );
+        };
+
+        await context.test(
+          'validated pinned storage cache misses for a different tenant',
+          () =>
+            assertDimensionMiss('tenantId', sameReleaseDifferentTenant, false),
+        );
+        await context.test(
+          'validated pinned storage cache misses for a different environment',
+          () =>
+            assertDimensionMiss(
+              'environmentId',
+              sameReleaseDifferentEnvironment,
+              false,
+            ),
+        );
+        await context.test(
+          'validated pinned storage cache misses for a different release id',
+          () =>
+            assertDimensionMiss('releaseId', differentReleaseSameContent, true),
+        );
+        await context.test(
+          'validated pinned storage cache misses for a different content hash',
+          () =>
+            assertDimensionMiss(
+              'contentHash',
+              sameReleaseDifferentContent,
+              false,
+            ),
+        );
+
+        await context.test(
+          'a corrupt first pinned storage load refuses and does not populate the cache',
+          async () => {
+            const observed = instrumentPinnedArtifactReads(
+              runtimePool,
+              (result, readCount) =>
+                readCount === 1
+                  ? {
+                      ...result,
+                      rows: result.rows.map((row, index) =>
+                        index === 0
+                          ? {
+                              ...row,
+                              canonical_bytes: Buffer.from(
+                                'corrupt-first-pinned-artifact-load',
+                              ),
+                            }
+                          : row,
+                      ),
+                    }
+                  : result,
+            );
+            const observations: PinnedStorageTargetCacheObservation[] = [];
+            const cacheInterpreter = new PostgresModuleRuntimeInterpreter(
+              observed.pool,
+              humanActorIssuer(),
+              [],
+              undefined,
+              (observation) => observations.push(observation),
+            );
+            const gateway = new SemanticQueryGateway(
+              new AllowPolicy(),
+              cacheInterpreter,
+            );
+            const invoke = () =>
+              query(gateway, viewA1, 'master_list', { limit: 20 });
+
+            await assert.rejects(invoke(), (error: unknown) =>
+              assertModuleError(error, 'MODULE_ARTIFACT_DIGEST_MISMATCH', null),
+            );
+            assert.equal(observed.readCount(), 1);
+            assert.equal(
+              observations.some(
+                (observation) => observation.kind === 'cachePopulated',
+              ),
+              false,
+            );
+
+            await invoke();
+            assert.equal(observed.readCount(), 2);
+            assert.equal(
+              observations.filter(
+                (observation) => observation.kind === 'cacheMiss',
+              ).length,
+              2,
+            );
+            await invoke();
+            assert.equal(
+              observed.readCount(),
+              2,
+              'the successful retry, not the refused load, populated the cache',
+            );
+          },
+        );
+
+        await context.test(
+          'pinned storage cache population follows every validation phase',
+          async () => {
+            const observations: PinnedStorageTargetCacheObservation[] = [];
+            const cacheInterpreter = new PostgresModuleRuntimeInterpreter(
+              runtimePool,
+              humanActorIssuer(),
+              [],
+              undefined,
+              (observation) => observations.push(observation),
+            );
+            const gateway = new SemanticQueryGateway(
+              new AllowPolicy(),
+              cacheInterpreter,
+            );
+            await query(gateway, viewA1, 'master_list', { limit: 20 });
+            assert.deepEqual(
+              observations.map((observation) => observation.kind),
+              [
+                'cacheMiss',
+                'tenantVisibleArtifactsRead',
+                'artifactHashesVerified',
+                'canonicalArtifactsDecoded',
+                'schemaValidated',
+                'cachePopulated',
+              ],
+            );
+            await query(gateway, viewA1, 'master_list', { limit: 20 });
+            assert.equal(observations.at(-1)?.kind, 'cacheHit');
+          },
+        );
+
+        await context.test(
+          'concurrent first pinned storage loads coalesce behind validation',
+          async () => {
+            let releaseRead!: () => void;
+            let reportReadStarted!: () => void;
+            let reportCoalesced!: () => void;
+            let reportSecondRead!: () => void;
+            const readReleased = new Promise<void>((resolve) => {
+              releaseRead = resolve;
+            });
+            const readStarted = new Promise<void>((resolve) => {
+              reportReadStarted = resolve;
+            });
+            const coalesced = new Promise<void>((resolve) => {
+              reportCoalesced = resolve;
+            });
+            const secondRead = new Promise<void>((resolve) => {
+              reportSecondRead = resolve;
+            });
+            const observed = instrumentPinnedArtifactReads(
+              runtimePool,
+              async (result, readCount) => {
+                if (readCount === 1) {
+                  reportReadStarted();
+                  await readReleased;
+                } else reportSecondRead();
+                return result;
+              },
+            );
+            const observations: PinnedStorageTargetCacheObservation[] = [];
+            const cacheInterpreter = new PostgresModuleRuntimeInterpreter(
+              observed.pool,
+              humanActorIssuer(),
+              [],
+              undefined,
+              (observation) => {
+                observations.push(observation);
+                if (observation.kind === 'cacheCoalesced') reportCoalesced();
+              },
+            );
+            const gateway = new SemanticQueryGateway(
+              new AllowPolicy(),
+              cacheInterpreter,
+            );
+            const invoke = () =>
+              query(gateway, viewA1, 'master_list', { limit: 20 });
+            let firstSettled = false;
+            let secondSettled = false;
+            const first = invoke().finally(() => {
+              firstSettled = true;
+            });
+            await readStarted;
+            const second = invoke().finally(() => {
+              secondSettled = true;
+            });
+            const firstConcurrencyEvent = await Promise.race([
+              coalesced.then(() => 'coalesced' as const),
+              secondRead.then(() => 'secondRead' as const),
+            ]);
+            const settledBeforeRelease = { firstSettled, secondSettled };
+            const populatedBeforeRelease = observations.some(
+              (observation) => observation.kind === 'cachePopulated',
+            );
+            releaseRead();
+            await Promise.all([first, second]);
+            assert.deepEqual(settledBeforeRelease, {
+              firstSettled: false,
+              secondSettled: false,
+            });
+            assert.equal(populatedBeforeRelease, false);
+            assert.equal(firstConcurrencyEvent, 'coalesced');
+            assert.equal(observed.readCount(), 1);
+            assert.deepEqual(
+              observations.map((observation) => observation.kind),
+              [
+                'cacheMiss',
+                'cacheCoalesced',
+                'tenantVisibleArtifactsRead',
+                'artifactHashesVerified',
+                'canonicalArtifactsDecoded',
+                'schemaValidated',
+                'cachePopulated',
+              ],
+            );
+          },
+        );
 
         await assertRoleBridge(pool);
 
@@ -2862,6 +3156,74 @@ function operationGatewayFor(
   const gateway = new SemanticOperationGateway(policy, interpreter, mediation);
   operationMediationByGateway.set(gateway, mediation);
   return gateway;
+}
+
+function instrumentPinnedArtifactReads(
+  pool: pg.Pool,
+  transform: (
+    result: pg.QueryResult<pg.QueryResultRow>,
+    readCount: number,
+  ) =>
+    | pg.QueryResult<pg.QueryResultRow>
+    | Promise<pg.QueryResult<pg.QueryResultRow>>,
+): Readonly<{ pool: pg.Pool; readCount: () => number }> {
+  let reads = 0;
+  const instrumented = new Proxy(pool, {
+    get(target, property, receiver) {
+      if (property === 'connect') {
+        return async () => {
+          const client = await target.connect();
+          return new Proxy(client, {
+            get(clientTarget, clientProperty, clientReceiver) {
+              if (clientProperty === 'query') {
+                return async (...arguments_: unknown[]) => {
+                  const result = (await Reflect.apply(
+                    clientTarget.query,
+                    clientTarget,
+                    arguments_,
+                  )) as pg.QueryResult<pg.QueryResultRow>;
+                  const statement = queryStatement(arguments_[0]);
+                  if (
+                    !statement.includes(
+                      'platform.read_tenant_release_artifacts',
+                    )
+                  ) {
+                    return result;
+                  }
+                  reads += 1;
+                  return transform(result, reads);
+                };
+              }
+              const value = Reflect.get(
+                clientTarget,
+                clientProperty,
+                clientReceiver,
+              );
+              return typeof value === 'function'
+                ? value.bind(clientTarget)
+                : value;
+            },
+          });
+        };
+      }
+      const value = Reflect.get(target, property, receiver);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+  return Object.freeze({ pool: instrumented, readCount: () => reads });
+}
+
+function queryStatement(argument: unknown): string {
+  if (typeof argument === 'string') return argument;
+  if (
+    typeof argument === 'object' &&
+    argument !== null &&
+    'text' in argument &&
+    typeof argument.text === 'string'
+  ) {
+    return argument.text;
+  }
+  return '';
 }
 
 async function query(
