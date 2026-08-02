@@ -5942,7 +5942,7 @@
           "field": {
             "kind": "fieldReference",
             "schemaVersion": "v4",
-            "targetId": "northstar.app:field.inventory_transaction_actor_id"
+            "targetId": "northstar.app:field.inventory_transaction_number"
           },
           "kind": "resolveMatchKey",
           "matchKeyId": "northstar.app:resolve-key.inventory_transaction",
@@ -6436,7 +6436,7 @@
           "field": {
             "kind": "fieldReference",
             "schemaVersion": "v4",
-            "targetId": "northstar.app:field.inventory_transaction_line_from_location_id"
+            "targetId": "northstar.app:field.inventory_transaction_line_unit_id"
           },
           "kind": "resolveMatchKey",
           "matchKeyId": "northstar.app:resolve-key.inventory_transaction_line",
@@ -6673,74 +6673,6 @@
           "orderKey": 10,
           "schemaVersion": "v4",
           "selectionId": "northstar.app:selection.inventory_period_lock_search_1"
-        }
-      ],
-      "sourceEntity": {
-        "kind": "entityReference",
-        "schemaVersion": "v4",
-        "targetId": "northstar.app:entity.inventory_period_lock"
-      },
-      "tier": "q0"
-    },
-    {
-      "kind": "queryDefinition",
-      "legalEntityScope": {
-        "cardinality": "exactlyOne",
-        "kind": "queryLegalEntityScope",
-        "operand": {
-          "kind": "queryParameterReference",
-          "parameterId": "northstar.app:parameter.inventory_period_lock_resolve_legal_entity_scope",
-          "schemaVersion": "v4"
-        },
-        "schemaVersion": "v4"
-      },
-      "parameters": [
-        {
-          "kind": "queryParameterDefinition",
-          "orderKey": 10,
-          "parameterId": "northstar.app:parameter.inventory_period_lock_resolve_legal_entity_scope",
-          "schemaVersion": "v4"
-        }
-      ],
-      "maximumResultCount": 100,
-      "module": {
-        "kind": "moduleReference",
-        "schemaVersion": "v4",
-        "targetId": "northstar.app:module.inventory"
-      },
-      "permission": {
-        "kind": "permissionReference",
-        "schemaVersion": "v4",
-        "targetId": "northstar.app:permission.inventory_period_lock_read"
-      },
-      "queryId": "northstar.app:query.inventory_period_lock_resolve",
-      "queryType": "resolve",
-      "resolveMatchKeys": [
-        {
-          "authority": "identifier",
-          "field": {
-            "kind": "fieldReference",
-            "schemaVersion": "v4",
-            "targetId": "northstar.app:field.inventory_period_lock_closed_through"
-          },
-          "kind": "resolveMatchKey",
-          "matchKeyId": "northstar.app:resolve-key.inventory_period_lock",
-          "orderKey": 10,
-          "schemaVersion": "v4"
-        }
-      ],
-      "schemaVersion": "v4",
-      "selections": [
-        {
-          "field": {
-            "kind": "fieldReference",
-            "schemaVersion": "v4",
-            "targetId": "northstar.app:field.inventory_period_lock_closed_through"
-          },
-          "kind": "querySelection",
-          "orderKey": 10,
-          "schemaVersion": "v4",
-          "selectionId": "northstar.app:selection.inventory_period_lock_resolve_1"
         }
       ],
       "sourceEntity": {
@@ -7215,7 +7147,7 @@
           "field": {
             "kind": "fieldReference",
             "schemaVersion": "v4",
-            "targetId": "northstar.app:field.stock_count_actor_id"
+            "targetId": "northstar.app:field.stock_count_number"
           },
           "kind": "resolveMatchKey",
           "matchKeyId": "northstar.app:resolve-key.stock_count",
@@ -7731,7 +7663,7 @@
           "field": {
             "kind": "fieldReference",
             "schemaVersion": "v4",
-            "targetId": "northstar.app:field.stock_count_line_counted_quantity"
+            "targetId": "northstar.app:field.stock_count_line_unit_id"
           },
           "kind": "resolveMatchKey",
           "matchKeyId": "northstar.app:resolve-key.stock_count_line",

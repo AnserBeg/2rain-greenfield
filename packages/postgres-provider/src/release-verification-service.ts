@@ -1000,6 +1000,11 @@ type VerificationQueryContract =
 
 interface VerificationRelationContract {
   readonly archiveBehavior: string;
+  readonly relationColumn: {
+    readonly nullable: boolean;
+    readonly origin?: 'field';
+    readonly physicalName: string;
+  };
   readonly relationId: string;
   readonly sourceEntityId: string;
   readonly targetEntityId: string;
@@ -1376,7 +1381,36 @@ class SemanticVerificationExecutor {
   }
 
   async #searchableExclusion(scenario: VerificationScenario, token: string) {
-    const record = await this.#create(scenario.entityId, token);
+    const storageEntity = this.#requiredStorageEntity(scenario.entityId);
+    const subjectColumn = storageEntity.columns.find(
+      (column) => column.canonicalFieldId === scenario.subjectId,
+    );
+    const optionalFieldRelation = subjectColumn
+      ? this.#relations.find(
+          (relation) =>
+            relation.sourceEntityId === scenario.entityId &&
+            relation.relationColumn.origin === 'field' &&
+            relation.relationColumn.nullable &&
+            relation.relationColumn.physicalName === subjectColumn.physicalName,
+        )
+      : undefined;
+    const relationOverrides: Record<string, string> = {};
+    if (optionalFieldRelation) {
+      const target = await this.#create(
+        optionalFieldRelation.targetEntityId,
+        arrangementPathToken(token, optionalFieldRelation.relationId),
+        {},
+        {},
+        [scenario.entityId],
+      );
+      relationOverrides[optionalFieldRelation.relationId] = target.recordId;
+    }
+    const record = await this.#create(
+      scenario.entityId,
+      token,
+      {},
+      relationOverrides,
+    );
     const search = this.#queryForEntity(scenario.entityId, 'search');
     const excludedValue = record.values[scenario.subjectId];
     if (excludedValue === undefined) {
@@ -1617,7 +1651,47 @@ class SemanticVerificationExecutor {
             : verificationFieldValue(field, token, storageEntity),
         ]),
     );
-    const relations: Record<string, string> = { ...relationOverrides };
+    const fieldOriginRelations = this.#relations.filter(
+      (relation) =>
+        relation.sourceEntityId === entityId &&
+        relation.relationColumn.origin === 'field',
+    );
+    const relations: Record<string, string> = Object.fromEntries(
+      Object.entries(relationOverrides).filter(([relationId]) => {
+        const relation = this.#relations.find(
+          (candidate) => candidate.relationId === relationId,
+        );
+        return relation?.relationColumn.origin !== 'field';
+      }),
+    );
+    for (const relation of fieldOriginRelations) {
+      const field = storageEntity.columns.find(
+        (column) =>
+          column.physicalName === relation.relationColumn.physicalName,
+      );
+      if (!field) {
+        throw failure(
+          'VERIFICATION_RELATION_CONTRACT_MISSING',
+          'field-origin relation has no source storage field',
+        );
+      }
+      if (Object.hasOwn(relationOverrides, relation.relationId)) {
+        values[field.canonicalFieldId] = relationOverrides[relation.relationId];
+        continue;
+      }
+      if (relation.relationColumn.nullable) {
+        delete values[field.canonicalFieldId];
+        continue;
+      }
+      const target = await this.#create(
+        relation.targetEntityId,
+        arrangementPathToken(token, relation.relationId),
+        {},
+        {},
+        nextArrangementPath,
+      );
+      values[field.canonicalFieldId] = target.recordId;
+    }
     for (const relationInput of operation.inputContract.relationInputs) {
       if (relations[relationInput.relationId]) continue;
       const relation = this.#relations.find(

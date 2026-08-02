@@ -106,7 +106,7 @@ test('fresh-tenant install refuses a failing intermediate transition', async () 
   );
 });
 
-// Harness limit, not a product budget. Each fresh tenant applies all eight
+// Harness limit, not a product budget. Each fresh tenant applies all five
 // immutable application transitions but verifies only the serving release,
 // recording every non-serving release explicitly. The unchanged 256 MiB
 // harness moved from >300s/capacity exhaustion to 54.6s and a 50.30 MiB peak.
@@ -183,6 +183,15 @@ test(
             'entity-owned create takes its derived legal-entity input through the real operation path',
             () =>
               assertEntityOwnedCreateInput(pool, tenantA, compiledApplication),
+          );
+          await context.test(
+            'verification persists required field references and leaves optional references unset',
+            () =>
+              assertVerificationFieldOriginCreates(
+                pool,
+                tenantA,
+                compiledApplication,
+              ),
           );
 
           const recordId = randomUUID();
@@ -2158,8 +2167,8 @@ async function assertBoundedFreshTenantInstallEvidence(
   ).plan.scenarios.length;
   assert.equal(
     servingScenarioCount,
-    168,
-    'the serving release keeps the pre-bounding semantic scenario count',
+    167,
+    'ADR-0042 removes exactly one resolver-authority scenario with inventory_period_lock_resolve',
   );
 
   const intermediate = await pool.query<{
@@ -2771,6 +2780,101 @@ async function assertEntityOwnedCreateInput(
   assert.deepEqual(stored.rows, [{ legal_entity_id: legalEntityId }]);
 }
 
+async function assertVerificationFieldOriginCreates(
+  pool: pg.Pool,
+  runtime: ComposedApplicationRuntime,
+  compiledApplication: unknown,
+): Promise<void> {
+  const compiled =
+    parseCompiledApplication(compiledApplication).application.compiled;
+  const storage = storageTarget(compiled);
+  const requiredSources = new Set([
+    'northstar.app:entity.inventory_transaction_line',
+    'northstar.app:entity.stock_count',
+    'northstar.app:entity.stock_count_line',
+  ]);
+  const requiredFieldRelations = storage.relations.filter(
+    (relation) =>
+      requiredSources.has(relation.sourceEntityId) &&
+      relation.relationColumn.origin === 'field' &&
+      !relation.relationColumn.nullable,
+  );
+  assert.equal(requiredFieldRelations.length, 3);
+  const quoted = (identifier: string) =>
+    `"${identifier.replaceAll('"', '""')}"`;
+  for (const relation of requiredFieldRelations) {
+    const source = storage.entities.find(
+      (entity) => entity.entityId === relation.sourceEntityId,
+    );
+    const target = storage.entities.find(
+      (entity) => entity.entityId === relation.targetEntityId,
+    );
+    assert.ok(source);
+    assert.ok(target);
+    const join = relation.foreignKey.sourceColumns
+      .map(
+        (sourceColumn, index) =>
+          `target.${quoted(relation.foreignKey.targetColumns[index]!)} = source.${quoted(sourceColumn)}`,
+      )
+      .join(' AND ');
+    const rows = await pool.query<{
+      reference_id: string;
+      target_id: string | null;
+    }>(
+      `SELECT source.${quoted(relation.relationColumn.physicalName)}::text AS reference_id,
+              target.${quoted(target.recordIdentity.column)}::text AS target_id
+         FROM north_star_module.${quoted(source.physicalTableName)} AS source
+         LEFT JOIN north_star_module.${quoted(target.physicalTableName)} AS target
+           ON ${join}
+        WHERE source.tenant_id = $1
+          AND source.environment_id = $2
+          AND source.${quoted(source.archive.archivedAtColumn)} IS NOT NULL
+          AND source.${quoted(relation.relationColumn.physicalName)} IS NOT NULL`,
+      [runtime.identity.tenantId, runtime.identity.environmentId],
+    );
+    assert.ok(
+      rows.rows.length > 0,
+      `${relation.sourceEntityId} produced no archived verification record`,
+    );
+    assert.equal(
+      rows.rows.every((row) => row.reference_id === row.target_id),
+      true,
+      `${relation.relationId} did not persist its arranged target UUID`,
+    );
+  }
+
+  const transactionLine = storage.entities.find(
+    (entity) =>
+      entity.entityId === 'northstar.app:entity.inventory_transaction_line',
+  );
+  assert.ok(transactionLine);
+  const optionalFieldRelations = storage.relations.filter(
+    (relation) =>
+      relation.sourceEntityId === transactionLine.entityId &&
+      relation.relationColumn.origin === 'field' &&
+      relation.relationColumn.nullable,
+  );
+  assert.equal(optionalFieldRelations.length, 2);
+  const unset = await pool.query<{ count: string }>(
+    `SELECT count(*)::text AS count
+       FROM north_star_module.${quoted(transactionLine.physicalTableName)}
+      WHERE tenant_id = $1
+        AND environment_id = $2
+        AND ${quoted(transactionLine.archive.archivedAtColumn)} IS NOT NULL
+        AND ${optionalFieldRelations
+          .map(
+            (relation) =>
+              `${quoted(relation.relationColumn.physicalName)} IS NULL`,
+          )
+          .join(' AND ')}`,
+    [runtime.identity.tenantId, runtime.identity.environmentId],
+  );
+  assert.ok(
+    Number(unset.rows[0]?.count ?? 0) > 0,
+    'ordinary verification creates must persist optional field-origin references as NULL',
+  );
+}
+
 /**
  * ADR-0033: the admitted composed product records an exact partition of the
  * compiler-emitted plan. Executed results and derivations are separate durable
@@ -2807,8 +2911,17 @@ async function assertExactPartitionEvidence(
   );
   assert.equal(
     derivations.length,
-    39,
-    'only entities with no generic create operation remain derived',
+    38,
+    'ADR-0042 removes the period-lock resolver rather than deriving it',
+  );
+  assert.equal(
+    binding.plan.scenarios.some(
+      (scenario) =>
+        scenario.kind === 'resolverAuthority' &&
+        scenario.entityId === 'northstar.app:entity.inventory_period_lock',
+    ),
+    false,
+    'inventory_period_lock_resolve is absent from the plan, not reclassified as a derivation',
   );
   assert.equal(
     derivations.filter(
@@ -2824,7 +2937,7 @@ async function assertExactPartitionEvidence(
       (derivation) =>
         derivation.reason.code === 'VERIFICATION_NO_GENERIC_CREATE_OPERATION',
     ).length,
-    39,
+    38,
   );
   assert.deepEqual(
     [...executedScenarioIds, ...derivedScenarioIds].toSorted(),

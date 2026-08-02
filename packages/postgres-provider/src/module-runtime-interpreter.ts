@@ -838,7 +838,9 @@ async function insertRecord(
     }
   }
   const relations = storage.relations.filter(
-    (relation) => relation.sourceEntityId === entity.entityId,
+    (relation) =>
+      relation.sourceEntityId === entity.entityId &&
+      relation.relationColumn.origin !== 'field',
   );
   const relationById = new Map(
     relations.map((relation) => [relation.relationId, relation]),
@@ -873,6 +875,13 @@ async function insertRecord(
         `required relation ${relation.relationId} is missing`,
       );
     }
+  }
+  if (new Set(columns).size !== columns.length) {
+    throw failure(
+      'MODULE_STORAGE_COLUMN_AUTHORITY_CONFLICT',
+      'module create input produced more than one authority for a storage column',
+      entity.entityId,
+    );
   }
   await client.query(
     `INSERT INTO north_star_module.${quoted(entity.physicalTableName)}

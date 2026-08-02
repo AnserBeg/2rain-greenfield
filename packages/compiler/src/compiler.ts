@@ -250,6 +250,13 @@ export function compileApplication(
     ),
     packageRevision,
   );
+  const resolveStorageDiagnostics = validateResolveStorageConformance(
+    packageRevision,
+    basePlans,
+  );
+  if (resolveStorageDiagnostics.length > 0) {
+    return failure(resolveStorageDiagnostics, maximumDiagnostics);
+  }
   const emittedBase = emitScheduledProjections(
     basePlans,
     normalizedDefinitionDigest,
@@ -435,6 +442,81 @@ export function compileApplication(
     stagedArtifacts: allArtifacts,
     status: 'compiled',
   };
+}
+
+function validateResolveStorageConformance(
+  packageRevision: VersionedNormalizedApplicationPackage,
+  plans: readonly ProjectionPayloadPlan[],
+): CompilerDiagnostic[] {
+  const storagePlan = plans.find(
+    (plan) => plan.familyId === PROJECTION_FAMILY_IDS.storageTarget,
+  );
+  if (!storagePlan || !isStorageTargetV1(storagePlan.payload)) return [];
+  const storageByEntity = new Map(
+    storagePlan.payload.entities.map((entity) => [entity.entityId, entity]),
+  );
+  type VersionedQuery =
+    VersionedNormalizedApplicationPackage['queries'][number];
+  const resolveByEntity = new Map<string, VersionedQuery[]>();
+  for (const query of packageRevision.queries) {
+    if (
+      query.lifecycle !== 'active' ||
+      query.tier !== 'q0' ||
+      query.queryType !== 'resolve'
+    ) {
+      continue;
+    }
+    const sourceEntityId = query.sourceEntity.targetId;
+    const queries = resolveByEntity.get(sourceEntityId) ?? [];
+    resolveByEntity.set(sourceEntityId, [...queries, query]);
+  }
+  const diagnostics: CompilerDiagnostic[] = [];
+  for (const entity of packageRevision.entities.filter(
+    (candidate) => candidate.lifecycle === 'active',
+  )) {
+    const storageEntity = storageByEntity.get(entity.entityId);
+    if (!storageEntity) continue;
+    const textBackedColumns = storageEntity.columns.filter((column) =>
+      /^(?:text|character varying|varchar)/u.test(column.postgresqlType),
+    );
+    const resolveQueries = resolveByEntity.get(entity.entityId) ?? [];
+    if (textBackedColumns.length > 0 && resolveQueries.length === 0) {
+      diagnostics.push(
+        compilerDiagnostic(
+          'COMPILER_RESOLVE_QUERY_REQUIRED',
+          'postLoweringValidation',
+          '$.entities.resolveQuery',
+          entity.entityId,
+        ),
+      );
+    }
+    const columnsById = new Map(
+      storageEntity.columns.map((column) => [column.canonicalFieldId, column]),
+    );
+    for (const query of resolveQueries) {
+      for (const [index, matchKey] of (
+        query.resolveMatchKeys ?? []
+      ).entries()) {
+        const column = columnsById.get(matchKey.field.targetId);
+        if (
+          column &&
+          /^(?:text|character varying|varchar)/u.test(column.postgresqlType)
+        ) {
+          continue;
+        }
+        diagnostics.push(
+          compilerDiagnostic(
+            'COMPILER_RESOLVE_MATCH_KEY_STORAGE_UNSUPPORTED',
+            'postLoweringValidation',
+            '$.queries.resolveMatchKeys.field',
+            matchKey.matchKeyId,
+            index,
+          ),
+        );
+      }
+    }
+  }
+  return diagnostics;
 }
 
 export function expectedActiveReleaseFrom(

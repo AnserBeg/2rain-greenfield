@@ -488,6 +488,125 @@ test('entity ownership derives one create-only system input while tenant-shared 
   );
 });
 
+test('resolve conformance is derived from lowered text storage in both directions', () => {
+  const compiled = mustCompile(input(composedApplicationDefinition()));
+  const storage = projectionPayload<StorageTargetPayloadV1>(
+    compiled,
+    PROJECTION_FAMILY_IDS.storageTarget,
+  );
+  const queries = projectionPayload<{
+    queries: Array<{
+      queryId: string;
+      queryType: string;
+      resolveMatchKeys: Array<{ fieldId: string; matchKeyId: string }>;
+      sourceEntityId: string;
+    }>;
+  }>(compiled, PROJECTION_FAMILY_IDS.queryCatalog).queries;
+  const resolveByEntity = new Map(
+    queries
+      .filter((query) => query.queryType === 'resolve')
+      .map((query) => [query.sourceEntityId, query] as const),
+  );
+  for (const entity of storage.entities) {
+    const textBackedColumns = entity.columns.filter((column) =>
+      /^(?:text|character varying|varchar)/u.test(column.postgresqlType),
+    );
+    const resolve = resolveByEntity.get(entity.entityId);
+    assert.equal(
+      resolve !== undefined,
+      textBackedColumns.length > 0,
+      `${entity.entityId} resolve presence must match lowered text storage`,
+    );
+    for (const matchKey of resolve?.resolveMatchKeys ?? []) {
+      const column = entity.columns.find(
+        (candidate) => candidate.canonicalFieldId === matchKey.fieldId,
+      );
+      assert.ok(column, `${matchKey.matchKeyId} has no lowered column`);
+      assert.match(
+        column.postgresqlType,
+        /^(?:text|character varying|varchar)/u,
+      );
+    }
+  }
+  assert.equal(
+    resolveByEntity.has('northstar.app:entity.inventory_period_lock'),
+    false,
+  );
+  const surfaces = projectionPayload<unknown>(
+    compiled,
+    PROJECTION_FAMILY_IDS.surfaceManifest,
+  );
+  assert.doesNotMatch(
+    canonicalize(surfaces),
+    /northstar\.app:query\.inventory_period_lock_resolve/u,
+    'no compiled surface depends on the removed unusable resolver',
+  );
+
+  const unsupported = structuredClone(composedApplicationDefinition()) as {
+    queries: Array<{
+      queryId: string;
+      resolveMatchKeys?: Array<{ field: { targetId: string } }>;
+    }>;
+  };
+  const transactionLineResolve = unsupported.queries.find(
+    (query) =>
+      query.queryId ===
+      'northstar.app:query.inventory_transaction_line_resolve',
+  );
+  assert.ok(transactionLineResolve?.resolveMatchKeys?.[0]);
+  transactionLineResolve.resolveMatchKeys[0].field.targetId =
+    'northstar.app:field.inventory_transaction_line_from_location_id';
+  const unsupportedResult = compileApplication(input(unsupported));
+  assert.equal(unsupportedResult.status, 'failed');
+  assert.deepEqual(
+    unsupportedResult.diagnostics.map((diagnostic) => ({
+      code: diagnostic.code,
+      path: diagnostic.path,
+      subjectId: diagnostic.subjectId,
+    })),
+    [
+      {
+        code: 'COMPILER_RESOLVE_MATCH_KEY_STORAGE_UNSUPPORTED',
+        path: '$.queries.resolveMatchKeys.field',
+        subjectId: 'northstar.app:resolve-key.inventory_transaction_line',
+      },
+    ],
+  );
+
+  const missing = structuredClone(composedApplicationDefinition()) as {
+    assertions: Array<{
+      invocation?: { query?: { targetId: string } };
+    }>;
+    queries: Array<{ queryId: string }>;
+  };
+  const itemResolveId = 'northstar.app:query.item_resolve';
+  const itemGetId = 'northstar.app:query.item_get';
+  missing.queries = missing.queries.filter(
+    (query) => query.queryId !== itemResolveId,
+  );
+  for (const assertion of missing.assertions) {
+    if (assertion.invocation?.query?.targetId === itemResolveId) {
+      assertion.invocation.query.targetId = itemGetId;
+    }
+  }
+  const missingResult = compileApplication(input(missing));
+  assert.equal(missingResult.status, 'failed');
+  assert.deepEqual(
+    missingResult.diagnostics.map((diagnostic) => ({
+      code: diagnostic.code,
+      path: diagnostic.path,
+      subjectId: diagnostic.subjectId,
+    })),
+    [
+      {
+        code: 'COMPILER_RESOLVE_QUERY_REQUIRED',
+        path: '$.entities.resolveQuery',
+        subjectId: 'northstar.app:entity.item',
+      },
+    ],
+  );
+});
+
 test('storage-target payload versions expose the pinned v1/v2/v3 split in release artifacts', () => {
   const entityOwnedDefinition = inventoryModuleDefinition();
   const entityOwned = mustCompile(input(entityOwnedDefinition));

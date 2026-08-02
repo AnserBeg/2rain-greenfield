@@ -85,11 +85,20 @@ export function registerInventoryContractCases(
         }>;
       }>(compiled, PROJECTION_FAMILY_IDS.queryCatalog).queries;
       const scoped = queries.filter((query) => query.legalEntityScope);
-      assert.equal(scoped.length, 25);
+      assert.equal(scoped.length, 24);
       const scopedRowQueries = scoped.filter(
         (query) => query.queryType !== 'aggregate',
       );
-      assert.equal(scopedRowQueries.length, 24);
+      assert.equal(scopedRowQueries.length, 23);
+      assert.equal(
+        queries.some(
+          (query) =>
+            query.queryId ===
+            'northstar.inventory:query.inventory_period_lock_resolve',
+        ),
+        false,
+        'the timestamp-only period-lock family declares no unusable text resolver',
+      );
       for (const query of scopedRowQueries) {
         assert.equal(query.legalEntityScope?.cardinality, 'exactlyOne');
         assert.deepEqual(query.parameters, [
@@ -1724,8 +1733,6 @@ function inventoryDefinitionWithoutCountEvidenceField(
     }>;
   };
   const fieldId = `northstar.inventory:field.${fieldLocalId}`;
-  const matchKeyFallbackId =
-    'northstar.inventory:field.stock_count_line_line_number';
   definition.fields = definition.fields.filter(
     (field) => field.fieldId !== fieldId,
   );
@@ -1744,15 +1751,11 @@ function inventoryDefinitionWithoutCountEvidenceField(
     }
     for (const matchKey of query.resolveMatchKeys ?? []) {
       if (matchKey.field.targetId !== fieldId) continue;
-      matchKey.field.targetId = matchKeyFallbackId;
       replacedMatchKeys += 1;
     }
   }
   assert.equal(removedSelections, 4);
-  assert.equal(
-    replacedMatchKeys,
-    fieldLocalId === 'stock_count_line_counted_quantity' ? 1 : 0,
-  );
+  assert.equal(replacedMatchKeys, 0);
   assert.equal(containsAnyExactString(definition, new Set([fieldId])), false);
   return definition;
 }

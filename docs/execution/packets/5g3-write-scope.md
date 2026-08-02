@@ -196,3 +196,136 @@ verification boundary.
 This is not a duration sample: the parent did not complete. No timeout or tmpfs
 was changed, no budget was re-derived, the second parent was not run after the
 shared prerequisite failed, and no full matrix or Critical review was started.
+
+## 5g3-fieldorigin continuation — ADR-0042 and ADR-0043
+
+The generic create interpreter now treats a storage relation whose column has
+`origin: 'field'` as metadata about the field's existing physical column, not as
+a second operation input. It neither requires `input.relations` nor emits a
+second INSERT column for that relation. Verification follows the same compiled
+storage facts: a required field-origin reference arranges its target and writes
+that target UUID through the field, while an optional field-origin reference is
+left unset. The PostgreSQL control reads the archived verification rows and
+joins every required source reference to its arranged target; it separately
+observes both optional transaction-line references as SQL NULL.
+
+ADR-0042 replaces unconditional resolve registration with a lowered-storage
+rule. A declared key whose physical column is not text-backed is refused, and
+an entity with a text-backed physical column is refused when it omits resolve.
+The focused compiler suite passed 80/80. Disabling the lowered-type arm made the
+canonically-text/physically-UUID negative fixture compile; disabling the
+missing-resolve arm made the text-capable entity without resolve compile. Both
+controls therefore observed independent reds. Inventory now selects deliberate
+resolvable fields, and `inventory_period_lock` declares no resolver because its
+only field is a timestamp. Its form/list/record surfaces contain no dependency
+on the removed query.
+
+### ADR-0039/ADR-0043 artifact event — invalid suffix truncated
+
+The pre-event compiled artifact SHA was
+`3b1e813ec6d39d5e9e5345268e4adb43996463ed769061ca1bde40a8651af605`.
+Entries 0–3 recompiled under the current compiler with their roots unchanged.
+Entries 4–7 could not: their stored normalized inputs declare all three
+now-refused resolver keys, and no source generator for those historical inputs
+exists. The explicit experimental-only `--truncate-invalid-lineage` compiler
+mode recompiled and byte-verified the longest valid prefix, observed the first
+compiler refusal at entry 4, dropped the invalid suffix, and compiled the
+generated current authored application as the single successor. A subsequent
+ordinary `--check` reproduced the complete result.
+
+| Former entry | Dropped root |
+| ---: | --- |
+| 4 | `74cedbb619cd725a91d657c744173f60d12d59df839a9572d4ebd5ede0cd1e00` |
+| 5 | `b9b28e711eb8220ec8b389369590d5f91aba1d417e4bacdd0b701d33bc4a5266` |
+| 6 | `33b9387509f3a5adc2a5533e7bbc6cce2a318bd1870b21481b6de11c9b32d044` |
+| 7 | `98079a9a533c247103fe824a1ba99bdead1496eb323375e0367aea108c7ef974` |
+
+The replacement entry 4 root is
+`ee5d474d50eb5243856fd11c7a3160f915b2fe6e1f85b57f2c443f6792e7e843`.
+The compiled artifact SHA after the event is
+`431f15d6a7e76c37641caacdd063f263567eb4079e6785a77c4c57af2e8bcd36`.
+Every retained entry still records
+`northstar.compiler-output/v0-experimental`.
+
+The shortened lineage no longer continuously proves the three separate
+Inventory transitions represented by former entries 4–7. It proves one exact
+58-element transition from entry 3 to the current Inventory head instead. The
+rollback control's `at(-2)` target consequently moves from an incremental
+Inventory release to entry 3: it now proves rollback across the consolidated
+transition, not across a small incremental step. The accepted fresh-tenant
+packet record remains truthful about its own eight-head artifact and accepted
+SHA; it is historical evidence, not a description of this new lineage.
+
+ADR-0042 removes exactly one `resolverAuthority` scenario with
+`inventory_period_lock_resolve`: that family count moves 11 → 10 and the total
+moves 168 → 167 by attribution, not by fitting. The executed/derived partition
+is recorded below only after real PostgreSQL verification observes which side
+lost the now-absent scenario.
+
+### Deferred search finding — recorded, not fixed
+
+The static lowered-storage sweep found 11 required search queries, of which
+five select no column carrying `searchMapping: 'normalizedTextIndex'` and can
+therefore only return an empty set in the current interpreter:
+
+- `northstar.app:query.inventory_movement_search`
+- `northstar.app:query.inventory_period_lock_search`
+- `northstar.app:query.inventory_transaction_line_search`
+- `northstar.app:query.party_role_search`
+- `northstar.app:query.stock_count_line_search`
+
+This is the third observed instance of a universally required query declaration
+whose runtime cannot perform the claimed job. ADR-0043 records the decision as
+owed; this continuation does not change search conformance or execution.
+
+The first real PostgreSQL execution of the 167-scenario head stopped before the
+partition could be observed. Part B correctly leaves the optional
+`inventory_transaction_line_from_location_id` value unset, but verification
+scenario
+`northstar.app:verification-scenario.2e92ca7a65a0702f3a527ea3aefd714528c2cea6582f9310526ca570e266c222`
+is a `searchableExclusion` probe whose executor requires that same optional
+field to have a value. It therefore refused
+`VERIFICATION_EXCLUDED_FIELD_VALUE_MISSING` at plan index 30. The equivalent
+`to_location_id` scenario
+`northstar.app:verification-scenario.54ae86867f3eb6d49f0d3ecee4dece04d8749e5d6dd19af6f6c011d0c1c6145e`
+remains later at index 52 and was not reached. The plan total is exactly the
+attributed 167, but no executed/derived counts were produced. Per the charter's
+explicit search exclusion, neither scenario was reclassified or repaired here;
+the matrix was not started.
+
+### On-demand optional arrangement and final partition observation
+
+The follow-on ruling preserves optional relations as unset by default while
+allowing a scenario that needs a value to arrange one explicitly. Before
+creating its probe record, `searchableExclusion` now identifies a nullable
+field-origin relation from compiled storage metadata, creates that target, and
+passes its UUID through the existing `relationOverrides` seam. Both
+`from_location_id` and `to_location_id` scenarios execute this path. The
+ordinary-create control still observes a transaction line with both columns
+NULL, proving blanket optional arrangement was not restored.
+
+The first exhaustive run passed every verification scenario and then exposed
+two downstream controls: the deliberately stale 39-derived pin and the
+full-replay schema snapshot from the old resolver shapes. With only the schema
+comparison bypassed diagnostically, the rest of the 130.3-second parent ran to
+completion and found no additional failure. The exact observed partition was
+**129 executed / 38 derived**. The executed side stayed at 129; the derived side
+lost one. The compiled plan contains exactly 167 scenarios, contains 10
+`resolverAuthority` scenarios, and contains no resolver-authority scenario for
+`northstar.app:entity.inventory_period_lock`. The exact union assertion then
+matches all 167 plan IDs and the independent constructibility partition. This
+observes deletion rather than reclassification.
+
+The full-replay schema oracle was regenerated by the checked-in
+`test/helpers/generate-fresh-tenant-full-replay-schema.ts` generator. It starts
+one fresh database, serves each retained application head in order through the
+real composed runtime so every intermediate head receives semantic
+verification, and only then calls the repository's `captureSchemaSnapshot`.
+The snapshot SHA moved from
+`15d9076789e2c5243542757c80de5e1ad5108f213f3bf91e562e46aa6b113880`
+to
+`bf0f6bfbe1307d370ce29341be2078b73328988bd9f3a58b2ed7623bd5b6f57b`.
+With the diagnostic bypass removed, the complete parent passed 5/5 in
+130,486.2 ms, including the regenerated full-replay comparison, 129/38 exact
+partition, required arranged-reference joins, optional-null observation, and
+second-tenant materializer boundary.
