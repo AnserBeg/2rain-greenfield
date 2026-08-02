@@ -103,6 +103,14 @@ per-entry field in §"The fact that decides it" is the hook for it.
 That transition is not free and must not be discovered late. Record it as owed
 work now, so the cost is chosen rather than met.
 
+The same stabilization work owns verification-arrangement identity epochs. The
+current verifier derives operation idempotency keys from an ordinal-rooted probe
+token while deriving prerequisite record identities from the relation path.
+That is safe only under §1's no-production, ephemeral-database premise. Once
+receipts or arranged rows may persist, any future change to arranged record
+identity requires a coordinated identity/idempotency epoch and must avoid
+collisions with rows persisted under earlier epochs.
+
 ## What this ADR does not decide
 
 - **When the output protocol should leave experimental.** That is a program-level

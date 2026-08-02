@@ -365,3 +365,18 @@ How to apply: bind transitional authority to its exact workflow identity and ste
 Date: 2026-08-01
 Why: immutable row existence closed an install even though a broadly shaped document could have been inserted without proving the facts it claimed.
 How to apply: revoke direct writes, derive the closed document and digest from durable facts inside one database authority, and refuse malformed or incomplete closure before insertion. See `docs/execution/packets/5g3-freshtenant.md`.
+
+## Never invent optional verification prerequisites
+Date: 2026-08-01
+Why: semantic verification recursively created an optional self-reference, exhausting the call stack in a minimal fixture and filling PostgreSQL storage when a required parent was created before each recursion.
+How to apply: arrange only relation inputs declared required, reject cycles in the required-relation path by name, and execute both an optional self-reference and a required-cycle control. See `docs/execution/packets/5g3-arrangecycle.md`.
+
+## Distinguish an unset relation from an absent target
+Date: 2026-08-02
+Why: restore joined a nullable foreign key directly to its target and interpreted zero rows as an archived target, so an ordinary unset optional relation made an archived record permanently unrestorable while verification's invented parent masked the defect.
+How to apply: observe nullable reference presence first, skip only an actual null, and independently lock and validate every non-null target. Control both the null-success direction and the archived-target refusal. See `docs/execution/packets/5g3-restorenull.md`.
+
+## Derive recursive identities from the full path
+Date: 2026-08-02
+Why: verification named every recursive parent by depth, so two required diamond paths reaching one entity at equal depth generated the same record UUID and collided at the primary key.
+How to apply: derive recursive fixture identities from the parent path plus the current compiled edge, never from depth, order, time, or a counter; prove sibling paths persist distinct records. See `docs/execution/packets/5g3-arrangecycle.md`.

@@ -1090,27 +1090,28 @@ async function assertRestorableRelations(
       entry.sourceEntityId === entity.entityId &&
       entry.archiveBehavior === 'restrict',
   )) {
-    const target = requiredEntity(storage, relation.targetEntityId);
-    const result = await client.query(
-      `SELECT target.${quoted(target.archive.archivedAtColumn)} IS NULL AS active
-         FROM north_star_module.${quoted(entity.physicalTableName)} AS source
-         JOIN north_star_module.${quoted(target.physicalTableName)} AS target
-           ON target.tenant_id = source.tenant_id
-          AND target.environment_id = source.environment_id
-          AND target.${quoted(target.recordIdentity.column)} =
-              source.${quoted(relation.relationColumn.physicalName)}
-        WHERE source.${quoted(entity.recordIdentity.column)} = $1
-        LIMIT 1
-        FOR SHARE OF target`,
+    const result = await client.query<QueryResultRow>(
+      `SELECT ${quoted(relation.relationColumn.physicalName)} AS target_record_id
+         FROM north_star_module.${quoted(entity.physicalTableName)}
+        WHERE ${quoted(entity.recordIdentity.column)} = $1
+        LIMIT 1`,
       [recordId],
     );
-    if (result.rows[0]?.active !== true) {
+    if (result.rowCount !== 1) {
       throw failure(
-        'MODULE_RELATION_VIOLATION',
-        'relation target cannot accept active dependents',
-        relation.relationId,
+        'MODULE_RECORD_NOT_FOUND',
+        'module record was not found while resolving its restore relations',
       );
     }
+    const targetRecordId = result.rows[0]?.target_record_id;
+    if (targetRecordId === null) continue;
+    await requireRelationTarget(
+      client,
+      storage,
+      relation,
+      requiredUuid(targetRecordId, 'targetRecordId'),
+      [],
+    );
   }
 }
 
