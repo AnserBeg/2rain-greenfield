@@ -280,6 +280,23 @@
       },
       "kind": "assertionDefinition",
       "schemaVersion": "v4"
+    },
+    {
+      "assertionId": "northstar.app:assertion.inventory_transaction_post_refusal",
+      "evidenceKinds": ["provider"],
+      "expectedDiagnosticCode": "INVENTORY_POSTING_INPUT_INVALID",
+      "expectedOutcome": "fails",
+      "invocation": {
+        "kind": "operationInvocation",
+        "operation": {
+          "kind": "operationReference",
+          "schemaVersion": "v4",
+          "targetId": "northstar.app:operation.inventory_transaction_post"
+        },
+        "schemaVersion": "v4"
+      },
+      "kind": "assertionDefinition",
+      "schemaVersion": "v4"
     }
   ],
   "capabilityRequirements": [
@@ -298,6 +315,15 @@
         "reporting",
         "verification"
       ],
+      "schemaVersion": "v4",
+      "supportStatus": "supported"
+    },
+    {
+      "capabilityId": "northstar.inventory:capability.posting",
+      "capabilityVersion": 1,
+      "declaredEffects": ["appendFact"],
+      "kind": "capabilityRequirement",
+      "requiredProjections": ["operation", "surface", "verification"],
       "schemaVersion": "v4",
       "supportStatus": "supported"
     }
@@ -3533,6 +3559,52 @@
       },
       "schemaVersion": "v4",
       "tier": "o0"
+    },
+    {
+      "confirmation": "humanRequired",
+      "effect": {
+        "capability": {
+          "kind": "capabilityReference",
+          "schemaVersion": "v4",
+          "targetId": "northstar.inventory:capability.posting"
+        },
+        "kind": "registeredCapabilityEffect",
+        "schemaVersion": "v4"
+      },
+      "kind": "operationDefinition",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v4",
+        "targetId": "northstar.app:module.inventory"
+      },
+      "operationId": "northstar.app:operation.inventory_transaction_post",
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v4",
+        "targetId": "northstar.app:permission.inventory_transaction_post"
+      },
+      "precondition": {
+        "field": {
+          "kind": "fieldReference",
+          "schemaVersion": "v4",
+          "targetId": "northstar.app:field.inventory_transaction_state"
+        },
+        "kind": "fieldComparisonPredicate",
+        "operator": "equals",
+        "schemaVersion": "v4",
+        "value": {
+          "kind": "textValue",
+          "schemaVersion": "v4",
+          "value": "northstar.app:option.inventory_transaction_state_draft"
+        }
+      },
+      "readBack": {
+        "kind": "queryReference",
+        "schemaVersion": "v4",
+        "targetId": "northstar.app:query.inventory_transaction_get"
+      },
+      "schemaVersion": "v4",
+      "tier": "o1"
     }
   ],
   "package": {
@@ -4129,6 +4201,18 @@
         "kind": "entityReference",
         "schemaVersion": "v4",
         "targetId": "northstar.app:entity.inventory_movement"
+      },
+      "schemaVersion": "v4"
+    },
+    {
+      "action": "transition",
+      "kind": "permissionDefinition",
+      "label": "inventory transaction post",
+      "permissionId": "northstar.app:permission.inventory_transaction_post",
+      "resource": {
+        "kind": "entityReference",
+        "schemaVersion": "v4",
+        "targetId": "northstar.app:entity.inventory_transaction"
       },
       "schemaVersion": "v4"
     }
@@ -10255,6 +10339,18 @@
           },
           "kind": "surfaceSlot",
           "orderKey": 30,
+          "schemaVersion": "v4",
+          "slot": "commandBar",
+          "slotId": "northstar.app:slot.inventory_transaction_detail_command_bar"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v4",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 40,
           "schemaVersion": "v4",
           "slot": "keyFacts",
           "slotId": "northstar.app:slot.inventory_transaction_detail_key_facts"

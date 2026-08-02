@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import type * as RuntimeViewContract from '@north-star/runtime/request-runtime-view';
+import { evaluateRegisteredOperationPrecondition } from '../../../packages/runtime/src/semantic-operation-gateway.js';
 import {
   registeredSemanticQueryFromPinnedView,
   type SemanticAggregateResultEnvelope,
@@ -63,7 +64,8 @@ export type SurfaceDataRenderState =
     };
 
 export interface SurfaceOperationFeedback {
-  readonly intent: 'archive' | 'create' | 'restore' | 'update';
+  readonly intent: SurfaceOperationIntent;
+  readonly label: string;
   readonly record: SemanticRecordDto;
   readonly trustLinked: boolean;
 }
@@ -125,7 +127,7 @@ const surfaceSlotRegistry: Readonly<Record<string, SurfaceSlotRegistration>> =
     'list:title': { renderer: renderListTitle },
     'record:breadcrumb': { renderer: renderBreadcrumb },
     'record:commandBar': {
-      mutationIntents: { record: ['archive', 'restore'] },
+      mutationIntents: { record: ['archive', 'command', 'restore'] },
       renderer: renderCommandBar,
     },
     'record:keyFacts': {
@@ -176,6 +178,7 @@ export function surfaceSupportsRuntimeIntent(
     return false;
   }
   if (surface.surfaceRole !== 'record') return true;
+  if (intent === 'command') return true;
   const form = findRelatedSurface(view, surface, surfaces, 'form');
   return form
     ? surfaceSupportsRuntimeIntent(view, form, surfaces, 'create') ||
@@ -492,6 +495,16 @@ function renderCommandBar(context: SurfaceComponentContext): string {
   }
 
   const form = relatedSurface(context, 'form');
+  const command = record
+    ? (context.operations ?? []).find(
+        (operation) =>
+          operation.intent === 'command' &&
+          evaluateRegisteredOperationPrecondition(
+            operation.precondition,
+            record.values,
+          ).outcome === 'holds',
+      )
+    : undefined;
   const actions = [
     record && form
       ? `<a class="primary-action" href="${escapeHtml(surfaceHref(form, record.recordId, false, context))}">Edit</a>`
@@ -499,6 +512,7 @@ function renderCommandBar(context: SurfaceComponentContext): string {
     form
       ? `<a class="secondary-action" href="${escapeHtml(surfaceHref(form, undefined, false, context))}">New</a>`
       : '',
+    record && command ? renderCapabilityCommand(context, record, command) : '',
     record ? renderLifecycleOverflow(context, record) : '',
   ].join('');
   return slotPanel(
@@ -506,6 +520,14 @@ function renderCommandBar(context: SurfaceComponentContext): string {
     `<div class="command-bar" aria-label="Record commands">${actions}</div>`,
     'command-bar-slot',
   );
+}
+
+function renderCapabilityCommand(
+  context: SurfaceComponentContext,
+  record: SemanticRecordDto,
+  operation: CompiledSurfaceOperationBinding,
+): string {
+  return `<form class="capability-command" method="post" action="/?surface=${encodeURIComponent(context.surface.surfaceId)}" data-capability-id="${escapeHtml(operation.capabilityId ?? '')}"><input type="hidden" name="intent" value="command"><input type="hidden" name="idempotencyKey" value="${randomUUID()}"><input type="hidden" name="recordId" value="${escapeHtml(record.recordId)}"><input type="hidden" name="expectedRevision" value="${record.revision}"><span><strong>Draft staged.</strong> Posting is a separate confirmed step.</span><button type="submit">${escapeHtml(operation.label)}</button></form>`;
 }
 
 function renderKeyFacts(context: SurfaceComponentContext): string {
@@ -733,7 +755,7 @@ function renderLifecycleForm(
     (binding) => binding.intent === intent,
   );
   return operation
-    ? `<form class="lifecycle-action" method="post" action="/?surface=${encodeURIComponent(context.surface.surfaceId)}"><input type="hidden" name="intent" value="${operation.intent}"><input type="hidden" name="idempotencyKey" value="${randomUUID()}"><input type="hidden" name="recordId" value="${escapeHtml(record.recordId)}"><input type="hidden" name="expectedRevision" value="${record.revision}"><button class="secondary-action" type="submit">${escapeHtml(operationLabel(operation.intent))}</button></form>`
+    ? `<form class="lifecycle-action" method="post" action="/?surface=${encodeURIComponent(context.surface.surfaceId)}"><input type="hidden" name="intent" value="${operation.intent}"><input type="hidden" name="idempotencyKey" value="${randomUUID()}"><input type="hidden" name="recordId" value="${escapeHtml(record.recordId)}"><input type="hidden" name="expectedRevision" value="${record.revision}"><button class="secondary-action" type="submit">${escapeHtml(operation.label)}</button></form>`
     : '';
 }
 
@@ -796,10 +818,6 @@ function fieldLabel(fieldId: string): string {
     .join(' ');
 }
 
-function operationLabel(intent: SurfaceOperationFeedback['intent']): string {
-  return intent.slice(0, 1).toUpperCase() + intent.slice(1);
-}
-
 function slotPanel(
   context: SurfaceComponentContext,
   html: string,
@@ -812,7 +830,7 @@ function feedbackHtml(
   feedback: SurfaceOperationFeedback | null | undefined,
 ): string {
   return feedback
-    ? `<section class="operation-feedback" role="status" data-operation-intent="${feedback.intent}" data-trust-linked="${String(feedback.trustLinked)}"><strong>${escapeHtml(operationLabel(feedback.intent))} complete.</strong> The saved record is reflected below${feedback.trustLinked ? ' and its trust evidence is linked' : ''}.</section>`
+    ? `<section class="operation-feedback" role="status" data-operation-intent="${feedback.intent}" data-trust-linked="${String(feedback.trustLinked)}"><strong>${escapeHtml(feedback.label)} complete.</strong> The saved record is reflected below${feedback.trustLinked ? ' and its trust evidence is linked' : ''}.</section>`
     : '';
 }
 

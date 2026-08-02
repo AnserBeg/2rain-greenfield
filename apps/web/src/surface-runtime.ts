@@ -230,7 +230,7 @@ export async function renderSurfaceRuntimeWithData(
   );
 }
 
-/** Resolves a browser intent to a pinned O0 binding; no operation ID is accepted. */
+/** Resolves a browser intent to one pinned operation; no operation ID is accepted. */
 export async function submitSurfaceRuntimeIntent(
   view: RuntimeViewContract.RequestRuntimeView,
   requestUrl: string,
@@ -275,7 +275,7 @@ export async function submitSurfaceRuntimeIntent(
       );
       return renderConfirmationTransition(
         selection.selected,
-        intent,
+        operation,
         submission,
         grant,
       );
@@ -320,6 +320,7 @@ export async function submitSurfaceRuntimeIntent(
     { records: [result.readBack], status: 'READY' },
     {
       intent,
+      label: operation.label,
       record: result.readBack,
       trustLinked: result.trust !== null,
     },
@@ -711,6 +712,7 @@ function operationIntent(
   value: string | undefined,
 ): SurfaceOperationIntent | null {
   return value === 'archive' ||
+    value === 'command' ||
     value === 'create' ||
     value === 'restore' ||
     value === 'update'
@@ -755,7 +757,7 @@ function operationDiagnostic(
 
 function renderConfirmationTransition(
   surface: CompiledSurfaceDefinition,
-  intent: SurfaceOperationIntent,
+  operation: CompiledSurfaceDataBinding['operations'][number],
   submission: SurfaceRuntimeSubmission,
   grant: string,
 ): SurfaceRuntimeResponse {
@@ -767,13 +769,9 @@ function renderConfirmationTransition(
     )
     .join('');
   return Object.freeze({
-    html: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Confirm ${escapeHtml(intentLabel(intent))} · 2rain</title><style>${styles}</style></head><body class="standalone"><main class="standalone__card" data-confirmation-step="preview"><p class="eyebrow">Operation preview</p><h1>Confirm ${escapeHtml(intentLabel(intent))}</h1><p>Review this ${escapeHtml(surface.label)} operation before it is executed.</p><form method="post" action="/?surface=${encodeURIComponent(surface.surfaceId)}">${preserved}<input type="hidden" name="confirmationGrant" value="${escapeHtml(grant)}"><button type="submit">Confirm ${escapeHtml(intentLabel(intent))}</button></form></main></body></html>`,
+    html: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Confirm ${escapeHtml(operation.label)} · 2rain</title><style>${styles}</style></head><body class="standalone"><main class="standalone__card" data-confirmation-step="preview"><p class="eyebrow">Operation preview</p><h1>Confirm ${escapeHtml(operation.label)}</h1><p>Review this ${escapeHtml(surface.label)} operation before it is executed.</p>${operation.capabilityId ? `<section data-predicted-effects="registered-capability"><strong>Predicted effects</strong><p>The registered capability <code>${escapeHtml(operation.capabilityId)}</code> will validate this draft and append its declared business facts. The screen will wait for the committed result.</p></section>` : ''}<form method="post" action="/?surface=${encodeURIComponent(surface.surfaceId)}">${preserved}<input type="hidden" name="confirmationGrant" value="${escapeHtml(grant)}"><button type="submit">Confirm ${escapeHtml(operation.label)}</button></form></main></body></html>`,
     statusCode: 200,
   });
-}
-
-function intentLabel(intent: SurfaceOperationIntent): string {
-  return intent.slice(0, 1).toUpperCase() + intent.slice(1);
 }
 
 export function renderApplicationDiagnostic(

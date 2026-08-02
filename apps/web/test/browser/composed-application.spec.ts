@@ -28,6 +28,7 @@ const journeyTimeoutMilliseconds = Object.freeze({
   inventoryNavigation: 20_000,
   onHandLookup: 20_000,
   partyLifecycle: 20_000,
+  postingRoute: 20_000,
   scopedInventory: 20_000,
 });
 const sharedSetupTimeoutMilliseconds = 180_000;
@@ -143,6 +144,14 @@ composedTest.describe('composed application journeys', () => {
       await expect(
         page.getByRole('cell', { name: 'Browser-persisted Party' }),
       ).toBeVisible();
+    },
+  );
+
+  composedTest(
+    'posts a staged adjustment through a deliberately confirmed command',
+    async ({ composedApplication, page }) => {
+      composedTest.setTimeout(journeyTimeoutMilliseconds.postingRoute);
+      await postingRouteJourney(page, composedApplication.currentBaseUrl());
     },
   );
 });
@@ -539,9 +548,7 @@ async function scopedInventoryJourney(
   await expect(
     page.getByRole('heading', { level: 1, name: 'browser-posted-adjustment' }),
   ).toBeVisible();
-  await expect(
-    page.locator('[data-platform-slot="record:commandBar"]'),
-  ).toHaveCount(0);
+  await expect(page.locator('form.capability-command')).toHaveCount(0);
 
   const scopedInventoryNavigation = page
     .getByRole('navigation', { name: 'Release navigation' })
@@ -573,9 +580,7 @@ async function scopedInventoryJourney(
       hasText: `${browserTransactionId.slice(0, 8)}…${browserTransactionId.slice(-4)}`,
     }),
   ).toBeVisible();
-  await expect(
-    page.locator('[data-platform-slot="record:commandBar"]'),
-  ).toHaveCount(0);
+  await expect(page.locator('form.capability-command')).toHaveCount(0);
   await expect(
     page.getByRole('button', { name: /Archive|Restore/ }),
   ).toHaveCount(0);
@@ -632,6 +637,76 @@ async function scopedInventoryJourney(
   });
   expect(refusedWrite.status()).toBe(422);
   expect(await refusedWrite.text()).toContain('OPERATION_UNSUPPORTED');
+}
+
+async function postingRouteJourney(page: Page, baseUrl: string): Promise<void> {
+  const scopeParameterId = await loadSurfaceScopeParameterId(
+    'inventory_transaction_detail',
+  );
+  const detailUrl = `${scopedSurfaceUrl(
+    baseUrl,
+    'inventory_transaction_detail',
+    scopeParameterId,
+    browserLegalEntityId,
+  )}&record=${encodeURIComponent(browserRouteTransactionId)}`;
+  await page.goto(detailUrl);
+  await expect(page.getByText(/Active · revision 1/)).toBeVisible();
+  const command = page.locator('form.capability-command');
+  await expect(command).toHaveAttribute(
+    'data-capability-id',
+    INVENTORY_POSTING_CAPABILITY_ID,
+  );
+  await expect(command).toContainText('Draft staged.');
+  const renderedIdempotencyKey = await command
+    .locator('input[name="idempotencyKey"]')
+    .inputValue();
+  await command.getByRole('button', { name: 'Post' }).click();
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'Confirm Post' }),
+  ).toBeVisible();
+  await expect(
+    page.locator('[data-predicted-effects="registered-capability"]'),
+  ).toContainText(INVENTORY_POSTING_CAPABILITY_ID);
+  await expect(page.locator('input[name="idempotencyKey"]')).toHaveValue(
+    renderedIdempotencyKey,
+  );
+  const preservedSubmission = Object.fromEntries(
+    await page
+      .locator('form input[type="hidden"]')
+      .evaluateAll((inputs) =>
+        inputs.map((input) => [
+          input.getAttribute('name') ?? '',
+          (input as HTMLInputElement).value,
+        ]),
+      ),
+  );
+
+  const beforeConfirmation = await page.context().newPage();
+  try {
+    await beforeConfirmation.goto(detailUrl);
+    await expect(
+      beforeConfirmation.getByText(/Active · revision 1/),
+    ).toBeVisible();
+    await expect(
+      beforeConfirmation.locator('form.capability-command'),
+    ).toBeVisible();
+  } finally {
+    await beforeConfirmation.close();
+  }
+
+  await page.getByRole('button', { name: 'Confirm Post' }).click();
+  await expect(page.getByRole('status')).toContainText('Post complete');
+  await expect(page.getByText(/Active · revision 2/)).toBeVisible();
+  await expect(page.locator('form.capability-command')).toHaveCount(0);
+
+  const replay = await page.request.post(
+    `${baseUrl}/?surface=${encodeURIComponent(`${applicationNamespace}:surface.inventory_transaction_detail`)}`,
+    { form: preservedSubmission },
+  );
+  expect(replay.status()).toBe(200);
+  const replayHtml = await replay.text();
+  expect(replayHtml).toContain('Post complete');
+  expect(replayHtml).toContain('Active · revision 2');
 }
 
 async function partyLifecycleJourney(
@@ -808,9 +883,12 @@ const rejectedBrowserTransactionLineId = '74100000-0000-4000-8000-000000000002';
 const rejectedBrowserPostingIdempotencyKey =
   '74100000-0000-4000-8000-000000000003';
 const rejectedBrowserPostingSourceId = 'browser-rejected-superuser-adjustment';
+const browserRouteTransactionId = '74200000-0000-4000-8000-000000000001';
+const browserRouteTransactionLineId = '74200000-0000-4000-8000-000000000002';
 const demoItemId = '71000000-0000-4000-8000-000000000011';
 const demoLocationId = '71000000-0000-4000-8000-000000000021';
 const browserPostingInstant = '2026-07-30T12:00:00.000Z';
+const browserRoutePostingInstant = new Date().toISOString();
 type StorageEntityTarget = StorageTargetPayloadV1['entities'][number];
 
 async function seedPostedInventory(
@@ -1152,6 +1230,49 @@ async function seedInventoryDraft(
         inventory_transaction_line_item_id: demoItemId,
         inventory_transaction_line_line_number: 1,
         inventory_transaction_line_quantity: '5',
+        inventory_transaction_line_to_location_id: demoLocationId,
+        inventory_transaction_line_unit_id: 'EA',
+      },
+      context,
+    });
+    await insertStorageEntity(client, target, transaction, {
+      legalEntityId: browserLegalEntityId,
+      recordId: browserRouteTransactionId,
+      relations: {},
+      values: {
+        inventory_transaction_actor_id: context.principalId,
+        inventory_transaction_effective_at: browserRoutePostingInstant,
+        inventory_transaction_number: 'ADJ-BROWSER-ROUTE-001',
+        inventory_transaction_reason_code: 'browser-route',
+        inventory_transaction_reason_narrative:
+          'Posted through the registered surface command',
+        inventory_transaction_recorded_at: browserRoutePostingInstant,
+        inventory_transaction_source_id: 'browser-posting-route',
+        inventory_transaction_source_type: 'browser-checkpoint',
+        inventory_transaction_state: enumOption(
+          transaction,
+          'inventory_transaction_state',
+          'draft',
+        ),
+        inventory_transaction_type: enumOption(
+          transaction,
+          'inventory_transaction_type',
+          'adjustment',
+        ),
+      },
+      context,
+    });
+    await insertStorageEntity(client, target, transactionLine, {
+      legalEntityId: browserLegalEntityId,
+      recordId: browserRouteTransactionLineId,
+      relations: {
+        'northstar.app:entity.inventory_transaction': browserRouteTransactionId,
+      },
+      values: {
+        inventory_transaction_line_from_location_id: null,
+        inventory_transaction_line_item_id: demoItemId,
+        inventory_transaction_line_line_number: 1,
+        inventory_transaction_line_quantity: '3',
         inventory_transaction_line_to_location_id: demoLocationId,
         inventory_transaction_line_unit_id: 'EA',
       },
