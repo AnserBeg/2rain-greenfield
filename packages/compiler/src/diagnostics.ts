@@ -120,6 +120,16 @@ export const COMPILER_DIAGNOSTIC_COPY = Object.freeze({
       'declare one or more resolveMatchKeys and mark every key as identifier or advisory',
     rule: 'v2 resolve queries fail closed unless their match authority is explicit in canonical definition data',
   },
+  COMPILER_RESOLVE_MATCH_KEY_STORAGE_UNSUPPORTED: {
+    acceptedAlternative:
+      'select a match key whose lowered storage column is text-backed, or omit resolve when the entity has no such column',
+    rule: 'every declared resolve key executes against a text-backed lowered storage column',
+  },
+  COMPILER_RESOLVE_QUERY_REQUIRED: {
+    acceptedAlternative:
+      'declare a resolve query with an explicit match authority over a text-backed lowered storage column',
+    rule: 'every entity with a text-backed lowered storage column exposes resolve',
+  },
   COMPILER_STORAGE_CLASS_REQUIRED: {
     acceptedAlternative:
       'declare dedicatedTable explicitly for every active entity storage mapping',

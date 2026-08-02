@@ -12,6 +12,7 @@ import {
   MODULE_COMPILER_PROFILE,
   compileApplication,
   expectedActiveReleaseFrom,
+  type CompileResult,
   type CompileSuccess,
 } from '@north-star/compiler';
 import { format } from 'prettier';
@@ -27,6 +28,18 @@ const outputPath = resolve(
 );
 const envelopeV1 = 'northstar.web:compiled-application-release/v1' as const;
 const envelopeV2 = 'northstar.web:compiled-application-release/v2' as const;
+const experimentalOutputProtocol =
+  'northstar.compiler-output/v0-experimental' as const;
+const truncateInvalidLineage = process.argv.includes(
+  '--truncate-invalid-lineage',
+);
+const checkOnly = process.argv.includes('--check');
+
+if (truncateInvalidLineage && checkOnly) {
+  throw new Error(
+    '--truncate-invalid-lineage writes a new lineage and cannot be combined with --check',
+  );
+}
 
 const authored = parseAuthoredApplicationPackageJson(
   readFileSync(authoredPath),
@@ -36,7 +49,9 @@ const existing = existsSync(outputPath)
   ? (JSON.parse(readFileSync(outputPath, 'utf8')) as unknown)
   : null;
 const verified = existing
-  ? verifyExistingLineage(existing)
+  ? truncateInvalidLineage
+    ? longestValidExperimentalLineagePrefix(existing)
+    : verifyExistingLineage(existing)
   : initialLineage(authored);
 const latest = verified.applications.at(-1)!;
 const authoredIsCurrent = equalBytes(
@@ -45,7 +60,7 @@ const authoredIsCurrent = equalBytes(
 );
 
 let payload: unknown = verified.payload;
-if (!authoredIsCurrent && !process.argv.includes('--check')) {
+if (!authoredIsCurrent && !checkOnly) {
   const candidate = mustCompile(
     applicationBytes,
     expectedActiveReleaseFrom(latest.compiled),
@@ -66,7 +81,7 @@ if (!authoredIsCurrent && !process.argv.includes('--check')) {
 }
 const serialized = await format(JSON.stringify(payload), { parser: 'json' });
 
-if (process.argv.includes('--check')) {
+if (checkOnly) {
   if (!authoredIsCurrent) {
     throw new Error(
       'compiled application release is stale; run pnpm --filter @north-star/web build:app-release',
@@ -74,6 +89,123 @@ if (process.argv.includes('--check')) {
   }
 } else {
   writeFileSync(outputPath, serialized);
+}
+
+function longestValidExperimentalLineagePrefix(
+  input: unknown,
+): CompiledLineage {
+  if (!isRecord(input)) {
+    throw new TypeError('compiled application release envelope is invalid');
+  }
+  const bootstrapBytes = releaseBytes(input.bootstrap, 'bootstrap');
+  const applicationValues =
+    input.schemaVersion === envelopeV1
+      ? [input.application]
+      : input.schemaVersion === envelopeV2 && Array.isArray(input.applications)
+        ? input.applications
+        : null;
+  if (!applicationValues || applicationValues.length === 0) {
+    throw new TypeError('compiled application release envelope is invalid');
+  }
+  assertExperimentalRelease(input.bootstrap, 'bootstrap');
+  applicationValues.forEach((value, index) =>
+    assertExperimentalRelease(value, `applications[${String(index)}]`),
+  );
+
+  const bootstrap = mustCompile(bootstrapBytes, null);
+  assertSerializedRelease(
+    input.bootstrap,
+    bootstrapBytes,
+    bootstrap,
+    'bootstrap',
+  );
+  const applications: CompiledLineageRelease[] = [];
+  let previous = bootstrap;
+  let firstInvalidIndex: number | null = null;
+  for (const [index, value] of applicationValues.entries()) {
+    const normalizedDefinitionBytes = releaseBytes(
+      value,
+      `applications[${String(index)}]`,
+    );
+    const result = compileNormalizedDefinition(
+      normalizedDefinitionBytes,
+      expectedActiveReleaseFrom(previous),
+    );
+    if (result.status !== 'compiled') {
+      firstInvalidIndex = index;
+      break;
+    }
+    assertSerializedRelease(
+      value,
+      normalizedDefinitionBytes,
+      result,
+      `applications[${String(index)}]`,
+    );
+    applications.push({ compiled: result, normalizedDefinitionBytes });
+    previous = result;
+  }
+  if (firstInvalidIndex === null) {
+    throw new Error(
+      'compiled application lineage has no invalid suffix to truncate',
+    );
+  }
+  if (applications.length === 0) {
+    throw new Error(
+      'compiled application lineage has no valid application prefix to retain',
+    );
+  }
+  for (
+    let index = firstInvalidIndex;
+    index < applicationValues.length;
+    index += 1
+  ) {
+    releaseBytes(applicationValues[index], `applications[${String(index)}]`);
+  }
+  const payload = {
+    applications: applications.map((release) =>
+      serializedRelease(release.normalizedDefinitionBytes, release.compiled),
+    ),
+    bootstrap: serializedRelease(bootstrapBytes, bootstrap),
+    schemaVersion: envelopeV2,
+  };
+  console.log(
+    `TRUNCATED_INVALID_LINEAGE kept=${String(applications.length)} ` +
+      `dropped=${String(applicationValues.length - firstInvalidIndex)} ` +
+      `firstInvalid=${String(firstInvalidIndex)}`,
+  );
+  return {
+    applications,
+    bootstrap: {
+      compiled: bootstrap,
+      normalizedDefinitionBytes: bootstrapBytes,
+    },
+    payload,
+  };
+}
+
+function assertExperimentalRelease(value: unknown, path: string): void {
+  if (
+    !isRecord(value) ||
+    value.outputProtocolVersion !== experimentalOutputProtocol
+  ) {
+    throw new Error(
+      `${path} is not eligible for experimental lineage truncation`,
+    );
+  }
+}
+
+function assertSerializedRelease(
+  value: unknown,
+  normalizedDefinitionBytes: Uint8Array,
+  compiled: CompileSuccess,
+  path: string,
+): void {
+  if (
+    JSON.stringify(value) !==
+    JSON.stringify(serializedRelease(normalizedDefinitionBytes, compiled))
+  ) {
+    throw new Error(`${path} does not match its current compiler output`);
+  }
 }
 
 interface CompiledLineageRelease {
@@ -218,10 +350,28 @@ function mustCompile(
     typeof compileApplication
   >[0]['expectedActiveRelease'],
 ): CompileSuccess {
+  const result = compileNormalizedDefinition(
+    normalizedDefinitionBytes,
+    expectedActiveRelease,
+  );
+  if (result.status !== 'compiled') {
+    throw new Error(
+      `composed application release did not compile: ${JSON.stringify(result.diagnostics)}`,
+    );
+  }
+  return result;
+}
+
+function compileNormalizedDefinition(
+  normalizedDefinitionBytes: Uint8Array,
+  expectedActiveRelease: Parameters<
+    typeof compileApplication
+  >[0]['expectedActiveRelease'],
+): CompileResult {
   const normalizedDefinition = parseNormalizedApplicationPackageJson(
     normalizedDefinitionBytes,
   );
-  const result = compileApplication({
+  return compileApplication({
     dependencies: [],
     expectedActiveRelease,
     kind: 'compilerInput',
@@ -234,12 +384,6 @@ function mustCompile(
         normalizedDefinition.normalizationProfileVersion,
     },
   });
-  if (result.status !== 'compiled') {
-    throw new Error(
-      `composed application release did not compile: ${JSON.stringify(result.diagnostics)}`,
-    );
-  }
-  return result;
 }
 
 function serializedRelease(

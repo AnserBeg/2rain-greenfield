@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import {
+  CanonicalModelError,
   canonicalize,
   normalizeApplicationPackage,
 } from '../../packages/canonical-model/src/index.js';
@@ -31,6 +32,7 @@ import {
   type StorageTargetPayloadV1,
   type StorageTransitionEnvelope,
 } from '../../packages/compiler/src/index.js';
+import { composedApplicationDefinition } from '../../packages/domain/src/app/builder.js';
 import { inventoryModuleDefinition } from '../../packages/domain/src/inventory/definition.js';
 import {
   FIXTURE_IDS,
@@ -368,6 +370,240 @@ test('pinned family ownership derives legal-entity storage and both business-key
       .filter((index) => index.indexKind === 'caseInsensitiveUnique')
       .every((index) => !index.columnNames.includes('legal_entity_id')),
     true,
+  );
+});
+
+test('entity ownership derives one create-only system input while tenant-shared families cannot author it', () => {
+  const entityOwnedId = 'northstar.app:entity.inventory_transaction';
+  const entityOwnedDefinition = composedApplicationDefinition();
+  const entityOwned = mustCompile(input(entityOwnedDefinition));
+  const entityOwnedOperations = projectionPayload<{
+    operations: Array<{
+      effect: { entity: { targetId: string }; kind: string };
+      inputContract?: {
+        closedArgumentKeys: string[];
+        schemaVersion: string;
+        systemInput?: {
+          argumentKey: string;
+          classification: string;
+          immutableAfterCreate: boolean;
+          physicalColumn: string;
+          required: boolean;
+          valueKind: string;
+        };
+      };
+    }>;
+  }>(entityOwned, PROJECTION_FAMILY_IDS.operationCatalog).operations;
+  const entityOwnedCreate = entityOwnedOperations.find(
+    (operation) =>
+      operation.effect.entity.targetId === entityOwnedId &&
+      operation.effect.kind === 'createRecordEffect',
+  );
+  assert.deepEqual(entityOwnedCreate?.inputContract?.systemInput, {
+    argumentKey: 'legalEntityId',
+    classification: 'INTERNAL',
+    immutableAfterCreate: true,
+    physicalColumn: 'legal_entity_id',
+    required: true,
+    valueKind: 'uuid',
+  });
+  assert.equal(
+    entityOwnedCreate?.inputContract?.schemaVersion,
+    'northstar.module-input-contract/v2',
+  );
+  assert.deepEqual(entityOwnedCreate?.inputContract?.closedArgumentKeys, [
+    'legalEntityId',
+    'recordId',
+    'relations',
+    'values',
+  ]);
+  for (const operation of entityOwnedOperations.filter(
+    (candidate) =>
+      candidate.effect.entity.targetId === entityOwnedId &&
+      candidate.effect.kind !== 'createRecordEffect',
+  )) {
+    assert.equal(
+      Object.hasOwn(operation.inputContract ?? {}, 'systemInput'),
+      false,
+      `${operation.effect.kind} gained the create-only system input`,
+    );
+    assert.equal(
+      operation.inputContract?.closedArgumentKeys.includes('legalEntityId'),
+      false,
+    );
+  }
+
+  const tenantSharedId = 'northstar.app:entity.item';
+  const tenantShared = entityOwned;
+  const tenantSharedCreate = projectionPayload<{
+    operations: Array<{
+      effect: { entity: { targetId: string }; kind: string };
+      inputContract?: {
+        closedArgumentKeys: string[];
+        schemaVersion: string;
+        systemInput?: unknown;
+      };
+    }>;
+  }>(tenantShared, PROJECTION_FAMILY_IDS.operationCatalog).operations.find(
+    (operation) =>
+      operation.effect.entity.targetId === tenantSharedId &&
+      operation.effect.kind === 'createRecordEffect',
+  );
+  assert.equal(
+    Object.hasOwn(tenantSharedCreate?.inputContract ?? {}, 'systemInput'),
+    false,
+  );
+  assert.equal(
+    tenantSharedCreate?.inputContract?.closedArgumentKeys.includes(
+      'legalEntityId',
+    ),
+    false,
+  );
+  assert.equal(
+    tenantSharedCreate?.inputContract?.schemaVersion,
+    'northstar.module-input-contract/v1',
+  );
+
+  const authoredAttempt = structuredClone(entityOwnedDefinition) as {
+    operations: Array<Record<string, unknown>>;
+  };
+  const authoredCreate = authoredAttempt.operations.find(
+    (operation) =>
+      (operation.effect as { kind?: string } | undefined)?.kind ===
+      'createRecordEffect',
+  );
+  assert.ok(authoredCreate);
+  authoredCreate.systemInput = {
+    argumentKey: 'author-chosen-entity',
+    valueKind: 'uuid',
+  };
+  assert.throws(
+    () => normalizeApplicationPackage(authoredAttempt),
+    (error: unknown) =>
+      error instanceof CanonicalModelError &&
+      error.diagnostics.some(
+        (diagnostic) => diagnostic.code === 'CANON_SCHEMA_INVALID',
+      ),
+    'the authored operation shape admitted a second system-input authority',
+  );
+});
+
+test('resolve conformance is derived from lowered text storage in both directions', () => {
+  const compiled = mustCompile(input(composedApplicationDefinition()));
+  const storage = projectionPayload<StorageTargetPayloadV1>(
+    compiled,
+    PROJECTION_FAMILY_IDS.storageTarget,
+  );
+  const queries = projectionPayload<{
+    queries: Array<{
+      queryId: string;
+      queryType: string;
+      resolveMatchKeys: Array<{ fieldId: string; matchKeyId: string }>;
+      sourceEntityId: string;
+    }>;
+  }>(compiled, PROJECTION_FAMILY_IDS.queryCatalog).queries;
+  const resolveByEntity = new Map(
+    queries
+      .filter((query) => query.queryType === 'resolve')
+      .map((query) => [query.sourceEntityId, query] as const),
+  );
+  for (const entity of storage.entities) {
+    const textBackedColumns = entity.columns.filter((column) =>
+      /^(?:text|character varying|varchar)/u.test(column.postgresqlType),
+    );
+    const resolve = resolveByEntity.get(entity.entityId);
+    assert.equal(
+      resolve !== undefined,
+      textBackedColumns.length > 0,
+      `${entity.entityId} resolve presence must match lowered text storage`,
+    );
+    for (const matchKey of resolve?.resolveMatchKeys ?? []) {
+      const column = entity.columns.find(
+        (candidate) => candidate.canonicalFieldId === matchKey.fieldId,
+      );
+      assert.ok(column, `${matchKey.matchKeyId} has no lowered column`);
+      assert.match(
+        column.postgresqlType,
+        /^(?:text|character varying|varchar)/u,
+      );
+    }
+  }
+  assert.equal(
+    resolveByEntity.has('northstar.app:entity.inventory_period_lock'),
+    false,
+  );
+  const surfaces = projectionPayload<unknown>(
+    compiled,
+    PROJECTION_FAMILY_IDS.surfaceManifest,
+  );
+  assert.doesNotMatch(
+    canonicalize(surfaces),
+    /northstar\.app:query\.inventory_period_lock_resolve/u,
+    'no compiled surface depends on the removed unusable resolver',
+  );
+
+  const unsupported = structuredClone(composedApplicationDefinition()) as {
+    queries: Array<{
+      queryId: string;
+      resolveMatchKeys?: Array<{ field: { targetId: string } }>;
+    }>;
+  };
+  const transactionLineResolve = unsupported.queries.find(
+    (query) =>
+      query.queryId ===
+      'northstar.app:query.inventory_transaction_line_resolve',
+  );
+  assert.ok(transactionLineResolve?.resolveMatchKeys?.[0]);
+  transactionLineResolve.resolveMatchKeys[0].field.targetId =
+    'northstar.app:field.inventory_transaction_line_from_location_id';
+  const unsupportedResult = compileApplication(input(unsupported));
+  assert.equal(unsupportedResult.status, 'failed');
+  assert.deepEqual(
+    unsupportedResult.diagnostics.map((diagnostic) => ({
+      code: diagnostic.code,
+      path: diagnostic.path,
+      subjectId: diagnostic.subjectId,
+    })),
+    [
+      {
+        code: 'COMPILER_RESOLVE_MATCH_KEY_STORAGE_UNSUPPORTED',
+        path: '$.queries.resolveMatchKeys.field',
+        subjectId: 'northstar.app:resolve-key.inventory_transaction_line',
+      },
+    ],
+  );
+
+  const missing = structuredClone(composedApplicationDefinition()) as {
+    assertions: Array<{
+      invocation?: { query?: { targetId: string } };
+    }>;
+    queries: Array<{ queryId: string }>;
+  };
+  const itemResolveId = 'northstar.app:query.item_resolve';
+  const itemGetId = 'northstar.app:query.item_get';
+  missing.queries = missing.queries.filter(
+    (query) => query.queryId !== itemResolveId,
+  );
+  for (const assertion of missing.assertions) {
+    if (assertion.invocation?.query?.targetId === itemResolveId) {
+      assertion.invocation.query.targetId = itemGetId;
+    }
+  }
+  const missingResult = compileApplication(input(missing));
+  assert.equal(missingResult.status, 'failed');
+  assert.deepEqual(
+    missingResult.diagnostics.map((diagnostic) => ({
+      code: diagnostic.code,
+      path: diagnostic.path,
+      subjectId: diagnostic.subjectId,
+    })),
+    [
+      {
+        code: 'COMPILER_RESOLVE_QUERY_REQUIRED',
+        path: '$.entities.resolveQuery',
+        subjectId: 'northstar.app:entity.item',
+      },
+    ],
   );
 });
 
