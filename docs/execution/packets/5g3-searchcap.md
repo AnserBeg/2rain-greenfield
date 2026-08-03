@@ -141,6 +141,23 @@ The event is unavoidable because the six ruled first-party search declarations
 change current normalized input and lowered query/storage output. No historical
 bytes, protocol version, or recorded root were hand-edited.
 
+The matrix also identified the independently checked shell demo release as a
+compiler-output consumer. It was regenerated through
+`pnpm --filter @north-star/web build:demo-release`, after which
+`check:demo-release` passes. Its release root moved from
+`0a5362906943d62c7397db835958153a85457356224eb227a05d53c4e143259f`
+to
+`a2f88c9b681b323ee113cde5c2d06e92e4ff25744c7bb72cd5e3310d7a76ea4f`,
+and the checked-in artifact SHA-256 moved from
+`40e58628a8a8520fffe9db130df91b8fe3d7bcc203b7580453befa1cf4ffc7e7`
+to
+`b7e98e880b4f10f00bfa67defc9e657b417b39093c52221a3b610135d07e9692`.
+The shell's authored definition is unchanged. Its release root changes because
+the compiler no longer emits a searchable-exclusion scenario for an entity
+that declares no search query; the generated JSON also returns to the
+repository formatter after the real compile. The semantic generator check
+passes over those formatted bytes; no shell artifact value was edited by hand.
+
 ## Gate evidence
 
 Typecheck passes. The repaired strict-head control passes in isolation. The
