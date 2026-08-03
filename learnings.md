@@ -400,3 +400,13 @@ How to apply: trace a failure from selection through data resolution to slot dis
 Date: 2026-08-02
 Why: a no-loading control borrowed a surface with declared status roles, so restoring the fallback `Loading` branch stayed green because the fixture never executed that branch.
 How to apply: construct every branch-decisive precondition explicitly, run the exact bad mutation, and reject a red that occurs before or after the claimed branch. See `docs/execution/packets/5g3-u4.md`.
+
+## Put external-resource cleanup outside its owner process
+Date: 2026-08-02
+Why: six `--rm` PostgreSQL test containers survived their killed harnesses for up to two days and contaminated every later matrix run.
+How to apply: pair normal `finally` cleanup with a detached, process-identity-bound guardian; kill -9 the real owner and independently observe the external resource disappear. See `docs/execution/packets/leak-guard.md`.
+
+## Keep every best-of-N cold sample genuinely cold
+Date: 2026-08-02
+Why: same-process repetition let warmed V8 state hide first-invocation compiler cost, while one noisy cold sample made an unchanged gate indeterminate in practice.
+How to apply: take each sample's first invocation in a distinct process, retain the unchanged budget, report every sample, and prove both one-noisy-sample PASS and all-slow-samples FAIL. See `docs/execution/packets/leak-guard.md`.
