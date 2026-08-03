@@ -1,6 +1,6 @@
 # 5g3-langgate — derived language conformance instrument
 
-Status: authoring candidate; exhaustive relation corpus remains split
+Status: Critical review revision 1 candidate; exhaustive relation corpus remains split
 
 Tier: Critical
 
@@ -84,10 +84,14 @@ not claim to replace review authority.
 `check:language-coverage` is wired into the root test path, the repository
 matrix, and hosted CI. A receipt claim alone does not discharge an obligation.
 The gate requires a current-run receipt whose integrity digest is valid, whose
-producer test file has successful executed-file credit, whose obligation
-exists in the freshly derived ledger, and whose outcome matches the claim's
-declared `executed`, `typedRefusal`, or defect-only `unhonored` kind. The only
-alternative is one of the exact, digest-bound written decisions above.
+exact producer suite and test file have successful current-run executed-file
+credit, whose obligation exists in the freshly derived ledger, and whose
+outcome matches the claim's declared `executed`, `typedRefusal`, or defect-only
+`unhonored` kind. An execution receipt must carry a checked persisted-effect,
+execution-counter, or produced-artifact observation; a nonempty declaration is
+not an execution fact. Typed-refusal and unhonored receipts have their own
+outcome-specific fact shapes. The only alternative is one of the exact,
+digest-bound written decisions above.
 
 The mandatory negative controls are observed in
 `test/unit/language-conformance-ledger.test.ts`:
@@ -100,7 +104,16 @@ The mandatory negative controls are observed in
 - `evidence-tamper` refuses `LANGUAGE_COVERAGE_RECEIPT_TAMPERED`;
 - `observation-snapshot` separately refuses an absent snapshot with
   `LANGUAGE_COVERAGE_OBSERVATION_SNAPSHOT_MISSING` and an empty snapshot with
-  `LANGUAGE_COVERAGE_OBSERVATION_SNAPSHOT_EMPTY`;
+  `LANGUAGE_COVERAGE_OBSERVATION_SNAPSHOT_EMPTY`; its all-zero bitmap arm
+  refuses `LANGUAGE_COVERAGE_OBSERVATION_SNAPSHOT_ZERO_OBSERVATIONS`;
+- `derived-subject` runs the real TypeScript derivation against temporary
+  authored-empty and lowered-empty specifications and refuses
+  `LANGUAGE_COVERAGE_AUTHORED_LEDGER_SUBJECT_EMPTY` and
+  `LANGUAGE_COVERAGE_LOWERED_LEDGER_SUBJECT_EMPTY` before graph constants can
+  mask the absent source;
+- `observation-subject` separately removes authored inputs, lowered inputs, and
+  all observable values, refusing the two named subject-empty failures and
+  `LANGUAGE_COVERAGE_CURRENT_OBSERVATION_EMPTY`;
 - `entry-skip` refuses `LANGUAGE_COVERAGE_UNCLAIMED_ENTRY` and names the entry;
 - `receipt-claim` refuses `LANGUAGE_COVERAGE_UNCLAIMED_ENTRY` when a checked-in
   claim names a receipt that the current run did not produce;
@@ -120,7 +133,15 @@ The mandatory negative controls are observed in
   fact and refuses `LANGUAGE_COVERAGE_OBSERVATION_CHANGED` rather than allowing
   the declaration-side path to keep it covered;
 - `receipt-shape` refuses an output outcome the parser does not recognize with
-  `LANGUAGE_COVERAGE_RECEIPT_OUTCOME_INVALID`; and
+  `LANGUAGE_COVERAGE_RECEIPT_OUTCOME_INVALID`;
+- `receipt-body` refuses an empty observed fact, a declaration-only execution
+  fact, a wrong receipt version, a refusal whose observed diagnostic differs,
+  an invalid unhonored fact, and an executed-file credit from the right path in
+  the wrong suite;
+- `receipt-reachability` refuses a successful executed-file artifact from a
+  prior run and one whose suite identity differs from the declared producer;
+  the gate now uses the same strict reachability parser as the final
+  reachability check rather than reading only `suiteSucceeded` and a path; and
 - `first-use-transition` starts with the real first-party obligation
   `authoredLanguage:$.fields[].classification="public"` in the unobserved
   partition, changes the composed first-party package to use that value,
@@ -144,6 +165,18 @@ The controls above catch and assert these exact failures:
 
 - absent snapshot: `LANGUAGE_COVERAGE_OBSERVATION_SNAPSHOT_MISSING`
 - empty snapshot: `LANGUAGE_COVERAGE_OBSERVATION_SNAPSHOT_EMPTY`
+- correctly encoded all-zero snapshot:
+  `LANGUAGE_COVERAGE_OBSERVATION_SNAPSHOT_ZERO_OBSERVATIONS`
+- authored derivation absent:
+  `LANGUAGE_COVERAGE_AUTHORED_LEDGER_SUBJECT_EMPTY`
+- lowered derivation absent:
+  `LANGUAGE_COVERAGE_LOWERED_LEDGER_SUBJECT_EMPTY`
+- authored observation input absent:
+  `LANGUAGE_COVERAGE_AUTHORED_OBSERVATION_SUBJECT_EMPTY`
+- lowered observation input absent:
+  `LANGUAGE_COVERAGE_LOWERED_OBSERVATION_SUBJECT_EMPTY`
+- nonempty inputs observe zero facts:
+  `LANGUAGE_COVERAGE_CURRENT_OBSERVATION_EMPTY`
 - accepted-but-unhonored but honored:
   `LANGUAGE_COVERAGE_DISPOSITION_MISMATCH: authoredLanguage:$.relations[].cardinality="manyToOne" is classified accepted-but-unhonored but receipt observed executed`
 - supported but unhonored:
@@ -156,6 +189,16 @@ The controls above catch and assert these exact failures:
   `LANGUAGE_COVERAGE_OBSERVATION_CHANGED: loweredStorage:$.relations[].relationColumn.origin.$presence="present" moved from observedRelationScope to unobserved; add an execution/refusal receipt or record a new explicit decision`
 - a bare defect-inventory line added:
   `LANGUAGE_COVERAGE_STALE_DEFECT_INVENTORY_SET: fixture-observedRelationScope@357ae32cd0ccb69c5f40cf38b84eedc2064d1291f6db57ab2dd2ab4d80ee1fe9 no longer binds the exact accepted-but-unhonored obligation set`
+- empty receipt observation:
+  `LANGUAGE_COVERAGE_RECEIPT_OBSERVED_FACT_EMPTY: receipt-body-control`
+- declaration offered as execution observation:
+  `LANGUAGE_COVERAGE_EXECUTION_FACT_INVALID: receipt-body-control`
+- current receipt credited by the same test path in the wrong suite:
+  `LANGUAGE_COVERAGE_RECEIPT_UNCREDITED_PRODUCER: unit:test/unit/language-conformance-ledger.test.ts`
+- prior-run reachability artifact:
+  `Stale reachability evidence for unit: expected run language-conformance-control, received previous-run`
+- wrong-suite reachability artifact:
+  `Reachability evidence metadata mismatch for unit`
 
 The last control does **not** make adjudication cryptographic. A future lane can
 add a defect-inventory entry, recompute the set digest, and mint the resulting
@@ -218,6 +261,27 @@ All three decision ledger/set digests and decision identities were re-derived
 from that corrected ledger; none of the pre-correction digests was carried
 forward.
 
+## Critical review convergence
+
+The first fresh naive Codex `gpt-5.6-sol` xhigh arm reviewed frozen SHA
+`5d62cfbd369c7d38c20f62ac13c0fe019088e7fb` after its exact-SHA full matrix
+passed and returned `VERDICT: REVISE`. L1, L2, L4, L6, and L7 passed. Its two
+material finding classes were accepted:
+
+1. a correctly sized all-zero observation bitmap was admitted, and fixed graph
+   axes could mask an empty authored or lowered derivation; and
+2. receipt credit checked the receipt run and test path but did not bind the
+   executed-file artifact's run or suite, while a declaration-only nonempty
+   `observedFact` could be labelled `executed`.
+
+Revision 1 adds the executed reds named above. Reachability evidence is parsed
+against the current run, declared suite, runner, and exact argv before the
+suite/test pair can earn credit. Receipt facts are versioned and restricted to
+direct observation forms: matching persisted values, a positive execution
+counter, a matching produced-artifact digest, an exact typed-refusal
+diagnostic, or the accepted-but-unhonored fact. No accepted language shape,
+decision category, exemption, or partition was widened.
+
 ## Calibration against the escaped defects
 
 The table distinguishes what this checkpoint proves now from what the complete
@@ -245,8 +309,12 @@ invariant. Defects 5 and 6 remain outside this instrument.
 ## Focused verification
 
 - `corepack pnpm typecheck` — PASS
-- `corepack pnpm test:unit` — PASS, 73/73 after the main merge and vacuity
-  controls. Earlier work observed the new ledger control red because the
+- focused `test/unit/language-conformance-ledger.test.ts` — PASS, 21/21 after
+  Critical review revision 1. The three added controls cover empty derived and
+  observed subjects, current-run/suite-bound executed-file credit, and
+  non-proxy receipt facts.
+- `corepack pnpm test:unit` — PASS, 76/76 on revision 1. Earlier work observed
+  the new ledger control red because the
   authored optional-boolean union was not enumerated; the walker was corrected
   to retain finite members beside `undefined`. The pre-handoff missing-axis
   control then independently failed against the earlier walker for the mixed
@@ -258,21 +326,21 @@ invariant. Defects 5 and 6 remain outside this instrument.
   derivations are byte-identical. An earlier 65/65 unit run overlapped KERNEL's
   matrix because the lane check and suite were incorrectly chained; it is not
   credited here. The reported unit result is the subsequent quiet rerun.
-- `corepack pnpm test:architecture` — pre-merge authoring evidence was PASS,
-  106/106. The post-merge focused run is environmentally red before LANGGATE's
-  architecture assertions: Docker Desktop is not mounted in this WSL distro,
-  so leak-guard's real-container controls fail at `docker run` with `The command
-  'docker' could not be found in this WSL 2 distro`; its parent-victim control
-  then waits indefinitely after the worker exits, so the focused run was
-  interrupted. No test was skipped or weakened. A frozen full matrix remains
-  required after Docker is restored.
-- `corepack pnpm check:language-coverage` — pre-merge authoring evidence only;
-  the refreshed focused run reports PASS: 1,899 obligations, 0 receipts, 1,899
+- `corepack pnpm test:architecture` — PASS, 116/116 in the first exact-SHA full
+  matrix after Docker was restored, including leak-guard's real-container
+  controls. The earlier environment-only Docker absence is superseded by this
+  successful run.
+- `corepack pnpm check:language-coverage` — the revision-1 focused run reports
+  PASS: 1,899 obligations, 0 receipts, 1,899
   decision-covered obligations, 396 first-party observations, and relation
   partition `94 = 0 + 89 + 5`. Its next
   line states the narrower reviewed-record/identity meaning and the absence of
   execution coverage.
-- `corepack pnpm format`, `corepack pnpm lint`, and `git diff --check` — PASS.
+- first frozen-candidate full matrix — PASS at
+  `5d62cfbd369c7d38c20f62ac13c0fe019088e7fb`; superseded by revision 1, which
+  requires its own exact-SHA matrix before the second review arm.
+- `corepack pnpm format`, `corepack pnpm typecheck`, `corepack pnpm lint`, and
+  `git diff --check` — PASS for revision 1.
 
 The exhaustive relation corpus is intentionally absent from this packet. It
 was split by ruling after the second derivation source materially grew the

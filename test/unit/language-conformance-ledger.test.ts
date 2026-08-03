@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import test from 'node:test';
 
 import { normalizeApplicationPackage } from '../../packages/canonical-model/src/index.js';
@@ -18,6 +25,7 @@ import {
   deriveObligationSetDigest,
   decodeLanguageCoverageObservationSnapshot,
   evaluateLanguageCoverage,
+  languageCoverageProducerFileKey,
   makeLanguageCoverageReceipt,
   observeLanguageCoverage,
   type LanguageCoverageDecision,
@@ -26,9 +34,15 @@ import {
   type LanguageCoverageObligation,
   type LanguageCoverageReceipt,
 } from '../helpers/language-conformance-ledger.js';
+import { parseReachabilityEvidence } from '../helpers/reachability-evidence.js';
+import { getReachabilityProducer } from '../helpers/reachability-producers.js';
 
 const testFile = 'test/unit/language-conformance-ledger.test.ts';
 const runId = 'language-conformance-control';
+const producerCredit = languageCoverageProducerFileKey({
+  suiteId: 'unit',
+  testFile,
+});
 
 test('the ledger derives authored and lowered closed choices from both specifications', () => {
   const ledger = deriveLanguageCoverageLedger();
@@ -98,6 +112,51 @@ test('missing-axis control retains finite members beside open union members', ()
   }
 });
 
+test('derived-subject controls refuse an empty authored or lowered type surface', () => {
+  for (const { authoredSource, expected, loweredSource } of [
+    {
+      authoredSource: 'export type VersionedAuthoredApplicationPackage = {};\n',
+      expected: /LANGUAGE_COVERAGE_AUTHORED_LEDGER_SUBJECT_EMPTY/u,
+      loweredSource: "export type StorageTargetPayloadV1 = { kind: 'one' };\n",
+    },
+    {
+      authoredSource:
+        "export type VersionedAuthoredApplicationPackage = { kind: 'one' | 'two' };\n",
+      expected: /LANGUAGE_COVERAGE_LOWERED_LEDGER_SUBJECT_EMPTY/u,
+      loweredSource: 'export type StorageTargetPayloadV1 = {};\n',
+    },
+  ]) {
+    const root = mkdtempSync(join(tmpdir(), 'language-ledger-subject-'));
+    try {
+      mkdirSync(resolve(root, 'packages/canonical-model/src'), {
+        recursive: true,
+      });
+      mkdirSync(resolve(root, 'packages/compiler/src'), { recursive: true });
+      writeFileSync(
+        resolve(root, 'tsconfig.json'),
+        `${JSON.stringify({
+          compilerOptions: { strict: true },
+          files: [
+            'packages/canonical-model/src/schemas.ts',
+            'packages/compiler/src/storage.ts',
+          ],
+        })}\n`,
+      );
+      writeFileSync(
+        resolve(root, 'packages/canonical-model/src/schemas.ts'),
+        authoredSource,
+      );
+      writeFileSync(
+        resolve(root, 'packages/compiler/src/storage.ts'),
+        loweredSource,
+      );
+      assert.throws(() => deriveLanguageCoverageLedger(root), expected);
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
+  }
+});
+
 test('ledger bytes and code-point ordering do not depend on the ambient locale', () => {
   assert.deepEqual(['ä', 'z', '😀', 'A'].sort(compareCodePoints), [
     'A',
@@ -148,7 +207,7 @@ test('the language gate is wired into local, matrix, and hosted acceptance paths
   );
 });
 
-test('observation snapshot controls refuse an absent or empty snapshot', () => {
+test('observation controls refuse absent subjects and zero observations', () => {
   const ledger = fixtureLedger();
 
   assert.throws(
@@ -159,6 +218,41 @@ test('observation snapshot controls refuse an absent or empty snapshot', () => {
     () => decodeLanguageCoverageObservationSnapshot(ledger, {}),
     /LANGUAGE_COVERAGE_OBSERVATION_SNAPSHOT_EMPTY/u,
   );
+  assert.throws(
+    () =>
+      decodeLanguageCoverageObservationSnapshot(ledger, {
+        bitmapEncoding: 'sorted-obligation-bitset-msb0-hex/v1',
+        ledgerDigest: ledger.digest,
+        obligationCount: ledger.obligations.length,
+        observedBitmap: '00',
+        observedCount: 0,
+      }),
+    /LANGUAGE_COVERAGE_OBSERVATION_SNAPSHOT_ZERO_OBSERVATIONS/u,
+  );
+  assert.throws(
+    () =>
+      observeLanguageCoverage(ledger, {
+        applicationPackages: [],
+        storageTargets: [{}],
+      }),
+    /LANGUAGE_COVERAGE_AUTHORED_OBSERVATION_SUBJECT_EMPTY/u,
+  );
+  assert.throws(
+    () =>
+      observeLanguageCoverage(ledger, {
+        applicationPackages: [{}],
+        storageTargets: [],
+      }),
+    /LANGUAGE_COVERAGE_LOWERED_OBSERVATION_SUBJECT_EMPTY/u,
+  );
+  assert.throws(
+    () =>
+      observeLanguageCoverage(ledger, {
+        applicationPackages: [{}],
+        storageTargets: [{}],
+      }),
+    /LANGUAGE_COVERAGE_CURRENT_OBSERVATION_EMPTY/u,
+  );
 });
 
 test('phantom-axis control refuses a claim for an obligation absent from the derived ledger', () => {
@@ -168,7 +262,7 @@ test('phantom-axis control refuses a claim for an obligation absent from the der
     () =>
       evaluateLanguageCoverage({
         acceptedButUnhonoredObligationIds: new Set(),
-        creditedTestFiles: new Set([testFile]),
+        creditedProducerFiles: new Set([producerCredit]),
         decisionObservedObligationIds: new Set(),
         decisions: fixtureDecisions(ledger),
         ledger,
@@ -193,14 +287,19 @@ test('evidence-tamper control refuses an altered execution receipt', () => {
   const receipt = executionReceipt(obligation);
   const tampered = {
     ...receipt,
-    observedFact: { storedValue: 'forged-after-observation' },
+    observedFact: {
+      expectedValue: false,
+      kind: 'persistedEffect',
+      observedValue: false,
+      subject: 'fixture stored value',
+    },
   } satisfies LanguageCoverageReceipt;
 
   assert.throws(
     () =>
       evaluateLanguageCoverage({
         acceptedButUnhonoredObligationIds: new Set(),
-        creditedTestFiles: new Set([testFile]),
+        creditedProducerFiles: new Set([producerCredit]),
         decisionObservedObligationIds: new Set(),
         decisions: fixtureDecisions(ledger),
         ledger,
@@ -227,7 +326,7 @@ test('receipt-shape control refuses an unrecognized outcome', () => {
     () =>
       makeLanguageCoverageReceipt({
         obligationId: obligation.id,
-        observedFact: { storedValue: true },
+        observedFact: persistedFact(),
         outcome: 'unexpected-output-shape',
         producer: { suiteId: 'unit', testFile },
         receiptId: 'unknown-outcome',
@@ -239,6 +338,128 @@ test('receipt-shape control refuses an unrecognized outcome', () => {
   );
 });
 
+test('receipt evidence must be versioned, nonempty, outcome-specific, and suite-bound', () => {
+  const ledger = fixtureLedger();
+  const obligation = ledger.obligations[0]!;
+  const base = {
+    obligationId: obligation.id,
+    outcome: 'executed' as const,
+    producer: { suiteId: 'unit', testFile },
+    receiptId: 'receipt-body-control',
+    runId,
+    version: LANGUAGE_COVERAGE_RECEIPT_VERSION,
+    witnessId: 'receipt-body-control',
+  };
+
+  assert.throws(
+    () => makeLanguageCoverageReceipt({ ...base, observedFact: {} }),
+    /LANGUAGE_COVERAGE_RECEIPT_OBSERVED_FACT_EMPTY: receipt-body-control/u,
+  );
+  assert.throws(
+    () =>
+      makeLanguageCoverageReceipt({
+        ...base,
+        observedFact: { declarationSeen: true },
+      }),
+    /LANGUAGE_COVERAGE_EXECUTION_FACT_INVALID: receipt-body-control/u,
+  );
+  assert.throws(
+    () =>
+      makeLanguageCoverageReceipt({
+        ...base,
+        observedFact: persistedFact(),
+        version: 'northstar.language-coverage-receipt/v0',
+      } as never),
+    /LANGUAGE_COVERAGE_RECEIPT_VERSION_INVALID: northstar.language-coverage-receipt\/v0/u,
+  );
+  assert.throws(
+    () =>
+      makeLanguageCoverageReceipt({
+        ...base,
+        observedFact: { diagnostic: 'OTHER', kind: 'typedRefusal' },
+        outcome: 'typedRefusal',
+        refusalDiagnostic: 'EXPECTED',
+      }),
+    /LANGUAGE_COVERAGE_REFUSAL_FACT_MISMATCH: receipt-body-control/u,
+  );
+  assert.throws(
+    () =>
+      makeLanguageCoverageReceipt({
+        ...base,
+        observedFact: {
+          accepted: true,
+          honored: true,
+          kind: 'unhonored',
+        },
+        outcome: 'unhonored',
+      }),
+    /LANGUAGE_COVERAGE_UNHONORED_FACT_INVALID: receipt-body-control/u,
+  );
+
+  const receipt = makeLanguageCoverageReceipt({
+    ...base,
+    observedFact: persistedFact(),
+  });
+  assert.throws(
+    () =>
+      evaluateLanguageCoverage({
+        acceptedButUnhonoredObligationIds: new Set(),
+        creditedProducerFiles: new Set([
+          languageCoverageProducerFileKey({
+            suiteId: 'architecture',
+            testFile,
+          }),
+        ]),
+        decisionObservedObligationIds: new Set(),
+        decisions: fixtureDecisions(ledger),
+        ledger,
+        observedObligationIds: new Set(),
+        receiptClaims: [
+          {
+            expectedOutcome: 'executed',
+            obligationId: obligation.id,
+            receiptId: receipt.receiptId,
+          },
+        ],
+        receipts: [receipt],
+        runId,
+      }),
+    new RegExp(
+      `LANGUAGE_COVERAGE_RECEIPT_UNCREDITED_PRODUCER: unit:${escapeRegExp(testFile)}`,
+      'u',
+    ),
+  );
+});
+
+test('receipt credit refuses reachability evidence from another run or suite', () => {
+  const producer = getReachabilityProducer('unit');
+  const evidence = JSON.stringify({
+    argv: producer.argv,
+    files: [{ path: resolve(testFile), realResultCount: 1 }],
+    runId: 'previous-run',
+    runner: producer.runner,
+    suiteId: producer.id,
+    suiteSucceeded: true,
+    version: 2,
+  });
+  assert.throws(
+    () => parseReachabilityEvidence(evidence, producer, runId),
+    new RegExp(
+      `Stale reachability evidence for unit: expected run ${runId}, received previous-run`,
+      'u',
+    ),
+  );
+  assert.throws(
+    () =>
+      parseReachabilityEvidence(
+        JSON.stringify({ ...JSON.parse(evidence), runId, suiteId: 'compiler' }),
+        producer,
+        runId,
+      ),
+    /Reachability evidence metadata mismatch for unit/u,
+  );
+});
+
 test('entry-skip control names an obligation with neither evidence nor a written decision', () => {
   const ledger = fixtureLedger();
   const obligation = ledger.obligations[0]!;
@@ -247,7 +468,7 @@ test('entry-skip control names an obligation with neither evidence nor a written
     () =>
       evaluateLanguageCoverage({
         acceptedButUnhonoredObligationIds: new Set(),
-        creditedTestFiles: new Set([testFile]),
+        creditedProducerFiles: new Set([producerCredit]),
         decisionObservedObligationIds: new Set(),
         decisions: [],
         ledger,
@@ -271,7 +492,7 @@ test('receipt-claim control refuses a claim that no current run produced', () =>
     () =>
       evaluateLanguageCoverage({
         acceptedButUnhonoredObligationIds: new Set(),
-        creditedTestFiles: new Set([testFile]),
+        creditedProducerFiles: new Set([producerCredit]),
         decisionObservedObligationIds: new Set(),
         decisions: fixtureDecisions(ledger),
         ledger,
@@ -298,7 +519,10 @@ test('refusal-distinguisher control cannot use a typed refusal as an execution r
   const obligation = ledger.obligations[0]!;
   const refusal = makeLanguageCoverageReceipt({
     obligationId: obligation.id,
-    observedFact: { diagnostic: 'SYNTHETIC_TYPED_REFUSAL' },
+    observedFact: {
+      diagnostic: 'SYNTHETIC_TYPED_REFUSAL',
+      kind: 'typedRefusal',
+    },
     outcome: 'typedRefusal',
     producer: { suiteId: 'unit', testFile },
     receiptId: 'refusal-receipt',
@@ -312,7 +536,7 @@ test('refusal-distinguisher control cannot use a typed refusal as an execution r
     () =>
       evaluateLanguageCoverage({
         acceptedButUnhonoredObligationIds: new Set(),
-        creditedTestFiles: new Set([testFile]),
+        creditedProducerFiles: new Set([producerCredit]),
         decisionObservedObligationIds: new Set(),
         decisions: fixtureDecisions(ledger),
         ledger,
@@ -341,7 +565,7 @@ test('disposition controls reject honoured behavior classified as a defect and u
     () =>
       evaluateLanguageCoverage({
         acceptedButUnhonoredObligationIds: defectSet,
-        creditedTestFiles: new Set([testFile]),
+        creditedProducerFiles: new Set([producerCredit]),
         decisionObservedObligationIds: new Set(),
         decisions: decisionsFor(
           ledger,
@@ -369,7 +593,7 @@ test('disposition controls reject honoured behavior classified as a defect and u
 
   const unhonored = makeLanguageCoverageReceipt({
     obligationId: obligation.id,
-    observedFact: { accepted: true, honored: false },
+    observedFact: { accepted: true, honored: false, kind: 'unhonored' },
     outcome: 'unhonored',
     producer: { suiteId: 'unit', testFile },
     receiptId: 'unhonored-receipt',
@@ -381,7 +605,7 @@ test('disposition controls reject honoured behavior classified as a defect and u
     () =>
       evaluateLanguageCoverage({
         acceptedButUnhonoredObligationIds: new Set(),
-        creditedTestFiles: new Set([testFile]),
+        creditedProducerFiles: new Set([producerCredit]),
         decisionObservedObligationIds: new Set(),
         decisions: fixtureDecisions(ledger),
         ledger,
@@ -412,7 +636,7 @@ test('a bare defect-inventory addition cannot retain the prior decision identiti
     () =>
       evaluateLanguageCoverage({
         acceptedButUnhonoredObligationIds: defectSet,
-        creditedTestFiles: new Set(),
+        creditedProducerFiles: new Set(),
         decisionObservedObligationIds: new Set(),
         decisions: fixtureDecisions(ledger),
         ledger,
@@ -427,7 +651,7 @@ test('a bare defect-inventory addition cannot retain the prior decision identiti
   assert.doesNotThrow(() =>
     evaluateLanguageCoverage({
       acceptedButUnhonoredObligationIds: defectSet,
-      creditedTestFiles: new Set(),
+      creditedProducerFiles: new Set(),
       decisionObservedObligationIds: new Set(),
       decisions: decisionsFor(
         ledger,
@@ -453,8 +677,11 @@ test('execution and typed-refusal receipts can take over a moved obligation with
       obligationId: obligation.id,
       observedFact:
         outcome === 'executed'
-          ? { storedValue: true }
-          : { diagnostic: 'SYNTHETIC_TYPED_REFUSAL' },
+          ? persistedFact()
+          : {
+              diagnostic: 'SYNTHETIC_TYPED_REFUSAL',
+              kind: 'typedRefusal',
+            },
       outcome,
       producer: { suiteId: 'unit', testFile },
       receiptId: `moved-obligation-${outcome}`,
@@ -467,7 +694,7 @@ test('execution and typed-refusal receipts can take over a moved obligation with
     });
     const result = evaluateLanguageCoverage({
       acceptedButUnhonoredObligationIds: new Set(),
-      creditedTestFiles: new Set([testFile]),
+      creditedProducerFiles: new Set([producerCredit]),
       decisionObservedObligationIds: new Set(),
       decisions: fixtureDecisions(ledger),
       ledger,
@@ -509,7 +736,7 @@ test('first use of an unobserved first-party shape requires evidence or a new de
   assert.doesNotThrow(() =>
     evaluateLanguageCoverage({
       acceptedButUnhonoredObligationIds: new Set(),
-      creditedTestFiles: new Set(),
+      creditedProducerFiles: new Set(),
       decisionObservedObligationIds: baselineObserved,
       decisions: baselineDecisions,
       ledger,
@@ -535,7 +762,7 @@ test('first use of an unobserved first-party shape requires evidence or a new de
     () =>
       evaluateLanguageCoverage({
         acceptedButUnhonoredObligationIds: new Set(),
-        creditedTestFiles: new Set(),
+        creditedProducerFiles: new Set(),
         decisionObservedObligationIds: baselineObserved,
         decisions: baselineDecisions,
         ledger,
@@ -554,7 +781,7 @@ test('first use of an unobserved first-party shape requires evidence or a new de
     () =>
       evaluateLanguageCoverage({
         acceptedButUnhonoredObligationIds: new Set(),
-        creditedTestFiles: new Set(),
+        creditedProducerFiles: new Set(),
         decisionObservedObligationIds: changedObserved,
         decisions: baselineDecisions,
         ledger,
@@ -578,7 +805,7 @@ test('first use of an unobserved first-party shape requires evidence or a new de
     () =>
       evaluateLanguageCoverage({
         acceptedButUnhonoredObligationIds: new Set(),
-        creditedTestFiles: new Set(),
+        creditedProducerFiles: new Set(),
         decisionObservedObligationIds: changedObserved,
         decisions: mechanicallyRetargetedDecisions,
         ledger,
@@ -600,7 +827,7 @@ test('first use of an unobserved first-party shape requires evidence or a new de
   }
   const newDecisionResult = evaluateLanguageCoverage({
     acceptedButUnhonoredObligationIds: new Set(),
-    creditedTestFiles: new Set(),
+    creditedProducerFiles: new Set(),
     decisionObservedObligationIds: changedObserved,
     decisions: newDecisions,
     ledger,
@@ -654,7 +881,7 @@ test('product-deletion control detects removal of an observed lowered relation f
     () =>
       evaluateLanguageCoverage({
         acceptedButUnhonoredObligationIds: new Set(),
-        creditedTestFiles: new Set(),
+        creditedProducerFiles: new Set(),
         decisionObservedObligationIds: baselineObserved,
         decisions: decisionsFor(
           ledger,
@@ -683,7 +910,7 @@ test('a written decision is tied to the exact derived ledger digest', () => {
     () =>
       evaluateLanguageCoverage({
         acceptedButUnhonoredObligationIds: new Set(),
-        creditedTestFiles: new Set(),
+        creditedProducerFiles: new Set(),
         decisionObservedObligationIds: new Set(),
         decisions: [{ ...decision, ledgerDigest: '0'.repeat(64) }],
         ledger,
@@ -721,7 +948,7 @@ test('language-growth control invalidates decisions when the derived ledger gain
     () =>
       evaluateLanguageCoverage({
         acceptedButUnhonoredObligationIds: new Set(),
-        creditedTestFiles: new Set(),
+        creditedProducerFiles: new Set(),
         decisionObservedObligationIds: new Set(),
         decisions: fixtureDecisions(ledger),
         ledger: grownLedger,
@@ -849,7 +1076,7 @@ function executionReceipt(
 ): LanguageCoverageReceipt {
   return makeLanguageCoverageReceipt({
     obligationId: obligation.id,
-    observedFact: { storedValue: true },
+    observedFact: persistedFact(),
     outcome: 'executed',
     producer: { suiteId: 'unit', testFile },
     receiptId: 'valid-execution-receipt',
@@ -857,6 +1084,15 @@ function executionReceipt(
     version: LANGUAGE_COVERAGE_RECEIPT_VERSION,
     witnessId: 'evidence-tamper-control',
   });
+}
+
+function persistedFact(): Readonly<Record<string, unknown>> {
+  return {
+    expectedValue: true,
+    kind: 'persistedEffect',
+    observedValue: true,
+    subject: 'fixture stored value',
+  };
 }
 
 function escapeRegExp(value: string): string {

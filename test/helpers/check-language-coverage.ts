@@ -15,7 +15,13 @@ import {
   type LanguageCoverageReceipt,
   type LanguageCoverageReceiptClaim,
   type LanguageCoverageObservationSnapshot,
+  languageCoverageProducerFileKey,
 } from './language-conformance-ledger.js';
+import {
+  normalizeEvidencePath,
+  parseReachabilityEvidence,
+} from './reachability-evidence.js';
+import { reachabilityProducers } from './reachability-producers.js';
 import { resolveReachabilityRunId } from './reachability-run.mjs';
 
 const decisionsPath =
@@ -79,16 +85,17 @@ try {
         resolve(repositoryRoot, path),
       ) as unknown as LanguageCoverageReceipt,
   );
+  const runId = resolveReachabilityRunId({ repositoryRoot });
   const result = evaluateLanguageCoverage({
     acceptedButUnhonoredObligationIds,
-    creditedTestFiles: creditedTestFiles(repositoryRoot),
+    creditedProducerFiles: creditedProducerFiles(repositoryRoot, runId),
     decisionObservedObligationIds,
     decisions,
     ledger,
     observedObligationIds,
     receiptClaims: claims,
     receipts,
-    runId: resolveReachabilityRunId({ repositoryRoot }),
+    runId,
   });
   process.stdout.write(
     `language coverage: PASS (${String(result.obligationCount)} obligations; ${String(result.receiptCount)} receipts; ${String(result.decisionCount)} decision-covered obligations; ${String(observedObligationIds.size)} first-party observations)\n`,
@@ -106,27 +113,44 @@ try {
   process.exitCode = 1;
 }
 
-function creditedTestFiles(repositoryRoot: string): ReadonlySet<string> {
+function creditedProducerFiles(
+  repositoryRoot: string,
+  runId: string,
+): ReadonlySet<string> {
   const credited = new Set<string>();
-  for (const path of globSync('test-results/reachability/*.json', {
-    cwd: repositoryRoot,
-  })) {
-    const evidence = readObject(resolve(repositoryRoot, path));
-    if (evidence.suiteSucceeded !== true || !Array.isArray(evidence.files)) {
-      continue;
+  for (const producer of reachabilityProducers) {
+    const artifactPath = resolve(repositoryRoot, producer.evidencePath);
+    if (!existsSync(artifactPath)) continue;
+    const serialized = readFileSync(artifactPath, 'utf8');
+    if (serialized.trim().length === 0) {
+      throw new Error(
+        `LANGUAGE_COVERAGE_EMPTY_REACHABILITY_EVIDENCE: ${producer.id}`,
+      );
+    }
+    const evidence = parseReachabilityEvidence(serialized, producer, runId);
+    if (!evidence.suiteSucceeded) {
+      throw new Error(
+        `LANGUAGE_COVERAGE_UNSUCCESSFUL_REACHABILITY_EVIDENCE: ${producer.id}`,
+      );
+    }
+    if (evidence.files.length === 0) {
+      throw new Error(
+        `LANGUAGE_COVERAGE_ZERO_FILE_REACHABILITY_EVIDENCE: ${producer.id}`,
+      );
     }
     for (const file of evidence.files) {
       if (
-        typeof file === 'object' &&
-        file !== null &&
-        'path' in file &&
-        typeof file.path === 'string' &&
-        'realResultCount' in file &&
-        typeof file.realResultCount === 'number' &&
-        file.realResultCount > 0
+        !Number.isSafeInteger(file.realResultCount) ||
+        file.realResultCount <= 0
       ) {
-        credited.add(file.path);
+        throw new Error(
+          `LANGUAGE_COVERAGE_INVALID_REAL_RESULT_COUNT: ${producer.id}:${String(file.realResultCount)}`,
+        );
       }
+      const testFile = normalizeEvidencePath(repositoryRoot, file.path);
+      credited.add(
+        languageCoverageProducerFileKey({ suiteId: producer.id, testFile }),
+      );
     }
   }
   return credited;

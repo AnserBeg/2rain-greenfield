@@ -88,7 +88,7 @@ export type LanguageCoverageDecisionBody = Omit<
 
 export interface EvaluateLanguageCoverageInput {
   readonly acceptedButUnhonoredObligationIds: ReadonlySet<string>;
-  readonly creditedTestFiles: ReadonlySet<string>;
+  readonly creditedProducerFiles: ReadonlySet<string>;
   readonly decisionObservedObligationIds: ReadonlySet<string>;
   readonly decisions: readonly LanguageCoverageDecision[];
   readonly ledger: LanguageCoverageLedger;
@@ -175,6 +175,12 @@ export function deriveLanguageCoverageLedger(
     'loweredStorage',
     true,
   );
+  if (authoredAxes.length === 0) {
+    throw new Error('LANGUAGE_COVERAGE_AUTHORED_LEDGER_SUBJECT_EMPTY');
+  }
+  if (loweredAxes.length === 0) {
+    throw new Error('LANGUAGE_COVERAGE_LOWERED_LEDGER_SUBJECT_EMPTY');
+  }
   const axes = [
     ...authoredAxes,
     {
@@ -218,6 +224,12 @@ export function observeLanguageCoverage(
     storageTargets: readonly unknown[];
   }>,
 ): ReadonlySet<string> {
+  if (input.applicationPackages.length === 0) {
+    throw new Error('LANGUAGE_COVERAGE_AUTHORED_OBSERVATION_SUBJECT_EMPTY');
+  }
+  if (input.storageTargets.length === 0) {
+    throw new Error('LANGUAGE_COVERAGE_LOWERED_OBSERVATION_SUBJECT_EMPTY');
+  }
   const observed = new Set<string>();
   for (const obligation of ledger.obligations) {
     const roots =
@@ -244,6 +256,9 @@ export function observeLanguageCoverage(
     ) {
       observed.add(obligation.id);
     }
+  }
+  if (observed.size === 0) {
+    throw new Error('LANGUAGE_COVERAGE_CURRENT_OBSERVATION_EMPTY');
   }
   return observed;
 }
@@ -320,7 +335,7 @@ export function evaluateLanguageCoverage(
         `LANGUAGE_COVERAGE_PHANTOM_OBLIGATION: ${receipt.obligationId}`,
       );
     }
-    validateReceipt(receipt, input.runId, input.creditedTestFiles);
+    validateReceipt(receipt, input.runId, input.creditedProducerFiles);
   }
 
   const validDecisions = new Map<
@@ -533,6 +548,9 @@ export function decodeLanguageCoverageObservationSnapshot(
     throw new Error(
       `LANGUAGE_COVERAGE_OBSERVATION_BITMAP_COUNT_MISMATCH: snapshot names ${String(snapshot.observedCount)}, bitmap contains ${String(observed.size)}`,
     );
+  }
+  if (observed.size === 0) {
+    throw new Error('LANGUAGE_COVERAGE_OBSERVATION_SNAPSHOT_ZERO_OBSERVATIONS');
   }
   const unusedBits = bytes.length * 8 - ledger.obligations.length;
   if (unusedBits > 0) {
@@ -887,7 +905,7 @@ function hasDisconnectedComponents(
 function validateReceipt(
   receipt: LanguageCoverageReceipt,
   runId: string,
-  creditedTestFiles: ReadonlySet<string>,
+  creditedProducerFiles: ReadonlySet<string>,
 ): void {
   const { integrityDigest, ...body } = receipt;
   assertReceiptBody(body);
@@ -899,11 +917,21 @@ function validateReceipt(
       `LANGUAGE_COVERAGE_RECEIPT_WRONG_RUN: ${receipt.receiptId}`,
     );
   }
-  if (!creditedTestFiles.has(receipt.producer.testFile)) {
+  if (
+    !creditedProducerFiles.has(
+      languageCoverageProducerFileKey(receipt.producer),
+    )
+  ) {
     throw new Error(
-      `LANGUAGE_COVERAGE_RECEIPT_UNCREDITED_PRODUCER: ${receipt.producer.testFile}`,
+      `LANGUAGE_COVERAGE_RECEIPT_UNCREDITED_PRODUCER: ${receipt.producer.suiteId}:${receipt.producer.testFile}`,
     );
   }
+}
+
+export function languageCoverageProducerFileKey(
+  producer: Readonly<{ readonly suiteId: string; readonly testFile: string }>,
+): string {
+  return stableStringify([producer.suiteId, producer.testFile]);
 }
 
 function assertReceiptBody(body: LanguageCoverageReceiptBody): void {
@@ -917,14 +945,39 @@ function assertReceiptBody(body: LanguageCoverageReceiptBody): void {
   ) {
     throw new Error('LANGUAGE_COVERAGE_RECEIPT_INCOMPLETE');
   }
+  if (body.version !== LANGUAGE_COVERAGE_RECEIPT_VERSION) {
+    throw new Error(
+      `LANGUAGE_COVERAGE_RECEIPT_VERSION_INVALID: ${String(body.version)}`,
+    );
+  }
+  if (
+    !isRecord(body.observedFact) ||
+    Object.keys(body.observedFact).length === 0
+  ) {
+    throw new Error(
+      `LANGUAGE_COVERAGE_RECEIPT_OBSERVED_FACT_EMPTY: ${body.receiptId}`,
+    );
+  }
   if (!isLanguageCoverageOutcome(body.outcome)) {
     throw new Error(
       `LANGUAGE_COVERAGE_RECEIPT_OUTCOME_INVALID: ${String(body.outcome)}`,
     );
   }
+  if (body.outcome === 'executed') {
+    assertExecutedObservedFact(body.receiptId, body.observedFact);
+  }
   if (body.outcome === 'typedRefusal' && !body.refusalDiagnostic) {
     throw new Error(
       `LANGUAGE_COVERAGE_REFUSAL_WITHOUT_DIAGNOSTIC: ${body.receiptId}`,
+    );
+  }
+  if (
+    body.outcome === 'typedRefusal' &&
+    (body.observedFact.kind !== 'typedRefusal' ||
+      body.observedFact.diagnostic !== body.refusalDiagnostic)
+  ) {
+    throw new Error(
+      `LANGUAGE_COVERAGE_REFUSAL_FACT_MISMATCH: ${body.receiptId}`,
     );
   }
   if (body.outcome === 'executed' && body.refusalDiagnostic !== undefined) {
@@ -937,6 +990,61 @@ function assertReceiptBody(body: LanguageCoverageReceiptBody): void {
       `LANGUAGE_COVERAGE_UNHONORED_WITH_REFUSAL: ${body.receiptId}`,
     );
   }
+  if (
+    body.outcome === 'unhonored' &&
+    (body.observedFact.kind !== 'unhonored' ||
+      body.observedFact.accepted !== true ||
+      body.observedFact.honored !== false)
+  ) {
+    throw new Error(
+      `LANGUAGE_COVERAGE_UNHONORED_FACT_INVALID: ${body.receiptId}`,
+    );
+  }
+}
+
+function assertExecutedObservedFact(
+  receiptId: string,
+  observedFact: Readonly<Record<string, unknown>>,
+): void {
+  const subject = observedFact.subject;
+  if (typeof subject !== 'string' || subject.trim().length === 0) {
+    throw new Error(`LANGUAGE_COVERAGE_EXECUTION_FACT_INVALID: ${receiptId}`);
+  }
+  if (observedFact.kind === 'persistedEffect') {
+    if (
+      !Object.hasOwn(observedFact, 'expectedValue') ||
+      !Object.hasOwn(observedFact, 'observedValue') ||
+      observedFact.expectedValue === undefined ||
+      observedFact.observedValue === undefined ||
+      stableStringify(observedFact.expectedValue) !==
+        stableStringify(observedFact.observedValue)
+    ) {
+      throw new Error(`LANGUAGE_COVERAGE_EXECUTION_FACT_INVALID: ${receiptId}`);
+    }
+    return;
+  }
+  if (observedFact.kind === 'executionCounter') {
+    if (
+      !Number.isSafeInteger(observedFact.minimumCount) ||
+      Number(observedFact.minimumCount) < 1 ||
+      !Number.isSafeInteger(observedFact.observedCount) ||
+      Number(observedFact.observedCount) < Number(observedFact.minimumCount)
+    ) {
+      throw new Error(`LANGUAGE_COVERAGE_EXECUTION_FACT_INVALID: ${receiptId}`);
+    }
+    return;
+  }
+  if (observedFact.kind === 'producedArtifact') {
+    if (
+      typeof observedFact.expectedDigest !== 'string' ||
+      !/^[0-9a-f]{64}$/u.test(observedFact.expectedDigest) ||
+      observedFact.observedDigest !== observedFact.expectedDigest
+    ) {
+      throw new Error(`LANGUAGE_COVERAGE_EXECUTION_FACT_INVALID: ${receiptId}`);
+    }
+    return;
+  }
+  throw new Error(`LANGUAGE_COVERAGE_EXECUTION_FACT_INVALID: ${receiptId}`);
 }
 
 function isLanguageCoverageOutcome(
