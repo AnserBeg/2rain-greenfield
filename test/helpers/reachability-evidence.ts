@@ -96,7 +96,11 @@ export function aggregateEvidence(
         `Empty reachability evidence for ${producer.id}: ${producer.evidencePath}`,
       );
     }
-    const evidence = parseEvidence(serialized, producer, currentRunId);
+    const evidence = parseReachabilityEvidence(
+      serialized,
+      producer,
+      currentRunId,
+    );
     if (!evidence.suiteSucceeded) {
       throw new Error(`Evidence producer did not succeed: ${producer.id}`);
     }
@@ -163,7 +167,7 @@ export function normalizeEvidencePath(
   return normalizeSeparators(repositoryPath);
 }
 
-function parseEvidence(
+export function parseReachabilityEvidence(
   serialized: string,
   producer: ReachabilityProducer,
   currentRunId: string,
