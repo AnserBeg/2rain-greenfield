@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import type { Server } from 'node:http';
 
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import {
   canonicalize,
   normalizeApplicationPackage,
@@ -222,10 +222,123 @@ test('compiler-valid one-slot Record surfaces retain fallback actions and feedba
   }
 });
 
+test('a failed data slot stays inline while ready siblings render without JavaScript', async ({
+  browser,
+}) => {
+  const compiled = compileFixture();
+  const policy = allowPolicy();
+  const failingExecutor = new BrowserFixtureExecutor(
+    `${FIXTURE_IDS.namespace}:query.master_get`,
+  );
+  const operationMediation = new SemanticOperationMediationAuthority();
+  const failingServer = createSurfaceRuntimeServer(
+    runtimeEntry(compiled, policy),
+    {
+      operationGateway: new SemanticOperationGateway(
+        policy,
+        failingExecutor,
+        operationMediation,
+      ),
+      operationMediation,
+      queryGateway: new SemanticQueryGateway(policy, failingExecutor),
+    },
+  );
+  const failingBaseUrl = await listen(failingServer);
+  const context = await browser.newContext({
+    extraHTTPHeaders: { authorization: 'fixture-user' },
+    javaScriptEnabled: false,
+  });
+
+  try {
+    const page = await context.newPage();
+    const response = await page.goto(
+      `${failingBaseUrl}/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_record`)}&record=${encodeURIComponent(randomUUID())}`,
+    );
+    expect(response?.status()).toBe(200);
+
+    const failedSlot = page.locator(
+      '[data-platform-slot="record:keyFacts"][data-slot-state="failed"]',
+    );
+    await expect(failedSlot.getByRole('alert')).toContainText(
+      'QUERY_UNAVAILABLE',
+    );
+    await expect(failedSlot.getByRole('alert')).toHaveAttribute(
+      'data-status-role',
+      'blocked',
+    );
+    await expect(
+      page.locator(
+        '[data-platform-slot="record:breadcrumb"][data-slot-state="ready"]',
+      ),
+    ).toContainText('master list');
+    await expect(
+      page.locator(
+        '[data-platform-slot="record:titleStatus"][data-slot-state="ready"]',
+      ),
+    ).toContainText('master');
+    await expect(
+      page.locator(
+        '[data-platform-slot="record:commandBar"][data-slot-state="ready"]',
+      ),
+    ).toContainText('New');
+    await expect(page.locator('.standalone')).toHaveCount(0);
+    await expectClosedSlotStates(page);
+  } finally {
+    await context.close();
+    await new Promise<void>((resolve, reject) => {
+      failingServer.close((error) => (error ? reject(error) : resolve()));
+    });
+  }
+});
+
+test('an empty data slot is observably distinct from a failed slot', async ({
+  page,
+}) => {
+  const compiled = compileFixture();
+  const policy = allowPolicy();
+  const emptyExecutor = new BrowserFixtureExecutor();
+  const operationMediation = new SemanticOperationMediationAuthority();
+  const emptyServer = createSurfaceRuntimeServer(
+    runtimeEntry(compiled, policy),
+    {
+      operationGateway: new SemanticOperationGateway(
+        policy,
+        emptyExecutor,
+        operationMediation,
+      ),
+      operationMediation,
+      queryGateway: new SemanticQueryGateway(policy, emptyExecutor),
+    },
+  );
+  const emptyBaseUrl = await listen(emptyServer);
+
+  try {
+    await page.setExtraHTTPHeaders({ authorization: 'fixture-user' });
+    await page.goto(
+      `${emptyBaseUrl}/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_list`)}`,
+    );
+    const emptySlot = page.locator(
+      '[data-platform-slot="list:dataGrid"][data-slot-state="empty"]',
+    );
+    await expect(emptySlot.getByText('No records yet')).toBeVisible();
+    await expect(emptySlot.getByRole('alert')).toHaveCount(0);
+    await expect(
+      page.locator('[data-platform-slot][data-slot-state="failed"]'),
+    ).toHaveCount(0);
+    await expectClosedSlotStates(page);
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      emptyServer.close((error) => (error ? reject(error) : resolve()));
+    });
+  }
+});
+
 class BrowserFixtureExecutor
   implements SemanticQueryExecutor, SemanticOperationExecutor
 {
   private readonly records = new Map<string, SemanticRecordDto>();
+
+  constructor(private readonly failedQueryId: string | null = null) {}
 
   createSeed(name?: string): string {
     const recordId = randomUUID();
@@ -249,6 +362,9 @@ class BrowserFixtureExecutor
     request: SemanticQueryExecutionRequest | SemanticOperationExecutionRequest,
   ): Promise<SemanticQueryResultEnvelope | SemanticOperationResultEnvelope> {
     if ('arguments' in request) {
+      if (request.definition.queryId === this.failedQueryId) {
+        throw new Error('intentional slot data failure');
+      }
       const args = recordValue(request.arguments);
       const records =
         request.definition.queryType === 'get'
@@ -537,6 +653,22 @@ async function listen(target: Server): Promise<string> {
 function recordValue(value: unknown): Record<string, unknown> {
   assert.ok(isRecord(value));
   return value;
+}
+
+async function expectClosedSlotStates(page: Page): Promise<void> {
+  const slots = page.locator('[data-platform-slot]');
+  expect(await slots.count()).toBeGreaterThan(0);
+  await expect(
+    page.locator('[data-platform-slot]:not([data-slot-state])'),
+  ).toHaveCount(0);
+  const states = await slots.evaluateAll((elements) =>
+    elements.map((element) => element.getAttribute('data-slot-state')),
+  );
+  expect(
+    states.every((state) =>
+      ['pending', 'ready', 'empty', 'failed'].includes(state ?? ''),
+    ),
+  ).toBe(true);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

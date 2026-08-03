@@ -31,13 +31,21 @@ export interface SurfaceComponentContext {
   readonly view: RuntimeViewContract.RequestRuntimeView;
 }
 
-export type SurfaceComponentRenderResult =
-  | { readonly html: string; readonly status: 'RENDERED' }
-  | {
-      readonly code: 'COMPONENT_RENDER_FAILED' | 'UNSUPPORTED_COMPONENT';
-      readonly html: string;
-      readonly status: 'DIAGNOSTIC';
-    };
+export const SURFACE_SLOT_RESOLUTION_STATES = Object.freeze([
+  'pending',
+  'ready',
+  'empty',
+  'failed',
+] as const);
+
+export type SurfaceSlotResolutionState =
+  (typeof SURFACE_SLOT_RESOLUTION_STATES)[number];
+
+export interface SurfaceComponentRenderResult {
+  readonly code?: 'COMPONENT_RENDER_FAILED' | 'UNSUPPORTED_COMPONENT';
+  readonly html: string;
+  readonly state: SurfaceSlotResolutionState;
+}
 
 export type SurfaceDataRenderState =
   | { readonly status: 'UNBOUND' }
@@ -107,9 +115,11 @@ type SurfaceComponentRenderer = (context: SurfaceComponentContext) => string;
 type MutationSurfaceRole = 'form' | 'record';
 
 interface SurfaceSlotRegistration {
+  readonly className: string;
   readonly mutationIntents?: Partial<
     Readonly<Record<MutationSurfaceRole, readonly SurfaceOperationIntent[]>>
   >;
+  readonly ownsDataResolution?: true;
   readonly renderer: SurfaceComponentRenderer;
 }
 
@@ -122,26 +132,57 @@ const componentRegistry: Readonly<Record<string, SurfaceComponentRenderer>> =
 
 const surfaceSlotRegistry: Readonly<Record<string, SurfaceSlotRegistration>> =
   Object.freeze({
-    'list:bulkActions': { renderer: renderBulkActions },
-    'list:dataGrid': { renderer: renderDataGrid },
-    'list:title': { renderer: renderListTitle },
-    'record:breadcrumb': { renderer: renderBreadcrumb },
+    'list:bulkActions': {
+      className: 'bulk-actions-slot',
+      renderer: renderBulkActions,
+    },
+    'list:dataGrid': {
+      className: 'data-grid-slot',
+      ownsDataResolution: true,
+      renderer: renderDataGrid,
+    },
+    'list:title': {
+      className: 'surface-title-slot',
+      renderer: renderListTitle,
+    },
+    'record:breadcrumb': {
+      className: 'breadcrumb-slot',
+      renderer: renderBreadcrumb,
+    },
     'record:commandBar': {
+      className: 'command-bar-slot',
       mutationIntents: { record: ['archive', 'command', 'restore'] },
       renderer: renderCommandBar,
     },
     'record:keyFacts': {
+      className: 'key-facts-slot',
       mutationIntents: { record: ['archive', 'restore'] },
+      ownsDataResolution: true,
       renderer: renderKeyFacts,
     },
     'record:sections': {
+      className: 'sections-slot',
       mutationIntents: { form: ['create', 'update'] },
+      ownsDataResolution: true,
       renderer: renderSections,
     },
-    'record:titleStatus': { renderer: renderTitleStatus },
-    'task:decision': { renderer: renderTaskDecision },
-    'task:primaryAction': { renderer: renderTaskPrimaryAction },
-    'task:scanInput': { renderer: renderTaskScanInput },
+    'record:titleStatus': {
+      className: 'title-status-slot',
+      renderer: renderTitleStatus,
+    },
+    'task:decision': {
+      className: 'task-decision-slot',
+      ownsDataResolution: true,
+      renderer: renderTaskDecision,
+    },
+    'task:primaryAction': {
+      className: 'task-primary-action-slot',
+      renderer: renderTaskPrimaryAction,
+    },
+    'task:scanInput': {
+      className: 'task-scan-input-slot',
+      renderer: renderTaskScanInput,
+    },
   });
 
 export const REGISTERED_SURFACE_COMPONENT_IDS = Object.freeze(
@@ -194,12 +235,16 @@ export function renderRegisteredSurfaceComponent(
   if (!renderer) {
     return Object.freeze({
       code: 'UNSUPPORTED_COMPONENT' as const,
-      html: diagnostic(
-        'Unsupported release capability',
-        `This runtime does not register ${context.slot.contentReferenceId}.`,
-        'UNSUPPORTED_COMPONENT',
+      html: resolvedSlot(
+        context,
+        diagnostic(
+          'Unsupported release capability',
+          `This runtime does not register ${context.slot.contentReferenceId}.`,
+          'UNSUPPORTED_COMPONENT',
+        ),
+        'failed',
       ),
-      status: 'DIAGNOSTIC' as const,
+      state: 'failed' as const,
     });
   }
 
@@ -224,21 +269,68 @@ function renderComponent(
   context: SurfaceComponentContext,
 ): SurfaceComponentRenderResult {
   try {
+    const state = slotResolutionState(context);
     return Object.freeze({
-      html: renderer(context),
-      status: 'RENDERED' as const,
+      html: resolvedSlot(context, renderer(context), state),
+      state,
     });
   } catch {
     return Object.freeze({
       code: 'COMPONENT_RENDER_FAILED' as const,
-      html: diagnostic(
-        'Component unavailable',
-        'The release-defined component could not be rendered. The rest of the pinned surface is unchanged.',
-        'COMPONENT_RENDER_FAILED',
+      html: resolvedSlot(
+        context,
+        diagnostic(
+          'Component unavailable',
+          'The release-defined component could not be rendered. The rest of the pinned surface is unchanged.',
+          'COMPONENT_RENDER_FAILED',
+        ),
+        'failed',
       ),
-      status: 'DIAGNOSTIC' as const,
+      state: 'failed' as const,
     });
   }
+}
+
+function slotResolutionState(
+  context: SurfaceComponentContext,
+): Exclude<SurfaceSlotResolutionState, 'failed'> | 'failed' {
+  if (!slotOwnsDataResolution(context.surface, context.slot)) return 'ready';
+  const data = context.data ?? { status: 'UNBOUND' as const };
+  if (data.status === 'UNBOUND') return 'pending';
+  if (data.status === 'DIAGNOSTIC') return 'failed';
+  if (
+    data.status === 'EMPTY' ||
+    (data.status === 'READY' && data.records.length === 0)
+  ) {
+    return context.surface.surfaceRole === 'form' ? 'ready' : 'empty';
+  }
+  return 'ready';
+}
+
+function slotOwnsDataResolution(
+  surface: CompiledSurfaceDefinition,
+  slot: CompiledSurfaceSlot,
+): boolean {
+  return (
+    surfaceSlotRegistry[`${surface.archetype}:${slot.slot}`]
+      ?.ownsDataResolution === true
+  );
+}
+
+function resolvedSlot(
+  context: SurfaceComponentContext,
+  html: string,
+  state: SurfaceSlotResolutionState,
+): string {
+  const slotClassName = surfaceSlotClassName(context.surface, context.slot);
+  return `<div class="surface-slot${slotClassName ? ` ${slotClassName}` : ''}" data-component="${escapeHtml(context.slot.contentReferenceId)}" data-platform-slot="${escapeHtml(`${context.surface.archetype}:${context.slot.slot}`)}" data-slot-state="${state}">${html}</div>`;
+}
+
+function surfaceSlotClassName(
+  surface: CompiledSurfaceDefinition,
+  slot: CompiledSurfaceSlot,
+): string | undefined {
+  return surfaceSlotRegistry[`${surface.archetype}:${slot.slot}`]?.className;
 }
 
 function renderListTitle(context: SurfaceComponentContext): string {
@@ -435,7 +527,9 @@ function renderTitleStatus(context: SurfaceComponentContext): string {
       ? declaredStatusRoles(context.surface)
       : record
         ? `<span class="status-pill" data-status-role="${record.archived ? 'attention' : 'success'}">${record.archived ? 'Archived' : 'Active'} · revision ${record.revision}</span>`
-        : `<span class="status-pill" data-status-role="inProgress">${form ? 'Draft' : 'Loading'}</span>`;
+        : form
+          ? '<span class="status-pill" data-status-role="inProgress">Draft</span>'
+          : '';
   return slotPanel(
     context,
     `<header class="surface-heading surface-heading--slot"><div><p class="eyebrow">${form ? 'Record form' : 'Record detail'} · compiled workspace</p><h1>${escapeHtml(title)}</h1></div>${status}</header>${feedbackHtml(context.feedback)}`,
@@ -627,7 +721,7 @@ function renderReleaseSummary({
     surface.statusRoles.length === 0
       ? 'No status roles declared'
       : surface.statusRoles.join(' · ');
-  return `<section class="panel panel--hero" data-component="northstar.shell:component.release_summary">
+  return `<section class="panel panel--hero">
     <div class="panel__accent" aria-hidden="true">↗</div>
     <p class="eyebrow">Pinned application definition</p>
     <h2>${escapeHtml(surface.label)} is release-defined</h2>
@@ -644,7 +738,7 @@ function renderSetupChecklist({
   surface,
   view,
 }: SurfaceComponentContext): string {
-  return `<section class="panel" data-component="northstar.shell:component.setup_checklist">
+  return `<section class="panel">
     <div class="panel__heading">
       <div>
         <p class="eyebrow">Compiled setup</p>
@@ -823,7 +917,10 @@ function slotPanel(
   html: string,
   className: string,
 ): string {
-  return `<div class="surface-slot ${className}" data-component="${escapeHtml(context.slot.contentReferenceId)}" data-platform-slot="${escapeHtml(`${context.surface.archetype}:${context.slot.slot}`)}">${html}</div>`;
+  if (surfaceSlotClassName(context.surface, context.slot) !== className) {
+    throw new TypeError('surface slot class does not match its registry key');
+  }
+  return html;
 }
 
 function feedbackHtml(
@@ -995,7 +1092,7 @@ function renderValue(value: unknown): string {
 }
 
 function diagnostic(title: string, message: string, code: string): string {
-  return `<section class="diagnostic" role="alert" data-diagnostic-code="${escapeHtml(code)}">
+  return `<section class="diagnostic" role="alert" data-diagnostic-code="${escapeHtml(code)}" data-status-role="blocked">
     <div class="diagnostic__mark" aria-hidden="true">!</div>
     <div><p class="eyebrow">Release diagnostic</p><h2>${escapeHtml(title)}</h2><p>${escapeHtml(message)}</p><code>${escapeHtml(code)}</code></div>
   </section>`;

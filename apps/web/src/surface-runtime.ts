@@ -23,7 +23,6 @@ import { SHARED_LIST_QUERY_VERSION } from '../../../packages/runtime/src/list-be
 
 import {
   renderRegisteredSurfaceComponent,
-  renderSurfaceDataComponent,
   surfaceSupportsRuntimeIntent,
   type SurfaceDataRenderState,
   type SurfaceOperationFeedback,
@@ -345,25 +344,21 @@ function renderSelectedSurface(
   workspaceContext: WorkspaceContextBar | null = null,
   queryParameterValues: Readonly<Record<string, string>> = Object.freeze({}),
 ): SurfaceRuntimeResponse {
-  const recordResolutionFailed =
-    selected.archetype === 'record' && data.status === 'DIAGNOSTIC';
   // Compact and full layouts are alternative renderings of these same slots;
   // a responsive implementation must never mount both at once.
-  const renderedSlots = recordResolutionFailed
-    ? []
-    : selected.slots.map((slot) =>
-        renderRegisteredSurfaceComponent({
-          data,
-          feedback,
-          legalEntitySelection,
-          operations,
-          queryParameterValues,
-          slot,
-          surface: selected,
-          surfaces,
-          view,
-        }),
-      );
+  const renderedSlots = selected.slots.map((slot) =>
+    renderRegisteredSurfaceComponent({
+      data,
+      feedback,
+      legalEntitySelection,
+      operations,
+      queryParameterValues,
+      slot,
+      surface: selected,
+      surfaces,
+      view,
+    }),
+  );
   const legacyHeading =
     selected.archetype === 'list' || selected.archetype === 'record'
       ? ''
@@ -379,7 +374,7 @@ function renderSelectedSurface(
     </header>`;
   const body = `${legacyHeading}
     <div class="surface-grid" data-surface-archetype="${escapeHtml(selected.archetype)}">
-      ${recordResolutionFailed ? renderSurfaceDataComponent({ data, feedback, operations, surface: selected }) : renderedSlots.map((result) => result.html).join('')}
+      ${renderedSlots.map((result) => result.html).join('')}
     </div>`;
 
   return Object.freeze({

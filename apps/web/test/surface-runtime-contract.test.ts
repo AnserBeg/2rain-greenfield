@@ -7,6 +7,7 @@ import test from 'node:test';
 
 import {
   REGISTERED_SURFACE_COMPONENT_IDS,
+  SURFACE_SLOT_RESOLUTION_STATES,
   renderRegisteredSurfaceComponent,
   surfaceHasUnsupportedComponent,
 } from '../src/component-registry.js';
@@ -90,6 +91,13 @@ test('renderer accepts one issued view and has no ambient release access', async
 });
 
 test('closed registry returns diagnostics for unknown and failing components', async () => {
+  assert.deepEqual(SURFACE_SLOT_RESOLUTION_STATES, [
+    'pending',
+    'ready',
+    'empty',
+    'failed',
+  ]);
+  assert.equal(Object.isFrozen(SURFACE_SLOT_RESOLUTION_STATES), true);
   assert.equal(Object.isFrozen(REGISTERED_SURFACE_COMPONENT_IDS), true);
   assert.deepEqual(REGISTERED_SURFACE_COMPONENT_IDS, [
     'northstar.shell:component.error_probe',
@@ -119,10 +127,38 @@ test('closed registry returns diagnostics for unknown and failing components', a
       surface: failing,
       view,
     });
-    assert.equal(unsupportedResult.status, 'DIAGNOSTIC');
+    assert.equal(unsupportedResult.state, 'failed');
+    assert.match(unsupportedResult.html, /data-slot-state="failed"/);
     assert.match(unsupportedResult.html, /UNSUPPORTED_COMPONENT/);
-    assert.equal(failingResult.status, 'DIAGNOSTIC');
+    assert.equal(failingResult.state, 'failed');
+    assert.match(failingResult.html, /data-slot-state="failed"/);
     assert.match(failingResult.html, /COMPONENT_RENDER_FAILED/);
+  });
+});
+
+test('a pending data slot authorizes no default loading treatment', async () => {
+  await demoEntry().run({}, (view) => {
+    const exemplar = readCompiledSurfaceManifest(view).surfaces[0];
+    assert.ok(exemplar?.slots[0]);
+    const dataGrid = {
+      ...exemplar.slots[0],
+      slot: 'dataGrid',
+    };
+    const surface = {
+      ...exemplar,
+      archetype: 'list' as const,
+      slots: [dataGrid],
+      surfaceRole: 'list' as const,
+    };
+    const result = renderRegisteredSurfaceComponent({
+      data: { status: 'UNBOUND' },
+      slot: dataGrid,
+      surface,
+      view,
+    });
+    assert.equal(result.state, 'pending');
+    assert.match(result.html, /data-slot-state="pending"/);
+    assert.doesNotMatch(result.html, /spinner|skeleton|loading/i);
   });
 });
 
