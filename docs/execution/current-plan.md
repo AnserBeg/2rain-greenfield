@@ -301,7 +301,10 @@ not run; cutting it would pre-empt a decision this queue reserves.
 `#0F5F8C` was recorded as 7.0:1 **AAA** and is **6.92:1**, below the AAA
 threshold. It clears AA comfortably and is fine for its roles, so only the label
 was false. Genuine AAA needs it ~2% darker — a change to an approved visual
-direction, so it is the user's call. `U2` must therefore ship a test that
+direction, so it was the user's call. **RULED 2026-08-02: keep `#0F5F8C` and
+correct the label to AA.** The platform targets WCAG 2.2 AA per plan §8.4, so AAA
+was never the requirement and only the claim was false; the token is unchanged and
+no visual re-approval is owed. `U2` must not reopen this. `U2` must still ship a test that
 **computes** contrast from the token values; a number in a table is exactly the
 proxy AGENTS.md §6 warns about, and it survived two documents before arithmetic
 caught it.
