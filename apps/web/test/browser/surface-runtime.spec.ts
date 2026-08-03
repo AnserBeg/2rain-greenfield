@@ -101,6 +101,19 @@ test('compiled unsupported and renderer-failure surfaces remain usable diagnosti
   await expect(page.getByRole('navigation')).toBeVisible();
 });
 
+test('unknown surfaces remain page-level diagnostics before slot composition', async ({
+  page,
+}) => {
+  const response = await page.goto(`${baseUrl}/?surface=not-in-release`);
+  expect(response?.status()).toBe(404);
+  await expect(
+    page.locator(
+      '.diagnostic--page[role="alert"][data-diagnostic-code="UNKNOWN_SURFACE"]',
+    ),
+  ).toBeVisible();
+  await expect(page.locator('[data-platform-slot]')).toHaveCount(0);
+});
+
 test('shell exposes a keyboard-first semantic path', async ({ page }) => {
   await page.goto(baseUrl);
   await page.keyboard.press('Tab');

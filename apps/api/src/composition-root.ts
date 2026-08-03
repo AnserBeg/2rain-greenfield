@@ -7,6 +7,7 @@ import {
   type InventoryScopeProvisioning,
 } from '@north-star/postgres-provider/composed-application-runtime';
 import { INVENTORY_PROVIDER_ERROR_MAPPINGS } from '@north-star/postgres-provider/inventory-provider-error-mappings';
+import { INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY } from '@north-star/postgres-provider/inventory-posting-capability-executor';
 import { createSurfaceRuntimeServer } from '@north-star/web/app-server';
 
 export interface ComposedApplicationServerOptions {
@@ -68,6 +69,9 @@ export async function startComposedApplication(
     ),
   ) as unknown;
   const runtime = await createComposedApplicationRuntime({
+    capabilityOperationExecutorFactories: [
+      INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY,
+    ],
     compiledApplication,
     databaseUrl: options.databaseUrl,
     inventoryScopeProvisioning: COMPOSED_APPLICATION_INVENTORY_SCOPE,

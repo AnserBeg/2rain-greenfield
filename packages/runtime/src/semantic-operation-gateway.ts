@@ -33,6 +33,8 @@ export const SEMANTIC_OPERATION_REQUEST_VERSION =
   'northstar.semantic-operation-request/v1' as const;
 export const SEMANTIC_OPERATION_RESULT_VERSION =
   'northstar.semantic-operation-result/v1' as const;
+export const SEMANTIC_OPERATION_POLICY_EVALUATOR_VERSION =
+  'northstar.semantic-gateway-policy-evaluator/v1' as const;
 
 export type TrustedInvocationChannel =
   'AGENT' | 'API' | 'IMPORT' | 'SYSTEM' | 'UI' | 'WORKFLOW';
@@ -56,21 +58,8 @@ export interface SemanticOperationRequestEnvelope {
   readonly schemaVersion: typeof SEMANTIC_OPERATION_REQUEST_VERSION;
 }
 
-export interface RegisteredOperationDefinition {
+interface RegisteredOperationDefinitionBase {
   readonly confirmation: 'humanRequired' | 'none';
-  readonly effect: {
-    readonly entity: {
-      readonly kind: string;
-      readonly schemaVersion: string;
-      readonly targetId: string;
-    };
-    readonly kind:
-      | 'archiveRecordEffect'
-      | 'createRecordEffect'
-      | 'restoreRecordEffect'
-      | 'updateRecordEffect';
-    readonly schemaVersion: string;
-  };
   readonly infrastructure?: {
     readonly archiveRepresentation: 'nullableArchivedAt';
     readonly optimisticRevision: 'compareAndIncrement';
@@ -84,6 +73,39 @@ export interface RegisteredOperationDefinition {
   readonly readBackQueryId: string;
   readonly tier: 'o0' | 'o1';
 }
+
+export interface RegisteredRecordOperationDefinition extends RegisteredOperationDefinitionBase {
+  readonly effect: {
+    readonly entity: {
+      readonly kind: string;
+      readonly schemaVersion: string;
+      readonly targetId: string;
+    };
+    readonly kind:
+      | 'archiveRecordEffect'
+      | 'createRecordEffect'
+      | 'restoreRecordEffect'
+      | 'updateRecordEffect';
+    readonly schemaVersion: string;
+  };
+  readonly tier: 'o0';
+}
+
+export interface RegisteredCapabilityOperationDefinition extends RegisteredOperationDefinitionBase {
+  readonly effect: {
+    readonly capability: {
+      readonly kind: string;
+      readonly schemaVersion: string;
+      readonly targetId: string;
+    };
+    readonly kind: 'registeredCapabilityEffect';
+    readonly schemaVersion: string;
+  };
+  readonly tier: 'o1';
+}
+
+export type RegisteredOperationDefinition =
+  RegisteredCapabilityOperationDefinition | RegisteredRecordOperationDefinition;
 
 export interface RegisteredOperationInputContract {
   readonly closedArgumentKeys: readonly string[];
@@ -159,12 +181,25 @@ export interface SemanticOperationResultEnvelope {
 export interface SemanticOperationExecutionRequest {
   readonly channel: TrustedInvocationChannel;
   readonly context: TrustedRequestContext;
-  readonly definition: RegisteredOperationDefinition;
+  readonly definition: RegisteredRecordOperationDefinition;
   readonly idempotencyKey: string;
   readonly input: ImmutableJsonValue;
   readonly inputDigest: string;
   readonly parentGuards: readonly SemanticOperationParentGuard[];
   readonly policyVersion: string;
+  readonly readBackDefinition: RegisteredQueryDefinition;
+  readonly view: IssuedRequestRuntimeView;
+}
+
+export interface RegisteredCapabilityOperationExecutionRequest {
+  readonly channel: TrustedInvocationChannel;
+  readonly context: TrustedRequestContext;
+  readonly definition: RegisteredCapabilityOperationDefinition;
+  readonly idempotencyKey: string;
+  readonly input: ImmutableJsonValue;
+  readonly inputDigest: string;
+  readonly policyVersion: string;
+  readonly policyEvaluatorVersion: typeof SEMANTIC_OPERATION_POLICY_EVALUATOR_VERSION;
   readonly readBackDefinition: RegisteredQueryDefinition;
   readonly view: IssuedRequestRuntimeView;
 }
@@ -184,6 +219,14 @@ export interface SemanticOperationExecutor {
   ): Promise<void>;
 }
 
+/** Exact-ID registration for capability-backed O1 execution. */
+export interface RegisteredCapabilityOperationExecutor {
+  readonly capabilityId: string;
+  execute(
+    request: RegisteredCapabilityOperationExecutionRequest,
+  ): Promise<SemanticOperationResultEnvelope>;
+}
+
 export interface SemanticOperationNonAcceptedRequest {
   readonly channel: TrustedInvocationChannel;
   readonly context: TrustedRequestContext;
@@ -197,6 +240,38 @@ export interface SemanticOperationNonAcceptedRequest {
 
 export interface TrustedSemanticOperationInvocation {
   readonly channel: TrustedInvocationChannel;
+}
+
+export interface RegisteredOperationPreconditionEvaluation {
+  readonly outcome: 'holds' | 'refused' | 'unsupported';
+}
+
+/**
+ * One evaluator for compiled operation preconditions over a canonical record
+ * image. Surfaces use it only to decide whether to offer a command; executors
+ * still evaluate the same contract against authoritative stored state.
+ */
+export function evaluateRegisteredOperationPrecondition(
+  precondition: Readonly<Record<string, ImmutableJsonValue>>,
+  image: Readonly<Record<string, ImmutableJsonValue>>,
+): RegisteredOperationPreconditionEvaluation {
+  try {
+    const receipt = inspectPredicateForExecution(precondition, {
+      bindingPosition: 'operationPrecondition',
+      resolveComparison: (comparison) =>
+        resolveOperationComparisonAgainstImage(comparison, image),
+    });
+    return Object.freeze({
+      outcome:
+        receipt.outcome !== 'evaluated'
+          ? 'unsupported'
+          : receipt.result
+            ? 'holds'
+            : 'refused',
+    });
+  } catch {
+    return Object.freeze({ outcome: 'unsupported' });
+  }
 }
 
 interface ConfirmationGrantClaims {
@@ -445,8 +520,27 @@ export class NoSuchRegisteredOperationError extends Error {
   }
 }
 
+export class NoSuchRegisteredCapabilityError extends Error {
+  readonly code = 'NO_SUCH_REGISTERED_CAPABILITY' as const;
+  override readonly name = 'NoSuchRegisteredCapabilityError';
+
+  constructor(
+    readonly capabilityId: string,
+    readonly operationId: string,
+  ) {
+    super(
+      `operation ${operationId} names unregistered capability ${capabilityId}`,
+    );
+  }
+}
+
 /** Sole application mutation ingress for the request-pinned semantic contract. */
 export class SemanticOperationGateway {
+  readonly #capabilityExecutors: ReadonlyMap<
+    string,
+    RegisteredCapabilityOperationExecutor
+  >;
+
   constructor(
     private readonly currentPolicy: CurrentPolicyGateway,
     private readonly executor:
@@ -454,7 +548,27 @@ export class SemanticOperationGateway {
     private readonly mediation: SemanticOperationMediationAuthority = new SemanticOperationMediationAuthority(),
     private readonly observePredicateReceipt:
       ((receipt: PredicateKernelReceipt) => void) | undefined = undefined,
-  ) {}
+    capabilityExecutors: readonly RegisteredCapabilityOperationExecutor[] = [],
+  ) {
+    const registrations = new Map<
+      string,
+      RegisteredCapabilityOperationExecutor
+    >();
+    for (const executor of capabilityExecutors) {
+      assertCanonicalId(
+        executor.capabilityId,
+        'capabilityId',
+        (message) => new TypeError(message),
+      );
+      if (registrations.has(executor.capabilityId)) {
+        throw new TypeError(
+          `registered capability executor is duplicated: ${executor.capabilityId}`,
+        );
+      }
+      registrations.set(executor.capabilityId, executor);
+    }
+    this.#capabilityExecutors = registrations;
+  }
 
   async invoke(
     view: IssuedRequestRuntimeView,
@@ -492,8 +606,11 @@ export class SemanticOperationGateway {
       const definition = operationCatalog.find(
         (operation) => operation.operationId === request.operationId,
       );
-      if (!definition || !this.executor) {
+      if (!definition) {
         throw new NoSuchRegisteredOperationError(request.operationId, view);
+      }
+      if (isRegisteredCapabilityOperation(definition)) {
+        assertClosedOperationArguments(definition, request.input);
       }
       const operationDecision = await authorizeCurrentPolicy(
         this.currentPolicy,
@@ -518,7 +635,7 @@ export class SemanticOperationGateway {
         request.input,
         request.confirmationGrant,
       );
-      if (definition.lifecycle !== 'active' || definition.tier !== 'o0') {
+      if (definition.lifecycle !== 'active') {
         await this.#recordNonAccepted(
           view,
           invocation,
@@ -571,11 +688,16 @@ export class SemanticOperationGateway {
         view,
         definition.readBackQueryId,
       );
+      const recordEffectEntityId =
+        definition.effect.kind === 'registeredCapabilityEffect'
+          ? null
+          : definition.effect.entity.targetId;
       const readBackPredicateReceipt =
         readBackDefinition?.lifecycle === 'active' &&
         readBackDefinition.tier === 'q0' &&
         readBackDefinition.queryType === 'get' &&
-        readBackDefinition.sourceEntityId === definition.effect.entity.targetId
+        (recordEffectEntityId === null ||
+          readBackDefinition.sourceEntityId === recordEffectEntityId)
           ? inspectPredicateForExecution(readBackDefinition.filter)
           : null;
       if (readBackPredicateReceipt) {
@@ -589,8 +711,8 @@ export class SemanticOperationGateway {
         readBackDefinition.lifecycle !== 'active' ||
         readBackDefinition.tier !== 'q0' ||
         readBackDefinition.queryType !== 'get' ||
-        readBackDefinition.sourceEntityId !==
-          definition.effect.entity.targetId ||
+        (recordEffectEntityId !== null &&
+          readBackDefinition.sourceEntityId !== recordEffectEntityId) ||
         readBackPredicateReceipt?.outcome !== 'accepted'
       ) {
         await this.#recordNonAccepted(
@@ -608,18 +730,42 @@ export class SemanticOperationGateway {
           'operation-read-back-unsupported',
         );
       }
+      const commonExecution = {
+        channel: invocation.channel,
+        context: trustedContextForRequestRuntimeView(view),
+        definition,
+        idempotencyKey: request.idempotencyKey,
+        input: request.input,
+        inputDigest: digestOperationInput(request.input),
+        policyVersion: operationDecision.policyVersion,
+        readBackDefinition,
+        view,
+      } as const;
+      if (isRegisteredCapabilityOperation(definition)) {
+        const capabilityExecutor = this.#capabilityExecutors.get(
+          definition.effect.capability.targetId,
+        );
+        if (!capabilityExecutor) {
+          throw new NoSuchRegisteredCapabilityError(
+            definition.effect.capability.targetId,
+            definition.operationId,
+          );
+        }
+        return await capabilityExecutor.execute(
+          Object.freeze({
+            ...commonExecution,
+            policyEvaluatorVersion: SEMANTIC_OPERATION_POLICY_EVALUATOR_VERSION,
+          }) as RegisteredCapabilityOperationExecutionRequest,
+        );
+      }
+      if (!this.executor) {
+        throw new NoSuchRegisteredOperationError(request.operationId, view);
+      }
       return await this.executor.execute(
         Object.freeze({
-          channel: invocation.channel,
-          context: trustedContextForRequestRuntimeView(view),
+          ...commonExecution,
           definition,
-          idempotencyKey: request.idempotencyKey,
-          input: request.input,
-          inputDigest: digestOperationInput(request.input),
           parentGuards: parentGuardsFromCatalog(operationCatalog),
-          policyVersion: operationDecision.policyVersion,
-          readBackDefinition,
-          view,
         }),
       );
     } catch (error) {
@@ -718,6 +864,25 @@ function parseSemanticOperationRequest(
   });
 }
 
+function assertClosedOperationArguments(
+  definition: RegisteredOperationDefinition,
+  value: ImmutableJsonValue,
+): void {
+  const contract = definition.inputContract;
+  if (!contract) return;
+  if (!isRecord(value)) {
+    throw new MalformedSemanticOperationRequestError(
+      'semantic operation input must be an object',
+    );
+  }
+  const admitted = new Set(contract.closedArgumentKeys);
+  if (Object.keys(value).some((key) => !admitted.has(key))) {
+    throw new MalformedSemanticOperationRequestError(
+      'semantic operation input contains a key outside its compiled contract',
+    );
+  }
+}
+
 function readPinnedOperationCatalog(
   view: IssuedRequestRuntimeView,
 ): readonly RegisteredOperationDefinition[] {
@@ -765,24 +930,28 @@ function readPinnedOperationCatalog(
   return Object.freeze(operations);
 }
 
+function isRegisteredCapabilityOperation(
+  definition: RegisteredOperationDefinition,
+): definition is RegisteredCapabilityOperationDefinition {
+  return definition.effect.kind === 'registeredCapabilityEffect';
+}
+
 function parentGuardsFromCatalog(
   operations: readonly RegisteredOperationDefinition[],
 ): readonly SemanticOperationParentGuard[] {
   return Object.freeze(
-    operations
-      .filter(
-        (operation) =>
-          operation.lifecycle === 'active' &&
-          operation.tier === 'o0' &&
-          operation.effect.kind === 'updateRecordEffect',
-      )
-      .map((operation) =>
-        Object.freeze({
-          operationId: operation.operationId,
-          parentEntityId: operation.effect.entity.targetId,
-          precondition: operation.precondition,
-        }),
-      ),
+    operations.flatMap((operation) =>
+      operation.lifecycle === 'active' &&
+      operation.effect.kind === 'updateRecordEffect'
+        ? [
+            Object.freeze({
+              operationId: operation.operationId,
+              parentEntityId: operation.effect.entity.targetId,
+              precondition: operation.precondition,
+            }),
+          ]
+        : [],
+    ),
   );
 }
 
@@ -827,29 +996,58 @@ function assertOperationDefinition(
   ) {
     throw invalid('pinned operation definition has an invalid shape');
   }
-  assertExactKeys(value.effect, ['entity', 'kind', 'schemaVersion'], invalid);
-  if (
-    !isRecord(value.effect.entity) ||
-    ![
-      'archiveRecordEffect',
-      'createRecordEffect',
-      'restoreRecordEffect',
-      'updateRecordEffect',
-    ].includes(String(value.effect.kind)) ||
-    typeof value.effect.schemaVersion !== 'string'
-  ) {
-    throw invalid('pinned operation effect is unsupported');
+  if (value.effect.kind === 'registeredCapabilityEffect') {
+    assertExactKeys(
+      value.effect,
+      ['capability', 'kind', 'schemaVersion'],
+      invalid,
+    );
+    if (
+      value.tier !== 'o1' ||
+      !isRecord(value.effect.capability) ||
+      typeof value.effect.schemaVersion !== 'string'
+    ) {
+      throw invalid('pinned capability operation effect is unsupported');
+    }
+    assertExactKeys(
+      value.effect.capability,
+      ['kind', 'schemaVersion', 'targetId'],
+      invalid,
+    );
+    assertCanonicalId(
+      value.effect.capability.targetId,
+      'effect.capability.targetId',
+      invalid,
+    );
+  } else {
+    // Load-bearing O0 fence: capability admission must never make an entity-
+    // less record effect valid. The complete entity reference remains required
+    // inside this record-only arm.
+    assertExactKeys(value.effect, ['entity', 'kind', 'schemaVersion'], invalid);
+    if (
+      value.tier !== 'o0' ||
+      !isRecord(value.effect.entity) ||
+      ![
+        'archiveRecordEffect',
+        'createRecordEffect',
+        'restoreRecordEffect',
+        'updateRecordEffect',
+      ].includes(String(value.effect.kind)) ||
+      typeof value.effect.schemaVersion !== 'string'
+    ) {
+      throw invalid('pinned record operation effect is unsupported');
+    }
+    assertExactKeys(
+      value.effect.entity,
+      ['kind', 'schemaVersion', 'targetId'],
+      invalid,
+    );
+    assertCanonicalId(
+      value.effect.entity.targetId,
+      'effect.entity.targetId',
+      invalid,
+    );
   }
-  assertExactKeys(
-    value.effect.entity,
-    ['kind', 'schemaVersion', 'targetId'],
-    invalid,
-  );
-  assertCanonicalId(
-    value.effect.entity.targetId,
-    'effect.entity.targetId',
-    invalid,
-  );
   if (hasInfrastructure) {
     if (!isRecord(value.infrastructure)) {
       throw invalid('pinned operation infrastructure must be an object');
@@ -1285,6 +1483,69 @@ function typedOperationFailure(error: unknown): Error {
       error instanceof RequestRuntimeViewIntegrityError)
     ? error
     : new SemanticOperationExecutionFailedError();
+}
+
+function resolveOperationComparisonAgainstImage(
+  comparison: { field: { targetId: string }; operator: string; value: unknown },
+  image: Readonly<Record<string, ImmutableJsonValue>>,
+): { presence: 'absent' } | { presence: 'present'; result: boolean } {
+  const actual = Object.hasOwn(image, comparison.field.targetId)
+    ? image[comparison.field.targetId]
+    : undefined;
+  if (actual === undefined || actual === null) return { presence: 'absent' };
+  if (
+    typeof comparison.value !== 'object' ||
+    comparison.value === null ||
+    !('value' in comparison.value)
+  ) {
+    throw new TypeError('precondition comparison operand is not a scalar');
+  }
+  const expected = (comparison.value as { value: unknown }).value;
+  const scalarKind = (comparison.value as { kind?: unknown }).kind;
+  // Raw `===` is sound only when persistence returns the canonical operand
+  // byte-for-byte. A false equality makes `not(equals)` admit, so widening this
+  // set requires a codec round-trip proof. Numeric(p,s) preserves scale while
+  // temporal codecs may add milliseconds; both therefore remain refused until
+  // field-contract-aware canonicalization exists.
+  if (
+    typeof scalarKind !== 'string' ||
+    !new Set(['booleanValue', 'integerValue', 'textValue']).has(scalarKind)
+  ) {
+    throw new TypeError(
+      `precondition comparison operand kind ${String(scalarKind)} has no canonical equality`,
+    );
+  }
+  switch (comparison.operator) {
+    case 'equals':
+      return { presence: 'present', result: actual === expected };
+    case 'notEquals':
+      return { presence: 'present', result: actual !== expected };
+    case 'lessThan':
+    case 'greaterThan':
+    case 'lessThanOrEqual':
+    case 'greaterThanOrEqual': {
+      if (
+        (typeof actual !== 'string' && typeof actual !== 'number') ||
+        typeof expected !== typeof actual
+      ) {
+        throw new TypeError('precondition ordering operands are not ordered');
+      }
+      const ordered = expected as string | number;
+      return {
+        presence: 'present',
+        result:
+          comparison.operator === 'lessThan'
+            ? actual < ordered
+            : comparison.operator === 'greaterThan'
+              ? actual > ordered
+              : comparison.operator === 'lessThanOrEqual'
+                ? actual <= ordered
+                : actual >= ordered,
+      };
+    }
+    default:
+      throw new TypeError('precondition comparison operator is not admitted');
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -39,6 +39,7 @@ import {
   type AggregateCacheObservation,
   PostgresModuleRuntimeInterpreter,
 } from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
+import { INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/inventory-posting-capability-executor.js';
 import {
   loadMigrations,
   runMigrations,
@@ -805,6 +806,8 @@ test('release verification executes a scoped aggregate probe and records the typ
           await setPointer(database.pool, releases[1]!.releaseId);
           const verification = new PostgresReleaseVerificationService(
             runtimePool,
+            [],
+            [INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY],
           );
           const command = {
             compiledRelease: fixture.inventory,

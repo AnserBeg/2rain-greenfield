@@ -22,9 +22,11 @@ export const PRODUCT_SURFACE_GRAMMAR_BASELINE = Object.freeze([
     // Record surfaces each report one more missing `commandBar` (+14 across
     // SG003 and SG009) and five Form surfaces each trade one missing
     // `activity` for a missing `commandBar` and `sections` (+10). G3-P6b-2's
-    // complete on-hand Task closes the one missing-archetype violation; the
-    // remaining anatomy debt is unchanged.
-    violationCount: 126,
+    // complete on-hand Task closes the one missing-archetype violation.
+    // 5g3-postroute then supplies inventory_transaction_detail's commandBar,
+    // closing that surface's SG003_REQUIRED_SLOT and SG009_COMPACT_SLOT:
+    // 126 - 2 = 124. The remaining anatomy debt is unchanged.
+    violationCount: 124,
   }),
   Object.freeze({
     moduleId: 'northstar.location:module.location',

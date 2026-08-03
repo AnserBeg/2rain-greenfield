@@ -962,7 +962,14 @@ function validateSemantics(
       } else {
         idOwners.set(id, family);
       }
-      if (namespaceOf(id) !== namespace) {
+      // Capability requirements name provider-owned contracts. ADR-0026's
+      // posting identity is intentionally independent of the consuming package
+      // namespace; treating it as an owned ID would force an alias and defeat
+      // exact registration. Every actual package-owned construct stays local.
+      if (
+        family !== 'capabilityRequirements' &&
+        namespaceOf(id) !== namespace
+      ) {
         diagnostics.push(
           diagnostic(
             'CANON_ID_NAMESPACE_MISMATCH',
@@ -1020,7 +1027,10 @@ function validateOwnedReferences(
       );
       return;
     }
-    if (namespaceOf(reference.targetId) !== namespace) {
+    if (
+      expectedKind !== 'capabilityReference' &&
+      namespaceOf(reference.targetId) !== namespace
+    ) {
       diagnostics.push(
         diagnostic(
           'CANON_REFERENCE_CROSS_PACKAGE_UNSUPPORTED',
