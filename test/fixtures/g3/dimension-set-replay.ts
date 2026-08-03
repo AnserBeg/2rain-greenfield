@@ -33,10 +33,12 @@ export const DIMENSION_REPLAY_IDS = Object.freeze({
   permission: `${DIMENSION_REPLAY_NAMESPACE}:permission.master_read`,
   queries: {
     byAddedDimension: `${DIMENSION_REPLAY_NAMESPACE}:query.balance_by_batch`,
+    renderAddedDimension: `${DIMENSION_REPLAY_NAMESPACE}:query.render_batch`,
     total: `${DIMENSION_REPLAY_NAMESPACE}:query.balance_total`,
   },
   selections: {
     byAddedDimension: `${DIMENSION_REPLAY_NAMESPACE}:selection.balance_by_batch`,
+    renderedAddedDimension: `${DIMENSION_REPLAY_NAMESPACE}:selection.rendered_batch`,
     total: `${DIMENSION_REPLAY_NAMESPACE}:selection.balance_total`,
   },
 });
@@ -266,9 +268,53 @@ export function dimensionReplayModuleDefinition(
     });
     definition.queries.push(
       balanceQuery(DIMENSION_REPLAY_IDS.queries.byAddedDimension, true),
+      renderedAddedDimensionQuery(),
     );
   }
   return definition;
+}
+
+function renderedAddedDimensionQuery(): Record<string, unknown> {
+  return {
+    filter: {
+      field: reference(
+        'fieldReference',
+        DIMENSION_REPLAY_IDS.fields.addedDimension,
+      ),
+      kind: 'fieldComparisonPredicate',
+      operator: 'equals',
+      schemaVersion: version,
+      value: {
+        kind: 'textValue',
+        schemaVersion: version,
+        value: DIMENSION_REPLAY_IDS.members.unspecified,
+      },
+    },
+    kind: 'queryDefinition',
+    maximumResultCount: 1,
+    module: reference('moduleReference', DIMENSION_REPLAY_IDS.module),
+    permission: reference(
+      'permissionReference',
+      DIMENSION_REPLAY_IDS.permission,
+    ),
+    queryId: DIMENSION_REPLAY_IDS.queries.renderAddedDimension,
+    queryType: 'get',
+    schemaVersion: version,
+    selections: [
+      {
+        field: reference(
+          'fieldReference',
+          DIMENSION_REPLAY_IDS.fields.addedDimension,
+        ),
+        kind: 'querySelection',
+        orderKey: 10,
+        schemaVersion: version,
+        selectionId: DIMENSION_REPLAY_IDS.selections.renderedAddedDimension,
+      },
+    ],
+    sourceEntity: reference('entityReference', DIMENSION_REPLAY_IDS.entity),
+    tier: 'q1',
+  };
 }
 
 function balanceQuery(

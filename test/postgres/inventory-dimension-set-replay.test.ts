@@ -24,6 +24,7 @@ import {
 import {
   SEMANTIC_AGGREGATE_RESULT_VERSION,
   SEMANTIC_QUERY_REQUEST_VERSION,
+  SEMANTIC_QUERY_RESULT_VERSION,
   SemanticQueryGateway,
   type SemanticAggregateQueryExecutionRequest,
   type SemanticAggregateResultEnvelope,
@@ -181,6 +182,8 @@ test('fixture dimension-set v2 replay reproduces every prior gateway balance byt
       pool,
       projectionTables.v2,
       PRIOR_DIMENSION_REPLAY_HISTORY,
+      v2Gateway,
+      v2View,
     );
 
     await replayV2(
@@ -245,6 +248,16 @@ test('fixture dimension-set v2 replay reproduces every prior gateway balance byt
       PRIOR_DIMENSION_REPLAY_HISTORY,
       () => 'ignored',
     );
+    const ignoredGateway = new SemanticQueryGateway(
+      policy,
+      new FixtureBalanceExecutor(pool, projectionTables.ignored),
+    );
+    const ignoredBalances = await observePriorBalances(ignoredGateway, v2View);
+    assertPriorReplayInvariant(
+      v1Balances,
+      ignoredBalances,
+      PRIOR_DIMENSION_REPLAY_HISTORY,
+    );
     await expectRed(
       recordedReds,
       'ignored-dimension-resolution',
@@ -254,6 +267,8 @@ test('fixture dimension-set v2 replay reproduces every prior gateway balance byt
           pool,
           projectionTables.ignored,
           PRIOR_DIMENSION_REPLAY_HISTORY,
+          ignoredGateway,
+          v2View,
         ),
     );
 
@@ -288,6 +303,8 @@ test('fixture dimension-set v2 replay reproduces every prior gateway balance byt
           pool,
           projectionTables.nullMember,
           PRIOR_DIMENSION_REPLAY_HISTORY,
+          nullGateway,
+          v2View,
         ),
     );
 
@@ -312,10 +329,61 @@ class FixtureBalanceExecutor implements SemanticQueryExecutor {
   ) {}
 
   async execute(
-    _request: SemanticQueryExecutionRequest,
+    request: SemanticQueryExecutionRequest,
   ): Promise<SemanticQueryResultEnvelope> {
-    void _request;
-    throw new Error('G3_R2_RECORD_QUERY_UNEXPECTED');
+    await assertProjectionBoundToView(
+      this.pool,
+      this.projectionTable,
+      request.view,
+    );
+    if (
+      request.definition.queryId !==
+      DIMENSION_REPLAY_IDS.queries.renderAddedDimension
+    ) {
+      throw new Error(
+        `G3_R2_RECORD_QUERY_UNEXPECTED: ${request.definition.queryId}`,
+      );
+    }
+    const member = DIMENSION_REPLAY_IDS.members.unspecified;
+    const result = await this.pool.query<{
+      added_dimension_member: string;
+      event_id: string;
+    }>(
+      `SELECT event_id::text, added_dimension_member
+         FROM ${quoted(this.projectionTable)}
+        WHERE added_dimension_member = $1
+        ORDER BY event_id
+        LIMIT 1`,
+      [member],
+    );
+    const row = result.rows[0];
+    return {
+      kind: 'semanticQueryResult',
+      outcome: row ? 'exact' : 'not-found',
+      queryId: request.definition.queryId,
+      records: row
+        ? [
+            {
+              archived: false,
+              displayValues: {
+                [DIMENSION_REPLAY_IDS.fields.addedDimension]:
+                  member === DIMENSION_REPLAY_IDS.members.unspecified
+                    ? 'Unspecified'
+                    : 'Batch red',
+              },
+              entityId: DIMENSION_REPLAY_IDS.entity,
+              recordId: row.event_id,
+              revision: 1,
+              values: {
+                [DIMENSION_REPLAY_IDS.fields.addedDimension]:
+                  row.added_dimension_member,
+              },
+            },
+          ]
+        : [],
+      schemaVersion: SEMANTIC_QUERY_RESULT_VERSION,
+      unsupportedReason: null,
+    };
   }
 
   async executeAggregate(
@@ -720,6 +788,8 @@ async function assertFirstClassUnspecified(
   pool: Pool,
   table: Exclude<ProjectionTable, typeof projectionTables.v1>,
   history: readonly DimensionReplayEvent[],
+  gateway: SemanticQueryGateway,
+  view: RequestRuntimeView,
 ): Promise<void> {
   const result = await pool.query<{
     added_dimension_member: string | null;
@@ -751,6 +821,23 @@ async function assertFirstClassUnspecified(
   if (!unspecified || !unspecified.member) {
     fail('G3_R2_UNSPECIFIED_GROUP_MISSING');
   }
+  const served = await gateway.invoke(view, {
+    arguments: {},
+    queryId: DIMENSION_REPLAY_IDS.queries.renderAddedDimension,
+    schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+  });
+  assert.equal(served.outcome, 'exact');
+  assert.equal(served.records.length, 1);
+  assert.equal(
+    served.records[0]?.values[DIMENSION_REPLAY_IDS.fields.addedDimension],
+    DIMENSION_REPLAY_IDS.members.unspecified,
+  );
+  assert.equal(
+    served.records[0]?.displayValues?.[
+      DIMENSION_REPLAY_IDS.fields.addedDimension
+    ],
+    'Unspecified',
+  );
 }
 
 async function assertPostExtensionMemberBehaviour(
