@@ -162,7 +162,7 @@ script, the SHA-256 digests were:
 | `app.authored.json` | `0217868f16700ea8c770f5d569e3796594885d391185ada3d810c7807b066f37` | `0217868f16700ea8c770f5d569e3796594885d391185ada3d810c7807b066f37` |
 | `app.compiled.json` | `f316b52cf9a40ff935882a789323ff6e7b97c9a06ee0a9409abf0156a0396533` | `a7282d06141017fea1a24fcb9fec33a508162abef6644ada7d2951c046122b49` |
 | `shell.authored.json` | `9584ff11af5fcdb4fc786b626a4f061b2d470d3d82c09f427011820bf0aeb2eb` | `9584ff11af5fcdb4fc786b626a4f061b2d470d3d82c09f427011820bf0aeb2eb` |
-| `shell.compiled.json` | `b7e98e880b4f10f00bfa67defc9e657b417b39093c52221a3b610135d07e9692` | `bf3385dd0b14bca8c916622962c784feb78266caa25c634477da2f5f2f7d5b5a` |
+| `shell.compiled.json` | `b7e98e880b4f10f00bfa67defc9e657b417b39093c52221a3b610135d07e9692` | `b7e98e880b4f10f00bfa67defc9e657b417b39093c52221a3b610135d07e9692` |
 
 `generate-app-authored.ts` overwrote the auto-merged authored file with
 identical bytes before `compile-app-release.ts` ran. Thus no generated value
@@ -175,7 +175,11 @@ bytes, protocol version, or recorded root were hand-edited.
 
 The independently checked shell demo release remains a compiler-output
 consumer. It was regenerated through
-`pnpm --filter @north-star/web build:demo-release`. Its release root remains
+`pnpm --filter @north-star/web build:demo-release` and then the repository
+formatter. The raw generator emitted digest
+`bf3385dd0b14bca8c916622962c784feb78266caa25c634477da2f5f2f7d5b5a`;
+the formatter restored the table's checked-in digest without changing JSON
+semantics. Its release root remains
 `a2f88c9b681b323ee113cde5c2d06e92e4ff25744c7bb72cd5e3310d7a76ea4f`,
 and the exact digest movement at integration is in the table above. The
 shell's authored definition is unchanged. Its stable semantic root plus moved
@@ -207,3 +211,17 @@ historical rollback refusal, the posting route, and the exact 163 / 127 / 36
 partition. `check:app-release` and `check:demo-release` passed after scripted
 regeneration. The frozen full-matrix verdict is recorded below after its single
 integration run.
+
+The first matrix attempt at `392d24d662e62d6c3e0e56c23575642d55bfdae3`
+stopped at formatting after its isolated performance gate passed. Exact red:
+
+```text
+[warn] apps/web/release/shell.compiled.json
+[warn] Code style issues found in the above file. Run Prettier with --write to fix.
+[ELIFECYCLE] Command failed with exit code 1.
+FULL_MATRIX_FAILED rc=1 sha=392d24d662e62d6c3e0e56c23575642d55bfdae3
+```
+
+The correction ran Prettier only on that generated file; targeted Prettier and
+`check:demo-release` checks then passed. The SHA moves visibly in the next
+commit; the red SHA is not a candidate.
