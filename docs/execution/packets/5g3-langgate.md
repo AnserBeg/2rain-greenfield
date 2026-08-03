@@ -1,13 +1,14 @@
 # 5g3-langgate — derived language conformance instrument
 
-Status: Critical review revision 1 candidate; exhaustive relation corpus remains split
+Status: Critical review revision 2 candidate; exhaustive relation corpus remains split
 
 Tier: Critical
 
 Original base: `5bdf511d652009b962cf0ad0983ab993ea0e96c3`
 
-Integrated base: `1962b10e45bd0e4d126d4c603056fc031a09144c` (merged at
-`c163c5c7dc83d317298ac63d29650171553d45b2`)
+Integrated base: `4341b6e5da4ed0f124fbf1c3a7343fa448f0a06c` (first merged at
+`c163c5c7dc83d317298ac63d29650171553d45b2`; refreshed at
+`89bea25d4c3aac242550725438ca866a0f3963b9`)
 
 ## Checkpoint outcome
 
@@ -104,8 +105,11 @@ The mandatory negative controls are observed in
 - `evidence-tamper` refuses `LANGUAGE_COVERAGE_RECEIPT_TAMPERED`;
 - `observation-snapshot` separately refuses an absent snapshot with
   `LANGUAGE_COVERAGE_OBSERVATION_SNAPSHOT_MISSING` and an empty snapshot with
-  `LANGUAGE_COVERAGE_OBSERVATION_SNAPSHOT_EMPTY`; its all-zero bitmap arm
-  refuses `LANGUAGE_COVERAGE_OBSERVATION_SNAPSHOT_ZERO_OBSERVATIONS`;
+  `LANGUAGE_COVERAGE_OBSERVATION_SNAPSHOT_EMPTY`; separate arms refuse the
+  wrong encoding, a stale ledger digest, a wrong obligation count, malformed
+  hex, a wrong byte length, a wrong observed count, and set padding. Its
+  correctly encoded all-zero bitmap arm refuses
+  `LANGUAGE_COVERAGE_OBSERVATION_SNAPSHOT_ZERO_OBSERVATIONS`;
 - `derived-subject` runs the real TypeScript derivation against temporary
   authored-empty and lowered-empty specifications and refuses
   `LANGUAGE_COVERAGE_AUTHORED_LEDGER_SUBJECT_EMPTY` and
@@ -136,8 +140,10 @@ The mandatory negative controls are observed in
   `LANGUAGE_COVERAGE_RECEIPT_OUTCOME_INVALID`;
 - `receipt-body` refuses an empty observed fact, a declaration-only execution
   fact, a wrong receipt version, a refusal whose observed diagnostic differs,
-  an invalid unhonored fact, and an executed-file credit from the right path in
-  the wrong suite;
+  whitespace and non-string refusal diagnostics, an invalid unhonored fact,
+  and an executed-file credit from the right path in the wrong suite;
+- `receipt-uniqueness` separately refuses duplicate claims for one obligation
+  and duplicate produced receipt IDs;
 - `receipt-reachability` refuses a successful executed-file artifact from a
   prior run and one whose suite identity differs from the declared producer;
   the gate now uses the same strict reachability parser as the final
@@ -167,6 +173,20 @@ The controls above catch and assert these exact failures:
 - empty snapshot: `LANGUAGE_COVERAGE_OBSERVATION_SNAPSHOT_EMPTY`
 - correctly encoded all-zero snapshot:
   `LANGUAGE_COVERAGE_OBSERVATION_SNAPSHOT_ZERO_OBSERVATIONS`
+- wrong snapshot bitmap encoding:
+  `LANGUAGE_COVERAGE_OBSERVATION_BITMAP_ENCODING_INVALID`
+- snapshot bound to the wrong ledger digest:
+  `LANGUAGE_COVERAGE_STALE_OBSERVATION_SNAPSHOT: snapshot names stale-fixture-ledger-digest, current ledger is fixture-ledger-digest`
+- snapshot names the wrong obligation count:
+  `LANGUAGE_COVERAGE_OBSERVATION_COUNT_MISMATCH: snapshot names 2, ledger has 1`
+- malformed snapshot bitmap:
+  `LANGUAGE_COVERAGE_OBSERVATION_BITMAP_INVALID`
+- snapshot bitmap has the wrong byte length:
+  `LANGUAGE_COVERAGE_OBSERVATION_BITMAP_LENGTH_MISMATCH`
+- snapshot observed count disagrees with its bitmap:
+  `LANGUAGE_COVERAGE_OBSERVATION_BITMAP_COUNT_MISMATCH: snapshot names 0, bitmap contains 1`
+- snapshot sets unused padding bits:
+  `LANGUAGE_COVERAGE_OBSERVATION_BITMAP_PADDING_SET`
 - authored derivation absent:
   `LANGUAGE_COVERAGE_AUTHORED_LEDGER_SUBJECT_EMPTY`
 - lowered derivation absent:
@@ -193,6 +213,14 @@ The controls above catch and assert these exact failures:
   `LANGUAGE_COVERAGE_RECEIPT_OBSERVED_FACT_EMPTY: receipt-body-control`
 - declaration offered as execution observation:
   `LANGUAGE_COVERAGE_EXECUTION_FACT_INVALID: receipt-body-control`
+- whitespace refusal diagnostic:
+  `LANGUAGE_COVERAGE_REFUSAL_WITHOUT_DIAGNOSTIC: receipt-body-control`
+- non-string refusal diagnostic:
+  `LANGUAGE_COVERAGE_REFUSAL_WITHOUT_DIAGNOSTIC: receipt-body-control`
+- duplicate receipt claim for one obligation:
+  `LANGUAGE_COVERAGE_DUPLICATE_RECEIPT_CLAIM: authoredLanguage:$.relations[].cardinality="manyToOne"`
+- duplicate produced receipt ID:
+  `LANGUAGE_COVERAGE_DUPLICATE_RECEIPT: valid-execution-receipt`
 - current receipt credited by the same test path in the wrong suite:
   `LANGUAGE_COVERAGE_RECEIPT_UNCREDITED_PRODUCER: unit:test/unit/language-conformance-ledger.test.ts`
 - prior-run reachability artifact:
@@ -282,6 +310,18 @@ counter, a matching produced-artifact digest, an exact typed-refusal
 diagnostic, or the accepted-but-unhonored fact. No accepted language shape,
 decision category, exemption, or partition was widened.
 
+The second fresh naive Codex `gpt-5.6-sol` xhigh arm reviewed frozen SHA
+`89bea25d4c3aac242550725438ca866a0f3963b9` after its exact-SHA full matrix
+passed and returned `VERDICT: REVISE`. L1, L3, L6, L7, L8, and L9 passed. Its
+two bounded findings were accepted: implemented snapshot-integrity and
+duplicate-receipt rejection branches lacked their own executed reds, and a
+typed-refusal diagnostic admitted truthy whitespace or non-string raw JSON.
+Revision 2 adds a distinct red for every named snapshot branch, duplicate
+claims and duplicate receipts, and both malformed diagnostic forms. It also
+requires both refusal diagnostic fields to be nonblank strings before exact
+equality can credit a refusal. No accepted language shape, decision category,
+exemption, or partition was changed.
+
 ## Calibration against the escaped defects
 
 The table distinguishes what this checkpoint proves now from what the complete
@@ -309,11 +349,13 @@ invariant. Defects 5 and 6 remain outside this instrument.
 ## Focused verification
 
 - `corepack pnpm typecheck` — PASS
-- focused `test/unit/language-conformance-ledger.test.ts` — PASS, 21/21 after
-  Critical review revision 1. The three added controls cover empty derived and
+- focused `test/unit/language-conformance-ledger.test.ts` — PASS, 22/22 after
+  Critical review revision 2. The revision-1 controls cover empty derived and
   observed subjects, current-run/suite-bound executed-file credit, and
-  non-proxy receipt facts.
-- `corepack pnpm test:unit` — PASS, 76/76 on revision 1. Earlier work observed
+  non-proxy receipt facts. Revision 2 adds the snapshot-integrity,
+  receipt-uniqueness, and strict typed-refusal controls named above.
+- `corepack pnpm test:unit` — PASS, 76/76 on revision 1; revision 2 requires a
+  fresh full-matrix result. Earlier work observed
   the new ledger control red because the
   authored optional-boolean union was not enumerated; the walker was corrected
   to retain finite members beside `undefined`. The pre-handoff missing-axis

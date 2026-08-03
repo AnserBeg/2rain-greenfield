@@ -966,7 +966,11 @@ function assertReceiptBody(body: LanguageCoverageReceiptBody): void {
   if (body.outcome === 'executed') {
     assertExecutedObservedFact(body.receiptId, body.observedFact);
   }
-  if (body.outcome === 'typedRefusal' && !body.refusalDiagnostic) {
+  if (
+    body.outcome === 'typedRefusal' &&
+    (typeof body.refusalDiagnostic !== 'string' ||
+      body.refusalDiagnostic.trim().length === 0)
+  ) {
     throw new Error(
       `LANGUAGE_COVERAGE_REFUSAL_WITHOUT_DIAGNOSTIC: ${body.receiptId}`,
     );
@@ -974,6 +978,8 @@ function assertReceiptBody(body: LanguageCoverageReceiptBody): void {
   if (
     body.outcome === 'typedRefusal' &&
     (body.observedFact.kind !== 'typedRefusal' ||
+      typeof body.observedFact.diagnostic !== 'string' ||
+      body.observedFact.diagnostic.trim().length === 0 ||
       body.observedFact.diagnostic !== body.refusalDiagnostic)
   ) {
     throw new Error(

@@ -218,6 +218,69 @@ test('observation controls refuse absent subjects and zero observations', () => 
     () => decodeLanguageCoverageObservationSnapshot(ledger, {}),
     /LANGUAGE_COVERAGE_OBSERVATION_SNAPSHOT_EMPTY/u,
   );
+  const snapshot = {
+    bitmapEncoding: 'sorted-obligation-bitset-msb0-hex/v1',
+    ledgerDigest: ledger.digest,
+    obligationCount: ledger.obligations.length,
+    observedBitmap: '80',
+    observedCount: 1,
+  };
+  assert.throws(
+    () =>
+      decodeLanguageCoverageObservationSnapshot(ledger, {
+        ...snapshot,
+        bitmapEncoding: 'sorted-obligation-bitset-lsb0-hex/v1',
+      }),
+    /LANGUAGE_COVERAGE_OBSERVATION_BITMAP_ENCODING_INVALID/u,
+  );
+  assert.throws(
+    () =>
+      decodeLanguageCoverageObservationSnapshot(ledger, {
+        ...snapshot,
+        ledgerDigest: 'stale-fixture-ledger-digest',
+      }),
+    /LANGUAGE_COVERAGE_STALE_OBSERVATION_SNAPSHOT: snapshot names stale-fixture-ledger-digest, current ledger is fixture-ledger-digest/u,
+  );
+  assert.throws(
+    () =>
+      decodeLanguageCoverageObservationSnapshot(ledger, {
+        ...snapshot,
+        obligationCount: 2,
+      }),
+    /LANGUAGE_COVERAGE_OBSERVATION_COUNT_MISMATCH: snapshot names 2, ledger has 1/u,
+  );
+  assert.throws(
+    () =>
+      decodeLanguageCoverageObservationSnapshot(ledger, {
+        ...snapshot,
+        observedBitmap: 'not-hex',
+      }),
+    /LANGUAGE_COVERAGE_OBSERVATION_BITMAP_INVALID/u,
+  );
+  assert.throws(
+    () =>
+      decodeLanguageCoverageObservationSnapshot(ledger, {
+        ...snapshot,
+        observedBitmap: '',
+      }),
+    /LANGUAGE_COVERAGE_OBSERVATION_BITMAP_LENGTH_MISMATCH/u,
+  );
+  assert.throws(
+    () =>
+      decodeLanguageCoverageObservationSnapshot(ledger, {
+        ...snapshot,
+        observedCount: 0,
+      }),
+    /LANGUAGE_COVERAGE_OBSERVATION_BITMAP_COUNT_MISMATCH: snapshot names 0, bitmap contains 1/u,
+  );
+  assert.throws(
+    () =>
+      decodeLanguageCoverageObservationSnapshot(ledger, {
+        ...snapshot,
+        observedBitmap: 'c0',
+      }),
+    /LANGUAGE_COVERAGE_OBSERVATION_BITMAP_PADDING_SET/u,
+  );
   assert.throws(
     () =>
       decodeLanguageCoverageObservationSnapshot(ledger, {
@@ -382,6 +445,21 @@ test('receipt evidence must be versioned, nonempty, outcome-specific, and suite-
       }),
     /LANGUAGE_COVERAGE_REFUSAL_FACT_MISMATCH: receipt-body-control/u,
   );
+  for (const invalidDiagnostic of ['   ', 7] as const) {
+    assert.throws(
+      () =>
+        makeLanguageCoverageReceipt({
+          ...base,
+          observedFact: {
+            diagnostic: invalidDiagnostic,
+            kind: 'typedRefusal',
+          },
+          outcome: 'typedRefusal',
+          refusalDiagnostic: invalidDiagnostic,
+        } as never),
+      /LANGUAGE_COVERAGE_REFUSAL_WITHOUT_DIAGNOSTIC: receipt-body-control/u,
+    );
+  }
   assert.throws(
     () =>
       makeLanguageCoverageReceipt({
@@ -428,6 +506,48 @@ test('receipt evidence must be versioned, nonempty, outcome-specific, and suite-
       `LANGUAGE_COVERAGE_RECEIPT_UNCREDITED_PRODUCER: unit:${escapeRegExp(testFile)}`,
       'u',
     ),
+  );
+});
+
+test('receipt uniqueness controls refuse duplicate claims and produced receipts', () => {
+  const ledger = fixtureLedger();
+  const obligation = ledger.obligations[0]!;
+  const receipt = executionReceipt(obligation);
+  const claim = {
+    expectedOutcome: 'executed' as const,
+    obligationId: obligation.id,
+    receiptId: receipt.receiptId,
+  };
+  const base = {
+    acceptedButUnhonoredObligationIds: new Set<string>(),
+    creditedProducerFiles: new Set([producerCredit]),
+    decisionObservedObligationIds: new Set<string>(),
+    decisions: fixtureDecisions(ledger),
+    ledger,
+    observedObligationIds: new Set<string>(),
+    runId,
+  };
+
+  assert.throws(
+    () =>
+      evaluateLanguageCoverage({
+        ...base,
+        receiptClaims: [claim, { ...claim, receiptId: 'duplicate-claim' }],
+        receipts: [receipt],
+      }),
+    new RegExp(
+      `LANGUAGE_COVERAGE_DUPLICATE_RECEIPT_CLAIM: ${escapeRegExp(obligation.id)}`,
+      'u',
+    ),
+  );
+  assert.throws(
+    () =>
+      evaluateLanguageCoverage({
+        ...base,
+        receiptClaims: [claim],
+        receipts: [receipt, receipt],
+      }),
+    /LANGUAGE_COVERAGE_DUPLICATE_RECEIPT: valid-execution-receipt/u,
   );
 });
 
