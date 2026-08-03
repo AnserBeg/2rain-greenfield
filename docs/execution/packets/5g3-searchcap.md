@@ -1,6 +1,6 @@
 # 5g3-searchcap — search capability is executable or refused
 
-Status: candidate
+Status: evidence_ready
 
 Tier: Critical
 
@@ -245,3 +245,23 @@ The runner's exact terminal evidence was:
 ```text
 FULL_MATRIX_PASS_SHA=1d907c1a1bc5175fd5c2497931ce14b47e74c232
 ```
+
+The matrix SHA and the frozen review candidate have identical executable
+content. Commit `4d15ad8b4add815c7e1b5ab35cf50b97ce03bffd` adds only this packet's
+matrix evidence; the `git-workflow` executable-tree comparison is empty.
+
+## Review evidence
+
+Both Critical reviewers examined the identical, clean, frozen candidate
+`4d15ad8b4add815c7e1b5ab35cf50b97ce03bffd`. There were no code changes and
+no revise rounds between them.
+
+- Fresh naive Codex `gpt-5.6-sol` at xhigh effort: **PASS**, with no in-scope
+  findings. Evidence:
+  `/home/rvham/2rain-missions/searchcap-codex-review-4d15ad8.result.txt` and
+  `/home/rvham/2rain-missions/searchcap-codex-review-4d15ad8.events.jsonl`.
+- Fable at max effort, confirming the unchanged SHA: **PASS**, with no
+  in-scope findings. Evidence:
+  `/home/rvham/2rain-missions/searchcap-fable-confirm-4d15ad8.result.txt`.
+
+The packet used zero of the two permitted revise rounds.
