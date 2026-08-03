@@ -51,6 +51,19 @@ try {
     decisionsDocument.decisions,
     `${decisionsPath}#decisions`,
   ) as unknown as LanguageCoverageDecision[];
+  const acceptedButUnhonoredEntries = readStringArray(
+    decisionsDocument.acceptedButUnhonoredObligationIds,
+    `${decisionsPath}#acceptedButUnhonoredObligationIds`,
+  );
+  const acceptedButUnhonoredObligationIds = new Set(
+    acceptedButUnhonoredEntries,
+  );
+  if (
+    acceptedButUnhonoredObligationIds.size !==
+    acceptedButUnhonoredEntries.length
+  ) {
+    throw new Error('LANGUAGE_COVERAGE_DUPLICATE_DEFECT_INVENTORY_ENTRY');
+  }
   const decisionObservedObligationIds =
     decodeLanguageCoverageObservationSnapshot(
       ledger,
@@ -67,6 +80,7 @@ try {
       ) as unknown as LanguageCoverageReceipt,
   );
   const result = evaluateLanguageCoverage({
+    acceptedButUnhonoredObligationIds,
     creditedTestFiles: creditedTestFiles(repositoryRoot),
     decisionObservedObligationIds,
     decisions,
@@ -77,7 +91,10 @@ try {
     runId: resolveReachabilityRunId({ repositoryRoot }),
   });
   process.stdout.write(
-    `language coverage: PASS (${String(result.obligationCount)} obligations; ${String(result.receiptCount)} receipts; ${String(result.decisionCount)} explicit decisions; ${String(observedObligationIds.size)} first-party observations)\n`,
+    `language coverage: PASS (${String(result.obligationCount)} obligations; ${String(result.receiptCount)} receipts; ${String(result.decisionCount)} decision-covered obligations; ${String(observedObligationIds.size)} first-party observations)\n`,
+  );
+  process.stdout.write(
+    `language coverage relation partition: ${String(result.relationObligationCount)} = ${String(result.supportedAndExercisedCount)} supported-and-exercised + ${String(result.supportedButUnexercisedCount)} supported-but-unexercised + ${String(result.acceptedButUnhonoredCount)} accepted-but-unhonored\n`,
   );
   process.stdout.write(
     `language coverage meaning: ${String(result.receiptCount)}/${String(result.obligationCount)} obligations have execution/refusal receipts; green proves the derived specification choices, observed partition, and exact decision identities match their reviewed records, not that decision-covered shapes execute; changing a decision record requires a new identity\n`,
@@ -128,6 +145,14 @@ function readArray(value: unknown, source: string): unknown[] {
     throw new Error(`LANGUAGE_COVERAGE_INVALID_JSON_ARRAY: ${source}`);
   }
   return value;
+}
+
+function readStringArray(value: unknown, source: string): string[] {
+  const entries = readArray(value, source);
+  if (!entries.every((entry): entry is string => typeof entry === 'string')) {
+    throw new Error(`LANGUAGE_COVERAGE_INVALID_STRING_ARRAY: ${source}`);
+  }
+  return entries;
 }
 
 function findRepositoryRoot(start: string): string {

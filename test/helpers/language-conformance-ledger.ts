@@ -41,7 +41,7 @@ export interface LanguageCoverageLedger {
   readonly version: typeof LANGUAGE_COVERAGE_LEDGER_VERSION;
 }
 
-export type LanguageCoverageOutcome = 'executed' | 'typedRefusal';
+export type LanguageCoverageOutcome = 'executed' | 'typedRefusal' | 'unhonored';
 
 export interface LanguageCoverageReceiptBody {
   readonly obligationId: string;
@@ -72,6 +72,7 @@ export type LanguageCoverageDecisionCategory =
   'observedRelationScope' | 'observedOutsideRelationScope' | 'unobserved';
 
 export interface LanguageCoverageDecision {
+  readonly acceptedButUnhonoredSetDigest: string;
   readonly category: LanguageCoverageDecisionCategory;
   readonly decisionId: string;
   readonly ledgerDigest: string;
@@ -86,6 +87,7 @@ export type LanguageCoverageDecisionBody = Omit<
 >;
 
 export interface EvaluateLanguageCoverageInput {
+  readonly acceptedButUnhonoredObligationIds: ReadonlySet<string>;
   readonly creditedTestFiles: ReadonlySet<string>;
   readonly decisionObservedObligationIds: ReadonlySet<string>;
   readonly decisions: readonly LanguageCoverageDecision[];
@@ -97,9 +99,13 @@ export interface EvaluateLanguageCoverageInput {
 }
 
 export interface LanguageCoverageResult {
+  readonly acceptedButUnhonoredCount: number;
   readonly decisionCount: number;
   readonly obligationCount: number;
   readonly receiptCount: number;
+  readonly relationObligationCount: number;
+  readonly supportedAndExercisedCount: number;
+  readonly supportedButUnexercisedCount: number;
 }
 
 export interface LanguageCoverageObservationSnapshot {
@@ -279,7 +285,29 @@ export function evaluateLanguageCoverage(
     'LANGUAGE_COVERAGE_DUPLICATE_RECEIPT',
   );
 
+  for (const obligationId of input.acceptedButUnhonoredObligationIds) {
+    const obligation = obligations.get(obligationId);
+    if (!obligation) {
+      throw new Error(
+        `LANGUAGE_COVERAGE_PHANTOM_DEFECT_INVENTORY_ENTRY: ${obligationId}`,
+      );
+    }
+    if (!isRelationScopeObligation(obligation)) {
+      throw new Error(
+        `LANGUAGE_COVERAGE_DEFECT_INVENTORY_OUTSIDE_PHASE1: ${obligationId}`,
+      );
+    }
+  }
+  const acceptedButUnhonoredSetDigest = deriveObligationSetDigest(
+    input.acceptedButUnhonoredObligationIds,
+  );
+
   for (const claim of input.receiptClaims) {
+    if (!isLanguageCoverageOutcome(claim.expectedOutcome)) {
+      throw new Error(
+        `LANGUAGE_COVERAGE_CLAIM_OUTCOME_INVALID: ${String(claim.expectedOutcome)}`,
+      );
+    }
     if (!obligations.has(claim.obligationId)) {
       throw new Error(
         `LANGUAGE_COVERAGE_PHANTOM_OBLIGATION: ${claim.obligationId}`,
@@ -332,6 +360,13 @@ export function evaluateLanguageCoverage(
       );
     }
     if (
+      decision.acceptedButUnhonoredSetDigest !== acceptedButUnhonoredSetDigest
+    ) {
+      throw new Error(
+        `LANGUAGE_COVERAGE_STALE_DEFECT_INVENTORY_SET: ${decision.decisionId} no longer binds the exact accepted-but-unhonored obligation set`,
+      );
+    }
+    if (
       decision.obligationSetDigest !==
       expectedDecisionSetDigests.get(decision.category)
     ) {
@@ -342,6 +377,7 @@ export function evaluateLanguageCoverage(
     const separator = decision.decisionId.lastIndexOf('@');
     const decisionName = decision.decisionId.slice(0, separator);
     const decisionBody: LanguageCoverageDecisionBody = {
+      acceptedButUnhonoredSetDigest: decision.acceptedButUnhonoredSetDigest,
       category: decision.category,
       ledgerDigest: decision.ledgerDigest,
       obligationSetDigest: decision.obligationSetDigest,
@@ -362,6 +398,9 @@ export function evaluateLanguageCoverage(
 
   let decisionCount = 0;
   let receiptCount = 0;
+  let supportedAndExercisedCount = 0;
+  let supportedButUnexercisedCount = 0;
+  let acceptedButUnhonoredCount = 0;
   const unclaimed: string[] = [];
   for (const obligation of input.ledger.obligations) {
     const claim = receiptClaims.get(obligation.id);
@@ -376,8 +415,28 @@ export function evaluateLanguageCoverage(
           `LANGUAGE_COVERAGE_OUTCOME_MISMATCH: ${obligation.id} expected ${claim.expectedOutcome}, receipt observed ${receipt.outcome}`,
         );
       }
+      const acceptedButUnhonored = input.acceptedButUnhonoredObligationIds.has(
+        obligation.id,
+      );
+      if (acceptedButUnhonored !== (receipt.outcome === 'unhonored')) {
+        throw new Error(
+          `LANGUAGE_COVERAGE_DISPOSITION_MISMATCH: ${obligation.id} is classified ${acceptedButUnhonored ? 'accepted-but-unhonored' : 'supported'} but receipt observed ${receipt.outcome}`,
+        );
+      }
       receiptCount += 1;
+      if (isRelationScopeObligation(obligation)) {
+        if (acceptedButUnhonored) acceptedButUnhonoredCount += 1;
+        else supportedAndExercisedCount += 1;
+      }
       continue;
+    }
+
+    if (isRelationScopeObligation(obligation)) {
+      if (input.acceptedButUnhonoredObligationIds.has(obligation.id)) {
+        acceptedButUnhonoredCount += 1;
+      } else {
+        supportedButUnexercisedCount += 1;
+      }
     }
 
     const decisionCategoryAtSnapshot = decisionCategory(
@@ -404,17 +463,42 @@ export function evaluateLanguageCoverage(
       `LANGUAGE_COVERAGE_UNCLAIMED_ENTRY: ${unclaimed.join(', ')}`,
     );
   }
+  const relationObligationCount = input.ledger.obligations.filter(
+    isRelationScopeObligation,
+  ).length;
+  if (
+    supportedAndExercisedCount +
+      supportedButUnexercisedCount +
+      acceptedButUnhonoredCount !==
+    relationObligationCount
+  ) {
+    throw new Error('LANGUAGE_COVERAGE_RELATION_PARTITION_INEXACT');
+  }
   return {
+    acceptedButUnhonoredCount,
     decisionCount,
     obligationCount: input.ledger.obligations.length,
     receiptCount,
+    relationObligationCount,
+    supportedAndExercisedCount,
+    supportedButUnexercisedCount,
   };
 }
 
 export function decodeLanguageCoverageObservationSnapshot(
   ledger: LanguageCoverageLedger,
-  snapshot: LanguageCoverageObservationSnapshot,
+  value: unknown,
 ): ReadonlySet<string> {
+  if (value === undefined || value === null) {
+    throw new Error('LANGUAGE_COVERAGE_OBSERVATION_SNAPSHOT_MISSING');
+  }
+  if (!isRecord(value) || Object.keys(value).length === 0) {
+    throw new Error('LANGUAGE_COVERAGE_OBSERVATION_SNAPSHOT_EMPTY');
+  }
+  const snapshot = value as Partial<LanguageCoverageObservationSnapshot>;
+  if (snapshot.bitmapEncoding !== 'sorted-obligation-bitset-msb0-hex/v1') {
+    throw new Error('LANGUAGE_COVERAGE_OBSERVATION_BITMAP_ENCODING_INVALID');
+  }
   if (snapshot.ledgerDigest !== ledger.digest) {
     throw new Error(
       `LANGUAGE_COVERAGE_STALE_OBSERVATION_SNAPSHOT: snapshot names ${snapshot.ledgerDigest}, current ledger is ${ledger.digest}`,
@@ -425,7 +509,10 @@ export function decodeLanguageCoverageObservationSnapshot(
       `LANGUAGE_COVERAGE_OBSERVATION_COUNT_MISMATCH: snapshot names ${String(snapshot.obligationCount)}, ledger has ${String(ledger.obligations.length)}`,
     );
   }
-  if (!/^(?:[0-9a-f]{2})*$/u.test(snapshot.observedBitmap)) {
+  if (
+    typeof snapshot.observedBitmap !== 'string' ||
+    !/^(?:[0-9a-f]{2})*$/u.test(snapshot.observedBitmap)
+  ) {
     throw new Error('LANGUAGE_COVERAGE_OBSERVATION_BITMAP_INVALID');
   }
   const bytes = Buffer.from(snapshot.observedBitmap, 'hex');
@@ -439,7 +526,10 @@ export function decodeLanguageCoverageObservationSnapshot(
       observed.add(obligation.id);
     }
   }
-  if (observed.size !== snapshot.observedCount) {
+  if (
+    typeof snapshot.observedCount !== 'number' ||
+    observed.size !== snapshot.observedCount
+  ) {
     throw new Error(
       `LANGUAGE_COVERAGE_OBSERVATION_BITMAP_COUNT_MISMATCH: snapshot names ${String(snapshot.observedCount)}, bitmap contains ${String(observed.size)}`,
     );
@@ -499,6 +589,12 @@ export function deriveDecisionSetDigest(
         .sort(compareCodePoints),
     ),
   );
+}
+
+export function deriveObligationSetDigest(
+  obligationIds: ReadonlySet<string>,
+): string {
+  return sha256(stableStringify([...obligationIds].sort(compareCodePoints)));
 }
 
 export function stableStringify(value: unknown): string {
@@ -821,6 +917,11 @@ function assertReceiptBody(body: LanguageCoverageReceiptBody): void {
   ) {
     throw new Error('LANGUAGE_COVERAGE_RECEIPT_INCOMPLETE');
   }
+  if (!isLanguageCoverageOutcome(body.outcome)) {
+    throw new Error(
+      `LANGUAGE_COVERAGE_RECEIPT_OUTCOME_INVALID: ${String(body.outcome)}`,
+    );
+  }
   if (body.outcome === 'typedRefusal' && !body.refusalDiagnostic) {
     throw new Error(
       `LANGUAGE_COVERAGE_REFUSAL_WITHOUT_DIAGNOSTIC: ${body.receiptId}`,
@@ -831,6 +932,28 @@ function assertReceiptBody(body: LanguageCoverageReceiptBody): void {
       `LANGUAGE_COVERAGE_EXECUTION_WITH_REFUSAL: ${body.receiptId}`,
     );
   }
+  if (body.outcome === 'unhonored' && body.refusalDiagnostic !== undefined) {
+    throw new Error(
+      `LANGUAGE_COVERAGE_UNHONORED_WITH_REFUSAL: ${body.receiptId}`,
+    );
+  }
+}
+
+function isLanguageCoverageOutcome(
+  value: unknown,
+): value is LanguageCoverageOutcome {
+  return (
+    value === 'executed' || value === 'typedRefusal' || value === 'unhonored'
+  );
+}
+
+function isRelationScopeObligation(
+  obligation: LanguageCoverageObligation,
+): boolean {
+  return (
+    obligation.axis.startsWith('$.relations') ||
+    obligation.axis.startsWith('$relationGraph')
+  );
 }
 
 function decisionCategory(

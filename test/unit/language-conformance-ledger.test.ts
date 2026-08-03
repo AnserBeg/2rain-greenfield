@@ -15,6 +15,8 @@ import {
   deriveLanguageCoverageDecisionId,
   deriveLanguageCoverageLedger,
   deriveDecisionSetDigest,
+  deriveObligationSetDigest,
+  decodeLanguageCoverageObservationSnapshot,
   evaluateLanguageCoverage,
   makeLanguageCoverageReceipt,
   observeLanguageCoverage,
@@ -146,12 +148,26 @@ test('the language gate is wired into local, matrix, and hosted acceptance paths
   );
 });
 
+test('observation snapshot controls refuse an absent or empty snapshot', () => {
+  const ledger = fixtureLedger();
+
+  assert.throws(
+    () => decodeLanguageCoverageObservationSnapshot(ledger, undefined),
+    /LANGUAGE_COVERAGE_OBSERVATION_SNAPSHOT_MISSING/u,
+  );
+  assert.throws(
+    () => decodeLanguageCoverageObservationSnapshot(ledger, {}),
+    /LANGUAGE_COVERAGE_OBSERVATION_SNAPSHOT_EMPTY/u,
+  );
+});
+
 test('phantom-axis control refuses a claim for an obligation absent from the derived ledger', () => {
   const ledger = fixtureLedger();
 
   assert.throws(
     () =>
       evaluateLanguageCoverage({
+        acceptedButUnhonoredObligationIds: new Set(),
         creditedTestFiles: new Set([testFile]),
         decisionObservedObligationIds: new Set(),
         decisions: fixtureDecisions(ledger),
@@ -183,6 +199,7 @@ test('evidence-tamper control refuses an altered execution receipt', () => {
   assert.throws(
     () =>
       evaluateLanguageCoverage({
+        acceptedButUnhonoredObligationIds: new Set(),
         creditedTestFiles: new Set([testFile]),
         decisionObservedObligationIds: new Set(),
         decisions: fixtureDecisions(ledger),
@@ -202,6 +219,26 @@ test('evidence-tamper control refuses an altered execution receipt', () => {
   );
 });
 
+test('receipt-shape control refuses an unrecognized outcome', () => {
+  const ledger = fixtureLedger();
+  const obligation = ledger.obligations[0]!;
+
+  assert.throws(
+    () =>
+      makeLanguageCoverageReceipt({
+        obligationId: obligation.id,
+        observedFact: { storedValue: true },
+        outcome: 'unexpected-output-shape',
+        producer: { suiteId: 'unit', testFile },
+        receiptId: 'unknown-outcome',
+        runId,
+        version: LANGUAGE_COVERAGE_RECEIPT_VERSION,
+        witnessId: 'receipt-shape-control',
+      } as never),
+    /LANGUAGE_COVERAGE_RECEIPT_OUTCOME_INVALID: unexpected-output-shape/u,
+  );
+});
+
 test('entry-skip control names an obligation with neither evidence nor a written decision', () => {
   const ledger = fixtureLedger();
   const obligation = ledger.obligations[0]!;
@@ -209,6 +246,7 @@ test('entry-skip control names an obligation with neither evidence nor a written
   assert.throws(
     () =>
       evaluateLanguageCoverage({
+        acceptedButUnhonoredObligationIds: new Set(),
         creditedTestFiles: new Set([testFile]),
         decisionObservedObligationIds: new Set(),
         decisions: [],
@@ -220,6 +258,36 @@ test('entry-skip control names an obligation with neither evidence nor a written
       }),
     new RegExp(
       `LANGUAGE_COVERAGE_UNCLAIMED_ENTRY: .*${escapeRegExp(obligation.id)}`,
+      'u',
+    ),
+  );
+});
+
+test('receipt-claim control refuses a claim that no current run produced', () => {
+  const ledger = fixtureLedger();
+  const obligation = ledger.obligations[0]!;
+
+  assert.throws(
+    () =>
+      evaluateLanguageCoverage({
+        acceptedButUnhonoredObligationIds: new Set(),
+        creditedTestFiles: new Set([testFile]),
+        decisionObservedObligationIds: new Set(),
+        decisions: fixtureDecisions(ledger),
+        ledger,
+        observedObligationIds: new Set(),
+        receiptClaims: [
+          {
+            expectedOutcome: 'executed',
+            obligationId: obligation.id,
+            receiptId: 'never-produced',
+          },
+        ],
+        receipts: [],
+        runId,
+      }),
+    new RegExp(
+      `LANGUAGE_COVERAGE_UNCLAIMED_ENTRY: ${escapeRegExp(obligation.id)}`,
       'u',
     ),
   );
@@ -243,6 +311,7 @@ test('refusal-distinguisher control cannot use a typed refusal as an execution r
   assert.throws(
     () =>
       evaluateLanguageCoverage({
+        acceptedButUnhonoredObligationIds: new Set(),
         creditedTestFiles: new Set([testFile]),
         decisionObservedObligationIds: new Set(),
         decisions: fixtureDecisions(ledger),
@@ -259,6 +328,119 @@ test('refusal-distinguisher control cannot use a typed refusal as an execution r
         runId,
       }),
     /LANGUAGE_COVERAGE_OUTCOME_MISMATCH/u,
+  );
+});
+
+test('disposition controls reject honoured behavior classified as a defect and unhonored behavior classified as supported', () => {
+  const ledger = fixtureLedger();
+  const obligation = ledger.obligations[0]!;
+  const executed = executionReceipt(obligation);
+  const defectSet = new Set([obligation.id]);
+
+  assert.throws(
+    () =>
+      evaluateLanguageCoverage({
+        acceptedButUnhonoredObligationIds: defectSet,
+        creditedTestFiles: new Set([testFile]),
+        decisionObservedObligationIds: new Set(),
+        decisions: decisionsFor(
+          ledger,
+          new Set(),
+          'classified-defect',
+          defectSet,
+        ),
+        ledger,
+        observedObligationIds: new Set(),
+        receiptClaims: [
+          {
+            expectedOutcome: 'executed',
+            obligationId: obligation.id,
+            receiptId: executed.receiptId,
+          },
+        ],
+        receipts: [executed],
+        runId,
+      }),
+    new RegExp(
+      `LANGUAGE_COVERAGE_DISPOSITION_MISMATCH: ${escapeRegExp(obligation.id)} is classified accepted-but-unhonored but receipt observed executed`,
+      'u',
+    ),
+  );
+
+  const unhonored = makeLanguageCoverageReceipt({
+    obligationId: obligation.id,
+    observedFact: { accepted: true, honored: false },
+    outcome: 'unhonored',
+    producer: { suiteId: 'unit', testFile },
+    receiptId: 'unhonored-receipt',
+    runId,
+    version: LANGUAGE_COVERAGE_RECEIPT_VERSION,
+    witnessId: 'reverse-disposition-control',
+  });
+  assert.throws(
+    () =>
+      evaluateLanguageCoverage({
+        acceptedButUnhonoredObligationIds: new Set(),
+        creditedTestFiles: new Set([testFile]),
+        decisionObservedObligationIds: new Set(),
+        decisions: fixtureDecisions(ledger),
+        ledger,
+        observedObligationIds: new Set(),
+        receiptClaims: [
+          {
+            expectedOutcome: 'unhonored',
+            obligationId: obligation.id,
+            receiptId: unhonored.receiptId,
+          },
+        ],
+        receipts: [unhonored],
+        runId,
+      }),
+    new RegExp(
+      `LANGUAGE_COVERAGE_DISPOSITION_MISMATCH: ${escapeRegExp(obligation.id)} is classified supported but receipt observed unhonored`,
+      'u',
+    ),
+  );
+});
+
+test('a bare defect-inventory addition cannot retain the prior decision identities', () => {
+  const ledger = fixtureLedger();
+  const obligation = ledger.obligations[0]!;
+  const defectSet = new Set([obligation.id]);
+
+  assert.throws(
+    () =>
+      evaluateLanguageCoverage({
+        acceptedButUnhonoredObligationIds: defectSet,
+        creditedTestFiles: new Set(),
+        decisionObservedObligationIds: new Set(),
+        decisions: fixtureDecisions(ledger),
+        ledger,
+        observedObligationIds: new Set(),
+        receiptClaims: [],
+        receipts: [],
+        runId,
+      }),
+    /LANGUAGE_COVERAGE_STALE_DEFECT_INVENTORY_SET/u,
+  );
+
+  assert.doesNotThrow(() =>
+    evaluateLanguageCoverage({
+      acceptedButUnhonoredObligationIds: defectSet,
+      creditedTestFiles: new Set(),
+      decisionObservedObligationIds: new Set(),
+      decisions: decisionsFor(
+        ledger,
+        new Set(),
+        'new-defect-inventory-decision',
+        defectSet,
+      ),
+      ledger,
+      observedObligationIds: new Set(),
+      receiptClaims: [],
+      receipts: [],
+      runId,
+    }),
   );
 });
 
@@ -284,6 +466,7 @@ test('execution and typed-refusal receipts can take over a moved obligation with
       witnessId: `moved-obligation-${outcome}-control`,
     });
     const result = evaluateLanguageCoverage({
+      acceptedButUnhonoredObligationIds: new Set(),
       creditedTestFiles: new Set([testFile]),
       decisionObservedObligationIds: new Set(),
       decisions: fixtureDecisions(ledger),
@@ -325,6 +508,7 @@ test('first use of an unobserved first-party shape requires evidence or a new de
 
   assert.doesNotThrow(() =>
     evaluateLanguageCoverage({
+      acceptedButUnhonoredObligationIds: new Set(),
       creditedTestFiles: new Set(),
       decisionObservedObligationIds: baselineObserved,
       decisions: baselineDecisions,
@@ -350,6 +534,7 @@ test('first use of an unobserved first-party shape requires evidence or a new de
   assert.throws(
     () =>
       evaluateLanguageCoverage({
+        acceptedButUnhonoredObligationIds: new Set(),
         creditedTestFiles: new Set(),
         decisionObservedObligationIds: baselineObserved,
         decisions: baselineDecisions,
@@ -368,6 +553,7 @@ test('first use of an unobserved first-party shape requires evidence or a new de
   assert.throws(
     () =>
       evaluateLanguageCoverage({
+        acceptedButUnhonoredObligationIds: new Set(),
         creditedTestFiles: new Set(),
         decisionObservedObligationIds: changedObserved,
         decisions: baselineDecisions,
@@ -391,6 +577,7 @@ test('first use of an unobserved first-party shape requires evidence or a new de
   assert.throws(
     () =>
       evaluateLanguageCoverage({
+        acceptedButUnhonoredObligationIds: new Set(),
         creditedTestFiles: new Set(),
         decisionObservedObligationIds: changedObserved,
         decisions: mechanicallyRetargetedDecisions,
@@ -412,6 +599,7 @@ test('first use of an unobserved first-party shape requires evidence or a new de
     assert.notEqual(decision.decisionId, baselineDecisions[index]?.decisionId);
   }
   const newDecisionResult = evaluateLanguageCoverage({
+    acceptedButUnhonoredObligationIds: new Set(),
     creditedTestFiles: new Set(),
     decisionObservedObligationIds: changedObserved,
     decisions: newDecisions,
@@ -424,6 +612,68 @@ test('first use of an unobserved first-party shape requires evidence or a new de
   assert.equal(newDecisionResult.decisionCount, ledger.obligations.length);
 });
 
+test('product-deletion control detects removal of an observed lowered relation fact', () => {
+  const ledger = deriveLanguageCoverageLedger();
+  const packages = firstPartyPackages();
+  const storageTargets = storageTargetsFor(packages);
+  const baselineObserved = observeLanguageCoverage(ledger, {
+    applicationPackages: packages,
+    storageTargets,
+  });
+  const originPresence = ledger.obligations.find(
+    (obligation) =>
+      obligation.id ===
+      'loweredStorage:$.relations[].relationColumn.origin.$presence="present"',
+  );
+  assert.ok(originPresence);
+  assert.equal(baselineObserved.has(originPresence.id), true);
+
+  const implementationRemoved = structuredClone(storageTargets);
+  for (const target of implementationRemoved) {
+    for (const relation of recordArray(
+      target as unknown as Record<string, unknown>,
+      'relations',
+    )) {
+      const relationColumn = relation.relationColumn;
+      if (
+        typeof relationColumn === 'object' &&
+        relationColumn !== null &&
+        !Array.isArray(relationColumn)
+      ) {
+        delete (relationColumn as Record<string, unknown>).origin;
+      }
+    }
+  }
+  const changedObserved = observeLanguageCoverage(ledger, {
+    applicationPackages: packages,
+    storageTargets: implementationRemoved,
+  });
+  assert.equal(changedObserved.has(originPresence.id), false);
+
+  assert.throws(
+    () =>
+      evaluateLanguageCoverage({
+        acceptedButUnhonoredObligationIds: new Set(),
+        creditedTestFiles: new Set(),
+        decisionObservedObligationIds: baselineObserved,
+        decisions: decisionsFor(
+          ledger,
+          baselineObserved,
+          'product-deletion-baseline',
+        ),
+        ledger,
+        observedObligationIds: changedObserved,
+        receiptClaims: [],
+        receipts: [],
+        runId,
+      }),
+    new RegExp(
+      `LANGUAGE_COVERAGE_OBSERVATION_CHANGED: ${escapeRegExp(originPresence.id)} moved from observedRelationScope to unobserved`,
+      'u',
+    ),
+  );
+});
+
 test('a written decision is tied to the exact derived ledger digest', () => {
   const ledger = fixtureLedger();
   const [decision] = fixtureDecisions(ledger);
@@ -432,10 +682,49 @@ test('a written decision is tied to the exact derived ledger digest', () => {
   assert.throws(
     () =>
       evaluateLanguageCoverage({
+        acceptedButUnhonoredObligationIds: new Set(),
         creditedTestFiles: new Set(),
         decisionObservedObligationIds: new Set(),
         decisions: [{ ...decision, ledgerDigest: '0'.repeat(64) }],
         ledger,
+        observedObligationIds: new Set(),
+        receiptClaims: [],
+        receipts: [],
+        runId,
+      }),
+    /LANGUAGE_COVERAGE_STALE_DECISION/u,
+  );
+});
+
+test('language-growth control invalidates decisions when the derived ledger gains an obligation', () => {
+  const ledger = fixtureLedger();
+  const added: LanguageCoverageObligation = {
+    axis: '$.relations[].cardinality',
+    id: 'authoredLanguage:$.relations[].cardinality="oneToMany"',
+    specification: 'authoredLanguage',
+    value: 'oneToMany',
+  };
+  const grownLedger: LanguageCoverageLedger = {
+    ...ledger,
+    axes: [
+      {
+        axis: added.axis,
+        specification: added.specification,
+        values: ['manyToOne', added.value],
+      },
+    ],
+    digest: 'grown-fixture-ledger-digest',
+    obligations: [...ledger.obligations, added],
+  };
+
+  assert.throws(
+    () =>
+      evaluateLanguageCoverage({
+        acceptedButUnhonoredObligationIds: new Set(),
+        creditedTestFiles: new Set(),
+        decisionObservedObligationIds: new Set(),
+        decisions: fixtureDecisions(ledger),
+        ledger: grownLedger,
         observedObligationIds: new Set(),
         receiptClaims: [],
         receipts: [],
@@ -458,10 +747,10 @@ function axis(
 
 function fixtureLedger(): LanguageCoverageLedger {
   const obligation: LanguageCoverageObligation = {
-    axis: '$.stateMachines[].states[].terminal',
-    id: 'authoredLanguage:$.stateMachines[].states[].terminal=true',
+    axis: '$.relations[].cardinality',
+    id: 'authoredLanguage:$.relations[].cardinality="manyToOne"',
     specification: 'authoredLanguage',
-    value: true,
+    value: 'manyToOne',
   };
   return {
     axes: [
@@ -497,6 +786,7 @@ function decisionsFor(
   ledger: LanguageCoverageLedger,
   observed: ReadonlySet<string>,
   prefix: string,
+  acceptedButUnhonored: ReadonlySet<string> = new Set(),
 ): LanguageCoverageDecision[] {
   return (
     [
@@ -506,6 +796,8 @@ function decisionsFor(
     ] as const
   ).map((category) => {
     const body = {
+      acceptedButUnhonoredSetDigest:
+        deriveObligationSetDigest(acceptedButUnhonored),
       category,
       ledgerDigest: ledger.digest,
       obligationSetDigest: deriveDecisionSetDigest(ledger, observed, category),
