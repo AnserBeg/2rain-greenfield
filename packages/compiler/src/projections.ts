@@ -35,6 +35,27 @@ export interface ProjectionPayloadPlan {
   requiredRuntimeCapability: RuntimeCapabilityRequirement;
 }
 
+/** One subject resolver shared by whole-model validation and lowering. */
+export function verificationAssertionEntityId(
+  packageRevision: VersionedNormalizedApplicationPackage,
+  assertion: VersionedNormalizedApplicationPackage['assertions'][number],
+): string | undefined {
+  if (assertion.invocation.kind === 'queryInvocation') {
+    const queryId = assertion.invocation.query.targetId;
+    return packageRevision.queries.find((query) => query.queryId === queryId)
+      ?.sourceEntity.targetId;
+  }
+  const operationId = assertion.invocation.operation.targetId;
+  const operation = packageRevision.operations.find(
+    (candidate) => candidate.operationId === operationId,
+  );
+  if (!operation) return undefined;
+  if ('entity' in operation.effect) return operation.effect.entity.targetId;
+  return packageRevision.queries.find(
+    (query) => query.queryId === operation.readBack.targetId,
+  )?.sourceEntity.targetId;
+}
+
 const payloadSchemaVersions: Record<
   Exclude<ProjectionFamilyId, typeof PROJECTION_FAMILY_IDS.storageTransition>,
   string
@@ -668,14 +689,6 @@ function agentDiscoveryPayload(
 function verificationPlanPayload(
   packageRevision: VersionedNormalizedApplicationPackage,
 ): unknown {
-  const queryById = new Map(
-    packageRevision.queries.map((query) => [query.queryId, query] as const),
-  );
-  const operationById = new Map(
-    packageRevision.operations.map(
-      (operation) => [operation.operationId, operation] as const,
-    ),
-  );
   const scenarios: Array<Record<string, unknown>> = [];
   const addScenario = (scenario: Record<string, unknown>) => {
     const scenarioFingerprint = hashCanonical(
@@ -692,18 +705,7 @@ function verificationPlanPayload(
   for (const assertion of packageRevision.assertions.filter(
     (entry) => entry.lifecycle === 'active',
   )) {
-    const entityId =
-      assertion.invocation.kind === 'queryInvocation'
-        ? queryById.get(assertion.invocation.query.targetId)?.sourceEntity
-            .targetId
-        : (() => {
-            const operation = operationById.get(
-              assertion.invocation.operation.targetId,
-            );
-            return operation && 'entity' in operation.effect
-              ? operation.effect.entity.targetId
-              : undefined;
-          })();
+    const entityId = verificationAssertionEntityId(packageRevision, assertion);
     if (!entityId) {
       throw new TypeError(
         `verification assertion invocation was not resolved before lowering: ${assertion.assertionId}`,
@@ -819,6 +821,7 @@ function operationInputContract(
   storageEntity: StorageTargetPayloadV1['entities'][number] | undefined,
 ): unknown {
   const effectKind = operation.effect.kind;
+  const capabilityRecordScope = effectKind === 'registeredCapabilityEffect';
   const writesFields =
     effectKind === 'createRecordEffect' || effectKind === 'updateRecordEffect';
   const systemInput =
@@ -832,18 +835,23 @@ function operationInputContract(
           valueKind: storageEntity.legalEntity.postgresqlType,
         }
       : null;
+  const closedArgumentKeys =
+    effectKind === 'createRecordEffect'
+      ? [
+          ...(systemInput ? [systemInput.argumentKey] : []),
+          'recordId',
+          'relations',
+          'values',
+        ]
+      : effectKind === 'updateRecordEffect'
+        ? ['expectedRevision', 'patch', 'recordId']
+        : capabilityRecordScope
+          ? // ADR-0038's O1 command carries only its record/revision pin;
+            // business content is hydrated from the staged draft.
+            ['expectedRevision', 'recordId']
+          : ['expectedRevision', 'recordId'];
   return {
-    closedArgumentKeys:
-      effectKind === 'createRecordEffect'
-        ? [
-            ...(systemInput ? [systemInput.argumentKey] : []),
-            'recordId',
-            'relations',
-            'values',
-          ]
-        : effectKind === 'updateRecordEffect'
-          ? ['expectedRevision', 'patch', 'recordId']
-          : ['expectedRevision', 'recordId'],
+    closedArgumentKeys,
     fields: writesFields
       ? fields.map((field) => ({
           bounds: {

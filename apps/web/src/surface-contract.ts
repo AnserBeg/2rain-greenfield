@@ -51,7 +51,7 @@ export type CompiledSurfaceArchetype = (typeof archetypes)[number];
 export type CompiledSurfaceStatusRole = (typeof statusRoles)[number];
 export type CompiledSurfaceRole = (typeof surfaceRoles)[number];
 export type SurfaceOperationIntent =
-  'archive' | 'create' | 'restore' | 'update';
+  'archive' | 'command' | 'create' | 'restore' | 'update';
 
 export interface CompiledSurfaceSlot {
   readonly contentReferenceId: string;
@@ -93,9 +93,14 @@ export interface CompiledNavigationTree {
 }
 
 export interface CompiledSurfaceOperationBinding {
+  readonly capabilityId: string | null;
   readonly confirmation: RegisteredOperationDefinition['confirmation'];
   readonly intent: SurfaceOperationIntent;
+  readonly label: string;
   readonly operationId: string;
+  readonly precondition: Readonly<
+    Record<string, RuntimeViewContract.ImmutableJsonValue>
+  >;
 }
 
 export interface CompiledSurfaceDataBinding {
@@ -191,10 +196,16 @@ export function readCompiledSurfaceDataBinding(
   >();
   for (const value of payload.operations) {
     const operation = parseOperationBinding(value);
+    const entityId =
+      operation.entityId ??
+      registeredSemanticQueryFromPinnedView(view, operation.readBackQueryId)
+        ?.sourceEntityId;
     if (
       operation.lifecycle !== 'active' ||
-      operation.tier !== 'o0' ||
-      operation.entityId !== query.sourceEntityId
+      entityId !== query.sourceEntityId ||
+      (operation.intent === 'command'
+        ? operation.tier !== 'o1'
+        : operation.tier !== 'o0')
     ) {
       continue;
     }
@@ -206,9 +217,12 @@ export function readCompiledSurfaceDataBinding(
     byIntent.set(
       operation.intent,
       Object.freeze({
+        capabilityId: operation.capabilityId,
         confirmation: operation.confirmation,
         intent: operation.intent,
+        label: operationLabel(operation.operationId),
         operationId: operation.operationId,
+        precondition: operation.precondition,
       }),
     );
   }
@@ -550,11 +564,16 @@ function parseSurface(
 }
 
 function parseOperationBinding(value: unknown): {
+  readonly capabilityId: string | null;
   readonly confirmation: RegisteredOperationDefinition['confirmation'];
-  readonly entityId: string;
+  readonly entityId: string | null;
   readonly intent: SurfaceOperationIntent;
   readonly lifecycle: RegisteredOperationDefinition['lifecycle'];
   readonly operationId: string;
+  readonly precondition: Readonly<
+    Record<string, RuntimeViewContract.ImmutableJsonValue>
+  >;
+  readonly readBackQueryId: string;
   readonly tier: RegisteredOperationDefinition['tier'];
 } {
   if (
@@ -563,28 +582,58 @@ function parseOperationBinding(value: unknown): {
     (value.lifecycle !== 'active' && value.lifecycle !== 'retired') ||
     (value.tier !== 'o0' && value.tier !== 'o1') ||
     !isNonBlank(value.operationId) ||
+    !isNonBlank(value.readBackQueryId) ||
     !isRecord(value.effect) ||
-    !isRecord(value.effect.entity) ||
-    !isNonBlank(value.effect.entity.targetId)
+    !isRecord(value.precondition)
   ) {
     throw invalidBinding(
       'pinned operation catalog contains an invalid operation',
     );
   }
-  const intent = operationIntent(value.effect.kind);
+  const capabilityEffect = value.effect.kind === 'registeredCapabilityEffect';
+  const entity = isRecord(value.effect.entity) ? value.effect.entity : null;
+  const capability = isRecord(value.effect.capability)
+    ? value.effect.capability
+    : null;
+  const intent = capabilityEffect
+    ? 'command'
+    : operationIntent(value.effect.kind);
   if (!intent) {
     throw invalidBinding(
       'pinned operation catalog contains a destructive or unknown effect',
     );
   }
+  if (
+    (capabilityEffect &&
+      (value.tier !== 'o1' ||
+        !capability ||
+        !isNonBlank(capability.targetId))) ||
+    (!capabilityEffect &&
+      (value.tier !== 'o0' || !entity || !isNonBlank(entity.targetId)))
+  ) {
+    throw invalidBinding('pinned operation effect does not match its tier');
+  }
   return {
+    capabilityId: capabilityEffect ? String(capability!.targetId) : null,
     confirmation: value.confirmation,
-    entityId: value.effect.entity.targetId,
+    entityId: capabilityEffect ? null : String(entity!.targetId),
     intent,
     lifecycle: value.lifecycle,
     operationId: value.operationId,
+    precondition: value.precondition as Readonly<
+      Record<string, RuntimeViewContract.ImmutableJsonValue>
+    >,
+    readBackQueryId: value.readBackQueryId,
     tier: value.tier,
   };
+}
+
+function operationLabel(operationId: string): string {
+  const local = operationId.slice(operationId.lastIndexOf('.') + 1);
+  const action = local.slice(local.lastIndexOf('_') + 1);
+  return action.length === 0
+    ? 'Run command'
+    : action.slice(0, 1).toUpperCase() + action.slice(1).replaceAll('_', ' ');
 }
 
 function operationIntent(value: unknown): SurfaceOperationIntent | null {

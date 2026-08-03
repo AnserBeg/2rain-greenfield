@@ -985,9 +985,9 @@ test('unresolvable assertion queries fail compilation with the assertion identit
   ]);
 });
 
-test('subjectless operation assertions fail instead of disappearing from verification', () => {
-  const assertionId = `${FIXTURE_IDS.namespace}:assertion.subjectless_operation`;
-  const operationId = `${FIXTURE_IDS.namespace}:operation.subjectless_verification`;
+test('capability operation assertions derive their scenario subject from read-back', () => {
+  const assertionId = `${FIXTURE_IDS.namespace}:assertion.capability_operation`;
+  const operationId = `${FIXTURE_IDS.namespace}:operation.capability_verification`;
   const definition = v3AggregateModule() as {
     assertions: Array<Record<string, unknown>>;
     operations: Array<Record<string, unknown>>;
@@ -1003,19 +1003,78 @@ test('subjectless operation assertions fail instead of disappearing from verific
     kind: 'registeredCapabilityEffect',
     schemaVersion: LANGUAGE_VERSIONS.v3,
   };
+  operation.tier = 'o1';
   definition.operations.push(operation);
-  definition.assertions.push(operationAssertion(assertionId, operationId));
+  const assertion = operationAssertion(assertionId, operationId);
+  assertion.expectedDiagnosticCode = 'EXPECTED_CAPABILITY_REFUSAL';
+  assertion.expectedOutcome = 'fails';
+  definition.assertions.push(assertion);
 
-  const rejected = compileApplication(input(definition));
-  assert.equal(rejected.status, 'failed');
-  assert.ok(
-    structuralDiagnostics(rejected).some(
-      (diagnostic) =>
-        diagnostic.code ===
-          'COMPILER_VERIFICATION_ASSERTION_INVOCATION_UNRESOLVED' &&
-        diagnostic.path === '$.assertions.invocation.operation' &&
-        diagnostic.subjectId === assertionId,
-    ),
+  const compiled = mustCompile(input(definition));
+  const operationCatalog = projectionPayload<{
+    readonly operations: readonly {
+      readonly effect: unknown;
+      readonly inputContract: unknown;
+      readonly operationId: string;
+      readonly tier: string;
+    }[];
+  }>(compiled, PROJECTION_FAMILY_IDS.operationCatalog);
+  const capabilityOperation = operationCatalog.operations.find(
+    (candidate) => candidate.operationId === operationId,
+  );
+  assert.deepEqual(capabilityOperation, {
+    confirmation: 'none',
+    effect: {
+      capability: {
+        kind: 'capabilityReference',
+        schemaVersion: LANGUAGE_VERSIONS.v3,
+        targetId: `${FIXTURE_IDS.namespace}:capability.standard_surface_content`,
+      },
+      kind: 'registeredCapabilityEffect',
+      schemaVersion: LANGUAGE_VERSIONS.v3,
+    },
+    inputContract: {
+      closedArgumentKeys: ['expectedRevision', 'recordId'],
+      fields: [],
+      relationInputs: [],
+      schemaVersion: 'northstar.module-input-contract/v1',
+      writableFieldIds: [],
+    },
+    infrastructure: {
+      archiveRepresentation: 'nullableArchivedAt',
+      optimisticRevision: 'compareAndIncrement',
+      recordIdentity: 'canonicalUuid',
+    },
+    lifecycle: 'active',
+    operationId,
+    permissionId: `${FIXTURE_IDS.namespace}:permission.master_create`,
+    precondition: {
+      kind: 'booleanPredicate',
+      schemaVersion: LANGUAGE_VERSIONS.v3,
+      value: true,
+    },
+    readBackQueryId: `${FIXTURE_IDS.namespace}:query.master_get`,
+    tier: 'o1',
+  });
+  const plan = projectionPayload<VerificationPlanPayloadV1>(
+    compiled,
+    PROJECTION_FAMILY_IDS.verificationPlan,
+  );
+  assert.deepEqual(
+    declaredEvidenceFor(plan, assertionId).map((scenario) => ({
+      entityId: scenario.entityId,
+      expectedDiagnosticCode: scenario.expectedDiagnosticCode,
+      expectedOutcome: scenario.expectedOutcome,
+      subjectId: scenario.subjectId,
+    })),
+    [
+      {
+        entityId: FIXTURE_IDS.entityIds.parent,
+        expectedDiagnosticCode: 'EXPECTED_CAPABILITY_REFUSAL',
+        expectedOutcome: 'fails',
+        subjectId: FIXTURE_IDS.entityIds.parent,
+      },
+    ],
   );
 });
 

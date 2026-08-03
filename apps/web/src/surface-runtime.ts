@@ -23,7 +23,6 @@ import { SHARED_LIST_QUERY_VERSION } from '../../../packages/runtime/src/list-be
 
 import {
   renderRegisteredSurfaceComponent,
-  renderSurfaceDataComponent,
   surfaceSupportsRuntimeIntent,
   type SurfaceDataRenderState,
   type SurfaceOperationFeedback,
@@ -109,14 +108,15 @@ export async function renderSurfaceRuntimeWithData(
   try {
     binding = readCompiledSurfaceDataBinding(view, selection.selected);
   } catch {
-    return renderSelectedSurface(
-      view,
-      selection,
-      { code: 'QUERY_UNSUPPORTED', status: 'DIAGNOSTIC' },
-      feedback,
-      [],
-      422,
-    );
+    return Object.freeze({
+      html: diagnosticDocument(
+        view,
+        'Compiled surface unavailable',
+        'The selected surface does not have a valid pinned semantic binding.',
+        'QUERY_UNSUPPORTED',
+      ),
+      statusCode: 422,
+    });
   }
 
   const url = new URL(requestUrl, 'http://surface-runtime.local');
@@ -230,7 +230,7 @@ export async function renderSurfaceRuntimeWithData(
   );
 }
 
-/** Resolves a browser intent to a pinned O0 binding; no operation ID is accepted. */
+/** Resolves a browser intent to one pinned operation; no operation ID is accepted. */
 export async function submitSurfaceRuntimeIntent(
   view: RuntimeViewContract.RequestRuntimeView,
   requestUrl: string,
@@ -275,7 +275,7 @@ export async function submitSurfaceRuntimeIntent(
       );
       return renderConfirmationTransition(
         selection.selected,
-        intent,
+        operation,
         submission,
         grant,
       );
@@ -320,6 +320,7 @@ export async function submitSurfaceRuntimeIntent(
     { records: [result.readBack], status: 'READY' },
     {
       intent,
+      label: operation.label,
       record: result.readBack,
       trustLinked: result.trust !== null,
     },
@@ -344,25 +345,21 @@ function renderSelectedSurface(
   workspaceContext: WorkspaceContextBar | null = null,
   queryParameterValues: Readonly<Record<string, string>> = Object.freeze({}),
 ): SurfaceRuntimeResponse {
-  const recordResolutionFailed =
-    selected.archetype === 'record' && data.status === 'DIAGNOSTIC';
   // Compact and full layouts are alternative renderings of these same slots;
   // a responsive implementation must never mount both at once.
-  const renderedSlots = recordResolutionFailed
-    ? []
-    : selected.slots.map((slot) =>
-        renderRegisteredSurfaceComponent({
-          data,
-          feedback,
-          legalEntitySelection,
-          operations,
-          queryParameterValues,
-          slot,
-          surface: selected,
-          surfaces,
-          view,
-        }),
-      );
+  const renderedSlots = selected.slots.map((slot) =>
+    renderRegisteredSurfaceComponent({
+      data,
+      feedback,
+      legalEntitySelection,
+      operations,
+      queryParameterValues,
+      slot,
+      surface: selected,
+      surfaces,
+      view,
+    }),
+  );
   const legacyHeading =
     selected.archetype === 'list' || selected.archetype === 'record'
       ? ''
@@ -378,7 +375,7 @@ function renderSelectedSurface(
     </header>`;
   const body = `${legacyHeading}
     <div class="surface-grid" data-surface-archetype="${escapeHtml(selected.archetype)}">
-      ${recordResolutionFailed ? renderSurfaceDataComponent({ data, feedback, operations, surface: selected }) : renderedSlots.map((result) => result.html).join('')}
+      ${renderedSlots.map((result) => result.html).join('')}
     </div>`;
 
   return Object.freeze({
@@ -711,6 +708,7 @@ function operationIntent(
   value: string | undefined,
 ): SurfaceOperationIntent | null {
   return value === 'archive' ||
+    value === 'command' ||
     value === 'create' ||
     value === 'restore' ||
     value === 'update'
@@ -755,7 +753,7 @@ function operationDiagnostic(
 
 function renderConfirmationTransition(
   surface: CompiledSurfaceDefinition,
-  intent: SurfaceOperationIntent,
+  operation: CompiledSurfaceDataBinding['operations'][number],
   submission: SurfaceRuntimeSubmission,
   grant: string,
 ): SurfaceRuntimeResponse {
@@ -767,13 +765,9 @@ function renderConfirmationTransition(
     )
     .join('');
   return Object.freeze({
-    html: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Confirm ${escapeHtml(intentLabel(intent))} · 2rain</title><style>${styles}</style></head><body class="standalone"><main class="standalone__card" data-confirmation-step="preview"><p class="eyebrow">Operation preview</p><h1>Confirm ${escapeHtml(intentLabel(intent))}</h1><p>Review this ${escapeHtml(surface.label)} operation before it is executed.</p><form method="post" action="/?surface=${encodeURIComponent(surface.surfaceId)}">${preserved}<input type="hidden" name="confirmationGrant" value="${escapeHtml(grant)}"><button type="submit">Confirm ${escapeHtml(intentLabel(intent))}</button></form></main></body></html>`,
+    html: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Confirm ${escapeHtml(operation.label)} · 2rain</title><style>${styles}</style></head><body class="standalone"><main class="standalone__card" data-confirmation-step="preview"><p class="eyebrow">Operation preview</p><h1>Confirm ${escapeHtml(operation.label)}</h1><p>Review this ${escapeHtml(surface.label)} operation before it is executed.</p>${operation.capabilityId ? `<section data-predicted-effects="registered-capability"><strong>Predicted effects</strong><p>The registered capability <code>${escapeHtml(operation.capabilityId)}</code> will validate this draft and append its declared business facts. The screen will wait for the committed result.</p></section>` : ''}<form method="post" action="/?surface=${encodeURIComponent(surface.surfaceId)}">${preserved}<input type="hidden" name="confirmationGrant" value="${escapeHtml(grant)}"><button type="submit">Confirm ${escapeHtml(operation.label)}</button></form></main></body></html>`,
     statusCode: 200,
   });
-}
-
-function intentLabel(intent: SurfaceOperationIntent): string {
-  return intent.slice(0, 1).toUpperCase() + intent.slice(1);
 }
 
 export function renderApplicationDiagnostic(

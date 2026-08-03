@@ -1795,11 +1795,12 @@ function inventoryDefinitionWithoutFamily(
     operations
       .filter(
         (operation) =>
-          typeof operation.effect === 'object' &&
-          operation.effect !== null &&
-          referenceTarget(
-            (operation.effect as Record<string, unknown>).entity,
-          ) === entityId,
+          (typeof operation.effect === 'object' &&
+            operation.effect !== null &&
+            referenceTarget(
+              (operation.effect as Record<string, unknown>).entity,
+            ) === entityId) ||
+          queryIds.has(referenceTarget(operation.readBack) ?? ''),
       )
       .map((operation) => String(operation.operationId)),
   );

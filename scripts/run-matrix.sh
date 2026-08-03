@@ -16,6 +16,13 @@ fi
 
 SHA="$(git rev-parse HEAD)"
 LOG="/tmp/matrix-${LABEL}-${SHA:0:8}.log"
+
+node scripts/guard-ephemeral-postgres.mjs pre-lock
+CONTAINER_GUARD_RC="$?"
+if [ "$CONTAINER_GUARD_RC" -ne 0 ]; then
+  exit "$CONTAINER_GUARD_RC"
+fi
+
 touch "$LOCK"
 
 echo "[$(date +%H:%M:%S)] $LABEL waiting for the matrix slot (sha ${SHA:0:8})..."
@@ -31,6 +38,12 @@ if [ "$LOCK_RC" -ne 0 ]; then
   exit "$LOCK_RC"
 fi
 echo "[$(date +%H:%M:%S)] $LABEL ACQUIRED the lock."
+
+node scripts/guard-ephemeral-postgres.mjs post-lock
+CONTAINER_GUARD_RC="$?"
+if [ "$CONTAINER_GUARD_RC" -ne 0 ]; then
+  exit "$CONTAINER_GUARD_RC"
+fi
 
 foreign_matrix() {
   local snapshot
@@ -124,6 +137,7 @@ echo "[$(date +%H:%M:%S)] $LABEL downgraded to shared access for the load-tolera
   corepack pnpm test:locale &&
   corepack pnpm test:browser &&
   node --import tsx test/helpers/run-observability-producer.ts &&
+  corepack pnpm check:language-coverage &&
   corepack pnpm check:reachability &&
   SECURITY_EVIDENCE_DIR=test-results/security .github/scripts/run-security-scans.sh
 } 2>&1 | tee -a "$LOG"

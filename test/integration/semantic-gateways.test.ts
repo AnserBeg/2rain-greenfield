@@ -30,8 +30,11 @@ import {
 import {
   MalformedPinnedOperationCatalogError,
   MalformedSemanticOperationRequestError,
+  NoSuchRegisteredCapabilityError,
   NoSuchRegisteredOperationError,
   SEMANTIC_OPERATION_REQUEST_VERSION,
+  SEMANTIC_OPERATION_RESULT_VERSION,
+  SemanticOperationConfirmationRequiredError,
   SemanticOperationGateway,
   SemanticOperationMediationAuthority,
   SemanticOperationPolicyDeniedError,
@@ -172,6 +175,167 @@ test('operation API uses one issued pinned view, consults current policy, and re
   assert.equal(
     Object.isFrozen(fixture.policy.authorizationCalls[0]!.decisionInput.input),
     true,
+  );
+});
+
+test('O1 capability operations require confirmation and dispatch by one exact ID', async () => {
+  const capabilityId = 'northstar.inventory:capability.posting';
+  const commandOperationId =
+    'northstar.bootstrap:operation.inventory_transaction_post';
+  const getQueryId = 'northstar.bootstrap:query.inventory_transaction_get';
+  const fixture = createFixture({
+    operationPayload: capabilityOperationCatalogWith(
+      commandOperationId,
+      capabilityId,
+      getQueryId,
+    ),
+    queryPayload: getQueryCatalogWith(getQueryId),
+  });
+  const view = await fixture.requestEntry.run(authenticationInput, (value) =>
+    Promise.resolve(value),
+  );
+  const input = Object.freeze({
+    expectedRevision: 1,
+    recordId: 'ab000000-0000-4000-8000-000000000002',
+  });
+  const request = {
+    confirmationGrant: null,
+    idempotencyKey: 'ab000000-0000-4000-8000-000000000003',
+    input,
+    operationId: commandOperationId,
+    schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
+  } as const;
+  let executions = 0;
+  const gateway = new SemanticOperationGateway(
+    fixture.policy,
+    undefined,
+    fixture.operationMediation,
+    undefined,
+    [
+      {
+        capabilityId,
+        async execute(execution) {
+          executions += 1;
+          assert.equal(
+            execution.definition.effect.capability.targetId,
+            capabilityId,
+          );
+          return {
+            kind: 'semanticOperationResult' as const,
+            operationId: commandOperationId,
+            outcome: 'succeeded' as const,
+            readBack: null,
+            schemaVersion: SEMANTIC_OPERATION_RESULT_VERSION,
+            trust: null,
+            unsupportedReason: null,
+          };
+        },
+      },
+    ],
+  );
+  await assert.rejects(
+    gateway.invoke(
+      view,
+      request,
+      fixture.operationMediation.issueInvocation(view, 'UI'),
+    ),
+    (error: unknown) => {
+      assert.ok(error instanceof SemanticOperationConfirmationRequiredError);
+      assert.equal(error.code, 'SEMANTIC_OPERATION_CONFIRMATION_REQUIRED');
+      return true;
+    },
+  );
+  assert.equal(executions, 0);
+
+  const confirmed = {
+    ...request,
+    confirmationGrant: fixture.operationMediation.issueConfirmationGrant(
+      view,
+      commandOperationId,
+      input,
+    ),
+  };
+  const result = await gateway.invoke(
+    view,
+    confirmed,
+    fixture.operationMediation.issueInvocation(view, 'UI'),
+  );
+  assert.equal(result.outcome, 'succeeded');
+  assert.equal(executions, 1);
+
+  const absent = new SemanticOperationGateway(
+    fixture.policy,
+    undefined,
+    fixture.operationMediation,
+  );
+  await assert.rejects(
+    absent.invoke(
+      view,
+      confirmed,
+      fixture.operationMediation.issueInvocation(view, 'UI'),
+    ),
+    (error: unknown) => {
+      assert.ok(error instanceof NoSuchRegisteredCapabilityError);
+      assert.equal(error.code, 'NO_SUCH_REGISTERED_CAPABILITY');
+      assert.equal(error.capabilityId, capabilityId);
+      return true;
+    },
+  );
+
+  let wrongExecutions = 0;
+  const wrongRegistration = new SemanticOperationGateway(
+    fixture.policy,
+    undefined,
+    fixture.operationMediation,
+    undefined,
+    [
+      {
+        capabilityId: 'northstar.inventory:capability.not_posting',
+        execute() {
+          wrongExecutions += 1;
+          return Promise.reject(new Error('wrong executor reached'));
+        },
+      },
+    ],
+  );
+  await assert.rejects(
+    wrongRegistration.invoke(
+      view,
+      confirmed,
+      fixture.operationMediation.issueInvocation(view, 'UI'),
+    ),
+    NoSuchRegisteredCapabilityError,
+  );
+  assert.equal(wrongExecutions, 0);
+});
+
+test('O1 admission does not make an entity-less O0 record effect valid', async () => {
+  const malformed = structuredClone(operationCatalogWith(operationId)) as {
+    operations: Array<{ effect: Record<string, unknown> }>;
+  };
+  delete malformed.operations[0]!.effect.entity;
+  const fixture = createFixture({
+    operationPayload: malformed as ImmutableJsonValue,
+    queryPayload: queryCatalogWith(queryId),
+  });
+  const view = await fixture.requestEntry.run(authenticationInput, (value) =>
+    Promise.resolve(value),
+  );
+  await assert.rejects(
+    new SemanticOperationGateway(
+      fixture.policy,
+      undefined,
+      fixture.operationMediation,
+    ).invoke(
+      view,
+      operationRequest,
+      fixture.operationMediation.issueInvocation(view, 'API'),
+    ),
+    (error: unknown) => {
+      assert.ok(error instanceof MalformedPinnedOperationCatalogError);
+      assert.equal(error.code, 'MALFORMED_PINNED_OPERATION_CATALOG');
+      return true;
+    },
   );
 });
 
@@ -718,6 +882,78 @@ function operationCatalogWith(
       },
     ],
     schemaVersion: 'northstar.operation-catalog-payload/v0-provisional',
+  };
+}
+
+function capabilityOperationCatalogWith(
+  registeredOperationId: string,
+  capabilityId: string,
+  readBackQueryId: string,
+): ImmutableJsonValue {
+  return {
+    kind: 'operationCatalogPayload',
+    operations: [
+      {
+        confirmation: 'humanRequired',
+        effect: {
+          capability: {
+            kind: 'capabilityReference',
+            schemaVersion: 'v4',
+            targetId: capabilityId,
+          },
+          kind: 'registeredCapabilityEffect',
+          schemaVersion: 'v4',
+        },
+        inputContract: {
+          closedArgumentKeys: ['expectedRevision', 'recordId'],
+          fields: [],
+          relationInputs: [],
+          schemaVersion: 'northstar.module-input-contract/v1',
+          writableFieldIds: [],
+        },
+        lifecycle: 'active',
+        operationId: registeredOperationId,
+        permissionId: 'northstar.bootstrap:permission.post',
+        precondition: {
+          kind: 'booleanPredicate',
+          schemaVersion: 'v4',
+          value: true,
+        },
+        readBackQueryId,
+        tier: 'o1',
+      },
+    ],
+    schemaVersion: 'northstar.operation-catalog-payload/v0-provisional',
+  };
+}
+
+function getQueryCatalogWith(registeredQueryId: string): ImmutableJsonValue {
+  return {
+    kind: 'queryCatalogPayload',
+    queries: [
+      {
+        filter: {
+          kind: 'booleanPredicate',
+          schemaVersion: 'v4',
+          value: true,
+        },
+        lifecycle: 'active',
+        maximumResultCount: 1,
+        permissionId: 'northstar.bootstrap:permission.read',
+        queryId: registeredQueryId,
+        queryType: 'get',
+        selections: [
+          {
+            fieldId: 'northstar.bootstrap:field.id',
+            orderKey: 0,
+            selectionId: 'northstar.bootstrap:selection.id',
+          },
+        ],
+        sourceEntityId: 'northstar.bootstrap:entity.inventory_transaction',
+        tier: 'q0',
+      },
+    ],
+    schemaVersion: 'northstar.query-catalog-payload/v0-provisional',
   };
 }
 

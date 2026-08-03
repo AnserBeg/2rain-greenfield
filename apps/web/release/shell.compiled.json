@@ -12,7 +12,9 @@
         "operations": [],
         "queries": [
           {
-            "fieldIds": ["northstar.shell:field.workspace_name"],
+            "fieldIds": [
+              "northstar.shell:field.workspace_name"
+            ],
             "queryId": "northstar.shell:query.workspace_get"
           }
         ],
@@ -179,7 +181,9 @@
           {
             "archetype": "home",
             "dataSourceQueryId": "northstar.shell:query.workspace_get",
-            "fieldIds": ["northstar.shell:field.workspace_name"],
+            "fieldIds": [
+              "northstar.shell:field.workspace_name"
+            ],
             "label": "Home",
             "lifecycle": "active",
             "slots": [
@@ -196,13 +200,18 @@
                 "slotId": "northstar.shell:slot.home_setup"
               }
             ],
-            "statusRoles": ["inProgress", "success"],
+            "statusRoles": [
+              "inProgress",
+              "success"
+            ],
             "surfaceId": "northstar.shell:surface.a_home"
           },
           {
             "archetype": "home",
             "dataSourceQueryId": "northstar.shell:query.workspace_get",
-            "fieldIds": ["northstar.shell:field.workspace_name"],
+            "fieldIds": [
+              "northstar.shell:field.workspace_name"
+            ],
             "label": "Setup",
             "lifecycle": "active",
             "slots": [
@@ -213,13 +222,17 @@
                 "slotId": "northstar.shell:slot.setup_checklist"
               }
             ],
-            "statusRoles": ["attention"],
+            "statusRoles": [
+              "attention"
+            ],
             "surfaceId": "northstar.shell:surface.b_setup"
           },
           {
             "archetype": "home",
             "dataSourceQueryId": "northstar.shell:query.workspace_get",
-            "fieldIds": ["northstar.shell:field.workspace_name"],
+            "fieldIds": [
+              "northstar.shell:field.workspace_name"
+            ],
             "label": "Unsupported component",
             "lifecycle": "active",
             "slots": [
@@ -230,13 +243,17 @@
                 "slotId": "northstar.shell:slot.unsupported_component"
               }
             ],
-            "statusRoles": ["blocked"],
+            "statusRoles": [
+              "blocked"
+            ],
             "surfaceId": "northstar.shell:surface.c_unsupported"
           },
           {
             "archetype": "home",
             "dataSourceQueryId": "northstar.shell:query.workspace_get",
-            "fieldIds": ["northstar.shell:field.workspace_name"],
+            "fieldIds": [
+              "northstar.shell:field.workspace_name"
+            ],
             "label": "Renderer error",
             "lifecycle": "active",
             "slots": [
@@ -247,7 +264,9 @@
                 "slotId": "northstar.shell:slot.error_probe"
               }
             ],
-            "statusRoles": ["blocked"],
+            "statusRoles": [
+              "blocked"
+            ],
             "surfaceId": "northstar.shell:surface.d_error"
           }
         ]

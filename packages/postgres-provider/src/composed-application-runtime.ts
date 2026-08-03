@@ -48,6 +48,12 @@ import {
   SemanticOperationMediationAuthority,
 } from '../../runtime/src/semantic-operation-gateway.js';
 import { SemanticQueryGateway } from '../../runtime/src/semantic-query-gateway.js';
+import {
+  createRegisteredCapabilityExecutors,
+  registeredCapabilityIdsFromOperationCatalog,
+  type PinnedCapabilityProjection,
+  type PostgresCapabilityOperationExecutorFactory,
+} from './capability-operation-executor-factory.js';
 import { loadMigrations, runMigrations } from './migrations.js';
 import {
   PostgresModuleRuntimeInterpreter,
@@ -88,6 +94,7 @@ export interface ComposedApplicationRuntimeOptions {
     observation: FreshTenantIntermediateActivationObservation,
   ) => Promise<void>;
   readonly compiledApplication: unknown;
+  readonly capabilityOperationExecutorFactories?: readonly PostgresCapabilityOperationExecutorFactory[];
   readonly databaseUrl: string;
   readonly environmentSlug?: string;
   readonly inventoryScopeProvisioning?: InventoryScopeProvisioning;
@@ -343,6 +350,7 @@ export async function createComposedApplicationRuntime(
         lineage[activeLineageIndex]!,
         releaseLineage[activeLineageIndex]!,
         options.providerErrorMappings,
+        options.capabilityOperationExecutorFactories ?? [],
       );
     }
     const materializer = new PostgresModuleStorageMaterializer(
@@ -371,6 +379,7 @@ export async function createComposedApplicationRuntime(
         targetIdentity,
         target,
         options.providerErrorMappings,
+        options.capabilityOperationExecutorFactories ?? [],
       );
       const reverseAuthorization = await withTrustedRequestTransaction(
         runtimePool,
@@ -438,6 +447,7 @@ export async function createComposedApplicationRuntime(
               targetIdentity,
               target,
               options.providerErrorMappings,
+              options.capabilityOperationExecutorFactories ?? [],
             );
           } else {
             await ensureFreshTenantIntermediateReleaseAdmitted(
@@ -479,6 +489,7 @@ export async function createComposedApplicationRuntime(
               targetIdentity,
               target,
               options.providerErrorMappings,
+              options.capabilityOperationExecutorFactories ?? [],
             );
           } else {
             await ensureFreshTenantIntermediateReleaseAdmitted(
@@ -562,17 +573,39 @@ export async function createComposedApplicationRuntime(
       : null;
 
     const policy = new AllowAllLocalPolicy();
+    const actorIssuer = humanActorIssuer();
     const interpreter = new PostgresModuleRuntimeInterpreter(
       runtimePool,
-      humanActorIssuer(),
+      actorIssuer,
       options.providerErrorMappings,
     );
     const queryGateway = new SemanticQueryGateway(policy, interpreter);
+    const capabilityExecutors = createRegisteredCapabilityExecutors(
+      options.capabilityOperationExecutorFactories ?? [],
+      registeredCapabilityIdsFromOperationCatalog(
+        projectionPayload(
+          applicationRelease.compiled,
+          PROJECTION_FAMILY_IDS.operationCatalog,
+        ),
+      ),
+      Object.freeze({
+        actorIssuer,
+        currentInstant: () => new Date().toISOString(),
+        pool: runtimePool,
+        projection: (familyId: string) =>
+          projectionBinding(applicationRelease.compiled, familyId),
+        queryGateway,
+        releaseContentHash: applicationRelease.compiled.releaseRoot,
+        releaseId: applicationIdentity.releaseId,
+      }),
+    );
     const operationMediation = new SemanticOperationMediationAuthority();
     const operationGateway = new SemanticOperationGateway(
       policy,
       interpreter,
       operationMediation,
+      undefined,
+      capabilityExecutors,
     );
     const entry = new AuthenticatedRequestRuntimeEntryAdapter(
       new AuthenticatedRequestEntryAdapter(async () => identities.runtime),
@@ -765,6 +798,13 @@ function projectionPayload(
   compiled: CompileSuccess,
   familyId: string,
 ): unknown {
+  return projectionBinding(compiled, familyId).payload;
+}
+
+function projectionBinding(
+  compiled: CompileSuccess,
+  familyId: string,
+): PinnedCapabilityProjection {
   const reference = requiredProjection(compiled, familyId);
   const manifestArtifact = compiled.bundle.artifacts.find(
     (artifact) =>
@@ -795,7 +835,12 @@ function projectionPayload(
   if (!chunk) {
     throw new Error(`compiled release is missing ${familyId} payload bytes`);
   }
-  return JSON.parse(new TextDecoder().decode(chunk.canonicalBytes)) as unknown;
+  return Object.freeze({
+    contentHash: chunk.contentHash,
+    payload: JSON.parse(
+      new TextDecoder().decode(chunk.canonicalBytes),
+    ) as unknown,
+  });
 }
 
 function requiredProjection(compiled: CompileSuccess, familyId: string) {
@@ -1087,12 +1132,14 @@ async function ensureReleaseAdmitted(
   identity: PersistedReleaseIdentity,
   release: ParsedRelease,
   providerErrorMappings: readonly ModuleProviderErrorMapping[],
+  capabilityOperationExecutorFactories: readonly PostgresCapabilityOperationExecutorFactory[],
 ): Promise<void> {
   const repository = new PostgresImmutableReleaseRepository(pool);
   if (await repository.getTenantRelease(context, identity.releaseId)) return;
   await new PostgresReleaseVerificationService(
     pool,
     providerErrorMappings,
+    capabilityOperationExecutorFactories,
   ).executeSemanticCandidateAndPersist(context, {
     compiledRelease: release.compiled,
     evidenceId: identity.evidenceId,

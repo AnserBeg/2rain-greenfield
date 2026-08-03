@@ -66,6 +66,8 @@ jobs:
         run: corepack pnpm check:app-release
       - name: Run web surface contracts
         run: corepack pnpm test:contracts
+      - name: Check language coverage obligations
+        run: corepack pnpm check:language-coverage
       - name: Retain quality executed-file evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

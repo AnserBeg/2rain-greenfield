@@ -84,6 +84,29 @@ EXECUTABLE CONTENT, not by the SHA** — corrected 2026-07-31.
   artifact differs: re-run the full CI matrix at the integrated SHA before
   acceptance.
 
+**ONE FULL MATRIX PER PACKET, AT THE FROZEN SHA — added 2026-08-03.** A lane runs
+the full matrix when it freezes its candidate, not after every intermediate fix.
+Measured on 2026-08-03: a full matrix is 11-18 minutes, and two packets that day
+each ran three — `5g3-langgate` spent 34 minutes of matrix on one packet, and
+`G3-R2` ran three before review even started. That cost bought no information,
+because **only the final SHA is ever accepted**; a green matrix on a superseded
+candidate proves nothing about the one that lands.
+
+AGENTS.md section 6 requires the matrix green **at the integrated SHA**. It has
+never required a run per revision round. Between rounds, run the targeted suites
+that could possibly be affected — `test:unit`, `test:compiler`, the one
+`test:postgres` file you touched — and freeze only when you believe you are done.
+
+Re-run the full matrix when, and only when:
+
+- you are freezing a candidate for review;
+- a review finding changed executable content after that freeze; or
+- the integrated tree's executable content differs from the reviewed tree, by the
+  `git diff --name-only` rule above.
+
+The failure this prevents is not a wrong acceptance — it is a lane spending an
+hour proving three times over what it will have to prove once more anyway.
+
 The exclusions are exactly the paths the docs-only exception already names, and
 for the same stated reason: those files are never executed, so a matrix cannot
 observe them. Do not widen the exclusion list — a generated artifact under any
@@ -119,6 +142,15 @@ base.
 
 - Push `main` to `origin` after every accepted packet — each checkpoint the
   user approves also becomes an off-machine backup.
+- **This rule is now executable.** `scripts/check-origin-sync.sh` fails when
+  `main` holds commits that are not on `origin`, and a `post-merge` hook runs it
+  after every integration. It needs no network: it compares against the local
+  remote-tracking ref, which is the honest question. Pass `--fetch` to refresh
+  first. **Why it exists:** on 2026-08-02 this rule was found to have lapsed for
+  eight days and **637 commits**. Merging kept working perfectly — 90 accepted
+  ledger rows — but pushing stopped, so a week of work existed on exactly one
+  laptop. A declared rule with no executing gate is the pattern AGENTS.md
+  section 6 exists to close.
 - Also push any tag or packet branch whose exact reviewed SHA should be
   backed up off-machine.
 - Never force-push `main` or any pushed/shared branch, and never rewrite

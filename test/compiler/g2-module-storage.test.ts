@@ -379,7 +379,7 @@ test('entity ownership derives one create-only system input while tenant-shared 
   const entityOwned = mustCompile(input(entityOwnedDefinition));
   const entityOwnedOperations = projectionPayload<{
     operations: Array<{
-      effect: { entity: { targetId: string }; kind: string };
+      effect: { entity?: { targetId: string }; kind: string };
       inputContract?: {
         closedArgumentKeys: string[];
         schemaVersion: string;
@@ -396,7 +396,7 @@ test('entity ownership derives one create-only system input while tenant-shared 
   }>(entityOwned, PROJECTION_FAMILY_IDS.operationCatalog).operations;
   const entityOwnedCreate = entityOwnedOperations.find(
     (operation) =>
-      operation.effect.entity.targetId === entityOwnedId &&
+      operation.effect.entity?.targetId === entityOwnedId &&
       operation.effect.kind === 'createRecordEffect',
   );
   assert.deepEqual(entityOwnedCreate?.inputContract?.systemInput, {
@@ -419,7 +419,7 @@ test('entity ownership derives one create-only system input while tenant-shared 
   ]);
   for (const operation of entityOwnedOperations.filter(
     (candidate) =>
-      candidate.effect.entity.targetId === entityOwnedId &&
+      candidate.effect.entity?.targetId === entityOwnedId &&
       candidate.effect.kind !== 'createRecordEffect',
   )) {
     assert.equal(
@@ -437,7 +437,7 @@ test('entity ownership derives one create-only system input while tenant-shared 
   const tenantShared = entityOwned;
   const tenantSharedCreate = projectionPayload<{
     operations: Array<{
-      effect: { entity: { targetId: string }; kind: string };
+      effect: { entity?: { targetId: string }; kind: string };
       inputContract?: {
         closedArgumentKeys: string[];
         schemaVersion: string;
@@ -446,7 +446,7 @@ test('entity ownership derives one create-only system input while tenant-shared 
     }>;
   }>(tenantShared, PROJECTION_FAMILY_IDS.operationCatalog).operations.find(
     (operation) =>
-      operation.effect.entity.targetId === tenantSharedId &&
+      operation.effect.entity?.targetId === tenantSharedId &&
       operation.effect.kind === 'createRecordEffect',
   );
   assert.equal(

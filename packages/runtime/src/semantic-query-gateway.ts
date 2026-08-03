@@ -1619,27 +1619,38 @@ function bindQueryParameters(
   definition: RegisteredSemanticQueryDefinition,
   argumentsValue: ImmutableJsonValue,
 ): Readonly<Record<string, ImmutableJsonValue>> {
-  if (definition.queryType !== 'aggregate') return Object.freeze({});
-  if (!isRecord(argumentsValue) || !Array.isArray(definition.parameters)) {
+  const aggregate = definition.queryType === 'aggregate';
+  const parameters = definition.parameters;
+  if (!aggregate && (!parameters || parameters.length === 0)) {
+    return Object.freeze({});
+  }
+  if (!isRecord(argumentsValue) || !Array.isArray(parameters)) {
     throw new MalformedSemanticQueryRequestError(
-      'aggregate query arguments must be an object',
+      `${aggregate ? 'aggregate' : 'row'} query arguments must be an object`,
     );
   }
-  const expected = definition.parameters.map(
-    (parameter) => parameter.parameterId,
-  );
-  const actual = Object.keys(argumentsValue).sort();
-  if (actual.join('\0') !== [...expected].sort().join('\0')) {
-    throw new MalformedSemanticQueryRequestError(
-      'aggregate query arguments do not match the declared parameters',
-    );
+  if (aggregate) {
+    const expected = parameters.map((parameter) => parameter.parameterId);
+    const actual = Object.keys(argumentsValue).sort();
+    if (actual.join('\0') !== [...expected].sort().join('\0')) {
+      throw new MalformedSemanticQueryRequestError(
+        'aggregate query arguments do not match the declared parameters',
+      );
+    }
   }
   const bound: Record<string, ImmutableJsonValue> = {};
-  for (const parameter of definition.parameters) {
+  const scopeParameterId = definition.legalEntityScope?.operand.parameterId;
+  for (const parameter of parameters) {
     const value = argumentsValue[parameter.parameterId];
-    if (!queryParameterValueMatches(parameter.parameterType, value)) {
+    // ADR-0031's selection kernel already accepted this operand before the
+    // binder runs. Bind its exact caller value, but never reinterpret it as a
+    // field-typed parameter and create a second validation authority.
+    if (
+      parameter.parameterId !== scopeParameterId &&
+      !queryParameterValueMatches(parameter.parameterType, value)
+    ) {
       throw new MalformedSemanticQueryRequestError(
-        `aggregate query argument ${parameter.parameterId} violates its declared type`,
+        `${aggregate ? 'aggregate' : 'row'} query argument ${parameter.parameterId} violates its declared type`,
       );
     }
     bound[parameter.parameterId] = value!;

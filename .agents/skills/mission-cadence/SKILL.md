@@ -71,6 +71,28 @@ A packet must have all of:
 5. Ledger row update.
 6. Proposed next packets (return to step 1 of the loop).
 
+## Parked work must stay VISIBLE — added 2026-08-02
+
+A packet parked mid-flight is legitimate: the standing prioritisation rule tells
+a lane to drop lower-priority work for an inventory-path packet. What is NOT
+legitimate is parked work that nobody can see.
+
+`current-plan.md` tracks what to START. It does not track what was left
+half-done, so a parked packet falls out of tracking entirely and survives only
+as a branch nobody is looking at.
+
+On 2026-08-02 five packets were found parked this way over eight days. Four had
+been silently superseded by work done another route; one (`rowparam`) held a
+real unshipped runtime fix that nearly rotted past cheap rescue. One was
+literally titled "PARTIAL stock-count authoring, interrupted mid-run" and sat
+253 commits behind.
+
+**The gate:** `scripts/check-parked-work.sh` lists every branch holding
+unintegrated work with its age, and fails when any has been parked beyond the
+staleness threshold. Run it at every checkpoint. For each branch it names:
+integrate it, rebase and finish it, or delete it deliberately — but decide.
+A branch 250 commits behind costs more to rescue than to rewrite.
+
 ## Stop conditions
 
 Stop mid-packet and report when: the packet needs an out-of-scope change
