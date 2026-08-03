@@ -395,3 +395,8 @@ How to apply: derive query requirements from executable lowered storage, refuse 
 Date: 2026-08-02
 Why: `5g3-u4` inherited a stale line citation that pointed at a correctly page-level manifest failure, while the real all-or-nothing behavior lived after surface selection at record-slot dispatch.
 How to apply: trace a failure from selection through data resolution to slot dispatch before moving its diagnostic; preserve pre-composition faults as page-level and isolate only failures arising after slot composition. See `docs/execution/packets/5g3-u4.md`.
+
+## Force the branch a negative control claims to cover
+Date: 2026-08-02
+Why: a no-loading control borrowed a surface with declared status roles, so restoring the fallback `Loading` branch stayed green because the fixture never executed that branch.
+How to apply: construct every branch-decisive precondition explicitly, run the exact bad mutation, and reject a red that occurs before or after the claimed branch. See `docs/execution/packets/5g3-u4.md`.

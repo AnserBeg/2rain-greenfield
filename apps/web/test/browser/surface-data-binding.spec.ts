@@ -333,6 +333,46 @@ test('an empty data slot is observably distinct from a failed slot', async ({
   }
 });
 
+test('an invalid selected-surface binding remains page-level before slot composition', async ({
+  page,
+}) => {
+  const compiled = compileFixture(true, true);
+  const policy = allowPolicy();
+  const invalidExecutor = new BrowserFixtureExecutor();
+  const operationMediation = new SemanticOperationMediationAuthority();
+  const invalidServer = createSurfaceRuntimeServer(
+    runtimeEntry(compiled, policy),
+    {
+      operationGateway: new SemanticOperationGateway(
+        policy,
+        invalidExecutor,
+        operationMediation,
+      ),
+      operationMediation,
+      queryGateway: new SemanticQueryGateway(policy, invalidExecutor),
+    },
+  );
+  const invalidBaseUrl = await listen(invalidServer);
+
+  try {
+    await page.setExtraHTTPHeaders({ authorization: 'fixture-user' });
+    const response = await page.goto(
+      `${invalidBaseUrl}/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_form`)}`,
+    );
+    expect(response?.status()).toBe(422);
+    await expect(
+      page.locator(
+        '.standalone__card[role="alert"][data-diagnostic-code="QUERY_UNSUPPORTED"]',
+      ),
+    ).toBeVisible();
+    await expect(page.locator('[data-platform-slot]')).toHaveCount(0);
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      invalidServer.close((error) => (error ? reject(error) : resolve()));
+    });
+  }
+});
+
 class BrowserFixtureExecutor
   implements SemanticQueryExecutor, SemanticOperationExecutor
 {
@@ -596,10 +636,13 @@ function decode(value: ContentAddressedArtifact): Record<string, unknown> {
   return decoded;
 }
 
-function compileFixture(withPartialAnatomy = true): CompileSuccess {
+function compileFixture(
+  withPartialAnatomy = true,
+  withInvalidFormBinding = false,
+): CompileSuccess {
   const authored = ordinaryModuleV1();
+  const surfaces = authored.surfaces as Array<Record<string, unknown>>;
   if (withPartialAnatomy) {
-    const surfaces = authored.surfaces as Array<Record<string, unknown>>;
     for (const surface of surfaces) {
       const surfaceId = String(surface.surfaceId);
       const existingSlots = surface.slots as Array<Record<string, unknown>>;
@@ -617,6 +660,15 @@ function compileFixture(withPartialAnatomy = true): CompileSuccess {
         slotId: `${surfaceId.replace(':surface.', ':slot.')}_${slot.replace(/[A-Z]/g, (character) => `_${character.toLowerCase()}`)}`,
       }));
     }
+  }
+  if (withInvalidFormBinding) {
+    const form = surfaces.find(
+      (surface) =>
+        surface.surfaceId === `${FIXTURE_IDS.namespace}:surface.master_form`,
+    );
+    assert.ok(form);
+    recordValue(form.dataSource).targetId =
+      `${FIXTURE_IDS.namespace}:query.master_list`;
   }
   const normalized = normalizeApplicationPackage(authored);
   const result = compileApplication({

@@ -108,14 +108,15 @@ export async function renderSurfaceRuntimeWithData(
   try {
     binding = readCompiledSurfaceDataBinding(view, selection.selected);
   } catch {
-    return renderSelectedSurface(
-      view,
-      selection,
-      { code: 'QUERY_UNSUPPORTED', status: 'DIAGNOSTIC' },
-      feedback,
-      [],
-      422,
-    );
+    return Object.freeze({
+      html: diagnosticDocument(
+        view,
+        'Compiled surface unavailable',
+        'The selected surface does not have a valid pinned semantic binding.',
+        'QUERY_UNSUPPORTED',
+      ),
+      statusCode: 422,
+    });
   }
 
   const url = new URL(requestUrl, 'http://surface-runtime.local');

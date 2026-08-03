@@ -136,7 +136,7 @@ test('closed registry returns diagnostics for unknown and failing components', a
   });
 });
 
-test('a pending data slot authorizes no default loading treatment', async () => {
+test('unbound slots authorize no default loading treatment', async () => {
   await demoEntry().run({}, (view) => {
     const exemplar = readCompiledSurfaceManifest(view).surfaces[0];
     assert.ok(exemplar?.slots[0]);
@@ -159,6 +159,27 @@ test('a pending data slot authorizes no default loading treatment', async () => 
     assert.equal(result.state, 'pending');
     assert.match(result.html, /data-slot-state="pending"/);
     assert.doesNotMatch(result.html, /spinner|skeleton|loading/i);
+
+    const titleStatus = {
+      ...exemplar.slots[0],
+      slot: 'titleStatus',
+    };
+    const recordSurface = {
+      ...exemplar,
+      archetype: 'record' as const,
+      slots: [titleStatus],
+      statusRoles: [],
+      surfaceRole: 'record' as const,
+    };
+    const titleResult = renderRegisteredSurfaceComponent({
+      data: { status: 'UNBOUND' },
+      slot: titleStatus,
+      surface: recordSurface,
+      view,
+    });
+    assert.equal(titleResult.state, 'ready');
+    assert.match(titleResult.html, /data-slot-state="ready"/);
+    assert.doesNotMatch(titleResult.html, /spinner|skeleton|loading/i);
   });
 });
 
