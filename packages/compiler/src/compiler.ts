@@ -663,12 +663,13 @@ function validateSearchStorageConformance(
     );
     for (const [index, query] of searchQueries.entries()) {
       const hasUsableSelection =
-        'selections' in query && query.selections.some((selection) => {
-        const fieldId = selection.field.targetId;
-        return (
-          capableColumnIds.has(fieldId) &&
-          columnsById.get(fieldId)?.searchMapping === 'normalizedTextIndex'
-        );
+        'selections' in query &&
+        query.selections.some((selection) => {
+          const fieldId = selection.field.targetId;
+          return (
+            capableColumnIds.has(fieldId) &&
+            columnsById.get(fieldId)?.searchMapping === 'normalizedTextIndex'
+          );
         });
       if (hasUsableSelection) continue;
       diagnostics.push(

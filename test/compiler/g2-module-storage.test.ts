@@ -680,8 +680,7 @@ test('search conformance is derived from lowered supported text storage in both 
       {
         code: 'COMPILER_SEARCH_SELECTION_STORAGE_UNUSABLE',
         path: '$.queries.selections',
-        subjectId:
-          'northstar.app:query.inventory_transaction_line_search',
+        subjectId: 'northstar.app:query.inventory_transaction_line_search',
       },
     ],
   );
@@ -725,8 +724,7 @@ test('search conformance is derived from lowered supported text storage in both 
   periodSearch.queryId = 'northstar.app:query.inventory_period_lock_search';
   periodSearch.queryType = 'search';
   for (const [index, selection] of periodSearch.selections.entries()) {
-    selection.selectionId =
-      `northstar.app:selection.inventory_period_lock_search_${String(index + 1)}`;
+    selection.selectionId = `northstar.app:selection.inventory_period_lock_search_${String(index + 1)}`;
   }
   unsupported.queries.push(periodSearch);
   const unsupportedResult = compileApplication(input(unsupported));

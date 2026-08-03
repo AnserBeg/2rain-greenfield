@@ -1242,7 +1242,8 @@ test('definition-only module is served generically through Q0/O0, trust, RLS, an
         };
         const unusableSearch = unusableQueryPayload.queries.find(
           (candidate) =>
-            candidate.queryId === `${FIXTURE_IDS.namespace}:query.master_search`,
+            candidate.queryId ===
+            `${FIXTURE_IDS.namespace}:query.master_search`,
         );
         assert.ok(unusableSearch?.selections[0]);
         unusableSearch.selections = [
