@@ -19,6 +19,7 @@ function ids(namespace: string) {
     `${namespace}:field.${local}_${name}`;
   return {
     contentCapabilityId: `${namespace}:capability.standard_surface_content`,
+    postingCapabilityId: 'northstar.inventory:capability.posting',
     entityIds: {
       legalEntity: entity('legal_entity'),
       movement: entity('inventory_movement'),
@@ -108,6 +109,9 @@ function ids(namespace: string) {
     },
     moduleId: `${namespace}:module.inventory`,
     namespace,
+    operationIds: {
+      postAdjustment: `${namespace}:operation.inventory_transaction_post`,
+    },
     packageId: `${namespace}:package.inventory`,
     queryIds: {
       onHand: `${namespace}:query.inventory_movement_on_hand`,
@@ -178,6 +182,7 @@ export function inventoryModuleDefinition(
       ...standardEntities.map(([local]) => assertion(definitionIds, local)),
       assertion(definitionIds, 'inventory_movement'),
       onHandScopeAssertion(definitionIds),
+      postingRouteAssertion(definitionIds),
     ],
     capabilityRequirements: [
       {
@@ -195,6 +200,15 @@ export function inventoryModuleDefinition(
           'reporting',
           'verification',
         ],
+        schemaVersion: version,
+        supportStatus: 'supported',
+      },
+      {
+        capabilityId: definitionIds.postingCapabilityId,
+        capabilityVersion: 1,
+        declaredEffects: ['appendFact'],
+        kind: 'capabilityRequirement',
+        requiredProjections: ['operation', 'surface', 'verification'],
         schemaVersion: version,
         supportStatus: 'supported',
       },
@@ -716,35 +730,38 @@ export function inventoryModuleDefinition(
       },
     ],
     normalizationProfileVersion,
-    operations: standardEntities.flatMap(([local, , entityId]) =>
-      local === 'inventory_period_lock'
-        ? periodLockOperations(definitionIds, entityId)
-        : operations(
-            definitionIds,
-            local,
-            entityId,
-            local === 'stock_count'
-              ? {
-                  kind: 'notPredicate',
-                  schemaVersion: version,
-                  term: {
-                    field: reference(
-                      'fieldReference',
-                      fieldIds.stockCount.state,
-                    ),
-                    kind: 'fieldComparisonPredicate',
-                    operator: 'equals',
+    operations: [
+      ...standardEntities.flatMap(([local, , entityId]) =>
+        local === 'inventory_period_lock'
+          ? periodLockOperations(definitionIds, entityId)
+          : operations(
+              definitionIds,
+              local,
+              entityId,
+              local === 'stock_count'
+                ? {
+                    kind: 'notPredicate',
                     schemaVersion: version,
-                    value: {
-                      kind: 'textValue',
+                    term: {
+                      field: reference(
+                        'fieldReference',
+                        fieldIds.stockCount.state,
+                      ),
+                      kind: 'fieldComparisonPredicate',
+                      operator: 'equals',
                       schemaVersion: version,
-                      value: `${namespace}:option.stock_count_state_posted`,
+                      value: {
+                        kind: 'textValue',
+                        schemaVersion: version,
+                        value: `${namespace}:option.stock_count_state_posted`,
+                      },
                     },
-                  },
-                }
-              : undefined,
-          ),
-    ),
+                  }
+                : undefined,
+            ),
+      ),
+      postingOperation(definitionIds),
+    ],
     package: {
       kind: 'packageDefinition',
       namespace,
@@ -765,6 +782,14 @@ export function inventoryModuleDefinition(
         entityIds.movement,
         true,
       ),
+      {
+        action: 'transition',
+        kind: 'permissionDefinition',
+        label: 'inventory transaction post',
+        permissionId: `${namespace}:permission.inventory_transaction_post`,
+        resource: reference('entityReference', entityIds.transaction),
+        schemaVersion: version,
+      },
     ],
     queries: [
       ...standardEntities.flatMap(([local, , entityId]) => {
@@ -850,6 +875,7 @@ export function inventoryModuleDefinition(
           local,
           label,
           local === 'inventory_period_lock',
+          local === 'inventory_transaction',
         ),
       ),
       ...surfaces(
@@ -863,6 +889,28 @@ export function inventoryModuleDefinition(
   };
 }
 
+function fieldComparison(
+  fieldId: string,
+  operator: 'equals' | 'lessThanOrEqual',
+  value: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    field: reference('fieldReference', fieldId),
+    kind: 'fieldComparisonPredicate',
+    operator,
+    schemaVersion: version,
+    value,
+  };
+}
+
+function queryParameterReference(parameterId: string): Record<string, unknown> {
+  return {
+    kind: 'queryParameterReference',
+    parameterId,
+    schemaVersion: version,
+  };
+}
+
 /**
  * Freeze N's one scalar authority. Both temporal horizons narrow the movement
  * set before ADR-0022's sum; neither is a post-aggregate filter. A movement is
@@ -871,21 +919,6 @@ export function inventoryModuleDefinition(
  */
 function onHandQuery(ids: InventoryIds): Record<string, unknown> {
   const parameters = ids.queryParameterIds;
-  const comparison = (
-    fieldId: string,
-    parameterId: string,
-    operator: 'equals' | 'lessThanOrEqual',
-  ) => ({
-    field: reference('fieldReference', fieldId),
-    kind: 'fieldComparisonPredicate',
-    operator,
-    schemaVersion: version,
-    value: {
-      kind: 'queryParameterReference',
-      parameterId,
-      schemaVersion: version,
-    },
-  });
   return {
     aggregate: {
       field: reference('fieldReference', ids.fieldIds.movement.quantityDelta),
@@ -898,25 +931,25 @@ function onHandQuery(ids: InventoryIds): Record<string, unknown> {
       kind: 'allPredicate',
       schemaVersion: version,
       terms: [
-        comparison(
+        fieldComparison(
           ids.fieldIds.movement.itemId,
-          parameters.onHandItemId,
           'equals',
+          queryParameterReference(parameters.onHandItemId),
         ),
-        comparison(
+        fieldComparison(
           ids.fieldIds.movement.locationId,
-          parameters.onHandLocationId,
           'equals',
+          queryParameterReference(parameters.onHandLocationId),
         ),
-        comparison(
+        fieldComparison(
           ids.fieldIds.movement.effectiveAt,
-          parameters.onHandAtTime,
           'lessThanOrEqual',
+          queryParameterReference(parameters.onHandAtTime),
         ),
-        comparison(
+        fieldComparison(
           ids.fieldIds.movement.recordedAt,
-          parameters.onHandRecordedAtHorizon,
           'lessThanOrEqual',
+          queryParameterReference(parameters.onHandRecordedAtHorizon),
         ),
       ],
     },
@@ -1220,6 +1253,35 @@ function operations(
   }));
 }
 
+function postingOperation(ids: InventoryIds): Record<string, unknown> {
+  return {
+    confirmation: 'humanRequired',
+    effect: {
+      capability: reference('capabilityReference', ids.postingCapabilityId),
+      kind: 'registeredCapabilityEffect',
+      schemaVersion: version,
+    },
+    kind: 'operationDefinition',
+    module: reference('moduleReference', ids.moduleId),
+    operationId: ids.operationIds.postAdjustment,
+    permission: reference(
+      'permissionReference',
+      `${ids.namespace}:permission.inventory_transaction_post`,
+    ),
+    precondition: fieldComparison(ids.fieldIds.transaction.state, 'equals', {
+      kind: 'textValue',
+      schemaVersion: version,
+      value: `${ids.namespace}:option.inventory_transaction_state_draft`,
+    }),
+    readBack: reference(
+      'queryReference',
+      `${ids.namespace}:query.inventory_transaction_get`,
+    ),
+    schemaVersion: version,
+    tier: 'o1',
+  };
+}
+
 function periodLockOperations(
   ids: InventoryIds,
   entityId: string,
@@ -1322,12 +1384,23 @@ function surfaces(
   local: string,
   label: string,
   readOnly: boolean,
+  commandRecord = false,
 ): Array<Record<string, unknown>> {
   const descriptors: Array<
     readonly [string, string, readonly string[], 'form' | 'list' | 'record']
   > = [
     ['list', 'list', ['title', 'dataGrid'], 'list'],
-    ['detail', 'record', ['breadcrumb', 'titleStatus', 'keyFacts'], 'record'],
+    [
+      'detail',
+      'record',
+      [
+        'breadcrumb',
+        'titleStatus',
+        ...(commandRecord ? ['commandBar'] : []),
+        'keyFacts',
+      ],
+      'record',
+    ],
     ...(readOnly
       ? []
       : ([
@@ -1431,6 +1504,25 @@ function onHandScopeAssertion(ids: InventoryIds): Record<string, unknown> {
     invocation: {
       kind: 'queryInvocation',
       query: reference('queryReference', ids.queryIds.onHand),
+      schemaVersion: version,
+    },
+    kind: 'assertionDefinition',
+    schemaVersion: version,
+  };
+}
+
+function postingRouteAssertion(ids: InventoryIds): Record<string, unknown> {
+  return {
+    assertionId: `${ids.namespace}:assertion.inventory_transaction_post_refusal`,
+    evidenceKinds: ['provider'],
+    expectedDiagnosticCode: 'INVENTORY_POSTING_INPUT_INVALID',
+    expectedOutcome: 'fails',
+    invocation: {
+      kind: 'operationInvocation',
+      operation: reference(
+        'operationReference',
+        ids.operationIds.postAdjustment,
+      ),
       schemaVersion: version,
     },
     kind: 'assertionDefinition',

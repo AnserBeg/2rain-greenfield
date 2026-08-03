@@ -56,6 +56,28 @@ test('one generic provider interpreter serves registration data without module l
   );
 });
 
+test('the Inventory capability adapter hydrates drafts but delegates every mutation to posting', () => {
+  const source = readFileSync(
+    resolve(
+      'packages/postgres-provider/src/inventory-posting-capability-executor.ts',
+    ),
+    'utf8',
+  );
+  const mutatingSql =
+    /\b(?:INSERT\s+INTO|UPDATE\s+[^;]+\s+SET|DELETE\s+FROM|CREATE\s+TABLE|ALTER\s+TABLE|DROP\s+TABLE|TRUNCATE)\b/i;
+
+  assert.match(source, /\bSELECT\b/);
+  assert.doesNotMatch(source, mutatingSql);
+  assert.match(source, /new PostgresInventoryPostingService\(/);
+  assert.match(source, /this\.#posting\.postAdjustment\(/);
+
+  assert.match(
+    'UPDATE north_star_module.draft SET state = posted',
+    mutatingSql,
+    'negative control must recognize a direct adapter mutation',
+  );
+});
+
 test('the conformance fixture is definition data, not emitted module TypeScript', () => {
   const fixtureDirectory = resolve('test/fixtures/g2/module-conformance');
   const names = readdirSync(fixtureDirectory).sort();

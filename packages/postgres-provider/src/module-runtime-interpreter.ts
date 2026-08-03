@@ -5,7 +5,6 @@ import {
   PREDICATE_LOWERING_PLAN_VERSION,
   PREDICATE_POSITION_PROFILE_VERSION,
   canonicalize,
-  inspectPredicateForExecution,
   unicodeCaseFold,
   type CanonicalScalar,
   type QueryFilterLoweringPlan,
@@ -25,6 +24,7 @@ import { POLICY_DECISION_EVIDENCE_VERSION } from '../../platform-runtime/src/tru
 import type {
   RegisteredOperationDefinition,
   RegisteredOperationInputContract,
+  RegisteredRecordOperationDefinition,
   RegisteredOperationSystemInput,
   SemanticOperationExecutionRequest,
   SemanticOperationExecutor,
@@ -32,7 +32,10 @@ import type {
   SemanticOperationParentGuard,
   SemanticOperationResultEnvelope,
 } from '../../runtime/src/semantic-operation-gateway.js';
-import { SEMANTIC_OPERATION_RESULT_VERSION } from '../../runtime/src/semantic-operation-gateway.js';
+import {
+  SEMANTIC_OPERATION_RESULT_VERSION,
+  evaluateRegisteredOperationPrecondition,
+} from '../../runtime/src/semantic-operation-gateway.js';
 import type {
   RegisteredAggregateQueryDefinition,
   RegisteredQueryDefinition,
@@ -580,106 +583,21 @@ function requirePrecondition(
   image: Readonly<Record<string, ImmutableJsonValue>>,
   imageLabel: 'candidate' | 'parent' | 'prior' | 'projected',
 ): void {
-  let receipt;
-  try {
-    receipt = inspectPredicateForExecution(precondition, {
-      bindingPosition: 'operationPrecondition',
-      resolveComparison: (comparison) => resolveAgainstImage(comparison, image),
-    });
-  } catch {
-    throw failure(
-      'MODULE_OPERATION_PRECONDITION_UNSUPPORTED',
-      `operation precondition could not be evaluated on the ${imageLabel} image`,
-    );
-  }
-  if (receipt.outcome !== 'evaluated') {
+  const evaluation = evaluateRegisteredOperationPrecondition(
+    precondition,
+    image,
+  );
+  if (evaluation.outcome === 'unsupported') {
     throw failure(
       'MODULE_OPERATION_PRECONDITION_UNSUPPORTED',
       `operation precondition is not executable on the ${imageLabel} image`,
     );
   }
-  if (!receipt.result) {
+  if (evaluation.outcome === 'refused') {
     throw failure(
       'MODULE_OPERATION_PRECONDITION_REFUSED',
       `operation precondition does not hold on the ${imageLabel} image`,
     );
-  }
-}
-
-function resolveAgainstImage(
-  comparison: { field: { targetId: string }; operator: string; value: unknown },
-  image: Readonly<Record<string, ImmutableJsonValue>>,
-): { presence: 'absent' } | { presence: 'present'; result: boolean } {
-  const actual = Object.hasOwn(image, comparison.field.targetId)
-    ? image[comparison.field.targetId]
-    : undefined;
-  if (actual === undefined || actual === null) return { presence: 'absent' };
-  if (
-    typeof comparison.value !== 'object' ||
-    comparison.value === null ||
-    !('value' in comparison.value)
-  ) {
-    throw new TypeError('precondition comparison operand is not a scalar');
-  }
-  const expected = (comparison.value as { value: unknown }).value;
-  // Raw `===` is a sound equality ONLY for kinds whose persisted round trip
-  // returns the canonical operand byte-for-byte. Anything else refuses, because
-  // a false equality makes `not(equals)` ADMIT -- the fail-open direction for
-  // the guard this evaluation exists to enforce.
-  //
-  // Two kinds were admitted here and should not have been, each verified by
-  // reading the codec rather than by reasoning about the kind:
-  //   - exactDecimal / money / quantity: PostgreSQL numeric(p,s) preserves
-  //     scale, so a persisted "1" reads back "1.000000000000000000".
-  //   - dateTime / date / time: a second-precision instant is stored as
-  //     timestamp(0), its canonical operand omits milliseconds
-  //     ("2026-07-30T12:00:00Z"), and the record codec's toISOString() returns
-  //     "2026-07-30T12:00:00.000Z". Temporal kinds cannot be admitted by scalar
-  //     kind alone; they need field-contract-aware canonicalization.
-  //
-  // Widening this set requires proving the round trip for that kind against the
-  // codec, not asserting that the kind looks canonical.
-  const comparableScalarKinds = new Set([
-    'booleanValue',
-    'integerValue',
-    'textValue',
-  ]);
-  const valueKind = (comparison.value as { kind?: unknown }).kind;
-  if (typeof valueKind !== 'string' || !comparableScalarKinds.has(valueKind)) {
-    throw new TypeError(
-      `precondition comparison operand kind ${String(valueKind)} has no canonical equality`,
-    );
-  }
-  switch (comparison.operator) {
-    case 'equals':
-      return { presence: 'present', result: actual === expected };
-    case 'notEquals':
-      return { presence: 'present', result: actual !== expected };
-    case 'lessThan':
-    case 'greaterThan':
-    case 'lessThanOrEqual':
-    case 'greaterThanOrEqual': {
-      if (
-        (typeof actual !== 'string' && typeof actual !== 'number') ||
-        typeof expected !== typeof actual
-      ) {
-        throw new TypeError('precondition ordering operands are not ordered');
-      }
-      const ordered = expected as string | number;
-      return {
-        presence: 'present',
-        result:
-          comparison.operator === 'lessThan'
-            ? actual < ordered
-            : comparison.operator === 'greaterThan'
-              ? actual > ordered
-              : comparison.operator === 'lessThanOrEqual'
-                ? actual <= ordered
-                : actual >= ordered,
-      };
-    }
-    default:
-      throw new TypeError('precondition comparison operator is not admitted');
   }
 }
 
@@ -3170,7 +3088,7 @@ function decodeCanonical(bytes: Uint8Array): Record<string, unknown> {
   }
 }
 
-async function withModuleRuntimeRole<T>(
+export async function withModuleRuntimeRole<T>(
   client: PoolClient,
   run: () => Promise<T>,
 ): Promise<T> {
@@ -3242,7 +3160,7 @@ async function roleFacts(client: PoolClient): Promise<{
 }
 
 function parseMutationInput(
-  definition: RegisteredOperationDefinition,
+  definition: RegisteredRecordOperationDefinition,
   value: ImmutableJsonValue,
 ): MutationInput {
   const contract = definition.inputContract;

@@ -400,3 +400,23 @@ How to apply: derive obligations independently from the authored schema and ever
 Date: 2026-08-02
 Why: the language ledger dropped `null` whenever it shared a union with open `string` or `number`, omitting exactly the nullable shapes that motivated the instrument.
 How to apply: emit every finite union member before independently traversing non-finite siblings, and retain a missing-axis control grounded in both authored and lowered specifications. See `docs/execution/packets/5g3-langgate.md`.
+
+## Classify failure scope at the live composition boundary
+Date: 2026-08-02
+Why: `5g3-u4` inherited a stale line citation that pointed at a correctly page-level manifest failure, while the real all-or-nothing behavior lived after surface selection at record-slot dispatch.
+How to apply: trace a failure from selection through data resolution to slot dispatch before moving its diagnostic; preserve pre-composition faults as page-level and isolate only failures arising after slot composition. See `docs/execution/packets/5g3-u4.md`.
+
+## Force the branch a negative control claims to cover
+Date: 2026-08-02
+Why: a no-loading control borrowed a surface with declared status roles, so restoring the fallback `Loading` branch stayed green because the fixture never executed that branch.
+How to apply: construct every branch-decisive precondition explicitly, run the exact bad mutation, and reject a red that occurs before or after the claimed branch. See `docs/execution/packets/5g3-u4.md`.
+
+## Put external-resource cleanup outside its owner process
+Date: 2026-08-02
+Why: six `--rm` PostgreSQL test containers survived their killed harnesses for up to two days and contaminated every later matrix run.
+How to apply: pair normal `finally` cleanup with a detached, process-identity-bound guardian; kill -9 the real owner and independently observe the external resource disappear. See `docs/execution/packets/leak-guard.md`.
+
+## Keep every best-of-N cold sample genuinely cold
+Date: 2026-08-02
+Why: same-process repetition let warmed V8 state hide first-invocation compiler cost, while one noisy cold sample made an unchanged gate indeterminate in practice.
+How to apply: take each sample's first invocation in a distinct process, retain the unchanged budget, report every sample, and prove both one-noisy-sample PASS and all-slow-samples FAIL. See `docs/execution/packets/leak-guard.md`.

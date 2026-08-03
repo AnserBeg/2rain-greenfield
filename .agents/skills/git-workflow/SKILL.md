@@ -119,6 +119,15 @@ base.
 
 - Push `main` to `origin` after every accepted packet — each checkpoint the
   user approves also becomes an off-machine backup.
+- **This rule is now executable.** `scripts/check-origin-sync.sh` fails when
+  `main` holds commits that are not on `origin`, and a `post-merge` hook runs it
+  after every integration. It needs no network: it compares against the local
+  remote-tracking ref, which is the honest question. Pass `--fetch` to refresh
+  first. **Why it exists:** on 2026-08-02 this rule was found to have lapsed for
+  eight days and **637 commits**. Merging kept working perfectly — 90 accepted
+  ledger rows — but pushing stopped, so a week of work existed on exactly one
+  laptop. A declared rule with no executing gate is the pattern AGENTS.md
+  section 6 exists to close.
 - Also push any tag or packet branch whose exact reviewed SHA should be
   backed up off-machine.
 - Never force-push `main` or any pushed/shared branch, and never rewrite

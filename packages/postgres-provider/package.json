@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     "./composed-application-runtime": "./src/composed-application-runtime.ts",
+    "./inventory-posting-capability-executor": "./src/inventory-posting-capability-executor.ts",
     "./inventory-provider-error-mappings": "./src/inventory-provider-error-mappings.ts",
     "./readiness": "./src/readiness.ts",
     "./release-activation-service": "./src/release-activation-service.ts",

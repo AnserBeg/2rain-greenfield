@@ -47,6 +47,7 @@ import {
   type FreshTenantIntermediateActivationObservation,
 } from '../../packages/postgres-provider/src/composed-application-runtime.js';
 import { INVENTORY_PROVIDER_ERROR_MAPPINGS } from '../../packages/postgres-provider/src/inventory-provider-error-mappings.js';
+import { INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/inventory-posting-capability-executor.js';
 import { ModuleRuntimeInterpreterError } from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
 import { captureSchemaSnapshot } from '../../packages/postgres-provider/src/migrations.js';
 import { PostgresReleaseActivationService } from '../../packages/postgres-provider/src/release-activation-service.js';
@@ -55,7 +56,9 @@ import { PostgresImmutableReleaseRepository } from '../../packages/postgres-prov
 import { RequestRuntimeViewLoadError } from '../../packages/postgres-provider/src/request-runtime-view-service.js';
 import { ReleaseReverseTransitionRefusal } from '../../packages/postgres-provider/src/release-reverse-transition-policy.js';
 import {
+  captureDeclaredCapabilityRefusal,
   PostgresReleaseVerificationService,
+  ReleaseVerificationIntegrityError,
   releaseVerificationBinding,
   type DurableReleaseVerificationEvidence,
 } from '../../packages/postgres-provider/src/release-verification-service.js';
@@ -86,6 +89,52 @@ test('composed product does not invent a verification evidence identity', async 
     'utf8',
   );
   assert.doesNotMatch(source, /evidenceId\s*=\s*minted\(randomUUID\(\)\)/u);
+});
+
+test('capability verification records only the exact declared typed refusal', async () => {
+  const exact = Object.assign(new Error('typed refusal reason'), {
+    code: 'EXPECTED_CAPABILITY_REFUSAL',
+  });
+  assert.deepEqual(
+    await captureDeclaredCapabilityRefusal(
+      Promise.reject(exact),
+      'EXPECTED_CAPABILITY_REFUSAL',
+      'northstar.test:operation.capability',
+    ),
+    {
+      code: 'EXPECTED_CAPABILITY_REFUSAL',
+      kind: 'registeredCapabilityRefusal',
+      operationId: 'northstar.test:operation.capability',
+      reason: 'typed refusal reason',
+      schemaVersion: 'northstar.release-verification-capability-probe/v1',
+    },
+  );
+  await assert.rejects(
+    captureDeclaredCapabilityRefusal(
+      Promise.reject(
+        Object.assign(new Error('wrong refusal'), { code: 'WRONG_REFUSAL' }),
+      ),
+      'EXPECTED_CAPABILITY_REFUSAL',
+      'northstar.test:operation.capability',
+    ),
+    (error: unknown) => {
+      assert.ok(error instanceof ReleaseVerificationIntegrityError);
+      assert.equal(error.code, 'VERIFICATION_CAPABILITY_REFUSAL_MISMATCH');
+      return true;
+    },
+  );
+  await assert.rejects(
+    captureDeclaredCapabilityRefusal(
+      Promise.resolve({ outcome: 'succeeded' }),
+      'EXPECTED_CAPABILITY_REFUSAL',
+      'northstar.test:operation.capability',
+    ),
+    (error: unknown) => {
+      assert.ok(error instanceof ReleaseVerificationIntegrityError);
+      assert.equal(error.code, 'VERIFICATION_CAPABILITY_REFUSAL_NOT_OBSERVED');
+      return true;
+    },
+  );
 });
 
 test('fresh-tenant install refuses a failing intermediate transition', async () => {
@@ -193,7 +242,15 @@ test(
                 compiledApplication,
               ),
           );
-
+          await context.test(
+            'registered Inventory posting route commits once and absorbs an identical replay',
+            () =>
+              assertInventoryPostingCapabilityRoute(
+                pool,
+                tenantA,
+                compiledApplication,
+              ),
+          );
           const recordId = randomUUID();
           const created = await tenantA.entry.run(
             { headers: { authorization: 'local' } },
@@ -681,6 +738,8 @@ async function assertApprovalEnforcementAndApprovedActivation(
     });
     await new PostgresReleaseVerificationService(
       runtimePool,
+      INVENTORY_PROVIDER_ERROR_MAPPINGS,
+      [INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY],
     ).executeSemanticCandidateAndPersist(context, {
       compiledRelease: application.compiled,
       evidenceId: staged.verificationEvidenceId,
@@ -825,6 +884,8 @@ async function assertApprovalRequiredForAdvancement(
     if (!(await repository.getTenantRelease(context, target.release_id))) {
       await new PostgresReleaseVerificationService(
         runtimePool,
+        INVENTORY_PROVIDER_ERROR_MAPPINGS,
+        [INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY],
       ).executeSemanticCandidateAndPersist(context, {
         compiledRelease: application.compiled,
         evidenceId: target.verification_evidence_id,
@@ -991,6 +1052,8 @@ async function assertReleaseServicesRejectNonExactReversePairs(
     });
     await new PostgresReleaseVerificationService(
       runtimePool,
+      INVENTORY_PROVIDER_ERROR_MAPPINGS,
+      [INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY],
     ).executeSemanticCandidateAndPersist(context, {
       compiledRelease: immediateTarget.compiled,
       evidenceId: staged.verificationEvidenceId,
@@ -2167,8 +2230,8 @@ async function assertBoundedFreshTenantInstallEvidence(
   ).plan.scenarios.length;
   assert.equal(
     servingScenarioCount,
-    167,
-    'ADR-0042 removes exactly one resolver-authority scenario with inventory_period_lock_resolve',
+    168,
+    'ADR-0042 removes the period-lock resolver and the posting route adds one executed declared-refusal scenario',
   );
 
   const intermediate = await pool.query<{
@@ -2780,6 +2843,267 @@ async function assertEntityOwnedCreateInput(
   assert.deepEqual(stored.rows, [{ legal_entity_id: legalEntityId }]);
 }
 
+async function assertInventoryPostingCapabilityRoute(
+  pool: pg.Pool,
+  runtime: ComposedApplicationRuntime,
+  compiledApplication: unknown,
+): Promise<void> {
+  const compiled =
+    parseCompiledApplication(compiledApplication).application.compiled;
+  const storage = storageTarget(compiled);
+  const postingScenario = releaseVerificationBinding(
+    compiled,
+  ).plan.scenarios.find(
+    (scenario) =>
+      scenario.kind === 'declaredEvidence' &&
+      scenario.assertionId ===
+        'northstar.app:assertion.inventory_transaction_post_refusal',
+  );
+  assert.ok(postingScenario);
+  const executedProbe = await pool.query<{ count: string }>(
+    `SELECT count(*)::text AS count
+       FROM platform.tenant_release_admissions AS admission
+       JOIN platform.release_verification_results AS result
+         ON result.tenant_id = admission.tenant_id
+        AND result.environment_id = admission.environment_id
+        AND result.verification_evidence_id = admission.verification_evidence_id
+      WHERE admission.tenant_id = $1
+        AND admission.environment_id = $2
+        AND admission.release_id = $3
+        AND result.scenario_id = $4`,
+    [
+      runtime.identity.tenantId,
+      runtime.identity.environmentId,
+      runtime.activeReleaseId,
+      postingScenario.scenarioId,
+    ],
+  );
+  assert.deepEqual(
+    executedProbe.rows,
+    [{ count: '1' }],
+    'the capability refusal has an executed result rather than a derivation or skip',
+  );
+  const transaction = requiredStorageEntity(storage, 'inventory_transaction');
+  const movement = requiredStorageEntity(storage, 'inventory_movement');
+  assert.ok(transaction.legalEntity);
+  const legalEntityId = COMPOSED_APPLICATION_INVENTORY_SCOPE.legalEntityId;
+  const itemId = randomUUID();
+  const locationId = randomUUID();
+  const transactionId = randomUUID();
+  const lineId = randomUUID();
+  const suffix = transactionId.slice(0, 8);
+  const effectiveAt = new Date().toISOString();
+  const sourceId = `postroute-${suffix}`;
+
+  const create = (
+    operationId: string,
+    recordId: string,
+    values: Readonly<Record<string, unknown>>,
+    options: Readonly<{
+      legalEntityId?: string;
+      relations?: Readonly<Record<string, string>>;
+    }> = {},
+  ) =>
+    runtime.entry.run(
+      { headers: { authorization: 'postroute-control' } },
+      (view) =>
+        runtime.operationGateway.invoke(
+          view,
+          {
+            confirmationGrant: null,
+            idempotencyKey: randomUUID(),
+            input: {
+              ...(options.legalEntityId
+                ? { legalEntityId: options.legalEntityId }
+                : {}),
+              recordId,
+              relations: options.relations ?? {},
+              values,
+            },
+            operationId,
+            schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
+          },
+          runtime.operationMediation.issueInvocation(view, 'UI'),
+        ),
+    );
+
+  assert.equal(
+    (
+      await create('northstar.app:operation.item_create', itemId, {
+        'northstar.app:field.item_base_unit': 'EA',
+        'northstar.app:field.item_description': 'Posting route control item',
+        'northstar.app:field.item_name': `Posting route ${suffix}`,
+        'northstar.app:field.item_sku': `POST-${suffix}`,
+      })
+    ).outcome,
+    'succeeded',
+  );
+  assert.equal(
+    (
+      await create('northstar.app:operation.location_create', locationId, {
+        'northstar.app:field.location_code': `POST-${suffix}`,
+        'northstar.app:field.location_name': `Posting route ${suffix}`,
+        'northstar.app:field.location_type': 'northstar.app:option.warehouse',
+      })
+    ).outcome,
+    'succeeded',
+  );
+  const createdTransaction = await create(
+    'northstar.app:operation.inventory_transaction_create',
+    transactionId,
+    {
+      'northstar.app:field.inventory_transaction_actor_id': 'postroute-control',
+      'northstar.app:field.inventory_transaction_effective_at': effectiveAt,
+      'northstar.app:field.inventory_transaction_number': `ADJ-${suffix}`,
+      'northstar.app:field.inventory_transaction_reason_code': 'adjustment',
+      'northstar.app:field.inventory_transaction_reason_narrative':
+        'Registered capability route control',
+      'northstar.app:field.inventory_transaction_recorded_at': effectiveAt,
+      'northstar.app:field.inventory_transaction_source_id': sourceId,
+      'northstar.app:field.inventory_transaction_source_type': 'test',
+      'northstar.app:field.inventory_transaction_state':
+        'northstar.app:option.inventory_transaction_state_draft',
+      'northstar.app:field.inventory_transaction_type':
+        'northstar.app:option.inventory_transaction_type_adjustment',
+    },
+    { legalEntityId },
+  );
+  assert.equal(createdTransaction.readBack?.revision, 1);
+  assert.equal(
+    (
+      await create(
+        'northstar.app:operation.inventory_transaction_line_create',
+        lineId,
+        {
+          'northstar.app:field.inventory_transaction_line_from_location_id':
+            null,
+          'northstar.app:field.inventory_transaction_line_item_id': itemId,
+          'northstar.app:field.inventory_transaction_line_line_number': '1',
+          'northstar.app:field.inventory_transaction_line_quantity': '7',
+          'northstar.app:field.inventory_transaction_line_to_location_id':
+            locationId,
+          'northstar.app:field.inventory_transaction_line_unit_id': 'EA',
+        },
+        {
+          legalEntityId,
+          relations: {
+            'northstar.app:relation.inventory_transaction_line_transaction':
+              transactionId,
+          },
+        },
+      )
+    ).outcome,
+    'succeeded',
+  );
+
+  const idempotencyKey = randomUUID();
+  const input = Object.freeze({ expectedRevision: 1, recordId: transactionId });
+  const grants: string[] = [];
+  const post = () =>
+    runtime.entry.run(
+      { headers: { authorization: 'postroute-control' } },
+      (view) => {
+        const confirmationGrant =
+          runtime.operationMediation.issueConfirmationGrant(
+            view,
+            'northstar.app:operation.inventory_transaction_post',
+            input,
+          );
+        grants.push(confirmationGrant);
+        return runtime.operationGateway.invoke(
+          view,
+          {
+            confirmationGrant,
+            idempotencyKey,
+            input,
+            operationId: 'northstar.app:operation.inventory_transaction_post',
+            schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
+          },
+          runtime.operationMediation.issueInvocation(view, 'UI'),
+        );
+      },
+    );
+  const posted = await post();
+  const replayed = await post();
+  assert.equal(posted.outcome, 'succeeded');
+  assert.equal(posted.readBack?.revision, 2);
+  assert.deepEqual(replayed.trust, posted.trust);
+  assert.deepEqual(
+    grants,
+    [grants[0], grants[0]],
+    'the same rendered command input produces the same server confirmation grant',
+  );
+
+  const movementSourceColumn = requiredStorageColumn(
+    movement,
+    'inventory_movement_source_id',
+  );
+  const movementQuantityColumn = requiredStorageColumn(
+    movement,
+    'inventory_movement_quantity_delta',
+  );
+  const movements = await pool.query<{ quantity: string }>(
+    `SELECT ${quoteSqlIdentifier(movementQuantityColumn)}::text AS quantity
+       FROM north_star_module.${quoteSqlIdentifier(movement.physicalTableName)}
+      WHERE tenant_id = $1 AND environment_id = $2
+        AND ${quoteSqlIdentifier(movementSourceColumn)} = $3`,
+    [runtime.identity.tenantId, runtime.identity.environmentId, sourceId],
+  );
+  assert.deepEqual(
+    movements.rows,
+    [{ quantity: '7.000000000000000000' }],
+    'the registered route appends one movement and replay appends none',
+  );
+  const stateColumn = requiredStorageColumn(
+    transaction,
+    'inventory_transaction_state',
+  );
+  const storedTransaction = await pool.query<{
+    revision: number;
+    state: string;
+  }>(
+    `SELECT ${quoteSqlIdentifier(transaction.optimisticRevision.column)}::integer AS revision,
+            ${quoteSqlIdentifier(stateColumn)}::text AS state
+       FROM north_star_module.${quoteSqlIdentifier(transaction.physicalTableName)}
+      WHERE tenant_id = $1 AND environment_id = $2
+        AND ${quoteSqlIdentifier(transaction.recordIdentity.column)} = $3`,
+    [runtime.identity.tenantId, runtime.identity.environmentId, transactionId],
+  );
+  assert.deepEqual(storedTransaction.rows, [
+    {
+      revision: 2,
+      state: 'northstar.app:option.inventory_transaction_state_posted',
+    },
+  ]);
+}
+
+function requiredStorageEntity(
+  storage: StorageTargetPayloadV1,
+  localId: string,
+): StorageTargetPayloadV1['entities'][number] {
+  const matches = storage.entities.filter((entity) =>
+    entity.entityId.endsWith(`:entity.${localId}`),
+  );
+  assert.equal(matches.length, 1);
+  return matches[0]!;
+}
+
+function requiredStorageColumn(
+  entity: StorageTargetPayloadV1['entities'][number],
+  localId: string,
+): string {
+  const matches = entity.columns.filter((column) =>
+    column.canonicalFieldId.endsWith(`:field.${localId}`),
+  );
+  assert.equal(matches.length, 1);
+  return matches[0]!.physicalName;
+}
+
+function quoteSqlIdentifier(value: string): string {
+  assert.match(value, /^[a-z][a-z0-9_]{0,62}$/u);
+  return `"${value}"`;
+}
+
 async function assertVerificationFieldOriginCreates(
   pool: pg.Pool,
   runtime: ComposedApplicationRuntime,
@@ -2906,8 +3230,8 @@ async function assertExactPartitionEvidence(
   assert.ok(derivations.length > 0);
   assert.equal(
     evidence.results.length,
-    129,
-    '73 formerly unconstructible scenarios moved into executed evidence',
+    130,
+    'write-scope executes 129 scenarios and the posting route adds one executed declared refusal',
   );
   assert.equal(
     derivations.length,
@@ -3283,6 +3607,9 @@ function createRuntime(
       ? { afterFreshTenantIntermediateActivation }
       : {}),
     compiledApplication,
+    capabilityOperationExecutorFactories: [
+      INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY,
+    ],
     databaseUrl,
     inventoryScopeProvisioning: COMPOSED_APPLICATION_INVENTORY_SCOPE,
     migrationsDirectory,
