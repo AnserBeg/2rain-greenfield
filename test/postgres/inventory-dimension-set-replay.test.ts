@@ -698,24 +698,99 @@ function assertOracleBytes(
 }
 
 async function assertSamePriorEventHistory(pool: Pool): Promise<void> {
-  const expected = PRIOR_DIMENSION_REPLAY_HISTORY.map(({ eventId }) => eventId);
+  const expectedV1 = PRIOR_DIMENSION_REPLAY_HISTORY.map((event) =>
+    expectedPersistedPriorEvent(event, null),
+  );
+  const expectedV2 = PRIOR_DIMENSION_REPLAY_HISTORY.map((event) =>
+    expectedPersistedPriorEvent(
+      event,
+      DIMENSION_REPLAY_IDS.members.unspecified,
+    ),
+  );
   const [v1, v2] = await Promise.all([
-    persistedEventIds(pool, projectionTables.v1),
-    persistedEventIds(pool, projectionTables.v2),
+    persistedPriorEvents(pool, projectionTables.v1),
+    persistedPriorEvents(pool, projectionTables.v2),
   ]);
-  assert.deepEqual(v1, expected);
-  assert.deepEqual(v2, expected);
-  assert.deepEqual(v1, v2);
+  assert.deepEqual(v1, expectedV1);
+  assert.deepEqual(v2, expectedV2);
 }
 
-async function persistedEventIds(
+interface PersistedPriorEvent {
+  readonly addedDimensionMember: string | null;
+  readonly effectiveAt: string;
+  readonly eventId: string;
+  readonly itemId: string;
+  readonly legalEntityId: string;
+  readonly locationId: string;
+  readonly quantity: string;
+  readonly recordedAt: string;
+  readonly stockDimensionSetVersion: string;
+  readonly stockIdentity: string;
+}
+
+function expectedPersistedPriorEvent(
+  event: DimensionReplayEvent,
+  addedDimensionMember: string | null,
+): PersistedPriorEvent {
+  return {
+    addedDimensionMember,
+    effectiveAt: event.effectiveAt,
+    eventId: event.eventId,
+    itemId: event.itemId,
+    legalEntityId: event.legalEntityId,
+    locationId: event.locationId,
+    quantity: event.quantity,
+    recordedAt: event.recordedAt,
+    stockDimensionSetVersion: event.stockDimensionSetVersion,
+    stockIdentity: stockIdentity(event),
+  };
+}
+
+async function persistedPriorEvents(
   pool: Pool,
   table: ProjectionTable,
-): Promise<string[]> {
-  const result = await pool.query<{ event_id: string }>(
-    `SELECT event_id::text FROM ${quoted(table)} ORDER BY event_id`,
+): Promise<PersistedPriorEvent[]> {
+  const addedDimensionSelection =
+    table === projectionTables.v1
+      ? 'NULL::text AS added_dimension_member'
+      : 'added_dimension_member';
+  const result = await pool.query<{
+    added_dimension_member: string | null;
+    effective_at: Date;
+    event_id: string;
+    item_id: string;
+    legal_entity_id: string;
+    location_id: string;
+    quantity: string;
+    recorded_at: Date;
+    stock_dimension_set_version: string;
+    stock_identity: string;
+  }>(
+    `SELECT event_id::text,
+            stock_dimension_set_version,
+            stock_identity,
+            legal_entity_id::text,
+            item_id::text,
+            location_id::text,
+            ${addedDimensionSelection},
+            quantity::text,
+            effective_at,
+            recorded_at
+       FROM ${quoted(table)}
+      ORDER BY event_id`,
   );
-  return result.rows.map(({ event_id: eventId }) => eventId);
+  return result.rows.map((row) => ({
+    addedDimensionMember: row.added_dimension_member,
+    effectiveAt: row.effective_at.toISOString(),
+    eventId: row.event_id,
+    itemId: row.item_id,
+    legalEntityId: row.legal_entity_id,
+    locationId: row.location_id,
+    quantity: row.quantity,
+    recordedAt: row.recorded_at.toISOString(),
+    stockDimensionSetVersion: row.stock_dimension_set_version,
+    stockIdentity: row.stock_identity,
+  }));
 }
 
 async function assertV2Activated(
@@ -755,33 +830,52 @@ async function assertV2Activated(
   ) {
     fail(`G3_R2_V2_ACTIVATION_EVIDENCE_INVALID: ${table}`);
   }
-  const queryPayload = activeView.projections.query.payload;
+  const v1QueryPayload = projectionPayload<unknown>(
+    v1,
+    PROJECTION_FAMILY_IDS.queryCatalog,
+  );
+  const v2QueryPayload = activeView.projections.query.payload;
+  if (hasQuery(v1QueryPayload, DIMENSION_REPLAY_IDS.queries.byAddedDimension)) {
+    fail('G3_R2_V1_QUERY_ALREADY_CONTAINS_ADDED_DIMENSION');
+  }
   if (
-    !isRecord(queryPayload) ||
-    !Array.isArray(queryPayload.queries) ||
-    !queryPayload.queries.some(
-      (query) =>
-        isRecord(query) &&
-        query.queryId === DIMENSION_REPLAY_IDS.queries.byAddedDimension,
-    )
+    !hasQuery(v2QueryPayload, DIMENSION_REPLAY_IDS.queries.byAddedDimension)
   ) {
     fail('G3_R2_V2_QUERY_NOT_ACTIVE');
   }
-  const storage = projectionPayload<StorageTargetPayloadV1>(
+  const v1Storage = projectionPayload<StorageTargetPayloadV1>(
+    v1,
+    PROJECTION_FAMILY_IDS.storageTarget,
+  );
+  const v2Storage = projectionPayload<StorageTargetPayloadV1>(
     v2,
     PROJECTION_FAMILY_IDS.storageTarget,
   );
-  if (
-    !storage.entities.some((entity) =>
-      entity.columns.some(
-        (column) =>
-          column.canonicalFieldId ===
-          DIMENSION_REPLAY_IDS.fields.addedDimension,
-      ),
-    )
-  ) {
+  if (hasStorageField(v1Storage, DIMENSION_REPLAY_IDS.fields.addedDimension)) {
+    fail('G3_R2_V1_STORAGE_ALREADY_CONTAINS_ADDED_DIMENSION');
+  }
+  if (!hasStorageField(v2Storage, DIMENSION_REPLAY_IDS.fields.addedDimension)) {
     fail('G3_R2_V2_STORAGE_FIELD_NOT_ACTIVE');
   }
+}
+
+function hasQuery(payload: unknown, queryId: string): boolean {
+  return (
+    isRecord(payload) &&
+    Array.isArray(payload.queries) &&
+    payload.queries.some(
+      (query) => isRecord(query) && query.queryId === queryId,
+    )
+  );
+}
+
+function hasStorageField(
+  storage: StorageTargetPayloadV1,
+  fieldId: string,
+): boolean {
+  return storage.entities.some((entity) =>
+    entity.columns.some((column) => column.canonicalFieldId === fieldId),
+  );
 }
 
 async function assertFirstClassUnspecified(
