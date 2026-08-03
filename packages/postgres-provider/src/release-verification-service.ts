@@ -1937,20 +1937,6 @@ class SemanticVerificationExecutor {
     return operation;
   }
 
-  #hasConstructibleCreateOperation(entityId: string): boolean {
-    const operation = this.#operations.find(
-      (candidate) =>
-        candidate.effect.entity.targetId === entityId &&
-        candidate.effect.kind === 'createRecordEffect',
-    );
-    return (
-      operation !== undefined &&
-      !this.constructibilityFindings.some(
-        (finding) => finding.operationId === operation.operationId,
-      )
-    );
-  }
-
   #requiredOperation(operationId: string): VerificationOperationContract {
     const operation = this.#operations.find(
       (candidate) => candidate.operationId === operationId,

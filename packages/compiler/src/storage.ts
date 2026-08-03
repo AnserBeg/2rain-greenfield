@@ -2190,16 +2190,14 @@ function isAdditiveSearchMappingTransition(
   ) {
     return false;
   }
-  const {
-    searchMapping: _previousSearchMapping,
-    shapeFingerprint: _previousShapeFingerprint,
-    ...previousShape
-  } = previous;
-  const {
-    searchMapping: _candidateSearchMapping,
-    shapeFingerprint: _candidateShapeFingerprint,
-    ...candidateShape
-  } = candidate;
+  const comparableShape = (column: StorageColumnTarget) =>
+    Object.fromEntries(
+      Object.entries(column).filter(
+        ([key]) => key !== 'searchMapping' && key !== 'shapeFingerprint',
+      ),
+    );
+  const previousShape = comparableShape(previous);
+  const candidateShape = comparableShape(candidate);
   return (
     hashCanonical(
       `${HASH_DOMAINS.projectionSemantic}/storage-column-transition-shape`,
