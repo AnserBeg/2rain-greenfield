@@ -2,7 +2,8 @@
 
 Status: evidence_ready  
 Tier: Behavioral  
-Base: `e4ae60ff38b430b5e126de6e9d54375348cccad2`
+Original packet base: `e4ae60ff38b430b5e126de6e9d54375348cccad2`
+Rescue parent: `30c0b06cad5bc8c19ae229cc6e5f534c8cfb8ab7`
 
 ## Outcome
 
@@ -42,8 +43,8 @@ scope rather than emitted unused.
 ## Artifact and ownership record
 
 No compiler, canonical model, projection, checked-in release, golden, or root
-changed. `packages/postgres-provider/src/module-runtime-interpreter.ts` remains
-byte-identical to the base; the aggregate regression only executed it.
+changed in this packet. `packages/postgres-provider/src/module-runtime-interpreter.ts`
+is byte-identical to the rescue parent; the aggregate regression only executed it.
 
 The reusable lesson is the existing ADR-0031 rule: one declared argument has
 one semantic authority, while transport binding copies the accepted value. It
