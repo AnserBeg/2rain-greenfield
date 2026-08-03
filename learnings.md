@@ -390,3 +390,8 @@ How to apply: compile every retained lineage input under a proposed conformance 
 Date: 2026-08-02
 Why: three resolve declarations and five search declarations satisfied universal conformance while their lowered storage made the promised lookup impossible.
 How to apply: derive query requirements from executable lowered storage, refuse declarations the runtime cannot honor, and independently require every capability that storage can honestly support. See ADR-0042 and `docs/execution/packets/5g3-write-scope.md`.
+
+## Separate historical integrity from current conformance
+Date: 2026-08-02
+Why: applying a newly tightened search rule to recorded lineage made valid historical releases appear corrupt and would have disabled rollback exactly when rules changed.
+How to apply: reproduce history from its recorded bytes and exact root, compile every new head strictly, and let historical defects refuse by name at runtime rather than returning plausible answers. Graduated to ADR-0045 and ADR-0046; see `docs/execution/packets/5g3-searchcap.md`.
