@@ -111,6 +111,7 @@ const suiteDefinitions = [
     expectedFiles: [
       'test/postgres/catalog-runtime.test.ts',
       'test/postgres/composed-application.test.ts',
+      'test/postgres/inventory-dimension-set-replay.test.ts',
       'test/postgres/inventory-onhand.test.ts',
       'test/postgres/inventory-posting.test.ts',
       'test/postgres/inventory-stock-count.test.ts',
