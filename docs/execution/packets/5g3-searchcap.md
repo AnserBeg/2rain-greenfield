@@ -6,6 +6,29 @@ Tier: Critical
 
 Base: `f3fdf0d`
 
+Integration base: `422c3bc0f50e314424b411d1a18b43584a206dae`
+
+## Premise audit against `98bb392`
+
+**Answer before conflict resolution:** `98bb392` does not supersede or
+invalidate this packet's premise. It adds the registered Inventory posting
+capability, routes `inventory_transaction_post` through it, derives capability
+assertion subjects from operation read-back, and adds one executed declared
+refusal to the verification plan. It does not derive search admission from the
+lowered storage contract, reject a search with no usable normalized-text
+column, or add the PostgreSQL runtime refusal; those mechanisms remain absent
+from main and remain this packet's work.
+
+The overlap is nevertheless semantic rather than incidental. I checked the
+commit's changes to `compiler.ts`, `projections.ts`, the Inventory definition,
+the three shared compiler controls, `inventory-onhand.test.ts`, and the composed
+application control. Its capability-effect branch must be preserved alongside
+the search rules. Its extra verification scenario also supersedes the packet's
+old numeric baseline, so the 167 / 129 / 38 to 162 / 126 / 36 attribution must
+be re-derived after the merge rather than carried forward. No search-capability
+implementation is redundant; only the old counts and generated release bytes
+are stale.
+
 ## Outcome
 
 Search capability is now derived from the lowered storage contract. A search
