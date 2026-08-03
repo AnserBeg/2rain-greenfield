@@ -390,3 +390,8 @@ How to apply: compile every retained lineage input under a proposed conformance 
 Date: 2026-08-02
 Why: three resolve declarations and five search declarations satisfied universal conformance while their lowered storage made the promised lookup impossible.
 How to apply: derive query requirements from executable lowered storage, refuse declarations the runtime cannot honor, and independently require every capability that storage can honestly support. See ADR-0042 and `docs/execution/packets/5g3-write-scope.md`.
+
+## Pin typed refusals to their producing layer
+Date: 2026-08-02
+Why: release verification accepted an adapter refusal because it shared the posting service's diagnostic code, while a nonempty-message check could not distinguish the layer actually reached.
+How to apply: require the exact declared code and reason (or an equally exact source identity), and mutation-prove that the same code from the wrong layer fails. See `docs/execution/packets/5g3-postroute.md`.

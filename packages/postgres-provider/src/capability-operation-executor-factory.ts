@@ -19,9 +19,15 @@ export interface PostgresCapabilityOperationExecutorContext {
   readonly releaseId: string;
 }
 
+export interface CapabilityVerificationRefusalExpectation {
+  readonly code: string;
+  readonly reason: string;
+}
+
 /** Product assembly supplies module-owned factories; generic code knows IDs only. */
 export interface PostgresCapabilityOperationExecutorFactory {
   readonly capabilityId: string;
+  readonly verificationRefusal: CapabilityVerificationRefusalExpectation;
   create(
     context: PostgresCapabilityOperationExecutorContext,
   ): RegisteredCapabilityOperationExecutor;

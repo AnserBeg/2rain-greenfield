@@ -92,20 +92,22 @@ test('composed product does not invent a verification evidence identity', async 
 });
 
 test('capability verification records only the exact declared typed refusal', async () => {
-  const exact = Object.assign(new Error('typed refusal reason'), {
-    code: 'EXPECTED_CAPABILITY_REFUSAL',
+  const expectedRefusal =
+    INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY.verificationRefusal;
+  const exact = Object.assign(new Error(expectedRefusal.reason), {
+    code: expectedRefusal.code,
   });
   assert.deepEqual(
     await captureDeclaredCapabilityRefusal(
       Promise.reject(exact),
-      'EXPECTED_CAPABILITY_REFUSAL',
+      expectedRefusal,
       'northstar.test:operation.capability',
     ),
     {
-      code: 'EXPECTED_CAPABILITY_REFUSAL',
+      code: expectedRefusal.code,
       kind: 'registeredCapabilityRefusal',
       operationId: 'northstar.test:operation.capability',
-      reason: 'typed refusal reason',
+      reason: expectedRefusal.reason,
       schemaVersion: 'northstar.release-verification-capability-probe/v1',
     },
   );
@@ -114,7 +116,26 @@ test('capability verification records only the exact declared typed refusal', as
       Promise.reject(
         Object.assign(new Error('wrong refusal'), { code: 'WRONG_REFUSAL' }),
       ),
-      'EXPECTED_CAPABILITY_REFUSAL',
+      expectedRefusal,
+      'northstar.test:operation.capability',
+    ),
+    (error: unknown) => {
+      assert.ok(error instanceof ReleaseVerificationIntegrityError);
+      assert.equal(error.code, 'VERIFICATION_CAPABILITY_REFUSAL_MISMATCH');
+      return true;
+    },
+  );
+  await assert.rejects(
+    captureDeclaredCapabilityRefusal(
+      Promise.reject(
+        Object.assign(
+          new Error(
+            'INVENTORY_POSTING_INPUT_INVALID: an adjustment requires at least one line',
+          ),
+          { code: expectedRefusal.code },
+        ),
+      ),
+      expectedRefusal,
       'northstar.test:operation.capability',
     ),
     (error: unknown) => {
@@ -126,7 +147,7 @@ test('capability verification records only the exact declared typed refusal', as
   await assert.rejects(
     captureDeclaredCapabilityRefusal(
       Promise.resolve({ outcome: 'succeeded' }),
-      'EXPECTED_CAPABILITY_REFUSAL',
+      expectedRefusal,
       'northstar.test:operation.capability',
     ),
     (error: unknown) => {

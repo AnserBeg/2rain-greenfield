@@ -57,6 +57,7 @@ import {
 import {
   createRegisteredCapabilityExecutors,
   registeredCapabilityIdsFromOperationCatalog,
+  type CapabilityVerificationRefusalExpectation,
   type PinnedCapabilityProjection,
   type PostgresCapabilityOperationExecutorFactory,
 } from './capability-operation-executor-factory.js';
@@ -200,7 +201,7 @@ export class ReleaseVerificationIntegrityError extends Error {
  */
 export async function captureDeclaredCapabilityRefusal(
   operation: Promise<unknown>,
-  expectedCode: string,
+  expected: CapabilityVerificationRefusalExpectation,
   operationId: string,
 ) {
   try {
@@ -209,10 +210,10 @@ export async function captureDeclaredCapabilityRefusal(
     const code =
       isRecord(error) && typeof error.code === 'string' ? error.code : null;
     const reason = error instanceof Error ? error.message : null;
-    if (code !== expectedCode || !reason) {
+    if (code !== expected.code || reason !== expected.reason) {
       throw failure(
         'VERIFICATION_CAPABILITY_REFUSAL_MISMATCH',
-        `capability operation ${operationId} refused with ${String(code)} instead of ${expectedCode}`,
+        `capability operation ${operationId} did not produce its exact declared typed refusal`,
       );
     }
     return Object.freeze({
@@ -452,6 +453,12 @@ export class PostgresReleaseVerificationService {
         mediation,
         queryGateway,
         policy,
+        new Map(
+          this.capabilityOperationExecutorFactories.map((factory) => [
+            factory.capabilityId,
+            factory.verificationRefusal,
+          ]),
+        ),
       );
       return (async () => {
         try {
@@ -1202,6 +1209,10 @@ class SemanticVerificationExecutor {
     private readonly mediation: SemanticOperationMediationAuthority,
     private readonly queryGateway: SemanticQueryGateway,
     private readonly currentPolicy: CurrentPolicyGateway,
+    private readonly capabilityVerificationRefusals: ReadonlyMap<
+      string,
+      CapabilityVerificationRefusalExpectation
+    >,
   ) {
     this.#operations = (
       view.projections.operation.payload as unknown as {
@@ -1385,9 +1396,14 @@ class SemanticVerificationExecutor {
     if (operationId) {
       const operation = this.#requiredOperation(operationId);
       if (operation.effect.kind === 'registeredCapabilityEffect') {
+        const expectedRefusal = this.capabilityVerificationRefusals.get(
+          operation.effect.capability.targetId,
+        );
         if (
           scenario.expectedOutcome !== 'fails' ||
-          typeof scenario.expectedDiagnosticCode !== 'string'
+          typeof scenario.expectedDiagnosticCode !== 'string' ||
+          !expectedRefusal ||
+          scenario.expectedDiagnosticCode !== expectedRefusal.code
         ) {
           throw failure(
             'VERIFICATION_CAPABILITY_REFUSAL_CONTRACT_INVALID',
@@ -1400,7 +1416,7 @@ class SemanticVerificationExecutor {
               expectedRevision: 1,
               recordId: record.recordId,
             }),
-            scenario.expectedDiagnosticCode,
+            expectedRefusal,
             operationId,
           ),
         };
