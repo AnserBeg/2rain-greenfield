@@ -225,3 +225,23 @@ FULL_MATRIX_FAILED rc=1 sha=392d24d662e62d6c3e0e56c23575642d55bfdae3
 The correction ran Prettier only on that generated file; targeted Prettier and
 `check:demo-release` checks then passed. The SHA moves visibly in the next
 commit; the red SHA is not a candidate.
+
+The authoritative matrix then passed at
+`1d907c1a1bc5175fd5c2497931ce14b47e74c232`:
+
+- performance 5/5, with best-of-five CPU 2,223.5 ms and wall 1,778.9 ms
+  against the unchanged 5,000 ms budget;
+- unit 77/77, compiler 117/117, integration 74/74, agent 3/3;
+- architecture 116/116 and contracts 7/7;
+- PostgreSQL 159/159, locale 1/1, browser 27/27, observability 5/5;
+- 21/21 migrations and schema drift, formatting, lint, typecheck, build,
+  dependency boundaries, both release checks, language coverage, reachability,
+  and security scans all passed;
+- reachability observed 90/90 test files across 10 producer artifacts; language
+  coverage reported 1,899 obligations and 396 first-party observations.
+
+The runner's exact terminal evidence was:
+
+```text
+FULL_MATRIX_PASS_SHA=1d907c1a1bc5175fd5c2497931ce14b47e74c232
+```
