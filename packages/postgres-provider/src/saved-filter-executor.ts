@@ -198,7 +198,8 @@ export class PostgresSavedFilterExecutor
     }
     if (
       request.definition.queryId !== this.registration.queryIds.get &&
-      request.definition.queryId !== this.registration.queryIds.list
+      request.definition.queryId !== this.registration.queryIds.list &&
+      request.definition.queryId !== this.registration.queryIds.search
     ) {
       return Object.freeze({
         kind: 'semanticQueryResult',
@@ -317,6 +318,22 @@ async function readRows(
     const result = await client.query<SavedFilterRow>(
       `${savedFilterSelect()} WHERE query_id = $1 AND lifecycle = 'active' ORDER BY filter_id LIMIT $2`,
       [queryId, request.definition.maximumResultCount],
+    );
+    return result.rows;
+  }
+  if (request.definition.queryId === registration.queryIds.search) {
+    const input = exactRecord(request.arguments, ['text'], '$.arguments');
+    const text = requiredString(input.text, '$.arguments.text');
+    const result = await client.query<SavedFilterRow>(
+      `${savedFilterSelect()}
+        WHERE lifecycle = 'active'
+          AND position(
+                lower($1::text COLLATE "C")
+                IN lower(name COLLATE "C")
+              ) > 0
+        ORDER BY filter_id
+        LIMIT $2`,
+      [text, request.definition.maximumResultCount],
     );
     return result.rows;
   }

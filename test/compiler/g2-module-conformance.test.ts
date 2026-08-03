@@ -146,8 +146,8 @@ test('compiler-derived conformance names the entity and missing family', () => {
   assert.equal(result.status, 'failed');
   assert.deepEqual(structuralDiagnostics(result), [
     {
-      code: 'COMPILER_ENTITY_PROJECTION_MISSING',
-      path: '$.conformance.query.search',
+      code: 'COMPILER_SEARCH_QUERY_REQUIRED',
+      path: '$.entities.searchQuery',
       subjectId: FIXTURE_IDS.entityIds.child,
     },
   ]);

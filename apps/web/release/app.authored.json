@@ -598,7 +598,7 @@
       "presence": "required",
       "reportable": true,
       "schemaVersion": "v4",
-      "searchable": false
+      "searchable": true
     },
     {
       "classification": "internal",
@@ -1349,7 +1349,7 @@
       "presence": "required",
       "reportable": true,
       "schemaVersion": "v4",
-      "searchable": false
+      "searchable": true
     },
     {
       "classification": "internal",
@@ -1778,7 +1778,7 @@
       "presence": "required",
       "reportable": true,
       "schemaVersion": "v4",
-      "searchable": false
+      "searchable": true
     },
     {
       "classification": "internal",
@@ -2020,7 +2020,7 @@
       "presence": "required",
       "reportable": true,
       "schemaVersion": "v4",
-      "searchable": false
+      "searchable": true
     },
     {
       "classification": "internal",
@@ -6619,60 +6619,6 @@
           "orderKey": 10,
           "schemaVersion": "v4",
           "selectionId": "northstar.app:selection.inventory_period_lock_list_1"
-        }
-      ],
-      "sourceEntity": {
-        "kind": "entityReference",
-        "schemaVersion": "v4",
-        "targetId": "northstar.app:entity.inventory_period_lock"
-      },
-      "tier": "q0"
-    },
-    {
-      "kind": "queryDefinition",
-      "legalEntityScope": {
-        "cardinality": "exactlyOne",
-        "kind": "queryLegalEntityScope",
-        "operand": {
-          "kind": "queryParameterReference",
-          "parameterId": "northstar.app:parameter.inventory_period_lock_search_legal_entity_scope",
-          "schemaVersion": "v4"
-        },
-        "schemaVersion": "v4"
-      },
-      "parameters": [
-        {
-          "kind": "queryParameterDefinition",
-          "orderKey": 10,
-          "parameterId": "northstar.app:parameter.inventory_period_lock_search_legal_entity_scope",
-          "schemaVersion": "v4"
-        }
-      ],
-      "maximumResultCount": 100,
-      "module": {
-        "kind": "moduleReference",
-        "schemaVersion": "v4",
-        "targetId": "northstar.app:module.inventory"
-      },
-      "permission": {
-        "kind": "permissionReference",
-        "schemaVersion": "v4",
-        "targetId": "northstar.app:permission.inventory_period_lock_read"
-      },
-      "queryId": "northstar.app:query.inventory_period_lock_search",
-      "queryType": "search",
-      "schemaVersion": "v4",
-      "selections": [
-        {
-          "field": {
-            "kind": "fieldReference",
-            "schemaVersion": "v4",
-            "targetId": "northstar.app:field.inventory_period_lock_closed_through"
-          },
-          "kind": "querySelection",
-          "orderKey": 10,
-          "schemaVersion": "v4",
-          "selectionId": "northstar.app:selection.inventory_period_lock_search_1"
         }
       ],
       "sourceEntity": {

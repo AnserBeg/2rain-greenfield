@@ -401,6 +401,7 @@ export function inventoryModuleDefinition(
         'Unit id',
         60,
         text(32),
+        { searchable: true },
       ),
 
       field(
@@ -547,6 +548,7 @@ export function inventoryModuleDefinition(
         'Unit id',
         60,
         text(32),
+        { searchable: true },
       ),
       field(
         definitionIds,
@@ -629,6 +631,7 @@ export function inventoryModuleDefinition(
         'Source id',
         90,
         text(80),
+        { searchable: true },
       ),
       field(
         definitionIds,
@@ -775,6 +778,7 @@ export function inventoryModuleDefinition(
           entityId,
           entityFields,
           resolveFieldForEntity(fieldIds, local),
+          local !== 'inventory_period_lock',
         );
       }),
       ...queries(
@@ -1114,11 +1118,12 @@ function queries(
   entityId: string,
   selectedFieldIds: readonly string[],
   resolveFieldId: string | null,
+  includeSearch = true,
 ): Array<Record<string, unknown>> {
   const queryTypes = [
     'get',
     'list',
-    'search',
+    ...(includeSearch ? (['search'] as const) : []),
     ...(resolveFieldId === null ? [] : (['resolve'] as const)),
   ] as const;
   return queryTypes.map((queryType) => {

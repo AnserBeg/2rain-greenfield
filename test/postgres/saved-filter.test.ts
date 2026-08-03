@@ -88,6 +88,11 @@ test('saved-filter package fails closed when real verification reaches unsupport
   assert.ok(observed.scenarioKinds.includes('resolverAuthority'));
   assert.ok(observed.scenarioKinds.includes('searchableExclusion'));
   assert.equal(
+    observed.searchWitnessCount,
+    1,
+    'saved-filter search returns the record created through its real operation path by matching name',
+  );
+  assert.equal(
     observed.executionErrorCode,
     'VERIFICATION_RESOLVER_POSITIVE_FAILED',
     observed.executionErrorMessage,

@@ -12,6 +12,7 @@ import {
   MODULE_COMPILER_PROFILE,
   compileApplication,
   expectedActiveReleaseFrom,
+  reproduceHistoricalApplication,
   type CompileResult,
   type CompileSuccess,
 } from '@north-star/compiler';
@@ -51,7 +52,7 @@ const existing = existsSync(outputPath)
 const verified = existing
   ? truncateInvalidLineage
     ? longestValidExperimentalLineagePrefix(existing)
-    : verifyExistingLineage(existing)
+    : verifyExistingLineage(existing, applicationBytes)
   : initialLineage(authored);
 const latest = verified.applications.at(-1)!;
 const authoredIsCurrent = equalBytes(
@@ -247,7 +248,10 @@ function initialLineage(
   };
 }
 
-function verifyExistingLineage(input: unknown): CompiledLineage {
+function verifyExistingLineage(
+  input: unknown,
+  currentSourceBytes: Uint8Array,
+): CompiledLineage {
   if (!isRecord(input)) {
     throw new TypeError('compiled application release envelope is invalid');
   }
@@ -261,7 +265,11 @@ function verifyExistingLineage(input: unknown): CompiledLineage {
   if (!applicationValues || applicationValues.length === 0) {
     throw new TypeError('compiled application release envelope is invalid');
   }
-  const bootstrap = mustCompile(bootstrapBytes, null);
+  const bootstrap = mustReproduceHistorical(
+    bootstrapBytes,
+    null,
+    recordedReleaseRoot(input.bootstrap, 'bootstrap'),
+  );
   const applications: CompiledLineageRelease[] = [];
   let previous = bootstrap;
   for (const [index, value] of applicationValues.entries()) {
@@ -269,10 +277,19 @@ function verifyExistingLineage(input: unknown): CompiledLineage {
       value,
       `applications[${String(index)}]`,
     );
-    const compiled = mustCompile(
-      normalizedDefinitionBytes,
-      expectedActiveReleaseFrom(previous),
-    );
+    const servingHead =
+      index === applicationValues.length - 1 &&
+      equalBytes(normalizedDefinitionBytes, currentSourceBytes);
+    const compiled = servingHead
+      ? mustCompile(
+          normalizedDefinitionBytes,
+          expectedActiveReleaseFrom(previous),
+        )
+      : mustReproduceHistorical(
+          normalizedDefinitionBytes,
+          expectedActiveReleaseFrom(previous),
+          recordedReleaseRoot(value, `applications[${String(index)}]`),
+        );
     applications.push({ compiled, normalizedDefinitionBytes });
     previous = compiled;
   }
@@ -327,6 +344,17 @@ function releaseBytes(value: unknown, path: string): Uint8Array {
   return new Uint8Array(bytes);
 }
 
+function recordedReleaseRoot(value: unknown, path: string): string {
+  if (
+    !isRecord(value) ||
+    typeof value.releaseRoot !== 'string' ||
+    !/^[0-9a-f]{64}$/u.test(value.releaseRoot)
+  ) {
+    throw new TypeError(`${path} recorded release root is invalid`);
+  }
+  return value.releaseRoot;
+}
+
 function equalBytes(left: Uint8Array, right: Uint8Array): boolean {
   return (
     left.byteLength === right.byteLength &&
@@ -357,6 +385,40 @@ function mustCompile(
   if (result.status !== 'compiled') {
     throw new Error(
       `composed application release did not compile: ${JSON.stringify(result.diagnostics)}`,
+    );
+  }
+  return result;
+}
+
+function mustReproduceHistorical(
+  normalizedDefinitionBytes: Uint8Array,
+  expectedActiveRelease: Parameters<
+    typeof compileApplication
+  >[0]['expectedActiveRelease'],
+  recordedReleaseRoot: string,
+): CompileSuccess {
+  const normalizedDefinition = parseNormalizedApplicationPackageJson(
+    normalizedDefinitionBytes,
+  );
+  const result = reproduceHistoricalApplication(
+    {
+      dependencies: [],
+      expectedActiveRelease,
+      kind: 'compilerInput',
+      limits: { ...DEFAULT_COMPILER_LIMITS },
+      normalizedDefinitionBytes,
+      profile: {
+        ...MODULE_COMPILER_PROFILE,
+        languageVersion: normalizedDefinition.languageVersion,
+        normalizationProfileVersion:
+          normalizedDefinition.normalizationProfileVersion,
+      },
+    },
+    { releaseRoot: recordedReleaseRoot },
+  );
+  if (result.status !== 'compiled') {
+    throw new Error(
+      `historical application release did not reproduce: ${JSON.stringify(result.diagnostics)}`,
     );
   }
   return result;

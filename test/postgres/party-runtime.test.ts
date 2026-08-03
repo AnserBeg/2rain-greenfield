@@ -554,6 +554,18 @@ test('Party executes the compiled declared-semantics contract on real PostgreSQL
       })
     ).records[0];
     assert.deepEqual(queryDto, restored.readBack);
+    const roleSearch = await invokePartyQuery(
+      runtime,
+      runtime.views.a,
+      'party_role_search',
+      { text: 'supplier' },
+    );
+    assert.equal(roleSearch.outcome, 'exact');
+    assert.equal(
+      roleSearch.records.some((record) => record.recordId === supplierRoleId),
+      true,
+      'party-role search returns the role through its searchable role-kind authority',
+    );
     const agent = projectionPayload<{
       queries: Array<{ queryId: string }>;
     }>(runtime.compiled, PROJECTION_FAMILY_IDS.agentDiscovery);

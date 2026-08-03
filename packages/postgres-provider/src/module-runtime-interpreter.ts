@@ -2321,7 +2321,13 @@ async function matchRecords(
       selected.has(column.canonicalFieldId) &&
       column.searchMapping === 'normalizedTextIndex',
   );
-  if (columns.length === 0) return [];
+  if (columns.length === 0) {
+    throw failure(
+      'MODULE_SEARCH_CAPABILITY_UNAVAILABLE',
+      `registered search query ${definition.queryId} has no usable lowered search column`,
+      definition.queryId,
+    );
+  }
   const match = buildFoldedMatchPredicate(entity, columns, text, matchMode);
   const values = [...match.values];
   const predicates = archivePredicate(entity, includeArchived);

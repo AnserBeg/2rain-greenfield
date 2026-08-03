@@ -88,6 +88,64 @@ test('composed product does not invent a verification evidence identity', async 
   assert.doesNotMatch(source, /evidenceId\s*=\s*minted\(randomUUID\(\)\)/u);
 });
 
+test('historical reproduction cannot admit a non-conformant current head', async () => {
+  const compiledApplication = JSON.parse(
+    await readFile(compiledArtifactPath, 'utf8'),
+  ) as {
+    applications: Array<{ normalizedDefinitionBytesBase64: string }>;
+    bootstrap: unknown;
+    schemaVersion: string;
+  };
+  assert.ok(compiledApplication.applications.length >= 6);
+  const historicalHead = compiledApplication.applications[4]!;
+  const candidateEnvelope = {
+    ...compiledApplication,
+    applications: compiledApplication.applications.slice(0, 5),
+  };
+  const directory = await mkdtemp(
+    resolve(tmpdir(), 'northstar-historical-head-scope-'),
+  );
+  const authoredPath = resolve(directory, 'app.authored.json');
+  const compiledPath = resolve(directory, 'app.compiled.json');
+  try {
+    await Promise.all([
+      writeFile(
+        authoredPath,
+        Buffer.from(
+          historicalHead.normalizedDefinitionBytesBase64,
+          'base64',
+        ),
+      ),
+      writeFile(compiledPath, JSON.stringify(candidateEnvelope)),
+    ]);
+    await assert.rejects(
+      execFileAsync(
+        process.execPath,
+        ['--import', 'tsx', compileScriptPath, '--check'],
+        {
+          cwd: resolve('.'),
+          encoding: 'utf8',
+          env: {
+            ...process.env,
+            NORTH_STAR_APP_AUTHORED_PATH: authoredPath,
+            NORTH_STAR_APP_COMPILED_PATH: compiledPath,
+          },
+          maxBuffer: 2 * 1024 * 1024,
+          timeout: 30_000,
+        },
+      ),
+      (error: unknown) =>
+        error instanceof Error &&
+        /COMPILER_SEARCH_SELECTION_STORAGE_UNUSABLE/u.test(
+          `${error.message} ${'stderr' in error ? String(error.stderr) : ''}`,
+        ),
+      'the same historical bytes must be strict and refused when presented as the freshly compiled head',
+    );
+  } finally {
+    await rm(directory, { force: true, recursive: true });
+  }
+});
+
 test('fresh-tenant install refuses a failing intermediate transition', async () => {
   const compiledApplication = JSON.parse(
     await readFile(compiledArtifactPath, 'utf8'),
@@ -2167,8 +2225,8 @@ async function assertBoundedFreshTenantInstallEvidence(
   ).plan.scenarios.length;
   assert.equal(
     servingScenarioCount,
-    167,
-    'ADR-0042 removes exactly one resolver-authority scenario with inventory_period_lock_resolve',
+    162,
+    '167 minus four fields that now carry real search authority and the impossible period-lock search exclusion',
   );
 
   const intermediate = await pool.query<{
@@ -2539,33 +2597,27 @@ async function assertConstrainedDomainVerificationCompleted(
     [],
     'every entity-owned create is constructible from its compiled system input',
   );
-  const unconstructableOperationIds = new Set(
-    constructibilityFindings.map((finding) => finding.operationId),
+  const scenarioSearch = searchQueries.find(
+    (query) => query.sourceEntityId === scenario.entityId,
   );
-  const constructiblePositiveCandidate = searchQueries
-    .flatMap((query) => {
-      const createOperation = createOperations.get(query.sourceEntityId);
-      if (
-        !createOperation ||
-        unconstructableOperationIds.has(createOperation.operationId)
-      ) {
-        return [];
-      }
-      return query.selections.map((selection) => ({
-        entityId: query.sourceEntityId,
-        field: createOperation.inputContract.fields.find(
-          (field) =>
-            field.fieldId === selection.fieldId &&
-            field.fieldKind === 'textFieldType' &&
-            !excludedFields.get(query.sourceEntityId)?.has(field.fieldId),
-        ),
-      }));
-    })
+  const scenarioCreate = createOperations.get(scenario.entityId);
+  const constructiblePositiveCandidate = scenarioSearch?.selections
+    .map((selection) => ({
+      entityId: scenario.entityId,
+      field: scenarioCreate?.inputContract.fields.find(
+        (field) =>
+          field.fieldId === selection.fieldId &&
+          (field.fieldKind === 'textFieldType' ||
+            field.fieldKind === 'enumFieldType') &&
+          !excludedFields.get(scenario.entityId)?.has(field.fieldId),
+      ),
+    }))
     .find((candidate) => candidate.field);
   assert.ok(
     constructiblePositiveCandidate?.field,
-    'the compiled product retains a constructible searchable source for the positive witness',
+    'the exclusion scenario retains a constructible same-entity searchable source for its positive witness',
   );
+  assert.equal(constructiblePositiveCandidate.entityId, scenario.entityId);
   for (const identifier of [
     entity.physicalTableName,
     entity.archive.archivedAtColumn,
@@ -2634,7 +2686,7 @@ async function assertConstrainedDomainVerificationCompleted(
   assert.equal(
     result.rows[0]?.positive_probe_digest,
     expectedPositiveProbeDigest,
-    'the executed searchable-exclusion proof binds every constructibility finding rather than silently skipping an unconstructable operation',
+    'the executed searchable-exclusion proof binds a positive witness from the same entity as its negative witness',
   );
   const admission = await pool.query<{ verification_evidence_id: string }>(
     `SELECT verification_evidence_id
@@ -2906,13 +2958,13 @@ async function assertExactPartitionEvidence(
   assert.ok(derivations.length > 0);
   assert.equal(
     evidence.results.length,
-    129,
-    '73 formerly unconstructible scenarios moved into executed evidence',
+    126,
+    'three formerly excluded fields now carry real same-entity search authority',
   );
   assert.equal(
     derivations.length,
-    38,
-    'ADR-0042 removes the period-lock resolver rather than deriving it',
+    36,
+    'the searchable movement field and impossible period-lock search exclusion ceased to exist rather than becoming derivations',
   );
   assert.equal(
     binding.plan.scenarios.some(
@@ -2937,7 +2989,7 @@ async function assertExactPartitionEvidence(
       (derivation) =>
         derivation.reason.code === 'VERIFICATION_NO_GENERIC_CREATE_OPERATION',
     ).length,
-    38,
+    36,
   );
   assert.deepEqual(
     [...executedScenarioIds, ...derivedScenarioIds].toSorted(),

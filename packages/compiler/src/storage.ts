@@ -1856,7 +1856,11 @@ export function buildStorageTransitionEnvelope(
     }
     for (const [fieldId, field] of newFields) {
       const oldField = oldFields.get(fieldId);
-      if (oldField && oldField.shapeFingerprint !== field.shapeFingerprint) {
+      if (
+        oldField &&
+        oldField.shapeFingerprint !== field.shapeFingerprint &&
+        !isAdditiveSearchMappingTransition(oldField, field)
+      ) {
         return failureDiagnostic(
           'COMPILER_STORAGE_RETYPE_UNSUPPORTED',
           '$.fields.fieldType',
@@ -2174,6 +2178,38 @@ export function buildStorageTransitionEnvelope(
     ),
     totalOrdering: 'declaredDependenciesThenElementIdCodeUnits',
   };
+}
+
+function isAdditiveSearchMappingTransition(
+  previous: StorageColumnTarget,
+  candidate: StorageColumnTarget,
+): boolean {
+  if (
+    previous.searchMapping !== 'none' ||
+    candidate.searchMapping !== 'normalizedTextIndex'
+  ) {
+    return false;
+  }
+  const {
+    searchMapping: _previousSearchMapping,
+    shapeFingerprint: _previousShapeFingerprint,
+    ...previousShape
+  } = previous;
+  const {
+    searchMapping: _candidateSearchMapping,
+    shapeFingerprint: _candidateShapeFingerprint,
+    ...candidateShape
+  } = candidate;
+  return (
+    hashCanonical(
+      `${HASH_DOMAINS.projectionSemantic}/storage-column-transition-shape`,
+      previousShape,
+    ).digest ===
+    hashCanonical(
+      `${HASH_DOMAINS.projectionSemantic}/storage-column-transition-shape`,
+      candidateShape,
+    ).digest
+  );
 }
 
 export function classifyStorageTransitionElement(
