@@ -1,6 +1,6 @@
 # 5g3-langnarrow — relation declarations are honoured or refused
 
-Status: merged current-main targeted-green candidate; frozen matrix pending
+Status: frozen current-main matrix-green candidate; Critical review pending
 
 Tier: Critical
 
@@ -70,29 +70,33 @@ inferred from declarations or older tests.
 Exactly seven relation obligations left the ledger; none was added and none
 moved into accepted-but-unhonored:
 
-- `authoredLanguage:$.relations[].cardinality="manyToOne"` — left
-  accepted-but-unhonored because it is now the sole admitted cardinality and
+- `authoredLanguage:$.relations[].cardinality="manyToOne"` —
+  accepted-but-unhonored → removed from the derived ledger because it is now
+  the sole admitted cardinality and
   the same real Inventory movement relation positively normalizes and lowers
   to its one source-side UUID foreign key.
-- `authoredLanguage:$.relations[].cardinality="oneToMany"` — left
-  accepted-but-unhonored because the spelling is now refused by name with
+- `authoredLanguage:$.relations[].cardinality="oneToMany"` —
+  accepted-but-unhonored → removed from the derived ledger because the spelling
+  is now refused by name with
   `CANON_RELATION_CARDINALITY_UNSUPPORTED`.
-- `authoredLanguage:$.relations[].cardinality="oneToOne"` — left
-  accepted-but-unhonored for the same ruled refusal; no uniqueness semantics
-  were invented.
-- `authoredLanguage:$.relations[].joinEligibility="none"` — left
-  accepted-but-unhonored because the spelling is refused by name with
+- `authoredLanguage:$.relations[].cardinality="oneToOne"` —
+  accepted-but-unhonored → removed from the derived ledger for the same ruled
+  refusal; no uniqueness semantics were invented.
+- `authoredLanguage:$.relations[].joinEligibility="none"` —
+  accepted-but-unhonored → removed from the derived ledger because the spelling
+  is refused by name with
   `CANON_RELATION_JOIN_ELIGIBILITY_UNSUPPORTED`.
-- `authoredLanguage:$.relations[].joinEligibility="query"` — left
-  accepted-but-unhonored because it is now the sole admitted join declaration;
-  the positive witness carries it through normalization into the relation that
-  lowers successfully.
-- `authoredLanguage:$.relations[].joinEligibility.$presence="absent"` — left
-  supported-but-unexercised because omission is no longer an admitted spelling
-  and is refused with the join-eligibility diagnostic.
-- `authoredLanguage:$.relations[].joinEligibility.$presence="present"` — left
-  supported-but-unexercised because presence is now mandatory rather than a
-  finite optionality choice.
+- `authoredLanguage:$.relations[].joinEligibility="query"` —
+  accepted-but-unhonored → removed from the derived ledger because it is now
+  the sole admitted join declaration; the positive witness carries it through
+  normalization into the relation that lowers successfully.
+- `authoredLanguage:$.relations[].joinEligibility.$presence="absent"` —
+  supported-but-unexercised → removed from the derived ledger because omission
+  is no longer an admitted spelling and is refused with the join-eligibility
+  diagnostic.
+- `authoredLanguage:$.relations[].joinEligibility.$presence="present"` —
+  supported-but-unexercised → removed from the derived ledger because presence
+  is now mandatory rather than a finite optionality choice.
 
 The non-relation observed-set digest remains exactly
 `d32619080727fdb3cf64c91d43b85c14db7a7bc205dbc2841a9e23399e72847e`;
@@ -204,5 +208,37 @@ frozen matrix:
   `canonicalizeAndHash` — PASS; produced and recorded digest both `51fa3abb…`.
 - targeted Prettier and `git diff --check` — PASS.
 
-The full repository matrix remains pending at the frozen candidate SHA. Per the
-2026-08-03 matrix rule, it will run once only after the candidate is committed.
+Two invocations waited the runner's bounded 300 seconds and exited 75 before
+any matrix phase ran, both with exact text:
+
+```text
+TEST_GATE_LOCK_BUSY: exclusive access to /tmp/north-star-matrix.lock was unavailable for 300s
+```
+
+The lock was not bypassed. The next normal retry acquired it and ran the one
+authoritative full matrix at frozen executable SHA
+`e446353d6e055ffcca6d12c4f195e2bfe4025702`:
+
+| Gate | Result |
+| --- | --- |
+| performance | 5/5; best-of-five CPU 1,514.8 ms and wall 1,220.6 ms against unchanged 5,000 ms budget; 97.5% CPU idle admission |
+| unit | 82/82 |
+| compiler | 117/117 |
+| integration | 74/74 |
+| agent | 3/3 |
+| architecture | 116/116; boundaries 149 files |
+| web contracts | 7/7 |
+| PostgreSQL | 159/159 |
+| locale | 1/1 |
+| browser | 27/27 |
+| observability | 5/5 |
+| migrations/schema | 21/21, schema drift PASS |
+| language coverage | 1,892 obligations; 393 observations; relation `87 = 0 + 87 + 0` |
+| reachability | 90/90 test files; 10 producer artifacts |
+| format, lint, typecheck, build, releases, security | PASS |
+
+The runner recorded both
+`PERFORMANCE_GATE_PASS_SHA=e446353d6e055ffcca6d12c4f195e2bfe4025702`
+and
+`FULL_MATRIX_PASS_SHA=e446353d6e055ffcca6d12c4f195e2bfe4025702`.
+Raw log: `/tmp/matrix-LANGNARROW-e446353d.log`.
