@@ -7,6 +7,7 @@ import type { Pool, PoolClient } from 'pg';
 
 import {
   aggregateGenerationLockKey,
+  expectedAggregateAnchorIntegrity,
   withModuleRuntimeRole,
 } from './module-runtime-interpreter.js';
 import { withTrustedRequestTransaction } from './request-context.js';
@@ -35,8 +36,17 @@ export type InventoryReconciliationArmIdV1 =
 export type InventoryReconciliationOutcomeV1 =
   'consistent' | 'discrepant' | 'indeterminate';
 
+/**
+ * Two instruments, two verdicts. One word spanning both is what let nine review
+ * rounds keep extending an unbounded conjunction: `consistent` meant "balances
+ * agree AND provenance agrees AND the cache is intact", which has no completion
+ * condition. Each verdict now has its own, and neither can mask the other.
+ */
+export type InventoryReconciliationAxisV1 = 'balance' | 'integrity';
+
 export type InventoryReconciliationFindingCodeV1 =
   | 'AGGREGATE_ANCHOR_BALANCE_UNRECOGNIZED'
+  | 'AGGREGATE_ANCHOR_DIGEST_DIVERGED'
   | 'AGGREGATE_ANCHOR_LEDGER_DIVERGED'
   | 'AGGREGATE_ANCHOR_PARAMETERS_UNRECOGNIZED'
   | 'AGGREGATE_ANCHOR_QUERY_UNRECOGNIZED'
@@ -50,10 +60,153 @@ export type InventoryReconciliationFindingCodeV1 =
   | 'SOURCE_DOCUMENT_MOVEMENT_COUNT_DIVERGED'
   | 'SOURCE_DOCUMENT_POSTING_ROLE_DIVERGED'
   | 'SOURCE_DOCUMENT_QUANTITY_DIVERGED'
+  | 'SOURCE_DOCUMENT_REASON_DIVERGED'
   | 'SOURCE_DOCUMENT_SOURCE_IDENTITY_DIVERGED'
   | 'SOURCE_DOCUMENT_SOURCE_LINE_DIVERGED'
+  | 'SOURCE_DOCUMENT_TRANSACTION_LINK_DIVERGED'
   | 'SOURCE_DOCUMENT_TYPE_UNRECOGNIZED'
   | 'SOURCE_DOCUMENT_UNIT_DIVERGED';
+
+/**
+ * Every column the movement contract carries, and what this reconciler does
+ * with it. The ratchet in `resolveReconciliationStorage` requires this map and
+ * the compiled column list to agree exactly, so a column added to the contract
+ * fails construction until somebody decides which instrument owns it.
+ *
+ * This does NOT derive semantics -- that was tried and reversed, because the
+ * compiled contract carries no field-level provenance. It makes silent omission
+ * impossible, which is the part that was actually costing review rounds.
+ */
+const MOVEMENT_COLUMN_CLASSIFICATION: Readonly<Record<string, string>> =
+  Object.freeze({
+    inventory_movement_actor_id:
+      'excluded: the posting actor, not a property of the document',
+    inventory_movement_effective_at: 'balance',
+    inventory_movement_item_id: 'balance',
+    inventory_movement_location_id: 'balance',
+    inventory_movement_posting_role: 'integrity',
+    inventory_movement_quantity_delta: 'balance',
+    inventory_movement_reason_code: 'integrity',
+    inventory_movement_reason_narrative: 'integrity',
+    inventory_movement_recorded_at:
+      'excluded: the posting instant, which legitimately differs from the header',
+    inventory_movement_reversal_of_movement_id:
+      'excluded: derived from a stock-count line, a different document than the transaction line',
+    inventory_movement_source_id: 'integrity',
+    inventory_movement_source_line: 'integrity',
+    inventory_movement_source_revision:
+      'excluded: the header revision advances on the draft-to-posted transition, so equality is false by construction',
+    inventory_movement_source_type: 'integrity',
+    inventory_movement_stock_dimension_set_version:
+      'excluded: a command input with no header counterpart',
+    inventory_movement_unit_id: 'balance',
+  });
+
+type AxisEffect = 'discrepant' | 'unaffected' | 'unverifiable';
+
+/**
+ * What each finding says about each verdict. Exhaustive over the code union by
+ * construction, so a new code cannot be added without deciding which
+ * instrument it belongs to.
+ *
+ * `unaffected` is the load-bearing value: a provenance defect leaves the
+ * BALANCE verdict untouched, which is the whole point of splitting them.
+ */
+const FINDING_AXIS_EFFECTS: Readonly<
+  Record<
+    InventoryReconciliationFindingCodeV1,
+    Readonly<Record<InventoryReconciliationAxisV1, AxisEffect>>
+  >
+> = Object.freeze({
+  // A balance outside numeric(38,18) blocks both: it cannot be summed against,
+  // and the integrity digest is taken over that same unusable value.
+  AGGREGATE_ANCHOR_BALANCE_UNRECOGNIZED: {
+    balance: 'unverifiable',
+    integrity: 'unverifiable',
+  },
+  AGGREGATE_ANCHOR_DIGEST_DIVERGED: {
+    balance: 'unaffected',
+    integrity: 'discrepant',
+  },
+  AGGREGATE_ANCHOR_LEDGER_DIVERGED: {
+    balance: 'discrepant',
+    integrity: 'unaffected',
+  },
+  // The digest is checkable without recognizing the query or its parameters,
+  // so an anchor the balance arm cannot read is still integrity-verified.
+  AGGREGATE_ANCHOR_PARAMETERS_UNRECOGNIZED: {
+    balance: 'unverifiable',
+    integrity: 'unaffected',
+  },
+  AGGREGATE_ANCHOR_QUERY_UNRECOGNIZED: {
+    balance: 'unverifiable',
+    integrity: 'unaffected',
+  },
+  AGGREGATE_ANCHOR_SCOPE_DIVERGED: {
+    balance: 'unverifiable',
+    integrity: 'discrepant',
+  },
+  RECORDED_ANCHOR_DISCREPANCY_PRESERVED: {
+    balance: 'unaffected',
+    integrity: 'discrepant',
+  },
+  SCOPE_OBSERVED_NO_SUBJECTS: {
+    balance: 'unverifiable',
+    integrity: 'unverifiable',
+  },
+  SOURCE_DOCUMENT_EFFECTIVE_AT_DIVERGED: {
+    balance: 'discrepant',
+    integrity: 'unaffected',
+  },
+  SOURCE_DOCUMENT_ITEM_DIVERGED: {
+    balance: 'discrepant',
+    integrity: 'unaffected',
+  },
+  SOURCE_DOCUMENT_LINE_SHAPE_UNRECOGNIZED: {
+    balance: 'unverifiable',
+    integrity: 'unverifiable',
+  },
+  SOURCE_DOCUMENT_MISSING_FOR_MOVEMENT: {
+    balance: 'discrepant',
+    integrity: 'unaffected',
+  },
+  SOURCE_DOCUMENT_MOVEMENT_COUNT_DIVERGED: {
+    balance: 'discrepant',
+    integrity: 'unaffected',
+  },
+  SOURCE_DOCUMENT_POSTING_ROLE_DIVERGED: {
+    balance: 'unaffected',
+    integrity: 'discrepant',
+  },
+  SOURCE_DOCUMENT_QUANTITY_DIVERGED: {
+    balance: 'discrepant',
+    integrity: 'unaffected',
+  },
+  SOURCE_DOCUMENT_REASON_DIVERGED: {
+    balance: 'unaffected',
+    integrity: 'discrepant',
+  },
+  SOURCE_DOCUMENT_SOURCE_IDENTITY_DIVERGED: {
+    balance: 'unaffected',
+    integrity: 'discrepant',
+  },
+  SOURCE_DOCUMENT_SOURCE_LINE_DIVERGED: {
+    balance: 'unaffected',
+    integrity: 'discrepant',
+  },
+  SOURCE_DOCUMENT_TRANSACTION_LINK_DIVERGED: {
+    balance: 'unaffected',
+    integrity: 'discrepant',
+  },
+  SOURCE_DOCUMENT_TYPE_UNRECOGNIZED: {
+    balance: 'unverifiable',
+    integrity: 'unverifiable',
+  },
+  SOURCE_DOCUMENT_UNIT_DIVERGED: {
+    balance: 'discrepant',
+    integrity: 'unaffected',
+  },
+});
 
 export type InventoryReconciliationErrorCodeV1 =
   | 'INVENTORY_RECONCILIATION_SCOPE_INVALID'
@@ -113,6 +266,15 @@ export interface InventoryReconciliationExclusionV1 {
   readonly subjectId: string;
 }
 
+export interface InventoryReconciliationVerdictV1 {
+  readonly axis: InventoryReconciliationAxisV1;
+  readonly consistentSubjectIds: readonly string[];
+  readonly discrepantSubjectIds: readonly string[];
+  readonly outcome: InventoryReconciliationOutcomeV1;
+  readonly subjectCount: number;
+  readonly unverifiableSubjectIds: readonly string[];
+}
+
 export interface InventoryReconciliationArmReportV1 {
   readonly armId: InventoryReconciliationArmIdV1;
   readonly consistentSubjectIds: readonly string[];
@@ -121,14 +283,24 @@ export interface InventoryReconciliationArmReportV1 {
   readonly findings: readonly InventoryReconciliationFindingV1[];
   readonly outcome: InventoryReconciliationOutcomeV1;
   readonly subjectCount: number;
+  readonly subjectIds: readonly string[];
   readonly unverifiableSubjectIds: readonly string[];
 }
 
 export interface InventoryReconciliationReportV1 {
   readonly arms: readonly InventoryReconciliationArmReportV1[];
+  /** Movement sums, anchors and the quantities documents declare. Closed set. */
+  readonly balances: InventoryReconciliationVerdictV1;
   readonly environmentId: string;
   readonly findings: readonly InventoryReconciliationFindingV1[];
+  /** Provenance and cache integrity. Open instrument, separately scoped. */
+  readonly integrity: InventoryReconciliationVerdictV1;
   readonly legalEntityIds: readonly string[];
+  /**
+   * The worse of the two verdicts, a convenience for alerting. **The two
+   * verdicts are the authority** — this exists so an operator has one line to
+   * decide whether to look, not so anything can be judged by it.
+   */
   readonly outcome: InventoryReconciliationOutcomeV1;
   readonly repairedSubjectCount: 0;
   readonly schemaVersion: typeof INVENTORY_RECONCILIATION_REPORT_VERSION;
@@ -164,6 +336,7 @@ interface ReconciliationStorageBinding {
   readonly movementPostingRoleTransfer: string;
   readonly movementQuantityColumn: string;
   readonly movementRelationToLineColumn: string;
+  readonly movementRelationToTransactionColumn: string;
   readonly schemaName: string;
   readonly transaction: EntityBinding;
   readonly transactionAdjustmentType: string;
@@ -178,6 +351,8 @@ interface ReconciliationStorageBinding {
   readonly transactionLineToLocationColumn: string;
   readonly transactionLineUnitColumn: string;
   readonly transactionPostedState: string;
+  readonly transactionReasonCodeColumn: string;
+  readonly transactionReasonNarrativeColumn: string;
   readonly transactionSourceIdColumn: string;
   readonly transactionSourceTypeColumn: string;
   readonly transactionStateColumn: string;
@@ -187,6 +362,8 @@ interface ReconciliationStorageBinding {
 
 interface SourceDocumentLineRow {
   readonly effectiveAt: string;
+  readonly reasonCode: string | null;
+  readonly reasonNarrative: string | null;
   readonly fromLocationId: string | null;
   readonly itemId: string;
   readonly lineNumber: string;
@@ -202,6 +379,9 @@ interface SourceDocumentLineRow {
 
 interface LedgerMovementRow {
   readonly effectiveAt: string;
+  readonly reasonCode: string | null;
+  readonly reasonNarrative: string | null;
+  readonly transactionId: string | null;
   readonly itemId: string;
   readonly postingRole: string;
   readonly locationId: string;
@@ -237,8 +417,20 @@ interface NormalizedAnchorScope {
 }
 
 interface AnchorRow {
+  readonly anchorDigest: string;
   readonly balanceValue: string;
+  readonly baseUnitId: string | null;
   readonly cacheKey: string;
+  readonly environmentId: string;
+  readonly filterPlanDigest: string;
+  readonly principalId: string;
+  readonly releaseContentHash: string;
+  readonly resultKind: 'exactDecimalResult' | 'quantityResult';
+  readonly resultPrecision: number;
+  readonly resultScale: number;
+  readonly selectionId: string;
+  readonly temporalHorizons: Record<string, unknown>;
+  readonly tenantId: string;
   readonly legalEntityScope: NormalizedAnchorScope;
   readonly movementGeneration: string;
   readonly parameterValues: Record<string, unknown>;
@@ -323,12 +515,20 @@ export class PostgresInventoryReconciliationService {
           (total, arm) => total + arm.subjectCount,
           0,
         );
+        const balances = axisVerdict('balance', arms, findings);
+        const integrity = axisVerdict('integrity', arms, findings);
         const report: InventoryReconciliationReportV1 = Object.freeze({
           arms: Object.freeze(arms),
+          balances,
           environmentId: context.environmentId,
+          integrity,
           findings: Object.freeze(findings),
           legalEntityIds: Object.freeze(legalEntityIds),
-          outcome: combinedOutcome(arms.map((arm) => arm.outcome)),
+          outcome: combinedOutcome([
+            ...arms.map((arm) => arm.outcome),
+            balances.outcome,
+            integrity.outcome,
+          ]),
           repairedSubjectCount: 0,
           schemaVersion: INVENTORY_RECONCILIATION_REPORT_VERSION,
           scopeId: scope.scopeId,
@@ -553,6 +753,40 @@ export class PostgresInventoryReconciliationService {
           subjectId,
         });
       }
+      if (movement.transactionId !== line.transactionId) {
+        // The movement carries its own foreign key to a transaction as well as
+        // to a line. They can disagree, and nothing else notices. No balance
+        // moves -- the on-hand query never joins the transaction -- so this is
+        // an integrity fact, reported as one.
+        divergent = true;
+        arm.finding({
+          code: 'SOURCE_DOCUMENT_TRANSACTION_LINK_DIVERGED',
+          declaredValue: line.transactionId,
+          detail: {
+            movementId: movement.movementId,
+            transactionLineId: subjectId,
+          },
+          observedValue: movement.transactionId,
+          subjectId,
+        });
+      }
+      if (
+        movement.reasonCode !== line.reasonCode ||
+        movement.reasonNarrative !== line.reasonNarrative
+      ) {
+        divergent = true;
+        arm.finding({
+          code: 'SOURCE_DOCUMENT_REASON_DIVERGED',
+          declaredValue: `${line.reasonCode ?? ''}/${line.reasonNarrative ?? ''}`,
+          detail: {
+            movementId: movement.movementId,
+            transactionId: line.transactionId,
+            transactionLineId: subjectId,
+          },
+          observedValue: `${movement.reasonCode ?? ''}/${movement.reasonNarrative ?? ''}`,
+          subjectId,
+        });
+      }
       if (movement.effectiveAt !== line.effectiveAt) {
         // The date a movement takes effect decides which period it lands in and
         // which as-of balance contains it, so a movement effective on a
@@ -705,6 +939,46 @@ export class PostgresInventoryReconciliationService {
     const declaredScaled = parseStoredDecimal(anchor.balanceValue);
     const declared =
       declaredScaled === null ? null : scaledToDecimal(declaredScaled);
+
+    // INTEGRITY FIRST, deliberately. Every balance branch below can return
+    // early, and when integrity ran after them a recorded discrepancy or a
+    // corrupt digest on an anchor the balance arm could not read was simply
+    // never reported. Ordering is what closes that, not a guard per branch.
+    let integrityDivergent = false;
+    if (anchor.recordedDiscrepancyCount !== '0') {
+      // The read path already caught something here and preserved the evidence.
+      // Nothing else in the system has ever shown it to anybody.
+      integrityDivergent = true;
+      arm.finding({
+        code: 'RECORDED_ANCHOR_DISCREPANCY_PRESERVED',
+        declaredValue: declared ?? anchor.balanceValue,
+        detail: {
+          cacheKey: subjectId,
+          queryId: anchor.queryId,
+          recordedDiscrepancyCount: anchor.recordedDiscrepancyCount,
+        },
+        observedValue: null,
+        subjectId,
+      });
+    }
+    const integrity = anchorIntegrity(anchor);
+    if (integrity) {
+      if (integrity.anchorDigest !== anchor.anchorDigest) {
+        // The read path verifies this on every read; until now the sweep
+        // verified only the balance, so a restored or defectively computed
+        // anchor with a correct value and a wrong digest read as consistent.
+        integrityDivergent = true;
+        arm.finding({
+          code: 'AGGREGATE_ANCHOR_DIGEST_DIVERGED',
+          declaredValue: anchor.anchorDigest,
+          detail: { cacheKey: subjectId, queryId: anchor.queryId },
+          observedValue: integrity.anchorDigest,
+          subjectId,
+        });
+      }
+    }
+    if (integrityDivergent) arm.markDiscrepant(subjectId);
+
     if (anchor.queryId !== this.registration.aggregateQueryId) {
       arm.unverifiable(subjectId, {
         code: 'AGGREGATE_ANCHOR_QUERY_UNRECOGNIZED',
@@ -791,23 +1065,7 @@ export class PostgresInventoryReconciliationService {
         subjectId,
       });
     }
-    if (anchor.recordedDiscrepancyCount !== '0') {
-      // R1-c: the read path already persists these and nothing has ever shown
-      // them to anybody. Surfacing them is the whole point of reading here.
-      divergent = true;
-      arm.finding({
-        code: 'RECORDED_ANCHOR_DISCREPANCY_PRESERVED',
-        declaredValue: declared,
-        detail: {
-          cacheKey: subjectId,
-          queryId: anchor.queryId,
-          recordedDiscrepancyCount: anchor.recordedDiscrepancyCount,
-        },
-        observedValue: observed,
-        subjectId,
-      });
-    }
-    if (divergent) arm.markDiscrepant(subjectId);
+    if (divergent || integrityDivergent) arm.markDiscrepant(subjectId);
     else arm.consistent(subjectId);
   }
 
@@ -831,6 +1089,7 @@ export function renderInventoryReconciliationReport(
   const lines = [
     `inventory reconciliation ${report.scopeId}: ${report.outcome.toUpperCase()}`,
     `  tenant=${report.tenantId} environment=${report.environmentId} legalEntities=${report.legalEntityIds.join(',')}`,
+    `  balances=${report.balances.outcome.toUpperCase()} integrity=${report.integrity.outcome.toUpperCase()}`,
     `  subjects=${String(report.subjectCount)} findings=${String(report.findings.length)} repaired=${String(report.repairedSubjectCount)} transactionReadOnly=${report.transactionReadOnly}`,
   ];
   for (const arm of report.arms) {
@@ -864,11 +1123,13 @@ class ArmAccumulator {
   readonly #findings: InventoryReconciliationFindingV1[] = [];
   readonly #unverifiable: string[] = [];
   readonly #excluded: InventoryReconciliationExclusionV1[] = [];
+  readonly #subjects = new Set<string>();
 
   constructor(private readonly armId: InventoryReconciliationArmIdV1) {}
 
   consistent(subjectId: string): void {
     this.#consistent.push(subjectId);
+    this.#subjects.add(subjectId);
   }
 
   excluded(
@@ -890,6 +1151,7 @@ class ArmAccumulator {
 
   markDiscrepant(subjectId: string): void {
     this.#discrepant.add(subjectId);
+    this.#subjects.add(subjectId);
   }
 
   discrepant(
@@ -906,6 +1168,7 @@ class ArmAccumulator {
   ): void {
     this.finding({ ...finding, subjectId });
     this.#unverifiable.push(subjectId);
+    this.#subjects.add(subjectId);
   }
 
   freeze(): InventoryReconciliationArmReportV1 {
@@ -938,9 +1201,50 @@ class ArmAccumulator {
               ? 'indeterminate'
               : 'consistent',
       subjectCount,
+      subjectIds: Object.freeze([...this.#subjects].toSorted()),
       unverifiableSubjectIds: Object.freeze(this.#unverifiable.toSorted()),
     });
   }
+}
+
+/**
+ * One verdict over one axis. A subject is consistent on an axis when nothing
+ * found against it says otherwise ON THAT AXIS — so a provenance defect leaves
+ * the balance verdict clean, and a wrong balance leaves provenance clean.
+ */
+function axisVerdict(
+  axis: InventoryReconciliationAxisV1,
+  arms: readonly InventoryReconciliationArmReportV1[],
+  findings: readonly InventoryReconciliationFindingV1[],
+): InventoryReconciliationVerdictV1 {
+  const subjects = new Set(arms.flatMap((arm) => [...arm.subjectIds]));
+  const discrepant = new Set<string>();
+  const unverifiable = new Set<string>();
+  for (const finding of findings) {
+    const effect = FINDING_AXIS_EFFECTS[finding.code][axis];
+    if (effect === 'unaffected') continue;
+    if (!subjects.has(finding.subjectId)) continue;
+    if (effect === 'discrepant') discrepant.add(finding.subjectId);
+    else unverifiable.add(finding.subjectId);
+  }
+  const consistent = [...subjects].filter(
+    (subjectId) => !discrepant.has(subjectId) && !unverifiable.has(subjectId),
+  );
+  return Object.freeze({
+    axis,
+    consistentSubjectIds: Object.freeze(consistent.toSorted()),
+    discrepantSubjectIds: Object.freeze([...discrepant].toSorted()),
+    outcome:
+      subjects.size === 0
+        ? 'indeterminate'
+        : discrepant.size > 0
+          ? 'discrepant'
+          : unverifiable.size > 0
+            ? 'indeterminate'
+            : 'consistent',
+    subjectCount: subjects.size,
+    unverifiableSubjectIds: Object.freeze([...unverifiable].toSorted()),
+  });
 }
 
 function combinedOutcome(
@@ -1043,6 +1347,51 @@ interface RecognizedAnchorParameters {
 }
 
 /**
+ * The integrity digests this anchor's own stored content implies, or `null`
+ * when the stored content cannot be read at all. Routed through the read
+ * path's exported derivation so the sweep cannot drift from the check it
+ * extends.
+ */
+function anchorIntegrity(
+  anchor: AnchorRow,
+): { readonly anchorDigest: string; readonly cacheKey: string } | null {
+  // The digest is taken over the stored identity, and a malformed stored scope
+  // is not an identity. Such an anchor is already reported by the scope rule;
+  // deriving a digest from a repaired reading of it would compare nothing.
+  if (!anchor.legalEntityScope.wellFormed) return null;
+  try {
+    return expectedAggregateAnchorIntegrity({
+      anchorDigest: anchor.anchorDigest,
+      balanceValue: anchor.balanceValue,
+      baseUnitId: anchor.baseUnitId,
+      cacheKey: anchor.cacheKey,
+      environmentId: anchor.environmentId,
+      filterPlanDigest: anchor.filterPlanDigest,
+      legalEntityIds: anchor.legalEntityScope.ids,
+      movementGeneration: anchor.movementGeneration,
+      parameterValues: anchor.parameterValues as Parameters<
+        typeof expectedAggregateAnchorIntegrity
+      >[0]['parameterValues'],
+      principalId: anchor.principalId,
+      queryId: anchor.queryId,
+      releaseContentHash: anchor.releaseContentHash,
+      resultKind: anchor.resultKind,
+      resultPrecision: anchor.resultPrecision,
+      resultScale: anchor.resultScale,
+      selectionId: anchor.selectionId,
+      temporalHorizons: anchor.temporalHorizons as Parameters<
+        typeof expectedAggregateAnchorIntegrity
+      >[0]['temporalHorizons'],
+      tenantId: anchor.tenantId,
+    });
+  } catch {
+    // An anchor whose stored content the read path itself cannot decode is
+    // reported by the balance arm as unrecognized; there is no digest to check.
+    return null;
+  }
+}
+
+/**
  * The scope authority alone, read independently of every sibling parameter and
  * of whole-parameter recognition.
  *
@@ -1142,6 +1491,18 @@ export async function selectAnchors(
 ): Promise<AnchorRow[]> {
   const result = await client.query<AnchorRow>(
     `SELECT anchor.cache_key AS "cacheKey",
+            anchor.tenant_id::text AS "tenantId",
+            anchor.environment_id::text AS "environmentId",
+            anchor.principal_id::text AS "principalId",
+            anchor.release_content_hash AS "releaseContentHash",
+            anchor.filter_plan_digest AS "filterPlanDigest",
+            anchor.temporal_horizons AS "temporalHorizons",
+            anchor.result_kind AS "resultKind",
+            anchor.result_precision AS "resultPrecision",
+            anchor.result_scale AS "resultScale",
+            anchor.selection_id AS "selectionId",
+            anchor.base_unit_id AS "baseUnitId",
+            anchor.anchor_digest AS "anchorDigest",
             anchor.movement_generation::text AS "movementGeneration",
             anchor.query_id AS "queryId",
             anchor.legal_entity_ids::text[] AS "legalEntityIds",
@@ -1286,6 +1647,10 @@ async function selectSourceDocumentSnapshot(
                 AS "transactionSourceType",
               header.${quoted(binding.transactionSourceIdColumn)}::text
                 AS "transactionSourceId",
+              header.${quoted(binding.transactionReasonCodeColumn)}::text
+                AS "reasonCode",
+              header.${quoted(binding.transactionReasonNarrativeColumn)}::text
+                AS "reasonNarrative",
               to_char(
                 header.${quoted(binding.transactionEffectiveAtColumn)}
                   AT TIME ZONE 'UTC',
@@ -1321,6 +1686,12 @@ async function selectSourceDocumentSnapshot(
                 AS "sourceLine",
               ${quoted(requiredColumn(movement, 'inventory_movement_posting_role'))}::text
                 AS "postingRole",
+              ${quoted(requiredColumn(movement, 'inventory_movement_reason_code'))}::text
+                AS "reasonCode",
+              ${quoted(requiredColumn(movement, 'inventory_movement_reason_narrative'))}::text
+                AS "reasonNarrative",
+              ${quoted(binding.movementRelationToTransactionColumn)}::text
+                AS "transactionId",
               to_char(
                 ${quoted(requiredColumn(movement, 'inventory_movement_effective_at'))}
                   AT TIME ZONE 'UTC',
@@ -1472,6 +1843,7 @@ function resolveReconciliationStorage(
       'storage target lacks the frozen append-only movement contract',
     );
   }
+  assertMovementColumnsClassified(movementEntity);
   const movement = bindEntity(movementEntity);
   const transaction = bindEntity(transactionEntity);
   const transactionLine = bindEntity(transactionLineEntity);
@@ -1510,6 +1882,11 @@ function resolveReconciliationStorage(
       target,
       movementEntity,
       'inventory_transaction_line',
+    ),
+    movementRelationToTransactionColumn: requiredRelationColumn(
+      target,
+      movementEntity,
+      'inventory_transaction',
     ),
     schemaName: target.providerAbi.managedSchema,
     transaction,
@@ -1553,6 +1930,14 @@ function resolveReconciliationStorage(
       'inventory_transaction_line_unit_id',
     ),
     transactionPostedState: uniqueEnumOption(transactionState, 'posted'),
+    transactionReasonCodeColumn: requiredColumn(
+      transaction,
+      'inventory_transaction_reason_code',
+    ),
+    transactionReasonNarrativeColumn: requiredColumn(
+      transaction,
+      'inventory_transaction_reason_narrative',
+    ),
     transactionSourceIdColumn: requiredColumn(
       transaction,
       'inventory_transaction_source_id',
@@ -1571,6 +1956,35 @@ function resolveReconciliationStorage(
       'inventory_transaction_type',
     ),
   });
+}
+
+/**
+ * The completeness ratchet. Reads the produced artifact -- the compiled column
+ * list -- rather than parsing source, so it observes rather than proxies
+ * (AGENTS.md section 6).
+ */
+function assertMovementColumnsClassified(entity: StorageEntityTarget): void {
+  const columns = entity.columns
+    .map((column) => column.canonicalFieldId.split(':field.').at(-1))
+    .filter((local): local is string => local !== undefined)
+    .toSorted();
+  const classified = Object.keys(MOVEMENT_COLUMN_CLASSIFICATION).toSorted();
+  const unclassified = columns.filter(
+    (local) => !Object.hasOwn(MOVEMENT_COLUMN_CLASSIFICATION, local),
+  );
+  if (unclassified.length > 0) {
+    throw new InventoryReconciliationError(
+      'INVENTORY_RECONCILIATION_STORAGE_INVALID',
+      `movement columns are unclassified: ${unclassified.join(', ')}`,
+    );
+  }
+  const absent = classified.filter((local) => !columns.includes(local));
+  if (absent.length > 0) {
+    throw new InventoryReconciliationError(
+      'INVENTORY_RECONCILIATION_STORAGE_INVALID',
+      `classified movement columns no longer exist: ${absent.join(', ')}`,
+    );
+  }
 }
 
 function bindEntity(entity: StorageEntityTarget): EntityBinding {

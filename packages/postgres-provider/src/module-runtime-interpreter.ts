@@ -1272,7 +1272,7 @@ async function executeAggregateQuery(
   ]);
   const anchor = await loadAggregateAnchor(client, identity);
   if (anchor) {
-    const cached = aggregateResultFromAnchor(definition, anchor);
+    const cached = aggregateResultFromAnchor(definition.queryId, anchor);
     const expectedAnchorDigest = aggregateAnchorDigest(identity, cached);
     const anchorIntegrityMatches =
       aggregateAnchorMatchesIdentity(anchor, identity) &&
@@ -1581,6 +1581,101 @@ function aggregateAnchorDigest(
   );
 }
 
+/**
+ * The identity and integrity digests a stored anchor's own persisted content
+ * implies.
+ *
+ * Exported so the reconciliation sweep verifies anchors through THIS
+ * derivation. A sweep carrying a second copy of the digest rule would drift
+ * from the read path and then verify nothing — which is the failure the sweep
+ * exists to catch, reproduced inside the thing catching it.
+ *
+ * The cache key is itself a digest over the identity, so recomputing both
+ * detects a rewritten identity as well as a rewritten result.
+ */
+export function expectedAggregateAnchorIntegrity(
+  anchor: PersistedAggregateAnchorV1,
+): { readonly anchorDigest: string; readonly cacheKey: string } {
+  const row: AggregateAnchorRow = {
+    anchor_digest: anchor.anchorDigest,
+    balance_value: anchor.balanceValue,
+    base_unit_id: anchor.baseUnitId,
+    cache_key: anchor.cacheKey,
+    environment_id: anchor.environmentId,
+    filter_plan_digest: anchor.filterPlanDigest,
+    legal_entity_ids: [...anchor.legalEntityIds],
+    movement_generation: anchor.movementGeneration,
+    parameter_values: anchor.parameterValues,
+    principal_id: anchor.principalId,
+    query_id: anchor.queryId,
+    release_content_hash: anchor.releaseContentHash,
+    result_kind: anchor.resultKind,
+    result_precision: anchor.resultPrecision,
+    result_scale: anchor.resultScale,
+    selection_id: anchor.selectionId,
+    temporal_horizons: anchor.temporalHorizons,
+    tenant_id: anchor.tenantId,
+  };
+  const keyInput = Object.freeze({
+    environmentId: anchor.environmentId,
+    filterPlanDigest: anchor.filterPlanDigest,
+    legalEntityIds: Object.freeze([...anchor.legalEntityIds]),
+    movementGeneration: anchor.movementGeneration,
+    parameterValues: anchor.parameterValues,
+    principalId: anchor.principalId,
+    queryId: anchor.queryId,
+    releaseContentHash: anchor.releaseContentHash,
+    schemaVersion: 'northstar.semantic-aggregate-anchor-key/v2',
+    tenantId: anchor.tenantId,
+    temporalHorizons: anchor.temporalHorizons,
+  });
+  const cacheKey = aggregateCacheDigest(
+    'northstar.semantic-aggregate-anchor-key/v2',
+    keyInput,
+  );
+  const identity: AggregateCacheIdentity = {
+    cacheKey: anchor.cacheKey,
+    environmentId: anchor.environmentId,
+    filterPlanDigest: anchor.filterPlanDigest,
+    legalEntityIds: Object.freeze([...anchor.legalEntityIds]),
+    movementGeneration: anchor.movementGeneration,
+    parameterValues: anchor.parameterValues,
+    principalId: anchor.principalId,
+    queryId: anchor.queryId,
+    releaseContentHash: anchor.releaseContentHash,
+    temporalHorizons: anchor.temporalHorizons,
+    tenantId: anchor.tenantId,
+  };
+  return Object.freeze({
+    anchorDigest: aggregateAnchorDigest(
+      identity,
+      aggregateResultFromAnchor(anchor.queryId, row),
+    ),
+    cacheKey,
+  });
+}
+
+export interface PersistedAggregateAnchorV1 {
+  readonly anchorDigest: string;
+  readonly balanceValue: string;
+  readonly baseUnitId: string | null;
+  readonly cacheKey: string;
+  readonly environmentId: string;
+  readonly filterPlanDigest: string;
+  readonly legalEntityIds: readonly string[];
+  readonly movementGeneration: string;
+  readonly parameterValues: Record<string, ImmutableJsonValue>;
+  readonly principalId: string;
+  readonly queryId: string;
+  readonly releaseContentHash: string;
+  readonly resultKind: 'exactDecimalResult' | 'quantityResult';
+  readonly resultPrecision: number;
+  readonly resultScale: number;
+  readonly selectionId: string;
+  readonly temporalHorizons: Record<string, ImmutableJsonValue>;
+  readonly tenantId: string;
+}
+
 async function loadAggregateMovementGeneration(
   client: PoolClient,
   tenantId: string,
@@ -1670,7 +1765,7 @@ function aggregateAnchorMatchesIdentity(
 }
 
 function aggregateResultFromAnchor(
-  definition: RegisteredAggregateQueryDefinition,
+  queryId: string,
   anchor: AggregateAnchorRow,
 ): SemanticAggregateResultEnvelope {
   const common = Object.freeze({
@@ -1682,7 +1777,7 @@ function aggregateResultFromAnchor(
   return Object.freeze({
     kind: 'semanticAggregateResult',
     outcome: 'exact',
-    queryId: definition.queryId,
+    queryId,
     schemaVersion: SEMANTIC_AGGREGATE_RESULT_VERSION,
     value:
       anchor.result_kind === 'quantityResult'

@@ -59,6 +59,7 @@ import {
 } from '../../packages/postgres-provider/src/migrations.js';
 import {
   aggregateGenerationLockKey,
+  expectedAggregateAnchorIntegrity,
   type AggregateCacheObservation,
   PostgresModuleRuntimeInterpreter,
 } from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
@@ -120,6 +121,8 @@ const partiallyCorruptAnchorCacheKey = '2c'.repeat(32);
 const fullyCorruptAnchorCacheKey = '3d'.repeat(32);
 const authorityLessAnchorCacheKey = '4e'.repeat(32);
 const nestedScopeAnchorCacheKey = '5f'.repeat(32);
+const corruptDigestAnchorCacheKey = '6a'.repeat(32);
+const divergedBalanceAnchorCacheKey = '7b'.repeat(32);
 const plantedFilterPlanDigest = 'ef'.repeat(32);
 const plantedReleaseContentHash = '12'.repeat(32);
 const plantedAnchorDigest = '34'.repeat(32);
@@ -430,6 +433,7 @@ test('reconciliation names divergence, confirms consistency, repairs nothing, an
 
       let divergentReport: InventoryReconciliationReportV1 | undefined;
       let recordedDiscrepancyAnchorKey: string | undefined;
+      let witnessTransactionIdForLink: string | undefined;
       const before = await snapshotState(database.pool, binding);
 
       await t.test(
@@ -638,7 +642,16 @@ test('reconciliation names divergence, confirms consistency, repairs nothing, an
           assert.equal(preserved.subjectId, cacheKey);
           assert.equal(preserved.detail.recordedDiscrepancyCount, '1');
           assert.equal(preserved.declaredValue, '777');
-          assert.equal(preserved.observedValue, '13');
+          // Deliberately NOT the ledger sum. That a discrepancy was recorded is
+          // an integrity fact; what the ledger currently says is a balance fact
+          // and is reported by AGGREGATE_ANCHOR_LEDGER_DIVERGED. Carrying the
+          // sum here conflated the two instruments this packet separates.
+          assert.equal(preserved.observedValue, null);
+          assert.equal(
+            findingFor(report, 'AGGREGATE_ANCHOR_LEDGER_DIVERGED', cacheKey)
+              .observedValue,
+            '13',
+          );
           const rendered =
             renderInventoryReconciliationReport(report).join('\n');
           assert.ok(
@@ -759,6 +772,15 @@ test('reconciliation names divergence, confirms consistency, repairs nothing, an
             arm(report, 'aggregateAnchors').excludedSubjects.length > 0,
             'the anchors this scope excludes are counted, not silently dropped',
           );
+          for (const verdict of [report.balances, report.integrity]) {
+            assert.equal(
+              verdict.outcome,
+              'indeterminate',
+              `${verdict.axis} must be indeterminate over zero subjects, never clean`,
+            );
+            assert.equal(verdict.subjectCount, 0);
+            assert.deepEqual(verdict.consistentSubjectIds, []);
+          }
         },
       );
 
@@ -925,6 +947,7 @@ test('reconciliation names divergence, confirms consistency, repairs nothing, an
           // A clean scope of its own, so the pre-fix verdict is `consistent`
           // rather than being masked by the divergences planted above.
           const witnessTransactionId = randomUUID();
+          witnessTransactionIdForLink = witnessTransactionId;
           const witnessLineId = randomUUID();
           const witnessAdjustment = adjustmentCommand({
             legalEntityId: witnessLegalEntityA,
@@ -1374,6 +1397,218 @@ test('reconciliation names divergence, confirms consistency, repairs nothing, an
           );
         },
       );
+
+      await t.test(
+        'the balance and integrity verdicts are independent in both directions',
+        async () => {
+          // A: correct balance, corrupt digest. Integrity only.
+          await plantAnchor(runtimePool, scopeA, {
+            anchorDigest: 'fe'.repeat(32),
+            balanceValue: '5',
+            cacheKey: corruptDigestAnchorCacheKey,
+            itemId: itemPrimary,
+            legalEntityId: witnessLegalEntityA,
+            locationId: locationPrimary,
+            principalId: principalA,
+            queryId: reconciliationIds.onHandQueryId,
+          });
+          // B: wrong balance, self-consistent digest. Balance only.
+          await plantAnchor(runtimePool, scopeA, {
+            balanceValue: '77',
+            cacheKey: divergedBalanceAnchorCacheKey,
+            itemId: itemPrimary,
+            legalEntityId: witnessLegalEntityA,
+            locationId: locationOrphan,
+            principalId: principalA,
+            queryId: reconciliationIds.onHandQueryId,
+          });
+          const report = await reconciliation.reconcile(scopeA.context, {
+            legalEntityIds: [witnessLegalEntityA],
+            scopeId: 'independence-scope',
+          });
+
+          // A corrupt digest is an INTEGRITY fact and must not move balance.
+          const digest = findingFor(
+            report,
+            'AGGREGATE_ANCHOR_DIGEST_DIVERGED',
+            corruptDigestAnchorCacheKey,
+          );
+          assert.equal(digest.declaredValue, 'fe'.repeat(32));
+          assert.match(digest.observedValue ?? '', /^[0-9a-f]{64}$/u);
+          assert.ok(
+            report.integrity.discrepantSubjectIds.includes(
+              corruptDigestAnchorCacheKey,
+            ),
+          );
+          assert.ok(
+            report.balances.consistentSubjectIds.includes(
+              corruptDigestAnchorCacheKey,
+            ),
+            'a corrupt digest over a correct balance must leave the balance verdict clean',
+          );
+
+          // A wrong balance is a BALANCE fact and must not move integrity.
+          const ledger = findingFor(
+            report,
+            'AGGREGATE_ANCHOR_LEDGER_DIVERGED',
+            divergedBalanceAnchorCacheKey,
+          );
+          assert.equal(ledger.declaredValue, '77');
+          assert.equal(ledger.observedValue, '2');
+          assert.ok(
+            report.balances.discrepantSubjectIds.includes(
+              divergedBalanceAnchorCacheKey,
+            ),
+          );
+          assert.ok(
+            report.integrity.consistentSubjectIds.includes(
+              divergedBalanceAnchorCacheKey,
+            ),
+            'a wrong balance with an intact digest must leave the integrity verdict clean',
+          );
+
+          assert.equal(report.balances.outcome, 'discrepant');
+          assert.equal(report.integrity.outcome, 'discrepant');
+          const rendered =
+            renderInventoryReconciliationReport(report).join('\n');
+          assert.ok(
+            rendered.includes('balances=DISCREPANT integrity=DISCREPANT'),
+          );
+        },
+      );
+
+      await t.test(
+        'a movement column nobody classified fails construction',
+        async () => {
+          // Planted, not read: the compiled contract is mutated so a column
+          // exists that the classification map has never heard of.
+          const mutated = structuredClone(
+            fixture.storage,
+          ) as StorageTargetPayloadV1;
+          const movement = mutated.entities.find((entity) =>
+            entity.entityId.endsWith(':entity.inventory_movement'),
+          );
+          assert.ok(movement);
+          const template = movement.columns[0];
+          assert.ok(template);
+          movement.columns = [
+            ...movement.columns,
+            {
+              ...structuredClone(template),
+              canonicalFieldId: `${APPLICATION_NAMESPACE}:field.inventory_movement_unclassified_probe`,
+              physicalName: 'unclassified_probe',
+            },
+          ];
+          assert.throws(
+            () =>
+              new PostgresInventoryReconciliationService(runtimePool, {
+                ...reconciliationRegistration,
+                storageTarget: mutated,
+              }),
+            (error: unknown) =>
+              error instanceof InventoryReconciliationError &&
+              error.code === 'INVENTORY_RECONCILIATION_STORAGE_INVALID' &&
+              /unclassified: .*unclassified_probe/u.test(error.message),
+          );
+          // The unmutated contract still constructs, so the ratchet is not
+          // simply refusing everything.
+          assert.doesNotThrow(
+            () =>
+              new PostgresInventoryReconciliationService(
+                runtimePool,
+                reconciliationRegistration,
+              ),
+          );
+        },
+      );
+
+      await t.test(
+        'a movement whose reason or transaction link contradicts its document is detected',
+        async () => {
+          const transactionId = randomUUID();
+          const transactionLineId = randomUUID();
+          const movementId = randomUUID();
+          await withModuleRole(runtimePool, scopeA, async (client) => {
+            await insertTransactionHeader(client, scopeA, binding, {
+              legalEntityId: witnessLegalEntityA,
+              number: `AUD-${transactionId.slice(0, 12)}`,
+              reasonCode: 'AUDIT',
+              reasonNarrative: 'Audited reason',
+              sourceId: 'reconcile-audit',
+              sourceType: 'adjustment',
+              state: 'posted',
+              transactionId,
+              type: 'adjustment',
+            });
+            await insertEntity(
+              client,
+              scopeA,
+              binding,
+              binding.transactionLine,
+              {
+                legalEntityId: witnessLegalEntityA,
+                overrides: {
+                  inventory_transaction_line_from_location_id: null,
+                  inventory_transaction_line_item_id: itemPrimary,
+                  inventory_transaction_line_line_number: 1,
+                  inventory_transaction_line_quantity: '1',
+                  inventory_transaction_line_to_location_id: locationSecondary,
+                  inventory_transaction_line_unit_id: 'EA',
+                },
+                recordId: transactionLineId,
+                relationIds: {
+                  [binding.transaction.entity.entityId]: transactionId,
+                },
+              },
+            );
+            // Quantity, item, location, unit, effective date, source line and
+            // posting role all agree. The reason contradicts the header, and
+            // the movement's own transaction key names a DIFFERENT posted
+            // transaction than the line it belongs to.
+            await insertMovement(client, scopeA, binding, {
+              itemId: itemPrimary,
+              legalEntityId: witnessLegalEntityA,
+              locationId: locationSecondary,
+              movementId,
+              quantityDelta: '1',
+              reasonCode: 'WRONG',
+              reasonNarrative: null,
+              sourceId: 'reconcile-audit',
+              sourceLine: '1',
+              sourceType: 'adjustment',
+              transactionId: witnessTransactionIdForLink!,
+              transactionLineId,
+            });
+          });
+          const report = await reconciliation.reconcile(scopeA.context, {
+            legalEntityIds: [witnessLegalEntityA],
+            scopeId: 'audit-scope',
+          });
+          const reason = findingFor(
+            report,
+            'SOURCE_DOCUMENT_REASON_DIVERGED',
+            transactionLineId,
+          );
+          assert.equal(reason.declaredValue, 'AUDIT/Audited reason');
+          assert.equal(reason.observedValue, 'WRONG/');
+          const link = findingFor(
+            report,
+            'SOURCE_DOCUMENT_TRANSACTION_LINK_DIVERGED',
+            transactionLineId,
+          );
+          assert.equal(link.declaredValue, transactionId);
+          assert.equal(link.observedValue, witnessTransactionIdForLink);
+          // Both are provenance: no balance moved, so the balance verdict must
+          // still count this line as consistent.
+          assert.ok(
+            report.integrity.discrepantSubjectIds.includes(transactionLineId),
+          );
+          assert.ok(
+            report.balances.consistentSubjectIds.includes(transactionLineId),
+            'neither a wrong reason nor a wrong transaction key changes a balance',
+          );
+        },
+      );
     } finally {
       await Promise.all([
         runtimePool.end(),
@@ -1606,6 +1841,8 @@ interface PlantedAnchorInput {
   readonly locationId: string;
   readonly principalId: string;
   readonly queryId: string;
+  /** Overrides the derived digest, so a control can plant a corrupt one. */
+  readonly anchorDigest?: string;
   /** Raw parameter_values overrides, so a single sibling can be corrupted. */
   readonly parameterOverrides?: Readonly<Record<string, unknown>>;
   /** The stored scope column, which defaults to agreeing with the operand. */
@@ -1630,6 +1867,41 @@ async function plantAnchor(
       [scope.tenantId, scope.environmentId],
     );
     assert.equal(generation.rowCount, 1);
+    const scopeIds = [...(input.scopeLegalEntityIds ?? [input.legalEntityId])];
+    const parameterValues = {
+      [reconciliationIds.parameterIds.atTime]: horizon,
+      [reconciliationIds.parameterIds.itemId]: input.itemId,
+      [reconciliationIds.parameterIds.legalEntityId]: input.legalEntityId,
+      [reconciliationIds.parameterIds.locationId]: input.locationId,
+      [reconciliationIds.parameterIds.recordedAtHorizon]: horizon,
+      ...(input.parameterOverrides ?? {}),
+    };
+    const temporalHorizons = {
+      [reconciliationIds.parameterIds.atTime]: horizon,
+      [reconciliationIds.parameterIds.recordedAtHorizon]: horizon,
+    };
+    // A real compute path leaves a self-consistent digest, so the fixture does
+    // too. A control that wants a corrupt one asks for it explicitly.
+    const derived = expectedAggregateAnchorIntegrity({
+      anchorDigest: '',
+      balanceValue: input.balanceValue,
+      baseUnitId: null,
+      cacheKey: input.cacheKey,
+      environmentId: scope.environmentId,
+      filterPlanDigest: plantedFilterPlanDigest,
+      legalEntityIds: scopeIds,
+      movementGeneration: generation.rows[0]!.movement_generation,
+      parameterValues: parameterValues as never,
+      principalId: input.principalId,
+      queryId: input.queryId,
+      releaseContentHash: plantedReleaseContentHash,
+      resultKind: 'exactDecimalResult',
+      resultPrecision: 38,
+      resultScale: 0,
+      selectionId: onHandSelectionId,
+      temporalHorizons: temporalHorizons as never,
+      tenantId: scope.tenantId,
+    });
     await client.query(
       `INSERT INTO north_star_internal.semantic_aggregate_anchors (
          tenant_id, environment_id, cache_key, movement_generation, query_id,
@@ -1649,7 +1921,7 @@ async function plantAnchor(
         input.queryId,
         input.principalId,
         plantedReleaseContentHash,
-        [...(input.scopeLegalEntityIds ?? [input.legalEntityId])],
+        scopeIds,
         JSON.stringify({
           [reconciliationIds.parameterIds.atTime]: horizon,
           [reconciliationIds.parameterIds.itemId]: input.itemId,
@@ -1665,7 +1937,7 @@ async function plantAnchor(
         plantedFilterPlanDigest,
         onHandSelectionId,
         input.balanceValue,
-        plantedAnchorDigest,
+        input.anchorDigest ?? derived.anchorDigest,
       ],
     );
   });
@@ -2151,6 +2423,8 @@ async function insertMovement(
     readonly movementId: string;
     readonly postingRole?: string;
     readonly quantityDelta: string;
+    readonly reasonCode?: string;
+    readonly reasonNarrative?: string | null;
     readonly sourceId: string;
     readonly sourceLine: string;
     readonly sourceType: string;
@@ -2171,8 +2445,8 @@ async function insertMovement(
         input.postingRole ?? 'adjustment',
       ),
       inventory_movement_quantity_delta: input.quantityDelta,
-      inventory_movement_reason_code: 'RECONCILE',
-      inventory_movement_reason_narrative: null,
+      inventory_movement_reason_code: input.reasonCode ?? 'RECONCILE',
+      inventory_movement_reason_narrative: input.reasonNarrative ?? null,
       inventory_movement_recorded_at: recordedAt,
       inventory_movement_reversal_of_movement_id: null,
       inventory_movement_source_id: input.sourceId,
