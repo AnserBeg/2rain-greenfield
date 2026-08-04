@@ -1,47 +1,41 @@
 {
   "version": "northstar.language-coverage-decisions/v1",
-  "ledgerDigest": "f32d5fa17f1e5ddaf0f0a28d61d3eb5447af0235e8301bc2952231624d52f5cb",
-  "acceptedButUnhonoredObligationIds": [
-    "authoredLanguage:$.relations[].cardinality=\"manyToOne\"",
-    "authoredLanguage:$.relations[].cardinality=\"oneToMany\"",
-    "authoredLanguage:$.relations[].cardinality=\"oneToOne\"",
-    "authoredLanguage:$.relations[].joinEligibility=\"none\"",
-    "authoredLanguage:$.relations[].joinEligibility=\"query\""
-  ],
+  "ledgerDigest": "b4cf5f064a30b1ac07382e006e5b9f91fd9fa7fd33b5cbcd414790fa3a4e6d41",
+  "acceptedButUnhonoredObligationIds": [],
   "observationSnapshot": {
     "bitmapEncoding": "sorted-obligation-bitset-msb0-hex/v1",
-    "ledgerDigest": "f32d5fa17f1e5ddaf0f0a28d61d3eb5447af0235e8301bc2952231624d52f5cb",
-    "obligationCount": 1899,
-    "observedBitmap": "ffe08004040086032a3fc2502000420040751d380000000020001000005e418230ee178018430143c0001400038d0800008100020400720002380240004600800000000000000000000000208000000000000000000000000000000000000000000410010021e20ff080004240005c00004000800000000000000000000000000000000000400054410000000000000000000000008100000000003a04000e81001ff900010848000850000f442b1b850000a00010800000000000000000000000000000010000c400b0e0200604000c0084001087c7fbffffcfde5fa3f6ffffefffffffffffffffffff7fffffa0",
-    "observedCount": 396
+    "ledgerDigest": "b4cf5f064a30b1ac07382e006e5b9f91fd9fa7fd33b5cbcd414790fa3a4e6d41",
+    "obligationCount": 1892,
+    "observedBitmap": "ffe08004040086032a3fc2502000420040751d380000000020001000005e418230ee178018430143c0001400038d0800008100020400720002380240004600800000000000000000000000208000000000000000000000000000000000000000000410010021e20ff080004240005c00004000800000000000000000000000000000000000400054410000000000000000000000008100000000003a04000e81001ff900010848000850000f218dc280005000084000000000000000000000000000000080006200587010030200060042000843e3fdffffe7ef2fd1fb7ffff7ffffffffffffffffffbfffffd0",
+    "observedCount": 393
   },
   "decisions": [
     {
-      "acceptedButUnhonoredSetDigest": "fe4d7cf40755d45a65b980e779e35ad715ff5b57a9dde6b6ee96d1687cdc4d87",
+      "acceptedButUnhonoredSetDigest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
       "category": "observedRelationScope",
-      "ledgerDigest": "f32d5fa17f1e5ddaf0f0a28d61d3eb5447af0235e8301bc2952231624d52f5cb",
-      "obligationSetDigest": "d521742c75656e8bfa8f072863c1bb5c45ea8d6820aa64097e5f6b5da9aa1422",
-      "rationale": "The first-party relation values are declared and lowered, but declaration is not execution evidence. They remain an explicit coverage debt until the sibling corpus executes each distinguishing value and topology through normalize, lower, materialize, and the real generic runtime.",
-      "revisitCondition": "Replace this decision with execution or stable-refusal receipts from the sibling relation corpus; any change to the exact observed relation obligation set invalidates this decision immediately.",
-      "decisionId": "5g3-langgate-relation-corpus-boundary@af8795c849a5bd898bafd9ee7bf8e3428bb570606fb3f8fb1c0ab6a3464927cc"
+      "ledgerDigest": "b4cf5f064a30b1ac07382e006e5b9f91fd9fa7fd33b5cbcd414790fa3a4e6d41",
+      "obligationSetDigest": "a89ba89791f0b76e6f8603b4b6198a03a49c7991e8ab8715e1a5ee6b7b5dfcd8",
+      "rationale": "The narrowed relation language now refuses unsupported cardinality and join-eligibility spellings. The remaining observed relation obligations are still declaration and lowering evidence, not execution evidence, and remain explicit coverage debt until the sibling corpus supplies receipts.",
+      "revisitCondition": "Replace this decision with execution or stable-refusal receipts from the sibling relation corpus; any change to the exact observed relation obligation set, including widening either declined relation axis, invalidates this decision immediately.",
+      "decisionId": "5g3-langgate-relation-corpus-boundary@185569678898f9139cf32418d70b3ba969744f7d8a86b7891f97baae0e219385"
     },
     {
-      "acceptedButUnhonoredSetDigest": "fe4d7cf40755d45a65b980e779e35ad715ff5b57a9dde6b6ee96d1687cdc4d87",
+      "acceptedButUnhonoredSetDigest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
       "category": "observedOutsideRelationScope",
-      "ledgerDigest": "f32d5fa17f1e5ddaf0f0a28d61d3eb5447af0235e8301bc2952231624d52f5cb",
+      "ledgerDigest": "b4cf5f064a30b1ac07382e006e5b9f91fd9fa7fd33b5cbcd414790fa3a4e6d41",
       "obligationSetDigest": "d32619080727fdb3cf64c91d43b85c14db7a7bc205dbc2841a9e23399e72847e",
       "rationale": "The whole-language ledger intentionally precedes execution coverage outside relations. Existing first-party uses are named evidence debt, not baselined as correct behavior, and this exact-set decision cannot absorb a new value or axis.",
       "revisitCondition": "Each later language-axis packet replaces the corresponding obligations with execution or stable-refusal receipts; any change to the exact observed non-relation set invalidates this decision immediately.",
-      "decisionId": "5g3-langgate-whole-language-execution-boundary@238277a8848b29ea6cb3bb4bf415525aadf414b486252721be4e919504f8e694"
+      "decisionId": "5g3-langgate-whole-language-execution-boundary@225cd37cc69056036644da70b0a9051d8ea8dfcd45a29abd33650b984a2b745f"
     },
     {
-      "acceptedButUnhonoredSetDigest": "fe4d7cf40755d45a65b980e779e35ad715ff5b57a9dde6b6ee96d1687cdc4d87",
+      "acceptedButUnhonoredSetDigest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
       "category": "unobserved",
-      "ledgerDigest": "f32d5fa17f1e5ddaf0f0a28d61d3eb5447af0235e8301bc2952231624d52f5cb",
-      "obligationSetDigest": "14f0fb068a434a30a56d5d0a3b9f8f6e6f5a9fb51a5136a46e1620d82b7cd4bf",
+      "ledgerDigest": "b4cf5f064a30b1ac07382e006e5b9f91fd9fa7fd33b5cbcd414790fa3a4e6d41",
+      "obligationSetDigest": "d0f64c865c9fb58816bca2a2e6357b7843ac5e294990d23630903be2467aa951",
       "rationale": "These derived values and topologies have no first-party instance. Their exemption is conditional on remaining unused and is not evidence that the platform honors them.",
       "revisitCondition": "The first first-party occurrence changes the observed partition, invalidates this exact-set decision, and requires execution, stable refusal, or a new explicit ruling before the gate can pass.",
-      "decisionId": "5g3-langgate-unused-shape-standing-exemption@6d406d57ec1471e606f846e8f86deb7fca8b933a0354d1f7361d76d18ee879e3"
+      "decisionId": "5g3-langgate-unused-shape-standing-exemption@911bb05fa7946422fb79bd4c4c1943cc39f38b5798b66c0cad29f83d414152ba"
     }
   ]
 }

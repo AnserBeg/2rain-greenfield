@@ -20,6 +20,8 @@ import {
   V3_AGGREGATE_IDS,
   v3AggregateModule,
 } from '../../compiler/v3-definition.js';
+import { lowerStorageTargetV1 } from '../../../packages/compiler/src/index.js';
+import { composedApplicationDefinition } from '../../../packages/domain/src/app/builder.js';
 import {
   Q1_AGGREGATE_PARITY_CASES,
   evaluatePredicateCase,
@@ -34,6 +36,37 @@ function fixture(): VersionedAuthoredApplicationPackage {
   return parseAuthoredApplicationPackageJson(
     readFileSync('test/fixtures/canonical-model/representative.authored.json'),
   );
+}
+
+const relationWitnessId =
+  'northstar.app:relation.inventory_movement_transaction_line';
+
+function relationWitness(): {
+  relations: Array<{
+    cardinality: string;
+    joinEligibility?: string;
+    ownership: string;
+    relationId: string;
+  }>;
+} {
+  return structuredClone(composedApplicationDefinition()) as {
+    relations: Array<{
+      cardinality: string;
+      joinEligibility?: string;
+      ownership: string;
+      relationId: string;
+    }>;
+  };
+}
+
+function relationWitnessIndex(
+  authored: ReturnType<typeof relationWitness>,
+): number {
+  const index = authored.relations.findIndex(
+    (relation) => relation.relationId === relationWitnessId,
+  );
+  assert.notEqual(index, -1, `missing relation witness ${relationWitnessId}`);
+  return index;
 }
 
 function expectDiagnostic(
@@ -1043,65 +1076,70 @@ test('parent scope, assertion diagnostics, and reference locality are closed', (
 
 for (const cardinality of ['oneToOne', 'oneToMany']) {
   test(`relation cardinality ${cardinality} is declined before lowering`, () => {
-    const declined = structuredClone(fixture()) as unknown as {
-      relations: Array<{
-        cardinality: string;
-        ownership: string;
-      }>;
-    };
-    declined.relations[0]!.cardinality = cardinality;
-    declined.relations[0]!.ownership = 'reference';
+    const declined = relationWitness();
+    const relationIndex = relationWitnessIndex(declined);
+    declined.relations[relationIndex]!.cardinality = cardinality;
     expectDiagnostic(
       () => normalizeApplicationPackage(declined),
       'CANON_RELATION_CARDINALITY_UNSUPPORTED',
       {
         acceptedAlternative:
           'use cardinality manyToOne until another cardinality has executing semantics',
-        objectId: 'northstar.inventory:relation.item_alias_parent',
-        path: '$.relations[0].cardinality',
+        objectId: relationWitnessId,
+        path: `$.relations[${String(relationIndex)}].cardinality`,
       },
     );
   });
 }
 
 test('relation join eligibility none is declined before lowering', () => {
-  const declinedJoin = structuredClone(fixture()) as unknown as {
-    relations: Array<{
-      joinEligibility?: string;
-      ownership: string;
-    }>;
-  };
-  declinedJoin.relations[0]!.joinEligibility = 'none';
-  declinedJoin.relations[0]!.ownership = 'reference';
+  const declinedJoin = relationWitness();
+  const relationIndex = relationWitnessIndex(declinedJoin);
+  declinedJoin.relations[relationIndex]!.joinEligibility = 'none';
   expectDiagnostic(
     () => normalizeApplicationPackage(declinedJoin),
     'CANON_RELATION_JOIN_ELIGIBILITY_UNSUPPORTED',
     {
       acceptedAlternative:
         'declare joinEligibility query; omission and none have no executing semantics',
-      objectId: 'northstar.inventory:relation.item_alias_parent',
-      path: '$.relations[0].joinEligibility',
+      objectId: relationWitnessId,
+      path: `$.relations[${String(relationIndex)}].joinEligibility`,
     },
   );
 });
 
 test('relation join eligibility cannot be omitted into a silent default', () => {
-  const omittedJoin = structuredClone(fixture()) as unknown as {
-    relations: Array<{
-      joinEligibility?: string;
-      ownership: string;
-    }>;
-  };
-  delete omittedJoin.relations[0]!.joinEligibility;
-  omittedJoin.relations[0]!.ownership = 'reference';
+  const omittedJoin = relationWitness();
+  const relationIndex = relationWitnessIndex(omittedJoin);
+  delete omittedJoin.relations[relationIndex]!.joinEligibility;
   expectDiagnostic(
     () => normalizeApplicationPackage(omittedJoin),
     'CANON_RELATION_JOIN_ELIGIBILITY_UNSUPPORTED',
     {
-      objectId: 'northstar.inventory:relation.item_alias_parent',
-      path: '$.relations[0].joinEligibility',
+      objectId: relationWitnessId,
+      path: `$.relations[${String(relationIndex)}].joinEligibility`,
     },
   );
+});
+
+test('supported relation shape from the refusal fixture normalizes and lowers', () => {
+  const supported = relationWitness();
+
+  const normalized = normalizeApplicationPackage(supported);
+  const normalizedRelation = normalized.relations.find(
+    (relation) => relation.relationId === relationWitnessId,
+  );
+  assert.ok(normalizedRelation);
+  assert.equal(normalizedRelation.cardinality, 'manyToOne');
+  assert.equal(normalizedRelation.joinEligibility, 'query');
+
+  const lowered = lowerStorageTargetV1(normalized);
+  const loweredRelation = lowered.relations.find(
+    (relation) => relation.relationId === relationWitnessId,
+  );
+  assert.ok(loweredRelation);
+  assert.equal(loweredRelation.ownership, 'reference');
+  assert.equal(loweredRelation.relationColumn.postgresqlType, 'uuid');
 });
 
 test('state storage is derived and authored state-field authority rejects', () => {

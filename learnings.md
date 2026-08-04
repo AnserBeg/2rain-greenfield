@@ -425,3 +425,8 @@ How to apply: take each sample's first invocation in a distinct process, retain 
 Date: 2026-08-02
 Why: applying a newly tightened search rule to recorded lineage made valid historical releases appear corrupt and would have disabled rollback exactly when rules changed.
 How to apply: reproduce history from its recorded bytes and exact root, compile every new head strictly, and let historical defects refuse by name at runtime rather than returning plausible answers. Graduated to ADR-0045 and ADR-0046; see `docs/execution/packets/5g3-searchcap.md`.
+
+## Retain singleton choices in derived language ledgers
+Date: 2026-08-03
+Why: narrowing relation cardinality and join eligibility to one literal removed both axes from the derived ledger, so a future singleton-for-singleton substitution would not move its digest.
+How to apply: derive admitted literal obligations even when an axis has one value, and control a singleton substitution explicitly. See `docs/execution/packets/5g3-langnarrow.md`.
