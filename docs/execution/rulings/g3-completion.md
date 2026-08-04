@@ -46,6 +46,96 @@ capability exists under a name different from the plan's wording, the code wins.
 | Item | Ruling | Reason |
 |---|---|---|
 | **Reconciliation job** (§11.6 build 11) | **STAYS IN G3 — scope corrected 2026-08-03** | ~~Nothing periodically re-derives from movements and compares.~~ **That was wrong, and reading `G3-P5`'s code before writing the packet prompt found it.** The read path already does most of this: every aggregate read verifies the anchor against an expected digest (`module-runtime-interpreter.ts:1277-1280`), and on mismatch it recomputes from the ledger, persists a row in `north_star_internal.semantic_aggregate_anchor_discrepancies`, emits an `anchor-discrepancy` observation, **returns the recomputed value rather than the cached one, and deliberately preserves the bad anchor rather than repairing it** (`:1315-1319`). That is "emits discrepancies without silently repairing them" already satisfied — **for keys someone reads**. **What genuinely remains is narrower and is what `G3-R1` owns:** (a) **the source-document arm** — §11.6 build 11 requires comparing movement sums, materialized read models **and source documents**, and nothing compares `inventory_transaction` / `inventory_transaction_line` against the movements they produced, so a posting that wrote a correct header and wrong movements is invisible; (b) **sweep coverage** — the check fires only on read, so a balance nobody looks at is never verified, and build 11 describes a job rather than a read-path guard; (c) **operator visibility** — discrepancies reach a table and a metric, and nothing surfaces them to a human. |
+
+### Correction, 2026-08-03 — this ruling named ARMS and not COMPLETENESS
+
+**The three arms above are not a specification, and treating them as one cost nine
+review rounds across three charters.** They say *where* to look and never say *what
+makes a comparison set complete rather than merely long*. Every reviewer therefore
+instantiated it differently and each round found one more uncompared field —
+effective date, then source line and posting role, then reason code and the
+movement's transaction FK. That regress does not terminate, because there is
+always one more column.
+
+**The rule, adopted from `G3-R1`'s own diagnosis and now binding:** a
+reconciliation's comparison set is **DERIVED FROM THE COMPILED CONTRACT, NOT
+ENUMERATED BY HAND.** Every column the posting service copies from a source
+document to a movement is document-derived by construction, so the obligation can
+be generated from the storage contract or asserted against the writer's field
+list. Under-enumeration then fails a gate instead of waiting for a reviewer to
+notice.
+
+### REVERSED, 2026-08-03, by an independent scope review — the derivation rule does not stand
+
+**Fable max, commissioned as an independent scope review after this packet's
+second trip to the cap, overruled the correction below. It is right, and it was
+right about the diagnosis too.** Recorded in full because the orchestrator was
+wrong three times running and the reasoning matters more than the verdict.
+
+**The cause is not under-specification. It is that ONE VERDICT WORD SPANS TWO
+INSTRUMENTS.** `consistent` currently asserts a conjunction over balances,
+provenance *and* cache integrity, and an unbounded conjunction has no completion
+condition. The evidence is the distribution, not the argument: every
+balance-affecting finding — quantity by location, movement count, item, unit,
+effective date, orphan movements, anchor-vs-ledger — landed in **rounds 1-2 and
+has been stable for seven rounds since**. Everything after was provenance or
+integrity wearing the balance verdict's name.
+
+**The derivation rule is unimplementable here.** `StorageFactTarget.fieldColumns`
+(`storage.ts:296-307`) is a *name map* over nine keys — it records that a fact has
+these columns and nothing about which document field any is copied from — and it
+**omits `quantityDelta`, `effectiveAt`, `reasonCode`, `reasonNarrative`,
+`actorId` and `reversalOfMovementId`**, most of the fields actually in dispute.
+Asserting against `insertMovement`'s field list means parsing source text, which
+AGENTS.md §6 names as a **proxy**, not observation.
+
+**And it would not terminate.** `location_id` and `quantity_delta` are not
+*copied* — they are computed by a sign-and-side rule — so the rule as worded
+**excludes the arm's two most important comparisons**. It would still need
+exceptions for computed fields, transitively-derived ones (`business_period`,
+`posting_role`), cross-document ones (`reversal_of_movement_id`), and
+revision skew (`source_revision` advances on draft→posted, so equality is false
+by construction). A rule needing a hand-maintained exception list is the
+enumerated list under a better name.
+
+**A correction to the orchestrator's use of ADR-0044.** The ADR forbids
+*undeclared inability* — a search returning `[]` indistinguishably from
+no-matches. It explicitly blesses **declared structural absence**. A
+reconciliation that says *"I verify balances; provenance is instrument X"* is
+compliant. Applying the ADR to every uncompared field regardless of declaration
+converts a rule about honesty into a rule about **totality**, and totality has no
+terminus. That conversion cost six of the nine rounds.
+
+**A materiality correction both the reviewer and the lane got wrong:** the
+current-generation early returns are **not** false-consistents. Every one calls
+`arm.unverifiable(...)` or `arm.discrepant(...)` before returning — five sites,
+verified — so the subject is always flagged and the scope can never read
+`consistent` because of it. What is lost is detail on an already-flagged anchor.
+
+**THE ADOPTED RULE — split the verdict, then ratchet the classification.**
+Reconciliation reports a **balance verdict** and an **integrity/provenance
+verdict** as separate outcomes, each with its own
+`consistent`/`discrepant`/`indeterminate`. The balance instrument is **declared
+complete and closed today**. The integrity instrument owns `anchor_digest`,
+provenance fields and recorded-discrepancy surfacing. Underneath both, a
+**construction-time completeness ratchet**: every column in the movement entity's
+compiled column list must appear in a declared classification map — compared, or
+excluded with a stated reason — or construction throws. That reads the produced
+artifact rather than parsing source, fails closed, needs no compiler change, and
+makes silent omission impossible **without pretending semantics can be derived**.
+
+**The finding nobody centred:** `anchor_digest` is unverified by the sweep and is
+**the only remaining genuine reachable false-consistent**. It is not a document
+field, so neither the derivation ruling nor the partial-set alternative reaches
+it — three rounds of specification debate were spent on the class that does not
+contain it.
+
+---
+
+*Superseded reasoning retained below.* This is the same move `5g3-langcover` made for the canonical language — derive the
+obligations from the schema rather than listing them — and it is the factory
+thesis applied to its own verification. A hand-written list of fields to compare
+is exactly the per-module bespoke code this platform exists to abolish.
 | **Dimension-set replay** (criterion 11) | **STAYS IN G3** | This is a one-way door. ADR-0016 versions the stock-dimension set precisely so it can grow; if growing it silently changes historical balances, the damage is unrecoverable and undetectable. It must be proven before the dimension set has a history worth protecting, which is now. |
 | **Backup restore + read-model rebuild** (criterion 16) | **STAYS IN G3** | Cheap, and it is a trust claim rather than a feature. Since on-hand is derived, "rebuild reproduces the same balances" is close to already true; proving it costs little and closes the criterion honestly. |
 | **Low-stock read model** (§11.6 build 6) | **DEFERRED TO G4** | A query declaration over movement data that already works. It exercises no new platform property. Cheap whenever it is wanted. |

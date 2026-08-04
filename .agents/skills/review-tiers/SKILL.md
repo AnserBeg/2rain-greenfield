@@ -180,3 +180,31 @@ in the ledger and packet record.
 Writer seat; each review spawn with its charter, verdict, and findings
 disposition (fixed / recorded-as-future / dismissed); final SHA; gate outputs.
 Keep it in the packet record.
+
+## When a packet stalls, the confirm arm is denied exactly when it is worth most
+
+**Added 2026-08-03, from `G3-R1`.** Critical tier runs Codex first and the Fable
+confirm only after Codex passes. That ordering is right for a healthy packet —
+the confirm arm should review a stable tree, not a moving target.
+
+It fails badly for a struggling one. `G3-R1` took **nine review rounds across
+three charters and Fable never ran once**. Every round was Codex assessing
+whether the *code* satisfied a charter, and nobody independently assessed
+whether the *charter* was right. It was not: it named three arms and never
+defined what makes a comparison set complete, so each round found one more
+uncompared field and the regress could not terminate.
+
+The orchestrator wrote that charter, corrected it twice, and was still wrong the
+third time. A single reviewer looping on the same question cannot surface that;
+it is not the question they were asked.
+
+**So: after a packet reaches the two-REVISE cap for a second time, the
+orchestrator may commission the second arm as an INDEPENDENT SCOPE REVIEW rather
+than a confirm.** Its charter asks *"is this packet being asked the right
+question?"* — not *"is this code correct?"* It reviews the ruling, the charter
+and the packet record, and it may conclude the orchestrator is wrong.
+
+This does not replace the confirm arm; the packet still needs one before it
+lands. It buys a second perspective at the point where one reviewer and one
+orchestrator have demonstrably converged on the wrong frame.
+
