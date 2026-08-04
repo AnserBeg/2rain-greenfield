@@ -93,9 +93,11 @@ const otherItemId = '75a00000-0000-4000-8000-0000000000a7';
 const inventoryIds = Object.freeze({
   namespace: APPLICATION_NAMESPACE,
   queryIds: {
+    movementSearch: `${APPLICATION_NAMESPACE}:query.inventory_movement_search`,
     onHand: `${APPLICATION_NAMESPACE}:query.inventory_movement_on_hand`,
   },
   queryParameterIds: {
+    movementSearchLegalEntityId: `${APPLICATION_NAMESPACE}:parameter.inventory_movement_search_legal_entity_scope`,
     onHandAtTime: `${APPLICATION_NAMESPACE}:parameter.on_hand_at_time`,
     onHandItemId: `${APPLICATION_NAMESPACE}:parameter.on_hand_item_id`,
     onHandLegalEntityId: `${APPLICATION_NAMESPACE}:parameter.on_hand_legal_entity_id`,
@@ -374,6 +376,23 @@ test('registered onHand is temporal, narrowed, and atomically invalidates a same
         (observation) => observations.push(observation),
       );
       const gateway = new SemanticQueryGateway(policy, interpreter);
+      const movementSearch = await gateway.invoke(view, {
+        arguments: {
+          [inventoryIds.queryParameterIds.movementSearchLegalEntityId]:
+            legalEntityId,
+          text: stableId(11),
+        },
+        queryId: inventoryIds.queryIds.movementSearch,
+        schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+      });
+      assert.equal(movementSearch.outcome, 'exact');
+      assert.equal(
+        movementSearch.records.some(
+          (record) => record.recordId === stableId(51),
+        ),
+        true,
+        'movement search returns the movement whose searchable source id matches',
+      );
       const sameKeyAppendArguments = onHandArguments(
         earlyEffectiveHorizon,
         firstRecordedHorizon,

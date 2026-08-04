@@ -420,3 +420,8 @@ How to apply: pair normal `finally` cleanup with a detached, process-identity-bo
 Date: 2026-08-02
 Why: same-process repetition let warmed V8 state hide first-invocation compiler cost, while one noisy cold sample made an unchanged gate indeterminate in practice.
 How to apply: take each sample's first invocation in a distinct process, retain the unchanged budget, report every sample, and prove both one-noisy-sample PASS and all-slow-samples FAIL. See `docs/execution/packets/leak-guard.md`.
+
+## Separate historical integrity from current conformance
+Date: 2026-08-02
+Why: applying a newly tightened search rule to recorded lineage made valid historical releases appear corrupt and would have disabled rollback exactly when rules changed.
+How to apply: reproduce history from its recorded bytes and exact root, compile every new head strictly, and let historical defects refuse by name at runtime rather than returning plausible answers. Graduated to ADR-0045 and ADR-0046; see `docs/execution/packets/5g3-searchcap.md`.

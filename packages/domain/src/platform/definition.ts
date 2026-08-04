@@ -95,7 +95,7 @@ export function platformModuleDefinition(): Record<string, unknown> {
       },
     ],
     fields: [
-      textField(fieldIds.name, 'Name', 10, 120),
+      textField(fieldIds.name, 'Name', 10, 120, true),
       textField(fieldIds.queryId, 'Query identity', 20, 320),
       textField(fieldIds.criteria, 'Canonical predicate criteria', 30, 4_000),
     ],
@@ -186,6 +186,7 @@ function textField(
   label: string,
   orderKey: number,
   maximumLength: number,
+  searchable = false,
 ): Record<string, unknown> {
   return {
     classification: 'internal',
@@ -200,7 +201,7 @@ function textField(
     presence: 'required',
     reportable: false,
     schemaVersion: version,
-    searchable: false,
+    searchable,
   };
 }
 
