@@ -30,11 +30,26 @@ Nothing was implemented on speculation. `oneToOne` has real semantics — a
 uniqueness constraint — and ADR-0041 §3 defers it until a module needs it and it
 arrives with its own enforcement.
 
-The executable diff against BASE is four hunks: one schema literal, one
-diagnostic selector branch, one accepted-alternative entry, and the controls.
-Every checked-in definition, fixture, golden and release artifact already
-declared `manyToOne`, so no byte of any derived artifact moved — verified by
-re-derivation below, not assumed.
+The executable diff against BASE is small and entirely on this subject: one
+schema literal (`schemas.ts:586`), one diagnostic-selector branch and one
+accepted-alternative entry in `normalize.ts`, and three hunks of controls in
+`negative-contracts.test.ts`. Every checked-in definition, fixture, golden and
+release artifact already declared `manyToOne`, so no byte of any derived
+artifact moved — verified by re-derivation below, not assumed.
+
+### One disclosed in-axis diagnostic shift
+
+The selector branch is `pathParts.includes('relations') && finalPart ===
+'cardinality'`. A relation whose `cardinality` is **missing or mistyped** —
+not just declined — now reports `CANON_RELATION_CARDINALITY_UNSUPPORTED` where
+it previously reported the generic `CANON_SCHEMA_INVALID`. This is deliberate
+and bounded: the failure is on the same member, the accepted alternative is
+correct guidance for it, and it follows the identical precedent of the existing
+`kind`, `archetype` and `slot` branches. `relations` appears as a schema key only
+in the two top-level `z.array` members, and the only other `cardinality` in the
+language is `queryLegalEntityScope.cardinality`, whose path never contains
+`relations` and which still reports `CANON_SCHEMA_INVALID`. No test or consumer
+depended on the old code.
 
 ## The join-eligibility half is NOT in this packet — a known open ADR-0041 violation
 
@@ -128,7 +143,7 @@ and keeps its own singleton axes (`$.relations[].relationColumn.origin = "field"
 
 | Control | Observed fact | Victim and recorded red |
 | --- | --- | --- |
-| `oneToOne` refusal | The real composed-app relation `northstar.app:relation.inventory_movement_transaction_line` carrying `oneToOne` returns `CANON_RELATION_CARDINALITY_UNSUPPORTED` at `$.relations[3].cardinality`, with its relation id and the accepted alternative `use cardinality manyToOne until another cardinality has executing semantics`. | `schemas.ts:583`. Restoring `z.enum(['oneToOne','manyToOne','oneToMany'])` made the test fail with exact text `error: 'Missing expected exception.'`; the literal was restored and it passed. |
+| `oneToOne` refusal | The real composed-app relation `northstar.app:relation.inventory_movement_transaction_line` carrying `oneToOne` returns `CANON_RELATION_CARDINALITY_UNSUPPORTED` at `$.relations[3].cardinality`, with its relation id and the accepted alternative `use cardinality manyToOne until another cardinality has executing semantics`. | `schemas.ts:586`. Restoring `z.enum(['oneToOne','manyToOne','oneToMany'])` made the test fail with exact text `error: 'Missing expected exception.'`; the literal was restored and it passed. |
 | `oneToMany` refusal | The same independent observation from the same relation. | The same victim, exact text `error: 'Missing expected exception.'`. |
 | the refusal is not the parent-scope guard in disguise | The witness relation is `ownership: 'reference'`, so `CANON_RELATION_PARENT_SCOPE_INVALID` cannot stand in for the authoring result. | Repointing `relationWitnessId` at the `parentScopedChild` relation `northstar.app:relation.party_role_party` made the witness fail with `expected: 'reference'` / `actual: 'parentScopedChild'`; the id was restored and it passed. |
 | positive witness — normalizes and lowers | The same relation normalizes with `cardinality: 'manyToOne'` and lowers to `ownership: 'reference'` with a `uuid` relation column. | `negative-contracts.test.ts`, 25/25 green in the focused file. It uses the compiler-admitted composed relation, not the representative canonical fixture: an earlier attempt on that fixture correctly failed with `error: 'v1 storage lowering requires validated dedicated storage'`, and that mistake is recorded here so it is not repeated. |
@@ -221,3 +236,80 @@ lineage unproducible. The orchestrator ruled that blocker architectural, routed
 it to `lang-retire`, scoped this packet to the cardinality half, and **reset the
 revise count to zero** because the finding was removed from this packet's
 charter rather than answered by it.
+
+## Gates — one full matrix at the frozen SHA
+
+`bash ./scripts/run-matrix.sh LANGNARROW` at `6a056fa44223f6c95df6aa53a2774ad57a5427bd`.
+The runner recorded both
+`PERFORMANCE_GATE_PASS_SHA=6a056fa44223f6c95df6aa53a2774ad57a5427bd` and
+`FULL_MATRIX_PASS_SHA=6a056fa44223f6c95df6aa53a2774ad57a5427bd`.
+Raw log: `/tmp/matrix-LANGNARROW-6a056fa4.log`.
+
+| Gate | Result |
+| --- | --- |
+| performance | 5/5; best-of-five CPU 1,627.4 ms and wall 1,279.3 ms against an unchanged 5,000 ms budget; 98.8% CPU idle admission |
+| unit | 80/80 |
+| compiler | 117/117 |
+| integration | 74/74 |
+| agent | 3/3 |
+| architecture | 116/116; boundaries 149 files |
+| web contracts | 7/7 |
+| PostgreSQL | 159/159 |
+| locale | 1/1 |
+| browser | 27/27 |
+| observability | 5/5 |
+| schema drift | PASS |
+| language coverage | 1,896 obligations; 395 observations; relation `91 = 0 + 89 + 2` |
+| reachability | 90/90 test files; 10 producer artifacts |
+| format, lint, typecheck, build, demo/app release, security | PASS |
+
+The security scan's `WRN leaks found: 1` line is its own negative control — a
+synthetic one-commit, 56-byte scan that must find a planted leak. The real
+853-commit scan reports `no leaks found` and the gate reports
+`Security scans passed`.
+
+## Critical review — both arms PASS at the identical SHA
+
+**Fresh naive Codex `gpt-5.6-sol` xhigh** reviewed frozen SHA `6a056fa` against
+BASE `011cd6a5` and returned:
+
+> No actionable findings. The cardinality refusal, diagnostic isolation, controls,
+> ledger attribution, deferral record, decision identities, and unchanged derived
+> artifacts all match the charter and frozen SHA evidence.
+>
+> VERDICT: PASS
+
+Charter and raw result:
+`/home/rvham/2rain-missions/langnarrow-codex-review-6a056fa.{prompt.md,result.txt}`.
+
+**Fable max confirm** ran only after that pass, on the identical unchanged SHA
+(`git status --porcelain` empty, `HEAD` still `6a056fa`), and returned
+`VERDICT: PASS`. It independently re-derived the partition from three directions —
+the whole-ledger delta, the exact-partition invariant
+`LANGUAGE_COVERAGE_RELATION_PARTITION_INEXACT`, and the per-category set digests —
+and confirmed the 237-byte bitmap is exactly 1,896 bits. It also decoded all eight
+stored lineage blobs and independently confirmed the removal blocker. Charter and
+raw result:
+`/home/rvham/2rain-missions/langnarrow-fable-confirm-6a056fa.{prompt.md,result.txt}`.
+
+### Findings disposition
+
+**LOW — the routed rows `lang-retire` and `lang-singleton` do not yet exist in the
+execution state.** Verified: neither appears in `docs/execution/ledger.md`,
+`docs/execution/current-plan.md`, or `docs/execution/lanes.md`. A future
+orchestrator session scanning the plan for open work would not find the scheduled
+owner of the open ADR-0041 §1 violation.
+
+**Recorded, not fixed — the correction is the orchestrator's to make.** All three
+files are orchestrator-only under `lanes.md`, and this packet is explicitly
+forbidden from editing the ledger. The rows belong in `current-plan.md` at
+acceptance. The violation cannot be silently lost meanwhile: the two
+join-eligibility entries remain in the gate's defect inventory, and
+`LANGUAGE_COVERAGE_STALE_DECISION_IDENTITY` forces re-acknowledgment on any change
+to that record.
+
+Two cosmetic inaccuracies Fable raised in this record were corrected above: the
+victim citation now reads `schemas.ts:586` (the literal's real line, not `:583`),
+and the diff description no longer says "four hunks" — the test file carries three.
+Fable's disclosed in-axis diagnostic shift is now recorded in its own section
+rather than left implicit.
