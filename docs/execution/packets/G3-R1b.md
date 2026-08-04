@@ -131,7 +131,7 @@ property of a reconciliation report, not an oversight.
 
 ## Controls and recorded reds
 
-`test/postgres/inventory-reconciliation.test.ts` — 16 subtests. All ten of
+`test/postgres/inventory-reconciliation.test.ts` — 18 subtests. All ten of
 `G3-R1`'s vacuity controls still pass unchanged; two assertions moved from
 `excludedSubjectCount` to `excludedSubjects` and became stronger, not weaker.
 
@@ -150,6 +150,9 @@ defect and nothing else:
 | 14 | the stored array's SHAPE is trusted downstream of attribution | scope agreement reads the raw array instead of `NormalizedAnchorScope` | `not ok 14` — `TypeError: raw[0]?.toLowerCase is not a function` at `inventory-reconciliation-service.ts:663` |
 | 15 | the raw stored scope rides the returned anchor object | restore the `...row` spread in place of the destructure | `not ok 15` — `0a0a…0a0a still carries the raw stored scope` / `true !== false` |
 | 16 | a movement effective on a different day than its document reads consistent | disable the effective-date comparison | `not ok 16` — `expected exactly one SOURCE_DOCUMENT_EFFECTIVE_AT_DIVERGED for <lineId>` / `0 !== 1` |
+| 17 | a movement filed under a line number its document never issued reads consistent | disable the source-line comparison | `not ok 17` — `expected exactly one SOURCE_DOCUMENT_SOURCE_LINE_DIVERGED for <lineId>` / `0 !== 1` |
+| 18 | a movement posted in a role its document cannot produce reads consistent | disable the posting-role comparison | `not ok 17` — `expected exactly one SOURCE_DOCUMENT_POSTING_ROLE_DIVERGED for <lineId>` / `0 !== 1` |
+| 19 | a recorded discrepancy is buried the moment the generation advances | exclude superseded anchors before reading `recordedDiscrepancyCount` | `not ok 18` — `expected exactly one RECORDED_ANCHOR_DISCREPANCY_PRESERVED for 7083…b3cf` / `0 !== 1` |
 
 Subtest 13 carries all four charter controls in one run, on a legal entity of its
 own so the pre-fix verdict is genuinely `consistent` rather than masked by the

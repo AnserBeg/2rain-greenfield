@@ -48,8 +48,10 @@ export type InventoryReconciliationFindingCodeV1 =
   | 'SOURCE_DOCUMENT_LINE_SHAPE_UNRECOGNIZED'
   | 'SOURCE_DOCUMENT_MISSING_FOR_MOVEMENT'
   | 'SOURCE_DOCUMENT_MOVEMENT_COUNT_DIVERGED'
+  | 'SOURCE_DOCUMENT_POSTING_ROLE_DIVERGED'
   | 'SOURCE_DOCUMENT_QUANTITY_DIVERGED'
   | 'SOURCE_DOCUMENT_SOURCE_IDENTITY_DIVERGED'
+  | 'SOURCE_DOCUMENT_SOURCE_LINE_DIVERGED'
   | 'SOURCE_DOCUMENT_TYPE_UNRECOGNIZED'
   | 'SOURCE_DOCUMENT_UNIT_DIVERGED';
 
@@ -156,6 +158,10 @@ interface EntityBinding {
 
 interface ReconciliationStorageBinding {
   readonly movement: EntityBinding;
+  readonly movementPostingRoleAdjustment: string;
+  readonly movementPostingRoleCorrection: string;
+  readonly movementPostingRoleCount: string;
+  readonly movementPostingRoleTransfer: string;
   readonly movementQuantityColumn: string;
   readonly movementRelationToLineColumn: string;
   readonly schemaName: string;
@@ -197,10 +203,12 @@ interface SourceDocumentLineRow {
 interface LedgerMovementRow {
   readonly effectiveAt: string;
   readonly itemId: string;
+  readonly postingRole: string;
   readonly locationId: string;
   readonly movementId: string;
   readonly quantityDelta: string;
   readonly sourceId: string;
+  readonly sourceLine: string;
   readonly sourceType: string;
   readonly transactionLineId: string | null;
   readonly unitId: string;
@@ -508,6 +516,43 @@ export class PostgresInventoryReconciliationService {
           subjectId,
         });
       }
+      const expectedAtLocation = expected.byLocation.get(movement.locationId);
+      if (
+        expectedAtLocation !== undefined &&
+        movement.sourceLine !== expectedAtLocation.sourceLine
+      ) {
+        // The natural-effect identity: source line is part of the movement's
+        // immutable provenance and of the uniqueness key that makes a posting
+        // non-duplicable, so a movement filed under a line number its document
+        // never issued is corrupt even when every quantity agrees.
+        divergent = true;
+        arm.finding({
+          code: 'SOURCE_DOCUMENT_SOURCE_LINE_DIVERGED',
+          declaredValue: expectedAtLocation.sourceLine,
+          detail: {
+            movementId: movement.movementId,
+            transactionId: line.transactionId,
+            transactionLineId: subjectId,
+          },
+          observedValue: movement.sourceLine,
+          subjectId,
+        });
+      }
+      if (!expected.postingRoles.has(movement.postingRole)) {
+        divergent = true;
+        arm.finding({
+          code: 'SOURCE_DOCUMENT_POSTING_ROLE_DIVERGED',
+          declaredValue: [...expected.postingRoles].toSorted().join('|'),
+          detail: {
+            movementId: movement.movementId,
+            transactionId: line.transactionId,
+            transactionLineId: subjectId,
+            transactionType: line.transactionType,
+          },
+          observedValue: movement.postingRole,
+          subjectId,
+        });
+      }
       if (movement.effectiveAt !== line.effectiveAt) {
         // The date a movement takes effect decides which period it lands in and
         // which as-of balance contains it, so a movement effective on a
@@ -549,7 +594,7 @@ export class PostgresInventoryReconciliationService {
       ...observedByLocation.keys(),
     ]);
     for (const locationId of [...locations].sort()) {
-      const declared = expected.byLocation.get(locationId) ?? 0n;
+      const declared = expected.byLocation.get(locationId)?.quantity ?? 0n;
       const summed = observedByLocation.get(locationId) ?? 0n;
       if (declared === summed) continue;
       divergent = true;
@@ -588,13 +633,6 @@ export class PostgresInventoryReconciliationService {
     const anchors = await selectAnchors(client, context);
     const arm = new ArmAccumulator('aggregateAnchors');
     for (const anchor of anchors) {
-      if (anchor.movementGeneration !== generation) {
-        // A superseded anchor cannot be served: the cache key and the identity
-        // comparison both carry the generation, which only advances. It is
-        // counted and named as excluded, never silently dropped.
-        arm.excluded(anchor.cacheKey, 'supersededGeneration');
-        continue;
-      }
       const registered = anchor.queryId === this.registration.aggregateQueryId;
       const parameters = registered
         ? recognizedAnchorParameters(this.registration, anchor.parameterValues)
@@ -625,6 +663,30 @@ export class PostgresInventoryReconciliationService {
         )
       ) {
         arm.excluded(anchor.cacheKey, 'outOfScope');
+        continue;
+      }
+      if (anchor.movementGeneration !== generation) {
+        // A superseded anchor cannot be served, so there is nothing to
+        // re-derive. A discrepancy RECORDED against it is a different fact and
+        // still the only trace that the read path once caught something --
+        // and excluding it would bury every recorded discrepancy the moment the
+        // next posting advances the generation, which is to say almost always.
+        if (anchor.recordedDiscrepancyCount !== '0') {
+          arm.discrepant(anchor.cacheKey, {
+            code: 'RECORDED_ANCHOR_DISCREPANCY_PRESERVED',
+            declaredValue: renderedStoredDecimal(anchor.balanceValue),
+            detail: {
+              cacheKey: anchor.cacheKey,
+              movementGeneration: anchor.movementGeneration,
+              queryId: anchor.queryId,
+              recordedDiscrepancyCount: anchor.recordedDiscrepancyCount,
+              supersededBy: generation,
+            },
+            observedValue: null,
+          });
+          continue;
+        }
+        arm.excluded(anchor.cacheKey, 'supersededGeneration');
         continue;
       }
       await this.#reconcileOneAnchor(client, context, arm, anchor, parameters);
@@ -890,9 +952,21 @@ function combinedOutcome(
   return 'consistent';
 }
 
+interface ExpectedLocationEffect {
+  readonly quantity: bigint;
+  readonly sourceLine: string;
+}
+
+/**
+ * The complete set of movement facts this arm derives from the document.
+ * Enumerated deliberately: two review rounds each found "one more field nobody
+ * compares", which is a signal that the comparison set was never written down
+ * rather than that any single field mattered most.
+ */
 interface ExpectedLineEffects {
-  readonly byLocation: ReadonlyMap<string, bigint>;
+  readonly byLocation: ReadonlyMap<string, ExpectedLocationEffect>;
   readonly movementCount: number;
+  readonly postingRoles: ReadonlySet<string>;
 }
 
 /**
@@ -916,10 +990,17 @@ function expectedLineEffects(
     }
     return {
       byLocation: new Map([
-        [line.fromLocationId, -quantity],
-        [line.toLocationId, quantity],
+        [
+          line.fromLocationId,
+          {
+            quantity: -quantity,
+            sourceLine: `${line.lineNumber}:out`,
+          },
+        ],
+        [line.toLocationId, { quantity, sourceLine: `${line.lineNumber}:in` }],
       ]),
       movementCount: 2,
+      postingRoles: new Set([binding.movementPostingRoleTransfer]),
     };
   }
   if (
@@ -935,8 +1016,20 @@ function expectedLineEffects(
   const negative = quantity < 0n;
   if (negative !== (line.fromLocationId !== null)) return null;
   return {
-    byLocation: new Map([[declaredLocations[0]!, quantity]]),
+    byLocation: new Map([
+      [declaredLocations[0]!, { quantity, sourceLine: line.lineNumber }],
+    ]),
     movementCount: 1,
+    // A count correction posts as either an initial count or a correction, and
+    // which one is a fact about the stock-count session rather than about the
+    // transaction, so both are admissible from the document alone.
+    postingRoles:
+      line.transactionType === binding.transactionAdjustmentType
+        ? new Set([binding.movementPostingRoleAdjustment])
+        : new Set([
+            binding.movementPostingRoleCount,
+            binding.movementPostingRoleCorrection,
+          ]),
   };
 }
 
@@ -1224,6 +1317,10 @@ async function selectSourceDocumentSnapshot(
                 AS "sourceType",
               ${quoted(requiredColumn(movement, 'inventory_movement_source_id'))}::text
                 AS "sourceId",
+              ${quoted(requiredColumn(movement, 'inventory_movement_source_line'))}::text
+                AS "sourceLine",
+              ${quoted(requiredColumn(movement, 'inventory_movement_posting_role'))}::text
+                AS "postingRole",
               to_char(
                 ${quoted(requiredColumn(movement, 'inventory_movement_effective_at'))}
                   AT TIME ZONE 'UTC',
@@ -1378,6 +1475,10 @@ function resolveReconciliationStorage(
   const movement = bindEntity(movementEntity);
   const transaction = bindEntity(transactionEntity);
   const transactionLine = bindEntity(transactionLineEntity);
+  const movementPostingRole = enumOptions(
+    movementEntity,
+    'inventory_movement_posting_role',
+  );
   const transactionState = enumOptions(
     transactionEntity,
     'inventory_transaction_state',
@@ -1388,6 +1489,19 @@ function resolveReconciliationStorage(
   );
   return Object.freeze({
     movement,
+    movementPostingRoleAdjustment: uniqueEnumOption(
+      movementPostingRole,
+      'adjustment',
+    ),
+    movementPostingRoleCorrection: uniqueEnumOption(
+      movementPostingRole,
+      'correction',
+    ),
+    movementPostingRoleCount: uniqueEnumOption(movementPostingRole, 'count'),
+    movementPostingRoleTransfer: uniqueEnumOption(
+      movementPostingRole,
+      'transfer',
+    ),
     movementQuantityColumn: requiredColumn(
       movement,
       'inventory_movement_quantity_delta',

@@ -429,6 +429,7 @@ test('reconciliation names divergence, confirms consistency, repairs nothing, an
       });
 
       let divergentReport: InventoryReconciliationReportV1 | undefined;
+      let recordedDiscrepancyAnchorKey: string | undefined;
       const before = await snapshotState(database.pool, binding);
 
       await t.test(
@@ -613,6 +614,7 @@ test('reconciliation names divergence, confirms consistency, repairs nothing, an
             reconciliationIds.onHandQueryId,
             [plantedAnchorCacheKey, unrecognizedAnchorCacheKey],
           );
+          recordedDiscrepancyAnchorKey = cacheKey;
           await corruptAnchor(database.pool, scopeA, cacheKey, '777');
           cacheObservations.length = 0;
           const afterCorruption = await invokeOnHand(gateway, view, {
@@ -1248,6 +1250,127 @@ test('reconciliation names divergence, confirms consistency, repairs nothing, an
             ).length,
             0,
             'the quantities agree; only the effective date diverges',
+          );
+        },
+      );
+
+      await t.test(
+        'a movement filed under the wrong line or posted in the wrong role is detected',
+        async () => {
+          const transactionId = randomUUID();
+          const transactionLineId = randomUUID();
+          const movementId = randomUUID();
+          await withModuleRole(runtimePool, scopeA, async (client) => {
+            await insertTransactionHeader(client, scopeA, binding, {
+              legalEntityId: witnessLegalEntityA,
+              number: `PRV-${transactionId.slice(0, 12)}`,
+              reasonCode: 'RECONCILE',
+              reasonNarrative: 'Provenance control',
+              sourceId: 'reconcile-provenance',
+              sourceType: 'adjustment',
+              state: 'posted',
+              transactionId,
+              type: 'adjustment',
+            });
+            await insertEntity(
+              client,
+              scopeA,
+              binding,
+              binding.transactionLine,
+              {
+                legalEntityId: witnessLegalEntityA,
+                overrides: {
+                  inventory_transaction_line_from_location_id: null,
+                  inventory_transaction_line_item_id: itemPrimary,
+                  inventory_transaction_line_line_number: 1,
+                  inventory_transaction_line_quantity: '2',
+                  inventory_transaction_line_to_location_id: locationOrphan,
+                  inventory_transaction_line_unit_id: 'EA',
+                },
+                recordId: transactionLineId,
+                relationIds: {
+                  [binding.transaction.entity.entityId]: transactionId,
+                },
+              },
+            );
+            // Quantity, item, location, unit, source identity and effective
+            // date all agree. Only the provenance differs.
+            await insertMovement(client, scopeA, binding, {
+              itemId: itemPrimary,
+              legalEntityId: witnessLegalEntityA,
+              locationId: locationOrphan,
+              movementId,
+              postingRole: 'transfer',
+              quantityDelta: '2',
+              sourceId: 'reconcile-provenance',
+              sourceLine: '2',
+              sourceType: 'adjustment',
+              transactionId,
+              transactionLineId,
+            });
+          });
+          const report = await reconciliation.reconcile(scopeA.context, {
+            legalEntityIds: [witnessLegalEntityA],
+            scopeId: 'provenance-scope',
+          });
+          const sourceLine = findingFor(
+            report,
+            'SOURCE_DOCUMENT_SOURCE_LINE_DIVERGED',
+            transactionLineId,
+          );
+          assert.equal(sourceLine.declaredValue, '1');
+          assert.equal(sourceLine.observedValue, '2');
+          const postingRole = findingFor(
+            report,
+            'SOURCE_DOCUMENT_POSTING_ROLE_DIVERGED',
+            transactionLineId,
+          );
+          assert.equal(postingRole.observedValue?.endsWith('_transfer'), true);
+          assert.equal(
+            postingRole.declaredValue?.endsWith('_adjustment'),
+            true,
+          );
+          assert.equal(
+            report.findings.filter(
+              (finding) =>
+                finding.subjectId === transactionLineId &&
+                finding.code === 'SOURCE_DOCUMENT_QUANTITY_DIVERGED',
+            ).length,
+            0,
+            'the quantities agree; only the provenance diverges',
+          );
+        },
+      );
+
+      await t.test(
+        'a discrepancy recorded against a now-superseded anchor is still surfaced',
+        async () => {
+          assert.ok(recordedDiscrepancyAnchorKey);
+          const report = await reconciliation.reconcile(scopeA.context, {
+            legalEntityIds: [legalEntityA],
+            scopeId: 'superseded-discrepancy-scope',
+          });
+          const anchors = arm(report, 'aggregateAnchors');
+          const preserved = findingFor(
+            report,
+            'RECORDED_ANCHOR_DISCREPANCY_PRESERVED',
+            recordedDiscrepancyAnchorKey,
+          );
+          assert.equal(preserved.detail.recordedDiscrepancyCount, '1');
+          assert.notEqual(
+            preserved.detail.movementGeneration,
+            preserved.detail.supersededBy,
+            'the control is only meaningful once the generation has moved on',
+          );
+          assert.equal(
+            anchors.excludedSubjects.some(
+              (excluded) => excluded.subjectId === recordedDiscrepancyAnchorKey,
+            ),
+            false,
+            'excluding it would bury every recorded discrepancy the next posting supersedes',
+          );
+          assert.ok(
+            anchors.discrepantSubjectIds.includes(recordedDiscrepancyAnchorKey),
           );
         },
       );
@@ -2026,6 +2149,7 @@ async function insertMovement(
     readonly legalEntityId: string;
     readonly locationId: string;
     readonly movementId: string;
+    readonly postingRole?: string;
     readonly quantityDelta: string;
     readonly sourceId: string;
     readonly sourceLine: string;
@@ -2044,7 +2168,7 @@ async function insertMovement(
       inventory_movement_location_id: input.locationId,
       inventory_movement_posting_role: enumOption(
         field(binding.movement, 'inventory_movement_posting_role'),
-        'adjustment',
+        input.postingRole ?? 'adjustment',
       ),
       inventory_movement_quantity_delta: input.quantityDelta,
       inventory_movement_reason_code: 'RECONCILE',
