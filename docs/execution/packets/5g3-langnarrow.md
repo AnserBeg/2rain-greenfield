@@ -1,6 +1,8 @@
 # 5g3-langnarrow — relation declarations are honoured or refused
 
-Status: stopped after Critical review round 1; scoped bridge required
+Status: revision 1 written under the granted bridge; stopped again before
+freezing — the checked-in release lineage cannot be produced under the new rule,
+and one departing ledger axis is HIDDEN rather than HONEST
 
 Tier: Critical
 
@@ -289,3 +291,196 @@ The runner recorded both
 and
 `FULL_MATRIX_PASS_SHA=e446353d6e055ffcca6d12c4f195e2bfe4025702`.
 Raw log: `/tmp/matrix-LANGNARROW-e446353d.log`.
+
+## Revision 1 under the bridge — the removal, and where it stopped
+
+Base `011cd6a5`; revision commit `a4d445c`. The bridge granted for this packet
+only was used exactly as scoped, with one addition named under "Bridge still
+required" below.
+
+`joinEligibility` is gone from `normalizedRelationDefinition`, so it is absent
+from both the authored and normalized relation shapes. `authoredRelationDefinition`
+extends the normalized one and adds nothing back. No query-join semantics were
+implemented; nothing was coerced.
+
+Because the relation schema is a closed `z.strictObject`, a declared
+`joinEligibility` now arrives as a zod `unrecognized_keys` issue whose `path`
+names the relation (`['relations', 3]`) and whose `keys` name the member. The
+issue path alone therefore cannot name the declaration back to the author, and
+the previous `finalPart === 'joinEligibility'` selector could never fire again.
+`schemaError` now reads the key list: a declined key becomes its own diagnostic
+at `$.relations[i].joinEligibility` with
+`CANON_RELATION_JOIN_ELIGIBILITY_UNSUPPORTED` and accepted alternative
+`omit joinEligibility until join semantics exist to honour it`. Every other
+unrecognized key keeps the generic `CANON_SCHEMA_INVALID` at the relation path.
+
+Authored declarations were removed from `packages/domain/src/{party,inventory}/
+definition.ts`, `test/fixtures/g2/module-conformance/definitions.ts`,
+`test/compiler/g2-module-{conformance,storage}.test.ts` (one each),
+`test/postgres/module-runtime.test.ts` (two), and
+`test/fixtures/canonical-model/representative.authored.json`.
+`apps/web/release/app.authored.json` was re-derived, never edited.
+
+### Controls and recorded reds
+
+| Control | Observed fact | Victim and recorded red |
+| --- | --- | --- |
+| `query` refusal | `northstar.app:relation.inventory_movement_transaction_line` carrying `joinEligibility: 'query'` returns `CANON_RELATION_JOIN_ELIGIBILITY_UNSUPPORTED` at `$.relations[3].joinEligibility` with that relation id. The formerly accepted spelling is now refused by name. | Restoring `joinEligibility: z.enum(['none','query'])` on the normalized shape, `.optional()` on the authored shape, and the `?? 'none'` normalization default made the test fail with exact text `error: 'Missing expected exception.'`; all three were removed again and it passed. |
+| `none` refusal | The same relation carrying `joinEligibility: 'none'` returns the same named diagnostic at the same path. | The same victim, exact text `error: 'Missing expected exception.'`. |
+| declined member is named, not swallowed | A relation carrying an unrelated unknown member `joinHint` still returns `CANON_SCHEMA_INVALID` at `$.relations[3]`. | Widening the declined-key filter from `key === 'joinEligibility'` to every unrecognized key made the test fail with exact text `error: 'expected CANON_SCHEMA_INVALID: [{"acceptedAlternative":"omit joinEligibility until join semantics exist to honour it","code":"CANON_RELATION_JOIN_ELIGIBILITY_UNSUPPORTED","objectId":"northstar.app:relation.inventory_movement_transaction_line","occurrenceIndex":0,"path":"$.relations[3].joinHint","phase":"canonicalModel","rule":"value must satisfy a closed supported schema through v4"}]'`. |
+| both refusals coexist | A relation carrying `joinEligibility` **and** `joinHint` returns both diagnostics, each at its own path. | The re-admission victim above, exact text `error: 'expected CANON_RELATION_JOIN_ELIGIBILITY_UNSUPPORTED: [{"acceptedAlternative":"use the exported authored schema and canonical example","code":"CANON_SCHEMA_INVALID","objectId":"northstar.app:relation.inventory_movement_transaction_line","occurrenceIndex":0,"path":"$.relations[3]","phase":"canonicalModel","rule":"value must satisfy a closed supported schema through v4"}]'`. |
+| omission is admitted, not defaulted | The same real relation, declaring no join eligibility, normalizes; the normalized relation has no `joinEligibility` own-property. | The re-admission victim restored the `?? 'none'` default and the test failed with `expected: false` / `actual: true` on `Object.hasOwn(normalizedRelation, 'joinEligibility')`. |
+| positive witness — normalizes, lowers | The same relation lowers to `ownership: 'reference'` with a `uuid` relation column. | `negative-contracts.test.ts`, 29/29 green. Uses the compiler-admitted composed relation, not the representative canonical fixture — the earlier attempt on that fixture correctly failed with `error: 'v1 storage lowering requires validated dedicated storage'` and is not repeated. |
+| positive witness — executes | `test/postgres/module-runtime.test.ts` 19/19 against real PostgreSQL, with the fixture's `joinEligibility` removed. | Stored-effect execution, not a declaration. |
+| parent-scoped-child regression | Unchanged; `required: false` still returns `CANON_RELATION_PARENT_SCOPE_INVALID`. | Pre-existing control, green in the same 29/29 file. |
+
+### Per-axis HONEST vs HIDDEN — one axis is HIDDEN
+
+Seven obligations left the derived ledger relative to BASE. Their classification:
+
+| Departing obligation | Mechanism | Verdict |
+| --- | --- | --- |
+| `authoredLanguage:$.relations[].joinEligibility="none"` | the member no longer exists in `VersionedAuthoredApplicationPackage`; the spelling is refused by name | **HONEST** |
+| `authoredLanguage:$.relations[].joinEligibility="query"` | same; the previously accepted spelling is refused by name with its own recorded red | **HONEST** |
+| `authoredLanguage:$.relations[].joinEligibility.$presence="absent"` | the presence axis existed only because the member was optional; there is no member and therefore no presence choice | **HONEST** |
+| `authoredLanguage:$.relations[].joinEligibility.$presence="present"` | same | **HONEST** |
+| `authoredLanguage:$.relations[].cardinality="oneToOne"` | the value is no longer admitted and is refused by name with `CANON_RELATION_CARDINALITY_UNSUPPORTED` | **HONEST** |
+| `authoredLanguage:$.relations[].cardinality="oneToMany"` | same | **HONEST** |
+| `authoredLanguage:$.relations[].cardinality="manyToOne"` | the value is **still authorable**. Its obligation left only because narrowing collapsed the axis to a single value and the authored derivation admits an axis only when `forced \|\| values.size > 1` (`language-conformance-ledger.ts:708`) | **HIDDEN** |
+
+The HIDDEN row is reported, not shipped. It is not the laundering this packet
+already caught once — `manyToOne` **is** honoured, witnessed by the lowering
+assertion and by 19/19 real-PostgreSQL execution above, so no defect entry
+disappeared with it. But the value is still authorable and the gate no longer
+carries its obligation, which is the literal definition of HIDDEN, and ADR-0041
+§1 makes that state unavoidable here: it rules cardinality **restricted** to the
+honoured value while join eligibility is **removed**. The singleton is therefore
+the ADR-mandated end state and the fix belongs to row `lang-singleton`.
+
+### The blind spot, measured
+
+The derived ledger digest is **`b4cf5f064a30b1ac07382e006e5b9f91fd9fa7fd33b5cbcd414790fa3a4e6d41`
+both before and after removing the member** — byte-identical, and the same digest
+`coverage-decisions.json` already binds. `check:language-coverage` passes
+unchanged: 1,892 obligations, 0 receipts, 393 first-party observations, relation
+partition `87 = 0 + 87 + 0`. No decision document needed re-deriving.
+
+That is the blind spot stated as a measurement rather than an argument: the gate
+returns the identical digest for "narrowed to an unhonoured singleton" and for
+"removed from the language entirely." The two states differ by the whole content
+of ADR-0041 and the instrument cannot see between them. The asymmetry is
+one-sided and mechanical — the lowered derivation passes `includeSingletons: true`
+and keeps its own singleton axes (`$.relations[].relationColumn.origin = "field"`,
+`postgresqlType = "uuid"`), while the authored derivation passes `false`.
+
+### Artifact event — canonical goldens re-derived
+
+Produced by executing `normalizeApplicationPackage` and `canonicalizeAndHash`;
+no digest was written independently of that result.
+
+| Artifact/profile | Before | After |
+| --- | --- | --- |
+| `representative.normalized.golden.sha256` / v3 | `51fa3abbc4e256b4d96223022c3ab2fa3ab1f0ec70e3e5798127e469a024fc02` | `2a65c466480d00d363d7d01349cdf7f898706639cfc6e11c02239478515481a5` |
+| normalization v0-experimental | `6eb27fb2b977d50288e3f141b16330c63e381ec05d638295d406ba7a6992af27` | `e17662627361d92ed35be27b3b9aa3d76347944b88e64f8c813c0060344e12d3` |
+| normalization v1 | `5c77f2c3b273e4704c17118c65eb0a1576316c21ac1c67d958ec455acb5c7d58` | `775a83edb684142b3d9a5a3b6ca0df755029e04a262ce52ae07f8d9a3d2666f8` |
+| normalization v2 | `dbabd07e6e946eabbb93136cbbd48d46ed35dd646a9b4c83440c32287f5a8cb8` | `389e563ff7e5c523d10baa5b3b0bd7265dfc61475f2d6ff1f4067eff1931582e` |
+| `apps/web/release/app.authored.json` | `0217868f16700ea8c770f5d569e3796594885d391185ada3d810c7807b066f37` | `2f0c94ee317c864ad5d39fb3526183d79932ea714945761d22f0fe2127af10b3` |
+| `v1-v2.release.structural.golden.json` v1 root | `bac8376eacf14945e2be9fcd798f63cadeb90ff90203e4601a8047e25063495e` | `920babc9b48fc1148674f74e5f7d049457435cbd0efdbe556cf5e63d0528ff6f` |
+| `v1-v2.release.structural.golden.json` v2 root | `e87185a6dcc34eaf8311b1cb77386bdf63cfde531c3107343f8b60cf2ddad171` | `b3b0e672d484304b48ce38ace17e5ae4cd47857ed23190a020e565e7042eaab5` |
+
+Authored-token telemetry returns to BASE's 3,651 because the canonical fixture no
+longer states join behavior. Normalized telemetry moves 2,567 to 2,560, attributed
+exactly: one relation, one `"joinEligibility":"none"` member no longer written
+into normalized output.
+
+### THE BLOCKER — the checked-in lineage cannot be produced
+
+`apps/web/release/app.compiled.json` did not move. It **cannot** be produced under
+this rule, and this is the recurrence ADR-0043 predicted by name:
+
+> Every conformance packet tightens a rule, and every tightened rule can invalidate
+> history authored under the looser one. `5g3-langnarrow` escaped it only because
+> every production relation already declared the surviving values.
+
+Removing the member ends that escape. `verifyExistingLineage` recompiles every
+historical entry from its stored `normalizedDefinitionBytes`, and **all seven
+application entries carry `joinEligibility`** — entries 0-3 carry one relation
+each, entries 4-6 carry eight. The build fails on entry 0:
+
+```text
+CanonicalModelError: CANON_RELATION_JOIN_ELIGIBILITY_UNSUPPORTED
+      acceptedAlternative: 'omit joinEligibility until join semantics exist to honour it',
+      code: 'CANON_RELATION_JOIN_ELIGIBILITY_UNSUPPORTED',
+      objectId: 'northstar.app:relation.party_role_party',
+      path: '$.relations[0].joinEligibility',
+```
+
+ADR-0043 §1 authorizes cutting back to the longest valid prefix and appending a
+new head. **The longest valid prefix here is empty**, and three separate things
+block every route out. None is a judgement call; each was executed.
+
+1. **The truncation instrument cannot classify this failure at all.**
+   `--truncate-invalid-lineage` crashes rather than truncating, because
+   `compileNormalizedDefinition` (`compile-app-release.ts:433`) lets
+   `parseNormalizedApplicationPackageJson`'s `CanonicalModelError` escape instead
+   of returning a failed `CompileResult`. The `result.status !== 'compiled'`
+   branch at `:135` is therefore unreachable for a canonically-invalid entry —
+   exactly the class ADR-0043 exists for. Stack:
+   `longestValidExperimentalLineagePrefix (:131) -> compileNormalizedDefinition (:433)`.
+2. **Even repaired, it would refuse.** With zero valid application entries,
+   `:153` throws `compiled application lineage has no valid application prefix to
+   retain`.
+3. **A from-scratch rebuild is the wrong artifact and breaks three ratchets.**
+   Deleting the file and letting `initialLineage` run does succeed — measured in a
+   scratch path — but it produces envelope
+   `northstar.web:compiled-application-release/**v1**` with a single `application`
+   key, one entry, and a moved bootstrap root
+   (`7619e59cba92a3cc786eae11c0d9f83a6bb344e3d613a3039b53a1d05cfa1a55` to
+   `8edda7bc5531a6ef691a7fb62f5543ad88bc8be7a9bf357a7c574aa6963c9458`).
+   That artifact cannot satisfy
+   `test/postgres/composed-application.test.ts:99`
+   (`assert.ok(compiledApplication.applications.length >= 6)`), `:194`
+   (`applications.length > 3`, then swaps entries 1 and 2), or `:3862`
+   (constructs a `.../v2` envelope). These are structural preconditions, not
+   counts: they would have to be rewritten, and lowering a depth floor to fit an
+   observation is precisely what ADR-0043 §3 refuses. That file is not in this
+   packet's lease.
+
+No matrix was run and no review was launched. A matrix at this SHA is guaranteed
+red at `check:app-release`, and freezing a candidate that cannot build would spend
+the packet's one remaining review round on a tree that cannot land.
+
+### Bridge still required
+
+- `apps/web/scripts/compile-app-release.ts` — to repair the truncation classifier
+  and admit an empty valid prefix, **if** the orchestrator rules that route.
+- `test/postgres/composed-application.test.ts` — the three lineage-shape
+  preconditions above, under an explicit ADR-0043 §3 attribution.
+- `test/compiler/legal-entity-query-scope.test.ts:457` — one pinned v3 release
+  manifest digest, `921ee2781fabdf5fd93f93cf07db9b27e6f41e8ad6163dbbd714da58dd9e6290`
+  to `b8d5afbee2aa97c807c550120779b7957863b6bc8f2f7c691cd88a0e2447771f`. It moves
+  because `v3AggregateModule()` derives from `ordinaryModuleV2()` in the
+  module-conformance fixture this packet owns. Not edited; it is the one remaining
+  red in `test:compiler` (116/117).
+- `test/fixtures/g2/module-conformance/v1-v2.release.structural.golden.json` —
+  **taken** as the deterministic dependent of the granted
+  `module-conformance/definitions.ts`; only the two release roots moved. Named
+  here rather than left silent, per the lanes.md rule that an uncontested lease
+  existing only in a prompt is invisible to the next lane.
+
+### Focused gates at `a4d445c`
+
+- `corepack pnpm typecheck` — PASS
+- `corepack pnpm test:unit` — PASS, 84/84
+- `corepack pnpm test:compiler` — **116/117**; the single red is the out-of-lease
+  pin named above
+- `corepack pnpm test:integration` — PASS, 74/74
+- `corepack pnpm test:agent` — PASS, 3/3
+- `corepack pnpm test:architecture` — PASS, 116/116
+- `corepack pnpm test:contracts` — PASS, 7/7
+- `corepack pnpm test:locale` — PASS, 1/1
+- focused `test/postgres/module-runtime.test.ts` — PASS, 19/19
+- focused `test/unit/canonical-model/negative-contracts.test.ts` — PASS, 29/29
+- `corepack pnpm check:language-coverage` — PASS, unchanged digest and partition
+- `corepack pnpm check:app-release` — **RED**, the blocker above
+- `corepack pnpm format`, `corepack pnpm lint`, `git diff --check` — PASS
