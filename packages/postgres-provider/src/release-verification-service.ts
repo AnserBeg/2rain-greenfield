@@ -231,6 +231,35 @@ export async function captureDeclaredCapabilityRefusal(
   );
 }
 
+export function declaredCapabilityVerificationRefusals(
+  factories: readonly PostgresCapabilityOperationExecutorFactory[],
+): ReadonlyMap<string, CapabilityVerificationRefusalExpectation> {
+  return new Map(
+    factories.map((factory) => {
+      const expectation: unknown = factory.verificationRefusal;
+      if (
+        !isRecord(expectation) ||
+        typeof expectation.code !== 'string' ||
+        expectation.code.length === 0 ||
+        typeof expectation.reason !== 'string' ||
+        expectation.reason.length === 0
+      ) {
+        throw failure(
+          'VERIFICATION_CAPABILITY_REFUSAL_CONTRACT_INVALID',
+          `capability factory ${factory.capabilityId} must declare its exact refusal`,
+        );
+      }
+      return [
+        factory.capabilityId,
+        Object.freeze({
+          code: expectation.code,
+          reason: expectation.reason,
+        }),
+      ] as const;
+    }),
+  );
+}
+
 export class PostgresReleaseVerificationService {
   constructor(
     private readonly pool: Pool,
@@ -453,11 +482,8 @@ export class PostgresReleaseVerificationService {
         mediation,
         queryGateway,
         policy,
-        new Map(
-          this.capabilityOperationExecutorFactories.map((factory) => [
-            factory.capabilityId,
-            factory.verificationRefusal,
-          ]),
+        declaredCapabilityVerificationRefusals(
+          this.capabilityOperationExecutorFactories,
         ),
       );
       return (async () => {

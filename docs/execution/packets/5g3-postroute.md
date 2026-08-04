@@ -8,7 +8,33 @@ Tier: Critical
 
 Branch: `packet/5g3-postroute`
 
-Base: `7e7c91b84131d6adde3a8fa1dc420b1cf6e962a8`
+Original posting-route base: `7e7c91b84131d6adde3a8fa1dc420b1cf6e962a8`
+
+Finish-and-land base: `011cd6a5a1afb9b314beedf58d8d161fe301dc21`
+
+## Finish-and-land premise audit
+
+Searchcap's refusal work is a different concern, not an overlap, duplicate, or
+conflict. Searchcap derives whether a declared search can execute from lowered
+storage and raises `MODULE_SEARCH_CAPABILITY_UNAVAILABLE` at runtime when a
+historical declaration cannot be honoured. This packet's
+`verificationRefusal` instead declares the exact typed error that release
+verification expects from a deliberately input-less capability probe. Searchcap
+did not add a factory-declared verification expectation or another mechanism
+for identifying that probe's producing layer, so there is no second authority
+to conform to. The merged service preserves searchcap's same-entity search
+witnesses and runtime refusal unchanged while applying the exact code-and-reason
+check only to registered-capability verification.
+
+Commit `98bb392` is the ground this guard was written against, not a later
+change that invalidates it: it is the parent of the guard commit and introduced
+the factory, Inventory adapter, verifier route, and composed-application probe
+that this packet tightens. Current main retains those mechanisms. Searchcap
+changed the neighbouring search scenarios and their partition counts, but did
+not change the posting factory or its route. On the merged tree the exact
+verification partition remains searchcap's `163 = 127 executed + 36 derived`;
+this guard changes what qualifies as evidence for the existing posting scenario
+and adds no scenario of its own.
 
 ## Outcome and boundary
 
@@ -102,8 +128,11 @@ from a different layer becomes
 `VERIFICATION_CAPABILITY_REFUSAL_MISMATCH`; a successful response becomes
 `VERIFICATION_CAPABILITY_REFUSAL_NOT_OBSERVED`.
 
-The authoritative partition moves from 167 total / 129 executed / 38 derived
-to 168 / 130 / 38. The new scenario is executed, never skipped or derived.
+In the original posting-route delivery, the authoritative partition moved from
+167 total / 129 executed / 38 derived to 168 / 130 / 38, with the new scenario
+executed rather than skipped or derived. Searchcap subsequently re-derived the
+current partition as 163 / 127 / 36 while preserving that posting scenario as
+executed. This finish-and-land guard changes no partition membership or count.
 
 ## Controls and victim lines
 
@@ -143,6 +172,33 @@ migration, privilege grant, posting-service byte, timeout, budget, or hex
 literal moved.
 
 ## Gate evidence
+
+### Finish-and-land guard controls
+
+The guard controls were executed after merging searchcap on
+`011cd6a5a1afb9b314beedf58d8d161fe301dc21`:
+
+- Restoring the historical loose predicate
+  `code !== expected.code || !reason` made the right-code/wrong-reason promise
+  resolve. The test therefore went red with the exact text
+  `Missing expected rejection: RIGHT_CODE_WRONG_REASON_MUST_FAIL`. This is the
+  original defect demonstrated: the wrong producing layer was admitted.
+- Supplying the declared code with the wrong reason to the restored production
+  guard exited red with
+  `ReleaseVerificationIntegrityError: VERIFICATION_CAPABILITY_REFUSAL_MISMATCH: capability operation northstar.test:operation.capability did not produce its exact declared typed refusal`.
+- Supplying the declared reason with the wrong code exited red with the same
+  named mismatch:
+  `ReleaseVerificationIntegrityError: VERIFICATION_CAPABILITY_REFUSAL_MISMATCH: capability operation northstar.test:operation.capability did not produce its exact declared typed refusal`.
+- Supplying a capability factory with no `verificationRefusal` exited red before
+  scenario execution with
+  `ReleaseVerificationIntegrityError: VERIFICATION_CAPABILITY_REFUSAL_CONTRACT_INVALID: capability factory northstar.inventory:capability.posting must declare its exact refusal`.
+
+The last control exercises `declaredCapabilityVerificationRefusals`, the same
+production validator the release-verification service uses to build its
+capability expectation map. A TypeScript declaration alone is not treated as a
+runtime observation.
+
+### Original posting-route evidence
 
 - `corepack pnpm typecheck`: PASS.
 - `corepack pnpm lint`: PASS.
