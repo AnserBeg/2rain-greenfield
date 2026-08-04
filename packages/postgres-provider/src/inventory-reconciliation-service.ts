@@ -1016,7 +1016,12 @@ async function readMovementGeneration(
   return result.rows[0]?.movementGeneration ?? '0';
 }
 
-async function selectAnchors(
+/**
+ * Exported only as a test seam: the raw-property absence is a fact about the
+ * returned OBJECT, and the type already claims the property is gone, so a
+ * control has to observe the object itself.
+ */
+export async function selectAnchors(
   client: PoolClient,
   context: TrustedRequestContext,
 ): Promise<AnchorRow[]> {
@@ -1040,14 +1045,19 @@ async function selectAnchors(
       ORDER BY anchor.cache_key`,
     [context.tenantId, context.environmentId],
   );
-  return result.rows.map((row) =>
-    Object.freeze({
-      ...row,
-      legalEntityScope: normalizeAnchorScope(
-        (row as unknown as { legalEntityIds: unknown }).legalEntityIds,
-      ),
-    }),
-  );
+  return result.rows.map((row) => {
+    // Destructured out, not merely undeclared. Spreading the row carried the
+    // raw array onto every anchor object beside its normalized form: invisible
+    // to the type, present at runtime, and reusable by the next consumer.
+    const { legalEntityIds, ...rest } = row as unknown as Omit<
+      AnchorRow,
+      'legalEntityScope'
+    > & { legalEntityIds: unknown };
+    return Object.freeze({
+      ...rest,
+      legalEntityScope: normalizeAnchorScope(legalEntityIds),
+    });
+  });
 }
 
 function normalizeAnchorScope(value: unknown): NormalizedAnchorScope {

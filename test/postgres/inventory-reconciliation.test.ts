@@ -47,6 +47,7 @@ import {
   InventoryReconciliationError,
   PostgresInventoryReconciliationService,
   renderInventoryReconciliationReport,
+  selectAnchors,
   type InventoryReconciliationArmReportV1,
   type InventoryReconciliationObservationV1,
   type InventoryReconciliationRegistrationV1,
@@ -1127,6 +1128,41 @@ test('reconciliation names divergence, confirms consistency, repairs nothing, an
             ),
           );
           assert.notEqual(nested.outcome, 'consistent');
+        },
+      );
+
+      await t.test(
+        'the returned anchor object carries no raw stored scope',
+        async () => {
+          // Asserted on the OBJECT, never on the type: the whole defect was that
+          // `AnchorRow` already claimed the property was gone while the spread
+          // kept putting it back at runtime.
+          const anchors = await withModuleRole(runtimePool, scopeA, (client) =>
+            selectAnchors(client, scopeA.context),
+          );
+          assert.ok(
+            anchors.length > 0,
+            'the control must observe real anchors, not an empty set',
+          );
+          for (const anchor of anchors) {
+            assert.equal(
+              Object.hasOwn(anchor, 'legalEntityIds'),
+              false,
+              `${anchor.cacheKey} still carries the raw stored scope`,
+            );
+            assert.deepEqual(
+              Object.keys(anchor).filter((key) => /legal/iu.test(key)),
+              ['legalEntityScope'],
+            );
+          }
+          // The normalized form is still there and still validated, so this is
+          // an absence control rather than a "delete the field" control.
+          const nested = anchors.find(
+            (anchor) => anchor.cacheKey === nestedScopeAnchorCacheKey,
+          );
+          assert.ok(nested);
+          assert.equal(nested.legalEntityScope.wellFormed, false);
+          assert.deepEqual(nested.legalEntityScope.ids, []);
         },
       );
     } finally {

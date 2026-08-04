@@ -90,15 +90,15 @@ query boundary, into `NormalizedAnchorScope { ids, rendered, wellFormed }`, and
 both consumers — attribution and scope agreement — see only validated
 identifiers.
 
-> **This claim was stronger when written, and round 3 showed the stronger form
-> was false.** It read *"the raw value no longer escapes `selectAnchors`."* It
-> does escape: `selectAnchors` spreads `...row`, and the row still carries the
-> raw `legalEntityIds` the SQL selected, so every anchor object holds the raw
-> array beside its normalized form. `AnchorRow` no longer declares the property,
-> which makes it invisible to the type system rather than absent at runtime. No
-> consumer reads it, so nothing is broken today — but the guarantee as stated was
-> wrong, and the correction is recorded rather than quietly narrowed. **The
-> stronger guarantee is not restored in this packet**; see the stop below. `wellFormed` is false for anything that is not a flat array of
+> **This claim was stronger when written, round 3 showed the stronger form was
+> false, and it is now true again.** It read *"the raw value no longer escapes
+> `selectAnchors`."* It did escape: the mapper spread `...row`, and the row still
+> carried the raw `legalEntityIds` the SQL selected, so every anchor object held
+> the raw array beside its normalized form — invisible to the type system rather
+> than absent at runtime. **Closed under orchestrator direction** by
+> destructuring the property out of the spread, with a control that asserts on
+> the returned OBJECT rather than on the type, because the type already claimed
+> the property was gone. `wellFormed` is false for anything that is not a flat array of
 well-formed UUIDs, which makes an unreadable stored shape a
 `AGGREGATE_ANCHOR_SCOPE_DIVERGED` rather than a crash. A well-formed scope still
 renders as the identifiers themselves; only a malformed one costs the operator
@@ -131,7 +131,7 @@ property of a reconciliation report, not an oversight.
 
 ## Controls and recorded reds
 
-`test/postgres/inventory-reconciliation.test.ts` — 14 subtests. All ten of
+`test/postgres/inventory-reconciliation.test.ts` — 15 subtests. All ten of
 `G3-R1`'s vacuity controls still pass unchanged; two assertions moved from
 `excludedSubjectCount` to `excludedSubjects` and became stronger, not weaker.
 
@@ -148,6 +148,7 @@ defect and nothing else:
 | 13 | a stored scope element is trusted rather than validated | *pre-fix code* — plant `ARRAY[NULL]::uuid[]` | `not ok 14` — `TypeError: Cannot read properties of null (reading 'toLowerCase')` at `inventory-reconciliation-service.ts:574` |
 | 13b | an unplaceable anchor is excluded from every scope | force `placeable = true` | `not ok 14` — `an anchor no authority can place must be reported by every scope, or it is reported by none` |
 | 14 | the stored array's SHAPE is trusted downstream of attribution | scope agreement reads the raw array instead of `NormalizedAnchorScope` | `not ok 14` — `TypeError: raw[0]?.toLowerCase is not a function` at `inventory-reconciliation-service.ts:663` |
+| 15 | the raw stored scope rides the returned anchor object | restore the `...row` spread in place of the destructure | `not ok 15` — `0a0a…0a0a still carries the raw stored scope` / `true !== false` |
 
 Subtest 13 carries all four charter controls in one run, on a legal entity of its
 own so the pre-fix verdict is genuinely `consistent` rather than masked by the
@@ -208,23 +209,34 @@ reachable failure today** — both former consumers were removed, and the review
 says as much. What is wrong is the packet's own central guarantee, and a latent
 hazard: the next consumer to spread or index an anchor row reproduces the class.
 
-**The fix is one line and is deliberately not written here.** Destructuring the
-raw property out — `const { legalEntityIds, ...rest } = row` — or building the
-returned object explicitly would close it. This is the **third round on one
-class**: trusted shape at attribution, then at scope agreement, then at the
-boundary meant to end it. `review-tiers` names that a mis-scoped charter rather
-than wrong code, and the charter's own two-revise cap says stop and report. The
-question this packet was given — *how does a sweep attribute an anchor whose
-stored scope may itself be wrong?* — is answered and reviewed clean. The question
-that keeps recurring is a different one: **where does an untrusted external
-representation stop being untrusted, and what enforces that boundary?** That is
-worth its own charter, and it is the user's call.
+**The fix was one line and the lane deliberately did not write it**, because
+this was the **third round on one class** — trusted shape at attribution, then at
+scope agreement, then at the boundary meant to end it — and `review-tiers` names
+that a mis-scoped charter rather than wrong code.
+
+**Closed 2026-08-04 under orchestrator direction**, which upheld both the finding
+and the unreachability assessment and named the line, the file and the fix. That
+is not a fourth autonomous round against a mis-scoped charter: the charter's own
+question was met and rounds D1/D2/D4 confirmed clean. The general question the
+lane surfaced — **where does an untrusted external representation stop being
+untrusted, and what enforces that boundary?** — was routed to row
+`trust-boundary` and is explicitly not this packet's; no row-mapper was built.
 
 **What is decided, and what is not.** Attribution totality, the null-element and
 nested-array shapes, the residual policy, the `0022` deferral, the controls and
 every `G3-R1` invariant were reviewed clean across three rounds. The open finding
 makes no reported finding wrong, cannot cause a repair, and cannot cause a crash
 on any path a consumer takes today.
+
+### The closing change, bounded exactly
+
+One destructure in `selectAnchors`, plus one `export` on that function as a test
+seam — the same minimal-seam pattern as `aggregateGenerationLockKey`, and needed
+because the absence of a runtime property is a fact about the object that no
+type-level assertion can observe. `recognizedAnchorParameters`, the read-only
+enforcement and its observed read-back, and every existing control are untouched.
+Nothing beyond that one destructure was required, which is the test the direction
+set for whether this was a one-liner or `trust-boundary`'s problem.
 
 ## What was not touched
 
