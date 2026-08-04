@@ -1535,7 +1535,12 @@ function aggregateCacheDigest(domain: string, value: unknown): string {
     .digest('hex');
 }
 
-function aggregateGenerationLockKey(
+/**
+ * Exported so the reconciliation sweep guards its snapshot with the same key
+ * this read path and `advance_semantic_aggregate_generation` already use. A
+ * second derivation of this string would drift and silently stop conflicting.
+ */
+export function aggregateGenerationLockKey(
   tenantId: string,
   environmentId: string,
 ): string {

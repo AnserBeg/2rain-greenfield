@@ -5,7 +5,10 @@ import {
 } from '@north-star/runtime';
 import type { Pool, PoolClient } from 'pg';
 
-import { withModuleRuntimeRole } from './module-runtime-interpreter.js';
+import {
+  aggregateGenerationLockKey,
+  withModuleRuntimeRole,
+} from './module-runtime-interpreter.js';
 import { withTrustedRequestTransaction } from './request-context.js';
 
 export const INVENTORY_RECONCILIATION_REPORT_VERSION =
@@ -18,6 +21,7 @@ const instantPattern =
   /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z$/u;
 const decimalScale = 18n;
 const scaleFactor = 10n ** decimalScale;
+const maximumScaledMagnitude = 10n ** 38n;
 
 export type InventoryReconciliationArmIdV1 =
   'aggregateAnchors' | 'sourceDocuments';
@@ -32,9 +36,11 @@ export type InventoryReconciliationOutcomeV1 =
   'consistent' | 'discrepant' | 'indeterminate';
 
 export type InventoryReconciliationFindingCodeV1 =
+  | 'AGGREGATE_ANCHOR_BALANCE_UNRECOGNIZED'
   | 'AGGREGATE_ANCHOR_LEDGER_DIVERGED'
   | 'AGGREGATE_ANCHOR_PARAMETERS_UNRECOGNIZED'
   | 'AGGREGATE_ANCHOR_QUERY_UNRECOGNIZED'
+  | 'AGGREGATE_ANCHOR_SCOPE_DIVERGED'
   | 'RECORDED_ANCHOR_DISCREPANCY_PRESERVED'
   | 'SCOPE_OBSERVED_NO_SUBJECTS'
   | 'SOURCE_DOCUMENT_ITEM_DIVERGED'
@@ -210,6 +216,12 @@ interface AnchorRow {
  * here instead of reusing the posting service's helpers. A verifier that shares
  * a code path with the thing it verifies cannot observe that path being wrong
  * (AGENTS.md section 6).
+ *
+ * The sweep holds the shared aggregate-generation guard for its whole
+ * transaction, because ordinary `READ COMMITTED` statement snapshots would let a
+ * posting commit between the document read and the movement read and produce a
+ * **false** discrepancy. The operational cost is real and deliberate: while a
+ * scope reconciles, movement appends in that tenant and environment wait.
  */
 export class PostgresInventoryReconciliationService {
   readonly #binding: ReconciliationStorageBinding;
@@ -243,6 +255,15 @@ export class PostgresInventoryReconciliationService {
             'reconciliation refuses to run in a writable transaction',
           );
         }
+        // Snapshot coherence. Every movement append advances the generation
+        // inside its own transaction and therefore takes this key exclusively,
+        // so holding it shared pins the ledger for the whole sweep. Without it
+        // a posting committing between the two reads below makes a correct
+        // movement look like it has no source document.
+        await client.query(
+          'SELECT pg_advisory_xact_lock_shared(hashtextextended($1, 0))',
+          [aggregateGenerationLockKey(context.tenantId, context.environmentId)],
+        );
         const sourceDocuments = await this.#reconcileSourceDocuments(
           client,
           context,
@@ -350,7 +371,7 @@ export class PostgresInventoryReconciliationService {
           movementId: movement.movementId,
           transactionLineId: movement.transactionLineId ?? '',
         },
-        observedValue: canonicalDecimal(movement.quantityDelta),
+        observedValue: renderedStoredDecimal(movement.quantityDelta),
       });
     }
     return arm.freeze();
@@ -363,7 +384,28 @@ export class PostgresInventoryReconciliationService {
   ): void {
     const binding = this.#binding;
     const subjectId = line.transactionLineId;
-    const declaredQuantity = canonicalDecimal(line.quantity);
+    const declaredQuantity = renderedStoredDecimal(line.quantity);
+    const uncomparable =
+      parseStoredDecimal(line.quantity) === null ||
+      observed.some(
+        (movement) => parseStoredDecimal(movement.quantityDelta) === null,
+      );
+    if (uncomparable) {
+      // Out of the declared storage contract, so no comparison this arm could
+      // make would mean anything. Named, never counted as consistent.
+      arm.unverifiable(subjectId, {
+        code: 'SOURCE_DOCUMENT_LINE_SHAPE_UNRECOGNIZED',
+        declaredValue: declaredQuantity,
+        detail: {
+          lineNumber: line.lineNumber,
+          transactionId: line.transactionId,
+          transactionLineId: subjectId,
+          transactionType: line.transactionType,
+        },
+        observedValue: null,
+      });
+      return;
+    }
     const expected = expectedLineEffects(binding, line);
     if (!expected) {
       arm.unverifiable(subjectId, {
@@ -407,7 +449,7 @@ export class PostgresInventoryReconciliationService {
       observedByLocation.set(
         movement.locationId,
         (observedByLocation.get(movement.locationId) ?? 0n) +
-          decimalToScaled(movement.quantityDelta),
+          (parseStoredDecimal(movement.quantityDelta) ?? 0n),
       );
       if (movement.itemId !== line.itemId) {
         divergent = true;
@@ -522,10 +564,25 @@ export class PostgresInventoryReconciliationService {
     anchor: AnchorRow,
   ): Promise<void> {
     const subjectId = anchor.cacheKey;
+    const declaredScaled = parseStoredDecimal(anchor.balanceValue);
+    const declared =
+      declaredScaled === null ? null : scaledToDecimal(declaredScaled);
     if (anchor.queryId !== this.registration.aggregateQueryId) {
       arm.unverifiable(subjectId, {
         code: 'AGGREGATE_ANCHOR_QUERY_UNRECOGNIZED',
-        declaredValue: canonicalDecimal(anchor.balanceValue),
+        declaredValue: declared,
+        detail: { cacheKey: subjectId, queryId: anchor.queryId },
+        observedValue: null,
+      });
+      return;
+    }
+    if (declared === null) {
+      // A stored balance outside numeric(38,18) is not comparable. Refusing to
+      // compare it is the only honest answer; treating it as zero would report
+      // a corrupt anchor as clean.
+      arm.unverifiable(subjectId, {
+        code: 'AGGREGATE_ANCHOR_BALANCE_UNRECOGNIZED',
+        declaredValue: anchor.balanceValue,
         detail: { cacheKey: subjectId, queryId: anchor.queryId },
         observedValue: null,
       });
@@ -538,20 +595,47 @@ export class PostgresInventoryReconciliationService {
     if (!parameters) {
       arm.unverifiable(subjectId, {
         code: 'AGGREGATE_ANCHOR_PARAMETERS_UNRECOGNIZED',
-        declaredValue: canonicalDecimal(anchor.balanceValue),
+        declaredValue: declared,
         detail: { cacheKey: subjectId, queryId: anchor.queryId },
         observedValue: null,
       });
       return;
     }
-    const declared = canonicalDecimal(anchor.balanceValue);
+    // The registered query scopes itself with exactly one legal entity taken
+    // from its own operand, so a stored scope that disagrees with that operand
+    // is an anchor whose cached value answers a different question than its key
+    // claims. Summing over either side would launder the defect.
+    if (
+      anchor.legalEntityIds.length !== 1 ||
+      anchor.legalEntityIds[0]?.toLowerCase() !== parameters.legalEntityId
+    ) {
+      arm.discrepant(subjectId, {
+        code: 'AGGREGATE_ANCHOR_SCOPE_DIVERGED',
+        declaredValue: anchor.legalEntityIds.join(','),
+        detail: {
+          cacheKey: subjectId,
+          queryId: anchor.queryId,
+        },
+        observedValue: parameters.legalEntityId,
+      });
+      return;
+    }
     const observed = await sumMovementLedger(
       client,
       this.#binding,
       context,
-      anchor.legalEntityIds,
+      [parameters.legalEntityId],
       parameters,
     );
+    if (observed === null) {
+      arm.unverifiable(subjectId, {
+        code: 'AGGREGATE_ANCHOR_BALANCE_UNRECOGNIZED',
+        declaredValue: declared,
+        detail: { cacheKey: subjectId, queryId: anchor.queryId },
+        observedValue: null,
+      });
+      return;
+    }
     let divergent = false;
     if (declared !== observed) {
       divergent = true;
@@ -562,7 +646,7 @@ export class PostgresInventoryReconciliationService {
           atTime: parameters.atTime,
           cacheKey: subjectId,
           itemId: parameters.itemId,
-          legalEntityIds: anchor.legalEntityIds.join(','),
+          legalEntityIds: parameters.legalEntityId,
           locationId: parameters.locationId,
           queryId: anchor.queryId,
           recordedAtHorizon: parameters.recordedAtHorizon,
@@ -740,7 +824,8 @@ function expectedLineEffects(
   binding: ReconciliationStorageBinding,
   line: SourceDocumentLineRow,
 ): ExpectedLineEffects | null {
-  const quantity = decimalToScaled(line.quantity);
+  const quantity = parseStoredDecimal(line.quantity);
+  if (quantity === null) return null;
   if (line.transactionType === binding.transactionTransferType) {
     if (
       line.fromLocationId === null ||
@@ -778,6 +863,8 @@ function expectedLineEffects(
 interface RecognizedAnchorParameters {
   readonly atTime: string;
   readonly itemId: string;
+  /** The query's own legal-entity operand, which is the scope authority. */
+  readonly legalEntityId: string;
   readonly locationId: string;
   readonly recordedAtHorizon: string;
 }
@@ -802,22 +889,31 @@ function recognizedAnchorParameters(
     return null;
   }
   const itemId = parameterValues[ids.itemId];
+  const legalEntityId = parameterValues[ids.legalEntityId];
   const locationId = parameterValues[ids.locationId];
   const atTime = parameterValues[ids.atTime];
   const recordedAtHorizon = parameterValues[ids.recordedAtHorizon];
   if (
     typeof itemId !== 'string' ||
+    typeof legalEntityId !== 'string' ||
     typeof locationId !== 'string' ||
     typeof atTime !== 'string' ||
     typeof recordedAtHorizon !== 'string' ||
     !uuidPattern.test(itemId) ||
+    !uuidPattern.test(legalEntityId) ||
     !uuidPattern.test(locationId) ||
     !instantPattern.test(atTime) ||
     !instantPattern.test(recordedAtHorizon)
   ) {
     return null;
   }
-  return Object.freeze({ atTime, itemId, locationId, recordedAtHorizon });
+  return Object.freeze({
+    atTime,
+    itemId,
+    legalEntityId: legalEntityId.toLowerCase(),
+    locationId,
+    recordedAtHorizon,
+  });
 }
 
 async function readTransactionReadOnly(client: PoolClient): Promise<string> {
@@ -873,7 +969,7 @@ async function sumMovementLedger(
   context: TrustedRequestContext,
   legalEntityIds: readonly string[],
   parameters: RecognizedAnchorParameters,
-): Promise<string> {
+): Promise<string | null> {
   const movement = binding.movement;
   const result = await client.query<{ balance: string }>(
     `SELECT COALESCE(SUM(${quoted(binding.movementQuantityColumn)}), 0)::text
@@ -896,7 +992,8 @@ async function sumMovementLedger(
       parameters.recordedAtHorizon,
     ],
   );
-  return canonicalDecimal(result.rows[0]?.balance ?? '0');
+  const scaled = parseStoredDecimal(result.rows[0]?.balance ?? '0');
+  return scaled === null ? null : scaledToDecimal(scaled);
 }
 
 async function selectPostedSourceDocumentLines(
@@ -1269,19 +1366,33 @@ function quoted(identifier: string): string {
   return `"${identifier.replaceAll('"', '""')}"`;
 }
 
-function decimalToScaled(value: string): bigint {
-  if (!storedDecimalPattern.test(value)) {
-    throw new InventoryReconciliationError(
-      'INVENTORY_RECONCILIATION_STORAGE_INVALID',
-      `stored quantity ${value} is not numeric(38,18)`,
-    );
-  }
+/**
+ * Returns `null` rather than throwing, and rather than coercing, for anything
+ * outside `numeric(38,18)`. The declared column bound is 38 significant digits;
+ * an unbounded sum of two maximal movements exceeds it, and the compiled query
+ * would raise on the same value. Silently comparing such a value would let a
+ * corrupt anchor reconcile as consistent, so the caller reports it unverifiable.
+ */
+function parseStoredDecimal(value: string): bigint | null {
+  if (!storedDecimalPattern.test(value)) return null;
   const negative = value.startsWith('-');
   const unsigned = negative ? value.slice(1) : value;
   const [whole = '0', fraction = ''] = unsigned.split('.');
+  if (fraction.length > 18) return null;
   const scaled =
     BigInt(whole) * scaleFactor + BigInt(fraction.padEnd(18, '0') || '0');
+  // The bound is on the SCALED magnitude, not on the digits written. A
+  // twenty-one digit integer carries no fraction yet still needs thirty-nine
+  // digits once scaled, so a "total digits" test would admit a value the column
+  // cannot hold.
+  if (scaled >= maximumScaledMagnitude) return null;
   return negative ? -scaled : scaled;
+}
+
+/** The canonical form when the value is in contract, the raw text when not. */
+function renderedStoredDecimal(value: string): string {
+  const scaled = parseStoredDecimal(value);
+  return scaled === null ? value : scaledToDecimal(scaled);
 }
 
 function scaledToDecimal(value: bigint): string {
@@ -1294,8 +1405,4 @@ function scaledToDecimal(value: bigint): string {
   const rendered =
     fraction.length === 0 ? String(whole) : `${String(whole)}.${fraction}`;
   return negative && absoluteValue !== 0n ? `-${rendered}` : rendered;
-}
-
-function canonicalDecimal(value: string): string {
-  return scaledToDecimal(decimalToScaled(value));
 }

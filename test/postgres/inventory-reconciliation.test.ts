@@ -57,6 +57,7 @@ import {
   runMigrations,
 } from '../../packages/postgres-provider/src/migrations.js';
 import {
+  aggregateGenerationLockKey,
   type AggregateCacheObservation,
   PostgresModuleRuntimeInterpreter,
 } from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
@@ -111,6 +112,8 @@ const horizon = '2026-12-31T00:00:00.000Z';
 
 const plantedAnchorCacheKey = 'ab'.repeat(32);
 const unrecognizedAnchorCacheKey = 'cd'.repeat(32);
+const scopeDivergedAnchorCacheKey = '0a'.repeat(32);
+const overflowingAnchorCacheKey = '1b'.repeat(32);
 const plantedFilterPlanDigest = 'ef'.repeat(32);
 const plantedReleaseContentHash = '12'.repeat(32);
 const plantedAnchorDigest = '34'.repeat(32);
@@ -771,6 +774,105 @@ test('reconciliation names divergence, confirms consistency, repairs nothing, an
             error.code === 'INVENTORY_RECONCILIATION_SCOPE_INVALID',
         );
       });
+
+      await t.test(
+        'an anchor whose stored scope or balance is out of contract is never called clean',
+        async () => {
+          await plantAnchor(runtimePool, scopeA, {
+            balanceValue: '3',
+            cacheKey: scopeDivergedAnchorCacheKey,
+            itemId: itemPrimary,
+            legalEntityId: legalEntityA,
+            locationId: locationSecondary,
+            principalId: principalA,
+            queryId: reconciliationIds.onHandQueryId,
+            scopeLegalEntityIds: [legalEntityA, quietLegalEntityA],
+          });
+          await plantAnchor(runtimePool, scopeA, {
+            // Twenty-one integer digits: inside migration 0020's lexical check
+            // and outside numeric(38,18), which is the gap a lexical check
+            // cannot see.
+            balanceValue: `1${'0'.repeat(20)}`,
+            cacheKey: overflowingAnchorCacheKey,
+            itemId: itemPrimary,
+            legalEntityId: legalEntityA,
+            locationId: locationSecondary,
+            principalId: principalA,
+            queryId: reconciliationIds.onHandQueryId,
+          });
+          const report = await reconciliation.reconcile(scopeA.context, {
+            legalEntityIds: [legalEntityA, quietLegalEntityA],
+            scopeId: 'out-of-contract-scope',
+          });
+          const scopeDiverged = findingFor(
+            report,
+            'AGGREGATE_ANCHOR_SCOPE_DIVERGED',
+            scopeDivergedAnchorCacheKey,
+          );
+          assert.equal(
+            scopeDiverged.declaredValue,
+            `${legalEntityA},${quietLegalEntityA}`,
+          );
+          assert.equal(scopeDiverged.observedValue, legalEntityA);
+          const anchors = arm(report, 'aggregateAnchors');
+          assert.equal(
+            anchors.consistentSubjectIds.includes(scopeDivergedAnchorCacheKey),
+            false,
+            'an anchor answering a different scope than its key claims is never consistent',
+          );
+          assert.ok(
+            anchors.discrepantSubjectIds.includes(scopeDivergedAnchorCacheKey),
+          );
+
+          const overflowing = findingFor(
+            report,
+            'AGGREGATE_ANCHOR_BALANCE_UNRECOGNIZED',
+            overflowingAnchorCacheKey,
+          );
+          assert.equal(overflowing.declaredValue, `1${'0'.repeat(20)}`);
+          assert.equal(overflowing.observedValue, null);
+          assert.ok(
+            anchors.unverifiableSubjectIds.includes(overflowingAnchorCacheKey),
+            'a stored balance outside numeric(38,18) is unverifiable, not clean',
+          );
+          assert.equal(
+            anchors.consistentSubjectIds.includes(overflowingAnchorCacheKey),
+            false,
+          );
+        },
+      );
+
+      await t.test(
+        'the sweep holds the aggregate-generation guard, so a concurrent append cannot split its snapshot',
+        async () => {
+          const holder = await database.pool.connect();
+          let pending: Promise<InventoryReconciliationReportV1> | undefined;
+          let holderOpen = false;
+          try {
+            await holder.query('BEGIN');
+            holderOpen = true;
+            await holder.query(
+              'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+              [aggregateGenerationLockKey(tenantA, environmentA)],
+            );
+            pending = reconciliation.reconcile(scopeA.context, {
+              legalEntityIds: [legalEntityA],
+              scopeId: 'guarded-scope',
+            });
+            void pending.catch(() => undefined);
+            const waiterPid = await waitForGenerationLockWaiter(database.pool);
+            assert.equal(typeof waiterPid, 'number');
+            await holder.query('ROLLBACK');
+            holderOpen = false;
+          } finally {
+            if (holderOpen) await holder.query('ROLLBACK');
+            holder.release();
+          }
+          assert.ok(pending);
+          const report = await pending;
+          assert.equal(report.scopeId, 'guarded-scope');
+        },
+      );
     } finally {
       await Promise.all([
         runtimePool.end(),
@@ -788,6 +890,49 @@ function arm(
   const found = report.arms.find((candidate) => candidate.armId === armId);
   assert.ok(found, `missing arm ${armId}`);
   return found;
+}
+
+function findingFor(
+  report: InventoryReconciliationReportV1,
+  code: string,
+  subjectId: string,
+): InventoryReconciliationReportV1['findings'][number] {
+  const matches = report.findings.filter(
+    (finding) => finding.code === code && finding.subjectId === subjectId,
+  );
+  assert.equal(
+    matches.length,
+    1,
+    `expected exactly one ${code} for ${subjectId}`,
+  );
+  return matches[0]!;
+}
+
+async function waitForGenerationLockWaiter(pool: Pool): Promise<number> {
+  const deadline = process.hrtime.bigint() + 15_000_000_000n;
+  while (process.hrtime.bigint() < deadline) {
+    const result = await pool.query<{ pid: number }>(
+      `SELECT activity.pid
+         FROM pg_catalog.pg_stat_activity AS activity
+         JOIN pg_catalog.pg_locks AS lock_record
+           ON lock_record.pid = activity.pid
+        WHERE activity.datname = current_database()
+          AND activity.application_name = 'g3-r1-reconciliation'
+          AND activity.wait_event_type = 'Lock'
+          AND activity.wait_event = 'advisory'
+          AND lock_record.locktype = 'advisory'
+          AND lock_record.mode = 'ShareLock'
+          AND NOT lock_record.granted
+        ORDER BY activity.pid
+        LIMIT 1`,
+    );
+    const pid = result.rows[0]?.pid;
+    if (typeof pid === 'number') return pid;
+    await new Promise<void>((resolveTurn) => setImmediate(resolveTurn));
+  }
+  throw new Error(
+    'the reconciliation never waited on the aggregate-generation guard',
+  );
 }
 
 function onlyFinding(
@@ -955,10 +1100,13 @@ interface PlantedAnchorInput {
   readonly balanceValue: string;
   readonly cacheKey: string;
   readonly itemId: string;
+  /** The value of the query's own legal-entity operand. */
   readonly legalEntityId: string;
   readonly locationId: string;
   readonly principalId: string;
   readonly queryId: string;
+  /** The stored scope column, which defaults to agreeing with the operand. */
+  readonly scopeLegalEntityIds?: readonly string[];
 }
 
 /**
@@ -998,7 +1146,7 @@ async function plantAnchor(
         input.queryId,
         input.principalId,
         plantedReleaseContentHash,
-        [input.legalEntityId],
+        [...(input.scopeLegalEntityIds ?? [input.legalEntityId])],
         JSON.stringify({
           [reconciliationIds.parameterIds.atTime]: horizon,
           [reconciliationIds.parameterIds.itemId]: input.itemId,
