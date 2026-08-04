@@ -311,7 +311,39 @@ packet's investigation contradicts, which is the orchestrator's to record.
 
 ## Gates — one full matrix at the frozen SHA
 
-*(pending)*
+`bash ./scripts/run-matrix.sh SINGLETON /home/rvham/2rain-greenfield-singleton`
+at `8df2195602e33a4a0086a424055d955133de2682`. The runner recorded both
+`PERFORMANCE_GATE_PASS_SHA=8df2195602e33a4a0086a424055d955133de2682` and
+`FULL_MATRIX_PASS_SHA=8df2195602e33a4a0086a424055d955133de2682`. Zero `not ok`
+lines across the whole run. Raw log: `/tmp/matrix-SINGLETON-8df21956.log`.
+
+| Gate | Result |
+| --- | --- |
+| performance | 5/5; best-of-five CPU 1,716.7 ms and wall 1,356.9 ms against an unchanged 5,000 ms budget; 98.3% CPU idle admission |
+| unit | 82/82 |
+| compiler | 117/117 |
+| integration | 74/74 |
+| agent | 3/3 |
+| architecture | 116/116 |
+| web contracts | 7/7 |
+| PostgreSQL | 160/160 |
+| locale | 1/1 |
+| browser | 27/27 |
+| observability | 5/5 |
+| schema drift | PASS |
+| language coverage | 1,938 obligations; 426 observations; relation `95 = 0 + 93 + 2` |
+| reachability | 90/90 test files; 10 producer artifacts |
+| format, lint, typecheck, build, demo/app release, security | PASS |
+
+Unit moves 80/80 to 82/82: exactly the two controls this packet adds. No other
+suite's count moved, and no derived artifact moved — this packet changes only the
+instrument that measures the language, not the language or anything compiled
+from it.
+
+The security scan's `WRN leaks found: 1` line is its own negative control — a
+synthetic one-commit, 56-byte scan that must find a planted leak. The real
+856-commit scan reports `no leaks found` and the gate reports
+`Security scans passed`.
 
 ## Critical review
 
