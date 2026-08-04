@@ -1,6 +1,6 @@
 # 5g3-langnarrow — relation declarations are honoured or refused
 
-Status: frozen current-main matrix-green candidate; Critical review pending
+Status: stopped after Critical review round 1; scoped bridge required
 
 Tier: Critical
 
@@ -20,11 +20,20 @@ and
 
 ## Outcome
 
-The relation grammar now admits only the declaration the platform implements:
+The matrix-green candidate narrowed the relation grammar to
 `cardinality: 'manyToOne'` and `joinEligibility: 'query'`. The cardinality
 spellings `oneToOne` and `oneToMany`, the join-eligibility spelling `none`, and
 an omitted join eligibility all fail at the canonical authoring boundary. None
 is rewritten to the supported declaration.
+
+Critical review rejected the candidate's claim that the surviving
+`joinEligibility: 'query'` declaration is implemented. Repository-wide consumer
+inspection confirms that it survives normalization but no compiler, query, or
+runtime path reads it. ADR-0041 explicitly requires consumerless join eligibility
+to be removed from the admitted surface. Consequently the candidate's zero
+accepted-but-unhonored partition is not admissible evidence: it launders the
+surviving `query` defect through the gate's singleton-axis blind spot. The
+cardinality narrowing remains sound, but the packet cannot land in this state.
 
 ADR-0021's pattern applies directly. It keeps required but unimplemented
 comparison spellings outside the admitted language and makes their use a
@@ -65,7 +74,7 @@ inferred from declarations or older tests.
 | Tree | Relation partition | Whole ledger | First-party observations |
 | --- | --- | --- | --- |
 | BASE | `94 = 0 supported-and-exercised + 89 supported-but-unexercised + 5 accepted-but-unhonored` | 1,899 | 396 |
-| merged candidate | `87 = 0 supported-and-exercised + 87 supported-but-unexercised + 0 accepted-but-unhonored` | 1,892 | 393 |
+| merged candidate (mechanical output; rejected by review) | `87 = 0 supported-and-exercised + 87 supported-but-unexercised + 0 accepted-but-unhonored` | 1,892 | 393 |
 
 Exactly seven relation obligations left the ledger; none was added and none
 moved into accepted-but-unhonored:
@@ -87,9 +96,11 @@ moved into accepted-but-unhonored:
   is refused by name with
   `CANON_RELATION_JOIN_ELIGIBILITY_UNSUPPORTED`.
 - `authoredLanguage:$.relations[].joinEligibility="query"` —
-  accepted-but-unhonored → removed from the derived ledger because it is now
-  the sole admitted join declaration; the positive witness carries it through
-  normalization into the relation that lowers successfully.
+  accepted-but-unhonored → mechanically removed because it became a singleton.
+  Critical review rejected the candidate attribution: carrying the value through
+  normalization beside a relation that lowers does not honour join-eligibility
+  semantics, because the lowerer never reads the value. This is still a defect,
+  hidden rather than closed.
 - `authoredLanguage:$.relations[].joinEligibility.$presence="absent"` —
   supported-but-unexercised → removed from the derived ledger because omission
   is no longer an admitted spelling and is refused with the join-eligibility
@@ -188,6 +199,42 @@ No compiler conformance source was changed, no relation semantics were
 implemented on speculation, and no language-coverage instrument was changed.
 Future one-to-one or one-to-many support must arrive with executing storage
 semantics and its own negative controls.
+
+## Critical review round 1 — REVISE; finding upheld
+
+Fresh naive Codex `gpt-5.6-sol` at `xhigh` reviewed frozen SHA
+`a2af1634547b2456da8dac56d00f47dd4062cc40` against BASE
+`011cd6a5a1afb9b314beedf58d8d161fe301dc21`. It returned `VERDICT: REVISE`:
+
+> `joinEligibility: 'query'` remains an authored declaration even though no
+> compiler, query, or runtime consumer observes it. The positive witness proves
+> only that the value survives normalization and that an ordinary foreign key
+> lowers. Clearing the former defect inventory therefore launders the existing
+> defect and conflicts with ADR-0041.
+
+The finding is upheld. `packages/compiler/src/storage.ts` never reads
+`joinEligibility`; repository-wide search finds production references only in
+canonical parsing and authored domain declarations. Fable confirmation was not
+launched because the Critical-tier sequence permits confirmation only after the
+primary reviewer passes. No revision round has yet been attempted.
+
+The smallest compliant revision removes `joinEligibility` from authored and
+normalized relation shapes, accepts omission, rejects every explicit spelling by
+name, removes the explicit declarations from all first-party authored inputs, and
+re-derives canonical and application artifacts plus coverage evidence. That
+revision crosses this packet's declared lease. A bridge or lease expansion is
+required for:
+
+- `packages/domain/src/inventory/definition.ts`
+- `packages/domain/src/party/definition.ts`
+- `test/compiler/g2-module-conformance.test.ts`
+- `test/compiler/g2-module-storage.test.ts`
+- `test/fixtures/g2/module-conformance/definitions.ts`
+- `test/postgres/module-runtime.test.ts`
+- `apps/web/release/app.authored.json` and deterministic dependent release output
+
+No file in that bridge set was edited. Raw review evidence is
+`/home/rvham/2rain-missions/langnarrow-codex-review-a2af163.result.txt`.
 
 ## Gates
 

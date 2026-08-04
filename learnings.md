@@ -430,3 +430,8 @@ How to apply: reproduce history from its recorded bytes and exact root, compile 
 Date: 2026-08-03
 Why: narrowing relation cardinality and join eligibility to one literal removed both axes from the derived ledger, so a future singleton-for-singleton substitution would not move its digest.
 How to apply: derive admitted literal obligations even when an axis has one value, and control a singleton substitution explicitly. See `docs/execution/packets/5g3-langnarrow.md`.
+
+## Admission is not implementation evidence
+Date: 2026-08-03
+Why: a relation value that survived normalization and accompanied a successfully lowered foreign key was misclassified as honoured even though no lowerer or runtime consumer read that value.
+How to apply: to move an obligation out of accepted-but-unhonored, name the downstream consumer and directly observe the declared semantics; successful processing of the surrounding object is not enough. See `docs/execution/packets/5g3-langnarrow.md`.
