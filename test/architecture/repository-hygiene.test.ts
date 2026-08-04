@@ -114,6 +114,7 @@ const suiteDefinitions = [
       'test/postgres/inventory-dimension-set-replay.test.ts',
       'test/postgres/inventory-onhand.test.ts',
       'test/postgres/inventory-posting.test.ts',
+      'test/postgres/inventory-reconciliation.test.ts',
       'test/postgres/inventory-stock-count.test.ts',
       'test/postgres/inventory-storage.test.ts',
       'test/postgres/inventory-terminal-state.test.ts',
