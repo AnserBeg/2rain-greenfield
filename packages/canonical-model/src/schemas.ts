@@ -580,7 +580,10 @@ const authoredV3FieldDefinition = normalizedV3FieldDefinition.extend({
 
 const normalizedRelationDefinition = z.strictObject({
   archiveBehavior: z.enum(['restrict', 'retainReference']),
-  cardinality: z.enum(['oneToOne', 'manyToOne', 'oneToMany']),
+  // ADR-0041 section 1: cardinality is restricted to the value the storage
+  // lowerer implements. `oneToOne` and `oneToMany` have no executing semantics,
+  // so they are refused at authoring rather than accepted and discarded.
+  cardinality: z.literal('manyToOne'),
   foreignKeyActions: z
     .strictObject({
       onDelete: z.literal('restrict'),

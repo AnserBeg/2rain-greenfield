@@ -16,6 +16,8 @@ import {
   parseAuthoredApplicationPackageJson,
   type VersionedAuthoredApplicationPackage,
 } from '../../../packages/canonical-model/src/index.js';
+import { lowerStorageTargetV1 } from '../../../packages/compiler/src/index.js';
+import { composedApplicationDefinition } from '../../../packages/domain/src/app/builder.js';
 import {
   V3_AGGREGATE_IDS,
   v3AggregateModule,
@@ -34,6 +36,38 @@ function fixture(): VersionedAuthoredApplicationPackage {
   return parseAuthoredApplicationPackageJson(
     readFileSync('test/fixtures/canonical-model/representative.authored.json'),
   );
+}
+
+// A real composed-application relation, not the representative canonical
+// fixture: the fixture's relation has no validated dedicated storage, so
+// lowering it fails for an unrelated reason and cannot witness anything.
+const relationWitnessId =
+  'northstar.app:relation.inventory_movement_transaction_line';
+
+function relationWitness(): {
+  relations: Array<{
+    cardinality: string;
+    ownership: string;
+    relationId: string;
+  }>;
+} {
+  return structuredClone(composedApplicationDefinition()) as {
+    relations: Array<{
+      cardinality: string;
+      ownership: string;
+      relationId: string;
+    }>;
+  };
+}
+
+function relationWitnessIndex(
+  authored: ReturnType<typeof relationWitness>,
+): number {
+  const index = authored.relations.findIndex(
+    (relation) => relation.relationId === relationWitnessId,
+  );
+  assert.notEqual(index, -1, `missing relation witness ${relationWitnessId}`);
+  return index;
 }
 
 function expectDiagnostic(
@@ -1039,6 +1073,47 @@ test('parent scope, assertion diagnostics, and reference locality are closed', (
     'CANON_QUERY_FILTER_FIELD_LOCALITY',
     { objectId: 'northstar.inventory:query.item_get' },
   );
+});
+
+for (const cardinality of ['oneToOne', 'oneToMany']) {
+  test(`relation cardinality ${cardinality} is declined before lowering`, () => {
+    const declined = relationWitness();
+    const relationIndex = relationWitnessIndex(declined);
+    declined.relations[relationIndex]!.cardinality = cardinality;
+    expectDiagnostic(
+      () => normalizeApplicationPackage(declined),
+      'CANON_RELATION_CARDINALITY_UNSUPPORTED',
+      {
+        acceptedAlternative:
+          'use cardinality manyToOne until another cardinality has executing semantics',
+        objectId: relationWitnessId,
+        path: `$.relations[${String(relationIndex)}].cardinality`,
+      },
+    );
+  });
+}
+
+test('the surviving relation cardinality normalizes and lowers', () => {
+  const supported = relationWitness();
+  const relationIndex = relationWitnessIndex(supported);
+  // The witness is already a `reference` relation, so the parent-scope guard
+  // cannot stand in for the authoring refusal above.
+  assert.equal(supported.relations[relationIndex]!.ownership, 'reference');
+
+  const normalized = normalizeApplicationPackage(supported);
+  const normalizedRelation = normalized.relations.find(
+    (relation) => relation.relationId === relationWitnessId,
+  );
+  assert.ok(normalizedRelation);
+  assert.equal(normalizedRelation.cardinality, 'manyToOne');
+
+  const lowered = lowerStorageTargetV1(normalized);
+  const loweredRelation = lowered.relations.find(
+    (relation) => relation.relationId === relationWitnessId,
+  );
+  assert.ok(loweredRelation);
+  assert.equal(loweredRelation.ownership, 'reference');
+  assert.equal(loweredRelation.relationColumn.postgresqlType, 'uuid');
 });
 
 test('state storage is derived and authored state-field authority rejects', () => {
