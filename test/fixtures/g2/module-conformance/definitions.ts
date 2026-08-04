@@ -235,6 +235,7 @@ export function ordinaryModuleV1(): Record<string, unknown> {
           onUpdate: 'restrict',
           schemaVersion: version,
         },
+        joinEligibility: 'query',
         kind: 'relationDefinition',
         orderKey: 10,
         ownership: 'parentScopedChild',

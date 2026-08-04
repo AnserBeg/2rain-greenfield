@@ -580,6 +580,9 @@ const authoredV3FieldDefinition = normalizedV3FieldDefinition.extend({
 
 const normalizedRelationDefinition = z.strictObject({
   archiveBehavior: z.enum(['restrict', 'retainReference']),
+  // ADR-0041 section 1: cardinality is restricted to the value the storage
+  // lowerer implements. `oneToOne` and `oneToMany` have no executing semantics,
+  // so they are refused at authoring rather than accepted and discarded.
   cardinality: z.literal('manyToOne'),
   foreignKeyActions: z
     .strictObject({
@@ -588,6 +591,7 @@ const normalizedRelationDefinition = z.strictObject({
       schemaVersion: nodeVersion,
     })
     .optional(),
+  joinEligibility: z.enum(['none', 'query']),
   kind: z.literal('relationDefinition'),
   lifecycle: z.enum(['active', 'retired']),
   orderKey: boundedOrderKey,
@@ -599,6 +603,7 @@ const normalizedRelationDefinition = z.strictObject({
   targetEntity: CanonicalReferenceSchema,
 });
 const authoredRelationDefinition = normalizedRelationDefinition.extend({
+  joinEligibility: z.enum(['none', 'query']).optional(),
   lifecycle: z.enum(['active', 'retired']).optional(),
   required: z.boolean().optional(),
 });

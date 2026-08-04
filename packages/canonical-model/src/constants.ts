@@ -154,6 +154,7 @@ export const IMMUTABLE_DEFAULTS_V0 = Object.freeze({
   searchable: false,
   terminal: false,
   relationRequired: false,
+  relationJoinEligibility: 'none' as const,
   queryFilter: Object.freeze({
     kind: 'booleanPredicate' as const,
     schemaVersion: LANGUAGE_VERSION,

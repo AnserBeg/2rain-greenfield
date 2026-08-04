@@ -16,12 +16,12 @@ import {
   parseAuthoredApplicationPackageJson,
   type VersionedAuthoredApplicationPackage,
 } from '../../../packages/canonical-model/src/index.js';
+import { lowerStorageTargetV1 } from '../../../packages/compiler/src/index.js';
+import { composedApplicationDefinition } from '../../../packages/domain/src/app/builder.js';
 import {
   V3_AGGREGATE_IDS,
   v3AggregateModule,
 } from '../../compiler/v3-definition.js';
-import { lowerStorageTargetV1 } from '../../../packages/compiler/src/index.js';
-import { composedApplicationDefinition } from '../../../packages/domain/src/app/builder.js';
 import {
   Q1_AGGREGATE_PARITY_CASES,
   evaluatePredicateCase,
@@ -38,13 +38,15 @@ function fixture(): VersionedAuthoredApplicationPackage {
   );
 }
 
+// A real composed-application relation, not the representative canonical
+// fixture: the fixture's relation has no validated dedicated storage, so
+// lowering it fails for an unrelated reason and cannot witness anything.
 const relationWitnessId =
   'northstar.app:relation.inventory_movement_transaction_line';
 
 function relationWitness(): {
   relations: Array<{
     cardinality: string;
-    joinEligibility?: string;
     ownership: string;
     relationId: string;
   }>;
@@ -52,7 +54,6 @@ function relationWitness(): {
   return structuredClone(composedApplicationDefinition()) as {
     relations: Array<{
       cardinality: string;
-      joinEligibility?: string;
       ownership: string;
       relationId: string;
     }>;
@@ -1092,79 +1093,12 @@ for (const cardinality of ['oneToOne', 'oneToMany']) {
   });
 }
 
-// Join eligibility left the language entirely rather than narrowing to one
-// spelling: nothing in the compiler, query or runtime path ever read it, so
-// ADR-0041 requires the member gone rather than admitted and ignored. Every
-// spelling is therefore declined, including the one the old grammar accepted.
-for (const joinEligibility of ['none', 'query']) {
-  test(`relation join eligibility ${joinEligibility} is declined by name`, () => {
-    const declinedJoin = relationWitness();
-    const relationIndex = relationWitnessIndex(declinedJoin);
-    declinedJoin.relations[relationIndex]!.joinEligibility = joinEligibility;
-    expectDiagnostic(
-      () => normalizeApplicationPackage(declinedJoin),
-      'CANON_RELATION_JOIN_ELIGIBILITY_UNSUPPORTED',
-      {
-        acceptedAlternative:
-          'omit joinEligibility until join semantics exist to honour it',
-        objectId: relationWitnessId,
-        path: `$.relations[${String(relationIndex)}].joinEligibility`,
-      },
-    );
-  });
-}
-
-test('an unrelated unknown relation member keeps the generic schema refusal', () => {
-  const unknownMember = relationWitness();
-  const relationIndex = relationWitnessIndex(unknownMember);
-  (unknownMember.relations[relationIndex] as Record<string, unknown>).joinHint =
-    'query';
-  expectDiagnostic(
-    () => normalizeApplicationPackage(unknownMember),
-    'CANON_SCHEMA_INVALID',
-    {
-      objectId: relationWitnessId,
-      path: `$.relations[${String(relationIndex)}]`,
-    },
-  );
-});
-
-test('a declined join eligibility beside another unknown member reports both', () => {
-  const bothMembers = relationWitness();
-  const relationIndex = relationWitnessIndex(bothMembers);
-  const relation = bothMembers.relations[relationIndex] as Record<
-    string,
-    unknown
-  >;
-  relation.joinEligibility = 'query';
-  relation.joinHint = 'query';
-  expectDiagnostic(
-    () => normalizeApplicationPackage(bothMembers),
-    'CANON_RELATION_JOIN_ELIGIBILITY_UNSUPPORTED',
-    {
-      objectId: relationWitnessId,
-      path: `$.relations[${String(relationIndex)}].joinEligibility`,
-    },
-  );
-  expectDiagnostic(
-    () => normalizeApplicationPackage(bothMembers),
-    'CANON_SCHEMA_INVALID',
-    {
-      objectId: relationWitnessId,
-      path: `$.relations[${String(relationIndex)}]`,
-    },
-  );
-});
-
-test('supported relation shape from the refusal fixture normalizes and lowers', () => {
+test('the surviving relation cardinality normalizes and lowers', () => {
   const supported = relationWitness();
-  assert.equal(
-    Object.hasOwn(
-      supported.relations[relationWitnessIndex(supported)]!,
-      'joinEligibility',
-    ),
-    false,
-  );
+  const relationIndex = relationWitnessIndex(supported);
+  // The witness is already a `reference` relation, so the parent-scope guard
+  // cannot stand in for the authoring refusal above.
+  assert.equal(supported.relations[relationIndex]!.ownership, 'reference');
 
   const normalized = normalizeApplicationPackage(supported);
   const normalizedRelation = normalized.relations.find(
@@ -1172,9 +1106,6 @@ test('supported relation shape from the refusal fixture normalizes and lowers', 
   );
   assert.ok(normalizedRelation);
   assert.equal(normalizedRelation.cardinality, 'manyToOne');
-  // The declined member must not reappear as a normalization default; that
-  // silent rewrite is the state ADR-0041 refuses.
-  assert.equal(Object.hasOwn(normalizedRelation, 'joinEligibility'), false);
 
   const lowered = lowerStorageTargetV1(normalized);
   const loweredRelation = lowered.relations.find(

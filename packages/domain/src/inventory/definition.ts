@@ -1354,6 +1354,7 @@ function relation(
       onUpdate: 'restrict',
       schemaVersion: version,
     },
+    joinEligibility: 'query',
     kind: 'relationDefinition',
     orderKey,
     ownership,
