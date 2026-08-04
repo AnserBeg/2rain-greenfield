@@ -157,6 +157,75 @@ test('derived-subject controls refuse an empty authored or lowered type surface'
   }
 });
 
+test('singleton-narrowing control keeps the obligation of an axis narrowed to one unhonored value', () => {
+  // The replay of what 5g3-langnarrow found. `joinEligibility` admitted two
+  // values; refusing `none` left `query` — a value still accepted with zero
+  // consumers — as the sole survivor. A shape's obligation must not depend on
+  // how many siblings it happens to have.
+  const admitsBoth = derivedLedgerFor("  joinEligibility: 'none' | 'query';\n");
+  const narrowedToSingleton = derivedLedgerFor("  joinEligibility: 'query';\n");
+
+  assert.deepEqual(
+    axis(admitsBoth, 'authoredLanguage', '$.joinEligibility')?.values,
+    ['none', 'query'],
+  );
+  assert.deepEqual(
+    axis(narrowedToSingleton, 'authoredLanguage', '$.joinEligibility')?.values,
+    ['query'],
+    'an axis narrowed to a single value must stay represented at size 1',
+  );
+  assert.ok(
+    narrowedToSingleton.obligations.some(
+      (obligation) =>
+        obligation.id === 'authoredLanguage:$.joinEligibility="query"',
+    ),
+    'the surviving unhonored value must keep its obligation',
+  );
+  assert.notEqual(
+    narrowedToSingleton.digest,
+    admitsBoth.digest,
+    'narrowing an axis from two values to one must move the ledger digest',
+  );
+
+  // The same rule read off the real language rather than a synthetic one:
+  // ADR-0041 narrowed relation cardinality to the single value the storage
+  // lowerer implements, and that value still owes an obligation.
+  const language = deriveLanguageCoverageLedger();
+  assert.deepEqual(
+    axis(language, 'authoredLanguage', '$.relations[].cardinality')?.values,
+    ['manyToOne'],
+  );
+});
+
+test('removal control distinguishes an axis retired from the language from one narrowed to a singleton', () => {
+  // The fix must not pin every axis forever. A member genuinely removed from
+  // the language leaves the ledger, and the two facts must not share a digest:
+  // langnarrow measured them as byte-identical.
+  const narrowedToSingleton = derivedLedgerFor("  joinEligibility: 'query';\n");
+  const removed = derivedLedgerFor('');
+
+  assert.equal(
+    axis(removed, 'authoredLanguage', '$.joinEligibility'),
+    undefined,
+    'an axis removed from the language must leave the ledger',
+  );
+  assert.ok(
+    !removed.obligations.some((obligation) =>
+      obligation.axis.startsWith('$.joinEligibility'),
+    ),
+  );
+  assert.notEqual(
+    removed.digest,
+    narrowedToSingleton.digest,
+    'removed-from-the-language and narrowed-to-an-unhonored-singleton are different facts and must not share a digest',
+  );
+  // The companion axis proves the removal was scoped: nothing else moved.
+  assert.deepEqual(axis(removed, 'authoredLanguage', '$.ownership')?.values, [
+    'parentScopedChild',
+    'reference',
+  ]);
+});
+
 test('ledger bytes and code-point ordering do not depend on the ambient locale', () => {
   assert.deepEqual(['ä', 'z', '😀', 'A'].sort(compareCodePoints), [
     'A',
@@ -1090,6 +1159,39 @@ function axis(
     (candidate) =>
       candidate.specification === specification && candidate.axis === path,
   );
+}
+
+function derivedLedgerFor(
+  authoredMember: string,
+): ReturnType<typeof deriveLanguageCoverageLedger> {
+  const root = mkdtempSync(join(tmpdir(), 'language-ledger-narrowing-'));
+  try {
+    mkdirSync(resolve(root, 'packages/canonical-model/src'), {
+      recursive: true,
+    });
+    mkdirSync(resolve(root, 'packages/compiler/src'), { recursive: true });
+    writeFileSync(
+      resolve(root, 'tsconfig.json'),
+      `${JSON.stringify({
+        compilerOptions: { strict: true },
+        files: [
+          'packages/canonical-model/src/schemas.ts',
+          'packages/compiler/src/storage.ts',
+        ],
+      })}\n`,
+    );
+    writeFileSync(
+      resolve(root, 'packages/canonical-model/src/schemas.ts'),
+      `export type VersionedAuthoredApplicationPackage = {\n  ownership: 'reference' | 'parentScopedChild';\n${authoredMember}};\n`,
+    );
+    writeFileSync(
+      resolve(root, 'packages/compiler/src/storage.ts'),
+      "export type StorageTargetPayloadV1 = { archiveBehavior: 'restrict' | 'retainReference' };\n",
+    );
+    return deriveLanguageCoverageLedger(root);
+  } finally {
+    rmSync(root, { force: true, recursive: true });
+  }
 }
 
 function fixtureLedger(): LanguageCoverageLedger {

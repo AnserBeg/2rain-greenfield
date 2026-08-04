@@ -1,44 +1,44 @@
 {
   "version": "northstar.language-coverage-decisions/v1",
-  "ledgerDigest": "cb0d163e90718282991f8886e3d4a0c2301de095e8d699da8f749564ae7c906b",
+  "ledgerDigest": "2be4b4de6461339aff6663e78b7e989eda0003d02d8caf6a44b9f437567cc6dd",
   "acceptedButUnhonoredObligationIds": [
     "authoredLanguage:$.relations[].joinEligibility=\"none\"",
     "authoredLanguage:$.relations[].joinEligibility=\"query\""
   ],
   "observationSnapshot": {
     "bitmapEncoding": "sorted-obligation-bitset-msb0-hex/v1",
-    "ledgerDigest": "cb0d163e90718282991f8886e3d4a0c2301de095e8d699da8f749564ae7c906b",
-    "obligationCount": 1896,
-    "observedBitmap": "ffe08004040086032a3fc2502000420040751d380000000020001000005e418230ee178018430143c0001400038d0800008100020400720002380240004600800000000000000000000000208000000000000000000000000000000000000000000410010021e20ff080004240005c00004000800000000000000000000000000000000000400054410000000000000000000000008100000000003a04000e81001ff900010848000850000f2158dc280005000084000000000000000000000000000000080006200587010030200060042000843e3fdffffe7ef2fd1fb7ffff7ffffffffffffffffffbfffffd",
-    "observedCount": 395
+    "ledgerDigest": "2be4b4de6461339aff6663e78b7e989eda0003d02d8caf6a44b9f437567cc6dd",
+    "obligationCount": 1938,
+    "observedBitmap": "ffe0800404008701958ff09604000840080ea3a700000000040002000005e50d08e1dc2f001c30f0143c0001400038d080000c0800102003900011c0120002300400000000000000000000000104000000000000000000000000000000000000000000208008010f883fe10000848000ee0000200040000000000000000000000000000000000020002a208000000000000000000000004080000000001ef888001e81001ff9000184240006140003d70ae370a00014000210000000000000000000000000000000010000e2000b0e020070200060021000610f8ff7ffff9fbcbf47edffffdffffffffffffffffffeffffff40",
+    "observedCount": 426
   },
   "decisions": [
     {
       "acceptedButUnhonoredSetDigest": "1182b596eb701e61cb8de3d7fd072da933de7785001c04934916b6c3776b7d0f",
       "category": "observedRelationScope",
-      "ledgerDigest": "cb0d163e90718282991f8886e3d4a0c2301de095e8d699da8f749564ae7c906b",
-      "obligationSetDigest": "b1ee7a9fb12716ca45848179b1f91c1f08365ca57e2acaf90ca71957608bf930",
-      "rationale": "The relation language now refuses every cardinality spelling the storage lowerer does not implement, so the cardinality axis is no longer a choice and leaves the derived ledger. The remaining observed relation obligations are still declaration and lowering evidence, not execution evidence, and remain explicit coverage debt until the sibling corpus supplies receipts. Join eligibility is deliberately NOT narrowed here: it is still accepted with zero consumers, is a known ADR-0041 violation left open on the record, and is owned by row lang-retire because every checked-in release entry has already serialized it.",
+      "ledgerDigest": "2be4b4de6461339aff6663e78b7e989eda0003d02d8caf6a44b9f437567cc6dd",
+      "obligationSetDigest": "e220b1233fedb4fac6f57f47d43b3d01f0e62f3a249f0e3fa30f3833f147354d",
+      "rationale": "The relation language refuses every cardinality spelling the storage lowerer does not implement, and the surviving singleton cardinality=\"manyToOne\" keeps its obligation: an axis narrowed to one value stays represented, so narrowing can no longer delete a shape from this record. The remaining observed relation obligations are still declaration and lowering evidence, not execution evidence, and remain explicit coverage debt until the sibling corpus supplies receipts. Join eligibility is deliberately NOT narrowed here: it is still accepted with zero consumers, is a known ADR-0041 violation left open on the record, and is owned by row lang-retire because every checked-in release entry has already serialized it.",
       "revisitCondition": "Replace this decision with execution or stable-refusal receipts from the sibling relation corpus; any change to the exact observed relation obligation set, including widening the declined cardinality axis or retiring join eligibility under lang-retire, invalidates this decision immediately.",
-      "decisionId": "5g3-langnarrow-relation-corpus-boundary@76d6923dc42ffc82f85a9dac6fe63c430bec605a7817aaf94760e6c55755f9e8"
+      "decisionId": "lang-singleton-relation-corpus-boundary@5c063258388d219514b642d7be01886f516e1358098758c845df94c985e33b79"
     },
     {
       "acceptedButUnhonoredSetDigest": "1182b596eb701e61cb8de3d7fd072da933de7785001c04934916b6c3776b7d0f",
       "category": "observedOutsideRelationScope",
-      "ledgerDigest": "cb0d163e90718282991f8886e3d4a0c2301de095e8d699da8f749564ae7c906b",
-      "obligationSetDigest": "d32619080727fdb3cf64c91d43b85c14db7a7bc205dbc2841a9e23399e72847e",
-      "rationale": "The whole-language ledger intentionally precedes execution coverage outside relations. Existing first-party uses are named evidence debt, not baselined as correct behavior, and this exact-set decision cannot absorb a new value or axis.",
+      "ledgerDigest": "2be4b4de6461339aff6663e78b7e989eda0003d02d8caf6a44b9f437567cc6dd",
+      "obligationSetDigest": "b58907e72e717deb3b941551a5d1c15fb1d81f9cb89ea1355775e717449d42f9",
+      "rationale": "The whole-language ledger intentionally precedes execution coverage outside relations. This set now also carries the single-valued authored axes the earlier cardinality filter dropped, which are declared constants rather than choices; admitting them is an inventory correction, not a claim that any of them executes. Existing first-party uses are named evidence debt, not baselined as correct behavior, and this exact-set decision cannot absorb a new value or axis.",
       "revisitCondition": "Each later language-axis packet replaces the corresponding obligations with execution or stable-refusal receipts; any change to the exact observed non-relation set invalidates this decision immediately.",
-      "decisionId": "5g3-langnarrow-whole-language-execution-boundary@c5acb0f7c5eec14ebcb9bca7aa81072da3b7a5c4ef3439a59bbe8b2e0047e65c"
+      "decisionId": "lang-singleton-whole-language-execution-boundary@efa86203a75b96f07aff0178949a301f5eb74ee64ef6d49ceaf12071d95c3e30"
     },
     {
       "acceptedButUnhonoredSetDigest": "1182b596eb701e61cb8de3d7fd072da933de7785001c04934916b6c3776b7d0f",
       "category": "unobserved",
-      "ledgerDigest": "cb0d163e90718282991f8886e3d4a0c2301de095e8d699da8f749564ae7c906b",
-      "obligationSetDigest": "2d4c6690d840f4f2bff9e071df29edc25a41dab9554c03aba42b580387469fb3",
+      "ledgerDigest": "2be4b4de6461339aff6663e78b7e989eda0003d02d8caf6a44b9f437567cc6dd",
+      "obligationSetDigest": "dcc1992e8f8f2c14a38ef57d1757272df0f7473c9440a3e9eaa24aa8299766c1",
       "rationale": "These derived values and topologies have no first-party instance. Their exemption is conditional on remaining unused and is not evidence that the platform honors them.",
       "revisitCondition": "The first first-party occurrence changes the observed partition, invalidates this exact-set decision, and requires execution, stable refusal, or a new explicit ruling before the gate can pass.",
-      "decisionId": "5g3-langnarrow-unused-shape-standing-exemption@e7c171b274174fa2f977f6551f0fca19f2429cf9c97b1f72e9765e020e8f22a0"
+      "decisionId": "lang-singleton-unused-shape-standing-exemption@49316035fe2374cefbcc963012194eba125adcbcaacffc00980186be1226cadb"
     }
   ]
 }

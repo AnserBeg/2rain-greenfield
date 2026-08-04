@@ -116,11 +116,6 @@ export interface LanguageCoverageObservationSnapshot {
   readonly observedCount: number;
 }
 
-interface MutableAxis {
-  readonly forced: boolean;
-  readonly values: Set<ClosedValue>;
-}
-
 const authoredLanguageRoot = {
   exportName: 'VersionedAuthoredApplicationPackage',
   sourcePath: 'packages/canonical-model/src/schemas.ts',
@@ -167,13 +162,11 @@ export function deriveLanguageCoverageLedger(
     checker,
     exportedType(program, checker, repositoryRoot, authoredLanguageRoot),
     'authoredLanguage',
-    false,
   );
   const loweredAxes = deriveClosedAxes(
     checker,
     exportedType(program, checker, repositoryRoot, loweredStorageRoot),
     'loweredStorage',
-    true,
   );
   if (authoredAxes.length === 0) {
     throw new Error('LANGUAGE_COVERAGE_AUTHORED_LEDGER_SUBJECT_EMPTY');
@@ -627,24 +620,29 @@ export function stableStringify(value: unknown): string {
     .join(',')}}`;
 }
 
+// Every path carrying at least one closed value is an axis, whatever its
+// cardinality. An earlier revision admitted an authored axis only when it held
+// more than one value unless a `forced` flag was set, and that flag was raised
+// only from the union, boolean and optionality branches below. A single-member
+// union is not a union in TypeScript — `z.literal('x')` is a bare
+// `StringLiteral` — so narrowing an axis to one value moved it off the forced
+// path entirely and deleted it, along with every obligation and defect
+// classification attached to it. See the singleton-narrowing and removal
+// controls in test/unit/language-conformance-ledger.test.ts.
 function deriveClosedAxes(
   checker: ts.TypeChecker,
   root: ts.Type,
   specification: LanguageSpecification,
-  includeSingletons: boolean,
 ): LanguageCoverageAxis[] {
-  const candidates = new Map<string, MutableAxis>();
+  const candidates = new Map<string, Set<ClosedValue>>();
 
-  function add(axis: string, value: ClosedValue, forced = false): void {
+  function add(axis: string, value: ClosedValue): void {
     const current = candidates.get(axis);
     if (current) {
-      current.values.add(value);
-      if (forced && !current.forced) {
-        candidates.set(axis, { forced: true, values: current.values });
-      }
+      current.add(value);
       return;
     }
-    candidates.set(axis, { forced, values: new Set([value]) });
+    candidates.set(axis, new Set([value]));
   }
 
   function walk(
@@ -660,7 +658,7 @@ function deriveClosedAxes(
         ): entry is { readonly finite: true; readonly value: ClosedValue } =>
           entry.finite,
       );
-      for (const entry of actualFinite) add(axis, entry.value, true);
+      for (const entry of actualFinite) add(axis, entry.value);
       for (const member of type.types) {
         if (!finiteValue(member).finite) walk(member, axis, ancestry);
       }
@@ -673,8 +671,8 @@ function deriveClosedAxes(
       return;
     }
     if (type.flags & ts.TypeFlags.Boolean) {
-      add(axis, false, true);
-      add(axis, true, true);
+      add(axis, false);
+      add(axis, true);
       return;
     }
     if (!(type.flags & ts.TypeFlags.Object) || ancestry.has(type)) return;
@@ -691,8 +689,8 @@ function deriveClosedAxes(
       if (!declaration) continue;
       const propertyAxis = `${axis}.${property.name}`;
       if (property.flags & ts.SymbolFlags.Optional) {
-        add(`${propertyAxis}.$presence`, 'absent', true);
-        add(`${propertyAxis}.$presence`, 'present', true);
+        add(`${propertyAxis}.$presence`, 'absent');
+        add(`${propertyAxis}.$presence`, 'present');
       }
       walk(
         checker.getTypeOfSymbolAtLocation(property, declaration),
@@ -704,15 +702,10 @@ function deriveClosedAxes(
 
   walk(root, '$', new Set());
   return [...candidates]
-    .filter(([, candidate]) =>
-      includeSingletons
-        ? candidate.values.size > 0
-        : candidate.forced || candidate.values.size > 1,
-    )
-    .map(([axis, candidate]) => ({
+    .map(([axis, values]) => ({
       axis,
       specification,
-      values: [...candidate.values].sort(compareValue),
+      values: [...values].sort(compareValue),
     }))
     .sort(compareAxis);
 }
