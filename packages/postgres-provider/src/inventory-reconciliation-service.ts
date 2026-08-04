@@ -101,11 +101,20 @@ export interface InventoryReconciliationFindingV1 {
   readonly subjectId: string;
 }
 
+export type InventoryReconciliationExclusionReasonV1 =
+  'outOfScope' | 'supersededGeneration';
+
+/** Exclusion is accounted for by name and reason, never as a bare count. */
+export interface InventoryReconciliationExclusionV1 {
+  readonly reason: InventoryReconciliationExclusionReasonV1;
+  readonly subjectId: string;
+}
+
 export interface InventoryReconciliationArmReportV1 {
   readonly armId: InventoryReconciliationArmIdV1;
   readonly consistentSubjectIds: readonly string[];
   readonly discrepantSubjectIds: readonly string[];
-  readonly excludedSubjectCount: number;
+  readonly excludedSubjects: readonly InventoryReconciliationExclusionV1[];
   readonly findings: readonly InventoryReconciliationFindingV1[];
   readonly outcome: InventoryReconciliationOutcomeV1;
   readonly subjectCount: number;
@@ -544,33 +553,37 @@ export class PostgresInventoryReconciliationService {
         // A superseded anchor cannot be served: the cache key and the identity
         // comparison both carry the generation, which only advances. It is
         // counted and named as excluded, never silently dropped.
-        arm.excluded();
+        arm.excluded(anchor.cacheKey, 'supersededGeneration');
         continue;
       }
-      const parameters =
-        anchor.queryId === this.registration.aggregateQueryId
-          ? recognizedAnchorParameters(
-              this.registration,
-              anchor.parameterValues,
-            )
-          : null;
-      // Membership is decided from the stored scope AND the query's own
-      // operand. Deciding it from the stored column alone would let a corrupt
-      // anchor -- operand A, stored scope B -- be excluded from A's
-      // reconciliation as out of scope and from B's as unattributable, so the
-      // one check that would name it never runs.
+      const registered = anchor.queryId === this.registration.aggregateQueryId;
+      const parameters = registered
+        ? recognizedAnchorParameters(this.registration, anchor.parameterValues)
+        : null;
+      // Attribution takes the UNION of every authority the anchor carries, each
+      // read independently of the others: the stored scope column, and the
+      // query's own legal-entity operand read on its own. Trusting the stored
+      // column alone lets a corrupt anchor -- operand A, stored scope B -- be
+      // excluded from A as out of scope. Taking the operand only from
+      // whole-parameter recognition is the same hole one step in, because that
+      // recognition is all-or-nothing: a malformed SIBLING parameter would
+      // discard a perfectly readable scope authority and make the anchor
+      // unattributable to A as well.
       const attributedTo = new Set(
         anchor.legalEntityIds.map((legalEntityId) =>
           legalEntityId.toLowerCase(),
         ),
       );
-      if (parameters) attributedTo.add(parameters.legalEntityId);
+      const operand = registered
+        ? anchorScopeOperand(this.registration, anchor.parameterValues)
+        : null;
+      if (operand) attributedTo.add(operand);
       if (
         ![...attributedTo].some((legalEntityId) =>
           legalEntityIds.includes(legalEntityId),
         )
       ) {
-        arm.excluded();
+        arm.excluded(anchor.cacheKey, 'outOfScope');
         continue;
       }
       await this.#reconcileOneAnchor(client, context, arm, anchor, parameters);
@@ -717,10 +730,13 @@ export function renderInventoryReconciliationReport(
   ];
   for (const arm of report.arms) {
     lines.push(
-      `  arm ${arm.armId}: ${arm.outcome.toUpperCase()} — ${String(arm.subjectCount)} subject(s), ${String(arm.consistentSubjectIds.length)} consistent, ${String(arm.discrepantSubjectIds.length)} discrepant, ${String(arm.unverifiableSubjectIds.length)} unverifiable, ${String(arm.excludedSubjectCount)} excluded`,
+      `  arm ${arm.armId}: ${arm.outcome.toUpperCase()} — ${String(arm.subjectCount)} subject(s), ${String(arm.consistentSubjectIds.length)} consistent, ${String(arm.discrepantSubjectIds.length)} discrepant, ${String(arm.unverifiableSubjectIds.length)} unverifiable, ${String(arm.excludedSubjects.length)} excluded`,
     );
     for (const subjectId of arm.consistentSubjectIds) {
       lines.push(`    consistent ${subjectId}`);
+    }
+    for (const excluded of arm.excludedSubjects) {
+      lines.push(`    excluded ${excluded.subjectId} (${excluded.reason})`);
     }
     for (const finding of arm.findings) {
       lines.push(`    ${renderFinding(finding)}`);
@@ -742,7 +758,7 @@ class ArmAccumulator {
   readonly #discrepant = new Set<string>();
   readonly #findings: InventoryReconciliationFindingV1[] = [];
   readonly #unverifiable: string[] = [];
-  #excluded = 0;
+  readonly #excluded: InventoryReconciliationExclusionV1[] = [];
 
   constructor(private readonly armId: InventoryReconciliationArmIdV1) {}
 
@@ -750,8 +766,11 @@ class ArmAccumulator {
     this.#consistent.push(subjectId);
   }
 
-  excluded(): void {
-    this.#excluded += 1;
+  excluded(
+    subjectId: string,
+    reason: InventoryReconciliationExclusionReasonV1,
+  ): void {
+    this.#excluded.push(Object.freeze({ reason, subjectId }));
   }
 
   finding(finding: Omit<InventoryReconciliationFindingV1, 'armId'>): void {
@@ -803,7 +822,7 @@ class ArmAccumulator {
       armId: this.armId,
       consistentSubjectIds: Object.freeze(consistent.toSorted()),
       discrepantSubjectIds: Object.freeze([...this.#discrepant].toSorted()),
-      excludedSubjectCount: this.#excluded,
+      excludedSubjects: Object.freeze([...this.#excluded]),
       findings: Object.freeze([...this.#findings]),
       outcome:
         subjectCount === 0
@@ -885,6 +904,28 @@ interface RecognizedAnchorParameters {
   readonly legalEntityId: string;
   readonly locationId: string;
   readonly recordedAtHorizon: string;
+}
+
+/**
+ * The scope authority alone, read independently of every sibling parameter and
+ * of whole-parameter recognition.
+ *
+ * `recognizedAnchorParameters` is deliberately all-or-nothing: it gates whether
+ * a balance can be RE-DERIVED, and a malformed horizon makes that impossible.
+ * Attribution is a different question and must not inherit that verdict. An
+ * anchor whose stored scope is wrong and whose horizon is corrupt still names a
+ * legal entity here, and that is the one authority that can put it in front of
+ * the scope it actually concerns.
+ */
+function anchorScopeOperand(
+  registration: InventoryReconciliationRegistrationV1,
+  parameterValues: Record<string, unknown>,
+): string | null {
+  const value =
+    parameterValues[registration.aggregateParameterIds.legalEntityId];
+  return typeof value === 'string' && uuidPattern.test(value)
+    ? value.toLowerCase()
+    : null;
 }
 
 function recognizedAnchorParameters(

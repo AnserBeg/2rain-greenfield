@@ -95,6 +95,7 @@ const tenantA = '1a000000-0000-4000-8000-00000000000a';
 const environmentA = '2a000000-0000-4000-8000-00000000000a';
 const legalEntityA = '3a000000-0000-4000-8000-00000000000a';
 const quietLegalEntityA = '3a000000-0000-4000-8000-00000000000b';
+const witnessLegalEntityA = '3a000000-0000-4000-8000-00000000000c';
 const principalA = '4a000000-0000-4000-8000-00000000000a';
 const tenantB = '1b000000-0000-4000-8000-00000000000b';
 const environmentB = '2b000000-0000-4000-8000-00000000000b';
@@ -114,6 +115,8 @@ const plantedAnchorCacheKey = 'ab'.repeat(32);
 const unrecognizedAnchorCacheKey = 'cd'.repeat(32);
 const scopeDivergedAnchorCacheKey = '0a'.repeat(32);
 const overflowingAnchorCacheKey = '1b'.repeat(32);
+const partiallyCorruptAnchorCacheKey = '2c'.repeat(32);
+const fullyCorruptAnchorCacheKey = '3d'.repeat(32);
 const plantedFilterPlanDigest = 'ef'.repeat(32);
 const plantedReleaseContentHash = '12'.repeat(32);
 const plantedAnchorDigest = '34'.repeat(32);
@@ -231,7 +234,7 @@ test('reconciliation names divergence, confirms consistency, repairs nothing, an
       assert.equal(prepared.schemaState, 'APPLIED');
       await setPointer(database.pool, scopeA, releases[1]!);
       await seedFoundation(runtimePool, scopeA, binding, {
-        legalEntityIds: [legalEntityA, quietLegalEntityA],
+        legalEntityIds: [legalEntityA, quietLegalEntityA, witnessLegalEntityA],
       });
       // Tenant B reuses tenant A's legal-entity identifier deliberately: it
       // makes the separation below a tenancy fact rather than an identifier
@@ -502,7 +505,7 @@ test('reconciliation names divergence, confirms consistency, repairs nothing, an
             'ADR-0044: an anchor the sweep cannot check is never counted as consistent',
           );
           assert.ok(
-            anchors.excludedSubjectCount >= 1,
+            anchors.excludedSubjects.length >= 1,
             'the read anchor is superseded by the planted movements and is named as excluded',
           );
 
@@ -748,7 +751,7 @@ test('reconciliation names divergence, confirms consistency, repairs nothing, an
             assert.deepEqual(armReport.consistentSubjectIds, []);
           }
           assert.ok(
-            arm(report, 'aggregateAnchors').excludedSubjectCount > 0,
+            arm(report, 'aggregateAnchors').excludedSubjects.length > 0,
             'the anchors this scope excludes are counted, not silently dropped',
           );
         },
@@ -907,6 +910,150 @@ test('reconciliation names divergence, confirms consistency, repairs nothing, an
               consistentLineId,
             ),
             false,
+          );
+        },
+      );
+
+      await t.test(
+        'a partly corrupt anchor cannot hide from the scope its own operand names',
+        async () => {
+          // A clean scope of its own, so the pre-fix verdict is `consistent`
+          // rather than being masked by the divergences planted above.
+          const witnessTransactionId = randomUUID();
+          const witnessLineId = randomUUID();
+          const witnessAdjustment = adjustmentCommand({
+            legalEntityId: witnessLegalEntityA,
+            lineId: witnessLineId,
+            locationId: locationPrimary,
+            quantityDelta: '5',
+            sourceId: 'reconcile-witness',
+            transactionId: witnessTransactionId,
+          });
+          await seedAdjustmentDraft(
+            runtimePool,
+            scopeA,
+            binding,
+            witnessAdjustment,
+          );
+          await postingService.postAdjustment(
+            scopeA.context,
+            actor,
+            witnessAdjustment,
+          );
+          const witnessBalance = await invokeOnHand(gateway, view, {
+            itemId: itemPrimary,
+            legalEntityId: witnessLegalEntityA,
+            locationId: locationPrimary,
+          });
+          assert.equal(witnessBalance.value.value, '5');
+
+          // THE EXACT SCENARIO. Stored scope names another legal entity, the
+          // legal-entity operand validly names the witness scope, and one
+          // sibling parameter is malformed.
+          await plantAnchor(runtimePool, scopeA, {
+            balanceValue: '4',
+            cacheKey: partiallyCorruptAnchorCacheKey,
+            itemId: itemPrimary,
+            legalEntityId: witnessLegalEntityA,
+            locationId: locationPrimary,
+            parameterOverrides: {
+              [reconciliationIds.parameterIds.atTime]: 'not-an-instant',
+            },
+            principalId: principalA,
+            queryId: reconciliationIds.onHandQueryId,
+            scopeLegalEntityIds: [legalEntityA],
+          });
+          // No attributable operand at all: the scope authority is unreadable
+          // too, so nothing links it to the witness scope except doubt.
+          await plantAnchor(runtimePool, scopeA, {
+            balanceValue: '4',
+            cacheKey: fullyCorruptAnchorCacheKey,
+            itemId: itemPrimary,
+            legalEntityId: witnessLegalEntityA,
+            locationId: locationPrimary,
+            parameterOverrides: {
+              [reconciliationIds.parameterIds.legalEntityId]: 'not-a-uuid',
+            },
+            principalId: principalA,
+            queryId: reconciliationIds.onHandQueryId,
+            // Its stored scope is the only authority left, and it names this
+            // scope. Excluding it here would drop it from every report.
+            scopeLegalEntityIds: [witnessLegalEntityA],
+          });
+
+          const report = await reconciliation.reconcile(scopeA.context, {
+            legalEntityIds: [witnessLegalEntityA],
+            scopeId: 'witness-scope',
+          });
+          const anchors = arm(report, 'aggregateAnchors');
+
+          assert.equal(
+            report.outcome,
+            'indeterminate',
+            'an anchor the sweep could not check must never leave the scope reading clean',
+          );
+          for (const cacheKey of [
+            partiallyCorruptAnchorCacheKey,
+            fullyCorruptAnchorCacheKey,
+          ]) {
+            assert.ok(
+              anchors.unverifiableSubjectIds.includes(cacheKey),
+              `${cacheKey} must be reported, not excluded`,
+            );
+            assert.equal(
+              anchors.excludedSubjects.some(
+                (excluded) => excluded.subjectId === cacheKey,
+              ),
+              false,
+              `${cacheKey} must not be silently excluded`,
+            );
+            const finding = findingFor(
+              report,
+              'AGGREGATE_ANCHOR_PARAMETERS_UNRECOGNIZED',
+              cacheKey,
+            );
+            assert.equal(finding.observedValue, null);
+          }
+
+          // The positive witness, in the same run: a clean anchor with all
+          // parameters valid is still attributed and reconciled normally, so
+          // the fix is not "mark everything indeterminate".
+          const witnessAnchorKey = await currentAnchorCacheKey(
+            database.pool,
+            scopeA,
+            reconciliationIds.onHandQueryId,
+            [
+              plantedAnchorCacheKey,
+              unrecognizedAnchorCacheKey,
+              scopeDivergedAnchorCacheKey,
+              overflowingAnchorCacheKey,
+              partiallyCorruptAnchorCacheKey,
+              fullyCorruptAnchorCacheKey,
+            ],
+          );
+          assert.deepEqual(anchors.consistentSubjectIds, [witnessAnchorKey]);
+          assert.deepEqual(
+            arm(report, 'sourceDocuments').consistentSubjectIds,
+            [witnessLineId],
+          );
+          assert.equal(arm(report, 'sourceDocuments').outcome, 'consistent');
+
+          // Exclusion still names what it dropped and why.
+          assert.ok(anchors.excludedSubjects.length > 0);
+          for (const excluded of anchors.excludedSubjects) {
+            assert.match(
+              excluded.reason,
+              /^(?:outOfScope|supersededGeneration)$/u,
+            );
+            assert.match(excluded.subjectId, /^[0-9a-f]{64}$/u);
+          }
+          const rendered =
+            renderInventoryReconciliationReport(report).join('\n');
+          assert.ok(
+            rendered.includes(
+              `excluded ${anchors.excludedSubjects[0]!.subjectId} (${anchors.excludedSubjects[0]!.reason})`,
+            ),
+            'the operator can read what the sweep left out and why',
           );
         },
       );
@@ -1142,6 +1289,8 @@ interface PlantedAnchorInput {
   readonly locationId: string;
   readonly principalId: string;
   readonly queryId: string;
+  /** Raw parameter_values overrides, so a single sibling can be corrupted. */
+  readonly parameterOverrides?: Readonly<Record<string, unknown>>;
   /** The stored scope column, which defaults to agreeing with the operand. */
   readonly scopeLegalEntityIds?: readonly string[];
 }
@@ -1190,6 +1339,7 @@ async function plantAnchor(
           [reconciliationIds.parameterIds.legalEntityId]: input.legalEntityId,
           [reconciliationIds.parameterIds.locationId]: input.locationId,
           [reconciliationIds.parameterIds.recordedAtHorizon]: horizon,
+          ...(input.parameterOverrides ?? {}),
         }),
         JSON.stringify({
           [reconciliationIds.parameterIds.atTime]: horizon,
@@ -1205,6 +1355,7 @@ async function plantAnchor(
 }
 
 function adjustmentCommand(input: {
+  readonly legalEntityId?: string;
   readonly lineId: string;
   readonly locationId: string;
   readonly quantityDelta: string;
@@ -1220,7 +1371,7 @@ function adjustmentCommand(input: {
     channel: 'API',
     effectiveAt,
     idempotencyKey: randomUUID(),
-    legalEntityId: legalEntityA,
+    legalEntityId: input.legalEntityId ?? legalEntityA,
     lines: [
       {
         itemId: itemPrimary,
@@ -1874,6 +2025,12 @@ async function migrateAndProvision(
         code: 'LE-QUIET',
         environmentId: environmentA,
         legalEntityId: quietLegalEntityA,
+        tenantId: tenantA,
+      },
+      {
+        code: 'LE-WITNESS',
+        environmentId: environmentA,
+        legalEntityId: witnessLegalEntityA,
         tenantId: tenantA,
       },
       {
