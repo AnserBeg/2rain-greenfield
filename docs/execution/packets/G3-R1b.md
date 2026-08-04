@@ -85,10 +85,20 @@ nested array, and the scope-agreement comparison called `.toLowerCase()` on an
 array and aborted the sweep. Patching that one call site would have been the
 third patch of one class.
 
-**So the raw value no longer escapes `selectAnchors`.** It is normalized once, at
-the query boundary, into `NormalizedAnchorScope { ids, rendered, wellFormed }`,
-and every consumer — attribution and scope agreement alike — sees only validated
-identifiers. `wellFormed` is false for anything that is not a flat array of
+**So no consumer reads the raw value any more.** It is normalized once, at the
+query boundary, into `NormalizedAnchorScope { ids, rendered, wellFormed }`, and
+both consumers — attribution and scope agreement — see only validated
+identifiers.
+
+> **This claim was stronger when written, and round 3 showed the stronger form
+> was false.** It read *"the raw value no longer escapes `selectAnchors`."* It
+> does escape: `selectAnchors` spreads `...row`, and the row still carries the
+> raw `legalEntityIds` the SQL selected, so every anchor object holds the raw
+> array beside its normalized form. `AnchorRow` no longer declares the property,
+> which makes it invisible to the type system rather than absent at runtime. No
+> consumer reads it, so nothing is broken today — but the guarantee as stated was
+> wrong, and the correction is recorded rather than quietly narrowed. **The
+> stronger guarantee is not restored in this packet**; see the stop below. `wellFormed` is false for anything that is not a flat array of
 well-formed UUIDs, which makes an unreadable stored shape a
 `AGGREGATE_ANCHOR_SCOPE_DIVERGED` rather than a crash. A well-formed scope still
 renders as the identifiers themselves; only a malformed one costs the operator
@@ -171,6 +181,50 @@ It confirmed the named malformed-sibling defect correctly fixed,
 charter had explicitly asked it to test against migration `0020`. The premise was
 verified by executing the insert rather than by reading the SQL, and it was
 wrong. Fixed here.
+
+## Stopped at the two-revise cap — round 3 BLOCK
+
+**Round 3** (candidate `536064d4`) found D1, D2 and D4 clean: the normalization
+logic, total attribution, the residual policy, the controls, the conditional
+rendering and every prior invariant. It returned **BLOCK** on D3, the question
+the charter had aimed it at, and invoked the convergence rule itself:
+
+> `inventory-reconciliation-service.ts:1023` — normalization-boundary breach. The
+> query row is incorrectly typed as `AnchorRow`, then `...row` copies the raw
+> `legalEntityIds` property into the returned object before adding
+> `legalEntityScope`. For the exercised `ARRAY[[A]]::uuid[]` case, every
+> downstream anchor therefore still carries the raw nested array alongside its
+> normalized representation. Current consumers happen to ignore the hidden
+> property, but the packet's central guarantee that the unsafe representation
+> cannot escape is false; an object spread or dynamic consumer can reuse it and
+> reproduce the same crash class.
+
+**The lane verified it and agrees.** `selectAnchors` selects
+`legal_entity_ids::text[] AS "legalEntityIds"` and then spreads `...row`, so the
+raw array is present on every returned object.
+
+**Materiality, stated precisely rather than argued either way.** There is **no
+reachable failure today** — both former consumers were removed, and the reviewer
+says as much. What is wrong is the packet's own central guarantee, and a latent
+hazard: the next consumer to spread or index an anchor row reproduces the class.
+
+**The fix is one line and is deliberately not written here.** Destructuring the
+raw property out — `const { legalEntityIds, ...rest } = row` — or building the
+returned object explicitly would close it. This is the **third round on one
+class**: trusted shape at attribution, then at scope agreement, then at the
+boundary meant to end it. `review-tiers` names that a mis-scoped charter rather
+than wrong code, and the charter's own two-revise cap says stop and report. The
+question this packet was given — *how does a sweep attribute an anchor whose
+stored scope may itself be wrong?* — is answered and reviewed clean. The question
+that keeps recurring is a different one: **where does an untrusted external
+representation stop being untrusted, and what enforces that boundary?** That is
+worth its own charter, and it is the user's call.
+
+**What is decided, and what is not.** Attribution totality, the null-element and
+nested-array shapes, the residual policy, the `0022` deferral, the controls and
+every `G3-R1` invariant were reviewed clean across three rounds. The open finding
+makes no reported finding wrong, cannot cause a repair, and cannot cause a crash
+on any path a consumer takes today.
 
 ## What was not touched
 
