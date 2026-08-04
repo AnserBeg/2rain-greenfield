@@ -118,6 +118,7 @@ const overflowingAnchorCacheKey = '1b'.repeat(32);
 const partiallyCorruptAnchorCacheKey = '2c'.repeat(32);
 const fullyCorruptAnchorCacheKey = '3d'.repeat(32);
 const authorityLessAnchorCacheKey = '4e'.repeat(32);
+const nestedScopeAnchorCacheKey = '5f'.repeat(32);
 const plantedFilterPlanDigest = 'ef'.repeat(32);
 const plantedReleaseContentHash = '12'.repeat(32);
 const plantedAnchorDigest = '34'.repeat(32);
@@ -1096,6 +1097,36 @@ test('reconciliation names divergence, confirms consistency, repairs nothing, an
             false,
           );
           assert.notEqual(report.outcome, 'consistent');
+
+          // The same trusted-shape assumption one step downstream: attribution
+          // recovers the scope from a valid operand, and the scope-agreement
+          // comparison then reads the stored member. A nested array reaches it
+          // with every parameter valid, which the null-element case never does.
+          await plantNestedScopeAnchor(runtimePool, scopeA, {
+            cacheKey: nestedScopeAnchorCacheKey,
+            itemId: itemPrimary,
+            legalEntityId: witnessLegalEntityA,
+            locationId: locationPrimary,
+            principalId: principalA,
+            queryId: reconciliationIds.onHandQueryId,
+          });
+          const nested = await reconciliation.reconcile(scopeA.context, {
+            legalEntityIds: [witnessLegalEntityA],
+            scopeId: 'nested-scope',
+          });
+          const divergence = findingFor(
+            nested,
+            'AGGREGATE_ANCHOR_SCOPE_DIVERGED',
+            nestedScopeAnchorCacheKey,
+          );
+          assert.equal(divergence.observedValue, witnessLegalEntityA);
+          assert.match(divergence.declaredValue ?? '', /\[\[/u);
+          assert.ok(
+            arm(nested, 'aggregateAnchors').discrepantSubjectIds.includes(
+              nestedScopeAnchorCacheKey,
+            ),
+          );
+          assert.notEqual(nested.outcome, 'consistent');
         },
       );
     } finally {
@@ -1389,6 +1420,69 @@ async function plantAnchor(
         plantedFilterPlanDigest,
         onHandSelectionId,
         input.balanceValue,
+        plantedAnchorDigest,
+      ],
+    );
+  });
+}
+
+async function plantNestedScopeAnchor(
+  pool: Pool,
+  scope: TenantScope,
+  input: {
+    readonly cacheKey: string;
+    readonly itemId: string;
+    readonly legalEntityId: string;
+    readonly locationId: string;
+    readonly principalId: string;
+    readonly queryId: string;
+  },
+): Promise<void> {
+  await withModuleRole(pool, scope, async (client) => {
+    const generation = await client.query<{ movement_generation: string }>(
+      `SELECT movement_generation::text AS movement_generation
+         FROM north_star_internal.semantic_aggregate_generations
+        WHERE tenant_id = $1 AND environment_id = $2`,
+      [scope.tenantId, scope.environmentId],
+    );
+    assert.equal(generation.rowCount, 1);
+    // cardinality() counts members across every dimension, so a 1x1 nested
+    // array satisfies migration 0020's BETWEEN 1 AND 64 exactly as a flat one
+    // does. Dimensionality is unconstrained.
+    await client.query(
+      `INSERT INTO north_star_internal.semantic_aggregate_anchors (
+         tenant_id, environment_id, cache_key, movement_generation, query_id,
+         principal_id, release_content_hash, legal_entity_ids,
+         parameter_values, temporal_horizons, filter_plan_digest, result_kind,
+         selection_id, balance_value, result_precision, result_scale,
+         base_unit_id, anchor_digest
+       ) VALUES (
+         $1, $2, $3, $4::bigint, $5, $6, $7, ARRAY[ARRAY[$8::uuid]],
+         $9::jsonb, $10::jsonb, $11, 'exactDecimalResult', $12, '3', 38, 0,
+         NULL, $13
+       )`,
+      [
+        scope.tenantId,
+        scope.environmentId,
+        input.cacheKey,
+        generation.rows[0]!.movement_generation,
+        input.queryId,
+        input.principalId,
+        plantedReleaseContentHash,
+        input.legalEntityId,
+        JSON.stringify({
+          [reconciliationIds.parameterIds.atTime]: horizon,
+          [reconciliationIds.parameterIds.itemId]: input.itemId,
+          [reconciliationIds.parameterIds.legalEntityId]: input.legalEntityId,
+          [reconciliationIds.parameterIds.locationId]: input.locationId,
+          [reconciliationIds.parameterIds.recordedAtHorizon]: horizon,
+        }),
+        JSON.stringify({
+          [reconciliationIds.parameterIds.atTime]: horizon,
+          [reconciliationIds.parameterIds.recordedAtHorizon]: horizon,
+        }),
+        plantedFilterPlanDigest,
+        onHandSelectionId,
         plantedAnchorDigest,
       ],
     );

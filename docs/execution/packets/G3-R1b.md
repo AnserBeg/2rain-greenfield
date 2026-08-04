@@ -77,6 +77,23 @@ assumption about storage. **The reconciler must not depend on a storage
 guarantee it does not own** — that is the whole lesson of the finding, and it is
 why the fix belongs here rather than in a migration.
 
+**Round 2 found the same assumption a second time, one step downstream**, and
+that changed the shape of the fix. Migration `0020` bounds `cardinality` but not
+**dimensionality**, and `cardinality()` counts members across every dimension —
+so `ARRAY[[A]]::uuid[]` also satisfies `BETWEEN 1 AND 64`, the driver returns a
+nested array, and the scope-agreement comparison called `.toLowerCase()` on an
+array and aborted the sweep. Patching that one call site would have been the
+third patch of one class.
+
+**So the raw value no longer escapes `selectAnchors`.** It is normalized once, at
+the query boundary, into `NormalizedAnchorScope { ids, rendered, wellFormed }`,
+and every consumer — attribution and scope agreement alike — sees only validated
+identifiers. `wellFormed` is false for anything that is not a flat array of
+well-formed UUIDs, which makes an unreadable stored shape a
+`AGGREGATE_ANCHOR_SCOPE_DIVERGED` rather than a crash. A well-formed scope still
+renders as the identifiers themselves; only a malformed one costs the operator
+the raw shape, which is exactly when they need it.
+
 **The residual that remains, stated rather than hidden.** An anchor whose operand
 is unreadable *but* whose stored scope validly names a different entity is
 excluded from this scope. It is not lost: the scope its stored column names
@@ -120,6 +137,7 @@ defect and nothing else:
 | 12 | exclusion stops naming what it dropped | `ArmAccumulator.excluded` records nothing | `not ok 3` — `the read anchor is superseded by the planted movements and is named as excluded`; `not ok 8` — `the anchors this scope excludes are counted, not silently dropped`; also `not ok 13` |
 | 13 | a stored scope element is trusted rather than validated | *pre-fix code* — plant `ARRAY[NULL]::uuid[]` | `not ok 14` — `TypeError: Cannot read properties of null (reading 'toLowerCase')` at `inventory-reconciliation-service.ts:574` |
 | 13b | an unplaceable anchor is excluded from every scope | force `placeable = true` | `not ok 14` — `an anchor no authority can place must be reported by every scope, or it is reported by none` |
+| 14 | the stored array's SHAPE is trusted downstream of attribution | scope agreement reads the raw array instead of `NormalizedAnchorScope` | `not ok 14` — `TypeError: raw[0]?.toLowerCase is not a function` at `inventory-reconciliation-service.ts:663` |
 
 Subtest 13 carries all four charter controls in one run, on a legal entity of its
 own so the pre-fix verdict is genuinely `consistent` rather than masked by the
@@ -136,6 +154,15 @@ divergences planted earlier:
   reason, and the rendered report prints both.
 
 ## Review history
+
+**Round 2** (candidate `d97b0705`) returned **REVISE**. It confirmed every
+one-dimensional case handled correctly, the residual policy and the `0022`
+deferral defensible, the positive witness genuine, and subtest 14 catching both
+stated regressions — then found the trusted-shape assumption **a second time**,
+downstream at scope agreement, reachable via a nested array with otherwise
+entirely valid parameters. That second instance is why the fix became "normalize
+once at the boundary" rather than a second guard: two instances of one class is
+a signal about where the value is read, not about which call sites to patch.
 
 **Round 1** (Codex `gpt-5.6-sol` xhigh, candidate `a9e2e275`) returned **BLOCK**.
 It confirmed the named malformed-sibling defect correctly fixed,

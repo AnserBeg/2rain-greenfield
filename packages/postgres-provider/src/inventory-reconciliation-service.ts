@@ -207,10 +207,27 @@ interface SourceDocumentSnapshot {
   readonly movements: readonly LedgerMovementRow[];
 }
 
+/**
+ * The stored scope after normalization. The raw driver value never escapes
+ * `selectAnchors`: migration 0020 bounds `cardinality` but neither element
+ * nullability nor DIMENSIONALITY, so what comes back is `unknown` in practice
+ * and every consumer that treated it as `string[]` was one corrupt row from
+ * aborting the sweep. Normalizing once, at the boundary, is what makes that a
+ * closed class rather than a list of patched call sites.
+ */
+interface NormalizedAnchorScope {
+  /** Only well-formed, lowercased UUID members. */
+  readonly ids: readonly string[];
+  /** The raw shape, rendered for an operator, whatever it turned out to be. */
+  readonly rendered: string;
+  /** True only for a flat array whose every member is a well-formed UUID. */
+  readonly wellFormed: boolean;
+}
+
 interface AnchorRow {
   readonly balanceValue: string;
   readonly cacheKey: string;
-  readonly legalEntityIds: string[];
+  readonly legalEntityScope: NormalizedAnchorScope;
   readonly movementGeneration: string;
   readonly parameterValues: Record<string, unknown>;
   readonly queryId: string;
@@ -569,20 +586,7 @@ export class PostgresInventoryReconciliationService {
       // recognition is all-or-nothing: a malformed SIBLING parameter would
       // discard a perfectly readable scope authority and make the anchor
       // unattributable to A as well.
-      //
-      // Each element is validated rather than trusted: `legal_entity_ids uuid[]
-      // NOT NULL` forbids a null ARRAY, not null ELEMENTS, and migration 0020's
-      // zero-uuid predicate evaluates to NULL for one, which a CHECK accepts.
-      // Executed, not argued -- the row inserts.
-      const attributedTo = new Set(
-        anchor.legalEntityIds
-          .filter(
-            (legalEntityId): legalEntityId is string =>
-              typeof legalEntityId === 'string' &&
-              uuidPattern.test(legalEntityId),
-          )
-          .map((legalEntityId) => legalEntityId.toLowerCase()),
-      );
+      const attributedTo = new Set(anchor.legalEntityScope.ids);
       const operand = registered
         ? anchorScopeOperand(this.registration, anchor.parameterValues)
         : null;
@@ -651,13 +655,15 @@ export class PostgresInventoryReconciliationService {
     // from its own operand, so a stored scope that disagrees with that operand
     // is an anchor whose cached value answers a different question than its key
     // claims. Summing over either side would launder the defect.
+    const storedScope = anchor.legalEntityScope;
     if (
-      anchor.legalEntityIds.length !== 1 ||
-      anchor.legalEntityIds[0]?.toLowerCase() !== parameters.legalEntityId
+      !storedScope.wellFormed ||
+      storedScope.ids.length !== 1 ||
+      storedScope.ids[0] !== parameters.legalEntityId
     ) {
       arm.discrepant(subjectId, {
         code: 'AGGREGATE_ANCHOR_SCOPE_DIVERGED',
-        declaredValue: anchor.legalEntityIds.join(','),
+        declaredValue: storedScope.rendered,
         detail: {
           cacheKey: subjectId,
           queryId: anchor.queryId,
@@ -1034,7 +1040,50 @@ async function selectAnchors(
       ORDER BY anchor.cache_key`,
     [context.tenantId, context.environmentId],
   );
-  return result.rows;
+  return result.rows.map((row) =>
+    Object.freeze({
+      ...row,
+      legalEntityScope: normalizeAnchorScope(
+        (row as unknown as { legalEntityIds: unknown }).legalEntityIds,
+      ),
+    }),
+  );
+}
+
+function normalizeAnchorScope(value: unknown): NormalizedAnchorScope {
+  if (!Array.isArray(value) || value.length === 0) {
+    return Object.freeze({
+      ids: Object.freeze([]),
+      rendered: renderStoredScope(value),
+      wellFormed: false,
+    });
+  }
+  const ids: string[] = [];
+  let wellFormed = true;
+  for (const member of value) {
+    if (typeof member === 'string' && uuidPattern.test(member)) {
+      ids.push(member.toLowerCase());
+    } else {
+      wellFormed = false;
+    }
+  }
+  // A well-formed scope reads as the identifiers themselves; only a malformed
+  // one costs the operator the raw shape, which is exactly when they need it.
+  return Object.freeze({
+    ids: Object.freeze(ids),
+    rendered: wellFormed ? ids.join(',') : renderStoredScope(value),
+    wellFormed,
+  });
+}
+
+function renderStoredScope(value: unknown): string {
+  let rendered: string;
+  try {
+    rendered = JSON.stringify(value) ?? String(value);
+  } catch {
+    rendered = '(unrenderable)';
+  }
+  return rendered.length > 200 ? `${rendered.slice(0, 200)}…` : rendered;
 }
 
 async function sumMovementLedger(
