@@ -54,21 +54,43 @@ This packet decides *whether the anchor is examined at all*, upstream of it.
 ### The attribution contract, stated exactly
 
 > An anchor is attributed to every legal entity named by any authority it
-> carries, each authority read independently. A scope's verdict covers exactly
-> the anchors attributable to it. Because the stored scope column is `NOT NULL`
-> with cardinality at least one, **every live anchor is attributable to at least
-> one scope**, so no anchor is invisible to every reconciliation. What a scope's
-> report never does is call itself clean while holding an anchor it could not
-> check.
+> carries, each authority read **and validated** independently. **An anchor is
+> excluded from a scope only when some authority places it elsewhere.** An
+> anchor that no authority can place anywhere is a subject of **every** scope,
+> because excluding it from one would exclude it from all of them. What a
+> scope's report never does is call itself clean while holding an anchor it
+> could not check.
 
-**The residual, stated rather than hidden.** An anchor whose operand is
-unreadable *and* whose stored scope names a different entity is excluded from
-this scope — its every surviving authority points elsewhere. It is not lost: the
-scope its stored column names admits it and reports it unverifiable. The
-alternative — admitting every doubtful anchor into every scope — was considered
-and rejected: one unattributable row would make every scope in the tenant
-permanently `indeterminate`, which trains operators to ignore the verdict, and
-the threat model ranks that second-worst.
+**Corrected in review round 1, and the correction matters.** This contract
+originally read *"because the stored scope column is `NOT NULL` with cardinality
+at least one, every live anchor is attributable to at least one scope."* **That
+premise is false, and it was refuted by execution rather than argument.**
+`legal_entity_ids uuid[] NOT NULL` forbids a null *array*, not null *elements*;
+`ARRAY[NULL]::uuid[]` has cardinality one, and migration `0020`'s zero-uuid
+predicate evaluates to `NULL` for it, which a `CHECK` accepts. The row inserts.
+Against the pre-fix code it did not merely slip through — it **crashed the
+sweep** on `legalEntityId.toLowerCase()`.
+
+Two things follow, and both are in the code now: stored elements are validated
+rather than trusted, and totality is a property of the reconciler instead of an
+assumption about storage. **The reconciler must not depend on a storage
+guarantee it does not own** — that is the whole lesson of the finding, and it is
+why the fix belongs here rather than in a migration.
+
+**The residual that remains, stated rather than hidden.** An anchor whose operand
+is unreadable *but* whose stored scope validly names a different entity is
+excluded from this scope. It is not lost: the scope its stored column names
+admits it and reports it unverifiable. Admitting every *placeable-but-doubtful*
+anchor into every scope was considered and rejected — one such row would make
+every scope in the tenant permanently `indeterminate`, which trains operators to
+ignore the verdict, and the threat model ranks that second-worst. That reasoning
+does **not** extend to an unplaceable anchor, which has no other scope to be
+caught by, which is exactly why it is admitted everywhere.
+
+**Open decision, surfaced rather than taken.** Whether migration `0022` should
+also forbid null elements at rest is a storage question this packet does not
+own. It would be defence in depth, not a substitute: the reconciler is correct
+without it, and it must stay correct without it.
 
 ## Exclusion is accounted for by name
 
@@ -82,7 +104,7 @@ property of a reconciliation report, not an oversight.
 
 ## Controls and recorded reds
 
-`test/postgres/inventory-reconciliation.test.ts` — 13 subtests. All ten of
+`test/postgres/inventory-reconciliation.test.ts` — 14 subtests. All ten of
 `G3-R1`'s vacuity controls still pass unchanged; two assertions moved from
 `excludedSubjectCount` to `excludedSubjects` and became stronger, not weaker.
 
@@ -96,6 +118,8 @@ defect and nothing else:
 | 11 | a partly corrupt anchor hides from the scope its operand names | *pre-fix code* — stored scope `B`, valid operand `A`, malformed `atTime`, otherwise-consistent `A` subjects | `not ok 13` — `an anchor the sweep could not check must never leave the scope reading clean` / `+ 'consistent'  - 'indeterminate'` |
 | 11b | attribution routed back through all-or-nothing recognition | `const operand = parameters ? parameters.legalEntityId : null` | `not ok 13` — `2c2c…2c2c must be reported, not excluded` |
 | 12 | exclusion stops naming what it dropped | `ArmAccumulator.excluded` records nothing | `not ok 3` — `the read anchor is superseded by the planted movements and is named as excluded`; `not ok 8` — `the anchors this scope excludes are counted, not silently dropped`; also `not ok 13` |
+| 13 | a stored scope element is trusted rather than validated | *pre-fix code* — plant `ARRAY[NULL]::uuid[]` | `not ok 14` — `TypeError: Cannot read properties of null (reading 'toLowerCase')` at `inventory-reconciliation-service.ts:574` |
+| 13b | an unplaceable anchor is excluded from every scope | force `placeable = true` | `not ok 14` — `an anchor no authority can place must be reported by every scope, or it is reported by none` |
 
 Subtest 13 carries all four charter controls in one run, on a legal entity of its
 own so the pre-fix verdict is genuinely `consistent` rather than masked by the
@@ -110,6 +134,16 @@ divergences planted earlier:
   anchor in the same report, so the fix is not "mark everything indeterminate";
 - **exclusion names what it dropped** — every entry carries a subject id and a
   reason, and the rendered report prints both.
+
+## Review history
+
+**Round 1** (Codex `gpt-5.6-sol` xhigh, candidate `a9e2e275`) returned **BLOCK**.
+It confirmed the named malformed-sibling defect correctly fixed,
+`recognizedAnchorParameters` unchanged, `anchorScopeOperand` no looser, and no
+`G3-R1` property weakened — then failed D1 on the totality claim above, which the
+charter had explicitly asked it to test against migration `0020`. The premise was
+verified by executing the insert rather than by reading the SQL, and it was
+wrong. Fixed here.
 
 ## What was not touched
 

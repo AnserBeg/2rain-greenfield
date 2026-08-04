@@ -569,16 +569,31 @@ export class PostgresInventoryReconciliationService {
       // recognition is all-or-nothing: a malformed SIBLING parameter would
       // discard a perfectly readable scope authority and make the anchor
       // unattributable to A as well.
+      //
+      // Each element is validated rather than trusted: `legal_entity_ids uuid[]
+      // NOT NULL` forbids a null ARRAY, not null ELEMENTS, and migration 0020's
+      // zero-uuid predicate evaluates to NULL for one, which a CHECK accepts.
+      // Executed, not argued -- the row inserts.
       const attributedTo = new Set(
-        anchor.legalEntityIds.map((legalEntityId) =>
-          legalEntityId.toLowerCase(),
-        ),
+        anchor.legalEntityIds
+          .filter(
+            (legalEntityId): legalEntityId is string =>
+              typeof legalEntityId === 'string' &&
+              uuidPattern.test(legalEntityId),
+          )
+          .map((legalEntityId) => legalEntityId.toLowerCase()),
       );
       const operand = registered
         ? anchorScopeOperand(this.registration, anchor.parameterValues)
         : null;
       if (operand) attributedTo.add(operand);
+      // No authority can place this anchor anywhere. Excluding it from this
+      // scope would exclude it from EVERY scope, so it is a subject of all of
+      // them until someone repairs it: the alternative is a live anchor no
+      // report ever mentions.
+      const placeable = attributedTo.size > 0;
       if (
+        placeable &&
         ![...attributedTo].some((legalEntityId) =>
           legalEntityIds.includes(legalEntityId),
         )

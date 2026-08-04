@@ -117,6 +117,7 @@ const scopeDivergedAnchorCacheKey = '0a'.repeat(32);
 const overflowingAnchorCacheKey = '1b'.repeat(32);
 const partiallyCorruptAnchorCacheKey = '2c'.repeat(32);
 const fullyCorruptAnchorCacheKey = '3d'.repeat(32);
+const authorityLessAnchorCacheKey = '4e'.repeat(32);
 const plantedFilterPlanDigest = 'ef'.repeat(32);
 const plantedReleaseContentHash = '12'.repeat(32);
 const plantedAnchorDigest = '34'.repeat(32);
@@ -1057,6 +1058,46 @@ test('reconciliation names divergence, confirms consistency, repairs nothing, an
           );
         },
       );
+
+      await t.test(
+        'an anchor with no readable attribution authority is still reported',
+        async () => {
+          // `legal_entity_ids uuid[] NOT NULL` forbids a null ARRAY, not null
+          // ELEMENTS, and the zero-uuid predicate evaluates to NULL for one,
+          // which a CHECK accepts. Whether that row is insertable is a fact
+          // about PostgreSQL, so it is executed rather than argued.
+          const planted = await plantNullScopeAnchor(runtimePool, scopeA, {
+            cacheKey: authorityLessAnchorCacheKey,
+            itemId: itemPrimary,
+            locationId: locationPrimary,
+            principalId: principalA,
+            queryId: reconciliationIds.onHandQueryId,
+          });
+          assert.equal(
+            planted,
+            true,
+            'the storage contract admits an anchor whose stored scope names nothing',
+          );
+          const report = await reconciliation.reconcile(scopeA.context, {
+            legalEntityIds: [witnessLegalEntityA],
+            scopeId: 'authority-less-scope',
+          });
+          const anchors = arm(report, 'aggregateAnchors');
+          assert.ok(
+            anchors.unverifiableSubjectIds.includes(
+              authorityLessAnchorCacheKey,
+            ),
+            'an anchor no authority can place must be reported by every scope, or it is reported by none',
+          );
+          assert.equal(
+            anchors.excludedSubjects.some(
+              (excluded) => excluded.subjectId === authorityLessAnchorCacheKey,
+            ),
+            false,
+          );
+          assert.notEqual(report.outcome, 'consistent');
+        },
+      );
     } finally {
       await Promise.all([
         runtimePool.end(),
@@ -1351,6 +1392,64 @@ async function plantAnchor(
         plantedAnchorDigest,
       ],
     );
+  });
+}
+
+async function plantNullScopeAnchor(
+  pool: Pool,
+  scope: TenantScope,
+  input: {
+    readonly cacheKey: string;
+    readonly itemId: string;
+    readonly locationId: string;
+    readonly principalId: string;
+    readonly queryId: string;
+  },
+): Promise<boolean> {
+  return withModuleRole(pool, scope, async (client) => {
+    const generation = await client.query<{ movement_generation: string }>(
+      `SELECT movement_generation::text AS movement_generation
+         FROM north_star_internal.semantic_aggregate_generations
+        WHERE tenant_id = $1 AND environment_id = $2`,
+      [scope.tenantId, scope.environmentId],
+    );
+    assert.equal(generation.rowCount, 1);
+    await client.query(
+      `INSERT INTO north_star_internal.semantic_aggregate_anchors (
+         tenant_id, environment_id, cache_key, movement_generation, query_id,
+         principal_id, release_content_hash, legal_entity_ids,
+         parameter_values, temporal_horizons, filter_plan_digest, result_kind,
+         selection_id, balance_value, result_precision, result_scale,
+         base_unit_id, anchor_digest
+       ) VALUES (
+         $1, $2, $3, $4::bigint, $5, $6, $7, ARRAY[NULL]::uuid[], $8::jsonb,
+         $9::jsonb, $10, 'exactDecimalResult', $11, '4', 38, 0, NULL, $12
+       )`,
+      [
+        scope.tenantId,
+        scope.environmentId,
+        input.cacheKey,
+        generation.rows[0]!.movement_generation,
+        input.queryId,
+        input.principalId,
+        plantedReleaseContentHash,
+        JSON.stringify({
+          [reconciliationIds.parameterIds.atTime]: horizon,
+          [reconciliationIds.parameterIds.itemId]: input.itemId,
+          [reconciliationIds.parameterIds.legalEntityId]: 'not-a-uuid',
+          [reconciliationIds.parameterIds.locationId]: input.locationId,
+          [reconciliationIds.parameterIds.recordedAtHorizon]: horizon,
+        }),
+        JSON.stringify({
+          [reconciliationIds.parameterIds.atTime]: horizon,
+          [reconciliationIds.parameterIds.recordedAtHorizon]: horizon,
+        }),
+        plantedFilterPlanDigest,
+        onHandSelectionId,
+        plantedAnchorDigest,
+      ],
+    );
+    return true;
   });
 }
 
