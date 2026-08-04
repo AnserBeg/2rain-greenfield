@@ -196,10 +196,8 @@ export class PostgresSavedFilterExecutor
         '$.filterPlans',
       );
     }
-    if (
-      request.definition.queryId !== this.registration.queryIds.get &&
-      request.definition.queryId !== this.registration.queryIds.list
-    ) {
+    const supported = supportsQuery(request, this.registration);
+    if (!supported) {
       return Object.freeze({
         kind: 'semanticQueryResult',
         outcome: 'unsupported',
@@ -320,7 +318,9 @@ async function readRows(
     );
     return result.rows;
   }
-  return [];
+  return request.definition.queryId === registration.queryIds.search
+    ? readSearchRows(client, request)
+    : [];
 }
 
 function savedFilterSelect(): string {
@@ -1035,6 +1035,38 @@ function acceptedCommand(
     releaseContentHash: request.view.release.contentHash,
     releaseId: request.view.release.releaseId,
   });
+}
+
+function supportsQuery(
+  request: SemanticQueryExecutionRequest,
+  registration: SavedFilterRegistration,
+): boolean {
+  const queryId = request.definition.queryId;
+  return (
+    queryId === registration.queryIds.get ||
+    queryId === registration.queryIds.list ||
+    queryId === registration.queryIds.search
+  );
+}
+
+async function readSearchRows(
+  client: PoolClient,
+  request: SemanticQueryExecutionRequest,
+): Promise<SavedFilterRow[]> {
+  const input = exactRecord(request.arguments, ['text'], '$.arguments');
+  const text = requiredString(input.text, '$.arguments.text');
+  const result = await client.query<SavedFilterRow>(
+    `${savedFilterSelect()}
+      WHERE lifecycle = 'active'
+        AND position(
+              lower($1::text COLLATE "C")
+              IN lower(name COLLATE "C")
+            ) > 0
+      ORDER BY filter_id
+      LIMIT $2`,
+    [text, request.definition.maximumResultCount],
+  );
+  return result.rows;
 }
 
 function mutationChanges(

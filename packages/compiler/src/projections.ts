@@ -726,6 +726,16 @@ function verificationPlanPayload(
       });
     }
   }
+  const searchableEntityIds = new Set(
+    packageRevision.queries
+      .filter(
+        (query) =>
+          query.lifecycle === 'active' &&
+          query.tier === 'q0' &&
+          query.queryType === 'search',
+      )
+      .map((query) => query.sourceEntity.targetId),
+  );
   for (const field of packageRevision.fields.filter(
     (entry) => entry.lifecycle === 'active',
   )) {
@@ -738,7 +748,7 @@ function verificationPlanPayload(
         subjectId: field.fieldId,
       });
     }
-    if (!field.searchable) {
+    if (!field.searchable && searchableEntityIds.has(field.entity.targetId)) {
       addScenario({
         entityId: field.entity.targetId,
         kind: 'searchableExclusion',

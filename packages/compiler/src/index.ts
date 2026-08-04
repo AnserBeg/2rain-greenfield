@@ -4,6 +4,8 @@ export {
   MODULE_COMPILER_PROFILE,
   compileApplication,
   expectedActiveReleaseFrom,
+  reproduceHistoricalApplication,
+  type HistoricalApplicationReproductionExpectation,
 } from './compiler.js';
 export { COMPILER_DIAGNOSTIC_COPY } from './diagnostics.js';
 export { diffCompiledReleases } from './diff.js';

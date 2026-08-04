@@ -1,11 +1,14 @@
 import { randomUUID } from 'node:crypto';
-import { execFile } from 'node:child_process';
+import { execFile, spawn, type ChildProcess } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { promisify } from 'node:util';
 
 import pg from 'pg';
 
 const execFileAsync = promisify(execFile);
+const postgresGuardianPath = join(__dirname, 'postgres-container-guardian.mjs');
 
 export const postgresTestImage =
   'postgres@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777';
@@ -57,7 +60,14 @@ export async function withEphemeralPostgres<T>(
   const containerName = `north-star-${safeLabel}-${process.pid}-${randomUUID().slice(0, 8)}`;
   let started = false;
   let pool: pg.Pool | undefined;
+  const guardian = await startEphemeralPostgresGuardian(containerName);
 
+  let outcome:
+    | { readonly ok: true; readonly value: T }
+    | {
+        readonly error: unknown;
+        readonly ok: false;
+      };
   try {
     await docker([
       'run',
@@ -65,6 +75,10 @@ export async function withEphemeralPostgres<T>(
       '--rm',
       '--name',
       containerName,
+      '--label',
+      'north-star.ephemeral-postgres=true',
+      '--label',
+      `north-star.owner-pid=${process.pid}`,
       '--publish',
       '127.0.0.1::5432',
       '--tmpfs',
@@ -94,13 +108,121 @@ export async function withEphemeralPostgres<T>(
     };
     await waitUntilReady(connection, containerName);
     pool = new pg.Pool(connection);
-    return await run({ containerName, connection, pool });
-  } finally {
-    if (pool) await pool.end();
-    if (started) {
-      await removeEphemeralPostgresContainer(containerName);
+    outcome = {
+      ok: true,
+      value: await run({ containerName, connection, pool }),
+    };
+  } catch (error) {
+    outcome = { error, ok: false };
+  }
+
+  const cleanupErrors: unknown[] = [];
+  if (pool) {
+    try {
+      await pool.end();
+    } catch (error) {
+      cleanupErrors.push(error);
     }
   }
+  let containerRemoved = !started;
+  if (started) {
+    try {
+      await removeEphemeralPostgresContainer(containerName);
+      containerRemoved = true;
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
+  }
+  try {
+    if (containerRemoved) {
+      guardian.kill('SIGTERM');
+    } else {
+      guardian.kill('SIGUSR1');
+    }
+  } catch (error) {
+    cleanupErrors.push(error);
+  }
+
+  if (!outcome.ok) {
+    if (cleanupErrors.length === 0) throw outcome.error;
+    throw new AggregateError(
+      [outcome.error, ...cleanupErrors],
+      `ephemeral PostgreSQL operation and cleanup failed: ${containerName}`,
+    );
+  }
+  if (cleanupErrors.length === 1) throw cleanupErrors[0];
+  if (cleanupErrors.length > 1) {
+    throw new AggregateError(
+      cleanupErrors,
+      `ephemeral PostgreSQL cleanup failed: ${containerName}`,
+    );
+  }
+  return outcome.value;
+}
+
+function startEphemeralPostgresGuardian(
+  containerName: string,
+): Promise<ChildProcess> {
+  return new Promise((resolve, reject) => {
+    const guardian = spawn(
+      process.execPath,
+      [
+        postgresGuardianPath,
+        containerName,
+        String(process.pid),
+        readProcessStartTicks(process.pid),
+        String(process.ppid),
+        readProcessStartTicks(process.ppid),
+      ],
+      {
+        detached: true,
+        stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+      },
+    );
+    const onError = (error: Error) => {
+      reject(
+        new Error(`ephemeral PostgreSQL guardian failed to start`, {
+          cause: error,
+        }),
+      );
+    };
+    const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
+      reject(
+        new Error(
+          `ephemeral PostgreSQL guardian exited before ready: code=${String(code)} signal=${String(signal)}`,
+        ),
+      );
+    };
+    guardian.once('error', onError);
+    guardian.once('exit', onExit);
+    guardian.once('message', (message: unknown) => {
+      if (
+        typeof message !== 'object' ||
+        message === null ||
+        !('status' in message) ||
+        message.status !== 'ready'
+      ) {
+        return;
+      }
+      guardian.off('error', onError);
+      guardian.off('exit', onExit);
+      guardian.unref();
+      resolve(guardian);
+    });
+  });
+}
+
+function readProcessStartTicks(pid: number): string {
+  const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+  const closingParenthesis = stat.lastIndexOf(')');
+  if (closingParenthesis < 0) {
+    throw new Error(`cannot read process identity for PID ${pid}`);
+  }
+  const startTicks = stat.slice(closingParenthesis + 2).split(' ')[19];
+  if (startTicks === undefined || !/^\d+$/u.test(startTicks)) {
+    throw new Error(`cannot read process identity for PID ${pid}`);
+  }
+  return startTicks;
 }
 
 export async function waitUntilReady(
@@ -266,8 +388,8 @@ function isMissingDockerContainerError(
   const stderr = cause.stderr;
   return (
     typeof stderr === 'string' &&
-    (stderr.includes(`No such container: ${containerName}`) ||
-      stderr.includes(`No such object: ${containerName}`))
+    (stderr.toLowerCase().includes(`no such container: ${containerName}`) ||
+      stderr.toLowerCase().includes(`no such object: ${containerName}`))
   );
 }
 

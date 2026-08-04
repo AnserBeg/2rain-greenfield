@@ -1228,6 +1228,53 @@ test('definition-only module is served generically through Q0/O0, trust, RLS, an
         });
         assert.equal(search.outcome, 'exact');
         assert.equal(search.records.length, 2);
+        const unusableQueryProjection = runtimeProjection(
+          v1,
+          REQUEST_RUNTIME_PROJECTION_FAMILIES.query,
+        );
+        const unusableQueryPayload = structuredClone(
+          unusableQueryProjection.payload,
+        ) as {
+          queries: Array<{
+            queryId: string;
+            selections: Array<{ fieldId: string }>;
+          }>;
+        };
+        const unusableSearch = unusableQueryPayload.queries.find(
+          (candidate) =>
+            candidate.queryId ===
+            `${FIXTURE_IDS.namespace}:query.master_search`,
+        );
+        assert.ok(unusableSearch?.selections[0]);
+        unusableSearch.selections = [
+          {
+            ...unusableSearch.selections[0],
+            fieldId: FIXTURE_IDS.fieldIds.parentNotes,
+          },
+        ];
+        const unusableSearchView = await issuedCandidateView(
+          v1,
+          releasesA[1]!,
+          identity(tenantA, environmentA, principalA),
+          viewA1.pointer,
+          new AllowPolicy(),
+          Object.freeze({
+            ...unusableQueryProjection,
+            payload: unusableQueryPayload as ImmutableJsonValue,
+          }),
+        );
+        await assert.rejects(
+          query(queryGateway, unusableSearchView, 'master_search', {
+            text: 'acm',
+          }),
+          (error: unknown) =>
+            assertModuleError(
+              error,
+              'MODULE_SEARCH_CAPABILITY_UNAVAILABLE',
+              `${FIXTURE_IDS.namespace}:query.master_search`,
+            ),
+          'a registered search with zero usable lowered columns must refuse by name instead of returning a plausible empty result',
+        );
         assert.equal(
           (
             await query(queryGateway, viewA1, 'master_resolve', {
@@ -3484,6 +3531,10 @@ async function issuedCandidateView(
   candidateIdentity: AuthenticatedIdentity,
   pointer: LoadedRequestRuntimeDefinition['pointer'],
   policy: CurrentPolicyGateway,
+  queryProjection = runtimeProjection(
+    compiled,
+    REQUEST_RUNTIME_PROJECTION_FAMILIES.query,
+  ),
 ): Promise<RequestRuntimeView> {
   const entry = new AuthenticatedRequestRuntimeEntryAdapter(
     new AuthenticatedRequestEntryAdapter(async () => candidateIdentity),
@@ -3505,10 +3556,7 @@ async function issuedCandidateView(
               compiled,
               REQUEST_RUNTIME_PROJECTION_FAMILIES.operation,
             ),
-            query: runtimeProjection(
-              compiled,
-              REQUEST_RUNTIME_PROJECTION_FAMILIES.query,
-            ),
+            query: queryProjection,
             surface: runtimeProjection(
               compiled,
               REQUEST_RUNTIME_PROJECTION_FAMILIES.surface,

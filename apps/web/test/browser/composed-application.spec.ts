@@ -822,9 +822,25 @@ async function partyLifecycleJourney(
 
   await page.goto(detailUrl);
   await expect(
-    page.locator('[data-diagnostic-code="QUERY_NOT_FOUND"]'),
-  ).toHaveCount(1);
-  await expect(page.locator('[data-platform-slot^="record:"]')).toHaveCount(0);
+    page.locator(
+      '[data-platform-slot^="record:"][data-slot-state="failed"] [data-diagnostic-code="QUERY_NOT_FOUND"]',
+    ),
+  ).toHaveCount(2);
+  await expect(
+    page.locator(
+      '[data-platform-slot="record:breadcrumb"][data-slot-state="ready"]',
+    ),
+  ).toBeVisible();
+  await expect(
+    page.locator(
+      '[data-platform-slot="record:titleStatus"][data-slot-state="ready"]',
+    ),
+  ).toContainText('Party');
+  await expect(
+    page.locator(
+      '[data-platform-slot="record:commandBar"][data-slot-state="ready"]',
+    ),
+  ).toContainText('New');
 
   await page.goto(
     `${surfaceUrl(baseUrl, 'party_list')}&q=${encodeURIComponent('Browser-persisted Party')}`,

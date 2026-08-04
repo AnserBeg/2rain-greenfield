@@ -1547,55 +1547,37 @@ class SemanticVerificationExecutor {
         `excluded field value was searchable: ${scenario.subjectId}`,
       );
     }
-    const positiveCandidate = this.#queries
-      .filter((query) => query.queryType === 'search')
-      .filter((query) =>
-        this.#hasConstructibleCreateOperation(query.sourceEntityId),
-      )
-      .flatMap((query) =>
-        query.selections.map((selection) => ({
-          entityId: query.sourceEntityId,
-          field: this.#createOperation(
-            query.sourceEntityId,
-          ).inputContract.fields.find(
-            (field) =>
-              field.fieldId === selection.fieldId &&
-              field.fieldKind === 'textFieldType' &&
-              !this.#excludedFieldsByEntity
-                .get(query.sourceEntityId)
-                ?.has(field.fieldId),
-          ),
-        })),
-      )
-      .find((candidate) => candidate.field);
-    if (!positiveCandidate?.field) {
+    const selectedFieldIds = new Set(
+      search.selections.map((selection) => selection.fieldId),
+    );
+    const positiveField = this.#createOperation(
+      scenario.entityId,
+    ).inputContract.fields.find(
+      (field) =>
+        selectedFieldIds.has(field.fieldId) &&
+        (field.fieldKind === 'textFieldType' ||
+          field.fieldKind === 'enumFieldType') &&
+        !this.#excludedFieldsByEntity
+          .get(scenario.entityId)
+          ?.has(field.fieldId),
+    );
+    if (!positiveField) {
       throw failure(
         'VERIFICATION_SEARCHABLE_FIELD_MISSING',
-        'search exclusion probe has no positive searchable field',
+        'search exclusion probe has no same-entity positive searchable field',
       );
     }
-    const positiveRecord =
-      positiveCandidate.entityId === scenario.entityId
-        ? record
-        : await this.#create(
-            positiveCandidate.entityId,
-            `${token}-search-positive`,
-          );
-    const positiveSearch = this.#queryForEntity(
-      positiveCandidate.entityId,
-      'search',
-    );
     const included = await this.#invokeQuery(
-      positiveSearch,
+      search,
       {
-        text: String(positiveRecord.values[positiveCandidate.field.fieldId]),
+        text: String(record.values[positiveField.fieldId]),
       },
-      positiveRecord,
+      record,
     );
-    if (!hasRecord(included, positiveRecord.recordId)) {
+    if (!hasRecord(included, record.recordId)) {
       throw failure(
         'VERIFICATION_SEARCH_POSITIVE_FAILED',
-        `searchable field ${positiveCandidate.field.fieldId} did not return record ${positiveRecord.recordId}: ${canonicalize(included)}`,
+        `searchable field ${positiveField.fieldId} did not return record ${record.recordId}: ${canonicalize(included)}`,
       );
     }
     return {
@@ -1603,8 +1585,8 @@ class SemanticVerificationExecutor {
       positiveProbe: {
         constructibilityFindings: this.constructibilityFindings,
         searchWitness: {
-          entityId: positiveCandidate.entityId,
-          fieldId: positiveCandidate.field.fieldId,
+          entityId: scenario.entityId,
+          fieldId: positiveField.fieldId,
           recordObserved: true,
         },
       },
@@ -2072,21 +2054,6 @@ class SemanticVerificationExecutor {
       );
     }
     return operation;
-  }
-
-  #hasConstructibleCreateOperation(entityId: string): boolean {
-    const operation = this.#operations.find(
-      (candidate) =>
-        candidate.effect.kind !== 'registeredCapabilityEffect' &&
-        candidate.effect.entity.targetId === entityId &&
-        candidate.effect.kind === 'createRecordEffect',
-    );
-    return (
-      operation !== undefined &&
-      !this.constructibilityFindings.some(
-        (finding) => finding.operationId === operation.operationId,
-      )
-    );
   }
 
   #requiredOperation(operationId: string): VerificationOperationContract {
