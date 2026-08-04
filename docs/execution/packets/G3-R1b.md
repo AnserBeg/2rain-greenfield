@@ -33,7 +33,7 @@ else, so a malformed sibling cannot discard it.
 
 | Authority | Read by | Independent of |
 |---|---|---|
-| stored scope column | `anchor.legalEntityIds` | the operand |
+| stored scope column | `NormalizedAnchorScope.ids` | the operand |
 | legal-entity operand | `anchorScopeOperand` | every sibling parameter, and whole-parameter recognition |
 
 An anchor is a subject of a scope when **either** authority names it. It is
