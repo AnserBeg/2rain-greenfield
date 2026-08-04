@@ -786,7 +786,10 @@ test('reconciliation names divergence, confirms consistency, repairs nothing, an
             locationId: locationSecondary,
             principalId: principalA,
             queryId: reconciliationIds.onHandQueryId,
-            scopeLegalEntityIds: [legalEntityA, quietLegalEntityA],
+            // Stored scope names ONLY the other legal entity. Deciding
+            // membership from the stored column alone would exclude this anchor
+            // from the reconciliation below and never compare it at all.
+            scopeLegalEntityIds: [quietLegalEntityA],
           });
           await plantAnchor(runtimePool, scopeA, {
             // Twenty-one integer digits: inside migration 0020's lexical check
@@ -801,7 +804,7 @@ test('reconciliation names divergence, confirms consistency, repairs nothing, an
             queryId: reconciliationIds.onHandQueryId,
           });
           const report = await reconciliation.reconcile(scopeA.context, {
-            legalEntityIds: [legalEntityA, quietLegalEntityA],
+            legalEntityIds: [legalEntityA],
             scopeId: 'out-of-contract-scope',
           });
           const scopeDiverged = findingFor(
@@ -809,10 +812,7 @@ test('reconciliation names divergence, confirms consistency, repairs nothing, an
             'AGGREGATE_ANCHOR_SCOPE_DIVERGED',
             scopeDivergedAnchorCacheKey,
           );
-          assert.equal(
-            scopeDiverged.declaredValue,
-            `${legalEntityA},${quietLegalEntityA}`,
-          );
+          assert.equal(scopeDiverged.declaredValue, quietLegalEntityA);
           assert.equal(scopeDiverged.observedValue, legalEntityA);
           const anchors = arm(report, 'aggregateAnchors');
           assert.equal(
@@ -871,6 +871,43 @@ test('reconciliation names divergence, confirms consistency, repairs nothing, an
           assert.ok(pending);
           const report = await pending;
           assert.equal(report.scopeId, 'guarded-scope');
+        },
+      );
+
+      await t.test(
+        'a document-side change that no movement matches is detected',
+        async () => {
+          // A transaction line is an ordinary updatable entity and its updates
+          // do not advance the aggregate generation, so the ledger guard alone
+          // cannot see this writer. The arm reads both sides in one statement
+          // for exactly that reason.
+          await withModuleRole(runtimePool, scopeA, async (client) => {
+            const updated = await client.query(
+              `UPDATE ${table(binding, binding.transactionLine)}
+                  SET ${quoted(field(binding.transactionLine, 'inventory_transaction_line_quantity').physicalName)} = $4
+                WHERE tenant_id = $1 AND environment_id = $2
+                  AND ${quoted(binding.transactionLine.recordIdColumn)} = $3`,
+              [tenantA, environmentA, consistentLineId, '8'],
+            );
+            assert.equal(updated.rowCount, 1);
+          });
+          const report = await reconciliation.reconcile(scopeA.context, {
+            legalEntityIds: [legalEntityA],
+            scopeId: 'document-drift-scope',
+          });
+          const drift = findingFor(
+            report,
+            'SOURCE_DOCUMENT_QUANTITY_DIVERGED',
+            consistentLineId,
+          );
+          assert.equal(drift.declaredValue, '8');
+          assert.equal(drift.observedValue, '5');
+          assert.equal(
+            arm(report, 'sourceDocuments').consistentSubjectIds.includes(
+              consistentLineId,
+            ),
+            false,
+          );
         },
       );
     } finally {

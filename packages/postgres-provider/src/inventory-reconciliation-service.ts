@@ -193,6 +193,11 @@ interface LedgerMovementRow {
   readonly unitId: string;
 }
 
+interface SourceDocumentSnapshot {
+  readonly lines: readonly SourceDocumentLineRow[];
+  readonly movements: readonly LedgerMovementRow[];
+}
+
 interface AnchorRow {
   readonly balanceValue: string;
   readonly cacheKey: string;
@@ -328,13 +333,7 @@ export class PostgresInventoryReconciliationService {
     legalEntityIds: readonly string[],
   ): Promise<InventoryReconciliationArmReportV1> {
     const binding = this.#binding;
-    const lines = await selectPostedSourceDocumentLines(
-      client,
-      binding,
-      context,
-      legalEntityIds,
-    );
-    const movements = await selectLinkedMovements(
+    const { lines, movements } = await selectSourceDocumentSnapshot(
       client,
       binding,
       context,
@@ -541,10 +540,6 @@ export class PostgresInventoryReconciliationService {
     const anchors = await selectAnchors(client, context);
     const arm = new ArmAccumulator('aggregateAnchors');
     for (const anchor of anchors) {
-      if (!anchor.legalEntityIds.every((id) => legalEntityIds.includes(id))) {
-        arm.excluded();
-        continue;
-      }
       if (anchor.movementGeneration !== generation) {
         // A superseded anchor cannot be served: the cache key and the identity
         // comparison both carry the generation, which only advances. It is
@@ -552,7 +547,33 @@ export class PostgresInventoryReconciliationService {
         arm.excluded();
         continue;
       }
-      await this.#reconcileOneAnchor(client, context, arm, anchor);
+      const parameters =
+        anchor.queryId === this.registration.aggregateQueryId
+          ? recognizedAnchorParameters(
+              this.registration,
+              anchor.parameterValues,
+            )
+          : null;
+      // Membership is decided from the stored scope AND the query's own
+      // operand. Deciding it from the stored column alone would let a corrupt
+      // anchor -- operand A, stored scope B -- be excluded from A's
+      // reconciliation as out of scope and from B's as unattributable, so the
+      // one check that would name it never runs.
+      const attributedTo = new Set(
+        anchor.legalEntityIds.map((legalEntityId) =>
+          legalEntityId.toLowerCase(),
+        ),
+      );
+      if (parameters) attributedTo.add(parameters.legalEntityId);
+      if (
+        ![...attributedTo].some((legalEntityId) =>
+          legalEntityIds.includes(legalEntityId),
+        )
+      ) {
+        arm.excluded();
+        continue;
+      }
+      await this.#reconcileOneAnchor(client, context, arm, anchor, parameters);
     }
     return arm.freeze();
   }
@@ -562,6 +583,7 @@ export class PostgresInventoryReconciliationService {
     context: TrustedRequestContext,
     arm: ArmAccumulator,
     anchor: AnchorRow,
+    parameters: RecognizedAnchorParameters | null,
   ): Promise<void> {
     const subjectId = anchor.cacheKey;
     const declaredScaled = parseStoredDecimal(anchor.balanceValue);
@@ -588,10 +610,6 @@ export class PostgresInventoryReconciliationService {
       });
       return;
     }
-    const parameters = recognizedAnchorParameters(
-      this.registration,
-      anchor.parameterValues,
-    );
     if (!parameters) {
       arm.unverifiable(subjectId, {
         code: 'AGGREGATE_ANCHOR_PARAMETERS_UNRECOGNIZED',
@@ -996,44 +1014,100 @@ async function sumMovementLedger(
   return scaled === null ? null : scaledToDecimal(scaled);
 }
 
-async function selectPostedSourceDocumentLines(
+/**
+ * Both sides in ONE statement, deliberately.
+ *
+ * Two statements would be two `READ COMMITTED` snapshots, and any writer that
+ * commits between them splits the comparison: a transaction line is an ordinary
+ * updatable entity whose updates do not advance the aggregate generation, so the
+ * generation guard alone cannot make the pair coherent. Reading the documents
+ * and the movements they produced in a single statement removes the race for
+ * every writer rather than for the one this module happens to know about.
+ */
+async function selectSourceDocumentSnapshot(
   client: PoolClient,
   binding: ReconciliationStorageBinding,
   context: TrustedRequestContext,
   legalEntityIds: readonly string[],
-): Promise<SourceDocumentLineRow[]> {
+): Promise<SourceDocumentSnapshot> {
   const line = binding.transactionLine;
   const header = binding.transaction;
-  const result = await client.query<SourceDocumentLineRow>(
-    `SELECT line.${quoted(line.recordIdColumn)}::text AS "transactionLineId",
-            header.${quoted(header.recordIdColumn)}::text AS "transactionId",
-            line.${quoted(binding.transactionLineItemColumn)}::text AS "itemId",
-            line.${quoted(binding.transactionLineFromLocationColumn)}::text
-              AS "fromLocationId",
-            line.${quoted(binding.transactionLineToLocationColumn)}::text
-              AS "toLocationId",
-            line.${quoted(binding.transactionLineQuantityColumn)}::text
-              AS "quantity",
-            line.${quoted(binding.transactionLineNumberColumn)}::text
-              AS "lineNumber",
-            line.${quoted(binding.transactionLineUnitColumn)} AS "unitId",
-            header.${quoted(binding.transactionTypeColumn)} AS "transactionType",
-            header.${quoted(binding.transactionSourceTypeColumn)}
-              AS "transactionSourceType",
-            header.${quoted(binding.transactionSourceIdColumn)}
-              AS "transactionSourceId"
-       FROM ${table(binding, line)} AS line
-       JOIN ${table(binding, header)} AS header
-         ON header.tenant_id = line.tenant_id
-        AND header.environment_id = line.environment_id
-        AND header.${quoted(header.recordIdColumn)} =
-            line.${quoted(binding.transactionLineRelationToTransactionColumn)}
-      WHERE line.tenant_id = $1 AND line.environment_id = $2
-        AND line.${quoted(line.legalEntityColumn)} = ANY($3::uuid[])
-        AND line.${quoted(line.archiveColumn)} IS NULL
-        AND header.${quoted(header.archiveColumn)} IS NULL
-        AND header.${quoted(binding.transactionStateColumn)} = $4
-      ORDER BY line.${quoted(line.recordIdColumn)}`,
+  const movement = binding.movement;
+  const result = await client.query<{
+    lines: SourceDocumentLineRow[];
+    movements: LedgerMovementRow[];
+  }>(
+    `WITH document_line AS (
+       SELECT line.${quoted(line.recordIdColumn)}::text AS "transactionLineId",
+              header.${quoted(header.recordIdColumn)}::text AS "transactionId",
+              line.${quoted(binding.transactionLineItemColumn)}::text AS "itemId",
+              line.${quoted(binding.transactionLineFromLocationColumn)}::text
+                AS "fromLocationId",
+              line.${quoted(binding.transactionLineToLocationColumn)}::text
+                AS "toLocationId",
+              line.${quoted(binding.transactionLineQuantityColumn)}::text
+                AS "quantity",
+              line.${quoted(binding.transactionLineNumberColumn)}::text
+                AS "lineNumber",
+              line.${quoted(binding.transactionLineUnitColumn)}::text AS "unitId",
+              header.${quoted(binding.transactionTypeColumn)}::text
+                AS "transactionType",
+              header.${quoted(binding.transactionSourceTypeColumn)}::text
+                AS "transactionSourceType",
+              header.${quoted(binding.transactionSourceIdColumn)}::text
+                AS "transactionSourceId"
+         FROM ${table(binding, line)} AS line
+         JOIN ${table(binding, header)} AS header
+           ON header.tenant_id = line.tenant_id
+          AND header.environment_id = line.environment_id
+          AND header.${quoted(header.recordIdColumn)} =
+              line.${quoted(binding.transactionLineRelationToTransactionColumn)}
+        WHERE line.tenant_id = $1 AND line.environment_id = $2
+          AND line.${quoted(line.legalEntityColumn)} = ANY($3::uuid[])
+          AND line.${quoted(line.archiveColumn)} IS NULL
+          AND header.${quoted(header.archiveColumn)} IS NULL
+          AND header.${quoted(binding.transactionStateColumn)} = $4
+     ), linked_movement AS (
+       SELECT ${quoted(movement.recordIdColumn)}::text AS "movementId",
+              ${quoted(binding.movementRelationToLineColumn)}::text
+                AS "transactionLineId",
+              ${quoted(requiredColumn(movement, 'inventory_movement_item_id'))}::text
+                AS "itemId",
+              ${quoted(requiredColumn(movement, 'inventory_movement_location_id'))}::text
+                AS "locationId",
+              ${quoted(binding.movementQuantityColumn)}::text AS "quantityDelta",
+              ${quoted(requiredColumn(movement, 'inventory_movement_unit_id'))}::text
+                AS "unitId",
+              ${quoted(requiredColumn(movement, 'inventory_movement_source_type'))}::text
+                AS "sourceType",
+              ${quoted(requiredColumn(movement, 'inventory_movement_source_id'))}::text
+                AS "sourceId"
+         FROM ${table(binding, movement)}
+        WHERE tenant_id = $1 AND environment_id = $2
+          AND ${quoted(movement.legalEntityColumn)} = ANY($3::uuid[])
+          AND ${quoted(movement.archiveColumn)} IS NULL
+     )
+     SELECT
+       COALESCE(
+         (
+           SELECT jsonb_agg(
+                    to_jsonb(document_line)
+                    ORDER BY document_line."transactionLineId"
+                  )
+             FROM document_line
+         ),
+         '[]'::jsonb
+       ) AS lines,
+       COALESCE(
+         (
+           SELECT jsonb_agg(
+                    to_jsonb(linked_movement)
+                    ORDER BY linked_movement."movementId"
+                  )
+             FROM linked_movement
+         ),
+         '[]'::jsonb
+       ) AS movements`,
     [
       context.tenantId,
       context.environmentId,
@@ -1041,39 +1115,17 @@ async function selectPostedSourceDocumentLines(
       binding.transactionPostedState,
     ],
   );
-  return result.rows;
-}
-
-async function selectLinkedMovements(
-  client: PoolClient,
-  binding: ReconciliationStorageBinding,
-  context: TrustedRequestContext,
-  legalEntityIds: readonly string[],
-): Promise<LedgerMovementRow[]> {
-  const movement = binding.movement;
-  const result = await client.query<LedgerMovementRow>(
-    `SELECT ${quoted(movement.recordIdColumn)}::text AS "movementId",
-            ${quoted(binding.movementRelationToLineColumn)}::text
-              AS "transactionLineId",
-            ${quoted(requiredColumn(movement, 'inventory_movement_item_id'))}::text
-              AS "itemId",
-            ${quoted(requiredColumn(movement, 'inventory_movement_location_id'))}::text
-              AS "locationId",
-            ${quoted(binding.movementQuantityColumn)}::text AS "quantityDelta",
-            ${quoted(requiredColumn(movement, 'inventory_movement_unit_id'))}
-              AS "unitId",
-            ${quoted(requiredColumn(movement, 'inventory_movement_source_type'))}
-              AS "sourceType",
-            ${quoted(requiredColumn(movement, 'inventory_movement_source_id'))}
-              AS "sourceId"
-       FROM ${table(binding, movement)}
-      WHERE tenant_id = $1 AND environment_id = $2
-        AND ${quoted(movement.legalEntityColumn)} = ANY($3::uuid[])
-        AND ${quoted(movement.archiveColumn)} IS NULL
-      ORDER BY ${quoted(movement.recordIdColumn)}`,
-    [context.tenantId, context.environmentId, [...legalEntityIds]],
-  );
-  return result.rows;
+  const snapshot = result.rows[0];
+  if (!snapshot) {
+    throw new InventoryReconciliationError(
+      'INVENTORY_RECONCILIATION_STORAGE_INVALID',
+      'source-document snapshot returned no row',
+    );
+  }
+  return Object.freeze({
+    lines: snapshot.lines,
+    movements: snapshot.movements,
+  });
 }
 
 function validatedScope(scope: InventoryReconciliationScopeV1): string[] {
