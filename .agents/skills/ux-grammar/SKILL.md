@@ -166,6 +166,46 @@ alone.** Three independent reasons, any one sufficient: colour-vision deficiency
 and low vision, the WCAG 2.2 AA floor plan §8.4 already claims, and legibility at
 arm's length on a warehouse tablet.
 
+## Slot resolution states
+
+Granted 2026-08-02 on a bridge request from `5g3-u4`, which stopped rather than
+inventing vocabulary. Sourced from `ux-strategy-proposal.md` M2.
+
+Every slot resolves into **exactly one** of a closed, mutually exclusive set:
+
+`pending` · `ready` · `empty` · `failed`
+
+- **`failed`** renders an inline `role="alert"` card **inside the slot**, while
+  sibling slots continue rendering their real content. A data failure is no
+  longer the whole page's fate.
+- **`empty`** is a distinct non-error treatment. **`empty` is never `failed`.**
+  This is [ADR-0044](../../../docs/decisions/ADR-0044-search-capability-is-derived-and-never-silently-empty.md)
+  at the UI layer: "nothing matched" and "this broke" are different facts, and a
+  screen that renders them identically reproduces the silently-wrong-answer
+  defect that ADR forbids.
+- **`pending` does not authorize a default loading treatment.**
+  [ADR-0032](../../../docs/decisions/ADR-0032-feedback-ladder-and-loading-states.md)
+  still governs: feedback appears only where a *measured* operation exceeds the
+  threshold. A page answering inside 400 ms shows nothing. The state exists so a
+  slot can be described, not so every slot can spin.
+
+**Resolution state is not status.** The status grammar above describes business
+facts; these describe whether a slot has data. They may not be conflated — a
+`failed` slot is not `blocked`. Where a resolution state renders colour it
+resolves through the existing status roles (`failed` through `blocked`), because
+the one-colour-grammar rule is unchanged and these add no new hues.
+
+**Page-level diagnostics survive, and must.** Faults arising *before* slot
+composition stay whole-page: invalid surface projection, no active surface,
+unknown surface, and release-level faults. Making every failure slot-local would
+replace an over-broad failure with an under-broad one and lose the signal that the
+page itself is unserviceable.
+
+**No client capability is implied.** These are server-rendered states.
+[ADR-0036](../../../docs/decisions/ADR-0036-minimum-client-capability.md)
+authorizes exactly one script with four closed behaviours, and none of them is
+this.
+
 ## Weight matches consequence
 
 - Drafts autosave and edit inline; feel light.

@@ -55,6 +55,12 @@ import {
   type SemanticOperationExecutor,
 } from '../../runtime/src/semantic-operation-gateway.js';
 import {
+  createRegisteredCapabilityExecutors,
+  registeredCapabilityIdsFromOperationCatalog,
+  type PinnedCapabilityProjection,
+  type PostgresCapabilityOperationExecutorFactory,
+} from './capability-operation-executor-factory.js';
+import {
   MalformedLegalEntityScopeArgumentError,
   MalformedSemanticQueryRequestError,
   SEMANTIC_QUERY_REQUEST_VERSION,
@@ -187,10 +193,48 @@ export class ReleaseVerificationIntegrityError extends Error {
   }
 }
 
+/**
+ * Verification executes a capability route but has no authority to invent its
+ * business inputs. Only the exact declared typed refusal is evidence that the
+ * route was registered, reached, and enforced its input contract.
+ */
+export async function captureDeclaredCapabilityRefusal(
+  operation: Promise<unknown>,
+  expectedCode: string,
+  operationId: string,
+) {
+  try {
+    await operation;
+  } catch (error) {
+    const code =
+      isRecord(error) && typeof error.code === 'string' ? error.code : null;
+    const reason = error instanceof Error ? error.message : null;
+    if (code !== expectedCode || !reason) {
+      throw failure(
+        'VERIFICATION_CAPABILITY_REFUSAL_MISMATCH',
+        `capability operation ${operationId} refused with ${String(code)} instead of ${expectedCode}`,
+      );
+    }
+    return Object.freeze({
+      code,
+      kind: 'registeredCapabilityRefusal' as const,
+      operationId,
+      reason,
+      schemaVersion:
+        'northstar.release-verification-capability-probe/v1' as const,
+    });
+  }
+  throw failure(
+    'VERIFICATION_CAPABILITY_REFUSAL_NOT_OBSERVED',
+    `capability operation ${operationId} did not produce its declared refusal`,
+  );
+}
+
 export class PostgresReleaseVerificationService {
   constructor(
     private readonly pool: Pool,
     private readonly providerErrorMappings: readonly ModuleProviderErrorMapping[] = [],
+    private readonly capabilityOperationExecutorFactories: readonly PostgresCapabilityOperationExecutorFactory[] = [],
   ) {}
 
   async #executeAndPersist(
@@ -278,15 +322,17 @@ export class PostgresReleaseVerificationService {
     command: ExecuteReleaseVerificationCommand,
   ): Promise<DurableReleaseVerificationEvidence> {
     const snapshot = snapshotExecutionCommand(command);
+    const actorIssuer = verificationActorIssuer();
     const interpreter = new PostgresModuleRuntimeInterpreter(
       this.pool,
-      verificationActorIssuer(),
+      actorIssuer,
       this.providerErrorMappings,
     );
     return this.#executeSemanticCandidateWithExecutorAndPersist(
       context,
       snapshot,
       interpreter,
+      actorIssuer,
     );
   }
 
@@ -307,6 +353,7 @@ export class PostgresReleaseVerificationService {
       snapshot,
       binding,
       executorProvider,
+      verificationActorIssuer(),
       (executor): Promise<ExecutedVerificationResultSet> => {
         const executionCommand = executionBinding(binding);
         return derive
@@ -329,6 +376,7 @@ export class PostgresReleaseVerificationService {
     context: TrustedRequestContext,
     command: ExecuteReleaseVerificationCommand,
     executorProvider: SemanticOperationExecutor & SemanticQueryExecutor,
+    actorIssuer: TrustedActorEnvelopeIssuer,
   ): Promise<DurableReleaseVerificationEvidence> {
     const binding = releaseVerificationBinding(command.compiledRelease);
     return this.#executeSemanticCandidateWithExecutor(
@@ -336,6 +384,7 @@ export class PostgresReleaseVerificationService {
       command,
       binding,
       executorProvider,
+      actorIssuer,
       (executor) =>
         this.#executeAndPersist(context, command, (scenario) =>
           executor.execute(scenario),
@@ -348,16 +397,38 @@ export class PostgresReleaseVerificationService {
     command: ExecuteReleaseVerificationCommand,
     binding: ReleaseVerificationBinding,
     executorProvider: SemanticOperationExecutor & SemanticQueryExecutor,
+    actorIssuer: TrustedActorEnvelopeIssuer,
     execute: (executor: SemanticVerificationExecutor) => Promise<TResult>,
   ): Promise<TResult> {
     const policy = new VerificationAllowPolicy();
     const mediation = new SemanticOperationMediationAuthority();
+    const queryGateway = new SemanticQueryGateway(policy, executorProvider);
+    const capabilityExecutors = createRegisteredCapabilityExecutors(
+      this.capabilityOperationExecutorFactories,
+      registeredCapabilityIdsFromOperationCatalog(
+        compiledProjectionPayload(
+          command.compiledRelease,
+          PROJECTION_FAMILY_IDS.operationCatalog,
+        ),
+      ),
+      Object.freeze({
+        actorIssuer,
+        currentInstant: () => new Date().toISOString(),
+        pool: this.pool,
+        projection: (familyId: string) =>
+          compiledProjectionBinding(command.compiledRelease, familyId),
+        queryGateway,
+        releaseContentHash: command.compiledRelease.releaseRoot,
+        releaseId: command.releaseId,
+      }),
+    );
     const operationGateway = new SemanticOperationGateway(
       policy,
       executorProvider,
       mediation,
+      undefined,
+      capabilityExecutors,
     );
-    const queryGateway = new SemanticQueryGateway(policy, executorProvider);
     const entry = new AuthenticatedRequestRuntimeEntryAdapter(
       new AuthenticatedRequestEntryAdapter(async () => ({
         environmentId: context.environmentId,
@@ -646,19 +717,16 @@ export function verificationConstructibilityFindings(
   );
   const findings: VerificationConstructibilityFinding[] = [];
   for (const operation of operations) {
-    if (
-      operation.effect.kind !== 'createRecordEffect' ||
-      !searchableEntityIds.has(operation.effect.entity.targetId)
-    ) {
-      continue;
-    }
+    if (operation.effect.kind !== 'createRecordEffect') continue;
+    const entityId = operation.effect.entity.targetId;
+    if (!searchableEntityIds.has(entityId)) continue;
     const entity = storage.entities.find(
-      (candidate) => candidate.entityId === operation.effect.entity.targetId,
+      (candidate) => candidate.entityId === entityId,
     );
     if (!entity) {
       throw failure(
         'VERIFICATION_STORAGE_ENTITY_MISSING',
-        `compiled verification entity has no storage target: ${operation.effect.entity.targetId}`,
+        `compiled verification entity has no storage target: ${entityId}`,
       );
     }
     const constructibleColumns = new Set<string>();
@@ -765,11 +833,14 @@ export function verificationScenarioDeriver(
   const createOperationEntityIds = new Set(
     compiledProjectionPayload<{
       readonly operations: readonly VerificationOperationContract[];
-    }>(compiledRelease, PROJECTION_FAMILY_IDS.operationCatalog)
-      .operations.filter(
-        (operation) => operation.effect.kind === 'createRecordEffect',
-      )
-      .map((operation) => operation.effect.entity.targetId),
+    }>(
+      compiledRelease,
+      PROJECTION_FAMILY_IDS.operationCatalog,
+    ).operations.flatMap((operation) =>
+      operation.effect.kind === 'createRecordEffect'
+        ? [operation.effect.entity.targetId]
+        : [],
+    ),
   );
   const derive = (
     scenario: VerificationScenario,
@@ -942,10 +1013,19 @@ interface VerificationFieldContract {
 
 interface VerificationOperationContract {
   readonly confirmation: string;
-  readonly effect: {
-    readonly entity: { readonly targetId: string };
-    readonly kind: string;
-  };
+  readonly effect:
+    | {
+        readonly capability: { readonly targetId: string };
+        readonly kind: 'registeredCapabilityEffect';
+      }
+    | {
+        readonly entity: { readonly targetId: string };
+        readonly kind:
+          | 'archiveRecordEffect'
+          | 'createRecordEffect'
+          | 'restoreRecordEffect'
+          | 'updateRecordEffect';
+      };
   readonly inputContract: {
     readonly fields: readonly VerificationFieldContract[];
     readonly relationInputs: readonly {
@@ -1304,6 +1384,27 @@ class SemanticVerificationExecutor {
       'operation' in invocation ? invocation.operation?.targetId : null;
     if (operationId) {
       const operation = this.#requiredOperation(operationId);
+      if (operation.effect.kind === 'registeredCapabilityEffect') {
+        if (
+          scenario.expectedOutcome !== 'fails' ||
+          typeof scenario.expectedDiagnosticCode !== 'string'
+        ) {
+          throw failure(
+            'VERIFICATION_CAPABILITY_REFUSAL_CONTRACT_INVALID',
+            `capability operation ${operationId} must declare its exact refusal`,
+          );
+        }
+        return {
+          positiveProbe: await captureDeclaredCapabilityRefusal(
+            this.#invokeOperation(operation, {
+              expectedRevision: 1,
+              recordId: record.recordId,
+            }),
+            scenario.expectedDiagnosticCode,
+            operationId,
+          ),
+        };
+      }
       return {
         positiveProbe: await this.#invokeOperation(
           operation,
@@ -1430,55 +1531,37 @@ class SemanticVerificationExecutor {
         `excluded field value was searchable: ${scenario.subjectId}`,
       );
     }
-    const positiveCandidate = this.#queries
-      .filter((query) => query.queryType === 'search')
-      .filter((query) =>
-        this.#hasConstructibleCreateOperation(query.sourceEntityId),
-      )
-      .flatMap((query) =>
-        query.selections.map((selection) => ({
-          entityId: query.sourceEntityId,
-          field: this.#createOperation(
-            query.sourceEntityId,
-          ).inputContract.fields.find(
-            (field) =>
-              field.fieldId === selection.fieldId &&
-              field.fieldKind === 'textFieldType' &&
-              !this.#excludedFieldsByEntity
-                .get(query.sourceEntityId)
-                ?.has(field.fieldId),
-          ),
-        })),
-      )
-      .find((candidate) => candidate.field);
-    if (!positiveCandidate?.field) {
+    const selectedFieldIds = new Set(
+      search.selections.map((selection) => selection.fieldId),
+    );
+    const positiveField = this.#createOperation(
+      scenario.entityId,
+    ).inputContract.fields.find(
+      (field) =>
+        selectedFieldIds.has(field.fieldId) &&
+        (field.fieldKind === 'textFieldType' ||
+          field.fieldKind === 'enumFieldType') &&
+        !this.#excludedFieldsByEntity
+          .get(scenario.entityId)
+          ?.has(field.fieldId),
+    );
+    if (!positiveField) {
       throw failure(
         'VERIFICATION_SEARCHABLE_FIELD_MISSING',
-        'search exclusion probe has no positive searchable field',
+        'search exclusion probe has no same-entity positive searchable field',
       );
     }
-    const positiveRecord =
-      positiveCandidate.entityId === scenario.entityId
-        ? record
-        : await this.#create(
-            positiveCandidate.entityId,
-            `${token}-search-positive`,
-          );
-    const positiveSearch = this.#queryForEntity(
-      positiveCandidate.entityId,
-      'search',
-    );
     const included = await this.#invokeQuery(
-      positiveSearch,
+      search,
       {
-        text: String(positiveRecord.values[positiveCandidate.field.fieldId]),
+        text: String(record.values[positiveField.fieldId]),
       },
-      positiveRecord,
+      record,
     );
-    if (!hasRecord(included, positiveRecord.recordId)) {
+    if (!hasRecord(included, record.recordId)) {
       throw failure(
         'VERIFICATION_SEARCH_POSITIVE_FAILED',
-        `searchable field ${positiveCandidate.field.fieldId} did not return record ${positiveRecord.recordId}: ${canonicalize(included)}`,
+        `searchable field ${positiveField.fieldId} did not return record ${record.recordId}: ${canonicalize(included)}`,
       );
     }
     return {
@@ -1486,8 +1569,8 @@ class SemanticVerificationExecutor {
       positiveProbe: {
         constructibilityFindings: this.constructibilityFindings,
         searchWitness: {
-          entityId: positiveCandidate.entityId,
-          fieldId: positiveCandidate.field.fieldId,
+          entityId: scenario.entityId,
+          fieldId: positiveField.fieldId,
           recordObserved: true,
         },
       },
@@ -1765,6 +1848,7 @@ class SemanticVerificationExecutor {
   ) {
     const operation = this.#operations.find(
       (candidate) =>
+        candidate.effect.kind !== 'registeredCapabilityEffect' &&
         candidate.effect.entity.targetId === entityId &&
         candidate.effect.kind === effectKind,
     );
@@ -1943,6 +2027,7 @@ class SemanticVerificationExecutor {
   #createOperation(entityId: string): VerificationOperationContract {
     const operation = this.#operations.find(
       (candidate) =>
+        candidate.effect.kind !== 'registeredCapabilityEffect' &&
         candidate.effect.entity.targetId === entityId &&
         candidate.effect.kind === 'createRecordEffect',
     );
@@ -1953,20 +2038,6 @@ class SemanticVerificationExecutor {
       );
     }
     return operation;
-  }
-
-  #hasConstructibleCreateOperation(entityId: string): boolean {
-    const operation = this.#operations.find(
-      (candidate) =>
-        candidate.effect.entity.targetId === entityId &&
-        candidate.effect.kind === 'createRecordEffect',
-    );
-    return (
-      operation !== undefined &&
-      !this.constructibilityFindings.some(
-        (finding) => finding.operationId === operation.operationId,
-      )
-    );
   }
 
   #requiredOperation(operationId: string): VerificationOperationContract {
@@ -2212,6 +2283,13 @@ function compiledProjectionPayload<T>(
   compiled: CompileSuccess,
   familyId: string,
 ): T {
+  return compiledProjectionBinding(compiled, familyId).payload as T;
+}
+
+function compiledProjectionBinding(
+  compiled: CompileSuccess,
+  familyId: string,
+): PinnedCapabilityProjection {
   const reference = compiled.bundle.releaseManifest.projections.find(
     (projection) => projection.familyId === familyId,
   );
@@ -2242,7 +2320,10 @@ function compiledProjectionPayload<T>(
       `candidate release lacks projection payload ${familyId}`,
     );
   }
-  return decode(chunk.canonicalBytes) as T;
+  return Object.freeze({
+    contentHash: chunk.contentHash,
+    payload: decode(chunk.canonicalBytes),
+  });
 }
 
 function verificationFieldValue(

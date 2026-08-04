@@ -47,6 +47,7 @@ import {
   type FreshTenantIntermediateActivationObservation,
 } from '../../packages/postgres-provider/src/composed-application-runtime.js';
 import { INVENTORY_PROVIDER_ERROR_MAPPINGS } from '../../packages/postgres-provider/src/inventory-provider-error-mappings.js';
+import { INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/inventory-posting-capability-executor.js';
 import { ModuleRuntimeInterpreterError } from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
 import { captureSchemaSnapshot } from '../../packages/postgres-provider/src/migrations.js';
 import { PostgresReleaseActivationService } from '../../packages/postgres-provider/src/release-activation-service.js';
@@ -55,8 +56,11 @@ import { PostgresImmutableReleaseRepository } from '../../packages/postgres-prov
 import { RequestRuntimeViewLoadError } from '../../packages/postgres-provider/src/request-runtime-view-service.js';
 import { ReleaseReverseTransitionRefusal } from '../../packages/postgres-provider/src/release-reverse-transition-policy.js';
 import {
+  captureDeclaredCapabilityRefusal,
   PostgresReleaseVerificationService,
+  ReleaseVerificationIntegrityError,
   releaseVerificationBinding,
+  verificationScenarioDeriver,
   type DurableReleaseVerificationEvidence,
 } from '../../packages/postgres-provider/src/release-verification-service.js';
 import { withTrustedRequestTransaction } from '../../packages/postgres-provider/src/request-context.js';
@@ -86,6 +90,101 @@ test('composed product does not invent a verification evidence identity', async 
     'utf8',
   );
   assert.doesNotMatch(source, /evidenceId\s*=\s*minted\(randomUUID\(\)\)/u);
+});
+
+test('historical reproduction cannot admit a non-conformant freshly compiled head', async () => {
+  const compiledApplication = JSON.parse(
+    await readFile(compiledArtifactPath, 'utf8'),
+  ) as { applications: unknown[] };
+  assert.ok(compiledApplication.applications.length >= 6);
+  const nonConformantHead = JSON.parse(
+    await readFile(authoredArtifactPath, 'utf8'),
+  ) as {
+    fields: Array<{ fieldId: string; searchable: boolean }>;
+  };
+  const unitField = nonConformantHead.fields.find(
+    (field) => field.fieldId === 'northstar.app:field.stock_count_line_unit_id',
+  );
+  assert.ok(unitField?.searchable);
+  unitField.searchable = false;
+  const directory = await mkdtemp(
+    resolve(tmpdir(), 'northstar-historical-head-scope-'),
+  );
+  const authoredPath = resolve(directory, 'app.authored.json');
+  const compiledPath = resolve(directory, 'app.compiled.json');
+  try {
+    await Promise.all([
+      writeFile(authoredPath, JSON.stringify(nonConformantHead)),
+      writeFile(compiledPath, JSON.stringify(compiledApplication)),
+    ]);
+    await assert.rejects(
+      execFileAsync(process.execPath, ['--import', 'tsx', compileScriptPath], {
+        cwd: resolve('.'),
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          NORTH_STAR_APP_AUTHORED_PATH: authoredPath,
+          NORTH_STAR_APP_COMPILED_PATH: compiledPath,
+        },
+        maxBuffer: 2 * 1024 * 1024,
+        timeout: 30_000,
+      }),
+      (error: unknown) =>
+        error instanceof Error &&
+        /COMPILER_SEARCH_SELECTION_STORAGE_UNUSABLE/u.test(
+          `${error.message} ${'stderr' in error ? String(error.stderr) : ''}`,
+        ),
+      'historical entries reproduce leniently, but a newly authored head always compiles strictly and is refused',
+    );
+  } finally {
+    await rm(directory, { force: true, recursive: true });
+  }
+});
+
+test('capability verification records only the exact declared typed refusal', async () => {
+  const exact = Object.assign(new Error('typed refusal reason'), {
+    code: 'EXPECTED_CAPABILITY_REFUSAL',
+  });
+  assert.deepEqual(
+    await captureDeclaredCapabilityRefusal(
+      Promise.reject(exact),
+      'EXPECTED_CAPABILITY_REFUSAL',
+      'northstar.test:operation.capability',
+    ),
+    {
+      code: 'EXPECTED_CAPABILITY_REFUSAL',
+      kind: 'registeredCapabilityRefusal',
+      operationId: 'northstar.test:operation.capability',
+      reason: 'typed refusal reason',
+      schemaVersion: 'northstar.release-verification-capability-probe/v1',
+    },
+  );
+  await assert.rejects(
+    captureDeclaredCapabilityRefusal(
+      Promise.reject(
+        Object.assign(new Error('wrong refusal'), { code: 'WRONG_REFUSAL' }),
+      ),
+      'EXPECTED_CAPABILITY_REFUSAL',
+      'northstar.test:operation.capability',
+    ),
+    (error: unknown) => {
+      assert.ok(error instanceof ReleaseVerificationIntegrityError);
+      assert.equal(error.code, 'VERIFICATION_CAPABILITY_REFUSAL_MISMATCH');
+      return true;
+    },
+  );
+  await assert.rejects(
+    captureDeclaredCapabilityRefusal(
+      Promise.resolve({ outcome: 'succeeded' }),
+      'EXPECTED_CAPABILITY_REFUSAL',
+      'northstar.test:operation.capability',
+    ),
+    (error: unknown) => {
+      assert.ok(error instanceof ReleaseVerificationIntegrityError);
+      assert.equal(error.code, 'VERIFICATION_CAPABILITY_REFUSAL_NOT_OBSERVED');
+      return true;
+    },
+  );
 });
 
 test('fresh-tenant install refuses a failing intermediate transition', async () => {
@@ -193,7 +292,15 @@ test(
                 compiledApplication,
               ),
           );
-
+          await context.test(
+            'registered Inventory posting route commits once and absorbs an identical replay',
+            () =>
+              assertInventoryPostingCapabilityRoute(
+                pool,
+                tenantA,
+                compiledApplication,
+              ),
+          );
           const recordId = randomUUID();
           const created = await tenantA.entry.run(
             { headers: { authorization: 'local' } },
@@ -253,7 +360,6 @@ test(
             tenantB,
             compiledApplication,
             databaseUrl,
-            pool,
             'composed-tenant-b',
           );
           await context.test(
@@ -681,6 +787,8 @@ async function assertApprovalEnforcementAndApprovedActivation(
     });
     await new PostgresReleaseVerificationService(
       runtimePool,
+      INVENTORY_PROVIDER_ERROR_MAPPINGS,
+      [INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY],
     ).executeSemanticCandidateAndPersist(context, {
       compiledRelease: application.compiled,
       evidenceId: staged.verificationEvidenceId,
@@ -825,6 +933,8 @@ async function assertApprovalRequiredForAdvancement(
     if (!(await repository.getTenantRelease(context, target.release_id))) {
       await new PostgresReleaseVerificationService(
         runtimePool,
+        INVENTORY_PROVIDER_ERROR_MAPPINGS,
+        [INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY],
       ).executeSemanticCandidateAndPersist(context, {
         compiledRelease: application.compiled,
         evidenceId: target.verification_evidence_id,
@@ -991,6 +1101,8 @@ async function assertReleaseServicesRejectNonExactReversePairs(
     });
     await new PostgresReleaseVerificationService(
       runtimePool,
+      INVENTORY_PROVIDER_ERROR_MAPPINGS,
+      [INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY],
     ).executeSemanticCandidateAndPersist(context, {
       compiledRelease: immediateTarget.compiled,
       evidenceId: staged.verificationEvidenceId,
@@ -2165,10 +2277,11 @@ async function assertBoundedFreshTenantInstallEvidence(
   const servingScenarioCount = releaseVerificationBinding(
     compiled.application.compiled,
   ).plan.scenarios.length;
+  await assertAttributedSearchCapabilityScenarioDelta(compiledApplication);
   assert.equal(
     servingScenarioCount,
-    167,
-    'ADR-0042 removes exactly one resolver-authority scenario with inventory_period_lock_resolve',
+    163,
+    'the posting route adds one executed scenario and search capability removes three executable and two derived exclusions',
   );
 
   const intermediate = await pool.query<{
@@ -2416,50 +2529,26 @@ async function assertIntermediateBecomesServingOnlyAfterVerification(
   runtime: ComposedApplicationRuntime,
   compiledApplication: unknown,
   databaseUrl: string,
-  pool: pg.Pool,
   tenantSlug: string,
 ): Promise<ComposedApplicationRuntime> {
   const compiled = parseCompiledApplication(compiledApplication);
   const target = compiled.applications.at(-2);
   assert.ok(target);
   await runtime.close();
-  const rolledBack = await createRuntime(
-    compiledApplication,
-    databaseUrl,
-    tenantSlug,
-    {
+  const historicalSearchQueryId = 'northstar.app:query.stock_count_line_search';
+  await assert.rejects(
+    createRuntime(compiledApplication, databaseUrl, tenantSlug, {
       kind: 'rollback',
       targetReleaseRoot: target.compiled.releaseRoot,
+    }),
+    (error: unknown) => {
+      assert.ok(error instanceof ModuleRuntimeInterpreterError);
+      assert.equal(error.code, 'MODULE_SEARCH_CAPABILITY_UNAVAILABLE');
+      assert.equal(error.subjectId, historicalSearchQueryId);
+      return true;
     },
+    'ADR-0046: rollback remains eligible, while verification of its pre-existing unusable search refuses by name',
   );
-  try {
-    assert.equal(rolledBack.releaseRoot, target.compiled.releaseRoot);
-    assert.equal(rolledBack.freshTenantInstallEvidence, null);
-    const semantic = await pool.query<{ release_root: string }>(
-      `SELECT evidence.release_root
-         FROM platform.tenant_release_admissions AS admission
-         JOIN platform.release_verification_evidence AS evidence
-           ON evidence.tenant_id = admission.tenant_id
-          AND evidence.environment_id = admission.environment_id
-          AND evidence.verification_evidence_id =
-              admission.verification_evidence_id
-        WHERE admission.tenant_id = $1
-          AND admission.environment_id = $2
-          AND admission.release_id = $3`,
-      [
-        rolledBack.identity.tenantId,
-        rolledBack.identity.environmentId,
-        rolledBack.activeReleaseId,
-      ],
-    );
-    assert.deepEqual(
-      semantic.rows,
-      [{ release_root: target.compiled.releaseRoot }],
-      'an expired transition-only admission cannot make a historical release serve',
-    );
-  } finally {
-    await rolledBack.close();
-  }
   return createRuntime(compiledApplication, databaseUrl, tenantSlug);
 }
 
@@ -2539,33 +2628,27 @@ async function assertConstrainedDomainVerificationCompleted(
     [],
     'every entity-owned create is constructible from its compiled system input',
   );
-  const unconstructableOperationIds = new Set(
-    constructibilityFindings.map((finding) => finding.operationId),
+  const scenarioSearch = searchQueries.find(
+    (query) => query.sourceEntityId === scenario.entityId,
   );
-  const constructiblePositiveCandidate = searchQueries
-    .flatMap((query) => {
-      const createOperation = createOperations.get(query.sourceEntityId);
-      if (
-        !createOperation ||
-        unconstructableOperationIds.has(createOperation.operationId)
-      ) {
-        return [];
-      }
-      return query.selections.map((selection) => ({
-        entityId: query.sourceEntityId,
-        field: createOperation.inputContract.fields.find(
-          (field) =>
-            field.fieldId === selection.fieldId &&
-            field.fieldKind === 'textFieldType' &&
-            !excludedFields.get(query.sourceEntityId)?.has(field.fieldId),
-        ),
-      }));
-    })
+  const scenarioCreate = createOperations.get(scenario.entityId);
+  const constructiblePositiveCandidate = scenarioSearch?.selections
+    .map((selection) => ({
+      entityId: scenario.entityId,
+      field: scenarioCreate?.inputContract.fields.find(
+        (field) =>
+          field.fieldId === selection.fieldId &&
+          (field.fieldKind === 'textFieldType' ||
+            field.fieldKind === 'enumFieldType') &&
+          !excludedFields.get(scenario.entityId)?.has(field.fieldId),
+      ),
+    }))
     .find((candidate) => candidate.field);
   assert.ok(
     constructiblePositiveCandidate?.field,
-    'the compiled product retains a constructible searchable source for the positive witness',
+    'the exclusion scenario retains a constructible same-entity searchable source for its positive witness',
   );
+  assert.equal(constructiblePositiveCandidate.entityId, scenario.entityId);
   for (const identifier of [
     entity.physicalTableName,
     entity.archive.archivedAtColumn,
@@ -2634,7 +2717,7 @@ async function assertConstrainedDomainVerificationCompleted(
   assert.equal(
     result.rows[0]?.positive_probe_digest,
     expectedPositiveProbeDigest,
-    'the executed searchable-exclusion proof binds every constructibility finding rather than silently skipping an unconstructable operation',
+    'the executed searchable-exclusion proof binds a positive witness from the same entity as its negative witness',
   );
   const admission = await pool.query<{ verification_evidence_id: string }>(
     `SELECT verification_evidence_id
@@ -2780,6 +2863,267 @@ async function assertEntityOwnedCreateInput(
   assert.deepEqual(stored.rows, [{ legal_entity_id: legalEntityId }]);
 }
 
+async function assertInventoryPostingCapabilityRoute(
+  pool: pg.Pool,
+  runtime: ComposedApplicationRuntime,
+  compiledApplication: unknown,
+): Promise<void> {
+  const compiled =
+    parseCompiledApplication(compiledApplication).application.compiled;
+  const storage = storageTarget(compiled);
+  const postingScenario = releaseVerificationBinding(
+    compiled,
+  ).plan.scenarios.find(
+    (scenario) =>
+      scenario.kind === 'declaredEvidence' &&
+      scenario.assertionId ===
+        'northstar.app:assertion.inventory_transaction_post_refusal',
+  );
+  assert.ok(postingScenario);
+  const executedProbe = await pool.query<{ count: string }>(
+    `SELECT count(*)::text AS count
+       FROM platform.tenant_release_admissions AS admission
+       JOIN platform.release_verification_results AS result
+         ON result.tenant_id = admission.tenant_id
+        AND result.environment_id = admission.environment_id
+        AND result.verification_evidence_id = admission.verification_evidence_id
+      WHERE admission.tenant_id = $1
+        AND admission.environment_id = $2
+        AND admission.release_id = $3
+        AND result.scenario_id = $4`,
+    [
+      runtime.identity.tenantId,
+      runtime.identity.environmentId,
+      runtime.activeReleaseId,
+      postingScenario.scenarioId,
+    ],
+  );
+  assert.deepEqual(
+    executedProbe.rows,
+    [{ count: '1' }],
+    'the capability refusal has an executed result rather than a derivation or skip',
+  );
+  const transaction = requiredStorageEntity(storage, 'inventory_transaction');
+  const movement = requiredStorageEntity(storage, 'inventory_movement');
+  assert.ok(transaction.legalEntity);
+  const legalEntityId = COMPOSED_APPLICATION_INVENTORY_SCOPE.legalEntityId;
+  const itemId = randomUUID();
+  const locationId = randomUUID();
+  const transactionId = randomUUID();
+  const lineId = randomUUID();
+  const suffix = transactionId.slice(0, 8);
+  const effectiveAt = new Date().toISOString();
+  const sourceId = `postroute-${suffix}`;
+
+  const create = (
+    operationId: string,
+    recordId: string,
+    values: Readonly<Record<string, unknown>>,
+    options: Readonly<{
+      legalEntityId?: string;
+      relations?: Readonly<Record<string, string>>;
+    }> = {},
+  ) =>
+    runtime.entry.run(
+      { headers: { authorization: 'postroute-control' } },
+      (view) =>
+        runtime.operationGateway.invoke(
+          view,
+          {
+            confirmationGrant: null,
+            idempotencyKey: randomUUID(),
+            input: {
+              ...(options.legalEntityId
+                ? { legalEntityId: options.legalEntityId }
+                : {}),
+              recordId,
+              relations: options.relations ?? {},
+              values,
+            },
+            operationId,
+            schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
+          },
+          runtime.operationMediation.issueInvocation(view, 'UI'),
+        ),
+    );
+
+  assert.equal(
+    (
+      await create('northstar.app:operation.item_create', itemId, {
+        'northstar.app:field.item_base_unit': 'EA',
+        'northstar.app:field.item_description': 'Posting route control item',
+        'northstar.app:field.item_name': `Posting route ${suffix}`,
+        'northstar.app:field.item_sku': `POST-${suffix}`,
+      })
+    ).outcome,
+    'succeeded',
+  );
+  assert.equal(
+    (
+      await create('northstar.app:operation.location_create', locationId, {
+        'northstar.app:field.location_code': `POST-${suffix}`,
+        'northstar.app:field.location_name': `Posting route ${suffix}`,
+        'northstar.app:field.location_type': 'northstar.app:option.warehouse',
+      })
+    ).outcome,
+    'succeeded',
+  );
+  const createdTransaction = await create(
+    'northstar.app:operation.inventory_transaction_create',
+    transactionId,
+    {
+      'northstar.app:field.inventory_transaction_actor_id': 'postroute-control',
+      'northstar.app:field.inventory_transaction_effective_at': effectiveAt,
+      'northstar.app:field.inventory_transaction_number': `ADJ-${suffix}`,
+      'northstar.app:field.inventory_transaction_reason_code': 'adjustment',
+      'northstar.app:field.inventory_transaction_reason_narrative':
+        'Registered capability route control',
+      'northstar.app:field.inventory_transaction_recorded_at': effectiveAt,
+      'northstar.app:field.inventory_transaction_source_id': sourceId,
+      'northstar.app:field.inventory_transaction_source_type': 'test',
+      'northstar.app:field.inventory_transaction_state':
+        'northstar.app:option.inventory_transaction_state_draft',
+      'northstar.app:field.inventory_transaction_type':
+        'northstar.app:option.inventory_transaction_type_adjustment',
+    },
+    { legalEntityId },
+  );
+  assert.equal(createdTransaction.readBack?.revision, 1);
+  assert.equal(
+    (
+      await create(
+        'northstar.app:operation.inventory_transaction_line_create',
+        lineId,
+        {
+          'northstar.app:field.inventory_transaction_line_from_location_id':
+            null,
+          'northstar.app:field.inventory_transaction_line_item_id': itemId,
+          'northstar.app:field.inventory_transaction_line_line_number': '1',
+          'northstar.app:field.inventory_transaction_line_quantity': '7',
+          'northstar.app:field.inventory_transaction_line_to_location_id':
+            locationId,
+          'northstar.app:field.inventory_transaction_line_unit_id': 'EA',
+        },
+        {
+          legalEntityId,
+          relations: {
+            'northstar.app:relation.inventory_transaction_line_transaction':
+              transactionId,
+          },
+        },
+      )
+    ).outcome,
+    'succeeded',
+  );
+
+  const idempotencyKey = randomUUID();
+  const input = Object.freeze({ expectedRevision: 1, recordId: transactionId });
+  const grants: string[] = [];
+  const post = () =>
+    runtime.entry.run(
+      { headers: { authorization: 'postroute-control' } },
+      (view) => {
+        const confirmationGrant =
+          runtime.operationMediation.issueConfirmationGrant(
+            view,
+            'northstar.app:operation.inventory_transaction_post',
+            input,
+          );
+        grants.push(confirmationGrant);
+        return runtime.operationGateway.invoke(
+          view,
+          {
+            confirmationGrant,
+            idempotencyKey,
+            input,
+            operationId: 'northstar.app:operation.inventory_transaction_post',
+            schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
+          },
+          runtime.operationMediation.issueInvocation(view, 'UI'),
+        );
+      },
+    );
+  const posted = await post();
+  const replayed = await post();
+  assert.equal(posted.outcome, 'succeeded');
+  assert.equal(posted.readBack?.revision, 2);
+  assert.deepEqual(replayed.trust, posted.trust);
+  assert.deepEqual(
+    grants,
+    [grants[0], grants[0]],
+    'the same rendered command input produces the same server confirmation grant',
+  );
+
+  const movementSourceColumn = requiredStorageColumn(
+    movement,
+    'inventory_movement_source_id',
+  );
+  const movementQuantityColumn = requiredStorageColumn(
+    movement,
+    'inventory_movement_quantity_delta',
+  );
+  const movements = await pool.query<{ quantity: string }>(
+    `SELECT ${quoteSqlIdentifier(movementQuantityColumn)}::text AS quantity
+       FROM north_star_module.${quoteSqlIdentifier(movement.physicalTableName)}
+      WHERE tenant_id = $1 AND environment_id = $2
+        AND ${quoteSqlIdentifier(movementSourceColumn)} = $3`,
+    [runtime.identity.tenantId, runtime.identity.environmentId, sourceId],
+  );
+  assert.deepEqual(
+    movements.rows,
+    [{ quantity: '7.000000000000000000' }],
+    'the registered route appends one movement and replay appends none',
+  );
+  const stateColumn = requiredStorageColumn(
+    transaction,
+    'inventory_transaction_state',
+  );
+  const storedTransaction = await pool.query<{
+    revision: number;
+    state: string;
+  }>(
+    `SELECT ${quoteSqlIdentifier(transaction.optimisticRevision.column)}::integer AS revision,
+            ${quoteSqlIdentifier(stateColumn)}::text AS state
+       FROM north_star_module.${quoteSqlIdentifier(transaction.physicalTableName)}
+      WHERE tenant_id = $1 AND environment_id = $2
+        AND ${quoteSqlIdentifier(transaction.recordIdentity.column)} = $3`,
+    [runtime.identity.tenantId, runtime.identity.environmentId, transactionId],
+  );
+  assert.deepEqual(storedTransaction.rows, [
+    {
+      revision: 2,
+      state: 'northstar.app:option.inventory_transaction_state_posted',
+    },
+  ]);
+}
+
+function requiredStorageEntity(
+  storage: StorageTargetPayloadV1,
+  localId: string,
+): StorageTargetPayloadV1['entities'][number] {
+  const matches = storage.entities.filter((entity) =>
+    entity.entityId.endsWith(`:entity.${localId}`),
+  );
+  assert.equal(matches.length, 1);
+  return matches[0]!;
+}
+
+function requiredStorageColumn(
+  entity: StorageTargetPayloadV1['entities'][number],
+  localId: string,
+): string {
+  const matches = entity.columns.filter((column) =>
+    column.canonicalFieldId.endsWith(`:field.${localId}`),
+  );
+  assert.equal(matches.length, 1);
+  return matches[0]!.physicalName;
+}
+
+function quoteSqlIdentifier(value: string): string {
+  assert.match(value, /^[a-z][a-z0-9_]{0,62}$/u);
+  return `"${value}"`;
+}
+
 async function assertVerificationFieldOriginCreates(
   pool: pg.Pool,
   runtime: ComposedApplicationRuntime,
@@ -2906,13 +3250,13 @@ async function assertExactPartitionEvidence(
   assert.ok(derivations.length > 0);
   assert.equal(
     evidence.results.length,
-    129,
-    '73 formerly unconstructible scenarios moved into executed evidence',
+    127,
+    'three formerly excluded fields now carry real same-entity search authority while the posting refusal adds one executed scenario',
   );
   assert.equal(
     derivations.length,
-    38,
-    'ADR-0042 removes the period-lock resolver rather than deriving it',
+    36,
+    'the searchable movement field and impossible period-lock search exclusion ceased to exist rather than becoming derivations',
   );
   assert.equal(
     binding.plan.scenarios.some(
@@ -2937,7 +3281,7 @@ async function assertExactPartitionEvidence(
       (derivation) =>
         derivation.reason.code === 'VERIFICATION_NO_GENERIC_CREATE_OPERATION',
     ).length,
-    38,
+    36,
   );
   assert.deepEqual(
     [...executedScenarioIds, ...derivedScenarioIds].toSorted(),
@@ -3075,6 +3419,115 @@ interface ConstructibilityPartition {
     readonly scenarioId: string;
   }[];
   readonly results: readonly { readonly scenarioId: string }[];
+}
+
+async function assertAttributedSearchCapabilityScenarioDelta(
+  compiledApplication: unknown,
+): Promise<void> {
+  const compiled = parseCompiledApplication(compiledApplication);
+  const previousRelease = compiled.applications.at(-2);
+  assert.ok(previousRelease);
+  const previous = releaseVerificationBinding(previousRelease.compiled);
+  const current = releaseVerificationBinding(compiled.application.compiled);
+  assert.equal(previous.plan.scenarios.length, 168);
+  assert.equal(current.plan.scenarios.length, 163);
+
+  const changes = [
+    {
+      entityId: 'northstar.app:entity.inventory_movement',
+      partition: 'derived',
+      subjectId: 'northstar.app:field.inventory_movement_source_id',
+    },
+    {
+      entityId: 'northstar.app:entity.stock_count_line',
+      partition: 'executed',
+      subjectId: 'northstar.app:field.stock_count_line_unit_id',
+    },
+    {
+      entityId: 'northstar.app:entity.party_role',
+      partition: 'executed',
+      subjectId: 'northstar.app:field.party_role_kind',
+    },
+    {
+      entityId: 'northstar.app:entity.inventory_transaction_line',
+      partition: 'executed',
+      subjectId: 'northstar.app:field.inventory_transaction_line_unit_id',
+    },
+    {
+      entityId: 'northstar.app:entity.inventory_period_lock',
+      partition: 'derived',
+      subjectId: 'northstar.app:field.inventory_period_lock_closed_through',
+    },
+  ] as const;
+  assert.deepEqual(
+    changes.reduce(
+      (counts, change) => ({
+        derived: counts.derived + Number(change.partition === 'derived'),
+        executed: counts.executed + Number(change.partition === 'executed'),
+      }),
+      { derived: 0, executed: 0 },
+    ),
+    { derived: 2, executed: 3 },
+    'the attributed delta is exactly three executed and two derived scenarios',
+  );
+
+  const derivePrevious = verificationScenarioDeriver(
+    previousRelease.compiled,
+    previous,
+  );
+  assert.ok(derivePrevious);
+  const currentIds = new Set(
+    current.plan.scenarios.map((scenario) => scenario.scenarioId),
+  );
+  const removedScenarioIds = await Promise.all(
+    changes.map(async (change) => {
+      const candidates = previous.plan.scenarios.filter(
+        (scenario) =>
+          scenario.kind === 'searchableExclusion' &&
+          scenario.entityId === change.entityId &&
+          scenario.subjectId === change.subjectId,
+      );
+      assert.equal(candidates.length, 1);
+      const scenario = candidates[0]!;
+      assert.equal(
+        current.plan.scenarios.some(
+          (candidate) =>
+            candidate.kind === scenario.kind &&
+            candidate.entityId === scenario.entityId &&
+            candidate.subjectId === scenario.subjectId,
+        ),
+        false,
+        `${scenario.subjectId} exclusion is absent from the new plan rather than reclassified`,
+      );
+      assert.equal(currentIds.has(scenario.scenarioId), false);
+      assert.equal(
+        (await derivePrevious(scenario))?.code ?? null,
+        change.partition === 'derived'
+          ? 'VERIFICATION_NO_GENERIC_CREATE_OPERATION'
+          : null,
+        `${scenario.subjectId} is attributed to the ${change.partition} side of the prior partition`,
+      );
+      return scenario.scenarioId;
+    }),
+  );
+  assert.deepEqual(
+    previous.plan.scenarios
+      .filter((scenario) => !currentIds.has(scenario.scenarioId))
+      .map((scenario) => scenario.scenarioId)
+      .toSorted(),
+    removedScenarioIds.toSorted(),
+    'the five named exclusions are every scenario removed from the 168-scenario plan',
+  );
+  const previousIds = new Set(
+    previous.plan.scenarios.map((scenario) => scenario.scenarioId),
+  );
+  assert.deepEqual(
+    current.plan.scenarios
+      .filter((scenario) => !previousIds.has(scenario.scenarioId))
+      .map((scenario) => scenario.scenarioId),
+    [],
+    'the ruled change only removes the five named exclusions; it does not replace them with reclassified scenarios',
+  );
 }
 
 type IndependentUnconstructibleReason =
@@ -3283,6 +3736,9 @@ function createRuntime(
       ? { afterFreshTenantIntermediateActivation }
       : {}),
     compiledApplication,
+    capabilityOperationExecutorFactories: [
+      INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY,
+    ],
     databaseUrl,
     inventoryScopeProvisioning: COMPOSED_APPLICATION_INVENTORY_SCOPE,
     migrationsDirectory,

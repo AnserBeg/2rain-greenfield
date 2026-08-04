@@ -788,6 +788,51 @@ test('cross-package references parse and then reject as unsupported in v0', () =
   );
 });
 
+test('external capability requirements resolve by exact ID without widening ordinary references', () => {
+  const definition = v3AggregateModule() as {
+    capabilityRequirements: Array<Record<string, unknown>>;
+    operations: Array<Record<string, unknown>>;
+  } & Record<string, unknown>;
+  const capabilityId = 'vendor.inventory:capability.posting';
+  definition.capabilityRequirements.push({
+    capabilityId,
+    capabilityVersion: 1,
+    declaredEffects: ['appendFact'],
+    kind: 'capabilityRequirement',
+    requiredProjections: ['operation', 'verification'],
+    schemaVersion: 'v3',
+    supportStatus: 'supported',
+  });
+  const operation = definition.operations[0]!;
+  operation.effect = {
+    capability: {
+      kind: 'capabilityReference',
+      schemaVersion: 'v3',
+      targetId: capabilityId,
+    },
+    kind: 'registeredCapabilityEffect',
+    schemaVersion: 'v3',
+  };
+  operation.tier = 'o1';
+
+  const normalized = normalizeApplicationPackage(definition);
+  assert.equal(
+    normalized.capabilityRequirements.some(
+      (requirement) => requirement.capabilityId === capabilityId,
+    ),
+    true,
+  );
+
+  (
+    operation.effect as { capability: { targetId: string } }
+  ).capability.targetId = 'vendor.inventory:capability.unregistered';
+  expectDiagnostic(
+    () => normalizeApplicationPackage(definition),
+    'CANON_REFERENCE_UNRESOLVED',
+    { objectId: String(operation.operationId) },
+  );
+});
+
 test('duplicate JSON keys and lone surrogates reject before normalization', () => {
   expectDiagnostic(
     () => parseAuthoredApplicationPackageJson('{"kind":"a","kind":"b"}'),

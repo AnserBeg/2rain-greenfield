@@ -85,11 +85,11 @@ export function registerInventoryContractCases(
         }>;
       }>(compiled, PROJECTION_FAMILY_IDS.queryCatalog).queries;
       const scoped = queries.filter((query) => query.legalEntityScope);
-      assert.equal(scoped.length, 24);
+      assert.equal(scoped.length, 23);
       const scopedRowQueries = scoped.filter(
         (query) => query.queryType !== 'aggregate',
       );
-      assert.equal(scopedRowQueries.length, 23);
+      assert.equal(scopedRowQueries.length, 22);
       assert.equal(
         queries.some(
           (query) =>
@@ -1795,11 +1795,12 @@ function inventoryDefinitionWithoutFamily(
     operations
       .filter(
         (operation) =>
-          typeof operation.effect === 'object' &&
-          operation.effect !== null &&
-          referenceTarget(
-            (operation.effect as Record<string, unknown>).entity,
-          ) === entityId,
+          (typeof operation.effect === 'object' &&
+            operation.effect !== null &&
+            referenceTarget(
+              (operation.effect as Record<string, unknown>).entity,
+            ) === entityId) ||
+          queryIds.has(referenceTarget(operation.readBack) ?? ''),
       )
       .map((operation) => String(operation.operationId)),
   );

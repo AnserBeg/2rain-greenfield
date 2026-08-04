@@ -30,6 +30,7 @@ import {
   lowerBaseProjectionPayloads,
   queryParameterCatalogEntries,
   requiredProjectionFamily,
+  verificationAssertionEntityId,
   type ProjectionPayloadPlan,
 } from './projections.js';
 import {
@@ -137,9 +138,70 @@ interface EmittedProjection {
   reference: ProjectionReference;
 }
 
+export interface HistoricalApplicationReproductionExpectation {
+  readonly releaseRoot: string;
+}
+
 export function compileApplication(
   input: CompilerInput,
   options: CompilerExecutionOptions = {},
+): CompileResult {
+  return compileApplicationInternal(input, options, 'current');
+}
+
+/**
+ * Reproduces an already-recorded release without applying conformance policy
+ * introduced after that release was authored. The expected content-addressed
+ * root is mandatory: this entry point cannot mint a new head.
+ */
+export function reproduceHistoricalApplication(
+  input: CompilerInput,
+  expectation: HistoricalApplicationReproductionExpectation,
+  options: CompilerExecutionOptions = {},
+): CompileResult {
+  const maximumDiagnostics = validDiagnosticLimit(input?.limits)
+    ? input.limits.maximumDiagnostics
+    : DEFAULT_COMPILER_LIMITS.maximumDiagnostics;
+  if (!isSha256(expectation?.releaseRoot)) {
+    return failure(
+      [
+        compilerDiagnostic(
+          'COMPILER_HISTORICAL_REPRODUCTION_MISMATCH',
+          'postLoweringValidation',
+          '$.historicalReproduction.releaseRoot',
+          null,
+        ),
+      ],
+      maximumDiagnostics,
+    );
+  }
+  const result = compileApplicationInternal(
+    input,
+    options,
+    'historicalReproduction',
+  );
+  if (result.status === 'failed') return result;
+  if (result.releaseRoot !== expectation.releaseRoot) {
+    return failure(
+      [
+        compilerDiagnostic(
+          'COMPILER_HISTORICAL_REPRODUCTION_MISMATCH',
+          'postLoweringValidation',
+          '$.historicalReproduction.releaseRoot',
+          expectation.releaseRoot,
+        ),
+      ],
+      maximumDiagnostics,
+      result.stagedArtifacts,
+    );
+  }
+  return result;
+}
+
+function compileApplicationInternal(
+  input: CompilerInput,
+  options: CompilerExecutionOptions,
+  conformanceMode: 'current' | 'historicalReproduction',
 ): CompileResult {
   const maximumDiagnostics = validDiagnosticLimit(input?.limits)
     ? input.limits.maximumDiagnostics
@@ -204,9 +266,11 @@ export function compileApplication(
     return failure(typeDiagnostics, maximumDiagnostics);
   }
 
-  const wholeModelDiagnostics = validateWholeModel(packageRevision);
-  if (wholeModelDiagnostics.length > 0) {
-    return failure(wholeModelDiagnostics, maximumDiagnostics);
+  if (conformanceMode === 'current') {
+    const wholeModelDiagnostics = validateWholeModel(packageRevision);
+    if (wholeModelDiagnostics.length > 0) {
+      return failure(wholeModelDiagnostics, maximumDiagnostics);
+    }
   }
 
   const semanticProfileDigest = hashCanonical(
@@ -250,12 +314,22 @@ export function compileApplication(
     ),
     packageRevision,
   );
-  const resolveStorageDiagnostics = validateResolveStorageConformance(
-    packageRevision,
-    basePlans,
-  );
-  if (resolveStorageDiagnostics.length > 0) {
-    return failure(resolveStorageDiagnostics, maximumDiagnostics);
+  if (conformanceMode === 'current') {
+    const resolveStorageDiagnostics = validateResolveStorageConformance(
+      packageRevision,
+      basePlans,
+    );
+    const searchStorageDiagnostics = validateSearchStorageConformance(
+      packageRevision,
+      basePlans,
+    );
+    const storageConformanceDiagnostics = [
+      ...resolveStorageDiagnostics,
+      ...searchStorageDiagnostics,
+    ];
+    if (storageConformanceDiagnostics.length > 0) {
+      return failure(storageConformanceDiagnostics, maximumDiagnostics);
+    }
   }
   const emittedBase = emitScheduledProjections(
     basePlans,
@@ -514,6 +588,100 @@ function validateResolveStorageConformance(
           ),
         );
       }
+    }
+  }
+  return diagnostics;
+}
+
+function validateSearchStorageConformance(
+  packageRevision: VersionedNormalizedApplicationPackage,
+  plans: readonly ProjectionPayloadPlan[],
+): CompilerDiagnostic[] {
+  const storagePlan = plans.find(
+    (plan) => plan.familyId === PROJECTION_FAMILY_IDS.storageTarget,
+  );
+  if (!storagePlan || !isStorageTargetV1(storagePlan.payload)) return [];
+  const storageByEntity = new Map(
+    storagePlan.payload.entities.map((entity) => [entity.entityId, entity]),
+  );
+  type VersionedQuery =
+    VersionedNormalizedApplicationPackage['queries'][number];
+  const searchByEntity = new Map<string, VersionedQuery[]>();
+  for (const query of packageRevision.queries) {
+    if (
+      query.lifecycle !== 'active' ||
+      query.tier !== 'q0' ||
+      query.queryType !== 'search'
+    ) {
+      continue;
+    }
+    const sourceEntityId = query.sourceEntity.targetId;
+    const queries = searchByEntity.get(sourceEntityId) ?? [];
+    searchByEntity.set(sourceEntityId, [...queries, query]);
+  }
+  const diagnostics: CompilerDiagnostic[] = [];
+  for (const entity of packageRevision.entities.filter(
+    (candidate) => candidate.lifecycle === 'active',
+  )) {
+    const storageEntity = storageByEntity.get(entity.entityId);
+    if (!storageEntity) continue;
+    const capableColumns = storageEntity.columns.filter(
+      (column) =>
+        (column.fieldContract.fieldKind === 'textFieldType' ||
+          column.fieldContract.fieldKind === 'enumFieldType') &&
+        /^(?:text|character varying|varchar)/u.test(column.postgresqlType),
+    );
+    const capableColumnIds = new Set(
+      capableColumns.map((column) => column.canonicalFieldId),
+    );
+    const searchQueries = searchByEntity.get(entity.entityId) ?? [];
+    if (capableColumns.length > 0 && searchQueries.length === 0) {
+      diagnostics.push(
+        compilerDiagnostic(
+          'COMPILER_SEARCH_QUERY_REQUIRED',
+          'postLoweringValidation',
+          '$.entities.searchQuery',
+          entity.entityId,
+        ),
+      );
+    }
+    if (capableColumns.length === 0 && searchQueries.length > 0) {
+      for (const [index, query] of searchQueries.entries()) {
+        diagnostics.push(
+          compilerDiagnostic(
+            'COMPILER_SEARCH_QUERY_STORAGE_UNSUPPORTED',
+            'postLoweringValidation',
+            '$.queries.queryType',
+            query.queryId,
+            index,
+          ),
+        );
+      }
+      continue;
+    }
+    const columnsById = new Map(
+      storageEntity.columns.map((column) => [column.canonicalFieldId, column]),
+    );
+    for (const [index, query] of searchQueries.entries()) {
+      const hasUsableSelection =
+        'selections' in query &&
+        query.selections.some((selection) => {
+          const fieldId = selection.field.targetId;
+          return (
+            capableColumnIds.has(fieldId) &&
+            columnsById.get(fieldId)?.searchMapping === 'normalizedTextIndex'
+          );
+        });
+      if (hasUsableSelection) continue;
+      diagnostics.push(
+        compilerDiagnostic(
+          'COMPILER_SEARCH_SELECTION_STORAGE_UNUSABLE',
+          'postLoweringValidation',
+          '$.queries.selections',
+          query.queryId,
+          index,
+        ),
+      );
     }
   }
   return diagnostics;
@@ -892,27 +1060,12 @@ function validateWholeModel(
 function validateVerificationAssertionInvocations(
   packageRevision: VersionedNormalizedApplicationPackage,
 ): CompilerDiagnostic[] {
-  const queryById = new Map(
-    packageRevision.queries.map((query) => [query.queryId, query] as const),
-  );
-  const operationById = new Map(
-    packageRevision.operations.map(
-      (operation) => [operation.operationId, operation] as const,
-    ),
-  );
   const diagnostics: CompilerDiagnostic[] = [];
   for (const assertion of packageRevision.assertions.filter(
     (entry) => entry.lifecycle === 'active',
   )) {
     const resolved =
-      assertion.invocation.kind === 'queryInvocation'
-        ? queryById.has(assertion.invocation.query.targetId)
-        : (() => {
-            const operation = operationById.get(
-              assertion.invocation.operation.targetId,
-            );
-            return operation !== undefined && 'entity' in operation.effect;
-          })();
+      verificationAssertionEntityId(packageRevision, assertion) !== undefined;
     if (!resolved) {
       diagnostics.push(
         compilerDiagnostic(

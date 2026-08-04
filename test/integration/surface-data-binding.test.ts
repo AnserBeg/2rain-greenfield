@@ -388,6 +388,144 @@ test('human-confirmed forms render the authoritative operation read-back without
   assert.equal(executor.operationCalls.length, 2);
 });
 
+test('a capability command is artifact-bound, render-minted, and deliberately confirmed', async () => {
+  const definition = ordinaryModuleV1();
+  const capabilityId = `${FIXTURE_IDS.namespace}:capability.post`;
+  const operationId = `${FIXTURE_IDS.namespace}:operation.master_post`;
+  assert.ok(Array.isArray(definition.capabilityRequirements));
+  definition.capabilityRequirements.push({
+    capabilityId,
+    capabilityVersion: 1,
+    declaredEffects: ['appendFact'],
+    kind: 'capabilityRequirement',
+    requiredProjections: ['operation', 'surface', 'verification'],
+    schemaVersion: 'v3',
+    supportStatus: 'supported',
+  });
+  assert.ok(Array.isArray(definition.permissions));
+  definition.permissions.push({
+    action: 'transition',
+    kind: 'permissionDefinition',
+    label: 'Post master',
+    lifecycle: 'active',
+    permissionId: `${FIXTURE_IDS.namespace}:permission.master_post`,
+    resource: {
+      kind: 'entityReference',
+      schemaVersion: 'v3',
+      targetId: FIXTURE_IDS.entityIds.parent,
+    },
+    schemaVersion: 'v3',
+  });
+  assert.ok(Array.isArray(definition.operations));
+  definition.operations.push({
+    confirmation: 'humanRequired',
+    effect: {
+      capability: {
+        kind: 'capabilityReference',
+        schemaVersion: 'v3',
+        targetId: capabilityId,
+      },
+      kind: 'registeredCapabilityEffect',
+      schemaVersion: 'v3',
+    },
+    kind: 'operationDefinition',
+    module: {
+      kind: 'moduleReference',
+      schemaVersion: 'v3',
+      targetId: FIXTURE_IDS.moduleId,
+    },
+    operationId,
+    permission: {
+      kind: 'permissionReference',
+      schemaVersion: 'v3',
+      targetId: `${FIXTURE_IDS.namespace}:permission.master_post`,
+    },
+    precondition: {
+      field: {
+        kind: 'fieldReference',
+        schemaVersion: 'v3',
+        targetId: FIXTURE_IDS.fieldIds.parentName,
+      },
+      kind: 'fieldComparisonPredicate',
+      operator: 'equals',
+      schemaVersion: 'v3',
+      value: { kind: 'textValue', schemaVersion: 'v3', value: 'Draft' },
+    },
+    readBack: {
+      kind: 'queryReference',
+      schemaVersion: 'v3',
+      targetId: `${FIXTURE_IDS.namespace}:query.master_get`,
+    },
+    schemaVersion: 'v3',
+    tier: 'o1',
+  });
+  assert.ok(Array.isArray(definition.surfaces));
+  const recordSurface = definition.surfaces
+    .map(asRecord)
+    .find(
+      (surface) =>
+        surface.surfaceId === `${FIXTURE_IDS.namespace}:surface.master_record`,
+    );
+  assert.ok(recordSurface && Array.isArray(recordSurface.slots));
+  recordSurface.slots.push({
+    content: {
+      kind: 'opaqueSurfaceContentReference',
+      schemaVersion: 'v3',
+      targetId: `${FIXTURE_IDS.namespace}:capability.standard_surface_content`,
+    },
+    kind: 'surfaceSlot',
+    orderKey: 20,
+    schemaVersion: 'v3',
+    slot: 'commandBar',
+    slotId: `${FIXTURE_IDS.namespace}:slot.master_record_command_bar`,
+  });
+
+  const compiled = compileFixture(definition);
+  const policy = new RecordingPolicy('ALLOW');
+  const executor = new InMemoryGenericExecutor();
+  const recordId = executor.seed(tenantA, 'Draft');
+  const gateways = semanticGateways(policy, executor);
+  const view = await issuedView(
+    runtimeEntry(compiled, policy, {
+      a: identity(tenantA, environmentA, principalA),
+    }),
+    'a',
+  );
+  const recordUrl = `/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_record`)}&record=${encodeURIComponent(recordId)}`;
+  const rendered = await renderSurfaceRuntimeWithData(
+    view,
+    recordUrl,
+    gateways,
+  );
+  assert.match(
+    rendered.html,
+    new RegExp(`data-capability-id="${capabilityId}"`),
+  );
+  assert.match(rendered.html, /Draft staged\./);
+  const renderedKey = hiddenValue(rendered.html, 'idempotencyKey');
+  assert.match(
+    renderedKey,
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
+  );
+  const preview = await submitSurfaceRuntimeIntent(
+    view,
+    recordUrl,
+    {
+      expectedRevision: '1',
+      idempotencyKey: renderedKey,
+      intent: 'command',
+      recordId,
+    },
+    gateways,
+  );
+  assert.equal(preview.statusCode, 200);
+  assert.match(preview.html, /data-confirmation-step="preview"/);
+  assert.match(preview.html, /data-predicted-effects="registered-capability"/);
+  assert.match(preview.html, new RegExp(`<code>${capabilityId}</code>`));
+  assert.equal(hiddenValue(preview.html, 'idempotencyKey'), renderedKey);
+  assert.equal(executor.operationCalls.length, 0);
+});
+
 class RecordingPolicy implements CurrentPolicyGateway {
   readonly calls: CurrentPolicyDecisionRequest[] = [];
 
@@ -423,12 +561,13 @@ class InMemoryGenericExecutor
     Map<string, SemanticRecordDto>
   >();
 
-  seed(tenantId: string, name: string): void {
+  seed(tenantId: string, name: string): string {
     const recordId = randomUUID();
     this.tenantRecords(tenantId).set(
       recordId,
       record(recordId, name, FIXTURE_IDS.entityIds.parent),
     );
+    return recordId;
   }
 
   async recordNonAccepted(

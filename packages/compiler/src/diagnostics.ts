@@ -70,6 +70,11 @@ export const COMPILER_DIAGNOSTIC_COPY = Object.freeze({
       'use dedicatedTable storage until generated typed storage has provider and runtime evidence',
     rule: 'generatedTyped is representable but intentionally unsupported by the Freeze F candidate',
   },
+  COMPILER_HISTORICAL_REPRODUCTION_MISMATCH: {
+    acceptedAlternative:
+      'restore the recorded normalized bytes and compiled release whose content-addressed root was accepted into the lineage',
+    rule: 'historical leniency verifies an already-recorded release root and can never mint a new release',
+  },
   COMPILER_PHYSICAL_NAME_COLLISION: {
     acceptedAlternative:
       'use the compiler-owned domain-separated SHA-256/base32 physical mapping without overrides',
@@ -124,6 +129,21 @@ export const COMPILER_DIAGNOSTIC_COPY = Object.freeze({
     acceptedAlternative:
       'select a match key whose lowered storage column is text-backed, or omit resolve when the entity has no such column',
     rule: 'every declared resolve key executes against a text-backed lowered storage column',
+  },
+  COMPILER_SEARCH_QUERY_REQUIRED: {
+    acceptedAlternative:
+      'declare one q0 search query selecting at least one field that lowers to supported text search storage',
+    rule: 'an entity with a lowered search-capable column exposes a usable search query',
+  },
+  COMPILER_SEARCH_QUERY_STORAGE_UNSUPPORTED: {
+    acceptedAlternative:
+      'omit search until the entity has a supported field kind lowered to physical text storage',
+    rule: 'an entity without any lowered search-capable column cannot declare search',
+  },
+  COMPILER_SEARCH_SELECTION_STORAGE_UNUSABLE: {
+    acceptedAlternative:
+      'select at least one searchable supported field whose lowered column carries normalizedTextIndex',
+    rule: 'a declared search query selects a lowered column that the runtime can search',
   },
   COMPILER_RESOLVE_QUERY_REQUIRED: {
     acceptedAlternative:

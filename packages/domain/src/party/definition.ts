@@ -133,6 +133,7 @@ export function partyModuleDefinition(
           ['supplier', 'Supplier'],
           ['customer', 'Customer'],
         ],
+        true,
       ),
       enumField(
         definitionIds,
@@ -308,6 +309,7 @@ function enumField(
   label: string,
   orderKey: number,
   options: ReadonlyArray<readonly [string, string]>,
+  searchable = false,
 ): Record<string, unknown> {
   return {
     classification: 'internal',
@@ -332,7 +334,7 @@ function enumField(
     presence: 'required',
     reportable: true,
     schemaVersion: version,
-    searchable: false,
+    searchable,
   };
 }
 

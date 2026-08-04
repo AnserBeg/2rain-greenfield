@@ -31,6 +31,7 @@ import {
 import {
   MalformedLegalEntityScopeArgumentError,
   MalformedPinnedQueryCatalogError,
+  MalformedSemanticQueryRequestError,
   SEMANTIC_QUERY_REQUEST_VERSION,
   SEMANTIC_QUERY_RESULT_VERSION,
   SemanticQueryGateway,
@@ -51,6 +52,7 @@ const ENTITY_B = '7c4d8e20-1a53-4f6b-9d82-3e5a7c9b1d0f';
 
 const scopedQueryId = 'northstar.bootstrap:query.entity_scoped_list';
 const scopeParameterId = 'northstar.bootstrap:parameter.entity_scope';
+const rowParameterId = 'northstar.bootstrap:parameter.row_text';
 const permissionId = 'northstar.bootstrap:permission.read';
 
 const authenticationInput = Object.freeze({
@@ -95,6 +97,10 @@ test('an ordinary API caller supplies the legal-entity operand end to end', asyn
     ),
     [ENTITY_A, ENTITY_B],
   );
+  assert.deepEqual(request.parameterValues, {
+    [scopeParameterId]: [ENTITY_B, ENTITY_A],
+  });
+  assert.equal(Object.isFrozen(request.parameterValues), true);
 
   // The caller never held a capability — only an ordinary query argument.
   assert.equal(AuthenticatedSemanticQueryApiAdapter.length, 2);
@@ -105,6 +111,74 @@ test('an ordinary API caller supplies the legal-entity operand end to end', asyn
     2,
     'each selected entity must receive its own live policy decision',
   );
+});
+
+/**
+ * 5g3-rowparam CONTROL A. The value must reach the executor through the same
+ * `parameterValues` member aggregates use; observing the request argument
+ * alone would pass while binding still returned an empty object.
+ *
+ * Victim: the non-aggregate early return in `bindQueryParameters`.
+ */
+test('a declared row parameter is bound and reaches the executor', async () => {
+  const fixture = createFixture({ rowParameter: true, unscopedQuery: true });
+  const result = await fixture.queryApi.handle(authenticationInput, {
+    arguments: { [rowParameterId]: 'counted stock' },
+    queryId: scopedQueryId,
+    schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+  });
+  assert.equal(result.outcome, 'exact');
+  assert.deepEqual(fixture.executor.lastRequest?.parameterValues, {
+    [rowParameterId]: 'counted stock',
+  });
+  assert.equal(
+    Object.isFrozen(fixture.executor.lastRequest?.parameterValues),
+    true,
+  );
+});
+
+/**
+ * 5g3-rowparam CONTROL B. The declared field type is enforced before the
+ * executor. Merely observing that a value was copied would not prove this.
+ *
+ * Victim: the field-type match in `bindQueryParameters`.
+ */
+test('a wrong row parameter type fails closed before execution', async () => {
+  const fixture = createFixture({ rowParameter: true, unscopedQuery: true });
+  await assert.rejects(
+    () =>
+      fixture.queryApi.handle(authenticationInput, {
+        arguments: { [rowParameterId]: false },
+        queryId: scopedQueryId,
+        schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+      }),
+    (error: unknown) =>
+      error instanceof MalformedSemanticQueryRequestError &&
+      error.code === 'MALFORMED_SEMANTIC_QUERY_REQUEST',
+  );
+  assert.equal(fixture.executor.lastRequest, null);
+});
+
+/**
+ * 5g3-rowparam CONTROL C. Omission is its own vacuity vector: the binder must
+ * not silently default a required declaration or deliver `undefined`.
+ *
+ * Victim: the declared-parameter presence check in `bindQueryParameters`.
+ */
+test('an omitted row parameter fails closed before execution', async () => {
+  const fixture = createFixture({ rowParameter: true, unscopedQuery: true });
+  await assert.rejects(
+    () =>
+      fixture.queryApi.handle(authenticationInput, {
+        arguments: {},
+        queryId: scopedQueryId,
+        schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+      }),
+    (error: unknown) =>
+      error instanceof MalformedSemanticQueryRequestError &&
+      error.code === 'MALFORMED_SEMANTIC_QUERY_REQUEST',
+  );
+  assert.equal(fixture.executor.lastRequest, null);
 });
 
 /**
@@ -440,6 +514,7 @@ interface FixtureOptions {
   readonly dropParameterDeclaration?: boolean;
   readonly parameterDeclaration?: ImmutableJsonValue;
   readonly retiredQuery?: boolean;
+  readonly rowParameter?: boolean;
   readonly unscopedQuery?: boolean;
 }
 
@@ -515,20 +590,38 @@ function scopedQueryCatalog(options: FixtureOptions): ImmutableJsonValue {
             }),
         lifecycle: options.retiredQuery ? 'retired' : 'active',
         maximumResultCount: 10,
-        ...(options.dropParameterDeclaration || options.unscopedQuery
-          ? {}
-          : {
+        ...((!options.dropParameterDeclaration && !options.unscopedQuery) ||
+        options.rowParameter
+          ? {
               parameters: [
-                options.parameterDeclaration ?? {
-                  orderKey: 10,
-                  parameterId: scopeParameterId,
-                  parameterType: {
-                    kind: 'legalEntityReferenceParameterType',
-                    schemaVersion: 'v4',
-                  },
-                },
+                ...(!options.dropParameterDeclaration && !options.unscopedQuery
+                  ? [
+                      options.parameterDeclaration ?? {
+                        orderKey: 10,
+                        parameterId: scopeParameterId,
+                        parameterType: {
+                          kind: 'legalEntityReferenceParameterType',
+                          schemaVersion: 'v4',
+                        },
+                      },
+                    ]
+                  : []),
+                ...(options.rowParameter
+                  ? [
+                      {
+                        orderKey: 20,
+                        parameterId: rowParameterId,
+                        parameterType: {
+                          kind: 'textFieldType',
+                          maximumLength: 40,
+                          schemaVersion: 'v4',
+                        },
+                      },
+                    ]
+                  : []),
               ],
-            }),
+            }
+          : {}),
         permissionId,
         queryId: scopedQueryId,
         queryType: 'list',

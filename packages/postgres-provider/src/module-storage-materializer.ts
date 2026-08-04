@@ -4230,20 +4230,52 @@ function mergeCompatibleEntity(
         void _fieldContract;
         return shape;
       };
+      const withoutSearchMetadata = (
+        value: StorageEntityTarget['columns'][number],
+      ) => {
+        const {
+          fieldContract: _fieldContract,
+          searchMapping: _searchMapping,
+          shapeFingerprint: _shapeFingerprint,
+          ...shape
+        } = value;
+        void _fieldContract;
+        void _searchMapping;
+        void _shapeFingerprint;
+        return shape;
+      };
+      const searchMappingPairIsAdditive =
+        new Set([existing.searchMapping, column.searchMapping]).size === 2 &&
+        new Set([existing.searchMapping, column.searchMapping]).has('none') &&
+        new Set([existing.searchMapping, column.searchMapping]).has(
+          'normalizedTextIndex',
+        );
+      const contractsMatch =
+        !Object.hasOwn(existing, 'fieldContract') ||
+        !Object.hasOwn(column, 'fieldContract') ||
+        canonicalize(existing.fieldContract) ===
+          canonicalize(column.fieldContract);
+      const additiveSearchMappingIsCompatible =
+        searchMappingPairIsAdditive &&
+        contractsMatch &&
+        canonicalize(withoutSearchMetadata(existing)) ===
+          canonicalize(withoutSearchMetadata(column));
       if (
-        canonicalize(withoutContract(existing)) !==
+        !additiveSearchMappingIsCompatible &&
+        (canonicalize(withoutContract(existing)) !==
           canonicalize(withoutContract(column)) ||
-        (Object.hasOwn(existing, 'fieldContract') &&
-          Object.hasOwn(column, 'fieldContract') &&
-          canonicalize(existing.fieldContract) !==
-            canonicalize(column.fieldContract))
+          !contractsMatch)
       ) {
         throw failure(
           'LIVE_SET_SHAPE_CONFLICT',
           `conflicting live roots claim ${next.physicalTableName}.${column.physicalName}`,
         );
       }
-      if (Object.hasOwn(column, 'fieldContract')) {
+      if (
+        Object.hasOwn(column, 'fieldContract') &&
+        (column.searchMapping === 'normalizedTextIndex' ||
+          existing.searchMapping !== 'normalizedTextIndex')
+      ) {
         values.set(column.physicalName, column);
       }
     }

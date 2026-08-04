@@ -35,6 +35,7 @@ import type {
   SemanticOperationResultEnvelope,
 } from '../../../../packages/runtime/src/semantic-operation-gateway.js';
 import type {
+  RegisteredQueryDefinition,
   SemanticQueryExecutionRequest,
   SemanticQueryExecutor,
   SemanticQueryResultEnvelope,
@@ -58,6 +59,7 @@ export interface SavedFilterAdmissionRefusal {
   readonly executionErrorCode: string;
   readonly executionErrorMessage: string;
   readonly releaseRoot: string;
+  readonly searchWitnessCount: number;
   readonly scenarioKinds: readonly string[];
 }
 
@@ -169,6 +171,7 @@ export async function observeSavedFilterAdmissionRefusal(
             ? executionError.message
             : String(executionError),
         releaseRoot: fixture.compiled.releaseRoot,
+        searchWitnessCount: executor.searchWitnessCount,
         scenarioKinds: Object.freeze(
           binding.plan.scenarios.map((scenario) => scenario.kind),
         ),
@@ -182,6 +185,8 @@ export async function observeSavedFilterAdmissionRefusal(
 class SavedFilterVerificationExecutor
   implements SemanticOperationExecutor, SemanticQueryExecutor
 {
+  searchWitnessCount = 0;
+
   constructor(private readonly executor: PostgresSavedFilterExecutor) {}
 
   execute(
@@ -190,7 +195,7 @@ class SavedFilterVerificationExecutor
   execute(
     request: SemanticQueryExecutionRequest,
   ): Promise<SemanticQueryResultEnvelope>;
-  execute(
+  async execute(
     request: SemanticOperationExecutionRequest | SemanticQueryExecutionRequest,
   ): Promise<SemanticOperationResultEnvelope | SemanticQueryResultEnvelope> {
     if ('idempotencyKey' in request) {
@@ -201,7 +206,8 @@ class SavedFilterVerificationExecutor
         recordId: string;
         relations: Readonly<Record<string, string>>;
       }>;
-      return this.executor.execute({
+      const name = `Verification ${input.recordId}`;
+      const created = await this.executor.execute({
         ...request,
         input: {
           recordId: input.recordId,
@@ -212,11 +218,34 @@ class SavedFilterVerificationExecutor
               schemaVersion: request.definition.effect.schemaVersion,
               value: true,
             }),
-            [PLATFORM_IDS.fieldIds.name]: `Verification ${input.recordId}`,
+            [PLATFORM_IDS.fieldIds.name]: name,
             [PLATFORM_IDS.fieldIds.queryId]: PLATFORM_IDS.queryIds.list,
           },
         },
       });
+      if (this.searchWitnessCount === 0) {
+        const payload = request.view.projections.query.payload as unknown as {
+          queries: RegisteredQueryDefinition[];
+        };
+        const definition = payload.queries.find(
+          (query) => query.queryId === PLATFORM_IDS.queryIds.search,
+        );
+        assert.ok(definition);
+        const searched = await this.executor.execute({
+          arguments: { text: name },
+          context: request.context,
+          definition,
+          filterPlans: [],
+          legalEntityReadScope: null,
+          list: null,
+          parameterValues: Object.freeze({}),
+          view: request.view,
+        });
+        this.searchWitnessCount = searched.records.filter(
+          (record) => record.recordId === input.recordId,
+        ).length;
+      }
+      return created;
     }
     if (request.definition.queryType === 'get') {
       const arguments_ = request.arguments as Readonly<{

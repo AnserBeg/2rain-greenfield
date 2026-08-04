@@ -64,10 +64,13 @@ export function composedApplicationDefinition(): Record<string, unknown> {
       throw new TypeError('module surface capability requirements diverged');
     }
   }
+  const moduleCapabilities = definitions.flatMap((definition) =>
+    collection(definition, 'capabilityRequirements').slice(1),
+  );
 
   return {
     assertions: merged(definitions, 'assertions'),
-    capabilityRequirements: [sharedCapability],
+    capabilityRequirements: [sharedCapability, ...moduleCapabilities],
     entities: merged(definitions, 'entities'),
     fields: merged(definitions, 'fields'),
     hashAlgorithm: 'sha256',

@@ -390,3 +390,38 @@ How to apply: compile every retained lineage input under a proposed conformance 
 Date: 2026-08-02
 Why: three resolve declarations and five search declarations satisfied universal conformance while their lowered storage made the promised lookup impossible.
 How to apply: derive query requirements from executable lowered storage, refuse declarations the runtime cannot honor, and independently require every capability that storage can honestly support. See ADR-0042 and `docs/execution/packets/5g3-write-scope.md`.
+
+## Derive conformance from authored and synthesized contracts
+Date: 2026-08-02
+Why: a schema-only language inventory could not see compiler-synthesized field-origin relations, so downstream consumers ignored a real output choice and demanded two authorities for one physical column.
+How to apply: derive obligations independently from the authored schema and every lowered output contract; discharge each exact value only with distinguishing execution, stable refusal, or a digest-bound written decision. See `docs/execution/packets/5g3-langgate.md`.
+
+## Enumerate finite union members independently
+Date: 2026-08-02
+Why: the language ledger dropped `null` whenever it shared a union with open `string` or `number`, omitting exactly the nullable shapes that motivated the instrument.
+How to apply: emit every finite union member before independently traversing non-finite siblings, and retain a missing-axis control grounded in both authored and lowered specifications. See `docs/execution/packets/5g3-langgate.md`.
+
+## Classify failure scope at the live composition boundary
+Date: 2026-08-02
+Why: `5g3-u4` inherited a stale line citation that pointed at a correctly page-level manifest failure, while the real all-or-nothing behavior lived after surface selection at record-slot dispatch.
+How to apply: trace a failure from selection through data resolution to slot dispatch before moving its diagnostic; preserve pre-composition faults as page-level and isolate only failures arising after slot composition. See `docs/execution/packets/5g3-u4.md`.
+
+## Force the branch a negative control claims to cover
+Date: 2026-08-02
+Why: a no-loading control borrowed a surface with declared status roles, so restoring the fallback `Loading` branch stayed green because the fixture never executed that branch.
+How to apply: construct every branch-decisive precondition explicitly, run the exact bad mutation, and reject a red that occurs before or after the claimed branch. See `docs/execution/packets/5g3-u4.md`.
+
+## Put external-resource cleanup outside its owner process
+Date: 2026-08-02
+Why: six `--rm` PostgreSQL test containers survived their killed harnesses for up to two days and contaminated every later matrix run.
+How to apply: pair normal `finally` cleanup with a detached, process-identity-bound guardian; kill -9 the real owner and independently observe the external resource disappear. See `docs/execution/packets/leak-guard.md`.
+
+## Keep every best-of-N cold sample genuinely cold
+Date: 2026-08-02
+Why: same-process repetition let warmed V8 state hide first-invocation compiler cost, while one noisy cold sample made an unchanged gate indeterminate in practice.
+How to apply: take each sample's first invocation in a distinct process, retain the unchanged budget, report every sample, and prove both one-noisy-sample PASS and all-slow-samples FAIL. See `docs/execution/packets/leak-guard.md`.
+
+## Separate historical integrity from current conformance
+Date: 2026-08-02
+Why: applying a newly tightened search rule to recorded lineage made valid historical releases appear corrupt and would have disabled rollback exactly when rules changed.
+How to apply: reproduce history from its recorded bytes and exact root, compile every new head strictly, and let historical defects refuse by name at runtime rather than returning plausible answers. Graduated to ADR-0045 and ADR-0046; see `docs/execution/packets/5g3-searchcap.md`.

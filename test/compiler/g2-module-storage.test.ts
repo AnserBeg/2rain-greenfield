@@ -379,7 +379,7 @@ test('entity ownership derives one create-only system input while tenant-shared 
   const entityOwned = mustCompile(input(entityOwnedDefinition));
   const entityOwnedOperations = projectionPayload<{
     operations: Array<{
-      effect: { entity: { targetId: string }; kind: string };
+      effect: { entity?: { targetId: string }; kind: string };
       inputContract?: {
         closedArgumentKeys: string[];
         schemaVersion: string;
@@ -396,7 +396,7 @@ test('entity ownership derives one create-only system input while tenant-shared 
   }>(entityOwned, PROJECTION_FAMILY_IDS.operationCatalog).operations;
   const entityOwnedCreate = entityOwnedOperations.find(
     (operation) =>
-      operation.effect.entity.targetId === entityOwnedId &&
+      operation.effect.entity?.targetId === entityOwnedId &&
       operation.effect.kind === 'createRecordEffect',
   );
   assert.deepEqual(entityOwnedCreate?.inputContract?.systemInput, {
@@ -419,7 +419,7 @@ test('entity ownership derives one create-only system input while tenant-shared 
   ]);
   for (const operation of entityOwnedOperations.filter(
     (candidate) =>
-      candidate.effect.entity.targetId === entityOwnedId &&
+      candidate.effect.entity?.targetId === entityOwnedId &&
       candidate.effect.kind !== 'createRecordEffect',
   )) {
     assert.equal(
@@ -437,7 +437,7 @@ test('entity ownership derives one create-only system input while tenant-shared 
   const tenantShared = entityOwned;
   const tenantSharedCreate = projectionPayload<{
     operations: Array<{
-      effect: { entity: { targetId: string }; kind: string };
+      effect: { entity?: { targetId: string }; kind: string };
       inputContract?: {
         closedArgumentKeys: string[];
         schemaVersion: string;
@@ -446,7 +446,7 @@ test('entity ownership derives one create-only system input while tenant-shared 
     }>;
   }>(tenantShared, PROJECTION_FAMILY_IDS.operationCatalog).operations.find(
     (operation) =>
-      operation.effect.entity.targetId === tenantSharedId &&
+      operation.effect.entity?.targetId === tenantSharedId &&
       operation.effect.kind === 'createRecordEffect',
   );
   assert.equal(
@@ -602,6 +602,144 @@ test('resolve conformance is derived from lowered text storage in both direction
         code: 'COMPILER_RESOLVE_QUERY_REQUIRED',
         path: '$.entities.resolveQuery',
         subjectId: 'northstar.app:entity.item',
+      },
+    ],
+  );
+});
+
+test('search conformance is derived from lowered supported text storage in both directions', () => {
+  const definition = composedApplicationDefinition();
+  const compiled = mustCompile(input(definition));
+  const storage = projectionPayload<StorageTargetPayloadV1>(
+    compiled,
+    PROJECTION_FAMILY_IDS.storageTarget,
+  );
+  const queries = projectionPayload<{
+    queries: Array<{
+      queryId: string;
+      queryType: string;
+      selections: Array<{ fieldId: string }>;
+      sourceEntityId: string;
+    }>;
+  }>(compiled, PROJECTION_FAMILY_IDS.queryCatalog).queries;
+  const searchByEntity = new Map(
+    queries
+      .filter((query) => query.queryType === 'search')
+      .map((query) => [query.sourceEntityId, query] as const),
+  );
+  for (const entity of storage.entities) {
+    const capableColumns = entity.columns.filter(
+      (column) =>
+        (column.fieldContract.fieldKind === 'textFieldType' ||
+          column.fieldContract.fieldKind === 'enumFieldType') &&
+        /^(?:text|character varying|varchar)/u.test(column.postgresqlType),
+    );
+    const search = searchByEntity.get(entity.entityId);
+    assert.equal(
+      search !== undefined,
+      capableColumns.length > 0,
+      `${entity.entityId} search presence must match lowered capability`,
+    );
+    if (!search) continue;
+    const selected = new Set(
+      search.selections.map((selection) => selection.fieldId),
+    );
+    assert.ok(
+      capableColumns.some(
+        (column) =>
+          selected.has(column.canonicalFieldId) &&
+          column.searchMapping === 'normalizedTextIndex',
+      ),
+      `${search.queryId} must select a usable normalized-text index`,
+    );
+  }
+  assert.equal(
+    searchByEntity.has('northstar.app:entity.inventory_period_lock'),
+    false,
+  );
+
+  const unusable = structuredClone(definition) as {
+    fields: Array<{ fieldId: string; searchable: boolean }>;
+  };
+  const transactionLineUnit = unusable.fields.find(
+    (field) =>
+      field.fieldId ===
+      'northstar.app:field.inventory_transaction_line_unit_id',
+  );
+  assert.ok(transactionLineUnit);
+  transactionLineUnit.searchable = false;
+  const unusableResult = compileApplication(input(unusable));
+  assert.equal(unusableResult.status, 'failed');
+  assert.deepEqual(
+    unusableResult.diagnostics.map((diagnostic) => ({
+      code: diagnostic.code,
+      path: diagnostic.path,
+      subjectId: diagnostic.subjectId,
+    })),
+    [
+      {
+        code: 'COMPILER_SEARCH_SELECTION_STORAGE_UNUSABLE',
+        path: '$.queries.selections',
+        subjectId: 'northstar.app:query.inventory_transaction_line_search',
+      },
+    ],
+  );
+
+  const missing = structuredClone(definition) as {
+    queries: Array<{ queryId: string }>;
+  };
+  missing.queries = missing.queries.filter(
+    (query) => query.queryId !== 'northstar.app:query.item_search',
+  );
+  const missingResult = compileApplication(input(missing));
+  assert.equal(missingResult.status, 'failed');
+  assert.deepEqual(
+    missingResult.diagnostics.map((diagnostic) => ({
+      code: diagnostic.code,
+      path: diagnostic.path,
+      subjectId: diagnostic.subjectId,
+    })),
+    [
+      {
+        code: 'COMPILER_SEARCH_QUERY_REQUIRED',
+        path: '$.entities.searchQuery',
+        subjectId: 'northstar.app:entity.item',
+      },
+    ],
+  );
+
+  const unsupported = structuredClone(definition) as {
+    queries: Array<Record<string, unknown>>;
+  };
+  const periodGet = unsupported.queries.find(
+    (query) =>
+      query.queryId === 'northstar.app:query.inventory_period_lock_get',
+  );
+  assert.ok(periodGet);
+  const periodSearch = structuredClone(periodGet) as {
+    queryId: string;
+    queryType: string;
+    selections: Array<{ selectionId: string }>;
+  };
+  periodSearch.queryId = 'northstar.app:query.inventory_period_lock_search';
+  periodSearch.queryType = 'search';
+  for (const [index, selection] of periodSearch.selections.entries()) {
+    selection.selectionId = `northstar.app:selection.inventory_period_lock_search_${String(index + 1)}`;
+  }
+  unsupported.queries.push(periodSearch);
+  const unsupportedResult = compileApplication(input(unsupported));
+  assert.equal(unsupportedResult.status, 'failed');
+  assert.deepEqual(
+    unsupportedResult.diagnostics.map((diagnostic) => ({
+      code: diagnostic.code,
+      path: diagnostic.path,
+      subjectId: diagnostic.subjectId,
+    })),
+    [
+      {
+        code: 'COMPILER_SEARCH_QUERY_STORAGE_UNSUPPORTED',
+        path: '$.queries.queryType',
+        subjectId: 'northstar.app:query.inventory_period_lock_search',
       },
     ],
   );
