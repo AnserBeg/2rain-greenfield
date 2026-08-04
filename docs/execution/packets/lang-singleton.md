@@ -1,6 +1,6 @@
 # lang-singleton — the coverage ledger must not hide singletons
 
-Status: candidate
+Status: evidence_ready — full matrix green, both Critical review arms PASS
 
 Tier: Critical
 
@@ -100,10 +100,10 @@ accepted-but-unhonored at all.
 
 | Newly visible relation obligation | Machinery that implements it | Verdict |
 | --- | --- | --- |
-| `$.relations[].cardinality="manyToOne"` | lowered to a nullable FK column; witnessed by `5g3-langnarrow`'s lowering assertion and 19/19 real-PostgreSQL execution. This is the obligation langnarrow recorded departing as **HIDDEN**; it is restored. | **HONEST — supported** |
-| `$.relations[].foreignKeyActions.onDelete="restrict"` | `module-storage-materializer.ts:1222` refuses any value other than `restrict`, and `:1252`, `:1321`, `:1601` emit `ON DELETE RESTRICT ON UPDATE RESTRICT` into real DDL. | **HONEST — supported** |
+| `$.relations[].cardinality="manyToOne"` | read and enforced at `normalize.ts:1459` (parent-scope guard) and `conformance.ts:1052`, refused by name with `CANON_RELATION_CARDINALITY_UNSUPPORTED`, and lowered at `storage.ts:1050-1103` to a single nullable `uuid` FK column with no uniqueness constraint — which is many-to-one semantics. Witnessed by `5g3-langnarrow`'s lowering assertion and 19/19 real-PostgreSQL execution. This is the obligation langnarrow recorded departing as **HIDDEN**; it is restored. | **HONEST — supported** |
+| `$.relations[].foreignKeyActions.onDelete="restrict"` | read at `normalize.ts:911`, pinned into every `StorageRelationTarget` (`storage.ts:500-501`, `:1087-1088`); the materializer's guard at `module-storage-materializer.ts:1220-1223` refuses any other value with `DESTRUCTIVE_FOREIGN_KEY_REJECTED` (`:1225`), and `:1252`, `:1321`, `:1601` emit `ON DELETE RESTRICT ON UPDATE RESTRICT` into real DDL. | **HONEST — supported** |
 | `$.relations[].foreignKeyActions.onUpdate="restrict"` | same guard and same emitted DDL. | **HONEST — supported** |
-| `$.relations[].kind="relationDefinition"` | the node's identity tag; `z.literal` refuses any other spelling at authoring. | **HONEST — supported** |
+| `$.relations[].kind="relationDefinition"` | the node's identity tag; `z.literal` at `schemas.ts:595` refuses any other spelling at authoring, and the node is processed as a relation throughout. | **HONEST — supported** |
 
 **No newly visible obligation is accepted-but-unhonored, and the tripwire did
 not fire.** That is a per-obligation finding, not an inference from the total.
@@ -345,6 +345,81 @@ synthetic one-commit, 56-byte scan that must find a planted leak. The real
 856-commit scan reports `no leaks found` and the gate reports
 `Security scans passed`.
 
-## Critical review
+## Critical review — both arms PASS at the identical SHA
 
-*(pending)*
+**Fresh naive Codex `gpt-5.6-sol` xhigh** reviewed frozen SHA `edcb9a9c` against
+BASE `30f50e8d` and returned:
+
+> No in-scope material findings.
+>
+> VERDICT: PASS
+
+It did not take the record on trust. It materialized the base-SHA helper, ran
+both derivations against the same tree, and independently reproduced 398→440
+axes, 1,896→1,938 obligations, 395→426 observations, 42 additions, zero
+departures, zero pre-existing value-set changes and zero pre-existing
+observation-partition changes. It reproduced the ledger digest, the 243-byte
+bitmap, all three exact-set digests and all three decision identities
+byte-for-byte, and confirmed **none of the three identities appears at the base
+SHA**. On the tripwire question it ran direct authoring mutations rather than
+reading the argument: cardinality and `kind` are refused by named diagnostics,
+both foreign-key action alternatives are refused, and admitted `restrict` values
+lower to `restrict` storage targets the materializer emits in DDL.
+
+Charter and raw result:
+`/home/rvham/2rain-missions/langsingleton-codex-review-edcb9a9.{prompt.md,result.txt}`.
+
+**One honest limitation of the review environment.** The Codex sandbox is
+read-only, so `corepack pnpm test:unit` failed with `EROFS` before starting when
+pnpm tried to write a workspace temp file. The reviewer correctly declined to run
+the dependent coverage command rather than break the required ordering, and
+continued by executing the exported derivations directly. That is a limit on the
+review arm, not packet evidence — both suites are green in the recorded matrix.
+
+**Fable max confirm** ran only after that pass, on the identical unchanged SHA
+(`HEAD` still `edcb9a9c`, `git status --porcelain` empty, both verified by the
+launcher before it would start), and returned `VERDICT: PASS`.
+
+It confirmed each load-bearing claim by execution — 60 programmatic checks — and
+strengthened three of them:
+
+- **The root cause is proved rather than argued.** Forcing `:672` would make
+  `forced` universally true, since every candidate axis holds at least one value
+  by construction, collapsing `forced || size > 1` into `size > 0`. "Flip
+  `includeSingletons`" and "force the bare-literal branch" are therefore
+  provably the same fix, and removing both was behaviourally identical to either.
+- **The digest separation is not an artifact of the control's content.** It
+  re-derived the three digests from its own differently-shaped specification
+  (`retryPolicy.mode`) and observed the same one-sided separation.
+- **The relation four were traced to their enforcement**, adding
+  `normalize.ts:1459`, `conformance.ts:1052`, and the materializer's
+  `DESTRUCTIVE_FOREIGN_KEY_REJECTED` refusal to the record above. It confirmed
+  the inventory absorbed nothing and that `joinEligibility="query"` — accepted
+  with zero consumers — remains in it, visible, as the contrast case proving the
+  instrument still bites.
+
+Charter and raw result:
+`/home/rvham/2rain-missions/langsingleton-fable-confirm-edcb9a9.{prompt.md,result.txt}`.
+
+### Findings disposition
+
+**No material findings from either arm.** Two RECORD-ONLY items:
+
+**Corrected here.** The materializer citation read `:1222`, a line inside the
+guard's condition rather than the guard itself. It now reads `:1220-1223` with
+the `DESTRUCTIVE_FOREIGN_KEY_REJECTED` throw at `:1225`. Same guard; the
+correction is precision, not substance. The relation table also gained the
+additional consumers Fable traced, so the HONEST verdicts rest on named
+enforcement sites rather than on the structural argument alone.
+
+**Recorded, not fixed — the orchestrator's to make.** `docs/execution/ledger.md`
+lines 138 and 142, `docs/execution/current-plan.md:259`, and
+`docs/execution/packets/5g3-langnarrow.md` lines 117 and 138 describe the
+`forced` / `includeSingletons` mechanism this packet retires. All are outside
+this packet's owned paths and the first three are orchestrator-only under
+`lanes.md`. Both reviewers independently flagged it, and Fable added the sharper
+point: `current-plan.md:259` predicts *"the fix is the `forced` flag the code
+already has and does not use here"*, and this packet's verified root-cause
+analysis contradicts that prediction — the flag could not have carried the
+invariant, because it is keyed on the walker's syntactic branch rather than on
+the axis. That correction belongs in the queue row at acceptance.
