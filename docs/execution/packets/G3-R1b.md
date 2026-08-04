@@ -242,6 +242,55 @@ enforcement and its observed read-back, and every existing control are untouched
 Nothing beyond that one destructure was required, which is the test the direction
 set for whether this was a one-liner or `trust-boundary`'s problem.
 
+## Stopped at the two-revise cap — combined-tree round 3
+
+Three combined-tree review rounds each returned **REVISE** on the same class:
+*here is one more thing the reconciler does not check.*
+
+| Round | SHA | Found |
+|---|---|---|
+| A | `35fba8d9` | R1-a: effective date not compared |
+| B | `69a05ba4` | R1-a: source line, posting role not compared · R1-c: superseded anchors bury recorded discrepancies |
+| C | `bc0bc84a` | R1-a: reason code/narrative, transaction FK not compared · R1-b: `anchor_digest` never verified · R1-c: current-generation early returns bury recorded discrepancies |
+
+Rounds A and B were fixed. **Round B's fix was to enumerate the comparison set in
+full, precisely so the class would end — and round C found two fields missing
+from that enumeration plus an entirely different axis.** That is the signal
+`review-tiers` names: a review that keeps finding more of the same class means the
+charter is mis-scoped, not that the code is wrong. Round C is also the third
+REVISE round, so the cap fires.
+
+**The question nobody has answered**, and the reason each round finds more:
+*what is a reconciliation obligated to compare, and what makes that set complete
+rather than merely long?* The `g3-completion` ruling names three **arms** —
+movement sums, materialized read models, source documents — not a field set. Each
+reviewer instantiates the field set differently, and so did this lane, twice.
+
+Two candidate answers, offered rather than taken:
+
+1. **Derive the set mechanically instead of authoring it.** Every column the
+   posting service copies from a document onto a movement is document-derived by
+   construction. Generating that set from the compiled storage contract, or
+   asserting it against `insertMovement`'s field list, makes under-enumeration a
+   gate failure rather than a review finding. This is the answer that actually
+   converges.
+2. **Declare the set deliberately partial** — reconciliation checks
+   balance-significant fields, provenance is a different instrument — and say so,
+   so a reviewer stops counting omissions as defects.
+
+**The open findings are recorded in `G3-R1.md` beside the claims they qualify**,
+not left implicit: the two uncompared document-derived fields, the unverified
+`anchor_digest`, and the current-generation surfacing branches. All three are
+false-`consistent` paths and all three are real; none is fixed here.
+
+**What is settled.** Round C independently confirmed: the effective-date,
+source-line, transfer-suffix and posting-role comparisons all match legitimate
+adjustment, transfer, initial-count, correction, reversal and replay behaviour;
+the four deliberate exclusions are justified; tenant isolation, the closing
+destructure and its export seam, read-only enforcement, superseded-anchor
+non-rederivation, and non-weakening of `G3-P5` and `ON DELETE RESTRICT` are all
+sound; and every claimed control remains intact.
+
 ## What was not touched
 
 `SET LOCAL transaction_read_only = on` and its observed read-back; the
