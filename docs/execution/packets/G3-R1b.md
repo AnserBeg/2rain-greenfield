@@ -131,7 +131,7 @@ property of a reconciliation report, not an oversight.
 
 ## Controls and recorded reds
 
-`test/postgres/inventory-reconciliation.test.ts` — 15 subtests. All ten of
+`test/postgres/inventory-reconciliation.test.ts` — 16 subtests. All ten of
 `G3-R1`'s vacuity controls still pass unchanged; two assertions moved from
 `excludedSubjectCount` to `excludedSubjects` and became stronger, not weaker.
 
@@ -149,6 +149,7 @@ defect and nothing else:
 | 13b | an unplaceable anchor is excluded from every scope | force `placeable = true` | `not ok 14` — `an anchor no authority can place must be reported by every scope, or it is reported by none` |
 | 14 | the stored array's SHAPE is trusted downstream of attribution | scope agreement reads the raw array instead of `NormalizedAnchorScope` | `not ok 14` — `TypeError: raw[0]?.toLowerCase is not a function` at `inventory-reconciliation-service.ts:663` |
 | 15 | the raw stored scope rides the returned anchor object | restore the `...row` spread in place of the destructure | `not ok 15` — `0a0a…0a0a still carries the raw stored scope` / `true !== false` |
+| 16 | a movement effective on a different day than its document reads consistent | disable the effective-date comparison | `not ok 16` — `expected exactly one SOURCE_DOCUMENT_EFFECTIVE_AT_DIVERGED for <lineId>` / `0 !== 1` |
 
 Subtest 13 carries all four charter controls in one run, on a legal entity of its
 own so the pre-fix verdict is genuinely `consistent` rather than masked by the

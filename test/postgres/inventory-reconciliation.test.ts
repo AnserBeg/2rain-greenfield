@@ -1165,6 +1165,92 @@ test('reconciliation names divergence, confirms consistency, repairs nothing, an
           assert.deepEqual(nested.legalEntityScope.ids, []);
         },
       );
+
+      await t.test(
+        'a movement effective on a different day than its document is detected',
+        async () => {
+          // Every quantity, item, unit, location and source identity agrees.
+          // Only the date the movement takes effect differs, which decides the
+          // period it lands in and every as-of balance that contains it.
+          const transactionId = randomUUID();
+          const transactionLineId = randomUUID();
+          const movementId = randomUUID();
+          await withModuleRole(runtimePool, scopeA, async (client) => {
+            await insertTransactionHeader(client, scopeA, binding, {
+              legalEntityId: witnessLegalEntityA,
+              number: `EFF-${transactionId.slice(0, 12)}`,
+              reasonCode: 'RECONCILE',
+              reasonNarrative: 'Effective-date control',
+              sourceId: 'reconcile-effective',
+              sourceType: 'adjustment',
+              state: 'posted',
+              transactionId,
+              type: 'adjustment',
+            });
+            await insertEntity(
+              client,
+              scopeA,
+              binding,
+              binding.transactionLine,
+              {
+                legalEntityId: witnessLegalEntityA,
+                overrides: {
+                  inventory_transaction_line_from_location_id: null,
+                  inventory_transaction_line_item_id: itemPrimary,
+                  inventory_transaction_line_line_number: 1,
+                  inventory_transaction_line_quantity: '2',
+                  inventory_transaction_line_to_location_id: locationSecondary,
+                  inventory_transaction_line_unit_id: 'EA',
+                },
+                recordId: transactionLineId,
+                relationIds: {
+                  [binding.transaction.entity.entityId]: transactionId,
+                },
+              },
+            );
+            await insertMovement(client, scopeA, binding, {
+              businessPeriod: '2026-07-28',
+              effectiveAt: '2026-07-28T12:00:00.000Z',
+              itemId: itemPrimary,
+              legalEntityId: witnessLegalEntityA,
+              locationId: locationSecondary,
+              movementId,
+              quantityDelta: '2',
+              sourceId: 'reconcile-effective',
+              sourceLine: '1',
+              sourceType: 'adjustment',
+              transactionId,
+              transactionLineId,
+            });
+          });
+          const report = await reconciliation.reconcile(scopeA.context, {
+            legalEntityIds: [witnessLegalEntityA],
+            scopeId: 'effective-date-scope',
+          });
+          const drift = findingFor(
+            report,
+            'SOURCE_DOCUMENT_EFFECTIVE_AT_DIVERGED',
+            transactionLineId,
+          );
+          assert.equal(drift.declaredValue, effectiveAt);
+          assert.equal(drift.observedValue, '2026-07-28T12:00:00.000Z');
+          assert.equal(drift.detail.movementId, movementId);
+          assert.ok(
+            arm(report, 'sourceDocuments').discrepantSubjectIds.includes(
+              transactionLineId,
+            ),
+          );
+          assert.equal(
+            report.findings.filter(
+              (finding) =>
+                finding.subjectId === transactionLineId &&
+                finding.code === 'SOURCE_DOCUMENT_QUANTITY_DIVERGED',
+            ).length,
+            0,
+            'the quantities agree; only the effective date diverges',
+          );
+        },
+      );
     } finally {
       await Promise.all([
         runtimePool.end(),
@@ -1934,6 +2020,8 @@ async function insertMovement(
   scope: TenantScope,
   binding: TestStorageBinding,
   input: {
+    readonly businessPeriod?: string;
+    readonly effectiveAt?: string;
     readonly itemId: string;
     readonly legalEntityId: string;
     readonly locationId: string;
@@ -1947,11 +2035,11 @@ async function insertMovement(
   },
 ): Promise<void> {
   await insertEntity(client, scope, binding, binding.movement, {
-    factBusinessPeriod: businessPeriod,
+    factBusinessPeriod: input.businessPeriod ?? businessPeriod,
     legalEntityId: input.legalEntityId,
     overrides: {
       inventory_movement_actor_id: scope.context.principalId,
-      inventory_movement_effective_at: effectiveAt,
+      inventory_movement_effective_at: input.effectiveAt ?? effectiveAt,
       inventory_movement_item_id: input.itemId,
       inventory_movement_location_id: input.locationId,
       inventory_movement_posting_role: enumOption(

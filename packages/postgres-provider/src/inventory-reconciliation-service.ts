@@ -43,6 +43,7 @@ export type InventoryReconciliationFindingCodeV1 =
   | 'AGGREGATE_ANCHOR_SCOPE_DIVERGED'
   | 'RECORDED_ANCHOR_DISCREPANCY_PRESERVED'
   | 'SCOPE_OBSERVED_NO_SUBJECTS'
+  | 'SOURCE_DOCUMENT_EFFECTIVE_AT_DIVERGED'
   | 'SOURCE_DOCUMENT_ITEM_DIVERGED'
   | 'SOURCE_DOCUMENT_LINE_SHAPE_UNRECOGNIZED'
   | 'SOURCE_DOCUMENT_MISSING_FOR_MOVEMENT'
@@ -161,6 +162,7 @@ interface ReconciliationStorageBinding {
   readonly transaction: EntityBinding;
   readonly transactionAdjustmentType: string;
   readonly transactionCountCorrectionType: string;
+  readonly transactionEffectiveAtColumn: string;
   readonly transactionLine: EntityBinding;
   readonly transactionLineFromLocationColumn: string;
   readonly transactionLineItemColumn: string;
@@ -178,6 +180,7 @@ interface ReconciliationStorageBinding {
 }
 
 interface SourceDocumentLineRow {
+  readonly effectiveAt: string;
   readonly fromLocationId: string | null;
   readonly itemId: string;
   readonly lineNumber: string;
@@ -192,6 +195,7 @@ interface SourceDocumentLineRow {
 }
 
 interface LedgerMovementRow {
+  readonly effectiveAt: string;
   readonly itemId: string;
   readonly locationId: string;
   readonly movementId: string;
@@ -501,6 +505,24 @@ export class PostgresInventoryReconciliationService {
             transactionLineId: subjectId,
           },
           observedValue: movement.unitId,
+          subjectId,
+        });
+      }
+      if (movement.effectiveAt !== line.effectiveAt) {
+        // The date a movement takes effect decides which period it lands in and
+        // which as-of balance contains it, so a movement effective on a
+        // different day than the document that produced it is a balance-
+        // significant divergence even when every quantity agrees.
+        divergent = true;
+        arm.finding({
+          code: 'SOURCE_DOCUMENT_EFFECTIVE_AT_DIVERGED',
+          declaredValue: line.effectiveAt,
+          detail: {
+            movementId: movement.movementId,
+            transactionId: line.transactionId,
+            transactionLineId: subjectId,
+          },
+          observedValue: movement.effectiveAt,
           subjectId,
         });
       }
@@ -1170,7 +1192,12 @@ async function selectSourceDocumentSnapshot(
               header.${quoted(binding.transactionSourceTypeColumn)}::text
                 AS "transactionSourceType",
               header.${quoted(binding.transactionSourceIdColumn)}::text
-                AS "transactionSourceId"
+                AS "transactionSourceId",
+              to_char(
+                header.${quoted(binding.transactionEffectiveAtColumn)}
+                  AT TIME ZONE 'UTC',
+                'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
+              ) AS "effectiveAt"
          FROM ${table(binding, line)} AS line
          JOIN ${table(binding, header)} AS header
            ON header.tenant_id = line.tenant_id
@@ -1196,7 +1223,12 @@ async function selectSourceDocumentSnapshot(
               ${quoted(requiredColumn(movement, 'inventory_movement_source_type'))}::text
                 AS "sourceType",
               ${quoted(requiredColumn(movement, 'inventory_movement_source_id'))}::text
-                AS "sourceId"
+                AS "sourceId",
+              to_char(
+                ${quoted(requiredColumn(movement, 'inventory_movement_effective_at'))}
+                  AT TIME ZONE 'UTC',
+                'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
+              ) AS "effectiveAt"
          FROM ${table(binding, movement)}
         WHERE tenant_id = $1 AND environment_id = $2
           AND ${quoted(movement.legalEntityColumn)} = ANY($3::uuid[])
@@ -1371,6 +1403,10 @@ function resolveReconciliationStorage(
     transactionCountCorrectionType: uniqueEnumOption(
       transactionType,
       'count_correction',
+    ),
+    transactionEffectiveAtColumn: requiredColumn(
+      transaction,
+      'inventory_transaction_effective_at',
     ),
     transactionLine,
     transactionLineFromLocationColumn: requiredColumn(
