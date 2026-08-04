@@ -523,42 +523,71 @@ function parseAuthoredValue(
 }
 
 function schemaError(error: ZodError, input: unknown): CanonicalModelError {
-  const diagnostics = error.issues.map((issue) => {
-    const path = `$${issue.path
-      .map((part) =>
-        typeof part === 'number' ? `[${part}]` : `.${String(part)}`,
-      )
-      .join('')}`;
+  const diagnostics = error.issues.flatMap((issue) => {
     const pathParts = issue.path.map(String);
-    const finalPart = pathParts.at(-1) ?? '';
     const relationField = pathParts.includes('relations');
+    // A member the language no longer declares reaches the closed relation
+    // schema as an unrecognized key. That issue's path names the relation, not
+    // the declaration, so the refusal is selected from the key list and the
+    // declined member is named back to the author.
+    const unrecognized =
+      issue.code === 'unrecognized_keys' ? issue.keys : ([] as string[]);
+    const declined = relationField
+      ? unrecognized.filter((key) => key === 'joinEligibility')
+      : [];
+    const retained = unrecognized.filter(
+      (key) => !relationField || key !== 'joinEligibility',
+    );
+    const declinedDiagnostics = declined.map((key) =>
+      schemaDiagnostic(
+        'CANON_RELATION_JOIN_ELIGIBILITY_UNSUPPORTED',
+        [...issue.path, key],
+        findObjectId(input, issue.path),
+      ),
+    );
+    if (declined.length > 0 && retained.length === 0)
+      return declinedDiagnostics;
+    const finalPart = pathParts.at(-1) ?? '';
     const code =
       issue.message === MIXED_NODE_VERSION_ISSUE
         ? 'CANON_VERSION_MIXED'
         : relationField && finalPart === 'cardinality'
           ? 'CANON_RELATION_CARDINALITY_UNSUPPORTED'
-          : relationField && finalPart === 'joinEligibility'
-            ? 'CANON_RELATION_JOIN_ELIGIBILITY_UNSUPPORTED'
-            : finalPart === 'kind'
-              ? 'CANON_KIND_UNSUPPORTED'
-              : finalPart === 'schemaVersion' || finalPart.endsWith('Version')
-                ? 'CANON_VERSION_UNSUPPORTED'
-                : finalPart === 'archetype'
-                  ? 'CANON_SURFACE_ARCHETYPE_UNSUPPORTED'
-                  : finalPart === 'slot'
-                    ? 'CANON_SURFACE_SLOT_UNSUPPORTED'
-                    : pathParts.includes('statusRoles')
-                      ? 'CANON_SURFACE_STATUS_ROLE_UNSUPPORTED'
-                      : 'CANON_SCHEMA_INVALID';
-    return diagnostic(
-      code,
-      path,
-      `value must satisfy a closed supported schema through ${LATEST_LANGUAGE_VERSION}`,
-      acceptedAlternativeFor(code),
-      findObjectId(input, issue.path),
-    );
+          : finalPart === 'kind'
+            ? 'CANON_KIND_UNSUPPORTED'
+            : finalPart === 'schemaVersion' || finalPart.endsWith('Version')
+              ? 'CANON_VERSION_UNSUPPORTED'
+              : finalPart === 'archetype'
+                ? 'CANON_SURFACE_ARCHETYPE_UNSUPPORTED'
+                : finalPart === 'slot'
+                  ? 'CANON_SURFACE_SLOT_UNSUPPORTED'
+                  : pathParts.includes('statusRoles')
+                    ? 'CANON_SURFACE_STATUS_ROLE_UNSUPPORTED'
+                    : 'CANON_SCHEMA_INVALID';
+    return [
+      ...declinedDiagnostics,
+      schemaDiagnostic(code, issue.path, findObjectId(input, issue.path)),
+    ];
   });
   return new CanonicalModelError(diagnostics);
+}
+
+function schemaDiagnostic(
+  code: string,
+  path: readonly PropertyKey[],
+  objectId: string | null,
+): CanonicalDiagnostic {
+  return diagnostic(
+    code,
+    `$${path
+      .map((part) =>
+        typeof part === 'number' ? `[${part}]` : `.${String(part)}`,
+      )
+      .join('')}`,
+    `value must satisfy a closed supported schema through ${LATEST_LANGUAGE_VERSION}`,
+    acceptedAlternativeFor(code),
+    objectId,
+  );
 }
 
 function deriveQueryContracts(
@@ -2240,7 +2269,7 @@ function acceptedAlternativeFor(code: string): string {
     CANON_RELATION_CARDINALITY_UNSUPPORTED:
       'use cardinality manyToOne until another cardinality has executing semantics',
     CANON_RELATION_JOIN_ELIGIBILITY_UNSUPPORTED:
-      'declare joinEligibility query; omission and none have no executing semantics',
+      'omit joinEligibility until join semantics exist to honour it',
     CANON_SCHEMA_INVALID:
       'use the exported authored schema and canonical example',
     CANON_SURFACE_ARCHETYPE_UNSUPPORTED:

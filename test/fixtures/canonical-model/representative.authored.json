@@ -217,7 +217,6 @@
         "targetId": "northstar.inventory:entity.item"
       },
       "cardinality": "manyToOne",
-      "joinEligibility": "query",
       "ownership": "parentScopedChild",
       "archiveBehavior": "restrict",
       "required": true,

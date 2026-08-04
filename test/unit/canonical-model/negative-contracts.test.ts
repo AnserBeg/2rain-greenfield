@@ -1092,38 +1092,79 @@ for (const cardinality of ['oneToOne', 'oneToMany']) {
   });
 }
 
-test('relation join eligibility none is declined before lowering', () => {
-  const declinedJoin = relationWitness();
-  const relationIndex = relationWitnessIndex(declinedJoin);
-  declinedJoin.relations[relationIndex]!.joinEligibility = 'none';
+// Join eligibility left the language entirely rather than narrowing to one
+// spelling: nothing in the compiler, query or runtime path ever read it, so
+// ADR-0041 requires the member gone rather than admitted and ignored. Every
+// spelling is therefore declined, including the one the old grammar accepted.
+for (const joinEligibility of ['none', 'query']) {
+  test(`relation join eligibility ${joinEligibility} is declined by name`, () => {
+    const declinedJoin = relationWitness();
+    const relationIndex = relationWitnessIndex(declinedJoin);
+    declinedJoin.relations[relationIndex]!.joinEligibility = joinEligibility;
+    expectDiagnostic(
+      () => normalizeApplicationPackage(declinedJoin),
+      'CANON_RELATION_JOIN_ELIGIBILITY_UNSUPPORTED',
+      {
+        acceptedAlternative:
+          'omit joinEligibility until join semantics exist to honour it',
+        objectId: relationWitnessId,
+        path: `$.relations[${String(relationIndex)}].joinEligibility`,
+      },
+    );
+  });
+}
+
+test('an unrelated unknown relation member keeps the generic schema refusal', () => {
+  const unknownMember = relationWitness();
+  const relationIndex = relationWitnessIndex(unknownMember);
+  (unknownMember.relations[relationIndex] as Record<string, unknown>).joinHint =
+    'query';
   expectDiagnostic(
-    () => normalizeApplicationPackage(declinedJoin),
-    'CANON_RELATION_JOIN_ELIGIBILITY_UNSUPPORTED',
+    () => normalizeApplicationPackage(unknownMember),
+    'CANON_SCHEMA_INVALID',
     {
-      acceptedAlternative:
-        'declare joinEligibility query; omission and none have no executing semantics',
       objectId: relationWitnessId,
-      path: `$.relations[${String(relationIndex)}].joinEligibility`,
+      path: `$.relations[${String(relationIndex)}]`,
     },
   );
 });
 
-test('relation join eligibility cannot be omitted into a silent default', () => {
-  const omittedJoin = relationWitness();
-  const relationIndex = relationWitnessIndex(omittedJoin);
-  delete omittedJoin.relations[relationIndex]!.joinEligibility;
+test('a declined join eligibility beside another unknown member reports both', () => {
+  const bothMembers = relationWitness();
+  const relationIndex = relationWitnessIndex(bothMembers);
+  const relation = bothMembers.relations[relationIndex] as Record<
+    string,
+    unknown
+  >;
+  relation.joinEligibility = 'query';
+  relation.joinHint = 'query';
   expectDiagnostic(
-    () => normalizeApplicationPackage(omittedJoin),
+    () => normalizeApplicationPackage(bothMembers),
     'CANON_RELATION_JOIN_ELIGIBILITY_UNSUPPORTED',
     {
       objectId: relationWitnessId,
       path: `$.relations[${String(relationIndex)}].joinEligibility`,
+    },
+  );
+  expectDiagnostic(
+    () => normalizeApplicationPackage(bothMembers),
+    'CANON_SCHEMA_INVALID',
+    {
+      objectId: relationWitnessId,
+      path: `$.relations[${String(relationIndex)}]`,
     },
   );
 });
 
 test('supported relation shape from the refusal fixture normalizes and lowers', () => {
   const supported = relationWitness();
+  assert.equal(
+    Object.hasOwn(
+      supported.relations[relationWitnessIndex(supported)]!,
+      'joinEligibility',
+    ),
+    false,
+  );
 
   const normalized = normalizeApplicationPackage(supported);
   const normalizedRelation = normalized.relations.find(
@@ -1131,7 +1172,9 @@ test('supported relation shape from the refusal fixture normalizes and lowers', 
   );
   assert.ok(normalizedRelation);
   assert.equal(normalizedRelation.cardinality, 'manyToOne');
-  assert.equal(normalizedRelation.joinEligibility, 'query');
+  // The declined member must not reappear as a normalization default; that
+  // silent rewrite is the state ADR-0041 refuses.
+  assert.equal(Object.hasOwn(normalizedRelation, 'joinEligibility'), false);
 
   const lowered = lowerStorageTargetV1(normalized);
   const loweredRelation = lowered.relations.find(

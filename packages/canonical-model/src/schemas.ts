@@ -588,7 +588,6 @@ const normalizedRelationDefinition = z.strictObject({
       schemaVersion: nodeVersion,
     })
     .optional(),
-  joinEligibility: z.literal('query'),
   kind: z.literal('relationDefinition'),
   lifecycle: z.enum(['active', 'retired']),
   orderKey: boundedOrderKey,

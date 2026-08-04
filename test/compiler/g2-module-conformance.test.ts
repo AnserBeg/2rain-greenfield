@@ -1301,7 +1301,6 @@ test('relation additions order the column before the FK and debt preserves both 
       onUpdate: 'restrict',
       schemaVersion: FIXTURE_LANGUAGE_VERSION,
     },
-    joinEligibility: 'query',
     kind: 'relationDefinition',
     orderKey: 20,
     ownership: 'reference',

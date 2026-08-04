@@ -1573,7 +1573,6 @@ function secondaryParentRelation(required: boolean): Record<string, unknown> {
       onUpdate: 'restrict',
       schemaVersion: FIXTURE_LANGUAGE_VERSION,
     },
-    joinEligibility: 'query',
     kind: 'relationDefinition',
     orderKey: 20,
     ownership: 'reference',
