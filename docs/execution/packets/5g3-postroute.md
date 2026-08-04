@@ -8,7 +8,33 @@ Tier: Critical
 
 Branch: `packet/5g3-postroute`
 
-Base: `7e7c91b84131d6adde3a8fa1dc420b1cf6e962a8`
+Original posting-route base: `7e7c91b84131d6adde3a8fa1dc420b1cf6e962a8`
+
+Finish-and-land base: `011cd6a5a1afb9b314beedf58d8d161fe301dc21`
+
+## Finish-and-land premise audit
+
+Searchcap's refusal work is a different concern, not an overlap, duplicate, or
+conflict. Searchcap derives whether a declared search can execute from lowered
+storage and raises `MODULE_SEARCH_CAPABILITY_UNAVAILABLE` at runtime when a
+historical declaration cannot be honoured. This packet's
+`verificationRefusal` instead declares the exact typed error that release
+verification expects from a deliberately input-less capability probe. Searchcap
+did not add a factory-declared verification expectation or another mechanism
+for identifying that probe's producing layer, so there is no second authority
+to conform to. The merged service preserves searchcap's same-entity search
+witnesses and runtime refusal unchanged while applying the exact code-and-reason
+check only to registered-capability verification.
+
+Commit `98bb392` is the ground this guard was written against, not a later
+change that invalidates it: it is the parent of the guard commit and introduced
+the factory, Inventory adapter, verifier route, and composed-application probe
+that this packet tightens. Current main retains those mechanisms. Searchcap
+changed the neighbouring search scenarios and their partition counts, but did
+not change the posting factory or its route. On the merged tree the exact
+verification partition remains searchcap's `163 = 127 executed + 36 derived`;
+this guard changes what qualifies as evidence for the existing posting scenario
+and adds no scenario of its own.
 
 ## Outcome and boundary
 
@@ -77,24 +103,36 @@ movement appears.
 
 ## Verification refusal
 
-Verification arranges a real transaction header but no child line. It executes
-the O1 operation through the same operation gateway and exact registered
-capability adapter. The unchanged posting service therefore refuses with:
+Verification arranges a real generic transaction header and executes the O1
+operation through the same operation gateway and exact registered capability
+adapter. The arranged transaction is not an adjustment draft, so the adapter
+refuses before the posting service is entered with:
 
 ```text
 INVENTORY_POSTING_INPUT_INVALID
-an adjustment requires at least one line
+only adjustment drafts are admitted by this route
 ```
 
-This is the right refusal because it proves registration, gateway dispatch,
-adapter hydration, and capability enforcement without inventing a business
-line or posting a movement. `captureDeclaredCapabilityRefusal` requires both
-the exact code and a nonempty typed reason. A different code becomes
+This is the declared verification refusal. It proves registration, gateway
+dispatch, adapter hydration, and route-level input enforcement without
+inventing a business adjustment or posting a movement; it does not prove that
+release verification enters `PostgresInventoryPostingService`. The independent
+browser journey proves the complete route reaches that service by posting a
+staged adjustment in 1.3 seconds and observing its committed read-back and
+idempotent replay.
+
+Each capability factory owns the exact refusal expected from its verification
+probe. `captureDeclaredCapabilityRefusal` requires both the assertion's exact
+code and the factory-declared exact reason. A different code or the same code
+from a different layer becomes
 `VERIFICATION_CAPABILITY_REFUSAL_MISMATCH`; a successful response becomes
 `VERIFICATION_CAPABILITY_REFUSAL_NOT_OBSERVED`.
 
-The authoritative partition moves from 167 total / 129 executed / 38 derived
-to 168 / 130 / 38. The new scenario is executed, never skipped or derived.
+In the original posting-route delivery, the authoritative partition moved from
+167 total / 129 executed / 38 derived to 168 / 130 / 38, with the new scenario
+executed rather than skipped or derived. Searchcap subsequently re-derived the
+current partition as 163 / 127 / 36 while preserving that posting scenario as
+executed. This finish-and-land guard changes no partition membership or count.
 
 ## Controls and victim lines
 
@@ -105,7 +143,7 @@ to 168 / 130 / 38. The new scenario is executed, never skipped or derived.
 | Confirmation is load-bearing | No grant raises `SEMANTIC_OPERATION_CONFIRMATION_REQUIRED` and executor count remains zero; a matching server grant executes once | `mediation.assertConfirmationGrant` at `semantic-operation-gateway.ts:632-637` |
 | No direct adapter writer | Architecture reads the production adapter, observes hydration SELECTs and delegation, and refuses a synthetic UPDATE; the PostgreSQL route observes posting-service trust receipts and one movement | delegation at `inventory-posting-capability-executor.ts:120-124` and the adapter's no-mutating-SQL control |
 | Same rendered command | Preview preserves the exact hidden key; the real PostgreSQL route replays the same envelope and observes the same trust receipt, revision 2, and exactly one quantity-7 movement | render mint at `component-registry.ts:530`, preservation at `surface-runtime.ts:764-770`, submission at `:293` |
-| Exact verification refusal | Correct code/reason records an executed probe; wrong-code and non-refusing promises independently fail | exact match at `release-verification-service.ts:212-217` and success fallthrough at `:227-230` |
+| Exact verification refusal | The adapter's exact code/reason records an executed probe; wrong-code, same-code/wrong-layer reason, and non-refusing promises independently fail | exact code-and-reason match in `captureDeclaredCapabilityRefusal` and its success fallthrough |
 | No optimistic posting | Browser observes revision 1 on the preview page and revision 2 only after confirm | confirmation transition at `surface-runtime.ts:758-774` |
 | Append-only fact still has no press | Compiled Inventory movement declares zero operation effects and all conformance gates pass | append-only operation-effect refusal at `conformance.ts:1378-1386` |
 
@@ -134,6 +172,33 @@ migration, privilege grant, posting-service byte, timeout, budget, or hex
 literal moved.
 
 ## Gate evidence
+
+### Finish-and-land guard controls
+
+The guard controls were executed after merging searchcap on
+`011cd6a5a1afb9b314beedf58d8d161fe301dc21`:
+
+- Restoring the historical loose predicate
+  `code !== expected.code || !reason` made the right-code/wrong-reason promise
+  resolve. The test therefore went red with the exact text
+  `Missing expected rejection: RIGHT_CODE_WRONG_REASON_MUST_FAIL`. This is the
+  original defect demonstrated: the wrong producing layer was admitted.
+- Supplying the declared code with the wrong reason to the restored production
+  guard exited red with
+  `ReleaseVerificationIntegrityError: VERIFICATION_CAPABILITY_REFUSAL_MISMATCH: capability operation northstar.test:operation.capability did not produce its exact declared typed refusal`.
+- Supplying the declared reason with the wrong code exited red with the same
+  named mismatch:
+  `ReleaseVerificationIntegrityError: VERIFICATION_CAPABILITY_REFUSAL_MISMATCH: capability operation northstar.test:operation.capability did not produce its exact declared typed refusal`.
+- Supplying a capability factory with no `verificationRefusal` exited red before
+  scenario execution with
+  `ReleaseVerificationIntegrityError: VERIFICATION_CAPABILITY_REFUSAL_CONTRACT_INVALID: capability factory northstar.inventory:capability.posting must declare its exact refusal`.
+
+The last control exercises `declaredCapabilityVerificationRefusals`, the same
+production validator the release-verification service uses to build its
+capability expectation map. A TypeScript declaration alone is not treated as a
+runtime observation.
+
+### Original posting-route evidence
 
 - `corepack pnpm typecheck`: PASS.
 - `corepack pnpm lint`: PASS.
@@ -186,6 +251,15 @@ check was accidentally started during another lane's matrix window and is not
 counted as evidence; after that matrix exited, formatting, typecheck, lint,
 compiler, and integration were rerun on a quiet machine and passed.
 
+Fable's Critical review then found that this record named the posting service's
+no-lines refusal even though verification actually stopped at the adapter's
+non-adjustment refusal. The record above now names the observed layer and exact
+reason. The control was strengthened from code-plus-nonempty-message to exact
+code-plus-factory-declared-reason. Mutating the verifier back to a nonempty
+message check made the same-code/wrong-layer arm fail with
+`Missing expected rejection`; restoring the exact reason comparison returned
+the focused control to green.
+
 ## Test it yourself
 
 ```bash
@@ -203,6 +277,10 @@ the preserved confirmation must keep revision 2 and produce no second movement.
 
 - This packet exposes adjustment posting only. Transfer, count correction,
   agent tools, HTTP APIs, imports, reservations, and grouping remain absent.
+- Inventory deliberately declares `confirmation: 'humanRequired'`, and the
+  gateway enforces it, but the compiler does not yet require that declaration
+  for every fact-writing registered capability. Row `5g3-o1confirm` owns that
+  gate before a second O1 family is admitted.
 - The gate proving that the adapter contains no mutating SQL is a source
   observation. The real PostgreSQL route supplies the independent behavioral
   evidence: the result carries the posting service's trust receipt and the

@@ -57,6 +57,7 @@ import {
 import {
   createRegisteredCapabilityExecutors,
   registeredCapabilityIdsFromOperationCatalog,
+  type CapabilityVerificationRefusalExpectation,
   type PinnedCapabilityProjection,
   type PostgresCapabilityOperationExecutorFactory,
 } from './capability-operation-executor-factory.js';
@@ -200,7 +201,7 @@ export class ReleaseVerificationIntegrityError extends Error {
  */
 export async function captureDeclaredCapabilityRefusal(
   operation: Promise<unknown>,
-  expectedCode: string,
+  expected: CapabilityVerificationRefusalExpectation,
   operationId: string,
 ) {
   try {
@@ -209,10 +210,10 @@ export async function captureDeclaredCapabilityRefusal(
     const code =
       isRecord(error) && typeof error.code === 'string' ? error.code : null;
     const reason = error instanceof Error ? error.message : null;
-    if (code !== expectedCode || !reason) {
+    if (code !== expected.code || reason !== expected.reason) {
       throw failure(
         'VERIFICATION_CAPABILITY_REFUSAL_MISMATCH',
-        `capability operation ${operationId} refused with ${String(code)} instead of ${expectedCode}`,
+        `capability operation ${operationId} did not produce its exact declared typed refusal`,
       );
     }
     return Object.freeze({
@@ -227,6 +228,35 @@ export async function captureDeclaredCapabilityRefusal(
   throw failure(
     'VERIFICATION_CAPABILITY_REFUSAL_NOT_OBSERVED',
     `capability operation ${operationId} did not produce its declared refusal`,
+  );
+}
+
+export function declaredCapabilityVerificationRefusals(
+  factories: readonly PostgresCapabilityOperationExecutorFactory[],
+): ReadonlyMap<string, CapabilityVerificationRefusalExpectation> {
+  return new Map(
+    factories.map((factory) => {
+      const expectation: unknown = factory.verificationRefusal;
+      if (
+        !isRecord(expectation) ||
+        typeof expectation.code !== 'string' ||
+        expectation.code.length === 0 ||
+        typeof expectation.reason !== 'string' ||
+        expectation.reason.length === 0
+      ) {
+        throw failure(
+          'VERIFICATION_CAPABILITY_REFUSAL_CONTRACT_INVALID',
+          `capability factory ${factory.capabilityId} must declare its exact refusal`,
+        );
+      }
+      return [
+        factory.capabilityId,
+        Object.freeze({
+          code: expectation.code,
+          reason: expectation.reason,
+        }),
+      ] as const;
+    }),
   );
 }
 
@@ -452,6 +482,9 @@ export class PostgresReleaseVerificationService {
         mediation,
         queryGateway,
         policy,
+        declaredCapabilityVerificationRefusals(
+          this.capabilityOperationExecutorFactories,
+        ),
       );
       return (async () => {
         try {
@@ -1202,6 +1235,10 @@ class SemanticVerificationExecutor {
     private readonly mediation: SemanticOperationMediationAuthority,
     private readonly queryGateway: SemanticQueryGateway,
     private readonly currentPolicy: CurrentPolicyGateway,
+    private readonly capabilityVerificationRefusals: ReadonlyMap<
+      string,
+      CapabilityVerificationRefusalExpectation
+    >,
   ) {
     this.#operations = (
       view.projections.operation.payload as unknown as {
@@ -1385,9 +1422,14 @@ class SemanticVerificationExecutor {
     if (operationId) {
       const operation = this.#requiredOperation(operationId);
       if (operation.effect.kind === 'registeredCapabilityEffect') {
+        const expectedRefusal = this.capabilityVerificationRefusals.get(
+          operation.effect.capability.targetId,
+        );
         if (
           scenario.expectedOutcome !== 'fails' ||
-          typeof scenario.expectedDiagnosticCode !== 'string'
+          typeof scenario.expectedDiagnosticCode !== 'string' ||
+          !expectedRefusal ||
+          scenario.expectedDiagnosticCode !== expectedRefusal.code
         ) {
           throw failure(
             'VERIFICATION_CAPABILITY_REFUSAL_CONTRACT_INVALID',
@@ -1400,7 +1442,7 @@ class SemanticVerificationExecutor {
               expectedRevision: 1,
               recordId: record.recordId,
             }),
-            scenario.expectedDiagnosticCode,
+            expectedRefusal,
             operationId,
           ),
         };

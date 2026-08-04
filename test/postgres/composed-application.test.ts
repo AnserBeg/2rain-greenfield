@@ -57,6 +57,7 @@ import { RequestRuntimeViewLoadError } from '../../packages/postgres-provider/sr
 import { ReleaseReverseTransitionRefusal } from '../../packages/postgres-provider/src/release-reverse-transition-policy.js';
 import {
   captureDeclaredCapabilityRefusal,
+  declaredCapabilityVerificationRefusals,
   PostgresReleaseVerificationService,
   ReleaseVerificationIntegrityError,
   releaseVerificationBinding,
@@ -142,29 +143,33 @@ test('historical reproduction cannot admit a non-conformant freshly compiled hea
 });
 
 test('capability verification records only the exact declared typed refusal', async () => {
-  const exact = Object.assign(new Error('typed refusal reason'), {
-    code: 'EXPECTED_CAPABILITY_REFUSAL',
+  const expectedRefusal =
+    INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY.verificationRefusal;
+  const exact = Object.assign(new Error(expectedRefusal.reason), {
+    code: expectedRefusal.code,
   });
   assert.deepEqual(
     await captureDeclaredCapabilityRefusal(
       Promise.reject(exact),
-      'EXPECTED_CAPABILITY_REFUSAL',
+      expectedRefusal,
       'northstar.test:operation.capability',
     ),
     {
-      code: 'EXPECTED_CAPABILITY_REFUSAL',
+      code: expectedRefusal.code,
       kind: 'registeredCapabilityRefusal',
       operationId: 'northstar.test:operation.capability',
-      reason: 'typed refusal reason',
+      reason: expectedRefusal.reason,
       schemaVersion: 'northstar.release-verification-capability-probe/v1',
     },
   );
   await assert.rejects(
     captureDeclaredCapabilityRefusal(
       Promise.reject(
-        Object.assign(new Error('wrong refusal'), { code: 'WRONG_REFUSAL' }),
+        Object.assign(new Error(expectedRefusal.reason), {
+          code: 'WRONG_REFUSAL',
+        }),
       ),
-      'EXPECTED_CAPABILITY_REFUSAL',
+      expectedRefusal,
       'northstar.test:operation.capability',
     ),
     (error: unknown) => {
@@ -172,11 +177,32 @@ test('capability verification records only the exact declared typed refusal', as
       assert.equal(error.code, 'VERIFICATION_CAPABILITY_REFUSAL_MISMATCH');
       return true;
     },
+    'RIGHT_REASON_WRONG_CODE_MUST_FAIL',
+  );
+  await assert.rejects(
+    captureDeclaredCapabilityRefusal(
+      Promise.reject(
+        Object.assign(
+          new Error(
+            'INVENTORY_POSTING_INPUT_INVALID: an adjustment requires at least one line',
+          ),
+          { code: expectedRefusal.code },
+        ),
+      ),
+      expectedRefusal,
+      'northstar.test:operation.capability',
+    ),
+    (error: unknown) => {
+      assert.ok(error instanceof ReleaseVerificationIntegrityError);
+      assert.equal(error.code, 'VERIFICATION_CAPABILITY_REFUSAL_MISMATCH');
+      return true;
+    },
+    'RIGHT_CODE_WRONG_REASON_MUST_FAIL',
   );
   await assert.rejects(
     captureDeclaredCapabilityRefusal(
       Promise.resolve({ outcome: 'succeeded' }),
-      'EXPECTED_CAPABILITY_REFUSAL',
+      expectedRefusal,
       'northstar.test:operation.capability',
     ),
     (error: unknown) => {
@@ -184,6 +210,27 @@ test('capability verification records only the exact declared typed refusal', as
       assert.equal(error.code, 'VERIFICATION_CAPABILITY_REFUSAL_NOT_OBSERVED');
       return true;
     },
+    'SUCCESS_WITHOUT_REFUSAL_MUST_FAIL',
+  );
+});
+
+test('capability verification fails closed when a factory declares no refusal', () => {
+  const factoryWithoutRefusal = Object.freeze({
+    capabilityId: INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY.capabilityId,
+    create: INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY.create,
+  }) as unknown as typeof INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY;
+  assert.throws(
+    () => declaredCapabilityVerificationRefusals([factoryWithoutRefusal]),
+    (error: unknown) => {
+      assert.ok(error instanceof ReleaseVerificationIntegrityError);
+      assert.equal(
+        error.code,
+        'VERIFICATION_CAPABILITY_REFUSAL_CONTRACT_INVALID',
+      );
+      assert.match(error.message, /must declare its exact refusal/u);
+      return true;
+    },
+    'MISSING_FACTORY_REFUSAL_MUST_FAIL_CLOSED',
   );
 });
 

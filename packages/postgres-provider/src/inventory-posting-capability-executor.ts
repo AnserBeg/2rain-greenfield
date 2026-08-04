@@ -28,6 +28,11 @@ import { withModuleRuntimeRole } from './module-runtime-interpreter.js';
 import { withTrustedRequestTransaction } from './request-context.js';
 
 const identifierPattern = /^[a-z][a-z0-9_]{0,62}$/u;
+const INVENTORY_POSTING_VERIFICATION_REFUSAL = Object.freeze({
+  code: 'INVENTORY_POSTING_INPUT_INVALID',
+  reason:
+    'INVENTORY_POSTING_INPUT_INVALID: only adjustment drafts are admitted by this route',
+});
 type StorageEntityTarget = StorageTargetPayloadV1['entities'][number];
 type StorageColumnTarget = StorageEntityTarget['columns'][number];
 
@@ -160,6 +165,7 @@ class InventoryPostingCapabilityExecutor implements RegisteredCapabilityOperatio
 /** Inventory owns the sole adapter from its registered capability to posting. */
 export const INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY = Object.freeze({
   capabilityId: INVENTORY_POSTING_CAPABILITY_ID,
+  verificationRefusal: INVENTORY_POSTING_VERIFICATION_REFUSAL,
   create(context) {
     const projection = context.projection(PROJECTION_FAMILY_IDS.storageTarget);
     return new InventoryPostingCapabilityExecutor(

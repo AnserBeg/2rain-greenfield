@@ -425,3 +425,8 @@ How to apply: take each sample's first invocation in a distinct process, retain 
 Date: 2026-08-02
 Why: applying a newly tightened search rule to recorded lineage made valid historical releases appear corrupt and would have disabled rollback exactly when rules changed.
 How to apply: reproduce history from its recorded bytes and exact root, compile every new head strictly, and let historical defects refuse by name at runtime rather than returning plausible answers. Graduated to ADR-0045 and ADR-0046; see `docs/execution/packets/5g3-searchcap.md`.
+
+## Pin typed refusals to their producing layer
+Date: 2026-08-02
+Why: release verification accepted an adapter refusal because it shared the posting service's diagnostic code, while a nonempty-message check could not distinguish the layer actually reached.
+How to apply: require the exact declared code and reason (or an equally exact source identity), and mutation-prove that the same code from the wrong layer fails. See `docs/execution/packets/5g3-postroute.md`.
