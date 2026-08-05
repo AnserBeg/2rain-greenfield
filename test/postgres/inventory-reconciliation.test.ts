@@ -470,6 +470,26 @@ test('reconciliation names divergence, confirms consistency, repairs nothing, an
           );
           assert.equal(orphan.subjectId, orphanMovementId);
           assert.equal(orphan.observedValue, '2');
+          // With no document there is nothing to compare its reason, source
+          // line, posting role or transaction key against, so integrity must
+          // report it unverified rather than defaulting it to clean.
+          assert.ok(
+            divergentReport.integrity.unverifiableSubjectIds.includes(
+              orphanMovementId,
+            ),
+          );
+          assert.equal(
+            divergentReport.integrity.consistentSubjectIds.includes(
+              orphanMovementId,
+            ),
+            false,
+            'a movement with no document is never integrity-consistent',
+          );
+          assert.ok(
+            divergentReport.balances.discrepantSubjectIds.includes(
+              orphanMovementId,
+            ),
+          );
           assert.deepEqual(
             sourceDocuments.discrepantSubjectIds.toSorted(),
             [divergentLineId, orphanMovementId].toSorted(),

@@ -35,6 +35,15 @@ exhaustive over the code union by construction, so a new code cannot be added
 without deciding which instrument owns it. The load-bearing value is
 `unaffected`: a provenance defect leaves the balance verdict clean.
 
+**The rule that decides `unaffected` versus `unverifiable`, and it took three
+findings across two rounds to state properly.** `unaffected` means the other
+axis **was examined** for this subject and this finding says nothing about it.
+If the finding means there was nothing on that axis to check at all, it must be
+`unverifiable` — otherwise the subject defaults to consistent on an axis that
+never looked, which is ADR-0044's undeclared inability arriving through the
+bookkeeping rather than through a query. All twenty-two entries were audited
+against that rule; exactly one was wrong.
+
 `report.outcome` is retained as the worse of the two — a convenience for
 alerting, explicitly **not** the authority. Keeping it is also what lets every
 prior control stand unchanged.
@@ -134,6 +143,7 @@ than weakened (below).
 | 24 | a movement contradicting its document's reason reads consistent | disable the reason comparison | `not ok 21` — `expected exactly one SOURCE_DOCUMENT_REASON_DIVERGED for <lineId>` / `0 !== 1` |
 | 25 | an anchor whose digest was never checked reads integrity-consistent | drop the `!integrity` branch | `not ok 14` — `expected exactly one AGGREGATE_ANCHOR_INTEGRITY_UNVERIFIABLE for 4e4e…4e4e` / `0 !== 1` |
 | 26 | an arm that observed nothing disappears from the authoritative verdicts | drop `blindArms` from the outcome | `not ok 22` — `balance must not read clean while an arm observed nothing` |
+| 27 | a movement with no document defaults to integrity-consistent | classify `SOURCE_DOCUMENT_MISSING_FOR_MOVEMENT` as `integrity: 'unaffected'` | `not ok 2` — `a movement with no document is never integrity-consistent` |
 
 **Two of those five had no red on the first attempt.** The reason and
 transaction-link comparisons were live and producing findings against existing
@@ -177,6 +187,25 @@ weakening. Four findings, all confirmed and all fixed:
 - **`recorded_at` and `reversal_of_movement_id` were misclassified** — see the
   declared limits above. Both classifications stated a reason that answered a
   different question than the one the map asks.
+
+**Round 2** (candidate `a0ec51bb`) confirmed the verdict split, the digest
+derivation, the ratchet, the new comparisons and the prior-control adjustments,
+and confirmed all five exclusions and declared limits match what the posting
+service writes — the question of whether "declared limit" was being used to
+retire a defect by renaming it was asked explicitly and answered no. It returned
+**REVISE** on one finding, confirmed and fixed:
+
+- **A movement with no source document defaulted to integrity-consistent.**
+  `SOURCE_DOCUMENT_MISSING_FOR_MOVEMENT` was classified `integrity: 'unaffected'`,
+  but with no document there is nothing to compare its reason, source line,
+  posting role or transaction key against. An orphan movement plus a normal read
+  creating a live anchor from that ledger produced `balances: discrepant,
+  integrity: consistent`, listing the orphan as integrity-clean.
+
+That is the third instance of one shape across two rounds — *absence of
+verification defaulting to consistent* — which is why the fix was to **state the
+rule and audit every entry against it** rather than reclassify the one code the
+reviewer named.
 
 ## Deliberately not built
 

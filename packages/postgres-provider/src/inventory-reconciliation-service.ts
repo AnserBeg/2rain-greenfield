@@ -121,6 +121,13 @@ type AxisEffect = 'discrepant' | 'unaffected' | 'unverifiable';
  *
  * `unaffected` is the load-bearing value: a provenance defect leaves the
  * BALANCE verdict untouched, which is the whole point of splitting them.
+ *
+ * **The rule that decides `unaffected` versus `unverifiable`:** `unaffected`
+ * means the other axis WAS examined for this subject and this finding says
+ * nothing about it. If the finding means there was nothing on that axis to
+ * check at all, it must be `unverifiable` — otherwise the subject defaults to
+ * consistent on an axis that never looked, which is ADR-0044's undeclared
+ * inability arriving through the bookkeeping instead of through a query.
  */
 const FINDING_AXIS_EFFECTS: Readonly<
   Record<
@@ -180,9 +187,13 @@ const FINDING_AXIS_EFFECTS: Readonly<
     balance: 'unverifiable',
     integrity: 'unverifiable',
   },
+  // There is no document, so none of this movement's provenance -- reason,
+  // source line, posting role, transaction key -- can be compared against
+  // anything. Marking integrity `unaffected` defaulted the movement to
+  // integrity-consistent on the strength of a check that never ran.
   SOURCE_DOCUMENT_MISSING_FOR_MOVEMENT: {
     balance: 'discrepant',
-    integrity: 'unaffected',
+    integrity: 'unverifiable',
   },
   SOURCE_DOCUMENT_MOVEMENT_COUNT_DIVERGED: {
     balance: 'discrepant',
