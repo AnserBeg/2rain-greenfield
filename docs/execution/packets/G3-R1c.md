@@ -49,6 +49,18 @@ before are now integrity-verified. Splitting the verdict *increased* coverage.
 movement count per line, item, unit, effective date, orphan movements (a
 movement with no posted source document), and anchor-versus-ledger.
 
+**One declared limit inside the balance set, corrected in review round 1.**
+`recorded_at` is **balance-relevant** — it bounds ledger inclusion at the
+recorded-time horizon (`sumMovementLedger`) — and it is **not compared**, because
+the document carries no counterpart instant: the header's `recorded_at` is set at
+draft creation and the movement's at posting, so they legitimately differ. The
+classification originally called this "excluded: the posting instant", which
+answered a different question (is it document-derived?) and thereby implied it
+was balance-irrelevant. It is not. It is a **declared limit**, which is exactly
+what ADR-0044 permits and exactly what it must be called. A comparison against
+the posting receipt's recorded instant is the plausible way to close it and is
+recorded as a follow-up, not built here.
+
 Stable since round 2. **A reviewer counting uncompared provenance fields is
 answering a question the balance verdict does not ask.**
 [ADR-0044](../decisions/ADR-0044-search-capability-is-derived-and-never-silently-empty.md)
@@ -92,9 +104,12 @@ columns are classified `balance`, `integrity`, or `excluded` with a stated
 reason — `recorded_at` (posting instant), `actor_id` (posting actor),
 `source_revision` (the header revision advances on the draft-to-posted
 transition, so equality is false by construction),
-`stock_dimension_set_version` (a command input with no header counterpart), and
-`reversal_of_movement_id` (derived from a stock-count line, a different
-document).
+`stock_dimension_set_version` (a command input with no header counterpart).
+Two entries are **declared limits rather than exclusions**, corrected in review
+round 1 because the original wording conceded the provenance and then excluded it
+anyway: `recorded_at` (balance-relevant, no document counterpart) and
+`reversal_of_movement_id` (integrity-relevant, declared by the stock-count line,
+which this arm does not read).
 
 It does not derive semantics. It makes silent omission impossible, which is the
 part that was actually costing review rounds.
@@ -112,6 +127,8 @@ than weakened (below).
 | 22 | an integrity defect contaminates the balance verdict | classify `AGGREGATE_ANCHOR_DIGEST_DIVERGED` as `balance: 'discrepant'` | `not ok 19` — `a corrupt digest over a correct balance must leave the balance verdict clean` |
 | 23 | a movement keyed to the wrong transaction reads consistent | disable the transaction-link comparison | `not ok 21` — `expected exactly one SOURCE_DOCUMENT_TRANSACTION_LINK_DIVERGED for <lineId>` / `0 !== 1` |
 | 24 | a movement contradicting its document's reason reads consistent | disable the reason comparison | `not ok 21` — `expected exactly one SOURCE_DOCUMENT_REASON_DIVERGED for <lineId>` / `0 !== 1` |
+| 25 | an anchor whose digest was never checked reads integrity-consistent | drop the `!integrity` branch | `not ok 14` — `expected exactly one AGGREGATE_ANCHOR_INTEGRITY_UNVERIFIABLE for 4e4e…4e4e` / `0 !== 1` |
+| 26 | an arm that observed nothing disappears from the authoritative verdicts | drop `blindArms` from the outcome | `not ok 22` — `balance must not read clean while an arm observed nothing` |
 
 **Two of those five had no red on the first attempt.** The reason and
 transaction-link comparisons were live and producing findings against existing
@@ -132,6 +149,29 @@ recorded* is an integrity fact; *what the ledger says now* is a balance fact,
 already reported by `AGGREGATE_ANCHOR_LEDGER_DIVERGED`. The assertion now pins
 the separation — `observedValue` is `null`, and the ledger value is asserted on
 the balance finding instead.
+
+## Review history
+
+**Round 1** (Codex `gpt-5.6-sol` xhigh, candidate `689edea9`) returned
+**REVISE**. It confirmed the split structurally real for emitted findings,
+`unaffected` genuinely isolating, the read-path refactor behaviour-preserving
+(`definition.queryId` produces the identical cached envelope), the ratchet
+observing rather than proxying, the new provenance comparisons holding on every
+legitimate posting path, and subtest 6's change a correction rather than a
+weakening. Four findings, all confirmed and all fixed:
+
+- **An unchecked digest read as integrity-consistent.** When `anchorIntegrity`
+  returned `null` — a malformed stored scope is not an identity — nothing was
+  emitted, so the integrity verdict counted the anchor clean while never having
+  checked it. That is ADR-0044's undeclared inability **on the axis this packet
+  created to prevent it**, and it is the most serious of the four.
+- **An arm that observed nothing vanished from the authoritative verdicts.** The
+  `SCOPE_OBSERVED_NO_SUBJECTS` sentinel is not a real subject, so `axisVerdict`
+  ignored it: one clean line in the other arm could report both axes clean while
+  the anchor sweep had seen no anchors at all.
+- **`recorded_at` and `reversal_of_movement_id` were misclassified** — see the
+  declared limits above. Both classifications stated a reason that answered a
+  different question than the one the map asks.
 
 ## Deliberately not built
 

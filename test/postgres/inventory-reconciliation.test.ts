@@ -1123,6 +1123,27 @@ test('reconciliation names divergence, confirms consistency, repairs nothing, an
             false,
           );
           assert.notEqual(report.outcome, 'consistent');
+          // Its stored scope is not an identity, so no digest can be derived
+          // for it. Saying nothing would let the integrity verdict count it as
+          // consistent while never having checked it.
+          const unchecked = findingFor(
+            report,
+            'AGGREGATE_ANCHOR_INTEGRITY_UNVERIFIABLE',
+            authorityLessAnchorCacheKey,
+          );
+          assert.equal(unchecked.observedValue, null);
+          assert.ok(
+            report.integrity.unverifiableSubjectIds.includes(
+              authorityLessAnchorCacheKey,
+            ),
+          );
+          assert.equal(
+            report.integrity.consistentSubjectIds.includes(
+              authorityLessAnchorCacheKey,
+            ),
+            false,
+            'an anchor whose digest was never checked is never integrity-consistent',
+          );
 
           // The same trusted-shape assumption one step downstream: attribution
           // recovers the scope from a valid operand, and the scope-agreement
@@ -1607,6 +1628,81 @@ test('reconciliation names divergence, confirms consistency, repairs nothing, an
             report.balances.consistentSubjectIds.includes(transactionLineId),
             'neither a wrong reason nor a wrong transaction key changes a balance',
           );
+        },
+      );
+
+      await t.test(
+        'an arm that observed nothing makes both verdicts indeterminate',
+        async () => {
+          // One clean posted line, and no live anchors at all: every anchor
+          // attributable to this scope is superseded by now. Reading the axes
+          // off subjects alone let the anchor sweep's blindness disappear.
+          const transactionId = randomUUID();
+          const transactionLineId = randomUUID();
+          await withModuleRole(runtimePool, scopeA, async (client) => {
+            await insertTransactionHeader(client, scopeA, binding, {
+              legalEntityId: quietLegalEntityA,
+              number: `BLD-${transactionId.slice(0, 12)}`,
+              reasonCode: 'RECONCILE',
+              reasonNarrative: null,
+              sourceId: 'reconcile-blind',
+              sourceType: 'adjustment',
+              state: 'posted',
+              transactionId,
+              type: 'adjustment',
+            });
+            await insertEntity(
+              client,
+              scopeA,
+              binding,
+              binding.transactionLine,
+              {
+                legalEntityId: quietLegalEntityA,
+                overrides: {
+                  inventory_transaction_line_from_location_id: null,
+                  inventory_transaction_line_item_id: itemPrimary,
+                  inventory_transaction_line_line_number: 1,
+                  inventory_transaction_line_quantity: '4',
+                  inventory_transaction_line_to_location_id: locationPrimary,
+                  inventory_transaction_line_unit_id: 'EA',
+                },
+                recordId: transactionLineId,
+                relationIds: {
+                  [binding.transaction.entity.entityId]: transactionId,
+                },
+              },
+            );
+            await insertMovement(client, scopeA, binding, {
+              itemId: itemPrimary,
+              legalEntityId: quietLegalEntityA,
+              locationId: locationPrimary,
+              movementId: randomUUID(),
+              quantityDelta: '4',
+              sourceId: 'reconcile-blind',
+              sourceLine: '1',
+              sourceType: 'adjustment',
+              transactionId,
+              transactionLineId,
+            });
+          });
+          const report = await reconciliation.reconcile(scopeA.context, {
+            legalEntityIds: [quietLegalEntityA],
+            scopeId: 'blind-arm-scope',
+          });
+          // The document really is clean -- that is what makes this decisive.
+          assert.deepEqual(
+            arm(report, 'sourceDocuments').consistentSubjectIds,
+            [transactionLineId],
+          );
+          assert.equal(arm(report, 'sourceDocuments').outcome, 'consistent');
+          assert.equal(arm(report, 'aggregateAnchors').subjectCount, 0);
+          for (const verdict of [report.balances, report.integrity]) {
+            assert.equal(
+              verdict.outcome,
+              'indeterminate',
+              `${verdict.axis} must not read clean while an arm observed nothing`,
+            );
+          }
         },
       );
     } finally {

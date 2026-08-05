@@ -47,6 +47,7 @@ export type InventoryReconciliationAxisV1 = 'balance' | 'integrity';
 export type InventoryReconciliationFindingCodeV1 =
   | 'AGGREGATE_ANCHOR_BALANCE_UNRECOGNIZED'
   | 'AGGREGATE_ANCHOR_DIGEST_DIVERGED'
+  | 'AGGREGATE_ANCHOR_INTEGRITY_UNVERIFIABLE'
   | 'AGGREGATE_ANCHOR_LEDGER_DIVERGED'
   | 'AGGREGATE_ANCHOR_PARAMETERS_UNRECOGNIZED'
   | 'AGGREGATE_ANCHOR_QUERY_UNRECOGNIZED'
@@ -88,10 +89,19 @@ const MOVEMENT_COLUMN_CLASSIFICATION: Readonly<Record<string, string>> =
     inventory_movement_quantity_delta: 'balance',
     inventory_movement_reason_code: 'integrity',
     inventory_movement_reason_narrative: 'integrity',
+    // Balance-relevant -- it bounds ledger inclusion at the recorded-time
+    // horizon -- but the document carries no counterpart instant to compare it
+    // against: the header's recorded_at is set at draft creation and the
+    // movement's at posting, so they legitimately differ. Uncompared, and that
+    // is a DECLARED LIMIT of the balance set rather than an irrelevance.
     inventory_movement_recorded_at:
-      'excluded: the posting instant, which legitimately differs from the header',
+      'balance: declared limit, no document counterpart exists to compare against',
+    // Document-derived, but by the stock-count line rather than the transaction
+    // line, and this arm reads transactions. A declared limit, not an
+    // irrelevance: the earlier wording conceded the provenance and then
+    // excluded it anyway.
     inventory_movement_reversal_of_movement_id:
-      'excluded: derived from a stock-count line, a different document than the transaction line',
+      'integrity: declared limit, declared by the stock-count line which this arm does not read',
     inventory_movement_source_id: 'integrity',
     inventory_movement_source_line: 'integrity',
     inventory_movement_source_revision:
@@ -127,6 +137,10 @@ const FINDING_AXIS_EFFECTS: Readonly<
   AGGREGATE_ANCHOR_DIGEST_DIVERGED: {
     balance: 'unaffected',
     integrity: 'discrepant',
+  },
+  AGGREGATE_ANCHOR_INTEGRITY_UNVERIFIABLE: {
+    balance: 'unaffected',
+    integrity: 'unverifiable',
   },
   AGGREGATE_ANCHOR_LEDGER_DIVERGED: {
     balance: 'discrepant',
@@ -962,6 +976,21 @@ export class PostgresInventoryReconciliationService {
       });
     }
     const integrity = anchorIntegrity(anchor);
+    if (!integrity) {
+      // The digest was NOT checked. Saying nothing here let the integrity
+      // verdict count this anchor as consistent -- ADR-0044's undeclared
+      // inability, on the axis this packet created to prevent it.
+      arm.unverifiable(subjectId, {
+        code: 'AGGREGATE_ANCHOR_INTEGRITY_UNVERIFIABLE',
+        declaredValue: anchor.anchorDigest,
+        detail: {
+          cacheKey: subjectId,
+          queryId: anchor.queryId,
+          storedScope: anchor.legalEntityScope.rendered,
+        },
+        observedValue: null,
+      });
+    }
     if (integrity) {
       if (integrity.anchorDigest !== anchor.anchorDigest) {
         // The read path verifies this on every read; until now the sweep
@@ -1218,6 +1247,11 @@ function axisVerdict(
   findings: readonly InventoryReconciliationFindingV1[],
 ): InventoryReconciliationVerdictV1 {
   const subjects = new Set(arms.flatMap((arm) => [...arm.subjectIds]));
+  // An arm that observed nothing is indeterminate, and that has to reach the
+  // authoritative verdicts. Reading it off `subjects` alone silently dropped
+  // it, so one clean line in the other arm could report both axes clean while
+  // the anchor sweep had seen no anchors at all.
+  const blindArms = arms.filter((arm) => arm.subjectCount === 0);
   const discrepant = new Set<string>();
   const unverifiable = new Set<string>();
   for (const finding of findings) {
@@ -1239,7 +1273,7 @@ function axisVerdict(
         ? 'indeterminate'
         : discrepant.size > 0
           ? 'discrepant'
-          : unverifiable.size > 0
+          : unverifiable.size > 0 || blindArms.length > 0
             ? 'indeterminate'
             : 'consistent',
     subjectCount: subjects.size,
