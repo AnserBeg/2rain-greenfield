@@ -207,6 +207,34 @@ verification defaulting to consistent* — which is why the fix was to **state t
 rule and audit every entry against it** rather than reclassify the one code the
 reviewer named.
 
+**Round 3** (candidate `0d9156c2`) returned **REVISE** and invoked the cap
+itself. It confirmed the `unaffected` rule correct, the digest export faithful to
+the read path and behaviour-preserving, the ratchet observing compiled columns
+and failing on semantic add/remove/rename, the five exclusions and limits honest
+against the posting writer, the provenance comparisons holding across every
+posting path, subtest 6's change a correction, and `report.outcome` having no
+authoritative consumer. **Its independent audit of the 22 entries found three the
+lane's own audit had missed.** All three were verified in the code:
+
+| Entry | Defect |
+|---|---|
+| `RECORDED_ANCHOR_DISCREPANCY_PRESERVED.balance = 'unaffected'` (`:170`) | The superseded branch (`:927-944`) admits the anchor as a subject and runs **no balance check** — its own comment says *"there is nothing to re-derive"* — so it lands in `balances.consistentSubjectIds` never having been balance-checked. |
+| `SOURCE_DOCUMENT_MOVEMENT_COUNT_DIVERGED.integrity = 'unaffected'` (`:198`) | With zero observed movements the comparison loop never executes, so reason, source line, posting role, source identity and transaction link are never examined — and the line is integrity-consistent. |
+| `AGGREGATE_ANCHOR_BALANCE_UNRECOGNIZED.integrity = 'unverifiable'` (`:140`) | The **inverse** defect. Integrity runs first and succeeds independently, so forcing it to `indeterminate` contaminates the axis this packet built to be independent. The comment at `:138` asserted a coupling that does not exist. |
+
+**Two of the three are the third instance of the class rounds 1 and 2 already
+hit** — *absence of verification defaulting to consistent*. Round 2's fix was to
+state the deciding rule and audit all 22 entries precisely so this would end. The
+rule was sound; **the audit missed two entries**. That is the cap's signal: this
+table cannot be converged on by iterating with a reviewer.
+
+**The diagnosis handed forward.** Both missed entries share a shape — the axis
+effect is right for the common path and wrong for a degenerate one (a superseded
+anchor, an empty movement set). **A static table cannot express "unaffected,
+unless nothing ran."** The convergent fix is to stop hand-classifying: have each
+arm record what it actually examined, per subject per axis, and derive the verdict
+from that. `G3-R1d` implements it.
+
 ## Deliberately not built
 
 - **The cache-key integrity check.** The cache key is itself a digest over the
