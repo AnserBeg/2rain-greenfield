@@ -175,3 +175,37 @@ already places it before `G3-P6b`, is unaffected and remains takeable at any tim
   an inventory-correctness claim, so it does not move any verdict above — but if
   it survives review, it means several of the MET verdicts rest on shapes the
   platform accepts without proof that it honours them.
+
+### Final ruling on reconciliation, 2026-08-03 — observation, not a table; and a hard stop
+
+**Fifteen Codex rounds across four charters. The Fable confirm has never run.**
+Each charter was closer and each was still hand-maintained: first a field list,
+then an axis classification table. **Adversarial review does not converge on a
+hand-maintained artifact**, which is the lesson, and it took four tries to see it.
+
+**Adopted, from the lane's own diagnosis:** the reconciler records **what each arm
+actually examined**, per subject per axis, and derives the verdict from that. A
+subject is `consistent` on an axis **only if something on that axis ran and found
+nothing**. The 22-entry `FINDING_AXIS_EFFECTS` table of intentions is deleted.
+
+That makes all three open findings structurally impossible rather than
+individually fixed: a superseded anchor runs no balance check so it cannot be
+balance-consistent; a line with zero observed movements runs no integrity
+comparison so it cannot be integrity-consistent; and integrity that ran and
+succeeded reports itself verified, so it cannot be contaminated by an unrelated
+balance failure. **This is AGENTS.md §6 — observe, do not proxy — applied to the
+reconciler's own verdict.** A table of intentions is a declaration; a record of
+what executed is an observation.
+
+**THIS IS THE LAST CHARTER FOR THIS PACKET.** If a third round blocks again on
+the same class, the disposition is fixed in advance and is not open to another
+re-scope: **ship the balance verdict alone**, which the independent scope review
+found *"converged at round 2 and stable for seven rounds — specifiable, finite,
+done"*, and which satisfies plan §11.6 build item 11 (movement sums, read models,
+source documents, discrepancies without repair). **Integrity becomes its own
+packet** with `anchor_digest` as its subject. Recorded now, before the outcome is
+known, so it cannot be re-litigated afterwards.
+
+**And the standing hole closes here regardless.** A Critical packet with fifteen
+review rounds and **no second arm on any of them** is a gate failure, not a
+scheduling detail. Whatever the outcome, Fable reviews this tree.
