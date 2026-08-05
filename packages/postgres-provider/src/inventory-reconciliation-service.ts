@@ -112,126 +112,13 @@ const MOVEMENT_COLUMN_CLASSIFICATION: Readonly<Record<string, string>> =
     inventory_movement_unit_id: 'balance',
   });
 
-type AxisEffect = 'discrepant' | 'unaffected' | 'unverifiable';
-
 /**
- * What each finding says about each verdict. Exhaustive over the code union by
- * construction, so a new code cannot be added without deciding which
- * instrument it belongs to.
- *
- * `unaffected` is the load-bearing value: a provenance defect leaves the
- * BALANCE verdict untouched, which is the whole point of splitting them.
- *
- * **The rule that decides `unaffected` versus `unverifiable`:** `unaffected`
- * means the other axis WAS examined for this subject and this finding says
- * nothing about it. If the finding means there was nothing on that axis to
- * check at all, it must be `unverifiable` — otherwise the subject defaults to
- * consistent on an axis that never looked, which is ADR-0044's undeclared
- * inability arriving through the bookkeeping instead of through a query.
+ * How a finding bears on the verdict it belongs to. A finding declares ONLY its
+ * own axis: there is deliberately no value meaning "and the other axis is
+ * fine". Whether the other axis is fine is decided by whether anything on it
+ * ran, which is recorded rather than declared.
  */
-const FINDING_AXIS_EFFECTS: Readonly<
-  Record<
-    InventoryReconciliationFindingCodeV1,
-    Readonly<Record<InventoryReconciliationAxisV1, AxisEffect>>
-  >
-> = Object.freeze({
-  // A balance outside numeric(38,18) blocks both: it cannot be summed against,
-  // and the integrity digest is taken over that same unusable value.
-  AGGREGATE_ANCHOR_BALANCE_UNRECOGNIZED: {
-    balance: 'unverifiable',
-    integrity: 'unverifiable',
-  },
-  AGGREGATE_ANCHOR_DIGEST_DIVERGED: {
-    balance: 'unaffected',
-    integrity: 'discrepant',
-  },
-  AGGREGATE_ANCHOR_INTEGRITY_UNVERIFIABLE: {
-    balance: 'unaffected',
-    integrity: 'unverifiable',
-  },
-  AGGREGATE_ANCHOR_LEDGER_DIVERGED: {
-    balance: 'discrepant',
-    integrity: 'unaffected',
-  },
-  // The digest is checkable without recognizing the query or its parameters,
-  // so an anchor the balance arm cannot read is still integrity-verified.
-  AGGREGATE_ANCHOR_PARAMETERS_UNRECOGNIZED: {
-    balance: 'unverifiable',
-    integrity: 'unaffected',
-  },
-  AGGREGATE_ANCHOR_QUERY_UNRECOGNIZED: {
-    balance: 'unverifiable',
-    integrity: 'unaffected',
-  },
-  AGGREGATE_ANCHOR_SCOPE_DIVERGED: {
-    balance: 'unverifiable',
-    integrity: 'discrepant',
-  },
-  RECORDED_ANCHOR_DISCREPANCY_PRESERVED: {
-    balance: 'unaffected',
-    integrity: 'discrepant',
-  },
-  SCOPE_OBSERVED_NO_SUBJECTS: {
-    balance: 'unverifiable',
-    integrity: 'unverifiable',
-  },
-  SOURCE_DOCUMENT_EFFECTIVE_AT_DIVERGED: {
-    balance: 'discrepant',
-    integrity: 'unaffected',
-  },
-  SOURCE_DOCUMENT_ITEM_DIVERGED: {
-    balance: 'discrepant',
-    integrity: 'unaffected',
-  },
-  SOURCE_DOCUMENT_LINE_SHAPE_UNRECOGNIZED: {
-    balance: 'unverifiable',
-    integrity: 'unverifiable',
-  },
-  // There is no document, so none of this movement's provenance -- reason,
-  // source line, posting role, transaction key -- can be compared against
-  // anything. Marking integrity `unaffected` defaulted the movement to
-  // integrity-consistent on the strength of a check that never ran.
-  SOURCE_DOCUMENT_MISSING_FOR_MOVEMENT: {
-    balance: 'discrepant',
-    integrity: 'unverifiable',
-  },
-  SOURCE_DOCUMENT_MOVEMENT_COUNT_DIVERGED: {
-    balance: 'discrepant',
-    integrity: 'unaffected',
-  },
-  SOURCE_DOCUMENT_POSTING_ROLE_DIVERGED: {
-    balance: 'unaffected',
-    integrity: 'discrepant',
-  },
-  SOURCE_DOCUMENT_QUANTITY_DIVERGED: {
-    balance: 'discrepant',
-    integrity: 'unaffected',
-  },
-  SOURCE_DOCUMENT_REASON_DIVERGED: {
-    balance: 'unaffected',
-    integrity: 'discrepant',
-  },
-  SOURCE_DOCUMENT_SOURCE_IDENTITY_DIVERGED: {
-    balance: 'unaffected',
-    integrity: 'discrepant',
-  },
-  SOURCE_DOCUMENT_SOURCE_LINE_DIVERGED: {
-    balance: 'unaffected',
-    integrity: 'discrepant',
-  },
-  SOURCE_DOCUMENT_TRANSACTION_LINK_DIVERGED: {
-    balance: 'unaffected',
-    integrity: 'discrepant',
-  },
-  SOURCE_DOCUMENT_TYPE_UNRECOGNIZED: {
-    balance: 'unverifiable',
-    integrity: 'unverifiable',
-  },
-  SOURCE_DOCUMENT_UNIT_DIVERGED: {
-    balance: 'discrepant',
-    integrity: 'unaffected',
-  },
-});
+export type InventoryReconciliationSeverityV1 = 'discrepant' | 'unverifiable';
 
 export type InventoryReconciliationErrorCodeV1 =
   | 'INVENTORY_RECONCILIATION_SCOPE_INVALID'
@@ -273,12 +160,15 @@ export interface InventoryReconciliationScopeV1 {
 
 export interface InventoryReconciliationFindingV1 {
   readonly armId: InventoryReconciliationArmIdV1 | null;
+  /** The verdict this finding speaks to. It says nothing about the other. */
+  readonly axis: InventoryReconciliationAxisV1;
   readonly code: InventoryReconciliationFindingCodeV1;
   /** What the source document or the cached anchor claims. */
   readonly declaredValue: string | null;
   readonly detail: Readonly<Record<string, string>>;
   /** What re-deriving from the movement ledger observes. */
   readonly observedValue: string | null;
+  readonly severity: InventoryReconciliationSeverityV1;
   readonly subjectId: string;
 }
 
@@ -303,6 +193,10 @@ export interface InventoryReconciliationVerdictV1 {
 export interface InventoryReconciliationArmReportV1 {
   readonly armId: InventoryReconciliationArmIdV1;
   readonly consistentSubjectIds: readonly string[];
+  /** Subjects for which a balance check actually executed. */
+  readonly examinedBalanceSubjectIds: readonly string[];
+  /** Subjects for which an integrity check actually executed. */
+  readonly examinedIntegritySubjectIds: readonly string[];
   readonly discrepantSubjectIds: readonly string[];
   readonly excludedSubjects: readonly InventoryReconciliationExclusionV1[];
   readonly findings: readonly InventoryReconciliationFindingV1[];
@@ -624,8 +518,11 @@ export class PostgresInventoryReconciliationService {
       ) {
         continue;
       }
+      arm.examined(movement.movementId, 'balance');
       arm.discrepant(movement.movementId, {
+        axis: 'balance',
         code: 'SOURCE_DOCUMENT_MISSING_FOR_MOVEMENT',
+        severity: 'discrepant',
         declaredValue: null,
         detail: {
           itemId: movement.itemId,
@@ -656,7 +553,9 @@ export class PostgresInventoryReconciliationService {
       // Out of the declared storage contract, so no comparison this arm could
       // make would mean anything. Named, never counted as consistent.
       arm.unverifiable(subjectId, {
+        axis: 'balance',
         code: 'SOURCE_DOCUMENT_LINE_SHAPE_UNRECOGNIZED',
+        severity: 'unverifiable',
         declaredValue: declaredQuantity,
         detail: {
           lineNumber: line.lineNumber,
@@ -671,12 +570,14 @@ export class PostgresInventoryReconciliationService {
     const expected = expectedLineEffects(binding, line);
     if (!expected) {
       arm.unverifiable(subjectId, {
+        axis: 'balance',
         code:
           line.transactionType === binding.transactionAdjustmentType ||
           line.transactionType === binding.transactionCountCorrectionType ||
           line.transactionType === binding.transactionTransferType
             ? 'SOURCE_DOCUMENT_LINE_SHAPE_UNRECOGNIZED'
             : 'SOURCE_DOCUMENT_TYPE_UNRECOGNIZED',
+        severity: 'unverifiable',
         declaredValue: declaredQuantity,
         detail: {
           fromLocationId: line.fromLocationId ?? '',
@@ -690,11 +591,15 @@ export class PostgresInventoryReconciliationService {
       });
       return;
     }
+    // The balance comparison below is about to run for this line.
+    arm.examined(subjectId, 'balance');
     let divergent = false;
     if (observed.length !== expected.movementCount) {
       divergent = true;
       arm.finding({
+        axis: 'balance',
         code: 'SOURCE_DOCUMENT_MOVEMENT_COUNT_DIVERGED',
+        severity: 'discrepant',
         declaredValue: String(expected.movementCount),
         detail: {
           lineNumber: line.lineNumber,
@@ -716,7 +621,9 @@ export class PostgresInventoryReconciliationService {
       if (movement.itemId !== line.itemId) {
         divergent = true;
         arm.finding({
+          axis: 'balance',
           code: 'SOURCE_DOCUMENT_ITEM_DIVERGED',
+          severity: 'discrepant',
           declaredValue: line.itemId,
           detail: {
             movementId: movement.movementId,
@@ -730,7 +637,9 @@ export class PostgresInventoryReconciliationService {
       if (movement.unitId !== line.unitId) {
         divergent = true;
         arm.finding({
+          axis: 'balance',
           code: 'SOURCE_DOCUMENT_UNIT_DIVERGED',
+          severity: 'discrepant',
           declaredValue: line.unitId,
           detail: {
             movementId: movement.movementId,
@@ -741,6 +650,11 @@ export class PostgresInventoryReconciliationService {
           subjectId,
         });
       }
+      // Integrity is compared per MOVEMENT. With zero movements this loop
+      // never runs, nothing on the integrity axis is examined, and the line
+      // therefore cannot be reported integrity-consistent -- which is the
+      // second of the three findings, made structurally impossible.
+      arm.examined(subjectId, 'integrity');
       const expectedAtLocation = expected.byLocation.get(movement.locationId);
       if (
         expectedAtLocation !== undefined &&
@@ -752,7 +666,9 @@ export class PostgresInventoryReconciliationService {
         // never issued is corrupt even when every quantity agrees.
         divergent = true;
         arm.finding({
+          axis: 'integrity',
           code: 'SOURCE_DOCUMENT_SOURCE_LINE_DIVERGED',
+          severity: 'discrepant',
           declaredValue: expectedAtLocation.sourceLine,
           detail: {
             movementId: movement.movementId,
@@ -766,7 +682,9 @@ export class PostgresInventoryReconciliationService {
       if (!expected.postingRoles.has(movement.postingRole)) {
         divergent = true;
         arm.finding({
+          axis: 'integrity',
           code: 'SOURCE_DOCUMENT_POSTING_ROLE_DIVERGED',
+          severity: 'discrepant',
           declaredValue: [...expected.postingRoles].toSorted().join('|'),
           detail: {
             movementId: movement.movementId,
@@ -785,7 +703,9 @@ export class PostgresInventoryReconciliationService {
         // an integrity fact, reported as one.
         divergent = true;
         arm.finding({
+          axis: 'integrity',
           code: 'SOURCE_DOCUMENT_TRANSACTION_LINK_DIVERGED',
+          severity: 'discrepant',
           declaredValue: line.transactionId,
           detail: {
             movementId: movement.movementId,
@@ -801,7 +721,9 @@ export class PostgresInventoryReconciliationService {
       ) {
         divergent = true;
         arm.finding({
+          axis: 'integrity',
           code: 'SOURCE_DOCUMENT_REASON_DIVERGED',
+          severity: 'discrepant',
           declaredValue: `${line.reasonCode ?? ''}/${line.reasonNarrative ?? ''}`,
           detail: {
             movementId: movement.movementId,
@@ -819,7 +741,9 @@ export class PostgresInventoryReconciliationService {
         // significant divergence even when every quantity agrees.
         divergent = true;
         arm.finding({
+          axis: 'balance',
           code: 'SOURCE_DOCUMENT_EFFECTIVE_AT_DIVERGED',
+          severity: 'discrepant',
           declaredValue: line.effectiveAt,
           detail: {
             movementId: movement.movementId,
@@ -836,7 +760,9 @@ export class PostgresInventoryReconciliationService {
       ) {
         divergent = true;
         arm.finding({
+          axis: 'integrity',
           code: 'SOURCE_DOCUMENT_SOURCE_IDENTITY_DIVERGED',
+          severity: 'discrepant',
           declaredValue: `${line.transactionSourceType}/${line.transactionSourceId}`,
           detail: {
             movementId: movement.movementId,
@@ -858,7 +784,9 @@ export class PostgresInventoryReconciliationService {
       if (declared === summed) continue;
       divergent = true;
       arm.finding({
+        axis: 'balance',
         code: 'SOURCE_DOCUMENT_QUANTITY_DIVERGED',
+        severity: 'discrepant',
         declaredValue: scaledToDecimal(declared),
         detail: {
           itemId: line.itemId,
@@ -932,7 +860,9 @@ export class PostgresInventoryReconciliationService {
         // next posting advances the generation, which is to say almost always.
         if (anchor.recordedDiscrepancyCount !== '0') {
           arm.discrepant(anchor.cacheKey, {
+            axis: 'integrity',
             code: 'RECORDED_ANCHOR_DISCREPANCY_PRESERVED',
+            severity: 'discrepant',
             declaredValue: renderedStoredDecimal(anchor.balanceValue),
             detail: {
               cacheKey: anchor.cacheKey,
@@ -975,7 +905,9 @@ export class PostgresInventoryReconciliationService {
       // Nothing else in the system has ever shown it to anybody.
       integrityDivergent = true;
       arm.finding({
+        axis: 'integrity',
         code: 'RECORDED_ANCHOR_DISCREPANCY_PRESERVED',
+        severity: 'discrepant',
         declaredValue: declared ?? anchor.balanceValue,
         detail: {
           cacheKey: subjectId,
@@ -987,12 +919,20 @@ export class PostgresInventoryReconciliationService {
       });
     }
     const integrity = anchorIntegrity(anchor);
+    if (integrity) {
+      // The digest comparison ran and produced an answer. Recording that here
+      // is what stops an unrelated BALANCE failure from contaminating this
+      // axis -- the third finding, made structurally impossible.
+      arm.examined(subjectId, 'integrity');
+    }
     if (!integrity) {
       // The digest was NOT checked. Saying nothing here let the integrity
       // verdict count this anchor as consistent -- ADR-0044's undeclared
       // inability, on the axis this packet created to prevent it.
       arm.unverifiable(subjectId, {
+        axis: 'integrity',
         code: 'AGGREGATE_ANCHOR_INTEGRITY_UNVERIFIABLE',
+        severity: 'unverifiable',
         declaredValue: anchor.anchorDigest,
         detail: {
           cacheKey: subjectId,
@@ -1009,7 +949,9 @@ export class PostgresInventoryReconciliationService {
         // anchor with a correct value and a wrong digest read as consistent.
         integrityDivergent = true;
         arm.finding({
+          axis: 'integrity',
           code: 'AGGREGATE_ANCHOR_DIGEST_DIVERGED',
+          severity: 'discrepant',
           declaredValue: anchor.anchorDigest,
           detail: { cacheKey: subjectId, queryId: anchor.queryId },
           observedValue: integrity.anchorDigest,
@@ -1021,7 +963,9 @@ export class PostgresInventoryReconciliationService {
 
     if (anchor.queryId !== this.registration.aggregateQueryId) {
       arm.unverifiable(subjectId, {
+        axis: 'balance',
         code: 'AGGREGATE_ANCHOR_QUERY_UNRECOGNIZED',
+        severity: 'unverifiable',
         declaredValue: declared,
         detail: { cacheKey: subjectId, queryId: anchor.queryId },
         observedValue: null,
@@ -1033,7 +977,9 @@ export class PostgresInventoryReconciliationService {
       // compare it is the only honest answer; treating it as zero would report
       // a corrupt anchor as clean.
       arm.unverifiable(subjectId, {
+        axis: 'balance',
         code: 'AGGREGATE_ANCHOR_BALANCE_UNRECOGNIZED',
+        severity: 'unverifiable',
         declaredValue: anchor.balanceValue,
         detail: { cacheKey: subjectId, queryId: anchor.queryId },
         observedValue: null,
@@ -1042,7 +988,9 @@ export class PostgresInventoryReconciliationService {
     }
     if (!parameters) {
       arm.unverifiable(subjectId, {
+        axis: 'balance',
         code: 'AGGREGATE_ANCHOR_PARAMETERS_UNRECOGNIZED',
+        severity: 'unverifiable',
         declaredValue: declared,
         detail: { cacheKey: subjectId, queryId: anchor.queryId },
         observedValue: null,
@@ -1060,7 +1008,9 @@ export class PostgresInventoryReconciliationService {
       storedScope.ids[0] !== parameters.legalEntityId
     ) {
       arm.discrepant(subjectId, {
+        axis: 'integrity',
         code: 'AGGREGATE_ANCHOR_SCOPE_DIVERGED',
+        severity: 'discrepant',
         declaredValue: storedScope.rendered,
         detail: {
           cacheKey: subjectId,
@@ -1079,18 +1029,27 @@ export class PostgresInventoryReconciliationService {
     );
     if (observed === null) {
       arm.unverifiable(subjectId, {
+        axis: 'balance',
         code: 'AGGREGATE_ANCHOR_BALANCE_UNRECOGNIZED',
+        severity: 'unverifiable',
         declaredValue: declared,
         detail: { cacheKey: subjectId, queryId: anchor.queryId },
         observedValue: null,
       });
       return;
     }
+    // The one place an anchor's balance is actually re-derived. The superseded
+    // branch above never reaches it -- "there is nothing to re-derive" -- so a
+    // superseded anchor cannot be balance-consistent. First finding, made
+    // structurally impossible.
+    arm.examined(subjectId, 'balance');
     let divergent = false;
     if (declared !== observed) {
       divergent = true;
       arm.finding({
+        axis: 'balance',
         code: 'AGGREGATE_ANCHOR_LEDGER_DIVERGED',
+        severity: 'discrepant',
         declaredValue: declared,
         detail: {
           atTime: parameters.atTime,
@@ -1164,12 +1123,33 @@ class ArmAccumulator {
   readonly #unverifiable: string[] = [];
   readonly #excluded: InventoryReconciliationExclusionV1[] = [];
   readonly #subjects = new Set<string>();
+  /** Subjects for which a check on this axis actually executed. */
+  readonly #examined: Readonly<
+    Record<InventoryReconciliationAxisV1, Set<string>>
+  > = Object.freeze({
+    balance: new Set<string>(),
+    integrity: new Set<string>(),
+  });
 
   constructor(private readonly armId: InventoryReconciliationArmIdV1) {}
 
   consistent(subjectId: string): void {
     this.#consistent.push(subjectId);
     this.#subjects.add(subjectId);
+  }
+
+  /**
+   * Declare that a check on `axis` RAN for this subject. Called from the site
+   * that performs the check, never from a lookup table -- the whole defect this
+   * replaces was a table asserting an axis was fine when nothing had run.
+   */
+  examined(subjectId: string, axis: InventoryReconciliationAxisV1): void {
+    this.#examined[axis].add(subjectId);
+    this.#subjects.add(subjectId);
+  }
+
+  examinedSubjectIds(axis: InventoryReconciliationAxisV1): ReadonlySet<string> {
+    return this.#examined[axis];
   }
 
   excluded(
@@ -1219,7 +1199,9 @@ class ArmAccumulator {
       consistent.length + this.#discrepant.size + this.#unverifiable.length;
     if (subjectCount === 0) {
       this.finding({
+        axis: 'balance',
         code: 'SCOPE_OBSERVED_NO_SUBJECTS',
+        severity: 'unverifiable',
         declaredValue: null,
         detail: { armId: this.armId },
         observedValue: null,
@@ -1240,6 +1222,12 @@ class ArmAccumulator {
             : this.#unverifiable.length > 0
               ? 'indeterminate'
               : 'consistent',
+      examinedBalanceSubjectIds: Object.freeze(
+        [...this.#examined.balance].toSorted(),
+      ),
+      examinedIntegritySubjectIds: Object.freeze(
+        [...this.#examined.integrity].toSorted(),
+      ),
       subjectCount,
       subjectIds: Object.freeze([...this.#subjects].toSorted()),
       unverifiableSubjectIds: Object.freeze(this.#unverifiable.toSorted()),
@@ -1258,23 +1246,37 @@ function axisVerdict(
   findings: readonly InventoryReconciliationFindingV1[],
 ): InventoryReconciliationVerdictV1 {
   const subjects = new Set(arms.flatMap((arm) => [...arm.subjectIds]));
-  // An arm that observed nothing is indeterminate, and that has to reach the
-  // authoritative verdicts. Reading it off `subjects` alone silently dropped
-  // it, so one clean line in the other arm could report both axes clean while
-  // the anchor sweep had seen no anchors at all.
+  // What actually RAN on this axis, as recorded by the arms that ran it.
+  const examined = new Set(
+    arms.flatMap((arm) => [
+      ...(axis === 'balance'
+        ? arm.examinedBalanceSubjectIds
+        : arm.examinedIntegritySubjectIds),
+    ]),
+  );
+  // An arm that observed no subjects at all is blind, and that has to reach the
+  // authoritative verdicts rather than being averaged away by the other arm.
   const blindArms = arms.filter((arm) => arm.subjectCount === 0);
   const discrepant = new Set<string>();
   const unverifiable = new Set<string>();
   for (const finding of findings) {
-    const effect = FINDING_AXIS_EFFECTS[finding.code][axis];
-    if (effect === 'unaffected') continue;
+    if (finding.axis !== axis) continue;
     if (!subjects.has(finding.subjectId)) continue;
-    if (effect === 'discrepant') discrepant.add(finding.subjectId);
+    if (finding.severity === 'discrepant') discrepant.add(finding.subjectId);
     else unverifiable.add(finding.subjectId);
   }
-  const consistent = [...subjects].filter(
-    (subjectId) => !discrepant.has(subjectId) && !unverifiable.has(subjectId),
-  );
+  // THE RULE, and the whole point of this packet: consistent requires that
+  // something on this axis ran. A subject nothing examined is unverifiable, so
+  // silence can never be read as a clean bill of health.
+  const consistent: string[] = [];
+  for (const subjectId of subjects) {
+    if (discrepant.has(subjectId)) continue;
+    if (unverifiable.has(subjectId) || !examined.has(subjectId)) {
+      unverifiable.add(subjectId);
+      continue;
+    }
+    consistent.push(subjectId);
+  }
   return Object.freeze({
     axis,
     consistentSubjectIds: Object.freeze(consistent.toSorted()),

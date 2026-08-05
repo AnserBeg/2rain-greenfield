@@ -123,6 +123,8 @@ const authorityLessAnchorCacheKey = '4e'.repeat(32);
 const nestedScopeAnchorCacheKey = '5f'.repeat(32);
 const corruptDigestAnchorCacheKey = '6a'.repeat(32);
 const divergedBalanceAnchorCacheKey = '7b'.repeat(32);
+const liveOverflowAnchorCacheKey = '8c'.repeat(32);
+const liveUnplaceableAnchorCacheKey = '9d'.repeat(32);
 const plantedFilterPlanDigest = 'ef'.repeat(32);
 const plantedReleaseContentHash = '12'.repeat(32);
 const plantedAnchorDigest = '34'.repeat(32);
@@ -1721,6 +1723,180 @@ test('reconciliation names divergence, confirms consistency, repairs nothing, an
               verdict.outcome,
               'indeterminate',
               `${verdict.axis} must not read clean while an arm observed nothing`,
+            );
+          }
+        },
+      );
+
+      await t.test(
+        'a verdict is derived from what ran, so silence is never a clean bill of health',
+        async () => {
+          // FINDING 2, structurally impossible: a posted line with NO movements.
+          // The per-movement comparison loop never runs, so nothing on the
+          // integrity axis was examined for this line.
+          const emptyTransactionId = randomUUID();
+          const emptyLineId = randomUUID();
+          await withModuleRole(runtimePool, scopeA, async (client) => {
+            await insertTransactionHeader(client, scopeA, binding, {
+              legalEntityId: witnessLegalEntityA,
+              number: `NIL-${emptyTransactionId.slice(0, 12)}`,
+              reasonCode: 'RECONCILE',
+              reasonNarrative: null,
+              sourceId: 'reconcile-empty',
+              sourceType: 'adjustment',
+              state: 'posted',
+              transactionId: emptyTransactionId,
+              type: 'adjustment',
+            });
+            await insertEntity(
+              client,
+              scopeA,
+              binding,
+              binding.transactionLine,
+              {
+                legalEntityId: witnessLegalEntityA,
+                overrides: {
+                  inventory_transaction_line_from_location_id: null,
+                  inventory_transaction_line_item_id: itemPrimary,
+                  inventory_transaction_line_line_number: 1,
+                  inventory_transaction_line_quantity: '9',
+                  inventory_transaction_line_to_location_id: locationSecondary,
+                  inventory_transaction_line_unit_id: 'EA',
+                },
+                recordId: emptyLineId,
+                relationIds: {
+                  [binding.transaction.entity.entityId]: emptyTransactionId,
+                },
+              },
+            );
+          });
+
+          // Fresh and LIVE in this scope: the earlier planted anchors are
+          // superseded by now, and a superseded anchor is excluded rather than
+          // examined, which would make these assertions vacuous.
+          await plantAnchor(runtimePool, scopeA, {
+            balanceValue: `1${'0'.repeat(20)}`,
+            cacheKey: liveOverflowAnchorCacheKey,
+            itemId: itemPrimary,
+            legalEntityId: witnessLegalEntityA,
+            locationId: locationSecondary,
+            principalId: principalA,
+            queryId: reconciliationIds.onHandQueryId,
+          });
+          await plantNullScopeAnchor(runtimePool, scopeA, {
+            cacheKey: liveUnplaceableAnchorCacheKey,
+            itemId: itemPrimary,
+            locationId: locationSecondary,
+            principalId: principalA,
+            queryId: reconciliationIds.onHandQueryId,
+          });
+
+          const report = await reconciliation.reconcile(scopeA.context, {
+            legalEntityIds: [witnessLegalEntityA],
+            scopeId: 'derived-verdict-scope',
+          });
+          const documents = arm(report, 'sourceDocuments');
+          const anchors = arm(report, 'aggregateAnchors');
+
+          // The balance check DID run for it and found a count divergence.
+          assert.ok(
+            documents.examinedBalanceSubjectIds.includes(emptyLineId),
+            'the balance comparison ran for this line',
+          );
+          assert.ok(report.balances.discrepantSubjectIds.includes(emptyLineId));
+          // Nothing on the integrity axis ran, so it cannot be clean there.
+          assert.equal(
+            documents.examinedIntegritySubjectIds.includes(emptyLineId),
+            false,
+            'no movement means no integrity comparison executed',
+          );
+          assert.equal(
+            report.integrity.consistentSubjectIds.includes(emptyLineId),
+            false,
+            'a line whose provenance was never examined is never integrity-consistent',
+          );
+          assert.ok(
+            report.integrity.unverifiableSubjectIds.includes(emptyLineId),
+          );
+
+          // FINDING 1, structurally impossible: the superseded anchor carrying a
+          // recorded discrepancy. Its branch never re-derives a balance.
+          assert.ok(recordedDiscrepancyAnchorKey);
+          const supersededReport = await reconciliation.reconcile(
+            scopeA.context,
+            {
+              legalEntityIds: [legalEntityA],
+              scopeId: 'superseded-axis-scope',
+            },
+          );
+          const supersededAnchors = arm(supersededReport, 'aggregateAnchors');
+          assert.ok(
+            supersededAnchors.discrepantSubjectIds.includes(
+              recordedDiscrepancyAnchorKey,
+            ),
+          );
+          assert.equal(
+            supersededAnchors.examinedBalanceSubjectIds.includes(
+              recordedDiscrepancyAnchorKey,
+            ),
+            false,
+            'the superseded branch re-derives nothing, so no balance check ran',
+          );
+          assert.equal(
+            supersededReport.balances.consistentSubjectIds.includes(
+              recordedDiscrepancyAnchorKey,
+            ),
+            false,
+            'an anchor whose balance was never re-derived is never balance-consistent',
+          );
+
+          // FINDING 3, structurally impossible: integrity that RAN and succeeded
+          // reports itself verified, so an unrelated balance failure on the same
+          // subject cannot contaminate it. The overflowing anchor's balance is
+          // out of contract; its digest derives perfectly.
+          assert.ok(
+            anchors.examinedIntegritySubjectIds.includes(
+              liveOverflowAnchorCacheKey,
+            ),
+          );
+          assert.ok(
+            report.integrity.consistentSubjectIds.includes(
+              liveOverflowAnchorCacheKey,
+            ),
+            'a balance the sweep cannot read must not make integrity indeterminate',
+          );
+          assert.equal(
+            anchors.examinedBalanceSubjectIds.includes(
+              liveOverflowAnchorCacheKey,
+            ),
+            false,
+            'the balance was out of contract, so no ledger comparison ran',
+          );
+          assert.ok(
+            report.balances.unverifiableSubjectIds.includes(
+              liveOverflowAnchorCacheKey,
+            ),
+          );
+
+          // Examined on NEITHER axis: unverifiable on both, never consistent.
+          assert.equal(
+            anchors.examinedBalanceSubjectIds.includes(
+              liveUnplaceableAnchorCacheKey,
+            ),
+            false,
+          );
+          assert.equal(
+            anchors.examinedIntegritySubjectIds.includes(
+              liveUnplaceableAnchorCacheKey,
+            ),
+            false,
+          );
+          for (const verdict of [report.balances, report.integrity]) {
+            assert.ok(
+              verdict.unverifiableSubjectIds.includes(
+                liveUnplaceableAnchorCacheKey,
+              ),
+              `${verdict.axis} must not call an unexamined subject consistent`,
             );
           }
         },
