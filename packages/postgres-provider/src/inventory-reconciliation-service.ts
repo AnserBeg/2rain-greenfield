@@ -56,6 +56,7 @@ export type InventoryReconciliationFindingCodeV1 =
   | 'SCOPE_OBSERVED_NO_SUBJECTS'
   | 'SOURCE_DOCUMENT_EFFECTIVE_AT_DIVERGED'
   | 'SOURCE_DOCUMENT_ITEM_DIVERGED'
+  | 'SOURCE_DOCUMENT_LEGAL_ENTITY_DIVERGED'
   | 'SOURCE_DOCUMENT_LINE_SHAPE_UNRECOGNIZED'
   | 'SOURCE_DOCUMENT_MISSING_FOR_MOVEMENT'
   | 'SOURCE_DOCUMENT_MOVEMENT_COUNT_DIVERGED'
@@ -135,7 +136,7 @@ const MOVEMENT_INFRASTRUCTURE_CLASSIFICATION: Readonly<Record<string, string>> =
     // comparison here would be an unexercised branch, which AGENTS.md section 6
     // forbids; the constraint is observed by a control instead.
     legal_entity_id:
-      'balance: enforced structurally by the entity-scoped relation foreign key, not compared',
+      'balance: compared, SOURCE_DOCUMENT_LEGAL_ENTITY_DIVERGED — the entity-scoped relation foreign key refuses it through ordinary writes but not through a constraint-disabled restore',
     record_id: 'excluded: minted per movement, with no document counterpart',
     tenant_id: 'excluded: ambient request context, not document-derived',
   });
@@ -309,6 +310,7 @@ interface ReconciliationStorageBinding {
 
 interface SourceDocumentLineRow {
   readonly effectiveAt: string;
+  readonly legalEntityId: string;
   readonly reasonCode: string | null;
   readonly reasonNarrative: string | null;
   readonly fromLocationId: string | null;
@@ -326,6 +328,7 @@ interface SourceDocumentLineRow {
 
 interface LedgerMovementRow {
   readonly effectiveAt: string;
+  readonly legalEntityId: string;
   readonly reasonCode: string | null;
   readonly reasonNarrative: string | null;
   readonly transactionId: string | null;
@@ -721,6 +724,32 @@ export class PostgresInventoryReconciliationService {
             transactionType: line.transactionType,
           },
           observedValue: movement.postingRole,
+          subjectId,
+        });
+      }
+      if (movement.legalEntityId !== line.legalEntityId) {
+        // Balances are entity-keyed, so the ledger key is (entity, location) and
+        // comparing quantity by location alone compares half of it.
+        //
+        // The entity-scoped relation foreign key refuses this through every
+        // ordinary write, and that was once the reason not to compare it. That
+        // reasoning was wrong: `session_replication_role = replica` bypasses the
+        // constraint, this repository already uses exactly that to build
+        // adversarial fixtures, and a constraint-disabled restore is named in
+        // the threat model. A guarantee that holds only while constraints are
+        // enabled is not a guarantee against a restore.
+        divergent = true;
+        arm.finding({
+          axis: 'balance',
+          code: 'SOURCE_DOCUMENT_LEGAL_ENTITY_DIVERGED',
+          declaredValue: line.legalEntityId,
+          detail: {
+            movementId: movement.movementId,
+            transactionId: line.transactionId,
+            transactionLineId: subjectId,
+          },
+          observedValue: movement.legalEntityId,
+          severity: 'discrepant',
           subjectId,
         });
       }
@@ -1227,10 +1256,16 @@ class ArmAccumulator {
       (subjectId) =>
         !this.#discrepant.has(subjectId) && !this.#unverifiable.has(subjectId),
     );
-    const subjectCount =
-      new Set(consistent).size +
-      this.#discrepant.size +
-      this.#unverifiable.size;
+    // Discrepant wins over unverifiable, so the three states partition and a
+    // subject classified on both severities is one subject, counted once.
+    const unverifiable = [...this.#unverifiable].filter(
+      (subjectId) => !this.#discrepant.has(subjectId),
+    );
+    const subjectCount = new Set([
+      ...consistent,
+      ...this.#discrepant,
+      ...unverifiable,
+    ]).size;
     if (subjectCount === 0) {
       this.finding({
         axis: 'balance',
@@ -1253,7 +1288,7 @@ class ArmAccumulator {
           ? 'indeterminate'
           : this.#discrepant.size > 0
             ? 'discrepant'
-            : this.#unverifiable.size > 0
+            : unverifiable.length > 0
               ? 'indeterminate'
               : 'consistent',
       examinedBalanceSubjectIds: Object.freeze(
@@ -1264,7 +1299,7 @@ class ArmAccumulator {
       ),
       subjectCount,
       subjectIds: Object.freeze([...this.#subjects].toSorted()),
-      unverifiableSubjectIds: Object.freeze([...this.#unverifiable].toSorted()),
+      unverifiableSubjectIds: Object.freeze(unverifiable.toSorted()),
     });
   }
 }
@@ -1302,6 +1337,7 @@ function axisVerdict(
   // THE RULE, and the whole point of this packet: consistent requires that
   // something on this axis ran. A subject nothing examined is unverifiable, so
   // silence can never be read as a clean bill of health.
+  for (const subjectId of discrepant) unverifiable.delete(subjectId);
   const consistent: string[] = [];
   for (const subjectId of subjects) {
     if (discrepant.has(subjectId)) continue;
@@ -1728,6 +1764,7 @@ async function selectSourceDocumentSnapshot(
                 AS "transactionSourceType",
               header.${quoted(binding.transactionSourceIdColumn)}::text
                 AS "transactionSourceId",
+              line.${quoted(line.legalEntityColumn)}::text AS "legalEntityId",
               header.${quoted(binding.transactionReasonCodeColumn)}::text
                 AS "reasonCode",
               header.${quoted(binding.transactionReasonNarrativeColumn)}::text
@@ -1763,6 +1800,7 @@ async function selectSourceDocumentSnapshot(
                 AS "sourceType",
               ${quoted(requiredColumn(movement, 'inventory_movement_source_id'))}::text
                 AS "sourceId",
+              ${quoted(movement.legalEntityColumn)}::text AS "legalEntityId",
               ${quoted(requiredColumn(movement, 'inventory_movement_source_line'))}::text
                 AS "sourceLine",
               ${quoted(requiredColumn(movement, 'inventory_movement_posting_role'))}::text

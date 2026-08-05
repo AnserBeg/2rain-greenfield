@@ -94,7 +94,10 @@ Fable confirmed C1–C3 without reservation — the verdict mechanism, the delet
 table, and all five `examined` placements — then refuted the claim that the
 accumulated tree carries no remaining reachable false-consistent.
 
-### F1 — refuted by execution, not by argument
+### F1 — I refuted it, and the next round refuted my refutation
+
+**This is the most instructive exchange in the packet, so it is recorded in
+full rather than as a conclusion.**
 
 Fable's finding: the movement-to-line pairing is keyed by `transactionLineId`
 alone, and legal entity is used only as a **filter**, never projected or
@@ -108,21 +111,42 @@ foreign key is entity-scoped (`compiler/src/storage.ts:1071,1077`), so a movemen
 cannot reference a line in another legal entity. PostgreSQL rejects the insert
 with `23503`. The state is unrepresentable.
 
-**So no comparison was added.** A comparison guarding an unrepresentable state is
-an unexercised branch, which AGENTS.md §6 forbids as firmly as it forbids a
-missing one. Subtest 24 observes the constraint instead — the cross-entity
-movement is refused, the entity-consistent one is accepted, and the document then
-reconciles clean in a genuine **two-entity scope**, which no prior test had ever
-used. That absence is exactly why the question stayed open for sixteen rounds.
+On that basis no comparison was added, on the reasoning that one guarding an
+unrepresentable state is an unexercised branch — which AGENTS.md §6 forbids as
+firmly as a missing one.
 
-### F2 — a subject classified twice was counted twice
+**That reasoning was wrong, and the next Codex round said so with the citation
+that settles it.** `session_replication_role = replica` bypasses foreign keys,
+**this repository already uses exactly that to build adversarial fixtures**
+(`test/postgres/module-runtime.test.ts:2152`), and a constraint-disabled restore
+is named in this packet's own threat model. *A guarantee that holds only while
+constraints are enabled is not a guarantee against a restore* — and a restore is
+precisely the scenario the reconciler exists for.
 
-Real and fixed. `arm.unverifiable` does not return, so an anchor can be
-classified twice — integrity unverifiable, then parameters unrecognised. The
-accumulator counted classifications rather than distinct subjects, inflating
-`subjectCount` and listing one cache key twice. `#unverifiable` is now a `Set`
-and consistency excludes it. The authoritative axis verdicts were never affected;
-this was report accounting.
+So the comparison **is** in the code, and the state **is** creatable: subtest 24
+now proves both halves — an ordinary module-role write is refused with `23503`,
+and a constraint-disabled write succeeds and is then **caught by the sweep**. It
+is also the first test in the suite to use a genuine **two-entity scope**, whose
+absence is why the question survived seventeen rounds.
+
+The lesson is narrower and more useful than "check storage constraints": **I
+treated a database constraint as a structural impossibility without asking what
+disables it.** The reviewer that caught it was answering a question I had
+explicitly flagged as the one most likely to be my own error.
+
+### F2 — a subject classified twice was counted twice, and the first fix was partial
+
+`arm.unverifiable` does not return, so an anchor can be classified twice. The
+first fix made `#unverifiable` a `Set`, which closed duplicates *within* one
+severity. The next round found it incomplete: `subjectCount` still **added** the
+discrepant and unverifiable sizes rather than taking their union, and a subject
+carrying both severities on one axis — which the nested-scope fixture produces
+for a single cache key — was counted twice and listed in both states.
+
+**The three states now partition**, in the accumulator and in `axisVerdict`
+alike: discrepant wins, and the count is the union. The control lives where a
+doubly-classified subject actually exists; asserted on a report without one it
+was vacuous, which the victim caught.
 
 ### F3 — the ratchet's universe was undeclared, and is now enforced
 
@@ -139,9 +163,11 @@ construction exactly as an unclassified field column does.
 
 | # | Vacuity vector | Victim | Recorded red |
 |---|---|---|---|
-| 32 | a movement booked to another entity is representable | *storage itself* — insert the cross-entity movement | `23503` — `violates foreign key constraint` (the control's positive result) |
+| 32 | a movement booked to another entity reads consistent | disable the legal-entity comparison | `not ok 24` — the cross-entity movement created through a constraint-disabled restore goes unreported |
 | 33 | the infrastructure ratchet stops seeing a column | drop `entity.recordIdentity.column` from the infrastructure list | `not ok 20` — `Missing expected exception.` |
 | 34 | subjects are counted per classification, not per subject | inflate `subjectCount` by one | `not ok 1`; `not ok 8` |
+| 35 | a verdict reports one subject in two states | drop the discrepant-wins filter in `axisVerdict` | `not ok 14` — `integrity must not report one subject as both discrepant and unverifiable` |
+| 36 | an arm reports one subject in two states | drop the discrepant-wins filter in `freeze()` | `not ok 14` — `the arm must not report one subject in two states` |
 
 ## What was not touched
 

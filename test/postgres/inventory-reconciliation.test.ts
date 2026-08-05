@@ -1196,6 +1196,37 @@ test('reconciliation names divergence, confirms consistency, repairs nothing, an
             ),
           );
           assert.notEqual(nested.outcome, 'consistent');
+          // This anchor is classified on BOTH severities of the same axis --
+          // integrity unverifiable because its stored scope is not an identity,
+          // then scope-diverged because that scope contradicts its operand. The
+          // three states must partition: one subject, one state, counted once.
+          assert.ok(
+            arm(nested, 'aggregateAnchors').discrepantSubjectIds.includes(
+              nestedScopeAnchorCacheKey,
+            ),
+          );
+          for (const verdict of [nested.balances, nested.integrity]) {
+            assert.deepEqual(
+              verdict.discrepantSubjectIds.filter((subjectId) =>
+                verdict.unverifiableSubjectIds.includes(subjectId),
+              ),
+              [],
+              `${verdict.axis} must not report one subject as both discrepant and unverifiable`,
+            );
+          }
+          const nestedAnchors = arm(nested, 'aggregateAnchors');
+          assert.deepEqual(
+            nestedAnchors.discrepantSubjectIds.filter((subjectId) =>
+              nestedAnchors.unverifiableSubjectIds.includes(subjectId),
+            ),
+            [],
+            'the arm must not report one subject in two states',
+          );
+          assert.equal(
+            nestedAnchors.subjectCount,
+            new Set(nestedAnchors.subjectIds).size,
+            'a subject classified on both severities is counted once',
+          );
         },
       );
 
@@ -1947,11 +1978,34 @@ test('reconciliation names divergence, confirms consistency, repairs nothing, an
             new Set(anchors.subjectIds).size,
             'the arm counts distinct subjects, not classifications',
           );
+          // The three states must PARTITION. A subject classified on both
+          // severities -- integrity unverifiable and scope diverged, which the
+          // nested-scope fixture produces for one cache key -- was counted once
+          // in each set and appeared in both lists.
+          for (const armReport of report.arms) {
+            const overlap = armReport.discrepantSubjectIds.filter((subjectId) =>
+              armReport.unverifiableSubjectIds.includes(subjectId),
+            );
+            assert.deepEqual(
+              overlap,
+              [],
+              `${armReport.armId} must not report one subject as both discrepant and unverifiable`,
+            );
+          }
+          for (const verdict of [report.balances, report.integrity]) {
+            assert.deepEqual(
+              verdict.discrepantSubjectIds.filter((subjectId) =>
+                verdict.unverifiableSubjectIds.includes(subjectId),
+              ),
+              [],
+              `${verdict.axis} must not report one subject in two states`,
+            );
+          }
         },
       );
 
       await t.test(
-        'a movement cannot be booked to a legal entity other than its document',
+        'a movement booked to another legal entity is detected, restore or not',
         async () => {
           // A confirm review reasoned that a movement with a correct line link
           // and a different legal entity would reconcile clean in a scope naming
@@ -1962,6 +2016,7 @@ test('reconciliation names divergence, confirms consistency, repairs nothing, an
           // branch nothing could ever execute.
           const transactionId = randomUUID();
           const transactionLineId = randomUUID();
+          const crossEntityMovementId = randomUUID();
           await withModuleRole(runtimePool, scopeA, async (client) => {
             await insertTransactionHeader(client, scopeA, binding, {
               legalEntityId: witnessLegalEntityA,
@@ -1997,9 +2052,9 @@ test('reconciliation names divergence, confirms consistency, repairs nothing, an
             );
           });
 
-          // Quantity, item, location, unit, effective date, source line, role,
-          // reason and transaction key would all have agreed. Only the entity
-          // differs, and that alone is refused.
+          // Ordinary writes are refused by the entity-scoped relation foreign
+          // key, and that alone was once taken as proof the state could not
+          // exist.
           await assert.rejects(
             withModuleRole(runtimePool, scopeA, (client) =>
               insertMovement(client, scopeA, binding, {
@@ -2016,32 +2071,70 @@ test('reconciliation names divergence, confirms consistency, repairs nothing, an
               }),
             ),
             (error: unknown) => (error as { code?: string }).code === '23503',
-            'the entity-scoped relation foreign key must refuse a cross-entity movement',
+            'an ordinary write must be refused by the entity-scoped foreign key',
           );
 
-          // The same movement in its document's own entity is accepted, so the
-          // refusal above is about the entity and not about the fixture.
-          await withModuleRole(runtimePool, scopeA, (client) =>
-            insertMovement(client, scopeA, binding, {
+          // But a constraint-disabled restore creates it, which is named in the
+          // threat model and which this repository already uses to build
+          // adversarial fixtures. A guarantee that holds only while constraints
+          // are enabled is not a guarantee against a restore.
+          const restored = await database.pool.connect();
+          try {
+            await restored.query('SET session_replication_role = replica');
+            await restored.query(
+              `SELECT set_config('north_star.tenant_id',$1,false),
+                      set_config('north_star.environment_id',$2,false),
+                      set_config('north_star.principal_id',$3,false),
+                      set_config('north_star.request_id',$4,false)`,
+              [tenantA, environmentA, principalA, randomUUID()],
+            );
+            await insertMovement(restored, scopeA, binding, {
               itemId: itemPrimary,
-              legalEntityId: witnessLegalEntityA,
+              legalEntityId: quietLegalEntityA,
               locationId: locationSecondary,
-              movementId: randomUUID(),
+              movementId: crossEntityMovementId,
               quantityDelta: '8',
               sourceId: 'reconcile-cross-entity',
               sourceLine: '1',
               sourceType: 'adjustment',
               transactionId,
               transactionLineId,
-            }),
-          );
+            });
+          } finally {
+            await restored.query('RESET session_replication_role');
+            restored.release();
+          }
+
           const report = await reconciliation.reconcile(scopeA.context, {
             legalEntityIds: [witnessLegalEntityA, quietLegalEntityA],
             scopeId: 'cross-entity-scope',
           });
+          const diverged = findingFor(
+            report,
+            'SOURCE_DOCUMENT_LEGAL_ENTITY_DIVERGED',
+            transactionLineId,
+          );
+          assert.equal(diverged.declaredValue, witnessLegalEntityA);
+          assert.equal(diverged.observedValue, quietLegalEntityA);
+          assert.equal(diverged.detail.movementId, crossEntityMovementId);
+          // Balances are entity-keyed, so this is a BALANCE fact.
           assert.ok(
+            report.balances.discrepantSubjectIds.includes(transactionLineId),
+          );
+          assert.equal(
             report.balances.consistentSubjectIds.includes(transactionLineId),
-            'the entity-consistent document reconciles clean in a two-entity scope',
+            false,
+            'a movement booked to another entity must never read balance-consistent',
+          );
+          // Nothing else diverges, which is what makes the control decisive.
+          assert.equal(
+            report.findings.filter(
+              (finding) =>
+                finding.subjectId === transactionLineId &&
+                finding.code === 'SOURCE_DOCUMENT_QUANTITY_DIVERGED',
+            ).length,
+            0,
+            'the quantity agrees at the location; only the entity differs',
           );
         },
       );
