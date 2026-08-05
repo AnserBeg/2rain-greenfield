@@ -175,3 +175,53 @@ Read-only enforcement and its observed read-back, the scope-agreement rule, the
 completeness ratchet, `recognizedAnchorParameters`, the digest derivation
 exported from the read path, and every prior control. No migration — `0021`
 remains the last.
+
+## Both arms, and the gate hole closed
+
+**Codex `gpt-5.6-sol` xhigh — PASS** at `777778fe`. **Fable max — CONFIRM.**
+
+This is the **first time in nineteen rounds across five charters that the
+reconciliation tree has had two independent review arms agree**, and the first
+time the Fable arm has run to a confirm at all. That absence was the standing
+gate failure the final ruling ordered closed regardless of outcome.
+
+Fable did not simply ratify. It walked every load-bearing claim in the code and
+attacked the mechanism with three scenarios of its own that neither Codex nor
+this packet names — cross-arm subject-id collision, arm-level consistent bypass,
+and examined-before-skip paths. The collision probe is worth recording: a subject
+id shared between a cache key and a line UUID would leak examined status across
+records, and it is unrepresentable because migration `0020`'s
+`cache_key ~ '^[0-9a-f]{64}$'` is a **CHECK**, and `session_replication_role =
+replica` suppresses triggers — never CHECKs. That distinction is the exact
+counterpart of the F1 lesson, arrived at from the other side.
+
+### Two findings recorded, neither held the packet
+
+**Stale comment at `inventory-reconciliation-service.ts:132-137`.** The comment
+above the `legal_entity_id` infrastructure entry still states the **refuted**
+pre-F1 rationale — *"NOT compared, because the state a comparison would catch is
+unrepresentable"* — while the map value on the next line says `compared`, the
+comparison exists, and subtest 24 exercises it. No runtime effect; the hazard is
+a future reader trusting the comment and deleting the comparison. **Not fixed
+here**, deliberately: the reviews are SHA-pinned to `777778fe` and both arms
+passed there, so a comment edit would void two green arms and a matrix. It is
+safe to carry precisely because **the comparison is protected by an executing
+control** — subtest 24 goes red the moment anyone acts on the stale comment. First
+item for whenever the tree next opens.
+
+**Header-to-line legal-entity agreement is not compared** — F1's unfinished
+sibling one join upstream. `selectSourceDocumentSnapshot` joins header to line on
+tenant, environment and record id, never selecting the header's legal-entity
+column, so a replica-mode restore that moves a posted header to another entity
+while its lines and movements stay put leaves the original scope reading fully
+consistent, and the new scope never sees the header at all because lines drive
+iteration. No balance, anchor or movement moves. **Integrity-class,
+restore-reachable only, and explicitly not the ruled class** — nothing defaults to
+consistent through silence; the line's checks genuinely ran. Recorded as a carry
+beside the cache-key check and the `recorded_at`-versus-receipt idea, and the
+natural first scope if the integrity instrument is ever cut as its own packet.
+
+Footnote tier: the effective-at comparison renders both sides at millisecond
+precision, so a sub-millisecond corruption is invisible. Canonical platform
+instants are millisecond-precision, so only a restore writing microsecond digits
+could create one.
