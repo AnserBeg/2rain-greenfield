@@ -167,6 +167,17 @@ interface RelationCensus {
   readonly rows: string;
 }
 
+interface AnchorRow {
+  readonly balanceValue: string;
+  readonly baseUnitId: string | null;
+  readonly cacheKey: string;
+  readonly parameterValues: string;
+  readonly queryId: string;
+  readonly resultKind: string;
+  readonly resultScale: number;
+  readonly temporalHorizons: string;
+}
+
 interface DockerOutcome {
   readonly code: number;
   readonly stderr: string;
@@ -394,6 +405,11 @@ test(
         assert.equal(correction.movements[0]?.postingRole, 'correction');
         assert.equal(correction.movements[0]?.quantityDelta, '-1');
 
+        // The expected anchor set is DERIVED from the source, never written
+        // down: snapshot the catalogue either side of the probe reads and take
+        // the difference, so the expectation is exactly what these reads
+        // produced.
+        const anchorsBeforeProbes = await anchorCatalogue(database.pool);
         const sourceSeat = await openReadSeat(
           database.connection,
           'postgres',
@@ -415,6 +431,13 @@ test(
         } finally {
           await sourceSeat.runtimePool.end();
         }
+        const sourceAnchors = await anchorCatalogue(database.pool);
+        const probeAnchors = anchorsAddedBy(anchorsBeforeProbes, sourceAnchors);
+        assert.equal(
+          probeAnchors.length,
+          balanceProbes.length,
+          'each probe read must leave exactly one aggregate anchor behind',
+        );
 
         // Backup three: the complete subject, taken after the balances above
         // were served, so it carries both the ledger and the read models.
@@ -520,6 +543,39 @@ test(
           },
         );
 
+        // The decoy control runs on its own restored copy and NEVER opens a
+        // read seat, so "the set assertion fires before any gateway read" is a
+        // structural fact about this block rather than a claim about ordering.
+        await withRestoredDatabase(
+          database,
+          completeBackup,
+          'g3_r3_restored_decoy_anchors',
+          async (restored) => {
+            await substituteDecoyAnchors(
+              restored.administrativePool,
+              probeAnchors,
+            );
+            const decoyed = await anchorCatalogue(restored.administrativePool);
+            assert.equal(
+              decoyed.length,
+              sourceAnchors.length,
+              'the decoy substitution must preserve the row count it is meant to defeat',
+            );
+            assertDerivedStoresPopulated(
+              await derivedStoreCensus(restored.administrativePool),
+              'decoyed',
+            );
+            recordRed(
+              recordedReds,
+              'decoy-anchors-preserving-row-count',
+              `G3_R3_RESTORED_ANCHOR_SET_DIVERGED: expected ${String(sourceAnchors.length)} anchors, observed ${String(sourceAnchors.length)}, ${String(balanceProbes.length - 1)} missing and ${String(balanceProbes.length - 1)} unexpected`,
+              () => {
+                assertRestoredAnchorSet(sourceAnchors, decoyed);
+              },
+            );
+          },
+        );
+
         await withRestoredDatabase(
           database,
           completeBackup,
@@ -532,6 +588,13 @@ test(
             );
             await assertDerivedStoreRosterIsComplete(
               restored.administrativePool,
+            );
+            // Before any read: the restored anchor set must be exactly the
+            // source's, identified by cache key. A row count cannot tell a
+            // restored anchor from a decoy.
+            assertRestoredAnchorSet(
+              sourceAnchors,
+              await anchorCatalogue(restored.administrativePool),
             );
 
             const beforeClear = await derivedStoreCensus(
@@ -598,6 +661,35 @@ test(
                 expectedSourceBalances,
                 'the rebuilt read models must also satisfy the independent oracle',
               );
+              // The read models are rebuilt in full, not partially: every probe
+              // anchor is back, matched on what survives the generation reset —
+              // the query, its operands and the balance it anchors.
+              assertRebuiltAnchorSet(
+                probeAnchors,
+                await anchorCatalogue(restored.administrativePool),
+              );
+
+              // Control: a rebuild that persisted only one of the seven
+              // recomputed anchors satisfies "anchors exist" and is still a
+              // rebuild that did not happen. Six are discarded for real and the
+              // catalogue is re-read, so the observed set is the database's.
+              await discardAllButOneAnchor(restored.administrativePool);
+              const partiallyPersisted = await anchorCatalogue(
+                restored.administrativePool,
+              );
+              assert.equal(partiallyPersisted.length, 1);
+              assertDerivedStoresPopulated(
+                await derivedStoreCensus(restored.administrativePool),
+                'partially-persisted',
+              );
+              recordRed(
+                recordedReds,
+                'only-one-anchor-persisted',
+                `G3_R3_REBUILT_ANCHOR_SET_DIVERGED: expected ${String(balanceProbes.length)} anchors, observed 1, ${String(balanceProbes.length - 1)} missing and 0 unexpected`,
+                () => {
+                  assertRebuiltAnchorSet(probeAnchors, partiallyPersisted);
+                },
+              );
             } finally {
               await rebuiltSeat.runtimePool.end();
             }
@@ -612,7 +704,7 @@ test(
       }
     });
 
-    assert.equal(recordedReds.length, 7);
+    assert.equal(recordedReds.length, 9);
     for (const failure of recordedReds) {
       testContext.diagnostic(`G3-R3 EXECUTED RED: ${failure}`);
     }
@@ -727,22 +819,183 @@ function assertRestoreCarriedTheHistory(
   }
   if (source.length !== restored.length) {
     fail(
-      `G3_R3_RESTORE_INCOMPLETE: relation count source=${String(source.length)} restored=${String(restored.length)}`,
+      `G3_R3_RESTORE_ROW_COUNT_DIVERGED: relation count source=${String(source.length)} restored=${String(restored.length)}`,
     );
   }
   for (const [index, expected] of source.entries()) {
     const observed = restored[index]!;
     if (observed.relation !== expected.relation) {
       fail(
-        `G3_R3_RESTORE_INCOMPLETE: expected relation ${expected.relation}, observed ${observed.relation}`,
+        `G3_R3_RESTORE_ROW_COUNT_DIVERGED: expected relation ${expected.relation}, observed ${observed.relation}`,
       );
     }
     if (observed.rows !== expected.rows) {
       fail(
-        `G3_R3_RESTORE_INCOMPLETE: ${expected.relation} source=${expected.rows} restored=${observed.rows}`,
+        `G3_R3_RESTORE_ROW_COUNT_DIVERGED: ${expected.relation} source=${expected.rows} restored=${observed.rows}`,
       );
     }
   }
+}
+
+/**
+ * Identity of an anchor as the RESTORE must preserve it. The cache key is the
+ * anchor's whole identity — release, principal, query, operands and movement
+ * generation are all folded into it — so a restored set that matches key for
+ * key cannot be a set of decoys with the right cardinality.
+ */
+function assertRestoredAnchorSet(
+  expected: readonly AnchorRow[],
+  observed: readonly AnchorRow[],
+): void {
+  assertAnchorSet(
+    'G3_R3_RESTORED_ANCHOR_SET_DIVERGED',
+    expected.map((row) => row.cacheKey),
+    observed.map((row) => row.cacheKey),
+  );
+}
+
+/**
+ * Identity of an anchor as the REBUILD must reproduce it. The cache key cannot
+ * serve here: clearing `semantic_aggregate_generations` resets the movement
+ * generation the key folds in, so every rebuilt key legitimately differs. What
+ * must be reproduced exactly is the query, the operands it was asked with, and
+ * the balance it anchors.
+ */
+function assertRebuiltAnchorSet(
+  expected: readonly AnchorRow[],
+  observed: readonly AnchorRow[],
+): void {
+  assertAnchorSet(
+    'G3_R3_REBUILT_ANCHOR_SET_DIVERGED',
+    expected.map(anchorSemanticIdentity),
+    observed.map(anchorSemanticIdentity),
+  );
+}
+
+function assertAnchorSet(
+  code: string,
+  expected: readonly string[],
+  observed: readonly string[],
+): void {
+  const expectedSet = new Set(expected);
+  const observedSet = new Set(observed);
+  assert.equal(
+    expectedSet.size,
+    expected.length,
+    `${code}: the expected set must not repeat an identity`,
+  );
+  assert.equal(
+    observedSet.size,
+    observed.length,
+    `${code}: the observed set must not repeat an identity`,
+  );
+  const missing = expected.filter((entry) => !observedSet.has(entry)).length;
+  const unexpected = observed.filter((entry) => !expectedSet.has(entry)).length;
+  if (missing > 0 || unexpected > 0) {
+    fail(
+      `${code}: expected ${String(expected.length)} anchors, observed ${String(observed.length)}, ${String(missing)} missing and ${String(unexpected)} unexpected`,
+    );
+  }
+}
+
+function anchorSemanticIdentity(row: AnchorRow): string {
+  return [
+    row.queryId,
+    row.parameterValues,
+    row.temporalHorizons,
+    row.resultKind,
+    String(row.resultScale),
+    row.baseUnitId ?? '',
+    row.balanceValue,
+  ].join(' ');
+}
+
+function anchorsAddedBy(
+  before: readonly AnchorRow[],
+  after: readonly AnchorRow[],
+): AnchorRow[] {
+  const already = new Set(before.map((row) => row.cacheKey));
+  return after.filter((row) => !already.has(row.cacheKey));
+}
+
+async function anchorCatalogue(pool: Pool): Promise<AnchorRow[]> {
+  const result = await pool.query<{
+    balance_value: string;
+    base_unit_id: string | null;
+    cache_key: string;
+    parameter_values: string;
+    query_id: string;
+    result_kind: string;
+    result_scale: number;
+    temporal_horizons: string;
+  }>(
+    `SELECT balance_value,
+            base_unit_id,
+            cache_key,
+            parameter_values::text AS parameter_values,
+            query_id,
+            result_kind,
+            result_scale,
+            temporal_horizons::text AS temporal_horizons
+       FROM ${quoted(derivedStoreSchema)}.semantic_aggregate_anchors
+      ORDER BY cache_key`,
+  );
+  return result.rows.map((row) => ({
+    balanceValue: row.balance_value,
+    baseUnitId: row.base_unit_id,
+    cacheKey: row.cache_key,
+    parameterValues: row.parameter_values,
+    queryId: row.query_id,
+    resultKind: row.result_kind,
+    resultScale: row.result_scale,
+    temporalHorizons: row.temporal_horizons,
+  }));
+}
+
+/**
+ * Replace all but one probe anchor with copies carrying a different cache key.
+ * The row count is unchanged, so every count-shaped check still passes — which
+ * is exactly the point.
+ */
+async function substituteDecoyAnchors(
+  pool: Pool,
+  probeAnchors: readonly AnchorRow[],
+): Promise<void> {
+  const replaced = probeAnchors.slice(1).map((row) => row.cacheKey);
+  await withAnchorDeleteRulesDisabled(pool, async () => {
+    const inserted = await pool.query(
+      `INSERT INTO ${quoted(derivedStoreSchema)}.semantic_aggregate_anchors
+       SELECT tenant_id, environment_id,
+              md5(cache_key) || md5(cache_key || 'g3-r3-decoy') AS cache_key,
+              movement_generation, query_id, principal_id, release_content_hash,
+              legal_entity_ids, parameter_values, temporal_horizons,
+              filter_plan_digest, result_kind, selection_id, balance_value,
+              result_precision, result_scale, base_unit_id, anchor_digest,
+              computed_at
+         FROM ${quoted(derivedStoreSchema)}.semantic_aggregate_anchors
+        WHERE cache_key = ANY($1::text[])`,
+      [replaced],
+    );
+    assert.equal(inserted.rowCount, replaced.length);
+    const removed = await pool.query(
+      `DELETE FROM ${quoted(derivedStoreSchema)}.semantic_aggregate_anchors
+        WHERE cache_key = ANY($1::text[])`,
+      [replaced],
+    );
+    assert.equal(removed.rowCount, replaced.length);
+  });
+}
+
+async function discardAllButOneAnchor(pool: Pool): Promise<void> {
+  await withAnchorDeleteRulesDisabled(pool, async () => {
+    await pool.query(
+      `DELETE FROM ${quoted(derivedStoreSchema)}.semantic_aggregate_anchors
+        WHERE cache_key <> (
+          SELECT min(cache_key)
+            FROM ${quoted(derivedStoreSchema)}.semantic_aggregate_anchors
+        )`,
+    );
+  });
 }
 
 function assertDerivedStoresEmpty(census: readonly RelationCensus[]): void {
@@ -949,12 +1202,39 @@ async function reattachChecks(
 }
 
 async function rebuildDerivedStores(pool: Pool): Promise<void> {
+  await withDeleteRulesDisabled(pool, derivedStores, async () => {
+    for (const store of derivedStores) {
+      await pool.query(
+        `DELETE FROM ${quoted(derivedStoreSchema)}.${quoted(store)}`,
+      );
+    }
+  });
+}
+
+function withAnchorDeleteRulesDisabled(
+  pool: Pool,
+  run: () => Promise<void>,
+): Promise<void> {
+  return withDeleteRulesDisabled(pool, ['semantic_aggregate_anchors'], run);
+}
+
+/**
+ * The anchor stores answer DELETE with a DO INSTEAD rule that records the
+ * attempt, so a controlled rebuild has to lift the rules it is written to
+ * enforce and put them back. The rule names are read from the catalogue, never
+ * listed here.
+ */
+async function withDeleteRulesDisabled(
+  pool: Pool,
+  tables: readonly string[],
+  run: () => Promise<void>,
+): Promise<void> {
   const rules = await pool.query<{ rulename: string; tablename: string }>(
     `SELECT rulename, tablename
        FROM pg_catalog.pg_rules
       WHERE schemaname = $1 AND tablename = ANY($2::text[])
       ORDER BY tablename, rulename`,
-    [derivedStoreSchema, [...derivedStores]],
+    [derivedStoreSchema, [...tables]],
   );
   for (const rule of rules.rows) {
     await pool.query(
@@ -962,11 +1242,7 @@ async function rebuildDerivedStores(pool: Pool): Promise<void> {
     );
   }
   try {
-    for (const store of derivedStores) {
-      await pool.query(
-        `DELETE FROM ${quoted(derivedStoreSchema)}.${quoted(store)}`,
-      );
-    }
+    await run();
   } finally {
     for (const rule of rules.rows) {
       await pool.query(
@@ -977,10 +1253,13 @@ async function rebuildDerivedStores(pool: Pool): Promise<void> {
 }
 
 /**
- * Row counts for every base table in every non-system schema, read from the
- * catalogue rather than from a list this test maintains. Nothing here decides
- * which relations matter, so a relation the restore silently dropped cannot go
- * uncompared.
+ * CARDINALITY ONLY. Row counts for every base table in every non-system schema,
+ * read from the catalogue rather than from a list this test maintains. Nothing
+ * here decides which relations matter, so a relation the restore silently
+ * dropped or truncated cannot go unnoticed — but equal counts are NOT equal
+ * content, and this census never claims they are. Content equality is proven
+ * only where it is separately observed: the balances byte for byte, the anchor
+ * set by identity, and every business period by the re-attached CHECK.
  */
 async function relationCensus(pool: Pool): Promise<RelationCensus[]> {
   const result = await pool.query<RelationCensus>(
