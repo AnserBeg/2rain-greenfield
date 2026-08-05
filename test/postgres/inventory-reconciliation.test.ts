@@ -1553,6 +1553,37 @@ test('reconciliation names divergence, confirms consistency, repairs nothing, an
               error.code === 'INVENTORY_RECONCILIATION_STORAGE_INVALID' &&
               /unclassified: .*unclassified_probe/u.test(error.message),
           );
+          // The same ratchet over the INFRASTRUCTURE columns, which live
+          // outside `entity.columns` and which a confirm review found the
+          // field-column ratchet structurally cannot see.
+          const rebound = structuredClone(
+            fixture.storage,
+          ) as StorageTargetPayloadV1;
+          const reboundMovement = rebound.entities.find((entity) =>
+            entity.entityId.endsWith(':entity.inventory_movement'),
+          );
+          assert.ok(reboundMovement?.legalEntity);
+          reboundMovement.legalEntity = {
+            ...reboundMovement.legalEntity,
+            column: 'legal_entity_id' as never,
+          };
+          reboundMovement.recordIdentity = {
+            ...reboundMovement.recordIdentity,
+            column: 'unclassified_infrastructure' as never,
+          };
+          assert.throws(
+            () =>
+              new PostgresInventoryReconciliationService(runtimePool, {
+                ...reconciliationRegistration,
+                storageTarget: rebound,
+              }),
+            (error: unknown) =>
+              error instanceof InventoryReconciliationError &&
+              /infrastructure columns are unclassified: .*unclassified_infrastructure/u.test(
+                error.message,
+              ),
+          );
+
           // The unmutated contract still constructs, so the ratchet is not
           // simply refusing everything.
           assert.doesNotThrow(
@@ -1899,6 +1930,119 @@ test('reconciliation names divergence, confirms consistency, repairs nothing, an
               `${verdict.axis} must not call an unexamined subject consistent`,
             );
           }
+
+          // That anchor is classified twice -- integrity unverifiable, then
+          // parameters unrecognized -- and must still be ONE subject. Counting
+          // the classifications rather than the subjects inflated the arm's
+          // count and listed the same cache key twice.
+          assert.equal(
+            anchors.unverifiableSubjectIds.filter(
+              (subjectId) => subjectId === liveUnplaceableAnchorCacheKey,
+            ).length,
+            1,
+            'a subject classified twice is still one subject',
+          );
+          assert.equal(
+            anchors.subjectCount,
+            new Set(anchors.subjectIds).size,
+            'the arm counts distinct subjects, not classifications',
+          );
+        },
+      );
+
+      await t.test(
+        'a movement cannot be booked to a legal entity other than its document',
+        async () => {
+          // A confirm review reasoned that a movement with a correct line link
+          // and a different legal entity would reconcile clean in a scope naming
+          // both entities -- every other column agreeing. The scenario is real
+          // in the reconciler and UNREACHABLE in storage: the movement-to-line
+          // relation's foreign key is entity-scoped, so the state cannot exist.
+          // Observed here rather than argued, and rather than guarding it with a
+          // branch nothing could ever execute.
+          const transactionId = randomUUID();
+          const transactionLineId = randomUUID();
+          await withModuleRole(runtimePool, scopeA, async (client) => {
+            await insertTransactionHeader(client, scopeA, binding, {
+              legalEntityId: witnessLegalEntityA,
+              number: `XLE-${transactionId.slice(0, 12)}`,
+              reasonCode: 'RECONCILE',
+              reasonNarrative: null,
+              sourceId: 'reconcile-cross-entity',
+              sourceType: 'adjustment',
+              state: 'posted',
+              transactionId,
+              type: 'adjustment',
+            });
+            await insertEntity(
+              client,
+              scopeA,
+              binding,
+              binding.transactionLine,
+              {
+                legalEntityId: witnessLegalEntityA,
+                overrides: {
+                  inventory_transaction_line_from_location_id: null,
+                  inventory_transaction_line_item_id: itemPrimary,
+                  inventory_transaction_line_line_number: 1,
+                  inventory_transaction_line_quantity: '8',
+                  inventory_transaction_line_to_location_id: locationSecondary,
+                  inventory_transaction_line_unit_id: 'EA',
+                },
+                recordId: transactionLineId,
+                relationIds: {
+                  [binding.transaction.entity.entityId]: transactionId,
+                },
+              },
+            );
+          });
+
+          // Quantity, item, location, unit, effective date, source line, role,
+          // reason and transaction key would all have agreed. Only the entity
+          // differs, and that alone is refused.
+          await assert.rejects(
+            withModuleRole(runtimePool, scopeA, (client) =>
+              insertMovement(client, scopeA, binding, {
+                itemId: itemPrimary,
+                legalEntityId: quietLegalEntityA,
+                locationId: locationSecondary,
+                movementId: randomUUID(),
+                quantityDelta: '8',
+                sourceId: 'reconcile-cross-entity',
+                sourceLine: '1',
+                sourceType: 'adjustment',
+                transactionId,
+                transactionLineId,
+              }),
+            ),
+            (error: unknown) => (error as { code?: string }).code === '23503',
+            'the entity-scoped relation foreign key must refuse a cross-entity movement',
+          );
+
+          // The same movement in its document's own entity is accepted, so the
+          // refusal above is about the entity and not about the fixture.
+          await withModuleRole(runtimePool, scopeA, (client) =>
+            insertMovement(client, scopeA, binding, {
+              itemId: itemPrimary,
+              legalEntityId: witnessLegalEntityA,
+              locationId: locationSecondary,
+              movementId: randomUUID(),
+              quantityDelta: '8',
+              sourceId: 'reconcile-cross-entity',
+              sourceLine: '1',
+              sourceType: 'adjustment',
+              transactionId,
+              transactionLineId,
+            }),
+          );
+          const report = await reconciliation.reconcile(scopeA.context, {
+            legalEntityIds: [witnessLegalEntityA, quietLegalEntityA],
+            scopeId: 'cross-entity-scope',
+          });
+          assert.ok(
+            report.balances.consistentSubjectIds.includes(transactionLineId),
+            'the entity-consistent document reconciles clean in a two-entity scope',
+          );
         },
       );
     } finally {

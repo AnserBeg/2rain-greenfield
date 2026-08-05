@@ -57,7 +57,7 @@ and balance-unverifiable — examined on one axis, honestly reported on both.
 
 ## Controls and recorded reds
 
-`test/postgres/inventory-reconciliation.test.ts` — 23 subtests. **Every control
+`test/postgres/inventory-reconciliation.test.ts` — 24 subtests. **Every control
 from `G3-R1`, `G3-R1b` and `G3-R1c` passes unchanged.**
 
 | # | Vacuity vector | Victim | Recorded red |
@@ -82,6 +82,66 @@ The controls plant **live** anchors inside the subtest rather than reusing
 earlier fixtures: by that point every earlier planted anchor is superseded, and a
 superseded anchor is excluded rather than examined, which would have made the
 assertions vacuous.
+
+## The confirm arm, and what it found
+
+**Codex `gpt-5.6-sol` xhigh returned PASS** at `a33d0616` — the first pass in
+sixteen rounds. **Fable max, the confirm arm this tree had never had, REFUTED
+it.** Both were right about different things, and the refutation is why a second
+arm exists.
+
+Fable confirmed C1–C3 without reservation — the verdict mechanism, the deleted
+table, and all five `examined` placements — then refuted the claim that the
+accumulated tree carries no remaining reachable false-consistent.
+
+### F1 — refuted by execution, not by argument
+
+Fable's finding: the movement-to-line pairing is keyed by `transactionLineId`
+alone, and legal entity is used only as a **filter**, never projected or
+compared. So in a scope naming two entities, a movement booked to the wrong
+entity would pair with its line, agree on every column, and read consistent while
+one entity is short and the other holds a phantom.
+
+The reasoning is exact about the reconciler and about the writer. **The control
+written to reproduce it refuted it instead:** the movement-to-line relation's
+foreign key is entity-scoped (`compiler/src/storage.ts:1071,1077`), so a movement
+cannot reference a line in another legal entity. PostgreSQL rejects the insert
+with `23503`. The state is unrepresentable.
+
+**So no comparison was added.** A comparison guarding an unrepresentable state is
+an unexercised branch, which AGENTS.md §6 forbids as firmly as it forbids a
+missing one. Subtest 24 observes the constraint instead — the cross-entity
+movement is refused, the entity-consistent one is accepted, and the document then
+reconciles clean in a genuine **two-entity scope**, which no prior test had ever
+used. That absence is exactly why the question stayed open for sixteen rounds.
+
+### F2 — a subject classified twice was counted twice
+
+Real and fixed. `arm.unverifiable` does not return, so an anchor can be
+classified twice — integrity unverifiable, then parameters unrecognised. The
+accumulator counted classifications rather than distinct subjects, inflating
+`subjectCount` and listing one cache key twice. `#unverifiable` is now a `Set`
+and consistency excludes it. The authoritative axis verdicts were never affected;
+this was report accounting.
+
+### F3 — the ratchet's universe was undeclared, and is now enforced
+
+Fable observed that `business_period` shares F1's blind spot: the completeness
+ratchet walks `entity.columns`, and a movement's **infrastructure** columns —
+`tenant_id`, `environment_id`, `record_id`, the legal-entity column and
+`business_period` — are bound elsewhere on the entity and are structurally
+invisible to it.
+
+That boundary is no longer prose. `MOVEMENT_INFRASTRUCTURE_CLASSIFICATION` records
+a decision for each, and `assertMovementColumnsClassified` now enforces it over
+the infrastructure list too, so an unclassified infrastructure column fails
+construction exactly as an unclassified field column does.
+
+| # | Vacuity vector | Victim | Recorded red |
+|---|---|---|---|
+| 32 | a movement booked to another entity is representable | *storage itself* — insert the cross-entity movement | `23503` — `violates foreign key constraint` (the control's positive result) |
+| 33 | the infrastructure ratchet stops seeing a column | drop `entity.recordIdentity.column` from the infrastructure list | `not ok 20` — `Missing expected exception.` |
+| 34 | subjects are counted per classification, not per subject | inflate `subjectCount` by one | `not ok 1`; `not ok 8` |
 
 ## What was not touched
 

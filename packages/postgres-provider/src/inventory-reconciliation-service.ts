@@ -113,6 +113,34 @@ const MOVEMENT_COLUMN_CLASSIFICATION: Readonly<Record<string, string>> =
   });
 
 /**
+ * The ratchet's universe is the compiled FIELD column list. A movement also
+ * carries infrastructure columns bound elsewhere on the entity -- `tenant_id`,
+ * `environment_id`, `record_id`, the legal-entity column
+ * (`entity.legalEntity.column`) and `business_period`
+ * (`factStorage.businessPeriod.column`) -- and `entity.columns` does not contain
+ * them, so `assertMovementColumnsClassified` structurally cannot force a
+ * decision about any of them. That boundary is declared here rather than left
+ * silent, because a confirm review found a reachable false-consistent hiding in
+ * exactly this gap.
+ */
+const MOVEMENT_INFRASTRUCTURE_CLASSIFICATION: Readonly<Record<string, string>> =
+  Object.freeze({
+    business_period:
+      'integrity: declared limit, derived transitively from the header-pinned effective date via the tenant calendar; no balance read consumes it',
+    environment_id: 'excluded: ambient request context, not document-derived',
+    // Balance-relevant and NOT compared, because the state a comparison would
+    // catch is unrepresentable: the movement-to-line relation's foreign key is
+    // entity-scoped (`storage.ts:1071,1077`), so a movement cannot reference a
+    // line in another legal entity -- PostgreSQL rejects it with 23503. A
+    // comparison here would be an unexercised branch, which AGENTS.md section 6
+    // forbids; the constraint is observed by a control instead.
+    legal_entity_id:
+      'balance: enforced structurally by the entity-scoped relation foreign key, not compared',
+    record_id: 'excluded: minted per movement, with no document counterpart',
+    tenant_id: 'excluded: ambient request context, not document-derived',
+  });
+
+/**
  * How a finding bears on the verdict it belongs to. A finding declares ONLY its
  * own axis: there is deliberately no value meaning "and the other axis is
  * fine". Whether the other axis is fine is decided by whether anything on it
@@ -1120,7 +1148,7 @@ class ArmAccumulator {
   readonly #consistent: string[] = [];
   readonly #discrepant = new Set<string>();
   readonly #findings: InventoryReconciliationFindingV1[] = [];
-  readonly #unverifiable: string[] = [];
+  readonly #unverifiable = new Set<string>();
   readonly #excluded: InventoryReconciliationExclusionV1[] = [];
   readonly #subjects = new Set<string>();
   /** Subjects for which a check on this axis actually executed. */
@@ -1187,16 +1215,22 @@ class ArmAccumulator {
     finding: Omit<InventoryReconciliationFindingV1, 'armId' | 'subjectId'>,
   ): void {
     this.finding({ ...finding, subjectId });
-    this.#unverifiable.push(subjectId);
+    this.#unverifiable.add(subjectId);
     this.#subjects.add(subjectId);
   }
 
   freeze(): InventoryReconciliationArmReportV1 {
+    // A subject can be classified twice -- integrity unverifiable, then
+    // parameters unrecognized -- so consistency and the count are taken over
+    // DISTINCT subjects. Counting the raw pushes inflated both.
     const consistent = this.#consistent.filter(
-      (subjectId) => !this.#discrepant.has(subjectId),
+      (subjectId) =>
+        !this.#discrepant.has(subjectId) && !this.#unverifiable.has(subjectId),
     );
     const subjectCount =
-      consistent.length + this.#discrepant.size + this.#unverifiable.length;
+      new Set(consistent).size +
+      this.#discrepant.size +
+      this.#unverifiable.size;
     if (subjectCount === 0) {
       this.finding({
         axis: 'balance',
@@ -1219,7 +1253,7 @@ class ArmAccumulator {
           ? 'indeterminate'
           : this.#discrepant.size > 0
             ? 'discrepant'
-            : this.#unverifiable.length > 0
+            : this.#unverifiable.size > 0
               ? 'indeterminate'
               : 'consistent',
       examinedBalanceSubjectIds: Object.freeze(
@@ -1230,7 +1264,7 @@ class ArmAccumulator {
       ),
       subjectCount,
       subjectIds: Object.freeze([...this.#subjects].toSorted()),
-      unverifiableSubjectIds: Object.freeze(this.#unverifiable.toSorted()),
+      unverifiableSubjectIds: Object.freeze([...this.#unverifiable].toSorted()),
     });
   }
 }
@@ -2011,6 +2045,24 @@ function resolveReconciliationStorage(
  * (AGENTS.md section 6).
  */
 function assertMovementColumnsClassified(entity: StorageEntityTarget): void {
+  // The infrastructure columns this ratchet cannot see are enumerated so the
+  // boundary is checkable rather than prose: every one the entity actually
+  // carries must carry a recorded decision.
+  const infrastructure = [
+    ...entity.scopeKeyColumns,
+    entity.recordIdentity.column,
+    ...(entity.legalEntity ? [entity.legalEntity.column] : []),
+    ...(entity.factStorage ? [entity.factStorage.businessPeriod.column] : []),
+  ];
+  const undecided = infrastructure.filter(
+    (column) => !Object.hasOwn(MOVEMENT_INFRASTRUCTURE_CLASSIFICATION, column),
+  );
+  if (undecided.length > 0) {
+    throw new InventoryReconciliationError(
+      'INVENTORY_RECONCILIATION_STORAGE_INVALID',
+      `movement infrastructure columns are unclassified: ${undecided.join(', ')}`,
+    );
+  }
   const columns = entity.columns
     .map((column) => column.canonicalFieldId.split(':field.').at(-1))
     .filter((local): local is string => local !== undefined)
