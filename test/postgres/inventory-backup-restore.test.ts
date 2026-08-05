@@ -657,6 +657,10 @@ function assertSameBalances(
         `G3_R3_BALANCE_QUERY_MISMATCH: ${probe.id} before=${left.queryId} after=${right.queryId}`,
       );
     }
+    // Victim, run: replacing this with a numeric comparison
+    // (`Number(decode(left)) !== Number(decode(right))`) makes the
+    // `numerically-equal-but-reformatted` red stop firing — 10.50 is the same
+    // number as 10.5 and a different answer.
     if (!bytesEqual(left.bytes, right.bytes)) {
       fail(
         `G3_R3_BALANCE_BYTES_CHANGED: ${probe.id} before=${decode(left.bytes)} after=${decode(right.bytes)}`,
@@ -671,6 +675,11 @@ function assertSameBalances(
  * where each served value came from: the interpreter reports `cache-hit` when a
  * surviving anchor answered, and `ledger-recomputation` when it summed the
  * movements. A rebuild that did not clear reports the former.
+ *
+ * Victim, run: clearing the derived stores BEFORE the pre-clear read makes the
+ * `served-from-surviving-cache` red stop firing, because nothing survives to
+ * answer it. Deleting the DELETE loop in `rebuildDerivedStores` instead makes
+ * `assertDerivedStoresEmpty` fail after the clear.
  */
 function assertRebuiltFromLedger(
   served: readonly ServedBalance[],
@@ -827,20 +836,23 @@ async function withRestoredDatabase(
     max: 2,
   });
   try {
-    // Three passes, because a single-pass restore of this database does not
-    // work and would not be faithful if it did.
+    // Three passes, because a single-pass restore of this database FAILS.
     //
-    // 1. `--disable-triggers` keeps the movement fact table's own effect
-    //    trigger from re-deriving the companion rows and re-advancing the
-    //    aggregate generation during COPY. It is honoured only for a data-only
-    //    restore, so the data pass has to stand alone.
-    // 2. The fact table also carries a CHECK constraint that calls
-    //    `north_star_internal.inventory_business_period`, which READS
-    //    `platform.inventory_tenant_calendars`. A CHECK that reads another
-    //    table is validated per COPY row, so a plain restore fails whenever the
-    //    calendar has not been loaded first. It is detached around the data
-    //    pass and re-attached afterwards, which VALIDATES every restored
-    //    business period against the derivation instead of recomputing it.
+    // The movement fact table carries a CHECK constraint that calls
+    // `north_star_internal.inventory_business_period`, which READS
+    // `platform.inventory_tenant_calendars`. A CHECK that reads another table
+    // is re-validated on every COPY row, so a single-pass restore raises
+    // INVENTORY_TENANT_CALENDAR_UNDECLARED whenever the calendar has not
+    // happened to load first. Detaching it around the data pass and
+    // re-attaching it afterwards VALIDATES every restored business period
+    // against the derivation, rather than leaving it unchecked.
+    //
+    // Splitting the passes also puts the data load before post-data, where the
+    // fact table's effect trigger is created, so that trigger cannot re-derive
+    // companion rows or re-advance the aggregate generation during COPY.
+    // `--disable-triggers` is belt-and-braces for that and is NOT load-bearing:
+    // removing it leaves this test green, because the trigger does not yet
+    // exist when the data pass runs.
     await runRestorePass(database.containerName, databaseName, dumpPath, [
       '--section=pre-data',
     ]);
