@@ -100,23 +100,28 @@ location and the two temporal horizons and **never joins the transaction**.
 list and `MOVEMENT_COLUMN_CLASSIFICATION` to agree exactly, or construction
 throws `INVENTORY_RECONCILIATION_STORAGE_INVALID`. It reads the **produced
 artifact**, not source text, so it observes rather than proxies. All sixteen
-columns are classified `balance`, `integrity`, or `excluded` with a stated
-reason — `recorded_at` (posting instant), `actor_id` (posting actor),
-`source_revision` (the header revision advances on the draft-to-posted
-transition, so equality is false by construction),
-`stock_dimension_set_version` (a command input with no header counterpart).
-Two entries are **declared limits rather than exclusions**, corrected in review
-round 1 because the original wording conceded the provenance and then excluded it
-anyway: `recorded_at` (balance-relevant, no document counterpart) and
-`reversal_of_movement_id` (integrity-relevant, declared by the stock-count line,
-which this arm does not read).
+columns carry a classification:
+
+- **`balance`** — item, location, quantity delta, unit, effective date.
+- **`integrity`** — source type, source id, source line, posting role, reason
+  code, reason narrative.
+- **`excluded`, with a stated reason** — `actor_id` (the posting actor, not a
+  property of the document), `source_revision` (the header revision advances on
+  the draft-to-posted transition, so equality is false by construction), and
+  `stock_dimension_set_version` (a command input with no header counterpart).
+- **declared limits, corrected in review round 1** — `recorded_at` is
+  *balance*-relevant with no document counterpart to compare against, and
+  `reversal_of_movement_id` is *integrity*-relevant but declared by the
+  stock-count line, which this arm does not read. Both were previously written as
+  plain exclusions, which stated a reason answering a different question than
+  the map asks.
 
 It does not derive semantics. It makes silent omission impossible, which is the
 part that was actually costing review rounds.
 
 ## Controls and recorded reds
 
-`test/postgres/inventory-reconciliation.test.ts` — 21 subtests. **Every control
+`test/postgres/inventory-reconciliation.test.ts` — 22 subtests. **Every control
 from `G3-R1` and `G3-R1b` still passes**, with one assertion corrected rather
 than weakened (below).
 
