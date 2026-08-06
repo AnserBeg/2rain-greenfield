@@ -42,6 +42,19 @@ touches_executable() {
   [ -n "$(git diff --name-only "$1^" "$1" -- . "${NON_EXECUTABLE[@]}" 2>/dev/null)" ]
 }
 
+# git-workflow permits repository setup and agent-doctrine housekeeping straight
+# to main, outside any packet — those are not packet work and no review arm is
+# owed. That cannot be inferred from a path: `scripts/` holds both this file and
+# run-matrix.sh, and a packet may legitimately change the latter. So the exemption
+# is declared in the commit message and counted in the output, where it can be
+# audited, rather than carved out of the exclusion list where it would be silent.
+#
+# Found when this gate fired on the very commit that introduced it — which is the
+# best evidence available that it works.
+doctrine_only() {
+  git log -1 --format='%B' "$1" | grep -qiE '^Doctrine-only:[[:space:]]*[^[:space:]]'
+}
+
 packet_of() {
   git log -1 --format='%B' "$1" | sed -n 's/^Packet:[[:space:]]*\([^[:space:]]*\).*/\1/p' | head -1
 }
@@ -131,7 +144,17 @@ if [ "${1:-}" = '--self-test' ]; then
     echo 'self-test FAIL: branch tip covered — the gate would never fire' >&2
     fails=1
   fi
-  [ "$fails" -eq 0 ] && echo 'check-review-record self-test: OK (7 controls)'
+  # Control 8: the exemption must require a non-empty reason, or `Doctrine-only:`
+  # with nothing after it would wave any commit through.
+  if echo 'Doctrine-only:' | grep -qiE '^Doctrine-only:[[:space:]]*[^[:space:]]'; then
+    echo 'self-test FAIL: bare Doctrine-only: accepted — exemption would be free' >&2
+    fails=1
+  fi
+  if ! echo 'Doctrine-only: review gate tooling' | grep -qiE '^Doctrine-only:[[:space:]]*[^[:space:]]'; then
+    echo 'self-test FAIL: valid Doctrine-only: rejected' >&2
+    fails=1
+  fi
+  [ "$fails" -eq 0 ] && echo 'check-review-record self-test: OK (9 controls)'
   exit "$fails"
 fi
 
@@ -146,17 +169,22 @@ load_records
 mapfile -t COMMITS < <(git rev-list --first-parent --reverse "$BASELINE..$BRANCH" 2>/dev/null)
 
 UNCOVERED=()
+EXEMPT=()
 CHECKED=0
 
 for sha in "${COMMITS[@]:-}"; do
   [ -n "$sha" ] || continue
   touches_executable "$sha" || continue
+  if doctrine_only "$sha"; then
+    EXEMPT+=("$sha")
+    continue
+  fi
   CHECKED=$((CHECKED + 1))
   covered_by_record "$sha" || UNCOVERED+=("$sha")
 done
 
 if [ "${#UNCOVERED[@]}" -eq 0 ]; then
-  echo "review-record: OK ($CHECKED executable commit(s) since ${BASELINE:0:7}, all covered by ${#RECORDED[@]} record(s))"
+  echo "review-record: OK ($CHECKED executable commit(s) since ${BASELINE:0:7}, all covered by ${#RECORDED[@]} record(s)${EXEMPT:+, ${#EXEMPT[@]} doctrine-only})"
   exit 0
 fi
 
