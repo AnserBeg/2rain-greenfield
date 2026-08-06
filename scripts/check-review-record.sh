@@ -77,7 +77,24 @@ packet_of() {
 # "nothing has landed since the last recorded review".
 covered_by_record() {
   [ -n "${NEWEST_RECORD:-}" ] || return 1
-  git merge-base --is-ancestor "$1" "$NEWEST_RECORD" 2>/dev/null
+  git merge-base --is-ancestor "$1" "$NEWEST_RECORD" 2>/dev/null && return 0
+
+  # A --no-ff integration is BY CONSTRUCTION newer than the SHA it integrates,
+  # so the ancestor test above can never cover it and the gate fired on the
+  # first real merge it saw. Left unfixed it would false-positive on every
+  # non-fast-forward integration, which is the "control that fails on correct
+  # behaviour" failure this script's own self-test warns about.
+  #
+  # A merge is covered when its second parent is covered AND the merge changed
+  # no executable content relative to that parent. That second clause is
+  # git-workflow's identical-tree rule, and it is what makes the reviewed
+  # matrix the acceptance matrix: a merge that silently resolved a conflict in
+  # executable content is NOT covered by the review of the branch it merged.
+  local second
+  second="$(git rev-parse --verify --quiet "$1^2" 2>/dev/null)" || return 1
+  [ -n "$second" ] || return 1
+  git merge-base --is-ancestor "$second" "$NEWEST_RECORD" 2>/dev/null || return 1
+  [ -z "$(git diff --name-only "$second" "$1" -- . "${NON_EXECUTABLE[@]}" 2>/dev/null)" ]
 }
 
 # Full 40-char SHAs from the log that resolve and are actually on main. A record
@@ -145,8 +162,19 @@ if [ "${1:-}" = '--self-test' ]; then
   done
   # A commit no record contains must NOT be covered. Without this the gate
   # passes on everything, which is the only failure mode that matters.
-  if covered_by_record "$BRANCH"; then
-    echo 'self-test FAIL: branch tip covered — the gate would never fire' >&2
+  #
+  # Probed with a dangling commit built on the tip rather than with the tip
+  # itself: after a valid --no-ff integration the tip IS legitimately covered
+  # via the merge path, so asserting on it made this control fail on correct
+  # behaviour. The probe is newer than every record and is not a merge, so it
+  # is uncovered by construction and stays uncovered as history grows.
+  _probe="$(git commit-tree "$(git rev-parse "$BRANCH^{tree}")" -p "$BRANCH" \
+    -m 'check-review-record self-test probe' 2>/dev/null)"
+  if [ -z "$_probe" ]; then
+    echo 'self-test FAIL: could not build the uncovered probe' >&2
+    fails=1
+  elif covered_by_record "$_probe"; then
+    echo 'self-test FAIL: an unrecorded commit was covered — the gate would never fire' >&2
     fails=1
   fi
   # Control 8: the exemption must require a non-empty reason, or `Doctrine-only:`
@@ -159,7 +187,14 @@ if [ "${1:-}" = '--self-test' ]; then
     echo 'self-test FAIL: valid Doctrine-only: rejected' >&2
     fails=1
   fi
-  [ "$fails" -eq 0 ] && echo 'check-review-record self-test: OK (9 controls)'
+  # Control 10: a --no-ff merge of a recorded tip must be covered, or every
+  # non-fast-forward integration false-positives.
+  _merge="$(git rev-list --merges -1 "$NEWEST_RECORD..$BRANCH" 2>/dev/null)"
+  if [ -n "$_merge" ] && ! covered_by_record "$_merge"; then
+    echo "self-test FAIL: --no-ff merge of a recorded tip reported uncovered" >&2
+    fails=1
+  fi
+  [ "$fails" -eq 0 ] && echo 'check-review-record self-test: OK (10 controls)'
   exit "$fails"
 fi
 
