@@ -100,12 +100,13 @@ The ring is now **`--b500` (`#2196CF`)**, ruled by the user 2026-08-06:
 | Page `#F6F8FA` | 1.61:1 ✗ | **3.12:1 ✓** | 4.56:1 ✓ |
 | Rail `#0B3A55` | 7.00:1 ✓ | **3.61:1 ✓** | **2.47:1 ✗** |
 
-**`--b500` is the only step on the ramp that clears 3:1 everywhere the ring
-lands**, which is the whole reason it is the answer rather than simply "go
-darker". The obvious fix is wrong: `--b600` fails on the dark rail at 2.47:1,
-because a ring that gains contrast against light surfaces loses it against the
-sidebar. A ring used on both light panels and a deep rail must sit in the middle
-of the ramp, not at either end.
+**~~`--b500` is the only step on the ramp that clears 3:1 everywhere the ring
+lands~~ — this sentence was false when written. See §2.2.** The three grounds in
+the table above are not every ground the ring lands on. The reasoning that
+follows is still correct as far as it goes: `--b600` fails on the dark rail at
+2.47:1, so a ring used on both light panels and a deep rail cannot sit at either
+end of the ramp. What was wrong was the leap from "clears the three grounds we
+measured" to "clears every ground".
 
 `--b300` keeps the brand mark, the active-nav edge and the selection edge — the
 identity jobs, none of which are focus indicators and none of which carry the 3:1
@@ -121,6 +122,41 @@ floor is 3:1, not 4.5:1. The step was never redundant; it was mis-assigned.
 **A ring must be gated against every ground it lands on, not against white.**
 `--b300` would have passed a naive white-background check on the rail and failed
 in the two places it is used most.
+
+### 2.2 One ring token cannot work — correction, 2026-08-06
+
+§2.1 claimed `--b500` clears 3:1 "everywhere the ring lands". **It does not, and
+no single token does.** Found by `U2`'s confirm review the same day, which read
+the stylesheet instead of the gate and located two focus states the gate never
+measured:
+
+| Ground | Where | `--b500` |
+|---|---|---|
+| `--surface-rail-raised` = `--b700` | open compact nav flyout (`surface-runtime.ts:1157`), whose links use the `.sidebar a:focus-visible` rule | **2.08:1 ✗** |
+| `--surface-sunken` = `--n100` | open action overflow (`:1091`), whose summary ring sits in the parent's 4 px padding at `outline-offset:2px` | **2.92:1 ✗** |
+
+Measured across all eight real grounds, **the best single token is `--b500` at
+2.08:1 worst-case** and the next best is `--b400` at 2.06:1. Nothing on the ramp
+works, because the ring must hold contrast against both `#FFFFFF` and `#0F5F8C`,
+and no single colour does.
+
+**The ring must therefore be context-scoped, exactly as `--accent` already is.**
+§10 states the accent moves *up* the ramp on dark ground; the ring obeys the same
+rule and this is not a new principle:
+
+| Context | Light scheme | Dark scheme | Worst measured |
+|---|---|---|---|
+| Surfaces — panel, page, sunken | `--b600` | `--b300` | 4.28:1 / 5.83:1 |
+| Rail — rail, rail-raised (same in both schemes) | `--b300` | `--b300` | 4.03:1 |
+
+**The generative error is worth more than the fix.** §2.1's completeness claim
+was written from the *gate's* coverage rather than from the stylesheet: three
+grounds were measured, so "three grounds" became "every ground". That is the same
+defect the round-1 review found in this packet's own test code — an expectation
+derived from the subject it measures — reproduced in doctrine by the orchestrator
+who had just recorded the lesson. **A conformance claim must be derived from the
+consumers of the token, enumerated from source, not from the list the test
+happens to check.**
 
 ### 3. Neutrals are chosen, not inherited
 
