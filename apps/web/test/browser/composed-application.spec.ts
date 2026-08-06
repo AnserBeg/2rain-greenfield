@@ -182,8 +182,12 @@ const FOCUS_RING_MINIMUM_CONTRAST = 3;
 
 interface FocusRingMeasurement {
   readonly declaredRing: string;
+  readonly focusable: boolean;
   readonly groundColor: string;
   readonly groundLabel: string;
+  readonly renderedColor: string;
+  readonly renderedStyle: string;
+  readonly renderedWidth: string;
   readonly selector: string;
   readonly state: string;
 }
@@ -191,43 +195,52 @@ interface FocusRingMeasurement {
 interface FocusRingObservation {
   readonly measurements: readonly FocusRingMeasurement[];
   readonly selectorsDerived: readonly string[];
+  /** Matched but with no layout box in that state — counted, never dropped. */
+  readonly subjectsNotRendered: readonly string[];
   readonly selectorsWithoutSubject: readonly string[];
 }
 
 composedTest.describe('focus ring coverage', () => {
-  composedTest(
-    'every focus-visible rule clears 3:1 on every ground it lands on',
-    async ({ composedApplication, page }) => {
-      composedTest.setTimeout(journeyTimeoutMilliseconds.focusRing);
-      const observed = await readFocusRingCoverage(
-        page,
-        composedApplication.currentBaseUrl(),
-      );
-      const result = observeFocusRingCoverage(observed);
+  for (const scheme of ['light', 'dark'] as const) {
+    composedTest(
+      `every focus-visible rule clears 3:1 on every ${scheme} ground it lands on`,
+      async ({ composedApplication, page }) => {
+        composedTest.setTimeout(journeyTimeoutMilliseconds.focusRing);
+        const observed = await readFocusRingCoverage(
+          page,
+          composedApplication.currentBaseUrl(),
+          scheme,
+        );
+        const result = observeFocusRingCoverage(observed);
 
-      assert.ok(observed.selectorsDerived.length > 0);
-      assert.ok(result.measurementsRead > 0);
-      console.log(
-        `focus ring coverage: ${String(observed.selectorsDerived.length)} :focus-visible selectors derived from the stylesheet, ${String(result.measurementsRead)} selector/ground measurements across ${String(result.grounds.length)} distinct grounds`,
-      );
-      console.log(`  selectors: ${observed.selectorsDerived.join(' | ')}`);
-      console.log(`  grounds: ${result.grounds.join(' | ')}`);
-      console.log(`  worst: ${result.worst}`);
+        assert.ok(observed.selectorsDerived.length > 0);
+        assert.ok(result.measurementsRead > 0);
+        console.log(
+          `focus ring coverage (${scheme}): ${String(observed.selectorsDerived.length)} :focus-visible selectors derived from the stylesheet, ${String(result.measurementsRead)} selector/ground measurements across ${String(result.grounds.length)} distinct grounds`,
+        );
+        console.log(`  selectors: ${observed.selectorsDerived.join(' | ')}`);
+        console.log(`  grounds: ${result.grounds.join(' | ')}`);
+        console.log(
+          `  painted rings: ${String(result.paintedRingsRead)} of ${String(result.measurementsRead)}; subjects with no layout box: ${String(observed.subjectsNotRendered.length)}`,
+        );
+        console.log(`  worst: ${result.worst}`);
+        assert.equal(result.paintedRingsRead, result.measurementsRead);
 
-      // A derived selector nobody could reach is unmeasured coverage — the exact
-      // shape of the §2.1 defect — so the unreached set is pinned by EXACT
-      // equality, never by an allowlist that can grow. `.list-page-link` renders
-      // only when a list has a next cursor, and no composed-application list
-      // seeds past its compiled `maximumResultCount`, so this packet cannot
-      // reach it; its ring is `--focus-ring-surface`, which five other selectors
-      // do measure on five grounds. An eleventh unreached selector, or this one
-      // becoming reachable, changes the array and reds either way.
-      assert.deepEqual(observed.selectorsWithoutSubject, [
-        '.list-page-link:focus-visible',
-      ]);
-      assert.deepEqual(result.violations, []);
-    },
-  );
+        // This pins a KNOWN ABSENCE, and it is not a coverage claim — the
+        // distinction the confirm review named correctly. The unreached set is
+        // held by EXACT equality, never by an allowlist that can grow. `.list-page-link` renders
+        // only when a list has a next cursor, and no composed-application list
+        // seeds past its compiled `maximumResultCount`, so this packet cannot
+        // reach it; its ring is `--focus-ring-surface`, which five other selectors
+        // do measure on five grounds. An eleventh unreached selector, or this one
+        // becoming reachable, changes the array and reds either way.
+        assert.deepEqual(observed.selectorsWithoutSubject, [
+          '.list-page-link:focus-visible',
+        ]);
+        assert.deepEqual(result.violations, []);
+      },
+    );
+  }
 
   composedTest(
     'focus-ring red: a seventh selector on an unmeasured ground is derived and fails',
@@ -241,7 +254,8 @@ composedTest.describe('focus ring coverage', () => {
       const after = await readFocusRingCoverage(
         page,
         baseUrl,
-        '.panel__heading{background:var(--b300)}.panel__heading h2:focus-visible{outline:3px solid var(--b200);outline-offset:2px}',
+        'light',
+        '.skip-link:focus-visible{outline:3px solid var(--n100);outline-offset:2px}',
       );
       const result = observeFocusRingCoverage(after);
 
@@ -249,15 +263,20 @@ composedTest.describe('focus ring coverage', () => {
         after.selectorsDerived.length,
         before.selectorsDerived.length + 1,
       );
-      assert.ok(
-        after.selectorsDerived.includes('.panel__heading h2:focus-visible'),
-      );
+      assert.ok(after.selectorsDerived.includes('.skip-link:focus-visible'));
       assert.ok(
         result.measurementsRead >
           observeFocusRingCoverage(before).measurementsRead,
       );
+      // Isolated: the injected selector matches an element no shipped focus rule
+      // matches, so nothing else moves. The ground set is unchanged and exactly
+      // one violation appears.
+      assert.deepEqual(
+        result.grounds,
+        observeFocusRingCoverage(before).grounds,
+      );
       assert.deepEqual(result.violations, [
-        'FOCUS_RING_CONTRAST:.panel__heading h2:focus-visible',
+        'FOCUS_RING_CONTRAST:.skip-link:focus-visible',
       ]);
     },
   );
@@ -271,6 +290,7 @@ composedTest.describe('focus ring coverage', () => {
       const observed = await readFocusRingCoverage(
         page,
         composedApplication.currentBaseUrl(),
+        'light',
         ':root{--focus-ring-surface:var(--b600)!important;--focus-ring-rail:var(--b600)!important}',
       );
       const result = observeFocusRingCoverage(observed);
@@ -284,12 +304,86 @@ composedTest.describe('focus ring coverage', () => {
   );
 
   composedTest(
+    'focus-ring red: a ring suppressed to zero width is observed as unpainted',
+    async ({ composedApplication, page }) => {
+      composedTest.setTimeout(journeyTimeoutMilliseconds.focusRing);
+      // The declaration still says `3px solid var(--focus-ring-rail)` and still
+      // resolves to a passing colour. Only the painted indicator is gone, so
+      // nothing that reads declarations can see this.
+      const observed = await readFocusRingCoverage(
+        page,
+        composedApplication.currentBaseUrl(),
+        'light',
+        '.sidebar a{outline-width:0!important}',
+      );
+      const result = observeFocusRingCoverage(observed);
+
+      assert.ok(result.measurementsRead > 0);
+      assert.deepEqual(result.violations, [
+        'FOCUS_RING_NOT_PAINTED:.sidebar a:focus-visible',
+      ]);
+    },
+  );
+
+  composedTest(
+    'focus-ring red: outline none is observed as no indicator, not as inherited text colour',
+    async ({ composedApplication, page }) => {
+      composedTest.setTimeout(journeyTimeoutMilliseconds.focusRing);
+      // `resolveColor` used to strip the keyword `none`, hand the probe an empty
+      // colour and read back the probe's inherited text colour — a confident
+      // measurement of a ring that does not exist.
+      const observed = await readFocusRingCoverage(
+        page,
+        composedApplication.currentBaseUrl(),
+        'light',
+        '.sidebar a:focus-visible{outline:none!important}',
+      );
+      const result = observeFocusRingCoverage(observed);
+
+      assert.ok(result.measurementsRead > 0);
+      assert.deepEqual(result.violations, [
+        'FOCUS_RING_DECLARED_NONE:.sidebar a:focus-visible',
+        'FOCUS_RING_NOT_PAINTED:.sidebar a:focus-visible',
+      ]);
+    },
+  );
+
+  composedTest(
+    'focus-ring red: a regression confined to the dark block is observed',
+    async ({ composedApplication, page }) => {
+      composedTest.setTimeout(journeyTimeoutMilliseconds.focusRing);
+      // §2.2 gives the surface context --b600 light and --b300 dark. Putting the
+      // light value into the dark scheme is invisible to any light-only run.
+      const observed = await readFocusRingCoverage(
+        page,
+        composedApplication.currentBaseUrl(),
+        'dark',
+        ':root{--focus-ring-surface:var(--b600)!important}',
+      );
+      const result = observeFocusRingCoverage(observed);
+
+      assert.ok(result.measurementsRead > 0);
+      assert.ok(
+        result.violations.length > 0,
+        `dark-only regression was not observed; worst was ${result.worst}`,
+      );
+      assert.ok(
+        result.violations.every((violation) =>
+          violation.startsWith('FOCUS_RING_CONTRAST:'),
+        ),
+        result.violations.join(' | '),
+      );
+    },
+  );
+
+  composedTest(
     'focus-ring red: the retired --b500 fails on the ground §2.1 never measured',
     async ({ composedApplication, page }) => {
       composedTest.setTimeout(journeyTimeoutMilliseconds.focusRing);
       const observed = await readFocusRingCoverage(
         page,
         composedApplication.currentBaseUrl(),
+        'light',
         ':root{--focus-ring-rail:var(--b500)!important}',
       );
       const result = observeFocusRingCoverage(observed);
@@ -317,10 +411,13 @@ composedTest.describe('focus ring coverage', () => {
 async function readFocusRingCoverage(
   page: Page,
   baseUrl: string,
+  scheme: 'dark' | 'light' = 'light',
   injected: string | null = null,
 ): Promise<FocusRingObservation> {
+  await page.emulateMedia({ colorScheme: scheme });
   const measurements: FocusRingMeasurement[] = [];
   const selectorsDerived = new Set<string>();
+  const subjectsNotRendered: string[] = [];
   const withSubject = new Set<string>();
 
   const states: { go: () => Promise<void>; label: string }[] = [
@@ -434,6 +531,10 @@ async function readFocusRingCoverage(
         probe.style.position = 'absolute';
         probe.style.left = '-9999px';
         document.body.append(probe);
+        // `outline: none` declares no ring at all. Stripping the keyword and
+        // handing the probe an empty colour reads back the probe's INHERITED
+        // text colour — a confident measurement of a ring that does not exist —
+        // so the absent case returns '' and the observer reports it.
         const resolveColor = (declaration: string): string => {
           const colorText = declaration
             .replace(/\b\d+(?:\.\d+)?(?:px|em|rem)\b/g, '')
@@ -442,15 +543,21 @@ async function readFocusRingCoverage(
               '',
             )
             .trim();
+          if (colorText === '') return '';
           probe.style.color = '';
           probe.style.color = colorText;
           return getComputedStyle(probe).color;
         };
 
+        const skipped: string[] = [];
         const rows: {
           declaredRing: string;
+          focusable: boolean;
           groundColor: string;
           groundLabel: string;
+          renderedColor: string;
+          renderedStyle: string;
+          renderedWidth: string;
           selector: string;
           state: string;
         }[] = [];
@@ -470,11 +577,29 @@ async function readFocusRingCoverage(
             const declaredRing = resolveColor(declaration);
             for (const element of matched) {
               if (element === probe) continue;
+              if (element.getClientRects().length === 0) {
+                skipped.push(`${selector}@${label}`);
+                continue;
+              }
               const ground = groundFor(element, outlineOffset);
+              // The declaration is an intention; this is the indicator. Focus
+              // the subject and read what the browser painted, which is the only
+              // way `outline-width:0!important` elsewhere in the cascade, or a
+              // rule that simply lost, can be seen at all.
+              let focusable = false;
+              if (element instanceof HTMLElement) {
+                element.focus();
+                focusable = document.activeElement === element;
+              }
+              const painted = getComputedStyle(element);
               rows.push({
                 declaredRing,
+                focusable,
                 groundColor: ground?.color ?? '',
                 groundLabel: ground?.label ?? 'unresolved',
+                renderedColor: focusable ? painted.outlineColor : '',
+                renderedStyle: focusable ? painted.outlineStyle : '',
+                renderedWidth: focusable ? painted.outlineWidth : '',
                 selector,
                 state: label,
               });
@@ -483,10 +608,11 @@ async function readFocusRingCoverage(
         } finally {
           probe.remove();
         }
-        return { derived, rows };
+        return { derived, rows, skipped };
       }, `${state.label}/${viewport.label}`);
 
       for (const selector of pass.derived) selectorsDerived.add(selector);
+      for (const entry of pass.skipped) subjectsNotRendered.push(entry);
       for (const row of pass.rows) {
         withSubject.add(row.selector);
         measurements.push(row);
@@ -497,6 +623,7 @@ async function readFocusRingCoverage(
   return {
     measurements,
     selectorsDerived: [...selectorsDerived].sort(),
+    subjectsNotRendered: subjectsNotRendered.toSorted(),
     selectorsWithoutSubject: [...selectorsDerived]
       .filter((selector) => !withSubject.has(selector))
       .sort(),
@@ -510,11 +637,36 @@ function observeFocusRingCoverage(observation: FocusRingObservation) {
   let worst = 'none measured';
 
   for (const measurement of observation.measurements) {
+    // Rendered first. A contrast number computed from a declaration that never
+    // reached the screen is the defect this gate was blocked for.
+    if (!measurement.focusable) {
+      violations.add(`FOCUS_RING_UNFOCUSABLE:${measurement.selector}`);
+      continue;
+    }
+    if (measurement.declaredRing === '') {
+      violations.add(`FOCUS_RING_DECLARED_NONE:${measurement.selector}`);
+      continue;
+    }
+    if (
+      measurement.renderedStyle === 'none' ||
+      measurement.renderedStyle === 'hidden' ||
+      Number.parseFloat(measurement.renderedWidth) === 0
+    ) {
+      violations.add(`FOCUS_RING_NOT_PAINTED:${measurement.selector}`);
+      continue;
+    }
+    // The cascade proof: what the browser painted must be the ring this
+    // subject's own rule declared. A rule that lost, or an override anywhere
+    // else, separates these two and nothing before this line notices.
+    if (measurement.renderedColor !== measurement.declaredRing) {
+      violations.add(`FOCUS_RING_CASCADE:${measurement.selector}`);
+      continue;
+    }
     if (measurement.groundColor === '') {
       violations.add(`FOCUS_RING_GROUND_UNRESOLVED:${measurement.selector}`);
       continue;
     }
-    const ring = parseComputedColor(measurement.declaredRing);
+    const ring = parseComputedColor(measurement.renderedColor);
     const ground = parseComputedColor(measurement.groundColor);
     if (!ring.opaque || !ground.opaque) {
       violations.add(`FOCUS_RING_NON_OPAQUE:${measurement.selector}`);
@@ -534,6 +686,12 @@ function observeFocusRingCoverage(observation: FocusRingObservation) {
   return {
     grounds: [...grounds].sort(),
     measurementsRead: observation.measurements.length,
+    paintedRingsRead: observation.measurements.filter(
+      (measurement) =>
+        measurement.focusable &&
+        measurement.renderedStyle !== 'none' &&
+        Number.parseFloat(measurement.renderedWidth) > 0,
+    ).length,
     violations: [...violations].sort(),
     worst,
   };

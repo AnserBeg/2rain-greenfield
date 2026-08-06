@@ -883,6 +883,105 @@ function hueDistance(left: number, right: number): number {
   return delta > 180 ? 360 - delta : delta;
 }
 
+/**
+ * ADR-0035 §6 alignment, at the layer that actually shipped.
+ *
+ * `surface-runtime.ts:1176-1177` went out ungated. The reason given was that no
+ * real numeric cell exists while the compiled numeric type is blocked, and that
+ * gating it would mean inventing a subject. That reasoning was wrong, and the
+ * distinction is worth keeping: the fabricated-subject vacuity is about
+ * inventing *data*. The fact under test here is *cascade behaviour* — a compact
+ * card cell selector at 0-2-2 beat the numeric override at 0-2-1, so a marked
+ * cell rendered left-aligned — and that is real whether or not real data flows
+ * through it.
+ *
+ * **This proves the CSS, not the feature.** Nothing marks a cell `.cell-numeric`
+ * on the shared-list path today; that is the blocked numeric-type work and this
+ * gate does not claim it.
+ */
+test('a marked numeric cell aligns right in both projections, and its compact label stays left', async ({
+  page,
+}) => {
+  await page.goto(baseUrl);
+
+  const wide = await readNumericCellAlignment(page, 1280);
+  const compact = await readNumericCellAlignment(page, 390);
+
+  console.log(
+    `numeric cell alignment: wide cell=${wide.cell} label=${wide.label}; compact cell=${compact.cell} label=${compact.label} (compact card layout ${String(compact.isCard)})`,
+  );
+  // The compact rule only exists because the card cell selector wins at that
+  // width; asserting the card layout is active is what stops this passing as a
+  // second reading of the wide rule.
+  assert.equal(wide.isCard, false);
+  assert.equal(compact.isCard, true);
+  assert.equal(wide.cell, 'right');
+  assert.equal(compact.cell, 'right');
+  assert.equal(compact.label, 'left');
+});
+
+test('alignment red: removing the compact override returns the cell to left while wide stays right', async ({
+  page,
+}) => {
+  await page.goto(baseUrl);
+  // Same specificity as the shipped rule and later in order, so it wins — which
+  // reproduces the pre-fix cascade exactly: the 0-2-2 card rule deciding the
+  // cell and the 0-2-1 numeric override losing.
+  await page.addStyleTag({
+    content:
+      '@media(max-width:800px){.data-table-wrap tr[data-compact-card=true] td:has(.cell-numeric){text-align:left}}',
+  });
+
+  const wide = await readNumericCellAlignment(page, 1280);
+  const compact = await readNumericCellAlignment(page, 390);
+  assert.equal(compact.isCard, true);
+  assert.equal(compact.cell, 'left');
+  // The compact case reds on its own: the wide rule is untouched, so a single
+  // control cannot be mistaken for both halves failing together.
+  assert.equal(wide.cell, 'right');
+});
+
+/**
+ * Builds the compact card structure the compiled list emits and reads what the
+ * shipped stylesheet resolves for it. The markup is constructed rather than
+ * navigated to because the numeric marker has no producer yet — stated in the
+ * test above rather than hidden here.
+ */
+async function readNumericCellAlignment(
+  page: Page,
+  width: number,
+): Promise<{
+  readonly cell: string;
+  readonly isCard: boolean;
+  readonly label: string;
+}> {
+  await page.setViewportSize({ height: 844, width });
+  return await page.evaluate(() => {
+    document
+      .querySelectorAll('[data-alignment-probe]')
+      .forEach((existing) => existing.remove());
+    const wrap = document.createElement('div');
+    wrap.className = 'data-table-wrap';
+    wrap.setAttribute('data-alignment-probe', '');
+    wrap.innerHTML =
+      '<table><tbody><tr data-compact-card="true">' +
+      '<td data-column-label="Quantity"><span class="cell-numeric">1,250.00</span></td>' +
+      '</tr></tbody></table>';
+    document.body.append(wrap);
+    const cell = wrap.querySelector('td');
+    if (!cell) throw new Error('numeric probe cell was not created');
+    const cellStyle = getComputedStyle(cell);
+    const labelStyle = getComputedStyle(cell, '::before');
+    const observed = {
+      cell: cellStyle.textAlign,
+      isCard: cellStyle.display === 'grid',
+      label: labelStyle.textAlign,
+    };
+    wrap.remove();
+    return observed;
+  });
+}
+
 async function requireCompactJourney(
   page: Page,
   surface: FixtureCompiledSurface,
