@@ -51,9 +51,9 @@ ADR without further discussion.
 | `--b50` | `#F1F9FE` | Page tint, hover ground | — |
 | `--b100` | `#DCF0FB` | Selected-row ground | — |
 | `--b200` | `#BAE3F8` | Borders on tinted surfaces | — |
-| **`--b300`** | **`#89CFF0`** | **Brand.** Mark, active-nav edge, selection edge, focus ring | — |
+| **`--b300`** | **`#89CFF0`** | **Brand.** Mark, active-nav edge, selection edge | — |
 | `--b400` | `#4FB4E3` | Primary action **on dark ground** | — |
-| `--b500` | `#2196CF` | Hover on 600 | — |
+| **`--b500`** | **`#2196CF`** | Hover on 600; **focus ring** *(amended 2026-08-06, §2.1)* | **3.12–3.61:1** on every ground it lands on |
 | **`--b600`** | **`#1478AE`** | **Primary action, links on light ground** | **4.85:1 AA** |
 | `--b700` | `#0F5F8C` | Pressed; body-weight link text | **6.92:1 AA** |
 | `--b900` | `#0B3A55` | Rail ground, deep surfaces | 12.00:1 AAA |
@@ -77,6 +77,50 @@ direction and therefore the user's call, not this ADR's.
 
 Where the proposal document's Part II gives different figures, **this ADR
 governs**.
+
+### 2.1 The focus ring moves to `--b500` — amended 2026-08-06
+
+**This ADR originally assigned the focus ring to `--b300`, and that was a defect
+in this document.** `#89CFF0` measures **1.71:1** against a white panel and
+**1.61:1** against the page ground. WCAG 2.2 **SC 1.4.11 Non-text Contrast**
+requires **3:1** for a focus indicator against adjacent colours, and plan §8.4
+claims WCAG 2.2 AA without qualification. The assignment therefore contradicted a
+conformance level the platform states elsewhere.
+
+Found by `U2`'s independent review, 2026-08-06. The lane implemented the ring
+literally, measured it, and refused to change an approved visual direction on its
+own authority — which is the correct behaviour and the reason this was caught
+before it set.
+
+The ring is now **`--b500` (`#2196CF`)**, ruled by the user 2026-08-06:
+
+| Ground | `--b300` (was) | `--b500` (now) | `--b600` |
+|---|---|---|---|
+| Panel `#FFFFFF` | 1.71:1 ✗ | **3.32:1 ✓** | 4.85:1 ✓ |
+| Page `#F6F8FA` | 1.61:1 ✗ | **3.12:1 ✓** | 4.56:1 ✓ |
+| Rail `#0B3A55` | 7.00:1 ✓ | **3.61:1 ✓** | **2.47:1 ✗** |
+
+**`--b500` is the only step on the ramp that clears 3:1 everywhere the ring
+lands**, which is the whole reason it is the answer rather than simply "go
+darker". The obvious fix is wrong: `--b600` fails on the dark rail at 2.47:1,
+because a ring that gains contrast against light surfaces loses it against the
+sidebar. A ring used on both light panels and a deep rail must sit in the middle
+of the ramp, not at either end.
+
+`--b300` keeps the brand mark, the active-nav edge and the selection edge — the
+identity jobs, none of which are focus indicators and none of which carry the 3:1
+floor. The visual direction the user approved on 2026-07-30 is otherwise
+unchanged.
+
+This also consumes `--b500`, which `U2` had defined as `--accent-tone` and
+deliberately left unconsumed after finding that white on `--b500` measures
+3.32:1 — below the 4.5:1 text floor — so it could not serve as a filled-button
+hover. It is fine as a **ring**, because a focus indicator is non-text and its
+floor is 3:1, not 4.5:1. The step was never redundant; it was mis-assigned.
+
+**A ring must be gated against every ground it lands on, not against white.**
+`--b300` would have passed a naive white-background check on the rail and failed
+in the two places it is used most.
 
 ### 3. Neutrals are chosen, not inherited
 
