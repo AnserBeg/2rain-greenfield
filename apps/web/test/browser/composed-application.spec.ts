@@ -1,3 +1,4 @@
+import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 import { expect, test } from '@playwright/test';
@@ -25,6 +26,7 @@ import { withEphemeralPostgres } from '../../../../test/helpers/postgres.js';
 
 const applicationNamespace = 'northstar.app';
 const journeyTimeoutMilliseconds = Object.freeze({
+  focusRing: 40_000,
   inventoryNavigation: 20_000,
   onHandLookup: 20_000,
   partyLifecycle: 20_000,
@@ -155,6 +157,422 @@ composedTest.describe('composed application journeys', () => {
     },
   );
 });
+
+/**
+ * ADR-0035 §2.2. The focus ring is gated by **derivation**, not by a list.
+ *
+ * §2.1 claimed `--b500` cleared 3:1 "everywhere the ring lands" and shipped two
+ * states below the floor. The claim survived review because the gate measured
+ * three hardcoded grounds, and "three grounds" silently became "every ground" —
+ * a completeness claim taken from the test's own coverage rather than from the
+ * consumers of the token.
+ *
+ * So this reads the shipped stylesheet out of the browser's CSSOM, finds every
+ * `:focus-visible` rule there is, resolves each rule's own declared ring colour,
+ * and measures it against the ground each *matched element* actually sits on.
+ * Every `<details>` is forced open and both viewports are visited, because two
+ * of the grounds exist only inside an open overlay. A seventh focus selector
+ * added anywhere in the stylesheet is therefore measured without this file
+ * changing — which is the property §2.1's gate did not have.
+ *
+ * It runs against the composed application because that is the only page where
+ * all ten derived selectors have real elements.
+ */
+const FOCUS_RING_MINIMUM_CONTRAST = 3;
+
+interface FocusRingMeasurement {
+  readonly declaredRing: string;
+  readonly groundColor: string;
+  readonly groundLabel: string;
+  readonly selector: string;
+  readonly state: string;
+}
+
+interface FocusRingObservation {
+  readonly measurements: readonly FocusRingMeasurement[];
+  readonly selectorsDerived: readonly string[];
+  readonly selectorsWithoutSubject: readonly string[];
+}
+
+composedTest.describe('focus ring coverage', () => {
+  composedTest(
+    'every focus-visible rule clears 3:1 on every ground it lands on',
+    async ({ composedApplication, page }) => {
+      composedTest.setTimeout(journeyTimeoutMilliseconds.focusRing);
+      const observed = await readFocusRingCoverage(
+        page,
+        composedApplication.currentBaseUrl(),
+      );
+      const result = observeFocusRingCoverage(observed);
+
+      assert.ok(observed.selectorsDerived.length > 0);
+      assert.ok(result.measurementsRead > 0);
+      console.log(
+        `focus ring coverage: ${String(observed.selectorsDerived.length)} :focus-visible selectors derived from the stylesheet, ${String(result.measurementsRead)} selector/ground measurements across ${String(result.grounds.length)} distinct grounds`,
+      );
+      console.log(`  selectors: ${observed.selectorsDerived.join(' | ')}`);
+      console.log(`  grounds: ${result.grounds.join(' | ')}`);
+      console.log(`  worst: ${result.worst}`);
+
+      // A derived selector nobody could reach is unmeasured coverage — the exact
+      // shape of the §2.1 defect — so the unreached set is pinned by EXACT
+      // equality, never by an allowlist that can grow. `.list-page-link` renders
+      // only when a list has a next cursor, and no composed-application list
+      // seeds past its compiled `maximumResultCount`, so this packet cannot
+      // reach it; its ring is `--focus-ring-surface`, which five other selectors
+      // do measure on five grounds. An eleventh unreached selector, or this one
+      // becoming reachable, changes the array and reds either way.
+      assert.deepEqual(observed.selectorsWithoutSubject, [
+        '.list-page-link:focus-visible',
+      ]);
+      assert.deepEqual(result.violations, []);
+    },
+  );
+
+  composedTest(
+    'focus-ring red: a seventh selector on an unmeasured ground is derived and fails',
+    async ({ composedApplication, page }) => {
+      composedTest.setTimeout(journeyTimeoutMilliseconds.focusRing);
+      const baseUrl = composedApplication.currentBaseUrl();
+      const before = await readFocusRingCoverage(page, baseUrl);
+      // Neither this selector nor this ground exists in the shipped stylesheet.
+      // A gate driven by a hand-written list stays green here however wrong the
+      // colour is, which is exactly how §2.1 shipped.
+      const after = await readFocusRingCoverage(
+        page,
+        baseUrl,
+        '.panel__heading{background:var(--b300)}.panel__heading h2:focus-visible{outline:3px solid var(--b200);outline-offset:2px}',
+      );
+      const result = observeFocusRingCoverage(after);
+
+      assert.equal(
+        after.selectorsDerived.length,
+        before.selectorsDerived.length + 1,
+      );
+      assert.ok(
+        after.selectorsDerived.includes('.panel__heading h2:focus-visible'),
+      );
+      assert.ok(
+        result.measurementsRead >
+          observeFocusRingCoverage(before).measurementsRead,
+      );
+      assert.deepEqual(result.violations, [
+        'FOCUS_RING_CONTRAST:.panel__heading h2:focus-visible',
+      ]);
+    },
+  );
+
+  composedTest(
+    'focus-ring red: one token everywhere fails wherever it is not the right end of the ramp',
+    async ({ composedApplication, page }) => {
+      composedTest.setTimeout(journeyTimeoutMilliseconds.focusRing);
+      // §2.1's answer, and the trap: a single token measured only against light
+      // surfaces looks correct and fails where the sidebar and its flyout are.
+      const observed = await readFocusRingCoverage(
+        page,
+        composedApplication.currentBaseUrl(),
+        ':root{--focus-ring-surface:var(--b600)!important;--focus-ring-rail:var(--b600)!important}',
+      );
+      const result = observeFocusRingCoverage(observed);
+
+      assert.ok(result.measurementsRead > 0);
+      assert.deepEqual(result.violations, [
+        'FOCUS_RING_CONTRAST:.navigation-group > summary:focus-visible',
+        'FOCUS_RING_CONTRAST:.sidebar a:focus-visible',
+      ]);
+    },
+  );
+
+  composedTest(
+    'focus-ring red: the retired --b500 fails on the ground §2.1 never measured',
+    async ({ composedApplication, page }) => {
+      composedTest.setTimeout(journeyTimeoutMilliseconds.focusRing);
+      const observed = await readFocusRingCoverage(
+        page,
+        composedApplication.currentBaseUrl(),
+        ':root{--focus-ring-rail:var(--b500)!important}',
+      );
+      const result = observeFocusRingCoverage(observed);
+
+      // The control is only meaningful if the flyout ground was actually
+      // reached, so that is asserted before the violation is.
+      assert.ok(
+        result.grounds.some((ground) => ground.includes('#0f5f8c')),
+        `rail-raised was never measured; grounds were ${result.grounds.join(' | ')}`,
+      );
+      // Precisely one selector reds, and it is the flyout one: --b500 clears
+      // 3:1 on the rail itself (3.61:1) and fails only on the raised overlay
+      // (2.08:1). That is the exact state §2.1 asserted was fine.
+      assert.deepEqual(result.violations, [
+        'FOCUS_RING_CONTRAST:.sidebar a:focus-visible',
+      ]);
+    },
+  );
+});
+
+/**
+ * Drives the application into every state a ring can land in, then derives
+ * coverage from the CSSOM and the DOM together.
+ */
+async function readFocusRingCoverage(
+  page: Page,
+  baseUrl: string,
+  injected: string | null = null,
+): Promise<FocusRingObservation> {
+  const measurements: FocusRingMeasurement[] = [];
+  const selectorsDerived = new Set<string>();
+  const withSubject = new Set<string>();
+
+  const states: { go: () => Promise<void>; label: string }[] = [
+    {
+      go: async () => {
+        await page.goto(surfaceUrl(baseUrl, 'party_list'));
+      },
+      label: 'list',
+    },
+    {
+      go: async () => {
+        await page.goto(surfaceUrl(baseUrl, 'party_form'));
+      },
+      label: 'form',
+    },
+    {
+      // Navigated by href rather than clicked: in the compact viewport the
+      // fixed bottom navigation intercepts the pointer, and this gate is about
+      // the rendered state, not about how a human reaches it.
+      go: async () => {
+        await page.goto(surfaceUrl(baseUrl, 'party_list'));
+        const href = await page
+          .locator('.record-link')
+          .first()
+          .getAttribute('href');
+        if (href) await page.goto(new URL(href, baseUrl).href);
+      },
+      label: 'record',
+    },
+  ];
+
+  for (const state of states) {
+    for (const viewport of [
+      { height: 720, label: 'wide', width: 1280 },
+      { height: 844, label: 'compact', width: 390 },
+    ]) {
+      await page.setViewportSize({
+        height: viewport.height,
+        width: viewport.width,
+      });
+      await state.go();
+      if (injected) await page.addStyleTag({ content: injected });
+      const pass = await page.evaluate((label: string) => {
+        for (const details of document.querySelectorAll('details')) {
+          details.open = true;
+        }
+
+        const focusRules: { outline: string; selector: string }[] = [];
+        const walk = (rules: CSSRuleList) => {
+          for (const rule of rules) {
+            const styleRule = rule as CSSStyleRule;
+            const isStyleRule = typeof styleRule.selectorText === 'string';
+            // A modern CSSStyleRule carries `cssRules` for CSS nesting, so an
+            // `'cssRules' in rule` test swallows every style rule before its
+            // selector is read. Recurse into both, classify by selector.
+            const nested = (rule as Partial<CSSGroupingRule>).cssRules;
+            if (nested && nested.length > 0) walk(nested);
+            if (!isStyleRule) continue;
+            if (!styleRule.selectorText.includes(':focus-visible')) continue;
+            const outline =
+              styleRule.style.getPropertyValue('outline') ||
+              styleRule.style.getPropertyValue('outline-color') ||
+              /outline\s*:\s*([^;}]+)/.exec(styleRule.cssText)?.[1] ||
+              '';
+            const offset = Number.parseFloat(
+              styleRule.style.getPropertyValue('outline-offset') || '0',
+            );
+            for (const selector of styleRule.selectorText.split(',')) {
+              const trimmed = selector.trim();
+              if (!trimmed.includes(':focus-visible')) continue;
+              focusRules.push({
+                outline: `${outline}|${String(Number.isFinite(offset) ? offset : 0)}`,
+                selector: trimmed,
+              });
+            }
+          }
+        };
+        for (const sheet of document.styleSheets) {
+          walk(sheet.cssRules);
+        }
+
+        const opaque = (color: string): boolean => {
+          const parts = color.match(/-?\d+(?:\.\d+)?/g);
+          if (!parts || parts.length < 3) return false;
+          return parts.length > 3 ? Number(parts[3]) >= 1 : true;
+        };
+        const groundFor = (
+          element: Element,
+          outlineOffset: number,
+        ): { color: string; label: string } | null => {
+          let node: Element | null =
+            outlineOffset < 0 ? element : element.parentElement;
+          while (node) {
+            const background = getComputedStyle(node).backgroundColor;
+            if (opaque(background)) {
+              const classes =
+                typeof node.className === 'string' && node.className.trim()
+                  ? `.${node.className.trim().split(/\s+/).join('.')}`
+                  : '';
+              return {
+                color: background,
+                label: `${node.tagName.toLowerCase()}${classes}`,
+              };
+            }
+            node = node.parentElement;
+          }
+          return null;
+        };
+
+        const probe = document.createElement('span');
+        probe.style.position = 'absolute';
+        probe.style.left = '-9999px';
+        document.body.append(probe);
+        const resolveColor = (declaration: string): string => {
+          const colorText = declaration
+            .replace(/\b\d+(?:\.\d+)?(?:px|em|rem)\b/g, '')
+            .replace(
+              /\b(?:solid|dashed|dotted|double|groove|ridge|inset|outset|none|hidden|auto)\b/g,
+              '',
+            )
+            .trim();
+          probe.style.color = '';
+          probe.style.color = colorText;
+          return getComputedStyle(probe).color;
+        };
+
+        const rows: {
+          declaredRing: string;
+          groundColor: string;
+          groundLabel: string;
+          selector: string;
+          state: string;
+        }[] = [];
+        const derived: string[] = [];
+        try {
+          for (const { outline, selector } of focusRules) {
+            derived.push(selector);
+            const [declaration = '', offsetText = '0'] = outline.split('|');
+            const outlineOffset = Number.parseFloat(offsetText);
+            const base = selector.replaceAll(':focus-visible', '');
+            let matched: Element[] = [];
+            try {
+              matched = [...document.querySelectorAll(base)];
+            } catch {
+              matched = [];
+            }
+            const declaredRing = resolveColor(declaration);
+            for (const element of matched) {
+              if (element === probe) continue;
+              const ground = groundFor(element, outlineOffset);
+              rows.push({
+                declaredRing,
+                groundColor: ground?.color ?? '',
+                groundLabel: ground?.label ?? 'unresolved',
+                selector,
+                state: label,
+              });
+            }
+          }
+        } finally {
+          probe.remove();
+        }
+        return { derived, rows };
+      }, `${state.label}/${viewport.label}`);
+
+      for (const selector of pass.derived) selectorsDerived.add(selector);
+      for (const row of pass.rows) {
+        withSubject.add(row.selector);
+        measurements.push(row);
+      }
+    }
+  }
+
+  return {
+    measurements,
+    selectorsDerived: [...selectorsDerived].sort(),
+    selectorsWithoutSubject: [...selectorsDerived]
+      .filter((selector) => !withSubject.has(selector))
+      .sort(),
+  };
+}
+
+function observeFocusRingCoverage(observation: FocusRingObservation) {
+  const violations = new Set<string>();
+  const grounds = new Set<string>();
+  let worstRatio = Number.POSITIVE_INFINITY;
+  let worst = 'none measured';
+
+  for (const measurement of observation.measurements) {
+    if (measurement.groundColor === '') {
+      violations.add(`FOCUS_RING_GROUND_UNRESOLVED:${measurement.selector}`);
+      continue;
+    }
+    const ring = parseComputedColor(measurement.declaredRing);
+    const ground = parseComputedColor(measurement.groundColor);
+    if (!ring.opaque || !ground.opaque) {
+      violations.add(`FOCUS_RING_NON_OPAQUE:${measurement.selector}`);
+      continue;
+    }
+    const ratio = contrastRatio(ring.hex, ground.hex);
+    grounds.add(`${measurement.groundLabel} ${ground.hex}`);
+    if (ratio < worstRatio) {
+      worstRatio = ratio;
+      worst = `${measurement.selector} on ${measurement.groundLabel} (${measurement.state}) = ${ratio.toFixed(2)}:1`;
+    }
+    if (ratio < FOCUS_RING_MINIMUM_CONTRAST) {
+      violations.add(`FOCUS_RING_CONTRAST:${measurement.selector}`);
+    }
+  }
+
+  return {
+    grounds: [...grounds].sort(),
+    measurementsRead: observation.measurements.length,
+    violations: [...violations].sort(),
+    worst,
+  };
+}
+
+/** A computed colour is only measurable when it is opaque. */
+function parseComputedColor(value: string): {
+  readonly hex: string;
+  readonly opaque: boolean;
+} {
+  const channels = value.match(/-?\d+(?:\.\d+)?/g);
+  if (!channels || channels.length < 3) return { hex: '', opaque: false };
+  const alpha = channels.length > 3 ? Number(channels[3]) : 1;
+  if (!Number.isFinite(alpha) || alpha < 1) return { hex: '', opaque: false };
+  return {
+    hex: `#${channels
+      .slice(0, 3)
+      .map((channel) =>
+        Math.round(Number(channel)).toString(16).padStart(2, '0'),
+      )
+      .join('')}`,
+    opaque: true,
+  };
+}
+
+function contrastRatio(foreground: string, background: string): number {
+  const lighter = Math.max(luminance(foreground), luminance(background));
+  const darker = Math.min(luminance(foreground), luminance(background));
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+function luminance(color: string): number {
+  const linear = [1, 3, 5]
+    .map((offset) => Number.parseInt(color.slice(offset, offset + 2), 16) / 255)
+    .map((channel) =>
+      channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4,
+    );
+  return linear[0]! * 0.2126 + linear[1]! * 0.7152 + linear[2]! * 0.0722;
+}
 
 async function inventoryNavigationJourney(
   page: Page,
