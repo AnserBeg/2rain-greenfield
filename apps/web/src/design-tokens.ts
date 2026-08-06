@@ -21,11 +21,15 @@
  *
  * One role is defined and deliberately unconsumed. `--accent-tone` holds
  * ADR-0035 §2's `--b500` "hover on 600" step. A filled primary action carries
- * `--ink-on-accent` (white on light ground), and white on `#2196CF` measures
+ * `--ink-on-accent` (white on a light ground), and white on `--b500` measures
  * **3.32:1** — below the 4.5:1 floor plan §8.4 claims — while a 4.85 → 3.32
  * jump also breaks §9's "hover shifts the ground 2–3 %, never jumps". So the
  * filled hover moves *darker*, to `--accent-ground-hover`, and the ramp step
  * stays named here rather than silently dropped. Recorded in the U2 report.
+ *
+ * Prose names tokens, never literals — a hex in this comment would sit outside
+ * the block below and fail the ratchet, which is how the first draft of this
+ * paragraph was caught.
  */
 export const DESIGN_TOKENS = `
 /* token-definition-block:start */
