@@ -1088,6 +1088,10 @@ function renderInputValue(value: unknown): string {
 function renderValue(value: unknown): string {
   if (value === null || value === undefined)
     return '<span class="muted">—</span>';
+  // ADR-0035 §6: numbers are right-aligned and tabular; text is left-aligned.
+  // The alignment is CSS, but only the renderer knows the value is a number.
+  if (typeof value === 'number')
+    return `<span class="cell-numeric">${escapeHtml(String(value))}</span>`;
   return escapeHtml(typeof value === 'string' ? value : JSON.stringify(value));
 }
 

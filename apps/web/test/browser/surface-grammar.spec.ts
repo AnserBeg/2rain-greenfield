@@ -236,6 +236,353 @@ test('version boundary red: a v0 reader refuses grouped navigation instead of de
   );
 });
 
+/**
+ * ADR-0035 observations. Every one of these reads the *rendered* page in a live
+ * browser rather than the stylesheet source, because the fact each asserts is
+ * "what the user's machine resolved", not "what someone typed". Each carries a
+ * read-count guard: a run against a page with no status chips and no skeleton
+ * would otherwise pass while proving nothing.
+ */
+test('rendered status roles hold the contrast floor and stay off the brand hue', async ({
+  page,
+}) => {
+  const builder = fixtureSurface('builder');
+  await page.goto(
+    `${baseUrl}/?surface=${encodeURIComponent(builder.surfaceId)}`,
+  );
+
+  const pairs = await readStatusColorPairs(page);
+  assert.deepEqual(
+    pairs.map((pair) => pair.subjectId).toSorted(),
+    // Deliberately compared against the compiled definition, not a literal, so
+    // the subject cannot silently shrink to one easy chip.
+    [...builder.statusRoles].toSorted(),
+  );
+  const accessibility = observeAccessibility(pairs, []);
+  assert.ok(accessibility.contrastPairsRead > 0);
+  assert.equal(accessibility.contrastPairsRead, builder.statusRoles.length);
+  assert.deepEqual(accessibility.violations, []);
+
+  const separability = observeBrandStatusSeparability(pairs);
+  assert.ok(separability.hueSamplesRead > 0);
+  assert.ok(separability.chromaticHueSamplesRead > 0);
+  assert.equal(separability.hueSamplesRead, pairs.length * 2);
+  console.log(
+    `rendered status palette: ${String(accessibility.contrastPairsRead)} contrast pairs, ${String(separability.hueSamplesRead)} hue samples (${String(separability.chromaticHueSamplesRead)} chromatic)`,
+  );
+  assert.deepEqual(separability.violations, []);
+});
+
+test('contrast red: a rendered status pair forced below 4.5:1 is observed', async ({
+  page,
+}) => {
+  const builder = fixtureSurface('builder');
+  await page.goto(
+    `${baseUrl}/?surface=${encodeURIComponent(builder.surfaceId)}`,
+  );
+  await page.addStyleTag({
+    content:
+      '[data-status-role=blocked]{color:#c9c2c1!important;background:#ffffff!important}',
+  });
+
+  const observed = observeAccessibility(await readStatusColorPairs(page), []);
+  assert.ok(observed.contrastPairsRead > 0);
+  assert.deepEqual(observed.violations, ['CONTRAST:blocked']);
+});
+
+test('separability red: a status role moved into the brand hue is observed', async ({
+  page,
+}) => {
+  const builder = fixtureSurface('builder');
+  await page.goto(
+    `${baseUrl}/?surface=${encodeURIComponent(builder.surfaceId)}`,
+  );
+  // b700 on b100 clears 4.5:1 comfortably, so the only thing this can trip is
+  // the separability rule — the contrast gate stays green underneath it.
+  await page.addStyleTag({
+    content:
+      '[data-status-role=inProgress]{color:var(--b700)!important;background:var(--b100)!important}',
+  });
+
+  const pairs = await readStatusColorPairs(page);
+  assert.deepEqual(observeAccessibility(pairs, []).violations, []);
+  const separability = observeBrandStatusSeparability(pairs);
+  assert.ok(separability.hueSamplesRead > 0);
+  assert.deepEqual(separability.violations, [
+    'BRAND_HUE:inProgress:background',
+    'BRAND_HUE:inProgress:foreground',
+  ]);
+});
+
+test('reduced motion is honoured: the shimmer animates by contract and is absent under reduce', async ({
+  page,
+}) => {
+  const builder = fixtureSurface('builder');
+  await page.goto(
+    `${baseUrl}/?surface=${encodeURIComponent(builder.surfaceId)}`,
+  );
+
+  // The positive direction first. Without it "absent under reduce" is satisfied
+  // by never shipping a shimmer at all, which is the vacuity vector here.
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  const animating = await readSkeletonMotion(page);
+  assert.ok(animating.length > 0);
+  assert.deepEqual(animating, [
+    {
+      animationDuration: '2s',
+      animationName: 'skeleton-sweep',
+      display: 'block',
+      subjectId: 'skeleton-probe',
+      timingFunction: 'linear',
+    },
+  ]);
+
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  const reduced = await readSkeletonMotion(page);
+  const observed = observeReducedMotion(reduced);
+  assert.ok(observed.skeletonsRead > 0);
+  console.log(
+    `shimmer under reduced motion: ${String(observed.skeletonsRead)} skeletons read, animation ${reduced[0]?.animationName ?? 'unread'}, display ${reduced[0]?.display ?? 'unread'}`,
+  );
+  assert.deepEqual(observed.violations, []);
+});
+
+test('reduced-motion red: a shimmer that survives the reduce query is observed', async ({
+  page,
+}) => {
+  const builder = fixtureSurface('builder');
+  await page.goto(
+    `${baseUrl}/?surface=${encodeURIComponent(builder.surfaceId)}`,
+  );
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.addStyleTag({
+    content:
+      '.skeleton::after{display:block!important;animation:skeleton-sweep 2000ms linear infinite!important}',
+  });
+
+  const observed = observeReducedMotion(await readSkeletonMotion(page));
+  assert.ok(observed.skeletonsRead > 0);
+  assert.deepEqual(observed.violations, [
+    'REDUCED_MOTION_SHIMMER:skeleton-probe',
+  ]);
+});
+
+test('dark mode holds the contrast floor rather than merely having a media query', async ({
+  page,
+}) => {
+  const builder = fixtureSurface('builder');
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await page.goto(
+    `${baseUrl}/?surface=${encodeURIComponent(builder.surfaceId)}`,
+  );
+
+  const pairs = await readStatusColorPairs(page);
+  const light = await lightSchemeStatusColorPairs(page, builder.surfaceId);
+  // Proves the emulation actually reached the page: a stylesheet with a dark
+  // block nobody applies would otherwise return the light values and pass.
+  assert.notDeepEqual(pairs, light);
+
+  const accessibility = observeAccessibility(pairs, []);
+  assert.ok(accessibility.contrastPairsRead > 0);
+  assert.equal(accessibility.contrastPairsRead, builder.statusRoles.length);
+  const separability = observeBrandStatusSeparability(pairs);
+  assert.ok(separability.chromaticHueSamplesRead > 0);
+  console.log(
+    `dark scheme status palette: ${String(accessibility.contrastPairsRead)} contrast pairs, ${String(separability.hueSamplesRead)} hue samples (${String(separability.chromaticHueSamplesRead)} chromatic)`,
+  );
+  assert.deepEqual(accessibility.violations, []);
+  assert.deepEqual(separability.violations, []);
+});
+
+test('dark mode red: the light-ground accent on a dark ground is observed below the floor', async ({
+  page,
+}) => {
+  const builder = fixtureSurface('builder');
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await page.goto(
+    `${baseUrl}/?surface=${encodeURIComponent(builder.surfaceId)}`,
+  );
+  // ADR-0035 §10: naive inversion puts --b600 on a dark ground. This is that
+  // inversion, executed, and the gate has to see it.
+  await page.addStyleTag({
+    content: '[data-status-role]{color:var(--b600)!important}',
+  });
+
+  const observed = observeAccessibility(await readStatusColorPairs(page), []);
+  assert.equal(observed.contrastPairsRead, builder.statusRoles.length);
+  assert.deepEqual(
+    observed.violations.toSorted(),
+    [...builder.statusRoles].toSorted().map((role) => `CONTRAST:${role}`),
+  );
+});
+
+async function readStatusColorPairs(page: Page): Promise<
+  readonly {
+    readonly background: string;
+    readonly foreground: string;
+    readonly subjectId: string;
+  }[]
+> {
+  const computedPairs = await page
+    .locator('[data-status-role]')
+    .evaluateAll((elements) =>
+      elements.map((element) => {
+        const style = getComputedStyle(element);
+        return {
+          background: style.backgroundColor,
+          foreground: style.color,
+          subjectId: element.getAttribute('data-status-role') ?? 'missing-role',
+        };
+      }),
+    );
+  return computedPairs.map((pair) => ({
+    ...pair,
+    background: rgbToHex(pair.background),
+    foreground: rgbToHex(pair.foreground),
+  }));
+}
+
+async function lightSchemeStatusColorPairs(
+  page: Page,
+  surfaceId: string,
+): Promise<
+  readonly {
+    readonly background: string;
+    readonly foreground: string;
+    readonly subjectId: string;
+  }[]
+> {
+  const context = page.context();
+  const lightPage = await context.newPage();
+  try {
+    await lightPage.emulateMedia({ colorScheme: 'light' });
+    await lightPage.goto(
+      `${baseUrl}/?surface=${encodeURIComponent(surfaceId)}`,
+    );
+    return await readStatusColorPairs(lightPage);
+  } finally {
+    await lightPage.close();
+  }
+}
+
+/**
+ * The shimmer's subject is the shipped stylesheet, not any surface: skeleton
+ * geometry is packet `U5` and nothing renders a skeleton yet. So the probe is
+ * an element carrying the shipped `.skeleton` class, and what is observed is
+ * what the browser resolved for it — including the `::after` pseudo-element the
+ * animation actually lives on.
+ */
+async function readSkeletonMotion(page: Page): Promise<
+  readonly {
+    readonly animationDuration: string;
+    readonly animationName: string;
+    readonly display: string;
+    readonly subjectId: string;
+    readonly timingFunction: string;
+  }[]
+> {
+  return await page.evaluate(() => {
+    document
+      .querySelectorAll('[data-skeleton-probe]')
+      .forEach((existing) => existing.remove());
+    const probe = document.createElement('div');
+    probe.className = 'skeleton';
+    probe.setAttribute('data-skeleton-probe', 'skeleton-probe');
+    probe.style.width = '200px';
+    probe.style.height = '20px';
+    document.body.append(probe);
+    return [...document.querySelectorAll('[data-skeleton-probe]')].map(
+      (element) => {
+        const sheen = getComputedStyle(element, '::after');
+        return {
+          animationDuration: sheen.animationDuration,
+          animationName: sheen.animationName,
+          display: sheen.display,
+          subjectId: element.getAttribute('data-skeleton-probe') ?? 'unnamed',
+          timingFunction: sheen.animationTimingFunction,
+        };
+      },
+    );
+  });
+}
+
+function observeReducedMotion(
+  skeletons: readonly {
+    readonly animationName: string;
+    readonly display: string;
+    readonly subjectId: string;
+  }[],
+) {
+  return {
+    skeletonsRead: skeletons.length,
+    violations: skeletons
+      .filter(
+        (skeleton) =>
+          skeleton.animationName !== 'none' && skeleton.display !== 'none',
+      )
+      .map((skeleton) => `REDUCED_MOTION_SHIMMER:${skeleton.subjectId}`),
+  };
+}
+
+/**
+ * ADR-0035 §4: the brand hue is reserved and no status role may resolve into
+ * it. Derived from the rendered colour rather than asserted against a token
+ * name, because the rule is about what the eye competes with.
+ */
+const BRAND_HUE_DEGREES = 199;
+const BRAND_HUE_BAND_DEGREES = 20;
+// Below this chroma a colour has no hue worth competing with — a near-grey
+// cannot fight the identity colour. Reported separately so a palette that went
+// achromatic cannot pass this gate by having nothing left to measure.
+const CHROMATIC_FLOOR = 0.06;
+
+function observeBrandStatusSeparability(
+  pairs: readonly {
+    readonly background: string;
+    readonly foreground: string;
+    readonly subjectId: string;
+  }[],
+) {
+  const violations: string[] = [];
+  let hueSamplesRead = 0;
+  let chromaticHueSamplesRead = 0;
+  for (const pair of pairs) {
+    for (const channel of ['background', 'foreground'] as const) {
+      hueSamplesRead += 1;
+      const sample = hueOf(pair[channel]);
+      if (sample.chroma < CHROMATIC_FLOOR) continue;
+      chromaticHueSamplesRead += 1;
+      if (
+        hueDistance(sample.hue, BRAND_HUE_DEGREES) <= BRAND_HUE_BAND_DEGREES
+      ) {
+        violations.push(`BRAND_HUE:${pair.subjectId}:${channel}`);
+      }
+    }
+  }
+  return { chromaticHueSamplesRead, hueSamplesRead, violations };
+}
+
+function hueOf(color: string): { chroma: number; hue: number } {
+  const [red, green, blue] = [1, 3, 5].map(
+    (offset) => Number.parseInt(color.slice(offset, offset + 2), 16) / 255,
+  ) as [number, number, number];
+  const max = Math.max(red, green, blue);
+  const chroma = max - Math.min(red, green, blue);
+  if (chroma === 0) return { chroma: 0, hue: 0 };
+  const raw =
+    max === red
+      ? ((green - blue) / chroma) % 6
+      : max === green
+        ? (blue - red) / chroma + 2
+        : (red - green) / chroma + 4;
+  return { chroma, hue: (raw * 60 + 360) % 360 };
+}
+
+function hueDistance(left: number, right: number): number {
+  const delta = Math.abs(left - right) % 360;
+  return delta > 180 ? 360 - delta : delta;
+}
+
 async function requireCompactJourney(
   page: Page,
   surface: FixtureCompiledSurface,
