@@ -349,6 +349,67 @@ composedTest.describe('focus ring coverage', () => {
   );
 
   composedTest(
+    'focus-ring red: a painted ring that is not the declared token is observed',
+    async ({ composedApplication, page }) => {
+      composedTest.setTimeout(journeyTimeoutMilliseconds.focusRing);
+      // FOCUS_RING_CASCADE had no committed red: `outline-width:0` exits through
+      // NOT_PAINTED, `outline:none` through DECLARED_NONE, and every token and
+      // selector control exits through CONTRAST. A branch never seen to fail is
+      // not evidence.
+      //
+      // `--n0` is a real token on this rail (`--ink-on-rail`), so this is the
+      // realistic shape of the defect — another rule declaring a different
+      // legitimate token wins — rather than an implausible colour. Measured on
+      // both grounds `.sidebar a` occupies: 12.00:1 on `--surface-rail`
+      // (`#0B3A55`) and 6.92:1 on `--surface-rail-raised` (`#0F5F8C`), against a
+      // 3:1 floor, so contrast cannot fire and only the cascade check can.
+      const observed = await readFocusRingCoverage(
+        page,
+        composedApplication.currentBaseUrl(),
+        'light',
+        '.sidebar a{outline-color:#FFFFFF!important}',
+      );
+      const result = observeFocusRingCoverage(observed);
+      assert.ok(result.measurementsRead > 0);
+
+      // The injection landed in the direction intended: painted moved, declared
+      // did not. Without this the control could red for an unrelated reason.
+      const railSubjects = observed.measurements.filter(
+        (measurement) => measurement.selector === '.sidebar a:focus-visible',
+      );
+      assert.ok(railSubjects.length > 0);
+      assert.deepEqual(
+        [...new Set(railSubjects.map((subject) => subject.renderedColor))],
+        ['rgb(255, 255, 255)'],
+      );
+      assert.deepEqual(
+        [...new Set(railSubjects.map((subject) => subject.declaredRing))],
+        ['rgb(137, 207, 240)'],
+      );
+
+      // Isolation, in order: contrast green, the two neighbouring branches
+      // absent, and then the cascade set exactly.
+      assert.deepEqual(
+        result.violations.filter((violation) =>
+          violation.startsWith('FOCUS_RING_CONTRAST:'),
+        ),
+        [],
+      );
+      assert.deepEqual(
+        result.violations.filter(
+          (violation) =>
+            violation.startsWith('FOCUS_RING_NOT_PAINTED:') ||
+            violation.startsWith('FOCUS_RING_DECLARED_NONE:'),
+        ),
+        [],
+      );
+      assert.deepEqual(result.violations, [
+        'FOCUS_RING_CASCADE:.sidebar a:focus-visible',
+      ]);
+    },
+  );
+
+  composedTest(
     'focus-ring red: a regression confined to the dark block is observed',
     async ({ composedApplication, page }) => {
       composedTest.setTimeout(journeyTimeoutMilliseconds.focusRing);
