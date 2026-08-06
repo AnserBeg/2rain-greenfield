@@ -134,10 +134,15 @@ if [ "${1:-}" = '--self-test' ]; then
   # this commit"; main being linear, that made one late record cover all history.
   # A commit older than every record must still be covered only via the newest,
   # and a commit NEWER than the newest must not be. Both directions are asserted.
-  if [ "$NEWEST_RECORD" != '3975746658e23d6efc37a09045973d72d295a27e' ]; then
-    echo "self-test FAIL: newest record resolved to ${NEWEST_RECORD:-none}" >&2
+  # Assert the invariant, not a literal. An earlier version pinned the then-newest
+  # SHA and broke the moment a record was appended — a control that fails on
+  # correct behaviour teaches people to delete controls.
+  for _r in "${RECORDED[@]:-}"; do
+    [ -n "$_r" ] || continue
+    git merge-base --is-ancestor "$_r" "$NEWEST_RECORD" 2>/dev/null && continue
+    echo "self-test FAIL: $_r is not an ancestor of the resolved newest record" >&2
     fails=1
-  fi
+  done
   # A commit no record contains must NOT be covered. Without this the gate
   # passes on everything, which is the only failure mode that matters.
   if covered_by_record "$BRANCH"; then
