@@ -257,3 +257,43 @@ Two corollaries worth carrying:
   `rgbToHex` discarded alpha, so an element with no background computed
   `rgba(0,0,0,0)` and was measured as **pure black** — a confident number for a
   colour that was not there. Refuse the input rather than truncating it.
+
+## Acceptance requires a recorded verdict — executable since 2026-08-06
+
+`scripts/check-review-record.sh` fails when executable work sits on `main`
+newer than the newest verdict in `docs/execution/review-log.md`, and the
+`post-merge` hook runs it at every integration. Record the verdict there —
+SHA, packet, arm, verdict, date — as part of accepting, not afterwards.
+
+**Why it is executable.** On 2026-08-06 `U2` and `U2-fix` were each integrated
+with no review arm. Both times the orchestrator had verified the work personally
+and both times that was insufficient for the same structural reason: the
+orchestrator had written the revision specification, so the check was against its
+own instructions rather than against the ADR. Both times the omission was caught
+by the **user asking whether a review was owed**. When the reviews finally ran,
+both returned BLOCK, and between them they found a focus ring below the WCAG
+floor on two shipped states, an unreachable alignment path, and a gate that had
+*deleted* a rendered observation and replaced it with declaration inference.
+
+A declared rule the orchestrator must remember is the same shape as the push rule
+that lapsed for eight days and 637 commits. This is the gate.
+
+**Read the green honestly.** It proves a verdict was *recorded*, not that a
+review happened and not that it was good — a BLOCK is a valid record. And it
+measures against the newest record only, so if two packets land and only the
+later is recorded, the earlier passes. Closing that needs per-packet grouping via
+the `Packet:` trailer `git-workflow` already requires and which **no lane commit
+since the baseline carries** — a gap the gate found on its first run.
+
+**The gate shipped with a vacuity of its own, which is the part worth keeping.**
+Its first formulation asked *"does any record contain this commit?"*. `main` is
+linear, so every commit before any recorded SHA is an ancestor of one, and a
+single late record silently covered all of history. It passed its unit controls
+and it passed live. It was caught only by pushing a negative control until it
+*should* have tripped and noticing it did not — then, when reaching backwards
+could not trip it either, by building a scratch branch carrying an unrecorded
+executable commit and proving the gate fired on it.
+
+> **A negative control that never actually reds is not a control.** Run it until
+> you have seen the failure, or you have written a test for a gate you have not
+> tested.
