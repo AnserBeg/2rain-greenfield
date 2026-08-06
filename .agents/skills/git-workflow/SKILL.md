@@ -51,6 +51,29 @@ description: Branching, commit, push, and tag discipline for this repository.
 - The accepted SHA is recorded in the ledger row and must stay retrievable
   forever (see integration).
 
+**Tag a reviewed candidate before rebasing it — added 2026-08-06.** When a
+review returns findings and the orchestrator instructs a rebase onto moved
+`main`, the rebase rewrites the branch and the force-push that follows leaves the
+**reviewed** SHA on no ref at all. It survives only in a local reflog, and the
+remote will collect it.
+
+    git tag -a <packet>-reviewed-r<n> <reviewed-sha> -m "<packet> round-<n> candidate as reviewed"
+    git push origin <packet>-reviewed-r<n>
+
+**Why a rejected candidate still needs to be retrievable:** a review's findings
+cite file and line at the SHA they were written against. Once that tree is gone
+the findings cannot be checked, and the record of *why* a packet was revised
+becomes unverifiable. This is the same evidence-link reasoning that forbids
+squashing accepted work — it simply applies one round earlier.
+
+Caught on `U2` (2026-08-06), where the orchestrator instructed the rebase and did
+not preserve `8feabfa` first; the lane force-pushed as instructed and reported it
+plainly, and the tag was added at acceptance rather than before the rewrite. The
+rule below permits `--force-with-lease` only on a branch not yet pushed or
+reviewed; `U2`'s branch was both, so **an orchestrator-instructed rebase of a
+reviewed candidate is the one case that overrides it — and it does so only once
+the tag exists.**
+
 ## Integrating an accepted packet
 
 **First, check whether `main` moved while the packet was in flight**

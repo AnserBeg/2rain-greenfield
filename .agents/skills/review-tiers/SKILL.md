@@ -208,3 +208,52 @@ This does not replace the confirm arm; the packet still needs one before it
 lands. It buys a second perspective at the point where one reviewer and one
 orchestrator have demonstrably converged on the wrong frame.
 
+
+## A read count is not a proof — added 2026-08-06
+
+AGENTS.md section 6 requires a negative control per way a gate could pass
+vacuously, and the standard instrument for the commonest vector — *the subject
+was never there* — is a read-count guard: `assert.ok(subjectsRead > 0)`.
+
+**A read count closes "nothing was there". It does not close "the thing there was
+hollow."** Those are different vectors and the guard only looks like it covers
+both.
+
+`U2` shipped four gates, each with a read-count guard, and the online review
+blocked all four on the same shape:
+
+- Status chips were counted and their colours measured, but nothing checked they
+  were **visible**. `display:none` still yields a computed colour, so every
+  colour gate stayed green against a page showing no status at all.
+- The expected coverage set was `[...builder.statusRoles]` — read from the same
+  compiled fixture that rendered the page. Shrink the fixture and **both sides
+  shrink together**. The comment above it claimed this stopped the subject
+  shrinking.
+- Three colour gates each proved a real fact — literals are in one block, tokens
+  have contrast, rendered elements have contrast — and **nothing joined them**,
+  so hardcoded `rgb()` in the status selectors satisfied all three while the
+  doctrine those gates exist to enforce ("status colour resolves only from role
+  tokens") was violated.
+- `assert.notDeepEqual(darkPairs, lightPairs)` passed on **one** differing
+  element, so three of four roles could carry light values into dark mode.
+
+The generative question is not *did the gate read its subject?* It is:
+
+> **What is the cheapest broken tree that keeps this gate green?**
+
+Write that tree down. If you can describe it in a sentence, the gate is not yet a
+gate. Then make the negative control **be** that tree, and prove it isolates —
+`U2`'s round-2 routing control substitutes a contrast-safe, off-brand `hsl()` and
+asserts contrast, separability and encoding all stay green while routing alone
+reds. A control that reds several gates at once has not shown which one is
+load-bearing.
+
+Two corollaries worth carrying:
+
+- **A gate that derives its expectation from its subject proves nothing.** Pin
+  the expectation to something the subject cannot move — for `U2` that was the
+  canonical `STATUS_ROLES`, already bound by the grammar pin.
+- **A measurement that cannot fail is worse than no measurement.** `U2`'s
+  `rgbToHex` discarded alpha, so an element with no background computed
+  `rgba(0,0,0,0)` and was measured as **pure black** — a confident number for a
+  colour that was not there. Refuse the input rather than truncating it.
