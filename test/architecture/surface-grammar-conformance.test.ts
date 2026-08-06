@@ -473,26 +473,55 @@ test('zero-input red reports that zero active and compact surfaces were read', (
 });
 
 test('closed status token contrast pairs and a 44px target pass the automated floor', () => {
+  // ADR-0035 §4, both themes. These are the shipped token values, read back out
+  // of `apps/web/src/design-tokens.ts` rather than copied, so a token edited
+  // below its floor fails here and not only in the browser suite — which is the
+  // computed-from-token-values check ADR-0035's Consequences section requires.
+  const light = shippedStatusRoleColors('light');
+  const dark = shippedStatusRoleColors('dark');
+  assert.deepEqual(
+    light.map((pair) => pair.subjectId),
+    ['success', 'attention', 'blocked', 'inProgress'],
+  );
+  assert.deepEqual(
+    dark.map((pair) => pair.subjectId),
+    ['success', 'attention', 'blocked', 'inProgress'],
+  );
+
   const result = checkSurfaceAccessibility(
-    [
-      { background: '#e8f6ed', foreground: '#246240', subjectId: 'success' },
-      {
-        background: '#fff7e8',
-        foreground: '#8a5918',
-        subjectId: 'attention',
-      },
-      { background: '#fff0ee', foreground: '#8f3028', subjectId: 'blocked' },
-      {
-        background: '#edf7fc',
-        foreground: '#2d607d',
-        subjectId: 'inProgress',
-      },
-    ],
+    [...light, ...dark],
+    [{ height: 44, subjectId: 'minimum-target', width: 44 }],
+  );
+  assert.equal(result.contrastPairsRead, 8);
+  assert.equal(result.targetsRead, 1);
+  assert.deepEqual(result.violations, []);
+});
+
+test('token red: a shipped status token moved below its floor is observed', () => {
+  const light = shippedStatusRoleColors('light');
+  const success = light.find((pair) => pair.subjectId === 'success');
+  assert.ok(success);
+  // ADR-0035 §2 measured `#89CFF0` at 1.71:1 on white and forbids it carrying
+  // text. Putting the brand on a status ground is that forbidden move.
+  const result = checkSurfaceAccessibility(
+    light.map((pair) =>
+      pair.subjectId === 'success' ? { ...pair, foreground: '#89CFF0' } : pair,
+    ),
     [{ height: 44, subjectId: 'minimum-target', width: 44 }],
   );
   assert.equal(result.contrastPairsRead, 4);
-  assert.equal(result.targetsRead, 1);
+  assert.deepEqual(ruleIds(result), ['SG010_CONTRAST']);
+});
+
+test('token red: an empty token block reports that zero status pairs were read', () => {
+  const result = checkSurfaceAccessibility(
+    [],
+    [{ height: 44, subjectId: 'minimum-target', width: 44 }],
+  );
+  assert.equal(result.contrastPairsRead, 0);
   assert.deepEqual(result.violations, []);
+  // The count is the guard: zero pairs is a silent pass on the check above, so
+  // that test asserts the exact expected count rather than only `violations`.
 });
 
 test('contrast red: a failing foreground/background pair is observed', () => {
@@ -549,6 +578,69 @@ test('bespoke-screen red: a module-specific React screen outside the compiled pa
     removeArchitectureFixture(root);
   }
 });
+
+const DESIGN_TOKENS_PATH = 'apps/web/src/design-tokens.ts';
+const TOKEN_BLOCK_START = '/* token-definition-block:start */';
+const TOKEN_BLOCK_END = '/* token-definition-block:end */';
+const DARK_SCHEME_MARKER = '@media (prefers-color-scheme:dark)';
+const STATUS_ROLE_TOKENS = [
+  { subjectId: 'success', token: 'success' },
+  { subjectId: 'attention', token: 'attention' },
+  { subjectId: 'blocked', token: 'blocked' },
+  { subjectId: 'inProgress', token: 'inprogress' },
+] as const;
+
+/**
+ * Reads the shipped ADR-0035 status roles back out of the token-definition
+ * block and resolves them through the primitive layer, so the contrast check
+ * observes the values the browser will receive rather than a number copied into
+ * a table. ADR-0035's own Consequences section records why: recomputing the
+ * table by hand on 2026-07-31 found `--b700` labelled AAA at a real 6.92:1.
+ *
+ * Read as text, never imported: `apps/web` is a consumer of the packages this
+ * suite checks, and an import would invert that edge.
+ */
+function shippedStatusRoleColors(
+  scheme: 'dark' | 'light',
+): { background: string; foreground: string; subjectId: string }[] {
+  const tokens = readDesignTokens(scheme);
+  return STATUS_ROLE_TOKENS.map(({ subjectId, token }) => ({
+    background: resolveToken(tokens, `status-${token}-ground`),
+    foreground: resolveToken(tokens, `status-${token}-ink`),
+    subjectId,
+  }));
+}
+
+function readDesignTokens(scheme: 'dark' | 'light'): Map<string, string> {
+  const source = readFileSync(
+    resolve(process.cwd(), DESIGN_TOKENS_PATH),
+    'utf8',
+  );
+  const start = source.indexOf(TOKEN_BLOCK_START);
+  const end = source.indexOf(TOKEN_BLOCK_END, start + TOKEN_BLOCK_START.length);
+  assert.ok(start >= 0 && end > start, 'token-definition block not found');
+  const block = source.slice(start, end);
+  const darkAt = block.indexOf(DARK_SCHEME_MARKER);
+  assert.ok(darkAt > 0, 'designed dark-mode block not found');
+
+  const tokens = new Map<string, string>();
+  for (const match of block.matchAll(/--([a-z0-9-]+)\s*:\s*([^;}]+)[;}]/gu)) {
+    if (scheme === 'light' && match.index > darkAt) continue;
+    tokens.set(match[1]!, match[2]!.trim());
+  }
+  assert.ok(tokens.size > 0, `no ${scheme} tokens read`);
+  return tokens;
+}
+
+function resolveToken(tokens: Map<string, string>, name: string): string {
+  let value = tokens.get(name);
+  for (let hops = 0; hops < 8 && value !== undefined; hops += 1) {
+    const reference = /^var\(\s*--([a-z0-9-]+)\s*\)$/u.exec(value);
+    if (!reference) return value;
+    value = tokens.get(reference[1]!);
+  }
+  throw new Error(`unresolved design token --${name}`);
+}
 
 interface MutableAuthoredSurface {
   archetype: string;
