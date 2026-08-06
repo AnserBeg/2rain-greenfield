@@ -6,6 +6,7 @@ import { join } from 'node:path';
 
 import { expect, test, type Page } from '@playwright/test';
 import {
+  STATUS_ROLES,
   SURFACE_ARCHETYPES,
   SURFACE_SLOTS,
   canonicalize,
@@ -237,43 +238,82 @@ test('version boundary red: a v0 reader refuses grouped navigation instead of de
 });
 
 /**
- * ADR-0035 observations. Every one of these reads the *rendered* page in a live
- * browser rather than the stylesheet source, because the fact each asserts is
- * "what the user's machine resolved", not "what someone typed". Each carries a
- * read-count guard: a run against a page with no status chips and no skeleton
- * would otherwise pass while proving nothing.
+ * ADR-0035 observations. Every one reads the *rendered* page in a live browser
+ * rather than the stylesheet source, because the fact each asserts is "what the
+ * user's machine resolved", not "what someone typed".
+ *
+ * Revision 1 closed five holes an independent review found in the first round,
+ * and the shape of all five was the same: the gate measured a property of a
+ * subject without first proving the subject was there, was complete, or was the
+ * one the doctrine names. So the sample below carries geometry, text and the
+ * generated dot alongside colour, the coverage set comes from the canonical
+ * vocabulary rather than from the fixture that rendered the page, the token the
+ * colour should have come from is resolved separately and compared, and a
+ * non-opaque computed colour is refused instead of being truncated into a
+ * confident wrong number.
  */
-test('rendered status roles hold the contrast floor and stay off the brand hue', async ({
+interface StatusRoleSample {
+  readonly background: string;
+  readonly dotArea: number;
+  readonly dotContent: string;
+  readonly dotDisplay: string;
+  readonly foreground: string;
+  readonly height: number;
+  readonly subjectId: string;
+  readonly text: string;
+  readonly tokenGround: string;
+  readonly tokenInk: string;
+  readonly visible: boolean;
+  readonly width: number;
+}
+
+test('every canonical status role renders perceivably, from its own token', async ({
   page,
 }) => {
   const builder = fixtureSurface('builder');
+  // The fixture must still declare the whole vocabulary; if it ever shrinks the
+  // failure belongs here and not silently inside a smaller coverage set.
+  assert.deepEqual(
+    [...builder.statusRoles].toSorted(),
+    [...STATUS_ROLES].toSorted(),
+  );
   await page.goto(
     `${baseUrl}/?surface=${encodeURIComponent(builder.surfaceId)}`,
   );
 
-  const pairs = await readStatusColorPairs(page);
+  const samples = await readStatusRoleSamples(page);
+  // Pinned to the canonical vocabulary, NOT to the compiled fixture. The first
+  // round compared the fixture against itself, so both sides shrank together.
   assert.deepEqual(
-    pairs.map((pair) => pair.subjectId).toSorted(),
-    // Deliberately compared against the compiled definition, not a literal, so
-    // the subject cannot silently shrink to one easy chip.
-    [...builder.statusRoles].toSorted(),
+    samples.map((sample) => sample.subjectId).toSorted(),
+    [...STATUS_ROLES].toSorted(),
   );
-  const accessibility = observeAccessibility(pairs, []);
-  assert.ok(accessibility.contrastPairsRead > 0);
-  assert.equal(accessibility.contrastPairsRead, builder.statusRoles.length);
-  assert.deepEqual(accessibility.violations, []);
 
-  const separability = observeBrandStatusSeparability(pairs);
-  assert.ok(separability.hueSamplesRead > 0);
+  const encoding = observeRedundantEncoding(samples);
+  const routing = observeTokenRouting(samples);
+  const brand = await readBrandHue(page);
+  const separability = observeBrandStatusSeparability(samples, brand.hue);
+  const accessibility = observeAccessibility(samples, []);
+
+  assert.equal(encoding.rolesRead, STATUS_ROLES.length);
+  assert.equal(routing.rolesRead, STATUS_ROLES.length);
+  assert.equal(accessibility.contrastPairsRead, STATUS_ROLES.length);
+  assert.equal(separability.hueSamplesRead, STATUS_ROLES.length * 2);
   assert.ok(separability.chromaticHueSamplesRead > 0);
-  assert.equal(separability.hueSamplesRead, pairs.length * 2);
+  // A near-grey brand would make the reserved band meaningless, so the band's
+  // own source is checked before it is trusted as a comparator.
+  assert.ok(brand.chroma >= CHROMATIC_FLOOR);
   console.log(
-    `rendered status palette: ${String(accessibility.contrastPairsRead)} contrast pairs, ${String(separability.hueSamplesRead)} hue samples (${String(separability.chromaticHueSamplesRead)} chromatic)`,
+    `rendered status palette: ${String(encoding.rolesRead)} roles perceivable, ${String(routing.rolesRead)} token-routed, ${String(accessibility.contrastPairsRead)} contrast pairs, ${String(separability.hueSamplesRead)} hue samples (${String(separability.chromaticHueSamplesRead)} chromatic) against a rendered brand hue of ${brand.hue.toFixed(1)}°`,
   );
+
+  assert.deepEqual(encoding.violations, []);
+  assert.deepEqual(routing.violations, []);
+  assert.deepEqual(accessibility.violations, []);
   assert.deepEqual(separability.violations, []);
 });
 
-test('contrast red: a rendered status pair forced below 4.5:1 is observed', async ({
+test('redundant-encoding red: a hidden status role is observed while its siblings stay green', async ({
   page,
 }) => {
   const builder = fixtureSurface('builder');
@@ -281,16 +321,78 @@ test('contrast red: a rendered status pair forced below 4.5:1 is observed', asyn
     `${baseUrl}/?surface=${encodeURIComponent(builder.surfaceId)}`,
   );
   await page.addStyleTag({
-    content:
-      '[data-status-role=blocked]{color:#c9c2c1!important;background:#ffffff!important}',
+    content: '[data-status-role=success]{display:none!important}',
   });
 
-  const observed = observeAccessibility(await readStatusColorPairs(page), []);
-  assert.ok(observed.contrastPairsRead > 0);
-  assert.deepEqual(observed.violations, ['CONTRAST:blocked']);
+  const samples = await readStatusRoleSamples(page);
+  const encoding = observeRedundantEncoding(samples);
+  // The subject is still fully read — this is the vacuity vector, so the count
+  // has to stay at four while exactly one role reds.
+  assert.equal(encoding.rolesRead, STATUS_ROLES.length);
+  assert.deepEqual(encoding.violations, [
+    'REDUNDANT_ENCODING_IMPERCEPTIBLE:success',
+  ]);
 });
 
-test('separability red: a status role moved into the brand hue is observed', async ({
+test('redundant-encoding red: colour without the dot is observed as colour alone', async ({
+  page,
+}) => {
+  const builder = fixtureSurface('builder');
+  await page.goto(
+    `${baseUrl}/?surface=${encodeURIComponent(builder.surfaceId)}`,
+  );
+  // ADR-0035 §5 calls colour + dot + word non-negotiable. This removes exactly
+  // the dot and leaves colour and word intact.
+  await page.addStyleTag({
+    content: '[data-status-role]::before{display:none!important}',
+  });
+
+  const encoding = observeRedundantEncoding(await readStatusRoleSamples(page));
+  assert.equal(encoding.rolesRead, STATUS_ROLES.length);
+  assert.deepEqual(
+    encoding.violations.toSorted(),
+    [...STATUS_ROLES]
+      .toSorted()
+      .map((role) => `REDUNDANT_ENCODING_DOT:${role}`),
+  );
+});
+
+test('token-routing red: an off-brand contrast-safe literal in a status selector is observed', async ({
+  page,
+}) => {
+  const builder = fixtureSurface('builder');
+  await page.goto(
+    `${baseUrl}/?surface=${encodeURIComponent(builder.surfaceId)}`,
+  );
+  // The whole point of this control: a green that clears 4.5:1 and sits nowhere
+  // near the brand hue. Contrast and separability must stay green underneath so
+  // that the routing assertion is demonstrably the only thing that reds. This
+  // is the tree ADR-0035's doctrine forbids and the first round could not see:
+  // no new hex literal, the tokens still declared and still well-formed, and
+  // every colour gate satisfied by hardcoded values.
+  await page.addStyleTag({
+    content:
+      '[data-status-role=success]{color:hsl(150 70% 22%)!important;background:hsl(150 45% 93%)!important}',
+  });
+
+  const samples = await readStatusRoleSamples(page);
+  const brand = await readBrandHue(page);
+  assert.deepEqual(observeAccessibility(samples, []).violations, []);
+  assert.deepEqual(
+    observeBrandStatusSeparability(samples, brand.hue).violations,
+    [],
+  );
+  assert.deepEqual(observeRedundantEncoding(samples).violations, []);
+
+  const routing = observeTokenRouting(samples);
+  assert.equal(routing.rolesRead, STATUS_ROLES.length);
+  assert.deepEqual(routing.violations, [
+    'TOKEN_ROUTING:success:background',
+    'TOKEN_ROUTING:success:foreground',
+  ]);
+});
+
+test('separability red: a status role moved into the rendered brand hue is observed', async ({
   page,
 }) => {
   const builder = fixtureSurface('builder');
@@ -304,14 +406,59 @@ test('separability red: a status role moved into the brand hue is observed', asy
       '[data-status-role=inProgress]{color:var(--b700)!important;background:var(--b100)!important}',
   });
 
-  const pairs = await readStatusColorPairs(page);
-  assert.deepEqual(observeAccessibility(pairs, []).violations, []);
-  const separability = observeBrandStatusSeparability(pairs);
-  assert.ok(separability.hueSamplesRead > 0);
+  const samples = await readStatusRoleSamples(page);
+  const brand = await readBrandHue(page);
+  assert.deepEqual(observeAccessibility(samples, []).violations, []);
+  const separability = observeBrandStatusSeparability(samples, brand.hue);
+  assert.equal(separability.hueSamplesRead, STATUS_ROLES.length * 2);
   assert.deepEqual(separability.violations, [
     'BRAND_HUE:inProgress:background',
     'BRAND_HUE:inProgress:foreground',
   ]);
+});
+
+test('separability red: the band follows the brand token rather than a copied constant', async ({
+  page,
+}) => {
+  const builder = fixtureSurface('builder');
+  await page.goto(
+    `${baseUrl}/?surface=${encodeURIComponent(builder.surfaceId)}`,
+  );
+  // Move the BRAND onto inProgress's indigo instead of moving a status role.
+  // A hardcoded 199° comparator stays green here; a derived one cannot.
+  await page.addStyleTag({
+    content: ':root{--brand:var(--s-inprogress-ink)!important}',
+  });
+
+  const samples = await readStatusRoleSamples(page);
+  const brand = await readBrandHue(page);
+  assert.ok(brand.chroma >= CHROMATIC_FLOOR);
+  assert.ok(hueDistance(brand.hue, 199) > BRAND_HUE_BAND_DEGREES);
+  const separability = observeBrandStatusSeparability(samples, brand.hue);
+  assert.equal(separability.hueSamplesRead, STATUS_ROLES.length * 2);
+  assert.deepEqual(separability.violations, [
+    'BRAND_HUE:inProgress:background',
+    'BRAND_HUE:inProgress:foreground',
+  ]);
+});
+
+test('opacity red: a non-opaque status ground is refused rather than measured as black', async ({
+  page,
+}) => {
+  const builder = fixtureSurface('builder');
+  await page.goto(
+    `${baseUrl}/?surface=${encodeURIComponent(builder.surfaceId)}`,
+  );
+  // `rgba(0,0,0,0)` truncated to three channels reads as pure black, which
+  // "passes" against light text. Refusing it is the only honest answer without
+  // compositing against the real underlying surface.
+  await page.addStyleTag({
+    content: '[data-status-role=blocked]{background:transparent!important}',
+  });
+
+  const observed = observeAccessibility(await readStatusRoleSamples(page), []);
+  assert.equal(observed.contrastPairsRead, STATUS_ROLES.length);
+  assert.deepEqual(observed.violations, ['NON_OPAQUE:blocked:background']);
 });
 
 test('reduced motion is honoured: the shimmer animates by contract and is absent under reduce', async ({
@@ -367,7 +514,7 @@ test('reduced-motion red: a shimmer that survives the reduce query is observed',
   ]);
 });
 
-test('dark mode holds the contrast floor rather than merely having a media query', async ({
+test('every status role is remapped for dark mode and holds the floor there', async ({
   page,
 }) => {
   const builder = fixtureSurface('builder');
@@ -376,25 +523,59 @@ test('dark mode holds the contrast floor rather than merely having a media query
     `${baseUrl}/?surface=${encodeURIComponent(builder.surfaceId)}`,
   );
 
-  const pairs = await readStatusColorPairs(page);
-  const light = await lightSchemeStatusColorPairs(page, builder.surfaceId);
-  // Proves the emulation actually reached the page: a stylesheet with a dark
-  // block nobody applies would otherwise return the light values and pass.
-  assert.notDeepEqual(pairs, light);
+  const dark = await readStatusRoleSamples(page);
+  const light = await lightSchemeStatusRoleSamples(page, builder.surfaceId);
+  // Per role, not per page. `notDeepEqual` over the whole array passed when a
+  // single element differed, so three roles could carry light values into dark.
+  const remapping = observeDarkRemapping(dark, light);
+  const encoding = observeRedundantEncoding(dark);
+  const routing = observeTokenRouting(dark);
+  const brand = await readBrandHue(page);
+  const separability = observeBrandStatusSeparability(dark, brand.hue);
+  const accessibility = observeAccessibility(dark, []);
 
-  const accessibility = observeAccessibility(pairs, []);
-  assert.ok(accessibility.contrastPairsRead > 0);
-  assert.equal(accessibility.contrastPairsRead, builder.statusRoles.length);
-  const separability = observeBrandStatusSeparability(pairs);
+  assert.equal(remapping.rolesCompared, STATUS_ROLES.length);
+  assert.equal(encoding.rolesRead, STATUS_ROLES.length);
+  assert.equal(routing.rolesRead, STATUS_ROLES.length);
+  assert.equal(accessibility.contrastPairsRead, STATUS_ROLES.length);
   assert.ok(separability.chromaticHueSamplesRead > 0);
   console.log(
-    `dark scheme status palette: ${String(accessibility.contrastPairsRead)} contrast pairs, ${String(separability.hueSamplesRead)} hue samples (${String(separability.chromaticHueSamplesRead)} chromatic)`,
+    `dark scheme status palette: ${String(remapping.rolesCompared)} roles remapped, ${String(encoding.rolesRead)} perceivable, ${String(routing.rolesRead)} token-routed, ${String(accessibility.contrastPairsRead)} contrast pairs, ${String(separability.hueSamplesRead)} hue samples (${String(separability.chromaticHueSamplesRead)} chromatic)`,
   );
+
+  assert.deepEqual(remapping.violations, []);
+  assert.deepEqual(encoding.violations, []);
+  assert.deepEqual(routing.violations, []);
   assert.deepEqual(accessibility.violations, []);
   assert.deepEqual(separability.violations, []);
 });
 
-test('dark mode red: the light-ground accent on a dark ground is observed below the floor', async ({
+test('dark-mode red: one role left on its light values is observed', async ({
+  page,
+}) => {
+  const builder = fixtureSurface('builder');
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await page.goto(
+    `${baseUrl}/?surface=${encodeURIComponent(builder.surfaceId)}`,
+  );
+  // `--s-*` are the light status primitives and are NOT redefined under dark, so
+  // this restores exactly the light pair. Contrast stays green (7.07:1) and no
+  // literal moves, which is what makes the partial-remap case invisible without
+  // a per-role comparison.
+  await page.addStyleTag({
+    content:
+      '[data-status-role=success]{color:var(--s-success-ink)!important;background:var(--s-success-ground)!important}',
+  });
+
+  const dark = await readStatusRoleSamples(page);
+  const light = await lightSchemeStatusRoleSamples(page, builder.surfaceId);
+  assert.deepEqual(observeAccessibility(dark, []).violations, []);
+  const remapping = observeDarkRemapping(dark, light);
+  assert.equal(remapping.rolesCompared, STATUS_ROLES.length);
+  assert.deepEqual(remapping.violations, ['DARK_SCHEME_UNMAPPED:success']);
+});
+
+test('dark-mode red: the light-ground accent on a dark ground is observed below the floor', async ({
   page,
 }) => {
   const builder = fixtureSurface('builder');
@@ -408,61 +589,226 @@ test('dark mode red: the light-ground accent on a dark ground is observed below 
     content: '[data-status-role]{color:var(--b600)!important}',
   });
 
-  const observed = observeAccessibility(await readStatusColorPairs(page), []);
-  assert.equal(observed.contrastPairsRead, builder.statusRoles.length);
+  const observed = observeAccessibility(await readStatusRoleSamples(page), []);
+  assert.equal(observed.contrastPairsRead, STATUS_ROLES.length);
   assert.deepEqual(
     observed.violations.toSorted(),
-    [...builder.statusRoles].toSorted().map((role) => `CONTRAST:${role}`),
+    [...STATUS_ROLES].toSorted().map((role) => `CONTRAST:${role}`),
   );
 });
 
-async function readStatusColorPairs(page: Page): Promise<
-  readonly {
-    readonly background: string;
-    readonly foreground: string;
-    readonly subjectId: string;
-  }[]
-> {
-  const computedPairs = await page
-    .locator('[data-status-role]')
-    .evaluateAll((elements) =>
-      elements.map((element) => {
-        const style = getComputedStyle(element);
-        return {
-          background: style.backgroundColor,
-          foreground: style.color,
-          subjectId: element.getAttribute('data-status-role') ?? 'missing-role',
-        };
-      }),
+/**
+ * ADR-0035 §2.1. The ring is gated against every ground it lands on — panel,
+ * page and rail — in both schemes, because a white-only check is exactly what
+ * let `--b300` through: it measures 7.00:1 on the rail and 1.71:1 where the ring
+ * is actually seen most.
+ */
+for (const scheme of ['light', 'dark'] as const) {
+  test(`focus ring clears the 3:1 non-text floor on every ${scheme} ground it lands on`, async ({
+    page,
+  }) => {
+    await page.emulateMedia({ colorScheme: scheme });
+    await page.goto(baseUrl);
+
+    const observed = observeFocusRing(await readFocusRingGrounds(page));
+    assert.equal(observed.groundsRead, FOCUS_RING_GROUND_TOKENS.length);
+    console.log(
+      `focus ring (${scheme}): ${String(observed.groundsRead)} grounds read — ${observed.measured.join(', ')}`,
     );
-  return computedPairs.map((pair) => ({
-    ...pair,
-    background: rgbToHex(pair.background),
-    foreground: rgbToHex(pair.foreground),
-  }));
+    assert.deepEqual(observed.violations, []);
+
+    // The token is right; this proves the ring actually uses it. A ring styled
+    // with its own literal would satisfy the measurement above and nothing else.
+    const rendered = await readRenderedFocusRing(page);
+    assert.equal(rendered.style, 'solid');
+    assert.notEqual(rendered.width, '0px');
+    assert.equal(rendered.color, rendered.token);
+  });
 }
 
-async function lightSchemeStatusColorPairs(
+test('focus-ring red: --b600 passes a white-only check and fails on the rail', async ({
+  page,
+}) => {
+  await page.goto(baseUrl);
+  // The exact trap ADR-0035 §2.1 records. `--b600` is the obvious "go darker"
+  // fix, clears panel and page comfortably, and fails where the sidebar is.
+  await page.addStyleTag({
+    content: ':root{--focus-ring:var(--b600)!important}',
+  });
+
+  const observed = observeFocusRing(await readFocusRingGrounds(page));
+  assert.equal(observed.groundsRead, FOCUS_RING_GROUND_TOKENS.length);
+  assert.deepEqual(observed.violations, ['FOCUS_RING_CONTRAST:surface-rail']);
+});
+
+test('focus-ring red: the retired --b300 ring fails on panel and page', async ({
+  page,
+}) => {
+  await page.goto(baseUrl);
+  await page.addStyleTag({
+    content: ':root{--focus-ring:var(--b300)!important}',
+  });
+
+  const observed = observeFocusRing(await readFocusRingGrounds(page));
+  assert.equal(observed.groundsRead, FOCUS_RING_GROUND_TOKENS.length);
+  assert.deepEqual(observed.violations.toSorted(), [
+    'FOCUS_RING_CONTRAST:surface-page',
+    'FOCUS_RING_CONTRAST:surface-panel',
+  ]);
+});
+
+/**
+ * One pass over the page per scheme. Colour, geometry, visible text and the
+ * generated dot come off the same element, and the token the colour is supposed
+ * to have come from is resolved beside it through a probe that deliberately
+ * carries no `data-status-role` — so a stylesheet that overrides the role
+ * selectors moves the rendered pair and leaves the probe alone.
+ */
+async function readStatusRoleSamples(
+  page: Page,
+): Promise<readonly StatusRoleSample[]> {
+  return await page.evaluate(() => {
+    const tokenSuffix = (role: string) => role.toLowerCase();
+    const probe = document.createElement('span');
+    probe.setAttribute('data-token-probe', '');
+    probe.style.position = 'absolute';
+    probe.style.left = '-9999px';
+    document.body.append(probe);
+    const resolve = (property: string): string => {
+      probe.style.color = '';
+      probe.style.color = `var(${property})`;
+      return getComputedStyle(probe).color;
+    };
+    try {
+      return [...document.querySelectorAll('[data-status-role]')]
+        .map((element) => {
+          const role = element.getAttribute('data-status-role') ?? 'missing';
+          const style = getComputedStyle(element);
+          const dot = getComputedStyle(element, '::before');
+          const rectangle = element.getBoundingClientRect();
+          const dotWidth = Number.parseFloat(dot.width);
+          const dotHeight = Number.parseFloat(dot.height);
+          return {
+            background: style.backgroundColor,
+            dotArea:
+              Number.isFinite(dotWidth) && Number.isFinite(dotHeight)
+                ? dotWidth * dotHeight
+                : 0,
+            dotContent: dot.content,
+            dotDisplay: dot.display,
+            foreground: style.color,
+            height: rectangle.height,
+            subjectId: role,
+            text: (element.textContent ?? '').trim(),
+            tokenGround: resolve(`--status-${tokenSuffix(role)}-ground`),
+            tokenInk: resolve(`--status-${tokenSuffix(role)}-ink`),
+            visible:
+              style.display !== 'none' &&
+              style.visibility !== 'hidden' &&
+              Number.parseFloat(style.opacity) > 0,
+            width: rectangle.width,
+          };
+        })
+        .sort((left, right) => left.subjectId.localeCompare(right.subjectId));
+    } finally {
+      probe.remove();
+    }
+  });
+}
+
+async function lightSchemeStatusRoleSamples(
   page: Page,
   surfaceId: string,
-): Promise<
-  readonly {
-    readonly background: string;
-    readonly foreground: string;
-    readonly subjectId: string;
-  }[]
-> {
-  const context = page.context();
-  const lightPage = await context.newPage();
+): Promise<readonly StatusRoleSample[]> {
+  const lightPage = await page.context().newPage();
   try {
     await lightPage.emulateMedia({ colorScheme: 'light' });
     await lightPage.goto(
       `${baseUrl}/?surface=${encodeURIComponent(surfaceId)}`,
     );
-    return await readStatusColorPairs(lightPage);
+    return await readStatusRoleSamples(lightPage);
   } finally {
     await lightPage.close();
   }
+}
+
+/**
+ * ADR-0035 §5: every status renders colour + dot + word on a tinted ground,
+ * never colour alone. Nothing observed this in round one, so a stylesheet
+ * carrying `[data-status-role]{display:none}` kept every colour gate green
+ * against a page showing no status at all.
+ */
+function observeRedundantEncoding(samples: readonly StatusRoleSample[]) {
+  const violations: string[] = [];
+  for (const sample of samples) {
+    if (!sample.visible || sample.width <= 0 || sample.height <= 0) {
+      // Word and dot are meaningless on something nobody can see, so this is
+      // reported alone rather than as three violations for one cause.
+      violations.push(`REDUNDANT_ENCODING_IMPERCEPTIBLE:${sample.subjectId}`);
+      continue;
+    }
+    if (sample.text.length === 0) {
+      violations.push(`REDUNDANT_ENCODING_WORD:${sample.subjectId}`);
+    }
+    if (
+      sample.dotContent === 'none' ||
+      sample.dotDisplay === 'none' ||
+      sample.dotArea <= 0
+    ) {
+      violations.push(`REDUNDANT_ENCODING_DOT:${sample.subjectId}`);
+    }
+  }
+  return { rolesRead: samples.length, violations };
+}
+
+/**
+ * The seam plan §8.6 and `ux-grammar` both require and nothing joined up: the
+ * colour on screen must be the colour the role token resolves to. Without this
+ * a tree can replace every status selector with `rgb()` or `hsl()` literals and
+ * satisfy the hex ratchet, the token-value contrast check and the rendered
+ * contrast check simultaneously.
+ */
+function observeTokenRouting(samples: readonly StatusRoleSample[]) {
+  const violations: string[] = [];
+  for (const sample of samples) {
+    if (sample.background !== sample.tokenGround) {
+      violations.push(`TOKEN_ROUTING:${sample.subjectId}:background`);
+    }
+    if (sample.foreground !== sample.tokenInk) {
+      violations.push(`TOKEN_ROUTING:${sample.subjectId}:foreground`);
+    }
+  }
+  return { rolesRead: samples.length, violations };
+}
+
+/**
+ * ADR-0035 §10 requires both themes designed. Compared per role: a whole-array
+ * inequality passes when one element of four differs.
+ */
+function observeDarkRemapping(
+  dark: readonly StatusRoleSample[],
+  light: readonly StatusRoleSample[],
+) {
+  const lightByRole = new Map(
+    light.map((sample) => [sample.subjectId, sample] as const),
+  );
+  const violations: string[] = [];
+  let rolesCompared = 0;
+  for (const sample of dark) {
+    const counterpart = lightByRole.get(sample.subjectId);
+    if (!counterpart) {
+      violations.push(`DARK_SCHEME_UNCOMPARED:${sample.subjectId}`);
+      continue;
+    }
+    rolesCompared += 1;
+    if (
+      sample.background === counterpart.background &&
+      sample.foreground === counterpart.foreground
+    ) {
+      violations.push(`DARK_SCHEME_UNMAPPED:${sample.subjectId}`);
+    }
+  }
+  return { rolesCompared, violations };
 }
 
 /**
@@ -524,38 +870,141 @@ function observeReducedMotion(
   };
 }
 
+const FOCUS_RING_GROUND_TOKENS = [
+  'surface-panel',
+  'surface-page',
+  'surface-rail',
+] as const;
+const FOCUS_RING_MINIMUM_CONTRAST = 3;
+
+async function readFocusRingGrounds(page: Page): Promise<{
+  readonly grounds: readonly { readonly color: string; readonly id: string }[];
+  readonly ring: string;
+}> {
+  return await page.evaluate(
+    (groundTokens) => {
+      const probe = document.createElement('span');
+      probe.style.position = 'absolute';
+      probe.style.left = '-9999px';
+      document.body.append(probe);
+      const resolve = (property: string): string => {
+        probe.style.color = '';
+        probe.style.color = `var(${property})`;
+        return getComputedStyle(probe).color;
+      };
+      try {
+        return {
+          grounds: groundTokens.map((id) => ({
+            color: resolve(`--${id}`),
+            id,
+          })),
+          ring: resolve('--focus-ring'),
+        };
+      } finally {
+        probe.remove();
+      }
+    },
+    [...FOCUS_RING_GROUND_TOKENS],
+  );
+}
+
+async function readRenderedFocusRing(page: Page): Promise<{
+  readonly color: string;
+  readonly style: string;
+  readonly token: string;
+  readonly width: string;
+}> {
+  await page.locator('.sidebar a').first().focus();
+  return await page.evaluate(() => {
+    const focused = document.activeElement;
+    if (!(focused instanceof HTMLElement)) {
+      throw new Error('no element took focus');
+    }
+    const probe = document.createElement('span');
+    probe.style.position = 'absolute';
+    probe.style.left = '-9999px';
+    probe.style.color = 'var(--focus-ring)';
+    document.body.append(probe);
+    const token = getComputedStyle(probe).color;
+    probe.remove();
+    const style = getComputedStyle(focused);
+    return {
+      color: style.outlineColor,
+      style: style.outlineStyle,
+      token,
+      width: style.outlineWidth,
+    };
+  });
+}
+
+function observeFocusRing(observation: {
+  readonly grounds: readonly { readonly color: string; readonly id: string }[];
+  readonly ring: string;
+}) {
+  const ring = parseComputedColor(observation.ring);
+  const violations: string[] = [];
+  const measured: string[] = [];
+  for (const ground of observation.grounds) {
+    const surface = parseComputedColor(ground.color);
+    if (!ring.opaque || !surface.opaque) {
+      violations.push(`FOCUS_RING_NON_OPAQUE:${ground.id}`);
+      continue;
+    }
+    const ratio = contrastRatio(ring.hex, surface.hex);
+    measured.push(`${ground.id} ${ratio.toFixed(2)}:1`);
+    if (ratio < FOCUS_RING_MINIMUM_CONTRAST) {
+      violations.push(`FOCUS_RING_CONTRAST:${ground.id}`);
+    }
+  }
+  return { groundsRead: observation.grounds.length, measured, violations };
+}
+
 /**
  * ADR-0035 §4: the brand hue is reserved and no status role may resolve into
- * it. Derived from the rendered colour rather than asserted against a token
- * name, because the rule is about what the eye competes with.
+ * it. The band is derived from the rendered `--brand` rather than a copied
+ * constant, so moving the brand onto a status hue is caught from either side.
  */
-const BRAND_HUE_DEGREES = 199;
 const BRAND_HUE_BAND_DEGREES = 20;
 // Below this chroma a colour has no hue worth competing with — a near-grey
 // cannot fight the identity colour. Reported separately so a palette that went
 // achromatic cannot pass this gate by having nothing left to measure.
 const CHROMATIC_FLOOR = 0.06;
 
+async function readBrandHue(
+  page: Page,
+): Promise<{ readonly chroma: number; readonly hue: number }> {
+  const rendered = await page.evaluate(() => {
+    const probe = document.createElement('span');
+    probe.style.position = 'absolute';
+    probe.style.left = '-9999px';
+    probe.style.color = 'var(--brand)';
+    document.body.append(probe);
+    const color = getComputedStyle(probe).color;
+    probe.remove();
+    return color;
+  });
+  const brand = parseComputedColor(rendered);
+  if (!brand.opaque) throw new Error(`brand token is not opaque: ${rendered}`);
+  return hueOf(brand.hex);
+}
+
 function observeBrandStatusSeparability(
-  pairs: readonly {
-    readonly background: string;
-    readonly foreground: string;
-    readonly subjectId: string;
-  }[],
+  samples: readonly StatusRoleSample[],
+  brandHue: number,
 ) {
   const violations: string[] = [];
   let hueSamplesRead = 0;
   let chromaticHueSamplesRead = 0;
-  for (const pair of pairs) {
+  for (const sample of samples) {
     for (const channel of ['background', 'foreground'] as const) {
       hueSamplesRead += 1;
-      const sample = hueOf(pair[channel]);
-      if (sample.chroma < CHROMATIC_FLOOR) continue;
+      const color = parseComputedColor(sample[channel]);
+      if (!color.opaque) continue;
+      const measurement = hueOf(color.hex);
+      if (measurement.chroma < CHROMATIC_FLOOR) continue;
       chromaticHueSamplesRead += 1;
-      if (
-        hueDistance(sample.hue, BRAND_HUE_DEGREES) <= BRAND_HUE_BAND_DEGREES
-      ) {
-        violations.push(`BRAND_HUE:${pair.subjectId}:${channel}`);
+      if (hueDistance(measurement.hue, brandHue) <= BRAND_HUE_BAND_DEGREES) {
+        violations.push(`BRAND_HUE:${sample.subjectId}:${channel}`);
       }
     }
   }
@@ -648,11 +1097,6 @@ async function requireCompactJourney(
         };
       }),
     );
-  const contrastPairs = computedPairs.map((pair) => ({
-    ...pair,
-    background: rgbToHex(pair.background),
-    foreground: rgbToHex(pair.foreground),
-  }));
   const targets = await links.evaluateAll((elements) =>
     elements.map((element, index) => {
       const rectangle = element.getBoundingClientRect();
@@ -663,7 +1107,7 @@ async function requireCompactJourney(
       };
     }),
   );
-  const accessibility = observeAccessibility(contrastPairs, targets);
+  const accessibility = observeAccessibility(computedPairs, targets);
   assert.ok(accessibility.contrastPairsRead > 0);
   assert.equal(accessibility.targetsRead, expectedNavigation.length);
   assert.deepEqual(accessibility.violations, []);
@@ -717,14 +1161,38 @@ async function close(target: Server): Promise<void> {
   });
 }
 
-function rgbToHex(value: string): string {
-  const channels = value.match(/\d+(?:\.\d+)?/g)?.slice(0, 3);
-  if (!channels || channels.length !== 3) {
+/**
+ * A computed colour is only measurable when it is opaque. The first round took
+ * the first three numbers and discarded alpha, so an element with no background
+ * computed `rgba(0, 0, 0, 0)` and was measured as pure black — a confident
+ * number for a colour that is not there, and one that passes against light
+ * text. Compositing against the effective underlying surface is the other
+ * honest answer; it needs the whole ancestor stack and every intervening
+ * background, so this refuses instead and the caller records the refusal.
+ */
+interface ComputedColor {
+  readonly hex: string;
+  readonly opaque: boolean;
+}
+
+function parseComputedColor(value: string): ComputedColor {
+  const channels = value.match(/-?\d+(?:\.\d+)?/g);
+  if (!channels || channels.length < 3) {
     throw new Error(`unsupported computed color ${value}`);
   }
-  return `#${channels
-    .map((channel) => Math.round(Number(channel)).toString(16).padStart(2, '0'))
-    .join('')}`;
+  const alpha = channels.length > 3 ? Number(channels[3]) : 1;
+  if (!Number.isFinite(alpha) || alpha < 1) {
+    return { hex: '', opaque: false };
+  }
+  return {
+    hex: `#${channels
+      .slice(0, 3)
+      .map((channel) =>
+        Math.round(Number(channel)).toString(16).padStart(2, '0'),
+      )
+      .join('')}`,
+    opaque: true,
+  };
 }
 
 function observeAccessibility(
@@ -741,7 +1209,16 @@ function observeAccessibility(
 ) {
   const violations: string[] = [];
   for (const pair of contrastPairs) {
-    if (contrastRatio(pair.foreground, pair.background) < 4.5) {
+    const foreground = parseComputedColor(pair.foreground);
+    const background = parseComputedColor(pair.background);
+    if (!foreground.opaque) {
+      violations.push(`NON_OPAQUE:${pair.subjectId}:foreground`);
+    }
+    if (!background.opaque) {
+      violations.push(`NON_OPAQUE:${pair.subjectId}:background`);
+    }
+    if (!foreground.opaque || !background.opaque) continue;
+    if (contrastRatio(foreground.hex, background.hex) < 4.5) {
       violations.push(`CONTRAST:${pair.subjectId}`);
     }
   }

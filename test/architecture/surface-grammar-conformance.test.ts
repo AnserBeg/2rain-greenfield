@@ -592,10 +592,18 @@ const STATUS_ROLE_TOKENS = [
 
 /**
  * Reads the shipped ADR-0035 status roles back out of the token-definition
- * block and resolves them through the primitive layer, so the contrast check
- * observes the values the browser will receive rather than a number copied into
- * a table. ADR-0035's own Consequences section records why: recomputing the
- * table by hand on 2026-07-31 found `--b700` labelled AAA at a real 6.92:1.
+ * block, so the contrast check observes the values the browser will receive
+ * rather than a number copied into a table. ADR-0035's own Consequences section
+ * records why: recomputing the table by hand on 2026-07-31 found `--b700`
+ * labelled AAA at a real 6.92:1.
+ *
+ * The two schemes resolve differently and deliberately. Light roles are
+ * `var(--s-*)` references and resolve through the primitive layer; dark roles
+ * carry their scheme-specific values directly, because a dark status ground is
+ * not any light primitive shifted — it is a separately designed colour, which
+ * is what ADR-0035 §10's "designed, never inverted" means. `resolveToken`
+ * therefore follows `var()` chains when they exist and returns the literal when
+ * they do not; both paths end at the value the browser receives.
  *
  * Read as text, never imported: `apps/web` is a consumer of the packages this
  * suite checks, and an import would invert that edge.

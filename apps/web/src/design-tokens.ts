@@ -19,13 +19,16 @@
  * The `token-definition-block` sentinels below are read by the ratchet. Keep
  * every literal between them.
  *
- * One role is defined and deliberately unconsumed. `--accent-tone` holds
- * ADR-0035 §2's `--b500` "hover on 600" step. A filled primary action carries
- * `--ink-on-accent` (white on a light ground), and white on `--b500` measures
- * **3.32:1** — below the 4.5:1 floor plan §8.4 claims — while a 4.85 → 3.32
- * jump also breaks §9's "hover shifts the ground 2–3 %, never jumps". So the
- * filled hover moves *darker*, to `--accent-ground-hover`, and the ramp step
- * stays named here rather than silently dropped. Recorded in the U2 report.
+ * `--b500` does two jobs and neither is a filled-button hover. `--accent-tone`
+ * holds ADR-0035 §2's "hover on 600" step, which a filled action cannot use:
+ * white on `--b500` measures **3.32:1**, below the 4.5:1 text floor plan §8.4
+ * claims, and a 4.85 → 3.32 move also breaks §9's "hover shifts the ground
+ * 2–3 %, never jumps". So the filled hover goes *darker*, to
+ * `--accent-ground-hover`. The same step is correct as `--focus-ring`
+ * (ADR-0035 §2.1) because a focus indicator is non-text and its floor is
+ * SC 1.4.11's 3:1, not 4.5:1 — and `--b500` is the only step clearing 3:1 on
+ * all three grounds the ring lands on. `--b600` is the obvious fix and is
+ * wrong: 2.47:1 against the rail.
  *
  * Prose names tokens, never literals — a hex in this comment would sit outside
  * the block below and fail the ratchet, which is how the first draft of this
@@ -53,7 +56,7 @@ color-scheme:light dark;
 --ink:var(--n800);--ink-strong:var(--n900);--ink-muted:var(--n600);
 --ink-on-accent:var(--n0);--ink-on-rail:var(--n0);--ink-on-rail-muted:var(--b200);
 --line:var(--n200);--line-strong:var(--n300);--line-on-rail:var(--b700);
---brand:var(--b300);--focus-ring:var(--b300);--ink-on-brand:var(--b900);
+--brand:var(--b300);--focus-ring:var(--b500);--ink-on-brand:var(--b900);
 --accent:var(--b600);--accent-ink:var(--b700);--accent-soft:var(--b50);
 --accent-selected:var(--b100);--accent-edge:var(--b200);--accent-tone:var(--b500);
 --accent-ground:var(--b600);--accent-ground-hover:var(--b700);
@@ -87,7 +90,7 @@ color-scheme:light dark;
 --ink:var(--n100);--ink-strong:var(--n0);--ink-muted:var(--n400);
 --ink-on-accent:var(--n900);--ink-on-rail:var(--n0);--ink-on-rail-muted:var(--b200);
 --line:var(--n700);--line-strong:var(--n600);--line-on-rail:var(--b700);
---brand:var(--b300);--focus-ring:var(--b300);--ink-on-brand:var(--b900);
+--brand:var(--b300);--focus-ring:var(--b500);--ink-on-brand:var(--b900);
 --accent:var(--b400);--accent-ink:var(--b300);--accent-soft:#16303F;
 --accent-selected:#123A4E;--accent-edge:var(--b700);--accent-tone:var(--b500);
 --accent-ground:var(--b400);--accent-ground-hover:var(--b300);
