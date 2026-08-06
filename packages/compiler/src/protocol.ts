@@ -1,6 +1,14 @@
 export const COMPILER_VERSION = 'northstar.compiler/0.1.0' as const;
 export const COMPILER_SEMANTIC_PROFILE_VERSION =
   'northstar.compiler-semantic/v0-experimental' as const;
+export const COMPILER_SEMANTIC_PROFILE_V1_VERSION =
+  'northstar.compiler-semantic/v1' as const;
+export const SUPPORTED_COMPILER_SEMANTIC_PROFILE_VERSIONS = Object.freeze([
+  COMPILER_SEMANTIC_PROFILE_VERSION,
+  COMPILER_SEMANTIC_PROFILE_V1_VERSION,
+] as const);
+export type CompilerSemanticProfileVersion =
+  (typeof SUPPORTED_COMPILER_SEMANTIC_PROFILE_VERSIONS)[number];
 export const OUTPUT_PROTOCOL_VERSION =
   'northstar.compiler-output/v0-experimental' as const;
 export const RELEASE_MANIFEST_VERSION =
@@ -147,7 +155,7 @@ export const INCREMENTAL_EQUIVALENCE_INVARIANT =
 export interface CompilerSemanticProfile {
   canonicalizationProfileVersion: string;
   chunkingSchemeVersion: typeof CHUNKING_SCHEME_VERSION;
-  compilerSemanticProfileVersion: typeof COMPILER_SEMANTIC_PROFILE_VERSION;
+  compilerSemanticProfileVersion: CompilerSemanticProfileVersion;
   compilerVersion: typeof COMPILER_VERSION;
   hashAlgorithm: typeof HASH_ALGORITHM;
   languageVersion: string;
@@ -405,7 +413,7 @@ export interface ReleaseManifestEnvelope {
   cacheInputDigest: string;
   canonicalizationProfileVersion: string;
   capabilityFacts: CapabilityFact[];
-  compilerSemanticProfileVersion: typeof COMPILER_SEMANTIC_PROFILE_VERSION;
+  compilerSemanticProfileVersion: CompilerSemanticProfileVersion;
   compilerVersion: typeof COMPILER_VERSION;
   completeSnapshot: true;
   dependencyClosureDigest: string;
@@ -457,7 +465,7 @@ export interface CompilerAttestation {
   attestationVersion: typeof COMPILER_ATTESTATION_VERSION;
   cacheInputDigest: string;
   compileMode: 'coldFull';
-  compilerSemanticProfileVersion: typeof COMPILER_SEMANTIC_PROFILE_VERSION;
+  compilerSemanticProfileVersion: CompilerSemanticProfileVersion;
   compilerVersion: typeof COMPILER_VERSION;
   dependencyClosureDigest: string;
   incrementalEquivalenceInvariant: typeof INCREMENTAL_EQUIVALENCE_INVARIANT;

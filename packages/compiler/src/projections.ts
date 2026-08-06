@@ -11,6 +11,8 @@ import {
   type StorageTargetPayloadV1,
 } from './storage.js';
 import {
+  COMPILER_SEMANTIC_PROFILE_V1_VERSION,
+  COMPILER_SEMANTIC_PROFILE_VERSION,
   FLAT_SURFACE_MANIFEST_PAYLOAD_VERSION,
   GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION,
   HASH_DOMAINS,
@@ -21,6 +23,7 @@ import {
   PROJECTION_FAMILY_IDS,
   VERIFICATION_PLAN_PAYLOAD_VERSION,
   VERIFICATION_SCENARIO_VERSION,
+  type CompilerSemanticProfileVersion,
   type LogicalScope,
   type ProjectionFamilyId,
   type RuntimeCapabilityRequirement,
@@ -126,6 +129,7 @@ export function lowerBaseProjectionPayloads(
   packageRevision: NormalizedApplicationPackage,
   previousStorageTarget: StorageTargetPayloadV1 | null = null,
   verificationPackageRevision: VersionedNormalizedApplicationPackage = packageRevision,
+  compilerSemanticProfileVersion: CompilerSemanticProfileVersion = COMPILER_SEMANTIC_PROFILE_VERSION,
 ): ProjectionPayloadPlan[] {
   const namespace = packageRevision.package.namespace;
   const packageScope: LogicalScope = {
@@ -140,7 +144,11 @@ export function lowerBaseProjectionPayloads(
   const currentStorageTarget = isModuleV1
     ? lowerStorageTargetV1(packageRevision, previousStorageTarget)
     : null;
-  const surfaceManifest = surfaceManifestPayload(packageRevision, queryById);
+  const surfaceManifest = surfaceManifestPayload(
+    packageRevision,
+    queryById,
+    compilerSemanticProfileVersion,
+  );
   const plans = [
     plan(
       PROJECTION_FAMILY_IDS.semanticModel,
@@ -502,6 +510,7 @@ function operationCatalogPayload(
 function surfaceManifestPayload(
   packageRevision: NormalizedApplicationPackage,
   queryById: Map<string, NormalizedApplicationPackage['queries'][number]>,
+  compilerSemanticProfileVersion: CompilerSemanticProfileVersion,
 ): {
   readonly payload: unknown;
   readonly payloadSchemaVersion:
@@ -532,6 +541,12 @@ function surfaceManifestPayload(
         slots: surface.slots.map((slot) => ({
           contentReferenceId: slot.content.targetId,
           orderKey: slot.orderKey,
+          // PROBE ONLY — a literal, to prove the discriminator dispatches an
+          // additive slot field. U5's real fields land in this position.
+          ...(compilerSemanticProfileVersion ===
+          COMPILER_SEMANTIC_PROFILE_V1_VERSION
+            ? { probeMarker: 'proj-disc' }
+            : {}),
           slot: slot.slot,
           slotId: slot.slotId,
         })),

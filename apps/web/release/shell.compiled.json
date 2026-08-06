@@ -12,7 +12,9 @@
         "operations": [],
         "queries": [
           {
-            "fieldIds": ["northstar.shell:field.workspace_name"],
+            "fieldIds": [
+              "northstar.shell:field.workspace_name"
+            ],
             "queryId": "northstar.shell:query.workspace_get"
           }
         ],
@@ -169,7 +171,7 @@
       "semanticDigest": "2e617336d2c715c98dafae27b8b0c5f3fe8e810fb86be335ea0bf48d3dae7e94"
     },
     "surface": {
-      "artifactRoot": "dc629fb7108dd7627e1fe11b70f0c283164d4976a11a2e08a442ff86d9f5f460",
+      "artifactRoot": "5053724432a4fd51cc6d12a35ab7ea0289f528f81b125ab8b44d5cad5965f537",
       "familyId": "northstar.compiler:projection-family.surface-manifest",
       "instanceId": "northstar.shell:projection.surface-manifest",
       "payload": {
@@ -179,83 +181,105 @@
           {
             "archetype": "home",
             "dataSourceQueryId": "northstar.shell:query.workspace_get",
-            "fieldIds": ["northstar.shell:field.workspace_name"],
+            "fieldIds": [
+              "northstar.shell:field.workspace_name"
+            ],
             "label": "Home",
             "lifecycle": "active",
             "slots": [
               {
                 "contentReferenceId": "northstar.shell:component.release_summary",
                 "orderKey": 10,
+                "probeMarker": "proj-disc",
                 "slot": "exceptions",
                 "slotId": "northstar.shell:slot.home_exceptions"
               },
               {
                 "contentReferenceId": "northstar.shell:component.setup_checklist",
                 "orderKey": 20,
+                "probeMarker": "proj-disc",
                 "slot": "setupChecklist",
                 "slotId": "northstar.shell:slot.home_setup"
               }
             ],
-            "statusRoles": ["inProgress", "success"],
+            "statusRoles": [
+              "inProgress",
+              "success"
+            ],
             "surfaceId": "northstar.shell:surface.a_home"
           },
           {
             "archetype": "home",
             "dataSourceQueryId": "northstar.shell:query.workspace_get",
-            "fieldIds": ["northstar.shell:field.workspace_name"],
+            "fieldIds": [
+              "northstar.shell:field.workspace_name"
+            ],
             "label": "Setup",
             "lifecycle": "active",
             "slots": [
               {
                 "contentReferenceId": "northstar.shell:component.setup_checklist",
                 "orderKey": 10,
+                "probeMarker": "proj-disc",
                 "slot": "setupChecklist",
                 "slotId": "northstar.shell:slot.setup_checklist"
               }
             ],
-            "statusRoles": ["attention"],
+            "statusRoles": [
+              "attention"
+            ],
             "surfaceId": "northstar.shell:surface.b_setup"
           },
           {
             "archetype": "home",
             "dataSourceQueryId": "northstar.shell:query.workspace_get",
-            "fieldIds": ["northstar.shell:field.workspace_name"],
+            "fieldIds": [
+              "northstar.shell:field.workspace_name"
+            ],
             "label": "Unsupported component",
             "lifecycle": "active",
             "slots": [
               {
                 "contentReferenceId": "northstar.shell:component.future_insights",
                 "orderKey": 10,
+                "probeMarker": "proj-disc",
                 "slot": "exceptions",
                 "slotId": "northstar.shell:slot.unsupported_component"
               }
             ],
-            "statusRoles": ["blocked"],
+            "statusRoles": [
+              "blocked"
+            ],
             "surfaceId": "northstar.shell:surface.c_unsupported"
           },
           {
             "archetype": "home",
             "dataSourceQueryId": "northstar.shell:query.workspace_get",
-            "fieldIds": ["northstar.shell:field.workspace_name"],
+            "fieldIds": [
+              "northstar.shell:field.workspace_name"
+            ],
             "label": "Renderer error",
             "lifecycle": "active",
             "slots": [
               {
                 "contentReferenceId": "northstar.shell:component.error_probe",
                 "orderKey": 10,
+                "probeMarker": "proj-disc",
                 "slot": "exceptions",
                 "slotId": "northstar.shell:slot.error_probe"
               }
             ],
-            "statusRoles": ["blocked"],
+            "statusRoles": [
+              "blocked"
+            ],
             "surfaceId": "northstar.shell:surface.d_error"
           }
         ]
       },
       "payloadSchemaVersion": "northstar.surface-manifest-payload/v0-provisional",
-      "semanticDigest": "3883e8cac981c8de95b1aad28b52ce410a0ba122b8bf1603049d11b16dcb34b6"
+      "semanticDigest": "a8ebf6d7646346034802ea752f960a83d18ebfae371d02236e69cf1a6cdf32ff"
     }
   },
-  "releaseRoot": "a2f88c9b681b323ee113cde5c2d06e92e4ff25744c7bb72cd5e3310d7a76ea4f",
+  "releaseRoot": "b70657807593ac55d2529e64593d2235719a3d0293314bca1e99143a13a296c6",
   "schemaVersion": "northstar.web:compiled-shell-fixture/v1"
 }
