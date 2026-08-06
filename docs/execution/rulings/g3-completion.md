@@ -209,3 +209,62 @@ known, so it cannot be re-litigated afterwards.
 **And the standing hole closes here regardless.** A Critical packet with fifteen
 review rounds and **no second arm on any of them** is a gate failure, not a
 scheduling detail. Whatever the outcome, Fable reviews this tree.
+
+---
+
+# G3 IS COMPLETE — ruled 2026-08-05
+
+**All four items in this ruling's executable definition are accepted, with the
+full matrix green at each integrated SHA:**
+
+| Item | Packet | Reviewed SHA |
+|---|---|---|
+| Reconciliation (§11.6 build 11) | `G3-R1` | `777778fe` |
+| Dimension-set replay (criterion 11) | `G3-R2` | `7791bcfb` |
+| Restore and rebuild (criterion 16) | `G3-R3` | `7a67b466` |
+| Backdating policy (criterion 7) | `G3-R3` | same |
+
+**The definition was deliberately executable** — each item a packet with a ledger
+row — so *"is G3 complete"* is a question about the ledger rather than a
+judgement call. It is answered by reading four rows.
+
+**Final tally against the seventeen gate criteria:** fifteen met, one met by
+construction (criterion 17 — there is no balance to update, because no `on_hand`
+column exists in any migration), and **one deliberately narrowed**: criterion 14
+asserted that UI, agent, export and reporting agree on balances, and the agent
+and export arms are a **non-optional G4 inheritance**. G4 may not close without
+them. That narrowing was recorded when it was made, not discovered afterwards.
+
+## What this fires
+
+**`U1`–`U8` are unparked.** Their trigger was *"G3 complete"*, which nobody had
+defined when they were parked on 2026-07-30; that is what this whole ruling
+exists to have fixed. `U0` was always exempt and remains takeable.
+
+## What G3 does not claim
+
+Recorded so the next stage inherits facts rather than an impression:
+
+- **Production disaster recovery is unproven.** `G3-R3` proves balances survive a
+  restore; it does not deliver a runbook, and the obvious one-command
+  `pg_restore` **fails** because a `CHECK` constraint reads another table.
+- **The integrity half of reconciliation is open.** `anchor_digest` is not
+  verified by the sweep, and provenance comparison sits behind the split verdict.
+- **Low-stock, export/recount and the agent tool surface are G4.**
+- Open rows carried forward: `dec-negfrac`, `trust-boundary`, `lang-retire`,
+  `5g3-langcorpus`, `5g3-derivcheck`, `5g3-cap`, `5g3-sm`, and the program review
+  `5g3-prog`.
+
+## The lesson this stage cost most to learn
+
+`G3-R1` took **nineteen review rounds across five charters**, and three
+orchestrator rulings were reversed getting there — one by an independent scope
+review commissioned after its second trip to the cap. The cause was the same
+every time: **each charter specified a hand-maintained artifact**, first a field
+list and then a classification table, and **adversarial review does not converge
+on a hand-maintained artifact**. Deleting the table and deriving the verdict from
+a record of what actually executed converged in three rounds after sixteen that
+did not.
+
+That is AGENTS.md §6 — observe, do not proxy — turned on a gate's own verdict. It
+belongs in the charter of every packet that specifies what something must check.
