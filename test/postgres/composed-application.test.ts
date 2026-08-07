@@ -268,7 +268,7 @@ test(
   async () => {
     await withEphemeralPostgres(
       'proj-disc-same-profile-edge',
-      async ({ connection }) => {
+      async ({ connection, pool }) => {
         const lineage = appendSameProfileSuccessor(
           JSON.parse(await readFile(compiledArtifactPath, 'utf8')) as unknown,
         );
@@ -294,6 +294,30 @@ test(
         const slug = 'same-profile-edge-tenant';
         const serving = await createRuntime(lineage, databaseUrl, slug);
         assert.equal(serving.releaseRoot, head.compiled.releaseRoot);
+
+        // OBSERVE the persisted effect rather than inferring it. "Same bytes,
+        // therefore ensurePersistedRelease reused a revision" is a claim about
+        // the current implementation, and two broken trees satisfy the byte
+        // assertions above while failing here: a duplicate persisted as its own
+        // revision with no usable parent edge still returns null and still
+        // raises the same refusal, and a request rejected early by the index
+        // check raises the same code from a different site. Only the persisted
+        // revision identity distinguishes them.
+        const headRevisionId = await persistedRevisionId(
+          pool,
+          serving.identity,
+          head.compiled.releaseRoot,
+        );
+        const targetRevisionId = await persistedRevisionId(
+          pool,
+          serving.identity,
+          target.compiled.releaseRoot,
+        );
+        assert.equal(
+          headRevisionId,
+          targetRevisionId,
+          'the two releases must be persisted against ONE package revision, or this is not the same-revision edge under test',
+        );
         await serving.close();
 
         await assert.rejects(
@@ -303,14 +327,16 @@ test(
           }),
           (error: unknown) => {
             assert.ok(error instanceof ReleaseReverseTransitionRefusal);
+            // Assert ONLY what this test proves: the profile-only name is not
+            // applied to an edge whose profiles are equal. The fallback code
+            // this currently lands on is itself inaccurate after the index
+            // check has passed -- that misnaming predates this packet and is
+            // routed to `rollback-release-edge`. Pinning it here would make a
+            // false name contractual and obstruct the packet that fixes it.
             assert.notEqual(
               error.code,
               'ROLLBACK_ACROSS_PROFILE_ONLY_EDGE',
               'the profiles are equal, so this edge is not profile-only',
-            );
-            assert.equal(
-              error.code,
-              'ROLLBACK_TARGET_NOT_IMMEDIATE_PREDECESSOR',
             );
             return true;
           },
@@ -1714,6 +1740,28 @@ async function assertAttemptTargetsCandidate(
     activation_attempt_id: activationAttemptId,
     target_release_id: candidateReleaseId,
   });
+}
+
+/**
+ * The package revision a release is persisted against. Same shape as
+ * `activeReleaseId` and the same column the trigger-negative path reads; two
+ * releases sharing one revision is the persisted fact that makes an edge a
+ * same-revision edge, and it is observable rather than inferable from bytes.
+ */
+async function persistedRevisionId(
+  pool: pg.Pool,
+  identity: ComposedApplicationRuntime['identity'],
+  releaseRoot: string,
+): Promise<MintedUuid> {
+  const result = await pool.query<{ app_package_revision_id: MintedUuid }>(
+    `SELECT app_package_revision_id
+       FROM platform.tenant_releases
+      WHERE tenant_id = $1 AND environment_id = $2 AND content_hash = $3`,
+    [identity.tenantId, identity.environmentId, releaseRoot],
+  );
+  const revisionId = result.rows[0]?.app_package_revision_id;
+  assert.ok(revisionId, `no persisted tenant release for ${releaseRoot}`);
+  return revisionId;
 }
 
 async function activeReleaseId(
