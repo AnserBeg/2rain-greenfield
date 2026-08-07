@@ -262,6 +262,23 @@ test('fresh-tenant install refuses a failing intermediate transition', async () 
 //
 // Deliberately its own lifecycle rather than another tenant on the test above,
 // whose 300s bound is already 1.42x consumed.
+//
+// DECLARED GAP -- ADR-0047 §6's negative direction is NOT observed. This test
+// proves that a same-revision, same-profile edge does not receive the
+// profile-only name. It cannot prove the classifier was reached at all: a
+// request rejected earlier by the index guard throws the same
+// ReleaseReverseTransitionRefusal class with a code that likewise differs from
+// the profile-only one, so both surviving assertions pass either way. Restoring
+// an exact-code pin does not close this -- production emits that same code from
+// the index guard AND the post-authorization fallback, so the pin was
+// restrictive without ever being probative.
+//
+// Closing it needs a production observation distinguishing the two refusal
+// sites: an execution counter after reverse authorization returns null, or a
+// structured origin/phase field on the refusal. Both are changes to the refusal
+// mechanism, which is `rollback-release-edge`'s subject, where this is now a
+// binding criterion. Declared here in the ADR-0044 sense -- a structural
+// absence, stated and observable, rather than a silent inability.
 test(
   'a same-profile successor over one revision is not named a profile-only edge',
   { timeout: 300_000 },
@@ -1758,6 +1775,16 @@ async function persistedRevisionId(
        FROM platform.tenant_releases
       WHERE tenant_id = $1 AND environment_id = $2 AND content_hash = $3`,
     [identity.tenantId, identity.environmentId, releaseRoot],
+  );
+  // Exactly one, asserted rather than assumed. This query has no ORDER BY,
+  // while production resolves a release root with `ORDER BY created_at LIMIT 1`
+  // -- so under a duplicate-root state `rows[0]` could silently observe a
+  // different release than production would, and the comparison built on it
+  // would be meaningless while still passing.
+  assert.equal(
+    result.rows.length,
+    1,
+    `expected exactly one persisted tenant release for ${releaseRoot}, found ${String(result.rows.length)}`,
   );
   const revisionId = result.rows[0]?.app_package_revision_id;
   assert.ok(revisionId, `no persisted tenant release for ${releaseRoot}`);
