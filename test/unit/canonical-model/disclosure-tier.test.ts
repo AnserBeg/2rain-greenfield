@@ -53,19 +53,22 @@ function forcing(): Record<string, unknown> {
   return authored;
 }
 
+/** `record:sections` renders the surface's fields; `record:titleStatus` does not. */
+const SECTIONS_SLOT = 'northstar.inventory:slot.item_sections';
 const TITLE_STATUS_SLOT = 'northstar.inventory:slot.item_title_status';
 
 function withTier(
   authored: Record<string, unknown>,
   tier: string,
+  slotId: string = SECTIONS_SLOT,
 ): Record<string, unknown> {
   const surfaces = authored.surfaces as {
     slots: { slotId: string; disclosureTier?: string }[];
   }[];
   const slot = surfaces[0]!.slots.find(
-    (candidate) => candidate.slotId === TITLE_STATUS_SLOT,
+    (candidate) => candidate.slotId === slotId,
   );
-  assert.ok(slot, 'fixture must still declare the titleStatus slot');
+  assert.ok(slot, `fixture must still declare ${slotId}`);
   slot.disclosureTier = tier;
   return authored;
 }
@@ -113,7 +116,7 @@ test('materializing the default would move the normalized bytes', () => {
 
 test('always is accepted on a slot that reaches a required field', () => {
   const slots = normalizedSlots(withTier(forcing(), 'always'));
-  const slot = slots.find((entry) => entry.slotId === TITLE_STATUS_SLOT);
+  const slot = slots.find((entry) => entry.slotId === SECTIONS_SLOT);
   assert.equal(slot?.disclosureTier, 'always');
 });
 
@@ -133,7 +136,7 @@ test('RED: the forcing refusal names the offending slot, not the surface', () =>
     const refusal = error.diagnostics.find(
       (entry) => entry.code === 'CANON_SURFACE_DISCLOSURE_TIER_FORCED_ALWAYS',
     );
-    assert.equal(refusal?.objectId, TITLE_STATUS_SLOT);
+    assert.equal(refusal?.objectId, SECTIONS_SLOT);
     assert.equal(refusal?.path, '$.surfaces.slots.disclosureTier');
     assert.match(refusal?.rule ?? '', /item_name/u);
   }
@@ -147,11 +150,30 @@ test('RED: the forcing refusal names the offending slot, not the surface', () =>
  */
 test('CONTROL: progressive is accepted where no reachable field forces always', () => {
   const slots = normalizedSlots(withTier(nonForcing(), 'progressive'));
-  const slot = slots.find((entry) => entry.slotId === TITLE_STATUS_SLOT);
+  const slot = slots.find((entry) => entry.slotId === SECTIONS_SLOT);
   assert.equal(
     slot?.disclosureTier,
     'progressive',
     'the rule must read the forcing set, not the word progressive',
+  );
+});
+
+/**
+ * The vacuity control for the field-bearing narrowing, and the reason the
+ * narrowing exists. `titleStatus` renders no field, so deferring it conceals
+ * nothing -- even on a surface that reaches a required field. Without this the
+ * rule is per-surface, and `progressive` is unusable on every record surface in
+ * the composed application, all of which reach one of its 50 required fields.
+ */
+test('CONTROL: a non-field-bearing slot may defer even on a forcing surface', () => {
+  const slots = normalizedSlots(
+    withTier(forcing(), 'progressive', TITLE_STATUS_SLOT),
+  );
+  const slot = slots.find((entry) => entry.slotId === TITLE_STATUS_SLOT);
+  assert.equal(
+    slot?.disclosureTier,
+    'progressive',
+    'titleStatus renders no field, so no forcing field can be concealed by deferring it',
   );
 });
 

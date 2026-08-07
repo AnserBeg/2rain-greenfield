@@ -268,6 +268,30 @@ export const DISCLOSURE_TIERS = ['always', 'progressive', 'onDemand'] as const;
  */
 export const DEFAULT_DISCLOSURE_TIER = 'always' as const;
 
+/**
+ * The subset of `SURFACE_SLOTS` that renders the surface's own fields, and
+ * therefore the only slots a forcing rule can bind: deferring a slot that
+ * renders no field conceals no field.
+ *
+ * Derived from the closed slot vocabulary above, not a new one -- every member
+ * appears in `SURFACE_SLOTS`. It mirrors the `ownsDataResolution` flag the web
+ * runtime already carries on exactly these four `(archetype, slot)` pairs
+ * (`apps/web/src/component-registry.ts`), which is a runtime restatement of a
+ * grammar fact; the two must not drift, and no gate binds them today. See the
+ * `U5b` report's bridge request.
+ *
+ * Without this restriction the rule is per-SURFACE and unusable: every slot of
+ * any surface reaching one required field would be forced to `always`, which in
+ * the composed application is 50 required fields against every record surface.
+ */
+export const FIELD_BEARING_SURFACE_SLOTS = Object.freeze({
+  home: [],
+  list: ['dataGrid'],
+  record: ['keyFacts', 'sections'],
+  task: ['decision'],
+  builder: [],
+} as const);
+
 export type SurfaceArchetype = (typeof SURFACE_ARCHETYPES)[number];
 export type SurfaceSlot = (typeof SURFACE_SLOTS)[SurfaceArchetype][number];
 export type DisclosureTier = (typeof DISCLOSURE_TIERS)[number];
