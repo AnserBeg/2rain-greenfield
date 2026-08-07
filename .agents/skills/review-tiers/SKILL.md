@@ -297,3 +297,82 @@ executable commit and proving the gate fired on it.
 > **A negative control that never actually reds is not a control.** Run it until
 > you have seen the failure, or you have written a test for a gate you have not
 > tested.
+
+## How to write a review prompt — measured 2026-08-06
+
+Six online reviews ran that day: **five BLOCK, one PASS**. Tallying where each
+finding actually came from is the whole basis for what follows.
+
+**The orchestrator's question lists produced confirmations and one overturn.**
+Asking whether the hex ratchet was blind to `rgb()` — it was. Asking whether the
+focus ring blocked — the reviewer said yes and overturned the orchestrator,
+correctly. Real value, but all of it was already suspected.
+
+**Open reading produced every genuinely new structural defect:**
+
+- `--truncate-invalid-lineage` broken by a signature change, in a file the prompt
+  never mentioned.
+- `readRenderedFocusRing` deleted and replaced with declaration inference — the
+  orchestrator had audited what the packet *added* and never opened the 149
+  deleted lines the diffstat showed.
+- A focus ring at 2.08:1 and 2.92:1 on two real grounds, found by reading the
+  **stylesheet** rather than the gate that claimed to cover it.
+
+**And some questions were worse than useless:** `@media` recursion (nothing
+there), test-timing variance (unanswerable without executing), a constructed
+lineage (the orchestrator could settle it alone).
+
+So the efficiency lever is **not shorter reviews — it is shorter question
+lists.** The review pays for itself every time; the hypotheses are the waste.
+
+### The rules that follow
+
+1. **Point at the contract, not at your prompt.** *"Judge against ADR-00NN and
+   AGENTS.md section 6, not against what I asked for."* This matters concretely:
+   twice a lane corrected a wrong orchestrator instruction because the reviewer
+   was anchored to the ADR instead of the prompt.
+2. **Cap hypotheses at three, and say they are guesses.** Then add the sentence
+   that would have saved two rounds: *"the most valuable finding is usually not
+   on this list."* A long list consumes the budget that open reading needs.
+3. **Always ask what was deleted.** *"What did this remove, and was it
+   load-bearing?"* A packet that replaces an observation with a proxy shows up as
+   a deletion count and nothing else. This is a standing question, not a
+   per-packet one.
+4. **Always ask the vacuity question.** *"For each gate, name the cheapest broken
+   tree that keeps it green."* Highest hit rate of anything tried — it found the
+   `display:none` chip, the fixture compared against itself, the `notDeepEqual`
+   hole, and the emitted-but-never-red branch.
+5. **Fence narrowly, and only what is settled.** "The approved palette is not open"
+   is a good fence. Fencing a whole file is how the truncation defect would have
+   been missed.
+6. **Never ask what the reviewer cannot do, or what you can settle yourself.**
+   They cannot execute; a timing question invites speculation dressed as a
+   finding.
+7. **Read the diff yourself before writing the list.** Writing questions first is
+   how "media-query recursion" got in. Ask only what your own reading left open.
+
+### Sizing
+
+Full review when a candidate freezes. **Narrow confirm on the fix delta**, with
+the prior round's CLOSED claims explicitly not reopened — the 61-line confirm that
+closed `U2-fix-b` returned PASS quickly because it was not asked to re-read the
+packet. Do not pay twice for the same reading.
+
+### The shape
+
+    Read <exact diff range>. <What the prior round closed, if any — not reopened.>
+    Judge against <the ADR> and AGENTS.md section 6, not against this prompt.
+
+    Three things I suspect, which are guesses rather than scope:
+      1. … 2. … 3. …
+    The most valuable finding is usually not on this list.
+
+    Standing, every time:
+      - What did this delete, and was it load-bearing?
+      - For each gate, the cheapest broken tree that keeps it green.
+
+    Settled, do not spend effort on: <narrow list, with the reason>.
+
+    Report: CLOSED / STILL OPEN per claim with file and line; any new defect;
+    one verdict. A clean review is a real outcome — say so plainly if you find
+    nothing, and name the one thing you would most want executed.
