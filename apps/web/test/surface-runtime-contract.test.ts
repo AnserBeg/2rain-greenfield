@@ -438,9 +438,55 @@ test('the gateway error mapping covers every error class the gateways export', (
    * failure is **reported**, never skipped: a class this cannot instantiate is
    * a class whose dispatch name is unverified.
    */
-  const instanceNames = (
-    namespace: Readonly<Record<string, unknown>>,
-  ): string[] => {
+  assert.deepEqual(
+    [
+      ...instanceNames(queryGateway),
+      ...instanceNames(listBehavior),
+      ...instanceNames(resolveByName),
+    ].sort(),
+    [...MAPPED_QUERY_ERROR_NAMES].sort(),
+  );
+  assert.deepEqual(
+    instanceNames(operationGateway),
+    [...MAPPED_OPERATION_ERROR_NAMES].sort(),
+  );
+});
+
+/**
+ * The vector this closes cannot be produced from the tree: it needs an error
+ * class whose export key and runtime `name` disagree, and every such class
+ * lives in `packages/runtime`, outside this packet's lease. So the red is
+ * in-process against a synthetic module, the same way
+ * `surface-grammar-conformance.test.ts` perturbs a fixture rather than the
+ * product. What it demonstrates is exact: the comparison that shipped in round
+ * one would have accepted this module, and this one does not.
+ */
+test('mapping red: an export key and a runtime name that disagree are observed', () => {
+  const misnamed = {
+    FooError: class extends Error {
+      override readonly name = 'BarError';
+    },
+  };
+  assert.deepEqual(Object.keys(misnamed), ['FooError']);
+  assert.deepEqual(instanceNames(misnamed), ['BarError']);
+
+  const unconstructible = {
+    HostileError: class extends Error {
+      constructor() {
+        super();
+        throw new TypeError('refuses every argument list');
+      }
+    },
+  };
+  assert.throws(
+    () => instanceNames(unconstructible),
+    /could not be constructed, so its dispatch name is unverified/,
+  );
+});
+
+/** Runtime `.name` is an instance field, so reading it means constructing one. */
+function instanceNames(namespace: Readonly<Record<string, unknown>>): string[] {
+  {
     const stub = {
       release: { contentHash: 'stub', releaseId: 'stub' },
     } as never;
@@ -475,21 +521,8 @@ test('the gateway error mapping covers every error class the gateways export', (
         );
       })
       .sort();
-  };
-
-  assert.deepEqual(
-    [
-      ...instanceNames(queryGateway),
-      ...instanceNames(listBehavior),
-      ...instanceNames(resolveByName),
-    ].sort(),
-    [...MAPPED_QUERY_ERROR_NAMES].sort(),
-  );
-  assert.deepEqual(
-    instanceNames(operationGateway),
-    [...MAPPED_OPERATION_ERROR_NAMES].sort(),
-  );
-});
+  }
+}
 
 /**
  * ADR-0048 §5's last control, made structural: a gate that asked the renderer
