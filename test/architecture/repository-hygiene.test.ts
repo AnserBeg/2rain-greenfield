@@ -41,6 +41,7 @@ const suiteDefinitions = [
     discoveryPattern: 'test/compiler/**/*.test.ts',
     excludedFiles: ['test/compiler/performance-budget.test.ts'],
     expectedFiles: [
+      'test/compiler/compiler-semantic-profile.test.ts',
       'test/compiler/determinism.test.ts',
       'test/compiler/freeze-b.test.ts',
       'test/compiler/g2-module-conformance.test.ts',

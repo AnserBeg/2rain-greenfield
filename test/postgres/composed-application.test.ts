@@ -252,10 +252,139 @@ test('fresh-tenant install refuses a failing intermediate transition', async () 
   );
 });
 
-// Harness limit, not a product budget. Each fresh tenant applies all five
-// immutable application transitions but verifies only the serving release,
-// recording every non-serving release explicitly. The unchanged 256 MiB
-// harness moved from >300s/capacity exhaustion to 54.6s and a 50.30 MiB peak.
+// ADR-0047 §6, the direction the revision check alone cannot establish. Shared
+// revision proves the two releases compile the same SOURCE; it does not prove
+// the profile is what differs. Compilation identity also folds in the expected
+// active release, the dependency closure and the limits, so a same-revision
+// SAME-profile successor exists -- it has no revision-parent edge either, so
+// authorization returns null down the identical path. Naming that a
+// profile-only edge would be the same misnaming §6 exists to forbid.
+//
+// Deliberately its own lifecycle rather than another tenant on the test above,
+// whose 300s bound is already 1.42x consumed.
+//
+// DECLARED GAP -- ADR-0047 §6's negative direction is NOT observed. This test
+// proves that a same-revision, same-profile edge does not receive the
+// profile-only name. It cannot prove the classifier was reached at all: a
+// request rejected earlier by the index guard throws the same
+// ReleaseReverseTransitionRefusal class with a code that likewise differs from
+// the profile-only one, so both surviving assertions pass either way. Restoring
+// an exact-code pin does not close this -- production emits that same code from
+// the index guard AND the post-authorization fallback, so the pin was
+// restrictive without ever being probative.
+//
+// Closing it needs a production observation distinguishing the two refusal
+// sites: an execution counter after reverse authorization returns null, or a
+// structured origin/phase field on the refusal. Both are changes to the refusal
+// mechanism, which is `rollback-release-edge`'s subject, where this is now a
+// binding criterion. Declared here in the ADR-0044 sense -- a structural
+// absence, stated and observable, rather than a silent inability.
+test(
+  'a same-profile successor over one revision is not named a profile-only edge',
+  { timeout: 300_000 },
+  async () => {
+    await withEphemeralPostgres(
+      'proj-disc-same-profile-edge',
+      async ({ connection, pool }) => {
+        const lineage = appendSameProfileSuccessor(
+          JSON.parse(await readFile(compiledArtifactPath, 'utf8')) as unknown,
+        );
+        const parsed = parseCompiledApplication(lineage);
+        const head = parsed.application;
+        const target = parsed.applications.at(-2)!;
+
+        // The construction is the control: assert it really is same-source,
+        // same-profile, distinct-root before drawing any conclusion from it.
+        assert.ok(
+          equalNormalizedDefinition(
+            head.normalizedDefinitionBytes,
+            target.normalizedDefinitionBytes,
+          ),
+        );
+        assert.equal(
+          head.compiled.bundle.releaseManifest.compilerSemanticProfileVersion,
+          target.compiled.bundle.releaseManifest.compilerSemanticProfileVersion,
+        );
+        assert.notEqual(head.compiled.releaseRoot, target.compiled.releaseRoot);
+
+        const databaseUrl = connectionUrl(connection);
+        const slug = 'same-profile-edge-tenant';
+        const serving = await createRuntime(lineage, databaseUrl, slug);
+        assert.equal(serving.releaseRoot, head.compiled.releaseRoot);
+
+        // OBSERVE the persisted effect rather than inferring it. "Same bytes,
+        // therefore ensurePersistedRelease reused a revision" is a claim about
+        // the current implementation, and two broken trees satisfy the byte
+        // assertions above while failing here: a duplicate persisted as its own
+        // revision with no usable parent edge still returns null and still
+        // raises the same refusal, and a request rejected early by the index
+        // check raises the same code from a different site. Only the persisted
+        // revision identity distinguishes them.
+        const headRevisionId = await persistedRevisionId(
+          pool,
+          serving.identity,
+          head.compiled.releaseRoot,
+        );
+        const targetRevisionId = await persistedRevisionId(
+          pool,
+          serving.identity,
+          target.compiled.releaseRoot,
+        );
+        assert.equal(
+          headRevisionId,
+          targetRevisionId,
+          'the two releases must be persisted against ONE package revision, or this is not the same-revision edge under test',
+        );
+        await serving.close();
+
+        await assert.rejects(
+          createRuntime(lineage, databaseUrl, slug, {
+            kind: 'rollback',
+            targetReleaseRoot: target.compiled.releaseRoot,
+          }),
+          (error: unknown) => {
+            assert.ok(error instanceof ReleaseReverseTransitionRefusal);
+            // Assert ONLY what this test proves: the profile-only name is not
+            // applied to an edge whose profiles are equal. The fallback code
+            // this currently lands on is itself inaccurate after the index
+            // check has passed -- that misnaming predates this packet and is
+            // routed to `rollback-release-edge`. Pinning it here would make a
+            // false name contractual and obstruct the packet that fixes it.
+            assert.notEqual(
+              error.code,
+              'ROLLBACK_ACROSS_PROFILE_ONLY_EDGE',
+              'the profiles are equal, so this edge is not profile-only',
+            );
+            return true;
+          },
+        );
+      },
+    );
+  },
+);
+
+// Harness limit, not a product budget. Each fresh tenant applies every
+// immutable application transition in the recorded lineage but verifies only
+// the serving release, recording each non-serving release explicitly. The
+// unchanged 256 MiB harness moved from >300s/capacity exhaustion to 54.6s and
+// a 50.30 MiB peak when that lineage held five application entries.
+//
+// Both figures are now stale and the timeout is the reason to say so. The
+// lineage holds EIGHT application entries, and this test drives three tenants:
+// two for the gateway-persistence subject, plus `-source-edge`, which activates
+// a truncated lineage so ADR-0047 §6's source-changing direction has a real
+// edge to cross.
+//
+// Measured against the 300s bound: 210.9s inside the full matrix at a8c9d07
+// (1.42x margin) and 117.6s standalone on a quiet machine (2.55x). Both are
+// recorded deliberately -- this workload is load-dependent, and quoting one
+// number without its conditions is how the 54.6s figure above went stale. The
+// matrix figure governs, because the matrix is where it has to pass.
+//
+// If this ever reds on timing, the fix is to split the `-source-edge` tenant
+// into its own test with its own lifecycle. It is NOT to raise the bound:
+// that widens what starvation is permitted to look like, which is the standing
+// prohibition this repository already carries.
 test(
   'composed product activates through the kernel and persists tenant-scoped gateway data',
   { timeout: 300_000 },
@@ -1630,6 +1759,38 @@ async function assertAttemptTargetsCandidate(
   });
 }
 
+/**
+ * The package revision a release is persisted against. Same shape as
+ * `activeReleaseId` and the same column the trigger-negative path reads; two
+ * releases sharing one revision is the persisted fact that makes an edge a
+ * same-revision edge, and it is observable rather than inferable from bytes.
+ */
+async function persistedRevisionId(
+  pool: pg.Pool,
+  identity: ComposedApplicationRuntime['identity'],
+  releaseRoot: string,
+): Promise<MintedUuid> {
+  const result = await pool.query<{ app_package_revision_id: MintedUuid }>(
+    `SELECT app_package_revision_id
+       FROM platform.tenant_releases
+      WHERE tenant_id = $1 AND environment_id = $2 AND content_hash = $3`,
+    [identity.tenantId, identity.environmentId, releaseRoot],
+  );
+  // Exactly one, asserted rather than assumed. This query has no ORDER BY,
+  // while production resolves a release root with `ORDER BY created_at LIMIT 1`
+  // -- so under a duplicate-root state `rows[0]` could silently observe a
+  // different release than production would, and the comparison built on it
+  // would be meaningless while still passing.
+  assert.equal(
+    result.rows.length,
+    1,
+    `expected exactly one persisted tenant release for ${releaseRoot}, found ${String(result.rows.length)}`,
+  );
+  const revisionId = result.rows[0]?.app_package_revision_id;
+  assert.ok(revisionId, `no persisted tenant release for ${releaseRoot}`);
+  return revisionId;
+}
+
 async function activeReleaseId(
   pool: pg.Pool,
   identity: ComposedApplicationRuntime['identity'],
@@ -2582,13 +2743,83 @@ async function assertIntermediateBecomesServingOnlyAfterVerification(
   const target = compiled.applications.at(-2);
   assert.ok(target);
   await runtime.close();
-  const historicalSearchQueryId = 'northstar.app:query.stock_count_line_search';
+
+  // DIRECTION 1 -- the refusal FIRES on a profile-only edge. The serving head
+  // and `at(-2)` share a normalized definition (ADR-0047 §4), so they share one
+  // package revision and the revision graph has no edge to reverse. The target
+  // IS the immediate predecessor -- the index check passes and control reaches
+  // the authorization -- so this must NOT borrow
+  // ROLLBACK_TARGET_NOT_IMMEDIATE_PREDECESSOR (ADR-0047 §6).
+  assert.equal(
+    target.normalizedDefinitionBytes.byteLength,
+    compiled.application.normalizedDefinitionBytes.byteLength,
+  );
+  assert.ok(
+    equalNormalizedDefinition(
+      target.normalizedDefinitionBytes,
+      compiled.application.normalizedDefinitionBytes,
+    ),
+    'this direction is only meaningful while the head is a profile sibling',
+  );
   await assert.rejects(
     createRuntime(compiledApplication, databaseUrl, tenantSlug, {
       kind: 'rollback',
       targetReleaseRoot: target.compiled.releaseRoot,
     }),
     (error: unknown) => {
+      assert.ok(error instanceof ReleaseReverseTransitionRefusal);
+      assert.equal(error.code, 'ROLLBACK_ACROSS_PROFILE_ONLY_EDGE');
+      assert.match(error.message, /shares its package revision/u);
+      return true;
+    },
+    'ADR-0047 §6: a profile-only edge refuses by its own name, not as a wrong predecessor',
+  );
+
+  // DIRECTION 2 -- the refusal does NOT fire on a source-changing edge, and the
+  // ADR-0046 observation this helper exists for is preserved rather than
+  // dropped. Truncating the lineage to the last source-changing head restores
+  // exactly the pair this asserted before the profile entry was appended: an
+  // eligible rollback whose verification refuses the pre-existing unusable
+  // search BY NAME. Without this the profile edge would have silently taken a
+  // real ADR-0046 gate out of the suite.
+  const sourceChangingLineage = withoutProfileSiblingHead(compiledApplication);
+  const truncated = parseCompiledApplication(sourceChangingLineage);
+  const sourceChangingTarget = truncated.applications.at(-2);
+  assert.ok(sourceChangingTarget);
+  assert.ok(
+    !equalNormalizedDefinition(
+      sourceChangingTarget.normalizedDefinitionBytes,
+      truncated.application.normalizedDefinitionBytes,
+    ),
+    'direction 2 must cross an edge whose endpoints differ in source',
+  );
+  // The tenant must already be serving the truncated head before the rollback
+  // is eligible at all: on a fresh tenant `activeLineageIndex` is still the
+  // fresh-install intermediate, so the index check at the FIRST refusal site
+  // fires and control never reaches the authorization this direction is about.
+  const sourceEdgeSlug = `${tenantSlug}-source-edge`;
+  const sourceEdgeRuntime = await createRuntime(
+    sourceChangingLineage,
+    databaseUrl,
+    sourceEdgeSlug,
+  );
+  assert.equal(
+    sourceEdgeRuntime.releaseRoot,
+    truncated.application.compiled.releaseRoot,
+  );
+  await sourceEdgeRuntime.close();
+
+  const historicalSearchQueryId = 'northstar.app:query.stock_count_line_search';
+  await assert.rejects(
+    createRuntime(sourceChangingLineage, databaseUrl, sourceEdgeSlug, {
+      kind: 'rollback',
+      targetReleaseRoot: sourceChangingTarget.compiled.releaseRoot,
+    }),
+    (error: unknown) => {
+      assert.ok(
+        !(error instanceof ReleaseReverseTransitionRefusal),
+        `a source-changing edge must not raise a reverse-transition refusal, got ${String((error as { code?: string }).code)}`,
+      );
       assert.ok(error instanceof ModuleRuntimeInterpreterError);
       assert.equal(error.code, 'MODULE_SEARCH_CAPABILITY_UNAVAILABLE');
       assert.equal(error.subjectId, historicalSearchQueryId);
@@ -2596,7 +2827,28 @@ async function assertIntermediateBecomesServingOnlyAfterVerification(
     },
     'ADR-0046: rollback remains eligible, while verification of its pre-existing unusable search refuses by name',
   );
+
   return createRuntime(compiledApplication, databaseUrl, tenantSlug);
+}
+
+/**
+ * The lineage with its trailing profile-sibling entries removed, so the head is
+ * the last entry that actually changed the authored source. Used to exercise a
+ * source-changing rollback edge while the real artifact's head is a profile
+ * sibling (ADR-0047 §4).
+ */
+function withoutProfileSiblingHead(compiledApplication: unknown): unknown {
+  const envelope = structuredClone(compiledApplication) as {
+    applications: { normalizedDefinitionBytesBase64: string }[];
+  };
+  while (
+    envelope.applications.length > 1 &&
+    envelope.applications.at(-1)!.normalizedDefinitionBytesBase64 ===
+      envelope.applications.at(-2)!.normalizedDefinitionBytesBase64
+  ) {
+    envelope.applications.pop();
+  }
+  return envelope;
 }
 
 async function assertConstrainedDomainVerificationCompleted(
@@ -3455,6 +3707,45 @@ async function assertExactPartitionEvidence(
   );
 }
 
+/**
+ * The last entry whose normalized definition differs from the head's -- the
+ * previous SOURCE release, which is not the same as the previous lineage
+ * position.
+ *
+ * ADR-0047 §4: the lineage also advances when the OUTPUT CONTRACT changes, so
+ * adopting a compiler-semantic profile mints an entry that is byte-identical
+ * in source to its predecessor and differs only in release root. `at(-2)` then
+ * selects that definition-equal sibling instead of an actually-earlier
+ * authored release. Callers that mean "the release before this source" say so
+ * here; `at(-2)` keeps meaning "the previous entry" where that is intended.
+ */
+function previousSourceRelease(
+  compiled: ReturnType<typeof parseCompiledApplication>,
+):
+  | ReturnType<typeof parseCompiledApplication>['applications'][number]
+  | undefined {
+  const headBytes = compiled.application.normalizedDefinitionBytes;
+  return compiled.applications
+    .slice(0, -1)
+    .findLast(
+      (release) =>
+        !equalNormalizedDefinition(
+          release.normalizedDefinitionBytes,
+          headBytes,
+        ),
+    );
+}
+
+function equalNormalizedDefinition(
+  left: Uint8Array,
+  right: Uint8Array,
+): boolean {
+  return (
+    left.byteLength === right.byteLength &&
+    left.every((value, index) => value === right[index])
+  );
+}
+
 interface ConstructibilityPartition {
   readonly derivations?: readonly {
     readonly reason: {
@@ -3472,7 +3763,9 @@ async function assertAttributedSearchCapabilityScenarioDelta(
   compiledApplication: unknown,
 ): Promise<void> {
   const compiled = parseCompiledApplication(compiledApplication);
-  const previousRelease = compiled.applications.at(-2);
+  // This delta is attributed to an authored-source change, so it must read the
+  // last entry whose definition actually differs -- see previousSourceRelease.
+  const previousRelease = previousSourceRelease(compiled);
   assert.ok(previousRelease);
   const previous = releaseVerificationBinding(previousRelease.compiled);
   const current = releaseVerificationBinding(compiled.application.compiled);
@@ -3881,6 +4174,31 @@ async function compileCandidateEnvelope(
   } finally {
     await rm(directory, { force: true, recursive: true });
   }
+}
+
+/**
+ * A successor compiled from the head's OWN normalized bytes at the head's own
+ * profile. Same source, so `ensurePersistedRelease` reuses one revision; same
+ * profile, so the edge is not a profile-only edge. The roots still differ
+ * because compilation identity folds in the expected active release.
+ */
+function appendSameProfileSuccessor(compiledApplication: unknown): unknown {
+  const previous = parseCompiledApplication(compiledApplication);
+  const headBytes = previous.application.normalizedDefinitionBytes;
+  const successor = compileSuccessor(previous.application.compiled, headBytes);
+  return {
+    applications: [
+      ...previous.applications.map((release) =>
+        serializedRelease(release.normalizedDefinitionBytes, release.compiled),
+      ),
+      serializedRelease(headBytes, successor),
+    ],
+    bootstrap: serializedRelease(
+      previous.bootstrap.normalizedDefinitionBytes,
+      previous.bootstrap.compiled,
+    ),
+    schemaVersion: 'northstar.web:compiled-application-release/v2',
+  };
 }
 
 function compileMismatchedEnvelope(

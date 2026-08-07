@@ -1,10 +1,12 @@
 export {
+  ADOPTED_COMPILER_SEMANTIC_PROFILE_VERSION,
   DEFAULT_COMPILER_LIMITS,
   DEFAULT_COMPILER_PROFILE,
   MODULE_COMPILER_PROFILE,
   compileApplication,
   expectedActiveReleaseFrom,
   reproduceHistoricalApplication,
+  selectAdoptedProfileVersion,
   type HistoricalApplicationReproductionExpectation,
 } from './compiler.js';
 export { COMPILER_DIAGNOSTIC_COPY } from './diagnostics.js';
@@ -32,6 +34,7 @@ export {
   CHUNKING_SCHEME_VERSION,
   COMPILER_ATTESTATION_VERSION,
   COMPILER_DIAGNOSTIC_VERSION,
+  COMPILER_SEMANTIC_PROFILE_V1_VERSION,
   COMPILER_SEMANTIC_PROFILE_VERSION,
   COMPILER_VERSION,
   FLAT_SURFACE_MANIFEST_PAYLOAD_VERSION,
@@ -59,6 +62,7 @@ export {
   STORAGE_ELEMENT_CONTRACT_VERSION,
   STORAGE_RENDERER_POLICY_VERSION,
   STORAGE_TARGET_PAYLOAD_VERSION,
+  SUPPORTED_COMPILER_SEMANTIC_PROFILE_VERSIONS,
   SUPPORTED_SURFACE_MANIFEST_PAYLOAD_VERSIONS,
   SUPPORTED_MODULE_INPUT_CONTRACT_VERSIONS,
   SUPPORTED_STORAGE_TARGET_PAYLOAD_VERSIONS,
@@ -79,6 +83,7 @@ export {
   type CompilerInput,
   type CompilerLimits,
   type CompilerSemanticProfile,
+  type CompilerSemanticProfileVersion,
   type CompilerTelemetryAttestation,
   type CompileSuccess,
   type ContentAddressedArtifact,

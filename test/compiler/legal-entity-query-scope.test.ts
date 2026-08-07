@@ -453,8 +453,18 @@ test('cutting v4 leaves v3 output byte-identical', () => {
   // 921ee278... Comparing two fresh compiles to each other, as this control did
   // before, proves DETERMINISM, not identity with the pre-v4 output -- a
   // deterministic change to the v3 manifest would move both and stay green.
+  // Re-derived by proj-disc-impl when compiler-semantic profile v1 was
+  // adopted (ADR-0047). This pin guards the LANGUAGE axis, and the v3 language
+  // output did not move: recompiling this fixture at an EXPLICIT
+  // `northstar.compiler-semantic/v0-experimental` still produces 921ee278...,
+  // the pre-adoption value. `compilerInput` spreads DEFAULT_COMPILER_PROFILE,
+  // so the digest here now reflects the adopted profile. Measured field by
+  // field, exactly three keys move and all three are profile-derived:
+  // `compilerSemanticProfileVersion`, `semanticProfileDigest` (the whole
+  // profile hashed) and `cacheInputDigest` (which folds in that digest).
+  // Every projection reference, artifact and payload field is unchanged.
   const V3_RELEASE_MANIFEST_DIGEST =
-    '921ee2781fabdf5fd93f93cf07db9b27e6f41e8ad6163dbbd714da58dd9e6290';
+    'aac9f52d2fe2fa592ec9df1a04f66d6d6ac4929f4b00ca047533bd7c9e5adce5';
   const before = canonicalizeAndHash(
     mustCompile(compilerInput(v3)).bundle.releaseManifest,
   ).contentHash;
