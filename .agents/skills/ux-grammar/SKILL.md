@@ -206,6 +206,49 @@ page itself is unserviceable.
 authorizes exactly one script with four closed behaviours, and none of them is
 this.
 
+## Disclosure tiers
+
+Granted 2026-08-06 for `U5b`, ruled from `ux-strategy-proposal.md` §3.2 after
+`U5-design` reported the hard rule unimplementable as written.
+
+Every field and section declares one of a closed set:
+
+`always` · `progressive` · `onDemand`
+
+- **`always`** — rendered on arrival. Key facts, status, required inputs, anything
+  blocking.
+- **`progressive`** — present and announced but collapsed. One interaction away,
+  and **counted in the summary so its existence is never concealed**.
+- **`onDemand`** — fetched on expand. Genuinely large or expensive content only.
+
+The tier distinguishes **deferred** from **hidden**. Nothing a user should have is
+ever hidden; `progressive` and `onDemand` defer, and both remain discoverable.
+
+**The hard rule splits across two enforcers, because one of its three clauses is
+not compile-time knowable.** §3.2 states that anything required, anything
+resolving to `blocked` or `attention`, and anything the user must act on is
+`always`. The middle clause asks the compiler to predict a runtime value, which it
+cannot: whether a field resolves to `blocked` depends on data.
+
+So:
+
+- **The compiler enforces what is declarable** — required fields, and fields
+  declared as demanding action. Declaring one `progressive` fails compilation.
+- **The runtime refuses what is not** — a field that resolves to `blocked` or
+  `attention` while declared `progressive` is refused by name at render, not
+  silently promoted and not silently collapsed.
+
+That split is [ADR-0041](../../../docs/decisions/ADR-0041-declared-shapes-must-be-honoured-or-refused.md)'s
+rule applied one layer down: a declared shape is honoured or refused, never
+quietly coerced. **Which fields are declarable is `U5b`'s to determine** — this
+grants the vocabulary and the shape of the answer, not the field inventory.
+
+**The carrier is not yet granted.** §3.2 wants the tier per field *and* per
+section; the canonical model has neither today. `U5b` determines the carrier and
+**stops for a bridge request before adding it to the G1 pin block** — the pin binds
+compiler-enforced vocabulary, and this is compiler-enforced, so it will likely need
+to move. The orchestrator lands the pin once the carrier is known.
+
 ## Message vocabulary
 
 Granted 2026-08-06 on `U6-design`'s report, which stopped rather than inventing
