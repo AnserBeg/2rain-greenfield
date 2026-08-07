@@ -11,9 +11,12 @@ export const COMPILER_SEMANTIC_PROFILE_VERSION =
   'northstar.compiler-semantic/v0-experimental' as const;
 export const COMPILER_SEMANTIC_PROFILE_V1_VERSION =
   'northstar.compiler-semantic/v1' as const;
+export const COMPILER_SEMANTIC_PROFILE_V2_VERSION =
+  'northstar.compiler-semantic/v2' as const;
 export const SUPPORTED_COMPILER_SEMANTIC_PROFILE_VERSIONS = Object.freeze([
   COMPILER_SEMANTIC_PROFILE_VERSION,
   COMPILER_SEMANTIC_PROFILE_V1_VERSION,
+  COMPILER_SEMANTIC_PROFILE_V2_VERSION,
 ] as const);
 export type CompilerSemanticProfileVersion =
   (typeof SUPPORTED_COMPILER_SEMANTIC_PROFILE_VERSIONS)[number];

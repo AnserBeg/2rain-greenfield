@@ -48,7 +48,7 @@ import {
   CHUNK_DESCRIPTOR_VERSION,
   CHUNKING_SCHEME_VERSION,
   COMPILER_ATTESTATION_VERSION,
-  COMPILER_SEMANTIC_PROFILE_V1_VERSION,
+  COMPILER_SEMANTIC_PROFILE_V2_VERSION,
   COMPILER_VERSION,
   SUPPORTED_COMPILER_SEMANTIC_PROFILE_VERSIONS,
   HASH_ALGORITHM,
@@ -95,7 +95,7 @@ import {
  * to history, which is why ADR-0047 §4 makes it a lineage-minting event.
  */
 export const ADOPTED_COMPILER_SEMANTIC_PROFILE_VERSION: CompilerSemanticProfileVersion =
-  COMPILER_SEMANTIC_PROFILE_V1_VERSION;
+  COMPILER_SEMANTIC_PROFILE_V2_VERSION;
 
 const compilerProfileBase = Object.freeze({
   canonicalizationProfileVersion: CANONICALIZATION_PROFILE_VERSION,
@@ -367,6 +367,7 @@ function compileApplicationInternal(
       projectionDispatchRevision(packageRevision),
       isStorageTargetV1(previousStorageTarget) ? previousStorageTarget : null,
       packageRevision,
+      input.profile.compilerSemanticProfileVersion,
     ),
     packageRevision,
   );
