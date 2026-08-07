@@ -40,8 +40,10 @@ sentence for the entire application.
 this directly — *"a refusal to ship a spelling ahead of its meaning."* Compiling a
 constant into a content-addressed artifact buys a moved release root and nothing
 else, and [ADR-0047](ADR-0047-the-compiler-semantic-profile-is-the-projection-evolution-axis.md)'s
-Consequences record that the profile axis is consumed **one version per projection
-change**. Spending a semantic-profile version and a lineage entry on a projection
+Consequences record that the profile axis is consumed **one version per adoption**
+(corrected 2026-08-06 by `U5-design`'s measurement; this ADR's conclusion is
+unaffected, since its load-bearing reason is that no message code is derivable
+from a `NormalizedApplicationPackage`). Spending a semantic-profile version and a lineage entry on a projection
 no authored package populates is the worst available use of a scarce append-only
 axis.
 
