@@ -305,7 +305,7 @@ orchestrator fell through the loophole three times in one evening.**
 **The corrected rule is now mechanical.** Test entry points and reviewer
 launches acquire a shared lease on `/tmp/north-star-matrix.lock`. The full
 matrix enters exclusively, runs the separated performance gate, and then
-downgrades its lease to shared for the load-tolerant matrix. A second matrix or
+downgrades its lease to shared for the load-tolerant tail. A second matrix or
 performance gate still waits for exclusive access; focused suites and reviews
 can proceed after the downgrade. A conflicting launch therefore waits or fails
 with `TEST_GATE_LOCK_BUSY` rather than corrupting a timing verdict. No git
