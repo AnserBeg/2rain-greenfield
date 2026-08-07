@@ -54,6 +54,22 @@ speed. That last point is why this ADR does not simply mandate skeletons.
 | 3 s – 10 s | **Indeterminate indicator with context** — a spinner or inline loader that says what is running. **No progress bar.** | NN/g; Nielsen |
 | > 10 s | **Determinate progress** where the total is knowable; indeterminate with step and elapsed text where it is not. **Plus cancel or background-handoff.** | Nielsen 10 s attention limit; NN/g; Goal-Gradient |
 
+**Bands are lower-inclusive, and the ladder is total — clarified 2026-08-06.**
+Every boundary belongs to the band above it, so exactly 10 000 ms is `> 10 s`,
+not the top of `3 s – 10 s`. `U1` reached this reading independently and it is
+ratified here rather than left to the next implementer.
+
+Three reasons, any one sufficient. Every other row is already lower-inclusive, and
+one upper-inclusive row is the inconsistency that produces off-by-one defects.
+Nielsen's 10 s figure is the limit for *keeping* attention — at 10 s you have
+reached it, not stayed inside it. And the conservative direction owes the user
+more: cancel and background-handoff rather than a spinner.
+
+**Totality is not cosmetic.** It is what allows a graded count to be compared
+against an invocation count, which is `U1`'s executable gate — an ingress path
+that escapes measurement goes red rather than silently absent. A ladder with a
+gap cannot support that comparison.
+
 ### 2. Loading states are an exception path, not a default
 
 > A loading treatment is admitted only where a **measured** operation exceeds the

@@ -194,3 +194,36 @@ base.
   commit anything uncommitted first.
 - All git commands run in Ubuntu/WSL against `/home/rvham/...` paths, never
   through a Windows path hop.
+
+## A live lane works in its own worktree — added 2026-08-06
+
+**Path leases separate what a lane may edit. They do not separate the directory
+it edits in.** Two lanes sharing one checkout share one working tree, so one
+lane's in-progress file is simply present in the other's `git status`.
+
+`U1` hit this: `apps/web/scripts/compile-app-release.ts` — a `proj-disc-impl`
+file `U1` was explicitly told to stay out of — appeared in the shared checkout
+mid-packet, and a `git add -A` swept it into `U1`'s first commit. The lane caught
+it, restored the path from its base, amended, and its frozen SHA contains none of
+it. **Nothing shipped. But nothing prevented it either.**
+
+Two rules, and the second is the one that would have made the first unnecessary:
+
+- **Never `git add -A` while any other lane is live.** Stage an explicit path
+  list. This was already written above; `U1` is the case that shows what it costs
+  when it lapses.
+- **A build lane runs in its own `git worktree`.** Not only for the matrix — for
+  the whole packet. `git worktree add ../<repo>-<packet> packet/<id>`, and
+  `git worktree remove` on integration.
+
+**A worktree is necessary but not sufficient**, which is the non-obvious part:
+`proj-disc-impl` *did* have its own worktree and its edit still reached the shared
+directory. So both rules stand together — isolation for the tree, explicit paths
+for the index.
+
+**A full matrix run in a shared checkout cannot be trusted to measure the
+packet's own tree.** When `U1` ran one, the shared directory did not typecheck,
+on a symbol belonging to the other lane.
+
+Remove stale trees. On 2026-08-06 `git worktree list` showed thirteen, twelve of
+them from packets accepted days earlier.
