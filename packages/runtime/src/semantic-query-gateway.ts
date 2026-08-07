@@ -234,6 +234,32 @@ export interface SemanticQueryExecutor {
   ): Promise<SemanticAggregateResultEnvelope>;
 }
 
+/**
+ * One read-ingress call, timed. `queryId` is null when the request was refused
+ * before it named a query — a malformed envelope still cost the caller time,
+ * and dropping those samples would quietly exclude the slowest refusals from
+ * the ladder.
+ */
+export interface RegisteredQueryLatencyObservation {
+  readonly durationMilliseconds: number;
+  /** `refused` means the ingress threw; every returned envelope is answered. */
+  readonly outcome: 'answered' | 'refused';
+  readonly queryId: string | null;
+}
+
+/**
+ * Injected rather than imported, for the same reason the predicate receipt
+ * observer is: this package may not depend on the observability package, and a
+ * read ingress that reached for a metrics singleton would be reaching across
+ * that boundary. `monotonicMilliseconds` is a required part of the dependency
+ * because AGENTS.md §6 forbids elapsed time from a wall clock, and because it
+ * is what lets a timing test inject a controlled clock instead of sleeping.
+ */
+export interface RegisteredQueryLatencyInstrumentation {
+  readonly monotonicMilliseconds: () => number;
+  readonly observe: (observation: RegisteredQueryLatencyObservation) => void;
+}
+
 export class MalformedSemanticQueryRequestError extends Error {
   readonly code = 'MALFORMED_SEMANTIC_QUERY_REQUEST' as const;
   override readonly name = 'MalformedSemanticQueryRequestError';
@@ -297,6 +323,8 @@ export class SemanticQueryGateway {
       ((receipt: PredicateKernelReceipt) => void) | undefined = undefined,
     private readonly policyNarrowing:
       QueryPolicyNarrowingGateway | undefined = undefined,
+    private readonly registeredQueryLatency:
+      RegisteredQueryLatencyInstrumentation | undefined = undefined,
   ) {}
 
   async invoke(
@@ -337,14 +365,61 @@ export class SemanticQueryGateway {
     return result;
   }
 
+  /**
+   * The timing seam. It wraps the whole ingress rather than the executor call,
+   * because policy authorization, catalog resolution and scope issuance are all
+   * latency the user waited through, and a band measured from the executor
+   * inward would grade a faster operation than the one that happened.
+   */
   async #invoke(
     view: IssuedRequestRuntimeView,
     requestInput: unknown,
     expectedResult: 'aggregate' | 'records',
     executionContext: SemanticQueryExecutionContext,
   ): Promise<SemanticAggregateResultEnvelope | SemanticQueryResultEnvelope> {
+    const instrumentation = this.registeredQueryLatency;
+    if (!instrumentation) {
+      return this.#answer(view, requestInput, expectedResult, executionContext);
+    }
+    const named: MutableQueryName = { queryId: null };
+    const startedAt = readMonotonicSafely(instrumentation);
+    const record = (outcome: 'answered' | 'refused'): void => {
+      const endedAt = readMonotonicSafely(instrumentation);
+      observeRegisteredQueryLatencySafely(instrumentation, {
+        durationMilliseconds:
+          startedAt === null || endedAt === null
+            ? Number.NaN
+            : endedAt - startedAt,
+        outcome,
+        queryId: named.queryId,
+      });
+    };
+    try {
+      const result = await this.#answer(
+        view,
+        requestInput,
+        expectedResult,
+        executionContext,
+        named,
+      );
+      record('answered');
+      return result;
+    } catch (error) {
+      record('refused');
+      throw error;
+    }
+  }
+
+  async #answer(
+    view: IssuedRequestRuntimeView,
+    requestInput: unknown,
+    expectedResult: 'aggregate' | 'records',
+    executionContext: SemanticQueryExecutionContext,
+    named: MutableQueryName = { queryId: null },
+  ): Promise<SemanticAggregateResultEnvelope | SemanticQueryResultEnvelope> {
     assertRequestRuntimeView(view);
     const request = parseSemanticQueryRequest(requestInput);
+    named.queryId = request.queryId;
     const boundaryDecision = await authorizeCurrentPolicy(
       this.currentPolicy,
       view,
@@ -670,6 +745,44 @@ export function observePredicateReceiptSafely(
 ): void {
   try {
     observer?.(receipt);
+  } catch {
+    // Observation is evidence only; it must never become execution authority.
+  }
+}
+
+/** Carries the query id out of the ingress once the request has named one. */
+interface MutableQueryName {
+  queryId: string | null;
+}
+
+/**
+ * A clock that throws yields `null`, which the caller turns into a `NaN`
+ * duration. That reaches the recorder as a named rejection rather than as a
+ * fast band, so an unusable clock is visible in the evidence instead of
+ * flattering it — and the read itself still returns.
+ */
+function readMonotonicSafely(
+  instrumentation: RegisteredQueryLatencyInstrumentation,
+): number | null {
+  try {
+    return instrumentation.monotonicMilliseconds();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A broken observer degrades the evidence, never the read. The consequence is
+ * that a gate for this instrumentation must read the recorded counter and not
+ * the absence of a thrown error, because silence here is indistinguishable from
+ * an observer that never ran.
+ */
+function observeRegisteredQueryLatencySafely(
+  instrumentation: RegisteredQueryLatencyInstrumentation,
+  observation: RegisteredQueryLatencyObservation,
+): void {
+  try {
+    instrumentation.observe(Object.freeze(observation));
   } catch {
     // Observation is evidence only; it must never become execution authority.
   }

@@ -30,6 +30,10 @@ import {
   type MintedUuid,
 } from '@north-star/platform-runtime';
 import {
+  ObservabilityMetrics,
+  monotonicMilliseconds,
+} from '@north-star/observability';
+import {
   AuthenticatedRequestEntryAdapter,
   type AuthenticatedIdentity,
   type TrustedRequestContext,
@@ -47,7 +51,10 @@ import {
   SemanticOperationGateway,
   SemanticOperationMediationAuthority,
 } from '../../runtime/src/semantic-operation-gateway.js';
-import { SemanticQueryGateway } from '../../runtime/src/semantic-query-gateway.js';
+import {
+  SemanticQueryGateway,
+  type RegisteredQueryLatencyInstrumentation,
+} from '../../runtime/src/semantic-query-gateway.js';
 import {
   createRegisteredCapabilityExecutors,
   registeredCapabilityIdsFromOperationCatalog,
@@ -98,6 +105,7 @@ export interface ComposedApplicationRuntimeOptions {
   readonly databaseUrl: string;
   readonly environmentSlug?: string;
   readonly inventoryScopeProvisioning?: InventoryScopeProvisioning;
+  readonly metrics?: ObservabilityMetrics;
   readonly migrationsDirectory: string;
   readonly providerErrorMappings: readonly ModuleProviderErrorMapping[];
   readonly releaseSelection?: Readonly<{
@@ -140,6 +148,8 @@ export interface ComposedApplicationRuntime {
   readonly entry: AuthenticatedRequestRuntimeEntryAdapter;
   readonly freshTenantInstallEvidence: FreshTenantInstallEvidence | null;
   readonly identity: AuthenticatedIdentity;
+  /** Registered-query ladder evidence for this runtime; see ADR-0032 §2. */
+  readonly metrics: ObservabilityMetrics;
   readonly operationGateway: SemanticOperationGateway;
   readonly operationMediation: SemanticOperationMediationAuthority;
   readonly queryGateway: SemanticQueryGateway;
@@ -572,6 +582,7 @@ export async function createComposedApplicationRuntime(
         )
       : null;
 
+    const metrics = options.metrics ?? new ObservabilityMetrics();
     const policy = new AllowAllLocalPolicy();
     const actorIssuer = humanActorIssuer();
     const interpreter = new PostgresModuleRuntimeInterpreter(
@@ -579,7 +590,25 @@ export async function createComposedApplicationRuntime(
       actorIssuer,
       options.providerErrorMappings,
     );
-    const queryGateway = new SemanticQueryGateway(policy, interpreter);
+    // ADR-0032 §2 admits a loading treatment only above a *measured* threshold,
+    // so the read ingress is composed with its measurement rather than gaining
+    // one later: an uninstrumented composition would make the ladder an
+    // assertion again.
+    const queryGateway = new SemanticQueryGateway(
+      policy,
+      interpreter,
+      undefined,
+      undefined,
+      Object.freeze({
+        monotonicMilliseconds,
+        observe: (observation) => {
+          metrics.recordRegisteredQueryLatency(
+            observation.outcome,
+            observation.durationMilliseconds,
+          );
+        },
+      } satisfies RegisteredQueryLatencyInstrumentation),
+    );
     const capabilityExecutors = createRegisteredCapabilityExecutors(
       options.capabilityOperationExecutorFactories ?? [],
       registeredCapabilityIdsFromOperationCatalog(
@@ -625,6 +654,7 @@ export async function createComposedApplicationRuntime(
       entry,
       freshTenantInstallEvidence,
       identity: identities.runtime,
+      metrics,
       operationGateway,
       operationMediation,
       queryGateway,
