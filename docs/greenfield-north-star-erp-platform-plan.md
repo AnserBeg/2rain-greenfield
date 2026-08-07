@@ -3708,9 +3708,9 @@ starting targets for launch are:
 | Measure                    | Starting objective                                                                       |
 | -------------------------- | ---------------------------------------------------------------------------------------- |
 | Application availability   | 99.9% monthly for interactive ERP operations                                             |
-| Common registered queries  | p95 under 500 ms at the declared launch data shape                                       |
+| Common registered queries  | p95 under **400 ms** at the declared launch data shape ([ADR-0032](../decisions/ADR-0032-feedback-ladder-and-loading-states.md) §7 — Doherty, replacing an uncited 500 ms) |
 | Non-AI business operations | p95 under 1.5 s excluding durable external work                                          |
-| UI responsiveness          | core launch pages meet agreed Core Web Vitals on supported warehouse and desktop devices |
+| UI responsiveness          | the ratified feedback ladder ([ADR-0032](../decisions/ADR-0032-feedback-ladder-and-loading-states.md) §1), measured — not "agreed Core Web Vitals", which named no figure and bound nothing |
 | Operation integrity        | zero unexplained accepted-write or inventory reconciliation mismatch                     |
 | Tenant isolation           | zero tolerated cross-tenant disclosure or mutation                                       |
 | Outbox delivery            | defined p95 lag, retry horizon, and zero silent loss                                     |
