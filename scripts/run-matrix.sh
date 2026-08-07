@@ -51,10 +51,10 @@ if [ "$LOCK_RC" -ne 0 ]; then
 fi
 registry record --mode exclusive --state holding --label "$LABEL" \
   --command "scripts/run-matrix.sh $LABEL"
-# Report before sweeping: a record whose process is gone is the signal, and
-# deleting it before printing it is how the last one became unknowable.
-registry report
-registry sweep
+# Report before sweeping, from one snapshot, and sweep only because this
+# acquisition is exclusive: success here does prove no incompatible inherited
+# descriptor survives.
+registry report --sweep exclusive
 echo "[$(date +%H:%M:%S)] $LABEL ACQUIRED the lock."
 
 node scripts/guard-ephemeral-postgres.mjs post-lock
@@ -63,12 +63,14 @@ if [ "$CONTAINER_GUARD_RC" -ne 0 ]; then
   exit "$CONTAINER_GUARD_RC"
 fi
 
-# A test process that shares a process group with a recorded participant is
-# queued behind this lock, not racing it. Blaming those was how a correctly
-# waiting lane starved the lane that legitimately held the slot.
+# A test process in a recorded participant's process lineage is queued behind
+# this lock, not racing it. Blaming those was how a correctly waiting lane
+# starved the lane that legitimately held the slot. Lineage, not process group:
+# a shared group only means "launched from the same shell", so exempting on it
+# hands a participant's exemption to an unrelated sibling.
 foreign_matrix() {
   local coordinated snapshot
-  coordinated="$(registry pgids)"
+  coordinated="$(registry coordinated-pids)"
   snapshot="$(ps -eo pid=,pgid=,args=)"
   FOREIGN_PROCESSES="$(
     printf '%s\n' "$snapshot" \
@@ -76,12 +78,12 @@ foreign_matrix() {
       | grep -E '[c]orepack pnpm (test|check:boundaries|check:schema)|[p]laywright test|[r]un-security-scans\.sh' \
       | awk -v coordinated="$coordinated" '
           BEGIN {
-            total = split(coordinated, groups, "\n")
+            total = split(coordinated, pids, "\n")
             for (position = 1; position <= total; position++) {
-              if (groups[position] != "") coordinated_group[groups[position]] = 1
+              if (pids[position] != "") coordinated_pid[pids[position]] = 1
             }
           }
-          !($2 in coordinated_group)
+          !($1 in coordinated_pid)
         '
   )"
   [ -n "$FOREIGN_PROCESSES" ]

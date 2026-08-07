@@ -460,7 +460,7 @@ test('matrix lock and legacy-process waits fail busy at their bounded deadline',
         const fakePs = join(fakeBin, 'ps');
         writeFileSync(
           fakePs,
-          "#!/usr/bin/env bash\nprintf '99999 9999999 corepack pnpm test:compiler\\n'\n",
+          "#!/usr/bin/env bash\nprintf '9999999 9999999 corepack pnpm test:compiler\\n'\n",
         );
         chmodSync(fakePs, 0o755);
         assert.throws(

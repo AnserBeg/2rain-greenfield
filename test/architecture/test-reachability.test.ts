@@ -382,9 +382,15 @@ test('root test aggregate includes every CI-invoked test command and reachabilit
     ['test:unit'],
     'aggregate discovery matches whole command segments, not substrings',
   );
+  // The aggregate does real work before its first suite — it mints the run
+  // token, then compiles and checks two releases — and none of that was leased.
+  // Its children coordinating afterwards is not the same as the aggregate
+  // coordinating: one outer exclusive lease is, and the nested shared and
+  // exclusive scripts already accept inherited exclusive access.
   assert.match(
     aggregate,
-    /^node --import tsx test\/helpers\/begin-reachability-run\.ts &&/u,
+    /^node scripts\/run-with-test-lock\.mjs exclusive -- bash -c 'node --import tsx test\/helpers\/begin-reachability-run\.ts &&/u,
+    'the aggregate must mint its run token inside one exclusive lease',
   );
   assert.match(aggregate, /test\/helpers\/run-observability-producer\.ts/u);
 });

@@ -38,6 +38,29 @@ function recordPath(lockPath, pid) {
  * elapsed-time measurement, so it carries no wall-clock dependence.
  */
 export function readProcessIdentity(pid) {
+  const fields = readProcessStatFields(pid);
+  if (fields === undefined) return undefined;
+  const parent = fields[1];
+  const processGroup = fields[2];
+  const startTicks = fields[19];
+  if (
+    parent === undefined ||
+    processGroup === undefined ||
+    startTicks === undefined ||
+    !/^\d+$/u.test(parent) ||
+    !/^\d+$/u.test(processGroup) ||
+    !/^\d+$/u.test(startTicks)
+  ) {
+    return undefined;
+  }
+  return {
+    parent: Number(parent),
+    processGroup: Number(processGroup),
+    startTicks,
+  };
+}
+
+function readProcessStatFields(pid) {
   let stat;
   try {
     stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
@@ -46,18 +69,7 @@ export function readProcessIdentity(pid) {
   }
   const closingParenthesis = stat.lastIndexOf(')');
   if (closingParenthesis < 0) return undefined;
-  const fields = stat.slice(closingParenthesis + 2).split(' ');
-  const processGroup = fields[2];
-  const startTicks = fields[19];
-  if (
-    processGroup === undefined ||
-    startTicks === undefined ||
-    !/^\d+$/u.test(processGroup) ||
-    !/^\d+$/u.test(startTicks)
-  ) {
-    return undefined;
-  }
-  return { processGroup: Number(processGroup), startTicks };
+  return stat.slice(closingParenthesis + 2).split(' ');
 }
 
 export function recordLockUser({
@@ -69,6 +81,9 @@ export function recordLockUser({
   pid = process.pid,
 }) {
   const identity = readProcessIdentity(pid);
+  // An unreadable identity is persisted as null and classified UNIDENTIFIED,
+  // never live. A record that cannot prove which process it names must not be
+  // able to vouch for one.
   const record = {
     version: RECORD_VERSION,
     pid,
@@ -128,11 +143,17 @@ export function readLockUsers(lockPath) {
 }
 
 function classify(record) {
+  if (record.startTicks === null) {
+    return {
+      liveness: 'unidentified',
+      unidentifiedReason: 'its process identity was unreadable when recorded',
+    };
+  }
   const identity = readProcessIdentity(record.pid);
   if (identity === undefined) {
     return { liveness: 'stale', staleReason: 'the process is gone' };
   }
-  if (record.startTicks !== null && identity.startTicks !== record.startTicks) {
+  if (identity.startTicks !== record.startTicks) {
     return {
       liveness: 'stale',
       staleReason: 'the PID was reused by an unrelated process',
@@ -142,9 +163,13 @@ function classify(record) {
 }
 
 export function describeLockUsers(lockPath, { excludePid } = {}) {
-  const users = readLockUsers(lockPath).filter(
-    (user) => user.pid !== excludePid,
+  return describeLockUserList(
+    readLockUsers(lockPath).filter((user) => user.pid !== excludePid),
+    lockPath,
   );
+}
+
+export function describeLockUserList(users, lockPath) {
   if (users.length === 0) {
     return [
       `[test-lock] no participant is recorded for ${lockPath}: either the lock` +
@@ -155,7 +180,7 @@ export function describeLockUsers(lockPath, { excludePid } = {}) {
   return users.map((user) => describeLockUser(user));
 }
 
-function describeLockUser(user) {
+export function describeLockUser(user) {
   if (user.liveness === 'unreadable') {
     return `[test-lock] UNREADABLE record for pid=${user.pid}; it names nothing`;
   }
@@ -163,6 +188,13 @@ function describeLockUser(user) {
     `pid=${user.pid} pgid=${user.processGroup ?? 'unknown'}` +
     ` mode=${user.mode} state=${user.state} label=${user.label}` +
     ` command=${JSON.stringify(user.command)}`;
+  if (user.liveness === 'unidentified') {
+    return (
+      `[test-lock] UNIDENTIFIED record (${user.unidentifiedReason}):` +
+      ` ${identity}. It may or may not still hold the lock, so it neither` +
+      ' names a holder nor vouches for any process.'
+    );
+  }
   if (user.liveness === 'stale') {
     return (
       `[test-lock] STALE record, NOT the current holder (${user.staleReason}):` +
@@ -174,12 +206,18 @@ function describeLockUser(user) {
 }
 
 /**
- * Removes records whose process is provably gone. Callers report before
- * sweeping, so the evidence is printed before it is deleted.
+ * Removes the stale records in an already-classified snapshot. Callers report
+ * before sweeping, so the evidence is printed before it is deleted, and pass
+ * the same list they reported so the two never disagree.
+ *
+ * ONLY AN EXCLUSIVE ACQUISITION MAY SWEEP. A successful shared acquisition is
+ * compatible with a surviving shared descriptor inherited from a dead holder,
+ * so there a stale record can be the only remaining name for a lock that is
+ * still held. Deleting it rebuilds the defect this registry exists to remove.
  */
-export function sweepStaleLockUsers(lockPath) {
+export function sweepStaleLockUsers(lockPath, users) {
   let swept = 0;
-  for (const user of readLockUsers(lockPath)) {
+  for (const user of users) {
     if (user.liveness !== 'stale') continue;
     releaseLockUser(lockPath, user.pid);
     swept += 1;
@@ -188,16 +226,63 @@ export function sweepStaleLockUsers(lockPath) {
 }
 
 /**
- * Process groups of every live participant. A process sharing one of these is
- * queued or running under the lock — coordinated, not lock-unaware.
+ * PIDs that belong to a recorded participant's process lineage: the
+ * participant, its ancestors, and its descendants. A same-process-group sibling
+ * is NOT included — a shared group means "launched from the same shell", which
+ * is not evidence of participation, and exempting on it lets an unrelated
+ * process inherit a participant's exemption.
  */
-export function liveLockUserProcessGroups(lockPath) {
-  const groups = new Set();
-  for (const user of readLockUsers(lockPath)) {
-    if (user.liveness !== 'live' || user.processGroup === null) continue;
-    groups.add(user.processGroup);
+export function coordinatedProcesses(lockPath) {
+  const participants = readLockUsers(lockPath)
+    .filter((user) => user.liveness === 'live')
+    .map((user) => user.pid);
+  if (participants.length === 0) return [];
+
+  const parents = readProcessParents();
+  const children = new Map();
+  for (const [pid, parent] of parents) {
+    if (!children.has(parent)) children.set(parent, []);
+    children.get(parent).push(pid);
   }
-  return [...groups].sort((left, right) => left - right);
+
+  const coordinated = new Set();
+  for (const participant of participants) {
+    for (
+      let current = participant;
+      current !== undefined && current > 0 && !coordinated.has(current);
+      current = parents.get(current)
+    ) {
+      coordinated.add(current);
+    }
+    const pending = [participant];
+    while (pending.length > 0) {
+      const next = pending.pop();
+      for (const child of children.get(next) ?? []) {
+        if (coordinated.has(child)) continue;
+        coordinated.add(child);
+        pending.push(child);
+      }
+    }
+  }
+  return [...coordinated].sort((left, right) => left - right);
+}
+
+function readProcessParents() {
+  const parents = new Map();
+  let entries;
+  try {
+    entries = readdirSync('/proc');
+  } catch {
+    return parents;
+  }
+  for (const entry of entries) {
+    if (!/^\d+$/u.test(entry)) continue;
+    const fields = readProcessStatFields(entry);
+    const parent = fields?.[1];
+    if (parent === undefined || !/^\d+$/u.test(parent)) continue;
+    parents.set(Number(entry), Number(parent));
+  }
+  return parents;
 }
 
 if (process.argv[1] === import.meta.filename) {
@@ -209,9 +294,9 @@ function runCommandLine(argv) {
   const options = parseOptions(rest);
   if (options === undefined || options.lock === undefined) {
     process.stderr.write(
-      'Usage: test-lock-registry.mjs <record|release|report|sweep|pgids>' +
+      'Usage: test-lock-registry.mjs <record|release|report|coordinated-pids>' +
         ' --lock <path> [--pid <pid>] [--mode <mode>] [--state <state>]' +
-        ' [--label <label>] [--command <command>]\n',
+        ' [--label <label>] [--command <command>] [--sweep <mode>]\n',
     );
     return 2;
   }
@@ -237,23 +322,25 @@ function runCommandLine(argv) {
       return 0;
     }
     case 'report': {
-      for (const line of describeLockUsers(options.lock, { excludePid: pid })) {
+      const users = readLockUsers(options.lock).filter(
+        (user) => user.pid !== pid,
+      );
+      for (const line of describeLockUserList(users, options.lock)) {
         process.stderr.write(`${line}\n`);
       }
-      return 0;
-    }
-    case 'sweep': {
-      const swept = sweepStaleLockUsers(options.lock);
-      if (swept > 0) {
-        process.stderr.write(
-          `[test-lock] swept ${swept} stale record(s) after reporting them\n`,
-        );
+      if (options.sweep === 'exclusive') {
+        const swept = sweepStaleLockUsers(options.lock, users);
+        if (swept > 0) {
+          process.stderr.write(
+            `[test-lock] swept ${swept} stale record(s) after reporting them\n`,
+          );
+        }
       }
       return 0;
     }
-    case 'pgids': {
-      for (const group of liveLockUserProcessGroups(options.lock)) {
-        process.stdout.write(`${group}\n`);
+    case 'coordinated-pids': {
+      for (const coordinated of coordinatedProcesses(options.lock)) {
+        process.stdout.write(`${coordinated}\n`);
       }
       return 0;
     }

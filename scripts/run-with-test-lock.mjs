@@ -5,7 +5,9 @@ import { closeSync, constants, openSync } from 'node:fs';
 import process from 'node:process';
 
 import {
+  describeLockUser,
   describeLockUsers,
+  readLockUsers,
   recordLockUser,
   releaseLockUser,
   sweepStaleLockUsers,
@@ -115,14 +117,23 @@ function reportOtherParticipants() {
   }
 }
 
+// Report and sweep from ONE classified snapshot, so the records that are
+// deleted are exactly the records that were printed.
+//
+// Only an exclusive acquisition sweeps. A shared acquisition succeeding proves
+// nothing about surviving descriptors: the matrix downgrades fd 9 and its
+// children inherit it, so a dead matrix shell leaves a stale record beside a
+// lock that a child still holds. Sweeping there would delete the only name the
+// next exclusive refusal could report.
 function reportStaleParticipants() {
-  const stale = describeLockUsers(LOCK_PATH, {
-    excludePid: process.pid,
-  }).filter((line) => line.includes('STALE record'));
-  for (const line of stale) {
-    process.stderr.write(`${line}\n`);
+  const users = readLockUsers(LOCK_PATH).filter(
+    (user) => user.pid !== process.pid,
+  );
+  for (const user of users) {
+    if (user.liveness !== 'stale') continue;
+    process.stderr.write(`${describeLockUser(user)}\n`);
   }
-  sweepStaleLockUsers(LOCK_PATH);
+  if (mode === 'exclusive') sweepStaleLockUsers(LOCK_PATH, users);
 }
 
 function parseTimeout(value) {
