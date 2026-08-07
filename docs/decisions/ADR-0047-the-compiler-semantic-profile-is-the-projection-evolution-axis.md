@@ -197,6 +197,20 @@ tie.
   `v1-v2.release.structural.golden.json`, and inline digests in `freeze-b.test.ts`
   and `legal-entity-query-scope.test.ts`. `inventory-contract.release.golden.json`
   did not fail in the probe and may be stable; **measure it rather than assuming**.
+**The axis is consumed one version per projection change, not adopted once.**
+Raised by `proj-disc-impl` and **believed but not measured** — the lane said so
+rather than asserting it. Once a profile version is adopted and recorded in the
+lineage, `check:app-release` reproduces that entry too, so changing what the
+adopted profile emits would break its own reproduction. A later v1-gated field
+should therefore force the next consumer to cut v2 and mint another entry.
+
+If that holds, adopting a version buys the mechanism's evidence rather than a
+lineage saving, and every consumer pays one version and one entry. That is still
+strictly cheaper than the language axis, which would additionally owe conformance
+ledger obligations per cut. **`U5` must measure this before assuming either way**
+— an orchestrator claim that later consumers would "add fields for free" was made
+during chartering and is not supported.
+
 - `check:demo-release` has no parallel reproduction path — `compile-demo-release.ts`
   compiles one fixture and string-compares — so it needs regeneration, not
   mechanism.
