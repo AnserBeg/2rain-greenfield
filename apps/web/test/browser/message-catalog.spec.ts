@@ -47,6 +47,13 @@ import { compiledFixturePath, demoEntry } from '../helpers.js';
  * source rather than leaving it to this comment.
  */
 
+/**
+ * The subject the census server is asked to render. Declared here, used both to
+ * drive the render and to expect it — so the expected value comes from this
+ * fixture, never from the renderer under test.
+ */
+const CENSUS_SUBJECT = 'northstar.shell:component.absent';
+
 interface MessagePart {
   readonly count: number;
   readonly text: string;
@@ -68,12 +75,26 @@ interface RenderedMessageSample {
  * The subject selector is `[data-message]` — the census marker every catalog
  * treatment carries — **not** `[role="alert"]`. Sampling by role fixed the
  * census to diagnostics and could never have seen a success confirmation
- * (`role="status"`) or an empty state (no role at all), which is half of
- * ADR-0048's scope and all of `U6b`'s.
+ * (`role="status"`) or an empty state (no role at all). That selector change
+ * means such a treatment would be *sampled*; it does **not** mean `U6b` is
+ * covered. `U6b` owes real-path observations of its own renderers, and an
+ * earlier version of this comment implying otherwise was wrong.
  *
- * Visibility is read **per element**, not once for the card. Hiding
+ * Visibility is read per element **and through its ancestors**. Hiding
  * `[data-message-sentence]` alone leaves the card visible and its `textContent`
- * readable, so a card-level check would have called that correct.
+ * readable; an ancestor at `opacity: 0` leaves every descendant reporting
+ * opacity 1 with a non-zero rectangle, because opacity composites rather than
+ * inherits.
+ *
+ * **What this still cannot prove, stated rather than implied** (AGENTS.md §6).
+ * "Perceptible" here means: laid out with a non-zero box, and no ancestor
+ * applying `display:none`, `visibility:hidden` or a zero effective opacity. It
+ * is **not** "the user read the text". It does not observe clipping by an
+ * `overflow:hidden` ancestor, displacement outside the viewport or behind
+ * another element, `color: transparent` or text painted on a ground of its own
+ * colour, `clip-path`, `filter: opacity(0)`, or `content-visibility: hidden`.
+ * Closing those needs pixel sampling or an accessibility-tree read, and neither
+ * is in this packet.
  */
 async function readMessageSamples(
   page: Page,
@@ -82,15 +103,27 @@ async function readMessageSamples(
     [...document.querySelectorAll('[data-message]')]
       .map((element) => {
         const perceptible = (node: Element): boolean => {
-          const style = getComputedStyle(node);
           const rectangle = node.getBoundingClientRect();
-          return (
-            style.display !== 'none' &&
-            style.visibility !== 'hidden' &&
-            Number.parseFloat(style.opacity) > 0 &&
-            rectangle.width > 0 &&
-            rectangle.height > 0
-          );
+          if (rectangle.width <= 0 || rectangle.height <= 0) return false;
+          // Opacity COMPOSITES through ancestors; it does not inherit. A
+          // wrapper at opacity:0 leaves every descendant reporting 1 with a
+          // non-zero rectangle, so reading each node's own style called an
+          // invisible card fully visible. Walk to the document root and
+          // multiply.
+          let effectiveOpacity = 1;
+          for (
+            let current: Element | null = node;
+            current !== null;
+            current = current.parentElement
+          ) {
+            const style = getComputedStyle(current);
+            if (style.display === 'none' || style.visibility === 'hidden') {
+              return false;
+            }
+            effectiveOpacity *= Number.parseFloat(style.opacity);
+            if (!(effectiveOpacity > 0)) return false;
+          }
+          return true;
         };
         const part = (selector: string) => {
           const found = element.querySelectorAll(selector);
@@ -124,6 +157,7 @@ async function readMessageSamples(
 function observeCatalogMessages(
   samples: readonly RenderedMessageSample[],
   expectedCodes: readonly string[],
+  expectedSubjects: Readonly<Record<string, string>> = {},
 ): string[] {
   const violations: string[] = [];
   if (expectedCodes.length === 0) violations.push('ZERO_CODES_READ');
@@ -173,7 +207,7 @@ function observeCatalogMessages(
         violations.push(`MESSAGE_${label}_HIDDEN:${sample.code}`);
         return;
       }
-      if (expected !== '' && part.text !== expected) {
+      if (part.text !== expected) {
         violations.push(`MESSAGE_${label}_MISMATCH:${sample.code}`);
       }
     };
@@ -181,19 +215,18 @@ function observeCatalogMessages(
     required('SENTENCE', sample.sentence, entry.sentence);
     required('DETAIL', sample.detail, entry.detail);
     required('NEXT_ACTION', sample.nextAction, entry.nextAction);
-    // The subject's text is a runtime value, not a catalog literal, so the
-    // assertion is that it is present, visible and non-empty. `''` means
-    // "expect a part, compare no text".
-    required('SUBJECT', sample.subject, entry.subject === null ? null : '');
-    // Only once the part is present and visible, so a deleted subject reports
-    // one cause rather than two.
-    if (
-      entry.subject !== null &&
-      sample.subject.count === 1 &&
-      sample.subject.visible &&
-      sample.subject.text === ''
-    ) {
-      violations.push(`MESSAGE_SUBJECT_EMPTY:${sample.code}`);
+    // The subject is a semantic runtime value — which component the release
+    // named — so proving it non-empty proved nothing: shipping a different
+    // identifier keeps the count at one, the element visible and the text
+    // non-empty. The expected value is derived by the caller from the same
+    // fixture that drove the render, never from the renderer.
+    required(
+      'SUBJECT',
+      sample.subject,
+      entry.subject === null ? null : (expectedSubjects[sample.code] ?? ''),
+    );
+    if (entry.subject !== null && expectedSubjects[sample.code] === undefined) {
+      violations.push(`MESSAGE_SUBJECT_EXPECTATION_MISSING:${sample.code}`);
     }
 
     const expectedRole =
@@ -336,7 +369,7 @@ async function censusServerUrl(): Promise<string> {
         renderApplicationDiagnostic(
           422,
           code === 'UNSUPPORTED_COMPONENT'
-            ? { code, subject: 'northstar.shell:component.absent' }
+            ? { code, subject: CENSUS_SUBJECT }
             : {
                 code: code as Exclude<
                   SurfaceMessageCode,
@@ -575,10 +608,19 @@ const DECLARED_NO_REAL_PATH_DRIVER: Readonly<
 };
 
 /**
- * The census itself is checked against the catalog, not merely used. Rejecting
- * only an empty census left `SURFACE_MESSAGE_CODES.slice(0, 1)` passing: the
- * partition stayed consistent and 26 codes silently left the gate's scope. A
- * truncation is the realistic way a census shrinks, not a deletion.
+ * The census itself is checked against the catalog rather than merely used.
+ *
+ * **The real vector is a coordinated truncation**: the census and the two
+ * accounting tables below shrinking together. The partition check alone cannot
+ * see that, because it only asks whether the census and the tables agree with
+ * each other, and both are hand-maintained. Comparing against
+ * `Object.keys(SURFACE_MESSAGE_CATALOG)` introduces an authority neither of
+ * them can move.
+ *
+ * A bare `SURFACE_MESSAGE_CODES.slice(0, 1)` was **not** the hole — it already
+ * reddened through `CODE_NOT_REGISTERED`, verified by running both gate
+ * revisions against that truncation. An earlier version of this comment said
+ * the partition "stayed consistent" under it, and that history is false.
  */
 function censusViolations(census: readonly string[]): string[] {
   const registered = Object.keys(SURFACE_MESSAGE_CATALOG).sort();
@@ -668,7 +710,9 @@ test('every registered code renders the sentence the catalog registers', async (
   for (const code of SURFACE_MESSAGE_CODES) {
     await page.goto(`${censusUrl}/?code=${encodeURIComponent(code)}`);
     violations.push(
-      ...observeCatalogMessages(await readMessageSamples(page), [code]),
+      ...observeCatalogMessages(await readMessageSamples(page), [code], {
+        UNSUPPORTED_COMPONENT: CENSUS_SUBJECT,
+      }),
     );
   }
   expect(violations).toEqual([]);
@@ -696,7 +740,12 @@ test('real request paths render the sentence the catalog registers', async ({
   for (const [code, drive] of Object.entries(REAL_PATH_DRIVERS)) {
     await drive(page);
     violations.push(
-      ...observeCatalogMessages(await readMessageSamples(page), [code]),
+      ...observeCatalogMessages(await readMessageSamples(page), [code], {
+        // Derived from the compiled fixture the shell actually served, so a
+        // renderer that substituted a different component identifier is caught
+        // rather than merely counted.
+        UNSUPPORTED_COMPONENT: unsupportedComponentReferenceId(),
+      }),
     );
   }
   expect(violations).toEqual([]);
@@ -787,6 +836,7 @@ test('control: a next action or subject deleted from the template is observed', 
     observeCatalogMessages(
       [{ ...full!, subject: { count: 0, text: '', visible: false } }],
       ['UNSUPPORTED_COMPONENT'],
+      { UNSUPPORTED_COMPONENT: CENSUS_SUBJECT },
     ),
   ).toEqual(['MESSAGE_SUBJECT_ABSENT:UNSUPPORTED_COMPONENT']);
 
@@ -799,6 +849,71 @@ test('control: a next action or subject deleted from the template is observed', 
       ['AUTHENTICATION_REQUIRED'],
     ),
   ).toEqual(['MESSAGE_NEXT_ACTION_ABSENT:AUTHENTICATION_REQUIRED']);
+});
+
+test('control: a wrong but non-empty subject is observed, not just counted', async ({
+  page,
+}) => {
+  // Presence and non-emptiness were satisfied by ANY identifier. Shipping a
+  // different component name keeps count at one, the element visible and the
+  // text non-empty — §6's proxy-satisfied-while-the-fact-is-false vector.
+  await page.goto(`${censusUrl}/?code=UNSUPPORTED_COMPONENT`);
+  const [rendered] = await readMessageSamples(page);
+  expect(rendered?.subject.text).toBe(CENSUS_SUBJECT);
+
+  const substituted = {
+    ...rendered!,
+    subject: { ...rendered!.subject, text: 'northstar.shell:component.other' },
+  };
+  expect(
+    observeCatalogMessages([substituted], ['UNSUPPORTED_COMPONENT'], {
+      UNSUPPORTED_COMPONENT: CENSUS_SUBJECT,
+    }),
+  ).toEqual(['MESSAGE_SUBJECT_MISMATCH:UNSUPPORTED_COMPONENT']);
+
+  // And an assertion run with no expected subject reports the gap rather than
+  // silently reverting to a presence check.
+  expect(
+    observeCatalogMessages([rendered!], ['UNSUPPORTED_COMPONENT'], {}),
+  ).toEqual([
+    'MESSAGE_SUBJECT_EXPECTATION_MISSING:UNSUPPORTED_COMPONENT',
+    'MESSAGE_SUBJECT_MISMATCH:UNSUPPORTED_COMPONENT',
+  ]);
+});
+
+test('control: an opacity-zero ancestor is observed, not reported as visible', async ({
+  page,
+}) => {
+  // Opacity composites through ancestors and does not inherit, so every
+  // descendant still reports opacity 1 with a non-zero rectangle. Reading each
+  // node's own style called this fully visible.
+  await page.goto(`${censusUrl}/?code=AUTHENTICATION_REQUIRED`);
+  await page.evaluate(() => {
+    const message = document.querySelector('[data-message]');
+    const wrapper = document.createElement('div');
+    wrapper.style.opacity = '0';
+    message?.parentElement?.insertBefore(wrapper, message);
+    if (message) wrapper.append(message);
+  });
+
+  const ownStyleSaysVisible = await page.evaluate(() => {
+    const node = document.querySelector('[data-message-sentence]');
+    if (!node) return false;
+    const style = getComputedStyle(node);
+    const rectangle = node.getBoundingClientRect();
+    return (
+      Number.parseFloat(style.opacity) === 1 &&
+      rectangle.width > 0 &&
+      rectangle.height > 0
+    );
+  });
+  expect(ownStyleSaysVisible).toBe(true);
+
+  expect(
+    observeCatalogMessages(await readMessageSamples(page), [
+      'AUTHENTICATION_REQUIRED',
+    ]),
+  ).toEqual(['MESSAGE_IMPERCEPTIBLE:AUTHENTICATION_REQUIRED']);
 });
 
 test('control: a part hidden on its own is observed while the card stays visible', async ({
@@ -869,6 +984,20 @@ function compiledSurfaces(): readonly Record<string, unknown>[] {
     };
   };
   return fixture.projections.surface.payload.surfaces;
+}
+
+/** The component id the compiled fixture names, read from the artifact. */
+function unsupportedComponentReferenceId(): string {
+  const surface = compiledSurfaces().find(
+    (candidate) => candidate.label === 'Unsupported component',
+  );
+  const slots = surface?.slots as
+    { contentReferenceId?: unknown }[] | undefined;
+  const reference = slots?.[0]?.contentReferenceId;
+  if (typeof reference !== 'string') {
+    throw new Error('compiled unsupported surface names no component');
+  }
+  return reference;
 }
 
 function unsupportedId(): string {

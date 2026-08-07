@@ -58,9 +58,13 @@ export function messageBody(
  * the ADR-0035 §2.2 error the ADR itself cites: a completeness claim derived
  * from what the gate happens to look at rather than from the consumers.
  *
- * Every treatment routes through here, so `U6b`'s success and empty entries are
- * covered by construction when they land rather than needing a second gate that
- * would drift from this one.
+ * Every treatment routes through here, so a success confirmation or empty state
+ * that uses this helper is *sampled* by the existing gate rather than falling
+ * outside its selector. **That is a mechanism, not an observation, and it is not
+ * coverage.** Nothing here proves `U6b`'s success and empty renderers emit the
+ * right text, or that they route through this helper at all; `U6b` owes
+ * real-path observations of those renderers. An earlier version of this comment
+ * claimed they were "covered by construction", which was false.
  *
  * `data-status-role` resolves through the pinned roles per ADR-0048 §3, derived
  * from the entry's consequence rather than written at the call site, so a
