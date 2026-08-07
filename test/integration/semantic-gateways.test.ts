@@ -1042,6 +1042,69 @@ test('the composed instrumentation carries a duration across a real ladder bound
   );
 });
 
+/**
+ * The production default branch, which every other control bypasses. Liveness
+ * calls the exported source directly; both boundary controls pass a clock. So
+ * `clock ?? monotonicMilliseconds` resolving to a dead fallback survives all of
+ * them, and extracting the factory is what introduced that branch.
+ *
+ * **No band assertion could ever catch it**: a 0 ms sample and a 99 ms sample
+ * are both `under_100ms`, and the composed PostgreSQL control asks only for
+ * valid bands and no rejections, which twenty zero-duration readings satisfy
+ * exactly. This observes the duration instead.
+ *
+ * It injects no clock, deliberately — that is the branch under test — so it
+ * asserts strict positivity rather than any bound. There is no threshold to be
+ * flaky about, and the interval is burned rather than slept through.
+ */
+test('the composed factory default times a call from the live monotonic source', async () => {
+  const fixture = createFixture({
+    queryPayload: queryCatalogWith(answeringQueryId),
+  });
+  const view = await fixture.requestEntry.run(authenticationInput, (value) =>
+    Promise.resolve(value),
+  );
+  const metrics = new ObservabilityMetrics();
+  // No clock argument: this is exactly what the composition constructs.
+  const instrumentation =
+    composedRegisteredQueryLatencyInstrumentation(metrics);
+  const observations: RegisteredQueryLatencyObservation[] = [];
+  const gateway = new SemanticQueryGateway(
+    fixture.policy,
+    busyQueryExecutor(),
+    undefined,
+    undefined,
+    Object.freeze({
+      // The factory's own resolved clock, unwrapped. Only `observe` is wrapped,
+      // and only so the duration that clock produced can be read back.
+      monotonicMilliseconds: instrumentation.monotonicMilliseconds,
+      observe: (observation: RegisteredQueryLatencyObservation) => {
+        observations.push(observation);
+        instrumentation.observe(observation);
+      },
+    }),
+  );
+
+  await gateway.invoke(view, ladderRequest(answeringQueryId));
+
+  assert.equal(observations.length, 1);
+  const observed = observations[0]!;
+  assert.ok(
+    observed.durationMilliseconds > 0,
+    `the composed default clock produced ${String(
+      observed.durationMilliseconds,
+    )} ms across a busy interval`,
+  );
+  assert.deepEqual(
+    metrics.snapshot().queryLatencyRejections,
+    [],
+    'a live default source yields a usable sample, not a refused one',
+  );
+  assert.deepEqual(metrics.snapshot().queryLatency, [
+    ['answered|under_100ms', 1],
+  ]);
+});
+
 const answeringQueryId = 'northstar.bootstrap:query.item_list';
 const aggregateQueryId = 'northstar.bootstrap:query.item_amount_sum';
 const aggregateNodeVersion = 'v4';
@@ -1164,6 +1227,25 @@ function ladderRequest(targetQueryId: string): SemanticQueryRequestEnvelope {
     queryId: targetQueryId,
     schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
   });
+}
+
+/**
+ * Burns a bounded interval so a duration measured across it is unambiguous.
+ * Busy, never asleep: AGENTS.md §6 forbids sleep-and-measure, and nothing here
+ * asserts a bound on how long the interval took.
+ */
+function busyQueryExecutor(): SemanticQueryExecutor {
+  return {
+    execute(request) {
+      const deadline = process.hrtime.bigint() + 1_000_000n;
+      let spins = 0;
+      while (process.hrtime.bigint() < deadline) {
+        spins += 1;
+      }
+      assert.ok(spins >= 0);
+      return Promise.resolve(recordEnvelope(request.definition.queryId));
+    },
+  };
 }
 
 function stubQueryExecutor(): SemanticQueryExecutor {

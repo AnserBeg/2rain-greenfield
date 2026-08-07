@@ -132,13 +132,6 @@ resolution is in the direction that owes more, and it is what makes the ladder
 total, which is what lets the graded count be compared against an invocation
 count at all.
 
-**One check here is a proxy, and is recorded as one.** A separate gate matches
-the 400 ms threshold and the six §1 rows against ADR-0032, plan §15.1 and the
-`ux-grammar` skill, so the code and the doctrine cannot drift apart unnoticed.
-Prose can only be matched, never observed, so per AGENTS.md §6 that check
-ratchets wording; it proves nothing about behaviour. Everything else in this
-family reads a recorded counter.
-
 **`loadingTreatmentAdmitted` is a helper, not a gate.** ADR-0032 §2 is written
 as a predicate that answers `false` for the two bands at or under 400 ms, and a
 unit test holds it to that. **No production path calls it.** It constrains
