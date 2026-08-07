@@ -392,6 +392,21 @@ export async function createComposedApplicationRuntime(
           }),
       );
       if (reverseAuthorization === null) {
+        // ADR-0047 §6. A profile-only edge: both releases compile the SAME
+        // package revision under different compiler-semantic profiles, so
+        // `ensurePersistedRelease` reused one revision row and the revision
+        // graph has no edge to reverse even though the release lineage does.
+        // The index check above already passed, so the target IS the immediate
+        // predecessor -- borrowing that code here would misname the cause and
+        // send an operator hunting the wrong fault (ADR-0046).
+        if (
+          targetIdentity.revisionId === lineage[activeLineageIndex]!.revisionId
+        ) {
+          refuseReverseTransition(
+            'ROLLBACK_ACROSS_PROFILE_ONLY_EDGE',
+            'rollback target is the immediate predecessor but shares its package revision: the two releases compile the same source under different compiler-semantic profiles, so the release lineage advances across this edge while the revision lineage does not, and there is no reverse revision edge to authorize',
+          );
+        }
         refuseReverseTransition(
           'ROLLBACK_TARGET_NOT_IMMEDIATE_PREDECESSOR',
           'rollback target does not reverse an exact compiled lineage edge',

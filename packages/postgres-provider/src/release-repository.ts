@@ -12,7 +12,7 @@ import {
   CHUNK_DESCRIPTOR_VERSION,
   CHUNKING_SCHEME_VERSION,
   COMPILER_ATTESTATION_VERSION,
-  COMPILER_SEMANTIC_PROFILE_VERSION,
+  SUPPORTED_COMPILER_SEMANTIC_PROFILE_VERSIONS,
   COMPILER_VERSION,
   HASH_ALGORITHM,
   HASH_DOMAINS,
@@ -689,8 +689,11 @@ function verifyReleaseManifestEnvelope(
     manifest.manifestVersion !== RELEASE_MANIFEST_VERSION ||
     manifest.policyModelVersion !== POLICY_MODEL_VERSION ||
     manifest.compilerVersion !== COMPILER_VERSION ||
-    manifest.compilerSemanticProfileVersion !==
-      COMPILER_SEMANTIC_PROFILE_VERSION ||
+    // Any READABLE profile version, not today's adopted one: a persisted
+    // release recorded under an earlier profile stays verifiable (ADR-0047 §2).
+    !SUPPORTED_COMPILER_SEMANTIC_PROFILE_VERSIONS.includes(
+      manifest.compilerSemanticProfileVersion,
+    ) ||
     manifest.outputProtocolVersion !== OUTPUT_PROTOCOL_VERSION ||
     manifest.hashAlgorithm !== HASH_ALGORITHM ||
     manifest.languageVersion !== revision.languageVersion ||
@@ -748,8 +751,11 @@ function verifyAttestation(
       INCREMENTAL_EQUIVALENCE_INVARIANT ||
     compiled.attestation.compilerVersion !== COMPILER_VERSION ||
     compiled.attestation.compilerVersion !== manifest.compilerVersion ||
-    compiled.attestation.compilerSemanticProfileVersion !==
-      COMPILER_SEMANTIC_PROFILE_VERSION ||
+    !SUPPORTED_COMPILER_SEMANTIC_PROFILE_VERSIONS.includes(
+      compiled.attestation.compilerSemanticProfileVersion,
+    ) ||
+    // The attestation and the manifest must still agree with EACH OTHER; only
+    // the comparison against a single current constant is relaxed.
     compiled.attestation.compilerSemanticProfileVersion !==
       manifest.compilerSemanticProfileVersion ||
     compiled.attestation.inputDefinitionDigest !==

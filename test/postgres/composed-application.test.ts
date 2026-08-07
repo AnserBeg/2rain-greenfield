@@ -2582,13 +2582,83 @@ async function assertIntermediateBecomesServingOnlyAfterVerification(
   const target = compiled.applications.at(-2);
   assert.ok(target);
   await runtime.close();
-  const historicalSearchQueryId = 'northstar.app:query.stock_count_line_search';
+
+  // DIRECTION 1 -- the refusal FIRES on a profile-only edge. The serving head
+  // and `at(-2)` share a normalized definition (ADR-0047 §4), so they share one
+  // package revision and the revision graph has no edge to reverse. The target
+  // IS the immediate predecessor -- the index check passes and control reaches
+  // the authorization -- so this must NOT borrow
+  // ROLLBACK_TARGET_NOT_IMMEDIATE_PREDECESSOR (ADR-0047 §6).
+  assert.equal(
+    target.normalizedDefinitionBytes.byteLength,
+    compiled.application.normalizedDefinitionBytes.byteLength,
+  );
+  assert.ok(
+    equalNormalizedDefinition(
+      target.normalizedDefinitionBytes,
+      compiled.application.normalizedDefinitionBytes,
+    ),
+    'this direction is only meaningful while the head is a profile sibling',
+  );
   await assert.rejects(
     createRuntime(compiledApplication, databaseUrl, tenantSlug, {
       kind: 'rollback',
       targetReleaseRoot: target.compiled.releaseRoot,
     }),
     (error: unknown) => {
+      assert.ok(error instanceof ReleaseReverseTransitionRefusal);
+      assert.equal(error.code, 'ROLLBACK_ACROSS_PROFILE_ONLY_EDGE');
+      assert.match(error.message, /shares its package revision/u);
+      return true;
+    },
+    'ADR-0047 §6: a profile-only edge refuses by its own name, not as a wrong predecessor',
+  );
+
+  // DIRECTION 2 -- the refusal does NOT fire on a source-changing edge, and the
+  // ADR-0046 observation this helper exists for is preserved rather than
+  // dropped. Truncating the lineage to the last source-changing head restores
+  // exactly the pair this asserted before the profile entry was appended: an
+  // eligible rollback whose verification refuses the pre-existing unusable
+  // search BY NAME. Without this the profile edge would have silently taken a
+  // real ADR-0046 gate out of the suite.
+  const sourceChangingLineage = withoutProfileSiblingHead(compiledApplication);
+  const truncated = parseCompiledApplication(sourceChangingLineage);
+  const sourceChangingTarget = truncated.applications.at(-2);
+  assert.ok(sourceChangingTarget);
+  assert.ok(
+    !equalNormalizedDefinition(
+      sourceChangingTarget.normalizedDefinitionBytes,
+      truncated.application.normalizedDefinitionBytes,
+    ),
+    'direction 2 must cross an edge whose endpoints differ in source',
+  );
+  // The tenant must already be serving the truncated head before the rollback
+  // is eligible at all: on a fresh tenant `activeLineageIndex` is still the
+  // fresh-install intermediate, so the index check at the FIRST refusal site
+  // fires and control never reaches the authorization this direction is about.
+  const sourceEdgeSlug = `${tenantSlug}-source-edge`;
+  const sourceEdgeRuntime = await createRuntime(
+    sourceChangingLineage,
+    databaseUrl,
+    sourceEdgeSlug,
+  );
+  assert.equal(
+    sourceEdgeRuntime.releaseRoot,
+    truncated.application.compiled.releaseRoot,
+  );
+  await sourceEdgeRuntime.close();
+
+  const historicalSearchQueryId = 'northstar.app:query.stock_count_line_search';
+  await assert.rejects(
+    createRuntime(sourceChangingLineage, databaseUrl, sourceEdgeSlug, {
+      kind: 'rollback',
+      targetReleaseRoot: sourceChangingTarget.compiled.releaseRoot,
+    }),
+    (error: unknown) => {
+      assert.ok(
+        !(error instanceof ReleaseReverseTransitionRefusal),
+        `a source-changing edge must not raise a reverse-transition refusal, got ${String((error as { code?: string }).code)}`,
+      );
       assert.ok(error instanceof ModuleRuntimeInterpreterError);
       assert.equal(error.code, 'MODULE_SEARCH_CAPABILITY_UNAVAILABLE');
       assert.equal(error.subjectId, historicalSearchQueryId);
@@ -2596,7 +2666,28 @@ async function assertIntermediateBecomesServingOnlyAfterVerification(
     },
     'ADR-0046: rollback remains eligible, while verification of its pre-existing unusable search refuses by name',
   );
+
   return createRuntime(compiledApplication, databaseUrl, tenantSlug);
+}
+
+/**
+ * The lineage with its trailing profile-sibling entries removed, so the head is
+ * the last entry that actually changed the authored source. Used to exercise a
+ * source-changing rollback edge while the real artifact's head is a profile
+ * sibling (ADR-0047 §4).
+ */
+function withoutProfileSiblingHead(compiledApplication: unknown): unknown {
+  const envelope = structuredClone(compiledApplication) as {
+    applications: { normalizedDefinitionBytesBase64: string }[];
+  };
+  while (
+    envelope.applications.length > 1 &&
+    envelope.applications.at(-1)!.normalizedDefinitionBytesBase64 ===
+      envelope.applications.at(-2)!.normalizedDefinitionBytesBase64
+  ) {
+    envelope.applications.pop();
+  }
+  return envelope;
 }
 
 async function assertConstrainedDomainVerificationCompleted(
@@ -3455,6 +3546,45 @@ async function assertExactPartitionEvidence(
   );
 }
 
+/**
+ * The last entry whose normalized definition differs from the head's -- the
+ * previous SOURCE release, which is not the same as the previous lineage
+ * position.
+ *
+ * ADR-0047 §4: the lineage also advances when the OUTPUT CONTRACT changes, so
+ * adopting a compiler-semantic profile mints an entry that is byte-identical
+ * in source to its predecessor and differs only in release root. `at(-2)` then
+ * selects that definition-equal sibling instead of an actually-earlier
+ * authored release. Callers that mean "the release before this source" say so
+ * here; `at(-2)` keeps meaning "the previous entry" where that is intended.
+ */
+function previousSourceRelease(
+  compiled: ReturnType<typeof parseCompiledApplication>,
+):
+  | ReturnType<typeof parseCompiledApplication>['applications'][number]
+  | undefined {
+  const headBytes = compiled.application.normalizedDefinitionBytes;
+  return compiled.applications
+    .slice(0, -1)
+    .findLast(
+      (release) =>
+        !equalNormalizedDefinition(
+          release.normalizedDefinitionBytes,
+          headBytes,
+        ),
+    );
+}
+
+function equalNormalizedDefinition(
+  left: Uint8Array,
+  right: Uint8Array,
+): boolean {
+  return (
+    left.byteLength === right.byteLength &&
+    left.every((value, index) => value === right[index])
+  );
+}
+
 interface ConstructibilityPartition {
   readonly derivations?: readonly {
     readonly reason: {
@@ -3472,7 +3602,9 @@ async function assertAttributedSearchCapabilityScenarioDelta(
   compiledApplication: unknown,
 ): Promise<void> {
   const compiled = parseCompiledApplication(compiledApplication);
-  const previousRelease = compiled.applications.at(-2);
+  // This delta is attributed to an authored-source change, so it must read the
+  // last entry whose definition actually differs -- see previousSourceRelease.
+  const previousRelease = previousSourceRelease(compiled);
   assert.ok(previousRelease);
   const previous = releaseVerificationBinding(previousRelease.compiled);
   const current = releaseVerificationBinding(compiled.application.compiled);

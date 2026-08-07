@@ -48,8 +48,9 @@ import {
   CHUNK_DESCRIPTOR_VERSION,
   CHUNKING_SCHEME_VERSION,
   COMPILER_ATTESTATION_VERSION,
-  COMPILER_SEMANTIC_PROFILE_VERSION,
+  COMPILER_SEMANTIC_PROFILE_V1_VERSION,
   COMPILER_VERSION,
+  SUPPORTED_COMPILER_SEMANTIC_PROFILE_VERSIONS,
   HASH_ALGORITHM,
   HASH_DOMAINS,
   INCREMENTAL_EQUIVALENCE_INVARIANT,
@@ -75,6 +76,7 @@ import {
   type CompilerInput,
   type CompilerLimits,
   type CompilerSemanticProfile,
+  type CompilerSemanticProfileVersion,
   type CompileSuccess,
   type ContentAddressedArtifact,
   type ExpectedActiveRelease,
@@ -84,26 +86,42 @@ import {
   type StorageTransitionEnvelope,
 } from './protocol.js';
 
+/**
+ * The compiler-semantic profile the default profile selects. Keyed exactly as
+ * `ADOPTED_LANGUAGE_VERSION` is: adoption is a separate event from the cut, so
+ * a newly cut but unadopted profile version is READABLE (a recorded entry
+ * compiled under it still reproduces) without becoming any caller's default.
+ * Moving this constant moves every release root and retires the serving head
+ * to history, which is why ADR-0047 §4 makes it a lineage-minting event.
+ */
+export const ADOPTED_COMPILER_SEMANTIC_PROFILE_VERSION: CompilerSemanticProfileVersion =
+  COMPILER_SEMANTIC_PROFILE_V1_VERSION;
+
 const compilerProfileBase = Object.freeze({
   canonicalizationProfileVersion: CANONICALIZATION_PROFILE_VERSION,
   chunkingSchemeVersion: CHUNKING_SCHEME_VERSION,
-  compilerSemanticProfileVersion: COMPILER_SEMANTIC_PROFILE_VERSION,
   compilerVersion: COMPILER_VERSION,
   hashAlgorithm: HASH_ALGORITHM,
   outputProtocolVersion: OUTPUT_PROTOCOL_VERSION,
   policyModelVersion: POLICY_MODEL_VERSION,
 });
 
+// The profile is a point in the (language x compiler-semantic) grid, not a
+// point on the language axis alone. Both axes are append-only supported lists.
 const supportedCompilerProfiles: readonly CompilerSemanticProfile[] =
   Object.freeze(
-    SUPPORTED_LANGUAGE_VERSIONS.map((languageVersion) =>
-      Object.freeze({
-        ...compilerProfileBase,
-        languageVersion,
-        normalizationProfileVersion:
-          canonicalLanguageProfileFor(languageVersion)
-            .normalizationProfileVersion,
-      }),
+    SUPPORTED_LANGUAGE_VERSIONS.flatMap((languageVersion) =>
+      SUPPORTED_COMPILER_SEMANTIC_PROFILE_VERSIONS.map(
+        (compilerSemanticProfileVersion) =>
+          Object.freeze({
+            ...compilerProfileBase,
+            compilerSemanticProfileVersion,
+            languageVersion,
+            normalizationProfileVersion:
+              canonicalLanguageProfileFor(languageVersion)
+                .normalizationProfileVersion,
+          }),
+      ),
     ),
   );
 
@@ -111,7 +129,10 @@ const supportedCompilerProfiles: readonly CompilerSemanticProfile[] =
 // unadopted version must not silently become every caller's default profile.
 export const DEFAULT_COMPILER_PROFILE: CompilerSemanticProfile =
   supportedCompilerProfiles.find(
-    (profile) => profile.languageVersion === ADOPTED_LANGUAGE_VERSION,
+    (profile) =>
+      profile.languageVersion === ADOPTED_LANGUAGE_VERSION &&
+      profile.compilerSemanticProfileVersion ===
+        ADOPTED_COMPILER_SEMANTIC_PROFILE_VERSION,
   )!;
 
 export const MODULE_COMPILER_PROFILE: CompilerSemanticProfile =
@@ -434,7 +455,11 @@ function compileApplicationInternal(
     canonicalizationProfileVersion:
       input.profile.canonicalizationProfileVersion,
     capabilityFacts,
-    compilerSemanticProfileVersion: COMPILER_SEMANTIC_PROFILE_VERSION,
+    // From the SELECTED profile, not the module constant: a historical
+    // reproduction re-emits the profile version it was recorded under
+    // (ADR-0047 §5), and only then does its recorded root reproduce.
+    compilerSemanticProfileVersion:
+      input.profile.compilerSemanticProfileVersion,
     compilerVersion: COMPILER_VERSION,
     completeSnapshot: true,
     dependencyClosureDigest,
@@ -493,13 +518,16 @@ function compileApplicationInternal(
   const nodeContracts = emitted
     .map((entry) => entry.nodeContract)
     .sort((left, right) => compare(left.stableNodeId, right.stableNodeId));
-  const attestation = buildAttestation({
-    cacheInputDigest,
-    dependencyClosureDigest,
-    inputDefinitionDigest: normalizedDefinitionDigest,
-    limitsDigest,
-    releaseRoot,
-  });
+  const attestation = buildAttestation(
+    {
+      cacheInputDigest,
+      dependencyClosureDigest,
+      inputDefinitionDigest: normalizedDefinitionDigest,
+      limitsDigest,
+      releaseRoot,
+    },
+    input.profile.compilerSemanticProfileVersion,
+  );
 
   return {
     attestation,
@@ -2034,12 +2062,15 @@ function buildAttestation(
     | 'incrementalEquivalenceInvariant'
     | 'kind'
   >,
+  // The durable per-entry discriminator. Taken from the selected profile and
+  // kept a separate parameter so the serialized key order is unchanged.
+  compilerSemanticProfileVersion: CompilerSemanticProfileVersion,
 ): CompilerAttestation {
   const value = {
     attestationVersion: COMPILER_ATTESTATION_VERSION,
     ...core,
     compileMode: 'coldFull' as const,
-    compilerSemanticProfileVersion: COMPILER_SEMANTIC_PROFILE_VERSION,
+    compilerSemanticProfileVersion,
     compilerVersion: COMPILER_VERSION,
     incrementalEquivalenceInvariant: INCREMENTAL_EQUIVALENCE_INVARIANT,
     kind: 'compilerAttestation' as const,

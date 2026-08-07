@@ -10,10 +10,12 @@ import {
 import {
   DEFAULT_COMPILER_LIMITS,
   MODULE_COMPILER_PROFILE,
+  SUPPORTED_COMPILER_SEMANTIC_PROFILE_VERSIONS,
   compileApplication,
   expectedActiveReleaseFrom,
   reproduceHistoricalApplication,
   type CompileResult,
+  type CompilerSemanticProfileVersion,
   type CompileSuccess,
 } from '@north-star/compiler';
 import { format } from 'prettier';
@@ -55,10 +57,13 @@ const verified = existing
     : verifyExistingLineage(existing, applicationBytes)
   : initialLineage(authored);
 const latest = verified.applications.at(-1)!;
-const authoredIsCurrent = equalBytes(
-  applicationBytes,
-  latest.normalizedDefinitionBytes,
-);
+// The lineage advances on EITHER axis: an authored-source edit, or an adopted
+// compiler-semantic profile the recorded head does not carry (ADR-0047 §4).
+// Two consecutive entries may therefore share a normalized definition.
+const authoredIsCurrent =
+  equalBytes(applicationBytes, latest.normalizedDefinitionBytes) &&
+  latest.compiled.bundle.releaseManifest.compilerSemanticProfileVersion ===
+    MODULE_COMPILER_PROFILE.compilerSemanticProfileVersion;
 
 let payload: unknown = verified.payload;
 if (!authoredIsCurrent && !checkOnly) {
@@ -269,17 +274,23 @@ function verifyExistingLineage(
     bootstrapBytes,
     null,
     recordedReleaseRoot(input.bootstrap, 'bootstrap'),
+    recordedCompilerSemanticProfileVersion(input.bootstrap, 'bootstrap'),
   );
   const applications: CompiledLineageRelease[] = [];
   let previous = bootstrap;
   for (const [index, value] of applicationValues.entries()) {
-    const normalizedDefinitionBytes = releaseBytes(
-      value,
-      `applications[${String(index)}]`,
-    );
+    const path = `applications[${String(index)}]`;
+    const normalizedDefinitionBytes = releaseBytes(value, path);
+    // An entry is the serving head only when BOTH its source bytes and its
+    // recorded compiler-semantic profile still match today's. A profile move
+    // retires the old head to history exactly as a source edit does; without
+    // this it would be recompiled in place, which is the history rewrite the
+    // freeze exists to prevent (ADR-0047 §4).
     const servingHead =
       index === applicationValues.length - 1 &&
-      equalBytes(normalizedDefinitionBytes, currentSourceBytes);
+      equalBytes(normalizedDefinitionBytes, currentSourceBytes) &&
+      recordedCompilerSemanticProfileVersion(value, path) ===
+        MODULE_COMPILER_PROFILE.compilerSemanticProfileVersion;
     const compiled = servingHead
       ? mustCompile(
           normalizedDefinitionBytes,
@@ -288,7 +299,8 @@ function verifyExistingLineage(
       : mustReproduceHistorical(
           normalizedDefinitionBytes,
           expectedActiveReleaseFrom(previous),
-          recordedReleaseRoot(value, `applications[${String(index)}]`),
+          recordedReleaseRoot(value, path),
+          recordedCompilerSemanticProfileVersion(value, path),
         );
     applications.push({ compiled, normalizedDefinitionBytes });
     previous = compiled;
@@ -344,6 +356,30 @@ function releaseBytes(value: unknown, path: string): Uint8Array {
   return new Uint8Array(bytes);
 }
 
+/**
+ * The durable per-entry discriminator, read from the entry's OWN attestation.
+ * Every recorded entry already carries the profile version it was compiled
+ * under, so reproduction never has to inherit today's constant (ADR-0047 §5).
+ */
+function recordedCompilerSemanticProfileVersion(
+  value: unknown,
+  path: string,
+): CompilerSemanticProfileVersion {
+  const attestation = isRecord(value) ? value.attestation : null;
+  const recorded = isRecord(attestation)
+    ? attestation.compilerSemanticProfileVersion
+    : null;
+  const supported = SUPPORTED_COMPILER_SEMANTIC_PROFILE_VERSIONS.find(
+    (candidate) => candidate === recorded,
+  );
+  if (!supported) {
+    throw new TypeError(
+      `${path} records an unreadable compiler-semantic profile version`,
+    );
+  }
+  return supported;
+}
+
 function recordedReleaseRoot(value: unknown, path: string): string {
   if (
     !isRecord(value) ||
@@ -396,6 +432,7 @@ function mustReproduceHistorical(
     typeof compileApplication
   >[0]['expectedActiveRelease'],
   recordedReleaseRoot: string,
+  recordedProfileVersion: CompilerSemanticProfileVersion,
 ): CompileSuccess {
   const normalizedDefinition = parseNormalizedApplicationPackageJson(
     normalizedDefinitionBytes,
@@ -409,6 +446,7 @@ function mustReproduceHistorical(
       normalizedDefinitionBytes,
       profile: {
         ...MODULE_COMPILER_PROFILE,
+        compilerSemanticProfileVersion: recordedProfileVersion,
         languageVersion: normalizedDefinition.languageVersion,
         normalizationProfileVersion:
           normalizedDefinition.normalizationProfileVersion,
