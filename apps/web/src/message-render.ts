@@ -34,6 +34,9 @@ export function messageBody(
   headingTag: 'h1' | 'h2',
 ): string {
   const message = surfaceMessage(ref.code);
+  // Both of these are observed per element by the gate, not merely concatenated
+  // here: deleting them from this template used to keep every check green while
+  // the user lost every next action and the component identifier.
   const subject =
     ref.subject === undefined
       ? ''
@@ -46,11 +49,23 @@ export function messageBody(
 }
 
 /**
- * The one attribute pair every rendered message carries. `data-status-role`
- * resolves through the pinned roles per ADR-0048 §3; it is derived from the
- * entry's consequence rather than written at the call site, so a message cannot
- * declare itself advisory and render as blocked.
+ * The attributes every rendered catalog treatment carries.
+ *
+ * **`data-message` is the census marker, and it is deliberately not a role.**
+ * The first version of the gate sampled `[role="alert"]`, which fixed its census
+ * to diagnostics — success confirmations carry `role="status"` and empty states
+ * carry neither, so half of ADR-0048's scope could never have been seen. That is
+ * the ADR-0035 §2.2 error the ADR itself cites: a completeness claim derived
+ * from what the gate happens to look at rather than from the consumers.
+ *
+ * Every treatment routes through here, so `U6b`'s success and empty entries are
+ * covered by construction when they land rather than needing a second gate that
+ * would drift from this one.
+ *
+ * `data-status-role` resolves through the pinned roles per ADR-0048 §3, derived
+ * from the entry's consequence rather than written at the call site, so a
+ * message cannot declare itself advisory and render as blocked.
  */
 export function messageAttributes(ref: SurfaceMessageRef): string {
-  return `data-diagnostic-code="${escapeHtml(ref.code)}" data-status-role="${messageStatusRole(ref.code)}"`;
+  return `data-message="${escapeHtml(ref.code)}" data-diagnostic-code="${escapeHtml(ref.code)}" data-status-role="${messageStatusRole(ref.code)}"`;
 }

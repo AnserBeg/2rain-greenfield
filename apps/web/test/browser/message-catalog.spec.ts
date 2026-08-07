@@ -18,13 +18,11 @@ import { createSurfaceRuntimeServer } from '../../src/app-server.js';
 import { renderSurfaceDataComponent } from '../../src/component-registry.js';
 import { createDemoRequestRuntimeEntry } from '../../src/demo-runtime.js';
 import {
+  QUERY_DIAGNOSTIC_CODES,
   SURFACE_MESSAGE_CATALOG,
   SURFACE_MESSAGE_CODES,
-  type SurfaceMessageCode,
-} from '../../src/message-catalog.js';
-import {
-  QUERY_DIAGNOSTIC_CODES,
   type QueryDiagnosticCode,
+  type SurfaceMessageCode,
 } from '../../src/message-catalog.js';
 import { readCompiledSurfaceManifest } from '../../src/surface-contract.js';
 import { renderApplicationDiagnostic } from '../../src/surface-runtime.js';
@@ -49,45 +47,69 @@ import { compiledFixturePath, demoEntry } from '../helpers.js';
  * source rather than leaving it to this comment.
  */
 
+interface MessagePart {
+  readonly count: number;
+  readonly text: string;
+  readonly visible: boolean;
+}
+
 interface RenderedMessageSample {
   readonly code: string;
-  readonly detail: string;
-  readonly detailCount: number;
-  readonly sentence: string;
-  readonly sentenceCount: number;
+  readonly detail: MessagePart;
+  readonly nextAction: MessagePart;
+  readonly role: string;
+  readonly sentence: MessagePart;
   readonly statusRole: string;
+  readonly subject: MessagePart;
   readonly visible: boolean;
 }
 
 /**
- * The subject selector is `[role="alert"]`, not `[data-diagnostic-code]`. A
- * message that loses its code attribute is still collected and reported, rather
- * than dropping out of the sample and leaving the gate green over an empty set.
+ * The subject selector is `[data-message]` — the census marker every catalog
+ * treatment carries — **not** `[role="alert"]`. Sampling by role fixed the
+ * census to diagnostics and could never have seen a success confirmation
+ * (`role="status"`) or an empty state (no role at all), which is half of
+ * ADR-0048's scope and all of `U6b`'s.
+ *
+ * Visibility is read **per element**, not once for the card. Hiding
+ * `[data-message-sentence]` alone leaves the card visible and its `textContent`
+ * readable, so a card-level check would have called that correct.
  */
 async function readMessageSamples(
   page: Page,
 ): Promise<readonly RenderedMessageSample[]> {
   return await page.evaluate(() =>
-    [...document.querySelectorAll('[role="alert"]')]
+    [...document.querySelectorAll('[data-message]')]
       .map((element) => {
-        const style = getComputedStyle(element);
-        const text = (selector: string): string =>
-          (element.querySelector(selector)?.textContent ?? '').trim();
-        const rectangle = element.getBoundingClientRect();
-        return {
-          code: element.getAttribute('data-diagnostic-code') ?? '',
-          detail: text('[data-message-detail]'),
-          detailCount: element.querySelectorAll('[data-message-detail]').length,
-          sentence: text('[data-message-sentence]'),
-          sentenceCount: element.querySelectorAll('[data-message-sentence]')
-            .length,
-          statusRole: element.getAttribute('data-status-role') ?? '',
-          visible:
+        const perceptible = (node: Element): boolean => {
+          const style = getComputedStyle(node);
+          const rectangle = node.getBoundingClientRect();
+          return (
             style.display !== 'none' &&
             style.visibility !== 'hidden' &&
             Number.parseFloat(style.opacity) > 0 &&
             rectangle.width > 0 &&
-            rectangle.height > 0,
+            rectangle.height > 0
+          );
+        };
+        const part = (selector: string) => {
+          const found = element.querySelectorAll(selector);
+          const first = found[0];
+          return {
+            count: found.length,
+            text: (first?.textContent ?? '').trim(),
+            visible: first !== undefined && perceptible(first),
+          };
+        };
+        return {
+          code: element.getAttribute('data-message') ?? '',
+          detail: part('[data-message-detail]'),
+          nextAction: part('[data-message-next-action]'),
+          role: element.getAttribute('role') ?? '',
+          sentence: part('[data-message-sentence]'),
+          statusRole: element.getAttribute('data-status-role') ?? '',
+          subject: part('[data-message-subject]'),
+          visible: perceptible(element),
         };
       })
       .sort((left, right) => left.code.localeCompare(right.code)),
@@ -125,20 +147,55 @@ function observeCatalogMessages(
     }
     if (!sample.visible) {
       // Text nobody can see is not text the user read, so this is reported
-      // alone rather than as three violations for one cause.
+      // alone rather than as one violation per part for one cause.
       violations.push(`MESSAGE_IMPERCEPTIBLE:${sample.code}`);
       continue;
     }
-    if (sample.sentenceCount !== 1) {
-      violations.push(`MESSAGE_SENTENCE_ABSENT:${sample.code}`);
-    } else if (sample.sentence !== entry.sentence) {
-      violations.push(`MESSAGE_SENTENCE_MISMATCH:${sample.code}`);
+
+    // Every registered field of the entry is an effect the user is owed. A part
+    // that is required-and-absent, present-and-wrong, or present-and-hidden are
+    // three different failures and are named separately.
+    const required = (
+      label: string,
+      part: MessagePart,
+      expected: string | null,
+    ): void => {
+      if (expected === null) {
+        if (part.count !== 0)
+          violations.push(`MESSAGE_${label}_UNEXPECTED:${sample.code}`);
+        return;
+      }
+      if (part.count !== 1) {
+        violations.push(`MESSAGE_${label}_ABSENT:${sample.code}`);
+        return;
+      }
+      if (!part.visible) {
+        violations.push(`MESSAGE_${label}_HIDDEN:${sample.code}`);
+        return;
+      }
+      if (expected !== '' && part.text !== expected) {
+        violations.push(`MESSAGE_${label}_MISMATCH:${sample.code}`);
+      }
+    };
+
+    required('SENTENCE', sample.sentence, entry.sentence);
+    required('DETAIL', sample.detail, entry.detail);
+    required('NEXT_ACTION', sample.nextAction, entry.nextAction);
+    // The subject's text is a runtime value, not a catalog literal, so the
+    // assertion is that it is present, visible and non-empty. `''` means
+    // "expect a part, compare no text".
+    required('SUBJECT', sample.subject, entry.subject === null ? null : '');
+    // Only once the part is present and visible, so a deleted subject reports
+    // one cause rather than two.
+    if (
+      entry.subject !== null &&
+      sample.subject.count === 1 &&
+      sample.subject.visible &&
+      sample.subject.text === ''
+    ) {
+      violations.push(`MESSAGE_SUBJECT_EMPTY:${sample.code}`);
     }
-    if (sample.detailCount !== 1) {
-      violations.push(`MESSAGE_DETAIL_ABSENT:${sample.code}`);
-    } else if (sample.detail !== entry.detail) {
-      violations.push(`MESSAGE_DETAIL_MISMATCH:${sample.code}`);
-    }
+
     const expectedRole =
       entry.consequence === 'blocking' ? 'blocked' : 'attention';
     if (sample.statusRole !== expectedRole) {
@@ -431,10 +488,23 @@ const REAL_PATH_DRIVERS: Readonly<
 
 /**
  * **Declared, with a reason each. A subset is acceptable; an implied 27 is
- * not.** Every code here is still text-observed by the census pass below; what
- * is missing is a real-path drive, so reachability for these rests on the
- * source-literal check in `surface-runtime-contract.test.ts` rather than on an
- * executed request.
+ * not.** Every code here is still text-observed by the census pass; what is
+ * missing is an executed request, so reachability for these rests on the
+ * source-literal scan in `surface-runtime-contract.test.ts`.
+ *
+ * The 14 are **three different things, and calling them all "structural" was
+ * wrong**:
+ *
+ * - **1 is intrinsically unreachable** — `INVALID_SURFACE_BINDING`. No request
+ *   can produce it. That is a defect, not a coverage decision.
+ * - **5 are already driven by a real request in another spec** —
+ *   `INVALID_SURFACE_NAVIGATION`, `QUERY_LEGAL_ENTITY_SCOPE_REQUIRED`,
+ *   `QUERY_NOT_FOUND`, `QUERY_UNAVAILABLE`, `QUERY_UNSUPPORTED`. Their
+ *   reachability is observed; only the text assertion lives elsewhere.
+ * - **8 are engineering calls about fixture cost and ownership** — the five
+ *   `OPERATION_*` codes plus `QUERY_AMBIGUOUS`, `QUERY_PARAMETER_REQUIRED` and
+ *   `QUERY_PERMISSION_DENIED`. Each needs the compile-and-serve gateway fixture
+ *   another spec owns. Judgements, defensible, and not structural facts.
  */
 const DECLARED_NO_REAL_PATH_DRIVER: Readonly<
   Partial<Record<SurfaceMessageCode, string>>
@@ -504,6 +574,25 @@ const DECLARED_NO_REAL_PATH_DRIVER: Readonly<
     'Same gateway-fixture reason.',
 };
 
+/**
+ * The census itself is checked against the catalog, not merely used. Rejecting
+ * only an empty census left `SURFACE_MESSAGE_CODES.slice(0, 1)` passing: the
+ * partition stayed consistent and 26 codes silently left the gate's scope. A
+ * truncation is the realistic way a census shrinks, not a deletion.
+ */
+function censusViolations(census: readonly string[]): string[] {
+  const registered = Object.keys(SURFACE_MESSAGE_CATALOG).sort();
+  const observed = [...census].sort();
+  return [
+    ...registered
+      .filter((code) => !observed.includes(code))
+      .map((code) => `CENSUS_OMITS:${code}`),
+    ...observed
+      .filter((code) => !registered.includes(code))
+      .map((code) => `CENSUS_INVENTS:${code}`),
+  ].sort();
+}
+
 function partitionViolations(
   census: readonly string[],
   drivers: readonly string[],
@@ -526,6 +615,7 @@ function partitionViolations(
 }
 
 test('every registered code is either driven by a real path or declared with a reason', () => {
+  expect(censusViolations(SURFACE_MESSAGE_CODES)).toEqual([]);
   expect(
     partitionViolations(
       SURFACE_MESSAGE_CODES,
@@ -541,6 +631,20 @@ test('every registered code is either driven by a real path or declared with a r
       `${SURFACE_MESSAGE_CODES.length} codes driven by a real request path; ` +
       `${Object.keys(DECLARED_NO_REAL_PATH_DRIVER).length} declared without one`,
   );
+});
+
+test('census red: a truncated census is observed, not only an emptied one', () => {
+  // The shape the earlier zero-input control missed entirely.
+  expect(censusViolations(SURFACE_MESSAGE_CODES.slice(0, 1))).toHaveLength(
+    SURFACE_MESSAGE_CODES.length - 1,
+  );
+  expect(censusViolations(SURFACE_MESSAGE_CODES.slice(0, 1))).toContain(
+    'CENSUS_OMITS:UNKNOWN_SURFACE',
+  );
+  expect(censusViolations([])).toHaveLength(SURFACE_MESSAGE_CODES.length);
+  expect(censusViolations([...SURFACE_MESSAGE_CODES, 'INVENTED'])).toEqual([
+    'CENSUS_INVENTS:INVENTED',
+  ]);
 });
 
 test('reachability red: a registered code with neither a driver nor a reason is unaccounted', () => {
@@ -636,10 +740,81 @@ test('control: the live tree — correct code attribute, sentence from somewhere
   expect(rendered?.code).toBe('QUERY_UNSUPPORTED');
   const hardcoded = {
     ...rendered!,
-    sentence: 'Compiled surface unavailable',
+    sentence: { ...rendered!.sentence, text: 'Compiled surface unavailable' },
   };
   expect(observeCatalogMessages([hardcoded], ['QUERY_UNSUPPORTED'])).toEqual([
     'MESSAGE_SENTENCE_MISMATCH:QUERY_UNSUPPORTED',
+  ]);
+});
+
+test('control: a treatment rendered outside role="alert" is still seen', async ({
+  page,
+}) => {
+  // The census marker is data-message, so a treatment that is not an alert —
+  // which is what every U6b success confirmation and empty state will be — is
+  // sampled rather than silently excluded from the gate's own scope.
+  await page.goto(`${censusUrl}/?code=NO_ACTIVE_SURFACE`);
+  await page.evaluate(() => {
+    document.querySelector('[data-message]')?.setAttribute('role', 'status');
+  });
+  const asStatus = await readMessageSamples(page);
+  expect(asStatus).toHaveLength(1);
+  expect(asStatus[0]?.role).toBe('status');
+  expect(observeCatalogMessages(asStatus, ['NO_ACTIVE_SURFACE'])).toEqual([]);
+
+  await page.evaluate(() => {
+    document.querySelector('[data-message]')?.removeAttribute('role');
+  });
+  const roleless = await readMessageSamples(page);
+  expect(roleless).toHaveLength(1);
+  expect(roleless[0]?.role).toBe('');
+  expect(observeCatalogMessages(roleless, ['NO_ACTIVE_SURFACE'])).toEqual([]);
+
+  // And the selector this replaced would have seen neither.
+  expect(await page.locator('[role="alert"]').count()).toBe(0);
+});
+
+test('control: a next action or subject deleted from the template is observed', async ({
+  page,
+}) => {
+  // The reviewer's nominated execution, as a permanent control: message-render
+  // emits ${nextAction}${subject}, and before this the sample read neither.
+  await page.goto(`${censusUrl}/?code=UNSUPPORTED_COMPONENT`);
+  const [full] = await readMessageSamples(page);
+  expect(full?.nextAction.count).toBe(0);
+  expect(full?.subject.count).toBe(1);
+  expect(
+    observeCatalogMessages(
+      [{ ...full!, subject: { count: 0, text: '', visible: false } }],
+      ['UNSUPPORTED_COMPONENT'],
+    ),
+  ).toEqual(['MESSAGE_SUBJECT_ABSENT:UNSUPPORTED_COMPONENT']);
+
+  await page.goto(`${censusUrl}/?code=AUTHENTICATION_REQUIRED`);
+  const [withAction] = await readMessageSamples(page);
+  expect(withAction?.nextAction.count).toBe(1);
+  expect(
+    observeCatalogMessages(
+      [{ ...withAction!, nextAction: { count: 0, text: '', visible: false } }],
+      ['AUTHENTICATION_REQUIRED'],
+    ),
+  ).toEqual(['MESSAGE_NEXT_ACTION_ABSENT:AUTHENTICATION_REQUIRED']);
+});
+
+test('control: a part hidden on its own is observed while the card stays visible', async ({
+  page,
+}) => {
+  // Card-level visibility called this correct: the section is visible and
+  // textContent still returns the words nobody can read.
+  await page.goto(`${censusUrl}/?code=AUTHENTICATION_REQUIRED`);
+  await page.addStyleTag({
+    content: '[data-message-next-action]{display:none!important}',
+  });
+  const samples = await readMessageSamples(page);
+  expect(samples[0]?.visible).toBe(true);
+  expect(samples[0]?.nextAction.text.length).toBeGreaterThan(0);
+  expect(observeCatalogMessages(samples, ['AUTHENTICATION_REQUIRED'])).toEqual([
+    'MESSAGE_NEXT_ACTION_HIDDEN:AUTHENTICATION_REQUIRED',
   ]);
 });
 
@@ -648,9 +823,7 @@ test('control: a message rendered without its code attribute reds rather than be
 }) => {
   await page.goto(`${censusUrl}/?code=NO_ACTIVE_SURFACE`);
   await page.evaluate(() => {
-    document
-      .querySelector('[role="alert"]')
-      ?.removeAttribute('data-diagnostic-code');
+    document.querySelector('[data-message]')?.setAttribute('data-message', '');
   });
   const samples = await readMessageSamples(page);
   expect(samples).toHaveLength(1);
@@ -665,7 +838,7 @@ test('control: a message hidden from the user reds as imperceptible, not as corr
 }) => {
   await page.goto(`${censusUrl}/?code=ROUTE_NOT_FOUND`);
   await page.addStyleTag({
-    content: '[role="alert"]{display:none!important}',
+    content: '[data-message]{display:none!important}',
   });
   expect(
     observeCatalogMessages(await readMessageSamples(page), ['ROUTE_NOT_FOUND']),
@@ -678,8 +851,8 @@ test('control: an unregistered code rendered on the page is reported, not ignore
   await page.goto(`${censusUrl}/?code=UNKNOWN_SURFACE`);
   await page.evaluate(() => {
     document
-      .querySelector('[role="alert"]')
-      ?.setAttribute('data-diagnostic-code', 'NOT_IN_THE_CATALOG');
+      .querySelector('[data-message]')
+      ?.setAttribute('data-message', 'NOT_IN_THE_CATALOG');
   });
   expect(
     observeCatalogMessages(await readMessageSamples(page), ['UNKNOWN_SURFACE']),

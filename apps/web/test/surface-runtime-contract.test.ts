@@ -384,13 +384,39 @@ test('every registered code has a raise site outside the catalog', () => {
     'gateway-error-codes.ts',
     'surface-contract.ts',
     'surface-runtime.ts',
-  ].map((name) => readFileSync(`${webRoot}/src/${name}`, 'utf8'));
+  ].map((name) =>
+    stripComments(readFileSync(`${webRoot}/src/${name}`, 'utf8')),
+  );
 
   const unraised = SURFACE_MESSAGE_CODES.filter(
     (code) => !sources.some((source) => source.includes(`'${code}'`)),
   );
   assert.deepEqual(unraised, []);
 });
+
+test('raise-site red: a code named only in a comment does not count as raised', () => {
+  const commented = stripComments(
+    `// UNKNOWN_SURFACE lives here\n/* 'NO_ACTIVE_SURFACE' too */\nconst x = 'ROUTE_NOT_FOUND';\n`,
+  );
+  assert.equal(commented.includes(`'NO_ACTIVE_SURFACE'`), false);
+  assert.equal(commented.includes('UNKNOWN_SURFACE'), false);
+  assert.equal(commented.includes(`'ROUTE_NOT_FOUND'`), true);
+});
+
+/**
+ * **What this scan cannot prove, stated rather than implied** (AGENTS.md §6).
+ * Stripping comments closes the commented-out hole outright. It does **not**
+ * close the dead-branch hole: a code named in unreachable code still counts as
+ * raised. `INVALID_SURFACE_BINDING` is the live proof — it satisfies this scan
+ * and no request can produce it, which is why it is declared in the browser
+ * gate's shortfall rather than left to this check. The 13 executed real-path
+ * drivers are the observation; this is the proxy that covers the rest.
+ */
+function stripComments(source: string): string {
+  return source
+    .replaceAll(/\/\*[\s\S]*?\*\//gu, '')
+    .replaceAll(/\/\/[^\n]*/gu, '');
+}
 
 /**
  * The half `Record<union, …>` exhaustiveness cannot reach: a gateway error class
@@ -400,28 +426,67 @@ test('every registered code has a raise site outside the catalog', () => {
  * parse of its source.
  */
 test('the gateway error mapping covers every error class the gateways export', () => {
-  const exportedErrorNames = (
+  /**
+   * **Runtime `.name`, not the export key.** Dispatch reads `error.name`
+   * (`gateway-error-codes.ts`), and `name` is an instance field rather than a
+   * prototype property, so it can only be read by constructing one. Comparing
+   * export keys let a class exported as `FooError` carrying
+   * `name = 'BarError'` satisfy this test and fall through to the residual at
+   * runtime. Not a live misclassification — the invariant was the weak part.
+   *
+   * Construction is attempted with progressively wider stub arguments and a
+   * failure is **reported**, never skipped: a class this cannot instantiate is
+   * a class whose dispatch name is unverified.
+   */
+  const instanceNames = (
     namespace: Readonly<Record<string, unknown>>,
-  ): string[] =>
-    Object.entries(namespace)
+  ): string[] => {
+    const stub = {
+      release: { contentHash: 'stub', releaseId: 'stub' },
+    } as never;
+    return Object.entries(namespace)
       .filter(
         ([, value]) =>
           typeof value === 'function' &&
           (value as { prototype?: unknown }).prototype instanceof Error,
       )
-      .map(([name]) => name)
+      .map(([exportKey, value]) => {
+        const Constructor = value as new (...args: never[]) => Error;
+        for (const argumentList of [
+          [],
+          ['stub'],
+          ['stub', stub],
+          ['stub', stub, stub],
+        ]) {
+          try {
+            const instance = new Constructor(...(argumentList as never[]));
+            assert.equal(
+              typeof instance.name,
+              'string',
+              `${exportKey} has no runtime name`,
+            );
+            return instance.name;
+          } catch {
+            continue;
+          }
+        }
+        assert.fail(
+          `${exportKey} could not be constructed, so its dispatch name is unverified`,
+        );
+      })
       .sort();
+  };
 
   assert.deepEqual(
     [
-      ...exportedErrorNames(queryGateway),
-      ...exportedErrorNames(listBehavior),
-      ...exportedErrorNames(resolveByName),
+      ...instanceNames(queryGateway),
+      ...instanceNames(listBehavior),
+      ...instanceNames(resolveByName),
     ].sort(),
     [...MAPPED_QUERY_ERROR_NAMES].sort(),
   );
   assert.deepEqual(
-    exportedErrorNames(operationGateway),
+    instanceNames(operationGateway),
     [...MAPPED_OPERATION_ERROR_NAMES].sort(),
   );
 });
@@ -435,12 +500,9 @@ test('the rendered-text gate never obtains its expected string from the renderer
   // Comments are stripped first: the gate's own header explains which helpers
   // it abstains from, and a scan that read prose would fail on the explanation
   // rather than on the behaviour.
-  const gate = readFileSync(
-    `${webRoot}/test/browser/message-catalog.spec.ts`,
-    'utf8',
-  )
-    .replaceAll(/\/\*[\s\S]*?\*\//gu, '')
-    .replaceAll(/\/\/[^\n]*/gu, '');
+  const gate = stripComments(
+    readFileSync(`${webRoot}/test/browser/message-catalog.spec.ts`, 'utf8'),
+  );
   for (const forbidden of [
     'messageBody',
     'messageAttributes',
