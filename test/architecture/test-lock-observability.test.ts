@@ -49,15 +49,18 @@ test('a waiting gate names the live holder it is waiting for', async () => {
 
     assert.equal(waiter.status, 75, waiter.stderr);
     assert.match(waiter.stderr, /TEST_GATE_LOCK_BUSY: shared access/u);
+    // The refusal itself must name the holder. A report emitted only before
+    // the wait began describes whoever held the lock 300s ago, which is a
+    // different and possibly wrong process.
+    const refusal = waiter.stderr.slice(
+      waiter.stderr.indexOf('TEST_GATE_LOCK_BUSY'),
+    );
     assert.match(
-      waiter.stderr,
+      refusal,
       new RegExp(`\\[test-lock\\] holder: pid=${holder.pid}\\b`, 'u'),
-      `the waiter did not name the holder:\n${waiter.stderr}`,
+      `the refusal did not name the holder:\n${waiter.stderr}`,
     );
-    assert.match(
-      waiter.stderr,
-      /mode=exclusive state=holding label=HOLDER-ALPHA/u,
-    );
+    assert.match(refusal, /mode=exclusive state=holding label=HOLDER-ALPHA/u);
     // A live holder must never be described as stale, and the waiter must not
     // report its own record back to itself.
     assert.doesNotMatch(waiter.stderr, /STALE/u);
@@ -176,8 +179,11 @@ test('a second matrix run refuses by name instead of racing a live one', async (
 
     assert.equal(second.status, 75, `${second.stdout}${second.stderr}`);
     assert.match(second.stderr, /TEST_GATE_LOCK_BUSY: exclusive access/u);
+    const refusal = second.stderr.slice(
+      second.stderr.indexOf('TEST_GATE_LOCK_BUSY'),
+    );
     assert.match(
-      second.stderr,
+      refusal,
       new RegExp(
         `\\[test-lock\\] holder: pid=${holder.pid}\\b.*label=MATRIX-ALPHA`,
         'u',
