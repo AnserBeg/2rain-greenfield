@@ -13,6 +13,7 @@ import {
 import {
   ADOPTED_COMPILER_SEMANTIC_PROFILE_VERSION,
   COMPILER_SEMANTIC_PROFILE_V1_VERSION,
+  COMPILER_SEMANTIC_PROFILE_V2_VERSION,
   COMPILER_SEMANTIC_PROFILE_VERSION,
   DEFAULT_COMPILER_LIMITS,
   DEFAULT_COMPILER_PROFILE,
@@ -75,7 +76,11 @@ test('cutting compiler-semantic profile v1 leaves v0 output byte-identical', () 
   // string. Cutting a version never renames or drops an existing one.
   assert.deepEqual(
     [...SUPPORTED_COMPILER_SEMANTIC_PROFILE_VERSIONS],
-    [COMPILER_SEMANTIC_PROFILE_VERSION, COMPILER_SEMANTIC_PROFILE_V1_VERSION],
+    [
+      COMPILER_SEMANTIC_PROFILE_VERSION,
+      COMPILER_SEMANTIC_PROFILE_V1_VERSION,
+      COMPILER_SEMANTIC_PROFILE_V2_VERSION,
+    ],
   );
   assert.ok(
     SUPPORTED_COMPILER_SEMANTIC_PROFILE_VERSIONS.includes(
@@ -91,6 +96,32 @@ test('cutting compiler-semantic profile v1 leaves v0 output byte-identical', () 
       compileAt(name, COMPILER_SEMANTIC_PROFILE_VERSION).releaseRoot,
       expectedRoot,
       `${name} v0 release root moved when v1 was cut`,
+    );
+  }
+});
+
+// Pre-cut v1 roots, measured on `main` at 3b74fc1 BEFORE v2 was cut, from a
+// clean checkout rather than from the branch that cuts it. Deriving them from
+// the post-cut tree would be circular: it would record whatever the cut
+// produced and then assert the cut did not change it.
+const PRE_CUT_V1_RELEASE_ROOTS = Object.freeze({
+  bootstrap: 'b8d5353634eec9b97e146523801b333a993117fc67196fb033f740142c5a0093',
+  'vertical-v1':
+    '64bf0535c2453feade300de7c5d46ec85a48bd2bb8c3f7d5d051515117dd80ee',
+});
+
+// The control ADR-0047's Consequences owes on every new cut, now on v2. Its v1
+// sibling above is what fired correctly when v1 was cut; this is the same
+// instrument one version along, and it is what makes "cutting is inert"
+// observable rather than asserted. `U5b` relies on that inertness: every field
+// it gates on v2 is invisible until adoption, and if a cut were NOT inert the
+// recorded lineage would move the moment the constant was appended.
+test('cutting compiler-semantic profile v2 leaves v1 output byte-identical', () => {
+  for (const [name, expectedRoot] of Object.entries(PRE_CUT_V1_RELEASE_ROOTS)) {
+    assert.equal(
+      compileAt(name, COMPILER_SEMANTIC_PROFILE_V1_VERSION).releaseRoot,
+      expectedRoot,
+      `${name} v1 release root moved when v2 was cut`,
     );
   }
 });
