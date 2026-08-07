@@ -197,19 +197,35 @@ tie.
   `v1-v2.release.structural.golden.json`, and inline digests in `freeze-b.test.ts`
   and `legal-entity-query-scope.test.ts`. `inventory-contract.release.golden.json`
   did not fail in the probe and may be stable; **measure it rather than assuming**.
-**The axis is consumed one version per projection change, not adopted once.**
-Raised by `proj-disc-impl` and **believed but not measured** — the lane said so
-rather than asserting it. Once a profile version is adopted and recorded in the
-lineage, `check:app-release` reproduces that entry too, so changing what the
-adopted profile emits would break its own reproduction. A later v1-gated field
-should therefore force the next consumer to cut v2 and mint another entry.
+**A profile version freezes at ADOPTION, not at the cut — measured 2026-08-06,
+correcting this paragraph's original text.** `U5-design` ran five variants of
+`check:app-release` and the result is better than either branch anticipated:
 
-If that holds, adopting a version buys the mechanism's evidence rather than a
-lineage saving, and every consumer pays one version and one entry. That is still
-strictly cheaper than the language axis, which would additionally owe conformance
-ledger obligations per cut. **`U5` must measure this before assuming either way**
-— an orchestrator claim that later consumers would "add fields for free" was made
-during chartering and is not supported.
+| Variant | Result |
+|---|---|
+| baseline | exit 0 |
+| field gated on `v1` (v1 adopted) | **exit 1** |
+| `v2` cut but **not adopted**, field gated on `v2` | **exit 0** |
+| `v2` cut and adopted | rebuild, exit 0, entry 8 minted |
+| `v1`-gated field after `v2` demoted `v1` to history | exit 1 |
+
+So the axis is consumed **one version per adoption**, not one per projection
+change — and **adoption is schedulable**. Fields accumulate on an unadopted
+version and land together. An adopted version can never gain a field; that half of
+the original claim was right.
+
+**The mechanism originally stated here was also wrong.** Entry 7 is the *serving
+head*, not history, so a `v1`-gated field never reaches
+`reproduceHistoricalApplication`. It fails whole-lineage serialization equality at
+`compile-app-release.ts:334` — a hard throw with no rebuild route, since `:55` is
+the entry point both `--check` and the build take. The original phrasing becomes
+literally true only *after* `v2` adoption, where the failure is
+`COMPILER_HISTORICAL_REPRODUCTION_MISMATCH` on entry 7's root.
+
+**The adoption price is now known rather than estimated:** 7 `test:compiler`
+failures across 5 files, `test:postgres` 188/188 green — a second profile-only
+sibling does not re-break the `at(-2)` class — and
+`inventory-contract.release.golden.json` again did not move.
 
 - `check:demo-release` has no parallel reproduction path — `compile-demo-release.ts`
   compiles one fixture and string-compares — so it needs regeneration, not

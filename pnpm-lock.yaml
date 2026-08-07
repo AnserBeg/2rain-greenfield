@@ -107,6 +107,9 @@ importers:
       '@north-star/compiler':
         specifier: workspace:*
         version: link:../compiler
+      '@north-star/observability':
+        specifier: workspace:*
+        version: link:../observability
       '@north-star/platform-runtime':
         specifier: workspace:*
         version: link:../platform-runtime

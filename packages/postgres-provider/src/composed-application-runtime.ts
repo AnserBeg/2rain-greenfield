@@ -30,6 +30,10 @@ import {
   type MintedUuid,
 } from '@north-star/platform-runtime';
 import {
+  ObservabilityMetrics,
+  monotonicMilliseconds,
+} from '@north-star/observability';
+import {
   AuthenticatedRequestEntryAdapter,
   type AuthenticatedIdentity,
   type TrustedRequestContext,
@@ -47,7 +51,10 @@ import {
   SemanticOperationGateway,
   SemanticOperationMediationAuthority,
 } from '../../runtime/src/semantic-operation-gateway.js';
-import { SemanticQueryGateway } from '../../runtime/src/semantic-query-gateway.js';
+import {
+  SemanticQueryGateway,
+  type RegisteredQueryLatencyInstrumentation,
+} from '../../runtime/src/semantic-query-gateway.js';
 import {
   createRegisteredCapabilityExecutors,
   registeredCapabilityIdsFromOperationCatalog,
@@ -98,6 +105,16 @@ export interface ComposedApplicationRuntimeOptions {
   readonly databaseUrl: string;
   readonly environmentSlug?: string;
   readonly inventoryScopeProvisioning?: InventoryScopeProvisioning;
+  readonly metrics?: ObservabilityMetrics;
+  /**
+   * The elapsed-time source the composed read ingress is timed from. It exists
+   * so a test can drive a composition across a real ladder boundary without
+   * sleeping (AGENTS.md §6). Production never passes it; the default is the
+   * process monotonic clock, whose liveness is gated separately, because a
+   * controlled clock here proves the wiring carries a duration and says
+   * nothing about whether the real source moves.
+   */
+  readonly monotonicMilliseconds?: () => number;
   readonly migrationsDirectory: string;
   readonly providerErrorMappings: readonly ModuleProviderErrorMapping[];
   readonly releaseSelection?: Readonly<{
@@ -140,6 +157,8 @@ export interface ComposedApplicationRuntime {
   readonly entry: AuthenticatedRequestRuntimeEntryAdapter;
   readonly freshTenantInstallEvidence: FreshTenantInstallEvidence | null;
   readonly identity: AuthenticatedIdentity;
+  /** Registered-query ladder evidence for this runtime; see ADR-0032 §2. */
+  readonly metrics: ObservabilityMetrics;
   readonly operationGateway: SemanticOperationGateway;
   readonly operationMediation: SemanticOperationMediationAuthority;
   readonly queryGateway: SemanticQueryGateway;
@@ -600,6 +619,7 @@ export async function createComposedApplicationRuntime(
         )
       : null;
 
+    const metrics = options.metrics ?? new ObservabilityMetrics();
     const policy = new AllowAllLocalPolicy();
     const actorIssuer = humanActorIssuer();
     const interpreter = new PostgresModuleRuntimeInterpreter(
@@ -607,7 +627,20 @@ export async function createComposedApplicationRuntime(
       actorIssuer,
       options.providerErrorMappings,
     );
-    const queryGateway = new SemanticQueryGateway(policy, interpreter);
+    // ADR-0032 §2 admits a loading treatment only above a *measured* threshold,
+    // so the read ingress is composed with its measurement rather than gaining
+    // one later: an uninstrumented composition would make the ladder an
+    // assertion again.
+    const queryGateway = new SemanticQueryGateway(
+      policy,
+      interpreter,
+      undefined,
+      undefined,
+      composedRegisteredQueryLatencyInstrumentation(
+        metrics,
+        options.monotonicMilliseconds,
+      ),
+    );
     const capabilityExecutors = createRegisteredCapabilityExecutors(
       options.capabilityOperationExecutorFactories ?? [],
       registeredCapabilityIdsFromOperationCatalog(
@@ -653,6 +686,7 @@ export async function createComposedApplicationRuntime(
       entry,
       freshTenantInstallEvidence,
       identity: identities.runtime,
+      metrics,
       operationGateway,
       operationMediation,
       queryGateway,
@@ -667,6 +701,26 @@ export async function createComposedApplicationRuntime(
     );
     throw error;
   }
+}
+
+/**
+ * The instrumentation the composition installs on the read ingress — exported
+ * so a gate can drive the real object across an ADR-0032 boundary instead of
+ * re-implementing it and testing the copy.
+ */
+export function composedRegisteredQueryLatencyInstrumentation(
+  metrics: ObservabilityMetrics,
+  clock: (() => number) | undefined = undefined,
+): RegisteredQueryLatencyInstrumentation {
+  return Object.freeze({
+    monotonicMilliseconds: clock ?? monotonicMilliseconds,
+    observe: (observation) => {
+      metrics.recordRegisteredQueryLatency(
+        observation.outcome,
+        observation.durationMilliseconds,
+      );
+    },
+  } satisfies RegisteredQueryLatencyInstrumentation);
 }
 
 export function parseCompiledApplication(

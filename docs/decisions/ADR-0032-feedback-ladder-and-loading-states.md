@@ -80,6 +80,42 @@ The corollary is the part that does work: list and record reads get **a budget
 and a gate**, not a skeleton. A surface that needs a skeleton for an ordinary
 read is reporting a performance defect, and the skeleton would hide it.
 
+### 2a. What makes a skeleton render — ruled 2026-08-06, and the answer is "not yet"
+
+`U5-design` reached a question §1 presumes is already answered: **a server-rendered
+response has no moment in which a skeleton exists.** The HTML is sent after the
+data is fetched. U4's `pending` fires on `data.status === 'UNBOUND'`
+(`component-registry.ts:299`) — a **structural** fact about a slot having no
+binding, not a temporal one about data being in flight.
+
+So a skeleton needs streamed SSR or a widened client script, and the latter is an
+[ADR-0036](ADR-0036-minimum-client-capability.md) amendment, since none of its four
+authorised behaviours is a skeleton swap.
+
+**Neither is chartered, and the reason is §2 above rather than cost.** A loading
+treatment is admitted only where a **measured** operation exceeds the threshold.
+`U1` shipped that measurement, and it reports **20 of 20 reads in `under_100ms`**.
+Nothing measures slow enough to need a spinner, let alone the 1–3 s skeleton band.
+Building the mechanism now — and choosing an architecture to carry it — would be
+[ADR-0041](ADR-0041-declared-shapes-must-be-honoured-or-refused.md) §3's shipping a
+spelling ahead of its meaning, with the added cost of settling a client-capability
+question no evidence is pressing.
+
+**The trigger is the measurement, and it now exists.** When the recorded counter
+reports a registered read in the 1 s – 3 s band, the question becomes live and
+earns its own ADR: streamed SSR versus a widened client script, decided against a
+real slow path rather than an anticipated one. Until then, skeleton geometry is
+**not chartered**, and `pending` keeps exactly one meaning.
+
+**What this does not defer.** The shimmer already ships as a stylesheet
+(ADR-0035 §9), and its trajectory — that the sheen begins fully left and travels
+past the right edge — is observable **today** without any skeleton rendering:
+pause the animation through `getAnimations()` and read the `::after` transform at
+t=0 and t=duration. That obligation was routed to `U5` on the reasoning that U5
+ships the element it applies to. **That reasoning was wrong**, it has kept the
+trajectory unproven across two packets, and the obligation moves to the
+visual-conformance work where its subject actually lives.
+
 ### 3. The 1–3 s skeleton band diverges from NN/g deliberately
 
 NN/g places skeletons at 2–10 s. This ADR places them at 1–3 s.

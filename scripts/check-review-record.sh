@@ -59,60 +59,60 @@ packet_of() {
   git log -1 --format='%B' "$1" | sed -n 's/^Packet:[[:space:]]*\([^[:space:]]*\).*/\1/p' | head -1
 }
 
-# A commit is covered when it is an ancestor of, or is, the NEWEST recorded SHA.
+# Coverage follows how packets actually reach `main`: by --no-ff merge.
 #
-# The obvious formulation — "some record contains it" — is vacuous here, and the
-# gate shipped with that bug until a negative control was pushed far enough back
-# to trip it. main is linear, so every commit before any recorded SHA is an
-# ancestor of it: a single late record silently covered all of history. Measuring
-# against the newest record instead makes the question "is there executable work
-# on main newer than the last review?", which is the failure actually being
-# closed.
+#   - A MERGE commit is covered when its second parent — the packet tip — is an
+#     ancestor of, or is, some recorded SHA. That parent is what the review read.
+#   - A NON-MERGE commit touching executable content is a direct commit to main,
+#     which git-workflow permits only for doctrine housekeeping. It is covered
+#     only by being recorded itself, or by carrying a `Doctrine-only:` trailer.
 #
-# WHAT THIS DOES NOT CATCH, stated rather than papered over: if two packets land
-# and only the later is recorded, the earlier passes. Closing that needs
-# per-packet grouping, which needs the `Packet:` trailer git-workflow already
-# requires and which no lane commit since the baseline carries. Tracked
-# separately; do not read a green run as "every packet was reviewed", only as
-# "nothing has landed since the last recorded review".
+# TWO EARLIER MODELS WERE WRONG, and each was found by running this, not by
+# reasoning about it. "Does ANY record contain this commit" was vacuous: main was
+# linear, so one late record covered all history. "Is it an ancestor of the NEWEST
+# record" fixed that but assumed the records are totally ordered — and the first
+# time two packets ran in parallel, `proj-disc-impl` and `U1` sat on divergent
+# branches with neither an ancestor of the other, so the gate failed on two
+# correctly-reviewed merges.
+#
+# This model needs no ordering. It asks of each arrival exactly what git-workflow
+# asks: the tip that was reviewed is the tip that landed.
+#
+# The merge case does NOT require the merge tree to equal the parent tree. A merge
+# that also brings in another packet's accepted work legitimately differs from
+# both parents; git-workflow's identical-tree rule governs whether the reviewed
+# MATRIX still counts, which is a separate question decided at integration and
+# recorded in the ledger.
 covered_by_record() {
-  [ -n "${NEWEST_RECORD:-}" ] || return 1
-  git merge-base --is-ancestor "$1" "$NEWEST_RECORD" 2>/dev/null && return 0
-
-  # A --no-ff integration is BY CONSTRUCTION newer than the SHA it integrates,
-  # so the ancestor test above can never cover it and the gate fired on the
-  # first real merge it saw. Left unfixed it would false-positive on every
-  # non-fast-forward integration, which is the "control that fails on correct
-  # behaviour" failure this script's own self-test warns about.
-  #
-  # A merge is covered when its second parent is covered AND the merge changed
-  # no executable content relative to that parent. That second clause is
-  # git-workflow's identical-tree rule, and it is what makes the reviewed
-  # matrix the acceptance matrix: a merge that silently resolved a conflict in
-  # executable content is NOT covered by the review of the branch it merged.
-  local second
-  second="$(git rev-parse --verify --quiet "$1^2" 2>/dev/null)" || return 1
-  [ -n "$second" ] || return 1
-  git merge-base --is-ancestor "$second" "$NEWEST_RECORD" 2>/dev/null || return 1
-  [ -z "$(git diff --name-only "$second" "$1" -- . "${NON_EXECUTABLE[@]}" 2>/dev/null)" ]
+  local commit="$1" second recorded
+  # --no-ff arrival: the packet tip is the second parent, and that tip is what
+  # the review read.
+  second="$(git rev-parse --verify --quiet "$commit^2" 2>/dev/null || true)"
+  if [ -n "$second" ]; then
+    for recorded in "${RECORDED[@]:-}"; do
+      [ -n "$recorded" ] || continue
+      git merge-base --is-ancestor "$second" "$recorded" 2>/dev/null && return 0
+    done
+  fi
+  # Fast-forward arrival: the packet's commits sit on the branch's own line and
+  # only its tip is recorded, so each is an ancestor of that record.
+  for recorded in "${RECORDED[@]:-}"; do
+    [ -n "$recorded" ] || continue
+    git merge-base --is-ancestor "$commit" "$recorded" 2>/dev/null && return 0
+  done
+  return 1
 }
 
-# Full 40-char SHAs from the log that resolve and are actually on main. A record
-# naming a SHA that never landed proves nothing, so it is not allowed to cover.
+# Full 40-char SHAs from the log that resolve and are reachable from the branch.
+# No ordering is computed — see covered_by_record for why that was a mistake.
 load_records() {
   RECORDED=()
-  NEWEST_RECORD=''
   [ -f "$LOG" ] || return 0
   local sha
   while read -r sha; do
     git rev-parse --verify --quiet "$sha^{commit}" >/dev/null || continue
     git merge-base --is-ancestor "$sha" "$BRANCH" 2>/dev/null || continue
     RECORDED+=("$sha")
-    # Newest = the one every other record is an ancestor of.
-    if [ -z "$NEWEST_RECORD" ] ||
-      git merge-base --is-ancestor "$NEWEST_RECORD" "$sha" 2>/dev/null; then
-      NEWEST_RECORD="$sha"
-    fi
   done < <(grep -oE '[0-9a-f]{40}' "$LOG" | sort -u)
 }
 
@@ -141,23 +141,22 @@ if [ "${1:-}" = '--self-test' ]; then
     echo 'self-test FAIL: no records loaded — every commit would be uncovered' >&2
     fails=1
   fi
-  # An ancestor of the newest record must be covered, or multi-commit packets
-  # break and every lane is told to re-review work that was reviewed.
+  # A recorded non-merge commit is covered by being recorded.
   if ! covered_by_record 'd150f80eab2755ebebd3194a39c0734f1b23bee3'; then
-    echo 'self-test FAIL: ancestor of the newest record reported uncovered' >&2
+    echo 'self-test FAIL: a recorded commit reported uncovered' >&2
     fails=1
   fi
   # The regression control. An earlier formulation asked "does ANY record contain
   # this commit"; main being linear, that made one late record cover all history.
   # A commit older than every record must still be covered only via the newest,
   # and a commit NEWER than the newest must not be. Both directions are asserted.
-  # Assert the invariant, not a literal. An earlier version pinned the then-newest
-  # SHA and broke the moment a record was appended — a control that fails on
-  # correct behaviour teaches people to delete controls.
+  # Records need no ordering under this model. Assert only that they loaded and
+  # resolve; an earlier version required a total order and broke on parallel
+  # branches, which is the defect this model exists to remove.
   for _r in "${RECORDED[@]:-}"; do
     [ -n "$_r" ] || continue
-    git merge-base --is-ancestor "$_r" "$NEWEST_RECORD" 2>/dev/null && continue
-    echo "self-test FAIL: $_r is not an ancestor of the resolved newest record" >&2
+    git rev-parse --verify --quiet "$_r^{commit}" >/dev/null && continue
+    echo "self-test FAIL: record $_r does not resolve" >&2
     fails=1
   done
   # A commit no record contains must NOT be covered. Without this the gate
@@ -189,9 +188,9 @@ if [ "${1:-}" = '--self-test' ]; then
   fi
   # Control 10: a --no-ff merge of a recorded tip must be covered, or every
   # non-fast-forward integration false-positives.
-  _merge="$(git rev-list --merges -1 "$NEWEST_RECORD..$BRANCH" 2>/dev/null)"
+  _merge="$(git rev-list --merges -1 "$BASELINE..$BRANCH" 2>/dev/null)"
   if [ -n "$_merge" ] && ! covered_by_record "$_merge"; then
-    echo "self-test FAIL: --no-ff merge of a recorded tip reported uncovered" >&2
+    echo 'self-test FAIL: --no-ff merge of a recorded tip reported uncovered' >&2
     fails=1
   fi
   [ "$fails" -eq 0 ] && echo 'check-review-record self-test: OK (10 controls)'
