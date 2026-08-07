@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import {
@@ -270,6 +271,52 @@ test('registered query latency evidence stays bounded under unbounded input', ()
     10_000,
     'every recorded sample lands in exactly one band',
   );
+});
+
+/**
+ * A proxy, and recorded as one per AGENTS.md §6: prose can only be matched, it
+ * cannot be observed. It exists because §18 risk 4's failure mode has a mirror
+ * image — code keeping a threshold the doctrine has since moved off — and three
+ * documents now state this number where previously none did.
+ */
+test('the graded threshold and bands are the ones ADR-0032, the plan, and the grammar state', () => {
+  const adr = readFileSync(
+    'docs/decisions/ADR-0032-feedback-ladder-and-loading-states.md',
+    'utf8',
+  );
+  const plan = readFileSync(
+    'docs/greenfield-north-star-erp-platform-plan.md',
+    'utf8',
+  );
+  const grammar = readFileSync('.agents/skills/ux-grammar/SKILL.md', 'utf8');
+  const threshold = `${String(DOHERTY_THRESHOLD_MILLISECONDS)} ms`;
+
+  assert.ok(
+    adr.includes(`It moves to **${threshold}**`),
+    'ADR-0032 §7 no longer tightens the budget to the graded threshold',
+  );
+  assert.ok(
+    plan.includes(`p95 under **${threshold}**`),
+    'plan §15.1 no longer carries the graded threshold',
+  );
+  assert.ok(
+    grammar.includes(`inside ${threshold} shows nothing`),
+    'the ux-grammar skill no longer states the graded threshold',
+  );
+
+  // The six rows of ADR-0032 §1, verbatim, against the six graded bands.
+  const ladderRows = [
+    '< 100 ms',
+    '100–400 ms',
+    '400 ms – 1 s',
+    '1 s – 3 s',
+    '3 s – 10 s',
+    '> 10 s',
+  ];
+  assert.equal(ladderRows.length, FEEDBACK_LADDER_BANDS.length);
+  for (const row of ladderRows) {
+    assert.ok(adr.includes(`| ${row} |`), `ADR-0032 §1 no longer has ${row}`);
+  }
 });
 
 test('the monotonic source never runs backward across successive reads', () => {

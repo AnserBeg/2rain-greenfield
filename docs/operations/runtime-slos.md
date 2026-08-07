@@ -3,7 +3,8 @@
 Status: v0 measurement and plan-shape contract
 Owner: PR-6 relation-plan gate; PR-6b folded-access plan gates; PR-6c
 existing-table locking-DDL window; PR-6d literal search and prefix-range
-gates; later platform budgets for percentile/error-budget ratification
+gates; U1 registered-query feedback-ladder grading; later platform budgets
+for percentile/error-budget ratification
 
 This document records the runtime request-path bounds the repository can defend
 today. It does not turn one-host measurements into fleet percentiles or claim a
@@ -20,6 +21,7 @@ tables with forced row-level security.
 | Exact/advisory resolve and case-insensitive unique lookup | Every compiled folded equality key uses a stored `COLLATE "C"` fold column and a tenant/environment-leading btree. The forced-RLS predicate must use that folded column in the intended index condition once the table has 100 analyzed rows. | The verdict measured the prior per-row-fold resolve at **4,472 ms** and the shipped stored-column shape at about **0.33 ms** on a 500,000-row partition (**0.24 ms** under a forced generic plan). PR-6b's provider probe independently verifies the current plan shape, not those latency values. | Current in PR-6b for newly materialized tables; deferred-online installation on pre-existing tables belongs to the next materializer packet. |
 | Unanchored substring search | Bounded tenant/environment partition scan over the stored folded column. Search input is literal: substring lowering escapes `!`, `%`, and `_` before an explicit `ESCAPE '!'`, while `\` is ordinary text. PostgreSQL's non-leakproof `textlike` prevents any index shape from serving this predicate through forced RLS; cost remains `O(rows in the tenant partition)`, not `O(all tenants)`. | The verdict measured **1,005 ms** for the former fold-per-row 20-match exit. The shipped stored-fold shape measured **123 ms** for that case and **188 ms** for a zero-match full-partition scan on 500,000 rows. PR-6d's 10,000-row probe observed the same tenant-primary-key plan before and after escaping, with 9,999 rows removed by the bounded post-filter and an exact primary-index `idx_scan` delta of 1. | A future search projection is trigger-driven only if real partitions exceed the verdict's threshold. |
 | Prefix/typeahead search | Current on compiled Q0 search through `matchMode: 'prefix'`. Each searchable stored fold is `COLLATE "C"`; lowering emits leakproof `>= folded_parameter` and, when one exists, `< exclusive_successor` range predicates. Every searchable non-unique fold receives a tenant/environment-leading `foldedAccess` btree; existing unique folded indexes serve unique fields. | The binding verdict measured **89.7 ms** for prefix `LIKE` and **0.31 ms** for explicit range lowering. PR-6d's local 10,000-row forced-RLS comparison observed **4.474 ms → 0.569 ms** with the complete compiled Party search shape; its exact-name execution oracle flipped at 100 analyzed rows and retained both zero tree-wide filter removals and expected-index counter deltas through 10,000 rows. | Re-measure at representative partition sizes and PostgreSQL upgrades; latency is recorded evidence, while exact-name access is the executable gate. |
+| Registered query read, graded against the UI feedback ladder | Every `SemanticQueryGateway` read-ingress call — answered or refused — is timed from an injected monotonic source and graded into exactly one [ADR-0032](../decisions/ADR-0032-feedback-ladder-and-loading-states.md) §1 band before it returns. The executable gate reads the recorded counter and requires the graded total to equal the invocation count, so an ingress path that escapes measurement is red rather than absent. ADR-0032 §2 is executable as `loadingTreatmentAdmitted`, which is false for exactly the two bands at or under Doherty's 400 ms, so a treatment can never be claimed for a duration inside the budget. | Twenty sequential compiled Party list reads through the composed runtime, against the pinned PostgreSQL image under the forced-RLS `north_star_runtime` role, graded **20 of 20 into `under_100ms`** at **285.296 ms** total and **14.265 ms** mean from the same monotonic source. It is a band observation on one host, not a percentile: the counter records which band a call fell in and can never yield a p95. | U1 owns the ingress grading. The treatments the upper bands earn are unbuilt — `U5` owns skeleton geometry and `U9` the visual-conformance gates — and operation-path latency (posting, publication, import, long verification) is uninstrumented and belongs to whichever packet instruments the operation gateway. |
 
 ## Measurement and extrapolation discipline
 
@@ -55,6 +57,72 @@ index conditions at a 100-tenant shape (one 100,000-row tenant and 99 1,000-row
 tenants). Adding tenants therefore does not add rows to a given tenant's scan;
 adding rows inside that tenant does. No p50/p95/p99, concurrency capacity, or
 fleet error budget is inferred from these single-host measurements.
+
+## The feedback-ladder family grades the ingress, not the surface
+
+Recorded by U1. ADR-0032 ratified the ladder on 2026-07-31 and plan §15.1 now
+carries Doherty's 400 ms with its citation, but
+[ux-strategy-proposal.md](../execution/ux-strategy-proposal.md) §18 risk 4 named
+the way that ratification could still fail: "the ladder is only meaningful if
+latency is measured. U1 must ship the measurement, not just the number, or it
+becomes another unratified aspiration." Before U1 nothing in the repository read
+a clock — no `hrtime`, no `performance.now`, no duration field anywhere in the
+runtime, platform-runtime or web sources.
+
+**What executes.** `SemanticQueryGateway` is the sole application read ingress,
+so it is where the timing seam sits, and it wraps the whole call rather than the
+executor: policy authorization, catalog resolution and legal-entity scope
+issuance are latency the caller waited through, and a band measured from the
+executor inward would grade a faster operation than the one that happened. Every
+call is graded, including the ones that throw — an `answered` sample is a
+returned envelope and a `refused` sample is a named refusal, and the slowest
+refusals are exactly the ones a "successes only" counter would hide. The gate
+reads the counter that composition recorded, never the observer the test
+injected, because the ingress swallows observer faults by design and silence
+there is indistinguishable from an observer that never ran.
+
+**What is evidence.** The band, and only the band. Duration never reaches the
+exported counter and neither does the query id: `outcome x band` is twelve
+series and stays twelve series however many queries a release registers, which
+is why cardinality cannot follow the catalog. The recorded latency figure in the
+table above is a single-host observation of one compiled query on one seeded
+tenant. It is not a p50, p95 or p99, no error budget is derived from it, and
+ADR-0032 §7's "p95 under 400 ms" remains unverified at the fleet level for the
+same reason the plan-shape rows above decline to extrapolate.
+
+**Unusable samples are refused by name, never clamped.** AGENTS.md §6 records
+that this machine's WSL2 kernel steps its wall clock backward about two seconds
+under CPU load. A negative or non-finite duration therefore increments a named
+rejection counter instead of grading as a fast band — clamping it to zero would
+file a broken clock under `under_100ms`, which is the precise shape of the
+defect this family exists to prevent. A clock that throws produces the same
+named rejection and the read still returns.
+
+**One ADR boundary was resolved, not invented.** ADR-0032 §1 writes its last two
+rows as "3 s – 10 s" and "> 10 s", which leaves exactly 10,000 ms unclaimed. The
+grading treats every band as lower-inclusive, so 10,000 ms is `over_10s` — the
+band that owes the user progress plus cancel or background-handoff. The
+resolution is in the direction that owes more, and it is what makes the ladder
+total, which is what lets the graded count be compared against an invocation
+count at all.
+
+**One check here is a proxy, and is recorded as one.** A separate gate matches
+the 400 ms threshold and the six §1 rows against ADR-0032, plan §15.1 and the
+`ux-grammar` skill, so the code and the doctrine cannot drift apart unnoticed.
+Prose can only be matched, never observed, so per AGENTS.md §6 that check
+ratchets wording; it proves nothing about behaviour. Everything else in this
+family reads a recorded counter.
+
+**What this family does not prove.** It observes that a duration was measured
+and graded. It does not observe that any band's treatment is rendered, because
+no treatment exists yet: `U5` owns skeleton geometry and `U9` the
+visual-conformance gates. ADR-0032's optimistic allow-list (§4), weighted
+success states (§5), name-only near-match suggestions (§6) and the mandatory
+`prefers-reduced-motion` fallback are outside the ingress entirely and are
+untouched here. Operation-path latency is uninstrumented: the operations
+ADR-0032 §1 expects to exceed the threshold — posting, release publication,
+import, long verification — travel through `SemanticOperationGateway`, which
+this family does not measure.
 
 ## Existing-table materialization window
 
