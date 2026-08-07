@@ -93,6 +93,7 @@ const suiteDefinitions = [
       'test/architecture/surface-grammar-conformance.test.ts',
       'test/architecture/surface-runtime-seam.test.ts',
       'test/architecture/tenant-completeness.test.ts',
+      'test/architecture/test-lock-observability.test.ts',
       'test/architecture/test-reachability.test.ts',
       'test/architecture/ux-grammar-skill.test.ts',
     ],
@@ -286,17 +287,19 @@ test('test entry points participate in the shared/exclusive gate lock', () => {
     readFileSync('apps/web/package.json', 'utf8'),
   ) as { scripts?: Record<string, string> };
   const rootScripts = packageJson.scripts ?? {};
+  // Which mode each entry point is entitled to is derived from whether it
+  // stands up containers, in test-lock-observability.test.ts. This asserts only
+  // that no entry point runs outside the lock at all.
   for (const [script, command] of Object.entries(rootScripts)) {
     if (!script.startsWith('test:')) continue;
-    const expectedMode = script === 'test:performance' ? 'exclusive' : 'shared';
     assert.match(
       command,
       new RegExp(
         `(?:^|&& )node ${testLockRunnerPath.replaceAll('.', '\\.')}` +
-          ` ${expectedMode} --`,
+          ` (?:shared|exclusive) --`,
         'u',
       ),
-      `${script} does not acquire the ${expectedMode} test lock`,
+      `${script} does not acquire the test lock`,
     );
   }
   assert.match(
@@ -457,7 +460,7 @@ test('matrix lock and legacy-process waits fail busy at their bounded deadline',
         const fakePs = join(fakeBin, 'ps');
         writeFileSync(
           fakePs,
-          "#!/usr/bin/env bash\nprintf '99999 corepack pnpm test:compiler\\n'\n",
+          "#!/usr/bin/env bash\nprintf '99999 9999999 corepack pnpm test:compiler\\n'\n",
         );
         chmodSync(fakePs, 0o755);
         assert.throws(

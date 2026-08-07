@@ -7,6 +7,7 @@ WORKTREE="${2:-$PWD}"
 LOCK="${NORTH_STAR_TEST_LOCK_PATH:-/tmp/north-star-matrix.lock}"
 LOCK_TIMEOUT_SECONDS="${NORTH_STAR_TEST_LOCK_TIMEOUT_SECONDS:-300}"
 FOREIGN_POLL_SECONDS=1
+FOREIGN_PROCESSES=""
 cd "$WORKTREE" || exit 2
 
 if ! [[ "$LOCK_TIMEOUT_SECONDS" =~ ^[0-9]+$ ]]; then
@@ -17,6 +18,10 @@ fi
 SHA="$(git rev-parse HEAD)"
 LOG="/tmp/matrix-${LABEL}-${SHA:0:8}.log"
 
+registry() {
+  node scripts/test-lock-registry.mjs "$@" --lock "$LOCK" --pid $$
+}
+
 node scripts/guard-ephemeral-postgres.mjs pre-lock
 CONTAINER_GUARD_RC="$?"
 if [ "$CONTAINER_GUARD_RC" -ne 0 ]; then
@@ -26,17 +31,30 @@ fi
 touch "$LOCK"
 
 echo "[$(date +%H:%M:%S)] $LABEL waiting for the matrix slot (sha ${SHA:0:8})..."
+# flock is a kernel descriptor lock, so this shell is the only thing that can
+# say who holds it. Record before waiting and clear on every exit path.
+trap 'registry release' EXIT
+registry record --mode exclusive --state waiting --label "$LABEL" \
+  --command "scripts/run-matrix.sh $LABEL"
+registry report
 exec 9>"$LOCK"
 flock --conflict-exit-code 75 --timeout "$LOCK_TIMEOUT_SECONDS" 9
 LOCK_RC="$?"
 if [ "$LOCK_RC" -ne 0 ]; then
   if [ "$LOCK_RC" -eq 75 ]; then
     echo "TEST_GATE_LOCK_BUSY: exclusive access to $LOCK was unavailable for ${LOCK_TIMEOUT_SECONDS}s" >&2
+    registry report
   else
     echo "TEST_GATE_LOCK_ERROR: flock failed with exit code $LOCK_RC for $LOCK" >&2
   fi
   exit "$LOCK_RC"
 fi
+registry record --mode exclusive --state holding --label "$LABEL" \
+  --command "scripts/run-matrix.sh $LABEL"
+# Report before sweeping: a record whose process is gone is the signal, and
+# deleting it before printing it is how the last one became unknowable.
+registry report
+registry sweep
 echo "[$(date +%H:%M:%S)] $LABEL ACQUIRED the lock."
 
 node scripts/guard-ephemeral-postgres.mjs post-lock
@@ -45,12 +63,28 @@ if [ "$CONTAINER_GUARD_RC" -ne 0 ]; then
   exit "$CONTAINER_GUARD_RC"
 fi
 
+# A test process that shares a process group with a recorded participant is
+# queued behind this lock, not racing it. Blaming those was how a correctly
+# waiting lane starved the lane that legitimately held the slot.
 foreign_matrix() {
-  local snapshot
-  snapshot="$(ps -eo pid=,args=)"
-  printf '%s\n' "$snapshot" \
-    | grep -vE "^[[:space:]]*($$|$PPID)[[:space:]]" \
-    | grep -Eq '[c]orepack pnpm (test|check:boundaries|check:schema)|[p]laywright test|[r]un-security-scans\.sh'
+  local coordinated snapshot
+  coordinated="$(registry pgids)"
+  snapshot="$(ps -eo pid=,pgid=,args=)"
+  FOREIGN_PROCESSES="$(
+    printf '%s\n' "$snapshot" \
+      | grep -vE "^[[:space:]]*($$|$PPID)[[:space:]]" \
+      | grep -E '[c]orepack pnpm (test|check:boundaries|check:schema)|[p]laywright test|[r]un-security-scans\.sh' \
+      | awk -v coordinated="$coordinated" '
+          BEGIN {
+            total = split(coordinated, groups, "\n")
+            for (position = 1; position <= total; position++) {
+              if (groups[position] != "") coordinated_group[groups[position]] = 1
+            }
+          }
+          !($2 in coordinated_group)
+        '
+  )"
+  [ -n "$FOREIGN_PROCESSES" ]
 }
 foreign_wait_attempts=0
 maximum_foreign_wait_attempts=$((
@@ -59,7 +93,11 @@ maximum_foreign_wait_attempts=$((
 while foreign_matrix; do
   if [ "$foreign_wait_attempts" -ge "$maximum_foreign_wait_attempts" ]; then
     echo "TEST_GATE_LOCK_BUSY: a lock-unaware test process remained active for ${LOCK_TIMEOUT_SECONDS}s" >&2
+    printf '%s\n' "$FOREIGN_PROCESSES" >&2
     exit 75
+  fi
+  if [ "$foreign_wait_attempts" -eq 0 ]; then
+    printf '%s\n' "$FOREIGN_PROCESSES"
   fi
   foreign_wait_attempts=$((foreign_wait_attempts + 1))
   echo "[$(date +%H:%M:%S)] $LABEL: lock held, but a lock-unaware test process is still running. Waiting ${FOREIGN_POLL_SECONDS}s (${foreign_wait_attempts}/${maximum_foreign_wait_attempts})..."
@@ -78,6 +116,7 @@ fi
 
 export CI=1
 export NORTH_STAR_TEST_LOCK_HELD=exclusive
+export NORTH_STAR_TEST_LOCK_LABEL="$LABEL"
 export REACHABILITY_RUN_ID="${LABEL}-${SHA:0:8}"
 
 PRE="${3:-}"
@@ -108,15 +147,11 @@ echo "PERFORMANCE_GATE_PASS_SHA=$SHA" | tee -a "$LOG"
 # The main matrix deliberately excludes test:performance. Its evidence was
 # produced above under the same run id, so the final reachability aggregation
 # proves both the exclusive gate and the load-tolerant matrix executed.
-bash scripts/downgrade-test-lock.sh "$LOCK" "$LOCK_TIMEOUT_SECONDS" 9
-LOCK_RC="$?"
-if [ "$LOCK_RC" -ne 0 ]; then
-  echo "FULL_MATRIX_FAILED rc=$LOCK_RC sha=$SHA" | tee -a "$LOG"
-  echo "[$(date +%H:%M:%S)] $LABEL released the slot." | tee -a "$LOG"
-  exit "$LOCK_RC"
-fi
-export NORTH_STAR_TEST_LOCK_HELD=shared
-echo "[$(date +%H:%M:%S)] $LABEL downgraded to shared access for the load-tolerant matrix." | tee -a "$LOG"
+#
+# Everything through test:browser stays under the exclusive lease. check:schema,
+# test:architecture, test:postgres, test:locale and test:browser all stand up
+# ephemeral PostgreSQL containers, and two container-bearing runs on this
+# machine starve each other's readiness deadline rather than colliding visibly.
 {
   set -x
   corepack pnpm format &&
@@ -135,7 +170,30 @@ echo "[$(date +%H:%M:%S)] $LABEL downgraded to shared access for the load-tolera
   corepack pnpm test:contracts &&
   corepack pnpm test:postgres &&
   corepack pnpm test:locale &&
-  corepack pnpm test:browser &&
+  corepack pnpm test:browser
+} 2>&1 | tee -a "$LOG"
+RC="${PIPESTATUS[0]}"
+if [ "$RC" -ne 0 ]; then
+  echo "FULL_MATRIX_FAILED rc=$RC sha=$SHA" | tee -a "$LOG"
+  echo "[$(date +%H:%M:%S)] $LABEL released the slot." | tee -a "$LOG"
+  exit "$RC"
+fi
+
+# The genuinely load-tolerant tail: no containers, no wall-clock assertions.
+# Other lanes' focused suites and reviewer launches enter here.
+bash scripts/downgrade-test-lock.sh "$LOCK" "$LOCK_TIMEOUT_SECONDS" 9
+LOCK_RC="$?"
+if [ "$LOCK_RC" -ne 0 ]; then
+  echo "FULL_MATRIX_FAILED rc=$LOCK_RC sha=$SHA" | tee -a "$LOG"
+  echo "[$(date +%H:%M:%S)] $LABEL released the slot." | tee -a "$LOG"
+  exit "$LOCK_RC"
+fi
+export NORTH_STAR_TEST_LOCK_HELD=shared
+registry record --mode shared --state holding --label "$LABEL" \
+  --command "scripts/run-matrix.sh $LABEL"
+echo "[$(date +%H:%M:%S)] $LABEL downgraded to shared access for the load-tolerant tail." | tee -a "$LOG"
+{
+  set -x
   node --import tsx test/helpers/run-observability-producer.ts &&
   corepack pnpm check:language-coverage &&
   corepack pnpm check:reachability &&
