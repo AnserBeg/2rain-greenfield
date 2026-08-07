@@ -11,6 +11,12 @@ import {
 
 import { escapeHtml, shortIdentity } from './html.js';
 import { sharedListView } from './list-runtime.js';
+import type { QueryDiagnosticCode } from './message-catalog.js';
+import {
+  messageAttributes,
+  messageBody,
+  type SurfaceMessageRef,
+} from './message-render.js';
 import { readCompiledSurfaceDataBinding } from './surface-contract.js';
 import type {
   CompiledSurfaceDefinition,
@@ -60,14 +66,10 @@ export type SurfaceDataRenderState =
     }
   | { readonly status: 'EMPTY' }
   | {
-      readonly code:
-        | 'QUERY_AMBIGUOUS'
-        | 'QUERY_LEGAL_ENTITY_SCOPE_REQUIRED'
-        | 'QUERY_NOT_FOUND'
-        | 'QUERY_PARAMETER_REQUIRED'
-        | 'QUERY_PERMISSION_DENIED'
-        | 'QUERY_UNAVAILABLE'
-        | 'QUERY_UNSUPPORTED';
+      // One authority: the read path's diagnostic subset is declared in the
+      // catalog, so the render state cannot admit a code the catalog does not
+      // register, and the gateway-error mapping targets the same set.
+      readonly code: QueryDiagnosticCode;
       readonly status: 'DIAGNOSTIC';
     };
 
@@ -237,11 +239,12 @@ export function renderRegisteredSurfaceComponent(
       code: 'UNSUPPORTED_COMPONENT' as const,
       html: resolvedSlot(
         context,
-        diagnostic(
-          'Unsupported release capability',
-          `This runtime does not register ${context.slot.contentReferenceId}.`,
-          'UNSUPPORTED_COMPONENT',
-        ),
+        // The one message carrying a subject. The component id is a declared
+        // subject in its own element, never interpolated into the sentence.
+        diagnostic({
+          code: 'UNSUPPORTED_COMPONENT',
+          subject: context.slot.contentReferenceId,
+        }),
         'failed',
       ),
       state: 'failed' as const,
@@ -279,11 +282,7 @@ function renderComponent(
       code: 'COMPONENT_RENDER_FAILED' as const,
       html: resolvedSlot(
         context,
-        diagnostic(
-          'Component unavailable',
-          'The release-defined component could not be rendered. The rest of the pinned surface is unchanged.',
-          'COMPONENT_RENDER_FAILED',
-        ),
+        diagnostic({ code: 'COMPONENT_RENDER_FAILED' }),
         'failed',
       ),
       state: 'failed' as const,
@@ -864,43 +863,9 @@ function renderLifecycleOverflow(
 }
 
 function dataDiagnostic(
-  code: Exclude<
-    Extract<SurfaceDataRenderState, { status: 'DIAGNOSTIC' }>['code'],
-    never
-  >,
+  code: Extract<SurfaceDataRenderState, { status: 'DIAGNOSTIC' }>['code'],
 ): string {
-  const copy = {
-    QUERY_AMBIGUOUS: [
-      'More than one record matched',
-      'Refine the semantic query before choosing a record.',
-    ],
-    QUERY_LEGAL_ENTITY_SCOPE_REQUIRED: [
-      'Legal entity required',
-      'Choose a legal entity before loading this scoped data.',
-    ],
-    QUERY_NOT_FOUND: [
-      'Record not found',
-      'No visible record matched this request in the pinned release.',
-    ],
-    QUERY_PARAMETER_REQUIRED: [
-      'Lookup parameters required',
-      'Complete every lookup input before asking for a result.',
-    ],
-    QUERY_PERMISSION_DENIED: [
-      'Access denied',
-      'Current policy does not allow this data to be shown.',
-    ],
-    QUERY_UNAVAILABLE: [
-      'Data unavailable',
-      'Live data could not be loaded safely. Try the request again.',
-    ],
-    QUERY_UNSUPPORTED: [
-      'Capability unavailable',
-      'The pinned release does not provide this semantic data capability.',
-    ],
-  } as const;
-  const [title, message] = copy[code];
-  return diagnostic(title, message, code);
+  return diagnostic({ code });
 }
 
 function fieldLabel(fieldId: string): string {
@@ -1095,9 +1060,14 @@ function renderValue(value: unknown): string {
   return escapeHtml(typeof value === 'string' ? value : JSON.stringify(value));
 }
 
-function diagnostic(title: string, message: string, code: string): string {
-  return `<section class="diagnostic" role="alert" data-diagnostic-code="${escapeHtml(code)}" data-status-role="blocked">
+/**
+ * The slot-local message card. `data-status-role` is derived from the catalog
+ * entry's consequence rather than pinned to `blocked` here — ADR-0048 §3, and
+ * the reason a required-input message no longer reads as a failure.
+ */
+function diagnostic(ref: SurfaceMessageRef): string {
+  return `<section class="diagnostic" role="alert" ${messageAttributes(ref)}>
     <div class="diagnostic__mark" aria-hidden="true">!</div>
-    <div><p class="eyebrow">Release diagnostic</p><h2>${escapeHtml(title)}</h2><p>${escapeHtml(message)}</p><code>${escapeHtml(code)}</code></div>
+    <div>${messageBody(ref, 'Release diagnostic', 'h2')}</div>
   </section>`;
 }

@@ -1,21 +1,12 @@
 import { assertRequestRuntimeView } from '@north-star/runtime/request-runtime-view';
 import type * as RuntimeViewContract from '@north-star/runtime/request-runtime-view';
-import {
-  NoSuchRegisteredOperationError,
-  SEMANTIC_OPERATION_REQUEST_VERSION,
-  SemanticOperationConfirmationGrantError,
-  SemanticOperationConfirmationStaleError,
-  SemanticOperationPolicyDeniedError,
-} from '../../../packages/runtime/src/semantic-operation-gateway.js';
+import { SEMANTIC_OPERATION_REQUEST_VERSION } from '../../../packages/runtime/src/semantic-operation-gateway.js';
 import type {
   SemanticOperationGateway,
   SemanticOperationMediationAuthority,
 } from '../../../packages/runtime/src/semantic-operation-gateway.js';
 import {
-  MalformedLegalEntityScopeArgumentError,
-  NoSuchRegisteredQueryError,
   SEMANTIC_QUERY_REQUEST_VERSION,
-  SemanticQueryPolicyDeniedError,
   type SemanticQueryResultEnvelope,
 } from '../../../packages/runtime/src/semantic-query-gateway.js';
 import type { SemanticQueryGateway } from '../../../packages/runtime/src/semantic-query-gateway.js';
@@ -29,6 +20,17 @@ import {
 } from './component-registry.js';
 import { DESIGN_TOKENS } from './design-tokens.js';
 import { escapeHtml, shortIdentity } from './html.js';
+import {
+  operationMessageCode,
+  queryMessageCode,
+} from './gateway-error-codes.js';
+import type { OperationDiagnosticCode } from './message-catalog.js';
+import {
+  messageAttributes,
+  messageBody,
+  surfaceMessage,
+  type SurfaceMessageRef,
+} from './message-render.js';
 import {
   readCompiledSurfaceManifest,
   readCompiledSurfaceDataBinding,
@@ -109,13 +111,14 @@ export async function renderSurfaceRuntimeWithData(
   try {
     binding = readCompiledSurfaceDataBinding(view, selection.selected);
   } catch {
+    // The code is inaccurate and stays that way here on purpose: the throw is a
+    // SurfaceProjectionError('INVALID_SURFACE_BINDING'), so this site names a
+    // missing capability for what is really an unreadable binding. Correcting
+    // it moves a `data-diagnostic-code` this packet is fenced from moving; it
+    // is reported as a finding and INVALID_SURFACE_BINDING is declared
+    // unreachable in the gate rather than silently absent.
     return Object.freeze({
-      html: diagnosticDocument(
-        view,
-        'Compiled surface unavailable',
-        'The selected surface does not have a valid pinned semantic binding.',
-        'QUERY_UNSUPPORTED',
-      ),
+      html: diagnosticDocument(view, { code: 'QUERY_UNSUPPORTED' }),
       statusCode: 422,
     });
   }
@@ -203,18 +206,9 @@ export async function renderSurfaceRuntimeWithData(
       data = dataState(result);
     }
   } catch (error) {
-    data = {
-      code:
-        error instanceof SemanticQueryPolicyDeniedError
-          ? 'QUERY_PERMISSION_DENIED'
-          : error instanceof MalformedLegalEntityScopeArgumentError
-            ? 'QUERY_LEGAL_ENTITY_SCOPE_REQUIRED'
-            : error instanceof NoSuchRegisteredQueryError
-              ? 'QUERY_UNSUPPORTED'
-              : 'QUERY_UNAVAILABLE',
-      status: 'DIAGNOSTIC',
-    };
-    if (error instanceof MalformedLegalEntityScopeArgumentError) {
+    const code = queryMessageCode(error);
+    data = { code, status: 'DIAGNOSTIC' };
+    if (code === 'QUERY_LEGAL_ENTITY_SCOPE_REQUIRED') {
       statusCode = 422;
     }
   }
@@ -299,16 +293,10 @@ export async function submitSurfaceRuntimeIntent(
       gateways.operationMediation.issueInvocation(view, 'UI'),
     );
   } catch (error) {
-    return operationDiagnostic(
-      error instanceof SemanticOperationPolicyDeniedError
-        ? 'OPERATION_PERMISSION_DENIED'
-        : error instanceof SemanticOperationConfirmationStaleError ||
-            error instanceof SemanticOperationConfirmationGrantError
-          ? 'OPERATION_CONFIRMATION_STALE'
-          : error instanceof NoSuchRegisteredOperationError
-            ? 'OPERATION_UNSUPPORTED'
-            : 'OPERATION_UNAVAILABLE',
-      error instanceof SemanticOperationPolicyDeniedError ? 403 : 422,
+    const code = operationMessageCode(error);
+    return renderApplicationDiagnostic(
+      code === 'OPERATION_PERMISSION_DENIED' ? 403 : 422,
+      { code },
     );
   }
   if (result.outcome !== 'succeeded' || !result.readBack) {
@@ -405,28 +393,21 @@ function selectSurface(
       (surface) => surface.lifecycle === 'active',
     );
   } catch (error) {
+    // Five codes that shared one sentence before ADR-0048. Each now resolves
+    // its own entry; the shared string was why a repeated surface id and an
+    // unreadable navigation tree read identically to an operator.
     const code =
       error instanceof SurfaceProjectionError
         ? error.code
         : 'INVALID_SURFACE_MANIFEST';
     return Object.freeze({
-      html: diagnosticDocument(
-        view,
-        'Compiled surface unavailable',
-        'The pinned release does not contain a surface projection this runtime can render.',
-        code,
-      ),
+      html: diagnosticDocument(view, { code }),
       statusCode: 422,
     });
   }
   if (surfaces.length === 0) {
     return Object.freeze({
-      html: diagnosticDocument(
-        view,
-        'No active surface',
-        'The pinned release contains no active browser surface.',
-        'NO_ACTIVE_SURFACE',
-      ),
+      html: diagnosticDocument(view, { code: 'NO_ACTIVE_SURFACE' }),
       statusCode: 422,
     });
   }
@@ -444,10 +425,7 @@ function selectSurface(
         surfaces,
         navigation,
         null,
-        `<section class="diagnostic diagnostic--page" role="alert" data-diagnostic-code="UNKNOWN_SURFACE">
-          <div class="diagnostic__mark" aria-hidden="true">?</div>
-          <div><p class="eyebrow">Release diagnostic</p><h1>Surface not found</h1><p>The requested surface is not present in this pinned release.</p><code>UNKNOWN_SURFACE</code></div>
-        </section>`,
+        pageMessageSection({ code: 'UNKNOWN_SURFACE' }),
       ),
       statusCode: 404,
     });
@@ -718,38 +696,10 @@ function operationIntent(
 }
 
 function operationDiagnostic(
-  code:
-    | 'OPERATION_CONFIRMATION_REQUIRED'
-    | 'OPERATION_CONFIRMATION_STALE'
-    | 'OPERATION_PERMISSION_DENIED'
-    | 'OPERATION_UNAVAILABLE'
-    | 'OPERATION_UNSUPPORTED',
+  code: OperationDiagnosticCode,
   statusCode: number,
 ): SurfaceRuntimeResponse {
-  const copy = {
-    OPERATION_CONFIRMATION_REQUIRED: [
-      'Confirmation required',
-      'This semantic operation requires explicit human confirmation.',
-    ],
-    OPERATION_CONFIRMATION_STALE: [
-      'Confirmation expired',
-      'The operation input or expected revision changed after preview. Preview it again.',
-    ],
-    OPERATION_PERMISSION_DENIED: [
-      'Access denied',
-      'Current policy does not allow this operation.',
-    ],
-    OPERATION_UNAVAILABLE: [
-      'Save unavailable',
-      'The semantic operation could not be completed safely.',
-    ],
-    OPERATION_UNSUPPORTED: [
-      'Operation unavailable',
-      'The pinned release does not provide this semantic operation.',
-    ],
-  } as const;
-  const [title, message] = copy[code];
-  return renderApplicationDiagnostic(statusCode, title, message, code);
+  return renderApplicationDiagnostic(statusCode, { code });
 }
 
 function renderConfirmationTransition(
@@ -771,25 +721,39 @@ function renderConfirmationTransition(
   });
 }
 
+/**
+ * Every message renderer in this file takes a `SurfaceMessageRef` and nothing
+ * else — no title, no message, no free code string. That is ADR-0048 §5's
+ * structural companion: a hardcoded sentence is not caught after the fact, it
+ * has nowhere to be passed.
+ */
 export function renderApplicationDiagnostic(
   statusCode: number,
-  title: string,
-  message: string,
-  code: string,
+  ref: SurfaceMessageRef,
 ): SurfaceRuntimeResponse {
   return Object.freeze({
-    html: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)} · 2rain</title><style>${styles}</style></head><body class="standalone"><main class="standalone__card"><p class="eyebrow">Application diagnostic</p><h1>${escapeHtml(title)}</h1><p>${escapeHtml(message)}</p><code>${escapeHtml(code)}</code></main></body></html>`,
+    html: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(surfaceMessage(ref.code).sentence)} · 2rain</title><style>${styles}</style></head><body class="standalone"><main class="standalone__card" role="alert" ${messageAttributes(ref)}>${messageBody(ref, 'Application diagnostic', 'h1')}</main></body></html>`,
     statusCode,
   });
 }
 
 function diagnosticDocument(
   view: RuntimeViewContract.RequestRuntimeView,
-  title: string,
-  message: string,
-  code: string,
+  ref: SurfaceMessageRef,
 ): string {
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)} · 2rain</title><style>${styles}</style></head><body class="standalone"><main class="standalone__card" role="alert" data-diagnostic-code="${escapeHtml(code)}"><p class="eyebrow">Pinned release diagnostic</p><h1>${escapeHtml(title)}</h1><p>${escapeHtml(message)}</p><code>${escapeHtml(code)}</code><p class="diagnostic-release">Release ${escapeHtml(shortIdentity(view.release.releaseId))} · fence ${view.pointer.fence}</p></main></body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(surfaceMessage(ref.code).sentence)} · 2rain</title><style>${styles}</style></head><body class="standalone"><main class="standalone__card" role="alert" ${messageAttributes(ref)}>${messageBody(ref, 'Pinned release diagnostic', 'h1')}<p class="diagnostic-release">Release ${escapeHtml(shortIdentity(view.release.releaseId))} · fence ${view.pointer.fence}</p></main></body></html>`;
+}
+
+/**
+ * Page-level message inside the shell, for faults that arise before slot
+ * composition but after a navigable manifest exists — the `ux-grammar` rule
+ * that page-level diagnostics survive.
+ */
+function pageMessageSection(ref: SurfaceMessageRef): string {
+  return `<section class="diagnostic diagnostic--page" role="alert" ${messageAttributes(ref)}>
+          <div class="diagnostic__mark" aria-hidden="true">?</div>
+          <div>${messageBody(ref, 'Release diagnostic', 'h1')}</div>
+        </section>`;
 }
 
 function shellDocument(
