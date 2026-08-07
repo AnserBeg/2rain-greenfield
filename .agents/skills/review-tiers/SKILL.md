@@ -376,3 +376,35 @@ packet. Do not pay twice for the same reading.
     Report: CLOSED / STILL OPEN per claim with file and line; any new defect;
     one verdict. A clean review is a real outcome — say so plainly if you find
     nothing, and name the one thing you would most want executed.
+
+## Verify why a red fired, not just that it fired — added 2026-08-06
+
+A negative control that never reds is not a control. **A control that reds for the
+wrong reason is not a control either** — and it is more dangerous, because it
+looks like evidence.
+
+`proj-disc-impl` caught three of these in one packet, each time by asking why the
+failure happened rather than accepting it:
+
+- A red that was a `ReferenceError` in the test, not the mutation.
+- A red that was `git checkout -- <path>` destroying uncommitted source fixes, so
+  the observed failures had nothing to do with the control. (`git-workflow` line
+  192 already requires stashing or committing before any history-losing command;
+  the rule lapsed twice in that packet.)
+- A red that was PostgreSQL `42P18 could not determine data type of parameter $3`
+  — a type error in the relaxed predicate, not the cardinality assertion it was
+  meant to prove. Fixed with an explicit `::text` cast and re-run.
+
+`U1` hit the mirror image in the same week: a hand-built aggregate fixture that
+was **malformed**, so the refusal assertion passed for the wrong reason. Adding an
+assertion on the error *message* — not just its class — exposed it, because
+`MalformedPinnedQueryCatalogError` is also what a bad catalog raises.
+
+So, when recording a red:
+
+- **Read the failure text.** If it does not name the assertion you expected to
+  break, the control proved nothing and the mutation may be untested.
+- **Assert the message, not only the error class**, wherever one class covers
+  several causes.
+- **A red arriving faster or louder than expected is a reason to look, not to
+  celebrate.** All three of the above looked like success at a glance.
