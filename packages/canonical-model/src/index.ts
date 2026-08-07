@@ -5,6 +5,8 @@ export {
   CANONICAL_LANGUAGE_PROFILES,
   CONTENT_HASH_ALGORITHM,
   CONTENT_HASH_DOMAIN,
+  DEFAULT_DISCLOSURE_TIER,
+  DISCLOSURE_TIERS,
   IMMUTABLE_DEFAULTS_V0,
   LANGUAGE_VERSIONS,
   LEGACY_LANGUAGE_VERSION,
@@ -30,6 +32,7 @@ export {
   type CanonicalLanguageProfile,
   type CanonicalLanguageVersion,
   type CanonicalNormalizationProfileVersion,
+  type DisclosureTier,
 } from './constants.js';
 export {
   CanonicalModelError,

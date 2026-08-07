@@ -922,7 +922,9 @@ function validateSemantics(
       ...packageRevision.surfaces
         .filter(
           (surface) =>
-            surface.renderer !== undefined || surface.surfaceRole !== undefined,
+            surface.renderer !== undefined ||
+            surface.surfaceRole !== undefined ||
+            surface.slots.some((slot) => slot.disclosureTier !== undefined),
         )
         .map((surface) => surface.surfaceId),
       ...packageRevision.storageMappings
@@ -1350,6 +1352,83 @@ function validateSurfaceVocabulary(
         );
       }
       seen.add(slot.slot);
+    }
+  }
+  validateDisclosureTiers(packageRevision, diagnostics);
+}
+
+/**
+ * The `ux-grammar` Disclosure tiers rule, enforced on the half that is
+ * compile-time knowable.
+ *
+ * §3.2 forces `always` for three kinds of content: anything required, anything
+ * the user must act on, and anything resolving to `blocked` or `attention`. The
+ * third is not a missing field -- it asks which VALUE a field will take for a
+ * record that does not exist yet, so no definition can carry it and the runtime
+ * owns it. What is enforced here is everything the definition does declare.
+ *
+ * The join is `surface.dataSource -> query.selections -> field`: that is the
+ * only path from a surface to its fields, because a slot's `content` is an
+ * opaque module reference carrying no field information.
+ *
+ * Conservative by construction. A slot forced to `always` because ONE reachable
+ * field demands it may reveal more than a per-field rule would -- the error
+ * direction is over-disclosure, never concealment, which is the direction §3.2
+ * exists to protect.
+ */
+function validateDisclosureTiers(
+  packageRevision: VersionedNormalizedApplicationPackage,
+  diagnostics: CanonicalDiagnostic[],
+): void {
+  const fieldById = new Map(
+    packageRevision.fields.map((field) => [field.fieldId, field] as const),
+  );
+  const queryById = new Map(
+    packageRevision.queries.map((query) => [query.queryId, query] as const),
+  );
+  for (const surface of packageRevision.surfaces) {
+    const query = queryById.get(surface.dataSource.targetId);
+    // `queries` is a union: row queries carry `selections`, aggregate queries
+    // carry `aggregate` instead. An aggregate-backed surface reaches no field,
+    // so it forces nothing -- which is correct, not an oversight: there is no
+    // required field on it to conceal.
+    const selections =
+      query !== undefined && 'selections' in query ? query.selections : [];
+    const forcing = selections
+      .map((selection) => fieldById.get(selection.field.targetId))
+      .filter((field) => field !== undefined)
+      .filter(
+        (field) =>
+          field.presence === 'required' ||
+          field.businessKey === 'tenantEnvironmentCaseInsensitiveUnique',
+      );
+    for (const slot of surface.slots) {
+      if (slot.disclosureTier === undefined) continue;
+      // Refused before the forcing rule is consulted: an unhonourable value is
+      // wrong on every slot, so reporting it as a forcing-rule violation would
+      // send an author to change the wrong thing.
+      if (slot.disclosureTier === 'onDemand') {
+        diagnostics.push(
+          diagnostic(
+            'CANON_SURFACE_DISCLOSURE_TIER_UNHONOURED',
+            '$.surfaces.slots.disclosureTier',
+            'onDemand means fetched on expand, and this application is server-rendered with no fetch-on-expand behaviour to honour it',
+            'declare progressive, which defers without concealing, or always',
+            slot.slotId,
+          ),
+        );
+        continue;
+      }
+      if (slot.disclosureTier === 'always' || forcing.length === 0) continue;
+      diagnostics.push(
+        diagnostic(
+          'CANON_SURFACE_DISCLOSURE_TIER_FORCED_ALWAYS',
+          '$.surfaces.slots.disclosureTier',
+          `slot ${slot.slot} reaches ${forcing[0]!.fieldId}, which is required or identifying, so it is always`,
+          'declare always, or move the deferred content to a slot that does not reach required or identifying fields',
+          slot.slotId,
+        ),
+      );
     }
   }
 }
@@ -2243,6 +2322,10 @@ function acceptedAlternativeFor(code: string): string {
       'use the exported authored schema and canonical example',
     CANON_SURFACE_ARCHETYPE_UNSUPPORTED:
       'use home, list, record, task, or builder',
+    CANON_SURFACE_DISCLOSURE_TIER_FORCED_ALWAYS:
+      'declare always on a slot that reaches a required or identifying field',
+    CANON_SURFACE_DISCLOSURE_TIER_UNHONOURED:
+      'declare progressive or always; onDemand has no fetch-on-expand to honour it',
     CANON_SURFACE_SLOT_UNSUPPORTED:
       'use a named slot declared by the selected archetype',
     CANON_SURFACE_STATUS_ROLE_UNSUPPORTED:

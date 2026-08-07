@@ -367,6 +367,7 @@ function compileApplicationInternal(
       projectionDispatchRevision(packageRevision),
       isStorageTargetV1(previousStorageTarget) ? previousStorageTarget : null,
       packageRevision,
+      input.profile.compilerSemanticProfileVersion,
     ),
     packageRevision,
   );
