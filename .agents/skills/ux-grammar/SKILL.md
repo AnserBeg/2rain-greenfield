@@ -206,6 +206,52 @@ page itself is unserviceable.
 authorizes exactly one script with four closed behaviours, and none of them is
 this.
 
+## Message vocabulary
+
+Granted 2026-08-06 on `U6-design`'s report, which stopped rather than inventing
+these. Ruled by [ADR-0048](../../../docs/decisions/ADR-0048-the-message-catalog-is-platform-vocabulary-held-in-code.md).
+
+Every user-facing error, empty state and success confirmation resolves to a
+**registered** entry. The catalog is platform vocabulary held in code and pinned
+by contract test — not a compiled projection — because every code is
+platform-raised and no module authors a message. `SurfaceMessageCode` derives from
+the catalog by `keyof typeof`, so an unregistered code is **inexpressible**, not
+merely a compile error.
+
+**`consequence`** — `advisory` · `blocking`. Does the user's work stop?
+
+**There is deliberately no `severity`.** The proposal's severity column stacked two
+orthogonal facts — a *scope* (field-level, slot-level) and a *consequence*
+(transient, blocking) — under one header naming neither. Registering it verbatim
+would have coined a word colliding with the status roles while not naming a single
+fact.
+
+**Message consequence is not status**, in exactly the way resolution state is not
+status. The status grammar describes a business fact about a record; consequence
+describes what a message does to the user's work. Where a message renders colour
+it resolves through the existing roles — `blocking` through `blocked`, `advisory`
+through `attention`, a success confirmation through `success` — so **no new hue is
+added and the pinned `statusRoles` array does not move.**
+
+**`placement`** — `page` · `slot`, and it is **derived, never authored**. A catalog
+entry declares which placements are *admissible*; the runtime picks by where the
+fault arose relative to slot composition, which the page-level-diagnostics rule
+above already discriminates. Slot placement anchors on the per-slot resolution
+state, which already computes and emits that fact rather than deriving a parallel
+one.
+
+**`toast` and `modal` are refused by name, with a diagnostic.** Neither is among
+the four client behaviours [ADR-0036](../../../docs/decisions/ADR-0036-minimum-client-capability.md)
+authorises; a toast additionally needs a durable record substrate that does not
+exist, and a modal needs a rectifying-action capability that does not exist.
+Registering a spelling nothing can honour is ADR-0041's accepted-and-ignored
+state — *indistinguishable from success at every point where anyone would look*.
+Refusing by name makes the absence declared and observable instead.
+
+**These are runtime vocabularies and do not widen the G1 pin block**, which binds
+what the compiler enforces. They follow the slot-resolution-state precedent:
+skill prose, a frozen constant, and a deep-equal contract test.
+
 ## Weight matches consequence
 
 - Drafts autosave and edit inline; feel light.
