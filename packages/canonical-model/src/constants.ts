@@ -255,12 +255,16 @@ export const DISCLOSURE_TIERS = ['always', 'progressive', 'onDemand'] as const;
  * materialized into normalized output: `normalize.ts` does not write this value
  * onto a slot that omitted it.
  *
- * Materializing it would rewrite every existing normalized definition, move
- * every `normalizedDefinitionDigest`, and therefore move every recorded release
- * root. The `surfaceRole` precedent is the one to follow -- absent stays absent
- * and is resolved with `?? null` at projection time -- not the
- * `IMMUTABLE_DEFAULTS_V0` precedent, which materializes and is only safe
- * because it predates the recorded lineage.
+ * Materializing it rewrites every existing normalized definition. MEASURED, on
+ * a throwaway mutation: `check:app-release` does not merely move a release root
+ * -- it fails earlier and harder, with `COMPILER_INPUT_NOT_CANONICAL` at
+ * `decodeSchemaCheck`, because the STORED normalized bytes of a recorded entry
+ * no longer round-trip through the changed normalizer. Reproduction never
+ * reaches a root comparison at all.
+ *
+ * The `surfaceRole` precedent is the one to follow -- absent stays absent and is
+ * resolved at projection time -- not the `IMMUTABLE_DEFAULTS_V0` precedent,
+ * which materializes and is only safe because it predates the recorded lineage.
  */
 export const DEFAULT_DISCLOSURE_TIER = 'always' as const;
 
