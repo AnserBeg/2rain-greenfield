@@ -250,9 +250,9 @@ test('the foreign-process wait blames only genuinely uncoordinated processes', a
       sentinelGroup,
     );
     assert.doesNotMatch(
-      coordinated.stdout,
-      /lock-unaware test process is still running/u,
-      `a queued lane was blamed as foreign:\n${coordinated.stdout}`,
+      coordinated.stderr,
+      /TEST_GATE_LOCK_BUSY: a lock-unaware test process remained active/u,
+      `a queued lane was blamed as foreign:\n${coordinated.stderr}`,
     );
     assert.match(
       coordinated.stdout,
