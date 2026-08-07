@@ -117,6 +117,50 @@ rest from current constants; the profile version joins what is derived.
 for its inverse: reproduction inheriting today's constant instead of the recorded
 one fails at the bootstrap root.
 
+### 6. A profile-only lineage edge is not rollback-eligible, and must refuse by its own name
+
+Ruled 2026-08-06 on `proj-disc-impl`'s stop-and-report, verified independently
+against the code before ruling.
+
+**The mechanism.** `ensurePersistedRelease`
+(`packages/postgres-provider/src/composed-application-runtime.ts:1065`) looks up a
+package revision by `content_hash` and reuses it. Two profile siblings have the
+same normalized definition, so they share one revision. The reverse-transition
+policy then computes `exact_forward_lineage` as `target_revision.parent_revision_id
+= source_revision.revision_id` — which, for one shared revision, asks whether a
+revision is its own parent. It never is. Neither lineage direction holds,
+`authorizeReverseTransitionIfApplicable` returns `null`, and rollback refuses.
+
+**The revision is not the defect.** A package revision is the *source*; a tenant
+release is the *compilation*. Two profile siblings genuinely are the same source
+and correctly share a revision — the compiler-semantic profile is a property of
+how the source was compiled, not of what it is, and pushing it into the revision
+key would put a compilation fact in the source table. `§1`'s
+`normalizedDefinitionDigest` coupling at `release-repository.ts:704` depends on
+that separation.
+
+**The defect is that a release-level operation is authorized by revision-level
+parentage.** For source-changing edges the two coincide, which is why this was
+never visible. §4's same-source entries separate them for the first time.
+
+**This ADR does not fix it, and the implementing packet must not either.** The
+fix touches release-activation authorization — the safety valve itself — and
+belongs in its own packet with its own review. What is owed here is smaller and
+non-negotiable:
+
+> **A profile-only edge must refuse with a distinct, accurate code.** Today the
+> second refusal reuses `ROLLBACK_TARGET_NOT_IMMEDIATE_PREDECESSOR` with the
+> message *"rollback target does not reverse an exact compiled lineage edge"* —
+> and the target **is** the immediate predecessor; the index check passed. A
+> refusal that misnames its own cause is exactly what
+> [ADR-0046](ADR-0046-rollback-activates-history-and-defects-refuse-by-name.md)
+> forbids, and it would send an operator hunting the wrong fault at the worst
+> possible moment.
+
+The named refusal is a declared limit in the [ADR-0044](ADR-0044-search-capability-is-derived-and-never-silently-empty.md)
+sense: structural absence, declared and observable. Silent inability is what that
+ADR forbids, and an accurate name is what converts one into the other.
+
 ## Why not a `v5` language adoption
 
 `v4` already carries the declared field types. A `v5` cut would mint a language
