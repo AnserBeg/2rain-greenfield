@@ -404,6 +404,14 @@ test(
             (ladderContext) =>
               assertRegisteredQueryLatencyIsGraded(tenantA, ladderContext),
           );
+          await context.test(
+            'a composed runtime grades a real read by its measured duration',
+            () =>
+              assertComposedRuntimeGradesByDuration(
+                compiledApplication,
+                databaseUrl,
+              ),
+          );
 
           tenantB = await createRuntime(
             compiledApplication,
@@ -1713,6 +1721,50 @@ async function assertRegisteredQueryLatencyIsGraded(
       totalMilliseconds: elapsedMilliseconds,
     })}`,
   );
+}
+
+/**
+ * Fix 2 on the composed path, not on the instrumentation object alone. The
+ * runtime is composed against the already-installed tenant with a clock the
+ * test steps across ADR-0032's 400 ms boundary, so a composition that dropped
+ * the duration — or a source frozen at a constant — cannot turn two identical
+ * reads into two different bands. No sleep is involved; the clock is injected,
+ * per AGENTS.md §6.
+ */
+async function assertComposedRuntimeGradesByDuration(
+  compiledApplication: unknown,
+  databaseUrl: string,
+): Promise<void> {
+  const readings = [0, 399.5, 1_000, 1_400.5];
+  let read = 0;
+  const runtime = await createRuntime(
+    compiledApplication,
+    databaseUrl,
+    'composed-tenant-a',
+    undefined,
+    undefined,
+    () => {
+      const next = readings[read];
+      assert.notEqual(next, undefined, 'the composed clock was over-read');
+      read += 1;
+      return next!;
+    },
+  );
+  try {
+    await listParty(runtime);
+    await listParty(runtime);
+    assert.equal(read, readings.length, 'two clock reads per invocation');
+    assert.deepEqual(
+      runtime.metrics.snapshot().queryLatency,
+      [
+        ['answered|100ms_400ms', 1],
+        ['answered|400ms_1s', 1],
+      ],
+      'identical composed reads land in different bands because the clock moved',
+    );
+  } finally {
+    await runtime.close();
+  }
 }
 
 function gradedInvocationCount(snapshot: MetricSnapshot): number {
@@ -3842,8 +3894,10 @@ function createRuntime(
   afterFreshTenantIntermediateActivation?: (
     observation: FreshTenantIntermediateActivationObservation,
   ) => Promise<void>,
+  monotonicMilliseconds?: () => number,
 ) {
   return createComposedApplicationRuntime({
+    ...(monotonicMilliseconds ? { monotonicMilliseconds } : {}),
     ...(afterFreshTenantIntermediateActivation
       ? { afterFreshTenantIntermediateActivation }
       : {}),

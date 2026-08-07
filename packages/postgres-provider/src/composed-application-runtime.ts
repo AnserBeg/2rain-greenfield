@@ -106,6 +106,15 @@ export interface ComposedApplicationRuntimeOptions {
   readonly environmentSlug?: string;
   readonly inventoryScopeProvisioning?: InventoryScopeProvisioning;
   readonly metrics?: ObservabilityMetrics;
+  /**
+   * The elapsed-time source the composed read ingress is timed from. It exists
+   * so a test can drive a composition across a real ladder boundary without
+   * sleeping (AGENTS.md §6). Production never passes it; the default is the
+   * process monotonic clock, whose liveness is gated separately, because a
+   * controlled clock here proves the wiring carries a duration and says
+   * nothing about whether the real source moves.
+   */
+  readonly monotonicMilliseconds?: () => number;
   readonly migrationsDirectory: string;
   readonly providerErrorMappings: readonly ModuleProviderErrorMapping[];
   readonly releaseSelection?: Readonly<{
@@ -599,15 +608,10 @@ export async function createComposedApplicationRuntime(
       interpreter,
       undefined,
       undefined,
-      Object.freeze({
-        monotonicMilliseconds,
-        observe: (observation) => {
-          metrics.recordRegisteredQueryLatency(
-            observation.outcome,
-            observation.durationMilliseconds,
-          );
-        },
-      } satisfies RegisteredQueryLatencyInstrumentation),
+      composedRegisteredQueryLatencyInstrumentation(
+        metrics,
+        options.monotonicMilliseconds,
+      ),
     );
     const capabilityExecutors = createRegisteredCapabilityExecutors(
       options.capabilityOperationExecutorFactories ?? [],
@@ -669,6 +673,26 @@ export async function createComposedApplicationRuntime(
     );
     throw error;
   }
+}
+
+/**
+ * The instrumentation the composition installs on the read ingress — exported
+ * so a gate can drive the real object across an ADR-0032 boundary instead of
+ * re-implementing it and testing the copy.
+ */
+export function composedRegisteredQueryLatencyInstrumentation(
+  metrics: ObservabilityMetrics,
+  clock: (() => number) | undefined = undefined,
+): RegisteredQueryLatencyInstrumentation {
+  return Object.freeze({
+    monotonicMilliseconds: clock ?? monotonicMilliseconds,
+    observe: (observation) => {
+      metrics.recordRegisteredQueryLatency(
+        observation.outcome,
+        observation.durationMilliseconds,
+      );
+    },
+  } satisfies RegisteredQueryLatencyInstrumentation);
 }
 
 export function parseCompiledApplication(

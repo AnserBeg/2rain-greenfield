@@ -338,11 +338,7 @@ export class SemanticQueryGateway {
       'records',
       executionContext,
     );
-    if (result.kind !== 'semanticQueryResult') {
-      throw new MalformedPinnedQueryCatalogError(
-        'record query returned an aggregate result',
-      );
-    }
+    assertRecordResultEnvelope(result);
     return result;
   }
 
@@ -357,11 +353,7 @@ export class SemanticQueryGateway {
       'aggregate',
       executionContext,
     );
-    if (result.kind !== 'semanticAggregateResult') {
-      throw new MalformedPinnedQueryCatalogError(
-        'aggregate query returned a record result',
-      );
-    }
+    assertAggregateResultEnvelope(result);
     return result;
   }
 
@@ -620,7 +612,43 @@ export class SemanticQueryGateway {
     ) {
       requireSemanticAggregateResult(definition, result);
     }
+    // The envelope shape the caller selected is refused HERE, inside the timed
+    // region, and not in the public method. An executor that answers with the
+    // wrong envelope kind is a refusal, and a refusal recorded as `answered`
+    // would make the outcome axis mean something other than what this packet's
+    // row claims it means.
+    if (expectedResult === 'records') {
+      assertRecordResultEnvelope(result);
+    } else {
+      assertAggregateResultEnvelope(result);
+    }
     return result;
+  }
+}
+
+/**
+ * Narrows the ingress union for the caller. The ingress already refused a
+ * mismatched envelope while the clock was still running, so this cannot fire in
+ * practice; it throws the same named refusal so that removing the timed check
+ * cannot silently widen the public return type instead of failing.
+ */
+function assertRecordResultEnvelope(
+  result: SemanticAggregateResultEnvelope | SemanticQueryResultEnvelope,
+): asserts result is SemanticQueryResultEnvelope {
+  if (result.kind !== 'semanticQueryResult') {
+    throw new MalformedPinnedQueryCatalogError(
+      'record query returned an aggregate result',
+    );
+  }
+}
+
+function assertAggregateResultEnvelope(
+  result: SemanticAggregateResultEnvelope | SemanticQueryResultEnvelope,
+): asserts result is SemanticAggregateResultEnvelope {
+  if (result.kind !== 'semanticAggregateResult') {
+    throw new MalformedPinnedQueryCatalogError(
+      'aggregate query returned a record result',
+    );
   }
 }
 

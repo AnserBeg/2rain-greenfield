@@ -319,15 +319,43 @@ test('the graded threshold and bands are the ones ADR-0032, the plan, and the gr
   }
 });
 
-test('the monotonic source never runs backward across successive reads', () => {
-  let previous = monotonicMilliseconds();
-  assert.ok(Number.isFinite(previous));
+/**
+ * The liveness control, and the reason it exists: round 1 asserted only that
+ * this source was finite and nondecreasing, which `return 0` satisfies exactly.
+ * Every other ladder gate injects its own clock, so a dead exported source
+ * would have graded twenty real database reads into `under_100ms` and turned
+ * the whole matrix green while measuring nothing.
+ */
+test('the monotonic source advances, so a dead clock cannot read as instantaneous', () => {
+  const outerBefore = process.hrtime.bigint();
+  const started = monotonicMilliseconds();
+  assert.ok(Number.isFinite(started));
+  let current = started;
+  let reads = 0;
+  // A bounded busy read, never a sleep (AGENTS.md §6). A live nanosecond source
+  // advances within a few reads; a frozen one exhausts the bound and reds.
+  while (current === started && reads < 5_000_000) {
+    current = monotonicMilliseconds();
+    reads += 1;
+  }
+  const outerAfter = process.hrtime.bigint();
+  assert.ok(
+    current > started,
+    `the monotonic source never advanced across ${String(reads)} reads`,
+  );
+
+  // The measured window sits strictly inside the hrtime window containing it,
+  // so a per-call counter incrementing faster than time cannot pass either.
+  const containingMilliseconds = Number(outerAfter - outerBefore) / 1e6;
+  assert.ok(
+    current - started <= containingMilliseconds,
+    'the source advanced further than the wall-independent window that contains it',
+  );
+
+  let previous = current;
   for (let read = 0; read < 1_000; read += 1) {
-    const current = monotonicMilliseconds();
-    assert.ok(
-      current >= previous,
-      `monotonic read ${String(read)} went backward`,
-    );
-    previous = current;
+    const next = monotonicMilliseconds();
+    assert.ok(next >= previous, `monotonic read ${String(read)} went backward`);
+    previous = next;
   }
 });

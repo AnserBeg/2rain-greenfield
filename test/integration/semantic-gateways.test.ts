@@ -44,15 +44,25 @@ import {
   MalformedPinnedQueryCatalogError,
   MalformedSemanticQueryRequestError,
   NoSuchRegisteredQueryError,
+  SEMANTIC_AGGREGATE_RESULT_VERSION,
   SEMANTIC_QUERY_REQUEST_VERSION,
   SEMANTIC_QUERY_RESULT_VERSION,
   SemanticQueryGateway,
   SemanticQueryPolicyDeniedError,
   type RegisteredQueryLatencyObservation,
+  type SemanticAggregateResultEnvelope,
   type SemanticQueryExecutor,
   type SemanticQueryRequestEnvelope,
+  type SemanticQueryResultEnvelope,
 } from '../../packages/runtime/src/semantic-query-gateway.js';
+import {
+  PARAMETERIZED_PREDICATE_LOWERING_PLAN_VERSION,
+  PREDICATE_POSITION_PROFILE_VERSION,
+  QUERY_AGGREGATE_LOWERING_PLAN_VERSION,
+  canonicalizeAndHash,
+} from '../../packages/canonical-model/src/index.js';
 import { ObservabilityMetrics } from '../../packages/observability/src/index.js';
+import { composedRegisteredQueryLatencyInstrumentation } from '../../packages/postgres-provider/src/composed-application-runtime.js';
 
 const tenantId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const environmentId = 'a1000000-0000-4000-8000-000000000001';
@@ -865,7 +875,288 @@ test('a throwing observer degrades the evidence and never the read', async () =>
   assert.equal(observations, 2, 'both paths still attempted an observation');
 });
 
+/**
+ * Round 1 recorded `answered` before the public method checked the envelope
+ * shape, so a call that threw `MalformedPinnedQueryCatalogError` was graded as
+ * a successful answer — the outcome axis meant "the ingress returned to the
+ * public method", not "the caller was answered". Both directions, because the
+ * record path was the only one round 1 exercised at all.
+ */
+test('an executor answering with the wrong envelope kind is graded refused, both directions', async () => {
+  const recordFixture = createFixture({
+    queryPayload: queryCatalogWith(answeringQueryId),
+  });
+  const recordView = await recordFixture.requestEntry.run(
+    authenticationInput,
+    (value) => Promise.resolve(value),
+  );
+  const recordMetrics = new ObservabilityMetrics();
+  const recordGateway = new SemanticQueryGateway(
+    recordFixture.policy,
+    // Lies about its envelope kind, which the executor contract cannot express.
+    {
+      execute: () =>
+        Promise.resolve(
+          aggregateEnvelope(
+            answeringQueryId,
+          ) as unknown as SemanticQueryResultEnvelope,
+        ),
+    },
+    undefined,
+    undefined,
+    ladderInstrumentation(recordMetrics, scriptedClock([0, 250]).read),
+  );
+  await assert.rejects(
+    recordGateway.invoke(recordView, ladderRequest(answeringQueryId)),
+    (error: unknown) => {
+      assert.ok(error instanceof MalformedPinnedQueryCatalogError);
+      assert.equal(error.code, 'MALFORMED_PINNED_QUERY_CATALOG');
+      // The message, not just the type: a malformed catalog raises the same
+      // error class, so type alone would let a broken fixture pass this.
+      assert.equal(error.message, 'record query returned an aggregate result');
+      return true;
+    },
+  );
+  assert.deepEqual(
+    recordMetrics.snapshot().queryLatency,
+    [['refused|100ms_400ms', 1]],
+    'a record query handed an aggregate envelope is refused, not answered',
+  );
+
+  const aggregateFixture = createFixture({
+    queryPayload: aggregateQueryCatalogWith(aggregateQueryId),
+  });
+  const aggregateView = await aggregateFixture.requestEntry.run(
+    authenticationInput,
+    (value) => Promise.resolve(value),
+  );
+  const aggregateMetrics = new ObservabilityMetrics();
+  const aggregateGateway = new SemanticQueryGateway(
+    aggregateFixture.policy,
+    {
+      execute: () => Promise.reject(new Error('record path must not be used')),
+      executeAggregate: () =>
+        Promise.resolve(
+          recordEnvelope(
+            aggregateQueryId,
+          ) as unknown as SemanticAggregateResultEnvelope,
+        ),
+    },
+    undefined,
+    undefined,
+    ladderInstrumentation(aggregateMetrics, scriptedClock([0, 1_500]).read),
+  );
+  await assert.rejects(
+    aggregateGateway.invokeAggregate(
+      aggregateView,
+      ladderRequest(aggregateQueryId),
+    ),
+    (error: unknown) => {
+      assert.ok(error instanceof MalformedPinnedQueryCatalogError);
+      assert.equal(error.message, 'aggregate query returned a record result');
+      return true;
+    },
+  );
+  assert.deepEqual(
+    aggregateMetrics.snapshot().queryLatency,
+    [['refused|1s_3s', 1]],
+    'an aggregate query handed a record envelope is refused, not answered',
+  );
+});
+
+/**
+ * Round 1 had no `invokeAggregate` witness at all — every fixture call and the
+ * composed-path control used `invoke`. This is the answered half of that hole;
+ * the refused half is above. Neither runs against a real database (see the
+ * unproven list in runtime-slos.md).
+ */
+test('an aggregate invocation is graded on the same ladder as a record read', async () => {
+  const fixture = createFixture({
+    queryPayload: aggregateQueryCatalogWith(aggregateQueryId),
+  });
+  const view = await fixture.requestEntry.run(authenticationInput, (value) =>
+    Promise.resolve(value),
+  );
+  const metrics = new ObservabilityMetrics();
+  const clock = scriptedClock([0, 42]);
+  const gateway = new SemanticQueryGateway(
+    fixture.policy,
+    {
+      execute: () => Promise.reject(new Error('record path must not be used')),
+      executeAggregate: (request) =>
+        Promise.resolve(aggregateEnvelope(request.definition.queryId)),
+    },
+    undefined,
+    undefined,
+    ladderInstrumentation(metrics, clock.read),
+  );
+
+  const result = await gateway.invokeAggregate(
+    view,
+    ladderRequest(aggregateQueryId),
+  );
+  assert.equal(result.kind, 'semanticAggregateResult');
+  assert.equal(clock.remaining(), 0);
+  assert.deepEqual(metrics.snapshot().queryLatency, [
+    ['answered|under_100ms', 1],
+  ]);
+});
+
+/**
+ * Fix 2, half one: the object the composition actually installs, driven across
+ * ADR-0032's 400 ms boundary. It proves the composed wiring carries a duration
+ * into a band rather than merely producing some band — round 1's composed
+ * control could not tell those apart. It says nothing about whether the real
+ * clock moves; that is the liveness gate in the observability suite.
+ */
+test('the composed instrumentation carries a duration across a real ladder boundary', async () => {
+  const fixture = createFixture({
+    queryPayload: queryCatalogWith(answeringQueryId),
+  });
+  const view = await fixture.requestEntry.run(authenticationInput, (value) =>
+    Promise.resolve(value),
+  );
+  const metrics = new ObservabilityMetrics();
+  // 399.5 ms then 400.5 ms: one step either side of Doherty, so a wiring that
+  // dropped the duration would put both in the same band.
+  const clock = scriptedClock([0, 399.5, 1_000, 1_400.5]);
+  const gateway = new SemanticQueryGateway(
+    fixture.policy,
+    stubQueryExecutor(),
+    undefined,
+    undefined,
+    composedRegisteredQueryLatencyInstrumentation(metrics, clock.read),
+  );
+
+  await gateway.invoke(view, ladderRequest(answeringQueryId));
+  await gateway.invoke(view, ladderRequest(answeringQueryId));
+
+  assert.equal(clock.remaining(), 0);
+  assert.deepEqual(
+    metrics.snapshot().queryLatency,
+    [
+      ['answered|100ms_400ms', 1],
+      ['answered|400ms_1s', 1],
+    ],
+    'the composed observer grades each call by its own measured duration',
+  );
+});
+
 const answeringQueryId = 'northstar.bootstrap:query.item_list';
+const aggregateQueryId = 'northstar.bootstrap:query.item_amount_sum';
+const aggregateNodeVersion = 'v4';
+const aggregateMeasureFieldType = Object.freeze({
+  kind: 'exactDecimalFieldType',
+  precision: 38,
+  representation: 'canonicalString',
+  scale: 2,
+  schemaVersion: aggregateNodeVersion,
+});
+
+function ladderInstrumentation(
+  metrics: ObservabilityMetrics,
+  clock: () => number,
+) {
+  return {
+    monotonicMilliseconds: clock,
+    observe: (observation: RegisteredQueryLatencyObservation) => {
+      metrics.recordRegisteredQueryLatency(
+        observation.outcome,
+        observation.durationMilliseconds,
+      );
+    },
+  };
+}
+
+function recordEnvelope(targetQueryId: string): SemanticQueryResultEnvelope {
+  return Object.freeze({
+    kind: 'semanticQueryResult' as const,
+    outcome: 'exact' as const,
+    queryId: targetQueryId,
+    records: Object.freeze([]),
+    schemaVersion: SEMANTIC_QUERY_RESULT_VERSION,
+    unsupportedReason: null,
+  });
+}
+
+function aggregateEnvelope(
+  targetQueryId: string,
+): SemanticAggregateResultEnvelope {
+  return Object.freeze({
+    kind: 'semanticAggregateResult' as const,
+    outcome: 'exact' as const,
+    queryId: targetQueryId,
+    schemaVersion: SEMANTIC_AGGREGATE_RESULT_VERSION,
+    value: Object.freeze({
+      kind: 'exactDecimalResult' as const,
+      precision: 38 as const,
+      scale: 2,
+      selectionId: 'northstar.bootstrap:selection.item_amount_sum',
+      value: '0',
+    }),
+  });
+}
+
+function aggregateQueryCatalogWith(
+  registeredQueryId: string,
+): ImmutableJsonValue {
+  const filter = {
+    kind: 'booleanPredicate',
+    schemaVersion: aggregateNodeVersion,
+    value: true,
+  };
+  return {
+    kind: 'queryCatalogPayload',
+    queries: [
+      {
+        aggregate: {
+          fieldId: 'northstar.bootstrap:field.item_amount',
+          measureFieldType: aggregateMeasureFieldType,
+          operator: 'sum',
+          resultType: {
+            kind: 'exactDecimalAggregateResultType',
+            precision: 38,
+            scale: 2,
+            schemaVersion: aggregateNodeVersion,
+          },
+          selectionId: 'northstar.bootstrap:selection.item_amount_sum',
+        },
+        aggregatePlan: {
+          costClass: 'tenantBoundedScan',
+          kind: 'queryAggregateLoweringPlan',
+          loweringRowId: 'northstar.query-aggregate-lowering/required-sum-v1',
+          providerProbeId: 'Q1-P3b/required-sum-tenant-bounded-scan',
+          schemaVersion: QUERY_AGGREGATE_LOWERING_PLAN_VERSION,
+          sourceFieldType: aggregateMeasureFieldType,
+        },
+        filter,
+        filterPlan: {
+          costClass: 'tenantBoundedScan',
+          kind: 'predicateLoweringPlan',
+          positionProfileVersion: PREDICATE_POSITION_PROFILE_VERSION,
+          predicateDigest: canonicalizeAndHash(filter).contentHash,
+          // A lowering node carries no schemaVersion; the plan above does.
+          root: { kind: 'booleanPredicate', value: true },
+          schemaVersion: PARAMETERIZED_PREDICATE_LOWERING_PLAN_VERSION,
+        },
+        lifecycle: 'active',
+        maximumResultCount: 1,
+        parameters: [],
+        permissionId: 'northstar.bootstrap:permission.read',
+        queryId: registeredQueryId,
+        queryType: 'aggregate',
+        resultContract: {
+          kind: 'semanticAggregateResult',
+          outcome: 'exact',
+          schemaVersion: SEMANTIC_AGGREGATE_RESULT_VERSION,
+        },
+        sourceEntityId: 'northstar.bootstrap:entity.item',
+        tier: 'q1',
+      },
+    ],
+    schemaVersion: 'northstar.query-catalog-payload/v0-provisional',
+  } as ImmutableJsonValue;
+}
 
 function ladderRequest(targetQueryId: string): SemanticQueryRequestEnvelope {
   return Object.freeze({
