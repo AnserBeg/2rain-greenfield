@@ -1053,9 +1053,10 @@ test('the composed instrumentation carries a duration across a real ladder bound
  * valid bands and no rejections, which twenty zero-duration readings satisfy
  * exactly. This observes the duration instead.
  *
- * It injects no clock, deliberately — that is the branch under test — so it
- * asserts strict positivity rather than any bound. There is no threshold to be
- * flaky about, and the interval is burned rather than slept through.
+ * It injects no clock, deliberately — that is the branch under test — so every
+ * assertion here is threshold-free: strict positivity, an empty rejection set,
+ * and one answered sample in whichever band the real clock produced. The
+ * interval is burned rather than slept through.
  */
 test('the composed factory default times a call from the live monotonic source', async () => {
   const fixture = createFixture({
@@ -1095,14 +1096,21 @@ test('the composed factory default times a call from the live monotonic source',
       observed.durationMilliseconds,
     )} ms across a busy interval`,
   );
+  const snapshot = metrics.snapshot();
   assert.deepEqual(
-    metrics.snapshot().queryLatencyRejections,
+    snapshot.queryLatencyRejections,
     [],
     'a live default source yields a usable sample, not a refused one',
   );
-  assert.deepEqual(metrics.snapshot().queryLatency, [
-    ['answered|under_100ms', 1],
-  ]);
+  // One answered sample, in whichever band the real clock produced. Naming the
+  // band would assert a bound this test has no business asserting: ADR-0032 §1
+  // makes 100-400 ms the *target* for a registered query, so a correct 120 ms
+  // observation is inside the ratified budget, and a scheduler or GC pause on a
+  // loaded host would red a correct invocation. Band boundaries are proved by
+  // the controlled-clock tests above, where they are deterministic.
+  assert.equal(snapshot.queryLatency.length, 1);
+  assert.equal(snapshot.queryLatency[0]![1], 1);
+  assert.match(snapshot.queryLatency[0]![0], /^answered\|/u);
 });
 
 const answeringQueryId = 'northstar.bootstrap:query.item_list';
