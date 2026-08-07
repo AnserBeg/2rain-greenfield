@@ -9,6 +9,7 @@ import {
   LEGACY_LANGUAGE_VERSION,
   LANGUAGE_VERSION,
   STRUCTURAL_LIMITS_V0,
+  FIELD_BEARING_SURFACE_SLOTS,
   SURFACE_SLOTS,
   canonicalLanguageProfileFor,
   languageHasLegalEntityQueryScope,
@@ -1402,6 +1403,9 @@ function validateDisclosureTiers(
           field.presence === 'required' ||
           field.businessKey === 'tenantEnvironmentCaseInsensitiveUnique',
       );
+    const fieldBearing = new Set<string>(
+      FIELD_BEARING_SURFACE_SLOTS[surface.archetype],
+    );
     for (const slot of surface.slots) {
       if (slot.disclosureTier === undefined) continue;
       // Refused before the forcing rule is consulted: an unhonourable value is
@@ -1419,7 +1423,17 @@ function validateDisclosureTiers(
         );
         continue;
       }
-      if (slot.disclosureTier === 'always' || forcing.length === 0) continue;
+      // Only a field-bearing slot can conceal a field. Deferring a breadcrumb
+      // or a command bar hides nothing the rule protects, and binding them
+      // would force `always` on every slot of any surface reaching one required
+      // field -- which is every record surface in the composed application.
+      if (
+        slot.disclosureTier === 'always' ||
+        forcing.length === 0 ||
+        !fieldBearing.has(slot.slot)
+      ) {
+        continue;
+      }
       diagnostics.push(
         diagnostic(
           'CANON_SURFACE_DISCLOSURE_TIER_FORCED_ALWAYS',
