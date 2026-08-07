@@ -6,6 +6,7 @@ export {
   compileApplication,
   expectedActiveReleaseFrom,
   reproduceHistoricalApplication,
+  selectAdoptedProfileVersion,
   type HistoricalApplicationReproductionExpectation,
 } from './compiler.js';
 export { COMPILER_DIAGNOSTIC_COPY } from './diagnostics.js';

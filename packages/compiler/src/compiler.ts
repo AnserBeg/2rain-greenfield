@@ -125,14 +125,49 @@ const supportedCompilerProfiles: readonly CompilerSemanticProfile[] =
     ),
   );
 
+/**
+ * The adoption selection rule, isolated so it can be exercised on a CONSTRUCTED
+ * readable set rather than only on today's constants.
+ *
+ * The defect this exists to catch is "take the latest readable version". That
+ * is indistinguishable from the correct rule whenever adoption happens to be
+ * the newest cut -- which is true right now on both axes -- so asserting it
+ * against live constants alone proves nothing. Given a readable set whose
+ * adopted member is NOT its last, the two rules disagree and the wrong one is
+ * observable.
+ *
+ * Fails closed: an adopted version outside the readable set is a programming
+ * error, not a silently-substituted default.
+ */
+export function selectAdoptedProfileVersion<T extends string>(
+  readable: readonly T[],
+  adopted: T,
+): T {
+  const selected = readable.find((candidate) => candidate === adopted);
+  if (selected === undefined) {
+    throw new TypeError(
+      `adopted version ${adopted} is not a member of the readable set`,
+    );
+  }
+  return selected;
+}
+
 // Keyed to the ADOPTED version, not the latest readable one. A newly cut but
 // unadopted version must not silently become every caller's default profile.
+// Both axes go through the selector above; neither inlines the rule.
 export const DEFAULT_COMPILER_PROFILE: CompilerSemanticProfile =
   supportedCompilerProfiles.find(
     (profile) =>
-      profile.languageVersion === ADOPTED_LANGUAGE_VERSION &&
+      profile.languageVersion ===
+        selectAdoptedProfileVersion(
+          SUPPORTED_LANGUAGE_VERSIONS,
+          ADOPTED_LANGUAGE_VERSION,
+        ) &&
       profile.compilerSemanticProfileVersion ===
-        ADOPTED_COMPILER_SEMANTIC_PROFILE_VERSION,
+        selectAdoptedProfileVersion(
+          SUPPORTED_COMPILER_SEMANTIC_PROFILE_VERSIONS,
+          ADOPTED_COMPILER_SEMANTIC_PROFILE_VERSION,
+        ),
   )!;
 
 export const MODULE_COMPILER_PROFILE: CompilerSemanticProfile =

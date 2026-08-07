@@ -393,18 +393,31 @@ export async function createComposedApplicationRuntime(
       );
       if (reverseAuthorization === null) {
         // ADR-0047 §6. A profile-only edge: both releases compile the SAME
-        // package revision under different compiler-semantic profiles, so
+        // package revision under DIFFERENT compiler-semantic profiles, so
         // `ensurePersistedRelease` reused one revision row and the revision
         // graph has no edge to reverse even though the release lineage does.
         // The index check above already passed, so the target IS the immediate
         // predecessor -- borrowing that code here would misname the cause and
         // send an operator hunting the wrong fault (ADR-0046).
+        //
+        // BOTH facts are observed, because shared revision alone does not
+        // establish the profile as the difference. Compilation identity also
+        // folds in the expected active release, the dependency closure and the
+        // limits, so a same-revision SAME-profile successor is constructible;
+        // it has no revision-parent edge either, and naming it a profile-only
+        // edge would be the same misnaming in a new place.
+        const activeProfileVersion =
+          source.compiled.bundle.releaseManifest.compilerSemanticProfileVersion;
+        const targetProfileVersion =
+          target.compiled.bundle.releaseManifest.compilerSemanticProfileVersion;
         if (
-          targetIdentity.revisionId === lineage[activeLineageIndex]!.revisionId
+          targetIdentity.revisionId ===
+            lineage[activeLineageIndex]!.revisionId &&
+          targetProfileVersion !== activeProfileVersion
         ) {
           refuseReverseTransition(
             'ROLLBACK_ACROSS_PROFILE_ONLY_EDGE',
-            'rollback target is the immediate predecessor but shares its package revision: the two releases compile the same source under different compiler-semantic profiles, so the release lineage advances across this edge while the revision lineage does not, and there is no reverse revision edge to authorize',
+            `rollback target is the immediate predecessor and shares its package revision, but was compiled under a different compiler-semantic profile (${targetProfileVersion} to ${activeProfileVersion}): the release lineage advances across this edge while the revision lineage does not, so there is no reverse revision edge to authorize`,
           );
         }
         refuseReverseTransition(

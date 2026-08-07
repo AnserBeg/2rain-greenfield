@@ -1,8 +1,15 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 
-import { parseNormalizedApplicationPackageJson } from '../../packages/canonical-model/src/index.js';
+import {
+  ADOPTED_LANGUAGE_VERSION,
+  SUPPORTED_LANGUAGE_VERSIONS,
+  parseNormalizedApplicationPackageJson,
+} from '../../packages/canonical-model/src/index.js';
 import {
   ADOPTED_COMPILER_SEMANTIC_PROFILE_VERSION,
   COMPILER_SEMANTIC_PROFILE_V1_VERSION,
@@ -11,11 +18,20 @@ import {
   DEFAULT_COMPILER_PROFILE,
   MODULE_COMPILER_PROFILE,
   SUPPORTED_COMPILER_SEMANTIC_PROFILE_VERSIONS,
+  compileApplication,
+  expectedActiveReleaseFrom,
   reproduceHistoricalApplication,
+  selectAdoptedProfileVersion,
   type CompilerSemanticProfileVersion,
 } from '../../packages/compiler/src/index.js';
 
-import { compilerInput, fixtureBytes, mustCompile } from './helpers.js';
+import {
+  authoredFixture,
+  compilerInput,
+  fixtureBytes,
+  mustCompile,
+  normalizedBytes,
+} from './helpers.js';
 
 const LINEAGE_PATH = 'apps/web/release/app.compiled.json';
 
@@ -40,6 +56,12 @@ test('cutting compiler-semantic profile v1 leaves v0 output byte-identical', () 
   // and passed while the default profile pointed at the unadopted version.
   // A control that derives the profile from the artifact cannot see the
   // defect it exists to catch, so this half must not go through a compile.
+  //
+  // On its own this assertion is DEGENERATE today: adopted and latest-readable
+  // are both v1, so a "take the last readable member" implementation satisfies
+  // it. The rule is therefore proven separately on a constructed readable set
+  // in the selector test below, and production is proven to route through that
+  // same selector rather than an inlined copy.
   assert.equal(
     DEFAULT_COMPILER_PROFILE.compilerSemanticProfileVersion,
     ADOPTED_COMPILER_SEMANTIC_PROFILE_VERSION,
@@ -71,6 +93,51 @@ test('cutting compiler-semantic profile v1 leaves v0 output byte-identical', () 
       `${name} v0 release root moved when v1 was cut`,
     );
   }
+});
+
+// HALF ONE of the adoption rule: the selector is exercised on a CONSTRUCTED
+// readable set whose adopted member is not its last, so "take the latest
+// readable version" -- the defect -- produces a recorded red. Against today's
+// live constants the two rules agree, which is exactly why this cannot be
+// proven from the constants alone.
+test('the adoption selector takes the adopted version, not the latest readable', () => {
+  const readable = ['v0', 'v1'] as const;
+
+  assert.equal(selectAdoptedProfileVersion(readable, 'v0'), 'v0');
+  assert.notEqual(selectAdoptedProfileVersion(readable, 'v0'), readable.at(-1));
+  assert.equal(selectAdoptedProfileVersion(readable, 'v1'), 'v1');
+
+  // The same shape as the live axes: three readable, adoption lagging by one.
+  const threeReadable = ['v0', 'v1', 'v2'] as const;
+  assert.equal(selectAdoptedProfileVersion(threeReadable, 'v1'), 'v1');
+
+  // Fails closed rather than substituting a default.
+  assert.throws(
+    () => selectAdoptedProfileVersion(readable, 'v2' as 'v0' | 'v1'),
+    /not a member of the readable set/u,
+  );
+});
+
+// HALF TWO: production routes through that selector rather than an inlined
+// copy. Structural by nature -- while adoption and latest-readable coincide no
+// runtime observation can separate them -- so this asserts the selector,
+// applied to the real inputs, yields exactly what production selected. It
+// arms fully the moment either axis cuts without adopting.
+test('the default profile is the selector applied to the live axes', () => {
+  assert.equal(
+    DEFAULT_COMPILER_PROFILE.compilerSemanticProfileVersion,
+    selectAdoptedProfileVersion(
+      SUPPORTED_COMPILER_SEMANTIC_PROFILE_VERSIONS,
+      ADOPTED_COMPILER_SEMANTIC_PROFILE_VERSION,
+    ),
+  );
+  assert.equal(
+    DEFAULT_COMPILER_PROFILE.languageVersion,
+    selectAdoptedProfileVersion(
+      SUPPORTED_LANGUAGE_VERSIONS,
+      ADOPTED_LANGUAGE_VERSION,
+    ),
+  );
 });
 
 // ADR-0047 §1: the profile is hashed whole into
@@ -179,12 +246,229 @@ test('historical reproduction reads the profile from the entry, not the constant
   );
 });
 
+// ADR-0043 keeps experimental lineage truncation available while the output
+// protocol is v0-experimental, and ADR-0047 deliberately leaves it there. The
+// truncation path re-compiles stored bytes and exact-compares against their
+// recorded serialization, so it must use each entry's OWN recorded profile.
+// `check:app-release` cannot catch a regression here: that command runs the
+// ordinary verification path, never the flag.
+//
+// Built as a constructed lineage rather than the checked-in one because the
+// real v0 history survives only under historical leniency, so truncation
+// legitimately refuses it with "no valid application prefix to retain" -- a
+// different outcome that would hide this defect.
+test('--truncate-invalid-lineage retains a v0 prefix while the adopted profile is v1', () => {
+  assert.notEqual(
+    ADOPTED_COMPILER_SEMANTIC_PROFILE_VERSION,
+    COMPILER_SEMANTIC_PROFILE_VERSION,
+    'this control is only meaningful while adoption has moved off v0',
+  );
+
+  const workspace = mkdtempSync(join(tmpdir(), 'northstar-truncate-'));
+  try {
+    const authoredPath = join(workspace, 'app.authored.json');
+    const compiledPath = join(workspace, 'app.compiled.json');
+    const fixture = buildV0LineageWithInvalidSuffix(authoredPath, compiledPath);
+
+    const run = spawnSync(
+      process.execPath,
+      [
+        '--import',
+        'tsx',
+        'apps/web/scripts/compile-app-release.ts',
+        '--truncate-invalid-lineage',
+      ],
+      {
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          NORTH_STAR_APP_AUTHORED_PATH: authoredPath,
+          NORTH_STAR_APP_COMPILED_PATH: compiledPath,
+        },
+      },
+    );
+
+    assert.equal(
+      run.status,
+      0,
+      `truncation failed: ${run.stderr || run.stdout}`,
+    );
+    assert.match(
+      run.stdout,
+      /TRUNCATED_INVALID_LINEAGE kept=1 dropped=1 firstInvalid=1/u,
+    );
+
+    const rewritten = JSON.parse(readFileSync(compiledPath, 'utf8')) as {
+      applications: RecordedRelease[];
+      bootstrap: RecordedRelease;
+    };
+    // Two entries, and the distinction between them is the whole point: the
+    // invalid suffix is dropped, the valid v0 prefix is RETAINED byte-for-byte
+    // under the profile it was recorded with, and the ordinary flow then mints
+    // a fresh head at today's adopted profile. Truncation repairs the tail; it
+    // never re-adopts or rewrites what it keeps.
+    assert.equal(rewritten.applications.length, 2);
+    assert.equal(rewritten.applications[0]!.releaseRoot, fixture.validRoot);
+    assert.equal(
+      rewritten.applications[0]!.attestation.compilerSemanticProfileVersion,
+      COMPILER_SEMANTIC_PROFILE_VERSION,
+    );
+    assert.equal(
+      rewritten.applications[1]!.attestation.compilerSemanticProfileVersion,
+      ADOPTED_COMPILER_SEMANTIC_PROFILE_VERSION,
+    );
+    assert.notEqual(
+      rewritten.applications[1]!.releaseRoot,
+      fixture.validRoot,
+      'the re-minted head must be a new release, not the retained entry',
+    );
+    // The bootstrap is reproduced, never re-minted.
+    assert.equal(rewritten.bootstrap.releaseRoot, fixture.bootstrapRoot);
+    assert.equal(
+      rewritten.bootstrap.attestation.compilerSemanticProfileVersion,
+      COMPILER_SEMANTIC_PROFILE_VERSION,
+    );
+  } finally {
+    rmSync(workspace, { force: true, recursive: true });
+  }
+});
+
 function compileAt(fixture: string, version: CompilerSemanticProfileVersion) {
   const base = compilerInput(fixtureBytes(fixture));
   return mustCompile({
     ...base,
     profile: { ...base.profile, compilerSemanticProfileVersion: version },
   });
+}
+
+/**
+ * A lineage whose bootstrap and first application are valid and recorded at
+ * compiler-semantic v0, followed by an entry that does not compile under
+ * current conformance. Mirrors the shape `compile-app-release.ts` writes; the
+ * serialized-release expression is copied verbatim from that script because
+ * truncation exact-compares against it, key order included.
+ */
+function buildV0LineageWithInvalidSuffix(
+  authoredPath: string,
+  compiledPath: string,
+): { readonly bootstrapRoot: string; readonly validRoot: string } {
+  const authored = authoredFixture('vertical-v1');
+  const bootstrapBytes = normalizedBytes(emptyApplicationDefinition(authored));
+  const applicationBytes = normalizedBytes(authored);
+
+  const bootstrap = compileFixtureAtV0(bootstrapBytes, null);
+  const application = compileFixtureAtV0(
+    applicationBytes,
+    expectedActiveReleaseFrom(bootstrap),
+  );
+
+  // Normalizes cleanly but fails current conformance, which is precisely the
+  // "invalid suffix" truncation exists to drop.
+  const invalidBytes = fixtureBytes('partial-lowering');
+
+  writeFileSync(authoredPath, JSON.stringify(authored));
+  writeFileSync(
+    compiledPath,
+    JSON.stringify({
+      applications: [
+        serializeRelease(applicationBytes, application),
+        {
+          attestation: {
+            compilerSemanticProfileVersion: COMPILER_SEMANTIC_PROFILE_VERSION,
+          },
+          normalizedDefinitionBytesBase64:
+            Buffer.from(invalidBytes).toString('base64'),
+          outputProtocolVersion: 'northstar.compiler-output/v0-experimental',
+          releaseRoot: '0'.repeat(64),
+        },
+      ],
+      bootstrap: serializeRelease(bootstrapBytes, bootstrap),
+      schemaVersion: 'northstar.web:compiled-application-release/v2',
+    }),
+  );
+  return {
+    bootstrapRoot: bootstrap.releaseRoot,
+    validRoot: application.releaseRoot,
+  };
+}
+
+function compileFixtureAtV0(
+  normalizedDefinitionBytes: Uint8Array,
+  expectedActiveRelease: Parameters<
+    typeof compileApplication
+  >[0]['expectedActiveRelease'],
+) {
+  const normalizedDefinition = parseNormalizedApplicationPackageJson(
+    normalizedDefinitionBytes,
+  );
+  const result = compileApplication({
+    dependencies: [],
+    expectedActiveRelease,
+    kind: 'compilerInput',
+    limits: { ...DEFAULT_COMPILER_LIMITS },
+    normalizedDefinitionBytes,
+    profile: {
+      ...MODULE_COMPILER_PROFILE,
+      compilerSemanticProfileVersion: COMPILER_SEMANTIC_PROFILE_VERSION,
+      languageVersion: normalizedDefinition.languageVersion,
+      normalizationProfileVersion:
+        normalizedDefinition.normalizationProfileVersion,
+    },
+  });
+  if (result.status !== 'compiled') {
+    throw new Error(JSON.stringify(result.diagnostics));
+  }
+  return result;
+}
+
+function serializeRelease(
+  normalizedDefinitionBytes: Uint8Array,
+  compiled: ReturnType<typeof compileFixtureAtV0>,
+) {
+  return {
+    attestation: compiled.attestation,
+    artifacts: compiled.bundle.artifacts.map((artifact) => ({
+      ...artifact,
+      canonicalBytesBase64: Buffer.from(artifact.canonicalBytes).toString(
+        'base64',
+      ),
+      canonicalBytes: undefined,
+    })),
+    nodeContracts: compiled.bundle.nodeContracts,
+    normalizedDefinitionBytesBase64: Buffer.from(
+      normalizedDefinitionBytes,
+    ).toString('base64'),
+    outputProtocolVersion: compiled.bundle.outputProtocolVersion,
+    releaseManifest: compiled.bundle.releaseManifest,
+    releaseManifestBytesBase64: Buffer.from(
+      compiled.bundle.releaseManifestBytes,
+    ).toString('base64'),
+    releaseRoot: compiled.releaseRoot,
+    stagedArtifactHashes: compiled.stagedArtifacts.map(
+      (artifact) => artifact.contentHash,
+    ),
+  };
+}
+
+function emptyApplicationDefinition(
+  source: Record<string, unknown>,
+): Record<string, unknown> {
+  const definition = structuredClone(source);
+  for (const family of [
+    'assertions',
+    'entities',
+    'fields',
+    'operations',
+    'permissions',
+    'queries',
+    'relations',
+    'stateMachines',
+    'storageMappings',
+    'surfaces',
+  ]) {
+    definition[family] = [];
+  }
+  return definition;
 }
 
 interface RecordedRelease {

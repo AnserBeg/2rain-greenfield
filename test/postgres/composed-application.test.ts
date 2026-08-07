@@ -252,10 +252,96 @@ test('fresh-tenant install refuses a failing intermediate transition', async () 
   );
 });
 
-// Harness limit, not a product budget. Each fresh tenant applies all five
-// immutable application transitions but verifies only the serving release,
-// recording every non-serving release explicitly. The unchanged 256 MiB
-// harness moved from >300s/capacity exhaustion to 54.6s and a 50.30 MiB peak.
+// ADR-0047 §6, the direction the revision check alone cannot establish. Shared
+// revision proves the two releases compile the same SOURCE; it does not prove
+// the profile is what differs. Compilation identity also folds in the expected
+// active release, the dependency closure and the limits, so a same-revision
+// SAME-profile successor exists -- it has no revision-parent edge either, so
+// authorization returns null down the identical path. Naming that a
+// profile-only edge would be the same misnaming §6 exists to forbid.
+//
+// Deliberately its own lifecycle rather than another tenant on the test above,
+// whose 300s bound is already 1.42x consumed.
+test(
+  'a same-profile successor over one revision is not named a profile-only edge',
+  { timeout: 300_000 },
+  async () => {
+    await withEphemeralPostgres(
+      'proj-disc-same-profile-edge',
+      async ({ connection }) => {
+        const lineage = appendSameProfileSuccessor(
+          JSON.parse(await readFile(compiledArtifactPath, 'utf8')) as unknown,
+        );
+        const parsed = parseCompiledApplication(lineage);
+        const head = parsed.application;
+        const target = parsed.applications.at(-2)!;
+
+        // The construction is the control: assert it really is same-source,
+        // same-profile, distinct-root before drawing any conclusion from it.
+        assert.ok(
+          equalNormalizedDefinition(
+            head.normalizedDefinitionBytes,
+            target.normalizedDefinitionBytes,
+          ),
+        );
+        assert.equal(
+          head.compiled.bundle.releaseManifest.compilerSemanticProfileVersion,
+          target.compiled.bundle.releaseManifest.compilerSemanticProfileVersion,
+        );
+        assert.notEqual(head.compiled.releaseRoot, target.compiled.releaseRoot);
+
+        const databaseUrl = connectionUrl(connection);
+        const slug = 'same-profile-edge-tenant';
+        const serving = await createRuntime(lineage, databaseUrl, slug);
+        assert.equal(serving.releaseRoot, head.compiled.releaseRoot);
+        await serving.close();
+
+        await assert.rejects(
+          createRuntime(lineage, databaseUrl, slug, {
+            kind: 'rollback',
+            targetReleaseRoot: target.compiled.releaseRoot,
+          }),
+          (error: unknown) => {
+            assert.ok(error instanceof ReleaseReverseTransitionRefusal);
+            assert.notEqual(
+              error.code,
+              'ROLLBACK_ACROSS_PROFILE_ONLY_EDGE',
+              'the profiles are equal, so this edge is not profile-only',
+            );
+            assert.equal(
+              error.code,
+              'ROLLBACK_TARGET_NOT_IMMEDIATE_PREDECESSOR',
+            );
+            return true;
+          },
+        );
+      },
+    );
+  },
+);
+
+// Harness limit, not a product budget. Each fresh tenant applies every
+// immutable application transition in the recorded lineage but verifies only
+// the serving release, recording each non-serving release explicitly. The
+// unchanged 256 MiB harness moved from >300s/capacity exhaustion to 54.6s and
+// a 50.30 MiB peak when that lineage held five application entries.
+//
+// Both figures are now stale and the timeout is the reason to say so. The
+// lineage holds EIGHT application entries, and this test drives three tenants:
+// two for the gateway-persistence subject, plus `-source-edge`, which activates
+// a truncated lineage so ADR-0047 §6's source-changing direction has a real
+// edge to cross.
+//
+// Measured against the 300s bound: 210.9s inside the full matrix at a8c9d07
+// (1.42x margin) and 117.6s standalone on a quiet machine (2.55x). Both are
+// recorded deliberately -- this workload is load-dependent, and quoting one
+// number without its conditions is how the 54.6s figure above went stale. The
+// matrix figure governs, because the matrix is where it has to pass.
+//
+// If this ever reds on timing, the fix is to split the `-source-edge` tenant
+// into its own test with its own lifecycle. It is NOT to raise the bound:
+// that widens what starvation is permitted to look like, which is the standing
+// prohibition this repository already carries.
 test(
   'composed product activates through the kernel and persists tenant-scoped gateway data',
   { timeout: 300_000 },
@@ -4013,6 +4099,31 @@ async function compileCandidateEnvelope(
   } finally {
     await rm(directory, { force: true, recursive: true });
   }
+}
+
+/**
+ * A successor compiled from the head's OWN normalized bytes at the head's own
+ * profile. Same source, so `ensurePersistedRelease` reuses one revision; same
+ * profile, so the edge is not a profile-only edge. The roots still differ
+ * because compilation identity folds in the expected active release.
+ */
+function appendSameProfileSuccessor(compiledApplication: unknown): unknown {
+  const previous = parseCompiledApplication(compiledApplication);
+  const headBytes = previous.application.normalizedDefinitionBytes;
+  const successor = compileSuccessor(previous.application.compiled, headBytes);
+  return {
+    applications: [
+      ...previous.applications.map((release) =>
+        serializedRelease(release.normalizedDefinitionBytes, release.compiled),
+      ),
+      serializedRelease(headBytes, successor),
+    ],
+    bootstrap: serializedRelease(
+      previous.bootstrap.normalizedDefinitionBytes,
+      previous.bootstrap.compiled,
+    ),
+    schemaVersion: 'northstar.web:compiled-application-release/v2',
+  };
 }
 
 function compileMismatchedEnvelope(

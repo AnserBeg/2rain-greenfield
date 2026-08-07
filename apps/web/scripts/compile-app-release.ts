@@ -118,7 +118,19 @@ function longestValidExperimentalLineagePrefix(
     assertExperimentalRelease(value, `applications[${String(index)}]`),
   );
 
-  const bootstrap = mustCompile(bootstrapBytes, null);
+  // Truncation re-compiles STORED bytes and exact-compares each result against
+  // its recorded serialization, so every candidate entry must be compiled under
+  // the profile it was recorded with (ADR-0047 §5). Inheriting today's adopted
+  // profile fails the bootstrap outright once adoption has moved, which would
+  // remove the ADR-0043 recovery mechanism this command exists to provide.
+  // Current conformance validation still applies: this is compileApplication,
+  // NOT the historical-leniency entry point. Truncation decides what a lineage
+  // may still mint; it must not admit what today's rules reject.
+  const bootstrap = mustCompile(
+    bootstrapBytes,
+    null,
+    recordedCompilerSemanticProfileVersion(input.bootstrap, 'bootstrap'),
+  );
   assertSerializedRelease(
     input.bootstrap,
     bootstrapBytes,
@@ -129,24 +141,18 @@ function longestValidExperimentalLineagePrefix(
   let previous = bootstrap;
   let firstInvalidIndex: number | null = null;
   for (const [index, value] of applicationValues.entries()) {
-    const normalizedDefinitionBytes = releaseBytes(
-      value,
-      `applications[${String(index)}]`,
-    );
+    const path = `applications[${String(index)}]`;
+    const normalizedDefinitionBytes = releaseBytes(value, path);
     const result = compileNormalizedDefinition(
       normalizedDefinitionBytes,
       expectedActiveReleaseFrom(previous),
+      recordedCompilerSemanticProfileVersion(value, path),
     );
     if (result.status !== 'compiled') {
       firstInvalidIndex = index;
       break;
     }
-    assertSerializedRelease(
-      value,
-      normalizedDefinitionBytes,
-      result,
-      `applications[${String(index)}]`,
-    );
+    assertSerializedRelease(value, normalizedDefinitionBytes, result, path);
     applications.push({ compiled: result, normalizedDefinitionBytes });
     previous = result;
   }
@@ -413,10 +419,12 @@ function mustCompile(
   expectedActiveRelease: Parameters<
     typeof compileApplication
   >[0]['expectedActiveRelease'],
+  compilerSemanticProfileVersion?: CompilerSemanticProfileVersion,
 ): CompileSuccess {
   const result = compileNormalizedDefinition(
     normalizedDefinitionBytes,
     expectedActiveRelease,
+    compilerSemanticProfileVersion,
   );
   if (result.status !== 'compiled') {
     throw new Error(
@@ -467,6 +475,10 @@ function compileNormalizedDefinition(
   expectedActiveRelease: Parameters<
     typeof compileApplication
   >[0]['expectedActiveRelease'],
+  // Defaults to today's adopted profile, which is correct for a freshly minted
+  // head. A RECORDED entry must pass its own, or its output is compared against
+  // a serialization it was never compiled to produce.
+  compilerSemanticProfileVersion: CompilerSemanticProfileVersion = MODULE_COMPILER_PROFILE.compilerSemanticProfileVersion,
 ): CompileResult {
   const normalizedDefinition = parseNormalizedApplicationPackageJson(
     normalizedDefinitionBytes,
@@ -479,6 +491,7 @@ function compileNormalizedDefinition(
     normalizedDefinitionBytes,
     profile: {
       ...MODULE_COMPILER_PROFILE,
+      compilerSemanticProfileVersion,
       languageVersion: normalizedDefinition.languageVersion,
       normalizationProfileVersion:
         normalizedDefinition.normalizationProfileVersion,
