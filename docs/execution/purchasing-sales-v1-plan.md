@@ -254,7 +254,35 @@ must enter the same top-level transaction that takes stock locks after `BEGIN`.
 **This is the central viability issue, and it is an extension of the transaction
 coordinator rather than a replacement of the ledger.**
 
-<<<<<<< HEAD
+### 7.7 Three corrections from `PUR-1`'s stopped lane — 2026-08-08
+
+**There is no migration, and none should be written.** Module tables are created by
+`module-storage-materializer.ts:1347` (`CREATE TABLE IF NOT EXISTS
+north_star_module.<physicalTableName>`) from the compiled storage-transition
+projection at release activation. `db/migrations/*.sql` is platform and kernel
+only. **§4's "accept a migration" bridge was wrong**; an empty migration would be a
+second authority for physical shape, which is the hazard §4's mount ruling names.
+
+**Family classification is a two-place edit.** `contracts.ts`'s
+`LEGAL_ENTITY_FAMILY_MAP_V1` is not the enforcement point —
+`packages/compiler/src/conformance.ts:35` holds `LEGAL_ENTITY_FAMILY_RULES`, and
+with only the domain rows the new entities compiled `legalEntity = undefined`
+(tenant-shared, no `legal_entity_id`) and `compileInventoryContract` raised three
+`INVENTORY_CONTRACT_INVALID` diagnostics. **It fails loudly**, because
+`inventory-contract.cases.ts:920` deep-equals the compiled contract against the
+domain map — materially better than `INVENTORY_POSTING_ROLES`, whose
+contract-to-provider gap has no gate at all. Edit both, and expect the compile
+failure if you forget.
+
+**`PS-0`'s ruling 1 is now constrained from two directions, not one.** Beyond the
+writability argument (`projections.ts:899`), `prepareMutation` evaluates an
+update's precondition against the **projected** image, so a `not(released)`
+predicate refuses the very update that performs the release. And
+`RegisteredCapabilityOperationDefinition` binds `kind: 'registeredCapabilityEffect'`
+to `tier: 'o1'` structurally, with the parser refusing a capability effect at any
+other tier. **`PS-0` must pin the exact tier rules for record effects before
+designing the transition carrier** — that is its first act, and it is cheap.
+
 ### 7.8 `PS-0` ruled the seam, and corrected §7 in three places — 2026-08-08
 
 **Superseded by [ADR-0049](../decisions/ADR-0049-document-transition-and-inventory-effect-seam.md).**
@@ -380,37 +408,6 @@ capability executor for release would have retired `transitionStateEffect` by
 accident. **`PUR-1` starts after that decision. `PUR-2` stays blocked** until the
 companion-creation protocol and the invocation-capability-versus-kernel-contract
 distinction are in ADR-0049.
-=======
-### 7.7 Three corrections from `PUR-1`'s stopped lane — 2026-08-08
-
-**There is no migration, and none should be written.** Module tables are created by
-`module-storage-materializer.ts:1347` (`CREATE TABLE IF NOT EXISTS
-north_star_module.<physicalTableName>`) from the compiled storage-transition
-projection at release activation. `db/migrations/*.sql` is platform and kernel
-only. **§4's "accept a migration" bridge was wrong**; an empty migration would be a
-second authority for physical shape, which is the hazard §4's mount ruling names.
-
-**Family classification is a two-place edit.** `contracts.ts`'s
-`LEGAL_ENTITY_FAMILY_MAP_V1` is not the enforcement point —
-`packages/compiler/src/conformance.ts:35` holds `LEGAL_ENTITY_FAMILY_RULES`, and
-with only the domain rows the new entities compiled `legalEntity = undefined`
-(tenant-shared, no `legal_entity_id`) and `compileInventoryContract` raised three
-`INVENTORY_CONTRACT_INVALID` diagnostics. **It fails loudly**, because
-`inventory-contract.cases.ts:920` deep-equals the compiled contract against the
-domain map — materially better than `INVENTORY_POSTING_ROLES`, whose
-contract-to-provider gap has no gate at all. Edit both, and expect the compile
-failure if you forget.
-
-**`PS-0`'s ruling 1 is now constrained from two directions, not one.** Beyond the
-writability argument (`projections.ts:899`), `prepareMutation` evaluates an
-update's precondition against the **projected** image, so a `not(released)`
-predicate refuses the very update that performs the release. And
-`RegisteredCapabilityOperationDefinition` binds `kind: 'registeredCapabilityEffect'`
-to `tier: 'o1'` structurally, with the parser refusing a capability effect at any
-other tier. **`PS-0` must pin the exact tier rules for record effects before
-designing the transition carrier** — that is its first act, and it is cheap.
->>>>>>> b32d3d7 (docs: record PUR-1's three charter corrections and the duplication pattern)
-
 ### 7.11 ADR-0050 ratified — `transitionStateEffect` is honoured, 2026-08-08
 
 **`5g3-sm` is settled and `PUR-1` is unblocked by it.** Two facts were verified
