@@ -190,6 +190,47 @@ The named refusal is a declared limit in the [ADR-0044](ADR-0044-search-capabili
 sense: structural absence, declared and observable. Silent inability is what that
 ADR forbids, and an accurate name is what converts one into the other.
 
+### 7. An optional authored key rides the adopted language version — ruled 2026-08-07 on `U5b`'s review
+
+`U5b`'s review arm found that `disclosureTier` is refused only inside the
+`LEGACY_LANGUAGE_VERSION` block of `normalize.ts`, so `v1`, `v2`, `v3` and the
+adopted `v4` all now admit an authored key every one of them previously rejected,
+and read that as retroactive widening of an adopted language.
+
+**The observation is correct as stated, and two further facts bound it.**
+`renderer` and `surfaceRole` sit in that same `v0`-only list one line above, so
+this is the standing pattern rather than a `U5b` regression. The opposite pattern
+also exists: `resolveMatchKeys` refuses *"prior language versions"* for a key
+introduced at language `v2`. The repository has been running both without a rule.
+
+**The rule: an OPTIONAL authored key, additive and never materialized by
+normalization, rides the adopted language version in place.** Reproduction
+recompiles a recorded entry's **stored normalized bytes**, and no recorded
+definition carries the key, so no release root moves. Nor is the change silent —
+the language conformance ledger derives its obligations from
+`VersionedAuthoredApplicationPackage` and minted four for `disclosureTier`, which
+is this repository's own authority for an authored-surface change. A key that
+arrives, is counted, and is exempted on a recorded rationale is versioned by the
+ledger even when it is not versioned by an identifier.
+
+A `v5` cut is refused on the cost this ADR already prices below: an
+application-wide adoption event plus conformance obligations, spent on one
+optional key, and it does not generalise to the next one.
+
+**The asymmetry with §1 is real, and it is bounded rather than dismissed.** The
+profile axis is versioned per change because a compiled byte reaches a recorded
+root. The authored axis is not, because an unused optional key reaches nothing.
+That reasoning fails the moment an authored key becomes **required**, or is
+**materialized** into normalized output — either one changes stored bytes, and
+either one owes a language cut. Both are the conditions `DEFAULT_DISCLOSURE_TIER`
+already documents as measured (`COMPILER_INPUT_NOT_CANONICAL` at
+`decodeSchemaCheck`), so the boundary is observed, not asserted.
+
+**What the finding got right and this ruling does not excuse:** `U5b`'s positive
+fixture is authored at `v3`. A test that proves the rule must be authored at the
+adopted version — a `v3` fixture proves the widening instead of the behaviour, and
+is the only evidence in the packet that anyone widened anything.
+
 ## Why not a `v5` language adoption
 
 `v4` already carries the declared field types. A `v5` cut would mint a language
