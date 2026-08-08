@@ -166,14 +166,162 @@ export function dependencyExtensionRootFor(
     .digest('hex');
 }
 
+/**
+ * PS-2 PROBE ONLY. The provider's copy of the posting-family catalog.
+ *
+ * The values are authored in `@north-star/domain`
+ * (`inventory/posting-families.ts`). They belong in a compiled projection, read
+ * through `context.projection(...)` exactly as `storageTarget` is — and `PUR-2`
+ * owes that projection, which is a compiler event under ADR-0047 rather than
+ * something a probe may invent.
+ *
+ * Until then the values exist in two places, which is the drift class this
+ * repository has already recorded twice (the authority literal at
+ * `contracts.ts:200-207` duplicated at `conformance.ts:3215-3222`, and
+ * `reBaseline` present in `INVENTORY_POSTING_ROLES` and absent from
+ * `InventoryPostingRoleV1` with nothing failing). **So it is not left to hold:**
+ * `test/unit/posting-family-catalog-parity.test.ts` asserts this constant and
+ * the domain declaration are identical and hash equal. A duplicate behind a
+ * gate is debt; a duplicate behind an assurance is the defect.
+ */
+export const INVENTORY_POSTING_FAMILY_CATALOG_V1: InventoryPostingFamilyCatalogPayloadV1 =
+  Object.freeze({
+    profiles: Object.freeze([
+      Object.freeze({
+        capabilityId: INVENTORY_POSTING_CAPABILITY_ID,
+        commandSchema: 'northstar.inventory-adjustment-posting-command/v1',
+        companion: Object.freeze({
+          createdByKernel: false,
+          identity: Object.freeze({
+            companionHeader: 'derivedFromSourceDocument',
+            companionLine: 'derivedFromSourceLine',
+            sourceLine: 'notApplicable',
+          }),
+          origin: 'authored',
+          sourceTypeLiteral: 'adjustment',
+          transactionTypeLocalId: 'inventory_transaction_type_adjustment',
+        }),
+        dependencyExtension: Object.freeze([]),
+        familyId: 'adjustment',
+        postingRole: 'adjustment',
+        reachability: Object.freeze({
+          genericAuthoring: 'admitted',
+          genericRead: 'admitted',
+        }),
+        revisions: Object.freeze({
+          companionRevisionAuthority: 'callerSupplied',
+          foreignSourceExpectedRevision: 'absent',
+        }),
+        sourceStep: 'inventoryInternal',
+      }),
+      Object.freeze({
+        capabilityId: PURCHASING_RECEIPT_POSTING_CAPABILITY_ID,
+        commandSchema: 'northstar.inventory-goods-receipt-posting-command/v1',
+        companion: Object.freeze({
+          createdByKernel: true,
+          identity: Object.freeze({
+            companionHeader: 'derivedFromSourceDocument',
+            companionLine: 'derivedFromSourceLine',
+            sourceLine: 'derivedFromSourceDocument',
+          }),
+          origin: 'companion',
+          sourceTypeLiteral: 'goodsReceipt',
+          transactionTypeLocalId: 'inventory_transaction_type_goods_receipt',
+        }),
+        dependencyExtension: Object.freeze([
+          { access: 'read', authority: 'inventory', dependencyId: 'northstar.purchasing:goods_receipt' },
+          { access: 'read', authority: 'inventory', dependencyId: 'northstar.purchasing:goods_receipt_line' },
+          { access: 'read', authority: 'inventory', dependencyId: 'northstar.purchasing:purchase_order' },
+          { access: 'read', authority: 'inventory', dependencyId: 'northstar.purchasing:purchase_order_line' },
+          { access: 'transition', authority: 'inventory', dependencyId: 'northstar.purchasing:goods_receipt.state' },
+          { access: 'append', authority: 'inventory', dependencyId: 'northstar.inventory:transaction' },
+          { access: 'append', authority: 'inventory', dependencyId: 'northstar.inventory:transaction_line' },
+        ]),
+        familyId: 'goodsReceipt',
+        postingRole: 'receipt',
+        reachability: Object.freeze({
+          genericAuthoring: 'closed',
+          genericRead: 'closed',
+        }),
+        revisions: Object.freeze({
+          companionRevisionAuthority: 'kernelMinted',
+          foreignSourceExpectedRevision: 'required',
+        }),
+        sourceStep: 'foreignPort',
+      }),
+      Object.freeze({
+        capabilityId: INVENTORY_POSTING_CAPABILITY_ID,
+        commandSchema: 'northstar.inventory-stock-count-posting-command/v1',
+        companion: Object.freeze({
+          createdByKernel: true,
+          identity: Object.freeze({
+            companionHeader: 'derivedFromSourceDocument',
+            companionLine: 'derivedFromSourceLine',
+            sourceLine: 'derivedFromSourceDocument',
+          }),
+          origin: 'companion',
+          sourceTypeLiteral: 'stockCount',
+          transactionTypeLocalId:
+            'inventory_transaction_type_count_correction',
+        }),
+        dependencyExtension: Object.freeze([
+          { access: 'append', authority: 'inventory', dependencyId: 'northstar.inventory:transaction' },
+          { access: 'append', authority: 'inventory', dependencyId: 'northstar.inventory:transaction_line' },
+        ]),
+        familyId: 'stockCount',
+        postingRole: 'count',
+        reachability: Object.freeze({
+          genericAuthoring: 'closed',
+          genericRead: 'closed',
+        }),
+        revisions: Object.freeze({
+          companionRevisionAuthority: 'kernelMinted',
+          foreignSourceExpectedRevision: 'required',
+        }),
+        sourceStep: 'inventoryInternal',
+      }),
+      Object.freeze({
+        capabilityId: INVENTORY_POSTING_CAPABILITY_ID,
+        commandSchema: 'northstar.inventory-transfer-posting-command/v1',
+        companion: Object.freeze({
+          createdByKernel: false,
+          identity: Object.freeze({
+            companionHeader: 'derivedFromSourceDocument',
+            companionLine: 'derivedFromSourceLine',
+            sourceLine: 'notApplicable',
+          }),
+          origin: 'authored',
+          sourceTypeLiteral: 'transfer',
+          transactionTypeLocalId: 'inventory_transaction_type_transfer',
+        }),
+        dependencyExtension: Object.freeze([]),
+        familyId: 'transfer',
+        postingRole: 'transfer',
+        reachability: Object.freeze({
+          genericAuthoring: 'admitted',
+          genericRead: 'admitted',
+        }),
+        revisions: Object.freeze({
+          companionRevisionAuthority: 'callerSupplied',
+          foreignSourceExpectedRevision: 'absent',
+        }),
+        sourceStep: 'inventoryInternal',
+      }),
+    ]),
+    schemaVersion: 'northstar.inventory-posting-family-profile/v1',
+  });
+
 export interface InventoryPostingRegistrationV1 {
   readonly capabilityId: InventoryPostingCapabilityIdV1;
   readonly capabilityVersion: typeof INVENTORY_POSTING_CAPABILITY_VERSION;
   /** The frozen kernel baseline. One value, shared by every registration. */
   readonly dependencySetRoot: typeof INVENTORY_POSTING_DEPENDENCY_SET_ROOT;
-  /** PS-2: the compiled posting-family catalog, and its content hash. */
-  readonly postingFamilyCatalog: InventoryPostingFamilyCatalogPayloadV1;
-  readonly postingFamilyCatalogContentHash: string;
+  /**
+   * PS-2: the compiled posting-family catalog. Optional only until `PUR-2`
+   * lands the projection that carries it; the invariants below always run.
+   */
+  readonly postingFamilyCatalog?: InventoryPostingFamilyCatalogPayloadV1;
+  readonly postingFamilyCatalogContentHash?: string;
   readonly releaseContentHash: string;
   readonly releaseId: string;
   readonly storageTarget: StorageTargetPayloadV1;
@@ -1331,7 +1479,8 @@ function validateRegistration(
   // capability is admitted because some profile names it, and its extension is
   // derived from exactly those profiles — there is no second list to disagree
   // with the first.
-  const catalog = registration.postingFamilyCatalog;
+  const catalog =
+    registration.postingFamilyCatalog ?? INVENTORY_POSTING_FAMILY_CATALOG_V1;
   if (
     catalog.schemaVersion !== 'northstar.inventory-posting-family-profile/v1' ||
     catalog.profiles.length === 0
@@ -1388,7 +1537,10 @@ function validateRegistration(
       `capability ${registration.capabilityId} is named by no posting family`,
     );
   }
-  if (!sha256Pattern.test(registration.postingFamilyCatalogContentHash)) {
+  if (
+    registration.postingFamilyCatalogContentHash !== undefined &&
+    !sha256Pattern.test(registration.postingFamilyCatalogContentHash)
+  ) {
     throw postingError(
       'INVENTORY_POSTING_CAPABILITY_MISMATCH',
       'postingFamilyCatalogContentHash must be a lowercase SHA-256 digest',
@@ -2970,7 +3122,9 @@ function resolveProfile(
   registration: InventoryPostingRegistrationV1,
   familyId: InventoryPostingCommandFamilyV1,
 ): InventoryPostingFamilyProfilePayloadV1 {
-  const profile = registration.postingFamilyCatalog.profiles.find(
+  const catalog =
+    registration.postingFamilyCatalog ?? INVENTORY_POSTING_FAMILY_CATALOG_V1;
+  const profile = catalog.profiles.find(
     (candidate) => candidate.familyId === familyId,
   );
   if (!profile) {
