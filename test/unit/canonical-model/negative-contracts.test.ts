@@ -111,6 +111,65 @@ function oneVersionPastNewestReadable(): string {
   return `v${newest + 1}`;
 }
 
+/**
+ * The pair, because either half alone proves less than it appears to.
+ *
+ * An UNSUPPORTED ENVELOPE is refused by the discriminated union before any
+ * nested node is read, so on its own it says nothing about nested refusal. A
+ * SUPPORTED ENVELOPE AT THE NEWLY CUT VERSION carrying an unsupported nested
+ * node is the half that matters after a cut: it proves the new version did not
+ * arrive with a hole where nested admission used to be. The existing probe in
+ * the test below is the second shape at an OLD version; this is the same shape
+ * at the new one, which is the version a cut can break.
+ *
+ * Both sides are derived from the constants, so the next cut inherits them.
+ */
+test('an unsupported version is refused in the envelope and in a nested node at the newest version', () => {
+  const unsupported = oneVersionPastNewestReadable();
+
+  const unsupportedEnvelope = structuredClone(fixture()) as unknown as Record<
+    string,
+    unknown
+  >;
+  unsupportedEnvelope.languageVersion = unsupported;
+  expectDiagnostic(
+    () => normalizeApplicationPackage(unsupportedEnvelope),
+    'CANON_VERSION_UNSUPPORTED',
+  );
+
+  const newestEnvelope = replaceEveryVersion(
+    structuredClone(fixture()),
+    LATEST_LANGUAGE_VERSION,
+  ) as { modules: Array<Record<string, unknown>> } & Record<string, unknown>;
+  newestEnvelope.normalizationProfileVersion = `northstar.normalization/${LATEST_LANGUAGE_VERSION}`;
+  // It normalizes before the node is spoiled, so the refusal below is
+  // attributable to the node and not to the re-authoring.
+  normalizeApplicationPackage(structuredClone(newestEnvelope));
+  newestEnvelope.modules[0]!.schemaVersion = unsupported;
+  expectDiagnostic(
+    () => normalizeApplicationPackage(newestEnvelope),
+    'CANON_VERSION_UNSUPPORTED',
+  );
+});
+
+function replaceEveryVersion(value: unknown, to: string): unknown {
+  if (typeof value === 'string') {
+    return /^v[0-9]+$/u.test(value) ? to : value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) => replaceEveryVersion(entry, to));
+  }
+  if (typeof value === 'object' && value !== null) {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [
+        key,
+        replaceEveryVersion(entry, to),
+      ]),
+    );
+  }
+  return value;
+}
+
 test('unknown kinds, versions, properties, slots, and status roles fail closed', () => {
   const unknownKind = structuredClone(fixture()) as unknown as {
     modules: Array<Record<string, unknown>>;
