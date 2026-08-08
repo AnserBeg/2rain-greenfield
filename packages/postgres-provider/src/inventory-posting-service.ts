@@ -449,6 +449,48 @@ type ParsedPosting =
     };
 
 /**
+ * PS-0 PROBE ONLY — NOT FOR MERGE.
+ *
+ * The cross-domain source-aggregate port. A foreign document aggregate cannot
+ * *enter* this service's transaction: `#post` calls `pool.connect()` itself and
+ * never accepts a client, so there is no outside position from which to join it.
+ * What the transaction can do is *carry* the aggregate, by handing it the client
+ * at the two points ADR-0026's transaction contract already names — step 4/5
+ * (locks held, module role assumed, business validation) and step 7 (inside the
+ * single post-lock savepoint, compare-and-swap transition).
+ *
+ * This is the same shape ADR-0029 gave `stock_count`, with the hard-coded
+ * `isStockCountPosting` branches replaced by an injected port.
+ */
+export interface InventorySourceAggregateStepV1 {
+  /** Diagnostic name of the foreign aggregate family, e.g. `goods_receipt`. */
+  readonly familyId: string;
+  /**
+   * ADR-0026 step 4/5. Every stock identity is already locked and the request
+   * key is held. Must row-lock the foreign aggregate in a deterministic order,
+   * validate it against the persisted state, and return a digest of everything
+   * it validated. No caller preflight may substitute for this.
+   */
+  lockAndValidate(
+    client: PoolClient,
+    context: TrustedRequestContext,
+    command: InventoryPostingCommandV1,
+  ): Promise<string>;
+  /**
+   * ADR-0026 step 7, inside the post-lock savepoint. Must be a compare-and-swap
+   * against the digest returned by `lockAndValidate`, so a row that changed
+   * after validation cannot escape observation.
+   */
+  transition(
+    client: PoolClient,
+    context: TrustedRequestContext,
+    command: InventoryPostingCommandV1,
+    evidenceDigest: string,
+    recordedAt: string,
+  ): Promise<void>;
+}
+
+/**
  * Capability-local posting adapter admitted by ADR-0026. It owns the complete
  * top-level transaction so the stock serializer runs immediately after BEGIN,
  * before a caller can establish a savepoint. The generic O0 interpreter stays
@@ -462,6 +504,8 @@ export class PostgresInventoryPostingService {
     private readonly registration: InventoryPostingRegistrationV1,
     private readonly recordedAtAuthority: InventoryRecordedAtAuthority,
     private readonly mintUuid: () => string = randomUUID,
+    /** PS-0 PROBE ONLY — NOT FOR MERGE. */
+    private readonly sourceAggregate: InventorySourceAggregateStepV1 | null = null,
   ) {
     this.#binding = resolvePostingStorage(registration.storageTarget);
     validateRegistration(registration);
@@ -615,6 +659,12 @@ export class PostgresInventoryPostingService {
             posting,
           )
         : null;
+      // PS-0 PROBE ONLY — NOT FOR MERGE. Exactly where ADR-0029 put the
+      // stock-count evidence lock: after the inventory line set is validated,
+      // before natural replay resolution, with every stock lock already held.
+      const sourceAggregateDigest = this.sourceAggregate
+        ? await this.sourceAggregate.lockAndValidate(client, context, parsed)
+        : null;
       const naturalReplay = await findNaturalReplay(
         client,
         this.#binding,
@@ -701,6 +751,17 @@ export class PostgresInventoryPostingService {
             actorEnvelope,
             posting,
             countEvidenceDigest!,
+            recordedAt,
+          );
+        }
+        // PS-0 PROBE ONLY — NOT FOR MERGE. Same savepoint, same transaction,
+        // after the movements exist and the companion transaction is posted.
+        if (this.sourceAggregate) {
+          await this.sourceAggregate.transition(
+            client,
+            context,
+            parsed,
+            sourceAggregateDigest!,
             recordedAt,
           );
         }
@@ -3875,7 +3936,13 @@ function inputError(message: string): InventoryPostingError {
 }
 
 function postgresCode(error: unknown): string | undefined {
-  return postgresErrorProperty(error, 'code');
+  const code = postgresErrorProperty(error, 'code');
+  // PS-0 PROBE ONLY — NOT FOR MERGE, but the defect is real and pre-existing.
+  // Without a shape check this reads *any* error carrying a string `code` as a
+  // PostgreSQL error, so a foreign source-aggregate refusal (or a Node
+  // `ERR_*` error) is relabelled `INVENTORY_POSTING_STORAGE_REJECTED` and its
+  // true cause is lost. SQLSTATE is exactly five uppercase alphanumerics.
+  return code !== undefined && /^[0-9A-Z]{5}$/u.test(code) ? code : undefined;
 }
 
 function postgresErrorProperty(
