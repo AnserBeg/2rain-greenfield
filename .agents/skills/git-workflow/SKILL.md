@@ -232,3 +232,32 @@ on a symbol belonging to the other lane.
 
 Remove stale trees. On 2026-08-06 `git worktree list` showed thirteen, twelve of
 them from packets accepted days earlier.
+
+## The stash is repo-global, not worktree-local — added 2026-08-08
+
+**`git stash` is shared lane state in exactly the way the working directory is**,
+and this repository has been running four to five worktrees at once.
+
+`PS-2` measured a baseline by running `git stash push` on an **already-clean**
+tree. It saved nothing, so the `git stash pop` that followed applied
+**`stash@{0}` — `packet/g3-term`'s preserved work** — into an unrelated worktree,
+producing four `UU` conflicts in files that packet never touched. Nothing was lost:
+the pop failed on conflict so the entry survived, and `git reset --hard HEAD`
+restored the tree because the lane's own work was already committed. **Both of
+those conditions were luck.**
+
+Two stashes hold preserved work right now — `packet/g3-term`'s and
+`packet/g2-p3b`'s — and they were **one careless `pop` from being consumed by any
+lane in any worktree.**
+
+- **Never `git stash pop`.** Use `git stash apply stash@{n}` with an explicit
+  index, then drop it deliberately once you have confirmed what you applied.
+- **`git stash push` on a clean tree saves nothing**, so the paired `pop` reaches
+  for someone else's entry. Check `git status --porcelain` first, and skip the
+  stash entirely when it is empty.
+- **Read `git stash list` before either command.** An entry labelled
+  `On packet/<other-lane>` is not yours.
+- **Preserved work does not live in a stash.** It has been tagged —
+  `preserved/g3-term-stash` and `preserved/g2-p3b-stash`, pushed to `origin` — so
+  the commits survive even if the stash entries are dropped. **Anything worth
+  keeping gets a ref, not a stash slot.**
