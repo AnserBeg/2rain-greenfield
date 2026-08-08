@@ -281,8 +281,13 @@ export const DEFAULT_DISCLOSURE_TIER = 'always' as const;
  *
  * **It is a PROXY, not an observation (AGENTS.md §6), and here is what it cannot
  * prove.** It reads source text rather than rendered output, so it cannot follow
- * dynamic dispatch through `componentRegistry[contentReferenceId]` -- a shell
- * component reached that way could consume a field without this seeing it. The
+ * `renderReferencedComponent`, which dispatches through
+ * `componentRegistry[contentReferenceId]`. Exactly one entry rests on that edge:
+ * `task:decision` is absent here because `renderTaskDecision` falls through to
+ * that dispatch when the task is not aggregate-backed, and its absence is sound
+ * only while no registered component consumes a field. Registering one makes
+ * this entry wrong WITHOUT making the gate red, so that packet must re-derive
+ * this entry by hand. The
  * observing gate would have to render each `(archetype, slot)` and check whether
  * a sentinel field value reaches the HTML, which needs a `RequestRuntimeView`
  * for a record surface; only the provider builds one, so that gate belongs in
