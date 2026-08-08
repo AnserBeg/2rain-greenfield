@@ -2870,6 +2870,7 @@ async function assertIntermediateBecomesServingOnlyAfterVerification(
   assert.equal(
     target.normalizedDefinitionBytes.byteLength,
     compiled.application.normalizedDefinitionBytes.byteLength,
+    'direction 1 is only meaningful across a profile-only edge; the head and at(-2) differ in source',
   );
   assert.ok(
     equalNormalizedDefinition(

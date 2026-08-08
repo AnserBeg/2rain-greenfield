@@ -15,6 +15,11 @@ export const COMPILER_DIAGNOSTIC_COPY = Object.freeze({
       'use a supported capability or leave the construct planned and out of the active package',
     rule: 'active compilation lowers only capabilities marked supported',
   },
+  COMPILER_DISCLOSURE_TIER_NOT_EMITTED: {
+    acceptedAlternative:
+      'compile under a profile version that emits the disclosure tier, or remove the explicit declaration',
+    rule: 'a declared disclosure tier is emitted or refused, never silently dropped by the selected profile',
+  },
   COMPILER_DEFINITION_INVALID: {
     acceptedAlternative:
       'supply canonical normalized bytes accepted by the frozen application language',

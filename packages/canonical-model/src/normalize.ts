@@ -922,7 +922,9 @@ function validateSemantics(
       ...packageRevision.surfaces
         .filter(
           (surface) =>
-            surface.renderer !== undefined || surface.surfaceRole !== undefined,
+            surface.renderer !== undefined ||
+            surface.surfaceRole !== undefined ||
+            surface.slots.some((slot) => slot.disclosureTier !== undefined),
         )
         .map((surface) => surface.surfaceId),
       ...packageRevision.storageMappings
@@ -1350,6 +1352,73 @@ function validateSurfaceVocabulary(
         );
       }
       seen.add(slot.slot);
+    }
+  }
+  validateDisclosureTiers(packageRevision, diagnostics);
+}
+
+/**
+ * The `ux-grammar` Disclosure tiers rule. **`always` is the only honourable
+ * tier; `progressive` and `onDemand` are each refused by name.**
+ *
+ * ADR-0041's honour-or-refuse rule: a spelling that cannot be honoured is
+ * refused by name rather than shipped as a silent alias. `onDemand` has been
+ * refused here since the first round -- it means "fetched on expand" and this
+ * application is server-rendered. `progressive` joins it, and the reason is the
+ * same shape one level up.
+ *
+ * **Why `progressive` cannot be honoured at this granularity.** §3.2 declares
+ * the tier per FIELD and per SECTION. The canonical model has neither: a slot's
+ * `content` is an opaque module reference, and `record:sections` is one slot
+ * rendering every field of its surface. So admitting `progressive` requires
+ * proving that some SLOT renders nothing protected -- and that is a rendering
+ * fact about `apps/web`, which a canonical rule cannot observe and a source-text
+ * scanner cannot prove. Three rounds of predicates each bought one more spelling:
+ * a field aliased before its bracket access, a helper imported from another
+ * module, a helper moved into an arrow function. Each fix was a proxy standing in
+ * for the fact. The authority question -- what may observe a rendering fact --
+ * is `U5c`'s, and until it is answered nothing is admitted.
+ *
+ * **No behavioural loss.** No authored definition in this repository declares a
+ * tier, so refusing `progressive` removes nothing that ships. What it removes is
+ * a claim that was never proven.
+ *
+ * The rule holds no membership set by design. A set that can be emptied can be
+ * refilled without proof; a refusal cannot.
+ */
+function validateDisclosureTiers(
+  packageRevision: VersionedNormalizedApplicationPackage,
+  diagnostics: CanonicalDiagnostic[],
+): void {
+  for (const surface of packageRevision.surfaces) {
+    for (const slot of surface.slots) {
+      if (
+        slot.disclosureTier === undefined ||
+        slot.disclosureTier === 'always'
+      ) {
+        continue;
+      }
+      if (slot.disclosureTier === 'onDemand') {
+        diagnostics.push(
+          diagnostic(
+            'CANON_SURFACE_DISCLOSURE_TIER_UNHONOURED',
+            '$.surfaces.slots.disclosureTier',
+            'onDemand means fetched on expand, and this application is server-rendered with no fetch-on-expand behaviour to honour it',
+            'declare always, the only honourable tier at slot granularity',
+            slot.slotId,
+          ),
+        );
+        continue;
+      }
+      diagnostics.push(
+        diagnostic(
+          'CANON_SURFACE_DISCLOSURE_TIER_NOT_DEFERRABLE',
+          '$.surfaces.slots.disclosureTier',
+          'progressive requires proving a slot renders nothing protected, which is a rendering fact no canonical rule can observe; §3.2 declares the tier per field and per section and the grammar has neither',
+          'declare always, the only honourable tier at slot granularity',
+          slot.slotId,
+        ),
+      );
     }
   }
 }
@@ -2243,6 +2312,10 @@ function acceptedAlternativeFor(code: string): string {
       'use the exported authored schema and canonical example',
     CANON_SURFACE_ARCHETYPE_UNSUPPORTED:
       'use home, list, record, task, or builder',
+    CANON_SURFACE_DISCLOSURE_TIER_NOT_DEFERRABLE:
+      'declare always, the only honourable tier at slot granularity',
+    CANON_SURFACE_DISCLOSURE_TIER_UNHONOURED:
+      'declare progressive or always; onDemand has no fetch-on-expand to honour it',
     CANON_SURFACE_SLOT_UNSUPPORTED:
       'use a named slot declared by the selected archetype',
     CANON_SURFACE_STATUS_ROLE_UNSUPPORTED:

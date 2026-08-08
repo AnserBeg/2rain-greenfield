@@ -235,5 +235,38 @@ export const STATUS_ROLES = [
   'inProgress',
 ] as const;
 
+/**
+ * Progressive-disclosure tiers, from the `ux-grammar` skill's Disclosure tiers
+ * section. The tier distinguishes DEFERRED from HIDDEN: nothing a user should
+ * have is ever concealed, and both non-`always` tiers stay discoverable.
+ *
+ * `onDemand` is READABLE BUT NOT HONOURABLE today, and normalization refuses it
+ * by name -- see `CANON_SURFACE_DISCLOSURE_TIER_UNHONOURED`. It means "fetched
+ * on expand", which needs a fetch this application cannot make: it is
+ * server-rendered, and none of ADR-0036's four authorised client behaviours is
+ * a fetch-on-expand. Declaring the value here rather than omitting it keeps the
+ * closed set the skill granted intact, while ADR-0041's honour-or-refuse rule
+ * keeps it from shipping as a silent alias for `progressive`.
+ */
+export const DISCLOSURE_TIERS = ['always', 'progressive', 'onDemand'] as const;
+
+/**
+ * The tier a slot carries when it declares none. Interpretive, and NEVER
+ * materialized into normalized output: `normalize.ts` does not write this value
+ * onto a slot that omitted it.
+ *
+ * Materializing it rewrites every existing normalized definition. MEASURED, on
+ * a throwaway mutation: `check:app-release` does not merely move a release root
+ * -- it fails earlier and harder, with `COMPILER_INPUT_NOT_CANONICAL` at
+ * `decodeSchemaCheck`, because the STORED normalized bytes of a recorded entry
+ * no longer round-trip through the changed normalizer. Reproduction never
+ * reaches a root comparison at all.
+ *
+ * The `surfaceRole` precedent is the one to follow -- absent stays absent and is
+ * resolved at projection time -- not the `IMMUTABLE_DEFAULTS_V0` precedent,
+ * which materializes and is only safe because it predates the recorded lineage.
+ */
+export const DEFAULT_DISCLOSURE_TIER = 'always' as const;
 export type SurfaceArchetype = (typeof SURFACE_ARCHETYPES)[number];
 export type SurfaceSlot = (typeof SURFACE_SLOTS)[SurfaceArchetype][number];
+export type DisclosureTier = (typeof DISCLOSURE_TIERS)[number];

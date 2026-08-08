@@ -11,9 +11,28 @@ export const COMPILER_SEMANTIC_PROFILE_VERSION =
   'northstar.compiler-semantic/v0-experimental' as const;
 export const COMPILER_SEMANTIC_PROFILE_V1_VERSION =
   'northstar.compiler-semantic/v1' as const;
+/**
+ * Cut by `U5b`, and deliberately NOT adopted.
+ *
+ * `U5-design` measured that a profile version freezes at ADOPTION, not at the
+ * cut (probe preserved at `packet/u5-design` `38ade5b`): a field gated on the
+ * adopted v1 fails `check:app-release` outright, while a field gated on a
+ * cut-but-unadopted version leaves the entire lineage byte-identical.
+ *
+ * So v2 is an accumulation window. Projection fields land on it one packet at a
+ * time and cost nothing; adoption is a separate, schedulable event that mints
+ * exactly one lineage entry no matter how many fields accumulated first.
+ * No DEFAULT compile and no recorded lineage entry uses v2 until
+ * `ADOPTED_COMPILER_SEMANTIC_PROFILE_VERSION` moves. Tests do compile under it
+ * by passing the version explicitly -- that is how a readable-but-unadopted
+ * version is exercised at all -- and nothing they produce is recorded.
+ */
+export const COMPILER_SEMANTIC_PROFILE_V2_VERSION =
+  'northstar.compiler-semantic/v2' as const;
 export const SUPPORTED_COMPILER_SEMANTIC_PROFILE_VERSIONS = Object.freeze([
   COMPILER_SEMANTIC_PROFILE_VERSION,
   COMPILER_SEMANTIC_PROFILE_V1_VERSION,
+  COMPILER_SEMANTIC_PROFILE_V2_VERSION,
 ] as const);
 export type CompilerSemanticProfileVersion =
   (typeof SUPPORTED_COMPILER_SEMANTIC_PROFILE_VERSIONS)[number];

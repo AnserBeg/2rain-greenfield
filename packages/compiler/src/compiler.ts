@@ -49,6 +49,7 @@ import {
   CHUNKING_SCHEME_VERSION,
   COMPILER_ATTESTATION_VERSION,
   COMPILER_SEMANTIC_PROFILE_V1_VERSION,
+  COMPILER_SEMANTIC_PROFILE_V2_VERSION,
   COMPILER_VERSION,
   SUPPORTED_COMPILER_SEMANTIC_PROFILE_VERSIONS,
   HASH_ALGORITHM,
@@ -367,6 +368,7 @@ function compileApplicationInternal(
       projectionDispatchRevision(packageRevision),
       isStorageTargetV1(previousStorageTarget) ? previousStorageTarget : null,
       packageRevision,
+      input.profile.compilerSemanticProfileVersion,
     ),
     packageRevision,
   );
@@ -382,6 +384,10 @@ function compileApplicationInternal(
     const storageConformanceDiagnostics = [
       ...resolveStorageDiagnostics,
       ...searchStorageDiagnostics,
+      ...validateDisclosureTierEmission(
+        packageRevision,
+        input.profile.compilerSemanticProfileVersion,
+      ),
     ];
     if (storageConformanceDiagnostics.length > 0) {
       return failure(storageConformanceDiagnostics, maximumDiagnostics);
@@ -654,6 +660,42 @@ function validateResolveStorageConformance(
     }
   }
   return diagnostics;
+}
+
+/**
+ * ADR-0041 §2 at the projection seam: a declared shape is honoured or refused,
+ * never quietly coerced.
+ *
+ * `disclosureTier` is emitted only under a profile version that carries it. A
+ * package that DECLARES a tier and is compiled under an earlier profile
+ * therefore produces a manifest with no tier at all -- the declaration is
+ * neither honoured nor refused, and the author has no way to learn it was
+ * dropped. That is the same defect `onDemand` already refuses by name, one layer
+ * up: there the value has no meaning, here the profile has no slot to put it in.
+ *
+ * Scoped to `current` conformance by its caller, so historical reproduction is
+ * untouched: a recorded entry is recompiled under the profile its own
+ * attestation names (ADR-0047 §5), and this must never newly refuse one.
+ */
+function validateDisclosureTierEmission(
+  packageRevision: VersionedNormalizedApplicationPackage,
+  compilerSemanticProfileVersion: CompilerSemanticProfileVersion,
+): CompilerDiagnostic[] {
+  if (compilerSemanticProfileVersion === COMPILER_SEMANTIC_PROFILE_V2_VERSION) {
+    return [];
+  }
+  return packageRevision.surfaces.flatMap((surface) =>
+    surface.slots
+      .filter((slot) => slot.disclosureTier !== undefined)
+      .map((slot) =>
+        compilerDiagnostic(
+          'COMPILER_DISCLOSURE_TIER_NOT_EMITTED',
+          'postLoweringValidation',
+          '$.surfaces.slots.disclosureTier',
+          slot.slotId,
+        ),
+      ),
+  );
 }
 
 function validateSearchStorageConformance(

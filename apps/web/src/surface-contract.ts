@@ -22,6 +22,7 @@ type SurfaceManifestPayloadVersion =
 const archetypes = ['builder', 'home', 'list', 'record', 'task'] as const;
 const lifecycleValues = ['active', 'retired'] as const;
 const statusRoles = ['attention', 'blocked', 'inProgress', 'success'] as const;
+const disclosureTiers = ['always', 'onDemand', 'progressive'] as const;
 const surfaceRoles = ['form', 'list', 'record'] as const;
 const operationCatalogPayloadVersion =
   'northstar.operation-catalog-payload/v0-provisional' as const;
@@ -49,12 +50,17 @@ const slotsByArchetype = Object.freeze({
 
 export type CompiledSurfaceArchetype = (typeof archetypes)[number];
 export type CompiledSurfaceStatusRole = (typeof statusRoles)[number];
+export type CompiledDisclosureTier = (typeof disclosureTiers)[number];
 export type CompiledSurfaceRole = (typeof surfaceRoles)[number];
 export type SurfaceOperationIntent =
   'archive' | 'command' | 'create' | 'restore' | 'update';
 
 export interface CompiledSurfaceSlot {
   readonly contentReferenceId: string;
+  // Absent under every profile version that does not emit it, which today is
+  // every recorded entry. Optional here rather than defaulted, so the reader
+  // cannot invent a tier the projection did not carry.
+  readonly disclosureTier?: CompiledDisclosureTier;
   readonly orderKey: number;
   readonly slot: string;
   readonly slotId: string;
@@ -668,7 +674,12 @@ function parseSlot(
     !isNonBlank(value.slotId) ||
     !Number.isSafeInteger(value.orderKey) ||
     Number(value.orderKey) < 0 ||
-    !slotsByArchetype[archetype].includes(value.slot)
+    !slotsByArchetype[archetype].includes(value.slot) ||
+    // Refused rather than dropped. `parseSlot` builds a fresh object from the
+    // keys it recognises, so an unrecognised tier would be silently discarded --
+    // the adoption trap this reader previously carried.
+    (value.disclosureTier !== undefined &&
+      !includes(disclosureTiers, value.disclosureTier))
   ) {
     throw new SurfaceProjectionError(
       'INVALID_SURFACE_SLOT',
@@ -677,6 +688,9 @@ function parseSlot(
   }
   return Object.freeze({
     contentReferenceId: value.contentReferenceId,
+    ...(value.disclosureTier === undefined
+      ? {}
+      : { disclosureTier: value.disclosureTier }),
     orderKey: Number(value.orderKey),
     slot: value.slot,
     slotId: value.slotId,

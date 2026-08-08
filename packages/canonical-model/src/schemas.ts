@@ -4,6 +4,7 @@ import {
   CANONICALIZATION_PROFILE_VERSION,
   CONTENT_HASH_ALGORITHM,
   CURRENCY_MINOR_UNITS_V0,
+  DISCLOSURE_TIERS,
   PROMOTE_STORAGE_CLASS_CAPABILITY_ID,
   QUERY_PARAMETER_LIMIT_V3,
   SUPPORTED_LANGUAGE_VERSIONS,
@@ -654,6 +655,10 @@ const authoredStateMachineDefinition = normalizedStateMachineDefinition.extend({
 
 const surfaceSlot = z.strictObject({
   content: CanonicalReferenceSchema,
+  // Optional, and deliberately NOT defaulted during normalization: an absent
+  // tier stays absent, so every existing normalized definition keeps its bytes
+  // and every recorded release root holds. See DEFAULT_DISCLOSURE_TIER.
+  disclosureTier: z.enum(DISCLOSURE_TIERS).optional(),
   kind: z.literal('surfaceSlot'),
   orderKey: boundedOrderKey,
   schemaVersion: nodeVersion,
