@@ -445,10 +445,29 @@ WSL cap of **8 processors**, four to seven concurrent sessions put idle in the
 mid-to-high 80s — structurally just under the floor, and the figure the gate
 captures depends on whether other sessions happen to be mid-turn in that instant.
 
-**So an instantaneous idle reading is not the check.** Count live `ccd-cli`
-runtimes before starting a matrix. **Quiesced means every session except the one
-running the matrix is stopped, not merely idle between turns** — a session at rest
-becomes a session at 12% the moment its user types.
+**CORRECTED 2026-08-08 — the first version of this rule was unreachable.** It said
+*"quiesced means every session except the one running the matrix is stopped"*. The
+orchestrator's own session and every other lane's are always live, so that
+condition can never hold and a lane obeying it literally would never run a matrix.
+A lane said so, reasoned past it, and was right — it launched at **6 runtimes**,
+more than the **4** present when the gate declined at 73.9%, and the gate measured
+**98.8%**.
+
+**The check is CPU idle plus whether other worktrees are working, not session
+count.** Before starting a matrix, measure and record:
+
+1. the lock registry — `/tmp/north-star-matrix.lock.holders/*.json` must be empty;
+2. **`cpu_idle_pct` against the 90% floor**, which is the figure the gate itself
+   reads;
+3. **whether any `2rain-greenfield-*` worktree has a process burning CPU** — a
+   `tsc` at 210% or a live compiler suite is what actually moved idle to 73.9%;
+4. the `ccd-cli` count, **as a risk indicator and not a gate** — more sessions
+   means a higher chance one types mid-run, which is exposure to report, not a
+   reason to refuse.
+
+**Take the window when 1-3 are clear, and report 4 with the decision.** If the
+gate then declines, report the figure and hold — do not retry. Waiting for a
+condition that cannot occur costs the packet; one declined run costs one run.
 
 **A packet may NOT freeze with the performance gate recorded indeterminate.**
 AGENTS.md §6 requires the matrix green at the integrated SHA; indeterminate is a
