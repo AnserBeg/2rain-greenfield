@@ -488,3 +488,16 @@ substitute for one.
 
 **The generative question when writing a fence:** *what would go red if this
 were deleted?*
+
+**And say what you are deleting the evidence for — added 2026-08-08, the lane's
+own sharpening.** `U5b` ended by deleting the gate its mutation harness served, so
+the harness went with it and the tree now contains **no committed mutation
+harness at all** — every mutation result in its final report rests on shell
+commands run and discarded. That is the same state that produced two overstated
+tables; the only difference is that it is labelled. **A packet removing a harness
+owes a sentence naming which claims lose their executable evidence**, so the next
+reader knows which rows in the claim ledger are now reports rather than controls.
+
+**Report mutation results as `N committed, M ad-hoc`, and count only the committed
+ones as evidence.** `U5b` reported *"fifteen"* when four were in the tree, and
+*"eleven"* of that fifteen were thrown away. The wording is the fix.
