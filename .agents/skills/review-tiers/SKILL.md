@@ -525,3 +525,29 @@ inside the same test body that asserted the pairing must be refused.
 **Cheap and sufficient:** run the named test, paste the failure text or the pass
 line, and push the branch. `PS-1` pushed; the reviewer read the source and found
 what execution would have found first.
+
+## Verify the target is on `origin` before writing the prompt — added 2026-08-08
+
+Three review arms in one session hit a target the reviewer could not fetch. Two
+returned findings weighed against *recorded* results rather than verified ones; the
+third returned **BLOCK — REVIEW TARGET UNAVAILABLE** and could judge nothing.
+
+**The orchestrator caused this by instructing rather than checking.** "Push the
+branch" appeared in three prompts; none was followed by
+`git ls-remote origin <branch>`. **A review prompt naming an unfetchable SHA is a
+wasted arm**, and the arm is the scarcest thing in this loop.
+
+**The rule, one command, before every review prompt:**
+
+    git ls-remote origin <branch>   # must print the exact SHA in the prompt
+
+If it is absent and the object exists locally, **push it yourself** — it is
+non-destructive, it backs up the reviewed candidate off-machine as `git-workflow`
+already requires, and it removes a dependency on the lane being awake.
+
+**The unavailable arm was not worthless, which is the reason to record this rather
+than just fix it.** Denied the candidate, the reviewer read `main` for the *class*
+of defect the prompt described and found a real one in the unreadable candidate: a
+hand-written `schemaVersion: 'v4'` that makes any `v5` package carrying a
+legal-entity scope operand fail `CANON_VERSION_MIXED`. **A reviewer told what to
+look for can find it without the diff. That is not a substitute for the diff.**
