@@ -221,20 +221,23 @@ independently. One `SurfaceDataRenderState` is computed per request
 (`apps/web/src/surface-runtime.ts:193-214`) and handed to every slot
 (`:339-349`), and `slotResolutionState()` (`component-registry.ts:293-307`)
 returns `ready` for any slot that does not own data resolution and otherwise
-grades that one shared value. On a Record surface `keyFacts` and `sections` —
-both `ownsDataResolution: true` (`component-registry.ts:159-170`) — therefore
-always share a fate.
+grades that one shared value. Every real Record surface declares `keyFacts` and
+`sections` together (`packages/domain/src/party/definition.ts:446`, and the same
+line in `location` and `catalog`), both are `ownsDataResolution: true`
+(`apps/web/src/component-registry.ts:159-170`), and both therefore always share a
+fate. **That is already visible in the gates rather than inferred:**
+`apps/web/test/browser/composed-application.spec.ts:1461-1465` asserts **two**
+`record:` slots failed with one diagnostic code while breadcrumb, titleStatus and
+commandBar are `ready`.
 
 The isolation this bought is real and it is what the doctrine claims against the
-old all-or-nothing page: the browser gate observes a failed data slot beside
-non-data siblings still rendering their real content
-(`apps/web/test/browser/surface-data-binding.spec.ts:259-283`). But **"the slot
-is the unit of fault isolation" is a claim about where a failure is *rendered*,
-not about what independently *resolves*.** The two coincide only because a
-surface has exactly one data binding today. **A surface gaining a second binding
-is the trigger for this section to rule which unit resolves** — filed as
-`slot-fault-scope`, which also makes the shared fate observable instead of
-implied.
+old all-or-nothing page. But **"the slot is the unit of fault isolation" is a
+claim about where a failure is *rendered*, not about what independently
+*resolves*.** The two coincide only because a surface has exactly one data
+binding today. **A surface gaining a second binding is the trigger for this
+section to rule which unit resolves**, and until then "a failed slot renders an
+inline card while siblings render normally" must be read as *siblings that do not
+own data resolution* — the others fail with it.
 
 **Resolution state is not status.** The status grammar above describes business
 facts; these describe whether a slot has data. They may not be conflated — a
