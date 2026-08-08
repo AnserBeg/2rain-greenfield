@@ -444,3 +444,16 @@ How to apply: to move an obligation out of accepted-but-unhonored, name the down
 Date: 2026-08-03
 Why: the coverage ledger marked an axis `forced` from its union, boolean and optionality branches, intending "this axis is a real choice" — but `z.literal('x')` lowers to a bare `StringLiteral`, not a one-member union, so narrowing an axis to its last value moved it off every forced branch and deleted it. The flag could not fire for the exact case it existed to protect.
 How to apply: when an invariant is "this thing must stay represented", assert it on the thing, not on the branch that produced it — and control the transition (two values to one) rather than the end states. See `docs/execution/packets/lang-singleton.md`.
+
+## Never match a process by its own command line
+Date: 2026-08-08
+Why: `pkill -f <pattern>` and `pgrep -f <pattern>` match the invoking shell,
+because the pattern is in that shell's own command line. `lock-obs` killed its
+own shell this way three times in one packet — its launcher, its `foreign_matrix()`
+helper, and again in round 3 — and the orchestrator's own `pgrep` returned its
+own pid alongside the two lanes it was looking for. Every instance looked like
+the target process had died.
+How to apply: resolve to a PID first and act on the PID. Where a pattern is
+unavoidable, exclude `$$` and the process group explicitly and assert the match
+count before acting. A gate that reads the real process table is separately
+suspect — see the same packet's machine-load-dependent controls.

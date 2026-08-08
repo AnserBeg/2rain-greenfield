@@ -5,6 +5,13 @@ the `ux-grammar` skill, or any ADR until a packet does so. Created 2026-07-30
 from a review of [Laws of UX](https://lawsofux.com/), the response-time
 literature it cites, a user requirements pass, and a visual-direction review.
 
+**Not an evidence authority — 2026-08-08.** A doctrine review adjudicated this
+document against the tree and found two conclusions reaching past their premises
+(M1's compile-time geometry, M2's slot-as-failure-boundary), both corrected inline
+below. Where this document and an ADR differ, the ADR governs — as Part I already
+says for the ladder. The full adjudication, upheld and refuted, is
+[ui-ux-remaining.md](ui-ux-remaining.md) §6.
+
 Owning queue rows: **U0–U8** in [current-plan.md](current-plan.md).
 Visual direction, live: **[UI direction mockup](https://claude.ai/code/artifact/db130305-e9b1-4dba-b195-bb0f24d8dd5f)**.
 
@@ -108,6 +115,17 @@ surface in the shadow browser at every breakpoint and compare box geometry withi
 tolerance. Negative controls: a slot present in one and absent in the other; a
 column-priority change reflected in one and not the other.
 
+> **Correction 2026-08-08 — "geometry" is two words here, and only one of them is
+> compile-time.** A shared `SurfaceDefinition` proves *structural* fidelity (same
+> slots, same column priority, same responsive branch) and that genuinely "cannot
+> drift". The gate in the paragraph above measures *rendered* boxes, which also
+> depend on content length, localization, fonts and font loading, zoom and text
+> scaling, layout engine, viewports between the nominated breakpoints, and the
+> device — a sampled empirical check, not a compile-time proof, and one reference
+> browser is not every device. Ruled in
+> [ADR-0032](../decisions/ADR-0032-feedback-ladder-and-loading-states.md) §2c; the
+> ADR governs where they differ.
+
 ### M2 — Per-slot state machine and fault isolation
 
 Every slot resolves independently into exactly one of
@@ -121,6 +139,19 @@ The slot is already the grammar's unit of composition, so it is the correct unit
 of fault isolation. Today a single data failure yields a whole-page diagnostic
 ([surface-runtime.ts:514](../../apps/web/src/surface-runtime.ts:514)) — the page
 is all-or-nothing. **Most architecturally significant item in this document.**
+
+> **Correction 2026-08-08 — the evidence proves *page* is too broad, not that
+> *slot* is exactly right.** Composition boundary and failure boundary are
+> different properties, and the shipped implementation shows the gap: one
+> `SurfaceDataRenderState` is computed per request
+> ([surface-runtime.ts:193](../../apps/web/src/surface-runtime.ts:193)) and handed
+> to every slot (`:339-349`), so all slots with `ownsDataResolution: true` share a
+> fate — on Record, `keyFacts` and `sections` together
+> ([component-registry.ts:159](../../apps/web/src/component-registry.ts:159)). What
+> resolves independently is the **data binding**; the slot is where the resulting
+> state is rendered. They coincide today only because a surface has one binding.
+> The `ux-grammar` skill's "Slot resolution states" section carries the ruling and
+> the trigger for revisiting it.
 
 ### M3 — Compiled message catalog
 

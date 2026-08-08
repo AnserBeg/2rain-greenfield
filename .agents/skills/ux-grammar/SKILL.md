@@ -113,8 +113,20 @@ Rules that follow:
   palette and the New button. It is platform-owned, never an archetype slot and
   never tenant-customizable. It **holds no state**: every selection is written to
   the URL and read back from it, per ADR-0015:38's ban on ambient session state.
-  It **never selects for the user**, not even when exactly one option exists —
-  ADR-0031 §3, omission is a refusal, not a default.
+  It **never selects for the user**. *Narrowed 2026-08-08.* For **legal entity**
+  that is absolute, including when exactly one option exists, because ADR-0031 §3
+  makes omission a typed refusal rather than a narrower scope — the reason is a
+  property of that dimension, not of the bar. The form that carries to a future
+  dimension is weaker and still binding: **no implicit default.** A default may
+  arrive only through the declared-default mechanism ADR-0015:38 admits and
+  ADR-0037 §4 records as absent; whether omission is *also* a refusal is answered
+  by each new dimension's own justification.
+
+  **A workspace scope is not a field pre-fill.** The bar selects the slice of the
+  business being looked at; a form pre-filling a legal-entity field from a
+  declared source is a different act on a different object. Neither is authorized
+  to invent the missing declared-default mechanism (see `U7` in
+  [ui-ux-remaining.md](../../../docs/execution/ui-ux-remaining.md) §3b).
 
   Never a place for actions, a second command surface, a notification host, or a
   breadcrumb. Each has a home already, and each is how a context bar becomes a
@@ -189,6 +201,44 @@ Every slot resolves into **exactly one** of a closed, mutually exclusive set:
   threshold. A page answering inside 400 ms shows nothing. The state exists so a
   slot can be described, not so every slot can spin.
 
+**`pending` is structural, and the spelling is now fenced — 2026-08-08.** In code
+it is `data.status === 'UNBOUND'` (`apps/web/src/component-registry.ts:298`):
+*this slot has no binding.* It is **not** "this slot's data is in flight", and it
+is **not** the ladder's pressed-control pending (ADR-0032 §1's 400 ms – 1 s row)
+or ADR-0036 §2's "pending-state toggling" — neither of those is a slot state at
+all. Three facts, one spelling, and only one of them belongs to this partition.
+
+So **a temporal loading state may not reuse `pending`.** A slot whose bound data
+is in flight transitions when work completes, participates in the ladder's
+elapsed-time escalation, and authorizes a treatment — three things `pending` is
+defined not to do. It is therefore a *new* member of this closed set and needs
+its own name and its own ruling, which `skeleton-route` owes
+([ui-ux-remaining.md](../../../docs/execution/ui-ux-remaining.md) §2.5).
+
+**The unit that resolves is the surface's data binding, not the slot — corrected
+2026-08-08.** Every slot *carries* a resolution state; they do not resolve
+independently. One `SurfaceDataRenderState` is computed per request
+(`apps/web/src/surface-runtime.ts:193-214`) and handed to every slot
+(`:339-349`), and `slotResolutionState()` (`component-registry.ts:293-307`)
+returns `ready` for any slot that does not own data resolution and otherwise
+grades that one shared value. Every real Record surface declares `keyFacts` and
+`sections` together (`packages/domain/src/party/definition.ts:446`, and the same
+line in `location` and `catalog`), both are `ownsDataResolution: true`
+(`apps/web/src/component-registry.ts:159-170`), and both therefore always share a
+fate. **That is already visible in the gates rather than inferred:**
+`apps/web/test/browser/composed-application.spec.ts:1461-1465` asserts **two**
+`record:` slots failed with one diagnostic code while breadcrumb, titleStatus and
+commandBar are `ready`.
+
+The isolation this bought is real and it is what the doctrine claims against the
+old all-or-nothing page. But **"the slot is the unit of fault isolation" is a
+claim about where a failure is *rendered*, not about what independently
+*resolves*.** The two coincide only because a surface has exactly one data
+binding today. **A surface gaining a second binding is the trigger for this
+section to rule which unit resolves**, and until then "a failed slot renders an
+inline card while siblings render normally" must be read as *siblings that do not
+own data resolution* — the others fail with it.
+
 **Resolution state is not status.** The status grammar above describes business
 facts; these describe whether a slot has data. They may not be conflated — a
 `failed` slot is not `blocked`. Where a resolution state renders colour it
@@ -224,6 +274,24 @@ Every field and section declares one of a closed set:
 The tier distinguishes **deferred** from **hidden**. Nothing a user should have is
 ever hidden; `progressive` and `onDemand` defer, and both remain discoverable.
 
+**`onDemand` is refused by name until a fetch-on-expand mechanism exists —
+2026-08-08.** It is spelled here because the vocabulary is closed and an unspelled
+tier cannot be refused *by name*; it is not a working tier. Nothing honours it:
+native `<details>` expansion reveals content already in the document and cannot
+fetch, ADR-0036 §2's four behaviours contain no fetch-on-expand, and §7 forbids
+client rendering of business data. Admitting it as workable would be precisely the
+accepted-and-ignored state this skill refuses `toast` and `modal` for
+(ADR-0041 §3, a refusal to ship a spelling ahead of its meaning). `U5b` — in
+flight when this was written — implements the refusal at normalization, before
+deferrability is consulted, with this same reason in its diagnostic.
+
+**The hard rule below applies to every tier that is not `always`** — not to
+`progressive` alone. A required, action-demanding, `blocked` or `attention` field
+is deferred *further* by `onDemand` than by `progressive`, so a refusal naming
+only `progressive` would leave the stronger deferral admissible. This is moot
+while `onDemand` refuses unconditionally, and it is stated so that admitting
+`onDemand` later cannot silently reopen the hole.
+
 **The hard rule splits across two enforcers, because one of its three clauses is
 not compile-time knowable.** §3.2 states that anything required, anything
 resolving to `blocked` or `attention`, and anything the user must act on is
@@ -237,6 +305,13 @@ So:
 - **The runtime refuses what is not** — a field that resolves to `blocked` or
   `attention` while declared `progressive` is refused by name at render, not
   silently promoted and not silently collapsed.
+
+**"Refused by name" does not mean "withheld" — stated 2026-08-08.** The hard rule
+exists so that a person *sees* blocking content. A runtime refusal that rendered a
+diagnostic in place of the field would enforce the rule by committing the harm the
+rule prevents. The refusal **reveals the content and names the defect** — the
+non-silent promotion the wording above already admits, made explicit so the
+implementing packet does not have to guess which way to read it.
 
 That split is [ADR-0041](../../../docs/decisions/ADR-0041-declared-shapes-must-be-honoured-or-refused.md)'s
 rule applied one layer down: a declared shape is honoured or refused, never
@@ -282,6 +357,24 @@ fault arose relative to slot composition, which the page-level-diagnostics rule
 above already discriminates. Slot placement anchors on the per-slot resolution
 state, which already computes and emits that fact rather than deriving a parallel
 one.
+
+**`page | slot` is closed over messages placed relative to slot composition, and
+field-level validation is a known open case — recorded 2026-08-08.** ADR-0048 §3
+decomposed the proposal's severity column into a *scope* and a *consequence*,
+kept the consequence, and dropped the scope rather than moving it here. But
+field-level was already on the queue when the vocabulary closed:
+`ux-strategy-proposal.md` §3.8 requires validation adjacent to the input,
+ADR-0036 §2.4 authorises server-requested advisory inline validation, and `U7` is
+chartered to build it. A slot card is not a message anchored to one input — they
+differ on focus movement and error association, which the WCAG 2.2 AA claim in
+plan §8.4 makes an obligation rather than a preference.
+
+**No `field` placement is coined here**, because coining one before `U7` knows
+what it anchors to is the same defect as coining `onDemand` did. **`U7` owns the
+decision and must stop with a bridge request** rather than routing a validation
+message through `slot` or around the catalog. Three admissible answers: placement
+gains a field or control anchor; placement and anchor become separate axes; or
+validation messages are ruled a grammar of their own, with the reason recorded.
 
 **`toast` and `modal` are refused by name, with a diagnostic.** Neither is among
 the four client behaviours [ADR-0036](../../../docs/decisions/ADR-0036-minimum-client-capability.md)

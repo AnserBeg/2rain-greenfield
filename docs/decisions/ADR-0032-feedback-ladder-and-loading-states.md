@@ -116,6 +116,109 @@ ships the element it applies to. **That reasoning was wrong**, it has kept the
 trajectory unproven across two packets, and the obligation moves to the
 visual-conformance work where its subject actually lives.
 
+### 2b. The wait is not the server's work — corrected 2026-08-08 by user ruling
+
+**§2a's deferral rested on two legs and both assumed the wait *is* server compute.**
+
+*"A server-rendered response has no moment in which a skeleton exists"* is true of
+server compute and false of the whole wait. Between the click and the painted page
+sit DNS and TLS on a first visit, request transit, server render, **response
+transit**, parse and paint. On a slow or congested link response transit dominates
+every other term, and during it the person is looking at the old page or at
+nothing. That moment exists on every navigation and it is the 1–3 s band.
+
+*"20 of 20 reads in `under_100ms`"* is recorded at
+`packages/postgres-provider/src/composed-application-runtime.ts:718`, around
+**registered query execution against Postgres**. It is the innermost segment of
+the wait — strong evidence the database is fast, and no evidence about §1's bands.
+
+**So the app can be fast and the wait can still be seconds.** A wait is slow for
+six reasons and this programme measures one; the largest in the field is the
+user's own connection, which nothing here observes.
+
+**Two rules follow, and they amend §1's reading.**
+
+- **§1 is not a lookup table.** A treatment is *predicted* from what is known
+  before the wait starts and then **escalated by actual elapsed time** as each
+  boundary is crossed: pending → skeleton → indeterminate-with-context →
+  determinate-or-handoff. **It never de-escalates** — the reverse direction is a
+  flicker and reads as a fault.
+- **The escalation half needs no prediction**, because it runs on a clock.
+  Prediction buys only the entry treatment, so the cheapest correct implementation
+  predicts nothing and escalates on elapsed time. Build it in that order.
+
+A skeleton also owes an anti-flicker contract — a floor before painting and a
+minimum hold once painted — or a fast response produces a flash that is worse
+than showing nothing.
+
+**§2a's deferral of skeleton *geometry* is not thereby lifted, and its open
+mechanism question is unchanged:** streamed SSR versus a widened client script,
+where the latter is an ADR-0036 amendment. What is lifted is the reasoning that no
+moment exists and that existing measurement shows none is needed. Both were wrong.
+
+Chartered, with the causes enumerated and the routes costed, in
+[ui-ux-remaining.md](../execution/ui-ux-remaining.md) §2 — rows `wait-measure`,
+`skeleton-route` and `wait-escalate`. `wait-measure`'s relationship to the
+`ladder-trigger` row is narrowed by §2c below: it absorbs the trigger for
+server-caused waits only.
+
+### 2c. Three more places one term stood for two things — 2026-08-08
+
+§2b caught one term standing in for a narrower referent. A doctrine review of the
+whole UI/UX set, adjudicated against the tree the same day, found the same shape
+three more times here — including once inside §2b's own replacement. Each is
+recorded rather than quietly rewritten, because in every case a *narrower* claim
+survives and the wider one does not.
+
+**`pending` names three facts and this ADR uses two of them.** §2a is right that
+U4's `pending` is structural — `data.status === 'UNBOUND'`
+(`apps/web/src/component-registry.ts:298`), *no binding exists*. §1's 400 ms – 1 s
+row means something else entirely: an interaction waiting for acknowledgement on
+the pressed control, which is not a slot state. ADR-0036 §2's "pending-state
+toggling" is that third thing again. A streamed slot awaiting its chunk would be a
+*fourth* reading — bound, temporal, escalating — and reusing the spelling for it
+would make `data-slot-state="pending"` mean two incompatible things in one
+document. **A temporal loading state may not reuse `pending`;** it is a new member
+of U4's closed set and `skeleton-route` owes its name. The `ux-grammar` skill
+carries the fence.
+
+**The observation this ADR needs is action-to-paint, and neither replacement
+signal reaches it.** §2b enumerates the wait as DNS/TLS, request transit, server
+work, response transit, parse and paint, and then requires escalation against
+*actual elapsed time*. Server-side whole-response time omits request transit,
+parse and paint; time to first byte stops before body transfer, parse and paint;
+and a streamed shell cannot start a user-visible clock during the interval before
+the shell arrives. So the replacement measurement is a second, wider proxy for the
+same subject — better than query execution, still not the subject.
+
+Two consequences, and they are binding on `wait-measure`:
+
+- **The trigger absorption is narrowed.** A server-side measurement retires
+  `ladder-trigger` for causes (1)–(3) in
+  [ui-ux-remaining.md](../execution/ui-ux-remaining.md) §2.1 and **cannot** retire
+  it for (4) the user's connection or (6) cold start — the two that document calls
+  the largest in the field. Per AGENTS.md §6, the packet states what its gate
+  cannot prove rather than letting the counter read as coverage.
+- **Any client-observed timing is an ADR-0036 question, not a free extra.** The
+  browser reports first byte, parse and paint only through the Navigation Timing
+  API, which needs script, and script is closed to
+  [ADR-0036](ADR-0036-minimum-client-capability.md) §2's four behaviours — none of
+  which is measurement. `wait-measure` may not smuggle it in as instrumentation.
+
+**"Skeleton geometry cannot drift" is true of structure and not of pixels.** The
+Consequences section below claims skeleton fidelity is a compile-time property
+because both states derive from one `SurfaceDefinition`, and in the same breath
+nominates a shadow-browser box-geometry comparison as its gate. Those are two
+different facts about two different senses of *geometry*. A shared declarative
+source proves **structural** fidelity — same slots, same column priority, same
+responsive branch — and a compiler can prove it. **Rendered** fidelity depends on
+content length, localization, fonts and font loading, user zoom and text scaling,
+layout engine, viewports between the nominated breakpoints, and the device; a
+browser comparison samples it in named conditions and never proves it. **"Cannot
+drift" is limited to the structural claim.** The rendered claim is a sampled gate
+that must name its browsers, viewports, locales and scaling conditions, and say
+what it did not sample.
+
 ### 3. The 1–3 s skeleton band diverges from NN/g deliberately
 
 NN/g places skeletons at 2–10 s. This ADR places them at 1–3 s.
@@ -161,6 +264,26 @@ user did not need to make.
 
 The proposal document's Part I carries the earlier single-band table. Where they
 differ, **this ADR governs**.
+
+**The `> 10 s` band is mandatory and unbuildable, and that is now said out loud —
+2026-08-08.** Every treatment this band requires is a fact about an operation that
+nothing in this repository produces: units completed, a step name, cancellation,
+and somewhere for a handed-off operation to go. `grep -rli job packages/runtime/src`
+matches no file, and [ADR-0036](ADR-0036-minimum-client-capability.md) §6 already
+ordered determinate progress last for exactly that reason while declining to design
+the substrate. No row in the UI/UX plan creates it either: `op-latency` measures
+and `wait-escalate` selects a treatment; neither can manufacture the fact the
+treatment must display.
+
+So the boundary is declared rather than implied. **`wait-escalate` implements the
+ladder up to and including `3 s – 10 s` and stops.** Above 10 s it renders the
+`3 s – 10 s` treatment — indeterminate, with the operation named — and that is a
+*declared shortfall*, recorded where a reader will find it, not an escalation
+silently missing its top rung. §3a's prohibition is unchanged and is the reason:
+a bar animated on a timer is a fabricated claim. The upper band opens when the
+substrate exists, tracked as `op-handoff-substrate` in
+[ui-ux-remaining.md](../execution/ui-ux-remaining.md) §3c with a firing trigger
+rather than "when it exists".
 
 ### 4. Optimistic UI is a closed, compiled allow-list
 
@@ -240,12 +363,15 @@ loading state is needed.
 - **The ladder is falsifiable, which is the point.** Every band names an
   observable treatment, so a surface can be checked against it rather than
   reviewed for taste.
-- **Skeleton fidelity becomes a compile-time property, not a visual bug.** M1
-  derives skeleton geometry from the same `SurfaceDefinition` as the layout, so
-  drift between them fails the build. Its gate must **observe** geometry — render
-  both and compare box geometry at every breakpoint (AGENTS.md §6) — with
-  negative controls for a slot present in one and absent in the other, and for a
-  column-priority change reflected in one and not the other.
+- **Skeleton *structural* fidelity becomes a compile-time property, not a visual
+  bug.** M1 derives the skeleton from the same `SurfaceDefinition` as the layout,
+  so a structural difference — a slot present in one and absent in the other, a
+  column-priority change reflected in one and not the other — fails the build.
+  **Rendered fidelity is a separate, sampled claim** (§2c): render both and
+  compare box geometry in named browsers, viewports, locales and text-scaling
+  conditions (AGENTS.md §6), carrying the same two negative controls plus a
+  statement of what was not sampled. Only the first claim may be written "cannot
+  drift".
 - **The 500 ms → 400 ms change tightens a shipped budget.** It is a tightening,
   not a relaxation, so it cannot be satisfied by widening anything.
 - **`prefers-reduced-motion` support is mandatory** for every treatment this ADR

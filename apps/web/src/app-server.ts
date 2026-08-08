@@ -40,16 +40,15 @@ async function handleRequest(
   response.setHeader('x-content-type-options', 'nosniff');
 
   if (request.method !== 'GET' && (request.method !== 'POST' || !gateways)) {
+    // One code had two sentences here, branching on whether gateways are
+    // composed. That is the same defect ADR-0048 was ruled on, and the branch
+    // is not a fact the user can act on: the accepted-method list belongs in an
+    // `Allow` header, not in two copies of one message.
     writeHtml(
       response,
-      renderApplicationDiagnostic(
-        405,
-        'Method not allowed',
-        gateways
-          ? 'The SurfaceRuntime accepts semantic reads and form intents only.'
-          : 'The SurfaceRuntime shell accepts browser reads only.',
-        'METHOD_NOT_ALLOWED',
-      ),
+      renderApplicationDiagnostic(405, {
+        code: 'METHOD_NOT_ALLOWED',
+      }),
     );
     return;
   }
@@ -58,12 +57,7 @@ async function handleRequest(
   if (url.pathname !== '/') {
     writeHtml(
       response,
-      renderApplicationDiagnostic(
-        404,
-        'Route not found',
-        'The requested route is not part of the compiled application shell.',
-        'ROUTE_NOT_FOUND',
-      ),
+      renderApplicationDiagnostic(404, { code: 'ROUTE_NOT_FOUND' }),
     );
     return;
   }
@@ -85,35 +79,24 @@ async function handleRequest(
     if (error instanceof AuthenticationRequiredError) {
       writeHtml(
         response,
-        renderApplicationDiagnostic(
-          401,
-          'Sign-in required',
-          'An authenticated request is required before a release can be pinned.',
-          'AUTHENTICATION_REQUIRED',
-        ),
+        renderApplicationDiagnostic(401, { code: 'AUTHENTICATION_REQUIRED' }),
       );
       return;
     }
     if (error instanceof UntrustedIdentityInputError) {
       writeHtml(
         response,
-        renderApplicationDiagnostic(
-          400,
-          'Untrusted context rejected',
-          'Tenant and environment identity cannot be selected by browser input.',
-          'UNTRUSTED_CONTEXT_REJECTED',
-        ),
+        renderApplicationDiagnostic(400, {
+          code: 'UNTRUSTED_CONTEXT_REJECTED',
+        }),
       );
       return;
     }
     writeHtml(
       response,
-      renderApplicationDiagnostic(
-        500,
-        'Application shell unavailable',
-        'The request could not construct its pinned runtime view.',
-        'REQUEST_RUNTIME_VIEW_UNAVAILABLE',
-      ),
+      renderApplicationDiagnostic(500, {
+        code: 'REQUEST_RUNTIME_VIEW_UNAVAILABLE',
+      }),
     );
   }
 }

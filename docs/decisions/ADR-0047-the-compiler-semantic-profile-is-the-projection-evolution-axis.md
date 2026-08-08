@@ -106,6 +106,35 @@ recorded and may be activated; overwriting it is precisely the history rewrite
 the freeze exists to prevent. Assertions that assumed consecutive entries differ
 in source are corrected to say what they actually mean.
 
+### 4a. A source-changing entry may carry no semantic delta — added 2026-08-06
+
+§4 named *position*-dependence. `U5b` found a second, distinct fragility in the
+same family, and it is not fixed by `previousSourceRelease`.
+
+`assertAttributedSearchCapabilityScenarioDelta`
+(`test/postgres/composed-application.test.ts`) already uses that helper, so it is
+correctly position-independent. It nonetheless broke, because it is
+**delta**-dependent: it compares the head against the last entry whose *source*
+differs and asserts a 168→163 search-capability scenario delta. A source change
+that carries **no semantic delta** — declaring a field gated on an unadopted
+profile version — makes `previous` the immediately preceding entry, and the delta
+the assertion attributes to named entities collapses to nothing.
+
+**So there are two questions, not one.** *Which entry precedes this one?* is
+answered by `previousSourceRelease`. *Which entry carries the delta I am
+attributing?* is not, and an assertion that attributes a change must locate the
+entry that made it rather than the entry that came before.
+
+**The practical rule this yields:** an authored change whose feature reaches no
+artifact still mints a lineage entry, and that entry is invisible to every
+assertion reasoning about compiled consequences while being fully visible to every
+assertion reasoning about position or source identity. Declaring a field gated on
+an **unadopted** profile version is exactly that shape — `U5b` measured
+`disclosureTier` in zero artifacts of either entry while eight artifacts differed
+by digest churn. **Do not mint one.** Land the declaration in the packet that
+adopts the version, where it carries a real difference and the affected
+assertions are corrected once against a delta that means something.
+
 ### 5. Every entry reproduces under the profile its own attestation records
 
 Never under today's constant. `reproduceHistoricalApplication`
@@ -160,6 +189,47 @@ non-negotiable:
 The named refusal is a declared limit in the [ADR-0044](ADR-0044-search-capability-is-derived-and-never-silently-empty.md)
 sense: structural absence, declared and observable. Silent inability is what that
 ADR forbids, and an accurate name is what converts one into the other.
+
+### 7. An optional authored key rides the adopted language version — ruled 2026-08-07 on `U5b`'s review
+
+`U5b`'s review arm found that `disclosureTier` is refused only inside the
+`LEGACY_LANGUAGE_VERSION` block of `normalize.ts`, so `v1`, `v2`, `v3` and the
+adopted `v4` all now admit an authored key every one of them previously rejected,
+and read that as retroactive widening of an adopted language.
+
+**The observation is correct as stated, and two further facts bound it.**
+`renderer` and `surfaceRole` sit in that same `v0`-only list one line above, so
+this is the standing pattern rather than a `U5b` regression. The opposite pattern
+also exists: `resolveMatchKeys` refuses *"prior language versions"* for a key
+introduced at language `v2`. The repository has been running both without a rule.
+
+**The rule: an OPTIONAL authored key, additive and never materialized by
+normalization, rides the adopted language version in place.** Reproduction
+recompiles a recorded entry's **stored normalized bytes**, and no recorded
+definition carries the key, so no release root moves. Nor is the change silent —
+the language conformance ledger derives its obligations from
+`VersionedAuthoredApplicationPackage` and minted four for `disclosureTier`, which
+is this repository's own authority for an authored-surface change. A key that
+arrives, is counted, and is exempted on a recorded rationale is versioned by the
+ledger even when it is not versioned by an identifier.
+
+A `v5` cut is refused on the cost this ADR already prices below: an
+application-wide adoption event plus conformance obligations, spent on one
+optional key, and it does not generalise to the next one.
+
+**The asymmetry with §1 is real, and it is bounded rather than dismissed.** The
+profile axis is versioned per change because a compiled byte reaches a recorded
+root. The authored axis is not, because an unused optional key reaches nothing.
+That reasoning fails the moment an authored key becomes **required**, or is
+**materialized** into normalized output — either one changes stored bytes, and
+either one owes a language cut. Both are the conditions `DEFAULT_DISCLOSURE_TIER`
+already documents as measured (`COMPILER_INPUT_NOT_CANONICAL` at
+`decodeSchemaCheck`), so the boundary is observed, not asserted.
+
+**What the finding got right and this ruling does not excuse:** `U5b`'s positive
+fixture is authored at `v3`. A test that proves the rule must be authored at the
+adopted version — a `v3` fixture proves the widening instead of the behaviour, and
+is the only evidence in the packet that anyone widened anything.
 
 ## Why not a `v5` language adoption
 
