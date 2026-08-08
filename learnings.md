@@ -471,3 +471,45 @@ How to apply: when a closed set must exist in two layers, add the deep-equal
 assertion in the same packet. The family map has one and drift fails compilation
 loudly; the posting roles do not, and a release can describe vocabulary the runtime
 cannot execute. Loud duplication is tolerable; unbound duplication is not.
+
+## A language cut silently drops released rules wherever a version is enumerated
+Date: 2026-08-08
+Why: Cutting canonical `v5` moved no release root and broke no byte pin — the gate
+made a `v4` package normalize identically. What it silently dropped were three
+released rules, each found only by executing: `languageHasV2Features` lost the
+resolve-match rule; the predicate kernel's enumerated node versions rejected `v5`,
+making the default `true` precondition unexecutable and declining **every**
+operation in the release; and two gates read `languageVersion` from a dispatch
+alias that always answers `v2`, so they enforced their invariant only when told the
+authored version.
+How to apply: on any version cut, grep for every place the version set is written
+out by hand and derive it from `SUPPORTED_LANGUAGE_VERSIONS` instead. An
+enumeration is a silent opt-out for every version added after it was written, and
+a passing byte pin proves nothing about it — the failure is in behaviour the pin
+never reaches.
+
+## Capture an exit code inside the log, not beside the command
+Date: 2026-08-08
+Why: A lane ran `pnpm test > log; echo "MATRIX_EXIT=$?"` and reported exit 0. `$?`
+held the exit of the redirect-completed `pnpm test`... except the harness reported
+the `echo`'s status, so a run that aborted at `test:integration` with nine steps
+never reached was read as a full pass. There was no basis for a
+`FULL_MATRIX_PASS_SHA` and one was nearly recorded.
+How to apply: append the exit code **inside** the log the matrix writes, and assert
+on that line. A green read from a wrapper's status is a false green in the
+reporting harness, which no gate in the tree can catch — see also
+[[a-probe-s-results-must-be-reproducible]].
+
+## A control can guard the premise of a claim instead of the claim
+Date: 2026-08-08
+Why: `U5b` recorded that `surface-manifest` `minimumVersion` stays 1 *on the
+condition that no tier value ever means "hide"*. Asked to make that condition
+executable, the lane pinned the tier vocabulary to an exact set and printed the
+recorded argument in the failure message — and the orchestrator accepted it as
+closing the condition. It closes the **premise** (a fourth spelling cannot arrive
+silently). **Nothing ever reads `requiredRuntimeCapability.minimumVersion`**, so
+raising it from 1 to 2 survives every control in the packet.
+How to apply: when a claim has the shape *"X holds because Y"*, a control on Y is
+not a control on X. Name both, and assert the one the claim is about. The tell is a
+failure message that mentions a value the assertion never reads — see also
+[[a-fenced-claim-without-a-control-is-never-checked-again]].

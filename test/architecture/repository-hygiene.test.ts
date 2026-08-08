@@ -23,6 +23,7 @@ const suiteDefinitions = [
     discoveryPattern: 'test/unit/**/*.test.ts',
     expectedFiles: [
       'test/unit/canonical-model/diagnostic-ordering.test.ts',
+      'test/unit/canonical-model/disclosure-tier.test.ts',
       'test/unit/canonical-model/negative-contracts.test.ts',
       'test/unit/canonical-model/normalization.test.ts',
       'test/unit/canonical-model/predicate-admission.test.ts',
@@ -43,6 +44,7 @@ const suiteDefinitions = [
     expectedFiles: [
       'test/compiler/compiler-semantic-profile.test.ts',
       'test/compiler/determinism.test.ts',
+      'test/compiler/disclosure-tier-projection.test.ts',
       'test/compiler/freeze-b.test.ts',
       'test/compiler/g2-module-conformance.test.ts',
       'test/compiler/g2-module-storage.test.ts',
@@ -62,6 +64,7 @@ const suiteDefinitions = [
     discoveryPattern: 'test/integration/**/*.test.ts',
     expectedFiles: [
       'test/integration/catalog-runtime.test.ts',
+      'test/integration/disclosure-tier-round-trip.test.ts',
       'test/integration/location-runtime.test.ts',
       'test/integration/module-runtime.test.ts',
       'test/integration/module-storage-transition.test.ts',

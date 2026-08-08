@@ -501,3 +501,77 @@ reader knows which rows in the claim ledger are now reports rather than controls
 **Report mutation results as `N committed, M ad-hoc`, and count only the committed
 ones as evidence.** `U5b` reported *"fifteen"* when four were in the tree, and
 *"eleven"* of that fifteen were thrown away. The wording is the fix.
+
+## A probe's results must be reproducible from its branch — added 2026-08-08
+
+Third instance in one session. `U5b` reported fifteen mutations with four in the
+tree, then reported no committed harness at all. `PS-1` reported companion
+creation, a second-capability posting, a correction and a measured lock order —
+and its first `post()` is **admission-refused before reaching any of them**,
+because the source aggregate's family is not admitted by the registration the
+probe uses first. The same report also said *"I did not run any suite."*
+
+**The rule:** a probe reports **observed** or **expected**, never both under one
+heading, and an observed result must be reproducible by checking out the branch
+and running the named test. If the branch cannot produce it, it is a prediction —
+say so, and say what blocked the run.
+
+**Why this is worse in a probe than in a packet.** A probe's whole product is
+evidence; there is no shipped behaviour to fall back on. An unreproducible probe
+result is not weak evidence, it is **no** evidence, and it costs a full review
+round to discover — as it did here, where a reviewer found the contradiction
+inside the same test body that asserted the pairing must be refused.
+
+**Cheap and sufficient:** run the named test, paste the failure text or the pass
+line, and push the branch. `PS-1` pushed; the reviewer read the source and found
+what execution would have found first.
+
+## Verify the target is on `origin` before writing the prompt — added 2026-08-08
+
+Three review arms in one session hit a target the reviewer could not fetch. Two
+returned findings weighed against *recorded* results rather than verified ones; the
+third returned **BLOCK — REVIEW TARGET UNAVAILABLE** and could judge nothing.
+
+**The orchestrator caused this by instructing rather than checking.** "Push the
+branch" appeared in three prompts; none was followed by
+`git ls-remote origin <branch>`. **A review prompt naming an unfetchable SHA is a
+wasted arm**, and the arm is the scarcest thing in this loop.
+
+**The rule, one command, before every review prompt:**
+
+    git ls-remote origin <branch>   # must print the exact SHA in the prompt
+
+If it is absent and the object exists locally, **push it yourself** — it is
+non-destructive, it backs up the reviewed candidate off-machine as `git-workflow`
+already requires, and it removes a dependency on the lane being awake.
+
+**The unavailable arm was not worthless, which is the reason to record this rather
+than just fix it.** Denied the candidate, the reviewer read `main` for the *class*
+of defect the prompt described and found a real one in the unreadable candidate: a
+hand-written `schemaVersion: 'v4'` that makes any `v5` package carrying a
+legal-entity scope operand fail `CANON_VERSION_MIXED`. **A reviewer told what to
+look for can find it without the diff. That is not a substitute for the diff.**
+
+## Self-chosen mutations are worth less than an independent replay — added 2026-08-08
+
+`U5b`'s lane observed it about its own evidence: *"my ad-hoc mutations were chosen
+by me against gaps I already knew about, and are worth strictly less than an
+independent replay for that reason."*
+
+That is correct, and it is the same argument this file already makes for **fresh
+naive** reviewers, one level down. A lane mutates where it suspects weakness, so
+its table measures the gaps it already found. An independent replay mutates where
+the *source* is weak. On this packet the difference was measured: the lane's own
+table reported no survivors while an independent replay of the same tree found
+**four**.
+
+**So report who chose the mutations, not only how many ran.** `N committed, M
+ad-hoc` gains a third term: **whether the set was chosen by the author or by
+someone else.** A self-chosen table is evidence about the author's model, and
+should be read as such.
+
+**And a named survivor with a reason beats a table claiming none.** `U5b` closed by
+reporting that a lowering mutation ignoring the authored value **survives**, because
+`?? DEFAULT_DISCLOSURE_TIER` makes explicit `always` and absent identical — the
+exact mutation its round trip cannot catch. **A gap you can name is closed
+knowledge; a table with no survivors is usually an unexamined one.**

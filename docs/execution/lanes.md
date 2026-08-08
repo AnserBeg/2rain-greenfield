@@ -445,10 +445,29 @@ WSL cap of **8 processors**, four to seven concurrent sessions put idle in the
 mid-to-high 80s — structurally just under the floor, and the figure the gate
 captures depends on whether other sessions happen to be mid-turn in that instant.
 
-**So an instantaneous idle reading is not the check.** Count live `ccd-cli`
-runtimes before starting a matrix. **Quiesced means every session except the one
-running the matrix is stopped, not merely idle between turns** — a session at rest
-becomes a session at 12% the moment its user types.
+**CORRECTED 2026-08-08 — the first version of this rule was unreachable.** It said
+*"quiesced means every session except the one running the matrix is stopped"*. The
+orchestrator's own session and every other lane's are always live, so that
+condition can never hold and a lane obeying it literally would never run a matrix.
+A lane said so, reasoned past it, and was right — it launched at **6 runtimes**,
+more than the **4** present when the gate declined at 73.9%, and the gate measured
+**98.8%**.
+
+**The check is CPU idle plus whether other worktrees are working, not session
+count.** Before starting a matrix, measure and record:
+
+1. the lock registry — `/tmp/north-star-matrix.lock.holders/*.json` must be empty;
+2. **`cpu_idle_pct` against the 90% floor**, which is the figure the gate itself
+   reads;
+3. **whether any `2rain-greenfield-*` worktree has a process burning CPU** — a
+   `tsc` at 210% or a live compiler suite is what actually moved idle to 73.9%;
+4. the `ccd-cli` count, **as a risk indicator and not a gate** — more sessions
+   means a higher chance one types mid-run, which is exposure to report, not a
+   reason to refuse.
+
+**Take the window when 1-3 are clear, and report 4 with the decision.** If the
+gate then declines, report the figure and hold — do not retry. Waiting for a
+condition that cannot occur costs the packet; one declined run costs one run.
 
 **A packet may NOT freeze with the performance gate recorded indeterminate.**
 AGENTS.md §6 requires the matrix green at the integrated SHA; indeterminate is a
@@ -458,3 +477,39 @@ retrying — which was the right call.
 **Do not retry into a loaded machine.** Report the idle figure and the runtime
 count, and let the orchestrator quiesce. Retrying is a coin flip on other people's
 turn boundaries, and each flip costs a full matrix.
+
+## The orchestrator does not grant the matrix slot — added 2026-08-08
+
+**The lock is the arbiter. The orchestrator is not.**
+
+On 2026-08-08 the orchestrator told three lanes the slot was free, from a model
+rather than a measurement. It was not: `U5b` was **mid-matrix** while a `PS-2`
+worktree typechecked at 210% CPU and a `ps1` worktree ran `subprocess-compile`, at
+load 4.40 on eight processors. A lane took *"the slot is free"* at face value,
+skipped the runtime count this file already requires, and spent a full matrix to
+be told `COMPILE_BUDGET_INDETERMINATE` at 73.9% idle.
+
+**A verbal grant is stale the instant it is given.** It is a measurement taken at
+one moment and relayed across a turn boundary, and the orchestrator is the one
+process on this machine that cannot see the others reliably.
+
+**The mechanism already exists and it works.** `lock-obs` shipped a registry that
+names its holder; the first real use of it read:
+
+    pid 61768 · exclusive · holding · label "u5b-r11" · scripts/run-matrix.sh u5b-r11
+
+That answered in one command what previously cost a 300-second wait ending in a
+bare `TEST_GATE_LOCK_BUSY` naming nobody.
+
+**So, before any matrix or exclusive suite, the lane — not the orchestrator —**
+
+1. reads `/tmp/north-star-matrix.lock.holders/*.json` and reports the holder if any;
+2. counts live `ccd-cli` runtimes;
+3. checks CPU idle against the 90% floor.
+
+**If any of the three says busy, the lane waits and reports the figures.** It does
+not ask permission and does not act on a previous turn's assurance.
+
+**What the orchestrator still owns** is *sequencing intent* — which packet is
+allowed to want the slot next — never the claim that the machine is free at this
+instant. Those are different facts and only one of them is measurable from here.

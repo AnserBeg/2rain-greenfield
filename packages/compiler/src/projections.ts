@@ -1,4 +1,5 @@
 import {
+  DEFAULT_DISCLOSURE_TIER,
   LANGUAGE_VERSION,
   languageHasMaterializedStateFields,
   type NormalizedApplicationPackage,
@@ -12,6 +13,8 @@ import {
   type StorageTargetPayloadV1,
 } from './storage.js';
 import {
+  COMPILER_SEMANTIC_PROFILE_V2_VERSION,
+  COMPILER_SEMANTIC_PROFILE_VERSION,
   FLAT_SURFACE_MANIFEST_PAYLOAD_VERSION,
   GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION,
   HASH_DOMAINS,
@@ -22,6 +25,7 @@ import {
   PROJECTION_FAMILY_IDS,
   VERIFICATION_PLAN_PAYLOAD_VERSION,
   VERIFICATION_SCENARIO_VERSION,
+  type CompilerSemanticProfileVersion,
   type LogicalScope,
   type ProjectionFamilyId,
   type RuntimeCapabilityRequirement,
@@ -127,6 +131,10 @@ export function lowerBaseProjectionPayloads(
   packageRevision: NormalizedApplicationPackage,
   previousStorageTarget: StorageTargetPayloadV1 | null = null,
   verificationPackageRevision: VersionedNormalizedApplicationPackage = packageRevision,
+  // ADR-0047 §1 authorises projection dispatch on this axis; U5b is the first
+  // consumer, so it is also the packet that wires it. Defaults to v0 so a
+  // caller that does not pass one gets the oldest shape rather than the newest.
+  compilerSemanticProfileVersion: CompilerSemanticProfileVersion = COMPILER_SEMANTIC_PROFILE_VERSION,
 ): ProjectionPayloadPlan[] {
   const namespace = packageRevision.package.namespace;
   const packageScope: LogicalScope = {
@@ -150,7 +158,11 @@ export function lowerBaseProjectionPayloads(
         materializedStateFields,
       )
     : null;
-  const surfaceManifest = surfaceManifestPayload(packageRevision, queryById);
+  const surfaceManifest = surfaceManifestPayload(
+    packageRevision,
+    queryById,
+    compilerSemanticProfileVersion,
+  );
   const plans = [
     plan(
       PROJECTION_FAMILY_IDS.semanticModel,
@@ -564,6 +576,7 @@ function operationCatalogPayload(
 function surfaceManifestPayload(
   packageRevision: NormalizedApplicationPackage,
   queryById: Map<string, NormalizedApplicationPackage['queries'][number]>,
+  compilerSemanticProfileVersion: CompilerSemanticProfileVersion,
 ): {
   readonly payload: unknown;
   readonly payloadSchemaVersion:
@@ -593,6 +606,16 @@ function surfaceManifestPayload(
         lifecycle: surface.lifecycle,
         slots: surface.slots.map((slot) => ({
           contentReferenceId: slot.content.targetId,
+          // Gated on the UNADOPTED v2, so this is readable and unemitted: no
+          // recorded entry compiles under v2, and every release root holds.
+          // `?? DEFAULT_DISCLOSURE_TIER` resolves an absent declaration at
+          // projection time rather than by materializing it into the
+          // normalized definition, which is what keeps those roots stable --
+          // the `surfaceRole` precedent one line below does exactly the same.
+          ...(compilerSemanticProfileVersion ===
+          COMPILER_SEMANTIC_PROFILE_V2_VERSION
+            ? { disclosureTier: slot.disclosureTier ?? DEFAULT_DISCLOSURE_TIER }
+            : {}),
           orderKey: slot.orderKey,
           slot: slot.slot,
           slotId: slot.slotId,
@@ -605,6 +628,14 @@ function surfaceManifestPayload(
       })),
     },
     payloadSchemaVersion,
+    // `minimumVersion` stays 1 when the tier is emitted, and that is honest on a
+    // named condition rather than by omission. It declares what a reader must
+    // support to consume the payload SAFELY. `navigation` bumped it to 2 because
+    // a v0 reader silently reconstructs unreachable overflow -- a WRONG render.
+    // A reader that drops the tier renders every slot expanded, which is exactly
+    // what `always` means, so it under-defers rather than concealing. The
+    // condition is that no tier value ever means "hide"; the moment one does,
+    // this needs re-deriving. Recorded, not fixed (U5b review item 3).
     requiredRuntimeCapability: {
       capabilityId: 'northstar.runtime:capability.surface-manifest',
       minimumVersion: navigation ? 2 : 1,

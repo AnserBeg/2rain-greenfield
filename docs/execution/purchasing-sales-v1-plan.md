@@ -455,7 +455,16 @@ so a released purchase order cannot be listed by state. **`PUR-1` cannot ship
 without that.** The rest: release verification cannot populate a field no caller may
 write (`5g3-mount` class, `systemInput` is the precedent); the closed-argument
 fence sits at the interpreter rather than the gateway for O0; the per-entity field
-budget; `apps/web`'s `operationIntent` returns `null` for the effect kind; and the
+budget — **that item is WITHDRAWN 2026-08-08 as a misattribution**, inherited from
+ADR-0050 item 4 and repeated here: there is no per-entity budget, the red was a **wall-clock
+timing gate under load** on a `v3` fixture with zero machines while a container and two
+lanes held the machine, and the real consequence is narrower — `families.fields` is
+package-wide and counted after normalization, so N machines cost N. **ADR-0050's
+companion claim needs the same qualification:** three compiler guards do enforce one
+state field per document, but two read the dispatch alias that always answers `v2`, so
+they enforce it only when told the authored version — invisible until the change was
+gated, which is the argument for gating it. Also owed:
+`apps/web`'s `operationIntent` returns `null` for the effect kind; and the
 misnamed refusal above.
 
 ### 7.12 `received_quantity` is `PUR-2`'s decision, not `PUR-1`'s — ruled 2026-08-08
@@ -511,3 +520,91 @@ made a single union root correct.
 
 **Ruled by `PS-1`, pending review** — ADR-0049 remains unratified and this
 amendment supersedes two of its rulings.
+
+### 7.14 `PS-1` returned BLOCK — the missing concept is a compiled posting family, 2026-08-08
+
+**Neither ADR-0049 nor its `PS-1` amendment is ratified. `PUR-2` remains blocked.**
+
+**The diagnosis is better than the charter that produced it.** §7.10 asked three
+questions — who creates the companion, how invocation identity separates from the
+kernel contract, what shape the dependency contract takes. **They are three views
+of one missing thing.** Verified at source: `inventory-posting-service.ts:609`
+declares `readonly familyId: string`, an **unrestricted string documented as a
+diagnostic name**, and `:2585` does `if (service.sourceAggregateFamilyId ===
+'goods_receipt') return 'goodsReceipt'`. **A magic string selects authorization**,
+and every ruling that wobbled traces to that.
+
+**Consequences the review established, each with a source citation and none needing
+execution:** the probe's first `post()` is admission-refused, so its reported
+companion, correction and reachability results describe runs that could not have
+happened — and the same test body later asserts that exact pairing must be refused;
+the executable command is still `InventoryAdjustmentPostingCommandV1` via
+`postAdjustment()`, so a receipt gets `postingRole: adjustment`, an adjustment
+companion type, adjustment reason/approval semantics, and a Purchasing event named
+`adjustment_posted` — **recreating the very `type=adjustment` /
+`source_type=goodsReceipt` pair A1 claims to structurally forbid**; the new writer
+runs only `if (this.sourceAggregate)`, so **stock count still has no kernel
+writer**, which makes A6 unsatisfiable while A3 leaves Inventory's extension empty;
+the lock edge was **reordered, not widened**; and A4's "lock-and-sum" arm reads and
+updates a **stored counter** — no arm sums movements.
+
+**Withdrawn:** the eight-entry Purchasing root, alongside the 41-entry union root.
+Its preimage contains the stored `received_quantity` transition A4 itself
+withdraws. **§7.12 must no longer say the lock-only arm supported derived
+lock-and-sum — it supported a lock around a stored counter.**
+
+**Upheld:** ruling 2's transaction ownership, narrowly; the discovery that no
+shipped companion mechanism exists; that generic `o0` authoring is the present
+writer; that a union root is the wrong shape; that capability authorization and
+`#post` implementation ownership are distinct; and A6's requirement that one gate
+close both companion classes.
+
+**The replacement, and `PS-2`'s charter: a closed, compiled posting-family profile
+consumed by `#post`.** One declaration per admitted family binding capability ID,
+command schema, posting role, companion transaction type, whether the kernel
+creates a companion, immutable companion provenance, **foreign-source expected
+revision separate from the companion revision**, deterministic source-line and
+companion-line identity, the source lock/transition implementation, exact
+dependency-extension entries and root, and generic reachability policy.
+**`stockCount` and `goodsReceipt` must both be profiles** — that is what makes A6
+satisfiable and A3's empty Inventory extension impossible.
+
+**ADR-0049 is to be rewritten as one authoritative ruling, not a refuted body with
+a superseding appendix.** Four implementation packets must not have to work out
+which sentence still governs; that is a second-authority shape, which this plan
+refuses everywhere else.
+
+### 7.15 `PS-2`'s two construction findings, and the sequencing ruling — 2026-08-08
+
+**`packet/ps-1` carries a deadlock hazard. Do not reuse that branch.** Its lock-edge
+change moved `{header → source}` to `{source → header}` **only for the injected
+port**, while `lockAndAssertStockCountEvidence` kept taking the header first — so a
+receipt posting and a stock count would acquire the same two locks in **opposite
+orders**. `PS-1` reported this as *"widened, never reordered"* and as a safety
+improvement. It is an **ABBA hazard it introduced**. The review caught the mislabel;
+`PS-2` found the deadlock by making the profile uniform, which is the only reason
+the reorder is admissible at all.
+
+**A receipt command is not a kernel command.** Adding it to the kernel union broke
+~25 sites, and that breakage was the finding: a receipt carries no `transactionId`,
+no `sourceType` and no companion revision, because the profile derives them. It
+**normalizes into** a kernel command. `PS-1` conflated the two, which is the
+mechanism by which a receipt acquired adjustment role, adjustment companion type,
+adjustment reason and approval semantics, and an `adjustment_posted` event.
+
+**The origin axis (`authored` | `companion`) makes the reachability requirement
+structural.** `adjustment` and `transfer` declare generic paths admitted, and
+`validateRegistration` refuses a profile whose reachability disagrees with its
+origin. That satisfies §7.14's positive case as a **rule** rather than a second
+test — a hide-only rule passes trivially by deleting every generic path and taking
+ordinary adjustment authoring with it.
+
+**Sequencing ruled: registration sites → runnable vertical → ADR rewrite.** The
+lane proposed ADR first. **Inverted, on this programme's own record.** `PS-0` and
+`PS-1` each ruled before measuring and were refuted — five rulings and six
+rulings respectively, most overturned. **`ADR-0050` shipped a green vertical
+*before* its ruling and survived review intact.** `PS-2`'s own best findings this
+round came from construction, not reasoning. **An ADR written from predictions is
+what `PUR-2` would then build against**, and nothing is reading ADR-0049 today:
+`PUR-2` waits on `PUR-1`, which waits on `5g3-sm-impl`'s review. The slack exists;
+spend it on evidence.
