@@ -435,3 +435,36 @@ Two consequences, both cheap:
 
 **The generative form:** *if the tool that produced this evidence is not in the
 tree, what would a reviewer have to take on trust?*
+
+## Re-tier when the diff outgrows the row — measured 2026-08-08
+
+Tier follows the final diff, which this file already says. **What it did not say is
+that nothing triggers a re-check**, so a row tiered when it was a sentence of scope
+keeps that tier after the packet becomes something else.
+
+`lock-owner` and `matrix-contention` were filed **Mechanical** on a one-line
+scope — *write the holder's pid into the lock file so the next starvation names its
+cause.* The packet that implemented them shipped a 175-line lock wrapper, a
+365-line registry, a new suite runner, changed acquisition modes on every test
+entry point, and a **new invariant**: an inherited claim authorizes work only if
+path, pid, start ticks, liveness, holding state and mode all validate. By this
+file's own rule — *"these stay Critical wherever they live: new or changed
+invariants"* — that is Critical, and it was reviewed as Critical for four rounds.
+
+**The four rounds were not over-spend, and the orchestrator's first reading that
+they were is the error being recorded here.** Round 1 found gates constructing the
+records they then read; round 2 found the lock bypassable through an inherited
+environment variable; round 3 found a reachable path that deletes a previous run's
+evidence before failing to acquire; round 4 found a valid shared request refused
+under a diagnostic naming an exclusive gate. **Three of the four would have
+defeated the packet's stated purpose.**
+
+**The rule:** before writing a review prompt, re-derive the tier **from the frozen
+diff**, and correct the queue row when it disagrees. A row's tier is a forecast; the
+diff is the fact.
+
+**And the cheap self-check the orchestrator skipped:** before concluding a review
+was too expensive, list what it found and ask whether shipping each finding would
+have mattered. If the answer is yes, the cost was the price, not the waste. Round
+4's finding was a **regression introduced by round 3's fix** — which is an argument
+for reviewing corrections, not against.
