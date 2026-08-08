@@ -468,3 +468,23 @@ was too expensive, list what it found and ask whether shipping each finding woul
 have mattered. If the answer is yes, the cost was the price, not the waste. Round
 4's finding was a **regression introduced by round 3's fix** — which is an argument
 for reviewing corrections, not against.
+
+## A fenced claim without a control is never checked again — added 2026-08-08
+
+Review prompts fence settled ground so rounds do not re-litigate it. That is
+correct and it has a cost nobody had named: **fencing removes a claim from review,
+so a claim fenced without a control is a claim no one will ever check.**
+
+`U5b` shipped `parseSlot`'s unknown-tier refusal in round 1. The orchestrator wrote
+*"settled — do not spend effort: `parseSlot`'s round trip and unknown-tier
+refusal"* into **three consecutive review prompts**. On round 4, an ad-hoc mutation
+removing that refusal entirely **went green across every suite** — it had never had
+a control, and three reviewers had been instructed not to look.
+
+**The rule:** before fencing a claim as settled, name the control that holds it.
+If you cannot name one, it is not settled — it is unexamined, and fencing it makes
+that permanent. A `CLOSED` row in a claim ledger is a report of a control, not a
+substitute for one.
+
+**The generative question when writing a fence:** *what would go red if this
+were deleted?*
