@@ -26,6 +26,8 @@ import {
   compileApplication,
 } from '../../packages/compiler/src/index.js';
 
+import { registeredSemanticQueryFromPinnedView } from '../../packages/runtime/src/semantic-query-gateway.js';
+
 import { compilerInput, mustCompile, projectionPayload } from './helpers.js';
 import { V3_AGGREGATE_IDS, v3AggregateModule } from './v3-definition.js';
 import {
@@ -569,3 +571,49 @@ function replaceLanguageVersion(
   }
   return value;
 }
+
+/**
+ * The normalization control above stops at the canonical model. It cannot see
+ * the four version literals that lived in the RUNTIME's reader, and those were
+ * the dangerous half: a v5 scoped query normalized, compiled, and was then
+ * refused by `registeredSemanticQueryFromPinnedView` as a malformed pinned
+ * catalog -- an admitter literal failing closed three layers from its cause.
+ *
+ * So this one presents the COMPILED catalog to the real gateway reader. It is
+ * the shape the earlier control could not reach, and it is why "we added a
+ * control" was not the same as "the path is covered".
+ */
+test('a compiled v5 scoped query is admitted by the runtime catalog reader', () => {
+  const latest = LATEST_LANGUAGE_VERSION;
+  const scoped = replaceLanguageVersion(
+    v4ScopedModule(),
+    LANGUAGE_VERSIONS.v4,
+    latest,
+  ) as Record<string, unknown>;
+  scoped.normalizationProfileVersion = `northstar.normalization/${latest}`;
+
+  const compiled = mustCompile(compilerInput(normalizedBytesFor(scoped)));
+  const catalog = projectionPayload<QueryCatalog>(
+    compiled,
+    PROJECTION_FAMILY_IDS.queryCatalog,
+  );
+  const view = {
+    projections: {
+      query: {
+        familyId: 'northstar.compiler:projection-family.query-catalog',
+        payloadSchemaVersion: 'northstar.query-catalog-payload/v0-provisional',
+        payload: catalog,
+      },
+    },
+  } as unknown as Parameters<typeof registeredSemanticQueryFromPinnedView>[0];
+
+  const registered = registeredSemanticQueryFromPinnedView(
+    view,
+    V4_SCOPE_IDS.rowQuery,
+  );
+  assert.ok(
+    registered,
+    'the runtime must admit a legal scoped query at the newest language version',
+  );
+  assert.equal(registered.legalEntityScope?.cardinality, 'nonEmptySet');
+});

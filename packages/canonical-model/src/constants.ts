@@ -145,11 +145,25 @@ export function languageHasLegalEntityQueryScope(
  * The gate is what keeps the cut free: a v4 package normalizes to byte-identical
  * output before and after this change, which is why every recorded release root
  * still reproduces.
+ *
+ * CUMULATIVE, and it was not. This tested `featureLevel === 'v5'` exactly while
+ * its own comment claimed a v6 cut could not drop the rule -- which was false,
+ * and is the sixth instance of this packet's named finding: a version written by
+ * hand where it was derivable.
+ *
+ * Its siblings above enumerate their levels, which is why each of them had to be
+ * edited by this cut and why one of them was missed. This one asks the ORDERED
+ * supported list instead -- "at or after the version that introduced the rule" --
+ * so a v6 cut inherits it with no edit, and there is nothing to forget.
  */
 export function languageHasMaterializedStateFields(
   languageVersion: CanonicalLanguageVersion,
-): languageVersion is 'v5' {
-  return CANONICAL_LANGUAGE_PROFILES[languageVersion].featureLevel === 'v5';
+): boolean {
+  const introducedAt = SUPPORTED_LANGUAGE_VERSIONS.indexOf(
+    LANGUAGE_VERSIONS.v5,
+  );
+  const candidate = SUPPORTED_LANGUAGE_VERSIONS.indexOf(languageVersion);
+  return introducedAt >= 0 && candidate >= introducedAt;
 }
 
 export function canonicalLanguageProfileFor(

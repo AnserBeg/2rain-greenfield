@@ -1345,10 +1345,7 @@ function assertRowQueryParameters(
     // rejected as an unadmitted parameter type, which names the wrong cause.
     const legalEntityReference =
       parameterType.kind === 'legalEntityReferenceParameterType' &&
-      typeof parameterType.schemaVersion === 'string' &&
-      (SUPPORTED_LANGUAGE_VERSIONS as readonly string[]).includes(
-        parameterType.schemaVersion,
-      );
+      isSupportedNodeVersion(parameterType.schemaVersion);
     if (
       !legalEntityReference &&
       FieldTypeSchema.safeParse(parameterType).success === false
@@ -1375,9 +1372,13 @@ function assertLegalEntityScopeContract(
     ['cardinality', 'kind', 'operand', 'schemaVersion'],
     invalid,
   );
+  // Every version check in this function admits any SUPPORTED version. These
+  // nodes are minted by a package whose version this reader does not choose, so
+  // a literal here refuses a legal later package -- and refuses it HERE, as a
+  // malformed pinned catalog, three layers from the literal that caused it.
   if (
     value.kind !== 'queryLegalEntityScope' ||
-    value.schemaVersion !== 'v4' ||
+    !isSupportedNodeVersion(value.schemaVersion) ||
     !LEGAL_ENTITY_SCOPE_CONTRACT_V1.admittedCardinalities.includes(
       value.cardinality as 'exactlyOne',
     ) ||
@@ -1390,7 +1391,7 @@ function assertLegalEntityScopeContract(
   assertCanonicalId(operand.parameterId, 'parameterId', invalid);
   if (
     operand.kind !== 'queryParameterReference' ||
-    operand.schemaVersion !== 'v4'
+    !isSupportedNodeVersion(operand.schemaVersion)
   ) {
     throw invalid('legal-entity scope operand is invalid');
   }
@@ -1411,10 +1412,23 @@ function assertLegalEntityScopeContract(
     !isRecord(operandParameter.parameterType) ||
     operandParameter.parameterType.kind !==
       'legalEntityReferenceParameterType' ||
-    operandParameter.parameterType.schemaVersion !== 'v4'
+    !isSupportedNodeVersion(operandParameter.parameterType.schemaVersion)
   ) {
     throw invalid('legal-entity scope operand has the wrong parameter type');
   }
+}
+
+/**
+ * One definition of "a node version this runtime admits", derived from the
+ * supported list rather than enumerated. Four checks in this file used a
+ * literal; each was a later package refused under a name describing the wrong
+ * cause.
+ */
+function isSupportedNodeVersion(value: unknown): boolean {
+  return (
+    typeof value === 'string' &&
+    (SUPPORTED_LANGUAGE_VERSIONS as readonly string[]).includes(value)
+  );
 }
 
 function parsePolicyNarrowing(value: unknown): QueryFilterLoweringPlan {

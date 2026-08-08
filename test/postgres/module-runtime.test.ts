@@ -5822,6 +5822,76 @@ test('a materialized state field is selectable, and only a transition writes it'
  *
  * That release is now unbuildable, and the refusal names its subject.
  */
+/**
+ * The language declares TWO permissions for a transition and execution honours
+ * one. The gateway authorizes `definition.permissionId` -- the OPERATION's --
+ * so a transition declaring a restricted permission under an operation
+ * declaring a permissive one would execute on the permissive one, and the
+ * declaration a reader trusts is the one ignored.
+ *
+ * BOTH halves are load-bearing. Without the second, the first is satisfiable by
+ * refusing every transition, which would pass a mismatch control while
+ * destroying the feature. The vertical above could not observe any of this:
+ * it declares one permission id in both positions, so its policy cannot tell
+ * the two declarations apart.
+ */
+test('a transition permission that disagrees with its operation is refused by name', () => {
+  const namespace = 'northstar.smpermmismatch';
+  const definition = transitionModuleDefinition(namespace) as {
+    operations: Array<Record<string, unknown>>;
+    permissions: Array<Record<string, unknown>>;
+  } & Record<string, unknown>;
+
+  // A second, genuinely different permission -- the shape a real module has
+  // when a release is restricted and ordinary editing is not.
+  const restricted = `${namespace}:permission.master_release_restricted`;
+  definition.permissions.push({
+    action: 'transition',
+    kind: 'permissionDefinition',
+    label: 'master release restricted',
+    permissionId: restricted,
+    resource: {
+      kind: 'entityReference',
+      schemaVersion: 'v5',
+      targetId: `${namespace}:entity.master`,
+    },
+    schemaVersion: 'v5',
+  });
+  const machine = (definition.stateMachines as Array<Record<string, unknown>>)[0]!;
+  (machine.transitions as Array<Record<string, unknown>>)[0]!.permission = {
+    kind: 'permissionReference',
+    schemaVersion: 'v5',
+    targetId: restricted,
+  };
+
+  const result = compileApplication(moduleInput(definition));
+  assert.equal(result.status, 'failed');
+  assert.deepEqual(
+    result.diagnostics
+      .filter(
+        (entry) => entry.code === 'COMPILER_TRANSITION_PERMISSION_MISMATCH',
+      )
+      .map((entry) => ({ path: entry.path, subjectId: entry.subjectId })),
+    [
+      {
+        path: '$.operations.permission',
+        subjectId: `${namespace}:operation.master_release`,
+      },
+    ],
+  );
+});
+
+test('a transition whose permissions agree still compiles', () => {
+  const result = compileApplication(
+    moduleInput(transitionModuleDefinition('northstar.smpermmatch')),
+  );
+  assert.equal(
+    result.status,
+    'compiled',
+    `matched permissions must still compile: ${JSON.stringify(result.diagnostics)}`,
+  );
+});
+
 test('below v5 a record transition is refused by name, at compile time', () => {
   const definition = transitionModuleDefinition('northstar.smtransitionv4', 'v4');
   const result = compileApplication(moduleInput(definition));

@@ -1266,6 +1266,43 @@ export function validateModuleConformance(
         ),
       );
     }
+    // The language declares TWO permissions for a transition -- the
+    // operation's and the transition's (`schemas.ts:634`) -- and execution
+    // honours exactly one: the gateway authorizes `definition.permissionId`,
+    // which is the operation's. A transition declaring `release_restricted`
+    // under an operation declaring `edit_basic` would therefore execute on
+    // `edit_basic`, and the declaration a reader trusts is the one ignored.
+    // That is this packet's own defect class one field down, so it is refused
+    // here rather than carried.
+    //
+    // EQUALITY, not a second runtime decision. `transitionStateEffect` holds
+    // exactly one transition reference, so the two are 1:1 today and one
+    // authorization is the whole truth. When an effect carries more than one
+    // transition that stops being true -- and this rule fails loudly at that
+    // moment, which is the trigger to revisit rather than a silent
+    // generalization made in advance.
+    if (
+      operation.effect.kind === 'transitionStateEffect' &&
+      'transition' in operation.effect
+    ) {
+      const carried = operation.effect.transition.targetId;
+      const transition = packageRevision.stateMachines
+        .flatMap((machine) => machine.transitions)
+        .find((candidate) => candidate.transitionId === carried);
+      if (
+        transition &&
+        transition.permission.targetId !== operation.permission.targetId
+      ) {
+        diagnostics.push(
+          compilerDiagnostic(
+            'COMPILER_TRANSITION_PERMISSION_MISMATCH',
+            'wholeModelValidation',
+            '$.operations.permission',
+            operation.operationId,
+          ),
+        );
+      }
+    }
   }
   for (const field of packageRevision.fields) {
     if (

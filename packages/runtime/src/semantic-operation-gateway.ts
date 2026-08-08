@@ -1116,14 +1116,30 @@ function assertOperationDefinition(
       ],
       invalid,
     );
-    if (value.tier !== 'o0' || !isRecord(value.effect.entity)) {
+    // Every nested reference is checked to the same depth the record arm
+    // below checks its entity. Leaving `schemaVersion` untyped and the two
+    // references unshaped admitted `{ ...valid, schemaVersion: 7,
+    // transition: null }`: the flattened ids still parsed, so it EXECUTED --
+    // a malformed artifact reaching the writer because the fence read only
+    // the fields it happened to use.
+    if (
+      value.tier !== 'o0' ||
+      typeof value.effect.schemaVersion !== 'string' ||
+      !isRecord(value.effect.entity) ||
+      !isRecord(value.effect.transition)
+    ) {
       throw invalid('pinned transition operation effect is unsupported');
     }
-    assertCanonicalId(
-      (value.effect.entity as { targetId: unknown }).targetId,
-      'effect.entity.targetId',
-      invalid,
-    );
+    for (const [reference, path] of [
+      [value.effect.entity, 'effect.entity'],
+      [value.effect.transition, 'effect.transition'],
+    ] as const) {
+      assertExactKeys(reference, ['kind', 'schemaVersion', 'targetId'], invalid);
+      assertCanonicalId(reference.targetId, `${path}.targetId`, invalid);
+      if (typeof reference.schemaVersion !== 'string') {
+        throw invalid(`${path}.schemaVersion must be a string`);
+      }
+    }
     assertCanonicalId(value.effect.stateFieldId, 'effect.stateFieldId', invalid);
     assertCanonicalId(value.effect.fromStateId, 'effect.fromStateId', invalid);
     assertCanonicalId(value.effect.toStateId, 'effect.toStateId', invalid);

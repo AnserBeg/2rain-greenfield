@@ -1979,60 +1979,98 @@ function validateAuthoredDerivedStateFields(
  * - `orderKey: 0` places state ahead of every authored field, which start at
  *   10 by convention, and is stable because a machine owns exactly one.
  */
+interface StateMachineForMaterialization {
+  readonly entity: unknown;
+  readonly lifecycle: string;
+  readonly initialState: { readonly targetId: string };
+  readonly schemaVersion: string;
+  readonly stateField: { readonly fieldId: string };
+  readonly states: readonly {
+    readonly label: string;
+    readonly orderKey: number;
+    readonly stateId: string;
+  }[];
+}
+
 function materializeStateFields(packageRevision: {
   readonly fields: readonly { readonly fieldId: string }[];
-  readonly stateMachines: readonly {
-    readonly entity: unknown;
-    readonly lifecycle: string;
-    readonly initialState: { readonly targetId: string };
-    readonly schemaVersion: string;
-    readonly stateField: { readonly fieldId: string };
-    readonly states: readonly {
-      readonly label: string;
-      readonly orderKey: number;
-      readonly stateId: string;
-    }[];
-  }[];
+  readonly stateMachines: readonly StateMachineForMaterialization[];
 }): VersionedNormalizedApplicationPackage['fields'] {
-  const alreadyMaterialized = new Set(
-    packageRevision.fields.map((field) => field.fieldId),
+  const existing = new Map(
+    packageRevision.fields.map((field) => [field.fieldId, field]),
   );
+  const diagnostics: CanonicalDiagnostic[] = [];
+  const derived = packageRevision.stateMachines.map((machine) =>
+    derivedStateFieldDefinition(machine),
+  );
+  packageRevision.stateMachines.forEach((machine, index) => {
+    const collision = existing.get(machine.stateField.fieldId);
+    if (collision === undefined) return;
+    // Skipping on a bare ID match lets an AUTHORED field of any shape occupy
+    // the state carrier: a required text field with the derived id and a
+    // matching default suppresses generation and counterfeits the column, and
+    // every downstream control still passes because the id is present. The ID
+    // ownership this cut moved out of `stateMachines` in `collectIds` rests on
+    // the collision BEING the derived field, so that is what is checked --
+    // kind, entity, options, default and all.
+    if (canonicalize(collision) !== canonicalize(derived[index])) {
+      diagnostics.push(
+        diagnostic(
+          'CANON_STATE_FIELD_COLLISION',
+          '$.fields',
+          "a machine's state field identity is owned by the machine and materialized from it",
+          'remove the authored field carrying the derived state identity',
+          machine.stateField.fieldId,
+        ),
+      );
+    }
+  });
+  if (diagnostics.length > 0) throw new CanonicalModelError(diagnostics);
   return packageRevision.stateMachines
-    .filter((machine) => !alreadyMaterialized.has(machine.stateField.fieldId))
-    .map(
-      (machine) =>
-        ({
-          classification: 'internal',
-          collation: 'binary',
-          defaultSemantics: 'declaredDefault',
-          defaultValue: {
-            kind: 'textValue',
-            schemaVersion: machine.schemaVersion,
-            value: machine.initialState.targetId,
-          },
-          entity: machine.entity,
-          fieldId: machine.stateField.fieldId,
-          fieldType: {
-            kind: 'enumFieldType',
-            options: machine.states.map((state) => ({
-              kind: 'enumOption',
-              label: state.label,
-              optionId: state.stateId,
-              orderKey: state.orderKey,
-              schemaVersion: machine.schemaVersion,
-            })),
-            schemaVersion: machine.schemaVersion,
-          },
-          kind: 'fieldDefinition',
-          label: 'State',
-          lifecycle: machine.lifecycle,
-          orderKey: 0,
-          presence: 'required',
-          reportable: true,
-          schemaVersion: machine.schemaVersion,
-          searchable: false,
-        }) as unknown as VersionedNormalizedApplicationPackage['fields'][number],
-    );
+    .filter((machine) => !existing.has(machine.stateField.fieldId))
+    .map((machine) => derivedStateFieldDefinition(machine));
+}
+
+/**
+ * ONE definition, used both to generate the field and to check a colliding
+ * authored field against it. Two copies of this shape would drift, and a guard
+ * that drifts from what it guards is worse than no guard.
+ */
+function derivedStateFieldDefinition(
+  machine: StateMachineForMaterialization,
+): VersionedNormalizedApplicationPackage['fields'][number] {
+  return {
+    classification: 'internal',
+    collation: 'binary',
+    defaultSemantics: 'declaredDefault',
+    defaultValue: {
+      kind: 'textValue',
+      schemaVersion: machine.schemaVersion,
+      value: machine.initialState.targetId,
+    },
+    entity: machine.entity,
+    fieldId: machine.stateField.fieldId,
+    fieldType: {
+      kind: 'enumFieldType',
+      options: machine.states.map((state) => ({
+        kind: 'enumOption',
+        label: state.label,
+        optionId: state.stateId,
+        orderKey: state.orderKey,
+        schemaVersion: machine.schemaVersion,
+      })),
+      schemaVersion: machine.schemaVersion,
+    },
+    kind: 'fieldDefinition',
+    label: 'State',
+    lifecycle: machine.lifecycle,
+    orderKey: 0,
+    presence: 'required',
+    reportable: true,
+    schemaVersion: machine.schemaVersion,
+    searchable: false,
+  } as unknown as VersionedNormalizedApplicationPackage['fields'][number];
+
 }
 
 function derivedStateField(

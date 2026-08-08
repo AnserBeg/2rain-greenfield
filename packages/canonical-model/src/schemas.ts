@@ -144,7 +144,7 @@ export type PredicateExpression = PredicateExpressionShape<
   CanonicalScalar
 >;
 export type PredicateExpressionV3 = PredicateExpressionShape<
-  'v3' | 'v4',
+  'v3' | 'v4' | 'v5',
   V3PredicateOperator,
   CanonicalScalar | QueryParameterReference
 >;
