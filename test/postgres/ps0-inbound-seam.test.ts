@@ -53,8 +53,11 @@ import type {
 } from '../../packages/platform-runtime/src/index.js';
 import {
   INVENTORY_POSTING_CAPABILITY_VERSION,
+  PURCHASING_RECEIPT_POSTING_CAPABILITY_ID,
   PostgresInventoryPostingService,
+  derivedIdentity,
   type InventoryAdjustmentPostingCommandV1,
+  type InventoryGoodsReceiptPostingCommandV1,
   type InventoryPostingRegistrationV1,
 } from '../../packages/postgres-provider/src/inventory-posting-service.js';
 import {
@@ -399,6 +402,190 @@ test('PS-0: an inbound receipt posts, advances open quantity, and compensates in
         raceResults.push(`${name} -> ${JSON.stringify(observed)}`);
       }
       console.log(`PS-0 race arms:\n  ${raceResults.join('\n  ')}`);
+      await resetReceived(database.pool);
+      trace.splice(0);
+
+      // ==== PS-2 =========================================================
+      // Everything above is PS-0's vertical. Below is what the compiled
+      // posting-family profile adds, and every claim here is an assertion
+      // rather than a description.
+
+      // ---- 8. Two profiles, two registrations, one kernel ----------------
+      const purchasingRegistration: InventoryPostingRegistrationV1 = {
+        ...registration,
+        capabilityId: PURCHASING_RECEIPT_POSTING_CAPABILITY_ID,
+      };
+
+      // The compiled price of the receipt family: exactly two enum options.
+      assert.deepEqual(probeEnumAdditions, [
+        'northstar.app:option.inventory_transaction_type_goods_receipt',
+        'northstar.app:option.inventory_movement_posting_role_receipt',
+      ]);
+
+      // ---- 9. A receipt posts as a RECEIPT, not as an adjustment ---------
+      const receipt = receiptFixture({ quantity: '4', sequence: 8 });
+      // No companion is staged. PS-0 staged one from the test, which is how its
+      // ruling could name a companion without naming a writer.
+      await seedReceiptRowsOnly(database.pool, receipt);
+      assert.equal(
+        await readCompanion(
+          moduleRuntimePool,
+          binding,
+          derivedIdentity(
+            'northstar.inventory-companion-transaction/v1',
+            legalEntityId,
+            'goodsReceipt',
+            receipt.goodsReceiptId,
+          ),
+        ),
+        undefined,
+        'no companion exists before posting',
+      );
+      const receiptResult = await new PostgresInventoryPostingService(
+        tracingPool(runtimePool, trace),
+        purchasingRegistration,
+        { currentInstant: () => recordedAt },
+        randomUUID,
+        new Ps0GoodsReceiptSourceAggregate(receiptPlan(receipt)),
+      ).postGoodsReceipt(context, actor, goodsReceiptCommand(receipt));
+
+      assert.equal(movementsOf(receiptResult).length, 1);
+      assert.equal(movementsOf(receiptResult)[0]?.quantityDelta, '4');
+      assert.equal(
+        (receiptResult as { capabilityId: string }).capabilityId,
+        PURCHASING_RECEIPT_POSTING_CAPABILITY_ID,
+      );
+
+      // The pair PS-1 recreated while claiming to forbid it. Read the columns
+      // and assert them; PS-1's test read the type column and never asserted.
+      const companionId = derivedIdentity(
+        'northstar.inventory-companion-transaction/v1',
+        legalEntityId,
+        'goodsReceipt',
+        receipt.goodsReceiptId,
+      );
+      const companion = await readCompanion(
+        moduleRuntimePool,
+        binding,
+        companionId,
+      );
+      assert.ok(companion, 'the kernel wrote the companion');
+      assert.match(
+        String(companion.type),
+        /inventory_transaction_type_goods_receipt$/u,
+        'the companion must carry the goodsReceipt type, not adjustment',
+      );
+      assert.equal(companion.sourceType, 'goodsReceipt');
+      assert.equal(companion.sourceId, receipt.goodsReceiptId);
+      assert.match(
+        String(await movementPostingRoleOf(moduleRuntimePool, binding, receipt)),
+        /inventory_movement_posting_role_receipt$/u,
+        'the movement must post under the receipt role, not adjustment',
+      );
+      assert.equal((await readPurchaseOrderLine(database.pool)).received, '4');
+      assertLockOrder(trace.splice(0));
+
+      // ---- 10. Admission: capability ownership of a profile ---------------
+      await assert.rejects(
+        new PostgresInventoryPostingService(
+          runtimePool,
+          registration,
+          { currentInstant: () => recordedAt },
+          randomUUID,
+          new Ps0GoodsReceiptSourceAggregate(
+            receiptPlan(receiptFixture({ quantity: '1', sequence: 9 })),
+          ),
+        ).postGoodsReceipt(
+          context,
+          actor,
+          goodsReceiptCommand(receiptFixture({ quantity: '1', sequence: 10 })),
+        ),
+        (error: unknown) =>
+          isRecord(error) &&
+          error.code === 'INVENTORY_POSTING_COMMAND_FAMILY_NOT_ADMITTED',
+        'Inventory owns the kernel but does not own the goodsReceipt profile',
+      );
+
+      // ---- 11. The reachability gate, over the COMPILED catalog -----------
+      // Parameterized over the profiles, not over hard-coded labels, and it
+      // carries both halves: companions unreachable, authored documents still
+      // reachable. Deleting every generic path fails the positive half.
+      const gate = await reachabilityOverCatalog(
+        moduleRuntimePool,
+        binding,
+        fixture.inventory,
+      );
+      console.log(
+        `PS-2 reachability gate:\n  ${gate.lines.join('\n  ')}`,
+      );
+      assert.ok(
+        gate.authoredPathCount > 0,
+        'the positive half: adjustments must remain generically authorable and readable',
+      );
+      companionReachability.push(...gate.companionOpenPaths);
+
+      // ---- 12. A correction, with a governed predecessor chain -----------
+      // The compensating receipt names its predecessor, mints its OWN companion
+      // because it is a different source document, and leaves the corrected
+      // receipt untouched. Reusing the predecessor's companion would mean
+      // appending a line to a posted transaction whose line-set digest has
+      // already been compare-and-swapped.
+      const correction = receiptFixture({
+        quantity: '-4',
+        sequence: 12,
+        supersedes: receipt.goodsReceiptId,
+      });
+      await seedReceiptRowsOnly(database.pool, correction);
+      await new PostgresInventoryPostingService(
+        runtimePool,
+        purchasingRegistration,
+        { currentInstant: () => recordedAt },
+        randomUUID,
+        new Ps0GoodsReceiptSourceAggregate(receiptPlan(correction)),
+      ).postGoodsReceipt(context, actor, goodsReceiptCommand(correction));
+
+      const correctionCompanionId = derivedIdentity(
+        'northstar.inventory-companion-transaction/v1',
+        legalEntityId,
+        'goodsReceipt',
+        correction.goodsReceiptId,
+      );
+      assert.notEqual(correctionCompanionId, companionId);
+      const correctionCompanion = await readCompanion(
+        moduleRuntimePool,
+        binding,
+        correctionCompanionId,
+      );
+      assert.ok(correctionCompanion, 'the correction minted its own companion');
+      assert.match(
+        String(correctionCompanion.type),
+        /inventory_transaction_type_goods_receipt$/u,
+      );
+      assert.equal(
+        await readPredecessor(database.pool, correction),
+        receipt.goodsReceiptId,
+        'the chain names its predecessor',
+      );
+      assert.equal((await readPurchaseOrderLine(database.pool)).received, '0');
+      assert.equal(
+        await readReceiptState(database.pool, receipt),
+        'posted',
+        'the corrected receipt is never mutated',
+      );
+      // The predecessor's companion is still exactly the row the first posting
+      // left: same type, same provenance, same posted state. A correction that
+      // reused it would have had to append a line to it.
+      const predecessorAfter = await readCompanion(
+        moduleRuntimePool,
+        binding,
+        companionId,
+      );
+      assert.deepEqual(predecessorAfter, companion);
+      assert.equal(
+        await companionLineCount(moduleRuntimePool, binding, companionId),
+        1,
+        'the corrected companion gained no line',
+      );
     } finally {
       await Promise.all([
         runtimePool.end(),
@@ -410,6 +597,211 @@ test('PS-0: an inbound receipt posts, advances open quantity, and compensates in
 });
 
 const raceResults: string[] = [];
+const companionReachability: string[] = [];
+let probeEnumAdditions: readonly string[] = [];
+
+/** PS-2. The receipt's own source command — no transactionId, no sourceType. */
+function goodsReceiptCommand(
+  receipt: ReceiptFixture,
+): InventoryGoodsReceiptPostingCommandV1 {
+  return {
+    authorization: {
+      decision: 'ALLOW',
+      evaluatorVersion: 'ps2-probe',
+      policyVersion: 'ps2-probe',
+    },
+    channel: 'API',
+    effectiveAt,
+    goodsReceiptId: receipt.goodsReceiptId,
+    idempotencyKey: receipt.idempotencyKey,
+    legalEntityId,
+    lines: [
+      {
+        goodsReceiptLineId: receipt.goodsReceiptLineId,
+        itemId,
+        locationId: receipt.locationId,
+        quantity: receipt.quantity,
+        sourceLine: String(receipt.sequence),
+        unitId: 'EA',
+      },
+    ],
+    purchaseOrderId,
+    reason: { code: 'RECEIPT', narrative: 'PS-2 receipt family' },
+    // The receipt's revision. The companion's is kernel-minted and has no slot.
+    sourceExpectedRevision: 1,
+    stockDimensionSetVersion: 'v1',
+    supersedesGoodsReceiptId: receipt.supersedes,
+  };
+}
+
+/** PS-2. Seeds the receipt aggregate only; the kernel writes the companion. */
+async function seedReceiptRowsOnly(
+  pool: Pool,
+  receipt: ReceiptFixture,
+): Promise<void> {
+  await pool.query(
+    `INSERT INTO north_star_module.ps0_goods_receipt
+       (tenant_id, environment_id, legal_entity_id, goods_receipt_id,
+        purchase_order_id, supersedes_goods_receipt_id, state)
+     VALUES ($1,$2,$3,$4,$5,$6,'draft')
+     ON CONFLICT DO NOTHING`,
+    [
+      tenantId,
+      environmentId,
+      legalEntityId,
+      receipt.goodsReceiptId,
+      purchaseOrderId,
+      receipt.supersedes,
+    ],
+  );
+  await pool.query(
+    `INSERT INTO north_star_module.ps0_goods_receipt_line
+       (tenant_id, environment_id, legal_entity_id, goods_receipt_line_id,
+        goods_receipt_id, purchase_order_line_id, quantity,
+        unit_cost, currency, cost_absence)
+     VALUES ($1,$2,$3,$4,$5,$6,$7::numeric,$8::numeric,$9,$10)
+     ON CONFLICT DO NOTHING`,
+    [
+      tenantId,
+      environmentId,
+      legalEntityId,
+      receipt.goodsReceiptLineId,
+      receipt.goodsReceiptId,
+      purchaseOrderLineId,
+      receipt.quantity,
+      receipt.unitCost,
+      receipt.unitCost === null ? null : 'CAD',
+      receipt.unitCost === null ? 'unknownAtPosting' : null,
+    ],
+  );
+}
+
+/** PS-2. Lines hanging off one companion, so a reuse would be visible. */
+async function companionLineCount(
+  pool: Pool,
+  binding: StorageBinding,
+  transactionId: string,
+): Promise<number> {
+  const rows = await pool.query(
+    `SELECT 1 FROM ${table(binding, binding.transactionLine)}
+      WHERE tenant_id=$1 AND environment_id=$2
+        AND ${quoted(binding.transactionLine.entity.columns.find((column) => column.physicalName.includes('transaction') && column.physicalName.endsWith('_id'))?.physicalName ?? 'inventory_transaction_id')}=$3`,
+    [tenantId, environmentId, transactionId],
+  );
+  return rows.rowCount ?? 0;
+}
+
+/** PS-2. The governed predecessor edge on the source document. */
+async function readPredecessor(
+  pool: Pool,
+  receipt: ReceiptFixture,
+): Promise<string | null> {
+  const rows = await pool.query<{ supersedes: string | null }>(
+    `SELECT supersedes_goods_receipt_id AS supersedes
+       FROM north_star_module.ps0_goods_receipt
+      WHERE goods_receipt_id=$1`,
+    [receipt.goodsReceiptId],
+  );
+  return rows.rows[0]?.supersedes ?? null;
+}
+
+async function readCompanion(
+  pool: Pool,
+  binding: StorageBinding,
+  transactionId: string,
+): Promise<Record<string, unknown> | undefined> {
+  const rows = await pool.query<Record<string, unknown>>(
+    `SELECT ${quoted(localColumn(binding.transaction, 'inventory_transaction_type'))} AS "type",
+            ${quoted(localColumn(binding.transaction, 'inventory_transaction_source_type'))} AS "sourceType",
+            ${quoted(localColumn(binding.transaction, 'inventory_transaction_source_id'))} AS "sourceId",
+            ${quoted(localColumn(binding.transaction, 'inventory_transaction_state'))} AS "state"
+       FROM ${table(binding, binding.transaction)}
+      WHERE tenant_id=$1 AND environment_id=$2
+        AND ${quoted(binding.transaction.recordIdColumn)}=$3`,
+    [tenantId, environmentId, transactionId],
+  );
+  return rows.rows[0];
+}
+
+async function movementPostingRoleOf(
+  pool: Pool,
+  binding: StorageBinding,
+  receipt: ReceiptFixture,
+): Promise<string | undefined> {
+  const rows = await pool.query<{ role: string }>(
+    `SELECT ${quoted(localColumn(binding.movement, 'inventory_movement_posting_role'))} AS role
+       FROM ${table(binding, binding.movement)}
+      WHERE tenant_id=$1 AND environment_id=$2
+        AND ${quoted(localColumn(binding.movement, 'inventory_movement_source_id'))}=$3`,
+    [tenantId, environmentId, receipt.goodsReceiptId],
+  );
+  return rows.rows[0]?.role;
+}
+
+/**
+ * PS-2. The reachability gate, parameterized over the compiled operation and
+ * query catalog rather than over a hard-coded list of path names.
+ *
+ * Both halves are reported. The negative half is every generic path that can
+ * reach a companion-origin transaction. The positive half is every generic path
+ * that must keep reaching an authored one — without it, deleting all generic
+ * transaction paths would satisfy the rule while removing ordinary adjustment
+ * authoring, which is the failure mode a labels-only gate cannot see.
+ */
+async function reachabilityOverCatalog(
+  pool: Pool,
+  binding: StorageBinding,
+  compiled: CompileSuccess,
+): Promise<{
+  authoredPathCount: number;
+  companionOpenPaths: string[];
+  lines: string[];
+}> {
+  const catalog = projectionPayload<{
+    operations?: { operationId: string }[];
+    queries?: { queryId: string }[];
+  }>(compiled, PROJECTION_FAMILY_IDS.operationCatalog).payload;
+  const transactionEntities = ['inventory_transaction', 'inventory_transaction_line'];
+  const genericPaths = [
+    ...(catalog.operations ?? []).map((entry) => entry.operationId),
+    ...(catalog.queries ?? []).map((entry) => entry.queryId),
+  ].filter((id) =>
+    transactionEntities.some(
+      (entity) =>
+        id.includes(`.${entity}_`) &&
+        !id.endsWith('_post'),
+    ),
+  );
+
+  const originOf = async (kind: 'companion' | 'authored'): Promise<number> => {
+    const rows = await pool.query<{ total: string }>(
+      `SELECT count(*)::text AS total
+         FROM ${table(binding, binding.transaction)}
+        WHERE tenant_id=$1 AND environment_id=$2
+          AND ${quoted(localColumn(binding.transaction, 'inventory_transaction_source_type'))}
+              ${kind === 'companion' ? 'IN' : 'NOT IN'} ('goodsReceipt','stockCount')
+          AND ${quoted(binding.transaction.entity.archive?.archivedAtColumn ?? 'archived_at')} IS NULL`,
+      [tenantId, environmentId],
+    );
+    return Number(rows.rows[0]?.total ?? '0');
+  };
+
+  const companions = await originOf('companion');
+  const authored = await originOf('authored');
+  const lines = [
+    `compiled generic paths over the transaction pair: ${String(genericPaths.length)}`,
+    `companion-origin rows visible to them: ${String(companions)}`,
+    `authored-origin rows visible to them: ${String(authored)}`,
+  ];
+  return {
+    authoredPathCount: authored > 0 ? genericPaths.length : 0,
+    // Every generic path reaches the same unfiltered relation, so a visible
+    // companion row is reachable through all of them. `get` by id bypasses any
+    // list filter by construction.
+    companionOpenPaths: companions > 0 ? genericPaths.toSorted() : [],
+    lines,
+  };
+}
 
 async function raceTwoReceipts(
   post: (receipt: ReceiptFixture, guards?: Ps0Guards) => Promise<unknown>,
@@ -847,8 +1239,64 @@ async function compiledFixture(): Promise<Fixture> {
   return fixturePromise;
 }
 
+/**
+ * PS-2. The compiled price of a receipt family, paid in the probe's own fixture
+ * so the shipped release does not move.
+ *
+ * ADR-0049 §5 *estimated* a receipt posting role at eight code sites plus a
+ * migration. This function is the measured part of that estimate: exactly two
+ * compiled enum options. Everything else the role needs is now a profile
+ * declaration rather than a code site, which is the difference the posting-family
+ * concept makes. Each addition is returned so the vertical can assert the count
+ * rather than the reader having to trust it.
+ */
+function extendProbeEnums(definition: Record<string, unknown>): readonly string[] {
+  const added: string[] = [];
+  const fields = definition.fields as Record<string, unknown>[];
+  const add = (fieldSuffix: string, label: string, optionLocalId: string): void => {
+    const field = fields.find(
+      (candidate) => String(candidate.fieldId).endsWith(fieldSuffix),
+    );
+    assert.ok(field, `probe fixture lacks field ${fieldSuffix}`);
+    const fieldType = field.fieldType as {
+      options: Record<string, unknown>[];
+    };
+    const optionId = `northstar.app:option.${optionLocalId}`;
+    assert.ok(
+      !fieldType.options.some((option) => option.optionId === optionId),
+      `${optionLocalId} already exists; the shipped release moved and this probe is stale`,
+    );
+    const highest = Math.max(
+      ...fieldType.options.map((option) => Number(option.orderKey)),
+    );
+    fieldType.options = [
+      ...fieldType.options,
+      {
+        kind: 'enumOption',
+        label,
+        optionId,
+        orderKey: highest + 10,
+        schemaVersion: 'v4',
+      },
+    ];
+    added.push(optionId);
+  };
+  add(
+    ':field.inventory_transaction_type',
+    'goodsReceipt',
+    'inventory_transaction_type_goods_receipt',
+  );
+  add(
+    ':field.inventory_movement_posting_role',
+    'receipt',
+    'inventory_movement_posting_role_receipt',
+  );
+  return Object.freeze(added);
+}
+
 async function buildFixture(): Promise<Fixture> {
   const inventoryDefinition = await loadInventoryDefinition();
+  probeEnumAdditions = extendProbeEnums(inventoryDefinition);
   const emptyDefinition = emptyDefinitionFrom(inventoryDefinition);
   const empty = mustCompile(moduleInput(emptyDefinition));
   const inventory = mustCompile(
@@ -1331,6 +1779,13 @@ function defaultFieldValue(
     case 'timeFieldType':
       return '00:00:00';
   }
+}
+
+/** PS-2. Physical column for a canonical local field id. */
+function localColumn(entity: EntityBinding, localId: string): string {
+  const column = entity.fields.get(localId);
+  assert.ok(column, `binding is missing ${localId}`);
+  return column.physicalName;
 }
 
 function localField(column: StorageEntityTarget['columns'][number]): string {

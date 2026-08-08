@@ -867,10 +867,10 @@ export interface InventorySourceAggregateStepV1 {
    * validate it against the persisted state, and return a digest of everything
    * it validated. No caller preflight may substitute for this.
    *
-   * PS-1 moves this call *ahead* of the companion header lock, so the source is
-   * locked before the companion is derived from it. Lock order is strictly
-   * widened, never reordered: stock identities, request key, source aggregate,
-   * companion header.
+   * PS-2 calls this *ahead* of the companion header lock, so the source is
+   * locked before the companion is derived from it. That is a **reorder** of the
+   * {companion header, source} edge, not a widening — no edge is added — and a
+   * reorder is only sound if it is uniform across every family. See `#post`.
    */
   lockAndValidate(
     client: PoolClient,
@@ -1004,6 +1004,11 @@ export class PostgresInventoryPostingService {
       );
     }
     const { command } = posting;
+    // A stock count names one location for the whole session; an adjustment
+    // names one per line. Both reach the companion as a line-level location,
+    // because that is what `inventory_transaction_line` stores.
+    const commandLocationId =
+      'locationId' in command ? command.locationId : null;
     return Object.freeze({
       effectiveAt: command.effectiveAt,
       lines: Object.freeze(
@@ -1020,7 +1025,7 @@ export class PostgresInventoryPostingService {
               ? line.locationId
               : 'toLocationId' in line
                 ? line.toLocationId
-                : null;
+                : commandLocationId;
           return Object.freeze({
             fromLocationId: negative ? locationId : null,
             itemId: line.itemId,
