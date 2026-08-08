@@ -61,9 +61,113 @@ export interface InventoryRecordedAtAuthority {
   currentInstant(): string;
 }
 
+/**
+ * PS-1 PROBE ONLY. The second invocation capability, over the same kernel.
+ * Purchasing's authority is its own; the kernel's contract is not.
+ */
+export const PURCHASING_RECEIPT_POSTING_CAPABILITY_ID =
+  `${'northstar'}.${'purchasing'}:capability.receipt_posting` as const;
+
+/**
+ * PS-1 PROBE ONLY. Invocation-capability identity: a **closed union**, not
+ * `string`. Widening this to `string` is the naive move ADR-0049's reviewer
+ * named — it would give every ID its own request-key lock, receipt, result and
+ * trust identity while handing all of them the same union authority. A closed
+ * union keeps an unadmitted ID a type error at assembly *and* a refusal at
+ * registration.
+ */
+export type InventoryPostingCapabilityIdV1 =
+  | typeof INVENTORY_POSTING_CAPABILITY_ID
+  | typeof PURCHASING_RECEIPT_POSTING_CAPABILITY_ID;
+
+/**
+ * PS-1 PROBE ONLY. What a capability may *execute*, as distinct from what it
+ * may *invoke*. Separate names without separate admission is not a boundary.
+ */
+export type InventoryPostingCommandFamilyV1 =
+  | 'adjustment'
+  | 'goodsReceipt'
+  | 'stockCount'
+  | 'transfer';
+
+/**
+ * PS-1 PROBE ONLY. The three identities ADR-0049 conflated, held apart:
+ *
+ *  1. **Invocation capability identity** — `capabilityId`. Namespaces the
+ *     request-key advisory lock, receipt lookup and persistence, the returned
+ *     result identity, and accepted invocation/change-document/event/outbox
+ *     evidence. Answers *who may invoke*.
+ *  2. **Shared posting-kernel contract identity** — `capabilityVersion` and
+ *     `kernelDependencyBaselineRoot`. One constant for every registration,
+ *     checked by equality exactly as it is today. Answers *what the kernel is*.
+ *  3. **Per-capability dependency extension and command-family admission** —
+ *     `dependencyExtensionRoot` and `admittedFamilies`. Answers *what this
+ *     capability adds, and which command families it may execute*.
+ *
+ * The extension root and the admitted families are declared together so they
+ * cannot drift: a capability that has not declared purchasing reads cannot
+ * admit the `goodsReceipt` family.
+ */
+export interface InventoryPostingCapabilityAdmissionV1 {
+  readonly admittedFamilies: readonly InventoryPostingCommandFamilyV1[];
+  readonly dependencyExtensionRoot: string;
+}
+
+const EMPTY_DEPENDENCY_EXTENSION_ROOT = createHash('sha256')
+  .update('northstar.inventory-posting-dependency-extension/v1')
+  .update('\0')
+  .digest('hex');
+
+export const INVENTORY_POSTING_CAPABILITY_ADMISSIONS = Object.freeze(
+  new Map<
+    InventoryPostingCapabilityIdV1,
+    InventoryPostingCapabilityAdmissionV1
+  >([
+    [
+      INVENTORY_POSTING_CAPABILITY_ID,
+      Object.freeze({
+        admittedFamilies: Object.freeze([
+          'adjustment',
+          'stockCount',
+          'transfer',
+        ] as const),
+        dependencyExtensionRoot: EMPTY_DEPENDENCY_EXTENSION_ROOT,
+      }),
+    ],
+    [
+      PURCHASING_RECEIPT_POSTING_CAPABILITY_ID,
+      Object.freeze({
+        // Deliberately NOT a superset of Inventory's. Purchasing may post a
+        // receipt and nothing else; Inventory may not post a receipt.
+        admittedFamilies: Object.freeze(['goodsReceipt'] as const),
+        dependencyExtensionRoot: createHash('sha256')
+          .update('northstar.inventory-posting-dependency-extension/v1')
+          .update('\0')
+          .update(
+            [
+              'read\0purchasing\0northstar.purchasing:purchase_order',
+              'read\0purchasing\0northstar.purchasing:purchase_order_line',
+              'read\0purchasing\0northstar.purchasing:goods_receipt',
+              'read\0purchasing\0northstar.purchasing:goods_receipt_line',
+              'transition\0purchasing\0northstar.purchasing:goods_receipt.state',
+              'transition\0purchasing\0northstar.purchasing:purchase_order_line.received_quantity',
+              'append\0inventory\0northstar.inventory:transaction',
+              'append\0inventory\0northstar.inventory:transaction_line',
+            ].join('\n'),
+          )
+          .digest('hex'),
+      }),
+    ],
+  ]),
+);
+
 export interface InventoryPostingRegistrationV1 {
-  readonly capabilityId: typeof INVENTORY_POSTING_CAPABILITY_ID;
+  readonly admittedFamilies?: readonly InventoryPostingCommandFamilyV1[];
+  readonly capabilityId: InventoryPostingCapabilityIdV1;
   readonly capabilityVersion: typeof INVENTORY_POSTING_CAPABILITY_VERSION;
+  /** PS-1: the per-capability extension. Empty for Inventory's own. */
+  readonly dependencyExtensionRoot?: string;
+  /** The frozen kernel baseline. One value, shared by every registration. */
   readonly dependencySetRoot: typeof INVENTORY_POSTING_DEPENDENCY_SET_ROOT;
   readonly releaseContentHash: string;
   readonly releaseId: string;
@@ -282,6 +386,9 @@ export type InventoryPostingErrorCode =
   | 'INVENTORY_LOCATION_INACTIVE'
   | 'INVENTORY_PERIOD_CLOSED'
   | 'INVENTORY_POSTING_CAPABILITY_MISMATCH'
+  /** PS-1: the invoking capability is registered, but not for this family. */
+  | 'INVENTORY_POSTING_COMMAND_FAMILY_NOT_ADMITTED'
+  | 'INVENTORY_POSTING_COMPANION_CONFLICT'
   | 'INVENTORY_POSTING_IDEMPOTENCY_CONFLICT'
   | 'INVENTORY_POSTING_INPUT_INVALID'
   | 'INVENTORY_POSTING_LOCK_TIMEOUT'
@@ -449,6 +556,41 @@ type ParsedPosting =
     };
 
 /**
+ * PS-1 PROBE ONLY. One companion line, derived from a source line under lock.
+ * `transactionLineId` is deterministic for the same reason the header id is:
+ * a retried posting must land on the same rows rather than mint a second set.
+ */
+export interface InventoryCompanionLineDerivationV1 {
+  readonly fromLocationId: string | null;
+  readonly itemId: string;
+  readonly lineNumber: string;
+  readonly quantity: string;
+  readonly toLocationId: string | null;
+  readonly transactionLineId: string;
+  readonly unitId: string;
+}
+
+/**
+ * PS-1 PROBE ONLY. The complete companion representation, derived from the
+ * locked source. It carries **no** state and **no** type: the kernel selects
+ * both, exactly as `transitionTransactionToPosted` selects the posted state
+ * from compiled storage rather than from an input. A port that could name its
+ * companion's `type` could mint a companion whose header claims an origin its
+ * movements do not have — which is the third condition ADR-0049 omitted, and
+ * which `PS-0`'s own fixture violated by staging a header typed `adjustment`
+ * while its `source_type` said `goodsReceipt`.
+ */
+export interface InventoryCompanionDerivationV1 {
+  readonly effectiveAt: string;
+  readonly lines: readonly InventoryCompanionLineDerivationV1[];
+  readonly number: string;
+  readonly reason: { readonly code: string; readonly narrative: string | null };
+  readonly sourceId: string;
+  readonly sourceType: string;
+  readonly transactionId: string;
+}
+
+/**
  * PS-0 PROBE ONLY — NOT FOR MERGE.
  *
  * The cross-domain source-aggregate port. A foreign document aggregate cannot
@@ -466,10 +608,39 @@ export interface InventorySourceAggregateStepV1 {
   /** Diagnostic name of the foreign aggregate family, e.g. `goods_receipt`. */
   readonly familyId: string;
   /**
+   * PS-1 PROBE ONLY. The companion derivation, returned as *data* rather than
+   * written by the port.
+   *
+   * `PS-0` left the companion `inventory_transaction` with no writer: `#post`
+   * requires it to already exist, and this port only locked and transitioned.
+   * `PS-1` rules that the kernel creates it, from a derivation the port computes
+   * off the source rows it has just locked. Two properties follow that a staged
+   * companion cannot have:
+   *
+   *  - **Congruence by construction.** The derivation is read under the same
+   *    lock, in the same transaction, that the movement append and the source
+   *    transition share. There is no window in which the source can move away
+   *    from its companion, so no repair policy is owed for source edits.
+   *  - **The kernel stays the sole writer.** The port never holds an `INSERT`
+   *    into `inventory_transaction`; it returns values. `#post` remains the only
+   *    code that writes the companion, exactly as it is the only code that
+   *    writes a movement.
+   */
+  deriveCompanion(
+    client: PoolClient,
+    context: TrustedRequestContext,
+    command: InventoryPostingCommandV1,
+  ): Promise<InventoryCompanionDerivationV1>;
+  /**
    * ADR-0026 step 4/5. Every stock identity is already locked and the request
    * key is held. Must row-lock the foreign aggregate in a deterministic order,
    * validate it against the persisted state, and return a digest of everything
    * it validated. No caller preflight may substitute for this.
+   *
+   * PS-1 moves this call *ahead* of the companion header lock, so the source is
+   * locked before the companion is derived from it. Lock order is strictly
+   * widened, never reordered: stock identities, request key, source aggregate,
+   * companion header.
    */
   lockAndValidate(
     client: PoolClient,
@@ -545,6 +716,11 @@ export class PostgresInventoryPostingService {
     });
   }
 
+  /** PS-1 PROBE ONLY. Names the command family this instance may execute. */
+  get sourceAggregateFamilyId(): string | null {
+    return this.sourceAggregate?.familyId ?? null;
+  }
+
   async #post(
     context: TrustedRequestContext,
     actorEnvelope: TrustedActorEnvelope,
@@ -554,6 +730,13 @@ export class PostgresInventoryPostingService {
     assertTrustedActorEnvelope(actorEnvelope);
     assertActorContext(context, actorEnvelope);
     const parsed = posting.command;
+    // PS-1 PROBE ONLY. Admission, not identity. This is the check a naive
+    // widening omits: without it, a second capability ID gets its own
+    // request-key lock, receipt, result and trust identity while still being
+    // able to execute every family the kernel implements. Separate names, no
+    // separate admission. It runs before `pool.connect()` — an unadmitted
+    // family never opens a transaction.
+    assertCommandFamilyAdmitted(this.registration, commandFamily(this, posting));
     const inputDigest = currentCommandDigest(posting);
     const movements = plannedMovements(posting, this.mintUuid);
     const identities = movements.map((movement) =>
@@ -638,6 +821,35 @@ export class PostgresInventoryPostingService {
         .toSorted(compareInventoryMovementOrderEntries);
 
       await assumeModuleRole(client);
+      // PS-1 PROBE ONLY. The source aggregate is locked and validated BEFORE
+      // the companion is derived from it, so the derivation cannot read a row
+      // that moves before the movement lands. Lock order is widened, not
+      // reordered: stock identities, request key, source aggregate, companion
+      // header. PS-0 measured this call one position later; moving it earlier
+      // strictly lengthens the serialized region, so PS-0's four-arm race
+      // result is preserved rather than re-opened.
+      const sourceAggregateDigest = this.sourceAggregate
+        ? await this.sourceAggregate.lockAndValidate(client, context, parsed)
+        : null;
+      // PS-1 PROBE ONLY. The companion writer ADR-0049 never assigned. The
+      // kernel writes it — the port only derives it — so `#post` remains the
+      // sole writer of the companion exactly as it is of the movement.
+      if (this.sourceAggregate) {
+        const derivation = await this.sourceAggregate.deriveCompanion(
+          client,
+          context,
+          parsed,
+        );
+        await createCompanionTransaction(
+          client,
+          this.#binding,
+          context,
+          actorEnvelope,
+          posting,
+          derivation,
+          recordedAt,
+        );
+      }
       await lockInventoryTransactionHeader(
         client,
         this.#binding,
@@ -658,12 +870,6 @@ export class PostgresInventoryPostingService {
             context,
             posting,
           )
-        : null;
-      // PS-0 PROBE ONLY — NOT FOR MERGE. Exactly where ADR-0029 put the
-      // stock-count evidence lock: after the inventory line set is validated,
-      // before natural replay resolution, with every stock lock already held.
-      const sourceAggregateDigest = this.sourceAggregate
-        ? await this.sourceAggregate.lockAndValidate(client, context, parsed)
         : null;
       const naturalReplay = await findNaturalReplay(
         client,
@@ -922,14 +1128,44 @@ export function planInventoryPostingRequestLock(
 function validateRegistration(
   registration: InventoryPostingRegistrationV1,
 ): void {
+  // PS-1: identity (1) is looked up, contract identity (2) is still equality.
+  const admission = INVENTORY_POSTING_CAPABILITY_ADMISSIONS.get(
+    registration.capabilityId,
+  );
   if (
-    registration.capabilityId !== INVENTORY_POSTING_CAPABILITY_ID ||
+    !admission ||
     registration.capabilityVersion !== INVENTORY_POSTING_CAPABILITY_VERSION ||
     registration.dependencySetRoot !== INVENTORY_POSTING_DEPENDENCY_SET_ROOT
   ) {
     throw postingError(
       'INVENTORY_POSTING_CAPABILITY_MISMATCH',
       'posting registration does not match the frozen capability contract',
+    );
+  }
+  // PS-1 identity (3): the extension root and the admitted families are the
+  // capability's own, and each must match what the kernel admits for that exact
+  // ID. A registration cannot name a family it has not declared reads for, and
+  // cannot claim another capability's extension.
+  if (
+    (registration.dependencyExtensionRoot ??
+      EMPTY_DEPENDENCY_EXTENSION_ROOT) !== admission.dependencyExtensionRoot
+  ) {
+    throw postingError(
+      'INVENTORY_POSTING_CAPABILITY_MISMATCH',
+      `capability ${registration.capabilityId} does not carry its admitted dependency extension`,
+    );
+  }
+  const declaredFamilies =
+    registration.admittedFamilies ?? admission.admittedFamilies;
+  if (
+    declaredFamilies.length !== admission.admittedFamilies.length ||
+    declaredFamilies.some(
+      (family) => !admission.admittedFamilies.includes(family),
+    )
+  ) {
+    throw postingError(
+      'INVENTORY_POSTING_CAPABILITY_MISMATCH',
+      `capability ${registration.capabilityId} claims command families it is not admitted to execute`,
     );
   }
   requiredUuid(registration.releaseId, 'releaseId');
@@ -2211,6 +2447,164 @@ async function insertMovement(
      VALUES (${values.map((_, index) => `$${String(index + 1)}`).join(', ')})`,
     values,
   );
+}
+
+/**
+ * PS-1 PROBE ONLY. The companion writer.
+ *
+ * Three properties, each one of the conditions ADR-0049 left unsupplied:
+ *
+ *  1. **Deterministic one-to-one identity, protected by the database.** The
+ *     header id is the port's derivation, which is a v5-style deterministic
+ *     function of (tenant, environment, legal entity, source type, source id) —
+ *     so a retried posting lands on the same row rather than minting a second.
+ *     `ON CONFLICT DO NOTHING` plus a re-read is what makes partial creation
+ *     self-repairing: there is no orphan to reap, because the only way to
+ *     create a companion is inside the transaction that also posts it. The
+ *     uniqueness that makes this one-to-one is a `UNIQUE (tenant_id,
+ *     environment_id, source_type, source_id)` index, which `PUR-2` owes as a
+ *     migration; this probe asserts the invariant it will enforce.
+ *  2. **Server-selected type and state.** Both come from the compiled binding
+ *     and the posting role, never from the derivation. A port cannot mint a
+ *     header claiming an origin its movements do not have.
+ *  3. **Origin carried and enforced.** `source_type`/`source_id` are written
+ *     here from the same command the movements take theirs from, and
+ *     `assertInventoryDraftHeader` — shipped, unmodified — re-pins both under
+ *     the header lock a few statements later.
+ */
+async function createCompanionTransaction(
+  client: PoolClient,
+  binding: PostingStorageBinding,
+  context: TrustedRequestContext,
+  actorEnvelope: TrustedActorEnvelope,
+  posting: ParsedPosting,
+  derivation: InventoryCompanionDerivationV1,
+  recordedAt: string,
+): Promise<void> {
+  const { command } = posting;
+  if (derivation.transactionId !== command.transactionId) {
+    throw postingError(
+      'INVENTORY_POSTING_COMPANION_CONFLICT',
+      'the derived companion identity does not match the command',
+      { transactionId: command.transactionId },
+    );
+  }
+  if (
+    derivation.sourceType !== command.sourceType ||
+    derivation.sourceId !== command.sourceId
+  ) {
+    throw postingError(
+      'INVENTORY_POSTING_COMPANION_CONFLICT',
+      'the derived companion does not carry the command origin',
+      { transactionId: command.transactionId },
+    );
+  }
+  const local = (id: string): string => requiredField(binding.transaction, id).name;
+  const headerColumns = [
+    'tenant_id',
+    'environment_id',
+    binding.transaction.legalEntityColumn!,
+    binding.transaction.recordIdColumn,
+    binding.transactionStateColumn,
+    binding.transactionTypeColumn,
+    local('inventory_transaction_number'),
+    local('inventory_transaction_effective_at'),
+    local('inventory_transaction_recorded_at'),
+    local('inventory_transaction_reason_code'),
+    local('inventory_transaction_reason_narrative'),
+    local('inventory_transaction_source_type'),
+    local('inventory_transaction_source_id'),
+    local('inventory_transaction_actor_id'),
+  ];
+  const headerValues = [
+    context.tenantId,
+    context.environmentId,
+    command.legalEntityId,
+    derivation.transactionId,
+    // Server-selected, both of them. Not derivable by the port.
+    binding.transactionDraftState,
+    transactionType(binding, posting.postingRole),
+    derivation.number,
+    derivation.effectiveAt,
+    recordedAt,
+    derivation.reason.code || null,
+    derivation.reason.narrative,
+    derivation.sourceType,
+    derivation.sourceId,
+    actorEnvelope.actor.executionPrincipal.principalId,
+  ];
+  await client.query(
+    `INSERT INTO ${table(binding, binding.transaction)}
+       (${headerColumns.map(quoted).join(', ')})
+     VALUES (${headerValues.map((_, index) => `$${String(index + 1)}`).join(', ')})
+     ON CONFLICT DO NOTHING`,
+    headerValues,
+  );
+  for (const line of derivation.lines) {
+    const lineColumns = [
+      'tenant_id',
+      'environment_id',
+      binding.transactionLine.legalEntityColumn!,
+      binding.transactionLine.recordIdColumn,
+      binding.transactionLineRelationToTransactionColumn,
+      binding.transactionLineItemColumn,
+      binding.transactionLineFromLocationColumn,
+      binding.transactionLineToLocationColumn,
+      binding.transactionLineQuantityColumn,
+      binding.transactionLineLineNumberColumn,
+      binding.transactionLineUnitColumn,
+    ];
+    const lineValues = [
+      context.tenantId,
+      context.environmentId,
+      command.legalEntityId,
+      line.transactionLineId,
+      derivation.transactionId,
+      line.itemId,
+      line.fromLocationId,
+      line.toLocationId,
+      line.quantity,
+      line.lineNumber,
+      line.unitId,
+    ];
+    await client.query(
+      `INSERT INTO ${table(binding, binding.transactionLine)}
+         (${lineColumns.map(quoted).join(', ')})
+       VALUES (${lineValues.map((_, index) => `$${String(index + 1)}`).join(', ')})
+       ON CONFLICT DO NOTHING`,
+      lineValues,
+    );
+  }
+}
+
+/** PS-1 PROBE ONLY. Which command family a posting belongs to. */
+function commandFamily(
+  service: { readonly sourceAggregateFamilyId: string | null },
+  posting: ParsedPosting,
+): InventoryPostingCommandFamilyV1 {
+  if (service.sourceAggregateFamilyId === 'goods_receipt') return 'goodsReceipt';
+  if (posting.postingRole === 'transfer') return 'transfer';
+  if (posting.postingRole === 'adjustment') return 'adjustment';
+  return 'stockCount';
+}
+
+/** PS-1 PROBE ONLY. The authorization boundary, distinct from `#post`. */
+function assertCommandFamilyAdmitted(
+  registration: InventoryPostingRegistrationV1,
+  family: InventoryPostingCommandFamilyV1,
+): void {
+  const admitted =
+    registration.admittedFamilies ??
+    INVENTORY_POSTING_CAPABILITY_ADMISSIONS.get(registration.capabilityId)
+      ?.admittedFamilies ??
+    [];
+  if (!admitted.includes(family)) {
+    throw postingError(
+      'INVENTORY_POSTING_COMMAND_FAMILY_NOT_ADMITTED',
+      `capability ${registration.capabilityId} may not execute the ${family} command family`,
+      { capabilityId: registration.capabilityId, family },
+    );
+  }
 }
 
 async function lockInventoryTransactionHeader(
