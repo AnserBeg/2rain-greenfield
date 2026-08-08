@@ -261,3 +261,31 @@ lane in any worktree.**
   `preserved/g3-term-stash` and `preserved/g2-p3b-stash`, pushed to `origin` — so
   the commits survive even if the stash entries are dropped. **Anything worth
   keeping gets a ref, not a stash slot.**
+
+## A conflict in a derived artifact is re-derived, never picked — added 2026-08-08
+
+`5g3-sm-impl` merged `U5b` and hit one conflict:
+`test/fixtures/g2/language-conformance/coverage-decisions.json`. **Both packets had
+moved the conformance ledger**, so both sides of the conflict were correct
+documents derived from *different* ledgers, and **neither was correct for the
+merged one.**
+
+Taking either side would have produced a **green gate over a digest no packet ever
+reviewed** — the artifact would agree with itself and with nothing else.
+
+The resolution was to re-run the deriver over the merged ledger: 1943 → **2050**
+obligations, observed steady at 427, both observed decisions verified unchanged in
+membership **against the other packet's `obligationSetDigests` as well as its own**,
+and only the standing exemption grown.
+
+**The rule:** when a generated or derived file conflicts, **re-derive it from the
+merged inputs and verify the result against both parents' recorded digests.** Do
+not resolve it by hand, do not take ours, do not take theirs. The tell is a file
+whose content is a function of other files — a ledger digest, a lockfile, a
+compiled release, a coverage decision document.
+
+**And re-derivation is not the same as regeneration.** Check that the re-derived
+result is *explicable*: which numbers moved, which held, and why. `5g3-sm-impl`
+could say that 107 of the 107 new obligations came from the `v5` cut and that
+observation count was unchanged — which is what made the new digest reviewable
+rather than merely fresh.
