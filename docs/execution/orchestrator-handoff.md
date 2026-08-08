@@ -63,6 +63,18 @@ self-contained blocks — the writer has no context but the repository.
 
 ## 4. Where things stand right now
 
+> **STALE AS OF 2026-08-08 — DO NOT ACT ON THIS SECTION OR ON THE
+> 2026-07-30 SESSION ADDENDUM BELOW.** Both describe G3-era state: `G3-P4b` is
+> long accepted, G3 is complete, and the program is in the UI/UX set plus a new
+> purchasing chain. Sections 1-3 and 5-8 are durable and still correct.
+> **For current state read [current-plan.md](current-plan.md),
+> [ui-ux-remaining.md](ui-ux-remaining.md) and
+> [purchasing-sales-v1-plan.md](purchasing-sales-v1-plan.md).**
+> A stale claim that reads as current is the failure this program keeps paying
+> for -- it is why the "inventory has no write path" line made a missing gate
+> hard to see.
+
+
 | Lane | Packet | State |
 |---|---|---|
 | KERNEL | `4c` — packages adopt v3 | active; merged main, three bridges cleared |
