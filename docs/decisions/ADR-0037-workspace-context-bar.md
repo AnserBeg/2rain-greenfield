@@ -81,6 +81,31 @@ The tempting shortcut — auto-selecting when a tenant has one legal entity —
 is refused. It trains a user to believe a scope was chosen for them, and it
 silently changes behaviour the day a second entity is created.
 
+**How far this generalises — narrowed 2026-08-08.** The evidence above is
+legal-entity evidence. ADR-0031 §3 is a ruling about the legal-entity query
+operand; "omission is a refusal" is a property of *that* dimension, and §2 already
+requires every further dimension to justify itself. A fiscal period or a site may
+turn out to have a legitimate declared default and a safe omission semantics, and
+this section is not evidence against it.
+
+So the rule splits:
+
+- **For legal entity:** absolute. No implicit default, even with one option.
+- **For any dimension:** **no implicit default.** A default may arrive only through
+  the declared-default mechanism ADR-0015:38 admits and this ADR records as absent
+  — never as a convenience coded into the bar. Whether omission is *also* a typed
+  refusal is answered by the dimension's own justification, not inherited from here.
+
+**A workspace scope is not a document-field pre-fill, and the distinction is
+load-bearing.** `ux-strategy-proposal.md` §3.6 lists *"current principal's default
+legal entity"* among the declared sources a form may pre-fill from, and `U7` is
+chartered to build declared-source pre-fill. That source is the same absent
+mechanism named above. Pre-filling a field is not the bar selecting a scope, and
+the two must not be conflated in either direction — but `U7` cannot invent the
+mechanism either. Recorded against `U7` in
+[ui-ux-remaining.md](../execution/ui-ux-remaining.md) §3b, which owes either a
+narrowed source list or a bridge request.
+
 ### 5. It is platform-owned, not tenant-customizable
 
 The context bar is not an archetype slot, not a customization surface, and not

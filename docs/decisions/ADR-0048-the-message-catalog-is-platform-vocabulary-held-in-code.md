@@ -65,6 +65,21 @@ of `surfaces` — [ADR-0030](ADR-0030-compiled-navigation-grouping.md) ruled it 
 compiled surface-manifest concept rather than a web-only heuristic and put it
 exactly there.
 
+**The trigger is a bridge request, not an authored package — corrected
+2026-08-08.** *"When a module first authors entity-specific copy"* names an event
+the language cannot produce: `schemas.ts` has no message field, so there is no
+spelling in which a module could author one, and the deferral therefore waits for
+something it has itself made impossible. The same defect shape as `ladder-trigger`,
+which this programme already caught wearing a temporary label over a permanent
+decision.
+
+**What actually fires it:** a chartered module needs entity-specific copy, finds it
+inexpressible, and **stops with a bridge request** rather than hard-coding the
+sentence in a renderer or overloading a platform code. That is an event a packet
+can raise on any ordinary day, and it is the same mechanism that produced U4's slot
+states and U6's message vocabulary. The carrier above is what the bridge request is
+granted; it is not what waits for one.
+
 **Consequence, and the practical payoff: `U6` never touches the projection axis,
 so it is independent of `U5-design`'s `v2` measurement under either outcome.**
 
@@ -142,6 +157,53 @@ declared limit rather than an omission:
 
 Registering either now would be **accepted-and-ignored** — ADR-0041's named worst
 state, *"indistinguishable from success at every point where anyone would look."*
+
+**Considered and refused 2026-08-08: a third state for presentation, "explicit
+semantics-preserving fallback."** The argument is that ADR-0041's binary comes from
+a storage example — `oneToOne` lowered as a plain foreign key — where the failure
+is silent and the data is wrong, and that a presentation modality has a third
+option the storage case does not: admit `toast`, render a durable inline notice
+where no toast is available, and honour the user-visible meaning while the modality
+is unavailable. It does not survive three checks against this tree.
+
+First, **that is what the refusal already does.** The user-facing meaning of every
+refused code is honoured today, page-level or slot-level; what is refused is a
+*declaration* that a specific modality took effect. Second, **the fallback the
+argument names does not exist either.** `toast`'s blocker in the table above is not
+only the modality: §3.8 requires a toast be recorded durably and there is no
+durable UI-failure record, so "render a durable inline notice instead" substitutes
+one absent substrate for another. Third, **retaining the declaration while
+silently changing its effect is the accepted-and-ignored shape**, one indirection
+further out: the entry says `toast`, the reader sees an inline notice, and nothing
+at the declaration site says so.
+
+ADR-0041's semantic core is unamended and it is not being stretched here. The
+narrower reading that survives, and which this section already practises: **what a
+declaration promises is a user-visible effect, not a byte-for-byte modality** — so
+a spelling is honoured when the promised effect is delivered, refused by name when
+it is not, and never retained while quietly meaning something else.
+
+#### 4a. `page | slot` is closed over composition-relative placement — 2026-08-08
+
+**Field-level was a known case before this vocabulary closed, and §3 dropped it
+rather than moving it.** §3 is right that the proposal's severity column stacked a
+scope on a consequence; it kept the consequence and discarded the scope. But the
+field scope was already chartered: `ux-strategy-proposal.md` §3.8 requires
+validation adjacent to the input, [ADR-0036](ADR-0036-minimum-client-capability.md)
+§2.4 authorises server-requested advisory inline validation, and `U7` owns it. A
+slot card is not a message anchored to one input; they differ on focus movement and
+error association, which plan §8.4's WCAG 2.2 AA claim makes binding.
+
+`MessagePlacement` is `'page' | 'slot'` (`apps/web/src/message-catalog.ts:42`), so
+as written *"every user-facing error… resolves to a registered entry"* cannot
+express a case already on the queue.
+
+**No `field` placement is coined here.** Coining a spelling before `U7` knows what
+it anchors to is §1's own prohibition. `U7` owns the decision, must **stop with a
+bridge request** rather than routing a validation message through `slot` or around
+the catalog, and has three admissible answers: a field or control anchor added to
+placement; placement and anchor split into separate axes; or validation messages
+ruled a grammar of their own with the reason recorded.
 
 ### 5. The gate observes rendered text, and its code census comes from the catalog
 
