@@ -34,6 +34,7 @@ import {
   type V3AuthoredApplicationPackage,
   type V3NormalizedApplicationPackage,
   type V4AuthoredApplicationPackage,
+  type V5AuthoredApplicationPackage,
   type V4NormalizedApplicationPackage,
   type VersionedAuthoredApplicationPackage,
   type VersionedNormalizedApplicationPackage,
@@ -60,13 +61,24 @@ type AggregateNormalizedQuery = Extract<
  */
 function authoredHasV3Families(
   authored: VersionedAuthoredApplicationPackage,
-): authored is V3AuthoredApplicationPackage | V4AuthoredApplicationPackage {
+): authored is
+  | V3AuthoredApplicationPackage
+  | V4AuthoredApplicationPackage
+  | V5AuthoredApplicationPackage {
   return languageHasV3Features(authored.languageVersion);
 }
 
+/**
+ * DERIVED from the package's own version, never written by hand. This node is
+ * minted by normalization rather than authored, so a literal here is a node
+ * version the package did not choose -- and `CANON_VERSION_MIXED` refuses any
+ * node whose version disagrees with the envelope. Pinning it to a literal
+ * therefore makes every package at a LATER version unnormalizable the moment
+ * it carries a legal-entity scope, silently and only for that shape.
+ */
 type LegalEntityReferenceParameterType = {
   kind: 'legalEntityReferenceParameterType';
-  schemaVersion: 'v4';
+  schemaVersion: CanonicalLanguageVersion;
 };
 type QueryParameterType = FieldType | LegalEntityReferenceParameterType;
 type QueryContract = {
@@ -778,7 +790,7 @@ function deriveQueryParameterTypes(
     } else {
       parameterTypes.set(scope.operand.parameterId, {
         kind: 'legalEntityReferenceParameterType',
-        schemaVersion: 'v4',
+        schemaVersion: authored.languageVersion,
       });
     }
   }

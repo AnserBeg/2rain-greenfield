@@ -1085,9 +1085,9 @@ interface VerificationQueryContractBase {
     readonly operand: {
       readonly kind: 'queryParameterReference';
       readonly parameterId: string;
-      readonly schemaVersion: 'v4';
+      readonly schemaVersion: string;
     };
-    readonly schemaVersion: 'v4';
+    readonly schemaVersion: string;
   };
   readonly parameters?: readonly { readonly parameterId: string }[];
   readonly queryId: string;

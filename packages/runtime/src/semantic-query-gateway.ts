@@ -136,9 +136,9 @@ export interface RegisteredLegalEntityScope {
   readonly operand: {
     readonly kind: 'queryParameterReference';
     readonly parameterId: string;
-    readonly schemaVersion: 'v4';
+    readonly schemaVersion: CanonicalLanguageVersion;
   };
-  readonly schemaVersion: 'v4';
+  readonly schemaVersion: CanonicalLanguageVersion;
 }
 
 interface RegisteredQueryDefinitionBase {
@@ -1338,9 +1338,17 @@ function assertRowQueryParameters(
       throw invalid('query parameter contract is invalid');
     }
     const parameterType = parameter.parameterType;
+    // The node carries the version of the package that minted it, so this
+    // admits any SUPPORTED version rather than the one that happened to
+    // introduce the operand. A literal here refuses a later package's scope
+    // operand outright -- it falls through to the field-type parse and is
+    // rejected as an unadmitted parameter type, which names the wrong cause.
     const legalEntityReference =
       parameterType.kind === 'legalEntityReferenceParameterType' &&
-      parameterType.schemaVersion === 'v4';
+      typeof parameterType.schemaVersion === 'string' &&
+      (SUPPORTED_LANGUAGE_VERSIONS as readonly string[]).includes(
+        parameterType.schemaVersion,
+      );
     if (
       !legalEntityReference &&
       FieldTypeSchema.safeParse(parameterType).success === false
