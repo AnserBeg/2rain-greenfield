@@ -1364,60 +1364,30 @@ function validateSurfaceVocabulary(
  * `progressive` is admissible only on a slot proven to render no surface field,
  * no required input, and no action. Every other slot is forced to `always`,
  * including every slot dispatched through `componentRegistry[contentReferenceId]`
- * -- those can never be proven safe, so they force automatically rather than
- * defaulting to deferrable.
+ * -- those can never be proven safe, so they force rather than defaulting to
+ * deferrable.
  *
- * **This replaces a deny-list that was unsound in the concealing direction.**
- * The deny-list asked "is this slot proven protected?" and let anything
- * unprovable through; the allow-list asks "is this slot proven safe?" and forces
- * anything unprovable. Same predicate, opposite default, and only one of the two
- * fails toward over-disclosure.
- *
- * Two arms, because one half is static and one is not:
- *
- * - **Membership** in `PROVEN_DEFERRABLE_SURFACE_SLOTS` is a property of the
- *   slot's renderer and is proven there.
- * - **`rendersDeclaredActions`** members carry a second, per-surface condition:
- *   the command bar renders the surface's declared operations, so it is
- *   deferrable only while none of them demands confirmation. Operations bind to
- *   a surface exactly as the runtime binds them -- effect entity equal to the
- *   data-source query's source entity (`apps/web/src/surface-contract.ts:205`).
- *
- * **What §3.2 asked for and this does not deliver.** §3.2 declares the tier per
- * FIELD and per SECTION. The canonical model has neither: a slot's `content` is
+ * **One slot, one archetype, unconditional.** `progressive` at slot granularity
+ * applies to `record:breadcrumb` and nothing else. §3.2 declares the tier per
+ * FIELD and per SECTION; the canonical model has neither -- a slot's `content` is
  * an opaque module reference, and `record:sections` is one slot rendering every
- * field of the surface. At slot granularity the proven-deferrable set is two
- * slots on one archetype, one of them conditional -- so `progressive` applies to
- * almost nothing. That is the honest size of the claim. It is narrow and it
- * holds; the per-field half is residue, and widening it is not this packet's
- * work.
+ * field of the surface. That is the honest size of this rule. It is narrow, it
+ * holds, and the per-field half is residue.
  *
- * Three further limits, ruled as shortfalls rather than defects:
- * slot-as-section does not survive `surfaceRole === 'form'`, where `sections`
- * renders a plain field collection; it does not survive a two-group surface,
- * because a second `record:sections` is refused as a duplicate slot; and no slot
- * outside `record` is deferrable at all today.
+ * **No conditional arm.** An earlier revision admitted `record:commandBar` when
+ * no bound operation demanded confirmation. That predicate could not see what it
+ * guarded -- it bound operations by `'entity' in operation.effect` while the
+ * runtime binds through `operation.entityId ?? readBackQueryId...sourceEntityId`
+ * -- and the slot renders a submit control on form surfaces regardless. It is
+ * deleted rather than repaired, and with it the packet's third proxy.
  */
 function validateDisclosureTiers(
   packageRevision: VersionedNormalizedApplicationPackage,
   diagnostics: CanonicalDiagnostic[],
 ): void {
-  const queryById = new Map(
-    packageRevision.queries.map((query) => [query.queryId, query] as const),
-  );
   for (const surface of packageRevision.surfaces) {
-    const deferrable: Readonly<Record<string, string>> =
-      PROVEN_DEFERRABLE_SURFACE_SLOTS[surface.archetype];
-    const query = queryById.get(surface.dataSource.targetId);
-    const sourceEntityId = query?.sourceEntity.targetId;
-    // Mirrors the runtime's own binding rule; an aggregate-backed surface has no
-    // source entity and therefore binds no operation.
-    const confirming = packageRevision.operations.filter(
-      (operation) =>
-        operation.confirmation === 'humanRequired' &&
-        sourceEntityId !== undefined &&
-        'entity' in operation.effect &&
-        operation.effect.entity.targetId === sourceEntityId,
+    const deferrable = new Set<string>(
+      PROVEN_DEFERRABLE_SURFACE_SLOTS[surface.archetype],
     );
     for (const slot of surface.slots) {
       if (slot.disclosureTier === undefined) continue;
@@ -1436,31 +1406,18 @@ function validateDisclosureTiers(
         );
         continue;
       }
-      if (slot.disclosureTier === 'always') continue;
-      const proof = deferrable[slot.slot];
-      if (proof === undefined) {
-        diagnostics.push(
-          diagnostic(
-            'CANON_SURFACE_DISCLOSURE_TIER_NOT_DEFERRABLE',
-            '$.surfaces.slots.disclosureTier',
-            `slot ${slot.slot} is not proven to render no field, no required input and no action, so it is always`,
-            'declare always, or prove the slot deferrable and add it to PROVEN_DEFERRABLE_SURFACE_SLOTS',
-            slot.slotId,
-          ),
-        );
+      if (slot.disclosureTier === 'always' || deferrable.has(slot.slot)) {
         continue;
       }
-      if (proof === 'rendersDeclaredActions' && confirming.length > 0) {
-        diagnostics.push(
-          diagnostic(
-            'CANON_SURFACE_DISCLOSURE_TIER_ACTION_FORCED',
-            '$.surfaces.slots.disclosureTier',
-            `slot ${slot.slot} renders ${confirming[0]!.operationId}, which the user must confirm, so it is always`,
-            'declare always, or move the confirmed operation off this surface',
-            slot.slotId,
-          ),
-        );
-      }
+      diagnostics.push(
+        diagnostic(
+          'CANON_SURFACE_DISCLOSURE_TIER_NOT_DEFERRABLE',
+          '$.surfaces.slots.disclosureTier',
+          `slot ${slot.slot} is not proven to render no field, no required input and no action, so it is always`,
+          'declare always, or prove the slot deferrable and add it to PROVEN_DEFERRABLE_SURFACE_SLOTS',
+          slot.slotId,
+        ),
+      );
     }
   }
 }
@@ -2356,8 +2313,6 @@ function acceptedAlternativeFor(code: string): string {
       'use home, list, record, task, or builder',
     CANON_SURFACE_DISCLOSURE_TIER_NOT_DEFERRABLE:
       'declare always, or prove the slot renders no field, no required input and no action',
-    CANON_SURFACE_DISCLOSURE_TIER_ACTION_FORCED:
-      'declare always on a slot rendering an operation the user must confirm',
     CANON_SURFACE_DISCLOSURE_TIER_UNHONOURED:
       'declare progressive or always; onDemand has no fetch-on-expand to honour it',
     CANON_SURFACE_SLOT_UNSUPPORTED:

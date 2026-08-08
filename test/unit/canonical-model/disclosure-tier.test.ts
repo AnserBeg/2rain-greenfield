@@ -138,10 +138,9 @@ function forcing(): Record<string, unknown> {
 }
 
 /**
- * `record:sections` AND `record:titleStatus` both render the surface's fields --
- * `titleStatus` through `recordTitle`'s `displayFieldId`, which is routinely the
- * business key. `record:commandBar` renders shell furniture and no field, so it
- * is the only non-bearing subject available here.
+ * `record:breadcrumb` is the only proven-deferrable slot. `commandBar` is here
+ * as a REFUSED subject: it renders a submit control on form surfaces, so it is
+ * not deferrable and the rule must say so.
  */
 const SECTIONS_SLOT = 'northstar.inventory:slot.item_sections';
 const TITLE_STATUS_SLOT = 'northstar.inventory:slot.item_title_status';
@@ -228,21 +227,6 @@ test('progressive is accepted on a proven-deferrable slot', () => {
     'progressive',
     'breadcrumb renders nothing protected, so the allow-list must admit it',
   );
-});
-
-/**
- * The conditional member. This fixture's only operation carries a
- * `transitionStateEffect`, which binds through `transition` rather than
- * `entity`, so no confirmed operation binds to this surface and the command bar
- * stays deferrable. The refusing half of the pair lives in the integration gate,
- * against a fixture whose archive operation does bind.
- */
-test('progressive is accepted on commandBar when no bound operation confirms', () => {
-  const slots = normalizedSlots(
-    withTier(forcing(), 'progressive', COMMAND_BAR_SLOT),
-  );
-  const slot = slots.find((entry) => entry.slotId === COMMAND_BAR_SLOT);
-  assert.equal(slot?.disclosureTier, 'progressive');
 });
 
 /**
@@ -336,4 +320,19 @@ test('RED: an unknown tier never reaches the rule at all', () => {
     codes.includes('CANON_SCHEMA_INVALID'),
     `closed vocabulary must be refused by the schema; got ${codes.join(', ')}`,
   );
+});
+
+/**
+ * `commandBar` was briefly a conditional member and is now simply refused.
+ * `renderCommandBar` emits `<button type="submit">Save</button>` whenever the
+ * surface role is `form`, so deferring it defers the primary action -- with no
+ * confirmed operation anywhere.
+ */
+test('RED: progressive on commandBar is refused, with no conditional arm', () => {
+  const codes = diagnosticCodes(() =>
+    normalizeApplicationPackage(
+      withTier(nonForcing(), 'progressive', COMMAND_BAR_SLOT),
+    ),
+  );
+  assert.deepEqual(codes, ['CANON_SURFACE_DISCLOSURE_TIER_NOT_DEFERRABLE']);
 });

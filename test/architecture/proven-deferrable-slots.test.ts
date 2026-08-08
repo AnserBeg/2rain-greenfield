@@ -3,82 +3,47 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import { PROVEN_DEFERRABLE_SURFACE_SLOTS } from '../../packages/canonical-model/src/index.js';
+import {
+  ACTION_TOKENS,
+  DYNAMIC_DISPATCH,
+  FIELD_TOKENS,
+  INPUT_TOKENS,
+  PROTECTED_TOKENS,
+  declarations,
+  protectedCategories,
+  reaches,
+  slotRenderers,
+} from '../helpers/renderer-consumption.js';
 
 const REGISTRY_SOURCE = 'apps/web/src/component-registry.ts';
 
 /**
- * `PROVEN_DEFERRABLE_SURFACE_SLOTS` is an ALLOW-list, and this proves each
- * member against the renderer that justifies it.
- *
- * The inversion is what makes this gate tractable. Under the previous deny-list
- * the gate had to prove a walk EXHAUSTIVE -- every path from every renderer to
- * every field token, including paths through
- * `componentRegistry[contentReferenceId]` that no source walk can follow. It
- * could not, and the unprovable case silently defaulted to deferrable. Inverted,
- * the gate proves a handful of slots render nothing protected and everything
- * else forces by default, so an incomplete walk costs over-disclosure instead of
- * concealment.
+ * `PROVEN_DEFERRABLE_SURFACE_SLOTS` claims its members render no surface field,
+ * no required input and no action. This proves exactly that claim, for the one
+ * member that remains.
  *
  * The compiler cannot import `apps/web` -- `check:boundaries` enforces the
  * dependency direction -- so the set is DECLARED in `canonical-model` and BOUND
  * here, where a test may read both sides.
+ *
+ * A PROXY, not an observation (AGENTS.md §6): it reads source text. That is why
+ * reaching `renderReferencedComponent` is DISQUALIFYING rather than a documented
+ * gap -- an unprovable slot forces instead of defaulting to deferrable.
+ *
+ * **The mutation harness below is part of the gate, not a report artifact.** The
+ * previous round's table was produced by a harness that was never committed, and
+ * an independent replay against the same predicates found four survivors. Every
+ * predicate here is now shown to fire against a planted violation, in an
+ * executed suite.
  */
-const FIELD_TOKENS = /\bfieldIds\b|\bdisplayFieldId\b/u;
-const DYNAMIC_DISPATCH = /\brenderReferencedComponent\s*\(/u;
-
 function registrySource(): string {
   return readFileSync(REGISTRY_SOURCE, 'utf8');
-}
-
-function slotRenderers(source: string): ReadonlyMap<string, string> {
-  const renderers = new Map<string, string>();
-  for (const entry of source.matchAll(
-    /'([a-z]+):([A-Za-z]+)':\s*\{([\s\S]*?)\n {4}\}/gu,
-  )) {
-    const renderer = /renderer:\s*([A-Za-z_$][\w$]*)/u.exec(entry[3]!);
-    if (renderer) renderers.set(`${entry[1]!}:${entry[2]!}`, renderer[1]!);
-  }
-  return renderers;
-}
-
-function functionBody(source: string, name: string): string {
-  return (
-    new RegExp(`function ${name}\\s*\\([\\s\\S]*?\\n\\}`, 'mu').exec(
-      source,
-    )?.[0] ?? ''
-  );
-}
-
-function reaches(
-  source: string,
-  name: string,
-  token: RegExp,
-  seen = new Set<string>(),
-): boolean {
-  if (seen.has(name)) return false;
-  seen.add(name);
-  const body = functionBody(source, name);
-  if (body.length === 0) return false;
-  if (token.test(body)) return true;
-  for (const call of body.matchAll(/\b([A-Za-z_$][\w$]*)\s*\(/gu)) {
-    const callee = call[1]!;
-    if (
-      callee !== name &&
-      new RegExp(`function ${callee}\\s*\\(`, 'u').test(source) &&
-      reaches(source, callee, token, seen)
-    ) {
-      return true;
-    }
-  }
-  return false;
 }
 
 function deferrableKeys(): readonly string[] {
   return Object.entries(PROVEN_DEFERRABLE_SURFACE_SLOTS).flatMap(
     ([archetype, slots]) =>
-      Object.keys(slots as Record<string, string>).map(
-        (slot) => `${archetype}:${slot}`,
-      ),
+      (slots as readonly string[]).map((slot) => `${archetype}:${slot}`),
   );
 }
 
@@ -96,97 +61,243 @@ test('the slot registry is readable, so the proofs have a subject', () => {
   }
 });
 
-test('no proven-deferrable slot consumes a surface field', () => {
+/**
+ * **The one admitted category, named rather than hidden by omitting a
+ * predicate.** `renderBreadcrumb` emits `<a href=...>` to the related list
+ * surface. Links ARE watched -- dropping the predicate to make the member pass
+ * would be the fourth proxy this packet has been blocked for -- so the admission
+ * is explicit here instead.
+ *
+ * A wayfinding link is not protected content. §3.2 forces `always` for key
+ * facts, status, required inputs and anything blocking; a breadcrumb link is
+ * none of them, and deferring it conceals no field, no input and no action.
+ *
+ * **What this gate therefore does and does not prove, stated exactly.** It
+ * PROVES `record:breadcrumb` reaches no field, no required input, no action
+ * control and no dynamic dispatch. It does NOT prove the link is harmless -- the
+ * predicate cannot tell a breadcrumb link from `list:title`'s
+ * `<a class="primary-action">New</a>`, which reaches the same single category.
+ * That admission is a RULING recorded in the constant, not a proof, and
+ * `list:title` stays out of the allow-list by membership rather than by anything
+ * measured here. Saying so is the difference between a narrow true claim and the
+ * proxy this packet has been blocked for three times.
+ */
+const ADMITTED_CATEGORIES: readonly string[] = Object.freeze(['link']);
+
+test('every proven-deferrable slot reaches no protected category', () => {
   const source = registrySource();
+  const bodies = declarations(source);
   const renderers = slotRenderers(source);
-  assert.ok(deferrableKeys().length > 0, 'the allow-list must have members');
-  for (const key of deferrableKeys()) {
+  const keys = deferrableKeys();
+  assert.deepEqual(
+    keys,
+    ['record:breadcrumb'],
+    'one slot, one archetype, unconditional -- progressive applies to record:breadcrumb and nothing else',
+  );
+  for (const key of keys) {
     const renderer = renderers.get(key)!;
-    assert.ok(
-      !reaches(source, renderer, FIELD_TOKENS),
-      `${key} (${renderer}) reaches a field token and cannot be deferrable`,
+    const seen = protectedCategories(bodies, renderer);
+    assert.deepEqual(
+      seen.filter((category) => !ADMITTED_CATEGORIES.includes(category)),
+      [],
+      `${key} (${renderer}) reaches protected content and cannot be deferrable`,
+    );
+    assert.deepEqual(
+      seen,
+      ['link'],
+      `${key} must reach the admitted navigation link and nothing else`,
     );
   }
 });
 
-/**
- * The assertion that retires the previous round's unfollowable-edge finding. A
- * slot whose renderer can reach `renderReferencedComponent` dispatches on a
- * runtime key, so no static reading can prove what it renders. Under the
- * allow-list that is not a gap to document -- it is a disqualification.
- */
-test('no proven-deferrable slot can reach dynamic dispatch', () => {
+test('every slot reaching protected content is excluded', () => {
   const source = registrySource();
-  const renderers = slotRenderers(source);
-  for (const key of deferrableKeys()) {
-    const renderer = renderers.get(key)!;
-    assert.ok(
-      !reaches(source, renderer, DYNAMIC_DISPATCH),
-      `${key} (${renderer}) reaches renderReferencedComponent, so it can never be proven safe`,
-    );
-  }
-});
-
-/**
- * The other direction, and the one that would catch a member added without its
- * proof: every registered slot that consumes a field or dispatches dynamically
- * must be absent from the allow-list.
- */
-test('every field-consuming or dynamically dispatched slot is excluded', () => {
-  const source = registrySource();
+  const bodies = declarations(source);
   const deferrable = new Set(deferrableKeys());
   const excluded: string[] = [];
   for (const [key, renderer] of slotRenderers(source)) {
+    const categories = protectedCategories(bodies, renderer);
     if (
-      reaches(source, renderer, FIELD_TOKENS) ||
-      reaches(source, renderer, DYNAMIC_DISPATCH)
+      categories.some((category) => !ADMITTED_CATEGORIES.includes(category))
     ) {
       excluded.push(key);
       assert.ok(
         !deferrable.has(key),
-        `${key} renders protected content or dispatches dynamically, yet is declared deferrable`,
+        `${key} reaches protected content, yet is declared deferrable`,
       );
     }
   }
-  assert.ok(
-    excluded.length >= 6,
-    `expected the exclusion to have real subjects; found ${String(excluded.length)}`,
+  assert.deepEqual(
+    excluded.sort(),
+    [
+      'list:bulkActions',
+      'list:dataGrid',
+      'record:commandBar',
+      'record:keyFacts',
+      'record:sections',
+      'record:titleStatus',
+      'task:decision',
+      'task:primaryAction',
+      'task:scanInput',
+    ],
+    'the exclusion set is pinned, so a renderer that stops reaching protected content cannot quietly become admissible',
   );
-  for (const key of [
-    'record:titleStatus',
-    'record:sections',
-    'record:keyFacts',
-    'list:dataGrid',
-    'task:decision',
-    'task:scanInput',
-    'task:primaryAction',
-  ]) {
-    assert.ok(excluded.includes(key), `${key} must be excluded`);
-  }
 });
 
 /**
- * The shortfall, asserted rather than only written down. The set is two slots on
- * one archetype and it is expected to stay that way; a packet that grows it must
- * come through this test and restate the size deliberately.
+ * The limit the exclusion above cannot express, asserted so it cannot be
+ * forgotten. `list:title` reaches exactly one category -- the admitted `link` --
+ * because `renderListTitle` emits `<a class="primary-action">New</a>`. By these
+ * predicates it is indistinguishable from `record:breadcrumb`. It is kept out of
+ * the allow-list by MEMBERSHIP, not by measurement, and a packet that widens the
+ * set must close this gap first rather than reason from the gate's silence.
  */
-test('the proven-deferrable set is as small as the report claims', () => {
+test('list:title is indistinguishable from breadcrumb by these predicates', () => {
+  const source = registrySource();
+  const bodies = declarations(source);
+  const renderers = slotRenderers(source);
   assert.deepEqual(
-    Object.fromEntries(
-      Object.entries(PROVEN_DEFERRABLE_SURFACE_SLOTS).map(
-        ([archetype, slots]) => [
-          archetype,
-          Object.keys(slots as Record<string, string>),
-        ],
+    protectedCategories(bodies, renderers.get('list:title')!),
+    ['link'],
+    'renderListTitle reaches only the admitted link category',
+  );
+  assert.deepEqual(
+    protectedCategories(bodies, renderers.get('record:breadcrumb')!),
+    ['link'],
+  );
+  assert.ok(
+    !deferrableKeys().includes('list:title'),
+    'list:title must stay out of the allow-list even though the predicates cannot exclude it',
+  );
+});
+
+/**
+ * The named reasons the two most recently deleted members were deleted, held
+ * open so neither can be restored without this failing first.
+ */
+test('commandBar reaches an action and dataGrid reaches a field', () => {
+  const bodies = declarations(registrySource());
+  assert.ok(
+    reaches(bodies, 'renderCommandBar', ACTION_TOKENS),
+    'renderCommandBar emits a submit control on form surfaces',
+  );
+  assert.ok(reaches(bodies, 'renderDataGrid', FIELD_TOKENS));
+  assert.ok(reaches(bodies, 'renderTaskScanInput', INPUT_TOKENS));
+  assert.ok(reaches(bodies, 'renderTaskDecision', DYNAMIC_DISPATCH));
+});
+
+/**
+ * THE MUTATION HARNESS. Each planted violation is injected into the renderer
+ * this gate certifies, and the gate must see it. The four cases are the exact
+ * survivors an independent replay found against the previous walk: a required
+ * input, an action button, a field read through `record.values[...]`, and a
+ * helper moved into an arrow function.
+ *
+ * `SURVIVOR` is printed when a planted violation is NOT seen, and the assertion
+ * that follows fails on the same condition -- so the marker is proven able to
+ * fire rather than assumed.
+ */
+const MUTATIONS: ReadonlyArray<{
+  readonly expect: string;
+  readonly name: string;
+  readonly plant: (source: string) => string;
+}> = Object.freeze([
+  {
+    expect: 'input',
+    name: 'a required input inside the certified renderer',
+    plant: (source) =>
+      source.replace(
+        'function renderBreadcrumb(context: SurfaceComponentContext): string {',
+        'function renderBreadcrumb(context: SurfaceComponentContext): string {\n  const planted = `<input name="scan" required>`;\n  void planted;',
       ),
+  },
+  {
+    expect: 'action',
+    name: 'an action button inside the certified renderer',
+    plant: (source) =>
+      source.replace(
+        'function renderBreadcrumb(context: SurfaceComponentContext): string {',
+        'function renderBreadcrumb(context: SurfaceComponentContext): string {\n  const planted = `<button type="submit">Go</button>`;\n  void planted;',
+      ),
+  },
+  {
+    expect: 'field',
+    name: 'a field read through record.values[...]',
+    plant: (source) =>
+      source.replace(
+        'function renderBreadcrumb(context: SurfaceComponentContext): string {',
+        'function renderBreadcrumb(context: SurfaceComponentContext): string {\n  void plantedFieldRead({ values: {} });',
+      ) +
+      '\nconst plantedFieldRead = (record: { values: Record<string, unknown> }) =>\n  record.values["item_name"];\n',
+  },
+  {
+    expect: 'action',
+    name: 'a helper moved into an arrow function',
+    plant: (source) =>
+      source.replace(
+        'function renderBreadcrumb(context: SurfaceComponentContext): string {',
+        'function renderBreadcrumb(context: SurfaceComponentContext): string {\n  void plantedArrowHelper();',
+      ) +
+      '\nconst plantedArrowHelper = () => `<button type="button">x</button>`;\n',
+  },
+]);
+
+test('every predicate fires against a planted violation', () => {
+  const source = registrySource();
+  const baseline = protectedCategories(
+    declarations(source),
+    'renderBreadcrumb',
+  );
+  assert.deepEqual(
+    baseline,
+    ['link'],
+    'the baseline must be the admitted link',
+  );
+  const survivors: string[] = [];
+  for (const mutation of MUTATIONS) {
+    const mutated = mutation.plant(source);
+    assert.notEqual(
+      mutated,
+      source,
+      `${mutation.name}: the plant did not apply, so this proves nothing`,
+    );
+    const seen = protectedCategories(declarations(mutated), 'renderBreadcrumb');
+    // Baseline-relative: breadcrumb already reaches the admitted `link`, so a
+    // plant must ADD its own category rather than merely be present alongside.
+    if (!seen.includes(mutation.expect) || baseline.includes(mutation.expect)) {
+      // eslint-disable-next-line no-console
+      console.log(`SURVIVOR: ${mutation.name} (expected ${mutation.expect})`);
+      survivors.push(mutation.name);
+    }
+  }
+  assert.deepEqual(
+    survivors,
+    [],
+    'a planted violation the gate cannot see is a survivor, and the certified renderer is not certified',
+  );
+});
+
+/**
+ * The marker itself must be able to fire, or its absence above means nothing.
+ * A deliberately unseeable plant -- a category no predicate watches -- is
+ * expected to survive.
+ */
+test('the SURVIVOR marker fires when a plant is genuinely unseen', () => {
+  const bodies = declarations(
+    registrySource().replace(
+      'function renderBreadcrumb(context: SurfaceComponentContext): string {',
+      'function renderBreadcrumb(context: SurfaceComponentContext): string {\n  const planted = `<marquee>unwatched</marquee>`;\n  void planted;',
     ),
-    {
-      builder: [],
-      home: [],
-      list: [],
-      record: ['breadcrumb', 'commandBar'],
-      task: [],
-    },
-    'progressive applies to two slots on one archetype; §3.2 wants per-field and per-section, and slot granularity cannot express it',
+  );
+  assert.deepEqual(
+    protectedCategories(bodies, 'renderBreadcrumb'),
+    ['link'],
+    'an unwatched category must add nothing, or this harness cannot distinguish a survivor from a catch',
+  );
+  assert.ok(
+    PROTECTED_TOKENS.every(
+      ([, token]) => !token.test('<marquee>unwatched</marquee>'),
+    ),
+    'the unseeable plant must genuinely match no predicate',
   );
 });

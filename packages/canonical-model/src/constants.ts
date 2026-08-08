@@ -269,55 +269,46 @@ export const DISCLOSURE_TIERS = ['always', 'progressive', 'onDemand'] as const;
 export const DEFAULT_DISCLOSURE_TIER = 'always' as const;
 
 /**
- * The slots on which `progressive` is admissible: an ALLOW-list of slots proven
+ * The slots on which `progressive` is admissible: an ALLOW-list of slots PROVEN
  * to render no surface field, no required input, and no action. Every slot not
  * named here is forced to `always`.
  *
- * **This is an allow-list because the deny-list could not be made sound.** A
- * deny-list has to prove a slot IS protected, and a slot dispatched through
- * `componentRegistry[contentReferenceId]` can never be proven either way -- so
- * under a deny-list every dynamically dispatched slot silently defaulted to
- * deferrable, which is concealment. Inverted, the unprovable case forces
- * automatically: `task:decision`, `task:scanInput` and `task:primaryAction` all
- * fall through to `renderReferencedComponent`, all fail to be provable, and all
- * force. The failure direction is over-disclosure, never concealment.
+ * **It is an allow-list because the deny-list could not be made sound.** A
+ * deny-list must prove a slot IS protected, so anything unprovable defaults to
+ * deferrable -- concealment. Inverted, the unprovable case forces automatically:
+ * every slot reachable through `componentRegistry[contentReferenceId]` fails to
+ * be provable and forces. The failure direction is over-disclosure, never
+ * concealment.
  *
- * **Each member carries its proof, and the value says what still has to be
- * checked at rule time.**
+ * **`record:breadcrumb` is the only member.** `renderBreadcrumb`
+ * (`apps/web/src/component-registry.ts`) emits a `<nav>` holding a link to the
+ * related list surface and the entity label -- no field read, no input, no
+ * button, no form, no submit control. `test/architecture/proven-deferrable-slots.test.ts`
+ * proves exactly those properties against the renderer and its transitive
+ * helpers, and its mutation harness proves those predicates can fire.
  *
- * - `record:breadcrumb` -- `rendersNothingProtected`. `renderBreadcrumb` emits a
- *   `<nav>` holding a link to the related list surface and the entity label.
- *   No field token, no input, no operation.
- * - `record:commandBar` -- `rendersDeclaredActions`. `renderCommandBar` emits no
- *   field and no input, but it does render the surface's declared operations, so
- *   it is deferrable ONLY while none of them demands confirmation. That second
- *   half is per-surface and cannot be decided here.
+ * **`record:commandBar` was a member and is deleted.** Two independent facts
+ * killed it: `renderCommandBar` emits `<button type="submit">Save</button>`
+ * whenever `surfaceRole === 'form'`, so deferring it defers the primary action
+ * with no confirmed operation anywhere; and the conditional predicate that was
+ * meant to guard it read `'entity' in operation.effect` while the runtime binds
+ * through `operation.entityId ?? readBackQueryId...sourceEntityId`
+ * (`apps/web/src/surface-contract.ts:201-209`), so a confirmed
+ * `registeredCapabilityEffect` binds in production and was invisible to the
+ * rule. A predicate that cannot see what it guards is not a narrower rule; it is
+ * a proxy, and it is gone rather than repaired.
  *
- * **Everything else is excluded, and here is why.** `list:dataGrid`,
- * `record:keyFacts`, `record:sections` and `record:titleStatus` render surface
- * fields. `task:scanInput` renders the aggregate query's parameters as required
- * inputs. `task:primaryAction` renders the submit control, and `list:title`
- * renders the `New` primary action alongside the archive toggle. `task:decision`
- * is unprovable by dispatch. Nothing in `home` or `builder` is registered at all,
- * so nothing there can be proven.
- *
- * **The shortfall, stated rather than hidden: this set is very small and it will
- * stay small.** Two slots on one archetype, one of them conditional. That is the
- * true cost of expressing a per-field, per-section rule at SLOT granularity --
- * §3.2 wants the tier on fields and sections, the model has neither, and at this
- * granularity `progressive` applies to almost nothing. A narrow claim that holds
- * is worth more than a broad one that conceals, and widening it is the residue
- * packet's work, not this one's.
+ * **The shortfall, in one line: one slot, one archetype, unconditional --
+ * `progressive` at slot granularity applies to `record:breadcrumb` and nothing
+ * else.** §3.2 declares the tier per field and per section; the model has
+ * neither. Widening it is the residue packet's work.
  */
 export const PROVEN_DEFERRABLE_SURFACE_SLOTS = Object.freeze({
-  home: Object.freeze({}),
-  list: Object.freeze({}),
-  record: Object.freeze({
-    breadcrumb: 'rendersNothingProtected',
-    commandBar: 'rendersDeclaredActions',
-  }),
-  task: Object.freeze({}),
-  builder: Object.freeze({}),
+  home: Object.freeze([]),
+  list: Object.freeze([]),
+  record: Object.freeze(['breadcrumb']),
+  task: Object.freeze([]),
+  builder: Object.freeze([]),
 } as const);
 
 export type SurfaceArchetype = (typeof SURFACE_ARCHETYPES)[number];
