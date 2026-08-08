@@ -116,6 +116,51 @@ ships the element it applies to. **That reasoning was wrong**, it has kept the
 trajectory unproven across two packets, and the obligation moves to the
 visual-conformance work where its subject actually lives.
 
+### 2b. The wait is not the server's work — corrected 2026-08-08 by user ruling
+
+**§2a's deferral rested on two legs and both assumed the wait *is* server compute.**
+
+*"A server-rendered response has no moment in which a skeleton exists"* is true of
+server compute and false of the whole wait. Between the click and the painted page
+sit DNS and TLS on a first visit, request transit, server render, **response
+transit**, parse and paint. On a slow or congested link response transit dominates
+every other term, and during it the person is looking at the old page or at
+nothing. That moment exists on every navigation and it is the 1–3 s band.
+
+*"20 of 20 reads in `under_100ms`"* is recorded at
+`packages/postgres-provider/src/composed-application-runtime.ts:718`, around
+**registered query execution against Postgres**. It is the innermost segment of
+the wait — strong evidence the database is fast, and no evidence about §1's bands.
+
+**So the app can be fast and the wait can still be seconds.** A wait is slow for
+six reasons and this programme measures one; the largest in the field is the
+user's own connection, which nothing here observes.
+
+**Two rules follow, and they amend §1's reading.**
+
+- **§1 is not a lookup table.** A treatment is *predicted* from what is known
+  before the wait starts and then **escalated by actual elapsed time** as each
+  boundary is crossed: pending → skeleton → indeterminate-with-context →
+  determinate-or-handoff. **It never de-escalates** — the reverse direction is a
+  flicker and reads as a fault.
+- **The escalation half needs no prediction**, because it runs on a clock.
+  Prediction buys only the entry treatment, so the cheapest correct implementation
+  predicts nothing and escalates on elapsed time. Build it in that order.
+
+A skeleton also owes an anti-flicker contract — a floor before painting and a
+minimum hold once painted — or a fast response produces a flash that is worse
+than showing nothing.
+
+**§2a's deferral of skeleton *geometry* is not thereby lifted, and its open
+mechanism question is unchanged:** streamed SSR versus a widened client script,
+where the latter is an ADR-0036 amendment. What is lifted is the reasoning that no
+moment exists and that existing measurement shows none is needed. Both were wrong.
+
+Chartered, with the causes enumerated and the routes costed, in
+[ui-ux-remaining.md](../execution/ui-ux-remaining.md) §2 — rows `wait-measure`,
+`skeleton-route` and `wait-escalate`. `wait-measure` absorbs the `ladder-trigger`
+row, since a measured whole-response wait fires the trigger on its own evidence.
+
 ### 3. The 1–3 s skeleton band diverges from NN/g deliberately
 
 NN/g places skeletons at 2–10 s. This ADR places them at 1–3 s.
