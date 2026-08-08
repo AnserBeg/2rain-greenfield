@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
-import { readCompiledSurfaceManifest } from '../../apps/web/src/surface-contract.js';
+import {
+  SurfaceProjectionError,
+  readCompiledSurfaceManifest,
+} from '../../apps/web/src/surface-contract.js';
 import {
   ADOPTED_LANGUAGE_VERSION,
   canonicalize,
@@ -114,7 +117,13 @@ const policy: CurrentPolicyGateway = {
   },
 };
 
-async function viewOf(compiled: CompileSuccess): Promise<RequestRuntimeView> {
+async function viewOf(
+  compiled: CompileSuccess,
+  transform: (
+    projections: LoadedRequestRuntimeDefinition['projections'],
+  ) => LoadedRequestRuntimeDefinition['projections'] = (projections) =>
+    projections,
+): Promise<RequestRuntimeView> {
   const entry = new AuthenticatedRequestRuntimeEntryAdapter(
     new AuthenticatedRequestEntryAdapter(async () => identity),
     {
@@ -125,7 +134,7 @@ async function viewOf(compiled: CompileSuccess): Promise<RequestRuntimeView> {
             fence: 1,
             pointerId: 'c1000000-0000-4000-8000-000000000006',
           },
-          projections: partyRuntimeProjections(compiled),
+          projections: transform(partyRuntimeProjections(compiled)),
           release: {
             contentHash: compiled.releaseRoot,
             releaseId: 'c1000000-0000-4000-8000-000000000007',
@@ -219,4 +228,44 @@ test('CONTROL: a package declaring no tier still compiles under v1', () => {
     COMPILER_SEMANTIC_PROFILE_V1_VERSION,
   );
   assert.equal(compiled.status, 'compiled');
+});
+
+/**
+ * The control `parseSlot`'s unknown-tier refusal was shipping without, found by
+ * this packet's own mutation harness rather than by review: removing the refusal
+ * left every suite green.
+ *
+ * `parseSlot` builds a fresh object from the keys it recognises, so an
+ * unrecognised value would otherwise be DROPPED rather than refused -- the
+ * reader would silently serve a manifest whose tier it did not understand. The
+ * refusal is the difference between that and an honest failure, and it is now
+ * observed.
+ */
+test('RED: the reader refuses a tier value outside the closed vocabulary', async () => {
+  const compiled = compileAt(
+    authoredWithDeclaredTier(),
+    COMPILER_SEMANTIC_PROFILE_V2_VERSION,
+  );
+  assert.ok(compiled.status === 'compiled');
+  const view = await viewOf(compiled, (projections) => {
+    const payload = structuredClone(projections.surface.payload) as {
+      surfaces: { slots: { disclosureTier?: string }[] }[];
+    };
+    const slot = payload.surfaces.flatMap((surface) => surface.slots)[0];
+    assert.ok(slot, 'the payload must carry a slot to corrupt');
+    slot.disclosureTier = 'hidden';
+    return {
+      ...projections,
+      surface: { ...projections.surface, payload },
+    };
+  });
+  assert.throws(
+    () => readCompiledSurfaceManifest(view),
+    (error: unknown) => {
+      assert.ok(error instanceof SurfaceProjectionError);
+      assert.equal(error.code, 'INVALID_SURFACE_SLOT');
+      return true;
+    },
+    'an unknown tier must be refused, not dropped',
+  );
 });
