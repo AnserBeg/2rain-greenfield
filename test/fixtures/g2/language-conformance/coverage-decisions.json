@@ -1,44 +1,44 @@
 {
   "version": "northstar.language-coverage-decisions/v1",
-  "ledgerDigest": "2be4b4de6461339aff6663e78b7e989eda0003d02d8caf6a44b9f437567cc6dd",
+  "ledgerDigest": "c333e37ce0d2bf2c90026b505e964bcfd63135132a06eb41897efc09d34a218d",
   "acceptedButUnhonoredObligationIds": [
     "authoredLanguage:$.relations[].joinEligibility=\"none\"",
     "authoredLanguage:$.relations[].joinEligibility=\"query\""
   ],
   "observationSnapshot": {
     "bitmapEncoding": "sorted-obligation-bitset-msb0-hex/v1",
-    "ledgerDigest": "2be4b4de6461339aff6663e78b7e989eda0003d02d8caf6a44b9f437567cc6dd",
-    "obligationCount": 1938,
-    "observedBitmap": "ffe0800404008701958ff09604000840080ea3a700000000040002000005e50d08e1dc2f001c30f0143c0001400038d080000c0800102003900011c0120002300400000000000000000000000104000000000000000000000000000000000000000000208008010f883fe10000848000ee0000200040000000000000000000000000000000000020002a208000000000000000000000004080000000001ef888001e81001ff9000184240006140003d70ae370a00014000210000000000000000000000000000000010000e2000b0e020070200060021000610f8ff7ffff9fbcbf47edffffdffffffffffffffffffeffffff40",
+    "ledgerDigest": "c333e37ce0d2bf2c90026b505e964bcfd63135132a06eb41897efc09d34a218d",
+    "obligationCount": 2045,
+    "observedBitmap": "ffe08004020041602958ff08b0200041001016a3a7000000000100008000005e50a84387709e001c285c0485c000120001634200000c0800101001640004380220002180200000000000000000000000002080000000000000000000000000000000000000000000010400200417882ff0800041100016b0000080010000000000000000000000000000000000000040004a20800000000000000000000000010200000000000f75110002e80800bfe40005082200028480005d70971b84800048000410000000000000000000000000000000000040002c400098701002c08001400208002841f1fefffff3f797e8fdbffffbffffffffffffffffffdfffffe8",
     "observedCount": 426
   },
   "decisions": [
     {
       "acceptedButUnhonoredSetDigest": "1182b596eb701e61cb8de3d7fd072da933de7785001c04934916b6c3776b7d0f",
       "category": "observedRelationScope",
-      "ledgerDigest": "2be4b4de6461339aff6663e78b7e989eda0003d02d8caf6a44b9f437567cc6dd",
+      "ledgerDigest": "c333e37ce0d2bf2c90026b505e964bcfd63135132a06eb41897efc09d34a218d",
       "obligationSetDigest": "e220b1233fedb4fac6f57f47d43b3d01f0e62f3a249f0e3fa30f3833f147354d",
-      "rationale": "The relation language refuses every cardinality spelling the storage lowerer does not implement, and the surviving singleton cardinality=\"manyToOne\" keeps its obligation: an axis narrowed to one value stays represented, so narrowing can no longer delete a shape from this record. The remaining observed relation obligations are still declaration and lowering evidence, not execution evidence, and remain explicit coverage debt until the sibling corpus supplies receipts. Join eligibility is deliberately NOT narrowed here: it is still accepted with zero consumers, is a known ADR-0041 violation left open on the record, and is owned by row lang-retire because every checked-in release entry has already serialized it.",
+      "rationale": "The relation language refuses every cardinality spelling the storage lowerer does not implement, and the surviving singleton cardinality=\"manyToOne\" keeps its obligation: an axis narrowed to one value stays represented, so narrowing can no longer delete a shape from this record. The remaining observed relation obligations are still declaration and lowering evidence, not execution evidence, and remain explicit coverage debt until the sibling corpus supplies receipts. Join eligibility is deliberately NOT narrowed here: it is still accepted with zero consumers, is a known ADR-0041 violation left open on the record, and is owned by row lang-retire because every checked-in release entry has already serialized it. Re-derived by 5g3-sm-impl for the v5 language cut (ADR-0050): the cut appended one node-version value to every version-bearing authored axis, 1938 obligations to 2045, and NONE of the 107 is observed, because no first-party module is authored at v5 -- the cut and its adoption are two events. This decision's obligation set is therefore unchanged in membership; it is re-recorded because a decision is bound to the ledger it was reviewed against, and that ledger moved.",
       "revisitCondition": "Replace this decision with execution or stable-refusal receipts from the sibling relation corpus; any change to the exact observed relation obligation set, including widening the declined cardinality axis or retiring join eligibility under lang-retire, invalidates this decision immediately.",
-      "decisionId": "lang-singleton-relation-corpus-boundary@5c063258388d219514b642d7be01886f516e1358098758c845df94c985e33b79"
+      "decisionId": "lang-singleton-relation-corpus-boundary@643d0a7cd7ac0c2b616402bd73a4076c40fd6fc8e2ce12be85cf4dc9a0c7f7d0"
     },
     {
       "acceptedButUnhonoredSetDigest": "1182b596eb701e61cb8de3d7fd072da933de7785001c04934916b6c3776b7d0f",
       "category": "observedOutsideRelationScope",
-      "ledgerDigest": "2be4b4de6461339aff6663e78b7e989eda0003d02d8caf6a44b9f437567cc6dd",
+      "ledgerDigest": "c333e37ce0d2bf2c90026b505e964bcfd63135132a06eb41897efc09d34a218d",
       "obligationSetDigest": "b58907e72e717deb3b941551a5d1c15fb1d81f9cb89ea1355775e717449d42f9",
-      "rationale": "The whole-language ledger intentionally precedes execution coverage outside relations. This set now also carries the single-valued authored axes the earlier cardinality filter dropped, which are declared constants rather than choices; admitting them is an inventory correction, not a claim that any of them executes. Existing first-party uses are named evidence debt, not baselined as correct behavior, and this exact-set decision cannot absorb a new value or axis.",
+      "rationale": "The whole-language ledger intentionally precedes execution coverage outside relations. This set now also carries the single-valued authored axes the earlier cardinality filter dropped, which are declared constants rather than choices; admitting them is an inventory correction, not a claim that any of them executes. Existing first-party uses are named evidence debt, not baselined as correct behavior, and this exact-set decision cannot absorb a new value or axis. Re-derived by 5g3-sm-impl for the v5 language cut (ADR-0050): the cut appended one node-version value to every version-bearing authored axis, 1938 obligations to 2045, and NONE of the 107 is observed, because no first-party module is authored at v5 -- the cut and its adoption are two events. This decision's obligation set is therefore unchanged in membership; it is re-recorded because a decision is bound to the ledger it was reviewed against, and that ledger moved.",
       "revisitCondition": "Each later language-axis packet replaces the corresponding obligations with execution or stable-refusal receipts; any change to the exact observed non-relation set invalidates this decision immediately.",
-      "decisionId": "lang-singleton-whole-language-execution-boundary@efa86203a75b96f07aff0178949a301f5eb74ee64ef6d49ceaf12071d95c3e30"
+      "decisionId": "lang-singleton-whole-language-execution-boundary@b2306cdc74933299339e1bd367e4019fce26850cfa118631a71becca2d21be81"
     },
     {
       "acceptedButUnhonoredSetDigest": "1182b596eb701e61cb8de3d7fd072da933de7785001c04934916b6c3776b7d0f",
       "category": "unobserved",
-      "ledgerDigest": "2be4b4de6461339aff6663e78b7e989eda0003d02d8caf6a44b9f437567cc6dd",
-      "obligationSetDigest": "dcc1992e8f8f2c14a38ef57d1757272df0f7473c9440a3e9eaa24aa8299766c1",
-      "rationale": "These derived values and topologies have no first-party instance. Their exemption is conditional on remaining unused and is not evidence that the platform honors them.",
+      "ledgerDigest": "c333e37ce0d2bf2c90026b505e964bcfd63135132a06eb41897efc09d34a218d",
+      "obligationSetDigest": "b46d58670f0bdff0c8dadf6ff8c0e94e03f84fec905793b8879c0932af5658e6",
+      "rationale": "These derived values and topologies have no first-party instance. Their exemption is conditional on remaining unused and is not evidence that the platform honors them. Re-derived by 5g3-sm-impl for the v5 language cut (ADR-0050). All 107 obligations the cut added land here: one v5 value on each version-bearing authored axis, plus $.languageVersion=\"v5\" and $.normalizationProfileVersion=\"northstar.normalization/v5\". They are unobserved for a precise reason rather than an accidental one -- node-version purity is uniform within a package revision, so no module can be authored at v5 until every module is, and ADOPTED_LANGUAGE_VERSION deliberately stays at v4. This exemption expires by construction at adoption, which is the behaviour the revisit condition below already specifies.",
       "revisitCondition": "The first first-party occurrence changes the observed partition, invalidates this exact-set decision, and requires execution, stable refusal, or a new explicit ruling before the gate can pass.",
-      "decisionId": "lang-singleton-unused-shape-standing-exemption@49316035fe2374cefbcc963012194eba125adcbcaacffc00980186be1226cadb"
+      "decisionId": "lang-singleton-unused-shape-standing-exemption@280cd9caf510dca507f5ea08f9606fb9b264a64e2127517bbe33901c4aa48022"
     }
   ]
 }
