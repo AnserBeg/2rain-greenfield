@@ -93,6 +93,7 @@ const suiteDefinitions = [
       'test/architecture/surface-grammar-conformance.test.ts',
       'test/architecture/surface-runtime-seam.test.ts',
       'test/architecture/tenant-completeness.test.ts',
+      'test/architecture/test-lock-observability.test.ts',
       'test/architecture/test-reachability.test.ts',
       'test/architecture/ux-grammar-skill.test.ts',
     ],
@@ -286,31 +287,55 @@ test('test entry points participate in the shared/exclusive gate lock', () => {
     readFileSync('apps/web/package.json', 'utf8'),
   ) as { scripts?: Record<string, string> };
   const rootScripts = packageJson.scripts ?? {};
+  // Which mode each entry point is entitled to is derived from whether it
+  // stands up containers, in test-lock-observability.test.ts. This asserts the
+  // WHOLE entry point is inside the lease. The previous regex accepted a
+  // wrapper anywhere, which admitted exactly the prefixes and suffixes that
+  // were running unleased: evidence preparation, which deletes the files, and
+  // playwright normalization, which rewrites them.
   for (const [script, command] of Object.entries(rootScripts)) {
     if (!script.startsWith('test:')) continue;
-    const expectedMode = script === 'test:performance' ? 'exclusive' : 'shared';
     assert.match(
       command,
       new RegExp(
-        `(?:^|&& )node ${testLockRunnerPath.replaceAll('.', '\\.')}` +
-          ` ${expectedMode} --`,
+        `^node ${testLockRunnerPath.replaceAll('.', '\\.')}` +
+          ` (?:shared|exclusive) -- `,
         'u',
       ),
-      `${script} does not acquire the ${expectedMode} test lock`,
+      `${script} runs work before it acquires the test lock`,
     );
+    if (command.includes('scripts/run-suite.sh')) {
+      assert.match(
+        command,
+        /-- bash scripts\/run-suite\.sh \S+(?: --normalize-playwright)? -- \S/u,
+        `${script} does not run its whole suite through the leased runner`,
+      );
+    }
   }
+  // Anchored for the same reason as the root scripts: an unanchored match
+  // accepted a wrapper anywhere in the string, and this entry point ran its
+  // evidence preparation — which deletes the files — before it.
   assert.match(
     webPackageJson.scripts?.['test:contracts'] ?? '',
-    /run-with-test-lock\.mjs shared --/u,
+    /^node \.\.\/\.\.\/scripts\/run-with-test-lock\.mjs shared -- /u,
+    'the workspace-local contracts entry point runs work before it locks',
   );
 
   const matrixRunner = readFileSync('scripts/run-matrix.sh', 'utf8');
-  assert.match(matrixRunner, /NORTH_STAR_TEST_LOCK_HELD=exclusive/u);
+  // The lease a child inherits is a minted claim, not a bare mode word: the
+  // child validates it against the registry before honouring it.
+  assert.match(
+    matrixRunner,
+    /mint_claim exclusive\nexport NORTH_STAR_TEST_LOCK_HELD="\$MATRIX_CLAIM"/u,
+  );
   assert.match(
     matrixRunner,
     /bash scripts\/downgrade-test-lock\.sh "\$LOCK" "\$LOCK_TIMEOUT_SECONDS" 9/u,
   );
-  assert.match(matrixRunner, /NORTH_STAR_TEST_LOCK_HELD=shared/u);
+  assert.match(
+    matrixRunner,
+    /mint_claim shared\nexport NORTH_STAR_TEST_LOCK_HELD="\$MATRIX_CLAIM"/u,
+  );
   assert.ok(
     matrixRunner.indexOf('corepack pnpm test:performance') <
       matrixRunner.indexOf('# The main matrix deliberately excludes'),
@@ -457,7 +482,7 @@ test('matrix lock and legacy-process waits fail busy at their bounded deadline',
         const fakePs = join(fakeBin, 'ps');
         writeFileSync(
           fakePs,
-          "#!/usr/bin/env bash\nprintf '99999 corepack pnpm test:compiler\\n'\n",
+          "#!/usr/bin/env bash\nprintf '9999999 9999999 corepack pnpm test:compiler\\n'\n",
         );
         chmodSync(fakePs, 0o755);
         assert.throws(

@@ -408,3 +408,96 @@ So, when recording a red:
   several causes.
 - **A red arriving faster or louder than expected is a reason to look, not to
   celebrate.** All three of the above looked like success at a glance.
+
+## An uncommitted harness is not evidence — added 2026-08-08
+
+`U5b` round 3 reported *"eleven mutations, no survivors,"* from a harness that
+printed `*** SURVIVOR — NO RED ***` when a mutation produced nothing, and reported
+that it never printed. **The harness was not in the committed tree.** The reviewer
+could not reproduce the claim from the SHA, wrote its own eleven-mutation replay
+against the same source predicates, and found **four survivors** — a required input
+and an action button added without a watched token, a field read through
+`record.values[...]`, and a confirmed capability command bound through the
+read-back query.
+
+**A mutation table is a claim about the committed controls. If the thing that
+produced it is not committed, the claim cannot be checked and does not count.**
+This is the same rule as *"a read count is not a proof"*, one level up: the lane's
+own tooling is part of the evidence, not scaffolding around it.
+
+Two consequences, both cheap:
+
+- **Commit the harness** with the packet, wired into an executed suite, so the
+  table can be re-derived rather than believed.
+- **Prove the marker can fire.** Absence of a `SURVIVOR` line is the evidence, so
+  a harness that can never print it produces a perfect table for free. The
+  reviewer checked this explicitly and it is now a standing question.
+
+**The generative form:** *if the tool that produced this evidence is not in the
+tree, what would a reviewer have to take on trust?*
+
+## Re-tier when the diff outgrows the row — measured 2026-08-08
+
+Tier follows the final diff, which this file already says. **What it did not say is
+that nothing triggers a re-check**, so a row tiered when it was a sentence of scope
+keeps that tier after the packet becomes something else.
+
+`lock-owner` and `matrix-contention` were filed **Mechanical** on a one-line
+scope — *write the holder's pid into the lock file so the next starvation names its
+cause.* The packet that implemented them shipped a 175-line lock wrapper, a
+365-line registry, a new suite runner, changed acquisition modes on every test
+entry point, and a **new invariant**: an inherited claim authorizes work only if
+path, pid, start ticks, liveness, holding state and mode all validate. By this
+file's own rule — *"these stay Critical wherever they live: new or changed
+invariants"* — that is Critical, and it was reviewed as Critical for four rounds.
+
+**The four rounds were not over-spend, and the orchestrator's first reading that
+they were is the error being recorded here.** Round 1 found gates constructing the
+records they then read; round 2 found the lock bypassable through an inherited
+environment variable; round 3 found a reachable path that deletes a previous run's
+evidence before failing to acquire; round 4 found a valid shared request refused
+under a diagnostic naming an exclusive gate. **Three of the four would have
+defeated the packet's stated purpose.**
+
+**The rule:** before writing a review prompt, re-derive the tier **from the frozen
+diff**, and correct the queue row when it disagrees. A row's tier is a forecast; the
+diff is the fact.
+
+**And the cheap self-check the orchestrator skipped:** before concluding a review
+was too expensive, list what it found and ask whether shipping each finding would
+have mattered. If the answer is yes, the cost was the price, not the waste. Round
+4's finding was a **regression introduced by round 3's fix** — which is an argument
+for reviewing corrections, not against.
+
+## A fenced claim without a control is never checked again — added 2026-08-08
+
+Review prompts fence settled ground so rounds do not re-litigate it. That is
+correct and it has a cost nobody had named: **fencing removes a claim from review,
+so a claim fenced without a control is a claim no one will ever check.**
+
+`U5b` shipped `parseSlot`'s unknown-tier refusal in round 1. The orchestrator wrote
+*"settled — do not spend effort: `parseSlot`'s round trip and unknown-tier
+refusal"* into **three consecutive review prompts**. On round 4, an ad-hoc mutation
+removing that refusal entirely **went green across every suite** — it had never had
+a control, and three reviewers had been instructed not to look.
+
+**The rule:** before fencing a claim as settled, name the control that holds it.
+If you cannot name one, it is not settled — it is unexamined, and fencing it makes
+that permanent. A `CLOSED` row in a claim ledger is a report of a control, not a
+substitute for one.
+
+**The generative question when writing a fence:** *what would go red if this
+were deleted?*
+
+**And say what you are deleting the evidence for — added 2026-08-08, the lane's
+own sharpening.** `U5b` ended by deleting the gate its mutation harness served, so
+the harness went with it and the tree now contains **no committed mutation
+harness at all** — every mutation result in its final report rests on shell
+commands run and discarded. That is the same state that produced two overstated
+tables; the only difference is that it is labelled. **A packet removing a harness
+owes a sentence naming which claims lose their executable evidence**, so the next
+reader knows which rows in the claim ledger are now reports rather than controls.
+
+**Report mutation results as `N committed, M ad-hoc`, and count only the committed
+ones as evidence.** `U5b` reported *"fifteen"* when four were in the tree, and
+*"eleven"* of that fifteen were thrown away. The wording is the fix.
