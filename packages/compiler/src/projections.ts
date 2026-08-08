@@ -566,6 +566,14 @@ function surfaceManifestPayload(
       })),
     },
     payloadSchemaVersion,
+    // `minimumVersion` stays 1 when the tier is emitted, and that is honest on a
+    // named condition rather than by omission. It declares what a reader must
+    // support to consume the payload SAFELY. `navigation` bumped it to 2 because
+    // a v0 reader silently reconstructs unreachable overflow -- a WRONG render.
+    // A reader that drops the tier renders every slot expanded, which is exactly
+    // what `always` means, so it under-defers rather than concealing. The
+    // condition is that no tier value ever means "hide"; the moment one does,
+    // this needs re-deriving. Recorded, not fixed (U5b review item 3).
     requiredRuntimeCapability: {
       capabilityId: 'northstar.runtime:capability.surface-manifest',
       minimumVersion: navigation ? 2 : 1,
