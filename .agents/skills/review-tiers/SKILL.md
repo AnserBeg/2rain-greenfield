@@ -551,3 +551,27 @@ of defect the prompt described and found a real one in the unreadable candidate:
 hand-written `schemaVersion: 'v4'` that makes any `v5` package carrying a
 legal-entity scope operand fail `CANON_VERSION_MIXED`. **A reviewer told what to
 look for can find it without the diff. That is not a substitute for the diff.**
+
+## Self-chosen mutations are worth less than an independent replay — added 2026-08-08
+
+`U5b`'s lane observed it about its own evidence: *"my ad-hoc mutations were chosen
+by me against gaps I already knew about, and are worth strictly less than an
+independent replay for that reason."*
+
+That is correct, and it is the same argument this file already makes for **fresh
+naive** reviewers, one level down. A lane mutates where it suspects weakness, so
+its table measures the gaps it already found. An independent replay mutates where
+the *source* is weak. On this packet the difference was measured: the lane's own
+table reported no survivors while an independent replay of the same tree found
+**four**.
+
+**So report who chose the mutations, not only how many ran.** `N committed, M
+ad-hoc` gains a third term: **whether the set was chosen by the author or by
+someone else.** A self-chosen table is evidence about the author's model, and
+should be read as such.
+
+**And a named survivor with a reason beats a table claiming none.** `U5b` closed by
+reporting that a lowering mutation ignoring the authored value **survives**, because
+`?? DEFAULT_DISCLOSURE_TIER` makes explicit `always` and absent identical — the
+exact mutation its round trip cannot catch. **A gap you can name is closed
+knowledge; a table with no survivors is usually an unexamined one.**
