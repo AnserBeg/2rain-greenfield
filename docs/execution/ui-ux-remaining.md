@@ -6,9 +6,9 @@ Read `AGENTS.md`, then the plan, then the ADRs cited here — this document
 charters work and records corrections; it does not override a ruling. Where it
 corrects a ruling, that ruling has been amended and is cited by section.
 
-**§6 carries the adjudicated 2026-08-08 doctrine review** — nine findings upheld,
-two refuted, each with where it landed. Read it before re-opening anything in §2
-or §5.
+**§6 carries the adjudicated 2026-08-08 doctrine review** — eleven findings, nine
+upheld, one split, one refuted, each with where it landed. Read it before
+re-opening anything in §2 or §5.
 
 Companion rows live in [current-plan.md](current-plan.md) (U0–U9 and the
 follow-ups). This file exists because those rows are spread across a queue built
@@ -314,9 +314,10 @@ replacement for it reproduced the same shape one step wider.
 
 A second session reviewed the whole UI/UX authority set for one defect shape:
 **a ruling whose load-bearing term means something narrower in its evidence than
-in the rule it justifies.** Eleven findings, adjudicated against the tree. Nine
-upheld in whole or in part, two refuted. Recorded here so neither the upheld ones
-are re-derived nor the refuted ones re-raised.
+in the rule it justifies.** Eleven findings, each adjudicated against the tree:
+**nine upheld** (F10 only in part), **one split** — F4's doctrine upheld and its
+code claim refuted — and **one refuted outright**. Recorded here so neither the
+upheld ones are re-derived nor the refuted ones re-raised.
 
 | # | Term | Verdict | Where it landed |
 |---|---|---|---|
