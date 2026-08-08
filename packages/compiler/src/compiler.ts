@@ -912,9 +912,12 @@ function collectSymbols(
   }
   for (const machine of packageRevision.stateMachines) {
     add(machine.machineId, machine.kind, ['stateMachineReference']);
-    add(machine.stateField.fieldId, machine.stateField.kind, []);
+    // 5g3-sm PROBE ONLY -- NOT FOR MERGE: the state field and the states are
+    // now owned by the materialized field and its enum options. They are
+    // registered here only as REFERENCE targets, never as second owners.
+    references.get('stateReference')!;
     for (const state of machine.states) {
-      add(state.stateId, state.kind, ['stateReference']);
+      references.get('stateReference')!.add(state.stateId);
     }
     for (const transition of machine.transitions) {
       add(transition.transitionId, transition.kind, ['transitionReference']);
@@ -1949,9 +1952,9 @@ function verifyCompleteness(
       ),
     );
   }
-  const expectedStateFields = new Set(
-    packageRevision.stateMachines.map((machine) => machine.stateField.fieldId),
-  );
+  // 5g3-sm PROBE ONLY -- NOT FOR MERGE: nothing is emitted into the retired
+  // parallel construct, so nothing is expected in it.
+  const expectedStateFields = new Set<string>();
   const emittedStateFields = new Set(
     isStorageTargetV1(emittedStorage)
       ? emittedStorage.entities.flatMap((entity) =>

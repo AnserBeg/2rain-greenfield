@@ -104,8 +104,32 @@ export interface RegisteredCapabilityOperationDefinition extends RegisteredOpera
   readonly tier: 'o1';
 }
 
+/** 5g3-sm PROBE ONLY -- NOT FOR MERGE. */
+export interface RegisteredTransitionOperationDefinition extends RegisteredOperationDefinitionBase {
+  readonly effect: {
+    readonly entity: {
+      readonly kind: string;
+      readonly schemaVersion: string;
+      readonly targetId: string;
+    };
+    readonly fromStateId: string;
+    readonly kind: 'transitionStateEffect';
+    readonly schemaVersion: string;
+    readonly stateFieldId: string;
+    readonly toStateId: string;
+    readonly transition: {
+      readonly kind: string;
+      readonly schemaVersion: string;
+      readonly targetId: string;
+    };
+  };
+  readonly tier: 'o0';
+}
+
 export type RegisteredOperationDefinition =
-  RegisteredCapabilityOperationDefinition | RegisteredRecordOperationDefinition;
+  | RegisteredCapabilityOperationDefinition
+  | RegisteredRecordOperationDefinition
+  | RegisteredTransitionOperationDefinition;
 
 export interface RegisteredOperationInputContract {
   readonly closedArgumentKeys: readonly string[];
@@ -181,7 +205,11 @@ export interface SemanticOperationResultEnvelope {
 export interface SemanticOperationExecutionRequest {
   readonly channel: TrustedInvocationChannel;
   readonly context: TrustedRequestContext;
-  readonly definition: RegisteredRecordOperationDefinition;
+  // 5g3-sm PROBE ONLY -- NOT FOR MERGE: the generic executor now receives
+  // transition definitions as well as record definitions.
+  readonly definition:
+    | RegisteredRecordOperationDefinition
+    | RegisteredTransitionOperationDefinition;
   readonly idempotencyKey: string;
   readonly input: ImmutableJsonValue;
   readonly inputDigest: string;
@@ -1019,6 +1047,37 @@ function assertOperationDefinition(
       'effect.capability.targetId',
       invalid,
     );
+  } else if (value.effect.kind === 'transitionStateEffect') {
+    // 5g3-sm PROBE ONLY -- NOT FOR MERGE.
+    // The transition arm keeps the entity requirement the record arm below
+    // states: an entity-less effect is still refused. What it admits is a
+    // SERVER-SELECTED target -- `toStateId` is compiled, never an argument --
+    // over the same closed ['expectedRevision','recordId'] contract the
+    // compiler already emits for this effect kind.
+    assertExactKeys(
+      value.effect,
+      [
+        'entity',
+        'fromStateId',
+        'kind',
+        'schemaVersion',
+        'stateFieldId',
+        'toStateId',
+        'transition',
+      ],
+      invalid,
+    );
+    if (value.tier !== 'o0' || !isRecord(value.effect.entity)) {
+      throw invalid('pinned transition operation effect is unsupported');
+    }
+    assertCanonicalId(
+      (value.effect.entity as { targetId: unknown }).targetId,
+      'effect.entity.targetId',
+      invalid,
+    );
+    assertCanonicalId(value.effect.stateFieldId, 'effect.stateFieldId', invalid);
+    assertCanonicalId(value.effect.fromStateId, 'effect.fromStateId', invalid);
+    assertCanonicalId(value.effect.toStateId, 'effect.toStateId', invalid);
   } else {
     // Load-bearing O0 fence: capability admission must never make an entity-
     // less record effect valid. The complete entity reference remains required

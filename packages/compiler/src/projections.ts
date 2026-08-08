@@ -443,6 +443,40 @@ function queryCatalogPayload(
   };
 }
 
+/**
+ * 5g3-sm PROBE ONLY -- NOT FOR MERGE.
+ *
+ * A `transitionStateEffect` names a transition and nothing else. The runtime
+ * needs the entity, the state field and the server-selected target, and no
+ * pinned projection carries any of them -- the semantic-model projection
+ * carries a FINGERPRINT of the transition, not its content. Resolving them
+ * here is the projection change the ruling prices on ADR-0047's profile axis.
+ */
+function resolvedEffect(
+  effect: NormalizedApplicationPackage['operations'][number]['effect'],
+  packageRevision: NormalizedApplicationPackage,
+): unknown {
+  if (effect.kind !== 'transitionStateEffect') return effect;
+  const machine = packageRevision.stateMachines.find((candidate) =>
+    candidate.transitions.some(
+      (transition) => transition.transitionId === effect.transition.targetId,
+    ),
+  );
+  if (!machine) return effect;
+  const transition = machine.transitions.find(
+    (candidate) => candidate.transitionId === effect.transition.targetId,
+  )!;
+  return {
+    entity: machine.entity,
+    fromStateId: transition.fromState.targetId,
+    kind: effect.kind,
+    schemaVersion: effect.schemaVersion,
+    stateFieldId: machine.stateField.fieldId,
+    toStateId: transition.toState.targetId,
+    transition: effect.transition,
+  };
+}
+
 function operationCatalogPayload(
   packageRevision: NormalizedApplicationPackage,
   storageTarget: StorageTargetPayloadV1 | null,
@@ -460,11 +494,14 @@ function operationCatalogPayload(
   const storageByEntity = new Map(
     (storageTarget?.entities ?? []).map((entity) => [entity.entityId, entity]),
   );
+  const stateFieldIds = new Set(
+    packageRevision.stateMachines.map((machine) => machine.stateField.fieldId),
+  );
   return {
     kind: 'operationCatalogPayload',
     operations: packageRevision.operations.map((operation) => ({
       confirmation: operation.confirmation,
-      effect: operation.effect,
+      effect: resolvedEffect(operation.effect, packageRevision),
       lifecycle: operation.lifecycle,
       operationId: operation.operationId,
       permissionId: operation.permission.targetId,
@@ -476,7 +513,12 @@ function operationCatalogPayload(
             inputContract: operationInputContract(
               operation,
               'entity' in operation.effect
-                ? (fieldsByEntity.get(operation.effect.entity.targetId) ?? [])
+                ? // 5g3-sm PROBE ONLY -- NOT FOR MERGE. A machine's state field
+                  // is never caller-writable: it is seeded from `initialState`
+                  // and moved only by a transition. This is the same shape
+                  // `systemInput` already uses for `legalEntityId`.
+                  (fieldsByEntity.get(operation.effect.entity.targetId) ?? [])
+                    .filter((field) => !stateFieldIds.has(field.fieldId))
                 : [],
               'entity' in operation.effect
                 ? (relationsByEntity.get(operation.effect.entity.targetId) ??

@@ -747,30 +747,19 @@ export function lowerStorageTargetV1(
         );
         return [constraint];
       });
-      const derivedStateFields = (
-        stateMachinesByEntity.get(entity.entityId) ?? []
-      )
-        .map((machine) => {
-          const physicalName = physicalNameFor(
-            'column',
-            machine.stateField.fieldId,
-          );
-          const derived = {
-            fieldId: machine.stateField.fieldId,
-            physicalName,
-            postgresqlType: 'text' as const,
-            stateMachineId: machine.machineId,
-          };
-          addMapping(
-            mappings,
-            'column',
-            machine.stateField.fieldId,
-            physicalName,
-            derived,
-          );
-          return derived;
-        })
-        .sort((left, right) => compare(left.fieldId, right.fieldId));
+      // 5g3-sm PROBE ONLY -- NOT FOR MERGE.
+      // The parallel construct is GONE. Emitting it alongside the materialized
+      // column registered two incompatible shapes for one physical identifier
+      // and the compiler refused with COMPILER_PHYSICAL_NAME_REUSE_INCOMPATIBLE
+      // -- which is the ruling's argument, enforced by the compiler itself: a
+      // document has one state field, not two.
+      void stateMachinesByEntity;
+      const derivedStateFields: Array<{
+        fieldId: string;
+        physicalName: string;
+        postgresqlType: 'text';
+        stateMachineId: string;
+      }> = [];
       const uniqueKeys: StorageUniqueKeyTarget[] = [];
       const indexes: StorageIndexTarget[] = [];
       const archiveExcludingPredicate = 'archived_at IS NULL';

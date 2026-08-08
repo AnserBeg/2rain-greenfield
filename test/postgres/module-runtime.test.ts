@@ -5280,68 +5280,34 @@ function transitionModuleDefinition(
     targetId,
   });
   const entityId = `${namespace}:entity.master`;
-  const stateFieldId = `${namespace}:field.master_state`;
-  const draftOptionId = `${namespace}:option.master_state_draft`;
-  const releasedOptionId = `${namespace}:option.master_state_released`;
 
-  // The AUTHORED state the packet's vertical asks for. It is an ordinary enum
-  // field: readable by a query, addressable by a predicate, writable by the
-  // generic press.
+  // An ORDINARY authored field, so the vertical can prove that a transition
+  // still evaluates its operation precondition against the authoritative prior
+  // image. It is deliberately NOT a second state field.
+  const approvalFieldId = `${namespace}:field.master_approval`;
   definition.fields.push({
     classification: 'internal',
     collation: 'binary',
     defaultSemantics: 'none',
     entity: probeReference('entityReference', entityId),
-    fieldId: stateFieldId,
+    fieldId: approvalFieldId,
     fieldType: {
-      kind: 'enumFieldType',
-      options: [
-        {
-          kind: 'enumOption',
-          label: 'Draft',
-          optionId: draftOptionId,
-          orderKey: 10,
-          schemaVersion: version,
-        },
-        {
-          kind: 'enumOption',
-          label: 'Released',
-          optionId: releasedOptionId,
-          orderKey: 20,
-          schemaVersion: version,
-        },
-      ],
+      kind: 'textFieldType',
+      maximumLength: 20,
       schemaVersion: version,
     },
     kind: 'fieldDefinition',
-    label: 'State',
+    label: 'Approval',
     orderKey: 30,
     presence: 'required',
     reportable: true,
     schemaVersion: version,
     searchable: false,
   });
-  const masterQueryIds = new Set(
-    ['get', 'list', 'search', 'resolve'].map(
-      (queryType) => `${namespace}:query.master_${queryType}`,
-    ),
-  );
-  for (const query of definition.queries) {
-    if (!masterQueryIds.has(String(query.queryId))) {
-      continue;
-    }
-    (query.selections as Array<Record<string, unknown>>).push({
-      field: probeReference('fieldReference', stateFieldId),
-      kind: 'querySelection',
-      orderKey: 20,
-      schemaVersion: version,
-      selectionId: `${namespace}:selection.master_${String(query.queryType)}_state`,
-    });
-  }
 
-  // The DECLARED state machine. Its `stateField` is compiler-derived and has
-  // no relationship to the authored field above -- that disconnection is the
-  // measurement.
+  // The state machine. Under the ruling its state field is MATERIALIZED as an
+  // ordinary enum field on this entity whose options are these states, so the
+  // document has exactly one state.
   const machineId = `${namespace}:machine.master_lifecycle`;
   const draftStateId = `${namespace}:state.master_draft`;
   const releasedStateId = `${namespace}:state.master_released`;
@@ -5403,6 +5369,15 @@ function transitionModuleDefinition(
     module: probeReference('moduleReference', `${namespace}:module.master`),
     operationId: `${namespace}:operation.master_release`,
     permission: probeReference('permissionReference', permissionId),
+    // The transition still carries an ordinary precondition over an ordinary
+    // authored field. It must be evaluated against the persisted image.
+    precondition: {
+      field: probeReference('fieldReference', approvalFieldId),
+      kind: 'fieldComparisonPredicate',
+      operator: 'equals',
+      schemaVersion: version,
+      value: { kind: 'textValue', schemaVersion: version, value: 'approved' },
+    },
     readBack: probeReference('queryReference', `${namespace}:query.master_get`),
     schemaVersion: version,
     tier: 'o0',
@@ -5411,14 +5386,17 @@ function transitionModuleDefinition(
 }
 
 interface TransitionProbeRuntime {
+  readonly approvalFieldId: string;
+  readonly changeDocumentStates: (recordId: string) => Promise<
+    Array<{ newState: unknown; oldState: unknown }>
+  >;
   readonly namespace: string;
   readonly operations: SemanticOperationGateway;
   readonly readState: (recordId: string) => Promise<{
-    readonly authored: string | null;
-    readonly derived: string | null;
     readonly revision: number;
+    readonly state: string | null;
   }>;
-  readonly stateFieldId: string;
+  readonly stateColumnCount: () => Promise<number>;
   readonly view: RequestRuntimeView;
 }
 
@@ -5440,13 +5418,16 @@ async function withTransitionProbeRuntime(
     (candidate) => candidate.entityId === `${namespace}:entity.master`,
   );
   assert.ok(entity);
-  const stateFieldId = `${namespace}:field.master_state`;
-  const authoredColumn = entity.columns.find(
+  const approvalFieldId = `${namespace}:field.master_approval`;
+  const stateFieldId = `${namespace}:derived_state_field.machine.master_lifecycle`;
+  // The ruled shape: ONE state, an ordinary column on the entity.
+  const stateColumn = entity.columns.find(
     (column) => column.canonicalFieldId === stateFieldId,
   );
-  assert.ok(authoredColumn, 'the authored state field must reach storage');
-  const derivedColumn = entity.derivedStateFields[0];
-  assert.ok(derivedColumn, 'the machine must lower a derived state column');
+  assert.ok(
+    stateColumn,
+    "the machine's state field must be an ordinary column",
+  );
 
   const tenant = '5a000000-0000-4000-8000-000000000001';
   const environment = '5b000000-0000-4000-8000-000000000002';
@@ -5501,24 +5482,6 @@ async function withTransitionProbeRuntime(
         humanActorIssuer(),
       );
 
-      // Did the ACTIVATION gate see anything? Both physical columns exist and
-      // release verification runs against the same catalog the gateway later
-      // refuses.
-      const materializedColumns = await pool.query<{ column_name: string }>(
-        `SELECT column_name
-           FROM information_schema.columns
-          WHERE table_schema = 'north_star_module'
-            AND table_name = $1
-            AND column_name = ANY($2::text[])
-          ORDER BY column_name`,
-        [
-          entity.physicalTableName,
-          [authoredColumn.physicalName, derivedColumn.physicalName],
-        ],
-      );
-      console.log(
-        `PROBE materialized state columns = ${materializedColumns.rowCount} of 2 (authored + machine-derived)`,
-      );
       const staged = await pool.query<{
         verification_evidence_id: MintedUuid;
       }>(
@@ -5543,7 +5506,7 @@ async function withTransitionProbeRuntime(
         )
         .then(
           (resultSet) =>
-            `passed with ${(resultSet as { results: unknown[] }).results.length} executed results`,
+            `passed with ${(resultSet as unknown as { results: unknown[] }).results.length} executed results`,
           (error: unknown) =>
             `${(error as Error).name}: ${(error as Error).message}`,
         );
@@ -5551,16 +5514,35 @@ async function withTransitionProbeRuntime(
 
       await run(
         Object.freeze({
+          approvalFieldId,
+          changeDocumentStates: async (recordId: string) => {
+            const result = await pool.query<{ changes: unknown }>(
+              `SELECT changes
+                 FROM platform.trust_business_change_documents
+                WHERE tenant_id = $1
+                  AND environment_id = $2
+                  AND record_id = $3
+                ORDER BY recorded_at`,
+              [tenant, environment, recordId],
+            );
+            const auditKey = stateFieldId.replaceAll(/[^A-Za-z0-9_.-]/g, '.');
+            return result.rows.flatMap((row) =>
+              (row.changes as Array<Record<string, any>>)
+                .filter((change) => change.fieldId === auditKey)
+                .map((change) => ({
+                  newState: change.newState?.value ?? change.newState,
+                  oldState: change.oldState?.value ?? change.oldState,
+                })),
+            );
+          },
           namespace,
           operations: operationGatewayFor(policy, interpreter),
           readState: async (recordId: string) => {
             const result = await pool.query<{
-              authored: string | null;
-              derived: string | null;
               revision: string;
+              state: string | null;
             }>(
-              `SELECT ${quoteTestIdentifier(authoredColumn.physicalName)} AS authored,
-                      ${quoteTestIdentifier(derivedColumn.physicalName)} AS derived,
+              `SELECT ${quoteTestIdentifier(stateColumn.physicalName)} AS state,
                       ${quoteTestIdentifier(entity.optimisticRevision.column)} AS revision
                  FROM north_star_module.${quoteTestIdentifier(entity.physicalTableName)}
                 WHERE ${quoteTestIdentifier(entity.recordIdentity.column)} = $1`,
@@ -5568,13 +5550,29 @@ async function withTransitionProbeRuntime(
             );
             assert.equal(result.rowCount, 1);
             const row = result.rows[0]!;
-            return {
-              authored: row.authored,
-              derived: row.derived,
-              revision: Number(row.revision),
-            };
+            return { revision: Number(row.revision), state: row.state };
           },
-          stateFieldId,
+          // A document must carry exactly ONE state column. This counts the
+          // physical columns whose canonical identity is a state field.
+          stateColumnCount: async () => {
+            const result = await pool.query<{ total: string }>(
+              `SELECT count(*)::text AS total
+                 FROM information_schema.columns
+                WHERE table_schema = 'north_star_module'
+                  AND table_name = $1
+                  AND column_name = ANY($2::text[])`,
+              [
+                entity.physicalTableName,
+                [
+                  stateColumn.physicalName,
+                  ...entity.derivedStateFields.map(
+                    (field) => field.physicalName,
+                  ),
+                ],
+              ],
+            );
+            return Number(result.rows[0]!.total);
+          },
           view,
         }),
       );
@@ -5588,47 +5586,160 @@ async function withTransitionProbeRuntime(
   });
 }
 
-test('5g3-sm PROBE — a declared transitionStateEffect refuses the entire pinned operation catalog', async () => {
+test('5g3-sm PROBE — the transition vertical: draft to released, four properties', async () => {
   await withTransitionProbeRuntime(async (runtime) => {
-    // The transition operation itself.
-    const transitionRefusal = await operation(
-      runtime.operations,
-      runtime.view,
-      'master_release',
-      { expectedRevision: 1, recordId: randomUUID() },
-      runtime.namespace,
-    ).then(
-      () => null,
-      (error: unknown) => error as Error,
-    );
-    assert.ok(transitionRefusal);
-    console.log(
-      `PROBE transition operation -> ${transitionRefusal.name}: ${transitionRefusal.message}`,
-    );
+    // Exactly one state column. The machine no longer lowers a parallel
+    // `derivedStateFields` entry alongside an authored one.
+    assert.equal(await runtime.stateColumnCount(), 1);
 
-    // And every UNRELATED operation in the same release.
-    const createRefusal = await operation(
+    const draftStateId = `${runtime.namespace}:state.master_draft`;
+    const releasedStateId = `${runtime.namespace}:state.master_released`;
+
+    const recordId = randomUUID();
+    await operation(
       runtime.operations,
       runtime.view,
       'master_create',
       {
-        recordId: randomUUID(),
+        recordId,
         values: {
-          ...masterValues(runtime.namespace, 'Poisoned catalog'),
-          [runtime.stateFieldId]: `${runtime.namespace}:option.master_state_draft`,
+          ...masterValues(runtime.namespace, 'Releasable'),
+          [runtime.approvalFieldId]: 'approved',
         },
       },
       runtime.namespace,
-    ).then(
-      () => null,
-      (error: unknown) => error as Error,
     );
-    assert.ok(
-      createRefusal,
-      'an unrelated create must also refuse if the catalog is poisoned',
+    assert.deepEqual(await runtime.readState(recordId), {
+      revision: 1,
+      state: draftStateId,
+    });
+
+    // ---- Control 1: a stale expected revision is refused. -----------------
+    await assert.rejects(
+      operation(
+        runtime.operations,
+        runtime.view,
+        'master_release',
+        { expectedRevision: 7, recordId },
+        runtime.namespace,
+      ),
+      (error: unknown) =>
+        assertModuleError(error, 'MODULE_REVISION_CONFLICT', null),
     );
-    console.log(
-      `PROBE unrelated create -> ${createRefusal.name}: ${createRefusal.message}`,
+    assert.deepEqual(await runtime.readState(recordId), {
+      revision: 1,
+      state: draftStateId,
+    });
+
+    // ---- Control 2: no caller argument can name a target state. ----------
+    // The compiled contract is closed over ['expectedRevision','recordId'].
+    await assert.rejects(
+      operation(
+        runtime.operations,
+        runtime.view,
+        'master_release',
+        {
+          expectedRevision: 1,
+          patch: { [`${runtime.namespace}:field.master_name`]: 'forged' },
+          recordId,
+        },
+        runtime.namespace,
+      ),
+      (error: unknown) => {
+        // Recorded rather than assumed: the gateway's closed-argument fence
+        // (`assertClosedOperationArguments`) runs for CAPABILITY operations
+        // only, so an O0 transition's closed contract is enforced one layer
+        // down, by the interpreter. Both refuse; the fence placement differs,
+        // and that difference belongs in the implementing packet.
+        console.log(
+          `PROBE forged target argument -> ${(error as Error).name}: ${
+            (error as { code?: string }).code ?? (error as Error).message
+          }`,
+        );
+        return true;
+      },
     );
+
+    // ---- Control 3: the precondition is evaluated against the persisted
+    // image, not against anything the caller sent. ------------------------
+    const unapprovedId = randomUUID();
+    await operation(
+      runtime.operations,
+      runtime.view,
+      'master_create',
+      {
+        recordId: unapprovedId,
+        values: {
+          ...masterValues(runtime.namespace, 'Not approved'),
+          [runtime.approvalFieldId]: 'pending',
+        },
+      },
+      runtime.namespace,
+    );
+    await assert.rejects(
+      operation(
+        runtime.operations,
+        runtime.view,
+        'master_release',
+        { expectedRevision: 1, recordId: unapprovedId },
+        runtime.namespace,
+      ),
+      (error: unknown) =>
+        assertModuleError(
+          error,
+          'MODULE_OPERATION_PRECONDITION_REFUSED',
+          null,
+        ),
+    );
+    assert.deepEqual(await runtime.readState(unapprovedId), {
+      revision: 1,
+      state: draftStateId,
+    });
+
+    // ---- The transition itself: server-selected target, written once. ----
+    const released = await operation(
+      runtime.operations,
+      runtime.view,
+      'master_release',
+      { expectedRevision: 1, recordId },
+      runtime.namespace,
+    );
+    assert.equal(released.outcome, 'succeeded');
+    assert.ok(released.trust?.changeDocumentId);
+    assert.deepEqual(await runtime.readState(recordId), {
+      revision: 2,
+      state: releasedStateId,
+    });
+
+    // ---- Control 4: the ADR-0034 case. `draft -> released` refuses a
+    // SECOND release without refusing the first, because the guard is the
+    // transition's own fromState rather than a projected-image predicate. --
+    await assert.rejects(
+      operation(
+        runtime.operations,
+        runtime.view,
+        'master_release',
+        { expectedRevision: 2, recordId },
+        runtime.namespace,
+      ),
+      (error: unknown) =>
+        assertModuleError(error, 'MODULE_MUTATION_PRECONDITION_FAILED', null),
+    );
+    assert.deepEqual(await runtime.readState(recordId), {
+      revision: 2,
+      state: releasedStateId,
+    });
+
+    // ---- The change document records the state move exactly once. --------
+    const changes = await runtime.changeDocumentStates(recordId);
+    console.log(`PROBE change documents = ${JSON.stringify(changes)}`);
+    assert.deepEqual(changes, [
+      { newState: releasedStateId, oldState: draftStateId },
+    ]);
   });
 });
+
+// The baseline red this replaces is preserved at commit bad2d8f: with no
+// implementation, a single declared transitionStateEffect made release
+// verification AND every operation in the release fail with
+// MalformedPinnedOperationCatalogError. Revert the slice to reproduce it.

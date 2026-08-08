@@ -360,6 +360,50 @@ export function normalizeApplicationPackage(
     })),
   };
 
+  // 5g3-sm PROBE ONLY -- NOT FOR MERGE.
+  // The ruled normalization rule: a state machine MATERIALIZES its state field
+  // as an ordinary enum field on its entity, whose options are the machine's
+  // states. This is the placement the compiler forces -- doing it in a
+  // projection instead fails COMPILER_PROJECTION_INVARIANT_FAILED, because
+  // every projection must agree with the normalized semantic model.
+  const alreadyMaterialized = new Set(
+    normalizedCandidate.fields.map((field: any) => field.fieldId),
+  );
+  const materializedStateFields = normalizedCandidate.stateMachines
+    .filter((machine: any) => !alreadyMaterialized.has(machine.stateField.fieldId))
+    .map((machine: any) => ({
+      classification: 'internal',
+      collation: 'binary',
+      defaultSemantics: 'declaredDefault',
+      defaultValue: {
+        kind: 'textValue',
+        schemaVersion: machine.schemaVersion,
+        value: machine.initialState.targetId,
+      },
+      entity: machine.entity,
+      fieldId: machine.stateField.fieldId,
+      fieldType: {
+        kind: 'enumFieldType',
+        options: machine.states.map((state: any) => ({
+          kind: 'enumOption',
+          label: state.label,
+          optionId: state.stateId,
+          orderKey: state.orderKey,
+          schemaVersion: machine.schemaVersion,
+        })),
+        schemaVersion: machine.schemaVersion,
+      },
+      kind: 'fieldDefinition',
+      label: 'State',
+      lifecycle: machine.lifecycle,
+      orderKey: 0,
+      presence: 'required',
+      reportable: true,
+      schemaVersion: machine.schemaVersion,
+      searchable: false,
+    }),
+  );
+
   const sortedCandidate = {
     ...normalizedCandidate,
     assertions: sortById(normalizedCandidate.assertions, 'assertionId'),
@@ -378,8 +422,8 @@ export function normalizeApplicationPackage(
       'entityId',
     ),
     fields: sortByOwnerOrderAndId(
-      normalizedCandidate.fields,
-      (entry) => entry.entity.targetId,
+      [...normalizedCandidate.fields, ...materializedStateFields] as any,
+      (entry: any) => entry.entity.targetId,
       'fieldId',
     ),
     modules: sortByOrderAndId(normalizedCandidate.modules, 'moduleId'),
@@ -2160,10 +2204,11 @@ function collectIds(
         : []),
     ]),
     relations: packageRevision.relations.map((entry) => entry.relationId),
+    // 5g3-sm PROBE ONLY -- NOT FOR MERGE: the state field and the state ids
+    // are now owned by the `fields` family, because normalization materializes
+    // them there. One identity, one owner.
     stateMachines: packageRevision.stateMachines.flatMap((entry) => [
       entry.machineId,
-      entry.stateField.fieldId,
-      ...entry.states.map((state) => state.stateId),
       ...entry.transitions.map((transition) => transition.transitionId),
     ]),
     surfaces: packageRevision.surfaces.flatMap((entry) => [
