@@ -64,6 +64,7 @@ const suiteDefinitions = [
     discoveryPattern: 'test/integration/**/*.test.ts',
     expectedFiles: [
       'test/integration/catalog-runtime.test.ts',
+      'test/integration/disclosure-tier-round-trip.test.ts',
       'test/integration/location-runtime.test.ts',
       'test/integration/module-runtime.test.ts',
       'test/integration/module-storage-transition.test.ts',
@@ -85,6 +86,7 @@ const suiteDefinitions = [
       'test/architecture/canonical-contracts-purity.test.ts',
       'test/architecture/compiler-hermeticity.test.ts',
       'test/architecture/dependency-boundaries.test.ts',
+      'test/architecture/field-bearing-slots.test.ts',
       'test/architecture/module-conformance-runtime.test.ts',
       'test/architecture/module-press-law.test.ts',
       'test/architecture/release-activation-boundary.test.ts',

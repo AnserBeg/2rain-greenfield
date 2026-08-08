@@ -681,9 +681,7 @@ function validateDisclosureTierEmission(
   packageRevision: VersionedNormalizedApplicationPackage,
   compilerSemanticProfileVersion: CompilerSemanticProfileVersion,
 ): CompilerDiagnostic[] {
-  if (
-    compilerSemanticProfileVersion === COMPILER_SEMANTIC_PROFILE_V2_VERSION
-  ) {
+  if (compilerSemanticProfileVersion === COMPILER_SEMANTIC_PROFILE_V2_VERSION) {
     return [];
   }
   return packageRevision.surfaces.flatMap((surface) =>

@@ -1362,11 +1362,30 @@ function validateSurfaceVocabulary(
  * The `ux-grammar` Disclosure tiers rule, enforced on the half that is
  * compile-time knowable.
  *
- * §3.2 forces `always` for three kinds of content: anything required, anything
- * the user must act on, and anything resolving to `blocked` or `attention`. The
- * third is not a missing field -- it asks which VALUE a field will take for a
- * record that does not exist yet, so no definition can carry it and the runtime
- * owns it. What is enforced here is everything the definition does declare.
+ * The predicate is **required or identifying**, and it is named that way rather
+ * than as "anything the user must act on". §3.2's action clause reaches only
+ * `confirmation: 'humanRequired'`, which binds to `commandBar` -- a slot that
+ * bears no field and therefore conceals none -- so that clause has no subject
+ * here and is residue, not coverage. §3.2's `blocked`/`attention` clause is not
+ * a missing field either: it asks which VALUE a field will take for a record
+ * that does not exist yet, so no definition can carry it and the runtime owns
+ * it.
+ *
+ * **Three declared limits of the slot-as-section carrier, ruled as shortfalls
+ * rather than defects and recorded so the residue packet inherits them.**
+ *
+ * 1. Slot-as-section does not survive `surfaceRole === 'form'`, where `sections`
+ *    renders a plain field collection rather than a section.
+ * 2. It does not survive a two-group surface: a second `record:sections` is
+ *    refused as a duplicate slot, so a surface cannot express two sections with
+ *    different tiers.
+ * 3. Forcing is per-SURFACE, because `surface.dataSource` names one query. On a
+ *    mixed surface -- one reaching any required or identifying field --
+ *    `progressive` is therefore unreachable on every field-bearing slot, not
+ *    only on the slot that renders the forcing field.
+ *
+ * The per-field half of §3.2 and the action predicate are the residue these
+ * limits define. This rule is the required-or-identifying half and nothing more.
  *
  * The join is `surface.dataSource -> query.selections -> field`: that is the
  * only path from a surface to its fields, because a slot's `content` is an

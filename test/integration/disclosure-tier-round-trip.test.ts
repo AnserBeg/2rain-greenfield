@@ -21,7 +21,6 @@ import { AuthenticatedRequestEntryAdapter } from '../../packages/runtime/src/req
 import {
   AuthenticatedRequestRuntimeEntryAdapter,
   CURRENT_POLICY_DECISION_VERSION,
-  type CurrentPolicyDecisionRequest,
   type CurrentPolicyGateway,
   type LoadedRequestRuntimeDefinition,
   type RequestRuntimeView,
@@ -67,7 +66,10 @@ function authoredWithProgressiveSlot(): Record<string, unknown> {
   const detail = authored.surfaces.find((surface) =>
     surface.surfaceId.endsWith('item_detail'),
   );
-  assert.ok(detail, 'fixture must still declare the item_detail record surface');
+  assert.ok(
+    detail,
+    'fixture must still declare the item_detail record surface',
+  );
   const commandBar = detail.slots.find((slot) => slot.slot === 'commandBar');
   assert.ok(commandBar, 'fixture must still declare a commandBar slot');
   commandBar.disclosureTier = 'progressive';
@@ -102,12 +104,11 @@ function compileAt(
 }
 
 const policy: CurrentPolicyGateway = {
-  async authorize(request: CurrentPolicyDecisionRequest) {
+  async authorize() {
     return {
       decision: 'ALLOW' as const,
       decisionVersion: CURRENT_POLICY_DECISION_VERSION,
       policyVersion: 'disclosure-tier-round-trip/v1',
-      requestId: request.requestId,
     };
   },
   async readCurrentVersion() {

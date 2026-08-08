@@ -51,8 +51,9 @@ function slotRenderers(source: string): ReadonlyMap<string, string> {
 
 function functionBody(source: string, name: string): string {
   return (
-    new RegExp(`function ${name}\\s*\\([\\s\\S]*?\\n\\}`, 'mu').exec(source)?.[0] ??
-    ''
+    new RegExp(`function ${name}\\s*\\([\\s\\S]*?\\n\\}`, 'mu').exec(
+      source,
+    )?.[0] ?? ''
   );
 }
 
@@ -151,7 +152,10 @@ test('ownsDataResolution is not the field-bearing authority', () => {
       slots.map((slot) => `${archetype}:${slot}`),
     ),
   );
-  assert.ok(owning.size > 0, 'the flag must be readable for this to mean anything');
+  assert.ok(
+    owning.size > 0,
+    'the flag must be readable for this to mean anything',
+  );
   assert.ok(
     owning.has('task:decision') && !bearing.has('task:decision'),
     'task:decision owns data resolution and bears no field',

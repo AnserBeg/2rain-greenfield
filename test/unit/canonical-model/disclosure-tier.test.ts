@@ -230,7 +230,9 @@ test('CONTROL: a non-field-bearing slot may defer even on a forcing surface', ()
  */
 test('RED: progressive on titleStatus is refused, because it renders the display field', () => {
   const codes = diagnosticCodes(() =>
-    normalizeApplicationPackage(withTier(forcing(), 'progressive', TITLE_STATUS_SLOT)),
+    normalizeApplicationPackage(
+      withTier(forcing(), 'progressive', TITLE_STATUS_SLOT),
+    ),
   );
   assert.deepEqual(codes, ['CANON_SURFACE_DISCLOSURE_TIER_FORCED_ALWAYS']);
 });
