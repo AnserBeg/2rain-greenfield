@@ -195,8 +195,7 @@ test('PS-0: an inbound receipt posts, advances open quantity, and compensates in
         capabilityVersion: INVENTORY_POSTING_CAPABILITY_VERSION,
         dependencySetRoot: DECLARED_DEPENDENCY_ROOT,
         postingFamilyCatalog: inventoryPostingFamilyCatalogPayload(),
-        postingFamilyCatalogContentHash:
-          '0'.repeat(64),
+        postingFamilyCatalogContentHash: '0'.repeat(64),
         releaseContentHash: fixture.inventory.releaseRoot,
         releaseId: releases[1]!,
         storageTarget: fixture.storage,
@@ -461,7 +460,9 @@ test('PS-0: an inbound receipt posts, advances open quantity, and compensates in
       assert.equal(companion.sourceType, 'goodsReceipt');
       assert.equal(companion.sourceId, receipt.goodsReceiptId);
       assert.match(
-        String(await movementPostingRoleOf(moduleRuntimePool, binding, receipt)),
+        String(
+          await movementPostingRoleOf(moduleRuntimePool, binding, receipt),
+        ),
         /inventory_posting_role_receipt$/u,
         'the movement must post under the receipt role, not adjustment',
       );
@@ -498,9 +499,7 @@ test('PS-0: an inbound receipt posts, advances open quantity, and compensates in
         binding,
         fixture.inventory,
       );
-      console.log(
-        `PS-2 reachability gate:\n  ${gate.lines.join('\n  ')}`,
-      );
+      console.log(`PS-2 reachability gate:\n  ${gate.lines.join('\n  ')}`);
       assert.ok(
         gate.authoredPathCount > 0,
         'the positive half: adjustments must remain generically authorable and readable',
@@ -744,15 +743,16 @@ async function reachabilityOverCatalog(
     operations?: { operationId: string }[];
     queries?: { queryId: string }[];
   }>(compiled, PROJECTION_FAMILY_IDS.operationCatalog).payload;
-  const transactionEntities = ['inventory_transaction', 'inventory_transaction_line'];
+  const transactionEntities = [
+    'inventory_transaction',
+    'inventory_transaction_line',
+  ];
   const genericPaths = [
     ...(catalog.operations ?? []).map((entry) => entry.operationId),
     ...(catalog.queries ?? []).map((entry) => entry.queryId),
   ].filter((id) =>
     transactionEntities.some(
-      (entity) =>
-        id.includes(`.${entity}_`) &&
-        !id.endsWith('_post'),
+      (entity) => id.includes(`.${entity}_`) && !id.endsWith('_post'),
     ),
   );
 
@@ -1087,12 +1087,18 @@ async function compiledFixture(): Promise<Fixture> {
  * concept makes. Each addition is returned so the vertical can assert the count
  * rather than the reader having to trust it.
  */
-function extendProbeEnums(definition: Record<string, unknown>): readonly string[] {
+function extendProbeEnums(
+  definition: Record<string, unknown>,
+): readonly string[] {
   const added: string[] = [];
   const fields = definition.fields as Record<string, unknown>[];
-  const add = (fieldSuffix: string, label: string, optionLocalId: string): void => {
-    const field = fields.find(
-      (candidate) => String(candidate.fieldId).endsWith(fieldSuffix),
+  const add = (
+    fieldSuffix: string,
+    label: string,
+    optionLocalId: string,
+  ): void => {
+    const field = fields.find((candidate) =>
+      String(candidate.fieldId).endsWith(fieldSuffix),
     );
     assert.ok(field, `probe fixture lacks field ${fieldSuffix}`);
     const fieldType = field.fieldType as {

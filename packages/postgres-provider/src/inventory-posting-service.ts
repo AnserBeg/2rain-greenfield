@@ -87,10 +87,7 @@ export type InventoryPostingCapabilityIdV1 =
  * may *invoke*. Separate names without separate admission is not a boundary.
  */
 export type InventoryPostingCommandFamilyV1 =
-  | 'adjustment'
-  | 'goodsReceipt'
-  | 'stockCount'
-  | 'transfer';
+  'adjustment' | 'goodsReceipt' | 'stockCount' | 'transfer';
 
 /**
  * PS-2 PROBE ONLY. The compiled posting-family profile, as the provider
@@ -231,13 +228,41 @@ export const INVENTORY_POSTING_FAMILY_CATALOG_V1: InventoryPostingFamilyCatalogP
           transactionTypeLocalId: 'inventory_transaction_type_goods_receipt',
         }),
         dependencyExtension: Object.freeze([
-          { access: 'read', authority: 'inventory', dependencyId: 'northstar.purchasing:goods_receipt' },
-          { access: 'read', authority: 'inventory', dependencyId: 'northstar.purchasing:goods_receipt_line' },
-          { access: 'read', authority: 'inventory', dependencyId: 'northstar.purchasing:purchase_order' },
-          { access: 'read', authority: 'inventory', dependencyId: 'northstar.purchasing:purchase_order_line' },
-          { access: 'transition', authority: 'inventory', dependencyId: 'northstar.purchasing:goods_receipt.state' },
-          { access: 'append', authority: 'inventory', dependencyId: 'northstar.inventory:transaction' },
-          { access: 'append', authority: 'inventory', dependencyId: 'northstar.inventory:transaction_line' },
+          {
+            access: 'read',
+            authority: 'inventory',
+            dependencyId: 'northstar.purchasing:goods_receipt',
+          },
+          {
+            access: 'read',
+            authority: 'inventory',
+            dependencyId: 'northstar.purchasing:goods_receipt_line',
+          },
+          {
+            access: 'read',
+            authority: 'inventory',
+            dependencyId: 'northstar.purchasing:purchase_order',
+          },
+          {
+            access: 'read',
+            authority: 'inventory',
+            dependencyId: 'northstar.purchasing:purchase_order_line',
+          },
+          {
+            access: 'transition',
+            authority: 'inventory',
+            dependencyId: 'northstar.purchasing:goods_receipt.state',
+          },
+          {
+            access: 'append',
+            authority: 'inventory',
+            dependencyId: 'northstar.inventory:transaction',
+          },
+          {
+            access: 'append',
+            authority: 'inventory',
+            dependencyId: 'northstar.inventory:transaction_line',
+          },
         ]),
         familyId: 'goodsReceipt',
         postingRole: 'receipt',
@@ -263,12 +288,19 @@ export const INVENTORY_POSTING_FAMILY_CATALOG_V1: InventoryPostingFamilyCatalogP
           }),
           origin: 'companion',
           sourceTypeLiteral: 'stockCount',
-          transactionTypeLocalId:
-            'inventory_transaction_type_count_correction',
+          transactionTypeLocalId: 'inventory_transaction_type_count_correction',
         }),
         dependencyExtension: Object.freeze([
-          { access: 'append', authority: 'inventory', dependencyId: 'northstar.inventory:transaction' },
-          { access: 'append', authority: 'inventory', dependencyId: 'northstar.inventory:transaction_line' },
+          {
+            access: 'append',
+            authority: 'inventory',
+            dependencyId: 'northstar.inventory:transaction',
+          },
+          {
+            access: 'append',
+            authority: 'inventory',
+            dependencyId: 'northstar.inventory:transaction_line',
+          },
         ]),
         familyId: 'stockCount',
         postingRole: 'count',
@@ -2264,7 +2296,10 @@ function plannedMovements(
   posting: ParsedPosting,
   mintUuid: () => string,
 ): PlannedMovement[] {
-  if (posting.postingRole === 'adjustment' || posting.postingRole === 'receipt') {
+  if (
+    posting.postingRole === 'adjustment' ||
+    posting.postingRole === 'receipt'
+  ) {
     return posting.command.lines.map((line) =>
       plannedMovement(
         posting.command,
@@ -2953,7 +2988,8 @@ async function createCompanionTransaction(
       { transactionId: command.transactionId },
     );
   }
-  const local = (id: string): string => requiredField(binding.transaction, id).name;
+  const local = (id: string): string =>
+    requiredField(binding.transaction, id).name;
   const headerColumns = [
     'tenant_id',
     'environment_id',
@@ -3334,7 +3370,10 @@ async function assertInventoryLineSet(
       row,
     ]),
   );
-  if (posting.postingRole === 'adjustment' || posting.postingRole === 'receipt') {
+  if (
+    posting.postingRole === 'adjustment' ||
+    posting.postingRole === 'receipt'
+  ) {
     for (const line of posting.command.lines) {
       assertInventoryLineMatches(
         adjustmentLineMatches(byId.get(line.transactionLineId), line),
@@ -4602,7 +4641,10 @@ function effectDeduplicationKey(posting: ParsedPosting): string {
 function naturalEffects(
   posting: ParsedPosting,
 ): readonly { readonly sourceLine: string }[] {
-  if (posting.postingRole === 'adjustment' || posting.postingRole === 'receipt') {
+  if (
+    posting.postingRole === 'adjustment' ||
+    posting.postingRole === 'receipt'
+  ) {
     return posting.command.lines.map((line) => ({
       sourceLine: line.sourceLine,
     }));

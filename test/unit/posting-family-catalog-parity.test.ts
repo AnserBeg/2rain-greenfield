@@ -17,7 +17,6 @@
  * difference between debt and a defect is whether something fails.
  */
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import test from 'node:test';
 
 import { inventoryPostingFamilyCatalogPayload } from '../../packages/domain/src/inventory/posting-families.js';
@@ -63,8 +62,7 @@ test('the provider posting-family catalog is identical to the authored one', () 
     ...JSON.parse(canonical(profile)),
     dependencyExtension: profile.dependencyExtension
       .map(
-        (entry) =>
-          `${entry.access}\0${entry.authority}\0${entry.dependencyId}`,
+        (entry) => `${entry.access}\0${entry.authority}\0${entry.dependencyId}`,
       )
       .toSorted(),
   });

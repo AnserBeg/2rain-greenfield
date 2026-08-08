@@ -260,8 +260,7 @@ export class Ps0GoodsReceiptSourceAggregate implements InventorySourceAggregateS
       effectiveAt: command.effectiveAt,
       lines: Object.freeze(
         command.lines.map((line, index) => {
-          const quantity =
-            'quantityDelta' in line ? line.quantityDelta : '0';
+          const quantity = 'quantityDelta' in line ? line.quantityDelta : '0';
           const negative = quantity.startsWith('-');
           const locationId = 'locationId' in line ? line.locationId : null;
           return Object.freeze({
