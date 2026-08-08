@@ -269,16 +269,31 @@ export const DISCLOSURE_TIERS = ['always', 'progressive', 'onDemand'] as const;
 export const DEFAULT_DISCLOSURE_TIER = 'always' as const;
 
 /**
- * The subset of `SURFACE_SLOTS` that renders the surface's own fields, and
- * therefore the only slots a forcing rule can bind: deferring a slot that
- * renders no field conceals no field.
+ * The subset of `SURFACE_SLOTS` whose registered renderer consumes the surface's
+ * own fields, and therefore the only slots the forcing rule can bind: deferring
+ * a slot that renders no field conceals no field.
  *
- * Derived from the closed slot vocabulary above, not a new one -- every member
- * appears in `SURFACE_SLOTS`. It mirrors the `ownsDataResolution` flag the web
- * runtime already carries on exactly these four `(archetype, slot)` pairs
- * (`apps/web/src/component-registry.ts`), which is a runtime restatement of a
- * grammar fact; the two must not drift, and no gate binds them today. See the
- * `U5b` report's bridge request.
+ * **Derived from renderer field consumption, and bound by a gate.**
+ * `test/architecture/field-bearing-slots.test.ts` walks `component-registry.ts`'s
+ * slot registry, follows each renderer's statically-resolvable callees, and
+ * deep-equals the result against this constant. That gate is the authority; this
+ * constant is its recorded value.
+ *
+ * **It is a PROXY, not an observation (AGENTS.md §6), and here is what it cannot
+ * prove.** It reads source text rather than rendered output, so it cannot follow
+ * dynamic dispatch through `componentRegistry[contentReferenceId]` -- a shell
+ * component reached that way could consume a field without this seeing it. The
+ * observing gate would have to render each `(archetype, slot)` and check whether
+ * a sentinel field value reaches the HTML, which needs a `RequestRuntimeView`
+ * for a record surface; only the provider builds one, so that gate belongs in
+ * `test/postgres` or a browser journey, not here.
+ *
+ * **`ownsDataResolution` is NOT the authority and the two disagree.** That flag
+ * marks `task:decision`, whose renderer emits an aggregate result and no surface
+ * field, and omits `record:titleStatus`, whose renderer reaches
+ * `displayFieldId` -- routinely the business key, the exact predicate the
+ * forcing rule protects. An earlier revision of this constant restated the flag
+ * and was wrong in both directions.
  *
  * Without this restriction the rule is per-SURFACE and unusable: every slot of
  * any surface reaching one required field would be forced to `always`, which in
@@ -287,8 +302,8 @@ export const DEFAULT_DISCLOSURE_TIER = 'always' as const;
 export const FIELD_BEARING_SURFACE_SLOTS = Object.freeze({
   home: [],
   list: ['dataGrid'],
-  record: ['keyFacts', 'sections'],
-  task: ['decision'],
+  record: ['keyFacts', 'sections', 'titleStatus'],
+  task: [],
   builder: [],
 } as const);
 
