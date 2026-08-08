@@ -313,3 +313,69 @@ saw a domain refusal surface as
 so an ordinary runtime fault is reported as a storage rejection. The probe carries
 a one-line fix. **It needs its own row because it changes an error contract**, and
 existing assertions pin those codes.
+
+### 7.10 ADR-0049 is NOT ratified — review returned BLOCK 2026-08-08
+
+**§7.8 above is wrong in five ways and is superseded by this section.** All five
+errors are the orchestrator's.
+
+1. **"A generic named-transition tier already ships" — false.** `o1` is generic
+   *capability dispatch*. Server-selected target state, compare-and-swap,
+   authoritative rehydration and accepted trust writes are
+   `InventoryPostingCapabilityExecutor` behaviour, **not gateway-enforced**. Any
+   executor may implement different semantics.
+2. **"There is no record-transition effect, and inventing one is a language
+   event" — false, and verified false.** `transitionStateEffect` exists at
+   `schemas.ts:934`; `transitionDefinition` carries server-authored `fromState`
+   (`:623`), `toState` (`:629`) and permission; the compiler transports the effect
+   generically. **The gateway contains zero references to it.** This is an
+   **enforce-or-retire** decision on shipped language, which is exactly what queue
+   row `5g3-sm` was created to own. `U5b`'s round-3 review found the same fact
+   independently through `parseOperationBinding`.
+3. **"The pessimistic lock is an optimization" — overstated.** Proven for the
+   measured single-aggregate invariant with a complete CAS predicate. Not proven
+   for multi-line write skew, constraints spanning several orders or receipts,
+   insertion or archival phantoms, incomplete digest predicates, correction racing
+   cancellation, or lock ordering across several foreign aggregates. **Correct
+   wording:** *for the measured one-order race, either source locking or a
+   complete compare-and-swap independently prevents double receipt; the protocol
+   retains both until broader controls prove one redundant.* **The rollback
+   vertical proves something stronger and safer to generalize: movement append and
+   source transition must share a transaction.**
+4. **The 41-entry root is conditional, not final.** It omits whichever
+   companion-creation protocol Ruling 3 settles, and preserves an unresolved
+   contradiction — separate capability ownership versus one Inventory union root.
+5. **The companion has no writer, and this is the highest-value finding.** Ruling 3
+   requires an internal `inventory_transaction` and lines per receipt, but `#post`
+   **requires the companion to already exist** — it plans movements with supplied
+   `transactionId`/`transactionLineId`, row-locks the header, digests the line set
+   and validates it before appending. Ruling 2's port exposes only
+   `lockAndValidate` and `transition`. **Nothing creates the companion.** The
+   stock-count precedent is not evidence the risk is controlled; it is evidence the
+   risk is already live and unclosed.
+
+**Also refuted: Ruling 4.** `InventoryPostingRegistrationV1.capabilityId` is typed
+`typeof INVENTORY_POSTING_CAPABILITY_ID` and the dependency root likewise
+(`inventory-posting-service.ts:64-75`), so a Purchasing registration cannot be
+typed. Capability identity additionally namespaces the request-key advisory lock,
+receipt lookup, result identity and trust evidence. **Single-writer has two layers**
+— the capability contract is the *authorization* boundary, `#post` the
+*implementation* boundary — and an architecture test finding one `INSERT` protects
+only the second.
+
+**Upheld:** Ruling 2's ownership model, narrowly — `#post` owns its connection and
+transaction, an external adapter cannot join it, the source aggregate rides
+provider-owned hooks, and preflight is safe only as an untrusted proposal
+re-decided under lock. Ruling 3's *structural choice* of a companion is upheld; its
+four conditions are not sufficient — it owes deterministic one-to-one identity, a
+**semantic** rather than presentational reachability rule covering create, update,
+archive, restore, get, list, resolve and agent exposure, and an origin-bearing
+companion header.
+
+**Sequencing changed: `5g3-sm` moves AHEAD of `PUR-1`.** Its own row warned that
+"deciding the fate of a language concept as a side effect of an inventory packet is
+how a second authority gets created by accident" — and `PUR-1` shipping a
+capability executor for release would have retired `transitionStateEffect` by
+accident. **`PUR-1` starts after that decision. `PUR-2` stays blocked** until the
+companion-creation protocol and the invocation-capability-versus-kernel-contract
+distinction are in ADR-0049.
