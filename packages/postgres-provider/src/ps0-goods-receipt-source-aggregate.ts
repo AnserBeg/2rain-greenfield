@@ -22,8 +22,6 @@
  *    and its line, because `inventory_movement`'s relations to both are
  *    required. That is PS-0 ruling 3 in executable form, not an accident.
  */
-import { createHash } from 'node:crypto';
-
 import type { PoolClient } from 'pg';
 
 import type {
@@ -242,22 +240,14 @@ export class Ps0GoodsReceiptSourceAggregate implements InventorySourceAggregateS
   }
 
   /**
-   * PS-1. The companion derivation, computed from rows this port has already
-   * locked in `lockAndValidate`. It returns values; it never writes. The kernel
-   * is the sole writer of `inventory_transaction`, as it is of the movement.
-   *
-   * The identity is deterministic and one-to-one with the *source document*,
-   * not with the purchase order: a compensating receipt is a different source
-   * document and therefore mints its own companion. It must, for a structural
-   * reason rather than a stylistic one — `inventory_movement` is append-only,
-   * so a correction needs a new `inventory_transaction_line` to hang from, and
-   * appending one to the corrected companion would silently invalidate the
-   * line-set digest that `transitionTransactionToPosted` already compare-and-
-   * swapped that row against.
+   * PS-2. Returns the companion's content; never writes it. The kernel is the
+   * sole writer of `inventory_transaction`, as it is of the movement. Identity
+   * and provenance are already derived in the kernel command under the profile,
+   * so this port cannot choose either.
    */
   async deriveCompanion(
     _client: PoolClient,
-    context: TrustedRequestContext,
+    _context: TrustedRequestContext,
     command: InventoryPostingCommandV1,
   ): Promise<InventoryCompanionDerivationV1> {
     if (this.#observed.length === 0) {
@@ -266,37 +256,30 @@ export class Ps0GoodsReceiptSourceAggregate implements InventorySourceAggregateS
         'deriveCompanion ran before the source aggregate was locked',
       );
     }
-    const lines = command.lines.map((line, index) => {
-      const quantity = 'quantityDelta' in line ? line.quantityDelta : '0';
-      const negative = quantity.startsWith('-');
-      const locationId = 'locationId' in line ? line.locationId : null;
-      return Object.freeze({
-        fromLocationId: negative ? locationId : null,
-        itemId: line.itemId,
-        lineNumber: String(index + 1),
-        quantity,
-        toLocationId: negative ? null : locationId,
-        transactionLineId: line.transactionLineId,
-        unitId: line.unitId,
-      });
-    });
     return Object.freeze({
       effectiveAt: command.effectiveAt,
-      lines: Object.freeze(lines),
+      lines: Object.freeze(
+        command.lines.map((line, index) => {
+          const quantity =
+            'quantityDelta' in line ? line.quantityDelta : '0';
+          const negative = quantity.startsWith('-');
+          const locationId = 'locationId' in line ? line.locationId : null;
+          return Object.freeze({
+            fromLocationId: negative ? locationId : null,
+            itemId: line.itemId,
+            lineNumber: String(index + 1),
+            quantity,
+            toLocationId: negative ? null : locationId,
+            transactionLineId: line.transactionLineId,
+            unitId: line.unitId,
+          });
+        }),
+      ),
       number: `RCPT-${this.plan.goodsReceiptId.slice(0, 8)}`,
       reason: command.reason,
       sourceId: command.sourceId,
       sourceType: command.sourceType,
-      // Deterministic in the source document, and one-to-one with it. `PUR-2`
-      // owes the UNIQUE (tenant_id, environment_id, source_type, source_id)
-      // index that makes the database, not this function, the guarantor.
-      transactionId: companionIdentity(
-        context.tenantId,
-        context.environmentId,
-        command.legalEntityId,
-        command.sourceType,
-        command.sourceId,
-      ),
+      transactionId: command.transactionId,
     });
   }
 
@@ -409,38 +392,4 @@ export class Ps0GoodsReceiptSourceAggregate implements InventorySourceAggregateS
 
 function sameDecimal(left: string, right: string): boolean {
   return Number(left) === Number(right);
-}
-
-/**
- * PS-1. A deterministic UUIDv5-shaped companion identity. Deterministic is what
- * makes partial creation self-repairing: a retry derives the same id, so
- * `ON CONFLICT DO NOTHING` converges instead of minting a second companion.
- * There is no orphan reaper because a companion only ever exists inside the
- * transaction that also posts it.
- */
-export function companionIdentity(
-  tenantId: string,
-  environmentId: string,
-  legalEntityId: string,
-  sourceType: string,
-  sourceId: string,
-): string {
-  const digest = createHash('sha1')
-    .update('northstar.inventory-companion-transaction/v1')
-    .update('\0')
-    .update(tenantId)
-    .update('\0')
-    .update(environmentId)
-    .update('\0')
-    .update(legalEntityId)
-    .update('\0')
-    .update(sourceType)
-    .update('\0')
-    .update(sourceId)
-    .digest();
-  const bytes = Buffer.from(digest.subarray(0, 16));
-  bytes[6] = (bytes[6]! & 0x0f) | 0x50;
-  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
-  const hex = bytes.toString('hex');
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }

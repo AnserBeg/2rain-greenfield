@@ -91,84 +91,89 @@ export type InventoryPostingCommandFamilyV1 =
   | 'transfer';
 
 /**
- * PS-1 PROBE ONLY. The three identities ADR-0049 conflated, held apart:
+ * PS-2 PROBE ONLY. The compiled posting-family profile, as the provider
+ * consumes it.
  *
- *  1. **Invocation capability identity** — `capabilityId`. Namespaces the
- *     request-key advisory lock, receipt lookup and persistence, the returned
- *     result identity, and accepted invocation/change-document/event/outbox
- *     evidence. Answers *who may invoke*.
- *  2. **Shared posting-kernel contract identity** — `capabilityVersion` and
- *     `kernelDependencyBaselineRoot`. One constant for every registration,
- *     checked by equality exactly as it is today. Answers *what the kernel is*.
- *  3. **Per-capability dependency extension and command-family admission** —
- *     `dependencyExtensionRoot` and `admittedFamilies`. Answers *what this
- *     capability adds, and which command families it may execute*.
+ * This is a **payload**, reaching the kernel exactly the way `storageTarget`
+ * does: authored in `@north-star/domain`
+ * (`inventory/posting-families.ts`), compiled into the release, handed to the
+ * registration by the caller, and content-hashed. The provider does not depend
+ * on domain and must not — it is a generic storage adapter — so the values
+ * arrive as data and the provider validates their shape.
  *
- * The extension root and the admitted families are declared together so they
- * cannot drift: a capability that has not declared purchasing reads cannot
- * admit the `goodsReceipt` family.
+ * It replaces three separate `PS-1` mechanisms that could drift from each other:
+ * an `admittedFamilies` list, a `dependencyExtensionRoot` literal, and a
+ * `familyId: string` compared against `'goods_receipt'` to select authorization.
+ * All three are now views of one declaration.
  */
-export interface InventoryPostingCapabilityAdmissionV1 {
-  readonly admittedFamilies: readonly InventoryPostingCommandFamilyV1[];
-  readonly dependencyExtensionRoot: string;
+export interface InventoryPostingFamilyProfilePayloadV1 {
+  readonly capabilityId: string;
+  readonly commandSchema: string;
+  readonly companion: {
+    readonly createdByKernel: boolean;
+    readonly identity: {
+      readonly companionHeader: 'derivedFromSourceDocument';
+      readonly companionLine: 'derivedFromSourceLine';
+      readonly sourceLine: 'derivedFromSourceDocument' | 'notApplicable';
+    };
+    readonly origin: 'authored' | 'companion';
+    readonly sourceTypeLiteral: string;
+    readonly transactionTypeLocalId: string;
+  };
+  readonly dependencyExtension: readonly {
+    readonly access: string;
+    readonly authority: string;
+    readonly dependencyId: string;
+  }[];
+  readonly familyId: InventoryPostingCommandFamilyV1;
+  readonly postingRole: string;
+  readonly reachability: {
+    readonly genericAuthoring: 'admitted' | 'closed';
+    readonly genericRead: 'admitted' | 'closed';
+  };
+  readonly revisions: {
+    readonly companionRevisionAuthority: 'callerSupplied' | 'kernelMinted';
+    readonly foreignSourceExpectedRevision: 'absent' | 'required';
+  };
+  readonly sourceStep: 'foreignPort' | 'inventoryInternal';
 }
 
-const EMPTY_DEPENDENCY_EXTENSION_ROOT = createHash('sha256')
-  .update('northstar.inventory-posting-dependency-extension/v1')
-  .update('\0')
-  .digest('hex');
+export interface InventoryPostingFamilyCatalogPayloadV1 {
+  readonly profiles: readonly InventoryPostingFamilyProfilePayloadV1[];
+  readonly schemaVersion: 'northstar.inventory-posting-family-profile/v1';
+}
 
-export const INVENTORY_POSTING_CAPABILITY_ADMISSIONS = Object.freeze(
-  new Map<
-    InventoryPostingCapabilityIdV1,
-    InventoryPostingCapabilityAdmissionV1
-  >([
-    [
-      INVENTORY_POSTING_CAPABILITY_ID,
-      Object.freeze({
-        admittedFamilies: Object.freeze([
-          'adjustment',
-          'stockCount',
-          'transfer',
-        ] as const),
-        dependencyExtensionRoot: EMPTY_DEPENDENCY_EXTENSION_ROOT,
-      }),
-    ],
-    [
-      PURCHASING_RECEIPT_POSTING_CAPABILITY_ID,
-      Object.freeze({
-        // Deliberately NOT a superset of Inventory's. Purchasing may post a
-        // receipt and nothing else; Inventory may not post a receipt.
-        admittedFamilies: Object.freeze(['goodsReceipt'] as const),
-        dependencyExtensionRoot: createHash('sha256')
-          .update('northstar.inventory-posting-dependency-extension/v1')
-          .update('\0')
-          .update(
-            [
-              'read\0purchasing\0northstar.purchasing:purchase_order',
-              'read\0purchasing\0northstar.purchasing:purchase_order_line',
-              'read\0purchasing\0northstar.purchasing:goods_receipt',
-              'read\0purchasing\0northstar.purchasing:goods_receipt_line',
-              'transition\0purchasing\0northstar.purchasing:goods_receipt.state',
-              'transition\0purchasing\0northstar.purchasing:purchase_order_line.received_quantity',
-              'append\0inventory\0northstar.inventory:transaction',
-              'append\0inventory\0northstar.inventory:transaction_line',
-            ].join('\n'),
-          )
-          .digest('hex'),
-      }),
-    ],
-  ]),
-);
+/**
+ * PS-2. Derived from the catalog, never declared beside it. `PS-1` kept an
+ * admission list next to an extension root and asserted they could not drift;
+ * deriving both from one declaration is what makes that true instead of stated.
+ */
+export function dependencyExtensionRootFor(
+  catalog: InventoryPostingFamilyCatalogPayloadV1,
+  capabilityId: string,
+): string {
+  const seen = new Set<string>();
+  for (const profile of catalog.profiles) {
+    if (profile.capabilityId !== capabilityId) continue;
+    for (const entry of profile.dependencyExtension) {
+      seen.add(`${entry.access}\0${entry.authority}\0${entry.dependencyId}`);
+    }
+  }
+  return createHash('sha256')
+    .update('northstar.inventory-posting-dependency-extension/v1')
+    .update('\0')
+    .update([...seen].toSorted().join('\n'))
+    .digest('hex');
+}
 
 export interface InventoryPostingRegistrationV1 {
-  readonly admittedFamilies?: readonly InventoryPostingCommandFamilyV1[];
   readonly capabilityId: InventoryPostingCapabilityIdV1;
   readonly capabilityVersion: typeof INVENTORY_POSTING_CAPABILITY_VERSION;
-  /** PS-1: the per-capability extension. Empty for Inventory's own. */
-  readonly dependencyExtensionRoot?: string;
   /** The frozen kernel baseline. One value, shared by every registration. */
   readonly dependencySetRoot: typeof INVENTORY_POSTING_DEPENDENCY_SET_ROOT;
+  /** PS-2: the compiled posting-family catalog, and its content hash. */
+  readonly postingFamilyCatalog: InventoryPostingFamilyCatalogPayloadV1;
+  readonly postingFamilyCatalogContentHash: string;
   readonly releaseContentHash: string;
   readonly releaseId: string;
   readonly storageTarget: StorageTargetPayloadV1;
@@ -272,13 +277,72 @@ export interface InventoryStockCountPostingCommandV1 {
   readonly transactionId: string;
 }
 
+/**
+ * PS-2 PROBE ONLY. A receipt line as the *source* document describes it. It
+ * carries no `transactionLineId`: companion line identity is derived from the
+ * source line, exactly as the companion header's is derived from the source
+ * document. `PS-1` derived the header's and left the line's caller-supplied,
+ * which meant a caller could still choose half the companion's identity.
+ */
+export interface InventoryGoodsReceiptLineV1 {
+  readonly goodsReceiptLineId: string;
+  readonly itemId: string;
+  readonly locationId: string;
+  readonly quantity: string;
+  readonly sourceLine: string;
+  readonly unitId: string;
+}
+
+/**
+ * PS-2 PROBE ONLY. The receipt command.
+ *
+ * The revision split is the point. `PS-1` had one `sourceRevision` doing three
+ * jobs — the foreign receipt's expected revision, the companion transaction's
+ * expected revision, and the revision stamped onto every movement. A
+ * kernel-minted companion's revision is internal: the kernel creates the row, so
+ * nothing outside it can have observed a revision to assert. Only the receipt's
+ * is a caller fact, and only it is carried.
+ */
+export interface InventoryGoodsReceiptPostingCommandV1 {
+  readonly authorization: InventoryPostingAuthorizationV1;
+  readonly channel: InvocationChannel;
+  readonly effectiveAt: string;
+  readonly goodsReceiptId: string;
+  readonly idempotencyKey: string;
+  readonly legalEntityId: string;
+  readonly lines: readonly InventoryGoodsReceiptLineV1[];
+  readonly purchaseOrderId: string;
+  readonly reason: {
+    readonly code: string;
+    readonly narrative: string | null;
+  };
+  /** The foreign source document's expected revision. Not the companion's. */
+  readonly sourceExpectedRevision: number;
+  readonly stockDimensionSetVersion: 'v1';
+  readonly supersedesGoodsReceiptId: string | null;
+}
+
+/**
+ * The **kernel** command union — what `#post` plans movements from. A family's
+ * *source* command (`InventoryGoodsReceiptPostingCommandV1`) is deliberately
+ * NOT a member: it carries no `transactionId`, no `sourceType` and no companion
+ * revision, because those are derived under the profile rather than supplied.
+ * `PS-1` conflated the two, which is how a receipt ended up being an adjustment
+ * command in every sense that mattered.
+ */
 export type InventoryPostingCommandV1 =
   | InventoryAdjustmentPostingCommandV1
   | InventoryStockCountPostingCommandV1
   | InventoryTransferPostingCommandV1;
 
+/**
+ * PS-2 adds `receipt`. ADR-0049 §5 priced this at eight code sites plus a
+ * migration and the probe pays it in fixture form rather than in the shipped
+ * release: the compiled enums are extended in the probe's own definition, so
+ * `PUR-2` inherits a measured price rather than an estimate.
+ */
 export type InventoryPostingRoleV1 =
-  'adjustment' | 'correction' | 'count' | 'transfer';
+  'adjustment' | 'correction' | 'count' | 'receipt' | 'transfer';
 
 export interface InventoryMovementOrderEntryV1 {
   readonly effectiveAt: string;
@@ -448,6 +512,9 @@ interface PostingStorageBinding {
   periodLockClosedThroughColumn: string;
   schemaName: string;
   transaction: EntityBinding;
+  /** PS-2. Raw compiled options, so a profile can name any of them by local id. */
+  transactionTypeOptions: readonly string[];
+  movementPostingRoleOptions: readonly string[];
   transactionAdjustmentType: string;
   transactionCountCorrectionType: string;
   transactionTransferType: string;
@@ -544,15 +611,30 @@ interface EvidenceIds {
 type ParsedPosting =
   | {
       readonly command: InventoryAdjustmentPostingCommandV1;
+      readonly familyId: 'adjustment';
       readonly postingRole: 'adjustment';
     }
   | {
       readonly command: InventoryTransferPostingCommandV1;
+      readonly familyId: 'transfer';
       readonly postingRole: 'transfer';
     }
   | {
       readonly command: InventoryStockCountPostingCommandV1;
+      readonly familyId: 'stockCount';
       readonly postingRole: 'correction' | 'count';
+    }
+  | {
+      /**
+       * The kernel movement-planning shape, **derived** from `source` under the
+       * profile. It is not an adjustment command and is never built by a
+       * caller: `transactionId`, every `transactionLineId`, `sourceType` and
+       * `sourceRevision` are all derived here rather than supplied.
+       */
+      readonly command: InventoryAdjustmentPostingCommandV1;
+      readonly familyId: 'goodsReceipt';
+      readonly postingRole: 'receipt';
+      readonly source: InventoryGoodsReceiptPostingCommandV1;
     };
 
 /**
@@ -689,6 +771,7 @@ export class PostgresInventoryPostingService {
   ): Promise<InventoryAdjustmentPostingResultV1> {
     return this.#post(context, actorEnvelope, {
       command: validateAdjustmentCommand(command),
+      familyId: 'adjustment',
       postingRole: 'adjustment',
     });
   }
@@ -700,6 +783,7 @@ export class PostgresInventoryPostingService {
   ): Promise<InventoryTransferPostingResultV1> {
     return this.#post(context, actorEnvelope, {
       command: validateTransferCommand(command),
+      familyId: 'transfer',
       postingRole: 'transfer',
     });
   }
@@ -712,13 +796,100 @@ export class PostgresInventoryPostingService {
     const parsed = validateStockCountCommand(command);
     return this.#post(context, actorEnvelope, {
       command: parsed,
+      familyId: 'stockCount',
       postingRole: parsed.kind === 'initial' ? 'count' : 'correction',
     });
   }
 
-  /** PS-1 PROBE ONLY. Names the command family this instance may execute. */
-  get sourceAggregateFamilyId(): string | null {
-    return this.sourceAggregate?.familyId ?? null;
+  /**
+   * PS-2 PROBE ONLY. A goods receipt is **not** an adjustment, and this entry
+   * point exists so it stops pretending to be one.
+   *
+   * `PS-1` posted receipts through `postAdjustment` with an
+   * `InventoryAdjustmentPostingCommandV1`, which handed them `postingRole:
+   * 'adjustment'`, the adjustment companion type, adjustment reason and
+   * approval semantics, and a domain event named for an adjustment — recreating
+   * the exact `type = adjustment` / `source_type = goodsReceipt` pair its own
+   * ruling said was structurally forbidden. Its test read the type column and
+   * never asserted on it, so nothing caught it.
+   */
+  async postGoodsReceipt(
+    context: TrustedRequestContext,
+    actorEnvelope: TrustedActorEnvelope,
+    command: InventoryGoodsReceiptPostingCommandV1,
+  ): Promise<InventoryPostingResultV1> {
+    const profile = resolveProfile(this.registration, 'goodsReceipt');
+    const source = validateGoodsReceiptCommand(command);
+    return this.#post(context, actorEnvelope, {
+      command: kernelCommandForGoodsReceipt(profile, source),
+      familyId: 'goodsReceipt',
+      postingRole: 'receipt',
+      source,
+    });
+  }
+
+  /**
+   * PS-2. Where a companion's content comes from, chosen by the profile's
+   * `sourceStep` rather than by whether a port was injected.
+   *
+   * `foreignPort` delegates to the cross-domain port, which has already locked
+   * its rows. `inventoryInternal` derives from the kernel command directly —
+   * that is the stock-count path, and it is the one `PS-1` had no answer for.
+   */
+  async #companionDerivation(
+    client: PoolClient,
+    context: TrustedRequestContext,
+    profile: InventoryPostingFamilyProfilePayloadV1,
+    posting: ParsedPosting,
+  ): Promise<InventoryCompanionDerivationV1> {
+    if (profile.sourceStep === 'foreignPort') {
+      if (!this.sourceAggregate) {
+        throw postingError(
+          'INVENTORY_POSTING_COMPANION_CONFLICT',
+          `posting family ${profile.familyId} requires a source-aggregate port and none is registered`,
+        );
+      }
+      return await this.sourceAggregate.deriveCompanion(
+        client,
+        context,
+        posting.command,
+      );
+    }
+    const { command } = posting;
+    return Object.freeze({
+      effectiveAt: command.effectiveAt,
+      lines: Object.freeze(
+        command.lines.map((line, index) => {
+          const quantity =
+            'quantityDelta' in line
+              ? line.quantityDelta
+              : 'varianceQuantity' in line
+                ? line.varianceQuantity
+                : line.quantity;
+          const negative = quantity.startsWith('-');
+          const locationId =
+            'locationId' in line
+              ? line.locationId
+              : 'toLocationId' in line
+                ? line.toLocationId
+                : null;
+          return Object.freeze({
+            fromLocationId: negative ? locationId : null,
+            itemId: line.itemId,
+            lineNumber: String(index + 1),
+            quantity,
+            toLocationId: negative ? null : locationId,
+            transactionLineId: line.transactionLineId,
+            unitId: line.unitId,
+          });
+        }),
+      ),
+      number: `${profile.companion.sourceTypeLiteral}-${command.sourceId.slice(0, 8)}`,
+      reason: command.reason,
+      sourceId: command.sourceId,
+      sourceType: profile.companion.sourceTypeLiteral,
+      transactionId: command.transactionId,
+    });
   }
 
   async #post(
@@ -730,13 +901,12 @@ export class PostgresInventoryPostingService {
     assertTrustedActorEnvelope(actorEnvelope);
     assertActorContext(context, actorEnvelope);
     const parsed = posting.command;
-    // PS-1 PROBE ONLY. Admission, not identity. This is the check a naive
-    // widening omits: without it, a second capability ID gets its own
-    // request-key lock, receipt, result and trust identity while still being
-    // able to execute every family the kernel implements. Separate names, no
-    // separate admission. It runs before `pool.connect()` — an unadmitted
-    // family never opens a transaction.
-    assertCommandFamilyAdmitted(this.registration, commandFamily(this, posting));
+    // PS-2. Admission, not identity, and resolved from the compiled catalog by
+    // the family the entry point named — never inferred from a diagnostic
+    // string or from the posting role, both of which a caller controls. It runs
+    // before `pool.connect()`, so an unadmitted family never opens a
+    // transaction.
+    const profile = resolveProfile(this.registration, posting.familyId);
     const inputDigest = currentCommandDigest(posting);
     const movements = plannedMovements(posting, this.mintUuid);
     const identities = movements.map((movement) =>
@@ -821,30 +991,42 @@ export class PostgresInventoryPostingService {
         .toSorted(compareInventoryMovementOrderEntries);
 
       await assumeModuleRole(client);
-      // PS-1 PROBE ONLY. The source aggregate is locked and validated BEFORE
-      // the companion is derived from it, so the derivation cannot read a row
-      // that moves before the movement lands. Lock order is widened, not
-      // reordered: stock identities, request key, source aggregate, companion
-      // header. PS-0 measured this call one position later; moving it earlier
-      // strictly lengthens the serialized region, so PS-0's four-arm race
-      // result is preserved rather than re-opened.
+      // PS-2. The source aggregate is locked and validated BEFORE the companion
+      // is derived from it, so the derivation cannot read a row that moves
+      // before the movement lands.
+      //
+      // **This is a REORDER, not a widening, and PS-1 was wrong to call it a
+      // widening.** The edge moved from {companion header → source} to {source →
+      // companion header}; no edge was added. A reorder is only safe if it is
+      // uniform, and PS-1's was not: it applied to the injected foreign port
+      // while `lockAndAssertStockCountEvidence` kept taking the header first,
+      // leaving two families acquiring the same two locks in opposite orders —
+      // a genuine ABBA hazard between a receipt posting and a stock count.
+      // The profile makes it uniform: every family with a source document
+      // locks the source first, and that uniformity is the reason the reorder
+      // is admissible at all.
       const sourceAggregateDigest = this.sourceAggregate
         ? await this.sourceAggregate.lockAndValidate(client, context, parsed)
         : null;
-      // PS-1 PROBE ONLY. The companion writer ADR-0049 never assigned. The
-      // kernel writes it — the port only derives it — so `#post` remains the
-      // sole writer of the companion exactly as it is of the movement.
-      if (this.sourceAggregate) {
-        const derivation = await this.sourceAggregate.deriveCompanion(
+      // PS-2. The companion writer, keyed on the **profile** rather than on
+      // whether a port happened to be injected. That is what stops
+      // `postStockCount` escaping it: stock count is a companion-origin family,
+      // so it gets a kernel-written companion on the same path a receipt does,
+      // which is what leaves Inventory's dependency extension non-empty and
+      // gives the reachability gate its second class to close.
+      if (profile.companion.createdByKernel) {
+        const derivation = await this.#companionDerivation(
           client,
           context,
-          parsed,
+          profile,
+          posting,
         );
         await createCompanionTransaction(
           client,
           this.#binding,
           context,
           actorEnvelope,
+          profile,
           posting,
           derivation,
           recordedAt,
@@ -894,7 +1076,13 @@ export class PostgresInventoryPostingService {
         return replay;
       }
 
-      await assertInventoryDraftHeader(client, this.#binding, context, posting);
+      await assertInventoryDraftHeader(
+        client,
+        this.#binding,
+        context,
+        profile,
+        posting,
+      );
       if (isStockCountPosting(posting)) {
         await assertStockCountCompensationAvailable(
           client,
@@ -946,6 +1134,7 @@ export class PostgresInventoryPostingService {
           client,
           this.#binding,
           context,
+          profile,
           posting,
           lineSetDigest,
         );
@@ -1128,12 +1317,8 @@ export function planInventoryPostingRequestLock(
 function validateRegistration(
   registration: InventoryPostingRegistrationV1,
 ): void {
-  // PS-1: identity (1) is looked up, contract identity (2) is still equality.
-  const admission = INVENTORY_POSTING_CAPABILITY_ADMISSIONS.get(
-    registration.capabilityId,
-  );
+  // Contract identity (2) is still equality — one kernel, one baseline.
   if (
-    !admission ||
     registration.capabilityVersion !== INVENTORY_POSTING_CAPABILITY_VERSION ||
     registration.dependencySetRoot !== INVENTORY_POSTING_DEPENDENCY_SET_ROOT
   ) {
@@ -1142,30 +1327,71 @@ function validateRegistration(
       'posting registration does not match the frozen capability contract',
     );
   }
-  // PS-1 identity (3): the extension root and the admitted families are the
-  // capability's own, and each must match what the kernel admits for that exact
-  // ID. A registration cannot name a family it has not declared reads for, and
-  // cannot claim another capability's extension.
+  // PS-2: the catalog is the single source for identity (1) and (3). A
+  // capability is admitted because some profile names it, and its extension is
+  // derived from exactly those profiles — there is no second list to disagree
+  // with the first.
+  const catalog = registration.postingFamilyCatalog;
   if (
-    (registration.dependencyExtensionRoot ??
-      EMPTY_DEPENDENCY_EXTENSION_ROOT) !== admission.dependencyExtensionRoot
+    catalog.schemaVersion !== 'northstar.inventory-posting-family-profile/v1' ||
+    catalog.profiles.length === 0
   ) {
     throw postingError(
       'INVENTORY_POSTING_CAPABILITY_MISMATCH',
-      `capability ${registration.capabilityId} does not carry its admitted dependency extension`,
+      'posting registration does not carry an admitted posting-family catalog',
     );
   }
-  const declaredFamilies =
-    registration.admittedFamilies ?? admission.admittedFamilies;
+  const familyIds = new Set<string>();
+  for (const profile of catalog.profiles) {
+    if (familyIds.has(profile.familyId)) {
+      throw postingError(
+        'INVENTORY_POSTING_CAPABILITY_MISMATCH',
+        `posting-family catalog declares ${profile.familyId} twice`,
+      );
+    }
+    familyIds.add(profile.familyId);
+    // Provenance and companion type are the profile's, and a companion-origin
+    // family must create its companion. An `authored` family that claimed a
+    // kernel writer, or a `companion` family that did not, is the exact
+    // combination that let `postStockCount` escape PS-1's writer.
+    if (
+      (profile.companion.origin === 'companion') !==
+      profile.companion.createdByKernel
+    ) {
+      throw postingError(
+        'INVENTORY_POSTING_CAPABILITY_MISMATCH',
+        `posting family ${profile.familyId} disagrees with itself about who writes its transaction`,
+      );
+    }
+    // Reachability follows origin. A companion that stayed generically
+    // reachable, or an authored document that did not, is a defect in the
+    // declaration rather than a policy choice.
+    const expectedReachability =
+      profile.companion.origin === 'companion' ? 'closed' : 'admitted';
+    if (
+      profile.reachability.genericAuthoring !== expectedReachability ||
+      profile.reachability.genericRead !== expectedReachability
+    ) {
+      throw postingError(
+        'INVENTORY_POSTING_CAPABILITY_MISMATCH',
+        `posting family ${profile.familyId} declares reachability its origin does not permit`,
+      );
+    }
+  }
   if (
-    declaredFamilies.length !== admission.admittedFamilies.length ||
-    declaredFamilies.some(
-      (family) => !admission.admittedFamilies.includes(family),
+    !catalog.profiles.some(
+      (profile) => profile.capabilityId === registration.capabilityId,
     )
   ) {
     throw postingError(
       'INVENTORY_POSTING_CAPABILITY_MISMATCH',
-      `capability ${registration.capabilityId} claims command families it is not admitted to execute`,
+      `capability ${registration.capabilityId} is named by no posting family`,
+    );
+  }
+  if (!sha256Pattern.test(registration.postingFamilyCatalogContentHash)) {
+    throw postingError(
+      'INVENTORY_POSTING_CAPABILITY_MISMATCH',
+      'postingFamilyCatalogContentHash must be a lowercase SHA-256 digest',
     );
   }
   requiredUuid(registration.releaseId, 'releaseId');
@@ -1303,6 +1529,8 @@ function resolvePostingStorage(
       periodLockEntity.periodLock.closedThroughColumn,
     schemaName: target.providerAbi.managedSchema,
     transaction,
+    transactionTypeOptions: transactionType.enumOptionIds,
+    movementPostingRoleOptions: movementPostingRole.enumOptionIds,
     transactionAdjustmentType: requiredEnumOption(
       transactionType,
       'adjustment',
@@ -1485,6 +1713,14 @@ function movementPostingRole(
   postingRole: InventoryPostingRoleV1,
 ): string {
   switch (postingRole) {
+    // PS-2. A receipt is its own posting role. It resolves generically from the
+    // compiled enum so adding one is a declaration, not another switch arm.
+    case 'receipt':
+      return requiredCompiledOption(
+        binding.movementPostingRoleOptions,
+        'inventory_movement_posting_role_receipt',
+        'inventory_movement_posting_role',
+      );
     case 'adjustment':
       return binding.movementPostingRoleAdjustment;
     case 'correction':
@@ -1510,19 +1746,41 @@ function postingRoleFromStorage(
   );
 }
 
+/**
+ * PS-2. The companion's transaction type comes from the **profile**, not from a
+ * switch on posting role.
+ *
+ * That switch is what made `PS-1`'s receipt carry `type = adjustment` while its
+ * `source_type` said `goodsReceipt` — the pair its own ruling called
+ * structurally forbidden. A family declares its companion type once, and the
+ * only way to change it is to change the declaration.
+ */
 function transactionType(
   binding: PostingStorageBinding,
-  postingRole: InventoryPostingRoleV1,
+  profile: InventoryPostingFamilyProfilePayloadV1,
 ): string {
-  switch (postingRole) {
-    case 'adjustment':
-      return binding.transactionAdjustmentType;
-    case 'correction':
-    case 'count':
-      return binding.transactionCountCorrectionType;
-    case 'transfer':
-      return binding.transactionTransferType;
+  return requiredCompiledOption(
+    binding.transactionTypeOptions,
+    profile.companion.transactionTypeLocalId,
+    'inventory_transaction_type',
+  );
+}
+
+/** PS-2. Resolves a compiled enum option a profile names by its local id. */
+function requiredCompiledOption(
+  options: readonly string[],
+  localId: string,
+  fieldLabel: string,
+): string {
+  const matches = options.filter((option) => option.endsWith(`.${localId}`));
+  if (matches.length !== 1) {
+    throw postingError(
+      'INVENTORY_POSTING_STORAGE_INVALID',
+      `${fieldLabel} lacks unique compiled option ${localId}`,
+      { localId },
+    );
   }
+  return matches[0]!;
 }
 
 function requiredRelationColumn(
@@ -1828,7 +2086,7 @@ function plannedMovements(
   posting: ParsedPosting,
   mintUuid: () => string,
 ): PlannedMovement[] {
-  if (posting.postingRole === 'adjustment') {
+  if (posting.postingRole === 'adjustment' || posting.postingRole === 'receipt') {
     return posting.command.lines.map((line) =>
       plannedMovement(
         posting.command,
@@ -2196,7 +2454,14 @@ function enforceReasonAndApproval(
   posting: ParsedPosting,
 ): void {
   const { command, postingRole } = posting;
-  const reason = configuration.reasonRequirements[postingRole];
+  // PS-2. `receipt` has no configuration dials yet. ADR-0049 §5 priced them —
+  // `receipt_reason_requirement` and `receipt_approval_threshold` columns plus a
+  // widened `provision_inventory_scope` — and `PUR-2` owes that migration. Until
+  // it lands the probe borrows the adjustment dials **explicitly**, so the gap
+  // is visible here rather than silently defaulting to the weakest setting.
+  const configuredRole: Exclude<InventoryPostingRoleV1, 'receipt'> =
+    postingRole === 'receipt' ? 'adjustment' : postingRole;
+  const reason = configuration.reasonRequirements[configuredRole];
   if (
     command.reason.code.trim().length === 0 ||
     (reason === 'codeAndNarrative' &&
@@ -2204,18 +2469,18 @@ function enforceReasonAndApproval(
         command.reason.narrative.trim().length === 0))
   ) {
     const code =
-      postingRole === 'adjustment'
+      postingRole === 'adjustment' || postingRole === 'receipt'
         ? 'INVENTORY_ADJUSTMENT_REASON_REQUIRED'
         : postingRole === 'transfer'
           ? 'INVENTORY_TRANSFER_REASON_REQUIRED'
           : 'INVENTORY_COUNT_REASON_REQUIRED';
     throw postingError(code, `${postingRole} requires ${reason}`);
   }
-  const threshold = configuration.approvalThresholds[postingRole];
+  const threshold = configuration.approvalThresholds[configuredRole];
   if (threshold === null) return;
   const scaledThreshold = decimalToScaled(threshold, 'approval threshold');
   const exceeds =
-    posting.postingRole === 'adjustment'
+    posting.postingRole === 'adjustment' || posting.postingRole === 'receipt'
       ? posting.command.lines.some(
           (line) =>
             absolute(decimalToScaled(line.quantityDelta, 'quantity')) >
@@ -2477,11 +2742,22 @@ async function createCompanionTransaction(
   binding: PostingStorageBinding,
   context: TrustedRequestContext,
   actorEnvelope: TrustedActorEnvelope,
+  profile: InventoryPostingFamilyProfilePayloadV1,
   posting: ParsedPosting,
   derivation: InventoryCompanionDerivationV1,
   recordedAt: string,
 ): Promise<void> {
   const { command } = posting;
+  // PS-2. Provenance is the profile's literal, checked against what the kernel
+  // command carries. A port that returned a different origin is refused rather
+  // than trusted.
+  if (derivation.sourceType !== profile.companion.sourceTypeLiteral) {
+    throw postingError(
+      'INVENTORY_POSTING_COMPANION_CONFLICT',
+      `posting family ${profile.familyId} derived a companion whose origin is not its declared provenance`,
+      { transactionId: command.transactionId },
+    );
+  }
   if (derivation.transactionId !== command.transactionId) {
     throw postingError(
       'INVENTORY_POSTING_COMPANION_CONFLICT',
@@ -2523,7 +2799,7 @@ async function createCompanionTransaction(
     derivation.transactionId,
     // Server-selected, both of them. Not derivable by the port.
     binding.transactionDraftState,
-    transactionType(binding, posting.postingRole),
+    transactionType(binding, profile),
     derivation.number,
     derivation.effectiveAt,
     recordedAt,
@@ -2577,34 +2853,141 @@ async function createCompanionTransaction(
   }
 }
 
-/** PS-1 PROBE ONLY. Which command family a posting belongs to. */
-function commandFamily(
-  service: { readonly sourceAggregateFamilyId: string | null },
-  posting: ParsedPosting,
-): InventoryPostingCommandFamilyV1 {
-  if (service.sourceAggregateFamilyId === 'goods_receipt') return 'goodsReceipt';
-  if (posting.postingRole === 'transfer') return 'transfer';
-  if (posting.postingRole === 'adjustment') return 'adjustment';
-  return 'stockCount';
+/**
+ * PS-2. Resolves the profile a posting runs under, and refuses if the invoking
+ * capability does not own it.
+ *
+ * This is what replaces `PS-1`'s magic string. The family is not inferred from
+ * a diagnostic name on an injected port, nor from the posting role — both of
+ * which the caller controls. It is named by the entry point (`postAdjustment`,
+ * `postStockCount`, `postGoodsReceipt`), looked up in the compiled catalog, and
+ * checked against the registration's own capability. Everything else the family
+ * varies by — posting role, companion type, provenance, revision ownership,
+ * identity derivation, reachability — is then read off the profile rather than
+ * re-derived at each use site.
+ */
+/**
+ * PS-2. A v5-shaped deterministic identity. Deterministic is what makes partial
+ * creation self-repairing — a retry derives the same ids, so the companion
+ * writer's `ON CONFLICT DO NOTHING` converges instead of minting a second row.
+ */
+export function derivedIdentity(
+  namespace: string,
+  ...parts: readonly string[]
+): string {
+  const hash = createHash('sha1').update(namespace);
+  for (const part of parts) hash.update('\0').update(part);
+  const bytes = Buffer.from(hash.digest().subarray(0, 16));
+  bytes[6] = (bytes[6]! & 0x0f) | 0x50;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = bytes.toString('hex');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-/** PS-1 PROBE ONLY. The authorization boundary, distinct from `#post`. */
-function assertCommandFamilyAdmitted(
-  registration: InventoryPostingRegistrationV1,
-  family: InventoryPostingCommandFamilyV1,
-): void {
-  const admitted =
-    registration.admittedFamilies ??
-    INVENTORY_POSTING_CAPABILITY_ADMISSIONS.get(registration.capabilityId)
-      ?.admittedFamilies ??
-    [];
-  if (!admitted.includes(family)) {
+const COMPANION_HEADER_NAMESPACE =
+  'northstar.inventory-companion-transaction/v1';
+const COMPANION_LINE_NAMESPACE = 'northstar.inventory-companion-line/v1';
+
+function validateGoodsReceiptCommand(
+  command: InventoryGoodsReceiptPostingCommandV1,
+): InventoryGoodsReceiptPostingCommandV1 {
+  requiredUuid(command.goodsReceiptId, 'goodsReceiptId');
+  requiredUuid(command.purchaseOrderId, 'purchaseOrderId');
+  requiredUuid(command.legalEntityId, 'legalEntityId');
+  requiredUuid(command.idempotencyKey, 'idempotencyKey');
+  if (
+    !Number.isSafeInteger(command.sourceExpectedRevision) ||
+    command.sourceExpectedRevision < 0
+  ) {
     throw postingError(
-      'INVENTORY_POSTING_COMMAND_FAMILY_NOT_ADMITTED',
-      `capability ${registration.capabilityId} may not execute the ${family} command family`,
-      { capabilityId: registration.capabilityId, family },
+      'INVENTORY_POSTING_INPUT_INVALID',
+      'sourceExpectedRevision must be a non-negative integer',
     );
   }
+  if (command.lines.length === 0) {
+    throw postingError(
+      'INVENTORY_POSTING_INPUT_INVALID',
+      'a goods receipt posting carries at least one line',
+    );
+  }
+  return command;
+}
+
+/**
+ * PS-2. The profile-governed normalization from a receipt to kernel work.
+ *
+ * Every identity and every provenance value is derived here. `sourceType` is
+ * the profile's literal, never the caller's — that is what makes a companion
+ * header incapable of claiming an origin its movements do not have. Both the
+ * companion header id and each companion line id are derived, closing the half
+ * of `PS-1`'s identity story that was still caller-supplied.
+ */
+function kernelCommandForGoodsReceipt(
+  profile: InventoryPostingFamilyProfilePayloadV1,
+  source: InventoryGoodsReceiptPostingCommandV1,
+): InventoryAdjustmentPostingCommandV1 {
+  const sourceType = profile.companion.sourceTypeLiteral;
+  const transactionId = derivedIdentity(
+    COMPANION_HEADER_NAMESPACE,
+    source.legalEntityId,
+    sourceType,
+    source.goodsReceiptId,
+  );
+  return Object.freeze({
+    authorization: source.authorization,
+    channel: source.channel,
+    effectiveAt: source.effectiveAt,
+    idempotencyKey: source.idempotencyKey,
+    legalEntityId: source.legalEntityId,
+    lines: Object.freeze(
+      source.lines.map((line) =>
+        Object.freeze({
+          itemId: line.itemId,
+          locationId: line.locationId,
+          quantityDelta: line.quantity,
+          sourceLine: line.sourceLine,
+          transactionLineId: derivedIdentity(
+            COMPANION_LINE_NAMESPACE,
+            transactionId,
+            line.goodsReceiptLineId,
+          ),
+          unitId: line.unitId,
+        }),
+      ),
+    ),
+    reason: source.reason,
+    sourceId: source.goodsReceiptId,
+    // The foreign document's revision. The companion's is kernel-minted and is
+    // deliberately not representable here.
+    sourceRevision: source.sourceExpectedRevision,
+    sourceType,
+    stockDimensionSetVersion: 'v1',
+    transactionId,
+  });
+}
+
+function resolveProfile(
+  registration: InventoryPostingRegistrationV1,
+  familyId: InventoryPostingCommandFamilyV1,
+): InventoryPostingFamilyProfilePayloadV1 {
+  const profile = registration.postingFamilyCatalog.profiles.find(
+    (candidate) => candidate.familyId === familyId,
+  );
+  if (!profile) {
+    throw postingError(
+      'INVENTORY_POSTING_COMMAND_FAMILY_NOT_ADMITTED',
+      `the compiled posting-family catalog declares no ${familyId} family`,
+      { family: familyId },
+    );
+  }
+  if (profile.capabilityId !== registration.capabilityId) {
+    throw postingError(
+      'INVENTORY_POSTING_COMMAND_FAMILY_NOT_ADMITTED',
+      `capability ${registration.capabilityId} may not execute the ${familyId} command family`,
+      { capabilityId: registration.capabilityId, family: familyId },
+    );
+  }
+  return profile;
 }
 
 async function lockInventoryTransactionHeader(
@@ -2641,6 +3024,7 @@ async function assertInventoryDraftHeader(
   client: PoolClient,
   binding: PostingStorageBinding,
   context: TrustedRequestContext,
+  profile: InventoryPostingFamilyProfilePayloadV1,
   posting: ParsedPosting,
 ): Promise<void> {
   const { command } = posting;
@@ -2685,7 +3069,7 @@ async function assertInventoryDraftHeader(
       command.legalEntityId,
       command.transactionId,
       binding.transactionDraftState,
-      transactionType(binding, posting.postingRole),
+      transactionType(binding, profile),
       command.sourceRevision,
       command.effectiveAt,
       command.reason.code || null,
@@ -2770,7 +3154,7 @@ async function assertInventoryLineSet(
       row,
     ]),
   );
-  if (posting.postingRole === 'adjustment') {
+  if (posting.postingRole === 'adjustment' || posting.postingRole === 'receipt') {
     for (const line of posting.command.lines) {
       assertInventoryLineMatches(
         adjustmentLineMatches(byId.get(line.transactionLineId), line),
@@ -3332,6 +3716,7 @@ async function transitionTransactionToPosted(
   client: PoolClient,
   binding: PostingStorageBinding,
   context: TrustedRequestContext,
+  profile: InventoryPostingFamilyProfilePayloadV1,
   posting: ParsedPosting,
   lineSetDigest: string,
 ): Promise<number> {
@@ -3381,7 +3766,7 @@ async function transitionTransactionToPosted(
       binding.transactionPostedState,
       command.transactionId,
       binding.transactionDraftState,
-      transactionType(binding, posting.postingRole),
+      transactionType(binding, profile),
       command.effectiveAt,
       command.reason.code || null,
       command.reason.narrative,
@@ -4037,7 +4422,7 @@ function effectDeduplicationKey(posting: ParsedPosting): string {
 function naturalEffects(
   posting: ParsedPosting,
 ): readonly { readonly sourceLine: string }[] {
-  if (posting.postingRole === 'adjustment') {
+  if (posting.postingRole === 'adjustment' || posting.postingRole === 'receipt') {
     return posting.command.lines.map((line) => ({
       sourceLine: line.sourceLine,
     }));
