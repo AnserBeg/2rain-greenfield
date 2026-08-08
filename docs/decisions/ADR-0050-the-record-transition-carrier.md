@@ -235,6 +235,39 @@ Found by the probe, and none of it optional for `PUR-1`:
    Not exercised by the vertical.
 6. **The misnamed refusal** of §1, which is owed regardless of this ruling.
 
+## 7. One transition, one permission — ruled 2026-08-08 on `5g3-sm-impl`'s review
+
+**The language declares two permissions for a transition and execution honours
+one.** `transitionDefinition.permission` is declared at `schemas.ts:634`; the
+gateway authorizes `definition.permissionId`, which is the *operation's*. The
+compiled effect carries `entity`, `fromStateId`, `toStateId`, `stateFieldId` and
+`transition` — and no permission. A transition declaring `release_restricted`
+under an operation declaring `edit_basic` therefore executes on `edit_basic`,
+and the declaration a reader trusts is precisely the one ignored.
+
+**This is §1's defect class, one field down, re-introduced by the packet that
+closed it.** The vertical stayed green because it declares one permission id in
+both positions, so its policy cannot tell the two declarations apart. A control
+that reuses an identity cannot observe a rule about two identities agreeing.
+
+**Ruled: `operation.permission` must equal `transition.permission`, refused by
+name at compile time** (`COMPILER_TRANSITION_PERMISSION_MISMATCH`).
+
+**Equality rather than a second runtime authorization**, and the reason is a
+fact about the effect rather than a preference: `transitionStateEffect` holds
+exactly one `transition` reference, so the two permissions are 1:1 and one
+authorization is the whole truth. Adding a second gateway decision would be
+generalizing in advance of the shape that needs it.
+
+**And the rule refuses the multi-transition case loudly, which is the trigger to
+revisit.** The day an effect carries more than one transition, equality stops
+being expressible and this diagnostic fires — a decision point that announces
+itself rather than one someone must remember to look for.
+
+**Two controls are owed, not one.** A mismatch must be refused, *and* the matched
+case must still compile. Without the second, the first is satisfiable by refusing
+every transition — which would pass the control while destroying the feature.
+
 ## Boundaries
 
 This decision authorizes no purchasing entity, no module, no mount, no posting

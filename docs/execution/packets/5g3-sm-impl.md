@@ -1,13 +1,12 @@
 # 5g3-sm-impl — honour `transitionStateEffect`, and cut the language it owes
 
-Status: unfrozen at `52e1726a` — the performance gate recorded
-`COMPILE_BUDGET_INDETERMINATE` on a loaded machine and `lanes.md` forbids
-freezing on a measurement that did not happen. Held for the slot, in the
-sequence `U5b` → this packet → `PS-2`.
+Status: re-frozen after review BLOCK. A prior freeze at `b83b810a` was green end
+to end; review then found the transition permission unenforced, and this record
+carries the tree that fixes it.
 
 Tier: Critical
 
-Base: `46a588a` (`origin/main`), merged into the branch at `262e5f5`
+Base: `origin/main` including `U5b` (`8c36c05`), merged at `b83b810`
 
 Authorities:
 [ADR-0050](../../decisions/ADR-0050-the-record-transition-carrier.md) (ratified,
@@ -33,10 +32,15 @@ recorded release root moves and `check:app-release` reproduces the whole lineage
 
 ## The finding this packet is actually worth: a version written by hand
 
-**Five defects, one shape.** Every one was a language version chosen by a human
+**Seven defects, one shape.** Every one was a language version chosen by a human
 and written as a literal, where the correct value was derivable from something
 the code already had. The cut did not *create* these; it revealed them, because
 a version literal is invisible until a version exists that it excludes.
+
+**Two of the seven were found by review, after this packet had named the class
+and swept for it.** That is the most useful fact in this record: naming a defect
+class and grepping for its most obvious spelling is not the same as closing it.
+Rows 6 and 7 are mine by my own definition and I did not find them.
 
 | # | Site | What the literal did |
 |---|---|---|
@@ -45,16 +49,25 @@ a version literal is invisible until a version exists that it excludes.
 | 3 | conformance and storage lowering reading the dispatch alias | the alias rewrites `languageVersion` to the legacy literal, so both gates asked "what version is this?" and were always answered "v2" — `COMPILER_PHYSICAL_NAME_REUSE_INCOMPATIBLE` |
 | 4 | `normalize.ts` minting the legal-entity parameter type at `'v4'` | a v5 package carrying a scope operand is refused `CANON_VERSION_MIXED`, because the node it mints disagrees with its own envelope |
 | 5 | the runtime and verification copies of that node's shape | `semantic-query-gateway.ts:1343` fails `=== 'v4'`, falls through to field-type parsing, and refuses a **v5 scope operand as an unadmitted parameter type** — a package that normalized and compiled cleanly, rejected under a name describing the wrong cause |
+| 6 | **three more** `!== 'v4'` in the same gateway's scope parser — *found by review* | a legal v5 scoped query normalizes, compiles, and is then refused as a malformed pinned catalog. My sweep matched `=== 'v4'` and missed the negated spelling, and my control stopped at normalization so it could never reach this reader |
+| 7 | `languageHasMaterializedStateFields` testing an **exact** feature level — *found by review* | its own comment claimed a v6 cut could not drop the rule. False: a v6 package would silently stop materializing. The gate this cut added was itself an instance of the class it was added for |
 
 **It takes exactly two forms, and they fail in opposite directions.**
 
 - An **emitter** writes a literal into a node it mints (4). It fails **closed and
   loudly**, but the refusal names the mixed version rather than the hand-written
   emitter, so the reader hunts the wrong file.
-- An **admitter** compares against a literal (1, 2, 3, 5). It fails **closed at a
-  distance**: the refusal surfaces far from the literal and describes the
+- An **admitter** compares against a literal (1, 2, 3, 5, 6, 7). It fails **closed
+  at a distance**: the refusal surfaces far from the literal and describes the
   symptom. #2 is the sharpest — a version omission in a predicate kernel
   presented as *every create operation in the release is unsupported*.
+
+**A grep is not a sweep.** Row 6 survived because I searched for `=== 'v4'` and
+the code said `!== 'v4'`; row 7 survived because I was looking for literals in
+comparisons and this one was a *predicate I had just written*. The durable form
+of the sweep is not a pattern, it is the question **"what does this compare
+against, and where did that value come from?"** asked of every version-bearing
+line.
 
 **Why three predicates' worth of testing missed #4 and #5.** A v5 package
 *without* a legal-entity scope operand normalizes perfectly. The shape must be
@@ -79,13 +92,38 @@ what it describes. **A warning is not a control.**
 
 ### Where each is closed
 
-Four by derivation: the emitter takes `authored.languageVersion`; the kernel's
-switches and the runtime's admitter derive from `SUPPORTED_LANGUAGE_VERSIONS`;
-the dispatch-alias readers are *told* the authored version rather than deriving
-it from an alias that cannot know it. Two by control, because the value is
-legitimately pinned: see R2 and R3 below.
+All seven by derivation. The emitter takes `authored.languageVersion`; the
+kernel's switches and all four gateway admitters derive from
+`SUPPORTED_LANGUAGE_VERSIONS` through one `isSupportedNodeVersion`; the
+dispatch-alias readers are *told* the authored version rather than deriving it
+from an alias that cannot know it; and the materialization gate now asks the
+**ordered** supported list — "at or after the version that introduced the rule" —
+so a v6 cut inherits it with nothing to remember. Its siblings enumerate their
+levels, which is why each had to be edited by this cut and why one was missed.
+
+R2 and R3 below add the controls for the values that remain legitimately pinned.
 
 ---
+
+## The blocker review found: two permissions, one honoured
+
+The language declares `transitionDefinition.permission` (`schemas.ts:634`) and
+the operation's permission. The gateway authorizes `definition.permissionId` —
+the operation's — and the compiled effect carries no permission at all. **A
+transition declared `release_restricted` under an operation declared
+`edit_basic` executes on `edit_basic`.**
+
+This is §1's defect class, one field down, re-introduced by the packet that
+closed it. **The vertical could not observe it**: it declares one permission id
+in both positions, so its policy cannot tell the two declarations apart. A
+control that reuses an identity cannot witness a rule about two identities
+agreeing — which is a sharper lesson than the fix.
+
+Closed by [ADR-0050 §7](../../decisions/ADR-0050-the-record-transition-carrier.md):
+equality, refused by name at compile time
+(`COMPILER_TRANSITION_PERMISSION_MISMATCH`), with **both** controls — mismatch
+refused, and the matched case still compiling. Without the second, the first is
+satisfiable by refusing every transition.
 
 ## The six items ADR-0050 owed
 
@@ -115,19 +153,30 @@ R2 closes the selector gap structurally *and* behaviourally: production source m
 
 ## Coverage decisions — re-derived, digests recorded
 
-| | before | after |
-|---|---|---|
-| obligations | 1938 | **2045** |
-| observed | 426 | **426** |
-| ledger digest | `2be4b4de…` | `c333e37ce0d2bf2c90026b505e964bcfd63135132a06eb41897efc09d34a218d` |
+Re-derived **twice** — once for the cut, then again over the ledger that already
+carried `U5b`'s disclosure tier, because the merge conflicted here and choosing
+either side would have produced a green gate over a digest neither packet
+reviewed.
+
+| | before the cut | after `U5b` | merged |
+|---|---|---|---|
+| obligations | 1938 | 1943 | **2050** |
+| observed | 426 | 427 | **427** |
+| ledger digest | `2be4b4de…` | `b004419f…` | `29b4dc6c05687d8ff7c8fab91c70e4877b8e7a8d062b1c76e4dd486cc9509b1f` |
 
 All 107 additions are one node-version value per version-bearing authored axis,
 plus `$.languageVersion="v5"` and the paired profile. Every one is unobserved for
 a structural reason: node-version purity is uniform within a package revision, so
 no module can be authored at v5 until every module is. Both *observed* decisions
-are therefore **unchanged in membership** — checked against their prior
-`obligationSetDigest`s — and are re-recorded only because a decision is bound to
-the ledger it was reviewed against. Each carries a new identity.
+are therefore **unchanged in membership** — verified byte-for-byte against
+`U5b`'s own `obligationSetDigest`s, not merely against the pre-cut ones — and are
+re-recorded only because a decision is bound to the ledger it was reviewed
+against. Each carries a new identity.
+
+**The expiry is executable, not prose.** The validator compares a decision's
+recorded category against the current observation and throws
+`LANGUAGE_COVERAGE_OBSERVATION_CHANGED` before a stale decision can cover an
+obligation whose partition moved. Adoption will trip it, which is the intent.
 
 ## Adoption
 
@@ -142,26 +191,17 @@ that pays it.
 No purchasing entity, module, mount, posting role or dependency-set change.
 ADR-0049's unresolved items are untouched. The cut is made and **not adopted**.
 
-## Gates
+## Additional controls from the review BLOCK
 
-`52e1726a`, tree clean, typecheck clean.
-
-| Gate | Result |
+| Control | Proves |
 |---|---|
-| `test:unit` | 92 pass, 0 fail |
-| `test:compiler` | 125 pass, 0 fail |
-| `test:performance` | 4 pass, **1 indeterminate** |
-| everything from `test:integration` onward | **did not run** |
+| transition permission mismatch refused | `COMPILER_TRANSITION_PERMISSION_MISMATCH` names the operation |
+| matched permissions still compile | the rule is not satisfied by refusing everything |
+| a compiled v5 scoped query reaches the **runtime** catalog reader | the gap row 6 lived in; the earlier control stopped at normalization |
+| an authored field wearing the derived state identity | `CANON_STATE_FIELD_COLLISION` — a bare id match no longer suppresses and counterfeits the carrier |
 
-```
-COMPILE_BUDGET_INDETERMINATE: observed CPU idle 73.9% is below required 90.0%
-```
+The collision guard and the field generator now share **one** definition of the
+derived field. Two copies would drift, and a guard that drifts from what it
+guards is worse than none.
 
-**Live `ccd-cli` runtimes at the reading: 4** (three besides this lane), with
-`2rain-greenfield-ps1` running `tsc` at 210% CPU and `2rain-greenfield-u5b`
-running a compiler suite. Load average 4.40 on 8 processors.
-
-Not retried, per `lanes.md`: *"Do not retry into a loaded machine… Retrying is a
-coin flip on other people's turn boundaries, and each flip costs a full matrix."*
-A prior run at `73ef105a` completed green end to end, but that SHA is void —
-this packet changed source after it.
+## Gates

@@ -9,6 +9,7 @@ import pg from 'pg';
 
 import {
   CANONICALIZATION_PROFILE_VERSION,
+  CanonicalModelError,
   CONTENT_HASH_ALGORITHM,
   canonicalize,
   canonicalizeAndHash,
@@ -5835,6 +5836,58 @@ test('a materialized state field is selectable, and only a transition writes it'
  * it declares one permission id in both positions, so its policy cannot tell
  * the two declarations apart.
  */
+/**
+ * The state field's identity is OWNED by the machine, and this cut moved that
+ * identity out of the `stateMachines` id family in `collectIds` on exactly that
+ * basis. Skipping generation on a bare id match let an authored field of any
+ * shape occupy the carrier: a required text field with the derived id and a
+ * matching default suppresses materialization, counterfeits the column, and
+ * passes every other control because the id is present.
+ */
+test('an authored field wearing the derived state identity is refused', () => {
+  const namespace = 'northstar.smstatecollision';
+  const definition = transitionModuleDefinition(namespace) as {
+    fields: Array<Record<string, unknown>>;
+  } & Record<string, unknown>;
+  definition.fields.push({
+    classification: 'internal',
+    collation: 'binary',
+    defaultSemantics: 'declaredDefault',
+    defaultValue: {
+      kind: 'textValue',
+      schemaVersion: 'v5',
+      value: `${namespace}:state.master_draft`,
+    },
+    entity: {
+      kind: 'entityReference',
+      schemaVersion: 'v5',
+      targetId: `${namespace}:entity.master`,
+    },
+    fieldId: `${namespace}:derived_state_field.machine.master_lifecycle`,
+    fieldType: { kind: 'textFieldType', maximumLength: 40, schemaVersion: 'v5' },
+    kind: 'fieldDefinition',
+    label: 'State',
+    orderKey: 0,
+    presence: 'required',
+    reportable: true,
+    schemaVersion: 'v5',
+    searchable: false,
+  });
+  assert.throws(
+    () => moduleInput(definition),
+    (error: unknown) => {
+      assert.ok(error instanceof CanonicalModelError);
+      assert.ok(
+        error.diagnostics.some(
+          (entry) => entry.code === 'CANON_STATE_FIELD_COLLISION',
+        ),
+        `expected CANON_STATE_FIELD_COLLISION: ${JSON.stringify(error.diagnostics)}`,
+      );
+      return true;
+    },
+  );
+});
+
 test('a transition permission that disagrees with its operation is refused by name', () => {
   const namespace = 'northstar.smpermmismatch';
   const definition = transitionModuleDefinition(namespace) as {
