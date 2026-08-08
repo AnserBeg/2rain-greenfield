@@ -49,13 +49,58 @@ function fixture(): VersionedAuthoredApplicationPackage {
     shared.replaceAll('"v3"', `"${ADOPTED_LANGUAGE_VERSION}"`),
   ) as { surfaces: { slots: Record<string, unknown>[] }[] };
   const slots = upgraded.surfaces[0]!.slots;
-  slots.push({
-    content: { ...(slots[0]!.content as Record<string, unknown>) },
-    kind: 'surfaceSlot',
-    orderKey: 30,
+  const content = { ...(slots[0]!.content as Record<string, unknown>) };
+  const addSlot = (slot: string, slotId: string, orderKey: number) => {
+    slots.push({
+      content,
+      kind: 'surfaceSlot',
+      orderKey,
+      schemaVersion: ADOPTED_LANGUAGE_VERSION,
+      slot,
+      slotId,
+    });
+  };
+  addSlot('commandBar', COMMAND_BAR_SLOT, 30);
+  addSlot('breadcrumb', BREADCRUMB_SLOT, 40);
+  // A task surface, so the aggregate-task hole has subjects. Its query selects
+  // nothing forcing, which is exactly the shape the old deny-list let through:
+  // `selections = []` meant nothing forced, while `scanInput` still renders
+  // required inputs and `primaryAction` still renders the submit control.
+  (
+    upgraded as unknown as { surfaces: Record<string, unknown>[] }
+  ).surfaces.push({
+    archetype: 'task',
+    dataSource: {
+      ...((upgraded.surfaces[0]! as unknown as { dataSource: unknown })
+        .dataSource as Record<string, unknown>),
+    },
+    kind: 'surfaceDefinition',
+    label: 'Item lookup',
+    module: {
+      ...((upgraded.surfaces[0]! as unknown as { module: unknown })
+        .module as Record<string, unknown>),
+    },
     schemaVersion: ADOPTED_LANGUAGE_VERSION,
-    slot: 'commandBar',
-    slotId: COMMAND_BAR_SLOT,
+    slots: [
+      {
+        content,
+        kind: 'surfaceSlot',
+        orderKey: 10,
+        schemaVersion: ADOPTED_LANGUAGE_VERSION,
+        slot: 'scanInput',
+        slotId: SCAN_INPUT_SLOT,
+      },
+      {
+        content,
+        kind: 'surfaceSlot',
+        orderKey: 20,
+        schemaVersion: ADOPTED_LANGUAGE_VERSION,
+        slot: 'primaryAction',
+        slotId: PRIMARY_ACTION_SLOT,
+      },
+    ],
+    statusRoles: [],
+    surfaceId: 'northstar.inventory:surface.item_lookup',
   });
   return parseAuthoredApplicationPackageJson(
     Buffer.from(JSON.stringify(upgraded)),
@@ -101,6 +146,9 @@ function forcing(): Record<string, unknown> {
 const SECTIONS_SLOT = 'northstar.inventory:slot.item_sections';
 const TITLE_STATUS_SLOT = 'northstar.inventory:slot.item_title_status';
 const COMMAND_BAR_SLOT = 'northstar.inventory:slot.item_command_bar';
+const BREADCRUMB_SLOT = 'northstar.inventory:slot.item_breadcrumb';
+const SCAN_INPUT_SLOT = 'northstar.inventory:slot.item_scan_input';
+const PRIMARY_ACTION_SLOT = 'northstar.inventory:slot.item_primary_action';
 
 function withTier(
   authored: Record<string, unknown>,
@@ -110,9 +158,9 @@ function withTier(
   const surfaces = authored.surfaces as {
     slots: { slotId: string; disclosureTier?: string }[];
   }[];
-  const slot = surfaces[0]!.slots.find(
-    (candidate) => candidate.slotId === slotId,
-  );
+  const slot = surfaces
+    .flatMap((surface) => surface.slots)
+    .find((candidate) => candidate.slotId === slotId);
   assert.ok(slot, `fixture must still declare ${slotId}`);
   slot.disclosureTier = tier;
   return authored;
@@ -124,7 +172,7 @@ function normalizedSlots(
   const normalized = normalizeApplicationPackage(authored) as unknown as {
     surfaces: { slots: { slotId: string; disclosureTier?: string }[] }[];
   };
-  return normalized.surfaces[0]!.slots;
+  return normalized.surfaces.flatMap((surface) => surface.slots);
 }
 
 test('an absent disclosure tier stays absent through normalization', () => {
@@ -159,112 +207,102 @@ test('materializing the default would move the normalized bytes', () => {
   assert.ok(materialized.includes('disclosureTier'));
 });
 
-test('always is accepted on a slot that reaches a required field', () => {
+test('always is accepted on any slot', () => {
   const slots = normalizedSlots(withTier(forcing(), 'always'));
   const slot = slots.find((entry) => entry.slotId === SECTIONS_SLOT);
   assert.equal(slot?.disclosureTier, 'always');
 });
 
-test('RED: progressive on a slot reaching a required field is refused', () => {
-  const codes = diagnosticCodes(() =>
-    normalizeApplicationPackage(withTier(forcing(), 'progressive')),
-  );
-  assert.deepEqual(codes, ['CANON_SURFACE_DISCLOSURE_TIER_FORCED_ALWAYS']);
-});
-
-test('RED: the forcing refusal names the offending slot, not the surface', () => {
-  try {
-    normalizeApplicationPackage(withTier(forcing(), 'progressive'));
-    throw new Error('expected normalization to refuse, and it accepted');
-  } catch (error) {
-    assert.ok(error instanceof CanonicalModelError);
-    const refusal = error.diagnostics.find(
-      (entry) => entry.code === 'CANON_SURFACE_DISCLOSURE_TIER_FORCED_ALWAYS',
-    );
-    assert.equal(refusal?.objectId, SECTIONS_SLOT);
-    assert.equal(refusal?.path, '$.surfaces.slots.disclosureTier');
-    assert.match(refusal?.rule ?? '', /item_name/u);
-  }
-});
-
 /**
- * The vacuity control for the forcing rule. Without it, an implementation that
- * refused EVERY `progressive` would pass the red above and be indistinguishable
- * from the rule this packet was asked for. The subject is identical except that
- * no selected field is required.
+ * The positive direction of the allow-list. `record:breadcrumb` is the only
+ * unconditionally deferrable slot in the grammar: `renderBreadcrumb` emits a
+ * navigation link and the entity label, and nothing else.
  */
-test('CONTROL: progressive is accepted where no reachable field forces always', () => {
-  const slots = normalizedSlots(withTier(nonForcing(), 'progressive'));
-  const slot = slots.find((entry) => entry.slotId === SECTIONS_SLOT);
+test('progressive is accepted on a proven-deferrable slot', () => {
+  const slots = normalizedSlots(
+    withTier(forcing(), 'progressive', BREADCRUMB_SLOT),
+  );
+  const slot = slots.find((entry) => entry.slotId === BREADCRUMB_SLOT);
   assert.equal(
     slot?.disclosureTier,
     'progressive',
-    'the rule must read the forcing set, not the word progressive',
+    'breadcrumb renders nothing protected, so the allow-list must admit it',
   );
 });
 
 /**
- * The vacuity control for the field-bearing narrowing, and the reason the
- * narrowing exists. `commandBar` renders no field, so deferring it conceals
- * nothing -- even on a surface that reaches a required field. Without this the
- * rule is per-surface, and `progressive` is unusable on every record surface in
- * the composed application, all of which reach one of its 50 required fields.
+ * The conditional member. This fixture's only operation carries a
+ * `transitionStateEffect`, which binds through `transition` rather than
+ * `entity`, so no confirmed operation binds to this surface and the command bar
+ * stays deferrable. The refusing half of the pair lives in the integration gate,
+ * against a fixture whose archive operation does bind.
  */
-test('CONTROL: a non-field-bearing slot may defer even on a forcing surface', () => {
+test('progressive is accepted on commandBar when no bound operation confirms', () => {
   const slots = normalizedSlots(
     withTier(forcing(), 'progressive', COMMAND_BAR_SLOT),
   );
   const slot = slots.find((entry) => entry.slotId === COMMAND_BAR_SLOT);
-  assert.equal(
-    slot?.disclosureTier,
-    'progressive',
-    'commandBar renders no field, so no forcing field can be concealed by deferring it',
-  );
+  assert.equal(slot?.disclosureTier, 'progressive');
 });
 
 /**
- * The inversion of what this file previously asserted. `titleStatus` was
- * classified as bearing no field and this test asserted that falsehood, so the
- * slot most likely to conceal a record's identifying value was the one the rule
- * exempted.
+ * The inversion's core red, and it no longer depends on the surface reaching a
+ * required field. `record:sections` renders the surface's fields, so it is
+ * simply absent from the allow-list.
  */
+test('RED: progressive on a field-rendering slot is refused as not deferrable', () => {
+  const codes = diagnosticCodes(() =>
+    normalizeApplicationPackage(withTier(nonForcing(), 'progressive')),
+  );
+  assert.deepEqual(codes, ['CANON_SURFACE_DISCLOSURE_TIER_NOT_DEFERRABLE']);
+});
+
+test('RED: the refusal names the offending slot, not the surface', () => {
+  try {
+    normalizeApplicationPackage(withTier(nonForcing(), 'progressive'));
+    throw new Error('expected normalization to refuse, and it accepted');
+  } catch (error) {
+    assert.ok(error instanceof CanonicalModelError);
+    const refusal = error.diagnostics.find(
+      (entry) => entry.code === 'CANON_SURFACE_DISCLOSURE_TIER_NOT_DEFERRABLE',
+    );
+    assert.equal(refusal?.objectId, SECTIONS_SLOT);
+    assert.equal(refusal?.path, '$.surfaces.slots.disclosureTier');
+  }
+});
+
 test('RED: progressive on titleStatus is refused, because it renders the display field', () => {
   const codes = diagnosticCodes(() =>
     normalizeApplicationPackage(
-      withTier(forcing(), 'progressive', TITLE_STATUS_SLOT),
+      withTier(nonForcing(), 'progressive', TITLE_STATUS_SLOT),
     ),
   );
-  assert.deepEqual(codes, ['CANON_SURFACE_DISCLOSURE_TIER_FORCED_ALWAYS']);
+  assert.deepEqual(codes, ['CANON_SURFACE_DISCLOSURE_TIER_NOT_DEFERRABLE']);
 });
 
 /**
- * Review finding 4, first half. The forcing predicate is a disjunction, and
- * deleting the `businessKey` arm left every existing control green: `item_name`
- * is required AND the surfaces that would exercise identification also carry a
- * required field. This subject is identifying and NOT required, so it fails when
- * that arm is deleted and nothing else does.
+ * The aggregate-task hole, which the deny-list could not close. An aggregate
+ * surface selects no field, so under the old rule NOTHING forced -- while
+ * `scanInput` still rendered the query's parameters as required inputs and
+ * `primaryAction` still rendered the submit control. Under the allow-list both
+ * force by default because neither is proven safe.
  */
-test('RED: an identifying field forces always even when nothing is required', () => {
-  const authored = nonForcing();
-  const fields = authored.fields as {
-    fieldId: string;
-    businessKey?: string;
-    collation?: string;
-  }[];
-  const selected = fields.find(
-    (field) => field.fieldId === 'northstar.inventory:field.item_name',
-  );
-  assert.ok(selected);
-  selected.businessKey = 'tenantEnvironmentCaseInsensitiveUnique';
-  selected.collation = 'unicodeCaseInsensitive';
+test('RED: progressive on task scanInput is refused', () => {
   const codes = diagnosticCodes(() =>
-    normalizeApplicationPackage(withTier(authored, 'progressive')),
+    normalizeApplicationPackage(
+      withTier(nonForcing(), 'progressive', SCAN_INPUT_SLOT),
+    ),
   );
-  assert.deepEqual(
-    codes,
-    ['CANON_SURFACE_DISCLOSURE_TIER_FORCED_ALWAYS'],
-    'the businessKey arm must force on its own, with no required field present',
+  assert.deepEqual(codes, ['CANON_SURFACE_DISCLOSURE_TIER_NOT_DEFERRABLE']);
+});
+
+test('RED: progressive on task primaryAction is refused', () => {
+  const codes = diagnosticCodes(() =>
+    normalizeApplicationPackage(
+      withTier(nonForcing(), 'progressive', PRIMARY_ACTION_SLOT),
+    ),
   );
+  assert.deepEqual(codes, ['CANON_SURFACE_DISCLOSURE_TIER_NOT_DEFERRABLE']);
 });
 
 test('RED: onDemand is refused even where nothing forces always', () => {

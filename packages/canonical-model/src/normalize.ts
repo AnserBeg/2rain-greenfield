@@ -9,7 +9,7 @@ import {
   LEGACY_LANGUAGE_VERSION,
   LANGUAGE_VERSION,
   STRUCTURAL_LIMITS_V0,
-  FIELD_BEARING_SURFACE_SLOTS,
+  PROVEN_DEFERRABLE_SURFACE_SLOTS,
   SURFACE_SLOTS,
   canonicalLanguageProfileFor,
   languageHasLegalEntityQueryScope,
@@ -1359,76 +1359,70 @@ function validateSurfaceVocabulary(
 }
 
 /**
- * The `ux-grammar` Disclosure tiers rule, enforced on the half that is
- * compile-time knowable.
+ * The `ux-grammar` Disclosure tiers rule, enforced as an ALLOW-list.
  *
- * The predicate is **required or identifying**, and it is named that way rather
- * than as "anything the user must act on". §3.2's action clause reaches only
- * `confirmation: 'humanRequired'`, which binds to `commandBar` -- a slot that
- * bears no field and therefore conceals none -- so that clause has no subject
- * here and is residue, not coverage. §3.2's `blocked`/`attention` clause is not
- * a missing field either: it asks which VALUE a field will take for a record
- * that does not exist yet, so no definition can carry it and the runtime owns
- * it.
+ * `progressive` is admissible only on a slot proven to render no surface field,
+ * no required input, and no action. Every other slot is forced to `always`,
+ * including every slot dispatched through `componentRegistry[contentReferenceId]`
+ * -- those can never be proven safe, so they force automatically rather than
+ * defaulting to deferrable.
  *
- * **Three declared limits of the slot-as-section carrier, ruled as shortfalls
- * rather than defects and recorded so the residue packet inherits them.**
+ * **This replaces a deny-list that was unsound in the concealing direction.**
+ * The deny-list asked "is this slot proven protected?" and let anything
+ * unprovable through; the allow-list asks "is this slot proven safe?" and forces
+ * anything unprovable. Same predicate, opposite default, and only one of the two
+ * fails toward over-disclosure.
  *
- * 1. Slot-as-section does not survive `surfaceRole === 'form'`, where `sections`
- *    renders a plain field collection rather than a section.
- * 2. It does not survive a two-group surface: a second `record:sections` is
- *    refused as a duplicate slot, so a surface cannot express two sections with
- *    different tiers.
- * 3. Forcing is per-SURFACE, because `surface.dataSource` names one query. On a
- *    mixed surface -- one reaching any required or identifying field --
- *    `progressive` is therefore unreachable on every field-bearing slot, not
- *    only on the slot that renders the forcing field.
+ * Two arms, because one half is static and one is not:
  *
- * The per-field half of §3.2 and the action predicate are the residue these
- * limits define. This rule is the required-or-identifying half and nothing more.
+ * - **Membership** in `PROVEN_DEFERRABLE_SURFACE_SLOTS` is a property of the
+ *   slot's renderer and is proven there.
+ * - **`rendersDeclaredActions`** members carry a second, per-surface condition:
+ *   the command bar renders the surface's declared operations, so it is
+ *   deferrable only while none of them demands confirmation. Operations bind to
+ *   a surface exactly as the runtime binds them -- effect entity equal to the
+ *   data-source query's source entity (`apps/web/src/surface-contract.ts:205`).
  *
- * The join is `surface.dataSource -> query.selections -> field`: that is the
- * only path from a surface to its fields, because a slot's `content` is an
- * opaque module reference carrying no field information.
+ * **What §3.2 asked for and this does not deliver.** §3.2 declares the tier per
+ * FIELD and per SECTION. The canonical model has neither: a slot's `content` is
+ * an opaque module reference, and `record:sections` is one slot rendering every
+ * field of the surface. At slot granularity the proven-deferrable set is two
+ * slots on one archetype, one of them conditional -- so `progressive` applies to
+ * almost nothing. That is the honest size of the claim. It is narrow and it
+ * holds; the per-field half is residue, and widening it is not this packet's
+ * work.
  *
- * Conservative by construction. A slot forced to `always` because ONE reachable
- * field demands it may reveal more than a per-field rule would -- the error
- * direction is over-disclosure, never concealment, which is the direction §3.2
- * exists to protect.
+ * Three further limits, ruled as shortfalls rather than defects:
+ * slot-as-section does not survive `surfaceRole === 'form'`, where `sections`
+ * renders a plain field collection; it does not survive a two-group surface,
+ * because a second `record:sections` is refused as a duplicate slot; and no slot
+ * outside `record` is deferrable at all today.
  */
 function validateDisclosureTiers(
   packageRevision: VersionedNormalizedApplicationPackage,
   diagnostics: CanonicalDiagnostic[],
 ): void {
-  const fieldById = new Map(
-    packageRevision.fields.map((field) => [field.fieldId, field] as const),
-  );
   const queryById = new Map(
     packageRevision.queries.map((query) => [query.queryId, query] as const),
   );
   for (const surface of packageRevision.surfaces) {
+    const deferrable: Readonly<Record<string, string>> =
+      PROVEN_DEFERRABLE_SURFACE_SLOTS[surface.archetype];
     const query = queryById.get(surface.dataSource.targetId);
-    // `queries` is a union: row queries carry `selections`, aggregate queries
-    // carry `aggregate` instead. An aggregate-backed surface reaches no field,
-    // so it forces nothing -- which is correct, not an oversight: there is no
-    // required field on it to conceal.
-    const selections =
-      query !== undefined && 'selections' in query ? query.selections : [];
-    const forcing = selections
-      .map((selection) => fieldById.get(selection.field.targetId))
-      .filter((field) => field !== undefined)
-      .filter(
-        (field) =>
-          field.presence === 'required' ||
-          field.businessKey === 'tenantEnvironmentCaseInsensitiveUnique',
-      );
-    const fieldBearing = new Set<string>(
-      FIELD_BEARING_SURFACE_SLOTS[surface.archetype],
+    const sourceEntityId = query?.sourceEntity.targetId;
+    // Mirrors the runtime's own binding rule; an aggregate-backed surface has no
+    // source entity and therefore binds no operation.
+    const confirming = packageRevision.operations.filter(
+      (operation) =>
+        operation.confirmation === 'humanRequired' &&
+        sourceEntityId !== undefined &&
+        'entity' in operation.effect &&
+        operation.effect.entity.targetId === sourceEntityId,
     );
     for (const slot of surface.slots) {
       if (slot.disclosureTier === undefined) continue;
-      // Refused before the forcing rule is consulted: an unhonourable value is
-      // wrong on every slot, so reporting it as a forcing-rule violation would
+      // Refused before deferrability is consulted: an unhonourable value is
+      // wrong on every slot, so reporting it as a deferrability violation would
       // send an author to change the wrong thing.
       if (slot.disclosureTier === 'onDemand') {
         diagnostics.push(
@@ -1442,26 +1436,31 @@ function validateDisclosureTiers(
         );
         continue;
       }
-      // Only a field-bearing slot can conceal a field. Deferring a breadcrumb
-      // or a command bar hides nothing the rule protects, and binding them
-      // would force `always` on every slot of any surface reaching one required
-      // field -- which is every record surface in the composed application.
-      if (
-        slot.disclosureTier === 'always' ||
-        forcing.length === 0 ||
-        !fieldBearing.has(slot.slot)
-      ) {
+      if (slot.disclosureTier === 'always') continue;
+      const proof = deferrable[slot.slot];
+      if (proof === undefined) {
+        diagnostics.push(
+          diagnostic(
+            'CANON_SURFACE_DISCLOSURE_TIER_NOT_DEFERRABLE',
+            '$.surfaces.slots.disclosureTier',
+            `slot ${slot.slot} is not proven to render no field, no required input and no action, so it is always`,
+            'declare always, or prove the slot deferrable and add it to PROVEN_DEFERRABLE_SURFACE_SLOTS',
+            slot.slotId,
+          ),
+        );
         continue;
       }
-      diagnostics.push(
-        diagnostic(
-          'CANON_SURFACE_DISCLOSURE_TIER_FORCED_ALWAYS',
-          '$.surfaces.slots.disclosureTier',
-          `slot ${slot.slot} reaches ${forcing[0]!.fieldId}, which is required or identifying, so it is always`,
-          'declare always, or move the deferred content to a slot that does not reach required or identifying fields',
-          slot.slotId,
-        ),
-      );
+      if (proof === 'rendersDeclaredActions' && confirming.length > 0) {
+        diagnostics.push(
+          diagnostic(
+            'CANON_SURFACE_DISCLOSURE_TIER_ACTION_FORCED',
+            '$.surfaces.slots.disclosureTier',
+            `slot ${slot.slot} renders ${confirming[0]!.operationId}, which the user must confirm, so it is always`,
+            'declare always, or move the confirmed operation off this surface',
+            slot.slotId,
+          ),
+        );
+      }
     }
   }
 }
@@ -2355,8 +2354,10 @@ function acceptedAlternativeFor(code: string): string {
       'use the exported authored schema and canonical example',
     CANON_SURFACE_ARCHETYPE_UNSUPPORTED:
       'use home, list, record, task, or builder',
-    CANON_SURFACE_DISCLOSURE_TIER_FORCED_ALWAYS:
-      'declare always on a slot that reaches a required or identifying field',
+    CANON_SURFACE_DISCLOSURE_TIER_NOT_DEFERRABLE:
+      'declare always, or prove the slot renders no field, no required input and no action',
+    CANON_SURFACE_DISCLOSURE_TIER_ACTION_FORCED:
+      'declare always on a slot rendering an operation the user must confirm',
     CANON_SURFACE_DISCLOSURE_TIER_UNHONOURED:
       'declare progressive or always; onDemand has no fetch-on-expand to honour it',
     CANON_SURFACE_SLOT_UNSUPPORTED:

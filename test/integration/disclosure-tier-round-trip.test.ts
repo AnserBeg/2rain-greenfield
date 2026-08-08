@@ -5,6 +5,7 @@ import test from 'node:test';
 import { readCompiledSurfaceManifest } from '../../apps/web/src/surface-contract.js';
 import {
   ADOPTED_LANGUAGE_VERSION,
+  CanonicalModelError,
   canonicalize,
   normalizeApplicationPackage,
 } from '../../packages/canonical-model/src/index.js';
@@ -34,21 +35,28 @@ const identity = {
 } as const;
 
 const COMMAND_BAR_SLOT = 'northstar.bootstrap:slot.item_detail_command_bar';
+const BREADCRUMB_SLOT = 'northstar.bootstrap:slot.item_detail_breadcrumb';
 
 /**
  * The authored package this gate compiles: `vertical-v1` upgraded to the ADOPTED
- * language version, with its `commandBar` slot declared `progressive`.
+ * language version, with a slot declared `progressive`.
  *
- * Three choices are load-bearing. The fixture is one that actually passes
- * compiler conformance -- the canonical-model fixture normalizes but does not
- * compile, so it cannot reach a projection at all. `commandBar` bears no field,
- * so `progressive` is admissible there; a forcing slot could not carry it.
- * And `progressive` rather than `always` is the only value whose survival proves
- * anything, because `always` is exactly what a reader invents when it drops an
- * unknown key.
+ * **The slot is `breadcrumb`, and the previous round had this wrong.** It used
+ * `commandBar` and justified it as "bears no field" -- but this fixture's
+ * `item_archive` declares `confirmation: 'humanRequired'` on an
+ * `archiveRecordEffect` over `entity.item`, which is `item_get`'s source entity,
+ * so that command bar renders an operation the user must confirm. Under the
+ * allow-list it is forced, and the old assertion required the opposite.
  *
- * The upgrade is applied to a CLONE. `vertical-v1.authored.json` is pinned at v3
- * by golden vectors and must not move.
+ * The round trip's subject is *does an authored tier survive compilation and the
+ * production reader*, and it does not need a forbidden slot to prove that.
+ * `breadcrumb` is unconditionally deferrable, so it isolates the round trip from
+ * the deferrability rule entirely.
+ *
+ * `progressive` rather than `always` is still the only value whose survival
+ * proves anything, because `always` is exactly what a reader invents when it
+ * drops an unknown key. The upgrade is applied to a CLONE;
+ * `vertical-v1.authored.json` is pinned at v3 by golden vectors.
  */
 function authoredWithProgressiveSlot(): Record<string, unknown> {
   const raw = readFileSync(
@@ -70,9 +78,37 @@ function authoredWithProgressiveSlot(): Record<string, unknown> {
     detail,
     'fixture must still declare the item_detail record surface',
   );
-  const commandBar = detail.slots.find((slot) => slot.slot === 'commandBar');
-  assert.ok(commandBar, 'fixture must still declare a commandBar slot');
-  commandBar.disclosureTier = 'progressive';
+  const breadcrumb = detail.slots.find((slot) => slot.slot === 'breadcrumb');
+  assert.ok(breadcrumb, 'fixture must still declare a breadcrumb slot');
+  breadcrumb.disclosureTier = 'progressive';
+  return authored as unknown as Record<string, unknown>;
+}
+
+/**
+ * The reviewer's paired control, isolating the ACTION arm from fields, business
+ * keys and any new fixture. Same package, same slot, one property changed.
+ */
+function authoredWithProgressiveCommandBar(
+  confirmation: 'humanRequired' | 'none',
+): Record<string, unknown> {
+  const authored = authoredWithProgressiveSlot() as unknown as {
+    operations: { operationId: string; confirmation?: string }[];
+    surfaces: {
+      surfaceId: string;
+      slots: { slot: string; disclosureTier?: string }[];
+    }[];
+  };
+  const detail = authored.surfaces.find((surface) =>
+    surface.surfaceId.endsWith('item_detail'),
+  )!;
+  for (const slot of detail.slots) delete slot.disclosureTier;
+  detail.slots.find((slot) => slot.slot === 'commandBar')!.disclosureTier =
+    'progressive';
+  const archive = authored.operations.find((operation) =>
+    operation.operationId.endsWith('item_archive'),
+  );
+  assert.ok(archive, 'fixture must still declare item_archive');
+  archive.confirmation = confirmation;
   return authored as unknown as Record<string, unknown>;
 }
 
@@ -171,9 +207,9 @@ test('an authored progressive survives compile-at-v2 through the production read
   const manifest = readCompiledSurfaceManifest(await viewOf(compiled));
   const slots = manifest.surfaces.flatMap((surface) => surface.slots);
   assert.ok(slots.length > 0, 'the reader must return slots to inspect');
-  const commandBar = slots.find((slot) => slot.slotId === COMMAND_BAR_SLOT);
+  const breadcrumb = slots.find((slot) => slot.slotId === BREADCRUMB_SLOT);
   assert.equal(
-    commandBar?.disclosureTier,
+    breadcrumb?.disclosureTier,
     'progressive',
     'the reader dropped the declared tier, which is the adoption trap this gate exists to close',
   );
@@ -201,7 +237,7 @@ test('RED: the same authored package is refused under the adopted v1 profile', (
     compiled.diagnostics.map((entry) => entry.code),
     ['COMPILER_DISCLOSURE_TIER_NOT_EMITTED'],
   );
-  assert.equal(compiled.diagnostics[0]?.subjectId, COMMAND_BAR_SLOT);
+  assert.equal(compiled.diagnostics[0]?.subjectId, BREADCRUMB_SLOT);
 });
 
 /**
@@ -221,4 +257,51 @@ test('CONTROL: a package declaring no tier still compiles under v1', () => {
     COMPILER_SEMANTIC_PROFILE_V1_VERSION,
   );
   assert.equal(compiled.status, 'compiled');
+});
+
+/**
+ * The action arm, refusing. `item_archive` demands confirmation and binds to
+ * `item_detail` through `entity.item`, so the command bar renders an operation
+ * the user must confirm and cannot be deferred.
+ */
+test('RED: progressive on commandBar is refused when a bound operation confirms', () => {
+  // The refusal is raised by normalization, which THROWS rather than returning a
+  // failed compile, so the code is asserted off the diagnostic set.
+  // `CanonicalModelError` covers every canonical rule; the class alone would not
+  // distinguish this from a neighbouring refusal.
+  try {
+    compileAt(
+      authoredWithProgressiveCommandBar('humanRequired'),
+      COMPILER_SEMANTIC_PROFILE_V2_VERSION,
+    );
+    throw new Error('expected normalization to refuse, and it accepted');
+  } catch (error) {
+    assert.ok(
+      error instanceof CanonicalModelError,
+      `expected a canonical refusal, got ${String(error)}`,
+    );
+    assert.deepEqual(
+      error.diagnostics.map((entry) => entry.code),
+      ['CANON_SURFACE_DISCLOSURE_TIER_ACTION_FORCED'],
+    );
+    assert.equal(error.diagnostics[0]?.objectId, COMMAND_BAR_SLOT);
+    assert.match(error.diagnostics[0]?.rule ?? '', /item_archive/u);
+  }
+});
+
+/**
+ * The same slot, the same package, one property changed: with no confirmed
+ * operation bound, the command bar is deferrable. Without this the refusal above
+ * is indistinguishable from "commandBar is never deferrable".
+ */
+test('CONTROL: the same commandBar compiles when no bound operation confirms', () => {
+  const compiled = compileAt(
+    authoredWithProgressiveCommandBar('none'),
+    COMPILER_SEMANTIC_PROFILE_V2_VERSION,
+  );
+  assert.equal(
+    compiled.status,
+    'compiled',
+    'the action arm must read the confirmation, not the slot name',
+  );
 });

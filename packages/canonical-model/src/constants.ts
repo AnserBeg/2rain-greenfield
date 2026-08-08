@@ -269,47 +269,55 @@ export const DISCLOSURE_TIERS = ['always', 'progressive', 'onDemand'] as const;
 export const DEFAULT_DISCLOSURE_TIER = 'always' as const;
 
 /**
- * The subset of `SURFACE_SLOTS` whose registered renderer consumes the surface's
- * own fields, and therefore the only slots the forcing rule can bind: deferring
- * a slot that renders no field conceals no field.
+ * The slots on which `progressive` is admissible: an ALLOW-list of slots proven
+ * to render no surface field, no required input, and no action. Every slot not
+ * named here is forced to `always`.
  *
- * **Derived from renderer field consumption, and bound by a gate.**
- * `test/architecture/field-bearing-slots.test.ts` walks `component-registry.ts`'s
- * slot registry, follows each renderer's statically-resolvable callees, and
- * deep-equals the result against this constant. That gate is the authority; this
- * constant is its recorded value.
+ * **This is an allow-list because the deny-list could not be made sound.** A
+ * deny-list has to prove a slot IS protected, and a slot dispatched through
+ * `componentRegistry[contentReferenceId]` can never be proven either way -- so
+ * under a deny-list every dynamically dispatched slot silently defaulted to
+ * deferrable, which is concealment. Inverted, the unprovable case forces
+ * automatically: `task:decision`, `task:scanInput` and `task:primaryAction` all
+ * fall through to `renderReferencedComponent`, all fail to be provable, and all
+ * force. The failure direction is over-disclosure, never concealment.
  *
- * **It is a PROXY, not an observation (AGENTS.md §6), and here is what it cannot
- * prove.** It reads source text rather than rendered output, so it cannot follow
- * `renderReferencedComponent`, which dispatches through
- * `componentRegistry[contentReferenceId]`. Exactly one entry rests on that edge:
- * `task:decision` is absent here because `renderTaskDecision` falls through to
- * that dispatch when the task is not aggregate-backed, and its absence is sound
- * only while no registered component consumes a field. Registering one makes
- * this entry wrong WITHOUT making the gate red, so that packet must re-derive
- * this entry by hand. The
- * observing gate would have to render each `(archetype, slot)` and check whether
- * a sentinel field value reaches the HTML, which needs a `RequestRuntimeView`
- * for a record surface; only the provider builds one, so that gate belongs in
- * `test/postgres` or a browser journey, not here.
+ * **Each member carries its proof, and the value says what still has to be
+ * checked at rule time.**
  *
- * **`ownsDataResolution` is NOT the authority and the two disagree.** That flag
- * marks `task:decision`, whose renderer emits an aggregate result and no surface
- * field, and omits `record:titleStatus`, whose renderer reaches
- * `displayFieldId` -- routinely the business key, the exact predicate the
- * forcing rule protects. An earlier revision of this constant restated the flag
- * and was wrong in both directions.
+ * - `record:breadcrumb` -- `rendersNothingProtected`. `renderBreadcrumb` emits a
+ *   `<nav>` holding a link to the related list surface and the entity label.
+ *   No field token, no input, no operation.
+ * - `record:commandBar` -- `rendersDeclaredActions`. `renderCommandBar` emits no
+ *   field and no input, but it does render the surface's declared operations, so
+ *   it is deferrable ONLY while none of them demands confirmation. That second
+ *   half is per-surface and cannot be decided here.
  *
- * Without this restriction the rule is per-SURFACE and unusable: every slot of
- * any surface reaching one required field would be forced to `always`, which in
- * the composed application is 50 required fields against every record surface.
+ * **Everything else is excluded, and here is why.** `list:dataGrid`,
+ * `record:keyFacts`, `record:sections` and `record:titleStatus` render surface
+ * fields. `task:scanInput` renders the aggregate query's parameters as required
+ * inputs. `task:primaryAction` renders the submit control, and `list:title`
+ * renders the `New` primary action alongside the archive toggle. `task:decision`
+ * is unprovable by dispatch. Nothing in `home` or `builder` is registered at all,
+ * so nothing there can be proven.
+ *
+ * **The shortfall, stated rather than hidden: this set is very small and it will
+ * stay small.** Two slots on one archetype, one of them conditional. That is the
+ * true cost of expressing a per-field, per-section rule at SLOT granularity --
+ * §3.2 wants the tier on fields and sections, the model has neither, and at this
+ * granularity `progressive` applies to almost nothing. A narrow claim that holds
+ * is worth more than a broad one that conceals, and widening it is the residue
+ * packet's work, not this one's.
  */
-export const FIELD_BEARING_SURFACE_SLOTS = Object.freeze({
-  home: [],
-  list: ['dataGrid'],
-  record: ['keyFacts', 'sections', 'titleStatus'],
-  task: [],
-  builder: [],
+export const PROVEN_DEFERRABLE_SURFACE_SLOTS = Object.freeze({
+  home: Object.freeze({}),
+  list: Object.freeze({}),
+  record: Object.freeze({
+    breadcrumb: 'rendersNothingProtected',
+    commandBar: 'rendersDeclaredActions',
+  }),
+  task: Object.freeze({}),
+  builder: Object.freeze({}),
 } as const);
 
 export type SurfaceArchetype = (typeof SURFACE_ARCHETYPES)[number];
