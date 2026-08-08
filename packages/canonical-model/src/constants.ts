@@ -267,50 +267,6 @@ export const DISCLOSURE_TIERS = ['always', 'progressive', 'onDemand'] as const;
  * which materializes and is only safe because it predates the recorded lineage.
  */
 export const DEFAULT_DISCLOSURE_TIER = 'always' as const;
-
-/**
- * The slots on which `progressive` is admissible: an ALLOW-list of slots PROVEN
- * to render no surface field, no required input, and no action. Every slot not
- * named here is forced to `always`.
- *
- * **It is an allow-list because the deny-list could not be made sound.** A
- * deny-list must prove a slot IS protected, so anything unprovable defaults to
- * deferrable -- concealment. Inverted, the unprovable case forces automatically:
- * every slot reachable through `componentRegistry[contentReferenceId]` fails to
- * be provable and forces. The failure direction is over-disclosure, never
- * concealment.
- *
- * **`record:breadcrumb` is the only member.** `renderBreadcrumb`
- * (`apps/web/src/component-registry.ts`) emits a `<nav>` holding a link to the
- * related list surface and the entity label -- no field read, no input, no
- * button, no form, no submit control. `test/architecture/proven-deferrable-slots.test.ts`
- * proves exactly those properties against the renderer and its transitive
- * helpers, and its mutation harness proves those predicates can fire.
- *
- * **`record:commandBar` was a member and is deleted.** Two independent facts
- * killed it: `renderCommandBar` emits `<button type="submit">Save</button>`
- * whenever `surfaceRole === 'form'`, so deferring it defers the primary action
- * with no confirmed operation anywhere; and the conditional predicate that was
- * meant to guard it read `'entity' in operation.effect` while the runtime binds
- * through `operation.entityId ?? readBackQueryId...sourceEntityId`
- * (`apps/web/src/surface-contract.ts:201-209`), so a confirmed
- * `registeredCapabilityEffect` binds in production and was invisible to the
- * rule. A predicate that cannot see what it guards is not a narrower rule; it is
- * a proxy, and it is gone rather than repaired.
- *
- * **The shortfall, in one line: one slot, one archetype, unconditional --
- * `progressive` at slot granularity applies to `record:breadcrumb` and nothing
- * else.** §3.2 declares the tier per field and per section; the model has
- * neither. Widening it is the residue packet's work.
- */
-export const PROVEN_DEFERRABLE_SURFACE_SLOTS = Object.freeze({
-  home: Object.freeze([]),
-  list: Object.freeze([]),
-  record: Object.freeze(['breadcrumb']),
-  task: Object.freeze([]),
-  builder: Object.freeze([]),
-} as const);
-
 export type SurfaceArchetype = (typeof SURFACE_ARCHETYPES)[number];
 export type SurfaceSlot = (typeof SURFACE_SLOTS)[SurfaceArchetype][number];
 export type DisclosureTier = (typeof DISCLOSURE_TIERS)[number];

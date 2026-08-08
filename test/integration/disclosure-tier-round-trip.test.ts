@@ -37,19 +37,18 @@ const BREADCRUMB_SLOT = 'northstar.bootstrap:slot.item_detail_breadcrumb';
 
 /**
  * The authored package this gate compiles: `vertical-v1` upgraded to the ADOPTED
- * language version, with `breadcrumb` declared `progressive`.
+ * language version, with `breadcrumb` declared `always`.
  *
- * `breadcrumb` is the only proven-deferrable slot in the grammar, so it isolates
- * the round trip from the deferrability rule entirely -- this gate's subject is
- * whether an authored tier survives compilation and the production reader, and
- * it must not depend on a slot whose admissibility is itself under test.
+ * **`always` is the subject because it is now the only honourable tier** --
+ * `progressive` and `onDemand` are refused by name. It still proves what this
+ * gate exists to prove: `parseSlot` OMITS a key it does not carry, so a dropped
+ * tier reads back as `undefined`, not as `always`. Asserting `=== 'always'`
+ * therefore distinguishes carried from dropped exactly as `progressive` did.
  *
- * `progressive` rather than `always` is the only value whose survival proves
- * anything, because `always` is exactly what a reader invents when it drops an
- * unknown key. The upgrade is applied to a CLONE;
- * `vertical-v1.authored.json` is pinned at v3 by golden vectors.
+ * The upgrade is applied to a CLONE; `vertical-v1.authored.json` is pinned at v3
+ * by golden vectors.
  */
-function authoredWithProgressiveSlot(): Record<string, unknown> {
+function authoredWithDeclaredTier(): Record<string, unknown> {
   const raw = readFileSync(
     'test/fixtures/g1/compiler/vertical-v1.authored.json',
     'utf8',
@@ -71,7 +70,7 @@ function authoredWithProgressiveSlot(): Record<string, unknown> {
   );
   const breadcrumb = detail.slots.find((slot) => slot.slot === 'breadcrumb');
   assert.ok(breadcrumb, 'fixture must still declare a breadcrumb slot');
-  breadcrumb.disclosureTier = 'progressive';
+  breadcrumb.disclosureTier = 'always';
   return authored as unknown as Record<string, unknown>;
 }
 
@@ -155,9 +154,9 @@ async function viewOf(compiled: CompileSuccess): Promise<RequestRuntimeView> {
  * It needs no adoption: the profile version is passed explicitly, so nothing is
  * recorded and no lineage entry is minted (ADR-0047 §4a).
  */
-test('an authored progressive survives compile-at-v2 through the production reader', async () => {
+test('an authored tier survives compile-at-v2 through the production reader', async () => {
   const compiled = compileAt(
-    authoredWithProgressiveSlot(),
+    authoredWithDeclaredTier(),
     COMPILER_SEMANTIC_PROFILE_V2_VERSION,
   );
   assert.equal(
@@ -173,7 +172,7 @@ test('an authored progressive survives compile-at-v2 through the production read
   const breadcrumb = slots.find((slot) => slot.slotId === BREADCRUMB_SLOT);
   assert.equal(
     breadcrumb?.disclosureTier,
-    'progressive',
+    'always',
     'the reader dropped the declared tier, which is the adoption trap this gate exists to close',
   );
   const keyFacts = slots.find((slot) => slot.slot === 'keyFacts');
@@ -191,7 +190,7 @@ test('an authored progressive survives compile-at-v2 through the production read
  */
 test('RED: the same authored package is refused under the adopted v1 profile', () => {
   const compiled = compileAt(
-    authoredWithProgressiveSlot(),
+    authoredWithDeclaredTier(),
     COMPILER_SEMANTIC_PROFILE_V1_VERSION,
   );
   assert.equal(compiled.status, 'failed');
@@ -209,7 +208,7 @@ test('RED: the same authored package is refused under the adopted v1 profile', (
  * profile alone.
  */
 test('CONTROL: a package declaring no tier still compiles under v1', () => {
-  const authored = authoredWithProgressiveSlot() as unknown as {
+  const authored = authoredWithDeclaredTier() as unknown as {
     surfaces: { slots: Record<string, unknown>[] }[];
   };
   for (const surface of authored.surfaces) {

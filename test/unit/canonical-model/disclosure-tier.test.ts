@@ -29,16 +29,16 @@ function diagnosticCodes(run: () => unknown): readonly string[] {
 
 /**
  * Authored at the ADOPTED language version, not at the version the shared
- * fixture happens to carry. ADR-0047 §7: a v3 fixture proves the language
- * widened, not that the rule works, and it was the one thing in this packet that
- * was evidence of accidental widening. The upgrade is a whole-package version
- * substitution because node-version purity is uniform within a revision.
+ * fixture happens to carry. ADR-0047 §7: a rule proven at a superseded version
+ * proves the widening, not the rule.
  *
- * It also gains a `commandBar` slot, which the derivation in
- * `test/architecture/field-bearing-slots.test.ts` classifies as bearing no
- * field. The shared fixture declares only `titleStatus` and `sections`, and both
- * of those bear fields, so without this the field-bearing narrowing has no
- * negative subject at all.
+ * The extra slots exist so the unconditional refusal has subjects across the
+ * range it now covers -- a slot that renders shell furniture (`commandBar`), one
+ * that renders only navigation (`breadcrumb`), and a task surface whose
+ * `scanInput` and `primaryAction` an aggregate query would leave un-forced under
+ * any field-based rule. None of them is deferrable: `progressive` is refused
+ * everywhere, so what these subjects prove is that the refusal does not depend
+ * on what a slot renders.
  */
 function fixture(): VersionedAuthoredApplicationPackage {
   const shared = readFileSync(
@@ -213,20 +213,19 @@ test('always is accepted on any slot', () => {
 });
 
 /**
- * The positive direction of the allow-list. `record:breadcrumb` is the only
- * unconditionally deferrable slot in the grammar: `renderBreadcrumb` emits a
- * navigation link and the entity label, and nothing else.
+ * A DELIBERATE REVERSAL. `record:breadcrumb` was the last admitted member and is
+ * now refused like every other slot. It was admitted by ruling rather than
+ * proof: the source-text gate could not distinguish its `<a href>` from
+ * `list:title`'s `<a class="primary-action">New</a>`. Rather than buy a fifth
+ * predicate, the tier is refused outright.
  */
-test('progressive is accepted on a proven-deferrable slot', () => {
-  const slots = normalizedSlots(
-    withTier(forcing(), 'progressive', BREADCRUMB_SLOT),
+test('RED: progressive on breadcrumb is refused, reversing its former admission', () => {
+  const codes = diagnosticCodes(() =>
+    normalizeApplicationPackage(
+      withTier(nonForcing(), 'progressive', BREADCRUMB_SLOT),
+    ),
   );
-  const slot = slots.find((entry) => entry.slotId === BREADCRUMB_SLOT);
-  assert.equal(
-    slot?.disclosureTier,
-    'progressive',
-    'breadcrumb renders nothing protected, so the allow-list must admit it',
-  );
+  assert.deepEqual(codes, ['CANON_SURFACE_DISCLOSURE_TIER_NOT_DEFERRABLE']);
 });
 
 /**

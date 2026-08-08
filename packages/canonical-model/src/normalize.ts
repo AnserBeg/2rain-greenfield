@@ -9,7 +9,6 @@ import {
   LEGACY_LANGUAGE_VERSION,
   LANGUAGE_VERSION,
   STRUCTURAL_LIMITS_V0,
-  PROVEN_DEFERRABLE_SURFACE_SLOTS,
   SURFACE_SLOTS,
   canonicalLanguageProfileFor,
   languageHasLegalEntityQueryScope,
@@ -1359,62 +1358,64 @@ function validateSurfaceVocabulary(
 }
 
 /**
- * The `ux-grammar` Disclosure tiers rule, enforced as an ALLOW-list.
+ * The `ux-grammar` Disclosure tiers rule. **`always` is the only honourable
+ * tier; `progressive` and `onDemand` are each refused by name.**
  *
- * `progressive` is admissible only on a slot proven to render no surface field,
- * no required input, and no action. Every other slot is forced to `always`,
- * including every slot dispatched through `componentRegistry[contentReferenceId]`
- * -- those can never be proven safe, so they force rather than defaulting to
- * deferrable.
+ * ADR-0041's honour-or-refuse rule: a spelling that cannot be honoured is
+ * refused by name rather than shipped as a silent alias. `onDemand` has been
+ * refused here since the first round -- it means "fetched on expand" and this
+ * application is server-rendered. `progressive` joins it, and the reason is the
+ * same shape one level up.
  *
- * **One slot, one archetype, unconditional.** `progressive` at slot granularity
- * applies to `record:breadcrumb` and nothing else. §3.2 declares the tier per
- * FIELD and per SECTION; the canonical model has neither -- a slot's `content` is
- * an opaque module reference, and `record:sections` is one slot rendering every
- * field of the surface. That is the honest size of this rule. It is narrow, it
- * holds, and the per-field half is residue.
+ * **Why `progressive` cannot be honoured at this granularity.** §3.2 declares
+ * the tier per FIELD and per SECTION. The canonical model has neither: a slot's
+ * `content` is an opaque module reference, and `record:sections` is one slot
+ * rendering every field of its surface. So admitting `progressive` requires
+ * proving that some SLOT renders nothing protected -- and that is a rendering
+ * fact about `apps/web`, which a canonical rule cannot observe and a source-text
+ * scanner cannot prove. Three rounds of predicates each bought one more spelling:
+ * a field aliased before its bracket access, a helper imported from another
+ * module, a helper moved into an arrow function. Each fix was a proxy standing in
+ * for the fact. The authority question -- what may observe a rendering fact --
+ * is `U5c`'s, and until it is answered nothing is admitted.
  *
- * **No conditional arm.** An earlier revision admitted `record:commandBar` when
- * no bound operation demanded confirmation. That predicate could not see what it
- * guarded -- it bound operations by `'entity' in operation.effect` while the
- * runtime binds through `operation.entityId ?? readBackQueryId...sourceEntityId`
- * -- and the slot renders a submit control on form surfaces regardless. It is
- * deleted rather than repaired, and with it the packet's third proxy.
+ * **No behavioural loss.** No authored definition in this repository declares a
+ * tier, so refusing `progressive` removes nothing that ships. What it removes is
+ * a claim that was never proven.
+ *
+ * The rule holds no membership set by design. An allow-list that can be emptied
+ * can be refilled without proof; a refusal cannot.
  */
 function validateDisclosureTiers(
   packageRevision: VersionedNormalizedApplicationPackage,
   diagnostics: CanonicalDiagnostic[],
 ): void {
   for (const surface of packageRevision.surfaces) {
-    const deferrable = new Set<string>(
-      PROVEN_DEFERRABLE_SURFACE_SLOTS[surface.archetype],
-    );
     for (const slot of surface.slots) {
-      if (slot.disclosureTier === undefined) continue;
-      // Refused before deferrability is consulted: an unhonourable value is
-      // wrong on every slot, so reporting it as a deferrability violation would
-      // send an author to change the wrong thing.
+      if (
+        slot.disclosureTier === undefined ||
+        slot.disclosureTier === 'always'
+      ) {
+        continue;
+      }
       if (slot.disclosureTier === 'onDemand') {
         diagnostics.push(
           diagnostic(
             'CANON_SURFACE_DISCLOSURE_TIER_UNHONOURED',
             '$.surfaces.slots.disclosureTier',
             'onDemand means fetched on expand, and this application is server-rendered with no fetch-on-expand behaviour to honour it',
-            'declare progressive, which defers without concealing, or always',
+            'declare always, the only honourable tier at slot granularity',
             slot.slotId,
           ),
         );
-        continue;
-      }
-      if (slot.disclosureTier === 'always' || deferrable.has(slot.slot)) {
         continue;
       }
       diagnostics.push(
         diagnostic(
           'CANON_SURFACE_DISCLOSURE_TIER_NOT_DEFERRABLE',
           '$.surfaces.slots.disclosureTier',
-          `slot ${slot.slot} is not proven to render no field, no required input and no action, so it is always`,
-          'declare always, or prove the slot deferrable and add it to PROVEN_DEFERRABLE_SURFACE_SLOTS',
+          'progressive requires proving a slot renders nothing protected, which is a rendering fact no canonical rule can observe; §3.2 declares the tier per field and per section and the grammar has neither',
+          'declare always, the only honourable tier at slot granularity',
           slot.slotId,
         ),
       );
