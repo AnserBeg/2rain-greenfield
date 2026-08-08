@@ -167,19 +167,16 @@ test('the document carries its plan shape and nothing from receiving or valuatio
       PURCHASING_IDS.fieldIds.purchaseOrderLine.lineNumber,
       PURCHASING_IDS.fieldIds.purchaseOrderLine.itemId,
       PURCHASING_IDS.fieldIds.purchaseOrderLine.orderedQuantity,
-      PURCHASING_IDS.fieldIds.purchaseOrderLine.receivedQuantity,
       PURCHASING_IDS.fieldIds.purchaseOrderLine.unitPrice,
     ],
   );
 
-  // Received quantity is a read model fed by posted receipts. PUR-2 owns the
-  // writer, so until then its honest value is absent, never a manufactured 0.
-  const received = definition.fields.find(
-    (field) =>
-      field.fieldId ===
-      PURCHASING_IDS.fieldIds.purchaseOrderLine.receivedQuantity,
-  );
-  assert.equal(received?.presence, 'optional');
+  // No received quantity, anywhere. It is a derived read model (plan 6.2) and
+  // PUR-1 posts no receipts, so a stored column could only ever hold zero --
+  // and choosing to store it would pre-commit PS-0's over-receipt race to
+  // compare-and-swap when PUR-2 may need lock-and-sum on a derived value.
+  // The absence is the decision being left open, so it is asserted.
+  assert.doesNotMatch(JSON.stringify(definition), /received/iu);
 
   // PUR-1 is the document only: no receipt, no movement, no posting role, and
   // nothing on the sales side.

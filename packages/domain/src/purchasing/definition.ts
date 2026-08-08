@@ -49,7 +49,6 @@ function ids(namespace: string) {
         itemId: field('purchase_order_line', 'item_id'),
         lineNumber: field('purchase_order_line', 'line_number'),
         orderedQuantity: field('purchase_order_line', 'ordered_quantity'),
-        receivedQuantity: field('purchase_order_line', 'received_quantity'),
         unitPrice: field('purchase_order_line', 'unit_price'),
       },
     },
@@ -231,24 +230,21 @@ export function purchasingModuleDefinition(
         30,
         decimal(),
       ),
-      // Derived from posted receipts (plan section 6.2); PUR-2 owns the writer.
-      // Absent means no receipt has been posted against the line yet, which is
-      // ADR-0021 absence rather than a zero this packet would have to invent.
-      field(
-        definitionIds,
-        entityIds.purchaseOrderLine,
-        fieldIds.purchaseOrderLine.receivedQuantity,
-        'Received quantity',
-        40,
-        decimal(),
-        { optional: true },
-      ),
+      // NO received quantity. Plan section 6.2 calls it "received quantity read
+      // model", derived from posted receipts -- and PUR-1 ships no receipts, so
+      // a stored column here could only ever hold zero. PS-0's race table
+      // closes over-receipt two different ways: compare-and-swap on a STORED
+      // quantity, or lock-and-sum on a DERIVED one. Authoring the column now
+      // would pre-commit that choice on behalf of a packet that has no data to
+      // justify it. PUR-2 chooses, together with the posting protocol that
+      // makes the choice meaningful, and SAL-1 inherits the same rule for
+      // shipped quantity.
       field(
         definitionIds,
         entityIds.purchaseOrderLine,
         fieldIds.purchaseOrderLine.unitPrice,
         'Unit price',
-        50,
+        40,
         decimal(),
         { optional: true },
       ),

@@ -153,7 +153,6 @@ export const APPLICATION_IDS = Object.freeze({
       number: `${APPLICATION_NAMESPACE}:field.purchase_order_number`,
       orderDate: `${APPLICATION_NAMESPACE}:field.purchase_order_order_date`,
       orderedQuantity: `${APPLICATION_NAMESPACE}:field.purchase_order_line_ordered_quantity`,
-      receivedQuantity: `${APPLICATION_NAMESPACE}:field.purchase_order_line_received_quantity`,
       state: `${APPLICATION_NAMESPACE}:field.purchase_order_state`,
       supplierPartyId: `${APPLICATION_NAMESPACE}:field.purchase_order_supplier_party_id`,
       unitPrice: `${APPLICATION_NAMESPACE}:field.purchase_order_line_unit_price`,
