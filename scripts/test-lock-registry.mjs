@@ -3,8 +3,10 @@
 //
 // flock is a kernel file-descriptor lock and the kernel will not name the
 // holder. The only process that can record the holder's identity is the holder
-// itself, so every participant writes one record beside the lock file when it
-// acquires and removes it when it releases.
+// itself, so a participant that uses this registry writes one record beside the
+// lock file when it acquires and removes it when it releases. A process that
+// never calls in is invisible here — that is what the foreign-process check in
+// run-matrix.sh exists to notice, within its own stated limits.
 //
 // A record whose process is gone is reported STALE and never blamed. That case
 // is the interesting signal rather than the answer: the lock can only still be
@@ -315,8 +317,13 @@ export function validateLockClaim(claim, lockPath, requestedMode) {
     };
   }
   if (!lockModeCovers(holder.mode, requestedMode)) {
+    // Everything else validated, so this holder is authenticated and its record
+    // is conclusive: the request is a nested upgrade. Acquiring for real would
+    // self-block against the authenticated holder's own descriptor until the
+    // bound expires, so the caller refuses immediately instead.
     return {
       honoured: false,
+      insufficientMode: true,
       reason:
         `the claim asserts ${claimedMode} but pid=${claimedPid} now records` +
         ` ${holder.mode}, which does not cover ${requestedMode}`,

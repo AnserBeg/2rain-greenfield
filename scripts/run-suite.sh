@@ -8,6 +8,11 @@
 # refused the lock had already destroyed the evidence of the last run.
 set -uo pipefail
 
+# Resolved from this script's location, not the caller's cwd: workspace-local
+# entry points run from apps/web, and the helpers live at the repository root.
+SCRIPT_DIRECTORY="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+REPOSITORY_ROOT="$(dirname -- "$SCRIPT_DIRECTORY")"
+
 usage() {
   echo "usage: run-suite.sh <suite-id> [--normalize-playwright] -- <command> [args...]" >&2
   exit 2
@@ -27,7 +32,7 @@ fi
 shift
 [ "$#" -gt 0 ] || usage
 
-node --import tsx test/helpers/prepare-reachability-evidence.ts "$SUITE"
+node --import tsx "$REPOSITORY_ROOT/test/helpers/prepare-reachability-evidence.ts" "$SUITE"
 PREPARE_RC="$?"
 if [ "$PREPARE_RC" -ne 0 ]; then
   exit "$PREPARE_RC"
@@ -40,6 +45,6 @@ if [ "$SUITE_RC" -ne 0 ]; then
 fi
 
 if [ -n "$NORMALIZE_PLAYWRIGHT" ]; then
-  node --import tsx test/helpers/normalize-playwright-evidence.ts
+  node --import tsx "$REPOSITORY_ROOT/test/helpers/normalize-playwright-evidence.ts"
   exit "$?"
 fi

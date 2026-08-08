@@ -23,8 +23,10 @@ registry() {
 }
 
 # set -uo pipefail is not set -e, so an unchecked registry write fails silently
-# and leaves a recorded mode nobody can trust. Every write is checked, and the
-# matrix refuses to run rather than hold a lease it cannot account for.
+# and leaves a recorded mode nobody can trust. This script's three record writes
+# — waiting, holding, and the shared mode after the downgrade — go through this
+# helper, and the release in the EXIT trap reports its own failure. The wrapper
+# checks its own writes separately; nothing here speaks for it.
 require_registry_write() {
   if ! registry record "$@"; then
     echo "TEST_GATE_REGISTRY_WRITE_FAILED: the matrix could not record its lease for $LOCK; refusing to run." >&2

@@ -48,6 +48,15 @@ const bypass =
 
 if (bypass.honoured) {
   process.exitCode = await run(command, process.env);
+} else if (bypass.insufficientMode === true) {
+  // The holder is authenticated and its record says shared, so an exclusive
+  // request here is a nested upgrade that can never be satisfied while this
+  // holder lives. Refuse now rather than block against its own descriptor.
+  process.stderr.write(
+    'TEST_GATE_LOCK_UPGRADE_REFUSED: an exclusive gate cannot run inside a' +
+      ` shared gate: ${bypass.reason}\n`,
+  );
+  process.exitCode = 2;
 } else {
   if (inheritedClaim !== undefined) {
     process.stderr.write(

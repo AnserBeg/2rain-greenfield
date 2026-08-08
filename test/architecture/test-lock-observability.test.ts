@@ -406,21 +406,46 @@ test('an exclusive claim stops covering once its holder records shared', async (
       'a recorded shared mode still covers a shared request',
     );
 
+    // The refusal must be immediate. An authenticated holder recording shared
+    // is conclusive that an exclusive request is a nested upgrade, and real
+    // acquisition would self-block against that holder's own descriptor for the
+    // whole bound. A stub flock records any acquisition attempt, and the bound
+    // is deliberately non-zero so that a regression to "acquire normally" could
+    // not be mistaken for an immediate refusal.
+    const flockMarker = join(scratch, 'flock-invoked');
+    const stubBin = createFakeBin({
+      flock: `touch ${flockMarker}\nexit 0\n`,
+    });
     const nestedExclusive = spawnSync(
       process.execPath,
       [lockRunnerPath, 'exclusive', '--', 'touch', markerPath],
       {
         encoding: 'utf8',
         env: {
-          ...lockEnvironment(lockPath),
+          ...lockEnvironment(lockPath, {
+            NORTH_STAR_TEST_LOCK_TIMEOUT_SECONDS: '5',
+            PATH: `${stubBin}:${process.env.PATH ?? ''}`,
+          }),
           NORTH_STAR_TEST_LOCK_HELD: claim,
         },
       },
     );
+    rmSync(stubBin, { force: true, recursive: true });
+    assert.equal(
+      nestedExclusive.status,
+      2,
+      `a nested upgrade must be refused outright:\n${nestedExclusive.stderr}`,
+    );
     assert.match(
       nestedExclusive.stderr,
-      /inherited lease claim NOT honoured: the claim asserts exclusive but pid=\d+ now records shared, which does not cover exclusive/u,
+      /TEST_GATE_LOCK_UPGRADE_REFUSED: an exclusive gate cannot run inside a shared gate: the claim asserts exclusive but pid=\d+ now records shared, which does not cover exclusive/u,
       `a narrowed lease still authorized exclusive work:\n${nestedExclusive.stderr}`,
+    );
+    assert.equal(
+      existsSync(flockMarker),
+      false,
+      'the refusal must precede acquisition; flock was invoked, so this run' +
+        " would have blocked against the authenticated holder's own descriptor",
     );
     assert.equal(
       existsSync(markerPath),
@@ -815,7 +840,12 @@ test('the foreign-process wait blames only genuinely uncoordinated processes', a
   });
 });
 
-test('every container-bearing entry point takes the exclusive lease', () => {
+test('each derived container-bearing entry point takes the exclusive lease', () => {
+  // PROVEN: for the root package.json test:*/check:* scripts, the mode matches
+  // what the declared model above derives. NOT PROVEN: that the model finds
+  // every container-bearing suite — see its declared limits — and workspace
+  // manifests are not scanned here at all; apps/web's lease shape is asserted
+  // in repository-hygiene.test.ts instead.
   const scripts = governedScripts();
   const bearing: string[] = [];
   const notBearing: string[] = [];
@@ -845,7 +875,8 @@ test('every container-bearing entry point takes the exclusive lease', () => {
   assert.ok(bearing.length > 0, 'no container-bearing entry point was found');
   assert.ok(
     notBearing.length > 0,
-    'every entry point looked container-bearing',
+    'the derivation classified every scanned entry point as container-bearing,' +
+      ' so it is reading something other than call sites',
   );
   // The scanner reads code, never prose. This file's own comments name the
   // helper and test:architecture globs this file, so a scanner that matched raw
@@ -942,6 +973,98 @@ test('a refused entry point has not touched its evidence', async () => {
   }
 });
 
+test('the workspace-local contracts entry point locks before it prepares', async () => {
+  // apps/web ran its evidence preparation before the wrapper, so a contracts
+  // run that was refused the lock had already deleted the previous run's
+  // evidence. Only contracts.json is a declared evidence path for this
+  // producer; the other two are the preparation loop's remaining slots and are
+  // undefined here, so they are seeded to prove nothing writes them either.
+  const lockPath = uniqueLockPath('contracts-evidence');
+  const evidencePaths = [
+    'test-results/reachability/contracts.json',
+    'test-results/reachability/contracts.raw.json',
+    'test-results/reachability/contracts.argv.json',
+  ];
+  const holder = startHolder(lockPath, 'CONTRACTS-HOLDER', 'exclusive');
+  assert.ok(holder.pid !== undefined);
+  mkdirSync(dirname(evidencePaths[0] ?? ''), { recursive: true });
+  const original = evidencePaths.map((path) =>
+    existsSync(path) ? readFileSync(path, 'utf8') : undefined,
+  );
+  const sentinels = evidencePaths.map(
+    (path, index) => `SENTINEL ${index} ${path}\n`,
+  );
+  try {
+    for (const [index, path] of evidencePaths.entries()) {
+      writeFileSync(path, sentinels[index] ?? '');
+    }
+    await waitForOutput(holder.stdout, 'LOCK_READY');
+
+    const refused = spawnSync(
+      'corepack',
+      ['pnpm', '--filter', '@north-star/web', 'test:contracts'],
+      { encoding: 'utf8', env: lockEnvironment(lockPath) },
+    );
+    assert.equal(refused.status, 75, `${refused.stdout}${refused.stderr}`);
+    assert.match(refused.stderr, /TEST_GATE_LOCK_BUSY/u);
+    for (const [index, path] of evidencePaths.entries()) {
+      assert.ok(
+        existsSync(path),
+        `${path} was deleted before the lock was taken`,
+      );
+      assert.equal(
+        readFileSync(path, 'utf8'),
+        sentinels[index],
+        `${path} was rewritten before the lock was taken`,
+      );
+    }
+  } finally {
+    for (const [index, path] of evidencePaths.entries()) {
+      const previous = original[index];
+      if (previous === undefined) rmSync(path, { force: true });
+      else writeFileSync(path, previous);
+    }
+    await stopHolder(holder);
+    removeLock(lockPath);
+  }
+});
+
+test('the wrapper refuses when it cannot record its own lease', async () => {
+  // The matrix's checked writes are controlled through run-matrix.sh; this
+  // drives the wrapper's own record() catch, which nothing else observes.
+  const lockPath = uniqueLockPath('wrapper-unwritable');
+  const scratch = createScratch();
+  const markerPath = join(scratch, 'payload-ran');
+  mkdirSync(`${lockPath}.holders`, { recursive: true });
+  chmodSync(`${lockPath}.holders`, 0o500);
+  try {
+    const refused = spawnSync(
+      process.execPath,
+      [lockRunnerPath, 'exclusive', '--', 'touch', markerPath],
+      { encoding: 'utf8', env: lockEnvironment(lockPath) },
+    );
+    assert.equal(
+      refused.status,
+      77,
+      `the wrapper ran on with an unrecordable lease:\n${refused.stderr}`,
+    );
+    assert.match(
+      refused.stderr,
+      /TEST_GATE_REGISTRY_WRITE_FAILED: cannot record pid=\d+ as waiting for/u,
+      `the wrapper did not name the failed write:\n${refused.stderr}`,
+    );
+    assert.equal(
+      existsSync(markerPath),
+      false,
+      'the payload ran under a lease the wrapper could not record',
+    );
+  } finally {
+    chmodSync(`${lockPath}.holders`, 0o700);
+    rmSync(scratch, { force: true, recursive: true });
+    removeLock(lockPath);
+  }
+});
+
 function governedScripts(): readonly (readonly [string, string])[] {
   const manifest = JSON.parse(readFileSync('package.json', 'utf8')) as {
     scripts?: Record<string, string>;
@@ -967,9 +1090,17 @@ function executableCommandLines(source: string): string[] {
  * prose that names the helper is not a call, and the scanner's own explanation
  * of itself lives inside a suite it scans.
  *
- * It remains a proxy for "this command starts a container" — it observes a call
- * site rather than a running container, so a suite reaching the helper only
- * through a dynamic path would be missed.
+ * DECLARED MODEL, not a repository fact. What is followed is: relative import
+ * specifiers, and single-quoted `test/**\/fixtures/**` or `apps/**\/fixtures/**`
+ * paths appearing anywhere in a file that also contains a `spawn(`/`spawnSync(`
+ * token. It does NOT read process-call arguments, so co-location is the whole
+ * of the association; `execFile`, `fork` and shell-string invocations are
+ * outside it entirely; and a non-fixture repository path is never followed.
+ *
+ * So a shared suite that spawns a literal non-fixture repository file which
+ * calls withEphemeralPostgres is invisible to this gate and would keep its
+ * shared lease. Reading the actual call arguments is the fix, and it is out of
+ * this packet's scope.
  */
 function standsUpContainers(command: string): boolean {
   const pending = entryFiles(command);

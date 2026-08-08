@@ -312,9 +312,13 @@ test('test entry points participate in the shared/exclusive gate lock', () => {
       );
     }
   }
+  // Anchored for the same reason as the root scripts: an unanchored match
+  // accepted a wrapper anywhere in the string, and this entry point ran its
+  // evidence preparation — which deletes the files — before it.
   assert.match(
     webPackageJson.scripts?.['test:contracts'] ?? '',
-    /run-with-test-lock\.mjs shared --/u,
+    /^node \.\.\/\.\.\/scripts\/run-with-test-lock\.mjs shared -- /u,
+    'the workspace-local contracts entry point runs work before it locks',
   );
 
   const matrixRunner = readFileSync('scripts/run-matrix.sh', 'utf8');
