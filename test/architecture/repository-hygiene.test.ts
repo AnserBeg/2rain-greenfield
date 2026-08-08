@@ -32,6 +32,7 @@ const suiteDefinitions = [
       'test/unit/module-provider-error-mappings.test.ts',
       'test/unit/observability.test.ts',
       'test/unit/party-definition.test.ts',
+      'test/unit/posting-family-catalog-parity.test.ts',
       'test/unit/web-surface-hex-literal-ratchet.test.ts',
       'test/unit/workspace-contract.test.ts',
     ],
@@ -131,6 +132,11 @@ const suiteDefinitions = [
       'test/postgres/party-runtime.test.ts',
       'test/postgres/predicate-absent-semantics.test.ts',
       'test/postgres/predicate-parity-corpus.test.ts',
+      // PS-2 PROBE ONLY. Registered because repository-hygiene requires every
+      // discovered test file to appear here, which means a preserved probe
+      // branch cannot reach matrix-green without declaring its probe as a
+      // reviewed test. PS-0 and PS-1 both carried unregistered probes.
+      'test/postgres/ps0-inbound-seam.test.ts',
       'test/postgres/query-aggregate-semantics.test.ts',
       'test/postgres/query-filter-lowering.test.ts',
       'test/postgres/release-activation.test.ts',
