@@ -317,16 +317,26 @@ export function validateLockClaim(claim, lockPath, requestedMode) {
     };
   }
   if (!lockModeCovers(holder.mode, requestedMode)) {
-    // Everything else validated, so this holder is authenticated and its record
-    // is conclusive: the request is a nested upgrade. Acquiring for real would
-    // self-block against the authenticated holder's own descriptor until the
-    // bound expires, so the caller refuses immediately instead.
+    // The record is conclusive only when the mode it carries is one this
+    // registry recognizes. A recognized SHARED holder plus an EXCLUSIVE request
+    // is a nested upgrade that cannot be satisfied while that holder lives, so
+    // refusing outright beats self-blocking against its own descriptor.
+    //
+    // Any other non-covering value — including the `unknown` this module's own
+    // CLI writes when --mode is omitted — proves nothing about coverage. It
+    // falls through to real acquisition, exactly as stale, malformed and
+    // cross-lock claims do. Treating it as conclusive refused work that should
+    // have proceeded, under a diagnostic naming a condition that did not hold.
+    const nestedUpgrade =
+      holder.mode === 'shared' && requestedMode === 'exclusive';
     return {
       honoured: false,
-      insufficientMode: true,
-      reason:
-        `the claim asserts ${claimedMode} but pid=${claimedPid} now records` +
-        ` ${holder.mode}, which does not cover ${requestedMode}`,
+      insufficientMode: nestedUpgrade,
+      reason: nestedUpgrade
+        ? `the claim asserts ${claimedMode} but pid=${claimedPid} now records` +
+          ` ${holder.mode}, which does not cover ${requestedMode}`
+        : `pid=${claimedPid} records mode ${JSON.stringify(holder.mode)},` +
+          ' which is not a recognized lease mode',
     };
   }
   return { honoured: true, mode: holder.mode };

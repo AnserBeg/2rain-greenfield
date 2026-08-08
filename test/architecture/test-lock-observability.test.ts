@@ -463,6 +463,97 @@ test('an exclusive claim stops covering once its holder records shared', async (
   }
 });
 
+test('an unrecognized recorded mode is not conclusive', async () => {
+  // A live, identity-valid holding record whose mode this registry does not
+  // recognize — the value its own CLI writes when --mode is omitted — with a
+  // claim that names that PID, its start ticks and this lock. The record
+  // authenticates but says nothing about coverage, so the claim must fall
+  // through to real acquisition rather than being refused as a nested upgrade.
+  const lockPath = uniqueLockPath('unrecognized-mode');
+  const scratch = createScratch();
+  const flockMarker = join(scratch, 'flock-invoked');
+  const payloadMarker = join(scratch, 'payload-ran');
+  const sentinel = spawn(process.execPath, ['-e', 'process.stdin.resume()'], {
+    stdio: ['pipe', 'ignore', 'ignore'],
+  });
+  assert.ok(sentinel.pid !== undefined);
+  const stubBin = createFakeBin({
+    flock: `touch ${flockMarker}\nexit 0\n`,
+  });
+  try {
+    // --mode omitted on purpose: this is the production recorder's own default.
+    const recorded = runRegistry(lockPath, [
+      'record',
+      '--pid',
+      String(sentinel.pid),
+      '--state',
+      'holding',
+      '--label',
+      'UNRECOGNIZED-MODE',
+      '--command',
+      'a holder recorded without a mode',
+    ]);
+    assert.equal(recorded.status, 0, recorded.stderr);
+    assert.equal(
+      (
+        JSON.parse(
+          readFileSync(recordFile(lockPath, sentinel.pid), 'utf8'),
+        ) as {
+          mode: string;
+        }
+      ).mode,
+      'unknown',
+      'the recorder no longer writes an unrecognized mode; the control is moot',
+    );
+
+    const claim = runRegistry(lockPath, [
+      'claim',
+      '--mode',
+      'shared',
+      '--pid',
+      String(sentinel.pid),
+    ]);
+    assert.equal(claim.status, 0, claim.stderr);
+
+    const nested = spawnSync(
+      process.execPath,
+      [lockRunnerPath, 'shared', '--', 'touch', payloadMarker],
+      {
+        encoding: 'utf8',
+        env: {
+          ...lockEnvironment(lockPath, {
+            PATH: `${stubBin}:${process.env.PATH ?? ''}`,
+          }),
+          NORTH_STAR_TEST_LOCK_HELD: claim.stdout.trim(),
+        },
+      },
+    );
+
+    assert.doesNotMatch(
+      nested.stderr,
+      /TEST_GATE_LOCK_UPGRADE_REFUSED/u,
+      `an unrecognized mode was treated as a nested upgrade:\n${nested.stderr}`,
+    );
+    assert.equal(nested.status, 0, `${nested.stdout}${nested.stderr}`);
+    assert.match(
+      nested.stderr,
+      /inherited lease claim NOT honoured: pid=\d+ records mode "unknown", which is not a recognized lease mode/u,
+      `the claim was not reported unhonoured for the right reason:\n${nested.stderr}`,
+    );
+    assert.ok(
+      existsSync(flockMarker),
+      'the run never attempted real acquisition',
+    );
+    assert.ok(existsSync(payloadMarker), 'the payload never ran');
+  } finally {
+    rmSync(stubBin, { force: true, recursive: true });
+    sentinel.kill('SIGKILL');
+    await once(sentinel, 'exit');
+    rmSync(scratch, { force: true, recursive: true });
+    removeLock(lockPath);
+  }
+});
+
 test('the matrix refuses to run when it cannot record its lease', async () => {
   const lockPath = uniqueLockPath('unwritable-registry');
   const scratch = createScratch();
