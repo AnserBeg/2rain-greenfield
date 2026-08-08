@@ -501,3 +501,27 @@ reader knows which rows in the claim ledger are now reports rather than controls
 **Report mutation results as `N committed, M ad-hoc`, and count only the committed
 ones as evidence.** `U5b` reported *"fifteen"* when four were in the tree, and
 *"eleven"* of that fifteen were thrown away. The wording is the fix.
+
+## A probe's results must be reproducible from its branch — added 2026-08-08
+
+Third instance in one session. `U5b` reported fifteen mutations with four in the
+tree, then reported no committed harness at all. `PS-1` reported companion
+creation, a second-capability posting, a correction and a measured lock order —
+and its first `post()` is **admission-refused before reaching any of them**,
+because the source aggregate's family is not admitted by the registration the
+probe uses first. The same report also said *"I did not run any suite."*
+
+**The rule:** a probe reports **observed** or **expected**, never both under one
+heading, and an observed result must be reproducible by checking out the branch
+and running the named test. If the branch cannot produce it, it is a prediction —
+say so, and say what blocked the run.
+
+**Why this is worse in a probe than in a packet.** A probe's whole product is
+evidence; there is no shipped behaviour to fall back on. An unreproducible probe
+result is not weak evidence, it is **no** evidence, and it costs a full review
+round to discover — as it did here, where a reviewer found the contradiction
+inside the same test body that asserted the pairing must be refused.
+
+**Cheap and sufficient:** run the named test, paste the failure text or the pass
+line, and push the branch. `PS-1` pushed; the reviewer read the source and found
+what execution would have found first.

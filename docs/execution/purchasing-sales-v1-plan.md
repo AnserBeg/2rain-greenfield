@@ -511,3 +511,56 @@ made a single union root correct.
 
 **Ruled by `PS-1`, pending review** — ADR-0049 remains unratified and this
 amendment supersedes two of its rulings.
+
+### 7.14 `PS-1` returned BLOCK — the missing concept is a compiled posting family, 2026-08-08
+
+**Neither ADR-0049 nor its `PS-1` amendment is ratified. `PUR-2` remains blocked.**
+
+**The diagnosis is better than the charter that produced it.** §7.10 asked three
+questions — who creates the companion, how invocation identity separates from the
+kernel contract, what shape the dependency contract takes. **They are three views
+of one missing thing.** Verified at source: `inventory-posting-service.ts:609`
+declares `readonly familyId: string`, an **unrestricted string documented as a
+diagnostic name**, and `:2585` does `if (service.sourceAggregateFamilyId ===
+'goods_receipt') return 'goodsReceipt'`. **A magic string selects authorization**,
+and every ruling that wobbled traces to that.
+
+**Consequences the review established, each with a source citation and none needing
+execution:** the probe's first `post()` is admission-refused, so its reported
+companion, correction and reachability results describe runs that could not have
+happened — and the same test body later asserts that exact pairing must be refused;
+the executable command is still `InventoryAdjustmentPostingCommandV1` via
+`postAdjustment()`, so a receipt gets `postingRole: adjustment`, an adjustment
+companion type, adjustment reason/approval semantics, and a Purchasing event named
+`adjustment_posted` — **recreating the very `type=adjustment` /
+`source_type=goodsReceipt` pair A1 claims to structurally forbid**; the new writer
+runs only `if (this.sourceAggregate)`, so **stock count still has no kernel
+writer**, which makes A6 unsatisfiable while A3 leaves Inventory's extension empty;
+the lock edge was **reordered, not widened**; and A4's "lock-and-sum" arm reads and
+updates a **stored counter** — no arm sums movements.
+
+**Withdrawn:** the eight-entry Purchasing root, alongside the 41-entry union root.
+Its preimage contains the stored `received_quantity` transition A4 itself
+withdraws. **§7.12 must no longer say the lock-only arm supported derived
+lock-and-sum — it supported a lock around a stored counter.**
+
+**Upheld:** ruling 2's transaction ownership, narrowly; the discovery that no
+shipped companion mechanism exists; that generic `o0` authoring is the present
+writer; that a union root is the wrong shape; that capability authorization and
+`#post` implementation ownership are distinct; and A6's requirement that one gate
+close both companion classes.
+
+**The replacement, and `PS-2`'s charter: a closed, compiled posting-family profile
+consumed by `#post`.** One declaration per admitted family binding capability ID,
+command schema, posting role, companion transaction type, whether the kernel
+creates a companion, immutable companion provenance, **foreign-source expected
+revision separate from the companion revision**, deterministic source-line and
+companion-line identity, the source lock/transition implementation, exact
+dependency-extension entries and root, and generic reachability policy.
+**`stockCount` and `goodsReceipt` must both be profiles** — that is what makes A6
+satisfiable and A3's empty Inventory extension impossible.
+
+**ADR-0049 is to be rewritten as one authoritative ruling, not a refuted body with
+a superseding appendix.** Four implementation packets must not have to work out
+which sentence still governs; that is a second-authority shape, which this plan
+refuses everywhere else.
