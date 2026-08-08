@@ -230,3 +230,48 @@ role, no dependency-set change and no merge. ADR-0049's unresolved items —
 capability admission, the companion transaction, the posting kernel — are
 untouched. It does not cut the language version; it rules that one is owed and
 prices it.
+
+## 7. The transition's permission and the operation's must be equal — ruled 2026-08-08
+
+`5g3-sm-impl`'s review found that **the language declares two permissions for a
+transition and execution honours only one.**
+
+- `transitionDefinition.permission` (`schemas.ts:634`) — who may make this state change.
+- `operationDefinition.permission` — who may invoke this operation.
+
+Nothing requires them equal. Lowering builds `resolvedEffect` with `entity`,
+`fromStateId`, `toStateId`, `stateFieldId` and `transition` — **and no
+permission** — and the catalog emits only `permissionId: operation.permission.targetId`,
+which is the sole value the gateway authorizes. **`transition.permission` appears
+zero times in `projections.ts` and zero times in `semantic-operation-gateway.ts`.**
+
+**The reachable tree is ordinary, not adversarial:** `transition.permission →
+permission.release_restricted`, `operation.permission → permission.edit_basic`.
+Both resolve, the package compiles, and a principal holding only `edit_basic`
+executes a transition policy meant to restrict. **The vertical stays green because
+it deliberately reuses one permission id for both**, so its `AllowPolicy` cannot
+tell the two declarations apart.
+
+**This is the defect class §1 of this ADR exists to close, re-introduced by the
+packet that closed it.** A released, security-relevant spelling that nothing reads
+is `transitionStateEffect` again, one field down.
+
+### Ruled: one authority, enforced by equality
+
+**Require `operation.permission === transition.permission`, and refuse a mismatch
+by name at compile time.**
+
+**Why equality rather than carrying a second permission.** `transitionStateEffect`
+holds exactly **one** `transition` reference, so an operation maps to exactly one
+transition — the two declarations are 1:1 today, and a second runtime
+authorization decision would be mechanism bought for a case that does not exist.
+Equality honours the language's spelling, keeps one authority at the gateway, and
+**leaves the two-authority option reachable**: the day an operation must drive
+several transitions with distinct permissions, the equality rule refuses it
+*loudly* rather than admitting it silently. That refusal is the trigger for
+revisiting this section.
+
+**What is owed:** a compiler conformance rule with a named diagnostic, a control
+proving a mismatch is refused, and a control proving the **matched** case still
+compiles — the second is what keeps the first from being satisfiable by refusing
+everything.
