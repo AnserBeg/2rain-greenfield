@@ -457,3 +457,28 @@ write (`5g3-mount` class, `systemInput` is the precedent); the closed-argument
 fence sits at the interpreter rather than the gateway for O0; the per-entity field
 budget; `apps/web`'s `operationIntent` returns `null` for the effect kind; and the
 misnamed refusal above.
+
+### 7.12 `received_quantity` is `PUR-2`'s decision, not `PUR-1`'s — ruled 2026-08-08
+
+`PUR-1` authored `receivedQuantity: field('purchase_order_line', 'received_quantity')`
+(`packages/domain/src/purchasing/definition.ts:52`) — a **stored column**, and a
+surface row displaying it. Plan §1276 calls it a *read model* **derived from posted
+receipts**.
+
+**It is not a simple defect, and that is why it must be routed rather than
+corrected.** `PS-0`'s four-arm race closed over-receipt with **compare-and-swap on a
+stored received quantity**, and CAS requires a stored value to swap on. The
+lock-only arm closed the same race, and that one works against a derived sum under
+lock. **Both are supported by the measurement; neither has been chosen.**
+
+**Ruling: `PUR-1` drops the field.** It ships no receipts, so the value can only
+ever be zero — a permanently-zero column and a surface row buy nothing while
+pre-committing the open-quantity mechanism. **`PUR-2` adds it with the posting
+protocol that decides it:** a stored column if it takes the CAS route, a derived
+read model if it takes lock-and-sum. `SAL-1`/`SAL-2` inherit the same rule for
+shipped quantity and open-to-ship.
+
+**This is the `5g3-sm` shape a second time** — an inventory packet settling a
+platform decision as a side effect of shipping. The charter caused it: the `PUR-1`
+prompt listed *"line number, item, ordered quantity, received quantity, unit
+price"* without the plan's *derived* qualifier.
