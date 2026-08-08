@@ -1,6 +1,7 @@
 # Purchasing and sales — the v1 charter, and what it rests on
 
-**Status: proposed, unreviewed. Written 2026-08-08.**
+**Status: REVIEWED 2026-08-08 — verdict "build it, but revise the charter before `PUR-1`". §7 records the
+rulings and supersedes §2's packet table. Read §7 first.**
 
 The goal in the user's words: *an office worker can receive inventory and send it
 out.* This document charters that as four packets and records what each one rests
@@ -143,3 +144,112 @@ Supplier pricing and cost capture beyond what ADR-0017 already permits; any
 valuation; invoicing, tax or ledger postings; back-orders; drop-ship;
 multi-currency; approval workflows; and any agent journey beyond what the existing
 fixed-tool set already covers.
+
+---
+
+## 7. Review verdict and the revised plan — ruled 2026-08-08
+
+**Viability: confirmed.** The inventory ledger is a foundation, not a prototype.
+The append-only movement fact, quantity-only semantics, source/effect idempotency,
+the stock-identity serializer with deterministic lock order, serialized
+negative-stock evaluation, base-unit enforcement, period locking, and the atomic
+trust/event/outbox/receipt transaction are the correct substrate. **Do not
+redesign the ledger, the serializer, or the derived on-hand model.** ADR-0029 is
+the evidence: stock-count posting added a materially different source aggregate
+without replacing any of them.
+
+**The packet boundary was wrong.** §2 cut packets at entity mounts. The
+load-bearing boundary is (1) generic draft CRUD, (2) **named O1 document
+transitions**, (3) **cross-domain posting and correction**. `main` provides (1)
+and one inventory-specific instance of (3). It provides no generic (2).
+
+### 7.1 The three confirmed refutations
+
+- **"Add a posting role" is refuted.** The role vocabulary is duplicated in five
+  places, not two — `contracts.ts:11`, `conformance.ts:198`, the persisted
+  movement enum at `definition.ts:580`, the provider's command/result/binding
+  types, and `migrations.ts:44` with one physical configuration column per role.
+  `hasExactKeys` makes domain/compiler drift a conformance failure, but the
+  contract-to-provider gap is unguarded: `reBaseline` is in the contract and
+  **not** in the provider's implemented union. More decisively, the posting
+  **dependency authority union is `catalog | location | party | inventory |
+  trust`** (`contracts.ts:200-207`) — receiving cannot read or lock a purchase
+  order at all. `PUR-2`/`SAL-2` are governed command-family and
+  transaction-protocol extensions, on the ADR-0029 precedent.
+- **"Enum plus precondition is a lifecycle" is refuted.** ADR-0034 decides whether
+  a caller's mutation is *allowed*; it cannot decide what the next state *must be*.
+  The generic O0 contract makes every active field writable
+  (`projections.ts:899`, `:914`) and the interpreter applies the caller's patch.
+  **Every business transition — release, confirm, cancel, post, correct — needs a
+  named O1 handler**, exactly as plan §1418–1427 classifies them.
+- **"Lineage cost is flat" is refuted literally.** `composed-application-runtime.ts:225-286`
+  traverses every adjacent release pair and visits every application release, so
+  handling is at least linear. Eight entries to twelve is not a cliff, and the
+  serial-mount conclusion stands — but the premise was false.
+
+### 7.2 Confirmed, and not blocking
+
+`builder.ts`'s fixed tuple is a smell, not a defect: after it, composition is
+generic array merging. **Refactor it once to an ordered definition registry in the
+first packet that mounts anything.**
+
+### 7.3 The money boundary was drawn wrong, and this is a correction
+
+Excluding valuation, invoicing, tax, AR and ledger postings is sound. **Excluding
+monetary facts is not.** ADR-0017 line 103 is a *gate*: posting a goods receipt
+**records actual unit cost or an explicit absence**. Order lines carry currency
+and optional unit price by the plan's own catalog. Movements stay quantity-only.
+
+**The correct boundary: no accounting, invoicing, tax or AR; retain optional
+commercial order data and mandatory receipt cost-or-explicit-absence evidence.** A
+packing slip with no amounts is a presentation choice and does not license
+discarding the source facts. Discarding receipt cost creates precisely the
+spreadsheet shadow system ADR-0017 exists to prevent.
+
+### 7.4 Reservation — deferred, with conditions
+
+Ship directly from a confirmed order: lock stock identities, lock and validate the
+order and shipment lines, compute open-to-ship, evaluate on-hand under the
+serialized transaction, refuse if short, append negative movements atomically.
+
+**Permitted only if all four hold, and they must be recorded as product
+limitations before `SAL-1`:** `confirmed` means *accepted*, not *allocated*; no UI
+or report calls any quantity "reserved"; available-to-promise is unsupported; and
+shipment failure from changed availability is an expected business outcome.
+
+**Not a rework trap** provided shipment lines keep a stable sales-order-line
+reference, no mutable `reservedQuantity` field is introduced, and a future
+reservation fact can attach to the same line identity. **Reverse this ruling** if
+the first customer picks before posting, promises allocated stock, or leaves orders
+open for days.
+
+### 7.5 The revised packet plan
+
+| Packet | Deliverable |
+|---|---|
+| **`PS-0`** *(new, first)* | **Design pass with a thin executable contract.** Freezes: exact O1 transition semantics (server-selected target state, expected revision, no arbitrary companion patch); the source-document posting ownership model — one transaction locking and transitioning PO/receipt or SO/shipment aggregates while appending movements; the **movement-lineage decision** (companion `inventory_transaction` versus direct receipt/shipment lineage); the provider ownership shape (separate Purchasing/Sales capability IDs over one cross-domain kernel, versus command routes under the inventory posting capability); and the §7.3/§7.4 product rulings. **Proof: a thin inbound vertical** — one released-PO-shaped aggregate posts one receipt-shaped effect, appends one positive movement, updates open quantity atomically, and is corrected by a compensating effect. No finished UI. |
+| **`PUR-1`** | Purchase order + lines, generic draft CRUD, **plus the named O1 release/cancel handlers** against `PS-0`'s seam. Includes the `builder.ts` registry refactor. |
+| **`PUR-2`** | Goods receipt + lines, cross-domain posting, **and receipt correction** — the lifecycle is `draft → posted → corrected` and a v1 that can post but not correct is not operationally viable. **Plus the derived read models**: PO-line received quantity and open-to-receive, without which partial receiving is unusable. **This is the architectural gate.** |
+| **`SAL-1`** | Sales order + lines, O1 confirm/cancel, and the §7.4 limitations recorded. |
+| **`SAL-2`** | Shipment + lines, negative posting, **shipment correction**, shipped-quantity and open-to-ship read models, and the packing document. **Riskiest packet as charted** — first outbound aggregate, negative stock, partial fulfilment, correction and an external document at once. |
+
+### 7.6 Two decisions `PS-0` must not leave implicit
+
+**Movement lineage.** Every movement is structurally tied to an
+`inventory_transaction` and `inventory_transaction_line` — the service command
+requires `transactionId`, each line requires `transactionLineId`, and the canonical
+relations are required. But the plan's catalog describes `inventory_transaction` as
+the human-facing document for opening, adjustment, transfer and count correction —
+**not** receipt or shipment. Either posting a receipt creates a companion internal
+transaction (smaller, but hidden duplicate documents must never become competing
+user-facing truth), or movement lineage references receipt/shipment lines directly
+(redesigns the required relations and posting bindings).
+
+**Atomicity.** `inventory-posting-capability-executor.ts` hydrates an
+`inventory_transaction`, checks it is an adjustment, and calls `postAdjustment`. It
+is not a generic source-document adapter. Preflight-then-post-then-mark is
+**unsafe** — another receipt races between steps, or inventory commits while the
+document update fails — and ADR-0026 rules out a nested transaction. The adapter
+must enter the same top-level transaction that takes stock locks after `BEGIN`.
+**This is the central viability issue, and it is an extension of the transaction
+coordinator rather than a replacement of the ledger.**
