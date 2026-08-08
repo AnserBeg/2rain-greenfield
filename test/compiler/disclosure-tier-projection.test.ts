@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { DISCLOSURE_TIERS } from '../../packages/canonical-model/src/index.js';
 import {
   ADOPTED_COMPILER_SEMANTIC_PROFILE_VERSION,
   COMPILER_SEMANTIC_PROFILE_V1_VERSION,
@@ -122,5 +123,25 @@ test('an undeclared tier resolves in the projection while staying absent upstrea
     manifestSlotsAt(COMPILER_SEMANTIC_PROFILE_V2_VERSION).every(
       (slot) => slot.disclosureTier === 'always',
     ),
+  );
+});
+
+/**
+ * The `minimumVersion` reasoning recorded at `surfaceManifestPayload`'s emission
+ * site is conditional, and this makes the condition executable rather than a
+ * comment someone has to remember.
+ *
+ * That reasoning holds because every tier a reader might DROP resolves to more
+ * disclosure, never less: an absent tier reads as `always`, so a reader that
+ * ignores the field under-defers rather than conceals. A fourth spelling meaning
+ * "hide" would invert that and silently invalidate the emission site's argument
+ * without touching this projection at all. Pinning the exact set forces whoever
+ * adds one to come back here.
+ */
+test('the tier vocabulary is exactly the three granted values', () => {
+  assert.deepEqual(
+    [...DISCLOSURE_TIERS],
+    ['always', 'progressive', 'onDemand'],
+    'surfaceManifestPayload keeps surface-manifest minimumVersion at 1 because no tier value means "hide" -- a reader that drops the field under-defers rather than conceals. Adding a tier requires re-deriving that argument at the emission site before changing this list.',
   );
 });

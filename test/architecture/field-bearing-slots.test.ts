@@ -19,13 +19,22 @@ const REGISTRY_SOURCE = 'apps/web/src/component-registry.ts';
  * `canonical-model` and BOUND here, where a test may read both sides.
  *
  * **This is a proxy and not an observation (AGENTS.md §6).** It reads source
- * text, so it follows only statically-resolvable calls. Dynamic dispatch through
- * `componentRegistry[contentReferenceId]` is invisible to it: a shell component
- * reached that way could consume a field without this gate seeing it. What it
- * does prove is that no renderer named in the slot registry reaches a field
- * token by a path a reader could follow -- which is the failure that actually
- * occurred, since `record:titleStatus` reaches `displayFieldId` through exactly
- * such a path and was classified as bearing no field.
+ * text, so it follows only statically-resolvable calls. What it does prove is
+ * that no renderer named in the slot registry reaches a field token by a path a
+ * reader could follow -- which is the failure that actually occurred, since
+ * `record:titleStatus` reaches `displayFieldId` through exactly such a path and
+ * was classified as bearing no field.
+ *
+ * **The one unfollowable edge is `renderReferencedComponent`**, and exactly one
+ * conclusion rests on it: `renderTaskDecision` returns
+ * `renderReferencedComponent(context)` when the task is not aggregate-backed,
+ * which dispatches through `componentRegistry[contentReferenceId]` -- a runtime
+ * key this derivation cannot resolve. So `task:decision`'s absence from the set
+ * is sound only while no registered component consumes a field. That holds today
+ * because the three registered components are shell surfaces, but it is a fact
+ * about the CURRENT REGISTRY, not about the rule. **A packet that registers a
+ * field-rendering component must re-derive `task:decision` by hand; this gate
+ * will not see it.**
  *
  * The observing version would render each `(archetype, slot)` with a sentinel
  * field value and check whether it reaches the HTML. That needs a
