@@ -8,6 +8,7 @@ export const LANGUAGE_VERSIONS = Object.freeze({
   v2: 'v2',
   v3: 'v3',
   v4: 'v4',
+  v5: 'v5',
 } as const);
 
 export const LEGACY_LANGUAGE_VERSION = LANGUAGE_VERSIONS.experimentalV0;
@@ -16,7 +17,7 @@ export const PREVIOUS_LANGUAGE_VERSION = LANGUAGE_VERSIONS.v1;
 // this name is stable and does not mean "latest supported".
 export const LANGUAGE_VERSION = LANGUAGE_VERSIONS.v2;
 /** The newest readable version. Readable is not the same as adopted. */
-export const LATEST_LANGUAGE_VERSION = LANGUAGE_VERSIONS.v4;
+export const LATEST_LANGUAGE_VERSION = LANGUAGE_VERSIONS.v5;
 /**
  * The version the default compiler profile selects. Moved to v4 by the
  * LANG-ADOPT packet: adoption is an application-wide artifact event, absorbed
@@ -33,6 +34,7 @@ export const SUPPORTED_LANGUAGE_VERSIONS = Object.freeze([
   LANGUAGE_VERSION,
   LANGUAGE_VERSIONS.v3,
   LANGUAGE_VERSIONS.v4,
+  LANGUAGE_VERSIONS.v5,
 ] as const);
 export type CanonicalLanguageVersion =
   (typeof SUPPORTED_LANGUAGE_VERSIONS)[number];
@@ -44,6 +46,7 @@ export const NORMALIZATION_PROFILE_VERSIONS = Object.freeze({
   v2: 'northstar.normalization/v2',
   v3: 'northstar.normalization/v3',
   v4: 'northstar.normalization/v4',
+  v5: 'northstar.normalization/v5',
 } as const);
 
 export const LEGACY_NORMALIZATION_PROFILE_VERSION =
@@ -53,7 +56,7 @@ export const PREVIOUS_NORMALIZATION_PROFILE_VERSION =
 // Compatibility authority paired with LANGUAGE_VERSION; not the latest reader.
 export const NORMALIZATION_PROFILE_VERSION = NORMALIZATION_PROFILE_VERSIONS.v2;
 export const LATEST_NORMALIZATION_PROFILE_VERSION =
-  NORMALIZATION_PROFILE_VERSIONS.v4;
+  NORMALIZATION_PROFILE_VERSIONS.v5;
 /** Paired with ADOPTED_LANGUAGE_VERSION; see that constant. */
 export const ADOPTED_NORMALIZATION_PROFILE_VERSION =
   NORMALIZATION_PROFILE_VERSIONS.v4;
@@ -63,12 +66,13 @@ export const SUPPORTED_NORMALIZATION_PROFILE_VERSIONS = Object.freeze([
   NORMALIZATION_PROFILE_VERSION,
   NORMALIZATION_PROFILE_VERSIONS.v3,
   NORMALIZATION_PROFILE_VERSIONS.v4,
+  NORMALIZATION_PROFILE_VERSIONS.v5,
 ] as const);
 export type CanonicalNormalizationProfileVersion =
   (typeof SUPPORTED_NORMALIZATION_PROFILE_VERSIONS)[number];
 
 export interface CanonicalLanguageProfile {
-  readonly featureLevel: 'v0-experimental' | 'v1' | 'v2' | 'v3' | 'v4';
+  readonly featureLevel: 'v0-experimental' | 'v1' | 'v2' | 'v3' | 'v4' | 'v5';
   readonly normalizationProfileVersion: CanonicalNormalizationProfileVersion;
 }
 
@@ -100,6 +104,10 @@ export const CANONICAL_LANGUAGE_PROFILES: Readonly<
     featureLevel: 'v4',
     normalizationProfileVersion: NORMALIZATION_PROFILE_VERSIONS.v4,
   }),
+  [LANGUAGE_VERSIONS.v5]: Object.freeze({
+    featureLevel: 'v5',
+    normalizationProfileVersion: NORMALIZATION_PROFILE_VERSIONS.v5,
+  }),
 });
 
 /**
@@ -109,17 +117,39 @@ export const CANONICAL_LANGUAGE_PROFILES: Readonly<
  */
 export function languageHasV3Features(
   languageVersion: CanonicalLanguageVersion,
-): languageVersion is 'v3' | 'v4' {
+): languageVersion is 'v3' | 'v4' | 'v5' {
   const featureLevel =
     CANONICAL_LANGUAGE_PROFILES[languageVersion].featureLevel;
-  return featureLevel === 'v3' || featureLevel === 'v4';
+  return featureLevel === 'v3' || featureLevel === 'v4' || featureLevel === 'v5';
 }
 
 /** v4 admits the legal-entity query operand; no earlier version does. */
 export function languageHasLegalEntityQueryScope(
   languageVersion: CanonicalLanguageVersion,
-): languageVersion is 'v4' {
-  return CANONICAL_LANGUAGE_PROFILES[languageVersion].featureLevel === 'v4';
+): languageVersion is 'v4' | 'v5' {
+  const featureLevel =
+    CANONICAL_LANGUAGE_PROFILES[languageVersion].featureLevel;
+  return featureLevel === 'v4' || featureLevel === 'v5';
+}
+
+/**
+ * v5 materializes each state machine's state field as an ordinary enumeration
+ * field on its entity, and retires the parallel `derivedStateField` storage
+ * construct ([ADR-0050](../../../docs/decisions/ADR-0050-the-record-transition-carrier.md)).
+ *
+ * This is the only question any state-field behaviour asks. It is deliberately
+ * a feature-level test rather than a comparison against a single version, so
+ * cutting v6 does not silently drop the rule -- the same discipline
+ * `languageHasV3Features` already documents one function above.
+ *
+ * The gate is what keeps the cut free: a v4 package normalizes to byte-identical
+ * output before and after this change, which is why every recorded release root
+ * still reproduces.
+ */
+export function languageHasMaterializedStateFields(
+  languageVersion: CanonicalLanguageVersion,
+): languageVersion is 'v5' {
+  return CANONICAL_LANGUAGE_PROFILES[languageVersion].featureLevel === 'v5';
 }
 
 export function canonicalLanguageProfileFor(

@@ -12,6 +12,7 @@ import {
   SURFACE_SLOTS,
   canonicalLanguageProfileFor,
   languageHasLegalEntityQueryScope,
+  languageHasMaterializedStateFields,
   languageHasV3Features,
   type CanonicalLanguageVersion,
   type CanonicalNormalizationProfileVersion,
@@ -360,49 +361,36 @@ export function normalizeApplicationPackage(
     })),
   };
 
-  // 5g3-sm PROBE ONLY -- NOT FOR MERGE.
-  // The ruled normalization rule: a state machine MATERIALIZES its state field
-  // as an ordinary enum field on its entity, whose options are the machine's
-  // states. This is the placement the compiler forces -- doing it in a
-  // projection instead fails COMPILER_PROJECTION_INVARIANT_FAILED, because
-  // every projection must agree with the normalized semantic model.
-  const alreadyMaterialized = new Set(
-    normalizedCandidate.fields.map((field: any) => field.fieldId),
-  );
-  const materializedStateFields = normalizedCandidate.stateMachines
-    .filter((machine: any) => !alreadyMaterialized.has(machine.stateField.fieldId))
-    .map((machine: any) => ({
-      classification: 'internal',
-      collation: 'binary',
-      defaultSemantics: 'declaredDefault',
-      defaultValue: {
-        kind: 'textValue',
-        schemaVersion: machine.schemaVersion,
-        value: machine.initialState.targetId,
-      },
-      entity: machine.entity,
-      fieldId: machine.stateField.fieldId,
-      fieldType: {
-        kind: 'enumFieldType',
-        options: machine.states.map((state: any) => ({
-          kind: 'enumOption',
-          label: state.label,
-          optionId: state.stateId,
-          orderKey: state.orderKey,
-          schemaVersion: machine.schemaVersion,
-        })),
-        schemaVersion: machine.schemaVersion,
-      },
-      kind: 'fieldDefinition',
-      label: 'State',
-      lifecycle: machine.lifecycle,
-      orderKey: 0,
-      presence: 'required',
-      reportable: true,
-      schemaVersion: machine.schemaVersion,
-      searchable: false,
-    }),
-  );
+  /**
+   * A state machine MATERIALIZES its state field as an ordinary enumeration
+   * field on its entity, whose options are the machine's states
+   * ([ADR-0050](../../../docs/decisions/ADR-0050-the-record-transition-carrier.md)).
+   * A document therefore has exactly ONE state, addressable by a predicate,
+   * selectable by a query, and written only by a transition.
+   *
+   * **The placement is forced, not chosen.** Three compiler guards refuse every
+   * alternative, each for its own reason: deriving it in a projection fails
+   * `COMPILER_PROJECTION_INVARIANT_FAILED`, because every projection must agree
+   * with the normalized model; emitting it alongside the retired
+   * `derivedStateField` fails `COMPILER_PHYSICAL_NAME_REUSE_INCOMPATIBLE`; and
+   * leaving the machine a second owner of the identity fails
+   * `COMPILER_SYMBOL_DUPLICATE`.
+   *
+   * **Gated at v5, and that gate is what keeps the cut free.** Materializing
+   * changes normalized bytes, which ADR-0047 §7 names as the boundary that owes
+   * a language cut. Below v5 the machine keeps its parallel `derivedStateField`
+   * and normalizes byte-for-byte as before, so every recorded release root
+   * still reproduces.
+   *
+   * The `alreadyMaterialized` guard is load-bearing rather than defensive:
+   * normalization is applied to already-normalized packages on the canonical
+   * round-trip, and without it the second pass mints a duplicate identity.
+   */
+  const materializedStateFields = languageHasMaterializedStateFields(
+    authored.languageVersion,
+  )
+    ? materializeStateFields(normalizedCandidate)
+    : [];
 
   const sortedCandidate = {
     ...normalizedCandidate,
@@ -422,8 +410,8 @@ export function normalizeApplicationPackage(
       'entityId',
     ),
     fields: sortByOwnerOrderAndId(
-      [...normalizedCandidate.fields, ...materializedStateFields] as any,
-      (entry: any) => entry.entity.targetId,
+      [...normalizedCandidate.fields, ...materializedStateFields],
+      (entry) => entry.entity.targetId,
       'fieldId',
     ),
     modules: sortByOrderAndId(normalizedCandidate.modules, 'moduleId'),
@@ -1893,6 +1881,79 @@ function validateAuthoredDerivedStateFields(
   if (diagnostics.length > 0) throw new CanonicalModelError(diagnostics);
 }
 
+/**
+ * The materialized form of a machine's state field. Every property is derived
+ * from the machine, so the authored surface gains nothing and the field cannot
+ * disagree with the states it admits:
+ *
+ * - `options` ARE the machine's states, so `stateId` and `optionId` are one
+ *   identity rather than two that must be kept in step. This is why the state
+ *   ids move out of the `stateMachines` id family in `collectIds`.
+ * - `declaredDefault` carries `initialState`, so a generic create seeds the
+ *   state without the caller naming it -- a caller that could choose the
+ *   initial state could forge one.
+ * - `presence: 'required'` with that default is what makes the column
+ *   non-null without making it caller-constructible; the compiled input
+ *   contract excludes it, exactly as `systemInput` excludes `legalEntityId`.
+ * - `orderKey: 0` places state ahead of every authored field, which start at
+ *   10 by convention, and is stable because a machine owns exactly one.
+ */
+function materializeStateFields(packageRevision: {
+  readonly fields: readonly { readonly fieldId: string }[];
+  readonly stateMachines: readonly {
+    readonly entity: unknown;
+    readonly lifecycle: string;
+    readonly initialState: { readonly targetId: string };
+    readonly schemaVersion: string;
+    readonly stateField: { readonly fieldId: string };
+    readonly states: readonly {
+      readonly label: string;
+      readonly orderKey: number;
+      readonly stateId: string;
+    }[];
+  }[];
+}): VersionedNormalizedApplicationPackage['fields'] {
+  const alreadyMaterialized = new Set(
+    packageRevision.fields.map((field) => field.fieldId),
+  );
+  return packageRevision.stateMachines
+    .filter((machine) => !alreadyMaterialized.has(machine.stateField.fieldId))
+    .map(
+      (machine) =>
+        ({
+          classification: 'internal',
+          collation: 'binary',
+          defaultSemantics: 'declaredDefault',
+          defaultValue: {
+            kind: 'textValue',
+            schemaVersion: machine.schemaVersion,
+            value: machine.initialState.targetId,
+          },
+          entity: machine.entity,
+          fieldId: machine.stateField.fieldId,
+          fieldType: {
+            kind: 'enumFieldType',
+            options: machine.states.map((state) => ({
+              kind: 'enumOption',
+              label: state.label,
+              optionId: state.stateId,
+              orderKey: state.orderKey,
+              schemaVersion: machine.schemaVersion,
+            })),
+            schemaVersion: machine.schemaVersion,
+          },
+          kind: 'fieldDefinition',
+          label: 'State',
+          lifecycle: machine.lifecycle,
+          orderKey: 0,
+          presence: 'required',
+          reportable: true,
+          schemaVersion: machine.schemaVersion,
+          searchable: false,
+        }) as unknown as VersionedNormalizedApplicationPackage['fields'][number],
+    );
+}
+
 function derivedStateField(
   machineId: string,
   schemaVersion: CanonicalLanguageVersion,
@@ -2204,13 +2265,24 @@ function collectIds(
         : []),
     ]),
     relations: packageRevision.relations.map((entry) => entry.relationId),
-    // 5g3-sm PROBE ONLY -- NOT FOR MERGE: the state field and the state ids
-    // are now owned by the `fields` family, because normalization materializes
-    // them there. One identity, one owner.
-    stateMachines: packageRevision.stateMachines.flatMap((entry) => [
-      entry.machineId,
-      ...entry.transitions.map((transition) => transition.transitionId),
-    ]),
+    // One identity, one owner. From v5 the state field and the state ids are
+    // owned by the `fields` family, because normalization materializes them
+    // there as a field and its enum options; claiming them here as well is
+    // what `CANON_ID_DUPLICATE` exists to catch. Below v5 the machine remains
+    // their only owner and nothing moves.
+    stateMachines: packageRevision.stateMachines.flatMap((entry) =>
+      languageHasMaterializedStateFields(packageRevision.languageVersion)
+        ? [
+            entry.machineId,
+            ...entry.transitions.map((transition) => transition.transitionId),
+          ]
+        : [
+            entry.machineId,
+            entry.stateField.fieldId,
+            ...entry.states.map((state) => state.stateId),
+            ...entry.transitions.map((transition) => transition.transitionId),
+          ],
+    ),
     surfaces: packageRevision.surfaces.flatMap((entry) => [
       entry.surfaceId,
       ...(entry.renderer ? [entry.renderer.rendererId] : []),

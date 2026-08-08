@@ -200,18 +200,17 @@ export function readCompiledSurfaceDataBinding(
       operation.entityId ??
       registeredSemanticQueryFromPinnedView(view, operation.readBackQueryId)
         ?.sourceEntityId;
-    if (
-      operation.lifecycle !== 'active' ||
-      entityId !== query.sourceEntityId ||
-      (operation.intent === 'command'
-        ? operation.tier !== 'o1'
-        : operation.tier !== 'o0')
-    ) {
+    if (operation.lifecycle !== 'active' || entityId !== query.sourceEntityId) {
       continue;
     }
+    // KNOWN LIMIT, declared rather than silent: one operation per intent, so
+    // an entity carrying two named transitions (a release AND a cancel) binds
+    // neither and refuses by name. Rendering a list of named actions is a
+    // surface-design question this contract does not answer, and it is owed
+    // before a document with more than one transition reaches a surface.
     if (byIntent.has(operation.intent)) {
       throw invalidBinding(
-        `surface entity has more than one active O0 ${operation.intent} operation`,
+        `surface entity has more than one active ${operation.tier} ${operation.intent} operation`,
       );
     }
     byIntent.set(
@@ -591,18 +590,21 @@ function parseOperationBinding(value: unknown): {
     );
   }
   const capabilityEffect = value.effect.kind === 'registeredCapabilityEffect';
+  const transitionEffect = value.effect.kind === 'transitionStateEffect';
   const entity = isRecord(value.effect.entity) ? value.effect.entity : null;
   const capability = isRecord(value.effect.capability)
     ? value.effect.capability
     : null;
-  const intent = capabilityEffect
-    ? 'command'
-    : operationIntent(value.effect.kind);
+  const intent = capabilityEffect ? 'command' : operationIntent(value.effect.kind);
   if (!intent) {
     throw invalidBinding(
       'pinned operation catalog contains a destructive or unknown effect',
     );
   }
+  // Tier follows the EFFECT, not the intent. A capability command is o1
+  // because ADR-0038 binds it there structurally; a transition is a record
+  // effect and stays o0, and both present as `command`. Keying this check on
+  // the intent instead would refuse the transition for being what it is.
   if (
     (capabilityEffect &&
       (value.tier !== 'o1' ||
@@ -636,6 +638,18 @@ function operationLabel(operationId: string): string {
     : action.slice(0, 1).toUpperCase() + action.slice(1).replaceAll('_', ' ');
 }
 
+/**
+ * A record transition is a named command from a surface's point of view: the
+ * record is already staged, the button names the move, and the server chooses
+ * the outcome. Its posted arguments -- `recordId` and `expectedRevision` --
+ * are byte-for-byte the capability command's, so it binds to the same intent
+ * rather than minting one the rest of the shell does not understand.
+ *
+ * Returning `null` here is not a small failure: `parseOperationBinding` raises
+ * `INVALID_SURFACE_BINDING` for the whole surface contract, so an unmapped
+ * effect kind takes every surface in the release down, the same shape as the
+ * catalog defect ADR-0050 §1 recorded one layer lower.
+ */
 function operationIntent(value: unknown): SurfaceOperationIntent | null {
   switch (value) {
     case 'archiveRecordEffect':
@@ -644,6 +658,8 @@ function operationIntent(value: unknown): SurfaceOperationIntent | null {
       return 'create';
     case 'restoreRecordEffect':
       return 'restore';
+    case 'transitionStateEffect':
+      return 'command';
     case 'updateRecordEffect':
       return 'update';
     default:

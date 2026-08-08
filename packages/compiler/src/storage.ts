@@ -1,6 +1,9 @@
 import { createHash } from 'node:crypto';
 
-import type { NormalizedApplicationPackage } from '@north-star/canonical-model';
+import {
+  languageHasMaterializedStateFields,
+  type NormalizedApplicationPackage,
+} from '@north-star/canonical-model';
 
 import {
   isPinnedInventoryBaseUnitField,
@@ -589,6 +592,9 @@ export function lowerStorageTargetV1(
     packageRevision.stateMachines,
     (machine) => machine.entity.targetId,
   );
+  const materializedStateFields = languageHasMaterializedStateFields(
+    packageRevision.languageVersion,
+  );
 
   const entities = packageRevision.entities.map(
     (entity): StorageEntityTarget => {
@@ -747,19 +753,37 @@ export function lowerStorageTargetV1(
         );
         return [constraint];
       });
-      // 5g3-sm PROBE ONLY -- NOT FOR MERGE.
-      // The parallel construct is GONE. Emitting it alongside the materialized
-      // column registered two incompatible shapes for one physical identifier
-      // and the compiler refused with COMPILER_PHYSICAL_NAME_REUSE_INCOMPATIBLE
-      // -- which is the ruling's argument, enforced by the compiler itself: a
-      // document has one state field, not two.
-      void stateMachinesByEntity;
-      const derivedStateFields: Array<{
-        fieldId: string;
-        physicalName: string;
-        postgresqlType: 'text';
-        stateMachineId: string;
-      }> = [];
+      // From v5 the machine's state field is an ordinary column, lowered by
+      // the `columns` map above like any other enumeration field, and this
+      // parallel construct is retired. Emitting both registers two
+      // incompatible shapes for one physical identifier and the compiler
+      // refuses with `COMPILER_PHYSICAL_NAME_REUSE_INCOMPATIBLE` -- the
+      // ruling's one-state-per-document claim, enforced by the compiler
+      // itself rather than asserted in prose.
+      const derivedStateFields = materializedStateFields
+        ? []
+        : (stateMachinesByEntity.get(entity.entityId) ?? [])
+            .map((machine) => {
+              const physicalName = physicalNameFor(
+                'column',
+                machine.stateField.fieldId,
+              );
+              const derived = {
+                fieldId: machine.stateField.fieldId,
+                physicalName,
+                postgresqlType: 'text' as const,
+                stateMachineId: machine.machineId,
+              };
+              addMapping(
+                mappings,
+                'column',
+                machine.stateField.fieldId,
+                physicalName,
+                derived,
+              );
+              return derived;
+            })
+            .sort((left, right) => compare(left.fieldId, right.fieldId));
       const uniqueKeys: StorageUniqueKeyTarget[] = [];
       const indexes: StorageIndexTarget[] = [];
       const archiveExcludingPredicate = 'archived_at IS NULL';

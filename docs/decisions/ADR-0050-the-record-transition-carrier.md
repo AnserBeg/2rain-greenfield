@@ -217,7 +217,19 @@ Found by the probe, and none of it optional for `PUR-1`:
    runs for capability operations only, so an O0 transition's closed contract is
    enforced one layer down by the interpreter. Both refuse; the placement should
    be decided rather than inherited.
-4. **The per-entity field budget** gains one field per machine.
+4. ~~**The per-entity field budget** gains one field per machine.~~
+   **Withdrawn as a misattribution — corrected 2026-08-08 by `5g3-sm-impl`.**
+   There is no per-entity field budget. The red was
+   `cold full compile stays within the numeric v0 maximum-field budget`, a
+   **wall/CPU timing** gate whose fixture (`test/fixtures/g1/compiler/vertical-v1.authored.json`)
+   is authored at v3 and declares **zero** state machines, so no change here can
+   reach it; the probe ran it while a PostgreSQL container and two other lanes
+   held the machine, and that gate refuses to measure below 90% CPU idle by
+   design. Attributing a load artifact to the change was the error.
+   The real and much narrower consequence:
+   `STRUCTURAL_LIMITS_V0.families.fields` is a **package-wide** limit of 4096
+   counted **after** normalization, so a package declaring N machines has an
+   effective authored budget of 4096 − N.
 5. **`apps/web`.** `operationIntent` (`surface-contract.ts:638`) returns `null`
    for this effect kind, so a bound surface would throw `INVALID_SURFACE_BINDING`.
    Not exercised by the vertical.

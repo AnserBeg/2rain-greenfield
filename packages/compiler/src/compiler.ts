@@ -6,6 +6,7 @@ import {
   SUPPORTED_LANGUAGE_VERSIONS,
   CanonicalModelError,
   canonicalLanguageProfileFor,
+  languageHasMaterializedStateFields,
   languageHasV3Features,
   canonicalizeAndHash,
   parseNormalizedApplicationPackageJson,
@@ -13,6 +14,7 @@ import {
   type NormalizedApplicationPackage,
   type V3NormalizedApplicationPackage,
   type V4NormalizedApplicationPackage,
+  type V5NormalizedApplicationPackage,
   type VersionedNormalizedApplicationPackage,
 } from '@north-star/canonical-model';
 
@@ -910,14 +912,25 @@ function collectSymbols(
   for (const value of packageRevision.relations) {
     add(value.relationId, value.kind, []);
   }
+  const materializedStateFields = languageHasMaterializedStateFields(
+    packageRevision.languageVersion,
+  );
   for (const machine of packageRevision.stateMachines) {
     add(machine.machineId, machine.kind, ['stateMachineReference']);
-    // 5g3-sm PROBE ONLY -- NOT FOR MERGE: the state field and the states are
-    // now owned by the materialized field and its enum options. They are
-    // registered here only as REFERENCE targets, never as second owners.
-    references.get('stateReference')!;
+    // From v5 the state field and the states are owned by the materialized
+    // field and its enum options, already registered by the `fields` loop
+    // above. They are still resolvable as `stateReference` targets -- a
+    // transition names them -- but registering them again here would make the
+    // machine a second owner, which is what `COMPILER_SYMBOL_DUPLICATE` caught.
+    if (!materializedStateFields) {
+      add(machine.stateField.fieldId, machine.stateField.kind, []);
+    }
     for (const state of machine.states) {
-      references.get('stateReference')!.add(state.stateId);
+      if (materializedStateFields) {
+        references.get('stateReference')!.add(state.stateId);
+      } else {
+        add(state.stateId, state.kind, ['stateReference']);
+      }
     }
     for (const transition of machine.transitions) {
       add(transition.transitionId, transition.kind, ['transitionReference']);
@@ -1168,7 +1181,9 @@ function languageUsesModuleProjectionShape(
 function isV3PlusRevision(
   packageRevision: VersionedNormalizedApplicationPackage,
 ): packageRevision is
-  V3NormalizedApplicationPackage | V4NormalizedApplicationPackage {
+  | V3NormalizedApplicationPackage
+  | V4NormalizedApplicationPackage
+  | V5NormalizedApplicationPackage {
   return languageHasV3Features(packageRevision.languageVersion);
 }
 
@@ -1183,7 +1198,7 @@ function projectionDispatchRevision(
   ) as Omit<
     Extract<
       VersionedNormalizedApplicationPackage,
-      { languageVersion: 'v3' | 'v4' }
+      { languageVersion: 'v3' | 'v4' | 'v5' }
     >,
     'impactAnalyses'
   >;
@@ -1952,9 +1967,17 @@ function verifyCompleteness(
       ),
     );
   }
-  // 5g3-sm PROBE ONLY -- NOT FOR MERGE: nothing is emitted into the retired
-  // parallel construct, so nothing is expected in it.
-  const expectedStateFields = new Set<string>();
+  // From v5 the state field is an ordinary field and the parallel construct is
+  // retired, so nothing is emitted into it and nothing is expected from it.
+  const expectedStateFields = languageHasMaterializedStateFields(
+    packageRevision.languageVersion,
+  )
+    ? new Set<string>()
+    : new Set(
+        packageRevision.stateMachines.map(
+          (machine) => machine.stateField.fieldId,
+        ),
+      );
   const emittedStateFields = new Set(
     isStorageTargetV1(emittedStorage)
       ? emittedStorage.entities.flatMap((entity) =>

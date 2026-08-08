@@ -5254,26 +5254,44 @@ function profileForNormalizedBytes(
 }
 
 // ===========================================================================
-// 5g3-sm PROBE ONLY -- NOT FOR MERGE
+// Record transitions (ADR-0050).
 //
-// Measures where a `transitionStateEffect` operation stops, using the real
-// compiler, the real materializer, the real release-verification service, the
-// real gateway and the real interpreter against real PostgreSQL. Nothing below
-// is a fixture of the behaviour under test; every stop is executed.
+// A document with a state machine, one `transitionStateEffect` operation, and
+// one materialized state field, exercised through the real compiler, the real
+// materializer, the real release-verification service, the real gateway and
+// the real interpreter against real PostgreSQL.
 // ===========================================================================
 
+/**
+ * The fixture is authored at v3 and pinned there deliberately, so the
+ * transition module re-authors it at the version that materializes state
+ * fields. Node-version purity is uniform within a package revision -- a v5
+ * node in a v4 package is refused and so is the reverse -- so EVERY
+ * `schemaVersion` moves together, which is also the mechanism that makes
+ * adoption an application-wide event rather than a per-module choice.
+ */
 function transitionModuleDefinition(
   namespace: string,
+  languageVersion: 'v4' | 'v5' = 'v5',
 ): Record<string, unknown> {
-  const definition = ordinaryModuleV1ForNamespace(namespace) as {
+  const source = ordinaryModuleV1ForNamespace(namespace) as Record<
+    string,
+    unknown
+  >;
+  // Every node version at once. No fixture identity contains `v3`, so this
+  // also carries `northstar.normalization/v3` to its paired profile.
+  const definition = replaceFixtureStrings(source, [
+    ['v3', languageVersion],
+  ]) as {
     fields: Array<Record<string, unknown>>;
     languageVersion: string;
+    normalizationProfileVersion: string;
     operations: Array<Record<string, unknown>>;
     permissions: Array<Record<string, unknown>>;
     queries: Array<Record<string, unknown>>;
     stateMachines: Array<Record<string, unknown>>;
   } & Record<string, unknown>;
-  const version = definition.languageVersion;
+  const version = languageVersion;
   const probeReference = (kind: string, targetId: string) => ({
     kind,
     schemaVersion: version,
@@ -5350,6 +5368,28 @@ function transitionModuleDefinition(
       ],
     },
   ];
+  // THE READ PATH -- acceptance criteria, not a follow-up. Materialization
+  // puts the state field in `packageRevision.fields`, which is exactly what
+  // makes this selection resolve: before the ruling the same selection failed
+  // `CANON_QUERY_FIELD_LOCALITY` and `CANON_REFERENCE_UNRESOLVED`, so a
+  // released document could be transitioned and then never listed by state.
+  const stateFieldId = `${namespace}:derived_state_field.machine.master_lifecycle`;
+  const masterQueryIds = new Set(
+    ['get', 'list', 'search', 'resolve'].map(
+      (queryType) => `${namespace}:query.master_${queryType}`,
+    ),
+  );
+  for (const query of definition.queries) {
+    if (!masterQueryIds.has(String(query.queryId))) continue;
+    (query.selections as Array<Record<string, unknown>>).push({
+      field: probeReference('fieldReference', stateFieldId),
+      kind: 'querySelection',
+      orderKey: 30,
+      schemaVersion: version,
+      selectionId: `${namespace}:selection.master_${String(query.queryType)}_state`,
+    });
+  }
+
   definition.permissions.push({
     action: 'transition',
     kind: 'permissionDefinition',
@@ -5387,6 +5427,8 @@ function transitionModuleDefinition(
 
 interface TransitionProbeRuntime {
   readonly approvalFieldId: string;
+  readonly queries: SemanticQueryGateway;
+  readonly stateFieldId: string;
   readonly changeDocumentStates: (recordId: string) => Promise<
     Array<{ newState: unknown; oldState: unknown }>
   >;
@@ -5510,11 +5552,17 @@ async function withTransitionProbeRuntime(
           (error: unknown) =>
             `${(error as Error).name}: ${(error as Error).message}`,
         );
-      console.log(`PROBE release verification -> ${verification}`);
+      assert.match(
+        verification,
+        /^passed with \d+ executed results$/,
+        `release verification must pass for a transition module, got: ${verification}`,
+      );
 
       await run(
         Object.freeze({
           approvalFieldId,
+          queries: new SemanticQueryGateway(policy, interpreter),
+          stateFieldId,
           changeDocumentStates: async (recordId: string) => {
             const result = await pool.query<{ changes: unknown }>(
               `SELECT changes
@@ -5586,7 +5634,7 @@ async function withTransitionProbeRuntime(
   });
 }
 
-test('5g3-sm PROBE — the transition vertical: draft to released, four properties', async () => {
+test('a materialized state field is selectable, and only a transition writes it', async () => {
   await withTransitionProbeRuntime(async (runtime) => {
     // Exactly one state column. The machine no longer lowers a parallel
     // `derivedStateFields` entry alongside an authored one.
@@ -5646,15 +5694,13 @@ test('5g3-sm PROBE — the transition vertical: draft to released, four properti
         runtime.namespace,
       ),
       (error: unknown) => {
-        // Recorded rather than assumed: the gateway's closed-argument fence
-        // (`assertClosedOperationArguments`) runs for CAPABILITY operations
-        // only, so an O0 transition's closed contract is enforced one layer
-        // down, by the interpreter. Both refuse; the fence placement differs,
-        // and that difference belongs in the implementing packet.
-        console.log(
-          `PROBE forged target argument -> ${(error as Error).name}: ${
-            (error as { code?: string }).code ?? (error as Error).message
-          }`,
+        // The GATEWAY refuses this now, not the interpreter. A transition's
+        // contract is closed over ['expectedRevision','recordId'], and the
+        // outer fence belongs where that contract is read; the interpreter
+        // keeps its own check behind this one.
+        assert.equal(
+          (error as Error).name,
+          'MalformedSemanticOperationRequestError',
         );
         return true;
       },
@@ -5711,6 +5757,28 @@ test('5g3-sm PROBE — the transition vertical: draft to released, four properti
       state: releasedStateId,
     });
 
+    // ---- The read path. The operation's own read-back returns the new state
+    // through an ordinary compiled query selection, so a released document can
+    // be listed by state rather than only transitioned. `PUR-1` cannot ship
+    // without this, and it is what materialization buys. ------------------
+    assert.equal(
+      released.readBack?.values[runtime.stateFieldId],
+      releasedStateId,
+    );
+    const listed = await query(
+      runtime.queries,
+      runtime.view,
+      'master_list',
+      {},
+      runtime.namespace,
+    );
+    assert.deepEqual(
+      listed.records
+        .filter((entry) => entry.recordId === recordId)
+        .map((entry) => entry.values[runtime.stateFieldId]),
+      [releasedStateId],
+    );
+
     // ---- Control 4: the ADR-0034 case. `draft -> released` refuses a
     // SECOND release without refusing the first, because the guard is the
     // transition's own fromState rather than a projected-image predicate. --
@@ -5731,15 +5799,39 @@ test('5g3-sm PROBE — the transition vertical: draft to released, four properti
     });
 
     // ---- The change document records the state move exactly once. --------
-    const changes = await runtime.changeDocumentStates(recordId);
-    console.log(`PROBE change documents = ${JSON.stringify(changes)}`);
-    assert.deepEqual(changes, [
+    assert.deepEqual(await runtime.changeDocumentStates(recordId), [
       { newState: releasedStateId, oldState: draftStateId },
     ]);
   });
 });
 
-// The baseline red this replaces is preserved at commit bad2d8f: with no
-// implementation, a single declared transitionStateEffect made release
-// verification AND every operation in the release fail with
-// MalformedPinnedOperationCatalogError. Revert the slice to reproduce it.
+/**
+ * The gate, proved in both directions.
+ *
+ * Below v5 a state field is not an ordinary field: nothing writes it, no
+ * predicate addresses it and no query selects it, so the effect compiles into
+ * a catalog the runtime cannot admit. The recorded consequence (commit
+ * `bad2d8f`) was that release verification AND every unrelated operation in
+ * the release failed with an anonymous `MalformedPinnedOperationCatalogError`
+ * -- an unrelated `master_create` died with it.
+ *
+ * That release is now unbuildable, and the refusal names its subject.
+ */
+test('below v5 a record transition is refused by name, at compile time', () => {
+  const definition = transitionModuleDefinition('northstar.smtransitionv4', 'v4');
+  const result = compileApplication(moduleInput(definition));
+  assert.equal(result.status, 'failed');
+  assert.deepEqual(
+    result.diagnostics
+      .filter(
+        (entry) => entry.code === 'COMPILER_TRANSITION_EFFECT_UNSUPPORTED',
+      )
+      .map((entry) => ({ path: entry.path, subjectId: entry.subjectId })),
+    [
+      {
+        path: '$.operations.effect.kind',
+        subjectId: 'northstar.smtransitionv4:operation.master_release',
+      },
+    ],
+  );
+});

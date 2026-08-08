@@ -104,7 +104,12 @@ export interface RegisteredCapabilityOperationDefinition extends RegisteredOpera
   readonly tier: 'o1';
 }
 
-/** 5g3-sm PROBE ONLY -- NOT FOR MERGE. */
+/**
+ * A record transition: an O0 record effect whose patch is COMPILED rather than
+ * supplied. `toStateId` is the whole difference from an update, and it is what
+ * makes the target server-selected -- the closed input contract carries no
+ * argument through which a caller could name one.
+ */
 export interface RegisteredTransitionOperationDefinition extends RegisteredOperationDefinitionBase {
   readonly effect: {
     readonly entity: {
@@ -205,8 +210,9 @@ export interface SemanticOperationResultEnvelope {
 export interface SemanticOperationExecutionRequest {
   readonly channel: TrustedInvocationChannel;
   readonly context: TrustedRequestContext;
-  // 5g3-sm PROBE ONLY -- NOT FOR MERGE: the generic executor now receives
-  // transition definitions as well as record definitions.
+  // The generic executor receives transition definitions as well as record
+  // definitions: a transition is executed by the same press, not by a
+  // registered capability.
   readonly definition:
     | RegisteredRecordOperationDefinition
     | RegisteredTransitionOperationDefinition;
@@ -637,7 +643,18 @@ export class SemanticOperationGateway {
       if (!definition) {
         throw new NoSuchRegisteredOperationError(request.operationId, view);
       }
-      if (isRegisteredCapabilityOperation(definition)) {
+      // The gateway owns the closed-argument fence for every operation whose
+      // compiled contract admits no caller patch -- a capability command and a
+      // record transition alike. Both were already refused, but a transition's
+      // refusal came one layer down from the interpreter, which meant an
+      // argument the compiled contract forbids reached the provider before
+      // anything rejected it. The interpreter keeps its own check; two fences
+      // on a closed contract is defence in depth, and the outer one belongs
+      // where the contract is read.
+      if (
+        isRegisteredCapabilityOperation(definition) ||
+        isRegisteredTransitionOperation(definition)
+      ) {
         assertClosedOperationArguments(definition, request.input);
       }
       const operationDecision = await authorizeCurrentPolicy(
@@ -964,6 +981,12 @@ function isRegisteredCapabilityOperation(
   return definition.effect.kind === 'registeredCapabilityEffect';
 }
 
+function isRegisteredTransitionOperation(
+  definition: RegisteredOperationDefinition,
+): definition is RegisteredTransitionOperationDefinition {
+  return definition.effect.kind === 'transitionStateEffect';
+}
+
 function parentGuardsFromCatalog(
   operations: readonly RegisteredOperationDefinition[],
 ): readonly SemanticOperationParentGuard[] {
@@ -983,11 +1006,36 @@ function parentGuardsFromCatalog(
   );
 }
 
+/**
+ * A malformed catalog entry refuses the WHOLE catalog, deliberately: this is an
+ * artifact-integrity fence, and an artifact with one entry the runtime cannot
+ * parse is not an artifact one entry of which can be trusted. Narrowing it to
+ * "skip the bad entry" would let a tampered projection serve.
+ *
+ * What was a defect is that it refused ANONYMOUSLY. An unrelated
+ * `master_create` died with `object keys do not match the closed contract`,
+ * naming neither the operation at fault nor its effect, which is the
+ * misnamed-cause failure [ADR-0046](../../../docs/decisions/ADR-0046-rollback-activates-history-and-defects-refuse-by-name.md)
+ * forbids and ADR-0050 §1 measured. Every refusal below now names its subject.
+ *
+ * The reachable cause is closed separately and earlier:
+ * `COMPILER_TRANSITION_EFFECT_UNSUPPORTED` refuses the only known way to build
+ * such a release, at compile time, before any of it is persisted.
+ */
 function assertOperationDefinition(
   value: unknown,
 ): asserts value is RegisteredOperationDefinition {
+  const subject = isRecord(value) && typeof value.operationId === 'string'
+    ? value.operationId
+    : '<unidentified operation>';
+  const effectKind =
+    isRecord(value) && isRecord(value.effect) && typeof value.effect.kind === 'string'
+      ? value.effect.kind
+      : '<unidentified effect>';
   const invalid = (message: string): MalformedPinnedOperationCatalogError =>
-    new MalformedPinnedOperationCatalogError(message);
+    new MalformedPinnedOperationCatalogError(
+      `${message} (operation ${subject}, effect ${effectKind})`,
+    );
   if (!isRecord(value)) {
     throw invalid('pinned operation definition must be an object');
   }
@@ -1048,12 +1096,12 @@ function assertOperationDefinition(
       invalid,
     );
   } else if (value.effect.kind === 'transitionStateEffect') {
-    // 5g3-sm PROBE ONLY -- NOT FOR MERGE.
-    // The transition arm keeps the entity requirement the record arm below
-    // states: an entity-less effect is still refused. What it admits is a
-    // SERVER-SELECTED target -- `toStateId` is compiled, never an argument --
-    // over the same closed ['expectedRevision','recordId'] contract the
-    // compiler already emits for this effect kind.
+    // The transition arm keeps the O0 fence the record arm below states: an
+    // entity-less effect is still refused, and the entity reference is still
+    // required in full. What it additionally admits is a SERVER-SELECTED
+    // target -- `toStateId` is compiled, never an argument -- over the same
+    // closed ['expectedRevision','recordId'] contract the compiler already
+    // emitted for this effect kind before anything executed it.
     assertExactKeys(
       value.effect,
       [

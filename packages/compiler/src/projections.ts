@@ -444,13 +444,21 @@ function queryCatalogPayload(
 }
 
 /**
- * 5g3-sm PROBE ONLY -- NOT FOR MERGE.
- *
  * A `transitionStateEffect` names a transition and nothing else. The runtime
- * needs the entity, the state field and the server-selected target, and no
- * pinned projection carries any of them -- the semantic-model projection
- * carries a FINGERPRINT of the transition, not its content. Resolving them
- * here is the projection change the ruling prices on ADR-0047's profile axis.
+ * needs three further facts to execute one -- the entity, the state field, and
+ * the server-selected target -- and **no pinned projection carries any of
+ * them**: the semantic-model projection carries a `semanticFingerprint` of the
+ * transition, not its content. That measured absence is why admitting the
+ * effect is a projection change rather than the execution-fence widening it
+ * resembles.
+ *
+ * Resolving them here keeps the compiler the single authority for what a
+ * transition means. The runtime never walks the machine, so it cannot reach a
+ * different answer.
+ *
+ * Below v5 the effect is refused by `conformance.ts` before reaching this
+ * point, so the unresolved arm is unreachable for a compiled release and is
+ * retained only as a total function.
  */
 function resolvedEffect(
   effect: NormalizedApplicationPackage['operations'][number]['effect'],
@@ -513,10 +521,12 @@ function operationCatalogPayload(
             inputContract: operationInputContract(
               operation,
               'entity' in operation.effect
-                ? // 5g3-sm PROBE ONLY -- NOT FOR MERGE. A machine's state field
-                  // is never caller-writable: it is seeded from `initialState`
-                  // and moved only by a transition. This is the same shape
-                  // `systemInput` already uses for `legalEntityId`.
+                ? // A machine's state field is never caller-writable: it is
+                  // seeded from `initialState` and moved only by a transition.
+                  // A caller that could patch it could forge a state, which is
+                  // the whole guarantee the carrier exists to provide. This is
+                  // the same exclusion `systemInput` already applies to
+                  // `legalEntityId`.
                   (fieldsByEntity.get(operation.effect.entity.targetId) ?? [])
                     .filter((field) => !stateFieldIds.has(field.fieldId))
                 : [],
@@ -778,8 +788,30 @@ function verificationPlanPayload(
       )
       .map((query) => query.sourceEntity.targetId),
   );
+  // A materialized state field is not a caller input: the compiled contract
+  // excludes it from create and update, it is seeded from `initialState`, and
+  // only a transition moves it. Both scenarios below probe a field THROUGH the
+  // create operation, so minting them here asks the provider to populate a
+  // field it is structurally forbidden to populate -- which is how this
+  // surfaced, as `VERIFICATION_EXCLUDED_FIELD_VALUE_MISSING`.
+  //
+  // This is the `legal_entity_id` shape from `5g3-mount`: compiler-derived
+  // storage that no generic press can arrange. That column stays outside
+  // `fields` and never reaches this loop; a materialized state field is
+  // deliberately inside `fields` -- that is the whole point of the ruling, and
+  // what makes it selectable and addressable -- so the exclusion is stated
+  // here instead of being had for free.
+  //
+  // Not emitting differs from skipping, and ADR-0020:156 cares about the
+  // difference: nothing is admitted unexecuted. The scenario is never planned,
+  // because the contract it would probe does not exist.
+  const materializedStateFieldIds = new Set(
+    packageRevision.stateMachines.map((machine) => machine.stateField.fieldId),
+  );
   for (const field of packageRevision.fields.filter(
-    (entry) => entry.lifecycle === 'active',
+    (entry) =>
+      entry.lifecycle === 'active' &&
+      !materializedStateFieldIds.has(entry.fieldId),
   )) {
     if (field.fieldType.kind === 'enumFieldType') {
       addScenario({

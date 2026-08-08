@@ -553,8 +553,9 @@ async function prepareMutation(
   const changes =
     kind === 'updateRecordEffect'
       ? updateChanges(request.definition.inputContract, prior, input.patch)
-      : // 5g3-sm PROBE ONLY -- NOT FOR MERGE. The transition's change document
-        // records the state move, not an archive flip.
+      : // A transition's change document records the state move, not an
+        // archive flip. The old and new states are both compiled, so the
+        // document cannot disagree with what the UPDATE pinned.
         kind === 'transitionStateEffect' &&
           request.definition.effect.kind === 'transitionStateEffect'
         ? [
@@ -714,7 +715,6 @@ async function executeMutationOnClient(
       );
       await setArchiveState(client, storage, entity, input, false);
       break;
-    // 5g3-sm PROBE ONLY -- NOT FOR MERGE.
     case 'transitionStateEffect':
       await requireExistingParentGuards(
         client,
@@ -959,8 +959,6 @@ async function updateRecord(
 }
 
 /**
- * 5g3-sm PROBE ONLY -- NOT FOR MERGE.
- *
  * The transition writer. Everything a named document transition needs is
  * already here in the generic press and none of it is new:
  *
@@ -3373,9 +3371,12 @@ function parseMutationInput(
       });
     case 'archiveRecordEffect':
     case 'restoreRecordEffect':
-    // 5g3-sm PROBE ONLY -- NOT FOR MERGE. A transition takes the SAME closed
-    // two-argument input as archive/restore and carries an empty patch, which
-    // is what makes its target server-selected rather than caller-supplied.
+    // A transition takes the SAME closed two-argument input as archive and
+    // restore, and carries an empty patch. That emptiness is not incidental:
+    // it is what makes the target server-selected rather than caller-supplied.
+    // The gateway now applies the same closed-key fence before this point;
+    // this check stays as the inner of two, because the provider must not
+    // trust an input contract it did not read itself.
     case 'transitionStateEffect':
       assertAllowedKeys(input, contract.closedArgumentKeys);
       return validateMutationInput(contract, {

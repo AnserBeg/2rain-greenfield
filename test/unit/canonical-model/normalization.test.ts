@@ -131,14 +131,16 @@ test('v3 and v4 select their profiles, reject mixed nodes, and leave adoption ex
     NORMALIZATION_PROFILE_VERSIONS.v2,
   );
   // Newest-readable and compiled-at are deliberately apart while a version is
-  // cut and unadopted. LANG-ADOPT adopted v4, so they are equal RIGHT NOW and
-  // reopen at the next cut -- that is the normal cycle, not a collapse. This
-  // pair is the adoption ratchet: it must fail loudly on every adoption event
-  // so the artifact churn is absorbed deliberately rather than discovered.
-  assert.equal(LATEST_LANGUAGE_VERSION, LANGUAGE_VERSIONS.v4);
+  // cut and unadopted. LANG-ADOPT adopted v4 and they were briefly equal;
+  // `5g3-sm-impl` cut v5 for ADR-0050's materialized state field and did NOT
+  // adopt it, so they are apart again -- that is the normal cycle, not a
+  // collapse. This pair is the adoption ratchet: it must fail loudly on every
+  // cut and every adoption, so the artifact churn is absorbed deliberately
+  // rather than discovered.
+  assert.equal(LATEST_LANGUAGE_VERSION, LANGUAGE_VERSIONS.v5);
   assert.equal(
     LATEST_NORMALIZATION_PROFILE_VERSION,
-    NORMALIZATION_PROFILE_VERSIONS.v4,
+    NORMALIZATION_PROFILE_VERSIONS.v5,
   );
   assert.equal(ADOPTED_LANGUAGE_VERSION, LANGUAGE_VERSIONS.v4);
   assert.equal(

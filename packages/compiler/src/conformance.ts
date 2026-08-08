@@ -1,6 +1,7 @@
 import {
   LANGUAGE_VERSION,
   canonicalizeAndHash,
+  languageHasMaterializedStateFields,
   type NormalizedApplicationPackage,
 } from '@north-star/canonical-model';
 
@@ -1218,6 +1219,9 @@ export function validateModuleConformance(
     }
   }
 
+  const materializedStateFields = languageHasMaterializedStateFields(
+    packageRevision.languageVersion,
+  );
   for (const operation of packageRevision.operations) {
     if (
       operation.effect.kind === 'deleteRecordEffect' ||
@@ -1227,6 +1231,28 @@ export function validateModuleConformance(
       diagnostics.push(
         compilerDiagnostic(
           'COMPILER_DESTRUCTIVE_OPERATION_UNSUPPORTED',
+          'wholeModelValidation',
+          '$.operations.effect.kind',
+          operation.operationId,
+        ),
+      );
+    }
+    // Honoured or refused, at every version -- ADR-0041's rule applied to the
+    // construct that provoked it. Below v5 the state field is not an ordinary
+    // field, so nothing can write it, no predicate can address it and no query
+    // can select it; the effect compiles into a catalog the runtime cannot
+    // admit. Refusing it HERE, by name and by subject, is what stops that
+    // release from being built. Without this the failure surfaces at request
+    // time as an anonymous `MalformedPinnedOperationCatalogError` that takes
+    // every unrelated operation in the release down with it -- the ADR-0046
+    // defect ADR-0050 §1 recorded.
+    if (
+      operation.effect.kind === 'transitionStateEffect' &&
+      !materializedStateFields
+    ) {
+      diagnostics.push(
+        compilerDiagnostic(
+          'COMPILER_TRANSITION_EFFECT_UNSUPPORTED',
           'wholeModelValidation',
           '$.operations.effect.kind',
           operation.operationId,
