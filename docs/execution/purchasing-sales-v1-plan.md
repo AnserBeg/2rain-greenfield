@@ -253,3 +253,63 @@ document update fails — and ADR-0026 rules out a nested transaction. The adapt
 must enter the same top-level transaction that takes stock locks after `BEGIN`.
 **This is the central viability issue, and it is an extension of the transaction
 coordinator rather than a replacement of the ledger.**
+
+### 7.8 `PS-0` ruled the seam, and corrected §7 in three places — 2026-08-08
+
+**Superseded by [ADR-0049](../decisions/ADR-0049-document-transition-and-inventory-effect-seam.md).**
+Read that; this records only what §7 got wrong, so the errors are not re-inherited.
+
+- **§7.1's "`main` provides no generic named-transition tier" is WRONG.** ADR-0038
+  shipped one and it is in the active release: `inventory_transaction_post` is
+  authored `tier: 'o1'` with a `registeredCapabilityEffect`
+  (`definition.ts:1266`, `:1286`), its input contract is closed to
+  `['expectedRevision','recordId']` with **no patch** (`projections.ts:848`), and
+  the target state is a compiled binding constant written by a compare-and-swap
+  `UPDATE`. Exactly one of 39 operations is `o1`. **The consequence for `PUR-1`:**
+  `tier: 'o1'` and `registeredCapabilityEffect` are equivalent both ways at the
+  gateway, so **PO release and SO confirm need a registered capability even though
+  they write no movement.** There is no record-transition effect, and inventing
+  one is a language event.
+- **§7.6's "the adapter must enter the same top-level transaction" is not
+  achievable, and is unnecessary.** `#post` calls `pool.connect()` itself, so
+  there is no outside position to join from. What works is the transaction
+  **carrying the foreign aggregate through a port** invoked at ADR-0026's steps
+  4/5 and 7 — which is what ADR-0029 already did for stock count, with hard-coded
+  branches instead of a port.
+- **"Preflight-then-post-then-mark is unsafe" was imprecise — the *mark* is the
+  unsafe part.** The shipped executor already preflights in its own transaction
+  and is safe because hydration carries no authority and everything is
+  re-validated under lock. **The rule to freeze is "hydrate as a proposal, decide
+  under lock."**
+
+**§5's assumption 1 is refuted with a count**, not an argument: a receipt posting
+role costs **eight code sites plus a migration**, a new purchasing authority member
+is needed in two unbound places (`contracts.ts:200-207`,
+`conformance.ts:3215-3222`), the dependency root is pinned at four executable
+sites, and a candidate v5 with six purchasing entries moves 35 entries to 41 with
+root `f8a68976…`. `reBaseline` remains in the contract and absent from the provider
+union, unguarded.
+
+**Measured, and sharper than the charter assumed:** two receipts at different
+locations are different stock identities, so the stock serializer does not
+serialize them. Across four arms, lock-only, compare-and-swap-only and both each
+admitted exactly one winner; **neither** admitted two and received 20 against an
+order of 10. **Either mechanism closes the race provided it is inside the posting
+transaction — the pessimistic lock is an optimization, not the requirement.**
+
+**Ruling 4 (separate Purchasing/Sales capability IDs over one shared kernel) is the
+one ruling the probe did not measure.** It is reasoned from registration code.
+`PUR-2` must land the second registration and report the cost.
+
+### 7.9 New row — `posting-error-classification`
+
+**OPEN 2026-08-08, found by `PS-0`'s probe, on `main`.**
+`inventory-posting-service.ts:3877`'s `postgresCode` delegates to
+`postgresErrorProperty`, which checks only that the property exists — so **any
+error carrying a string `code` is classified as a PostgreSQL rejection.** The probe
+saw a domain refusal surface as
+`INVENTORY_POSTING_STORAGE_REJECTED: PostgreSQL rejected inventory posting
+(PS0_RECEIPT_OPEN_QUANTITY_EXCEEDED)`. Node's `ERR_*` errors have the same shape,
+so an ordinary runtime fault is reported as a storage rejection. The probe carries
+a one-line fix. **It needs its own row because it changes an error contract**, and
+existing assertions pin those codes.
