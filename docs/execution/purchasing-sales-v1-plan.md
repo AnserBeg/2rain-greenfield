@@ -573,3 +573,38 @@ satisfiable and A3's empty Inventory extension impossible.
 a superseding appendix.** Four implementation packets must not have to work out
 which sentence still governs; that is a second-authority shape, which this plan
 refuses everywhere else.
+
+### 7.15 `PS-2`'s two construction findings, and the sequencing ruling — 2026-08-08
+
+**`packet/ps-1` carries a deadlock hazard. Do not reuse that branch.** Its lock-edge
+change moved `{header → source}` to `{source → header}` **only for the injected
+port**, while `lockAndAssertStockCountEvidence` kept taking the header first — so a
+receipt posting and a stock count would acquire the same two locks in **opposite
+orders**. `PS-1` reported this as *"widened, never reordered"* and as a safety
+improvement. It is an **ABBA hazard it introduced**. The review caught the mislabel;
+`PS-2` found the deadlock by making the profile uniform, which is the only reason
+the reorder is admissible at all.
+
+**A receipt command is not a kernel command.** Adding it to the kernel union broke
+~25 sites, and that breakage was the finding: a receipt carries no `transactionId`,
+no `sourceType` and no companion revision, because the profile derives them. It
+**normalizes into** a kernel command. `PS-1` conflated the two, which is the
+mechanism by which a receipt acquired adjustment role, adjustment companion type,
+adjustment reason and approval semantics, and an `adjustment_posted` event.
+
+**The origin axis (`authored` | `companion`) makes the reachability requirement
+structural.** `adjustment` and `transfer` declare generic paths admitted, and
+`validateRegistration` refuses a profile whose reachability disagrees with its
+origin. That satisfies §7.14's positive case as a **rule** rather than a second
+test — a hide-only rule passes trivially by deleting every generic path and taking
+ordinary adjustment authoring with it.
+
+**Sequencing ruled: registration sites → runnable vertical → ADR rewrite.** The
+lane proposed ADR first. **Inverted, on this programme's own record.** `PS-0` and
+`PS-1` each ruled before measuring and were refuted — five rulings and six
+rulings respectively, most overturned. **`ADR-0050` shipped a green vertical
+*before* its ruling and survived review intact.** `PS-2`'s own best findings this
+round came from construction, not reasoning. **An ADR written from predictions is
+what `PUR-2` would then build against**, and nothing is reading ADR-0049 today:
+`PUR-2` waits on `PUR-1`, which waits on `5g3-sm-impl`'s review. The slack exists;
+spend it on evidence.
