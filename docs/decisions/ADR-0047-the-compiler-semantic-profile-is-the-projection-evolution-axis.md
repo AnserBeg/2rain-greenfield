@@ -106,6 +106,35 @@ recorded and may be activated; overwriting it is precisely the history rewrite
 the freeze exists to prevent. Assertions that assumed consecutive entries differ
 in source are corrected to say what they actually mean.
 
+### 4a. A source-changing entry may carry no semantic delta — added 2026-08-06
+
+§4 named *position*-dependence. `U5b` found a second, distinct fragility in the
+same family, and it is not fixed by `previousSourceRelease`.
+
+`assertAttributedSearchCapabilityScenarioDelta`
+(`test/postgres/composed-application.test.ts`) already uses that helper, so it is
+correctly position-independent. It nonetheless broke, because it is
+**delta**-dependent: it compares the head against the last entry whose *source*
+differs and asserts a 168→163 search-capability scenario delta. A source change
+that carries **no semantic delta** — declaring a field gated on an unadopted
+profile version — makes `previous` the immediately preceding entry, and the delta
+the assertion attributes to named entities collapses to nothing.
+
+**So there are two questions, not one.** *Which entry precedes this one?* is
+answered by `previousSourceRelease`. *Which entry carries the delta I am
+attributing?* is not, and an assertion that attributes a change must locate the
+entry that made it rather than the entry that came before.
+
+**The practical rule this yields:** an authored change whose feature reaches no
+artifact still mints a lineage entry, and that entry is invisible to every
+assertion reasoning about compiled consequences while being fully visible to every
+assertion reasoning about position or source identity. Declaring a field gated on
+an **unadopted** profile version is exactly that shape — `U5b` measured
+`disclosureTier` in zero artifacts of either entry while eight artifacts differed
+by digest churn. **Do not mint one.** Land the declaration in the packet that
+adopts the version, where it carries a real difference and the affected
+assertions are corrected once against a delta that means something.
+
 ### 5. Every entry reproduces under the profile its own attestation records
 
 Never under today's constant. `reproduceHistoricalApplication`
