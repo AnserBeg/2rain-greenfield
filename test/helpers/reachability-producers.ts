@@ -28,6 +28,7 @@ export const observabilityTestFiles = [
 export const reachabilityProducers = [
   nodeProducer('unit', 'quality', 'test:unit', [
     'test/unit/canonical-model/diagnostic-ordering.test.ts',
+    'test/unit/canonical-model/disclosure-tier.test.ts',
     'test/unit/canonical-model/negative-contracts.test.ts',
     'test/unit/canonical-model/normalization.test.ts',
     'test/unit/canonical-model/predicate-admission.test.ts',
@@ -43,6 +44,7 @@ export const reachabilityProducers = [
   nodeProducer('compiler', 'quality', 'test:compiler', [
     'test/compiler/compiler-semantic-profile.test.ts',
     'test/compiler/determinism.test.ts',
+    'test/compiler/disclosure-tier-projection.test.ts',
     'test/compiler/freeze-b.test.ts',
     'test/compiler/g2-module-conformance.test.ts',
     'test/compiler/g2-module-storage.test.ts',
