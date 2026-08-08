@@ -575,3 +575,33 @@ reporting that a lowering mutation ignoring the authored value **survives**, bec
 `?? DEFAULT_DISCLOSURE_TIER` makes explicit `always` and absent identical — the
 exact mutation its round trip cannot catch. **A gap you can name is closed
 knowledge; a table with no survivors is usually an unexamined one.**
+
+
+## An ADR that packets will build against gets an external arm — added 2026-08-08
+
+The line above — *"for documents, the primary review is the human read"* — was
+read by the orchestrator as *no external arm needed*. **The record refutes that for
+any ruling downstream packets implement.**
+
+- **ADR-0049 received two external arms and both returned BLOCK.** The second found
+  that a receipt was posting as an **adjustment** in every load-bearing semantic —
+  role, companion type, reason and approval, and an `adjustment_posted` event —
+  while the test read the type column and never asserted on it.
+- **ADR-0050 received none.** It was ratified on the orchestrator's own
+  verification, and **item 4 was later withdrawn as a misattribution** — a
+  wall-clock timing gate under load, reported as a per-entity field budget — found
+  by the implementing lane rather than at ruling time.
+
+**The rule:** a design pass whose output is a ruling that other packets implement
+owes **one external arm against the ruling itself**, before ratification. Judge the
+ADR, not the probe: *does the evidence support the ruling, and is any load-bearing
+claim unmeasured?*
+
+**Two things make this cheap.** It costs no machine, so it runs in parallel with
+whatever holds the slot. And a design pass owes **no full matrix** (see
+`mission-cadence`), so the arm is the only gate it has — which is exactly why
+skipping it leaves a ruling with nothing behind it.
+
+**The tell that an arm was owed and skipped:** the implementing packet spends its
+first round correcting the ADR. That has now happened twice — `5g3-sm-impl`
+withdrawing ADR-0050 item 4, and `PS-1` rebuilding on refuted ADR-0049 rulings.
