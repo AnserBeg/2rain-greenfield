@@ -455,7 +455,16 @@ so a released purchase order cannot be listed by state. **`PUR-1` cannot ship
 without that.** The rest: release verification cannot populate a field no caller may
 write (`5g3-mount` class, `systemInput` is the precedent); the closed-argument
 fence sits at the interpreter rather than the gateway for O0; the per-entity field
-budget; `apps/web`'s `operationIntent` returns `null` for the effect kind; and the
+budget — **that item is WITHDRAWN 2026-08-08 as a misattribution**, inherited from
+ADR-0050 item 4 and repeated here: there is no per-entity budget, the red was a **wall-clock
+timing gate under load** on a `v3` fixture with zero machines while a container and two
+lanes held the machine, and the real consequence is narrower — `families.fields` is
+package-wide and counted after normalization, so N machines cost N. **ADR-0050's
+companion claim needs the same qualification:** three compiler guards do enforce one
+state field per document, but two read the dispatch alias that always answers `v2`, so
+they enforce it only when told the authored version — invisible until the change was
+gated, which is the argument for gating it. Also owed:
+`apps/web`'s `operationIntent` returns `null` for the effect kind; and the
 misnamed refusal above.
 
 ### 7.12 `received_quantity` is `PUR-2`'s decision, not `PUR-1`'s — ruled 2026-08-08
