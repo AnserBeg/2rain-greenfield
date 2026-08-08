@@ -408,3 +408,30 @@ So, when recording a red:
   several causes.
 - **A red arriving faster or louder than expected is a reason to look, not to
   celebrate.** All three of the above looked like success at a glance.
+
+## An uncommitted harness is not evidence — added 2026-08-08
+
+`U5b` round 3 reported *"eleven mutations, no survivors,"* from a harness that
+printed `*** SURVIVOR — NO RED ***` when a mutation produced nothing, and reported
+that it never printed. **The harness was not in the committed tree.** The reviewer
+could not reproduce the claim from the SHA, wrote its own eleven-mutation replay
+against the same source predicates, and found **four survivors** — a required input
+and an action button added without a watched token, a field read through
+`record.values[...]`, and a confirmed capability command bound through the
+read-back query.
+
+**A mutation table is a claim about the committed controls. If the thing that
+produced it is not committed, the claim cannot be checked and does not count.**
+This is the same rule as *"a read count is not a proof"*, one level up: the lane's
+own tooling is part of the evidence, not scaffolding around it.
+
+Two consequences, both cheap:
+
+- **Commit the harness** with the packet, wired into an executed suite, so the
+  table can be re-derived rather than believed.
+- **Prove the marker can fire.** Absence of a `SURVIVOR` line is the evidence, so
+  a harness that can never print it produces a perfect table for free. The
+  reviewer checked this explicitly and it is now a standing question.
+
+**The generative form:** *if the tool that produced this evidence is not in the
+tree, what would a reviewer have to take on trust?*
