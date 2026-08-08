@@ -9272,7 +9272,6 @@
             "schemaVersion": "v4",
             "targetId": "northstar.app:capability.standard_surface_content"
           },
-          "disclosureTier": "always",
           "kind": "surfaceSlot",
           "orderKey": 40,
           "schemaVersion": "v4",

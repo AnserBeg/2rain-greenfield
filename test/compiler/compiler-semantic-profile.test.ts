@@ -224,26 +224,8 @@ test('the compiler-semantic profile discriminates the release root', () => {
 // on the recorded artifact rather than declared.
 test('consecutive lineage entries may share a normalized definition', () => {
   const lineage = readLineage();
-  // Located by the property under test, NOT by position. This asserted
-  // `at(-1)`/`at(-2)` while the profile sibling happened to be the head, and
-  // `U5b`'s authored disclosure tier appended a source-changing entry after it.
-  // The claim was never about the tail: it is that a definition-equal pair
-  // EXISTS and that its predecessor was retired rather than rewritten. ADR-0047
-  // §4 names this class and its correction -- an assertion that assumed a
-  // position is corrected to say what it actually means.
-  const pairIndex = lineage.applications.findIndex(
-    (entry, index) =>
-      index > 0 &&
-      entry.normalizedDefinitionBytesBase64 ===
-        lineage.applications[index - 1]!.normalizedDefinitionBytesBase64,
-  );
-  assert.notEqual(
-    pairIndex,
-    -1,
-    'the lineage must still contain a profile-sibling pair, or §4 has no subject',
-  );
-  const head = lineage.applications[pairIndex]!;
-  const predecessor = lineage.applications[pairIndex - 1]!;
+  const head = lineage.applications.at(-1)!;
+  const predecessor = lineage.applications.at(-2)!;
 
   assert.equal(
     head.normalizedDefinitionBytesBase64,
@@ -252,7 +234,7 @@ test('consecutive lineage entries may share a normalized definition', () => {
   assert.notEqual(head.releaseRoot, predecessor.releaseRoot);
   assert.equal(
     head.attestation.compilerSemanticProfileVersion,
-    COMPILER_SEMANTIC_PROFILE_V1_VERSION,
+    ADOPTED_COMPILER_SEMANTIC_PROFILE_VERSION,
   );
   assert.equal(
     predecessor.attestation.compilerSemanticProfileVersion,

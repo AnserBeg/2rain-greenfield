@@ -467,19 +467,6 @@ function entitySurfaces(
         'opaqueSurfaceContentReference',
         ids.contentCapabilityId,
       ),
-      // The first authored disclosure tier, and a fact rather than a
-      // gate-satisfying gesture. `party_detail`'s keyFacts panel carries
-      // `party_number` and `party_name` -- an identifying business key and a
-      // required field -- so `ux-grammar`'s hard rule FORCES `always` here and
-      // would refuse any other value. Declaring it states what the compiler
-      // already enforces.
-      //
-      // Deliberately one slot. The sibling surfaces omit the tier and are
-      // interpreted as `always` identically; declaring it on all of them would
-      // add instances without adding evidence.
-      ...(local === 'party' && suffix === 'detail' && slot === 'keyFacts'
-        ? { disclosureTier: 'always' as const }
-        : {}),
       kind: 'surfaceSlot',
       orderKey: (index + 1) * 10,
       schemaVersion: version,

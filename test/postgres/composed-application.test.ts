@@ -2856,8 +2856,7 @@ async function assertIntermediateBecomesServingOnlyAfterVerification(
   databaseUrl: string,
   tenantSlug: string,
 ): Promise<ComposedApplicationRuntime> {
-  const profileEdgeLineage = truncatedToProfileSiblingHead(compiledApplication);
-  const compiled = parseCompiledApplication(profileEdgeLineage);
+  const compiled = parseCompiledApplication(compiledApplication);
   const target = compiled.applications.at(-2);
   assert.ok(target);
   await runtime.close();
@@ -2871,7 +2870,7 @@ async function assertIntermediateBecomesServingOnlyAfterVerification(
   assert.equal(
     target.normalizedDefinitionBytes.byteLength,
     compiled.application.normalizedDefinitionBytes.byteLength,
-    'direction 1 must cross a profile-only edge; the truncation above failed to find one',
+    'direction 1 is only meaningful across a profile-only edge; the head and at(-2) differ in source',
   );
   assert.ok(
     equalNormalizedDefinition(
@@ -2880,24 +2879,8 @@ async function assertIntermediateBecomesServingOnlyAfterVerification(
     ),
     'this direction is only meaningful while the head is a profile sibling',
   );
-  // The tenant must already be serving the profile-sibling head, exactly as
-  // direction 2 does below: on a fresh tenant the index check at the FIRST
-  // refusal site fires and control never reaches the authorization this
-  // direction is about.
-  const profileEdgeSlug = `${tenantSlug}-profile-edge`;
-  const profileEdgeRuntime = await createRuntime(
-    profileEdgeLineage,
-    databaseUrl,
-    profileEdgeSlug,
-  );
-  assert.equal(
-    profileEdgeRuntime.releaseRoot,
-    compiled.application.compiled.releaseRoot,
-  );
-  await profileEdgeRuntime.close();
-
   await assert.rejects(
-    createRuntime(profileEdgeLineage, databaseUrl, profileEdgeSlug, {
+    createRuntime(compiledApplication, databaseUrl, tenantSlug, {
       kind: 'rollback',
       targetReleaseRoot: target.compiled.releaseRoot,
     }),
@@ -2964,31 +2947,6 @@ async function assertIntermediateBecomesServingOnlyAfterVerification(
   );
 
   return createRuntime(compiledApplication, databaseUrl, tenantSlug);
-}
-
-/**
- * The lineage truncated so its HEAD is the profile sibling -- the entry that
- * shares a normalized definition with its own predecessor.
- *
- * Direction 1 below needs the serving head and `at(-2)` to be a profile-only
- * edge. That was true by position while the sibling was the lineage tail, and
- * `U5b`'s authored disclosure tier appended a source-changing entry after it.
- * Locating the pair by its defining property rather than by position is
- * ADR-0047 §4's own correction for this class, and it survives the next
- * source-changing entry too.
- */
-function truncatedToProfileSiblingHead(compiledApplication: unknown): unknown {
-  const envelope = structuredClone(compiledApplication) as {
-    applications: { normalizedDefinitionBytesBase64: string }[];
-  };
-  while (
-    envelope.applications.length > 2 &&
-    envelope.applications.at(-1)!.normalizedDefinitionBytesBase64 !==
-      envelope.applications.at(-2)!.normalizedDefinitionBytesBase64
-  ) {
-    envelope.applications.pop();
-  }
-  return envelope;
 }
 
 /**

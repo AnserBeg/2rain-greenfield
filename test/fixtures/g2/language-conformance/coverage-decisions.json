@@ -9,8 +9,8 @@
     "bitmapEncoding": "sorted-obligation-bitset-msb0-hex/v1",
     "ledgerDigest": "b004419f4dc2cac96f73fa509ff383a01b232449a07a528714f38caa63516703",
     "obligationCount": 1943,
-    "observedBitmap": "ffe0800404008701958ff09604000840080ea3a700000000040002000005e50d08e1dc2f001c30f0143c0001400038d080000c0800102003900011c0120002300400000000000000000000000104000000000000000000000000000000000000000000208008010f883fe10000848000ee0000200040000000000000000000000000000000000020002a208000000000000000000000004080000000001ef888001e81001ff9000184240006140003d70ae370a00014000210000000000000000000000000000000010000e2000b0e02007020006002100079087c7fbffffcfde5fa3f6ffffefffffffffffffffffff7fffffa",
-    "observedCount": 429
+    "observedBitmap": "ffe0800404008701958ff09604000840080ea3a700000000040002000005e50d08e1dc2f001c30f0143c0001400038d080000c0800102003900011c0120002300400000000000000000000000104000000000000000000000000000000000000000000208008010f883fe10000848000ee0000200040000000000000000000000000000000000020002a208000000000000000000000004080000000001ef888001e81001ff9000184240006140003d70ae370a00014000210000000000000000000000000000000010000e2000b0e02007020006002100061087c7fbffffcfde5fa3f6ffffefffffffffffffffffff7fffffa",
+    "observedCount": 427
   },
   "decisions": [
     {
@@ -26,19 +26,19 @@
       "acceptedButUnhonoredSetDigest": "1182b596eb701e61cb8de3d7fd072da933de7785001c04934916b6c3776b7d0f",
       "category": "observedOutsideRelationScope",
       "ledgerDigest": "b004419f4dc2cac96f73fa509ff383a01b232449a07a528714f38caa63516703",
-      "obligationSetDigest": "221cb35656666824cccdf53fe5fdbe8ed65c1c163d8de3e1c2a077113787431c",
-      "rationale": "The whole-language ledger intentionally precedes execution coverage outside relations. This set now also carries the single-valued authored axes the earlier cardinality filter dropped, which are declared constants rather than choices; admitting them is an inventory correction, not a claim that any of them executes. Existing first-party uses are named evidence debt, not baselined as correct behavior, and this exact-set decision cannot absorb a new value or axis. Amended by U5b: this set now also carries the surface-slot disclosure-tier axis, whose `$presence` pair and `always` value are observed because `party_detail`'s keyFacts slot declares `always` — a slot the compiler already forces, since its query selects `party_number` and `party_name`. That is a first-party instance, not an exemption, and it is why the axis appears here rather than under the unused-shape decision.",
+      "obligationSetDigest": "b1ebb712ee7a45d8b3cfc7b466fedc661e133d07c19699b80da0de58a7c83266",
+      "rationale": "The whole-language ledger intentionally precedes execution coverage outside relations. This set now also carries the single-valued authored axes the earlier cardinality filter dropped, which are declared constants rather than choices; admitting them is an inventory correction, not a claim that any of them executes. Existing first-party uses are named evidence debt, not baselined as correct behavior, and this exact-set decision cannot absorb a new value or axis. Amended by U5b: this set now also carries one obligation from the surface-slot disclosure-tier axis — `$presence=\"absent\"`, observed because every shipped slot omits the tier. The axis is admitted here as an inventory correction, exactly as the single-valued axes above were; no shipped slot declares a tier, so nothing about the tier itself is claimed to execute. Its other four obligations sit under the unused-shape decision.",
       "revisitCondition": "Each later language-axis packet replaces the corresponding obligations with execution or stable-refusal receipts; any change to the exact observed non-relation set invalidates this decision immediately.",
-      "decisionId": "lang-singleton-whole-language-execution-boundary@dafe995cce3acf204357a3b9411da6e1ef066b5ee1266678120d2c1c7b462b8e"
+      "decisionId": "lang-singleton-whole-language-execution-boundary@1a8d7742b2192aa7125b82aff806267a90f0bb0945825ad9e8e20816efb227f9"
     },
     {
       "acceptedButUnhonoredSetDigest": "1182b596eb701e61cb8de3d7fd072da933de7785001c04934916b6c3776b7d0f",
       "category": "unobserved",
       "ledgerDigest": "b004419f4dc2cac96f73fa509ff383a01b232449a07a528714f38caa63516703",
-      "obligationSetDigest": "a86aa3f2e04ac122218b79d064d9e5f3b104c0318982e13f26781089058c47ed",
+      "obligationSetDigest": "535caa3e137c47aae617e968c4074a40ac8b95f2855eb1454b3edebe171c758e",
       "rationale": "These derived values and topologies have no first-party instance. Their exemption is conditional on remaining unused and is not evidence that the platform honors them.",
       "revisitCondition": "The first first-party occurrence changes the observed partition, invalidates this exact-set decision, and requires execution, stable refusal, or a new explicit ruling before the gate can pass.",
-      "decisionId": "lang-singleton-unused-shape-standing-exemption@967cda91f9f62f408fe4447890faafa9683eebd1a94c1695869ea612c07ba713"
+      "decisionId": "lang-singleton-unused-shape-standing-exemption@4187235704fc07c0c67ab001bb91204f9ec985a4e0f0c2fc8b8bdb6925672fd8"
     }
   ]
 }
