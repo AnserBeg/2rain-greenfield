@@ -2115,7 +2115,10 @@ function languageHasV2Features(
   // Feature levels are cumulative. Leaving a newly cut version out of a
   // predecessor's check is how a version cut silently drops a released rule.
   return (
-    featureLevel === 'v2' || featureLevel === 'v3' || featureLevel === 'v4'
+    featureLevel === 'v2' ||
+    featureLevel === 'v3' ||
+    featureLevel === 'v4' ||
+    featureLevel === 'v5'
   );
 }
 

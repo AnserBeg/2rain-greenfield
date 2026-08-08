@@ -1,5 +1,6 @@
 import {
   LANGUAGE_VERSION,
+  languageHasMaterializedStateFields,
   type NormalizedApplicationPackage,
   type VersionedNormalizedApplicationPackage,
 } from '@north-star/canonical-model';
@@ -137,8 +138,17 @@ export function lowerBaseProjectionPayloads(
   );
 
   const isModuleV1 = packageRevision.languageVersion === LANGUAGE_VERSION;
+  // The AUTHORED version. `packageRevision` may be the dispatch alias; the
+  // third parameter is the real revision and is the only reliable source here.
+  const materializedStateFields = languageHasMaterializedStateFields(
+    verificationPackageRevision.languageVersion,
+  );
   const currentStorageTarget = isModuleV1
-    ? lowerStorageTargetV1(packageRevision, previousStorageTarget)
+    ? lowerStorageTargetV1(
+        packageRevision,
+        previousStorageTarget,
+        materializedStateFields,
+      )
     : null;
   const surfaceManifest = surfaceManifestPayload(packageRevision, queryById);
   const plans = [

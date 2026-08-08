@@ -5379,7 +5379,12 @@ function transitionModuleDefinition(
       (queryType) => `${namespace}:query.master_${queryType}`,
     ),
   );
-  for (const query of definition.queries) {
+  // Below v5 this selection cannot exist -- the field is not in
+  // `packageRevision.fields`, so it fails CANON_QUERY_FIELD_LOCALITY and
+  // CANON_REFERENCE_UNRESOLVED before any compiler rule is consulted. That is
+  // the read-path hole ADR-0050 §6 named, and it is why the v4 control below
+  // has to omit the selection to observe the compiler's refusal at all.
+  for (const query of languageVersion === 'v5' ? definition.queries : []) {
     if (!masterQueryIds.has(String(query.queryId))) continue;
     (query.selections as Array<Record<string, unknown>>).push({
       field: probeReference('fieldReference', stateFieldId),

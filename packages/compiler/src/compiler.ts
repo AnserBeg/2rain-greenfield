@@ -1167,7 +1167,10 @@ function languageUsesModuleProjectionShape(
   const featureLevel =
     canonicalLanguageProfileFor(languageVersion).featureLevel;
   return (
-    featureLevel === 'v2' || featureLevel === 'v3' || featureLevel === 'v4'
+    featureLevel === 'v2' ||
+    featureLevel === 'v3' ||
+    featureLevel === 'v4' ||
+    featureLevel === 'v5'
   );
 }
 

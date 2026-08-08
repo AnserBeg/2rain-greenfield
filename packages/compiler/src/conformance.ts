@@ -1219,8 +1219,15 @@ export function validateModuleConformance(
     }
   }
 
+  // The AUTHORED revision's version, not the dispatch alias's. `packageRevision`
+  // here is `projectionDispatchRevision(...)`, whose `languageVersion` is
+  // rewritten to the legacy compatibility literal -- which is exactly why the
+  // guard at the top of this function compares against `LANGUAGE_VERSION`.
+  // Asking the alias what version the author wrote is always answered "v2".
   const materializedStateFields = languageHasMaterializedStateFields(
-    packageRevision.languageVersion,
+    authoredOperations.languageVersion as Parameters<
+      typeof languageHasMaterializedStateFields
+    >[0],
   );
   for (const operation of packageRevision.operations) {
     if (

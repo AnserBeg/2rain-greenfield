@@ -555,9 +555,25 @@ export function buildStorageTransitionEnvelopeFromLegacyTargets(
   };
 }
 
+/**
+ * `materializedStateFields` is PASSED, not re-derived. Projection lowering
+ * receives `projectionDispatchRevision(...)`, an alias whose `languageVersion`
+ * is rewritten to the legacy compatibility literal so v2 physical families
+ * fingerprint unchanged. Asking that alias what version the author wrote is
+ * always answered "v2", so a gate derived here would silently take the
+ * pre-v5 branch for a v5 package -- observed as
+ * `COMPILER_PHYSICAL_NAME_REUSE_INCOMPATIBLE`, because both the materialized
+ * column and the retired parallel construct were then emitted.
+ *
+ * The default keeps direct callers (tests, the coverage gate) correct, since
+ * they pass the real revision.
+ */
 export function lowerStorageTargetV1(
   packageRevision: NormalizedApplicationPackage,
   previousStorageTarget: StorageTargetPayloadV1 | null = null,
+  materializedStateFields: boolean = languageHasMaterializedStateFields(
+    packageRevision.languageVersion,
+  ),
 ): StorageTargetPayloadV1 {
   const mappings: PhysicalMappingRecord[] = [];
   const previousEntities = new Map(
@@ -592,9 +608,7 @@ export function lowerStorageTargetV1(
     packageRevision.stateMachines,
     (machine) => machine.entity.targetId,
   );
-  const materializedStateFields = languageHasMaterializedStateFields(
-    packageRevision.languageVersion,
-  );
+
 
   const entities = packageRevision.entities.map(
     (entity): StorageEntityTarget => {

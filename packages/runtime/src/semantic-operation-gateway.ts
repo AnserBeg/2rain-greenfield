@@ -1012,10 +1012,10 @@ function parentGuardsFromCatalog(
  * parse is not an artifact one entry of which can be trusted. Narrowing it to
  * "skip the bad entry" would let a tampered projection serve.
  *
- * What was a defect is that it refused ANONYMOUSLY. An unrelated
- * `master_create` died with `object keys do not match the closed contract`,
- * naming neither the operation at fault nor its effect, which is the
- * misnamed-cause failure [ADR-0046](../../../docs/decisions/ADR-0046-rollback-activates-history-and-defects-refuse-by-name.md)
+ * What was a defect is that it refused ANONYMOUSLY. An unrelated create
+ * operation died with `object keys do not match the closed contract`, naming
+ * neither the operation at fault nor its effect, which is the misnamed-cause
+ * failure [ADR-0046](../../../docs/decisions/ADR-0046-rollback-activates-history-and-defects-refuse-by-name.md)
  * forbids and ADR-0050 §1 measured. Every refusal below now names its subject.
  *
  * The reachable cause is closed separately and earlier:

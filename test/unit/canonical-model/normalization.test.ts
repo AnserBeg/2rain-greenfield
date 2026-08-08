@@ -153,6 +153,7 @@ test('v3 and v4 select their profiles, reject mixed nodes, and leave adoption ex
     LANGUAGE_VERSIONS.v2,
     LANGUAGE_VERSIONS.v3,
     LANGUAGE_VERSIONS.v4,
+    LANGUAGE_VERSIONS.v5,
   ]);
   assert.deepEqual(SUPPORTED_NORMALIZATION_PROFILE_VERSIONS, [
     NORMALIZATION_PROFILE_VERSIONS.experimentalV0,
@@ -160,6 +161,7 @@ test('v3 and v4 select their profiles, reject mixed nodes, and leave adoption ex
     NORMALIZATION_PROFILE_VERSIONS.v2,
     NORMALIZATION_PROFILE_VERSIONS.v3,
     NORMALIZATION_PROFILE_VERSIONS.v4,
+    NORMALIZATION_PROFILE_VERSIONS.v5,
   ]);
   // Feature levels are cumulative in both directions that matter: v4 answers
   // yes to every v3 question, and only v4 answers yes to the operand question.
@@ -203,16 +205,17 @@ test('v3 and v4 select their profiles, reject mixed nodes, and leave adoption ex
       ),
   );
 
-  // This was a structural proxy modelling a hypothetical v4. v4 is now real,
-  // so the control observes the append itself: every binding that existed
-  // before the cut holds its exact prior literal, and v4 is the only addition.
-  // Renaming or retargeting any released version fails here.
+  // The append-only control, re-observed at every cut: every binding that
+  // existed before holds its exact prior literal, and the new version is the
+  // ONLY addition. Renaming or retargeting a released version fails here.
+  // `5g3-sm-impl` appended v5 for ADR-0050's materialized state field.
   assert.deepEqual(LANGUAGE_VERSIONS, {
     experimentalV0: 'v0-experimental',
     v1: 'v1',
     v2: 'v2',
     v3: 'v3',
     v4: 'v4',
+    v5: 'v5',
   });
   assert.deepEqual(NORMALIZATION_PROFILE_VERSIONS, {
     experimentalV0: 'northstar.normalization/v0-experimental',
@@ -220,6 +223,7 @@ test('v3 and v4 select their profiles, reject mixed nodes, and leave adoption ex
     v2: 'northstar.normalization/v2',
     v3: 'northstar.normalization/v3',
     v4: 'northstar.normalization/v4',
+    v5: 'northstar.normalization/v5',
   });
 });
 
