@@ -129,3 +129,28 @@ its own charter, and each stop cost a full orchestrator round trip.
 Count stops per packet, in the packet record. The cap is on stops that reveal
 NEW scope; a lane pausing for a ruling on work already inside its charter is
 not a stop for this purpose.
+
+## A preserved probe branch does not owe a matrix — ruled 2026-08-08
+
+Design packets in this programme end with a **probe preserved on a branch and
+never merged** — `proj-disc` at `a9146d2`, `U5-design` at `38ade5b`, `PS-0` at
+`9b59e09`. None was merged and none was matrix-green.
+
+**`PS-2` was allowed to chase matrix-green anyway, and it cost three slots.** That
+was the orchestrator's error: a packet whose deliverable is an ADR plus a preserved
+probe **does not integrate**, so AGENTS.md §6's *green at the integrated SHA* has
+no SHA to attach to.
+
+**It is also structurally unreachable, which `PS-2` proved.**
+`repository-hygiene` requires every discovered test file to appear in a reviewed
+inventory — so a preserved probe cannot reach green **without declaring itself a
+reviewed test**, which is precisely what a not-for-merge probe is not. `PS-0` and
+`PS-1` both carried unregistered probes; **neither could ever have gone green.**
+
+**The rule.** A design packet owes: the ruling with its evidence, the probe pushed
+and preserved on a branch, and **the targeted suites its probe actually exercises**
+— run and reported by name. It does **not** owe a full matrix, and it must not
+register its probe in a reviewed inventory to obtain one.
+
+**A design packet that finds it needs the matrix has usually stopped being a design
+packet.** That is worth noticing rather than routing around.
