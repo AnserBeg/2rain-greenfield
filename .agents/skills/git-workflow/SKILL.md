@@ -97,7 +97,7 @@ design (see "Branch model"), so a packet of any length should expect this.
 EXECUTABLE CONTENT, not by the SHA** — corrected 2026-07-31.
 
     git diff --name-only <reviewed-sha> <integrated-sha> -- . \
-      ':!docs' ':!.agents' ':!CLAUDE.md' ':!AGENTS.md'
+      ':!docs' ':!.agents' ':!CLAUDE.md' ':!AGENTS.md' ':!learnings.md'
 
 - **Empty output** — the integrated tree differs from the reviewed tree only in
   non-executable narrative, or not at all: the reviewed matrix **is** the
@@ -129,6 +129,11 @@ Re-run the full matrix when, and only when:
 
 The failure this prevents is not a wrong acceptance — it is a lane spending an
 hour proving three times over what it will have to prove once more anyway.
+
+**`learnings.md` was added to the list on 2026-08-08**, after `lock-obs`'s integration
+tripped on it: it sits at the repository root, outside all four original exclusions,
+while being pure doctrine. Verified before adding — `grep -rln 'learnings.md'` over
+`test/`, `packages/`, `scripts/` and `apps/` returns nothing, so no gate reads it.
 
 The exclusions are exactly the paths the docs-only exception already names, and
 for the same stated reason: those files are never executed, so a matrix cannot
