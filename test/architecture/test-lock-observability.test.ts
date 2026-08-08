@@ -722,11 +722,15 @@ function startMatrixRun(
   },
 ) {
   const fakeBin = createFakeBin(programs);
+  // Detached so the whole run is one process group. A killed run-matrix.sh
+  // leaves its container guard behind holding the stdout pipe, which keeps this
+  // test process alive long after the assertions are done.
   const child = spawn(
     'bash',
     [join(sandbox, 'scripts/run-matrix.sh'), label, sandbox, pre],
     {
       cwd: sandbox,
+      detached: true,
       env: lockEnvironment(lockPath, {
         PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
       }),
@@ -736,6 +740,16 @@ function startMatrixRun(
   return {
     child,
     cleanup: () => {
+      if (child.pid !== undefined) {
+        try {
+          process.kill(-child.pid, 'SIGKILL');
+        } catch {
+          // The group is already gone.
+        }
+      }
+      child.stdout.destroy();
+      child.stderr.destroy();
+      child.stdin.destroy();
       rmSync(fakeBin, { force: true, recursive: true });
       rmSync(sandbox, { force: true, recursive: true });
     },
