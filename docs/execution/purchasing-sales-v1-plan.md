@@ -254,6 +254,7 @@ must enter the same top-level transaction that takes stock locks after `BEGIN`.
 **This is the central viability issue, and it is an extension of the transaction
 coordinator rather than a replacement of the ledger.**
 
+<<<<<<< HEAD
 ### 7.8 `PS-0` ruled the seam, and corrected §7 in three places — 2026-08-08
 
 **Superseded by [ADR-0049](../decisions/ADR-0049-document-transition-and-inventory-effect-seam.md).**
@@ -379,3 +380,83 @@ capability executor for release would have retired `transitionStateEffect` by
 accident. **`PUR-1` starts after that decision. `PUR-2` stays blocked** until the
 companion-creation protocol and the invocation-capability-versus-kernel-contract
 distinction are in ADR-0049.
+=======
+### 7.7 Three corrections from `PUR-1`'s stopped lane — 2026-08-08
+
+**There is no migration, and none should be written.** Module tables are created by
+`module-storage-materializer.ts:1347` (`CREATE TABLE IF NOT EXISTS
+north_star_module.<physicalTableName>`) from the compiled storage-transition
+projection at release activation. `db/migrations/*.sql` is platform and kernel
+only. **§4's "accept a migration" bridge was wrong**; an empty migration would be a
+second authority for physical shape, which is the hazard §4's mount ruling names.
+
+**Family classification is a two-place edit.** `contracts.ts`'s
+`LEGAL_ENTITY_FAMILY_MAP_V1` is not the enforcement point —
+`packages/compiler/src/conformance.ts:35` holds `LEGAL_ENTITY_FAMILY_RULES`, and
+with only the domain rows the new entities compiled `legalEntity = undefined`
+(tenant-shared, no `legal_entity_id`) and `compileInventoryContract` raised three
+`INVENTORY_CONTRACT_INVALID` diagnostics. **It fails loudly**, because
+`inventory-contract.cases.ts:920` deep-equals the compiled contract against the
+domain map — materially better than `INVENTORY_POSTING_ROLES`, whose
+contract-to-provider gap has no gate at all. Edit both, and expect the compile
+failure if you forget.
+
+**`PS-0`'s ruling 1 is now constrained from two directions, not one.** Beyond the
+writability argument (`projections.ts:899`), `prepareMutation` evaluates an
+update's precondition against the **projected** image, so a `not(released)`
+predicate refuses the very update that performs the release. And
+`RegisteredCapabilityOperationDefinition` binds `kind: 'registeredCapabilityEffect'`
+to `tier: 'o1'` structurally, with the parser refusing a capability effect at any
+other tier. **`PS-0` must pin the exact tier rules for record effects before
+designing the transition carrier** — that is its first act, and it is cheap.
+>>>>>>> b32d3d7 (docs: record PUR-1's three charter corrections and the duplication pattern)
+
+### 7.11 ADR-0050 ratified — `transitionStateEffect` is honoured, 2026-08-08
+
+**`5g3-sm` is settled and `PUR-1` is unblocked by it.** Two facts were verified
+independently before ratifying.
+
+**They are one construct, so the choice was never two-sided.**
+`transitionStateEffect` carries exactly `kind`, `schemaVersion` and `transition`
+(`schemas.ts:933`) — no entity, no field, no target — and `transitionDefinition`
+is declared at `:622` and referenced exactly once, inside `stateMachineDefinition`'s
+`transitions` array. *Honour one, retire the other* is not available.
+
+**The current state is a trap, not neutral debt.** One declared
+`transitionStateEffect` makes **every operation in the release** fail with
+`MalformedPinnedOperationCatalogError` — an unrelated `master_create` dies with it —
+and the refusal names neither the operation nor the effect. That is an ADR-0046
+misnamed-cause defect layered on the ADR-0041 one. And the target it names is
+unreachable: a precondition on the machine's state field fails
+`CANON_REFERENCE_UNRESOLVED`, a query selecting it fails `CANON_QUERY_FIELD_LOCALITY`.
+**Accepted and unimplementable**, not accepted and ignored.
+
+**It is a canonical-language event and retirement is not cheaper.** ADR-0049 §1
+already priced re-inventing a transition effect as a language event, so retiring
+means paying twice *and* hand-writing a capability executor for every release,
+confirm and cancel in between.
+
+**Three corrections this makes to §7.10 and ADR-0049, all the orchestrator's:**
+§7.1's *"every business transition needs a named O1 handler"* is half wrong —
+refuting *enum plus precondition is a lifecycle* was right, concluding `o1` does
+not follow; what was missing is a **compiled patch, not a tier**. ADR-0049 §1
+attributed compare-and-swap, authoritative preconditions and trust writes to `o1`;
+three of those four are ordinary generic-press behaviour and **only
+server-selected target is new**. And the transition runs at `tier: 'o0'` through
+the generic press, measured — so **`PUR-1` does not write capability executors for
+release and cancel.**
+
+**No ADR-0034 exception is needed:** the projected-image check is scoped to
+`updateRecordEffect` because an update carries a caller patch; a transition carries
+none, so the hazard is structurally absent. Measured — a `not(released)`-shaped
+guard admits the release and refuses the second.
+
+**Cost, and the one item that gates `PUR-1`:** the language cut, plus six probe
+findings. **Load-bearing: the state field has no read path.** It is correctly
+excluded from caller-writable contracts, but nothing admits it to query selections,
+so a released purchase order cannot be listed by state. **`PUR-1` cannot ship
+without that.** The rest: release verification cannot populate a field no caller may
+write (`5g3-mount` class, `systemInput` is the precedent); the closed-argument
+fence sits at the interpreter rather than the gateway for O0; the per-entity field
+budget; `apps/web`'s `operationIntent` returns `null` for the effect kind; and the
+misnamed refusal above.

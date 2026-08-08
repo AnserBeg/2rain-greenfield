@@ -457,3 +457,17 @@ How to apply: resolve to a PID first and act on the PID. Where a pattern is
 unavoidable, exclude `$$` and the process group explicitly and assert the match
 count before acting. A gate that reads the real process table is separately
 suspect — see the same packet's machine-load-dependent controls.
+
+## A closed vocabulary duplicated across domain and compiler needs a binding gate
+Date: 2026-08-08
+Why: Three instances found in one day. `INVENTORY_POSTING_ROLES` exists in five
+places -- domain contract, compiler conformance, the persisted movement enum, the
+provider's command types, and one physical configuration column per role -- and
+`reBaseline` is already in the contract but not in the provider's implemented
+union, with no gate binding them. `LEGAL_ENTITY_FAMILY_MAP_V1` has a compiler twin
+in `conformance.ts`. `U5b` shipped `FIELD_BEARING_SURFACE_SLOTS` as a restatement
+of the runtime's `ownsDataResolution`, and the two disagreed on `record:titleStatus`.
+How to apply: when a closed set must exist in two layers, add the deep-equal
+assertion in the same packet. The family map has one and drift fails compilation
+loudly; the posting roles do not, and a release can describe vocabulary the runtime
+cannot execute. Loud duplication is tolerable; unbound duplication is not.
