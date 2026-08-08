@@ -482,3 +482,32 @@ shipped quantity and open-to-ship.
 platform decision as a side effect of shipping. The charter caused it: the `PUR-1`
 prompt listed *"line number, item, ordered quantity, received quantity, unit
 price"* without the plan's *derived* qualifier.
+
+### 7.13 `PS-1` corrects §7.10 item 5 — 2026-08-08
+
+**Item 5 said the companion has no writer. The truth is larger: no companion
+*mechanism* exists at all.** Verified: `#post` contains exactly **one** business
+`INSERT` — the movement at `inventory-posting-service.ts:2148`; the other five
+target `platform.*` receipts, trust invocations, change documents, domain events
+and outbox. And `inventory-posting-capability-executor.ts:254` passes
+`transactionId: input.recordId`, so **the record being posted *is* the
+`inventory_transaction`.**
+
+**Therefore the shipped writer of every companion — stock-count included — is the
+generic `o0` create, driven by a user.** Stock-count companions are not documents
+that escaped a filter; they are ordinary documents nobody ever hid.
+
+**This changes what `PUR-2` builds** from *a visibility filter* to *the writer,
+plus retiring the generic authoring path*. It also collapses ADR-0049's two
+branches: "stage it before posting" is not an alternative, it is what ships, and
+its only stager is the authoring path that must be closed. Both branches need a
+new internal writer; **inside the posting transaction wins on
+congruence-by-construction** — no repair policy, no orphans, one writer — at the
+honest cost of two companion appends in the dependency contract.
+
+**§7.10's other error: the 41-entry union root is not conditional, it is the wrong
+shape**, and it is withdrawn rather than completed. No companion ruling would have
+made a single union root correct.
+
+**Ruled by `PS-1`, pending review** — ADR-0049 remains unratified and this
+amendment supersedes two of its rulings.
