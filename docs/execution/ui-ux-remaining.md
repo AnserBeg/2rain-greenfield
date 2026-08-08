@@ -3,8 +3,12 @@
 **Status: open charter. Written 2026-08-08 so the work can be picked up cold.**
 
 Read `AGENTS.md`, then the plan, then the ADRs cited here — this document
-charters work and records one correction; it does not override a ruling. Where it
+charters work and records corrections; it does not override a ruling. Where it
 corrects a ruling, that ruling has been amended and is cited by section.
+
+**§6 carries the adjudicated 2026-08-08 doctrine review** — nine findings upheld,
+two refuted, each with where it landed. Read it before re-opening anything in §2
+or §5.
 
 Companion rows live in [current-plan.md](current-plan.md) (U0–U9 and the
 follow-ups). This file exists because those rows are spread across a queue built
@@ -97,6 +101,13 @@ Within one wait:
 **Never de-escalate.** Skeleton → indicator → progress is a story the user can
 follow. The reverse is a flicker, and it reads as a fault.
 
+**The `> 10 s` row is the ladder, not the buildable scope.** Every treatment in it
+is a fact about an operation nothing in this repository produces — units
+completed, a step name, cancellation, a destination for a handed-off operation.
+`wait-escalate` therefore implements up to `3 s – 10 s` and declares the shortfall;
+`op-handoff-substrate` (§3c) carries the rest with a trigger that can actually
+fire. Ruled in ADR-0032 §3a, 2026-08-08.
+
 **The escalation half needs no prediction.** It runs on a clock against the actual
 elapsed time. Prediction only buys the *entry* treatment — whether to open at
 "nothing" or open directly at a skeleton. So the cheapest correct implementation
@@ -140,9 +151,20 @@ every cause in §2.1.
 
 **Streamed SSR** — flush the document shell with skeletons immediately, then
 stream each slot as its data resolves. Needs no client script, so **no ADR-0036
-amendment**, and it degrades correctly with JavaScript disabled (ADR-0036 §4). It
-fits `U4`'s per-slot state machine exactly: a slot is `pending` until its chunk
-arrives, which is what streaming already means. **Covers causes (1), (2), (3).**
+amendment**, and it degrades correctly with JavaScript disabled (ADR-0036 §4).
+**Covers causes (1), (2), (3).**
+
+> **Corrected 2026-08-08 — it does *not* fit `U4`'s state machine "exactly", and
+> the correction is not cosmetic.** This paragraph said a streamed slot is
+> `pending` until its chunk arrives. `U4`'s `pending` is
+> `data.status === 'UNBOUND'` (`apps/web/src/component-registry.ts:298`) — *no
+> binding exists* — which ADR-0032 §2a ruled is a structural fact, and which the
+> `ux-grammar` skill says explicitly *"does not authorize a default loading
+> treatment"*. A streamed slot is the opposite on all three counts: bound,
+> temporal, and painting a skeleton. Reusing the spelling would make
+> `data-slot-state="pending"` mean two incompatible things in one document and
+> would silently repeal the skill's own guard. **A streamed slot is a new member
+> of `U4`'s closed set, and naming it is part of `skeleton-route`'s output.**
 
 **Widened client script** — intercept navigation and paint a skeleton before the
 new document arrives. Requires an **ADR-0036 amendment**: its four authorised
@@ -161,9 +183,32 @@ ADR-0032 §2a asked for in the first place.
 ### 2.6 What this replaces in the queue
 
 `ladder-trigger` — the open row noting that the skeleton deferral *"has no way to
-end"* — is **absorbed by `wait-measure` below.** Once the whole-response wait is
-measured rather than the query, the trigger fires on its own evidence instead of
-waiting for someone to remember to look.
+end"* — is **absorbed by `wait-measure` below for the server-caused half of the
+wait, and only that half.**
+
+**Corrected 2026-08-08, and this is the same defect this document was written to
+close, one step out.** §2 says the ladder is about the interval from the person's
+action to the painted result. `wait-measure` observes the **whole server
+response** — wider than query execution, still not that interval. It omits request
+transit, body transfer, parse and paint; time to first byte stops before the same
+three; and a streamed shell cannot start a user-visible clock during the interval
+before the shell arrives. So the trigger fires on its own evidence for causes
+(1)–(3) and **cannot** fire for (4) the user's connection or (6) cold start — the
+two §2.1 calls the largest in the field.
+
+Two consequences, both binding:
+
+- **`wait-measure` states what it cannot observe** (AGENTS.md §6), so its counter
+  is never read as coverage of the wait. A row of six causes with four unmeasured
+  is the honest report.
+- **Client-observed timing is an ADR-0036 question, not instrumentation.** First
+  byte, parse and paint reach the browser only through the Navigation Timing API,
+  which needs script; ADR-0036 §2's four behaviours do not include measurement,
+  and §7 now names client-side timing collection as unauthorised. Wanting the real
+  number is a good reason to amend that ADR under its §2a test — and not a reason
+  to slip a beacon in as tooling.
+
+Ruled in ADR-0032 §2c.
 
 ---
 
@@ -173,9 +218,9 @@ waiting for someone to remember to look.
 
 | Row | What it adds | Size |
 |---|---|---|
-| **`wait-measure`** | Extend `U1`'s classifier from query execution to the **whole server response**, per surface path, and record time to first byte where the client can report it. Reuse `U1`'s shape — the closed twelve-series counter and the *graded total equals invocation count* gate that earned its acceptance. **Absorbs `ladder-trigger`.** | ~1 day |
-| **`wait-escalate`** | The escalation ladder of §2.2 in the runtime, driven by elapsed time with no prediction: pending → skeleton → indicator-with-context → determinate-or-handoff, one direction only, with the §2.3 floor and hold. **Depends on the §2.5 route being chosen.** | ~1–2 days |
-| **`skeleton-route`** | Design pass settling streamed SSR versus the client-script amendment, against `wait-measure`'s numbers. Output is an ADR. **Do not implement skeletons before this row rules.** | ~half day |
+| **`wait-measure`** | Extend `U1`'s classifier from query execution to the **whole server response**, per surface path, measured server-side. Reuse `U1`'s shape — the closed twelve-series counter and the *graded total equals invocation count* gate that earned its acceptance. **Must declare what it cannot observe** (§2.6): request transit, body transfer, parse, paint, DNS/TLS — i.e. causes (4) and (6) stay unmeasured, and the packet record says so in those words. **No client-side timing**; that is an ADR-0036 §2a amendment, not instrumentation. **Absorbs `ladder-trigger` for causes (1)–(3) only.** | ~1 day |
+| **`skeleton-route`** | Design pass settling streamed SSR versus the client-script amendment, against `wait-measure`'s numbers *and* against what those numbers cannot see. Output is an ADR, and it owes two things beyond the route: **(a)** the name and semantics of the new `U4` slot state for a bound-but-in-flight slot — `pending` may not be reused (§2.5); **(b)** whether the unmeasured transit-bound half justifies an ADR-0036 amendment for client-observed timing, argued under that ADR's §2a test. **Do not implement skeletons before this row rules.** | ~half day |
+| **`wait-escalate`** | The escalation ladder of §2.2 in the runtime, driven by elapsed time with no prediction: pending → skeleton → indicator-with-context, one direction only, with the §2.3 floor and hold. **Stops at the `3 s – 10 s` band and declares the shortfall** — the `> 10 s` treatments need units-completed, a step name, cancellation and a handoff destination, none of which exists (`op-handoff-substrate`, §3c). Above 10 s it renders the 3–10 s treatment and records that as a declared limit, per ADR-0032 §3a. **Depends on the §2.5 route being chosen.** | ~1–2 days |
 
 ### 3b. A person notices
 
@@ -183,7 +228,7 @@ waiting for someone to remember to look.
 |---|---|---|
 | **`U6b`** | Today there is **one sentence** for every empty screen in the application and **one template** for every success message. A search that matched nothing, a filter that excluded everything, and a brand-new tenant with no records all read identically. `U6b` gives each its own, registers `page` and `slot` placement, refuses `toast` and `modal` by name with a diagnostic, and wires slot placement to `U4`'s existing `slotResolutionState()`. **Charter correction on record: it is *not* covered by `U6a`'s gate "by construction"** — `feedbackHtml()` and `emptyDataPanel()` never call `messageAttributes()`, so it owes real-path observations of the actual success and empty renderers. | ~1 day |
 | **`U2-num`** | Numeric right-alignment in tables. Small; in an ERP it is the difference between a column you can scan and one you cannot. | ~half day |
-| **`U7`** | Forms: chunk fields above ~10 (authority is Hick, not Miller), validate inline on blur, and make the submit control visually de-emphasised but **focusable and operable**, moving focus to the first incomplete field — a hard-`disabled` button would violate the plan's own WCAG 2.2 AA claim. Plus Postel input normalisation for phone, quantity, dates and scanner affixes, and declared-source pre-fill. Unblocked by `U6a`. | ~1.5 days |
+| **`U7`** | Forms: chunk fields above ~10 (authority is Hick, not Miller), validate inline on blur, and make the submit control visually de-emphasised but **focusable and operable**, moving focus to the first incomplete field — a hard-`disabled` button would violate the plan's own WCAG 2.2 AA claim. Plus Postel input normalisation for phone, quantity, dates and scanner affixes, and declared-source pre-fill. Unblocked by `U6a`. **Two dependencies added 2026-08-08, both stop-and-bridge rather than blocking.** *(i)* **Message placement has no field anchor.** `MessagePlacement` is `page \| slot` (`apps/web/src/message-catalog.ts:42`) and a validation message anchored to one input is neither — it differs on focus movement and error association. `U7` owns the ruling (ADR-0048 §4a): add a field/control anchor, split placement from anchor, or rule validation a separate grammar. Do **not** route a field message through `slot` or around the catalog. *(ii)* **Pre-fill from "the principal's default legal entity" names a mechanism that does not exist** — ADR-0037 §4 records the declared-default mechanism as absent and ADR-0015:38 as its only admission. Either narrow the source list to sources that exist, or stop for a bridge request. Pre-filling a field is not the context bar selecting a scope, and neither may invent the mechanism. | ~1.5 days |
 | **`msg-code-accuracy`** | Six gateway error mappings carry the wrong code and one code is reachable from no path under its own name. Mostly invisible, but it changes what a few failures say. Separate packet because fixing it moves `data-diagnostic-code` values that existing browser assertions pin. | ~half day |
 
 ### 3c. Only a gate notices
@@ -192,7 +237,9 @@ waiting for someone to remember to look.
 |---|---|---|
 | **`U9`** | **The largest remaining row, and the one that costs most to defer.** The accumulated "proved by proxy, not by observation" list from three packets: gates that read declared or computed CSS instead of painted pixels; a dark-mode predicate that passes on a white ground with dark ink; a colour parser that fabricates RGB from `oklch()`; a focus-ring check that survives `opacity:0`; a reachable hidden state that is logged and never asserted. Carries a **binding acceptance criterion — every `FOCUS_RING_*` branch ships an executed red**, four of five still outstanding. Also carries `U6a`'s perceptibility residue, where several cases the reviewer called impossible are in fact directly inspectable. Changes no pixel. It is the difference between the visual system being correct and being *believed* correct. | ~2 days |
 | **`shimmer-trajectory`** | The sheen must begin fully left and travel past the right edge; the current gate reads only animation name, duration and timing function, so a `-20% → 20%` keyframe passes. Observable **today** without any skeleton rendering — pause via `getAnimations()` and read the `::after` transform at t=0 and t=duration. | small |
-| **`op-latency`** | Instrument `SemanticOperationGateway` against the ladder's upper bands. Becomes urgent the moment `wait-escalate` lands, because that is what consumes the measurement. | ~half day |
+| **`op-latency`** | Instrument `SemanticOperationGateway` against the ladder's upper bands. Becomes urgent the moment `wait-escalate` lands, because that is what consumes the measurement. **It is also the trigger source for `op-handoff-substrate` below.** | ~half day |
+| **`slot-fault-scope`** | Make the actual scope of `U4`'s fault isolation observable instead of implied. Today one `SurfaceDataRenderState` is computed per request (`apps/web/src/surface-runtime.ts:193-214`) and handed to every slot (`:339-349`), so all `ownsDataResolution` slots share a fate, while the isolation gate asserts only *one* failed data slot beside three non-data siblings (`apps/web/test/browser/surface-data-binding.spec.ts:259-283`). The cheapest broken tree that keeps that gate green is one where `record:sections` carries `data-slot-state="failed"` and renders blank or stale content inside it — the attribute is set by `slotResolutionState()`, not by the renderer, so the state can be right while the content is not. Assert both data-owning slots fail together **and** the non-data siblings render, so the doctrine's real claim is pinned by observation. Docs half is the `ux-grammar` ruling, already landed. | small |
+| **`op-handoff-substrate`** | **BLOCKED, and now with a firing trigger instead of "when it exists".** ADR-0032 §1's `> 10 s` band requires units-completed, a step name, cancellation, and a durable destination for a handed-off operation; ADR-0036 §6 orders determinate progress last for exactly that reason and declines to design the substrate; `packages/runtime/src` contains no job concept at all. `wait-escalate` therefore ships the ladder up to `3 s – 10 s` with a declared shortfall. **Trigger: the first operation `op-latency` grades into `3s_10s` or `over_10s`.** That is an event a counter raises, not a memory someone has to keep. Output is a design pass and an ADR, not a UI packet — the substrate is platform work and is sized there. | blocked |
 | **`rollback-release-edge`** | ADR-0047 §6's negative direction, declared-unobserved. Compiler plumbing. | small |
 | **`lock-owner`, `matrix-contention`** | Both being closed by the in-flight `lock-obs` packet. | in flight |
 
@@ -200,9 +247,16 @@ waiting for someone to remember to look.
 
 - **`U8`** — conventions register and citation corrections. **Rides any packet
   already amending the grammar; never takes a slot alone.**
-- **`U6c`** — compiled per-surface copy. **Not chartered** until a module actually
-  authors a message (ADR-0048 §1, on ADR-0041 §3's refusal to ship a spelling
-  ahead of its meaning).
+- **`U6c`** — compiled per-surface copy. **Not chartered**, and the trigger is
+  **corrected 2026-08-08**: it was *"until a module actually authors a message"*,
+  which is an event the language cannot produce — `schemas.ts` has no message
+  field, so there is no spelling in which a module could author one, and the
+  deferral was waiting for something it had itself made impossible. The same shape
+  as `ladder-trigger`. **What fires it: a chartered module needs entity-specific
+  copy, finds it inexpressible, and stops with a bridge request** rather than
+  hard-coding a sentence in a renderer or overloading a platform code. The carrier
+  ADR-0048 §1 reserves is what that request is granted. ADR-0041 §3's refusal to
+  ship a spelling ahead of its meaning is unchanged.
 - **`U5b`'s v2 adoption obligation** — the compiler-semantic profile `v2` is cut
   and deliberately unadopted. Fields accumulate on it for free; adoption is a
   separate, schedulable event that mints exactly one lineage entry no matter how
@@ -217,8 +271,9 @@ waiting for someone to remember to look.
 2. **`U6b` + `U2-num`** — about a day and a half, and it closes the last two things
    a user encounters that are visibly unfinished.
 3. **`wait-measure`** — cheap, and everything in §2 is guesswork without it. It
-   also retires `ladder-trigger`, which is currently a permanent decision wearing a
-   temporary label.
+   retires the server-caused half of `ladder-trigger`, which is currently a
+   permanent decision wearing a temporary label; the transit-bound half stays open
+   by declaration rather than by oversight (§2.6).
 4. **`skeleton-route`** design pass, then **`wait-escalate`**.
 5. **`U7`**, which pairs naturally with inventory form work.
 6. **`U9`**, whenever there is a slot that is not competing with inventory. It does
@@ -235,14 +290,64 @@ small slot. `U8` rides whatever is already amending the grammar.
 boundaries (ADR-0032 §1); loading treatments as an exception path rather than a
 default (§2); the closed optimistic allow-list (§4); success states weighted with
 full-page almost always wrong (§5); the 400 ms query budget (§7); ADR-0036's four
-authorised client behaviours as a **closed** set; the message catalog living in
-code rather than a compiled projection (ADR-0048 §1); `toast` and `modal` refused
-by name with what would admit each recorded (§4).
+authorised client behaviours as a set closed over **this script's domain**
+(ADR-0036 §2a — the platform-wide reading did not survive; camera scanning and the
+PWA service worker are separate domains with their own decisions); the message
+catalog living in code rather than a compiled projection (ADR-0048 §1); `toast` and
+`modal` refused by name with what would admit each recorded (§4), and the
+"semantics-preserving fallback" alternative considered and refused (ADR-0048 §4).
 
-**Open, and yours to decide with evidence:** the §2.5 route; the §2.3 floor and
-hold values; whether client hints earn a place in the entry estimate; and whether
-the transit-bound causes justify an ADR-0036 amendment.
+**Open, and yours to decide with evidence:** the §2.5 route; the name of the new
+slot state a streamed slot needs; the §2.3 floor and hold values; whether client
+hints earn a place in the entry estimate; whether the transit-bound causes justify
+an ADR-0036 §2a amendment for client-observed timing; and `U7`'s two bridge
+questions (field placement anchor, declared-default pre-fill).
 
 **The standing trap this document exists to close:** a measurement that covers one
 segment of a wait, quoted as though it covered the wait. It survived on disk for
-two days inside a ruling that read as settled.
+two days inside a ruling that read as settled — and §2.6 shows the first
+replacement for it reproduced the same shape one step wider.
+
+---
+
+## 6. The 2026-08-08 doctrine review, adjudicated
+
+A second session reviewed the whole UI/UX authority set for one defect shape:
+**a ruling whose load-bearing term means something narrower in its evidence than
+in the rule it justifies.** Eleven findings, adjudicated against the tree. Nine
+upheld in whole or in part, two refuted. Recorded here so neither the upheld ones
+are re-derived nor the refuted ones re-raised.
+
+| # | Term | Verdict | Where it landed |
+|---|---|---|---|
+| F1 | `pending` | **Upheld** — structural (`UNBOUND`), temporal (in flight), and interaction-pending are three facts under one spelling; §2.5 claimed streamed SSR "fits exactly" | ADR-0032 §2c; `ux-grammar` slot states; §2.5 above; `skeleton-route` owes the name |
+| F2 | "the whole wait" | **Upheld, and it was our own correction that reproduced it** — `wait-measure` measures the whole *server response*, not action-to-paint | ADR-0032 §2c; §2.6 and the `wait-measure` row above |
+| F3 | `slot` | **Upheld with different evidence** — one `SurfaceDataRenderState` per request is shared by every slot, so the resolution unit is the data binding and the slot is where the state renders | `ux-grammar` slot states; proposal M2 correction; new `slot-fault-scope` row |
+| F4 | `onDemand` | **Split: doctrine upheld, code refuted** — the skill described a tier nothing can honour, but `U5b` already refuses `onDemand` by name at normalization, including on forcing slots. The skill now says so, and the hard rule is restated over every tier ≠ `always` | `ux-grammar` disclosure tiers |
+| F5 | "minimum client capability" | **Upheld** — the four behaviours were enumerated from the live residue while the ADR concedes camera scanning and the PWA need client JS at launch (plan lines 1690, 1711) | ADR-0036 §2a: scoped to this script's domain, plus an amendment test |
+| F6 | `placement` | **Upheld** — `page \| slot` cannot express field-anchored validation, which §3.8, ADR-0036 §2.4 and `U7` all already require | ADR-0048 §4a; `ux-grammar` message vocabulary; `U7` row. No `field` spelling coined |
+| F7 | "once a substrate exists" | **Upheld** — nothing in the plan creates the async job substrate the `> 10 s` band displays | ADR-0032 §3a; `wait-escalate` stops at 10 s and declares it; new `op-handoff-substrate` row with a counter-raised trigger |
+| F8 | "honoured / refused" | **Refuted** — see below | ADR-0048 §4, recorded as considered-and-refused |
+| F9 | "geometry" | **Upheld** — structural fidelity is compiler-provable, rendered fidelity is sampled, and one paragraph claimed both | ADR-0032 §2c and Consequences; proposal M1 correction |
+| F10 | "selection" / "default" | **Upheld in part** — the legal-entity ruling survives; the universal "never selects" reason does not, and `U7`'s pre-fill depends on the mechanism ADR-0037 §4 records as absent | ADR-0037 §4; `ux-grammar` shell contract; `U7` row |
+| F11 | "authors" | **Upheld** — `U6c` waited on an event the language cannot produce | ADR-0048 §1; §3d above |
+
+**F8 is the one to read if you are tempted to re-open it.** It argued that
+ADR-0041's binary comes from a storage example — a `oneToOne` silently lowered as
+an ordinary foreign key — and that presentation has a third state the storage case
+lacks: an explicit, observable, semantics-preserving fallback, such as admitting
+`toast` and rendering a durable inline notice. Refused on three checks: the
+user-facing meaning of every refused code is *already* honoured page- or
+slot-level, so the refusal costs the user nothing; the proposed fallback needs the
+same absent durable-record substrate that blocks `toast` in the first place; and
+retaining a declaration while changing its effect is the accepted-and-ignored shape
+one indirection further out. What the finding did earn is a sharper statement of
+what "honoured" means — the promised **user-visible effect**, not a byte-for-byte
+modality — and that is now in ADR-0048 §4.
+
+**The second refutation is inside F4.** The reviewer read the skill and concluded
+`onDemand` was admitted with no mechanism and no refusal. Half right: the in-flight
+`U5b` lane refuses it at normalization with that exact reason in the diagnostic,
+and refuses it on forcing slots too, which closes the "escapes the hard rule" half
+of the finding outright. Reading the branch, not just the doctrine, is what
+separated the two halves.
