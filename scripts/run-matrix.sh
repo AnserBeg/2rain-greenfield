@@ -22,6 +22,32 @@ registry() {
   node scripts/test-lock-registry.mjs "$@" --lock "$LOCK" --pid $$
 }
 
+# set -uo pipefail is not set -e, so an unchecked registry write fails silently
+# and leaves a recorded mode nobody can trust. Every write is checked, and the
+# matrix refuses to run rather than hold a lease it cannot account for.
+require_registry_write() {
+  if ! registry record "$@"; then
+    echo "TEST_GATE_REGISTRY_WRITE_FAILED: the matrix could not record its lease for $LOCK; refusing to run." >&2
+    exit 77
+  fi
+}
+
+# The claim a child inherits names this lock, this shell and its start ticks, so
+# the child can ask the registry whether the claim is still true. Assigned by
+# the caller rather than substituted: an exit inside $( ) leaves only the
+# subshell, which would export an empty claim and carry on.
+MATRIX_CLAIM=""
+mint_claim() {
+  if ! MATRIX_CLAIM="$(registry claim --mode "$1")"; then
+    echo "TEST_GATE_REGISTRY_WRITE_FAILED: the matrix could not mint a $1 lease claim for $LOCK; refusing to run." >&2
+    exit 77
+  fi
+  if [ -z "$MATRIX_CLAIM" ]; then
+    echo "TEST_GATE_REGISTRY_WRITE_FAILED: the matrix minted an empty $1 lease claim for $LOCK; refusing to run." >&2
+    exit 77
+  fi
+}
+
 node scripts/guard-ephemeral-postgres.mjs pre-lock
 CONTAINER_GUARD_RC="$?"
 if [ "$CONTAINER_GUARD_RC" -ne 0 ]; then
@@ -33,8 +59,8 @@ touch "$LOCK"
 echo "[$(date +%H:%M:%S)] $LABEL waiting for the matrix slot (sha ${SHA:0:8})..."
 # flock is a kernel descriptor lock, so this shell is the only thing that can
 # say who holds it. Record before waiting and clear on every exit path.
-trap 'registry release' EXIT
-registry record --mode exclusive --state waiting --label "$LABEL" \
+trap 'registry release || echo "TEST_GATE_REGISTRY_WRITE_FAILED: could not release the matrix record for $LOCK" >&2' EXIT
+require_registry_write --mode exclusive --state waiting --label "$LABEL" \
   --command "scripts/run-matrix.sh $LABEL"
 registry report
 exec 9>"$LOCK"
@@ -49,7 +75,7 @@ if [ "$LOCK_RC" -ne 0 ]; then
   fi
   exit "$LOCK_RC"
 fi
-registry record --mode exclusive --state holding --label "$LABEL" \
+require_registry_write --mode exclusive --state holding --label "$LABEL" \
   --command "scripts/run-matrix.sh $LABEL"
 # Report before sweeping, from one snapshot, and sweep only because this
 # acquisition is exclusive: success here does prove no incompatible inherited
@@ -117,7 +143,8 @@ if [ "$(git rev-parse HEAD)" != "$SHA" ]; then
 fi
 
 export CI=1
-export NORTH_STAR_TEST_LOCK_HELD=exclusive
+mint_claim exclusive
+export NORTH_STAR_TEST_LOCK_HELD="$MATRIX_CLAIM"
 export NORTH_STAR_TEST_LOCK_LABEL="$LABEL"
 export REACHABILITY_RUN_ID="${LABEL}-${SHA:0:8}"
 
@@ -190,9 +217,13 @@ if [ "$LOCK_RC" -ne 0 ]; then
   echo "[$(date +%H:%M:%S)] $LABEL released the slot." | tee -a "$LOG"
   exit "$LOCK_RC"
 fi
-export NORTH_STAR_TEST_LOCK_HELD=shared
-registry record --mode shared --state holding --label "$LABEL" \
+# Record the new mode BEFORE minting the claim that advertises it: a child
+# validating an inherited claim reads the record, so the record must never lag
+# behind what children are told.
+require_registry_write --mode shared --state holding --label "$LABEL" \
   --command "scripts/run-matrix.sh $LABEL"
+mint_claim shared
+export NORTH_STAR_TEST_LOCK_HELD="$MATRIX_CLAIM"
 echo "[$(date +%H:%M:%S)] $LABEL downgraded to shared access for the load-tolerant tail." | tee -a "$LOG"
 {
   set -x

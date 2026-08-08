@@ -288,19 +288,29 @@ test('test entry points participate in the shared/exclusive gate lock', () => {
   ) as { scripts?: Record<string, string> };
   const rootScripts = packageJson.scripts ?? {};
   // Which mode each entry point is entitled to is derived from whether it
-  // stands up containers, in test-lock-observability.test.ts. This asserts only
-  // that no entry point runs outside the lock at all.
+  // stands up containers, in test-lock-observability.test.ts. This asserts the
+  // WHOLE entry point is inside the lease. The previous regex accepted a
+  // wrapper anywhere, which admitted exactly the prefixes and suffixes that
+  // were running unleased: evidence preparation, which deletes the files, and
+  // playwright normalization, which rewrites them.
   for (const [script, command] of Object.entries(rootScripts)) {
     if (!script.startsWith('test:')) continue;
     assert.match(
       command,
       new RegExp(
-        `(?:^|&& )node ${testLockRunnerPath.replaceAll('.', '\\.')}` +
-          ` (?:shared|exclusive) --`,
+        `^node ${testLockRunnerPath.replaceAll('.', '\\.')}` +
+          ` (?:shared|exclusive) -- `,
         'u',
       ),
-      `${script} does not acquire the test lock`,
+      `${script} runs work before it acquires the test lock`,
     );
+    if (command.includes('scripts/run-suite.sh')) {
+      assert.match(
+        command,
+        /-- bash scripts\/run-suite\.sh \S+(?: --normalize-playwright)? -- \S/u,
+        `${script} does not run its whole suite through the leased runner`,
+      );
+    }
   }
   assert.match(
     webPackageJson.scripts?.['test:contracts'] ?? '',
@@ -308,12 +318,20 @@ test('test entry points participate in the shared/exclusive gate lock', () => {
   );
 
   const matrixRunner = readFileSync('scripts/run-matrix.sh', 'utf8');
-  assert.match(matrixRunner, /NORTH_STAR_TEST_LOCK_HELD=exclusive/u);
+  // The lease a child inherits is a minted claim, not a bare mode word: the
+  // child validates it against the registry before honouring it.
+  assert.match(
+    matrixRunner,
+    /mint_claim exclusive\nexport NORTH_STAR_TEST_LOCK_HELD="\$MATRIX_CLAIM"/u,
+  );
   assert.match(
     matrixRunner,
     /bash scripts\/downgrade-test-lock\.sh "\$LOCK" "\$LOCK_TIMEOUT_SECONDS" 9/u,
   );
-  assert.match(matrixRunner, /NORTH_STAR_TEST_LOCK_HELD=shared/u);
+  assert.match(
+    matrixRunner,
+    /mint_claim shared\nexport NORTH_STAR_TEST_LOCK_HELD="\$MATRIX_CLAIM"/u,
+  );
   assert.ok(
     matrixRunner.indexOf('corepack pnpm test:performance') <
       matrixRunner.indexOf('# The main matrix deliberately excludes'),

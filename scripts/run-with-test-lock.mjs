@@ -7,16 +7,23 @@ import process from 'node:process';
 import {
   describeLockUser,
   describeLockUsers,
+  mintLockClaim,
   readLockUsers,
   recordLockUser,
   releaseLockUser,
   sweepStaleLockUsers,
+  validateLockClaim,
 } from './test-lock-registry.mjs';
 
 const LOCK_PATH =
   process.env.NORTH_STAR_TEST_LOCK_PATH ?? '/tmp/north-star-matrix.lock';
-const inheritedMode = process.env.NORTH_STAR_TEST_LOCK_HELD;
+const inheritedClaim = process.env.NORTH_STAR_TEST_LOCK_HELD;
 const [mode, separator, ...command] = process.argv.slice(2);
+const label =
+  process.env.NORTH_STAR_TEST_LOCK_LABEL ??
+  process.env.npm_lifecycle_event ??
+  'unlabelled';
+const commandText = command.join(' ');
 
 if (
   (mode !== 'shared' && mode !== 'exclusive') ||
@@ -29,22 +36,28 @@ if (
   process.exit(2);
 }
 
-if (inheritedMode === 'exclusive' || inheritedMode === mode) {
+// An inherited claim is a statement, not proof. No asking process can inspect
+// a descriptor it does not own, so the claim is checked against the registry:
+// the lock path it names, the holder it names, that holder's start ticks, and
+// the mode that holder records RIGHT NOW. Anything short of all four resolving
+// means acquiring for real.
+const bypass =
+  inheritedClaim === undefined
+    ? { honoured: false, reason: 'no lease claim was inherited' }
+    : validateLockClaim(inheritedClaim, LOCK_PATH, mode);
+
+if (bypass.honoured) {
   process.exitCode = await run(command, process.env);
-} else if (inheritedMode === 'shared') {
-  process.stderr.write(
-    'TEST_GATE_LOCK_UPGRADE_REFUSED: an exclusive gate cannot run inside a shared gate\n',
-  );
-  process.exitCode = 2;
 } else {
+  if (inheritedClaim !== undefined) {
+    process.stderr.write(
+      `[test-lock] inherited lease claim NOT honoured: ${bypass.reason};` +
+        ` acquiring ${mode} access for real\n`,
+    );
+  }
   const timeoutSeconds = parseTimeout(
     process.env.NORTH_STAR_TEST_LOCK_TIMEOUT_SECONDS,
   );
-  const label =
-    process.env.NORTH_STAR_TEST_LOCK_LABEL ??
-    process.env.npm_lifecycle_event ??
-    'unlabelled';
-  const commandText = command.join(' ');
   // The kernel will not name an flock holder, so this process holds the lock on
   // its own descriptor and records itself. A dead record is left behind on
   // purpose: the registry reports it as stale rather than blaming it.
@@ -54,13 +67,7 @@ if (inheritedMode === 'exclusive' || inheritedMode === mode) {
     0o666,
   );
   try {
-    recordLockUser({
-      lockPath: LOCK_PATH,
-      mode,
-      state: 'waiting',
-      label,
-      command: commandText,
-    });
+    record('waiting');
     process.stderr.write(
       `[test-lock] waiting for ${mode} access to ${LOCK_PATH}\n`,
     );
@@ -89,24 +96,53 @@ if (inheritedMode === 'exclusive' || inheritedMode === mode) {
       process.exitCode = acquisitionCode;
     } else {
       // flock locked the open file description this process owns, so the lock
-      // outlives the flock child and is released when this process exits.
-      recordLockUser({
-        lockPath: LOCK_PATH,
-        mode,
-        state: 'holding',
-        label,
-        command: commandText,
-      });
+      // outlives the flock child and is released when this process exits. The
+      // record is written before the claim is minted: a child that validates
+      // the claim must find the holder already recorded.
+      record('holding');
       reportStaleParticipants();
       process.exitCode = await run(command, {
         ...process.env,
-        NORTH_STAR_TEST_LOCK_HELD: mode,
+        NORTH_STAR_TEST_LOCK_HELD: mintLockClaim(LOCK_PATH, mode),
       });
     }
   } finally {
-    releaseLockUser(LOCK_PATH);
+    try {
+      releaseLockUser(LOCK_PATH);
+    } catch (error) {
+      process.stderr.write(
+        `TEST_GATE_REGISTRY_WRITE_FAILED: cannot release pid=${process.pid}` +
+          ` for ${LOCK_PATH}: ${describeError(error)}\n`,
+      );
+      process.exitCode = 77;
+    }
     closeSync(lockDescriptor);
   }
+}
+
+// A record that cannot be written makes every later decision untrustworthy —
+// who holds the lock, and whether a child's inherited claim may be honoured.
+// Fail here rather than run a suite nobody can account for.
+function record(state) {
+  try {
+    recordLockUser({
+      lockPath: LOCK_PATH,
+      mode,
+      state,
+      label,
+      command: commandText,
+    });
+  } catch (error) {
+    process.stderr.write(
+      `TEST_GATE_REGISTRY_WRITE_FAILED: cannot record pid=${process.pid}` +
+        ` as ${state} for ${LOCK_PATH}: ${describeError(error)}\n`,
+    );
+    process.exit(77);
+  }
+}
+
+function describeError(error) {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function reportOtherParticipants() {

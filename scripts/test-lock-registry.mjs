@@ -9,6 +9,12 @@
 // A record whose process is gone is reported STALE and never blamed. That case
 // is the interesting signal rather than the answer: the lock can only still be
 // held by a process that inherited the dead holder's descriptor.
+//
+// The registry is also the only way an inherited lease claim can be checked. No
+// asking process can verify a descriptor it does not own — that is this
+// packet's founding observation — so a claim is honoured only when the registry
+// still says the named holder is live and holding a mode that covers the
+// request.
 
 import {
   mkdirSync,
@@ -23,6 +29,10 @@ import process from 'node:process';
 
 const RECORD_VERSION = 1;
 const recordFileNamePattern = /^(\d+)\.json$/u;
+const claimPattern = /^(shared|exclusive):(\d+):(\d+):(.+)$/u;
+// Z is reaped-pending, X and x are fully dead but still enumerable. All three
+// mean every descriptor the process held is already closed.
+const terminalProcessStates = new Set(['Z', 'X', 'x']);
 
 export function registryDirectory(lockPath) {
   return `${lockPath}.holders`;
@@ -35,18 +45,23 @@ function recordPath(lockPath, pid) {
 /**
  * Process identity that survives PID reuse. Field 22 of /proc/<pid>/stat is the
  * process start time in clock ticks since boot: a stable identity token, not an
- * elapsed-time measurement, so it carries no wall-clock dependence.
+ * elapsed-time measurement, so it carries no wall-clock dependence. Field 3 is
+ * the run state, which is what separates a live holder from an exited one whose
+ * /proc entry has not been reaped away yet.
  */
 export function readProcessIdentity(pid) {
   const fields = readProcessStatFields(pid);
   if (fields === undefined) return undefined;
+  const state = fields[0];
   const parent = fields[1];
   const processGroup = fields[2];
   const startTicks = fields[19];
   if (
+    state === undefined ||
     parent === undefined ||
     processGroup === undefined ||
     startTicks === undefined ||
+    !/^[A-Za-z]$/u.test(state) ||
     !/^\d+$/u.test(parent) ||
     !/^\d+$/u.test(processGroup) ||
     !/^\d+$/u.test(startTicks)
@@ -57,6 +72,7 @@ export function readProcessIdentity(pid) {
     parent: Number(parent),
     processGroup: Number(processGroup),
     startTicks,
+    state,
   };
 }
 
@@ -72,6 +88,10 @@ function readProcessStatFields(pid) {
   return stat.slice(closingParenthesis + 2).split(' ');
 }
 
+/**
+ * Writes one record, or throws. Callers must fail rather than continue: a lease
+ * whose mode cannot be written is a lease nobody can validate.
+ */
 export function recordLockUser({
   lockPath,
   mode,
@@ -159,6 +179,12 @@ function classify(record) {
       staleReason: 'the PID was reused by an unrelated process',
     };
   }
+  if (terminalProcessStates.has(identity.state)) {
+    return {
+      liveness: 'stale',
+      staleReason: `the process has exited but not been reaped (state ${identity.state})`,
+    };
+  }
   return { liveness: 'live', processGroup: identity.processGroup };
 }
 
@@ -226,10 +252,84 @@ export function sweepStaleLockUsers(lockPath, users) {
 }
 
 /**
+ * The lease claim a holder passes to its children. It names the lock path, the
+ * holder, and the holder's start ticks, so a child can ask the registry whether
+ * the claim is still true instead of trusting the environment variable.
+ */
+export function mintLockClaim(lockPath, mode, pid = process.pid) {
+  const identity = readProcessIdentity(pid);
+  if (identity === undefined) {
+    throw new Error(`cannot read process identity for PID ${pid}`);
+  }
+  return `${mode}:${pid}:${identity.startTicks}:${lockPath}`;
+}
+
+export function lockModeCovers(recordedMode, requestedMode) {
+  return recordedMode === 'exclusive' || recordedMode === requestedMode;
+}
+
+/**
+ * Validates an inherited claim against the registry. All four facts must
+ * resolve — path, holder PID, holder start ticks, and the holder's CURRENTLY
+ * recorded mode — and the recorded mode must cover the request. A claim minted
+ * for one lock cannot authorize another, and a descendant carrying an exclusive
+ * claim is refused once the holder's record has been rewritten to shared.
+ */
+export function validateLockClaim(claim, lockPath, requestedMode) {
+  const match = claimPattern.exec(claim);
+  if (match === null) {
+    return { honoured: false, reason: 'the inherited claim is unparseable' };
+  }
+  const [, claimedMode, claimedPid, claimedTicks, claimedPath] = match;
+  if (claimedPath !== lockPath) {
+    return {
+      honoured: false,
+      reason: `the inherited claim names ${claimedPath}, not ${lockPath}`,
+    };
+  }
+  const holder = readLockUsers(lockPath).find(
+    (user) => user.pid === Number(claimedPid),
+  );
+  if (holder === undefined) {
+    return {
+      honoured: false,
+      reason: `no record remains for the claimed holder pid=${claimedPid}`,
+    };
+  }
+  if (holder.liveness !== 'live') {
+    return {
+      honoured: false,
+      reason: `the claimed holder pid=${claimedPid} is ${holder.liveness}`,
+    };
+  }
+  if (holder.startTicks !== claimedTicks) {
+    return {
+      honoured: false,
+      reason: `pid=${claimedPid} is a different process than the one claimed`,
+    };
+  }
+  if (holder.state !== 'holding') {
+    return {
+      honoured: false,
+      reason: `the claimed holder pid=${claimedPid} is ${holder.state}, not holding`,
+    };
+  }
+  if (!lockModeCovers(holder.mode, requestedMode)) {
+    return {
+      honoured: false,
+      reason:
+        `the claim asserts ${claimedMode} but pid=${claimedPid} now records` +
+        ` ${holder.mode}, which does not cover ${requestedMode}`,
+    };
+  }
+  return { honoured: true, mode: holder.mode };
+}
+
+/**
  * PIDs that belong to a recorded participant's process lineage: the
  * participant, its ancestors, and its descendants. A same-process-group sibling
- * is NOT included — a shared group means "launched from the same shell", which
- * is not evidence of participation, and exempting on it lets an unrelated
+ * is NOT included — a shared group only means "launched from the same shell",
+ * which is not evidence of participation, and exempting on it lets an unrelated
  * process inherit a participant's exemption.
  */
 export function coordinatedProcesses(lockPath) {
@@ -294,7 +394,8 @@ function runCommandLine(argv) {
   const options = parseOptions(rest);
   if (options === undefined || options.lock === undefined) {
     process.stderr.write(
-      'Usage: test-lock-registry.mjs <record|release|report|coordinated-pids>' +
+      'Usage: test-lock-registry.mjs' +
+        ' <record|release|report|claim|coordinated-pids>' +
         ' --lock <path> [--pid <pid>] [--mode <mode>] [--state <state>]' +
         ' [--label <label>] [--command <command>] [--sweep <mode>]\n',
     );
@@ -307,18 +408,55 @@ function runCommandLine(argv) {
   }
   switch (subcommand) {
     case 'record': {
-      recordLockUser({
-        lockPath: options.lock,
-        mode: options.mode ?? 'unknown',
-        state: options.state ?? 'holding',
-        label: options.label ?? 'unlabelled',
-        command: options.command ?? '',
-        pid,
-      });
+      // A record that cannot be written must stop the caller. Every downstream
+      // decision — who holds the lock, whether an inherited claim is honoured —
+      // reads what this writes.
+      try {
+        recordLockUser({
+          lockPath: options.lock,
+          mode: options.mode ?? 'unknown',
+          state: options.state ?? 'holding',
+          label: options.label ?? 'unlabelled',
+          command: options.command ?? '',
+          pid,
+        });
+      } catch (error) {
+        process.stderr.write(
+          `TEST_GATE_REGISTRY_WRITE_FAILED: cannot record pid=${pid} for` +
+            ` ${options.lock}: ${error instanceof Error ? error.message : String(error)}\n`,
+        );
+        return 77;
+      }
       return 0;
     }
     case 'release': {
-      releaseLockUser(options.lock, pid);
+      try {
+        releaseLockUser(options.lock, pid);
+      } catch (error) {
+        process.stderr.write(
+          `TEST_GATE_REGISTRY_WRITE_FAILED: cannot release pid=${pid} for` +
+            ` ${options.lock}: ${error instanceof Error ? error.message : String(error)}\n`,
+        );
+        return 77;
+      }
+      return 0;
+    }
+    case 'claim': {
+      if (options.mode !== 'shared' && options.mode !== 'exclusive') {
+        process.stderr.write(`Invalid --mode: ${String(options.mode)}\n`);
+        return 2;
+      }
+      try {
+        process.stdout.write(
+          `${mintLockClaim(options.lock, options.mode, pid)}\n`,
+        );
+      } catch (error) {
+        process.stderr.write(
+          `TEST_GATE_REGISTRY_WRITE_FAILED: cannot mint a lease claim for` +
+            ` pid=${pid}: ${error instanceof Error ? error.message : String(error)}\n`,
+        );
+        return 77;
+      }
       return 0;
     }
     case 'report': {
