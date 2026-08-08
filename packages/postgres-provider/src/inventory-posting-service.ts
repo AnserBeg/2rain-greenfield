@@ -984,6 +984,20 @@ export class PostgresInventoryPostingService {
    * its rows. `inventoryInternal` derives from the kernel command directly —
    * that is the stock-count path, and it is the one `PS-1` had no answer for.
    */
+  /** PS-2. A `foreignPort` family without a port refuses; it does not proceed. */
+  #requireSourcePort(
+    profile: InventoryPostingFamilyProfilePayloadV1,
+  ): InventorySourceAggregateStepV1 {
+    if (!this.sourceAggregate) {
+      throw postingError(
+        'INVENTORY_POSTING_COMPANION_CONFLICT',
+        `posting family ${profile.familyId} declares a foreign source step and no port is registered`,
+        { family: profile.familyId },
+      );
+    }
+    return this.sourceAggregate;
+  }
+
   async #companionDerivation(
     client: PoolClient,
     context: TrustedRequestContext,
@@ -991,13 +1005,7 @@ export class PostgresInventoryPostingService {
     posting: ParsedPosting,
   ): Promise<InventoryCompanionDerivationV1> {
     if (profile.sourceStep === 'foreignPort') {
-      if (!this.sourceAggregate) {
-        throw postingError(
-          'INVENTORY_POSTING_COMPANION_CONFLICT',
-          `posting family ${profile.familyId} requires a source-aggregate port and none is registered`,
-        );
-      }
-      return await this.sourceAggregate.deriveCompanion(
+      return await this.#requireSourcePort(profile).deriveCompanion(
         client,
         context,
         posting.command,
@@ -1158,9 +1166,19 @@ export class PostgresInventoryPostingService {
       // The profile makes it uniform: every family with a source document
       // locks the source first, and that uniformity is the reason the reorder
       // is admissible at all.
-      const sourceAggregateDigest = this.sourceAggregate
-        ? await this.sourceAggregate.lockAndValidate(client, context, parsed)
-        : null;
+      // PS-2. Gated on the PROFILE, not on whether a port happened to be
+      // injected. `sourceStep` was declared and unenforced for exactly one
+      // commit, and a declared-but-unenforced field is this programme's worst
+      // defect class — it is `stateMachines`, it is `transitionStateEffect`,
+      // and it is the `familyId` string that made a receipt an adjustment.
+      const sourceAggregateDigest =
+        profile.sourceStep === 'foreignPort'
+          ? await this.#requireSourcePort(profile).lockAndValidate(
+              client,
+              context,
+              parsed,
+            )
+          : null;
       // PS-2. The companion writer, keyed on the **profile** rather than on
       // whether a port happened to be injected. That is what stops
       // `postStockCount` escaping it: stock count is a companion-origin family,
@@ -1304,8 +1322,8 @@ export class PostgresInventoryPostingService {
         }
         // PS-0 PROBE ONLY — NOT FOR MERGE. Same savepoint, same transaction,
         // after the movements exist and the companion transaction is posted.
-        if (this.sourceAggregate) {
-          await this.sourceAggregate.transition(
+        if (profile.sourceStep === 'foreignPort') {
+          await this.#requireSourcePort(profile).transition(
             client,
             context,
             parsed,

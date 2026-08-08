@@ -56,7 +56,6 @@ import {
   PURCHASING_RECEIPT_POSTING_CAPABILITY_ID,
   PostgresInventoryPostingService,
   derivedIdentity,
-  type InventoryAdjustmentPostingCommandV1,
   type InventoryGoodsReceiptPostingCommandV1,
   type InventoryPostingRegistrationV1,
 } from '../../packages/postgres-provider/src/inventory-posting-service.js';
@@ -130,8 +129,6 @@ interface Fixture {
 }
 
 interface ReceiptFixture {
-  companionTransactionId: string;
-  companionTransactionLineId: string;
   goodsReceiptId: string;
   goodsReceiptLineId: string;
   idempotencyKey: string;
@@ -214,29 +211,32 @@ test('PS-0: an inbound receipt posts, advances open quantity, and compensates in
           subject: null,
         }),
       }).issue(context);
+      // PS-2. The receipt family's own registration. PS-0 drove every one of
+      // the sections below through `postAdjustment` with an adjustment command,
+      // which is the masquerade this packet exists to end — so the whole
+      // vertical, including the four-arm race, now runs under the receipt
+      // family. Nothing about the race changes except what it is called.
+      const purchasingRegistration: InventoryPostingRegistrationV1 = {
+        ...registration,
+        capabilityId: PURCHASING_RECEIPT_POSTING_CAPABILITY_ID,
+      };
       const trace: TraceEntry[] = [];
       const post = async (
         receipt: ReceiptFixture,
         guards: Ps0Guards = PS0_ALL_GUARDS,
       ): Promise<unknown> => {
-        await seedReceiptAndCompanion(
-          database.pool,
-          runtimePool,
-          context,
-          binding,
-          receipt,
-        );
+        await seedReceiptRowsOnly(database.pool, receipt);
         const service = new PostgresInventoryPostingService(
           tracingPool(runtimePool, trace),
-          registration,
+          purchasingRegistration,
           { currentInstant: () => recordedAt },
           randomUUID,
           new Ps0GoodsReceiptSourceAggregate(receiptPlan(receipt), guards),
         );
-        return await service.postAdjustment(
+        return await service.postGoodsReceipt(
           context,
           actor,
-          adjustmentCommand(receipt),
+          goodsReceiptCommand(receipt),
         );
       };
 
@@ -291,13 +291,7 @@ test('PS-0: an inbound receipt posts, advances open quantity, and compensates in
 
       // ---- 4. Control: ADR-0017's cost-or-declared-absence gate -----------
       const uncosted = receiptFixture({ quantity: '1', sequence: 4 });
-      await seedReceiptAndCompanion(
-        database.pool,
-        runtimePool,
-        context,
-        binding,
-        uncosted,
-      );
+      await seedReceiptRowsOnly(database.pool, uncosted);
       await database.pool.query(
         `UPDATE north_star_module.ps0_goods_receipt_line
             SET unit_cost=NULL, currency=NULL, cost_absence=NULL
@@ -307,11 +301,11 @@ test('PS-0: an inbound receipt posts, advances open quantity, and compensates in
       await assert.rejects(
         new PostgresInventoryPostingService(
           runtimePool,
-          registration,
+          purchasingRegistration,
           { currentInstant: () => recordedAt },
           randomUUID,
           new Ps0GoodsReceiptSourceAggregate(receiptPlan(uncosted)),
-        ).postAdjustment(context, actor, adjustmentCommand(uncosted)),
+        ).postGoodsReceipt(context, actor, goodsReceiptCommand(uncosted)),
         (error: unknown) =>
           error instanceof Ps0SourceAggregateError &&
           error.code === 'PS0_RECEIPT_COST_EVIDENCE_MISSING',
@@ -320,13 +314,7 @@ test('PS-0: an inbound receipt posts, advances open quantity, and compensates in
 
       // ---- 5. Control: stale expected revision refuses --------------------
       const stale = receiptFixture({ quantity: '1', sequence: 5 });
-      await seedReceiptAndCompanion(
-        database.pool,
-        runtimePool,
-        context,
-        binding,
-        stale,
-      );
+      await seedReceiptRowsOnly(database.pool, stale);
       await database.pool.query(
         `UPDATE north_star_module.ps0_goods_receipt
             SET revision=revision+1 WHERE goods_receipt_id=$1`,
@@ -335,11 +323,11 @@ test('PS-0: an inbound receipt posts, advances open quantity, and compensates in
       await assert.rejects(
         new PostgresInventoryPostingService(
           runtimePool,
-          registration,
+          purchasingRegistration,
           { currentInstant: () => recordedAt },
           randomUUID,
           new Ps0GoodsReceiptSourceAggregate(receiptPlan(stale)),
-        ).postAdjustment(context, actor, adjustmentCommand(stale)),
+        ).postGoodsReceipt(context, actor, goodsReceiptCommand(stale)),
         (error: unknown) =>
           error instanceof Ps0SourceAggregateError &&
           error.code === 'PS0_RECEIPT_STATE_CONFLICT',
@@ -411,11 +399,6 @@ test('PS-0: an inbound receipt posts, advances open quantity, and compensates in
       // rather than a description.
 
       // ---- 8. Two profiles, two registrations, one kernel ----------------
-      const purchasingRegistration: InventoryPostingRegistrationV1 = {
-        ...registration,
-        capabilityId: PURCHASING_RECEIPT_POSTING_CAPABILITY_ID,
-      };
-
       // The compiled price of the receipt family: exactly two enum options.
       assert.deepEqual(probeEnumAdditions, [
         'northstar.app:option.inventory_transaction_type_goods_receipt',
@@ -864,8 +847,6 @@ function receiptFixture(input: {
   receiptCounter += 1;
   const suffix = String(receiptCounter).padStart(4, '0');
   return {
-    companionTransactionId: `71000000-0000-4000-8000-00000000${suffix}`,
-    companionTransactionLineId: `72000000-0000-4000-8000-00000000${suffix}`,
     goodsReceiptId: `73000000-0000-4000-8000-00000000${suffix}`,
     goodsReceiptLineId: `74000000-0000-4000-8000-00000000${suffix}`,
     idempotencyKey: `75000000-0000-4000-8000-00000000${suffix}`,
@@ -883,40 +864,6 @@ function receiptPlan(receipt: ReceiptFixture): Ps0ReceiptPlan {
     goodsReceiptId: receipt.goodsReceiptId,
     lines: [{ purchaseOrderLineId, quantity: receipt.quantity }],
     purchaseOrderId,
-  };
-}
-
-function adjustmentCommand(
-  receipt: ReceiptFixture,
-): InventoryAdjustmentPostingCommandV1 {
-  return {
-    authorization: {
-      decision: 'ALLOW',
-      evaluatorVersion: 'ps0-probe',
-      policyVersion: 'ps0-probe',
-    },
-    channel: 'API',
-    effectiveAt,
-    idempotencyKey: receipt.idempotencyKey,
-    legalEntityId,
-    lines: [
-      {
-        itemId,
-        locationId: receipt.locationId,
-        quantityDelta: receipt.quantity,
-        sourceLine: String(receipt.sequence),
-        transactionLineId: receipt.companionTransactionLineId,
-        unitId: 'EA',
-      },
-    ],
-    reason: { code: 'RECEIPT', narrative: 'PS-0 inbound probe' },
-    // The movement's lineage names the receipt, while its required relations
-    // still bind the companion transaction. Ruling 3, in the data.
-    sourceId: receipt.goodsReceiptId,
-    sourceRevision: 1,
-    sourceType: 'goodsReceipt',
-    stockDimensionSetVersion: 'v1',
-    transactionId: receipt.companionTransactionId,
   };
 }
 
@@ -1024,116 +971,6 @@ async function resetReceived(pool: Pool): Promise<void> {
         SET received_quantity=0 WHERE purchase_order_line_id=$1`,
     [purchaseOrderLineId],
   );
-}
-
-async function seedReceiptAndCompanion(
-  pool: Pool,
-  runtimePool: Pool,
-  context: TrustedRequestContext,
-  binding: StorageBinding,
-  receipt: ReceiptFixture,
-): Promise<void> {
-  const existing = await pool.query(
-    'SELECT 1 FROM north_star_module.ps0_goods_receipt WHERE goods_receipt_id=$1',
-    [receipt.goodsReceiptId],
-  );
-  if (existing.rowCount !== 0) return;
-  await pool.query(
-    `INSERT INTO north_star_module.ps0_goods_receipt
-       (tenant_id, environment_id, legal_entity_id, goods_receipt_id,
-        purchase_order_id, supersedes_goods_receipt_id, state)
-     VALUES ($1,$2,$3,$4,$5,$6,'draft')`,
-    [
-      tenantId,
-      environmentId,
-      legalEntityId,
-      receipt.goodsReceiptId,
-      purchaseOrderId,
-      receipt.supersedes,
-    ],
-  );
-  await pool.query(
-    `INSERT INTO north_star_module.ps0_goods_receipt_line
-       (tenant_id, environment_id, legal_entity_id, goods_receipt_line_id,
-        goods_receipt_id, purchase_order_line_id, quantity,
-        unit_cost, currency, cost_absence)
-     VALUES ($1,$2,$3,$4,$5,$6,$7::numeric,$8::numeric,$9,$10)`,
-    [
-      tenantId,
-      environmentId,
-      legalEntityId,
-      receipt.goodsReceiptLineId,
-      receipt.goodsReceiptId,
-      purchaseOrderLineId,
-      receipt.quantity,
-      receipt.unitCost,
-      receipt.unitCost === null ? null : 'CAD',
-      receipt.unitCost === null ? 'unknownAtPosting' : null,
-    ],
-  );
-  await seedCompanionTransaction(runtimePool, context, binding, receipt);
-}
-
-/**
- * `inventory_movement`'s relations to `inventory_transaction` and its line are
- * both required, so a receipt posting must supply a companion transaction. This
- * is PS-0 ruling 3 executing, not a convenience.
- */
-async function seedCompanionTransaction(
-  runtimePool: Pool,
-  context: TrustedRequestContext,
-  binding: StorageBinding,
-  receipt: ReceiptFixture,
-): Promise<void> {
-  const negative = receipt.quantity.startsWith('-');
-  await withModuleRole(runtimePool, context, async (client) => {
-    await insertEntity(
-      client,
-      binding,
-      binding.transaction,
-      {
-        inventory_transaction_actor_id: principalId,
-        inventory_transaction_effective_at: effectiveAt,
-        inventory_transaction_number: `PS0-RCPT-${String(receipt.sequence)}-${receipt.goodsReceiptId.slice(-4)}`,
-        inventory_transaction_reason_code: 'RECEIPT',
-        inventory_transaction_reason_narrative: 'PS-0 inbound probe',
-        inventory_transaction_recorded_at: recordedAt,
-        inventory_transaction_source_id: receipt.goodsReceiptId,
-        inventory_transaction_source_type: 'goodsReceipt',
-        inventory_transaction_state: enumOption(
-          field(binding.transaction, 'inventory_transaction_state'),
-          'draft',
-        ),
-        inventory_transaction_type: enumOption(
-          field(binding.transaction, 'inventory_transaction_type'),
-          'adjustment',
-        ),
-      },
-      receipt.companionTransactionId,
-      legalEntityId,
-      {},
-    );
-    await insertEntity(
-      client,
-      binding,
-      binding.transactionLine,
-      {
-        inventory_transaction_line_from_location_id: negative
-          ? receipt.locationId
-          : null,
-        inventory_transaction_line_item_id: itemId,
-        inventory_transaction_line_line_number: receipt.sequence,
-        inventory_transaction_line_quantity: receipt.quantity,
-        inventory_transaction_line_to_location_id: negative
-          ? null
-          : receipt.locationId,
-        inventory_transaction_line_unit_id: 'EA',
-      },
-      receipt.companionTransactionLineId,
-      legalEntityId,
-      { [binding.transaction.entity.entityId]: receipt.companionTransactionId },
-    );
-  });
 }
 
 async function readPurchaseOrderLine(
