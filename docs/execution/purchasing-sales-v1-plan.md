@@ -282,3 +282,285 @@ predicate refuses the very update that performs the release. And
 to `tier: 'o1'` structurally, with the parser refusing a capability effect at any
 other tier. **`PS-0` must pin the exact tier rules for record effects before
 designing the transition carrier** — that is its first act, and it is cheap.
+
+### 7.8 `PS-0` ruled the seam, and corrected §7 in three places — 2026-08-08
+
+**Superseded by [ADR-0049](../decisions/ADR-0049-document-transition-and-inventory-effect-seam.md).**
+Read that; this records only what §7 got wrong, so the errors are not re-inherited.
+
+- **§7.1's "`main` provides no generic named-transition tier" is WRONG.** ADR-0038
+  shipped one and it is in the active release: `inventory_transaction_post` is
+  authored `tier: 'o1'` with a `registeredCapabilityEffect`
+  (`definition.ts:1266`, `:1286`), its input contract is closed to
+  `['expectedRevision','recordId']` with **no patch** (`projections.ts:848`), and
+  the target state is a compiled binding constant written by a compare-and-swap
+  `UPDATE`. Exactly one of 39 operations is `o1`. **The consequence for `PUR-1`:**
+  `tier: 'o1'` and `registeredCapabilityEffect` are equivalent both ways at the
+  gateway, so **PO release and SO confirm need a registered capability even though
+  they write no movement.** There is no record-transition effect, and inventing
+  one is a language event.
+- **§7.6's "the adapter must enter the same top-level transaction" is not
+  achievable, and is unnecessary.** `#post` calls `pool.connect()` itself, so
+  there is no outside position to join from. What works is the transaction
+  **carrying the foreign aggregate through a port** invoked at ADR-0026's steps
+  4/5 and 7 — which is what ADR-0029 already did for stock count, with hard-coded
+  branches instead of a port.
+- **"Preflight-then-post-then-mark is unsafe" was imprecise — the *mark* is the
+  unsafe part.** The shipped executor already preflights in its own transaction
+  and is safe because hydration carries no authority and everything is
+  re-validated under lock. **The rule to freeze is "hydrate as a proposal, decide
+  under lock."**
+
+**§5's assumption 1 is refuted with a count**, not an argument: a receipt posting
+role costs **eight code sites plus a migration**, a new purchasing authority member
+is needed in two unbound places (`contracts.ts:200-207`,
+`conformance.ts:3215-3222`), the dependency root is pinned at four executable
+sites, and a candidate v5 with six purchasing entries moves 35 entries to 41 with
+root `f8a68976…`. `reBaseline` remains in the contract and absent from the provider
+union, unguarded.
+
+**Measured, and sharper than the charter assumed:** two receipts at different
+locations are different stock identities, so the stock serializer does not
+serialize them. Across four arms, lock-only, compare-and-swap-only and both each
+admitted exactly one winner; **neither** admitted two and received 20 against an
+order of 10. **Either mechanism closes the race provided it is inside the posting
+transaction — the pessimistic lock is an optimization, not the requirement.**
+
+**Ruling 4 (separate Purchasing/Sales capability IDs over one shared kernel) is the
+one ruling the probe did not measure.** It is reasoned from registration code.
+`PUR-2` must land the second registration and report the cost.
+
+### 7.9 New row — `posting-error-classification`
+
+**OPEN 2026-08-08, found by `PS-0`'s probe, on `main`.**
+`inventory-posting-service.ts:3877`'s `postgresCode` delegates to
+`postgresErrorProperty`, which checks only that the property exists — so **any
+error carrying a string `code` is classified as a PostgreSQL rejection.** The probe
+saw a domain refusal surface as
+`INVENTORY_POSTING_STORAGE_REJECTED: PostgreSQL rejected inventory posting
+(PS0_RECEIPT_OPEN_QUANTITY_EXCEEDED)`. Node's `ERR_*` errors have the same shape,
+so an ordinary runtime fault is reported as a storage rejection. The probe carries
+a one-line fix. **It needs its own row because it changes an error contract**, and
+existing assertions pin those codes.
+
+### 7.10 ADR-0049 is NOT ratified — review returned BLOCK 2026-08-08
+
+**§7.8 above is wrong in five ways and is superseded by this section.** All five
+errors are the orchestrator's.
+
+1. **"A generic named-transition tier already ships" — false.** `o1` is generic
+   *capability dispatch*. Server-selected target state, compare-and-swap,
+   authoritative rehydration and accepted trust writes are
+   `InventoryPostingCapabilityExecutor` behaviour, **not gateway-enforced**. Any
+   executor may implement different semantics.
+2. **"There is no record-transition effect, and inventing one is a language
+   event" — false, and verified false.** `transitionStateEffect` exists at
+   `schemas.ts:934`; `transitionDefinition` carries server-authored `fromState`
+   (`:623`), `toState` (`:629`) and permission; the compiler transports the effect
+   generically. **The gateway contains zero references to it.** This is an
+   **enforce-or-retire** decision on shipped language, which is exactly what queue
+   row `5g3-sm` was created to own. `U5b`'s round-3 review found the same fact
+   independently through `parseOperationBinding`.
+3. **"The pessimistic lock is an optimization" — overstated.** Proven for the
+   measured single-aggregate invariant with a complete CAS predicate. Not proven
+   for multi-line write skew, constraints spanning several orders or receipts,
+   insertion or archival phantoms, incomplete digest predicates, correction racing
+   cancellation, or lock ordering across several foreign aggregates. **Correct
+   wording:** *for the measured one-order race, either source locking or a
+   complete compare-and-swap independently prevents double receipt; the protocol
+   retains both until broader controls prove one redundant.* **The rollback
+   vertical proves something stronger and safer to generalize: movement append and
+   source transition must share a transaction.**
+4. **The 41-entry root is conditional, not final.** It omits whichever
+   companion-creation protocol Ruling 3 settles, and preserves an unresolved
+   contradiction — separate capability ownership versus one Inventory union root.
+5. **The companion has no writer, and this is the highest-value finding.** Ruling 3
+   requires an internal `inventory_transaction` and lines per receipt, but `#post`
+   **requires the companion to already exist** — it plans movements with supplied
+   `transactionId`/`transactionLineId`, row-locks the header, digests the line set
+   and validates it before appending. Ruling 2's port exposes only
+   `lockAndValidate` and `transition`. **Nothing creates the companion.** The
+   stock-count precedent is not evidence the risk is controlled; it is evidence the
+   risk is already live and unclosed.
+
+**Also refuted: Ruling 4.** `InventoryPostingRegistrationV1.capabilityId` is typed
+`typeof INVENTORY_POSTING_CAPABILITY_ID` and the dependency root likewise
+(`inventory-posting-service.ts:64-75`), so a Purchasing registration cannot be
+typed. Capability identity additionally namespaces the request-key advisory lock,
+receipt lookup, result identity and trust evidence. **Single-writer has two layers**
+— the capability contract is the *authorization* boundary, `#post` the
+*implementation* boundary — and an architecture test finding one `INSERT` protects
+only the second.
+
+**Upheld:** Ruling 2's ownership model, narrowly — `#post` owns its connection and
+transaction, an external adapter cannot join it, the source aggregate rides
+provider-owned hooks, and preflight is safe only as an untrusted proposal
+re-decided under lock. Ruling 3's *structural choice* of a companion is upheld; its
+four conditions are not sufficient — it owes deterministic one-to-one identity, a
+**semantic** rather than presentational reachability rule covering create, update,
+archive, restore, get, list, resolve and agent exposure, and an origin-bearing
+companion header.
+
+**Sequencing changed: `5g3-sm` moves AHEAD of `PUR-1`.** Its own row warned that
+"deciding the fate of a language concept as a side effect of an inventory packet is
+how a second authority gets created by accident" — and `PUR-1` shipping a
+capability executor for release would have retired `transitionStateEffect` by
+accident. **`PUR-1` starts after that decision. `PUR-2` stays blocked** until the
+companion-creation protocol and the invocation-capability-versus-kernel-contract
+distinction are in ADR-0049.
+### 7.11 ADR-0050 ratified — `transitionStateEffect` is honoured, 2026-08-08
+
+**`5g3-sm` is settled and `PUR-1` is unblocked by it.** Two facts were verified
+independently before ratifying.
+
+**They are one construct, so the choice was never two-sided.**
+`transitionStateEffect` carries exactly `kind`, `schemaVersion` and `transition`
+(`schemas.ts:933`) — no entity, no field, no target — and `transitionDefinition`
+is declared at `:622` and referenced exactly once, inside `stateMachineDefinition`'s
+`transitions` array. *Honour one, retire the other* is not available.
+
+**The current state is a trap, not neutral debt.** One declared
+`transitionStateEffect` makes **every operation in the release** fail with
+`MalformedPinnedOperationCatalogError` — an unrelated `master_create` dies with it —
+and the refusal names neither the operation nor the effect. That is an ADR-0046
+misnamed-cause defect layered on the ADR-0041 one. And the target it names is
+unreachable: a precondition on the machine's state field fails
+`CANON_REFERENCE_UNRESOLVED`, a query selecting it fails `CANON_QUERY_FIELD_LOCALITY`.
+**Accepted and unimplementable**, not accepted and ignored.
+
+**It is a canonical-language event and retirement is not cheaper.** ADR-0049 §1
+already priced re-inventing a transition effect as a language event, so retiring
+means paying twice *and* hand-writing a capability executor for every release,
+confirm and cancel in between.
+
+**Three corrections this makes to §7.10 and ADR-0049, all the orchestrator's:**
+§7.1's *"every business transition needs a named O1 handler"* is half wrong —
+refuting *enum plus precondition is a lifecycle* was right, concluding `o1` does
+not follow; what was missing is a **compiled patch, not a tier**. ADR-0049 §1
+attributed compare-and-swap, authoritative preconditions and trust writes to `o1`;
+three of those four are ordinary generic-press behaviour and **only
+server-selected target is new**. And the transition runs at `tier: 'o0'` through
+the generic press, measured — so **`PUR-1` does not write capability executors for
+release and cancel.**
+
+**No ADR-0034 exception is needed:** the projected-image check is scoped to
+`updateRecordEffect` because an update carries a caller patch; a transition carries
+none, so the hazard is structurally absent. Measured — a `not(released)`-shaped
+guard admits the release and refuses the second.
+
+**Cost, and the one item that gates `PUR-1`:** the language cut, plus six probe
+findings. **Load-bearing: the state field has no read path.** It is correctly
+excluded from caller-writable contracts, but nothing admits it to query selections,
+so a released purchase order cannot be listed by state. **`PUR-1` cannot ship
+without that.** The rest: release verification cannot populate a field no caller may
+write (`5g3-mount` class, `systemInput` is the precedent); the closed-argument
+fence sits at the interpreter rather than the gateway for O0; the per-entity field
+budget; `apps/web`'s `operationIntent` returns `null` for the effect kind; and the
+misnamed refusal above.
+
+### 7.12 `received_quantity` is `PUR-2`'s decision, not `PUR-1`'s — ruled 2026-08-08
+
+`PUR-1` authored `receivedQuantity: field('purchase_order_line', 'received_quantity')`
+(`packages/domain/src/purchasing/definition.ts:52`) — a **stored column**, and a
+surface row displaying it. Plan §1276 calls it a *read model* **derived from posted
+receipts**.
+
+**It is not a simple defect, and that is why it must be routed rather than
+corrected.** `PS-0`'s four-arm race closed over-receipt with **compare-and-swap on a
+stored received quantity**, and CAS requires a stored value to swap on. The
+lock-only arm closed the same race, and that one works against a derived sum under
+lock. **Both are supported by the measurement; neither has been chosen.**
+
+**Ruling: `PUR-1` drops the field.** It ships no receipts, so the value can only
+ever be zero — a permanently-zero column and a surface row buy nothing while
+pre-committing the open-quantity mechanism. **`PUR-2` adds it with the posting
+protocol that decides it:** a stored column if it takes the CAS route, a derived
+read model if it takes lock-and-sum. `SAL-1`/`SAL-2` inherit the same rule for
+shipped quantity and open-to-ship.
+
+**This is the `5g3-sm` shape a second time** — an inventory packet settling a
+platform decision as a side effect of shipping. The charter caused it: the `PUR-1`
+prompt listed *"line number, item, ordered quantity, received quantity, unit
+price"* without the plan's *derived* qualifier.
+
+### 7.13 `PS-1` corrects §7.10 item 5 — 2026-08-08
+
+**Item 5 said the companion has no writer. The truth is larger: no companion
+*mechanism* exists at all.** Verified: `#post` contains exactly **one** business
+`INSERT` — the movement at `inventory-posting-service.ts:2148`; the other five
+target `platform.*` receipts, trust invocations, change documents, domain events
+and outbox. And `inventory-posting-capability-executor.ts:254` passes
+`transactionId: input.recordId`, so **the record being posted *is* the
+`inventory_transaction`.**
+
+**Therefore the shipped writer of every companion — stock-count included — is the
+generic `o0` create, driven by a user.** Stock-count companions are not documents
+that escaped a filter; they are ordinary documents nobody ever hid.
+
+**This changes what `PUR-2` builds** from *a visibility filter* to *the writer,
+plus retiring the generic authoring path*. It also collapses ADR-0049's two
+branches: "stage it before posting" is not an alternative, it is what ships, and
+its only stager is the authoring path that must be closed. Both branches need a
+new internal writer; **inside the posting transaction wins on
+congruence-by-construction** — no repair policy, no orphans, one writer — at the
+honest cost of two companion appends in the dependency contract.
+
+**§7.10's other error: the 41-entry union root is not conditional, it is the wrong
+shape**, and it is withdrawn rather than completed. No companion ruling would have
+made a single union root correct.
+
+**Ruled by `PS-1`, pending review** — ADR-0049 remains unratified and this
+amendment supersedes two of its rulings.
+
+### 7.14 `PS-1` returned BLOCK — the missing concept is a compiled posting family, 2026-08-08
+
+**Neither ADR-0049 nor its `PS-1` amendment is ratified. `PUR-2` remains blocked.**
+
+**The diagnosis is better than the charter that produced it.** §7.10 asked three
+questions — who creates the companion, how invocation identity separates from the
+kernel contract, what shape the dependency contract takes. **They are three views
+of one missing thing.** Verified at source: `inventory-posting-service.ts:609`
+declares `readonly familyId: string`, an **unrestricted string documented as a
+diagnostic name**, and `:2585` does `if (service.sourceAggregateFamilyId ===
+'goods_receipt') return 'goodsReceipt'`. **A magic string selects authorization**,
+and every ruling that wobbled traces to that.
+
+**Consequences the review established, each with a source citation and none needing
+execution:** the probe's first `post()` is admission-refused, so its reported
+companion, correction and reachability results describe runs that could not have
+happened — and the same test body later asserts that exact pairing must be refused;
+the executable command is still `InventoryAdjustmentPostingCommandV1` via
+`postAdjustment()`, so a receipt gets `postingRole: adjustment`, an adjustment
+companion type, adjustment reason/approval semantics, and a Purchasing event named
+`adjustment_posted` — **recreating the very `type=adjustment` /
+`source_type=goodsReceipt` pair A1 claims to structurally forbid**; the new writer
+runs only `if (this.sourceAggregate)`, so **stock count still has no kernel
+writer**, which makes A6 unsatisfiable while A3 leaves Inventory's extension empty;
+the lock edge was **reordered, not widened**; and A4's "lock-and-sum" arm reads and
+updates a **stored counter** — no arm sums movements.
+
+**Withdrawn:** the eight-entry Purchasing root, alongside the 41-entry union root.
+Its preimage contains the stored `received_quantity` transition A4 itself
+withdraws. **§7.12 must no longer say the lock-only arm supported derived
+lock-and-sum — it supported a lock around a stored counter.**
+
+**Upheld:** ruling 2's transaction ownership, narrowly; the discovery that no
+shipped companion mechanism exists; that generic `o0` authoring is the present
+writer; that a union root is the wrong shape; that capability authorization and
+`#post` implementation ownership are distinct; and A6's requirement that one gate
+close both companion classes.
+
+**The replacement, and `PS-2`'s charter: a closed, compiled posting-family profile
+consumed by `#post`.** One declaration per admitted family binding capability ID,
+command schema, posting role, companion transaction type, whether the kernel
+creates a companion, immutable companion provenance, **foreign-source expected
+revision separate from the companion revision**, deterministic source-line and
+companion-line identity, the source lock/transition implementation, exact
+dependency-extension entries and root, and generic reachability policy.
+**`stockCount` and `goodsReceipt` must both be profiles** — that is what makes A6
+satisfiable and A3's empty Inventory extension impossible.
+
+**ADR-0049 is to be rewritten as one authoritative ruling, not a refuted body with
+a superseding appendix.** Four implementation packets must not have to work out
+which sentence still governs; that is a second-authority shape, which this plan
+refuses everywhere else.

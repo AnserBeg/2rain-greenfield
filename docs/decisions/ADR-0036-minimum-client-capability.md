@@ -48,11 +48,45 @@ Closed, not illustrative. This programme governs by closed vocabularies and exac
 partitions everywhere else; an open licence to "progressively enhance" is how one script
 becomes a framework.
 
+#### 2a. What the set is closed *over* — scoped 2026-08-08 after a doctrine review
+
+**The four were enumerated from the live residue, not from the platform's known
+commitments, and the ADR then wrote them as a platform-wide minimum.** §2's list is
+exactly what remained after ADR-0032 §2 removed reads from the question: progress,
+optimistic transitions, and validation, plus pending toggling. Meanwhile "What this ADR
+does not decide" concedes that **camera scanning and the installable PWA already require
+client JavaScript at launch** — plan lines 1690 and 1711 commit to both — and names them
+as the reason Tier A was rejected. A set that excludes the capabilities whose existence
+justified choosing this tier is not closed over the platform; §2b of ADR-0032 adds a
+fifth candidate the enumeration never saw, a navigation-time skeleton swap.
+
+Read at its own evidence, this decision is closed over **one thing**: the
+progressive-enhancement behaviours of the single inlined document script that serves
+grammar-owned surfaces. That is still the load-bearing ruling — it is what keeps one
+script from becoming a framework — and it is what §3 and §7 police.
+
+**Other client-capability domains are neither authorized nor foreclosed here.** Camera
+and keyboard-wedge scanning, and the service worker an installable PWA requires, are
+separate domains with their own delivery, their own CSP consequences, and their own
+one-way doors. Each needs its own decision, and §3's "no second script" is a rule about
+*this* script's domain, not a veto the plan's launch commitments must be argued around.
+
+**The amendment test, so the set can close without freezing.** A fifth behaviour is
+admitted to §2 only when all four hold: it belongs to this script's domain; the
+behaviour it enables cannot be delivered by a server navigation or by native HTML; the
+capability it depends on already exists (per §6's ordering); and it ships with the gate
+that observes it. Anything failing one of those is refused by name with what would admit
+it — the pattern ADR-0048 §4 uses for `toast` and `modal`.
+
 ### 3. No second script
 
 Structural, and mechanically enforceable — a gate can count scripts and check the CSP hash.
 The failure mode this forecloses is not a bad decision but an accumulation of small
-reasonable ones.
+reasonable ones. *Scoped by §2a:* the count is over scripts in this domain — the served
+document's own inlined script — and the packet that first ships one owes the gate. Today
+the count is zero and the CSP admits none (`apps/web/src/app-server.ts:36-39` sets
+`default-src 'none'` with no `script-src`), so there is nothing yet for a counter to
+observe.
 
 ### 4. Reads, navigation and forms work with JavaScript disabled
 
@@ -82,7 +116,12 @@ existing rule applied to a fact one arm went and checked.
 Frameworks; hypermedia libraries as the default; hydration; client routing or stores;
 client rendering of business data; executable client validation; tenant-authored client
 code; component-emitting compiler output; script-created interactive elements; any second
-script.
+script; **client-side timing collection or beaconing** — added 2026-08-08, because
+measurement is not one of the four behaviours and
+[ADR-0032](ADR-0032-feedback-ladder-and-loading-states.md) §2c records the standing
+temptation to admit it as instrumentation rather than as capability. Wanting to observe
+the user's real wait is a good reason to amend this ADR under §2a's test, and not a
+reason to route around it.
 
 ### 8. The named escalation
 

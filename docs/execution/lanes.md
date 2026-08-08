@@ -430,3 +430,31 @@ Everything in `AGENTS.md`, `mission-cadence`, and `review-tiers` applies
 unchanged per lane: one frozen candidate, honest gates at the integrated SHA,
 negative controls with recorded reds, the two-REVISE cap, fresh naive reviewers,
 and no self-certification. Parallelism buys throughput, not a lower bar.
+
+## The matrix needs a quiesced machine, and idle is not the measure — added 2026-08-08
+
+The compile-budget gate refuses to measure below **90% CPU idle** and returns
+`COMPILE_BUDGET_INDETERMINATE`. That floor is correct and does not move: a
+measurement taken under load measures the load, and widening it converts a refused
+measurement into a false green.
+
+**Three attempts on three different trees read 65.3%, 87.3% and 71.8% idle.** The
+variance tracked **agent-session count**, not anything the lane controlled.
+`lanes.md` already records the runtime at ~12% CPU sustained while working; on a
+WSL cap of **8 processors**, four to seven concurrent sessions put idle in the
+mid-to-high 80s — structurally just under the floor, and the figure the gate
+captures depends on whether other sessions happen to be mid-turn in that instant.
+
+**So an instantaneous idle reading is not the check.** Count live `ccd-cli`
+runtimes before starting a matrix. **Quiesced means every session except the one
+running the matrix is stopped, not merely idle between turns** — a session at rest
+becomes a session at 12% the moment its user types.
+
+**A packet may NOT freeze with the performance gate recorded indeterminate.**
+AGENTS.md §6 requires the matrix green at the integrated SHA; indeterminate is a
+measurement that did not happen. Ruled 2026-08-08, on a lane that asked rather than
+retrying — which was the right call.
+
+**Do not retry into a loaded machine.** Report the idle figure and the runtime
+count, and let the orchestrator quiesce. Retrying is a coin flip on other people's
+turn boundaries, and each flip costs a full matrix.
