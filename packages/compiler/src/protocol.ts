@@ -22,8 +22,10 @@ export const COMPILER_SEMANTIC_PROFILE_V1_VERSION =
  * So v2 is an accumulation window. Projection fields land on it one packet at a
  * time and cost nothing; adoption is a separate, schedulable event that mints
  * exactly one lineage entry no matter how many fields accumulated first.
- * Nothing compiles under v2 until `ADOPTED_COMPILER_SEMANTIC_PROFILE_VERSION`
- * moves, so every field gated here is readable and unemitted.
+ * No DEFAULT compile and no recorded lineage entry uses v2 until
+ * `ADOPTED_COMPILER_SEMANTIC_PROFILE_VERSION` moves. Tests do compile under it
+ * by passing the version explicitly -- that is how a readable-but-unadopted
+ * version is exercised at all -- and nothing they produce is recorded.
  */
 export const COMPILER_SEMANTIC_PROFILE_V2_VERSION =
   'northstar.compiler-semantic/v2' as const;

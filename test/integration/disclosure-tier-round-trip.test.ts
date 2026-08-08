@@ -40,13 +40,12 @@ const BREADCRUMB_SLOT = 'northstar.bootstrap:slot.item_detail_breadcrumb';
 
 /**
  * The authored package this gate compiles: `vertical-v1` upgraded to the ADOPTED
- * language version, with `breadcrumb` declared `always`.
+ * language version, with `breadcrumb` declared `always` -- the only honourable
+ * tier, since `progressive` and `onDemand` are refused by name.
  *
- * **`always` is the subject because it is now the only honourable tier** --
- * `progressive` and `onDemand` are refused by name. It still proves what this
- * gate exists to prove: `parseSlot` OMITS a key it does not carry, so a dropped
- * tier reads back as `undefined`, not as `always`. Asserting `=== 'always'`
- * therefore distinguishes carried from dropped exactly as `progressive` did.
+ * The declaration is deliberate even though lowering would resolve to the same
+ * value without it: it keeps the package one whose tier is AUTHORED, which is
+ * what the v1 refusal below needs a subject for.
  *
  * The upgrade is applied to a CLONE; `vertical-v1.authored.json` is pinned at v3
  * by golden vectors.
@@ -149,16 +148,23 @@ async function viewOf(
 }
 
 /**
- * The whole round trip, through the PRODUCTION reader rather than a test-local
- * parse: compile an authored `progressive` explicitly at v2, take the payload
- * the compiler actually emitted, and require the tier to survive
- * `readCompiledSurfaceManifest`.
+ * The round trip through the PRODUCTION reader rather than a test-local parse:
+ * compile at v2, take the payload the compiler actually emitted, and require the
+ * tier to survive `readCompiledSurfaceManifest`.
  *
- * This closes two holes at once. `parseSlot` builds a fresh object from the keys
- * it recognises, so before this it would have silently DROPPED the tier the
- * moment v2 was adopted -- a defect no gate would have reported. And every other
- * test in this packet asserts the default; this is the only one that compiles an
- * explicit non-default value and reads it back.
+ * **What this proves, stated no wider than it is.** Lowering resolves
+ * `slot.disclosureTier ?? DEFAULT_DISCLOSURE_TIER`, so an explicit `always` and
+ * an absent declaration produce identical output -- a mutation that ignored the
+ * authored value entirely would survive this test. The claim is therefore that a
+ * RESOLVED v2 tier survives the reader, not that the authored declaration drove
+ * lowering. Projection erases that distinction by design, and no test here can
+ * recover it.
+ *
+ * What it does close is real: `parseSlot` builds a fresh object from the keys it
+ * recognises, so before this gate it would have silently DROPPED the field the
+ * moment v2 was adopted. Paired with the absence test below, the two together
+ * distinguish CARRIED from INVENTED -- present at v2, absent at v1 -- which is
+ * exactly what the reader contract's own comment claims.
  *
  * It needs no adoption: the profile version is passed explicitly, so nothing is
  * recorded and no lineage entry is minted (ADR-0047 §4a).
@@ -268,4 +274,43 @@ test('RED: the reader refuses a tier value outside the closed vocabulary', async
     },
     'an unknown tier must be refused, not dropped',
   );
+});
+
+/**
+ * The other half of the reader contract, and the one nothing covered. The v2 test
+ * proves a PRESENT recognized field is carried; this proves an ABSENT field stays
+ * absent.
+ *
+ * Without it a `parseSlot` that invented `{ disclosureTier: 'always' }` from an
+ * absent input would survive the whole packet -- and that reader would be
+ * claiming, on every pre-v2 artifact ever recorded, to know a tier the projection
+ * never emitted. Every entry in the lineage is compiled at v0 or v1, so this is
+ * the shape the production artifact actually has.
+ */
+test('an absent tier stays absent through the production reader at v1', async () => {
+  const authored = authoredWithDeclaredTier() as unknown as {
+    surfaces: { slots: { disclosureTier?: string }[] }[];
+  };
+  for (const surface of authored.surfaces) {
+    for (const slot of surface.slots) delete slot.disclosureTier;
+  }
+  const compiled = compileAt(
+    authored as unknown as Record<string, unknown>,
+    COMPILER_SEMANTIC_PROFILE_V1_VERSION,
+  );
+  assert.ok(
+    compiled.status === 'compiled',
+    'a package declaring no tier must compile at v1',
+  );
+
+  const manifest = readCompiledSurfaceManifest(await viewOf(compiled));
+  const slots = manifest.surfaces.flatMap((surface) => surface.slots);
+  assert.ok(slots.length > 0, 'the reader must return slots to inspect');
+  for (const slot of slots) {
+    assert.equal(
+      Object.hasOwn(slot, 'disclosureTier'),
+      false,
+      `${slot.slotId}: the reader invented a tier the v1 projection never emitted`,
+    );
+  }
 });

@@ -138,9 +138,10 @@ function forcing(): Record<string, unknown> {
 }
 
 /**
- * `record:breadcrumb` is the only proven-deferrable slot. `commandBar` is here
- * as a REFUSED subject: it renders a submit control on form surfaces, so it is
- * not deferrable and the rule must say so.
+ * Subjects spanning what a slot may render -- fields, shell furniture, pure
+ * navigation, required inputs, a submit control. `progressive` is refused on
+ * every one of them, which is what makes the refusal unconditional rather than
+ * a narrower rule wearing a broader name.
  */
 const SECTIONS_SLOT = 'northstar.inventory:slot.item_sections';
 const TITLE_STATUS_SLOT = 'northstar.inventory:slot.item_title_status';
@@ -231,7 +232,8 @@ test('RED: progressive on breadcrumb is refused, reversing its former admission'
 /**
  * The inversion's core red, and it no longer depends on the surface reaching a
  * required field. `record:sections` renders the surface's fields, so it is
- * simply absent from the allow-list.
+ * refused like every other slot, and no longer needs the surface to reach a
+ * required field for the rule to fire.
  */
 test('RED: progressive on a field-rendering slot is refused as not deferrable', () => {
   const codes = diagnosticCodes(() =>
@@ -267,8 +269,8 @@ test('RED: progressive on titleStatus is refused, because it renders the display
  * The aggregate-task hole, which the deny-list could not close. An aggregate
  * surface selects no field, so under the old rule NOTHING forced -- while
  * `scanInput` still rendered the query's parameters as required inputs and
- * `primaryAction` still rendered the submit control. Under the allow-list both
- * force by default because neither is proven safe.
+ * `primaryAction` still rendered the submit control. Under the unconditional
+ * refusal both are refused, without the rule needing to know either fact.
  */
 test('RED: progressive on task scanInput is refused', () => {
   const codes = diagnosticCodes(() =>

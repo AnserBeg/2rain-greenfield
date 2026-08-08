@@ -1383,8 +1383,8 @@ function validateSurfaceVocabulary(
  * tier, so refusing `progressive` removes nothing that ships. What it removes is
  * a claim that was never proven.
  *
- * The rule holds no membership set by design. An allow-list that can be emptied
- * can be refilled without proof; a refusal cannot.
+ * The rule holds no membership set by design. A set that can be emptied can be
+ * refilled without proof; a refusal cannot.
  */
 function validateDisclosureTiers(
   packageRevision: VersionedNormalizedApplicationPackage,
@@ -2313,7 +2313,7 @@ function acceptedAlternativeFor(code: string): string {
     CANON_SURFACE_ARCHETYPE_UNSUPPORTED:
       'use home, list, record, task, or builder',
     CANON_SURFACE_DISCLOSURE_TIER_NOT_DEFERRABLE:
-      'declare always, or prove the slot renders no field, no required input and no action',
+      'declare always, the only honourable tier at slot granularity',
     CANON_SURFACE_DISCLOSURE_TIER_UNHONOURED:
       'declare progressive or always; onDemand has no fetch-on-expand to honour it',
     CANON_SURFACE_SLOT_UNSUPPORTED:

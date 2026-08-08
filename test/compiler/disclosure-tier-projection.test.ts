@@ -19,6 +19,19 @@ import {
   projectionPayload,
 } from './helpers.js';
 
+function surfaceProjectionReference(version: CompilerSemanticProfileVersion) {
+  const base = compilerInput(fixtureBytes('vertical-v1'));
+  const compiled = mustCompile({
+    ...base,
+    profile: { ...base.profile, compilerSemanticProfileVersion: version },
+  });
+  const reference = compiled.bundle.releaseManifest.projections.find(
+    (entry) => entry.familyId === PROJECTION_FAMILY_IDS.surfaceManifest,
+  );
+  assert.ok(reference, 'the surface manifest must be projected');
+  return reference;
+}
+
 interface ManifestSlot {
   readonly disclosureTier?: string;
   readonly slotId: string;
@@ -127,21 +140,38 @@ test('an undeclared tier resolves in the projection while staying absent upstrea
 });
 
 /**
- * The `minimumVersion` reasoning recorded at `surfaceManifestPayload`'s emission
- * site is conditional, and this makes the condition executable rather than a
- * comment someone has to remember.
+ * The `minimumVersion` argument recorded at `surfaceManifestPayload`'s emission
+ * site, asserted where it actually lives.
  *
- * That reasoning holds because every tier a reader might DROP resolves to more
- * disclosure, never less: an absent tier reads as `always`, so a reader that
- * ignores the field under-defers rather than conceals. A fourth spelling meaning
- * "hide" would invert that and silently invalidate the emission site's argument
- * without touching this projection at all. Pinning the exact set forces whoever
- * adds one to come back here.
+ * The argument has two halves and each needs its own assertion. Its PREMISE is
+ * that no tier value means "hide" -- a reader that drops the field under-defers
+ * rather than conceals -- and a fourth spelling would invert that silently. Its
+ * CONCLUSION is the emitted number. The vocabulary test below closes the
+ * premise; this closes the conclusion, which was previously guarded by nothing:
+ * raising flat v2 from 1 to 2 survived every other control in this packet.
+ */
+test('the flat v2 surface projection still requires capability version 1', () => {
+  assert.deepEqual(
+    surfaceProjectionReference(COMPILER_SEMANTIC_PROFILE_V2_VERSION)
+      .requiredRuntimeCapability,
+    {
+      capabilityId: 'northstar.runtime:capability.surface-manifest',
+      minimumVersion: 1,
+    },
+    'emitting the tier does not raise the reader requirement: a reader that drops it under-defers rather than conceals, so version 1 stays honest. Grouped navigation keeps the version-2 branch.',
+  );
+});
+
+/**
+ * The premise of the argument above. A fourth spelling meaning "hide" would
+ * invert it -- a dropped tier would then conceal rather than reveal -- without
+ * touching the projection at all, so pinning the exact set forces whoever adds
+ * one to re-derive the conclusion first.
  */
 test('the tier vocabulary is exactly the three granted values', () => {
   assert.deepEqual(
     [...DISCLOSURE_TIERS],
     ['always', 'progressive', 'onDemand'],
-    'surfaceManifestPayload keeps surface-manifest minimumVersion at 1 because no tier value means "hide" -- a reader that drops the field under-defers rather than conceals. Adding a tier requires re-deriving that argument at the emission site before changing this list.',
+    'surfaceManifestPayload keeps surface-manifest minimumVersion at 1 because no tier value means "hide". Adding a tier requires re-deriving that argument, and the assertion above, before changing this list.',
   );
 });
