@@ -42,6 +42,8 @@ const LEGAL_ENTITY_FAMILY_RULES = Object.freeze([
   { classification: 'entityOwned', familyId: 'inventory_transaction' },
   { classification: 'entityOwned', familyId: 'inventory_transaction_line' },
   { classification: 'entityOwned', familyId: 'inventory_period_lock' },
+  { classification: 'entityOwned', familyId: 'purchase_order' },
+  { classification: 'entityOwned', familyId: 'purchase_order_line' },
   { classification: 'entityOwned', familyId: 'reservation' },
   { classification: 'entityOwned', familyId: 'stock_count' },
   { classification: 'entityOwned', familyId: 'stock_count_line' },
@@ -162,6 +164,11 @@ const LEGAL_ENTITY_RELATION_RULES = Object.freeze([
     semantics: 'crossEntityAllowed',
     sourceFamilyId: 'party_role',
     targetFamilyId: 'party',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'purchase_order_line',
+    targetFamilyId: 'purchase_order',
   },
   {
     semantics: 'sameEntity',

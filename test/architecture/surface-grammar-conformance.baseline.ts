@@ -46,4 +46,15 @@ export const PRODUCT_SURFACE_GRAMMAR_BASELINE = Object.freeze([
     sourceDirectory: 'platform',
     violationCount: 33,
   }),
+  Object.freeze({
+    moduleId: 'northstar.purchasing:module.purchasing',
+    packageId: 'northstar.purchasing:package.purchasing',
+    sourceDirectory: 'purchasing',
+    // PUR-1 arrives at Party's number for Party's shape -- two entities, six
+    // surfaces, 23 -- because it took Party's slot anatomy rather than
+    // Inventory's. The residue is the shared anatomy debt every module carries,
+    // not anything Purchasing introduced: 3 SG002_ARCHETYPE_COVERAGE and a
+    // matched 10/10 SG003_REQUIRED_SLOT and SG009_COMPACT_SLOT.
+    violationCount: 23,
+  }),
 ] as const satisfies readonly ProductSurfaceGrammarBaselineEntry[]);

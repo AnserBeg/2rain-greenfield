@@ -19,7 +19,9 @@ const routedPlatformDebt: readonly ModulePressLawViolation[] = [
   // Inventory became definition-backed; keep it exact until that row lands.
   {
     file: 'packages/compiler/src/conformance.ts',
-    line: 1818,
+    // PUR-1 declared two family rows and one relation-semantics row above this
+    // line. The routed debt itself is unchanged; only its offset moved.
+    line: 1825,
     message: 'generic press references inventory identity northstar.inventory',
     moduleDirectory: 'inventory',
     ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
@@ -50,8 +52,9 @@ test('one auto-discovered guard covers every definition-backed product module', 
     'location',
     'party',
     'platform',
+    'purchasing',
   ]);
-  assert.equal(result.modulesRead, 5);
+  assert.equal(result.modulesRead, 6);
   assert.ok(
     result.productionFilesRead > 0,
     'press-law guard read zero production files',

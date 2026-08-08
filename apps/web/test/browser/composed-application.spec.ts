@@ -802,12 +802,15 @@ async function inventoryNavigationJourney(
     name: 'Release navigation',
   });
   const primaryEntries = navigation.locator('.navigation-tree > li');
-  await expect(primaryEntries).toHaveCount(4);
+  // PUR-1 mounted Purchasing as the fifth module group. Five is exactly
+  // MAX_PRIMARY_NAVIGATION_ENTRIES, so it is a peer of Inventory rather than
+  // the first occupant of an overflow `More`.
+  await expect(primaryEntries).toHaveCount(5);
   await expect(
     primaryEntries.locator(
       ':scope > a > span:nth-child(2), :scope > details > summary > span:nth-child(2)',
     ),
-  ).toHaveText(['Party', 'Catalog', 'Location', 'Inventory']);
+  ).toHaveText(['Party', 'Catalog', 'Location', 'Inventory', 'Purchasing']);
   await expect(navigation.locator('a > span:nth-child(2)')).toHaveText([
     'Party',
     'Party role',
@@ -821,6 +824,8 @@ async function inventoryNavigationJourney(
     'Legal entity',
     'Stock count line',
     'Stock count',
+    'Purchase order line',
+    'Purchase order',
   ]);
   await expect(
     navigation.getByRole('link', { name: /detail|form/i }),

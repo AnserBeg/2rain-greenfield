@@ -32,6 +32,7 @@ const suiteDefinitions = [
       'test/unit/module-provider-error-mappings.test.ts',
       'test/unit/observability.test.ts',
       'test/unit/party-definition.test.ts',
+      'test/unit/purchasing-definition.test.ts',
       'test/unit/web-surface-hex-literal-ratchet.test.ts',
       'test/unit/workspace-contract.test.ts',
     ],

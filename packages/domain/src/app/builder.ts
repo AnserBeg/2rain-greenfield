@@ -2,6 +2,7 @@ import { catalogModuleDefinition } from '../catalog/definition.js';
 import { inventoryModuleDefinition } from '../inventory/definition.js';
 import { locationModuleDefinition } from '../location/definition.js';
 import { partyModuleDefinition } from '../party/definition.js';
+import { purchasingModuleDefinition } from '../purchasing/definition.js';
 
 const version = 'v4' as const;
 const normalizationProfileVersion = 'northstar.normalization/v4' as const;
@@ -24,9 +25,10 @@ type CollectionName =
 
 /**
  * The product application is one canonical package containing the same Party,
- * Catalog, Location, and Inventory definitions their standalone harnesses
- * compile. The factories are instantiated under one package namespace; no
- * definition body is copied and no separately namespaced package is composed.
+ * Catalog, Location, Inventory, and Purchasing definitions their standalone
+ * harnesses compile. The factories are instantiated under one package
+ * namespace; no definition body is copied and no separately namespaced package
+ * is composed.
  */
 export function composedApplicationDefinition(): Record<string, unknown> {
   const definitions = [
@@ -34,13 +36,14 @@ export function composedApplicationDefinition(): Record<string, unknown> {
     catalogModuleDefinition(APPLICATION_NAMESPACE),
     locationModuleDefinition(APPLICATION_NAMESPACE),
     inventoryModuleDefinition(APPLICATION_NAMESPACE),
+    purchasingModuleDefinition(APPLICATION_NAMESPACE),
   ];
-  const [party, catalog, location, inventory] = definitions;
-  if (!party || !catalog || !location || !inventory) {
-    throw new TypeError('the composed application requires four modules');
+  const [party, catalog, location, inventory, purchasing] = definitions;
+  if (!party || !catalog || !location || !inventory || !purchasing) {
+    throw new TypeError('the composed application requires five modules');
   }
 
-  const modules = [party, catalog, location, inventory].map(
+  const modules = [party, catalog, location, inventory, purchasing].map(
     (definition, index) => {
       const [module] = collection(definition, 'modules');
       if (!isRecord(module)) {
@@ -58,7 +61,7 @@ export function composedApplicationDefinition(): Record<string, unknown> {
   if (!isRecord(sharedCapability)) {
     throw new TypeError('the standard surface capability is missing');
   }
-  for (const definition of [catalog, location, inventory]) {
+  for (const definition of [catalog, location, inventory, purchasing]) {
     const capability = collection(definition, 'capabilityRequirements')[0];
     if (JSON.stringify(capability) !== JSON.stringify(sharedCapability)) {
       throw new TypeError('module surface capability requirements diverged');
@@ -134,6 +137,43 @@ export const APPLICATION_IDS = Object.freeze({
     formSurfaceId: `${APPLICATION_NAMESPACE}:surface.party_form`,
     listQueryId: `${APPLICATION_NAMESPACE}:query.party_list`,
     listSurfaceId: `${APPLICATION_NAMESPACE}:surface.party_list`,
+  }),
+  purchasing: Object.freeze({
+    createOperationId: `${APPLICATION_NAMESPACE}:operation.purchase_order_create`,
+    entityIds: Object.freeze({
+      purchaseOrder: `${APPLICATION_NAMESPACE}:entity.purchase_order`,
+      purchaseOrderLine: `${APPLICATION_NAMESPACE}:entity.purchase_order_line`,
+    }),
+    fieldIds: Object.freeze({
+      currency: `${APPLICATION_NAMESPACE}:field.purchase_order_currency`,
+      expectedDate: `${APPLICATION_NAMESPACE}:field.purchase_order_expected_date`,
+      itemId: `${APPLICATION_NAMESPACE}:field.purchase_order_line_item_id`,
+      lineNumber: `${APPLICATION_NAMESPACE}:field.purchase_order_line_line_number`,
+      notes: `${APPLICATION_NAMESPACE}:field.purchase_order_notes`,
+      number: `${APPLICATION_NAMESPACE}:field.purchase_order_number`,
+      orderDate: `${APPLICATION_NAMESPACE}:field.purchase_order_order_date`,
+      orderedQuantity: `${APPLICATION_NAMESPACE}:field.purchase_order_line_ordered_quantity`,
+      receivedQuantity: `${APPLICATION_NAMESPACE}:field.purchase_order_line_received_quantity`,
+      state: `${APPLICATION_NAMESPACE}:field.purchase_order_state`,
+      supplierPartyId: `${APPLICATION_NAMESPACE}:field.purchase_order_supplier_party_id`,
+      unitPrice: `${APPLICATION_NAMESPACE}:field.purchase_order_line_unit_price`,
+    }),
+    formSurfaceId: `${APPLICATION_NAMESPACE}:surface.purchase_order_form`,
+    lineCreateOperationId: `${APPLICATION_NAMESPACE}:operation.purchase_order_line_create`,
+    lineFormSurfaceId: `${APPLICATION_NAMESPACE}:surface.purchase_order_line_form`,
+    lineListQueryId: `${APPLICATION_NAMESPACE}:query.purchase_order_line_list`,
+    lineListSurfaceId: `${APPLICATION_NAMESPACE}:surface.purchase_order_line_list`,
+    lineRelationId: `${APPLICATION_NAMESPACE}:relation.purchase_order_line_order`,
+    lineUpdateOperationId: `${APPLICATION_NAMESPACE}:operation.purchase_order_line_update`,
+    listQueryId: `${APPLICATION_NAMESPACE}:query.purchase_order_list`,
+    listSurfaceId: `${APPLICATION_NAMESPACE}:surface.purchase_order_list`,
+    optionIds: Object.freeze({
+      cancelled: `${APPLICATION_NAMESPACE}:option.purchase_order_state_cancelled`,
+      closed: `${APPLICATION_NAMESPACE}:option.purchase_order_state_closed`,
+      draft: `${APPLICATION_NAMESPACE}:option.purchase_order_state_draft`,
+      released: `${APPLICATION_NAMESPACE}:option.purchase_order_state_released`,
+    }),
+    updateOperationId: `${APPLICATION_NAMESPACE}:operation.purchase_order_update`,
   }),
 });
 

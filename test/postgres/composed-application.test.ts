@@ -921,10 +921,13 @@ async function assertRealProductDefinition(
         surfaces: readonly { surfaceId: string }[];
       }
     ).surfaces.map((surface) => surface.surfaceId);
-    assert.equal(surfaces.length, 32);
+    // 32 + PUR-1's six Purchasing surfaces.
+    assert.equal(surfaces.length, 38);
     assert.ok(surfaces.includes(APPLICATION_IDS.party.listSurfaceId));
     assert.ok(surfaces.includes(APPLICATION_IDS.catalog.listSurfaceId));
     assert.ok(surfaces.includes(APPLICATION_IDS.location.listSurfaceId));
+    assert.ok(surfaces.includes(APPLICATION_IDS.purchasing.listSurfaceId));
+    assert.ok(surfaces.includes(APPLICATION_IDS.purchasing.lineListSurfaceId));
     // Inventory only reaches a mounted runtime once its emitted-but-
     // unarrangeable verification scenarios are recorded as derivations.
     for (const inventorySurfaceId of [
