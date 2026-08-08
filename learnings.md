@@ -499,3 +499,17 @@ How to apply: append the exit code **inside** the log the matrix writes, and ass
 on that line. A green read from a wrapper's status is a false green in the
 reporting harness, which no gate in the tree can catch — see also
 [[a-probe-s-results-must-be-reproducible]].
+
+## A control can guard the premise of a claim instead of the claim
+Date: 2026-08-08
+Why: `U5b` recorded that `surface-manifest` `minimumVersion` stays 1 *on the
+condition that no tier value ever means "hide"*. Asked to make that condition
+executable, the lane pinned the tier vocabulary to an exact set and printed the
+recorded argument in the failure message — and the orchestrator accepted it as
+closing the condition. It closes the **premise** (a fourth spelling cannot arrive
+silently). **Nothing ever reads `requiredRuntimeCapability.minimumVersion`**, so
+raising it from 1 to 2 survives every control in the packet.
+How to apply: when a claim has the shape *"X holds because Y"*, a control on Y is
+not a control on X. Name both, and assert the one the claim is about. The tell is a
+failure message that mentions a value the assertion never reads — see also
+[[a-fenced-claim-without-a-control-is-never-checked-again]].
