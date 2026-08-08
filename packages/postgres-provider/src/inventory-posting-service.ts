@@ -46,6 +46,8 @@ const requestKeyLockDerivationVersion =
 const legacyInventoryPostingInputDigestVersion = 1 as const;
 const standardInventoryPostingInputDigestVersion = 2 as const;
 const stockCountInventoryPostingInputDigestVersion = 3 as const;
+/** PS-2. The goods-receipt family's own digest arm. See migration 0018. */
+const receiptInventoryPostingInputDigestVersion = 4 as const;
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const sha256Pattern = /^[0-9a-f]{64}$/u;
@@ -744,6 +746,7 @@ interface RecordedReceiptRow {
 interface VersionedInputDigest {
   readonly value: string;
   readonly version:
+    | typeof receiptInventoryPostingInputDigestVersion
     | typeof standardInventoryPostingInputDigestVersion
     | typeof stockCountInventoryPostingInputDigestVersion;
 }
@@ -1893,7 +1896,7 @@ function movementPostingRole(
     case 'receipt':
       return requiredCompiledOption(
         binding.movementPostingRoleOptions,
-        'inventory_movement_posting_role_receipt',
+        'inventory_posting_role_receipt',
         'inventory_movement_posting_role',
       );
     case 'adjustment':
@@ -4618,7 +4621,9 @@ function naturalEffects(
 function currentCommandDigest(posting: ParsedPosting): VersionedInputDigest {
   const version = isStockCountPosting(posting)
     ? stockCountInventoryPostingInputDigestVersion
-    : standardInventoryPostingInputDigestVersion;
+    : posting.postingRole === 'receipt'
+      ? receiptInventoryPostingInputDigestVersion
+      : standardInventoryPostingInputDigestVersion;
   return Object.freeze({
     value: digestCommand(posting, version),
     version,
@@ -4643,7 +4648,11 @@ function digestCommand(posting: ParsedPosting, version: number): string {
           ? isStockCountPosting(posting)
             ? { postingRole: posting.postingRole, ...semanticInput }
             : unsupportedReceiptVersion(version)
-          : unsupportedReceiptVersion(version);
+          : version === receiptInventoryPostingInputDigestVersion
+            ? posting.postingRole === 'receipt'
+              ? { postingRole: posting.postingRole, ...semanticInput }
+              : unsupportedReceiptVersion(version)
+            : unsupportedReceiptVersion(version);
   return createHash('sha256').update(canonicalize(digestInput)).digest('hex');
 }
 
@@ -4653,6 +4662,7 @@ function recordedResultForReplay(
   const version = receipt.input_digest_version;
   if (
     version !== legacyInventoryPostingInputDigestVersion &&
+    version !== receiptInventoryPostingInputDigestVersion &&
     version !== standardInventoryPostingInputDigestVersion &&
     version !== stockCountInventoryPostingInputDigestVersion
   ) {

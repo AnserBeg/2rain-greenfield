@@ -402,7 +402,7 @@ test('PS-0: an inbound receipt posts, advances open quantity, and compensates in
       // The compiled price of the receipt family: exactly two enum options.
       assert.deepEqual(probeEnumAdditions, [
         'northstar.app:option.inventory_transaction_type_goods_receipt',
-        'northstar.app:option.inventory_movement_posting_role_receipt',
+        'northstar.app:option.inventory_posting_role_receipt',
       ]);
 
       // ---- 9. A receipt posts as a RECEIPT, not as an adjustment ---------
@@ -462,7 +462,7 @@ test('PS-0: an inbound receipt posts, advances open quantity, and compensates in
       assert.equal(companion.sourceId, receipt.goodsReceiptId);
       assert.match(
         String(await movementPostingRoleOf(moduleRuntimePool, binding, receipt)),
-        /inventory_movement_posting_role_receipt$/u,
+        /inventory_posting_role_receipt$/u,
         'the movement must post under the receipt role, not adjustment',
       );
       assert.equal((await readPurchaseOrderLine(database.pool)).received, '4');
@@ -1123,11 +1123,13 @@ function extendProbeEnums(definition: Record<string, unknown>): readonly string[
     'goodsReceipt',
     'inventory_transaction_type_goods_receipt',
   );
-  add(
-    ':field.inventory_movement_posting_role',
-    'receipt',
-    'inventory_movement_posting_role_receipt',
-  );
+  if (process.env.PS2_SKIP_POSTING_ROLE !== '1') {
+    add(
+      ':field.inventory_movement_posting_role',
+      'receipt',
+      'inventory_posting_role_receipt',
+    );
+  }
   return Object.freeze(added);
 }
 
