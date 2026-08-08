@@ -1,10 +1,18 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import {
+  classifyFeedbackLadder,
   createObservationContext,
+  loadingTreatmentAdmitted,
+  monotonicMilliseconds,
+  DOHERTY_THRESHOLD_MILLISECONDS,
+  FEEDBACK_LADDER_BANDS,
+  FEEDBACK_LADDER_BOUNDARIES_MILLISECONDS,
   ObservabilityMetrics,
   StructuredLogger,
+  type FeedbackLadderBand,
 } from '../../packages/observability/src/index.js';
 
 const correlationId = 'request-correlation-001';
@@ -78,6 +86,11 @@ test('metrics expose stable bounded request, readiness, and error evidence', () 
   metrics.recordReadiness('ready');
   metrics.recordReadiness('not_ready');
   metrics.recordError('readiness.postgres_unavailable');
+  metrics.recordRegisteredQueryLatency('answered', 12.5);
+  metrics.recordRegisteredQueryLatency('answered', 3_400);
+  metrics.recordRegisteredQueryLatency('answered', 250);
+  metrics.recordRegisteredQueryLatency('refused', 640);
+  metrics.recordRegisteredQueryLatency('answered', Number.NaN);
 
   assert.equal(
     metrics.renderPrometheus(),
@@ -94,7 +107,255 @@ test('metrics expose stable bounded request, readiness, and error evidence', () 
       '# HELP north_star_errors_total Redacted platform error evidence.',
       '# TYPE north_star_errors_total counter',
       'north_star_errors_total{code="readiness.postgres_unavailable"} 1',
+      '# HELP north_star_registered_query_latency_band_total Registered query invocations by ADR-0032 feedback-ladder band.',
+      '# TYPE north_star_registered_query_latency_band_total counter',
+      'north_star_registered_query_latency_band_total{band="under_100ms",outcome="answered"} 1',
+      'north_star_registered_query_latency_band_total{band="100ms_400ms",outcome="answered"} 1',
+      'north_star_registered_query_latency_band_total{band="3s_10s",outcome="answered"} 1',
+      'north_star_registered_query_latency_band_total{band="400ms_1s",outcome="refused"} 1',
+      '# HELP north_star_registered_query_latency_rejected_total Latency samples refused by name instead of graded as a band.',
+      '# TYPE north_star_registered_query_latency_rejected_total counter',
+      'north_star_registered_query_latency_rejected_total{reason="not_finite"} 1',
       '',
     ].join('\n'),
   );
+  // Ladder order, not lexical: 3s_10s precedes 400ms_1s in the exposition.
+  const rendered = metrics.renderPrometheus();
+  assert.ok(
+    rendered.indexOf('band="100ms_400ms"') < rendered.indexOf('band="3s_10s"'),
+  );
+});
+
+/**
+ * ADR-0032 §1 is a table of boundaries; this is that table, executed. Both
+ * sides of every boundary are asserted, so a band that swallowed its neighbour
+ * — or a classifier that answered the same band for everything — cannot pass.
+ */
+test('the feedback ladder grades every ADR-0032 boundary into exactly one band', () => {
+  assert.deepEqual(
+    [...FEEDBACK_LADDER_BOUNDARIES_MILLISECONDS],
+    [100, 400, 1_000, 3_000, 10_000],
+    'the boundaries are ADR-0032 §1, and 400 ms is Doherty',
+  );
+  assert.equal(DOHERTY_THRESHOLD_MILLISECONDS, 400);
+  assert.equal(FEEDBACK_LADDER_BANDS.length, 6);
+
+  const expected: ReadonlyArray<readonly [number, FeedbackLadderBand]> = [
+    [0, 'under_100ms'],
+    [99.999, 'under_100ms'],
+    [100, '100ms_400ms'],
+    [399.999, '100ms_400ms'],
+    [400, '400ms_1s'],
+    [999.999, '400ms_1s'],
+    [1_000, '1s_3s'],
+    [2_999.999, '1s_3s'],
+    [3_000, '3s_10s'],
+    [9_999.999, '3s_10s'],
+    [10_000, 'over_10s'],
+    [86_400_000, 'over_10s'],
+  ];
+  for (const [durationMilliseconds, band] of expected) {
+    assert.deepEqual(
+      classifyFeedbackLadder(durationMilliseconds),
+      { band, kind: 'band' },
+      `${String(durationMilliseconds)} ms belongs to ${band}`,
+    );
+  }
+  assert.deepEqual(
+    [...new Set(expected.map(([, band]) => band))],
+    [...FEEDBACK_LADDER_BANDS],
+    'every declared band is reachable and none is unreachable',
+  );
+});
+
+/**
+ * ADR-0032 §2, executed. The rule is that a treatment is admitted only above
+ * the Doherty threshold, so the two bands at or under it must refuse one.
+ */
+test('a loading treatment is admitted only above the Doherty threshold', () => {
+  const admitted = FEEDBACK_LADDER_BANDS.filter((band) =>
+    loadingTreatmentAdmitted(band),
+  );
+  assert.deepEqual(
+    [...admitted],
+    ['400ms_1s', '1s_3s', '3s_10s', 'over_10s'],
+    'a sub-400 ms band that admitted a treatment would let a spinner hide a budget',
+  );
+  const admits = (durationMilliseconds: number): boolean => {
+    const classification = classifyFeedbackLadder(durationMilliseconds);
+    assert.equal(classification.kind, 'band', 'the sample must grade');
+    return (
+      classification.kind === 'band' &&
+      loadingTreatmentAdmitted(classification.band)
+    );
+  };
+  for (const inside of [0, 99, 100, DOHERTY_THRESHOLD_MILLISECONDS - 0.001]) {
+    assert.equal(
+      admits(inside),
+      false,
+      `${String(inside)} ms is inside budget`,
+    );
+  }
+  for (const outside of [
+    DOHERTY_THRESHOLD_MILLISECONDS,
+    1_000,
+    3_000,
+    10_000,
+  ]) {
+    assert.equal(admits(outside), true, `${String(outside)} ms exceeds budget`);
+  }
+});
+
+/**
+ * AGENTS.md §6 records that this machine's WSL2 kernel steps its wall clock
+ * backward under load. A clamp would file that as an instantaneous response,
+ * which is the exact shape of an unratified aspiration: a green number that
+ * measured nothing.
+ */
+test('an unusable latency sample is refused by name, never graded as a fast band', () => {
+  for (const [sample, reason] of [
+    [-1, 'negative'],
+    [-0.000_001, 'negative'],
+    [Number.NaN, 'not_finite'],
+    [Number.POSITIVE_INFINITY, 'not_finite'],
+    [Number.NEGATIVE_INFINITY, 'not_finite'],
+  ] as const) {
+    assert.deepEqual(classifyFeedbackLadder(sample), {
+      kind: 'rejected',
+      reason,
+    });
+  }
+  assert.deepEqual(classifyFeedbackLadder(-0), {
+    band: 'under_100ms',
+    kind: 'band',
+  });
+
+  const metrics = new ObservabilityMetrics();
+  metrics.recordRegisteredQueryLatency('answered', -3);
+  metrics.recordRegisteredQueryLatency('refused', Number.NaN);
+  const snapshot = metrics.snapshot();
+  assert.deepEqual(snapshot.queryLatency, []);
+  assert.deepEqual(snapshot.queryLatencyRejections, [
+    ['negative', 1],
+    ['not_finite', 1],
+  ]);
+});
+
+/**
+ * Bounded means bounded by the ladder, not by the workload. Ten thousand
+ * samples across the whole range still expose twelve series, because the
+ * recorder keys on `outcome x band` and never on the query that produced it.
+ */
+test('registered query latency evidence stays bounded under unbounded input', () => {
+  const metrics = new ObservabilityMetrics();
+  for (let sample = 0; sample < 10_000; sample += 1) {
+    metrics.recordRegisteredQueryLatency(
+      sample % 2 === 0 ? 'answered' : 'refused',
+      sample * 1.7,
+    );
+  }
+  const series = metrics
+    .renderPrometheus()
+    .split('\n')
+    .filter((line) =>
+      line.startsWith('north_star_registered_query_latency_band_total{'),
+    );
+  assert.equal(series.length, 12);
+  assert.equal(
+    new Set(series).size,
+    12,
+    'no series is emitted twice for one label pair',
+  );
+  assert.equal(
+    series.reduce((total, line) => total + Number(line.split(' ').at(-1)), 0),
+    10_000,
+    'every recorded sample lands in exactly one band',
+  );
+});
+
+/**
+ * A proxy, and recorded as one per AGENTS.md §6: prose can only be matched, it
+ * cannot be observed. It exists because §18 risk 4's failure mode has a mirror
+ * image — code keeping a threshold the doctrine has since moved off — and three
+ * documents now state this number where previously none did.
+ */
+test('the graded threshold and bands are the ones ADR-0032, the plan, and the grammar state', () => {
+  const adr = readFileSync(
+    'docs/decisions/ADR-0032-feedback-ladder-and-loading-states.md',
+    'utf8',
+  );
+  const plan = readFileSync(
+    'docs/greenfield-north-star-erp-platform-plan.md',
+    'utf8',
+  );
+  const grammar = readFileSync('.agents/skills/ux-grammar/SKILL.md', 'utf8');
+  const threshold = `${String(DOHERTY_THRESHOLD_MILLISECONDS)} ms`;
+
+  assert.ok(
+    adr.includes(`It moves to **${threshold}**`),
+    'ADR-0032 §7 no longer tightens the budget to the graded threshold',
+  );
+  assert.ok(
+    plan.includes(`p95 under **${threshold}**`),
+    'plan §15.1 no longer carries the graded threshold',
+  );
+  assert.ok(
+    grammar.includes(`inside ${threshold} shows nothing`),
+    'the ux-grammar skill no longer states the graded threshold',
+  );
+
+  // The six rows of ADR-0032 §1, verbatim, against the six graded bands.
+  const ladderRows = [
+    '< 100 ms',
+    '100–400 ms',
+    '400 ms – 1 s',
+    '1 s – 3 s',
+    '3 s – 10 s',
+    '> 10 s',
+  ];
+  assert.equal(ladderRows.length, FEEDBACK_LADDER_BANDS.length);
+  for (const row of ladderRows) {
+    assert.ok(adr.includes(`| ${row} |`), `ADR-0032 §1 no longer has ${row}`);
+  }
+});
+
+/**
+ * The liveness control, and the reason it exists: round 1 asserted only that
+ * this source was finite and nondecreasing, which `return 0` satisfies exactly.
+ * Every other ladder gate injects its own clock, so a dead exported source
+ * would have graded twenty real database reads into `under_100ms` and turned
+ * the whole matrix green while measuring nothing.
+ */
+test('the monotonic source advances, so a dead clock cannot read as instantaneous', () => {
+  const outerBefore = process.hrtime.bigint();
+  const started = monotonicMilliseconds();
+  assert.ok(Number.isFinite(started));
+  let current = started;
+  let reads = 0;
+  // A bounded busy read, never a sleep (AGENTS.md §6). A live nanosecond source
+  // advances within a few reads; a frozen one exhausts the bound and reds.
+  while (current === started && reads < 5_000_000) {
+    current = monotonicMilliseconds();
+    reads += 1;
+  }
+  const outerAfter = process.hrtime.bigint();
+  assert.ok(
+    current > started,
+    `the monotonic source never advanced across ${String(reads)} reads`,
+  );
+
+  // The measured window sits strictly inside the hrtime window containing it,
+  // so a per-call counter incrementing faster than time cannot pass either.
+  const containingMilliseconds = Number(outerAfter - outerBefore) / 1e6;
+  assert.ok(
+    current - started <= containingMilliseconds,
+    'the source advanced further than the wall-independent window that contains it',
+  );
+
+  let previous = current;
+  for (let read = 0; read < 1_000; read += 1) {
+    const next = monotonicMilliseconds();
+    assert.ok(next >= previous, `monotonic read ${String(read)} went backward`);
+    previous = next;
+  }
 });

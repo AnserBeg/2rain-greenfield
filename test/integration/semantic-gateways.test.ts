@@ -44,11 +44,25 @@ import {
   MalformedPinnedQueryCatalogError,
   MalformedSemanticQueryRequestError,
   NoSuchRegisteredQueryError,
+  SEMANTIC_AGGREGATE_RESULT_VERSION,
   SEMANTIC_QUERY_REQUEST_VERSION,
+  SEMANTIC_QUERY_RESULT_VERSION,
   SemanticQueryGateway,
   SemanticQueryPolicyDeniedError,
+  type RegisteredQueryLatencyObservation,
+  type SemanticAggregateResultEnvelope,
+  type SemanticQueryExecutor,
   type SemanticQueryRequestEnvelope,
+  type SemanticQueryResultEnvelope,
 } from '../../packages/runtime/src/semantic-query-gateway.js';
+import {
+  PARAMETERIZED_PREDICATE_LOWERING_PLAN_VERSION,
+  PREDICATE_POSITION_PROFILE_VERSION,
+  QUERY_AGGREGATE_LOWERING_PLAN_VERSION,
+  canonicalizeAndHash,
+} from '../../packages/canonical-model/src/index.js';
+import { ObservabilityMetrics } from '../../packages/observability/src/index.js';
+import { composedRegisteredQueryLatencyInstrumentation } from '../../packages/postgres-provider/src/composed-application-runtime.js';
 
 const tenantId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const environmentId = 'a1000000-0000-4000-8000-000000000001';
@@ -627,6 +641,656 @@ test('owned gateway sources expose one authority each, closed request keys, and 
   );
   assert.deepEqual([...ownedSources.matchAll(/\berp_[a-z0-9_]+\b/g)], []);
 });
+
+/**
+ * ADR-0032 §2 admits a loading treatment only where a *measured* operation
+ * exceeds the Doherty threshold, and `ux-strategy-proposal.md` §18 risk 4 says
+ * the ladder is meaningless unless something measures. These gates read the
+ * recorded counter rather than the observer they injected, because the ingress
+ * swallows observer faults by design: silence there is indistinguishable from
+ * an observer that never ran.
+ */
+test('every read-ingress call is graded into one band, answered and refused alike', async () => {
+  const fixture = createFixture({
+    queryPayload: queryCatalogWith(answeringQueryId),
+  });
+  const view = await fixture.requestEntry.run(authenticationInput, (value) =>
+    Promise.resolve(value),
+  );
+  const metrics = new ObservabilityMetrics();
+  const observations: RegisteredQueryLatencyObservation[] = [];
+  // A controlled clock, per AGENTS.md §6: paired start/end reads, never a sleep.
+  const clock = scriptedClock([0, 45, 100, 1_400, 2_000, 2_500, 3_000, 3_010]);
+  const gateway = new SemanticQueryGateway(
+    fixture.policy,
+    stubQueryExecutor(),
+    undefined,
+    undefined,
+    {
+      monotonicMilliseconds: clock.read,
+      observe: (observation) => {
+        observations.push(observation);
+        metrics.recordRegisteredQueryLatency(
+          observation.outcome,
+          observation.durationMilliseconds,
+        );
+      },
+    },
+  );
+
+  const answered = await gateway.invoke(view, ladderRequest(answeringQueryId));
+  assert.equal(answered.outcome, 'exact');
+  await gateway.invoke(view, ladderRequest(answeringQueryId));
+  await assert.rejects(
+    gateway.invoke(view, ladderRequest('northstar.bootstrap:query.absent')),
+    NoSuchRegisteredQueryError,
+  );
+  await assert.rejects(
+    gateway.invoke(view, { queryId: answeringQueryId }),
+    MalformedSemanticQueryRequestError,
+  );
+
+  assert.equal(
+    clock.remaining(),
+    0,
+    'the ingress read the clock exactly twice per call',
+  );
+  assert.deepEqual(
+    observations.map((observation) => [
+      observation.outcome,
+      observation.queryId,
+    ]),
+    [
+      ['answered', answeringQueryId],
+      ['answered', answeringQueryId],
+      ['refused', 'northstar.bootstrap:query.absent'],
+      // The envelope was refused before it named a query, so nothing is named.
+      ['refused', null],
+    ],
+  );
+
+  const snapshot = metrics.snapshot();
+  assert.deepEqual(snapshot.queryLatency, [
+    ['answered|under_100ms', 1],
+    ['answered|1s_3s', 1],
+    ['refused|under_100ms', 1],
+    ['refused|400ms_1s', 1],
+  ]);
+  assert.deepEqual(snapshot.queryLatencyRejections, []);
+  assert.equal(
+    snapshot.queryLatency.reduce((total, [, count]) => total + count, 0),
+    4,
+    'the graded total equals the invocation count: no ingress path escapes measurement',
+  );
+});
+
+test('ladder evidence does not grow with the query catalog', async () => {
+  const fixture = createFixture();
+  const view = await fixture.requestEntry.run(authenticationInput, (value) =>
+    Promise.resolve(value),
+  );
+  const metrics = new ObservabilityMetrics();
+  let reads = 0;
+  const gateway = new SemanticQueryGateway(
+    fixture.policy,
+    stubQueryExecutor(),
+    undefined,
+    undefined,
+    {
+      monotonicMilliseconds: () => (reads++ % 2 === 0 ? 0 : 250),
+      observe: (observation) => {
+        metrics.recordRegisteredQueryLatency(
+          observation.outcome,
+          observation.durationMilliseconds,
+        );
+      },
+    },
+  );
+
+  for (let ordinal = 0; ordinal < 200; ordinal += 1) {
+    await assert.rejects(
+      gateway.invoke(
+        view,
+        ladderRequest(`northstar.bootstrap:query.absent_${String(ordinal)}`),
+      ),
+      NoSuchRegisteredQueryError,
+    );
+  }
+
+  const rendered = metrics.renderPrometheus();
+  const series = rendered
+    .split('\n')
+    .filter((line) =>
+      line.startsWith('north_star_registered_query_latency_band_total{'),
+    );
+  assert.deepEqual(series, [
+    'north_star_registered_query_latency_band_total{band="100ms_400ms",outcome="refused"} 200',
+  ]);
+  assert.equal(
+    rendered.includes('northstar.bootstrap:query.'),
+    false,
+    'no query id reaches the exported evidence, so cardinality cannot follow the catalog',
+  );
+});
+
+test('a backward or unusable clock reaches the evidence as a named rejection, and the read still answers', async () => {
+  const fixture = createFixture({
+    queryPayload: queryCatalogWith(answeringQueryId),
+  });
+  const view = await fixture.requestEntry.run(authenticationInput, (value) =>
+    Promise.resolve(value),
+  );
+  const metrics = new ObservabilityMetrics();
+  // 500 -> 480 is the ~2s WSL2 wall-clock step AGENTS.md §6 records, in
+  // miniature. A clamp would file it as an instantaneous response.
+  const backward = scriptedClock([500, 480]);
+  const backwardGateway = new SemanticQueryGateway(
+    fixture.policy,
+    stubQueryExecutor(),
+    undefined,
+    undefined,
+    {
+      monotonicMilliseconds: backward.read,
+      observe: (observation) => {
+        metrics.recordRegisteredQueryLatency(
+          observation.outcome,
+          observation.durationMilliseconds,
+        );
+      },
+    },
+  );
+  const steppedBack = await backwardGateway.invoke(
+    view,
+    ladderRequest(answeringQueryId),
+  );
+  assert.equal(
+    steppedBack.outcome,
+    'exact',
+    'a bad clock never fails the read',
+  );
+
+  const brokenGateway = new SemanticQueryGateway(
+    fixture.policy,
+    stubQueryExecutor(),
+    undefined,
+    undefined,
+    {
+      monotonicMilliseconds: () => {
+        throw new Error('monotonic source unavailable');
+      },
+      observe: (observation) => {
+        metrics.recordRegisteredQueryLatency(
+          observation.outcome,
+          observation.durationMilliseconds,
+        );
+      },
+    },
+  );
+  const unclocked = await brokenGateway.invoke(
+    view,
+    ladderRequest(answeringQueryId),
+  );
+  assert.equal(unclocked.outcome, 'exact');
+
+  const snapshot = metrics.snapshot();
+  assert.deepEqual(
+    snapshot.queryLatency,
+    [],
+    'neither unusable sample was graded as a band',
+  );
+  assert.deepEqual(snapshot.queryLatencyRejections, [
+    ['negative', 1],
+    ['not_finite', 1],
+  ]);
+});
+
+test('a throwing observer degrades the evidence and never the read', async () => {
+  const fixture = createFixture({
+    queryPayload: queryCatalogWith(answeringQueryId),
+  });
+  const view = await fixture.requestEntry.run(authenticationInput, (value) =>
+    Promise.resolve(value),
+  );
+  let observations = 0;
+  const gateway = new SemanticQueryGateway(
+    fixture.policy,
+    stubQueryExecutor(),
+    undefined,
+    undefined,
+    {
+      monotonicMilliseconds: scriptedClock([0, 10, 20, 30]).read,
+      observe: () => {
+        observations += 1;
+        throw new Error('metrics sink unavailable');
+      },
+    },
+  );
+
+  const answered = await gateway.invoke(view, ladderRequest(answeringQueryId));
+  assert.equal(answered.outcome, 'exact');
+  await assert.rejects(
+    gateway.invoke(view, ladderRequest('northstar.bootstrap:query.absent')),
+    NoSuchRegisteredQueryError,
+  );
+  assert.equal(observations, 2, 'both paths still attempted an observation');
+});
+
+/**
+ * Round 1 recorded `answered` before the public method checked the envelope
+ * shape, so a call that threw `MalformedPinnedQueryCatalogError` was graded as
+ * a successful answer — the outcome axis meant "the ingress returned to the
+ * public method", not "the caller was answered". Both directions, because the
+ * record path was the only one round 1 exercised at all.
+ */
+test('an executor answering with the wrong envelope kind is graded refused, both directions', async () => {
+  const recordFixture = createFixture({
+    queryPayload: queryCatalogWith(answeringQueryId),
+  });
+  const recordView = await recordFixture.requestEntry.run(
+    authenticationInput,
+    (value) => Promise.resolve(value),
+  );
+  const recordMetrics = new ObservabilityMetrics();
+  const recordGateway = new SemanticQueryGateway(
+    recordFixture.policy,
+    // Lies about its envelope kind, which the executor contract cannot express.
+    {
+      execute: () =>
+        Promise.resolve(
+          aggregateEnvelope(
+            answeringQueryId,
+          ) as unknown as SemanticQueryResultEnvelope,
+        ),
+    },
+    undefined,
+    undefined,
+    ladderInstrumentation(recordMetrics, scriptedClock([0, 250]).read),
+  );
+  await assert.rejects(
+    recordGateway.invoke(recordView, ladderRequest(answeringQueryId)),
+    (error: unknown) => {
+      assert.ok(error instanceof MalformedPinnedQueryCatalogError);
+      assert.equal(error.code, 'MALFORMED_PINNED_QUERY_CATALOG');
+      // The message, not just the type: a malformed catalog raises the same
+      // error class, so type alone would let a broken fixture pass this.
+      assert.equal(error.message, 'record query returned an aggregate result');
+      return true;
+    },
+  );
+  assert.deepEqual(
+    recordMetrics.snapshot().queryLatency,
+    [['refused|100ms_400ms', 1]],
+    'a record query handed an aggregate envelope is refused, not answered',
+  );
+
+  const aggregateFixture = createFixture({
+    queryPayload: aggregateQueryCatalogWith(aggregateQueryId),
+  });
+  const aggregateView = await aggregateFixture.requestEntry.run(
+    authenticationInput,
+    (value) => Promise.resolve(value),
+  );
+  const aggregateMetrics = new ObservabilityMetrics();
+  const aggregateGateway = new SemanticQueryGateway(
+    aggregateFixture.policy,
+    {
+      execute: () => Promise.reject(new Error('record path must not be used')),
+      executeAggregate: () =>
+        Promise.resolve(
+          recordEnvelope(
+            aggregateQueryId,
+          ) as unknown as SemanticAggregateResultEnvelope,
+        ),
+    },
+    undefined,
+    undefined,
+    ladderInstrumentation(aggregateMetrics, scriptedClock([0, 1_500]).read),
+  );
+  await assert.rejects(
+    aggregateGateway.invokeAggregate(
+      aggregateView,
+      ladderRequest(aggregateQueryId),
+    ),
+    (error: unknown) => {
+      assert.ok(error instanceof MalformedPinnedQueryCatalogError);
+      assert.equal(error.message, 'aggregate query returned a record result');
+      return true;
+    },
+  );
+  assert.deepEqual(
+    aggregateMetrics.snapshot().queryLatency,
+    [['refused|1s_3s', 1]],
+    'an aggregate query handed a record envelope is refused, not answered',
+  );
+});
+
+/**
+ * Round 1 had no `invokeAggregate` witness at all — every fixture call and the
+ * composed-path control used `invoke`. This is the answered half of that hole;
+ * the refused half is above. Neither runs against a real database (see the
+ * unproven list in runtime-slos.md).
+ */
+test('an aggregate invocation is graded on the same ladder as a record read', async () => {
+  const fixture = createFixture({
+    queryPayload: aggregateQueryCatalogWith(aggregateQueryId),
+  });
+  const view = await fixture.requestEntry.run(authenticationInput, (value) =>
+    Promise.resolve(value),
+  );
+  const metrics = new ObservabilityMetrics();
+  const clock = scriptedClock([0, 42]);
+  const gateway = new SemanticQueryGateway(
+    fixture.policy,
+    {
+      execute: () => Promise.reject(new Error('record path must not be used')),
+      executeAggregate: (request) =>
+        Promise.resolve(aggregateEnvelope(request.definition.queryId)),
+    },
+    undefined,
+    undefined,
+    ladderInstrumentation(metrics, clock.read),
+  );
+
+  const result = await gateway.invokeAggregate(
+    view,
+    ladderRequest(aggregateQueryId),
+  );
+  assert.equal(result.kind, 'semanticAggregateResult');
+  assert.equal(clock.remaining(), 0);
+  assert.deepEqual(metrics.snapshot().queryLatency, [
+    ['answered|under_100ms', 1],
+  ]);
+});
+
+/**
+ * Fix 2, half one: the object the composition actually installs, driven across
+ * ADR-0032's 400 ms boundary. It proves the composed wiring carries a duration
+ * into a band rather than merely producing some band — round 1's composed
+ * control could not tell those apart. It says nothing about whether the real
+ * clock moves; that is the liveness gate in the observability suite.
+ */
+test('the composed instrumentation carries a duration across a real ladder boundary', async () => {
+  const fixture = createFixture({
+    queryPayload: queryCatalogWith(answeringQueryId),
+  });
+  const view = await fixture.requestEntry.run(authenticationInput, (value) =>
+    Promise.resolve(value),
+  );
+  const metrics = new ObservabilityMetrics();
+  // 399.5 ms then 400.5 ms: one step either side of Doherty, so a wiring that
+  // dropped the duration would put both in the same band.
+  const clock = scriptedClock([0, 399.5, 1_000, 1_400.5]);
+  const gateway = new SemanticQueryGateway(
+    fixture.policy,
+    stubQueryExecutor(),
+    undefined,
+    undefined,
+    composedRegisteredQueryLatencyInstrumentation(metrics, clock.read),
+  );
+
+  await gateway.invoke(view, ladderRequest(answeringQueryId));
+  await gateway.invoke(view, ladderRequest(answeringQueryId));
+
+  assert.equal(clock.remaining(), 0);
+  assert.deepEqual(
+    metrics.snapshot().queryLatency,
+    [
+      ['answered|100ms_400ms', 1],
+      ['answered|400ms_1s', 1],
+    ],
+    'the composed observer grades each call by its own measured duration',
+  );
+});
+
+/**
+ * The production default branch, which every other control bypasses. Liveness
+ * calls the exported source directly; both boundary controls pass a clock. So
+ * `clock ?? monotonicMilliseconds` resolving to a dead fallback survives all of
+ * them, and extracting the factory is what introduced that branch.
+ *
+ * **No band assertion could ever catch it**: a 0 ms sample and a 99 ms sample
+ * are both `under_100ms`, and the composed PostgreSQL control asks only for
+ * valid bands and no rejections, which twenty zero-duration readings satisfy
+ * exactly. This observes the duration instead.
+ *
+ * It injects no clock, deliberately — that is the branch under test — so every
+ * assertion here is threshold-free: strict positivity, an empty rejection set,
+ * and one answered sample in whichever band the real clock produced. The
+ * interval is burned rather than slept through.
+ */
+test('the composed factory default times a call from the live monotonic source', async () => {
+  const fixture = createFixture({
+    queryPayload: queryCatalogWith(answeringQueryId),
+  });
+  const view = await fixture.requestEntry.run(authenticationInput, (value) =>
+    Promise.resolve(value),
+  );
+  const metrics = new ObservabilityMetrics();
+  // No clock argument: this is exactly what the composition constructs.
+  const instrumentation =
+    composedRegisteredQueryLatencyInstrumentation(metrics);
+  const observations: RegisteredQueryLatencyObservation[] = [];
+  const gateway = new SemanticQueryGateway(
+    fixture.policy,
+    busyQueryExecutor(),
+    undefined,
+    undefined,
+    Object.freeze({
+      // The factory's own resolved clock, unwrapped. Only `observe` is wrapped,
+      // and only so the duration that clock produced can be read back.
+      monotonicMilliseconds: instrumentation.monotonicMilliseconds,
+      observe: (observation: RegisteredQueryLatencyObservation) => {
+        observations.push(observation);
+        instrumentation.observe(observation);
+      },
+    }),
+  );
+
+  await gateway.invoke(view, ladderRequest(answeringQueryId));
+
+  assert.equal(observations.length, 1);
+  const observed = observations[0]!;
+  assert.ok(
+    observed.durationMilliseconds > 0,
+    `the composed default clock produced ${String(
+      observed.durationMilliseconds,
+    )} ms across a busy interval`,
+  );
+  const snapshot = metrics.snapshot();
+  assert.deepEqual(
+    snapshot.queryLatencyRejections,
+    [],
+    'a live default source yields a usable sample, not a refused one',
+  );
+  // One answered sample, in whichever band the real clock produced. Naming the
+  // band would assert a bound this test has no business asserting: ADR-0032 §1
+  // makes 100-400 ms the *target* for a registered query, so a correct 120 ms
+  // observation is inside the ratified budget, and a scheduler or GC pause on a
+  // loaded host would red a correct invocation. Band boundaries are proved by
+  // the controlled-clock tests above, where they are deterministic.
+  assert.equal(snapshot.queryLatency.length, 1);
+  assert.equal(snapshot.queryLatency[0]![1], 1);
+  assert.match(snapshot.queryLatency[0]![0], /^answered\|/u);
+});
+
+const answeringQueryId = 'northstar.bootstrap:query.item_list';
+const aggregateQueryId = 'northstar.bootstrap:query.item_amount_sum';
+const aggregateNodeVersion = 'v4';
+const aggregateMeasureFieldType = Object.freeze({
+  kind: 'exactDecimalFieldType',
+  precision: 38,
+  representation: 'canonicalString',
+  scale: 2,
+  schemaVersion: aggregateNodeVersion,
+});
+
+function ladderInstrumentation(
+  metrics: ObservabilityMetrics,
+  clock: () => number,
+) {
+  return {
+    monotonicMilliseconds: clock,
+    observe: (observation: RegisteredQueryLatencyObservation) => {
+      metrics.recordRegisteredQueryLatency(
+        observation.outcome,
+        observation.durationMilliseconds,
+      );
+    },
+  };
+}
+
+function recordEnvelope(targetQueryId: string): SemanticQueryResultEnvelope {
+  return Object.freeze({
+    kind: 'semanticQueryResult' as const,
+    outcome: 'exact' as const,
+    queryId: targetQueryId,
+    records: Object.freeze([]),
+    schemaVersion: SEMANTIC_QUERY_RESULT_VERSION,
+    unsupportedReason: null,
+  });
+}
+
+function aggregateEnvelope(
+  targetQueryId: string,
+): SemanticAggregateResultEnvelope {
+  return Object.freeze({
+    kind: 'semanticAggregateResult' as const,
+    outcome: 'exact' as const,
+    queryId: targetQueryId,
+    schemaVersion: SEMANTIC_AGGREGATE_RESULT_VERSION,
+    value: Object.freeze({
+      kind: 'exactDecimalResult' as const,
+      precision: 38 as const,
+      scale: 2,
+      selectionId: 'northstar.bootstrap:selection.item_amount_sum',
+      value: '0',
+    }),
+  });
+}
+
+function aggregateQueryCatalogWith(
+  registeredQueryId: string,
+): ImmutableJsonValue {
+  const filter = {
+    kind: 'booleanPredicate',
+    schemaVersion: aggregateNodeVersion,
+    value: true,
+  };
+  return {
+    kind: 'queryCatalogPayload',
+    queries: [
+      {
+        aggregate: {
+          fieldId: 'northstar.bootstrap:field.item_amount',
+          measureFieldType: aggregateMeasureFieldType,
+          operator: 'sum',
+          resultType: {
+            kind: 'exactDecimalAggregateResultType',
+            precision: 38,
+            scale: 2,
+            schemaVersion: aggregateNodeVersion,
+          },
+          selectionId: 'northstar.bootstrap:selection.item_amount_sum',
+        },
+        aggregatePlan: {
+          costClass: 'tenantBoundedScan',
+          kind: 'queryAggregateLoweringPlan',
+          loweringRowId: 'northstar.query-aggregate-lowering/required-sum-v1',
+          providerProbeId: 'Q1-P3b/required-sum-tenant-bounded-scan',
+          schemaVersion: QUERY_AGGREGATE_LOWERING_PLAN_VERSION,
+          sourceFieldType: aggregateMeasureFieldType,
+        },
+        filter,
+        filterPlan: {
+          costClass: 'tenantBoundedScan',
+          kind: 'predicateLoweringPlan',
+          positionProfileVersion: PREDICATE_POSITION_PROFILE_VERSION,
+          predicateDigest: canonicalizeAndHash(filter).contentHash,
+          // A lowering node carries no schemaVersion; the plan above does.
+          root: { kind: 'booleanPredicate', value: true },
+          schemaVersion: PARAMETERIZED_PREDICATE_LOWERING_PLAN_VERSION,
+        },
+        lifecycle: 'active',
+        maximumResultCount: 1,
+        parameters: [],
+        permissionId: 'northstar.bootstrap:permission.read',
+        queryId: registeredQueryId,
+        queryType: 'aggregate',
+        resultContract: {
+          kind: 'semanticAggregateResult',
+          outcome: 'exact',
+          schemaVersion: SEMANTIC_AGGREGATE_RESULT_VERSION,
+        },
+        sourceEntityId: 'northstar.bootstrap:entity.item',
+        tier: 'q1',
+      },
+    ],
+    schemaVersion: 'northstar.query-catalog-payload/v0-provisional',
+  } as ImmutableJsonValue;
+}
+
+function ladderRequest(targetQueryId: string): SemanticQueryRequestEnvelope {
+  return Object.freeze({
+    arguments: Object.freeze({}),
+    queryId: targetQueryId,
+    schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+  });
+}
+
+/**
+ * Burns a bounded interval so a duration measured across it is unambiguous.
+ * Busy, never asleep: AGENTS.md §6 forbids sleep-and-measure, and nothing here
+ * asserts a bound on how long the interval took.
+ */
+function busyQueryExecutor(): SemanticQueryExecutor {
+  return {
+    execute(request) {
+      const deadline = process.hrtime.bigint() + 1_000_000n;
+      let spins = 0;
+      while (process.hrtime.bigint() < deadline) {
+        spins += 1;
+      }
+      assert.ok(spins >= 0);
+      return Promise.resolve(recordEnvelope(request.definition.queryId));
+    },
+  };
+}
+
+function stubQueryExecutor(): SemanticQueryExecutor {
+  return {
+    execute(request) {
+      return Promise.resolve(
+        Object.freeze({
+          kind: 'semanticQueryResult' as const,
+          outcome: 'exact' as const,
+          queryId: request.definition.queryId,
+          records: Object.freeze([]),
+          schemaVersion: SEMANTIC_QUERY_RESULT_VERSION,
+          unsupportedReason: null,
+        }),
+      );
+    },
+  };
+}
+
+/**
+ * The injected controlled clock. `remaining()` is what proves the ingress read
+ * it exactly twice per call, so an extra or missing read cannot pass unnoticed.
+ */
+function scriptedClock(readings: readonly number[]): {
+  read: () => number;
+  remaining: () => number;
+} {
+  const pending = [...readings];
+  return {
+    read: () => {
+      const next = pending.shift();
+      assert.notEqual(next, undefined, 'the scripted clock was over-read');
+      return next!;
+    },
+    remaining: () => pending.length,
+  };
+}
 
 type PolicyOutcome = 'ALLOW' | 'DENY' | 'MALFORMED';
 

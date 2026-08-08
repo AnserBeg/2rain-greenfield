@@ -17,6 +17,7 @@
   "dependencies": {
     "@north-star/canonical-model": "workspace:*",
     "@north-star/compiler": "workspace:*",
+    "@north-star/observability": "workspace:*",
     "@north-star/platform-runtime": "workspace:*",
     "@north-star/runtime": "workspace:*",
     "pg": "^8.22.0"
