@@ -5252,3 +5252,383 @@ function profileForNormalizedBytes(
         }),
   };
 }
+
+// ===========================================================================
+// 5g3-sm PROBE ONLY -- NOT FOR MERGE
+//
+// Measures where a `transitionStateEffect` operation stops, using the real
+// compiler, the real materializer, the real release-verification service, the
+// real gateway and the real interpreter against real PostgreSQL. Nothing below
+// is a fixture of the behaviour under test; every stop is executed.
+// ===========================================================================
+
+function transitionModuleDefinition(
+  namespace: string,
+): Record<string, unknown> {
+  const definition = ordinaryModuleV1ForNamespace(namespace) as {
+    fields: Array<Record<string, unknown>>;
+    languageVersion: string;
+    operations: Array<Record<string, unknown>>;
+    permissions: Array<Record<string, unknown>>;
+    queries: Array<Record<string, unknown>>;
+    stateMachines: Array<Record<string, unknown>>;
+  } & Record<string, unknown>;
+  const version = definition.languageVersion;
+  const probeReference = (kind: string, targetId: string) => ({
+    kind,
+    schemaVersion: version,
+    targetId,
+  });
+  const entityId = `${namespace}:entity.master`;
+  const stateFieldId = `${namespace}:field.master_state`;
+  const draftOptionId = `${namespace}:option.master_state_draft`;
+  const releasedOptionId = `${namespace}:option.master_state_released`;
+
+  // The AUTHORED state the packet's vertical asks for. It is an ordinary enum
+  // field: readable by a query, addressable by a predicate, writable by the
+  // generic press.
+  definition.fields.push({
+    classification: 'internal',
+    collation: 'binary',
+    defaultSemantics: 'none',
+    entity: probeReference('entityReference', entityId),
+    fieldId: stateFieldId,
+    fieldType: {
+      kind: 'enumFieldType',
+      options: [
+        {
+          kind: 'enumOption',
+          label: 'Draft',
+          optionId: draftOptionId,
+          orderKey: 10,
+          schemaVersion: version,
+        },
+        {
+          kind: 'enumOption',
+          label: 'Released',
+          optionId: releasedOptionId,
+          orderKey: 20,
+          schemaVersion: version,
+        },
+      ],
+      schemaVersion: version,
+    },
+    kind: 'fieldDefinition',
+    label: 'State',
+    orderKey: 30,
+    presence: 'required',
+    reportable: true,
+    schemaVersion: version,
+    searchable: false,
+  });
+  const masterQueryIds = new Set(
+    ['get', 'list', 'search', 'resolve'].map(
+      (queryType) => `${namespace}:query.master_${queryType}`,
+    ),
+  );
+  for (const query of definition.queries) {
+    if (!masterQueryIds.has(String(query.queryId))) {
+      continue;
+    }
+    (query.selections as Array<Record<string, unknown>>).push({
+      field: probeReference('fieldReference', stateFieldId),
+      kind: 'querySelection',
+      orderKey: 20,
+      schemaVersion: version,
+      selectionId: `${namespace}:selection.master_${String(query.queryType)}_state`,
+    });
+  }
+
+  // The DECLARED state machine. Its `stateField` is compiler-derived and has
+  // no relationship to the authored field above -- that disconnection is the
+  // measurement.
+  const machineId = `${namespace}:machine.master_lifecycle`;
+  const draftStateId = `${namespace}:state.master_draft`;
+  const releasedStateId = `${namespace}:state.master_released`;
+  const transitionId = `${namespace}:transition.master_release`;
+  const permissionId = `${namespace}:permission.master_release`;
+  definition.stateMachines = [
+    {
+      entity: probeReference('entityReference', entityId),
+      initialState: probeReference('stateReference', draftStateId),
+      kind: 'stateMachineDefinition',
+      machineId,
+      schemaVersion: version,
+      states: [
+        {
+          kind: 'stateDefinition',
+          label: 'Draft',
+          orderKey: 10,
+          schemaVersion: version,
+          stateId: draftStateId,
+        },
+        {
+          kind: 'stateDefinition',
+          label: 'Released',
+          orderKey: 20,
+          schemaVersion: version,
+          stateId: releasedStateId,
+        },
+      ],
+      transitions: [
+        {
+          fromState: probeReference('stateReference', draftStateId),
+          kind: 'transitionDefinition',
+          label: 'Release master',
+          orderKey: 10,
+          permission: probeReference('permissionReference', permissionId),
+          schemaVersion: version,
+          toState: probeReference('stateReference', releasedStateId),
+          transitionId,
+        },
+      ],
+    },
+  ];
+  definition.permissions.push({
+    action: 'transition',
+    kind: 'permissionDefinition',
+    label: 'master release',
+    permissionId,
+    resource: probeReference('entityReference', entityId),
+    schemaVersion: version,
+  });
+  definition.operations.push({
+    confirmation: 'none',
+    effect: {
+      kind: 'transitionStateEffect',
+      schemaVersion: version,
+      transition: probeReference('transitionReference', transitionId),
+    },
+    kind: 'operationDefinition',
+    module: probeReference('moduleReference', `${namespace}:module.master`),
+    operationId: `${namespace}:operation.master_release`,
+    permission: probeReference('permissionReference', permissionId),
+    readBack: probeReference('queryReference', `${namespace}:query.master_get`),
+    schemaVersion: version,
+    tier: 'o0',
+  });
+  return definition;
+}
+
+interface TransitionProbeRuntime {
+  readonly namespace: string;
+  readonly operations: SemanticOperationGateway;
+  readonly readState: (recordId: string) => Promise<{
+    readonly authored: string | null;
+    readonly derived: string | null;
+    readonly revision: number;
+  }>;
+  readonly stateFieldId: string;
+  readonly view: RequestRuntimeView;
+}
+
+async function withTransitionProbeRuntime(
+  run: (runtime: TransitionProbeRuntime) => Promise<void>,
+): Promise<void> {
+  const namespace = 'northstar.smtransition';
+  const definition = transitionModuleDefinition(namespace);
+  const emptyDefinition_ = emptyDefinition(definition);
+  const empty = mustCompile(moduleInput(emptyDefinition_));
+  const compiled = mustCompile(
+    moduleInput(definition, expectedActiveReleaseFrom(empty)),
+  );
+  const storage = compiledProjectionPayload<StorageTargetPayloadV1>(
+    compiled,
+    PROJECTION_FAMILY_IDS.storageTarget,
+  );
+  const entity = storage.entities.find(
+    (candidate) => candidate.entityId === `${namespace}:entity.master`,
+  );
+  assert.ok(entity);
+  const stateFieldId = `${namespace}:field.master_state`;
+  const authoredColumn = entity.columns.find(
+    (column) => column.canonicalFieldId === stateFieldId,
+  );
+  assert.ok(authoredColumn, 'the authored state field must reach storage');
+  const derivedColumn = entity.derivedStateFields[0];
+  assert.ok(derivedColumn, 'the machine must lower a derived state column');
+
+  const tenant = '5a000000-0000-4000-8000-000000000001';
+  const environment = '5b000000-0000-4000-8000-000000000002';
+  const principal = '5c000000-0000-4000-8000-000000000003';
+  await withEphemeralPostgres('sm-transition-probe', async ({ connection, pool }) => {
+    await migrateAndSeed(pool, [[tenant, environment, 'smtransition']]);
+    const runtimePool = new pg.Pool({
+      ...connection,
+      max: 3,
+      user: 'north_star_runtime',
+    });
+    const materializerPool = new pg.Pool({
+      ...connection,
+      max: 2,
+      user: 'north_star_module_materializer',
+    });
+    const modulePool = new pg.Pool({
+      ...connection,
+      max: 1,
+      user: 'north_star_module_runtime',
+    });
+    try {
+      const context = (
+        await contextsFor([['transition', tenant, environment, principal]])
+      ).transition!;
+      const releases = await persistSequence(runtimePool, context, [
+        [empty, emptyDefinition_],
+        [compiled, definition],
+      ]);
+      await setPointer(pool, tenant, environment, releases[0]!);
+      await grantExecutorAuthority(pool, [[tenant, principal]]);
+      const materializer = new PostgresModuleStorageMaterializer(
+        materializerPool,
+        modulePool,
+      );
+      await prepare(materializer, context, principal, releases[1]!);
+      const candidateIdentity = identity(tenant, environment, principal);
+      const sourceView = await issuedView(
+        runtimeEntry(runtimePool, { transition: candidateIdentity }),
+        'transition',
+      );
+      const policy = new AllowPolicy();
+      const view = await issuedCandidateView(
+        compiled,
+        releases[1]!,
+        candidateIdentity,
+        sourceView.pointer,
+        policy,
+      );
+      const interpreter = new PostgresModuleRuntimeInterpreter(
+        runtimePool,
+        humanActorIssuer(),
+      );
+
+      // Did the ACTIVATION gate see anything? Both physical columns exist and
+      // release verification runs against the same catalog the gateway later
+      // refuses.
+      const materializedColumns = await pool.query<{ column_name: string }>(
+        `SELECT column_name
+           FROM information_schema.columns
+          WHERE table_schema = 'north_star_module'
+            AND table_name = $1
+            AND column_name = ANY($2::text[])
+          ORDER BY column_name`,
+        [
+          entity.physicalTableName,
+          [authoredColumn.physicalName, derivedColumn.physicalName],
+        ],
+      );
+      console.log(
+        `PROBE materialized state columns = ${materializedColumns.rowCount} of 2 (authored + machine-derived)`,
+      );
+      const staged = await pool.query<{
+        verification_evidence_id: MintedUuid;
+      }>(
+        `SELECT verification_evidence_id
+           FROM platform.tenant_releases
+          WHERE tenant_id = $1 AND environment_id = $2 AND release_id = $3`,
+        [tenant, environment, releases[1]],
+      );
+      const evidenceId = staged.rows[0]?.verification_evidence_id;
+      assert.ok(evidenceId);
+      const verification = await new PostgresReleaseVerificationService(
+        runtimePool,
+      )
+        .executeSemanticCandidateWithExecutor(
+          context,
+          {
+            compiledRelease: compiled,
+            evidenceId,
+            releaseId: releases[1]!,
+          },
+          interpreter,
+        )
+        .then(
+          (resultSet) =>
+            `passed with ${(resultSet as { results: unknown[] }).results.length} executed results`,
+          (error: unknown) =>
+            `${(error as Error).name}: ${(error as Error).message}`,
+        );
+      console.log(`PROBE release verification -> ${verification}`);
+
+      await run(
+        Object.freeze({
+          namespace,
+          operations: operationGatewayFor(policy, interpreter),
+          readState: async (recordId: string) => {
+            const result = await pool.query<{
+              authored: string | null;
+              derived: string | null;
+              revision: string;
+            }>(
+              `SELECT ${quoteTestIdentifier(authoredColumn.physicalName)} AS authored,
+                      ${quoteTestIdentifier(derivedColumn.physicalName)} AS derived,
+                      ${quoteTestIdentifier(entity.optimisticRevision.column)} AS revision
+                 FROM north_star_module.${quoteTestIdentifier(entity.physicalTableName)}
+                WHERE ${quoteTestIdentifier(entity.recordIdentity.column)} = $1`,
+              [recordId],
+            );
+            assert.equal(result.rowCount, 1);
+            const row = result.rows[0]!;
+            return {
+              authored: row.authored,
+              derived: row.derived,
+              revision: Number(row.revision),
+            };
+          },
+          stateFieldId,
+          view,
+        }),
+      );
+    } finally {
+      await Promise.all([
+        runtimePool.end(),
+        materializerPool.end(),
+        modulePool.end(),
+      ]);
+    }
+  });
+}
+
+test('5g3-sm PROBE — a declared transitionStateEffect refuses the entire pinned operation catalog', async () => {
+  await withTransitionProbeRuntime(async (runtime) => {
+    // The transition operation itself.
+    const transitionRefusal = await operation(
+      runtime.operations,
+      runtime.view,
+      'master_release',
+      { expectedRevision: 1, recordId: randomUUID() },
+      runtime.namespace,
+    ).then(
+      () => null,
+      (error: unknown) => error as Error,
+    );
+    assert.ok(transitionRefusal);
+    console.log(
+      `PROBE transition operation -> ${transitionRefusal.name}: ${transitionRefusal.message}`,
+    );
+
+    // And every UNRELATED operation in the same release.
+    const createRefusal = await operation(
+      runtime.operations,
+      runtime.view,
+      'master_create',
+      {
+        recordId: randomUUID(),
+        values: {
+          ...masterValues(runtime.namespace, 'Poisoned catalog'),
+          [runtime.stateFieldId]: `${runtime.namespace}:option.master_state_draft`,
+        },
+      },
+      runtime.namespace,
+    ).then(
+      () => null,
+      (error: unknown) => error as Error,
+    );
+    assert.ok(
+      createRefusal,
+      'an unrelated create must also refuse if the catalog is poisoned',
+    );
+    console.log(
+      `PROBE unrelated create -> ${createRefusal.name}: ${createRefusal.message}`,
+    );
+  });
+});
