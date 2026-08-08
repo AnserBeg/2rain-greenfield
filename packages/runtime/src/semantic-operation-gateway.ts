@@ -105,10 +105,11 @@ export interface RegisteredCapabilityOperationDefinition extends RegisteredOpera
 }
 
 /**
- * A record transition: an O0 record effect whose patch is COMPILED rather than
- * supplied. `toStateId` is the whole difference from an update, and it is what
- * makes the target server-selected -- the closed input contract carries no
- * argument through which a caller could name one.
+ * A record transition: an O0 record effect whose next state is DECLARED by the
+ * release rather than supplied by the caller. `toStateId` is the whole
+ * difference from an update, and it is what makes the target server-selected --
+ * the closed input contract carries no argument through which a caller could
+ * name one.
  */
 export interface RegisteredTransitionOperationDefinition extends RegisteredOperationDefinitionBase {
   readonly effect: {
@@ -644,13 +645,13 @@ export class SemanticOperationGateway {
         throw new NoSuchRegisteredOperationError(request.operationId, view);
       }
       // The gateway owns the closed-argument fence for every operation whose
-      // compiled contract admits no caller patch -- a capability command and a
-      // record transition alike. Both were already refused, but a transition's
-      // refusal came one layer down from the interpreter, which meant an
-      // argument the compiled contract forbids reached the provider before
-      // anything rejected it. The interpreter keeps its own check; two fences
-      // on a closed contract is defence in depth, and the outer one belongs
-      // where the contract is read.
+      // declared contract admits no caller-supplied values -- a capability
+      // command and a record transition alike. Both were already refused, but
+      // a transition's refusal came one layer down, which meant an argument the
+      // declared contract forbids travelled further than it should before
+      // anything rejected it. The inner check stays; two fences on a closed
+      // contract is defence in depth, and the outer one belongs where the
+      // contract is read.
       if (
         isRegisteredCapabilityOperation(definition) ||
         isRegisteredTransitionOperation(definition)
@@ -1099,9 +1100,9 @@ function assertOperationDefinition(
     // The transition arm keeps the O0 fence the record arm below states: an
     // entity-less effect is still refused, and the entity reference is still
     // required in full. What it additionally admits is a SERVER-SELECTED
-    // target -- `toStateId` is compiled, never an argument -- over the same
-    // closed ['expectedRevision','recordId'] contract the compiler already
-    // emitted for this effect kind before anything executed it.
+    // target -- `toStateId` is declared, never an argument -- over the same
+    // closed ['expectedRevision','recordId'] contract the release already
+    // carried for this effect kind before anything executed it.
     assertExactKeys(
       value.effect,
       [
