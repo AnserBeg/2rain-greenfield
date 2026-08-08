@@ -1525,7 +1525,12 @@ async function withQueuedWrapperDuringMatrix(
         `count=$(cat ${gate}.count 2>/dev/null || echo 0)\n` +
         `count=$((count + 1)); echo "$count" > ${gate}.count\n` +
         `if [ "$count" = "2" ]; then\n` +
-        `  while [ ! -e ${gate}.release ]; do sleep 0.05; done\n` +
+        // Bounded: an orphaned stub left behind by an interrupted control must
+        // not spin forever on a release file whose directory is already gone.
+        `  for _ in $(seq 1 600); do\n` +
+        `    [ -e ${gate}.release ] && break\n` +
+        `    sleep 0.05\n` +
+        `  done\n` +
         `fi\nexit 0\n`,
       ps: `cat ${processTable}\n`,
     },
