@@ -39,7 +39,13 @@ const timingSensitiveScripts = new Set(['test:performance']);
 const containerCallPattern = /\bwithEphemeralPostgres\s*\(/u;
 const importSpecifierPattern =
   /(?:from|import)\s*\(?\s*'([^']+)'|require\s*\(\s*'([^']+)'/gu;
-const spawnedSourcePattern = /'((?:apps|test)\/[\w./-]+\.ts)'/gu;
+// Only fixtures. A test file names other test files as inventory data — the
+// repository-hygiene suite lists every postgres test by path — and it may also
+// spawn something for an unrelated reason, so "contains a spawn call" is not
+// enough to make a quoted path executable. Fixtures are the only repository
+// paths tests actually run.
+const spawnedSourcePattern =
+  /'((?:apps|test)\/(?:[\w./-]*\/)?fixtures\/[\w./-]+\.ts)'/gu;
 const processSpawnPattern = /\bspawn(?:Sync)?\s*\(/u;
 const lockModePattern = /run-with-test-lock\.mjs (shared|exclusive) --/u;
 
