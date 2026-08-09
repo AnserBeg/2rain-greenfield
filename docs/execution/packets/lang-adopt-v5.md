@@ -362,6 +362,48 @@ reported the matrix as **exit code 0** while the run had failed. `MATRIX_EXIT=1`
 was read from inside the log, which is the false-green `5g3-sm-impl` recorded and
 the reason its rule exists.
 
-## Gates
+## Gates — one full matrix, green
 
-_Filled in at the frozen SHA._
+`FULL_MATRIX_PASS_SHA=2e587fe`, tree clean, typecheck clean.
+**589 assertions, 0 failures, `MATRIX_EXIT=0` read from inside the log.**
+
+| Step | Result |
+|---|---|
+| `check:demo-release`, `check:app-release` | pass — shell root held, lineage reproduces 9/9 |
+| unit / compiler / performance | green |
+| integration / agent / architecture | green |
+| contracts / postgres / locale | green |
+| browser | 67 passed (2.0m) |
+| `check:language-coverage` | **PASS** — 2050 obligations, 2050 decision-covered, **427 first-party observations** |
+| `check:reachability` | **PASS** — **100/100** test files, 10 producer artifacts (99/99 before; the new fixture is the +1) |
+
+**Compile-budget gate MEASURED, not declined:** `cpu_idle_pct=96.3`, best-of-5
+wall **1679.9 ms** against a 5000 ms budget. Pre-flight: registry empty, no
+containers, no worktree burning CPU, idle 97.5 / 97.2 / 96.1 after decay,
+loadavg 0.21, four `ccd-cli` runtimes recorded as exposure.
+
+`pnpm lint` reports **7 errors and `prettier --check` drifts, both pre-existing
+on `main` at `5aa2d2c` and neither in the matrix command** — routed as
+`unrun-quality-gates`. This packet adds zero of either; the count is identical
+to the base, which is the comparison that means anything until that row lands.
+
+### It took three matrices, and both earlier failures were real
+
+Neither was flake, and neither would have been found by a subset.
+
+1. **`check:language-coverage`** — the compiler suite's file list is hand-written
+   in three places and this packet updated two. Everything else was green;
+   ~40 minutes to learn a list mismatch. Routed as `suite-inventory-copies`.
+2. **`test:postgres` timeouts** — `composed product activates through the kernel`
+   measured **251.1 s standalone** after the first split and then **timed out at
+   300 s in-matrix**, taking two sibling tests down with it. The first split was
+   sized against the wrong unit: that test's own comment records a **1.79×**
+   in-matrix load factor, and 251.1 s against it was never going to fit. Both
+   ADR-0047 §6 rollback directions then moved out together, returning the parent
+   to the two tenants it had before adoption — **110.6 s** and **109.3 s**
+   standalone, ≈1.5× margin at the recorded factor.
+
+**And the wrapper reported "exit code 0" on both failed runs.** `MATRIX_EXIT`
+was read from inside the log every time, which is the false green `5g3-sm-impl`
+recorded arriving through a different door — a background-task completion status
+rather than a shell wrapper.
