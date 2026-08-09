@@ -1422,7 +1422,7 @@ function assertLegalEntityScopeContract(
 /**
  * One definition of "a legal-entity scope node version this runtime admits".
  *
- * Derived, but derived from the RIGHT source, and the difference is the whole
+ * Derived, but from the RIGHT property, and the difference is the whole
  * lesson. Four checks here used the literal `'v4'`, which refuses a legal v5
  * package. Replacing them with "any supported version" then admitted `v3` --
  * and v3 never declared the legal-entity operand, so a `v3`-stamped
