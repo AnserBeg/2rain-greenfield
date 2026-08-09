@@ -1,9 +1,47 @@
 # ADR-0049: The document-transition and inventory-effect seam
 
 Date: 2026-08-08
-Status: proposed by packet `PS-2`; ratified when that packet is accepted
+Status: **BLOCKED 2026-08-08. Not ratified, and the design phase is capped.**
 Tier: Critical (it decides how every business document reaches the ledger)
 Supersedes: the `PS-0` text of this ADR and its `PS-1` amendment, both in full
+
+## Block record — read this before anything below
+
+**Three design passes, three BLOCKs, one class.** `PS-0`, `PS-1` and `PS-2` each
+ruled the mechanism settled having built only goods receipt, and each time stock
+count refuted it. That is a mis-scoped charter at the ADR level, not three
+independent errors.
+
+**The decisive finding, verified, which no further revision of this document can
+resolve.** `stock_count → inventory_transaction` and `stock_count_line →
+inventory_transaction_line` are **required** relations — `required = true` is the
+helper's default at `definition.ts:1347`. So a reviewed stock-count source
+**cannot exist before its companion**: the fixture inserts the transaction first,
+and `#companionDerivation` copies the caller's IDs rather than deriving them.
+`ON CONFLICT DO NOTHING` then converges by doing nothing.
+
+**Therefore §3.3's classification of `stockCount` as companion-origin gives it no
+kernel writer.** The declaration is right; the mechanism behind it is absent. The
+relations must become post-time outputs, which is code, not a ruling. §7.4
+understated this as a missing fixture — it is a structural blocker.
+
+**A second finding, in what the contract can express rather than in this ruling.**
+Every `northstar.purchasing:*` entry in §5's extension is labelled
+`authority: 'inventory'`, because the authority union has no `purchasing` member
+(`contracts.ts:200-207`, duplicated at `conformance.ts:3215-3222`). That avoided
+the compiler event plan §7.10 named rather than paying it. The measured extension
+roots in §3.3 and §5 are therefore roots over a mislabelled preimage.
+
+**Upheld and carried forward:** §1.1, §1.2's narrow correction, §3.1 and §3.2 as
+the *goods-receipt* design, §3.3's classification, §4's axis including its
+positive half, §5's direction, §6's ledger-derived truth source, §7.1, and §8
+exactly as written.
+
+**`PUR-2` inherits the mechanism, with stock count as its first acceptance
+control:** a stock-count source with no pre-staged transaction, posted through
+one compiled binding keyed by `(capabilityId, familyId)`, proving the kernel
+derives both IDs and both revisions. Building goods receipt first is precisely
+what let three passes miss this.
 
 **This is one ruling. It has no amendment and no appendix.** The `PS-0` body and
 the `PS-1` amendment were rewritten away rather than annotated, because four
