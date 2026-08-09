@@ -1039,7 +1039,7 @@ function parentGuardsFromCatalog(
  * `expectedKind` is required rather than inferred, and the node version must be
  * an admitted one AND equal to the effect that encloses it -- node-version
  * purity is a property of the artifact, so a reference disagreeing with its own
- * effect is a reference the compiler could not have emitted.
+ * effect is a reference no released artifact could have carried.
  */
 function assertCanonicalReference(
   value: unknown,
