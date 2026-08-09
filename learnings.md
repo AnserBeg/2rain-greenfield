@@ -513,3 +513,28 @@ How to apply: when a claim has the shape *"X holds because Y"*, a control on Y i
 not a control on X. Name both, and assert the one the claim is about. The tell is a
 failure message that mentions a value the assertion never reads — see also
 [[a-fenced-claim-without-a-control-is-never-checked-again]].
+
+## Derivation is not automatically correct — derive from the list that declares the shape
+Date: 2026-08-08
+Why: The fix for a hand-written version literal derived the admitted set from
+`SUPPORTED_LANGUAGE_VERSIONS` — the nearest list — which admitted `v3`, a version
+that never declared the legal-entity operand. The literal was too narrow; the
+nearest list was too wide. An existing forgery control, written by someone else for
+an unrelated reason, refused it.
+How to apply: "derive, don't enumerate" is half the rule. The other half is that
+the right list is the one that **declares the shape**, not the one nearest to hand.
+Pin the fence from both sides and record a red each way — widen it and the forgery
+control fires, narrow it to the literal and the version control fires. **Neither
+control alone holds it**, which is the tell that a single-sided fence is a guess.
+
+## Run the last three failures' checks before spending a matrix
+Date: 2026-08-08
+Why: Four matrix runs on one packet. Two found real defects; **two were the lane's
+own residue** — a word in a comment tripping a vocabulary guard, and a pinned line
+number moved by an earlier fix. After the third, the lane ran the guard sweep plus
+full integration and architecture locally *before* re-queuing, and that single pass
+caught two more that never became failed runs.
+How to apply: before requesting the slot, run whatever the last failures came from
+— not just `typecheck` and `lint`. Roughly three minutes of local checks against
+~50 minutes of machine time, and the matrix has a much longer preamble than a
+typecheck. See also [[the-matrix-needs-a-quiesced-machine]].
