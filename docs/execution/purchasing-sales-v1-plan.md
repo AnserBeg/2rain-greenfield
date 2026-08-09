@@ -576,7 +576,7 @@ refuses everywhere else.
 
 ### 7.15 `PS-2`'s two construction findings, and the sequencing ruling — 2026-08-08
 
-**`packet/ps-1` carries a deadlock hazard. Do not reuse that branch.** Its lock-edge
+**`packet/ps-1` carries a lock-order inversion. Do not reuse that branch.** **CORRECTED 2026-08-08 — this section originally called it a proven ABBA deadlock and that over-recorded the lane's claim.** The receipt and stock-count paths lock *different* source rows; no concrete two-resource cycle between them was ever constructed, in source or in evidence. What is established is an **inconsistent lock-class order**, which is a real hazard worth eliminating and is not the same as a demonstrated deadlock. **`PS-2` did not make it uniform either:** only `foreignPort` profiles lock the source before the companion header; stock count is `inventoryInternal` and still locks its source *after* `lockInventoryTransactionHeader`, while a comment immediately above claims the profile made the order uniform. Its lock-edge
 change moved `{header → source}` to `{source → header}` **only for the injected
 port**, while `lockAndAssertStockCountEvidence` kept taking the header first — so a
 receipt posting and a stock count would acquire the same two locks in **opposite
@@ -608,3 +608,57 @@ round came from construction, not reasoning. **An ADR written from predictions i
 what `PUR-2` would then build against**, and nothing is reading ADR-0049 today:
 `PUR-2` waits on `PUR-1`, which waits on `5g3-sm-impl`'s review. The slack exists;
 spend it on evidence.
+
+### 7.16 ADR-0049's design phase is capped — the mechanism goes to `PUR-2`, stock count first
+
+**Three design passes, three BLOCKs, one class.** `PS-0` ruled five things and three
+were refuted. `PS-1` ruled six and most were refuted. `PS-2` rewrote the document
+and five rulings came back refuted or partial. **Every version ruled the mechanism
+settled having built only goods receipt, and every review found stock count refutes
+it.** That is `review-tiers`' definition of a mis-scoped charter, at the ADR level.
+
+**The decisive finding, verified:** `stock_count → inventory_transaction` and
+`stock_count_line → inventory_transaction_line` are **required** relations —
+`required = true` is the helper's default — so a reviewed stock-count source
+**cannot exist before its companion**. The shipped fixture inserts the transaction
+and its lines first. The command carries `transactionId` and per-line
+`transactionLineId`; `#companionDerivation` **copies** them rather than deriving
+them from `stockCountId`. So `ON CONFLICT DO NOTHING` converges by doing nothing,
+and declaring stock count companion-origin **does not give it a kernel writer**.
+
+**Therefore A6 — one gate closing both companion classes — is not satisfiable
+against the shipped source model**, and no further ADR revision can make it so.
+The stock-count relations must become **post-time outputs rather than create-time
+inputs**, which is a code change, not a ruling.
+
+**Upheld and carried forward, which is most of the document:** §1.1, the generic
+press cannot hold module identity by any route, so the catalog must arrive as a
+compiled projection — and `PUR-2` must additionally prove it is the **exact
+active-release artifact**, as the storage target already is. §1.2's narrow
+correction that `PS-1` reordered rather than widened. §3.1 and §3.2 **as the
+receipt design**. §3.3's classification. §4's authored/companion axis **including
+the positive half**. §5's baseline-plus-extension **direction**. §6's ruling that
+received quantity is **ledger-derived primary truth**. §7.1's finding that
+enforcing `sourceStep` exposed rather than created `PS-0`'s defect.
+
+**Refuted, and not to be re-ruled in advance:** that the profile is executable
+authority — `postingRole` is a scalar while stock count needs `count` for an
+initial count and `correction` for corrections, `plannedMovements` reads
+`posting.postingRole` not the profile, `familyId` is still an unrestricted string,
+and `#requireSourcePort` proves only that *some* port was injected. That the
+existing two arrays carry baseline-plus-extension — there is no capability key, the
+extension root never reaches registration, `assertActiveRelease` never verifies the
+catalog bytes, **and every `northstar.purchasing:*` entry is labelled
+`authority: 'inventory'` because the authority union has no purchasing member** —
+which is how the compiler event §7.10 named was avoided rather than paid. And that
+lock-and-sum is the settled physical implementation, since movement-to-order-line
+lineage is unruled, the universal-writer lock protocol is unrepresented, and
+throughput is unmeasured.
+
+**`PUR-2`'s first acceptance control is stock count, not goods receipt.** Create and
+review a stock-count source with **no pre-staged transaction or transaction lines**,
+post it through one compiled family-execution binding keyed by
+`(capabilityId, familyId)`, and prove the kernel derives and writes both companion
+IDs and both revisions. **A mechanism whose nominated second family refutes it is
+not a mechanism**, and building goods receipt first is what let three passes miss
+that.
