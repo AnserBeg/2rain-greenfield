@@ -4,7 +4,9 @@ import test from 'node:test';
 import {
   CanonicalModelError,
   LANGUAGE_VERSIONS,
+  LATEST_LANGUAGE_VERSION,
   LEGAL_ENTITY_SCOPE_PROFILE_VERSION,
+  canonicalAuthoredProjection,
   canonicalize,
   canonicalizeAndHash,
   evaluateLegalEntityScopeSelection,
@@ -23,6 +25,8 @@ import {
   PROJECTION_FAMILY_IDS,
   compileApplication,
 } from '../../packages/compiler/src/index.js';
+
+import { registeredSemanticQueryFromPinnedView } from '../../packages/runtime/src/semantic-query-gateway.js';
 
 import { compilerInput, mustCompile, projectionPayload } from './helpers.js';
 import { V3_AGGREGATE_IDS, v3AggregateModule } from './v3-definition.js';
@@ -492,4 +496,124 @@ test('cutting v4 leaves v3 output byte-identical', () => {
     'northstar.normalization/v4',
   );
   assert.notEqual(v4Manifest.languageVersion, manifest.languageVersion);
+});
+
+/**
+ * The legal-entity reference parameter type is MINTED by normalization, not
+ * authored, and `CANON_VERSION_MIXED` refuses any node whose version disagrees
+ * with the package envelope. A literal version on that node therefore makes
+ * every LATER language version unnormalizable the moment it carries a scope
+ * operand -- silently, and only for that one shape.
+ *
+ * This control exists because three separate version predicates were exercised
+ * by the v5 cut and none of them could see this: a v5 package WITHOUT
+ * `legalEntityScope` normalizes perfectly. The shape has to be present for the
+ * defect to exist, so the control carries it.
+ *
+ * It is written against `LATEST_LANGUAGE_VERSION` rather than a literal, so the
+ * next cut inherits the coverage instead of re-opening the same hole.
+ */
+test('a scope operand derives its parameter type at the package version, not a pinned one', () => {
+  const latest = LATEST_LANGUAGE_VERSION;
+  const scoped = replaceLanguageVersion(
+    v4ScopedModule(),
+    LANGUAGE_VERSIONS.v4,
+    latest,
+  ) as Record<string, unknown>;
+  scoped.normalizationProfileVersion = `northstar.normalization/${latest}`;
+
+  // 1. It normalizes at all. Before the fix this threw CANON_VERSION_MIXED.
+  const normalized = normalizeApplicationPackage(scoped) as {
+    languageVersion: string;
+    queries: NormalizedQuery[];
+  };
+  assert.equal(normalized.languageVersion, latest);
+
+  // 2. The derived node carries the PACKAGE's version.
+  const row = normalized.queries.find(
+    (query) => query.queryId === V4_SCOPE_IDS.rowQuery,
+  );
+  const scopeParameter = row?.parameters?.find(
+    (parameter) => parameter.parameterId === V4_SCOPE_IDS.rowScopeParameter,
+  );
+  assert.deepEqual(scopeParameter?.parameterType, {
+    kind: 'legalEntityReferenceParameterType',
+    schemaVersion: latest,
+  });
+
+  // 3. Authored projection and renormalization reproduce identical bytes, so
+  // the derived node round-trips rather than merely parsing once.
+  const projected = canonicalAuthoredProjection(
+    normalized as Parameters<typeof canonicalAuthoredProjection>[0],
+  );
+  assert.equal(
+    canonicalize(normalizeApplicationPackage(projected)),
+    canonicalize(normalized),
+  );
+});
+
+function replaceLanguageVersion(
+  value: unknown,
+  from: string,
+  to: string,
+): unknown {
+  if (typeof value === 'string') return value === from ? to : value;
+  if (Array.isArray(value)) {
+    return value.map((entry) => replaceLanguageVersion(entry, from, to));
+  }
+  if (typeof value === 'object' && value !== null) {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [
+        key,
+        replaceLanguageVersion(entry, from, to),
+      ]),
+    );
+  }
+  return value;
+}
+
+/**
+ * The normalization control above stops at the canonical model. It cannot see
+ * the four version literals that lived in the RUNTIME's reader, and those were
+ * the dangerous half: a v5 scoped query normalized, compiled, and was then
+ * refused by `registeredSemanticQueryFromPinnedView` as a malformed pinned
+ * catalog -- an admitter literal failing closed three layers from its cause.
+ *
+ * So this one presents the COMPILED catalog to the real gateway reader. It is
+ * the shape the earlier control could not reach, and it is why "we added a
+ * control" was not the same as "the path is covered".
+ */
+test('a compiled v5 scoped query is admitted by the runtime catalog reader', () => {
+  const latest = LATEST_LANGUAGE_VERSION;
+  const scoped = replaceLanguageVersion(
+    v4ScopedModule(),
+    LANGUAGE_VERSIONS.v4,
+    latest,
+  ) as Record<string, unknown>;
+  scoped.normalizationProfileVersion = `northstar.normalization/${latest}`;
+
+  const compiled = mustCompile(compilerInput(normalizedBytesFor(scoped)));
+  const catalog = projectionPayload<QueryCatalog>(
+    compiled,
+    PROJECTION_FAMILY_IDS.queryCatalog,
+  );
+  const view = {
+    projections: {
+      query: {
+        familyId: 'northstar.compiler:projection-family.query-catalog',
+        payloadSchemaVersion: 'northstar.query-catalog-payload/v0-provisional',
+        payload: catalog,
+      },
+    },
+  } as unknown as Parameters<typeof registeredSemanticQueryFromPinnedView>[0];
+
+  const registered = registeredSemanticQueryFromPinnedView(
+    view,
+    V4_SCOPE_IDS.rowQuery,
+  );
+  assert.ok(
+    registered,
+    'the runtime must admit a legal scoped query at the newest language version',
+  );
+  assert.equal(registered.legalEntityScope?.cardinality, 'nonEmptySet');
 });

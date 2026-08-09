@@ -1,6 +1,9 @@
 import { createHash } from 'node:crypto';
 
-import type { NormalizedApplicationPackage } from '@north-star/canonical-model';
+import {
+  languageHasMaterializedStateFields,
+  type NormalizedApplicationPackage,
+} from '@north-star/canonical-model';
 
 import {
   isPinnedInventoryBaseUnitField,
@@ -552,9 +555,25 @@ export function buildStorageTransitionEnvelopeFromLegacyTargets(
   };
 }
 
+/**
+ * `materializedStateFields` is PASSED, not re-derived. Projection lowering
+ * receives `projectionDispatchRevision(...)`, an alias whose `languageVersion`
+ * is rewritten to the legacy compatibility literal so v2 physical families
+ * fingerprint unchanged. Asking that alias what version the author wrote is
+ * always answered "v2", so a gate derived here would silently take the
+ * pre-v5 branch for a v5 package -- observed as
+ * `COMPILER_PHYSICAL_NAME_REUSE_INCOMPATIBLE`, because both the materialized
+ * column and the retired parallel construct were then emitted.
+ *
+ * The default keeps direct callers (tests, the coverage gate) correct, since
+ * they pass the real revision.
+ */
 export function lowerStorageTargetV1(
   packageRevision: NormalizedApplicationPackage,
   previousStorageTarget: StorageTargetPayloadV1 | null = null,
+  materializedStateFields: boolean = languageHasMaterializedStateFields(
+    packageRevision.languageVersion,
+  ),
 ): StorageTargetPayloadV1 {
   const mappings: PhysicalMappingRecord[] = [];
   const previousEntities = new Map(
@@ -589,6 +608,7 @@ export function lowerStorageTargetV1(
     packageRevision.stateMachines,
     (machine) => machine.entity.targetId,
   );
+
 
   const entities = packageRevision.entities.map(
     (entity): StorageEntityTarget => {
@@ -747,30 +767,37 @@ export function lowerStorageTargetV1(
         );
         return [constraint];
       });
-      const derivedStateFields = (
-        stateMachinesByEntity.get(entity.entityId) ?? []
-      )
-        .map((machine) => {
-          const physicalName = physicalNameFor(
-            'column',
-            machine.stateField.fieldId,
-          );
-          const derived = {
-            fieldId: machine.stateField.fieldId,
-            physicalName,
-            postgresqlType: 'text' as const,
-            stateMachineId: machine.machineId,
-          };
-          addMapping(
-            mappings,
-            'column',
-            machine.stateField.fieldId,
-            physicalName,
-            derived,
-          );
-          return derived;
-        })
-        .sort((left, right) => compare(left.fieldId, right.fieldId));
+      // From v5 the machine's state field is an ordinary column, lowered by
+      // the `columns` map above like any other enumeration field, and this
+      // parallel construct is retired. Emitting both registers two
+      // incompatible shapes for one physical identifier and the compiler
+      // refuses with `COMPILER_PHYSICAL_NAME_REUSE_INCOMPATIBLE` -- the
+      // ruling's one-state-per-document claim, enforced by the compiler
+      // itself rather than asserted in prose.
+      const derivedStateFields = materializedStateFields
+        ? []
+        : (stateMachinesByEntity.get(entity.entityId) ?? [])
+            .map((machine) => {
+              const physicalName = physicalNameFor(
+                'column',
+                machine.stateField.fieldId,
+              );
+              const derived = {
+                fieldId: machine.stateField.fieldId,
+                physicalName,
+                postgresqlType: 'text' as const,
+                stateMachineId: machine.machineId,
+              };
+              addMapping(
+                mappings,
+                'column',
+                machine.stateField.fieldId,
+                physicalName,
+                derived,
+              );
+              return derived;
+            })
+            .sort((left, right) => compare(left.fieldId, right.fieldId));
       const uniqueKeys: StorageUniqueKeyTarget[] = [];
       const indexes: StorageIndexTarget[] = [];
       const archiveExcludingPredicate = 'archived_at IS NULL';

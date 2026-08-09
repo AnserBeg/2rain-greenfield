@@ -1,6 +1,7 @@
 import {
   LANGUAGE_VERSION,
   LANGUAGE_VERSIONS,
+  SUPPORTED_LANGUAGE_VERSIONS,
   LEGACY_LANGUAGE_VERSION,
   PREVIOUS_LANGUAGE_VERSION,
   STRUCTURAL_LIMITS_V0,
@@ -284,20 +285,17 @@ export const inspectPredicateForExecution: PredicateKernelEntryPoint = (
   if (!hasExactKeys(value, ['kind', 'schemaVersion', 'value'])) {
     return rejected(nodeSchemaVersion, 'invalid-node-shape');
   }
-  switch (value.schemaVersion) {
-    case LEGACY_LANGUAGE_VERSION:
-      return inspectLiteralForVersion(value, LEGACY_LANGUAGE_VERSION);
-    case PREVIOUS_LANGUAGE_VERSION:
-      return inspectLiteralForVersion(value, PREVIOUS_LANGUAGE_VERSION);
-    case LANGUAGE_VERSION:
-      return inspectLiteralForVersion(value, LANGUAGE_VERSION);
-    case LANGUAGE_VERSIONS.v3:
-      return inspectLiteralForVersion(value, LANGUAGE_VERSIONS.v3);
-    case LANGUAGE_VERSIONS.v4:
-      return inspectLiteralForVersion(value, LANGUAGE_VERSIONS.v4);
-    default:
-      return rejected(nodeSchemaVersion, 'unsupported-node-version');
-  }
+  // Derived from the supported list rather than enumerated. An enumeration
+  // here goes stale on every cut and fails OPEN in the direction that matters
+  // least visibly: the node is merely "unsupported", so an operation whose
+  // precondition is the DEFAULT `true` is declined as
+  // `operation-precondition-unsupported` and every create in the release stops
+  // -- which is how a v5 cut was caught. The admitted set is still closed; it
+  // is now closed over the same list the schemas are.
+  const version = supportedNodeVersion(value.schemaVersion);
+  return version === null
+    ? rejected(nodeSchemaVersion, 'unsupported-node-version')
+    : inspectLiteralForVersion(value, version);
 };
 
 /**
@@ -511,20 +509,9 @@ function parsed(predicate: Readonly<PredicateExpression>): ParsedPredicate {
 }
 
 function supportedNodeVersion(value: unknown): CanonicalLanguageVersion | null {
-  switch (value) {
-    case LEGACY_LANGUAGE_VERSION:
-      return LEGACY_LANGUAGE_VERSION;
-    case PREVIOUS_LANGUAGE_VERSION:
-      return PREVIOUS_LANGUAGE_VERSION;
-    case LANGUAGE_VERSION:
-      return LANGUAGE_VERSION;
-    case LANGUAGE_VERSIONS.v3:
-      return LANGUAGE_VERSIONS.v3;
-    case LANGUAGE_VERSIONS.v4:
-      return LANGUAGE_VERSIONS.v4;
-    default:
-      return null;
-  }
+  return SUPPORTED_LANGUAGE_VERSIONS.find(
+    (candidate): candidate is CanonicalLanguageVersion => candidate === value,
+  ) ?? null;
 }
 
 function nodeVersion(value: unknown): string | null {

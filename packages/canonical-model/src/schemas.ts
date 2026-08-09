@@ -21,9 +21,15 @@ const legacyNodeVersion = z.enum(['v0-experimental', 'v1', 'v2']);
 // the node schema admits both; `CANON_VERSION_MIXED` in normalize.ts is what
 // keeps a package's nodes on the package's own version, exactly as it already
 // does for the `nodeVersion` enum above.
-const v3PlusNodeVersion = z.enum(['v3', 'v4']);
+const v3PlusNodeVersion = z.enum(['v3', 'v4', 'v5']);
 const v3NodeVersion = z.literal('v3');
+// The v4 family's own node spelling. v5 reads every v4 node -- it changes no
+// node shape, only what normalization DERIVES -- so the family schema admits
+// both and `CANON_VERSION_MIXED` keeps a package on its own version, exactly
+// as `v3PlusNodeVersion` already does one line above.
+const v4PlusNodeVersion = z.enum(['v4', 'v5']);
 const v4NodeVersion = z.literal('v4');
+const v5NodeVersion = z.literal('v5');
 const boundedOrderKey = z.int().min(0).max(1_000_000);
 const boundedCount = z.int().min(1).max(1_000_000);
 const positiveVersion = z.int().min(1).max(1_000_000);
@@ -138,7 +144,7 @@ export type PredicateExpression = PredicateExpressionShape<
   CanonicalScalar
 >;
 export type PredicateExpressionV3 = PredicateExpressionShape<
-  'v3' | 'v4',
+  'v3' | 'v4' | 'v5',
   V3PredicateOperator,
   CanonicalScalar | QueryParameterReference
 >;
@@ -149,7 +155,7 @@ export type VersionedPredicateExpression =
 export interface QueryParameterReference {
   readonly kind: 'queryParameterReference';
   readonly parameterId: z.infer<typeof CanonicalIdSchema>;
-  readonly schemaVersion: 'v3' | 'v4';
+  readonly schemaVersion: 'v3' | 'v4' | 'v5';
 }
 
 export type CanonicalScalar =
@@ -834,9 +840,9 @@ const queryLegalEntityScope = z.strictObject({
   operand: z.strictObject({
     kind: z.literal('queryParameterReference'),
     parameterId: CanonicalIdSchema,
-    schemaVersion: v4NodeVersion,
+    schemaVersion: v4PlusNodeVersion,
   }),
-  schemaVersion: v4NodeVersion,
+  schemaVersion: v4PlusNodeVersion,
 });
 
 /**
@@ -846,7 +852,7 @@ const queryLegalEntityScope = z.strictObject({
  */
 const legalEntityReferenceParameterType = z.strictObject({
   kind: z.literal('legalEntityReferenceParameterType'),
-  schemaVersion: v4NodeVersion,
+  schemaVersion: v4PlusNodeVersion,
 });
 const normalizedV4QueryParameterDefinition =
   authoredQueryParameterDefinition.extend({
@@ -865,7 +871,7 @@ const normalizedV4RowQueryDefinition = normalizedV3RowQueryDefinition.extend({
   parameters: z
     .array(normalizedV4QueryParameterDefinition)
     .max(QUERY_PARAMETER_LIMIT_V3),
-  schemaVersion: v4NodeVersion,
+  schemaVersion: v4PlusNodeVersion,
 });
 const authoredV4RowQueryDefinition = normalizedV4RowQueryDefinition.extend({
   filter: v3PredicateExpressionSchema.optional(),
@@ -882,12 +888,12 @@ const normalizedV4AggregateQueryDefinition =
     parameters: z
       .array(normalizedV4QueryParameterDefinition)
       .max(QUERY_PARAMETER_LIMIT_V3),
-    schemaVersion: v4NodeVersion,
+    schemaVersion: v4PlusNodeVersion,
   });
 const authoredV4AggregateQueryDefinition =
   authoredAggregateQueryDefinition.extend({
     legalEntityScope: queryLegalEntityScope.optional(),
-    schemaVersion: v4NodeVersion,
+    schemaVersion: v4PlusNodeVersion,
   });
 
 const normalizedV4QueryDefinition = z.union([
@@ -1130,8 +1136,20 @@ const v4NormalizedShape = {
 const LegacyNormalizedApplicationPackageSchema = z.strictObject(
   legacyNormalizedShape,
 );
+// v5 adds no family collection and changes no element shape. It changes what
+// normalization DERIVES: each state machine's state field is materialized as
+// an ordinary enumeration field on its entity (ADR-0050). The authored surface
+// is untouched, which is why the cut moves no recorded release root -- only a
+// package that declares a state machine normalizes differently, and no
+// first-party module declares one.
+const v5NormalizedShape = {
+  ...v4NormalizedShape,
+  languageVersion: v5NodeVersion,
+} as const;
+
 const V3NormalizedApplicationPackageSchema = z.strictObject(v3NormalizedShape);
 const V4NormalizedApplicationPackageSchema = z.strictObject(v4NormalizedShape);
+const V5NormalizedApplicationPackageSchema = z.strictObject(v5NormalizedShape);
 
 /**
  * Marker carried on the purity issue so a canonical diagnostic can name it.
@@ -1193,6 +1211,7 @@ export const VersionedNormalizedApplicationPackageSchema =
       LegacyNormalizedApplicationPackageSchema,
       V3NormalizedApplicationPackageSchema,
       V4NormalizedApplicationPackageSchema,
+      V5NormalizedApplicationPackageSchema,
     ]),
   );
 export const NormalizedApplicationPackageSchema =
@@ -1239,16 +1258,23 @@ const v4AuthoredShape = {
   queries: z.array(authoredV4QueryDefinition),
 } as const;
 
+const v5AuthoredShape = {
+  ...v4AuthoredShape,
+  languageVersion: v5NodeVersion,
+} as const;
+
 const LegacyAuthoredApplicationPackageSchema =
   z.strictObject(legacyAuthoredShape);
 const V3AuthoredApplicationPackageSchema = z.strictObject(v3AuthoredShape);
 const V4AuthoredApplicationPackageSchema = z.strictObject(v4AuthoredShape);
+const V5AuthoredApplicationPackageSchema = z.strictObject(v5AuthoredShape);
 
 export const VersionedAuthoredApplicationPackageSchema = withNodeVersionPurity(
   z.discriminatedUnion('languageVersion', [
     LegacyAuthoredApplicationPackageSchema,
     V3AuthoredApplicationPackageSchema,
     V4AuthoredApplicationPackageSchema,
+    V5AuthoredApplicationPackageSchema,
   ]),
 );
 export const AuthoredApplicationPackageSchema =
@@ -1273,15 +1299,23 @@ export type V4AuthoredApplicationPackage = z.infer<
 export type V4NormalizedApplicationPackage = z.infer<
   typeof V4NormalizedApplicationPackageSchema
 >;
+export type V5AuthoredApplicationPackage = z.infer<
+  typeof V5AuthoredApplicationPackageSchema
+>;
+export type V5NormalizedApplicationPackage = z.infer<
+  typeof V5NormalizedApplicationPackageSchema
+>;
 export type QueryLegalEntityScope = z.infer<typeof queryLegalEntityScope>;
 export type VersionedAuthoredApplicationPackage =
   | AuthoredApplicationPackage
   | V3AuthoredApplicationPackage
-  | V4AuthoredApplicationPackage;
+  | V4AuthoredApplicationPackage
+  | V5AuthoredApplicationPackage;
 export type VersionedNormalizedApplicationPackage =
   | NormalizedApplicationPackage
   | V3NormalizedApplicationPackage
-  | V4NormalizedApplicationPackage;
+  | V4NormalizedApplicationPackage
+  | V5NormalizedApplicationPackage;
 export type CanonicalId = z.infer<typeof CanonicalIdSchema>;
 
 function isValidIsoDate(value: string): boolean {

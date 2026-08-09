@@ -4,6 +4,17 @@ import { join } from 'node:path';
 import test from 'node:test';
 
 import { checkPredicateDispatchTripwire } from '../../packages/dev-tooling/src/predicate-dispatch-tripwire/index.js';
+import {
+  ADOPTED_LANGUAGE_VERSION,
+  ADOPTED_NORMALIZATION_PROFILE_VERSION,
+  LATEST_LANGUAGE_VERSION,
+  normalizeApplicationPackage,
+} from '../../packages/canonical-model/src/index.js';
+import {
+  DEFAULT_COMPILER_PROFILE,
+  MODULE_COMPILER_PROFILE,
+} from '../../packages/compiler/src/index.js';
+import { composedApplicationDefinition } from '../../packages/domain/src/app/builder.js';
 
 const contractsRoot = join(process.cwd(), 'packages/canonical-model/src');
 
@@ -150,3 +161,72 @@ function quarryMetricFork(): { path: string; source: string } {
     `,
   };
 }
+
+/**
+ * A cut version must not become anyone's default before it is adopted.
+ *
+ * The adoption ratchet pins the CONSTANTS -- `ADOPTED === v4`, `LATEST === v5`
+ * -- and that is necessary but not sufficient: it stays green while a compiler
+ * default, a normalizer selector, a fixture builder or a projection dispatch
+ * alias quietly selects `LATEST` instead. Both halves below close that gap, one
+ * structurally and one behaviourally.
+ *
+ * The rule this enforces is ADR-0047 §2's, restated from
+ * `DEFAULT_COMPILER_PROFILE`: "Keyed to the ADOPTED version, not the latest
+ * readable one. A newly cut but unadopted version must not silently become
+ * every caller's default profile."
+ */
+test('the newest readable version is reported, never selected', () => {
+  const constantNames = [
+    'LATEST_LANGUAGE_VERSION',
+    'LATEST_NORMALIZATION_PROFILE_VERSION',
+  ];
+  const productionFiles = globSync(
+    ['packages/*/src/**/*.ts', 'apps/*/src/**/*.ts'],
+    { cwd: process.cwd() },
+  ).filter(
+    (file) =>
+      !file.endsWith('.test.ts') &&
+      !file.endsWith('packages/canonical-model/src/constants.ts'),
+  );
+
+  const selections: string[] = [];
+  for (const file of productionFiles) {
+    // Re-exporting a constant is not selecting it, and an `import`/`export`
+    // clause spans lines, so the whole statement is removed rather than
+    // matched line by line -- which is what a first attempt at this got wrong.
+    const source = readFileSync(file, 'utf8').replaceAll(
+      /^(?:import|export)\s[^;]*;/gmu,
+      '',
+    );
+    source.split('\n').forEach((line, index) => {
+      for (const name of constantNames) {
+        if (!line.includes(name)) continue;
+        // Interpolating it into operator-facing text is REPORTING it, which is
+        // the only use the adoption discipline permits before adoption.
+        if (line.includes(`\${${name}}`)) continue;
+        selections.push(`${file}:${String(index + 1)}: ${line.trim()}`);
+      }
+    });
+  }
+  assert.deepEqual(
+    selections,
+    [],
+    `a cut-but-unadopted version must not be selected:\n${selections.join('\n')}`,
+  );
+
+  // The behavioural half. While a version is cut and unadopted the two must
+  // differ, and every default must follow ADOPTED across that gap.
+  assert.notEqual(LATEST_LANGUAGE_VERSION, ADOPTED_LANGUAGE_VERSION);
+  assert.equal(DEFAULT_COMPILER_PROFILE.languageVersion, ADOPTED_LANGUAGE_VERSION);
+  assert.equal(MODULE_COMPILER_PROFILE.languageVersion, ADOPTED_LANGUAGE_VERSION);
+  assert.equal(
+    DEFAULT_COMPILER_PROFILE.normalizationProfileVersion,
+    ADOPTED_NORMALIZATION_PROFILE_VERSION,
+  );
+  assert.equal(
+    normalizeApplicationPackage(composedApplicationDefinition())
+      .languageVersion,
+    ADOPTED_LANGUAGE_VERSION,
+  );
+});
