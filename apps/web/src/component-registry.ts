@@ -588,8 +588,12 @@ function renderCommandBar(context: SurfaceComponentContext): string {
   }
 
   const form = relatedSurface(context, 'form');
-  const command = record
-    ? (context.operations ?? []).find(
+  // EVERY granted command, not the first one. The binding may now carry more
+  // than one (`INTENT_RENDERED_ARITY` in surface-contract.ts), and a `find`
+  // here would render one operable control while the rest bound invisibly --
+  // which is the shape of concealing an action the user is entitled to.
+  const commands = record
+    ? (context.operations ?? []).filter(
         (operation) =>
           operation.intent === 'command' &&
           evaluateRegisteredOperationPrecondition(
@@ -597,7 +601,7 @@ function renderCommandBar(context: SurfaceComponentContext): string {
             record.values,
           ).outcome === 'holds',
       )
-    : undefined;
+    : [];
   const actions = [
     record && form
       ? `<a class="primary-action" href="${escapeHtml(surfaceHref(form, record.recordId, false, context))}">Edit</a>`
@@ -605,7 +609,11 @@ function renderCommandBar(context: SurfaceComponentContext): string {
     form
       ? `<a class="secondary-action" href="${escapeHtml(surfaceHref(form, undefined, false, context))}">New</a>`
       : '',
-    record && command ? renderCapabilityCommand(context, record, command) : '',
+    record
+      ? commands
+          .map((command) => renderCapabilityCommand(context, record, command))
+          .join('')
+      : '',
     record ? renderLifecycleOverflow(context, record) : '',
   ].join('');
   return slotPanel(
@@ -620,7 +628,7 @@ function renderCapabilityCommand(
   record: SemanticRecordDto,
   operation: CompiledSurfaceOperationBinding,
 ): string {
-  return `<form class="capability-command" method="post" action="/?surface=${encodeURIComponent(context.surface.surfaceId)}" data-capability-id="${escapeHtml(operation.capabilityId ?? '')}"><input type="hidden" name="intent" value="command"><input type="hidden" name="idempotencyKey" value="${randomUUID()}"><input type="hidden" name="recordId" value="${escapeHtml(record.recordId)}"><input type="hidden" name="expectedRevision" value="${record.revision}"><span><strong>Draft staged.</strong> Posting is a separate confirmed step.</span><button type="submit">${escapeHtml(operation.label)}</button></form>`;
+  return `<form class="capability-command" method="post" action="/?surface=${encodeURIComponent(context.surface.surfaceId)}" data-capability-id="${escapeHtml(operation.capabilityId ?? '')}" data-operation-id="${escapeHtml(operation.operationId)}"><input type="hidden" name="operationId" value="${escapeHtml(operation.operationId)}"><input type="hidden" name="idempotencyKey" value="${randomUUID()}"><input type="hidden" name="recordId" value="${escapeHtml(record.recordId)}"><input type="hidden" name="expectedRevision" value="${record.revision}"><span><strong>Draft staged.</strong> Posting is a separate confirmed step.</span><button type="submit">${escapeHtml(operation.label)}</button></form>`;
 }
 
 function renderKeyFacts(context: SurfaceComponentContext): string {
@@ -707,7 +715,7 @@ function renderSections(context: SurfaceComponentContext): string {
     : '<button type="submit">Save</button>';
   return slotPanel(
     context,
-    `${compatibilityFeedback}<section class="panel data-panel" data-data-state="${record ? 'exact' : 'empty'}"><div class="panel__heading"><div><p class="eyebrow">Details</p><h2>${record ? 'Update the record' : 'Create a record'}</h2></div></div><form id="surface-record-form" method="post" action="/?surface=${encodeURIComponent(context.surface.surfaceId)}"><input type="hidden" name="intent" value="${intent}"><input type="hidden" name="idempotencyKey" value="${randomUUID()}"><input type="hidden" name="recordId" value="${escapeHtml(recordId)}">${record ? `<input type="hidden" name="expectedRevision" value="${record.revision}">` : ''}<div class="form-fields">${context.surface.fieldIds.map((fieldId) => `<label><span>${escapeHtml(fieldLabel(fieldId))}</span><input name="value:${escapeHtml(fieldId)}" value="${record ? renderInputValue(record.values[fieldId]) : ''}" autocomplete="off"></label>`).join('')}</div>${compatibilityCommand}</form></section>`,
+    `${compatibilityFeedback}<section class="panel data-panel" data-data-state="${record ? 'exact' : 'empty'}"><div class="panel__heading"><div><p class="eyebrow">Details</p><h2>${record ? 'Update the record' : 'Create a record'}</h2></div></div><form id="surface-record-form" method="post" action="/?surface=${encodeURIComponent(context.surface.surfaceId)}"><input type="hidden" name="operationId" value="${escapeHtml(operation.operationId)}"><input type="hidden" name="idempotencyKey" value="${randomUUID()}"><input type="hidden" name="recordId" value="${escapeHtml(recordId)}">${record ? `<input type="hidden" name="expectedRevision" value="${record.revision}">` : ''}<div class="form-fields">${context.surface.fieldIds.map((fieldId) => `<label><span>${escapeHtml(fieldLabel(fieldId))}</span><input name="value:${escapeHtml(fieldId)}" value="${record ? renderInputValue(record.values[fieldId]) : ''}" autocomplete="off"></label>`).join('')}</div>${compatibilityCommand}</form></section>`,
     'sections-slot',
   );
 }
@@ -848,7 +856,7 @@ function renderLifecycleForm(
     (binding) => binding.intent === intent,
   );
   return operation
-    ? `<form class="lifecycle-action" method="post" action="/?surface=${encodeURIComponent(context.surface.surfaceId)}"><input type="hidden" name="intent" value="${operation.intent}"><input type="hidden" name="idempotencyKey" value="${randomUUID()}"><input type="hidden" name="recordId" value="${escapeHtml(record.recordId)}"><input type="hidden" name="expectedRevision" value="${record.revision}"><button class="secondary-action" type="submit">${escapeHtml(operation.label)}</button></form>`
+    ? `<form class="lifecycle-action" method="post" action="/?surface=${encodeURIComponent(context.surface.surfaceId)}"><input type="hidden" name="operationId" value="${escapeHtml(operation.operationId)}"><input type="hidden" name="idempotencyKey" value="${randomUUID()}"><input type="hidden" name="recordId" value="${escapeHtml(record.recordId)}"><input type="hidden" name="expectedRevision" value="${record.revision}"><button class="secondary-action" type="submit">${escapeHtml(operation.label)}</button></form>`
     : '';
 }
 

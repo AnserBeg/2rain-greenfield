@@ -225,7 +225,20 @@ export async function renderSurfaceRuntimeWithData(
   );
 }
 
-/** Resolves a browser intent to one pinned operation; no operation ID is accepted. */
+/**
+ * Resolves a submission to one pinned operation, SELECTED by the posted id and
+ * AUTHORIZED only by the compiled binding.
+ *
+ * The distinction is the whole change, so it is stated rather than implied.
+ * This used to resolve `intent -> the one operation carrying it`, which made
+ * the one-operation-per-intent limit in `surface-contract.ts` load-bearing on
+ * the write path: two commands would both post `intent=command` and the
+ * `find` would return whichever sorted first, so pressing Cancel could
+ * release. The set of reachable operations is UNCHANGED -- it is
+ * `binding.operations`, exactly as before, and an id absent from it is
+ * refused. Only the selection within that already-authorized set moved from
+ * the server's sort order to the control the user actually pressed.
+ */
 export async function submitSurfaceRuntimeIntent(
   view: RuntimeViewContract.RequestRuntimeView,
   requestUrl: string,
@@ -241,22 +254,21 @@ export async function submitSurfaceRuntimeIntent(
   } catch {
     return operationDiagnostic('OPERATION_UNSUPPORTED', 422);
   }
-  const intent = operationIntent(submission.intent);
-  const operation = intent
-    ? binding.operations.find((candidate) => candidate.intent === intent)
-    : undefined;
+  const operation = binding.operations.find(
+    (candidate) => candidate.operationId === submission.operationId,
+  );
   if (
-    !intent ||
     !operation ||
     !surfaceSupportsRuntimeIntent(
       view,
       selection.selected,
       selection.surfaces,
-      intent,
+      operation.intent,
     )
   ) {
     return operationDiagnostic('OPERATION_UNSUPPORTED', 422);
   }
+  const intent = operation.intent;
   const input = operationInput(selection.selected, intent, submission);
   if (
     operation.confirmation === 'humanRequired' &&
@@ -683,17 +695,11 @@ function operationInput(
     : { expectedRevision, recordId };
 }
 
-function operationIntent(
-  value: string | undefined,
-): SurfaceOperationIntent | null {
-  return value === 'archive' ||
-    value === 'command' ||
-    value === 'create' ||
-    value === 'restore' ||
-    value === 'update'
-    ? value
-    : null;
-}
+// The wire's `intent` parser is deliberately gone rather than kept alongside
+// the id. It was a SECOND spelling of the closed vocabulary already declared
+// in surface-contract.ts, and with the operation resolved from the binding the
+// intent is read off that operation -- one authority, and a posted `intent`
+// can no longer disagree with the operation it accompanies.
 
 function operationDiagnostic(
   code: OperationDiagnosticCode,
