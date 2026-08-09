@@ -62,6 +62,15 @@ Rows 6 and 7 are mine by my own definition and I did not find them.
   symptom. #2 is the sharpest — a version omission in a predicate kernel
   presented as *every create operation in the release is unsupported*.
 
+**And derivation is not automatically correct.** Fixing row 6 by deriving from
+`SUPPORTED_LANGUAGE_VERSIONS` admitted `v3` — a version that never declared the
+legal-entity operand — and an existing forgery control refused it. The admitted
+set is *"versions whose language declares this node"*, not *"versions that
+exist"*. I derived from the nearest list rather than the governing property.
+The fence is now pinned from both sides, each with its own recorded red: widen
+it and the forgery control fires; narrow it back to the literal and the v5
+control fires.
+
 **A grep is not a sweep.** Row 6 survived because I searched for `=== 'v4'` and
 the code said `!== 'v4'`; row 7 survived because I was looking for literals in
 comparisons and this one was a *predicate I had just written*. The durable form
