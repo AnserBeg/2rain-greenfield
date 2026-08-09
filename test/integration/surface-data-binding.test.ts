@@ -103,7 +103,7 @@ test('compiled fixture surfaces bind live Q0/O0 data through one pinned request 
       {
         body: new URLSearchParams({
           idempotencyKey: randomUUID(),
-          intent: 'create',
+          operationId: `${FIXTURE_IDS.namespace}:operation.master_create`,
           recordId: randomUUID(),
           [`value:${FIXTURE_IDS.fieldIds.parentName}`]: 'Created in browser',
         }),
@@ -138,7 +138,7 @@ test('compiled fixture surfaces bind live Q0/O0 data through one pinned request 
     const createdId = String(createdInput.recordId);
     const update = await postIntent(baseUrl, formSurface, {
       expectedRevision: '1',
-      intent: 'update',
+      operationId: `${FIXTURE_IDS.namespace}:operation.master_update`,
       recordId: createdId,
       [`value:${FIXTURE_IDS.fieldIds.parentName}`]: 'Updated in browser',
     });
@@ -146,13 +146,13 @@ test('compiled fixture surfaces bind live Q0/O0 data through one pinned request 
     const recordSurface = `${FIXTURE_IDS.namespace}:surface.master_record`;
     const archived = await postIntent(baseUrl, recordSurface, {
       expectedRevision: '2',
-      intent: 'archive',
+      operationId: `${FIXTURE_IDS.namespace}:operation.master_archive`,
       recordId: createdId,
     });
     assert.match(archived, /Archived · revision 3/);
     const restored = await postIntent(baseUrl, recordSurface, {
       expectedRevision: '3',
-      intent: 'restore',
+      operationId: `${FIXTURE_IDS.namespace}:operation.master_restore`,
       recordId: createdId,
     });
     assert.match(restored, /Active · revision 4/);
@@ -324,7 +324,7 @@ test('human-confirmed forms render the authoritative operation read-back without
 
   const createSubmission = {
     idempotencyKey: randomUUID(),
-    intent: 'create',
+    operationId: `${FIXTURE_IDS.namespace}:operation.master_create`,
     recordId: randomUUID(),
     [`value:${FIXTURE_IDS.fieldIds.parentName}`]: 'Authoritative read-back',
   };
@@ -363,7 +363,7 @@ test('human-confirmed forms render the authoritative operation read-back without
   const updateSubmission = {
     expectedRevision: '1',
     idempotencyKey: randomUUID(),
-    intent: 'update',
+    operationId: `${FIXTURE_IDS.namespace}:operation.master_update`,
     recordId: String(createInput.recordId),
     [`value:${FIXTURE_IDS.fieldIds.parentName}`]: 'Updated read-back',
   };
@@ -513,7 +513,7 @@ test('a capability command is artifact-bound, render-minted, and deliberately co
     {
       expectedRevision: '1',
       idempotencyKey: renderedKey,
-      intent: 'command',
+      operationId,
       recordId,
     },
     gateways,

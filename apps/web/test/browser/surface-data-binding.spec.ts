@@ -574,10 +574,13 @@ test('a posted operation id outside the surface binding is refused', async ({
         form: {
           expectedRevision: '1',
           idempotencyKey: randomUUID(),
+          // Posted deliberately: the retired wire vocabulary must not be a
+          // fallback that resurrects the old intent-keyed resolution.
           intent: 'command',
           operationId,
           recordId,
         },
+        headers: { authorization: 'fixture-user' },
       });
       expect(refused.status()).toBe(422);
       expect(await refused.text()).toContain('OPERATION_UNSUPPORTED');
@@ -585,6 +588,25 @@ test('a posted operation id outside the surface binding is refused', async ({
     assert.deepEqual(
       capabilityExecutors.flatMap((candidate) => candidate.executed),
       [],
+    );
+
+    // The companion that makes the three refusals mean something. Without it
+    // this test is satisfied by a surface that refuses EVERYTHING -- which is
+    // exactly what the pre-change binding does with two commands bound, so the
+    // refusals alone would pass against the defect.
+    const accepted = await page.request.post(surfaceUrl, {
+      form: {
+        expectedRevision: '1',
+        idempotencyKey: randomUUID(),
+        operationId: commandOperationId('release'),
+        recordId,
+      },
+      headers: { authorization: 'fixture-user' },
+    });
+    expect(accepted.status()).toBe(200);
+    assert.deepEqual(
+      capabilityExecutors.flatMap((candidate) => candidate.executed),
+      [commandOperationId('release')],
     );
   } finally {
     await new Promise<void>((resolve, reject) => {
