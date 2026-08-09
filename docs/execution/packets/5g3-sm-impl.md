@@ -221,7 +221,7 @@ guards is worse than none.
 
 ## Gates — one full matrix at the frozen SHA
 
-`FULL_MATRIX_PASS_SHA=8533f412`, tree clean, typecheck clean.
+`FULL_MATRIX_PASS_SHA=8a806d7b`, tree clean, typecheck clean.
 
 | Step | Result |
 |---|---|
@@ -229,50 +229,51 @@ guards is worse than none.
 | unit / compiler / performance | green |
 | integration / agent / architecture | green |
 | contracts / postgres / locale | green |
-| browser | 67 passed (3.5m) |
+| browser | 67 passed (2.6m) |
 | `check:language-coverage` | **PASS** — 2050 obligations, 2050 decision-covered, 427 first-party observations |
 | `check:reachability` | **PASS** — 99/99 test files, 10 producer artifacts |
 
-718 assertions passed, 0 failed, `MATRIX_EXIT=0` read from inside the log.
-**Compile-budget gate measured**: `cpu_idle_pct=99.2`, best-of-5 wall 1513.4 ms
-against 5000 ms. Pre-flight: registry empty, 98.8% idle **sampled after the
-previous holder decayed**, loadavg 1.25, no worktree busy, 4 `ccd-cli` runtimes.
+714 assertions passed, 0 failed, `MATRIX_EXIT=0` read from inside the log.
+**Compile-budget gate measured**: `cpu_idle_pct=97.1`, best-of-5 wall 2153.6 ms
+against 5000 ms. Pre-flight: registry empty, no worktree busy, three idle
+samples after decay — 94.1, 95.8, 94.2 — loadavg falling 3.30 to 1.70, and
+4 `ccd-cli` runtimes.
 
 ### The control lesson, which outlived the control
 
-The forged-reference control was revised twice, and the second revision came
-from applying the review's own generative question — *delete each check alone;
-does the control still pass?* — to each **check** rather than to the control as
-a whole.
+One control was revised across three review rounds while the production parser
+was confirmed sound throughout. Each round tried to make the table prove more;
+each round the claim still outran the specimens.
 
 | Confound | Found by | Effect |
 |---|---|---|
-| all specimens installed at one call site | review | restoring a shallow check in either other arm left it green |
-| version membership masked by version equality | this packet, applying the question per check | deleting membership alone left **all twelve** cases green |
+| all specimens at one call site | review | restoring a shallow check in either other arm left it green |
+| version membership masked by version equality | this packet, asking the question per **check** | deleting membership alone left all twelve cases green |
+| membership's four rows were three specimens | review | both transition rows built an identical payload; neither could tell one call site from the other |
+| every specimen carried a hardcoded address | review | six of twelve changed the address as well as the nominated field, and everything downstream resolves from `targetId` |
 
-The second is the instructive one. An invented version cannot equal a real
-effect's version, so the equality check refused every membership specimen and
-membership was never exercised. Isolating it required moving the **effect's**
-version and its references together, so they agree and only membership can
-refuse. Per-check attribution now stands at 4 reds each — one per position — for
-`kind`, equality and membership.
+**The correction is to narrow, not to strengthen.** When a control has been
+revised twice and still overclaims, the defect is the claim rather than the
+coverage. Membership now makes one honest shared-parser assertion and states
+that per-call-site routing is established by `kind` and equality, which install
+at four genuinely distinct positions. A third check does not need its own table
+once routing is proven elsewhere.
 
-The table also carries its own admission twin: every position's **unforged**
-catalog must parse. Without it a position refused for an unrelated reason
-contributes three decorative cases, which is the same defect one level up.
+**And a red count is not attribution.** Re-running each deletion individually —
+because a number disagreed with the code — is what surfaced the second confound,
+and it still was not enough: the count was right and the attribution was false.
+Four reds looked like four positions; two were the same payload under different
+labels. Two subtests building one payload are one control with two names.
 
-**One claim in that review was refuted by measurement rather than accepted.**
-The wrong-kind specimen was said to be version-confounded; its version was its
-enclosing effect's own, so deleting the kind check alone reds it and leaves the
-other two green. Verifying before agreeing is what surfaced the real confound,
-which was in a different check entirely.
+Each specimen is now the position's own valid reference with exactly one
+property replaced. The admission twin cannot catch a substituted address,
+because it inspects the payload before the forgery is installed.
 
 ### What the failed runs cost, and what changed
 
-Seven matrices failed across this packet. Three found real defects. **Three were
+Eight matrices failed across this packet. Three found real defects. **Three were
 residue of my own** — a prohibited word in a comment, twice, and a pinned line
 number. After the third, verification moved before the matrix: vocabulary sweep,
 full integration, full architecture, run locally first. That pass has since
-caught a pinned line, a lock-contention red and a third vocabulary hit, none of
-which became a failed run. **Roughly an hour of machine time was spent learning
-that three minutes of local checks come first.**
+caught a pinned line, three lock-contention reds and a third vocabulary hit,
+none of which became a failed run.
