@@ -213,4 +213,35 @@ The collision guard and the field generator now share **one** definition of the
 derived field. Two copies would drift, and a guard that drifts from what it
 guards is worse than none.
 
-## Gates
+## Gates — one full matrix at the frozen SHA
+
+`FULL_MATRIX_PASS_SHA=40b40291`, tree clean, typecheck clean.
+
+| Step | Result |
+|---|---|
+| demo-release, app-release | pass |
+| unit / compiler / performance | green |
+| integration / agent / architecture | green |
+| contracts / postgres / locale | green |
+| browser | 67 passed (2.7m) |
+| `check:language-coverage` | **PASS** — 2050 obligations, 2050 decision-covered, 427 first-party observations |
+| `check:reachability` | **PASS** — 99/99 test files, 10 producer artifacts |
+
+694 assertions passed, 0 failed, `MATRIX_EXIT=0` read from inside the log.
+
+**The compile-budget gate measured**: `cpu_idle_pct=97.9` against the 90.0 floor,
+best-of-5 wall 1371.4 ms against 5000 ms. Pre-flight at launch: registry empty,
+99.1% idle, loadavg 0.98, no worktree busy, **2 `ccd-cli` runtimes**.
+
+### What the failed runs cost, and what changed
+
+Four matrices failed before this one. Two found real defects — an over-wide
+version fence that an existing forgery control refused, and the transition
+permission itself. **Two were residue of my own**: a prohibited word in a
+comment, and a pinned line number the permission rule had moved.
+
+After the third, verification moved before the matrix rather than after it: the
+gateway vocabulary sweep, full integration and full architecture run locally
+first. That pass immediately caught the pinned line and a lock-contention red —
+two more failed matrices that never happened. **Roughly fifty minutes of machine
+time was spent learning that three minutes of local checks come first.**
