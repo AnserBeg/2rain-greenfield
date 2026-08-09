@@ -619,6 +619,34 @@ type ForgeableCatalog = {
   operations: Array<{ effect: Record<string, unknown> }>;
 };
 
+/**
+ * The admission twin for the forgery table below, and the reason it exists is
+ * the table's own history: a control whose specimen is refused for an unrelated
+ * reason proves nothing, and reading the failure text cannot recover the
+ * attribution. If an UNFORGED catalog at some position is already rejected as
+ * malformed, then all three forgeries at that position are decoration.
+ */
+test('every forgery position starts from a catalog the parser admits', async (t) => {
+  for (const position of forgedReferencePositions) {
+    await t.test(position.arm, async () => {
+      const fixture = createFixture({
+        operationPayload: position.payload() as unknown as ImmutableJsonValue,
+      });
+      const failure = await fixture.operationApi
+        .handle(authenticationInput, position.request())
+        .then(
+          () => null,
+          (error: unknown) => error,
+        );
+      assert.equal(
+        failure instanceof MalformedPinnedOperationCatalogError,
+        false,
+        `unforged catalog for ${position.arm} must parse: ${String(failure)}`,
+      );
+    });
+  }
+});
+
 test('a forged canonical reference never reaches the executor, at every position', async (t) => {
   for (const position of forgedReferencePositions) {
     for (const [label, reference] of [
