@@ -7,6 +7,7 @@ import {
   LEGAL_ENTITY_SCOPE_CONTRACT_V1,
   LEGAL_ENTITY_SCOPE_PROFILE_VERSION,
   SUPPORTED_LANGUAGE_VERSIONS,
+  languageHasLegalEntityQueryScope,
   STRUCTURAL_LIMITS_V0,
   VersionedPredicateExpressionSchema,
   canonicalizeAndHash,
@@ -1345,7 +1346,7 @@ function assertRowQueryParameters(
     // rejected as an unadmitted parameter type, which names the wrong cause.
     const legalEntityReference =
       parameterType.kind === 'legalEntityReferenceParameterType' &&
-      isSupportedNodeVersion(parameterType.schemaVersion);
+      isLegalEntityScopeNodeVersion(parameterType.schemaVersion);
     if (
       !legalEntityReference &&
       FieldTypeSchema.safeParse(parameterType).success === false
@@ -1378,7 +1379,7 @@ function assertLegalEntityScopeContract(
   // malformed pinned catalog, three layers from the literal that caused it.
   if (
     value.kind !== 'queryLegalEntityScope' ||
-    !isSupportedNodeVersion(value.schemaVersion) ||
+    !isLegalEntityScopeNodeVersion(value.schemaVersion) ||
     !LEGAL_ENTITY_SCOPE_CONTRACT_V1.admittedCardinalities.includes(
       value.cardinality as 'exactlyOne',
     ) ||
@@ -1391,7 +1392,7 @@ function assertLegalEntityScopeContract(
   assertCanonicalId(operand.parameterId, 'parameterId', invalid);
   if (
     operand.kind !== 'queryParameterReference' ||
-    !isSupportedNodeVersion(operand.schemaVersion)
+    !isLegalEntityScopeNodeVersion(operand.schemaVersion)
   ) {
     throw invalid('legal-entity scope operand is invalid');
   }
@@ -1412,22 +1413,31 @@ function assertLegalEntityScopeContract(
     !isRecord(operandParameter.parameterType) ||
     operandParameter.parameterType.kind !==
       'legalEntityReferenceParameterType' ||
-    !isSupportedNodeVersion(operandParameter.parameterType.schemaVersion)
+    !isLegalEntityScopeNodeVersion(operandParameter.parameterType.schemaVersion)
   ) {
     throw invalid('legal-entity scope operand has the wrong parameter type');
   }
 }
 
 /**
- * One definition of "a node version this runtime admits", derived from the
- * supported list rather than enumerated. Four checks in this file used a
- * literal; each was a later package refused under a name describing the wrong
- * cause.
+ * One definition of "a legal-entity scope node version this runtime admits".
+ *
+ * Derived, but derived from the RIGHT source, and the difference is the whole
+ * lesson. Four checks here used the literal `'v4'`, which refuses a legal v5
+ * package. Replacing them with "any supported version" then admitted `v3` --
+ * and v3 never declared the legal-entity operand, so a `v3`-stamped
+ * `legalEntityReferenceParameterType` is a node the canonical model could not
+ * have produced. An existing forgery control caught it.
+ *
+ * The admitted set is therefore "versions whose language declares this node",
+ * not "versions that exist". Derivation is not automatically correct; it is
+ * correct when it names the property the check actually depends on.
  */
-function isSupportedNodeVersion(value: unknown): boolean {
+function isLegalEntityScopeNodeVersion(value: unknown): boolean {
   return (
     typeof value === 'string' &&
-    (SUPPORTED_LANGUAGE_VERSIONS as readonly string[]).includes(value)
+    (SUPPORTED_LANGUAGE_VERSIONS as readonly string[]).includes(value) &&
+    languageHasLegalEntityQueryScope(value as CanonicalLanguageVersion)
   );
 }
 
