@@ -573,6 +573,41 @@ function operationCatalogPayload(
   };
 }
 
+type NormalizedField = NormalizedApplicationPackage['fields'][number];
+
+/**
+ * What a control needs to exist: the declared kind, and -- for an enum -- the
+ * options it is a choice between. Nothing else about the field type is carried,
+ * because nothing else changes which control is rendered.
+ *
+ * `options` is present exactly when the kind is `enumFieldType`, so a reader
+ * that finds it absent on an enum has read a malformed payload rather than an
+ * enum with no choices. Order is the normalized order (`normalize.ts` sorts
+ * options by `orderKey` then `optionId`), so the rendered order is compiled,
+ * not incidental.
+ */
+function surfaceManifestField(field: NormalizedField): {
+  readonly fieldId: string;
+  readonly kind: NormalizedField['fieldType']['kind'];
+  readonly options?: readonly {
+    readonly label: string;
+    readonly optionId: string;
+  }[];
+} {
+  return {
+    fieldId: field.fieldId,
+    kind: field.fieldType.kind,
+    ...(field.fieldType.kind === 'enumFieldType'
+      ? {
+          options: field.fieldType.options.map((option) => ({
+            label: option.label,
+            optionId: option.optionId,
+          })),
+        }
+      : {}),
+  };
+}
+
 function surfaceManifestPayload(
   packageRevision: NormalizedApplicationPackage,
   queryById: Map<string, NormalizedApplicationPackage['queries'][number]>,
@@ -585,6 +620,9 @@ function surfaceManifestPayload(
   readonly requiredRuntimeCapability: RuntimeCapabilityRequirement;
 } {
   const navigation = surfaceNavigationTree(packageRevision);
+  const fieldById = new Map(
+    packageRevision.fields.map((field) => [field.fieldId, field]),
+  );
   // Load-bearing compatibility fence: labelling grouped output as v0 lets
   // v0 readers ignore the tree and silently reconstruct unreachable overflow.
   const payloadSchemaVersion = navigation
@@ -595,13 +633,39 @@ function surfaceManifestPayload(
       kind: 'surfaceManifestPayload',
       ...(navigation ? { navigation } : {}),
       schemaVersion: payloadSchemaVersion,
-      surfaces: packageRevision.surfaces.map((surface) => ({
-        archetype: surface.archetype,
-        dataSourceQueryId: surface.dataSource.targetId,
-        fieldIds:
+      surfaces: packageRevision.surfaces.map((surface) => {
+        const fieldIds =
           queryById
             .get(surface.dataSource.targetId)
-            ?.selections.map((selection) => selection.field.targetId) ?? [],
+            ?.selections.map((selection) => selection.field.targetId) ?? [];
+        return {
+        archetype: surface.archetype,
+        dataSourceQueryId: surface.dataSource.targetId,
+        fieldIds,
+        // Gated on the UNADOPTED v2, exactly as `disclosureTier` is one level
+        // down: readable and unemitted, so no recorded release root moves.
+        //
+        // Nothing is defaulted. Every canonical field DECLARES a `fieldType`,
+        // so there is no absent kind to invent -- the projection carries what
+        // the definition already says and stops. What can be absent is the
+        // whole key, under every profile that is not v2, and a reader must see
+        // that absence rather than a materialized default.
+        //
+        // `flatMap` drops a field the package does not declare. Normalization
+        // refuses that package first (`CANON_REFERENCE_UNRESOLVED`), so the
+        // drop is unreachable today; it is written this way rather than with an
+        // assertion because the observable consequence belongs at the reader,
+        // where a short `fields` against a full `fieldIds` is refused by name
+        // instead of rendering half a form as bare text boxes.
+        ...(compilerSemanticProfileVersion ===
+        COMPILER_SEMANTIC_PROFILE_V2_VERSION
+          ? {
+              fields: fieldIds.flatMap((fieldId) => {
+                const field = fieldById.get(fieldId);
+                return field ? [surfaceManifestField(field)] : [];
+              }),
+            }
+          : {}),
         label: surface.label,
         lifecycle: surface.lifecycle,
         slots: surface.slots.map((slot) => ({
@@ -625,7 +689,8 @@ function surfaceManifestPayload(
         ...(packageRevision.languageVersion === LANGUAGE_VERSION
           ? { surfaceRole: surface.surfaceRole ?? null }
           : {}),
-      })),
+        };
+      }),
     },
     payloadSchemaVersion,
     // `minimumVersion` stays 1 when the tier is emitted, and that is honest on a
@@ -636,6 +701,12 @@ function surfaceManifestPayload(
     // what `always` means, so it under-defers rather than concealing. The
     // condition is that no tier value ever means "hide"; the moment one does,
     // this needs re-deriving. Recorded, not fixed (U5b review item 3).
+    //
+    // `fields` is the same shape of honest omission. A reader that drops it
+    // renders every field as a bare text box -- the pre-`ux-picker` render,
+    // which is under-featured but never a WRONG value: the posted key and the
+    // posted string are identical either way. It would stop being true if a
+    // field kind ever changed what the form SUBMITS rather than what it OFFERS.
     requiredRuntimeCapability: {
       capabilityId: 'northstar.runtime:capability.surface-manifest',
       minimumVersion: navigation ? 2 : 1,

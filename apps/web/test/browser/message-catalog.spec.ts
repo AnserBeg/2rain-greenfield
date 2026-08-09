@@ -443,6 +443,22 @@ test.beforeAll(async () => {
     }),
   );
   realPathUrls.set(
+    'INVALID_SURFACE_FIELD',
+    await mutatedFixtureUrl('field', ({ payload }) => {
+      // Parity-correct and otherwise well-formed: one entry per selected field,
+      // in order, every entry a real kind -- except the first, whose kind alone
+      // is outside the reader's closed vocabulary. One property varied, so the
+      // refusal is attributable to the kind check and to nothing else.
+      for (const surface of payload.surfaces as Record<string, unknown>[]) {
+        const fieldIds = surface.fieldIds as string[];
+        surface.fields = fieldIds.map((fieldId, index) => ({
+          fieldId,
+          kind: index === 0 ? 'relationFieldType' : 'textFieldType',
+        }));
+      }
+    }),
+  );
+  realPathUrls.set(
     'AUTHENTICATION_REQUIRED',
     await refusingEntryUrl(
       async () => null,
@@ -491,6 +507,8 @@ const REAL_PATH_DRIVERS: Readonly<
     page.goto(`${shellUrl}/?surface=${encodeURIComponent(rendererErrorId())}`),
   DUPLICATE_SURFACE_ID: (page) =>
     page.goto(realPathUrls.get('DUPLICATE_SURFACE_ID')!),
+  INVALID_SURFACE_FIELD: (page) =>
+    page.goto(realPathUrls.get('INVALID_SURFACE_FIELD')!),
   INVALID_SURFACE_MANIFEST: (page) =>
     page.goto(realPathUrls.get('INVALID_SURFACE_MANIFEST')!),
   INVALID_SURFACE_SLOT: (page) =>

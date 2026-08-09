@@ -234,7 +234,16 @@ composedTest.describe('focus ring coverage', () => {
         // reach it; its ring is `--focus-ring-surface`, which five other selectors
         // do measure on five grounds. An eleventh unreached selector, or this one
         // becoming reachable, changes the array and reds either way.
+        // `.form-fields select` joined the unreached set with `ux-picker`, and
+        // for a reason that expires on a known event: a `select` renders only
+        // where the compiled surface carries per-field kinds, and those are
+        // gated on the UNADOPTED compiler-semantic v2, so no composed surface
+        // has one. Its ring is `--focus-ring-surface`, the same token five
+        // reached selectors measure on five grounds. **Adopting v2 must remove
+        // this entry** — it becomes reachable and this assertion reds, which is
+        // the intended signal rather than a regression.
         assert.deepEqual(observed.selectorsWithoutSubject, [
+          '.form-fields select:focus-visible',
           '.list-page-link:focus-visible',
         ]);
         assert.deepEqual(result.violations, []);

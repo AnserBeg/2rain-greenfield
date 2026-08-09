@@ -19,7 +19,9 @@ import {
 } from './message-render.js';
 import { readCompiledSurfaceDataBinding } from './surface-contract.js';
 import type {
+  CompiledFieldOption,
   CompiledSurfaceDefinition,
+  CompiledSurfaceField,
   CompiledSurfaceOperationBinding,
   CompiledSurfaceSlot,
   SurfaceOperationIntent,
@@ -718,7 +720,7 @@ function renderSections(context: SurfaceComponentContext): string {
     : '<button type="submit">Save</button>';
   return slotPanel(
     context,
-    `${compatibilityFeedback}<section class="panel data-panel" data-data-state="${record ? 'exact' : 'empty'}"><div class="panel__heading"><div><p class="eyebrow">Details</p><h2>${record ? 'Update the record' : 'Create a record'}</h2></div></div><form id="surface-record-form" method="post" action="/?surface=${encodeURIComponent(context.surface.surfaceId)}"><input type="hidden" name="intent" value="${intent}"><input type="hidden" name="idempotencyKey" value="${randomUUID()}"><input type="hidden" name="recordId" value="${escapeHtml(recordId)}">${record ? `<input type="hidden" name="expectedRevision" value="${record.revision}">` : ''}<div class="form-fields">${context.surface.fieldIds.map((fieldId) => `<label><span>${escapeHtml(fieldLabel(fieldId))}</span><input name="value:${escapeHtml(fieldId)}" value="${record ? renderInputValue(record.values[fieldId]) : ''}" autocomplete="off"></label>`).join('')}</div>${compatibilityCommand}</form></section>`,
+    `${compatibilityFeedback}<section class="panel data-panel" data-data-state="${record ? 'exact' : 'empty'}"><div class="panel__heading"><div><p class="eyebrow">Details</p><h2>${record ? 'Update the record' : 'Create a record'}</h2></div></div><form id="surface-record-form" method="post" action="/?surface=${encodeURIComponent(context.surface.surfaceId)}"><input type="hidden" name="intent" value="${intent}"><input type="hidden" name="idempotencyKey" value="${randomUUID()}"><input type="hidden" name="recordId" value="${escapeHtml(recordId)}">${record ? `<input type="hidden" name="expectedRevision" value="${record.revision}">` : ''}<div class="form-fields">${renderFormFields(context.surface, record)}</div>${compatibilityCommand}</form></section>`,
     'sections-slot',
   );
 }
@@ -1053,6 +1055,116 @@ function declaredStatusRoles(surface: CompiledSurfaceDefinition): string {
         `<span class="status-pill" data-status-role="${escapeHtml(role)}">${escapeHtml(role)}</span>`,
     )
     .join('');
+}
+
+/**
+ * Above this many options an enum renders as a `datalist`-backed input rather
+ * than a `select`. A short closed list is faster to operate as a menu; a long
+ * one is faster to type into, and `datalist` gives that typeahead with **no
+ * script at all** -- which is the whole reason it is the carrier here.
+ * ADR-0036 §2 authorises exactly four client behaviours and a scripted combobox
+ * is none of them, so the choice was between a native control and nothing.
+ */
+const ENUM_SELECT_MAXIMUM_OPTIONS = 5;
+
+/**
+ * The compiled surface says what a field IS; this decides what it looks like.
+ *
+ * When the manifest carries no per-field kinds -- every profile version before
+ * the unadopted v2, which is every recorded release today -- every field falls
+ * back to the bare text box that was here before. That fallback is deliberate
+ * and it is the reason the projection's `minimumVersion` did not have to move:
+ * an unaware reader renders a less capable form, never a wrong value.
+ *
+ * What this does NOT do is decide how the form BEHAVES. Required-ness, inline
+ * validation, chunking and input normalisation are `U7`'s, and the seam is
+ * visible here: a `datetime-local` control cannot express a canonical UTC
+ * instant's trailing `Z`, and a checkbox posts the string `"false"` where the
+ * write path wants a JSON `false`. Both are Postel normalisation, both are
+ * named in `U7`'s charter, and neither is invented here.
+ */
+function renderFormFields(
+  surface: CompiledSurfaceDefinition,
+  record: SemanticRecordDto | null,
+): string {
+  const fieldsById = new Map(
+    (surface.fields ?? []).map((field) => [field.fieldId, field]),
+  );
+  return surface.fieldIds
+    .map((fieldId, index) => {
+      const control = renderFormControl(
+        fieldsById.get(fieldId),
+        fieldId,
+        index,
+        record ? record.values[fieldId] : undefined,
+      );
+      return `<label><span>${escapeHtml(fieldLabel(fieldId))}</span>${control}</label>`;
+    })
+    .join('');
+}
+
+function renderFormControl(
+  field: CompiledSurfaceField | undefined,
+  fieldId: string,
+  index: number,
+  value: unknown,
+): string {
+  const name = `value:${escapeHtml(fieldId)}`;
+  const current = renderInputValue(value);
+  if (!field) {
+    return `<input name="${name}" value="${current}" autocomplete="off">`;
+  }
+  switch (field.kind) {
+    case 'enumFieldType':
+      return renderEnumControl(field.options ?? [], name, index, value);
+    case 'booleanFieldType':
+      // The hidden sibling is what makes `false` expressible. An unchecked box
+      // posts nothing, and a field missing from an update patch means "leave it
+      // alone", so without this a checkbox could be turned on and never off.
+      // Last value wins in the submission parser, so checked posts "true".
+      return `<input type="hidden" name="${name}" value="false"><input type="checkbox" name="${name}" value="true"${value === true ? ' checked' : ''}>`;
+    case 'dateFieldType':
+      return `<input type="date" name="${name}" value="${current}" autocomplete="off">`;
+    case 'dateTimeFieldType':
+      return `<input type="datetime-local" name="${name}" value="${current}" autocomplete="off">`;
+    case 'timeFieldType':
+      return `<input type="time" name="${name}" value="${current}" autocomplete="off">`;
+    case 'integerFieldType':
+      return `<input type="number" inputmode="numeric" step="1" name="${name}" value="${current}" autocomplete="off">`;
+    case 'exactDecimalFieldType':
+    case 'moneyFieldType':
+    case 'quantityFieldType':
+      // `step="any"` rather than a scale-derived step: the manifest carries the
+      // kind, not the scale, and a guessed step REJECTS values the field admits.
+      return `<input type="number" inputmode="decimal" step="any" name="${name}" value="${current}" autocomplete="off">`;
+    case 'textFieldType':
+      return `<input type="text" name="${name}" value="${current}" autocomplete="off">`;
+  }
+}
+
+function renderEnumControl(
+  options: readonly CompiledFieldOption[],
+  name: string,
+  index: number,
+  value: unknown,
+): string {
+  if (options.length <= ENUM_SELECT_MAXIMUM_OPTIONS) {
+    // The blank option is not decoration. Without it a select silently posts
+    // its first option for a field the record never had a value for, which is
+    // materializing a default at the one layer that is supposed to carry only
+    // what was declared.
+    const chosen = options.map(
+      (option) =>
+        `<option value="${escapeHtml(option.optionId)}"${option.optionId === value ? ' selected' : ''}>${escapeHtml(option.label)}</option>`,
+    );
+    return `<select name="${name}" autocomplete="off"><option value=""></option>${chosen.join('')}</select>`;
+  }
+  const listId = `surface-field-options-${String(index)}`;
+  const suggestions = options.map(
+    (option) =>
+      `<option value="${escapeHtml(option.optionId)}">${escapeHtml(option.label)}</option>`,
+  );
+  return `<input name="${name}" value="${renderInputValue(value)}" list="${listId}" autocomplete="off"><datalist id="${listId}">${suggestions.join('')}</datalist>`;
 }
 
 function renderInputValue(value: unknown): string {

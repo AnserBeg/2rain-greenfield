@@ -24,6 +24,25 @@ const lifecycleValues = ['active', 'retired'] as const;
 const statusRoles = ['attention', 'blocked', 'inProgress', 'success'] as const;
 const disclosureTiers = ['always', 'onDemand', 'progressive'] as const;
 const surfaceRoles = ['form', 'list', 'record'] as const;
+/**
+ * The canonical field-type vocabulary, verbatim. No second spelling is coined
+ * here: the renderer switches on the same word `FieldTypeSchema` discriminates
+ * on, so a kind the compiler can emit and this list omits is a mismatch a
+ * reviewer can see by diffing two lists rather than by reasoning about a
+ * mapping.
+ */
+export const COMPILED_FIELD_KINDS = Object.freeze([
+  'booleanFieldType',
+  'dateFieldType',
+  'dateTimeFieldType',
+  'enumFieldType',
+  'exactDecimalFieldType',
+  'integerFieldType',
+  'moneyFieldType',
+  'quantityFieldType',
+  'textFieldType',
+  'timeFieldType',
+] as const);
 const operationCatalogPayloadVersion =
   'northstar.operation-catalog-payload/v0-provisional' as const;
 const slotsByArchetype = Object.freeze({
@@ -52,6 +71,19 @@ export type CompiledSurfaceArchetype = (typeof archetypes)[number];
 export type CompiledSurfaceStatusRole = (typeof statusRoles)[number];
 export type CompiledDisclosureTier = (typeof disclosureTiers)[number];
 export type CompiledSurfaceRole = (typeof surfaceRoles)[number];
+export type CompiledFieldKind = (typeof COMPILED_FIELD_KINDS)[number];
+
+export interface CompiledFieldOption {
+  readonly label: string;
+  readonly optionId: string;
+}
+
+export interface CompiledSurfaceField {
+  readonly fieldId: string;
+  readonly kind: CompiledFieldKind;
+  /** Present exactly when `kind` is `enumFieldType`. */
+  readonly options?: readonly CompiledFieldOption[];
+}
 export type SurfaceOperationIntent =
   'archive' | 'command' | 'create' | 'restore' | 'update';
 
@@ -70,6 +102,11 @@ export interface CompiledSurfaceDefinition {
   readonly archetype: CompiledSurfaceArchetype;
   readonly dataSourceQueryId: string;
   readonly fieldIds: readonly string[];
+  // Absent under every profile version that does not emit it, which today is
+  // every recorded entry. Optional here rather than defaulted, so the reader
+  // cannot invent a kind the projection did not carry -- the `disclosureTier`
+  // precedent above, and the reason `text` is not the type of an unknown field.
+  readonly fields?: readonly CompiledSurfaceField[];
   readonly label: string;
   readonly lifecycle: (typeof lifecycleValues)[number];
   readonly slots: readonly CompiledSurfaceSlot[];
@@ -129,6 +166,7 @@ export class SurfaceProjectionError extends Error {
     readonly code:
       | 'DUPLICATE_SURFACE_ID'
       | 'INVALID_SURFACE_BINDING'
+      | 'INVALID_SURFACE_FIELD'
       | 'INVALID_SURFACE_MANIFEST'
       | 'INVALID_SURFACE_NAVIGATION'
       | 'INVALID_SURFACE_SLOT'
@@ -555,16 +593,118 @@ function parseSurface(
     return parsed;
   });
 
+  const fields = parseSurfaceFields(value, index);
+
   return Object.freeze({
     archetype,
     dataSourceQueryId: value.dataSourceQueryId,
     fieldIds: Object.freeze([...value.fieldIds]),
+    ...(fields === undefined ? {} : { fields }),
     label: value.label,
     lifecycle,
     slots: Object.freeze(slots),
     statusRoles: Object.freeze([...value.statusRoles]),
     surfaceId: value.surfaceId,
     surfaceRole,
+  });
+}
+
+function invalidField(message: string): SurfaceProjectionError {
+  return new SurfaceProjectionError('INVALID_SURFACE_FIELD', message);
+}
+
+/**
+ * Reads the per-field kinds a v2 manifest carries, and refuses rather than
+ * dropping.
+ *
+ * `U5b`'s round-1 defect was a reader that built a fresh object from the keys
+ * it recognised, so an unrecognised `disclosureTier` was silently discarded and
+ * the surface rendered as though nothing had been declared. The same shape here
+ * is worse: an unrecognised kind would fall back to a text box, which is
+ * indistinguishable from a field the compiler never described. So an unknown
+ * kind is refused **by name** -- the message says which kind, because a reader
+ * one version behind its compiler needs to learn what it is missing, not that
+ * something was wrong.
+ *
+ * The parity check is the second half. A `fields` array that is short, long, or
+ * out of order against `fieldIds` means the projection and the form disagree
+ * about what this surface has, and the failure that follows is a form rendering
+ * some controls correctly and the rest as bare text -- the exact silent
+ * degradation this packet exists to remove. Refused as one fault, named.
+ */
+function parseSurfaceFields(
+  value: Record<string, unknown>,
+  surfaceIndex: number,
+): readonly CompiledSurfaceField[] | undefined {
+  // Absence is a state, not a default. Under every profile that does not emit
+  // per-field kinds the key is not there at all; `Object.hasOwn` keeps that
+  // distinguishable from a surface whose field list is genuinely empty.
+  if (!Object.hasOwn(value, 'fields')) return undefined;
+  if (!Array.isArray(value.fields)) {
+    throw invalidField(
+      `compiled surface ${surfaceIndex} declares a non-array field list`,
+    );
+  }
+  const fields = value.fields.map((entry, fieldIndex) =>
+    parseSurfaceField(entry, surfaceIndex, fieldIndex),
+  );
+  const fieldIds = value.fieldIds as readonly string[];
+  if (
+    fields.length !== fieldIds.length ||
+    fields.some((field, fieldIndex) => field.fieldId !== fieldIds[fieldIndex])
+  ) {
+    throw invalidField(
+      `compiled surface ${surfaceIndex} declares field kinds that do not match its selected fields`,
+    );
+  }
+  return Object.freeze(fields);
+}
+
+function parseSurfaceField(
+  value: unknown,
+  surfaceIndex: number,
+  fieldIndex: number,
+): CompiledSurfaceField {
+  const at = `compiled surface ${surfaceIndex} field ${fieldIndex}`;
+  if (!isRecord(value) || !isNonBlank(value.fieldId)) {
+    throw invalidField(`${at} is not a declared field`);
+  }
+  if (!includes(COMPILED_FIELD_KINDS, value.kind)) {
+    throw invalidField(
+      `${at} (${value.fieldId}) declares the unrecognised field kind ${JSON.stringify(value.kind)}`,
+    );
+  }
+  const kind = value.kind;
+  // Present exactly when the kind is `enumFieldType`: options on any other kind
+  // mean the payload was built by something this reader does not understand,
+  // and their absence on an enum would render a choice with nothing to choose.
+  if (Object.hasOwn(value, 'options') !== (kind === 'enumFieldType')) {
+    throw invalidField(
+      `${at} (${value.fieldId}) carries options that do not belong to kind ${kind}`,
+    );
+  }
+  if (kind !== 'enumFieldType') {
+    return Object.freeze({ fieldId: value.fieldId, kind });
+  }
+  if (!Array.isArray(value.options)) {
+    throw invalidField(`${at} (${value.fieldId}) declares a non-array option list`);
+  }
+  const options = value.options.map((option) => {
+    if (
+      !isRecord(option) ||
+      !isNonBlank(option.optionId) ||
+      !isNonBlank(option.label)
+    ) {
+      throw invalidField(
+        `${at} (${value.fieldId}) declares an invalid enum option`,
+      );
+    }
+    return Object.freeze({ label: option.label, optionId: option.optionId });
+  });
+  return Object.freeze({
+    fieldId: value.fieldId,
+    kind,
+    options: Object.freeze(options),
   });
 }
 

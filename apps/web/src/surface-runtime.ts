@@ -1085,8 +1085,9 @@ main{width:min(1200px,100%);margin:0 auto;padding:var(--page-padding) var(--page
 .record-fields dd{margin:var(--space-1) 0 0}
 .form-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-4);margin:var(--space-4) 0}
 .form-fields label{display:grid;gap:var(--space-1)}
-.form-fields input{width:100%;min-height:44px;padding:var(--space-2) var(--space-3);border:1px solid var(--line-strong);border-radius:var(--radius-control);background:var(--surface-panel);color:var(--ink);font:inherit}
-.form-fields input:focus-visible,button:focus-visible{outline:3px solid var(--focus-ring-surface);outline-offset:2px}
+.form-fields input,.form-fields select{width:100%;min-height:44px;padding:var(--space-2) var(--space-3);border:1px solid var(--line-strong);border-radius:var(--radius-control);background:var(--surface-panel);color:var(--ink);font:inherit}
+.form-fields input[type="checkbox"]{width:24px;height:24px;min-height:24px;padding:0;justify-self:start;margin:10px 0}
+.form-fields input:focus-visible,.form-fields select:focus-visible,button:focus-visible{outline:3px solid var(--focus-ring-surface);outline-offset:2px}
 button{min-height:44px;padding:var(--space-2) var(--space-4);border:0;border-radius:var(--radius-control);background:var(--accent-ground);color:var(--ink-on-accent);font:inherit;font-weight:var(--weight-emphasis);cursor:pointer}
 button:hover{background:var(--accent-ground-hover)}
 button:active{background:var(--accent-ground-pressed)}

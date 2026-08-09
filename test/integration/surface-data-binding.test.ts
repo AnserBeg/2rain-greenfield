@@ -8,10 +8,12 @@ import {
   normalizeApplicationPackage,
 } from '../../packages/canonical-model/src/index.js';
 import {
+  COMPILER_SEMANTIC_PROFILE_V2_VERSION,
   DEFAULT_COMPILER_LIMITS,
   MODULE_COMPILER_PROFILE,
   compileApplication,
   type CompileSuccess,
+  type CompilerSemanticProfileVersion,
   type ContentAddressedArtifact,
 } from '../../packages/compiler/src/index.js';
 import {
@@ -58,6 +60,10 @@ import {
   FIXTURE_IDS,
   ordinaryModuleV1,
 } from '../fixtures/g2/module-conformance/definitions.js';
+import {
+  EVERY_KIND_FIELD_IDS,
+  everyFieldKindModule,
+} from '../fixtures/g2/module-conformance/field-kinds.js';
 
 const tenantA = 'a1000000-0000-4000-8000-000000000001';
 const tenantB = 'b1000000-0000-4000-8000-000000000001';
@@ -388,6 +394,173 @@ test('human-confirmed forms render the authoritative operation read-back without
   assert.equal(executor.operationCalls.length, 2);
 });
 
+const EVERY_KIND_FORM = `${FIXTURE_IDS.namespace}:surface.master_form`;
+
+async function everyKindFormHtml(
+  compilerSemanticProfileVersion: CompilerSemanticProfileVersion,
+  seed?: (executor: InMemoryGenericExecutor) => string,
+): Promise<string> {
+  const compiled = compileFixture(
+    everyFieldKindModule(),
+    compilerSemanticProfileVersion,
+  );
+  const policy = new RecordingPolicy('ALLOW');
+  const executor = new InMemoryGenericExecutor();
+  const recordId = seed?.(executor);
+  const view = await issuedView(
+    runtimeEntry(compiled, policy, {
+      a: identity(tenantA, environmentA, principalA),
+    }),
+    'a',
+  );
+  const url = `/?surface=${encodeURIComponent(EVERY_KIND_FORM)}${recordId ? `&record=${encodeURIComponent(recordId)}` : ''}`;
+  const rendered = await renderSurfaceRuntimeWithData(
+    view,
+    url,
+    semanticGateways(policy, executor),
+  );
+  assert.equal(rendered.statusCode, 200);
+  return rendered.html;
+}
+
+function controlFor(html: string, fieldId: string): string {
+  const form = html.slice(html.indexOf('<div class="form-fields">'));
+  const opening = form.indexOf(`name="value:${fieldId}"`);
+  assert.notEqual(opening, -1, `${fieldId} has no control in the rendered form`);
+  const start = form.lastIndexOf('<label>', opening);
+  const end = form.indexOf('</label>', opening);
+  assert.ok(start !== -1 && end !== -1, `${fieldId} control is not in a label`);
+  return form.slice(start, end);
+}
+
+/**
+ * The admission the packet owes: every kind the reader recognises renders the
+ * control its type calls for, on ONE form, from a real compile.
+ *
+ * Read per field rather than over the whole document -- `controlFor` slices the
+ * one `<label>` that owns the field's name -- so a single correct control
+ * elsewhere on the page cannot satisfy another field's assertion.
+ */
+test('a v2 form renders the control each canonical field kind calls for', async () => {
+  const html = await everyKindFormHtml(COMPILER_SEMANTIC_PROFILE_V2_VERSION);
+  const expected: readonly (readonly [string, RegExp])[] = [
+    [EVERY_KIND_FIELD_IDS.due, /<input type="date" /],
+    [FIXTURE_IDS.fieldIds.parentUtcInstant, /<input type="datetime-local" /],
+    [FIXTURE_IDS.fieldIds.parentLocalTime, /<input type="time" /],
+    [EVERY_KIND_FIELD_IDS.count, /<input type="number" inputmode="numeric" /],
+    [EVERY_KIND_FIELD_IDS.price, /<input type="number" inputmode="decimal" /],
+    [
+      FIXTURE_IDS.fieldIds.parentAmount,
+      /<input type="number" inputmode="decimal" /,
+    ],
+    [EVERY_KIND_FIELD_IDS.weight, /<input type="number" inputmode="decimal" /],
+    [EVERY_KIND_FIELD_IDS.active, /<input type="checkbox" /],
+    [FIXTURE_IDS.fieldIds.parentName, /<input type="text" /],
+    [EVERY_KIND_FIELD_IDS.grade, /<select /],
+    [EVERY_KIND_FIELD_IDS.region, /<input [^>]*list="/],
+  ];
+  for (const [fieldId, control] of expected) {
+    assert.match(controlFor(html, fieldId), control, fieldId);
+  }
+  // A boolean must still be able to say "false". An unchecked box posts
+  // nothing, and a field missing from an update patch means "leave it alone".
+  assert.match(
+    controlFor(html, EVERY_KIND_FIELD_IDS.active),
+    /<input type="hidden" name="value:[^"]+" value="false"><input type="checkbox"/,
+  );
+  // The blank option is what keeps a select from posting its first option for a
+  // field the record never had a value for.
+  assert.match(
+    controlFor(html, EVERY_KIND_FIELD_IDS.grade),
+    /<select [^>]*><option value=""><\/option>/,
+  );
+});
+
+/**
+ * The threshold, controlled on one property. `grade` and `region` differ only in
+ * option count -- same entity, same presence, same collation, same labels shape
+ * -- so a renderer branching on anything but the count fails one of them.
+ */
+test('an enum renders a select at five options and a datalist at six', async () => {
+  const html = await everyKindFormHtml(COMPILER_SEMANTIC_PROFILE_V2_VERSION);
+  const grade = controlFor(html, EVERY_KIND_FIELD_IDS.grade);
+  const region = controlFor(html, EVERY_KIND_FIELD_IDS.region);
+  assert.match(grade, /<select /);
+  assert.doesNotMatch(grade, /<datalist/);
+  // Five choices plus the blank that keeps "no value" expressible.
+  assert.equal(grade.match(/<option value="[^"]+"/gu)?.length, 5);
+  assert.equal(grade.match(/<option /gu)?.length, 6);
+
+  assert.doesNotMatch(region, /<select /);
+  const listId = /list="([^"]+)"/u.exec(region)?.[1];
+  assert.ok(listId, 'the datalist-backed input must name a list');
+  assert.match(region, new RegExp(`<datalist id="${listId}">`, 'u'));
+  assert.equal(region.match(/<option /gu)?.length, 6);
+  assert.match(region, /<option value="northstar\.modulefixture:option\.region_north">North<\/option>/);
+});
+
+/**
+ * The absence twin, and the state every recorded release is actually in. The
+ * SAME package, differing only in profile version, renders the bare text box
+ * that was here before this packet -- so the controls above are attributable to
+ * the projection rather than to anything else about the fixture.
+ */
+test('the same form under the adopted profile renders bare text boxes', async () => {
+  const html = await everyKindFormHtml(
+    MODULE_COMPILER_PROFILE.compilerSemanticProfileVersion,
+  );
+  for (const fieldId of [
+    EVERY_KIND_FIELD_IDS.due,
+    EVERY_KIND_FIELD_IDS.active,
+    EVERY_KIND_FIELD_IDS.grade,
+    EVERY_KIND_FIELD_IDS.region,
+    EVERY_KIND_FIELD_IDS.price,
+  ]) {
+    const control = controlFor(html, fieldId);
+    assert.match(control, /<input name="value:/u, fieldId);
+    assert.doesNotMatch(control, /type="|<select|<datalist/u, fieldId);
+  }
+});
+
+/**
+ * A control that cannot show the value it has is worse than a text box. Rendered
+ * against a record carrying a real typed value for each kind.
+ */
+test('compiled controls carry the record value they are rendering', async () => {
+  const html = await everyKindFormHtml(
+    COMPILER_SEMANTIC_PROFILE_V2_VERSION,
+    (executor) =>
+      executor.seedValues(tenantA, {
+        [EVERY_KIND_FIELD_IDS.active]: true,
+        [EVERY_KIND_FIELD_IDS.due]: '2026-08-09',
+        [EVERY_KIND_FIELD_IDS.grade]:
+          'northstar.modulefixture:option.grade_c',
+        [EVERY_KIND_FIELD_IDS.region]:
+          'northstar.modulefixture:option.region_west',
+      }),
+  );
+  assert.match(controlFor(html, EVERY_KIND_FIELD_IDS.active), / checked>/u);
+  assert.match(
+    controlFor(html, EVERY_KIND_FIELD_IDS.due),
+    /value="2026-08-09"/u,
+  );
+  assert.match(
+    controlFor(html, EVERY_KIND_FIELD_IDS.grade),
+    /<option value="northstar\.modulefixture:option\.grade_c" selected>/u,
+  );
+  assert.match(
+    controlFor(html, EVERY_KIND_FIELD_IDS.region),
+    /<input name="value:[^"]+" value="northstar\.modulefixture:option\.region_west" list="/u,
+  );
+  // The twin: an unset boolean is NOT checked, so `checked` is attributable to
+  // the stored value rather than to the control always carrying it.
+  const unset = await everyKindFormHtml(COMPILER_SEMANTIC_PROFILE_V2_VERSION);
+  assert.doesNotMatch(
+    controlFor(unset, EVERY_KIND_FIELD_IDS.active),
+    / checked>/u,
+  );
+});
+
 test('a capability command is artifact-bound, render-minted, and deliberately confirmed', async () => {
   const definition = ordinaryModuleV1();
   const capabilityId = `${FIXTURE_IDS.namespace}:capability.post`;
@@ -566,6 +739,30 @@ class InMemoryGenericExecutor
     this.tenantRecords(tenantId).set(
       recordId,
       record(recordId, name, FIXTURE_IDS.entityIds.parent),
+    );
+    return recordId;
+  }
+
+  /**
+   * Seeds a record carrying real typed values. `seed` above stores one string,
+   * which is enough for a title but cannot express a JSON `true` -- and a
+   * checkbox that renders `checked` only for a boolean cannot be observed
+   * against a record whose boolean is the string "true".
+   */
+  seedValues(
+    tenantId: string,
+    values: Readonly<Record<string, ImmutableJsonValue>>,
+  ): string {
+    const recordId = randomUUID();
+    this.tenantRecords(tenantId).set(
+      recordId,
+      Object.freeze({
+        archived: false,
+        entityId: FIXTURE_IDS.entityIds.parent,
+        recordId,
+        revision: 1,
+        values: Object.freeze({ ...values }),
+      }),
     );
     return recordId;
   }
@@ -899,6 +1096,11 @@ function decode(value: ContentAddressedArtifact): Record<string, unknown> {
 
 function compileFixture(
   definition: Record<string, unknown> = ordinaryModuleV1(),
+  // Defaults to whatever the profile constant carries, so every existing caller
+  // keeps compiling exactly as before. Passed explicitly only by the field-kind
+  // tests, which need the unadopted v2 -- nothing they compile is recorded, so
+  // no lineage entry is minted (ADR-0047 §4a).
+  compilerSemanticProfileVersion: CompilerSemanticProfileVersion = MODULE_COMPILER_PROFILE.compilerSemanticProfileVersion,
 ): CompileSuccess {
   const normalized = normalizeApplicationPackage(definition);
   const result = compileApplication({
@@ -912,6 +1114,7 @@ function compileFixture(
     // Version-from-artifact: compile the fixture at the version it declares.
     profile: {
       ...MODULE_COMPILER_PROFILE,
+      compilerSemanticProfileVersion,
       languageVersion: normalized.languageVersion,
       normalizationProfileVersion: normalized.normalizationProfileVersion,
     },

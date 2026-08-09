@@ -8,6 +8,7 @@ import {
   normalizeApplicationPackage,
 } from '@north-star/canonical-model';
 import {
+  COMPILER_SEMANTIC_PROFILE_V2_VERSION,
   DEFAULT_COMPILER_LIMITS,
   MODULE_COMPILER_PROFILE,
   compileApplication,
@@ -49,6 +50,10 @@ import {
   FIXTURE_IDS,
   ordinaryModuleV1,
 } from '../../../../test/fixtures/g2/module-conformance/definitions.js';
+import {
+  EVERY_KIND_FIELD_IDS,
+  everyFieldKindModule,
+} from '../../../../test/fixtures/g2/module-conformance/field-kinds.js';
 import { createSurfaceRuntimeServer } from '../../src/app-server.js';
 
 const tenantId = 'a1000000-0000-4000-8000-000000000001';
@@ -61,6 +66,8 @@ let server: Server;
 let baseUrl: string;
 let executor: BrowserFixtureExecutor;
 let missingDisplayRecordId: string;
+let fieldKindServer: Server;
+let fieldKindUrl: string;
 
 test.beforeAll(async () => {
   const compiled = compileFixture();
@@ -79,6 +86,27 @@ test.beforeAll(async () => {
     queryGateway: new SemanticQueryGateway(policy, executor),
   });
   baseUrl = await listen(server);
+
+  // A second server on the every-field-kind package compiled at the UNADOPTED
+  // compiler-semantic v2. Nothing it produces is recorded, so no lineage entry
+  // is minted (ADR-0047 §4a); it exists because the claim below -- that a date
+  // field renders a DATE CONTROL -- can only be observed in a browser.
+  const fieldKindPolicy = allowPolicy();
+  const fieldKindExecutor = new BrowserFixtureExecutor();
+  const fieldKindMediation = new SemanticOperationMediationAuthority();
+  fieldKindServer = createSurfaceRuntimeServer(
+    runtimeEntry(compileEveryFieldKindFixture(), fieldKindPolicy),
+    {
+      operationGateway: new SemanticOperationGateway(
+        fieldKindPolicy,
+        fieldKindExecutor,
+        fieldKindMediation,
+      ),
+      operationMediation: fieldKindMediation,
+      queryGateway: new SemanticQueryGateway(fieldKindPolicy, fieldKindExecutor),
+    },
+  );
+  fieldKindUrl = await listen(fieldKindServer);
 });
 
 test('record title falls back to short identity when its compiled display value is absent', async ({
@@ -101,6 +129,100 @@ test.afterAll(async () => {
   await new Promise<void>((resolve, reject) => {
     server.close((error) => (error ? reject(error) : resolve()));
   });
+  await new Promise<void>((resolve, reject) => {
+    fieldKindServer.close((error) => (error ? reject(error) : resolve()));
+  });
+});
+
+/**
+ * The observation, not the attribute. `type="date"` in the markup is already
+ * asserted server-side; what only a browser can answer is whether the USER gets
+ * a date control -- an engine that does not support the type reports `type` as
+ * `text` through the IDL and accepts any string. So this reads the live IDL
+ * property and then feeds the control a non-date, which a real date control
+ * refuses by leaving `value` empty.
+ *
+ * The same shape for `datalist`: an attribute is a string, `input.list` is the
+ * resolved element, and only the second one proves the suggestions are attached.
+ */
+test('compiled field kinds render as real browser controls', async ({
+  page,
+}) => {
+  await page.setExtraHTTPHeaders({ authorization: 'fixture-user' });
+  await page.goto(
+    `${fieldKindUrl}/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_form`)}`,
+  );
+  await expect(page.locator('#surface-record-form')).toBeVisible();
+
+  const date = page.locator(
+    `[name="value:${EVERY_KIND_FIELD_IDS.due}"]`,
+  );
+  await expect(date).toHaveJSProperty('type', 'date');
+  await date.evaluate((element: HTMLInputElement) => {
+    element.value = 'not-a-date';
+  });
+  expect(
+    await date.evaluate((element: HTMLInputElement) => element.value),
+  ).toBe('');
+  await date.fill('2026-08-09');
+  expect(
+    await date.evaluate((element: HTMLInputElement) => element.value),
+  ).toBe('2026-08-09');
+
+  const checkbox = page.locator(
+    `input[type="checkbox"][name="value:${EVERY_KIND_FIELD_IDS.active}"]`,
+  );
+  await expect(checkbox).toHaveJSProperty('checked', false);
+  await checkbox.check();
+  await expect(checkbox).toHaveJSProperty('checked', true);
+
+  const price = page.locator(`[name="value:${EVERY_KIND_FIELD_IDS.price}"]`);
+  await expect(price).toHaveJSProperty('type', 'number');
+  await price.fill('12.50');
+  expect(
+    await price.evaluate((element: HTMLInputElement) => element.validity.valid),
+  ).toBe(true);
+
+  const grade = page.locator(`[name="value:${EVERY_KIND_FIELD_IDS.grade}"]`);
+  expect(
+    await grade.evaluate((element) => element.tagName.toLowerCase()),
+  ).toBe('select');
+  await expect(grade).toHaveJSProperty('value', '');
+  expect(
+    await grade.evaluate((element: HTMLSelectElement) => element.options.length),
+  ).toBe(6);
+
+  const region = page.locator(`[name="value:${EVERY_KIND_FIELD_IDS.region}"]`);
+  expect(
+    await region.evaluate((element) => element.tagName.toLowerCase()),
+  ).toBe('input');
+  expect(
+    await region.evaluate(
+      (element: HTMLInputElement) => element.list?.options.length ?? 0,
+    ),
+  ).toBe(6);
+});
+
+/**
+ * The absence twin in the browser. The pre-`ux-picker` render is still what a
+ * reader of an unadopted-profile manifest gets, and it must stay a working text
+ * box rather than a control the payload never described.
+ */
+test('a form with no compiled field kinds still renders working text boxes', async ({
+  page,
+}) => {
+  await page.setExtraHTTPHeaders({ authorization: 'fixture-user' });
+  await page.goto(
+    `${baseUrl}/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_form`)}`,
+  );
+  const name = page.locator(
+    `[name="value:${FIXTURE_IDS.fieldIds.parentName}"]`,
+  );
+  await expect(name).toHaveJSProperty('type', 'text');
+  await name.fill('typed into a bare text box');
+  await expect(name).toHaveValue('typed into a bare text box');
+  await expect(page.locator('#surface-record-form select')).toHaveCount(0);
+  await expect(page.locator('#surface-record-form datalist')).toHaveCount(0);
 });
 
 test('fixture list and form render live DTOs and reflect a semantic create', async ({
@@ -684,6 +806,27 @@ function compileFixture(
     // pinning the profile.
     profile: {
       ...MODULE_COMPILER_PROFILE,
+      languageVersion: normalized.languageVersion,
+      normalizationProfileVersion: normalized.normalizationProfileVersion,
+    },
+  });
+  assert.equal(result.status, 'compiled');
+  return result as CompileSuccess;
+}
+
+function compileEveryFieldKindFixture(): CompileSuccess {
+  const normalized = normalizeApplicationPackage(everyFieldKindModule());
+  const result = compileApplication({
+    dependencies: [],
+    expectedActiveRelease: null,
+    kind: 'compilerInput',
+    limits: { ...DEFAULT_COMPILER_LIMITS },
+    normalizedDefinitionBytes: new TextEncoder().encode(
+      canonicalize(normalized),
+    ),
+    profile: {
+      ...MODULE_COMPILER_PROFILE,
+      compilerSemanticProfileVersion: COMPILER_SEMANTIC_PROFILE_V2_VERSION,
       languageVersion: normalized.languageVersion,
       normalizationProfileVersion: normalized.normalizationProfileVersion,
     },
