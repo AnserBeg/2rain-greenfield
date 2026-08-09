@@ -633,3 +633,30 @@ the admission that proves the refusal is discriminating.
 
 **Generative question when writing a red:** *what implementation refuses
 everything, and would this control notice?*
+
+## A negative control must vary one property — added 2026-08-08
+
+`5g3-sm-impl`'s canonical-reference control forged a specimen with **both** a wrong
+`kind` **and** an invalid `schemaVersion`. It was refused, so the control passed —
+and **deleting the production `kind` check kept it green**, because the version
+condition still refused the same specimen. The control proved the specimen was bad;
+it never proved which check refused it.
+
+**This is distinct from "verify why a red fired."** There, the red is real and the
+question is whether it fired for the stated reason. Here the specimen is
+**confounded at the source**, so even a correctly-observed red cannot attribute
+itself. No amount of reading the failure text recovers the attribution.
+
+**The rule:** a negative control changes **one** property and leaves every other
+property of the specimen valid — including ones that feel incidental, like a
+version that has to be *some* value. **The tell is a broken tree with two reasons
+to fail.**
+
+**And a specimen installed at one call site does not control the others.**
+`5g3-sm-impl` forged only `effect.entity` in one fixture while its comment claimed
+three arms; restoring the shallow check in the capability arm, or passing the wrong
+expected kind for `effect.transition`, kept it green. **Exercise every call site the
+claim covers, or narrow the claim to the site exercised.**
+
+**Generative question:** *for each check this control is supposed to hold, delete
+that check alone — does the control still pass?*
