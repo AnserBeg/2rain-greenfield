@@ -375,21 +375,29 @@ test(
 // a 50.30 MiB peak when that lineage held five application entries.
 //
 // Both figures are now stale and the timeout is the reason to say so. The
-// lineage holds EIGHT application entries, and this test drives three tenants:
-// two for the gateway-persistence subject, plus `-source-edge`, which activates
-// a truncated lineage so ADR-0047 §6's source-changing direction has a real
-// edge to cross.
+// lineage holds NINE application entries, and this test drives three tenants:
+// two for the gateway-persistence subject, plus `-profile-edge`, which activates
+// a lineage truncated THROUGH the profile-only edge so ADR-0047 §6's
+// profile-only direction has a real edge to cross.
 //
-// Measured against the 300s bound: 210.9s inside the full matrix at a8c9d07
-// (1.42x margin) and 117.6s standalone on a quiet machine (2.55x). Both are
-// recorded deliberately -- this workload is load-dependent, and quoting one
-// number without its conditions is how the 54.6s figure above went stale. The
-// matrix figure governs, because the matrix is where it has to pass.
+// THE SPLIT PRESCRIBED BELOW HAS BEEN TAKEN ONCE, by `LANG-ADOPT-v5`. Adoption
+// made the artifact's head source-changing rather than a profile sibling, so
+// the two ADR-0047 §6 directions swapped which one could borrow the real head
+// and which needed a tenant of its own. Carrying both cost two fresh installs
+// and measured 266s against this bound, so the source-changing direction moved
+// out to its own test ("a source-changing rollback edge stays eligible while
+// its verification refuses by name") rather than the bound moving up.
 //
-// If this ever reds on timing, the fix is to split the `-source-edge` tenant
-// into its own test with its own lifecycle. It is NOT to raise the bound:
-// that widens what starvation is permitted to look like, which is the standing
-// prohibition this repository already carries.
+// Measured against the 300s bound after that split: 251.1s standalone on a
+// quiet machine (1.19x margin), against 117.6s standalone before adoption. The
+// prior in-matrix figure was 210.9s at a8c9d07 (1.42x); this workload is
+// load-dependent, so the standalone figure here is NOT the matrix figure and
+// the matrix run recorded in the packet governs. Quoting one number without its
+// conditions is how the 54.6s figure above went stale.
+//
+// If this reds on timing again, split the `-profile-edge` tenant out the same
+// way. It is NOT to raise the bound: that widens what starvation is permitted
+// to look like, which is the standing prohibition this repository carries.
 test(
   'composed product activates through the kernel and persists tenant-scoped gateway data',
   { timeout: 300_000 },
@@ -2856,31 +2864,50 @@ async function assertIntermediateBecomesServingOnlyAfterVerification(
   databaseUrl: string,
   tenantSlug: string,
 ): Promise<ComposedApplicationRuntime> {
-  const compiled = parseCompiledApplication(compiledApplication);
-  const target = compiled.applications.at(-2);
-  assert.ok(target);
   await runtime.close();
 
-  // DIRECTION 1 -- the refusal FIRES on a profile-only edge. The serving head
-  // and `at(-2)` share a normalized definition (ADR-0047 §4), so they share one
-  // package revision and the revision graph has no edge to reverse. The target
+  // DIRECTION 1 -- the refusal FIRES on a profile-only edge. A serving head and
+  // its predecessor that share a normalized definition (ADR-0047 §4) share one
+  // package revision, so the revision graph has no edge to reverse. The target
   // IS the immediate predecessor -- the index check passes and control reaches
   // the authorization -- so this must NOT borrow
   // ROLLBACK_TARGET_NOT_IMMEDIATE_PREDECESSOR (ADR-0047 §6).
-  assert.equal(
-    target.normalizedDefinitionBytes.byteLength,
-    compiled.application.normalizedDefinitionBytes.byteLength,
-    'direction 1 is only meaningful across a profile-only edge; the head and at(-2) differ in source',
-  );
+  //
+  // THE EDGE IS LOCATED, NOT ASSUMED TO BE AT THE END -- corrected by
+  // `LANG-ADOPT-v5`. This read `at(-2)` against the real head and asserted the
+  // pair shared a definition, which held only while the profile-adoption entry
+  // WAS the head. Its sibling below already knew that was fragile: direction 2
+  // manufactures a truncated lineage precisely because the head was a profile
+  // sibling. Direction 1 needed the mirror image and did not have it, so an
+  // authored-source adoption turned a real ADR-0047 §6 gate into a premise
+  // failure. The profile-only edge is still in the lineage; only its position
+  // moved.
+  const profileEdgeLineage = throughProfileSiblingHead(compiledApplication);
+  const profileEdge = parseCompiledApplication(profileEdgeLineage);
+  const target = profileEdge.applications.at(-2);
+  assert.ok(target);
   assert.ok(
     equalNormalizedDefinition(
       target.normalizedDefinitionBytes,
-      compiled.application.normalizedDefinitionBytes,
+      profileEdge.application.normalizedDefinitionBytes,
     ),
     'this direction is only meaningful while the head is a profile sibling',
   );
+  // The tenant must already serve that head for the rollback to be eligible at
+  // all, exactly as direction 2 records below.
+  const profileEdgeSlug = `${tenantSlug}-profile-edge`;
+  const profileEdgeRuntime = await createRuntime(
+    profileEdgeLineage,
+    databaseUrl,
+    profileEdgeSlug,
+  );
+  assert.equal(
+    profileEdgeRuntime.releaseRoot,
+    profileEdge.application.compiled.releaseRoot,
+  );
+  await profileEdgeRuntime.close();
   await assert.rejects(
-    createRuntime(compiledApplication, databaseUrl, tenantSlug, {
+    createRuntime(profileEdgeLineage, databaseUrl, profileEdgeSlug, {
       kind: 'rollback',
       targetReleaseRoot: target.compiled.releaseRoot,
     }),
@@ -2893,61 +2920,107 @@ async function assertIntermediateBecomesServingOnlyAfterVerification(
     'ADR-0047 §6: a profile-only edge refuses by its own name, not as a wrong predecessor',
   );
 
-  // DIRECTION 2 -- the refusal does NOT fire on a source-changing edge, and the
-  // ADR-0046 observation this helper exists for is preserved rather than
-  // dropped. Truncating the lineage to the last source-changing head restores
-  // exactly the pair this asserted before the profile entry was appended: an
-  // eligible rollback whose verification refuses the pre-existing unusable
-  // search BY NAME. Without this the profile edge would have silently taken a
-  // real ADR-0046 gate out of the suite.
-  const sourceChangingLineage = withoutProfileSiblingHead(compiledApplication);
-  const truncated = parseCompiledApplication(sourceChangingLineage);
-  const sourceChangingTarget = truncated.applications.at(-2);
-  assert.ok(sourceChangingTarget);
-  assert.ok(
-    !equalNormalizedDefinition(
-      sourceChangingTarget.normalizedDefinitionBytes,
-      truncated.application.normalizedDefinitionBytes,
-    ),
-    'direction 2 must cross an edge whose endpoints differ in source',
-  );
-  // The tenant must already be serving the truncated head before the rollback
-  // is eligible at all: on a fresh tenant `activeLineageIndex` is still the
-  // fresh-install intermediate, so the index check at the FIRST refusal site
-  // fires and control never reaches the authorization this direction is about.
-  const sourceEdgeSlug = `${tenantSlug}-source-edge`;
-  const sourceEdgeRuntime = await createRuntime(
-    sourceChangingLineage,
-    databaseUrl,
-    sourceEdgeSlug,
-  );
-  assert.equal(
-    sourceEdgeRuntime.releaseRoot,
-    truncated.application.compiled.releaseRoot,
-  );
-  await sourceEdgeRuntime.close();
-
-  const historicalSearchQueryId = 'northstar.app:query.stock_count_line_search';
-  await assert.rejects(
-    createRuntime(sourceChangingLineage, databaseUrl, sourceEdgeSlug, {
-      kind: 'rollback',
-      targetReleaseRoot: sourceChangingTarget.compiled.releaseRoot,
-    }),
-    (error: unknown) => {
-      assert.ok(
-        !(error instanceof ReleaseReverseTransitionRefusal),
-        `a source-changing edge must not raise a reverse-transition refusal, got ${String((error as { code?: string }).code)}`,
-      );
-      assert.ok(error instanceof ModuleRuntimeInterpreterError);
-      assert.equal(error.code, 'MODULE_SEARCH_CAPABILITY_UNAVAILABLE');
-      assert.equal(error.subjectId, historicalSearchQueryId);
-      return true;
-    },
-    'ADR-0046: rollback remains eligible, while verification of its pre-existing unusable search refuses by name',
-  );
-
   return createRuntime(compiledApplication, databaseUrl, tenantSlug);
 }
+
+// SPLIT OUT of "composed product activates through the kernel" by `LANG-ADOPT-v5`,
+// and the split is that test's own standing instruction rather than a new idea:
+//
+//   "If this ever reds on timing, the fix is to split the `-source-edge` tenant
+//    into its own test with its own lifecycle. It is NOT to raise the bound."
+//
+// It red on timing. Adoption made the artifact's head source-changing rather
+// than a profile sibling, so ADR-0047 §6's OTHER direction -- the one that must
+// cross a profile-only edge -- can no longer borrow the real head and needs a
+// served tenant of its own. Two fresh installs in one test measured 266s inside
+// a 300s bound with no margin worth having, so this one moves out with its
+// lifecycle instead of the bound moving up.
+test(
+  'a source-changing rollback edge stays eligible while its verification refuses by name',
+  { timeout: 300_000 },
+  async () => {
+    await withEphemeralPostgres(
+      'lang-adopt-v5-source-changing-edge',
+      async ({ connection }) => {
+        const compiledApplication = JSON.parse(
+          await readFile(compiledArtifactPath, 'utf8'),
+        ) as unknown;
+        const databaseUrl = connectionUrl(connection);
+        const tenantSlug = 'composed-tenant-b';
+        // DIRECTION 2 -- the refusal does NOT fire on a source-changing edge, and the
+        // ADR-0046 observation this helper exists for is preserved rather than
+        // dropped. Truncating the lineage to the last source-changing head restores
+        // exactly the pair this asserted before the profile entry was appended: an
+        // eligible rollback whose verification refuses the pre-existing unusable
+        // search BY NAME. Without this the profile edge would have silently taken a
+        // real ADR-0046 gate out of the suite.
+        // Truncated THROUGH the profile edge and then past it, so the head is the
+        // last entry before the profile sibling and the target is the release that
+        // still carries the unusable search. `withoutProfileSiblingHead` alone no
+        // longer reaches it: with a source-changing head it returns the lineage
+        // unchanged, and the resulting edge crosses two post-search-capability
+        // releases where there is nothing for verification to refuse. Measured --
+        // that spelling produced "Missing expected rejection" rather than a red that
+        // named a real regression.
+        const sourceChangingLineage = withoutProfileSiblingHead(
+          throughProfileSiblingHead(compiledApplication),
+        );
+        const truncated = parseCompiledApplication(sourceChangingLineage);
+        const sourceChangingTarget = truncated.applications.at(-2);
+        assert.ok(sourceChangingTarget);
+        assert.ok(
+          !equalNormalizedDefinition(
+            sourceChangingTarget.normalizedDefinitionBytes,
+            truncated.application.normalizedDefinitionBytes,
+          ),
+          'direction 2 must cross an edge whose endpoints differ in source',
+        );
+        // The tenant must already be serving this head before the rollback is
+        // eligible at all: on a fresh tenant `activeLineageIndex` is still the
+        // fresh-install intermediate, so the index check at the FIRST refusal site
+        // fires and control never reaches the authorization this direction is about.
+        //
+        // `tenantSlug` already serves it. Until `LANG-ADOPT-v5` the artifact's head
+        // WAS a profile sibling, so this direction had to install a second tenant on
+        // a truncated lineage to find a source-changing edge; now the head is itself
+        // source-changing and the caller's tenant is already the right one. That
+        // matters beyond tidiness -- direction 1 needs a fresh install of its own now,
+        // and two fresh installs in one test exceed the 300 s budget.
+        const sourceEdgeSlug = `${tenantSlug}-source-edge`;
+        const sourceEdgeRuntime = await createRuntime(
+          sourceChangingLineage,
+          databaseUrl,
+          sourceEdgeSlug,
+        );
+        assert.equal(
+          sourceEdgeRuntime.releaseRoot,
+          truncated.application.compiled.releaseRoot,
+        );
+        await sourceEdgeRuntime.close();
+
+        const historicalSearchQueryId =
+          'northstar.app:query.stock_count_line_search';
+        await assert.rejects(
+          createRuntime(sourceChangingLineage, databaseUrl, sourceEdgeSlug, {
+            kind: 'rollback',
+            targetReleaseRoot: sourceChangingTarget.compiled.releaseRoot,
+          }),
+          (error: unknown) => {
+            assert.ok(
+              !(error instanceof ReleaseReverseTransitionRefusal),
+              `a source-changing edge must not raise a reverse-transition refusal, got ${String((error as { code?: string }).code)}`,
+            );
+            assert.ok(error instanceof ModuleRuntimeInterpreterError);
+            assert.equal(error.code, 'MODULE_SEARCH_CAPABILITY_UNAVAILABLE');
+            assert.equal(error.subjectId, historicalSearchQueryId);
+            return true;
+          },
+          'ADR-0046: rollback remains eligible, while verification of its pre-existing unusable search refuses by name',
+        );
+      },
+    );
+  },
+);
 
 /**
  * The lineage with its trailing profile-sibling entries removed, so the head is
@@ -2966,6 +3039,38 @@ function withoutProfileSiblingHead(compiledApplication: unknown): unknown {
   ) {
     envelope.applications.pop();
   }
+  return envelope;
+}
+
+/**
+ * The mirror image, added by `LANG-ADOPT-v5`: the lineage truncated so its head
+ * IS a profile sibling — the successor of the last profile-only edge (ADR-0047
+ * §4), with every later entry dropped.
+ *
+ * Direction 1 above needs a serving head that shares a package revision with its
+ * predecessor. That was true of the real artifact for exactly one packet, and
+ * `withoutProfileSiblingHead` existed because its sibling direction already had
+ * the opposite problem. Both directions now name the edge they need instead of
+ * assuming the artifact's head happens to supply it.
+ */
+function throughProfileSiblingHead(compiledApplication: unknown): unknown {
+  const envelope = structuredClone(compiledApplication) as {
+    applications: { normalizedDefinitionBytesBase64: string }[];
+  };
+  const lastEdgeIndex = envelope.applications.reduce(
+    (found, entry, index) =>
+      index > 0 &&
+      entry.normalizedDefinitionBytesBase64 ===
+        envelope.applications[index - 1]!.normalizedDefinitionBytesBase64
+        ? index
+        : found,
+    -1,
+  );
+  assert.ok(
+    lastEdgeIndex > 0,
+    'the recorded lineage carries no profile-only edge, so ADR-0047 §6 has nothing to refuse',
+  );
+  envelope.applications.length = lastEdgeIndex + 1;
   return envelope;
 }
 
