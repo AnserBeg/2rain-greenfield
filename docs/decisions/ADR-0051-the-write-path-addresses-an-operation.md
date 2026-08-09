@@ -77,3 +77,41 @@ Release** — backwards against `ux-grammar` §3's primary-first rule.
 That needs a carrier decision **and** a `ux-grammar` ruling, and inventing one
 inside this packet is how a second authority gets created. Routed to
 `surface-command-order`.
+
+## 4. The property must be structural, not scanned — corrected 2026-08-08
+
+§2 said the pin "narrows to the property." **That was directionally right and
+mechanically insufficient, and the review proved it with a green bypass:**
+
+    const operation =
+      submission.selectorBypass === '1'
+        ? binding.operations[0]
+        : binding.operations.find(
+            (candidate) => candidate.operationId === submission.operationId,
+          );
+
+The legitimate membership comparison is still present. The gateway still receives
+`operation.operationId`. No browser control submits `selectorBypass`. **And an
+unbound posted id proceeds with the first bound operation instead of stopping at
+the 422.** An object spread that overrides the compliant member from another
+submission field leaks the same way.
+
+**A scan cannot hold this property**, because it recognises **one source spelling**
+and the property is about what reaches the gateway on *every* path. Narrowing the
+predicate from *no id on the wire* to *every read of the posted id is the
+membership lookup* replaced one text pattern with another.
+
+**The boundary is made structural instead.** Build the gateway request in a helper
+that receives the **resolved operation**, the input, the confirmation grant and the
+idempotency key — **and never receives the raw submission.** A path that wants to
+select by anything other than the lookup then has nothing to select from.
+
+**The precedent is already in this repository.**
+[ADR-0048](ADR-0048-the-message-catalog-is-platform-vocabulary-held-in-code.md) §2
+chose `SurfaceMessageCode = keyof typeof SURFACE_MESSAGE_CATALOG` precisely because
+*"an unregistered code is not a compile error — it is **inexpressible**, which is
+strictly stronger than the current shape."* Same move, one layer over: **make the
+wrong thing unrepresentable rather than detectable.**
+
+The architecture test may remain as a cheap ratchet. **It must not be the thing the
+property rests on.**
