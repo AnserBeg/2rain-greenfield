@@ -51,9 +51,16 @@ import {
 import { createSurfaceRuntimeServer } from '../../apps/web/src/app-server.js';
 import {
   renderSurfaceRuntimeWithData,
+  semanticOperationRequestFor,
   submitSurfaceRuntimeIntent,
   type SurfaceRuntimeGateways,
 } from '../../apps/web/src/surface-runtime.js';
+import {
+  SurfaceProjectionError,
+  readCompiledSurfaceDataBinding,
+  readCompiledSurfaceManifest,
+  type CompiledSurfaceDataBinding,
+} from '../../apps/web/src/surface-contract.js';
 import {
   FIXTURE_IDS,
   ordinaryModuleV1,
@@ -978,6 +985,116 @@ async function postIntent(
   assert.equal(confirmedResponse.status, 200);
   return confirmedResponse.text();
 }
+
+/**
+ * The refusal half of `INTENT_RENDERED_ARITY`, run as a table over all four
+ * singular intents and asserted on the CODE rather than on a rendered page.
+ *
+ * The browser arm this supplements exercised `create` alone and observed a
+ * page-level `QUERY_UNSUPPORTED`, so three holes stayed green: a per-intent
+ * exemption (`intent !== 'update' && bound > arity`), the same independently
+ * for `archive` and `restore`, and a bare `throw` swapped in for
+ * `invalidBinding(...)`. `QUERY_UNSUPPORTED` is what the runtime renders for
+ * ANY unreadable binding, so it cannot tell those apart.
+ *
+ * Each intent carries its admission twin, because a refusal control alone is
+ * satisfiable by refusing everything (`review-tiers`, af44c6f).
+ */
+for (const intent of ['archive', 'create', 'restore', 'update'] as const) {
+  test(`a second active ${intent} operation is refused by name, and one is admitted`, async () => {
+    const operationId = `${FIXTURE_IDS.namespace}:operation.master_${intent}`;
+
+    // Admission twin first: the un-duplicated package binds, and binds exactly
+    // one operation of this intent. Without it the refusal below would prove
+    // nothing about the intent it names.
+    const admitted = await masterRecordBinding(compileFixture());
+    assert.equal(
+      admitted.operations.filter((operation) => operation.intent === intent)
+        .length,
+      1,
+      `${intent} is not bound at all, so its refusal is untested`,
+    );
+
+    const duplicated = ordinaryModuleV1();
+    const operations = duplicated.operations as Array<Record<string, unknown>>;
+    const original = operations.find(
+      (candidate) => candidate.operationId === operationId,
+    );
+    assert.ok(original, `${operationId} is absent from the fixture`);
+    operations.push({ ...original, operationId: `${operationId}_alternate` });
+
+    await assert.rejects(
+      async () => masterRecordBinding(compileFixture(duplicated)),
+      (error: unknown) => {
+        assert.ok(
+          error instanceof SurfaceProjectionError,
+          `${intent}: threw ${String(error)}, not a SurfaceProjectionError`,
+        );
+        assert.equal(error.code, 'INVALID_SURFACE_BINDING');
+        assert.match(error.message, new RegExp(`\\b${intent}\\b`));
+        return true;
+      },
+    );
+  });
+}
+
+/** Reads the master record surface's binding out of a compiled fixture. */
+async function masterRecordBinding(
+  compiled: CompileSuccess,
+): Promise<CompiledSurfaceDataBinding> {
+  const policy = new RecordingPolicy('ALLOW');
+  const view = await issuedView(
+    runtimeEntry(compiled, policy, {
+      a: identity(tenantA, environmentA, principalA),
+    }),
+    'a',
+  );
+  const surface = readCompiledSurfaceManifest(view).surfaces.find(
+    (candidate) =>
+      candidate.surfaceId === `${FIXTURE_IDS.namespace}:surface.master_record`,
+  );
+  assert.ok(surface);
+  return readCompiledSurfaceDataBinding(view, surface);
+}
+
+/**
+ * ADR-0051 §4's structural boundary, tested where it is enforced rather than
+ * where it is described. The helper cannot see a submission, so the only way
+ * the gateway's `operationId` can be wrong is for the resolved operation to be
+ * wrong -- which is what `boundOperation` and the ratchet hold.
+ */
+test('the gateway request carries the resolved operation id and nothing from the wire', () => {
+  const operation = Object.freeze({
+    capabilityId: null,
+    confirmation: 'none' as const,
+    intent: 'command' as const,
+    label: 'Release',
+    operationId: `${FIXTURE_IDS.namespace}:operation.master_release`,
+    precondition: Object.freeze({}),
+  });
+  const input = { expectedRevision: 1, recordId: 'r-1' };
+
+  const request = semanticOperationRequestFor(operation, input, null, 'k-1');
+  assert.equal(request.operationId, operation.operationId);
+  assert.deepEqual(Object.keys(request).sort(), [
+    'confirmationGrant',
+    'idempotencyKey',
+    'input',
+    'operationId',
+    'schemaVersion',
+  ]);
+  assert.equal(Object.isFrozen(request), true);
+
+  // The leak the argument list makes inexpressible: an `input` carrying its
+  // own `operationId` cannot reach the envelope, because nothing spreads it.
+  const hostile = semanticOperationRequestFor(
+    operation,
+    { ...input, operationId: 'northstar.forged:operation.evil' },
+    null,
+    'k-2',
+  );
+  assert.equal(hostile.operationId, operation.operationId);
+});
 
 function asRecord(value: unknown): Record<string, unknown> {
   assert.ok(isRecord(value));

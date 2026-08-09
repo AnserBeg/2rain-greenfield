@@ -43,7 +43,21 @@ test('SurfaceRuntime data binding has no module or surface-specific branch', () 
   // up in `binding.operations`, and the id handed to the gateway must be the
   // RESOLVED operation's -- which the assertion above already requires.
   assert.match(joined, /binding\.operations\.find\(/);
-  const postedIdReads = joined
+  assertPostedIdOnlySelects(joined);
+});
+
+/**
+ * A CHEAP RATCHET, and explicitly not what the property rests on — ADR-0051 §4.
+ *
+ * Narrowing this scan to the property left it a source scan, and a source scan
+ * stays green against `submission.selectorBypass === '1' ? operations[0] :
+ * find(...)`: the compliant comparison is still written. The property is now
+ * held structurally by `semanticOperationRequestFor`, whose argument list has
+ * no submission in it, and which is tested directly. This check remains
+ * because it is nearly free and catches the careless case early.
+ */
+function assertPostedIdOnlySelects(source: string): void {
+  const postedIdReads = source
     .split('\n')
     .filter((line) => line.includes('submission.operationId'));
   assert.ok(
@@ -53,15 +67,16 @@ test('SurfaceRuntime data binding has no module or surface-specific branch', () 
   for (const line of postedIdReads) {
     assert.match(line, /candidate\.operationId === submission\.operationId/);
   }
-});
+}
 
 /**
- * A source scan is a proxy for the property above; the observation is the
- * browser arm that posts three ids outside the binding, gets three refusals,
- * and then posts a bound one and gets a 200. This is the vacuity control for
- * the proxy: the leak it exists to catch, observed being caught.
+ * The vacuity controls for the ratchet, both running the PRODUCTION predicate
+ * against their specimen rather than re-implementing it. The empty-read arm
+ * previously asserted its own specimen had zero reads and never called
+ * `assertPostedIdOnlySelects`, so it never observed the `length > 0` guard
+ * firing — it proved a property of the fixture, not of the check.
  */
-test('binding-authority red: a posted operation id passed onward is observed', () => {
+test('binding-authority red: a passed-onward id and a never-read id are both observed', () => {
   const leaked = [
     'const operation = binding.operations.find(',
     '  (candidate) => candidate.operationId === submission.operationId,',
@@ -70,24 +85,44 @@ test('binding-authority red: a posted operation id passed onward is observed', (
     '  operationId: submission.operationId,',
     '});',
   ].join('\n');
-  const reads = leaked
-    .split('\n')
-    .filter((line) => line.includes('submission.operationId'));
-  assert.equal(reads.length, 2);
-  assert.throws(() => {
-    for (const line of reads) {
-      assert.match(line, /candidate\.operationId === submission\.operationId/);
-    }
-  }, /operationId: submission\.operationId/);
-
-  // And the other half: a file that never reads the posted id at all must not
-  // satisfy the check by vacuous quantification over an empty list.
-  const absent = 'const operation = binding.operations.find(() => true);';
-  assert.equal(
-    absent.split('\n').filter((line) => line.includes('submission.operationId'))
-      .length,
-    0,
+  assert.throws(
+    () => assertPostedIdOnlySelects(leaked),
+    /operationId: submission\.operationId/,
   );
+
+  // The other vacuity vector: a source that never reads the posted id must not
+  // satisfy the check by quantifying over an empty list.
+  assert.throws(
+    () =>
+      assertPostedIdOnlySelects(
+        'const operation = binding.operations.find(() => true);',
+      ),
+    /the posted operation id is never read/,
+  );
+
+  // And the arm that shows the predicate can pass, so the two reds above are
+  // not observing a check that refuses everything.
+  assertPostedIdOnlySelects(
+    'const operation = binding.operations.find(\n' +
+      '  (candidate) => candidate.operationId === submission.operationId,\n' +
+      ');',
+  );
+});
+
+/**
+ * ADR-0051 §4's structural half, asserted where it lives: the one construction
+ * site for a gateway request cannot see the wire, and does not spread.
+ */
+test('the gateway request is built where the submission is not in scope', () => {
+  const runtime = readFileSync(resolve('apps/web/src/surface-runtime.ts'), 'utf8');
+  const helper = runtime.slice(
+    runtime.indexOf('export function semanticOperationRequestFor('),
+  );
+  assert.notEqual(helper, '');
+  const body = helper.slice(0, helper.indexOf('\n}\n') + 3);
+  assert.doesNotMatch(body, /submission/);
+  assert.doesNotMatch(body, /\.\.\./);
+  assert.match(body, /operationId: operation\.operationId/);
 });
 
 test('apps/web has no PostgreSQL, SQL, provider, or direct database access', () => {

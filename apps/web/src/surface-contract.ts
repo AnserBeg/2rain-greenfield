@@ -173,8 +173,16 @@ export class SurfaceProjectionError extends Error {
 
 /**
  * Resolves a surface's semantic read/write binding exclusively from the
- * request-pinned projections. Operation IDs are never selected by browser
- * input and physical storage metadata is not part of this contract.
+ * request-pinned projections. Physical storage metadata is not part of this
+ * contract.
+ *
+ * **Browser input selects an operation id; it does not authorize one or widen
+ * the set.** Corrected 2026-08-08: this said *"Operation IDs are never
+ * selected by browser input"*, which stopped being true the moment a
+ * submission started naming its operation — directly above the reader that
+ * produces the set it names from. The set is built here, from the pinned
+ * catalog alone, and `submitSurfaceRuntimeIntent` may only pick a member of
+ * it.
  */
 export function readCompiledSurfaceDataBinding(
   view: RuntimeViewContract.RequestRuntimeView,

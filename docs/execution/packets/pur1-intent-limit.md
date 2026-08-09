@@ -82,10 +82,20 @@ two of anything still requires the write path to tell them apart.
 | `create`, `update` | 1 | the form role's single Save button |
 | `archive`, `restore` | 1 | one lifecycle button, chosen by `record.archived` |
 
-A second operation on any of the four still throws `INVALID_SURFACE_BINDING`
-with the same message. **The limit lifted where a control exists and nowhere
-else** — the alternative would be quiet permissiveness, which the charter
-correctly called worse than the limit.
+A second operation on any of the four still throws `INVALID_SURFACE_BINDING`.
+**The limit lifted where a control exists and nowhere else** — the alternative
+would be quiet permissiveness, which the charter correctly called worse than
+the limit.
+
+*Corrected on revision:* this said the refusal keeps *"the same message"*. It
+does not. The text moved from a hard-coded `O0` to `${operation.tier}`, so a
+tier-`o1` duplicate now names `o1` instead of misreporting it as `O0`. The new
+message is more accurate and the old claim was simply false — which matters
+because "unchanged" is exactly the kind of assertion a reader stops checking.
+
+All four intents are executed as a table against
+`readCompiledSurfaceDataBinding`, asserting `SurfaceProjectionError` and
+`code === 'INVALID_SURFACE_BINDING'`, each with an admission twin.
 
 ## The executed red
 
@@ -126,10 +136,27 @@ needs no purchasing entity, no mount and no language cut.
    pressing the **second** runs the second, observed three ways — the executor
    records which operation id it received, the record read-back names the
    capability that ran, and the feedback banner names the resolved operation;
-2. an intent rendered by one control still refuses a second operation by name;
+2. an intent rendered by one control still refuses a second operation, observed
+   as the rendered page (`create`);
 3. ids outside the binding are refused (another entity's operation, an
    unregistered one, and the empty string — so the retired wire vocabulary is
    not a fallback), with the bound-id 200 companion.
+
+`test/integration/surface-data-binding.test.ts` — the two controls that carry
+the properties, rather than a page that happens to agree with them:
+
+- **the four-intent refusal table.** For `archive`, `create`, `restore` and
+  `update` in turn: duplicate that operation, call
+  `readCompiledSurfaceDataBinding`, and assert `SurfaceProjectionError` with
+  `code === 'INVALID_SURFACE_BINDING'` and the intent named in the message —
+  each with its admission twin asserting exactly one such operation binds
+  un-duplicated. Arm 2 above observes `QUERY_UNSUPPORTED`, which is what the
+  runtime renders for *any* unreadable binding, so it cannot distinguish a
+  per-intent exemption, a bare `throw`, or the other three intents going
+  unchecked. This can;
+- **`semanticOperationRequestFor` tested directly** — the envelope's
+  `operationId` is the resolved operation's, its key set is closed, it is
+  frozen, and an `input` carrying its own `operationId` cannot reach it.
 
 `apps/web/test/surface-runtime-contract.test.ts` — the arity table pinned
 against the renderer each entry names as its authority, plus its vacuity red
@@ -144,9 +171,36 @@ one — the same shape `lease-derivation` is chartered on, one gate over.
 
 Re-pinned to the property rather than the spelling: every read of the posted id
 must be the comparison that looks it up in `binding.operations`, and the id
-handed to the gateway must be the resolved operation's. A red arm observes the
-leak it exists to catch. This is a source scan and therefore a proxy; arm 3
-above is the observation.
+handed to the gateway must be the resolved operation's.
+
+**That re-pin was not enough, and ADR-0051 §4 corrects the record.** Narrowing
+a source scan to the property leaves it a source scan. It stays green against
+
+```ts
+const operation =
+  submission.selectorBypass === '1'
+    ? binding.operations[0]
+    : binding.operations.find((c) => c.operationId === submission.operationId);
+```
+
+— the compliant comparison is still written, the gateway still receives
+`operation.operationId`, and an unbound posted id quietly proceeds with the
+first bound operation. A spread overriding the compliant member leaks
+identically.
+
+**The property is now structural.** `semanticOperationRequestFor` is the one
+construction site for a gateway request and its argument list has no
+submission in it, so neither shape is expressible there — ADR-0048 §2's
+`keyof typeof` move one layer over: make the wrong thing inexpressible, not
+detectable. `boundOperation` likewise takes the binding and one string, so
+there is no second axis to branch on. The architecture check stays as a cheap
+ratchet and is labelled as one; it is no longer what the property rests on.
+
+Its vacuity controls now run the **production predicate** against their
+specimens. The empty-read arm previously asserted its own fixture had zero
+reads without ever calling the predicate, so it never observed the
+`length > 0` guard fire — it proved a property of the specimen, not of the
+check.
 
 Precedent for re-pinning rather than deleting: `40b4029 test(press-law):
 re-pin the conformance line the permission rule moved`.
