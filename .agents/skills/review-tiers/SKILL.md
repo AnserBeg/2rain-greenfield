@@ -711,3 +711,39 @@ column is a duplicate.
 **The tell that you are strengthening when you should be narrowing:** the control
 grows, the production code has not changed in two rounds, and each review finds the
 same shape one layer in.
+
+## Write the claim from the measurement, and prefer unrepresentable to detectable
+
+**Measured 2026-08-08, across five packets in one session.** Rounds one and two of a
+review find production defects. **Rounds three and beyond find control defects while
+the production code sits unchanged and confirmed.** That transition is the signal
+that the loop has stopped being about the code.
+
+Two writing habits cause it.
+
+**Controls are written claim-first.** The comment states the aspiration — *"all
+three arms controlled"*, *"four positions, one red each"*, *"every entry point is
+leased"* — and the specimens implement a subset. Each review finds the gap, the
+control is strengthened, and the strengthened control makes a **new** slightly
+broad claim. Three rounds on one table is that loop, not three defects.
+
+> **Build the specimens, run the per-check deletion, then write the comment from
+> what actually died.** A lane that did this unprompted found a confound no reviewer
+> had named. Two review rounds would not have existed had it been standard.
+
+**And detection is chosen where impossibility was available.** A source scan
+narrowed from *"no id on the wire"* to *"every read of the posted id is the
+membership lookup"* is still a source scan, and a ternary reading a different
+submission field walks through it. The repository already ruled the better move:
+[ADR-0048](../../../docs/decisions/ADR-0048-the-message-catalog-is-platform-vocabulary-held-in-code.md)
+§2 chose `keyof typeof` because an unregistered code is **inexpressible**, *"strictly
+stronger than"* detectable.
+
+> **Before writing a detector, ask whether the consumer can be built so the wrong
+> input is unavailable to it.** Pass the resolved value, not the raw one. A guard
+> that cannot be evaded needs no control proving it wasn't.
+
+**What does not change:** control-quality findings are still worth the round. The
+worst defects this programme has carried were fenced claims with **no** control —
+one refusal shipped four rounds fenced as settled with nothing holding it, and a
+press-law guard is evaded on `main` to this day by a spliced literal.
