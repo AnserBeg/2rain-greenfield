@@ -513,3 +513,19 @@ not ask permission and does not act on a previous turn's assurance.
 **What the orchestrator still owns** is *sequencing intent* — which packet is
 allowed to want the slot next — never the claim that the machine is free at this
 instant. Those are different facts and only one of them is measurable from here.
+
+### Sample idle after the previous holder decays — added 2026-08-08
+
+An idle reading taken **at the instant the lock releases** is systematically
+pessimistic: the lane that just finished is still winding down. Measured — 92.6%
+at loadavg 2.42 at release, **96.7% at loadavg 1.22 moments later**, same machine,
+no other work started.
+
+**Waiting for the decay is not gaming the gate.** It is declining to attribute the
+previous holder's load to your own run, and the difference is the gap between a
+reading that measures and the 73.9% one that declined.
+
+**So: on release, re-read rather than launch.** Take a fresh sample once loadavg
+has settled, re-verify the registry is still empty at that moment, and report both
+figures with the decision. **A marginal reading is a reason to sample again, not a
+reason to spend a run.**
