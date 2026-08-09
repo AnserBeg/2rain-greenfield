@@ -170,18 +170,84 @@ re-pin the conformance line the permission rule moved`.
 
 ## Gate evidence
 
-Run at this tree, each through `run-with-test-lock.mjs`:
+**Full matrix green at `b86cb09`.** All fifteen steps executed, zero `not ok`,
+`MATRIX_EXIT=0` written inside the log the run produced. Terminal checks:
 
-| Gate | Result |
-|---|---|
-| `typecheck` | exit 0, clean |
-| `test:browser` | **70 passed** |
-| `test:contracts` | **16/16** |
-| `test:integration` | **87/87** |
-| `test:architecture` | 137/138, then 138/138 after the re-pin |
+```
+language coverage: PASS (1943 obligations; 0 receipts; 1943 decision-covered)
+reachability:      PASS (99/99 test files executed; 10 producer artifacts)
+```
 
-The full matrix at the frozen SHA is not claimed here; it is the acceptance
-gate and belongs in the writer handoff.
+Local gates before the slot was requested, each through
+`run-with-test-lock.mjs`: `typecheck` clean, `test:contracts` 16/16,
+`test:integration` 87/87, `test:architecture` 139/139, `test:unit` 105/105,
+`test:browser` 70.
+
+### What the first matrix cost, and why it was not this change
+
+The first run at the same SHA returned `MATRIX_EXIT=1`: two `testTimeoutFailure`
+at exactly 300000 ms in `test/postgres/composed-application.test.ts` — tests 8
+and 9. **Attributed to machine load, and then confirmed rather than argued.**
+
+The same two tests at the same SHA on the second run:
+
+| Test | run 1 | run 2 |
+|---|---|---|
+| composed product activates through the kernel | timeout (>300 s) | **135.8 s** |
+| composed product advances to a compiled successor | timeout (>300 s) | **98.8 s** |
+
+The test's own header documents the exposure: *"210.9 s inside the full matrix
+… this workload is load-dependent"* against a 300 s bound — a 1.42x margin. It
+also forbids the tempting fix: *"If this ever reds on timing … It is NOT to
+raise the bound."* **The bound was not touched.** Corroborating: all seven of
+test 8's subtests passed before the parent timed out, the overrun sitting in the
+post-subtest activation work; and this packet changes **no file either test
+reads** — they read `apps/web/release/*.json` and the compile script, and the
+diff touches zero release artifacts.
+
+**The failed run was nearly read as a pass.** The wrapper's exit status was 0,
+because the last command in the runner script was a `grep`. Only the
+`MATRIX_EXIT=` line *inside* the log showed the 1 — which is the whole content
+of learnings.md's *"Capture an exit code inside the log, not beside the
+command."*
+
+**One thing the second run's instrumentation could not do.** Idle was sampled
+every 30 s (mean 78.2%, min 43.9%), but that is *total system* idle and the
+matrix is itself the dominant load, so the sampler cannot separate self-load
+from contention. It would not have distinguished the two runs. The load record
+is reported for what it is rather than cited as the proof; the 300 s → 135.8 s
+delta at a fixed SHA is the evidence.
+
+### Pre-flight, per learnings.md
+
+Before requesting the slot, the last failures' checks were run rather than just
+`typecheck`: full integration and full architecture, plus a sweep of both
+residue classes `5g3-sm-impl` burned runs on. Two findings worth carrying:
+
+- **The implementation-vocabulary guard is in `test:integration`**, not
+  architecture — `test/integration/semantic-gateways.test.ts:593` — and it reads
+  exactly three `packages/runtime` files. Its forbidden list includes
+  `dispatch`, `handler`, `patch` and `source`, all used heavily in this packet's
+  new prose. In `apps/web/src`, which that guard does not scan.
+- **The pinned-line class: swept, two hits, both prose.** This packet shifts
+  lines in all three sources (+39, +6, +8). `message-catalog.spec.ts:548` cites
+  `surface-runtime.ts:113`, still exactly the catch site.
+  `surface-grammar.spec.ts:889` cites `surface-runtime.ts:1176-1177` — already
+  stale on `main`, where that file is 1146 lines. Pre-existing, no gate reads it.
+
+### Base
+
+Cut from `712f04c`. `main` has since moved to `af44c6f` with two narrative-only
+commits (ADR-0051 and a `review-tiers` amendment); nothing under `test/` or
+`apps/web/test/` reads `review-tiers/SKILL.md` or `current-plan.md`, so the
+integrated tree's executable content is identical to this candidate and
+AGENTS.md §6's identical-content rule makes this run the acceptance run.
+
+For a checkpoint under two minutes:
+
+```bash
+corepack pnpm test:contracts
+```
 
 For a checkpoint under two minutes:
 
