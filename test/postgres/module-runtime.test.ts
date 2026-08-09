@@ -11,6 +11,7 @@ import {
   CANONICALIZATION_PROFILE_VERSION,
   CanonicalModelError,
   CONTENT_HASH_ALGORITHM,
+  canonicalAuthoredProjection,
   canonicalize,
   canonicalizeAndHash,
   normalizeApplicationPackage,
@@ -5844,6 +5845,50 @@ test('a materialized state field is selectable, and only a transition writes it'
  * matching default suppresses materialization, counterfeits the column, and
  * passes every other control because the id is present.
  */
+/**
+ * The admission twin of the collision refusal below, and it is not optional.
+ *
+ * Replacing the deep comparison with "refuse ANY id collision" keeps the
+ * counterfeit control green and keeps the PostgreSQL vertical green, because
+ * neither fixture already contains the derived field. A refusal control alone
+ * cannot tell a discriminating guard from a blanket one.
+ *
+ * The authored form here is the machine's own derived field, obtained by
+ * round-tripping through `canonicalAuthoredProjection` rather than hand-copied
+ * -- a hand-copied expectation would drift from the generator and start
+ * asserting the wrong shape without failing.
+ */
+test('the machine-derived state field may be authored, and changes nothing', () => {
+  const namespace = 'northstar.smstateidempotent';
+  const definition = transitionModuleDefinition(namespace);
+  const normalized = normalizeApplicationPackage(definition) as {
+    fields: Array<{ fieldId: string }>;
+  };
+  const stateFieldId = `${namespace}:derived_state_field.machine.master_lifecycle`;
+  const materialized = normalized.fields.filter(
+    (field) => field.fieldId === stateFieldId,
+  );
+  assert.equal(materialized.length, 1, 'exactly one state field is generated');
+
+  // Author it explicitly, exactly as normalization produced it.
+  const authored = canonicalAuthoredProjection(
+    normalized as Parameters<typeof canonicalAuthoredProjection>[0],
+  );
+  const renormalized = normalizeApplicationPackage(authored) as {
+    fields: Array<{ fieldId: string }>;
+  };
+
+  // Admitted, not refused.
+  assert.equal(
+    renormalized.fields.filter((field) => field.fieldId === stateFieldId).length,
+    1,
+    'authoring the derived field adds no second field and is not refused',
+  );
+  // And byte-identical, so the collision path produces the same package the
+  // generation path does.
+  assert.equal(canonicalize(renormalized), canonicalize(normalized));
+});
+
 test('an authored field wearing the derived state identity is refused', () => {
   const namespace = 'northstar.smstatecollision';
   const definition = transitionModuleDefinition(namespace) as {
