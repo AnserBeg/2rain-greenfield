@@ -549,59 +549,125 @@ test('wrong catalog kind, schema, and shape fail closed after a live policy call
 
 /**
  * A canonical reference is more than a `targetId`. Three arms of the catalog
- * parser each read only the field the interpreter later resolves from, so a
- * reference declaring the WRONG KIND, or a version the language never had,
- * travelled all the way to the executor. These assert it never gets there.
+ * parser each grew their own shallow copy, and all of them admitted a reference
+ * declaring the WRONG CONSTRUCT, or a version the language never had, or a
+ * version admitted but disagreeing with its own effect. Nothing downstream
+ * noticed, because the interpreter resolves from `targetId` and never consults
+ * the other two fields.
  *
- * Every case keeps a valid `targetId`, because that is the field the old checks
- * looked at: if the refusal came from the id, these would prove nothing.
+ * **Every one of the four reference positions is forged here**, not one. A
+ * control installed at a single call site cannot distinguish "all arms route
+ * through the shared parser" from "the arm I happened to pick does" — restoring
+ * a shallow check in either of the other two would leave it green.
+ *
+ * **And each specimen carries exactly one defect.** Its unrelated properties are
+ * valid for its own enclosing effect, including the version on the wrong-kind
+ * case. A specimen wrong in two ways cannot attribute the refusal to either, and
+ * no amount of reading the failure text recovers that.
  */
-test('a canonical reference with a forged kind or version never reaches the executor', async (t) => {
-  const forgedReferences: readonly (readonly [string, ImmutableJsonValue])[] = [
-    [
-      'kind names a different construct',
-      {
-        kind: 'fieldReference',
-        schemaVersion: 'v0-experimental',
-        targetId: 'northstar.bootstrap:entity.item',
-      },
-    ],
-    [
-      'version was never in the language',
-      {
-        kind: 'entityReference',
-        schemaVersion: 'invented-version',
-        targetId: 'northstar.bootstrap:entity.item',
-      },
-    ],
-    [
-      'version is admitted but disagrees with its effect',
-      {
-        kind: 'entityReference',
-        schemaVersion: 'v4',
-        targetId: 'northstar.bootstrap:entity.item',
-      },
-    ],
-  ];
-  for (const [label, reference] of forgedReferences) {
-    await t.test(label, async () => {
-      const catalog = structuredClone(
-        operationCatalogWith(operationId),
-      ) as unknown as {
-        operations: Array<{ effect: Record<string, unknown> }>;
-      };
+const forgedReferencePositions = [
+  {
+    arm: 'record effect entity',
+    expectedKind: 'entityReference',
+    install: (catalog: ForgeableCatalog, reference: ImmutableJsonValue) => {
       catalog.operations[0]!.effect.entity = reference;
-      const fixture = createFixture({
-        operationPayload: catalog as unknown as ImmutableJsonValue,
+    },
+    payload: () => structuredClone(operationCatalogWith(operationId)),
+    request: () => operationRequest,
+    version: 'v0-experimental',
+  },
+  {
+    arm: 'capability effect capability',
+    expectedKind: 'capabilityReference',
+    install: (catalog: ForgeableCatalog, reference: ImmutableJsonValue) => {
+      catalog.operations[0]!.effect.capability = reference;
+    },
+    payload: () =>
+      structuredClone(
+        capabilityOperationCatalogWith(
+          operationId,
+          'northstar.inventory:capability.posting',
+          queryId,
+        ),
+      ),
+    request: () => operationRequest,
+    version: 'v4',
+  },
+  {
+    arm: 'transition effect entity',
+    expectedKind: 'entityReference',
+    install: (catalog: ForgeableCatalog, reference: ImmutableJsonValue) => {
+      catalog.operations[0]!.effect.entity = reference;
+    },
+    payload: () => structuredClone(transitionOperationCatalogWith(operationId)),
+    request: () => operationRequest,
+    version: 'v5',
+  },
+  {
+    arm: 'transition effect transition',
+    expectedKind: 'transitionReference',
+    install: (catalog: ForgeableCatalog, reference: ImmutableJsonValue) => {
+      catalog.operations[0]!.effect.transition = reference;
+    },
+    payload: () => structuredClone(transitionOperationCatalogWith(operationId)),
+    request: () => operationRequest,
+    version: 'v5',
+  },
+] as const;
+
+type ForgeableCatalog = {
+  operations: Array<{ effect: Record<string, unknown> }>;
+};
+
+test('a forged canonical reference never reaches the executor, at every position', async (t) => {
+  for (const position of forgedReferencePositions) {
+    for (const [label, reference] of [
+      // Only `kind` is wrong. The version is this effect's own, so deleting the
+      // production kind check is the only way to make this specimen pass.
+      [
+        'kind names a different construct',
+        {
+          kind: 'queryReference',
+          schemaVersion: position.version,
+          targetId: 'northstar.bootstrap:entity.item',
+        },
+      ],
+      // Only the version is wrong, and wrong by never having existed.
+      [
+        'version was never in the language',
+        {
+          kind: position.expectedKind,
+          schemaVersion: 'invented-version',
+          targetId: 'northstar.bootstrap:entity.item',
+        },
+      ],
+      // Only the version is wrong, and wrong by disagreeing with its effect
+      // while being a real language version -- the case membership alone misses.
+      [
+        'version is admitted but disagrees with its effect',
+        {
+          kind: position.expectedKind,
+          schemaVersion:
+            position.version === 'v0-experimental' ? 'v4' : 'v0-experimental',
+          targetId: 'northstar.bootstrap:entity.item',
+        },
+      ],
+    ] as const) {
+      await t.test(`${position.arm}: ${label}`, async () => {
+        const catalog = position.payload() as unknown as ForgeableCatalog;
+        position.install(catalog, reference as ImmutableJsonValue);
+        const fixture = createFixture({
+          operationPayload: catalog as unknown as ImmutableJsonValue,
+        });
+        await assert.rejects(
+          fixture.operationApi.handle(authenticationInput, position.request()),
+          MalformedPinnedOperationCatalogError,
+        );
+        // The executor is never constructed for a malformed catalog, so a
+        // refusal later than this would surface as an execution.
+        assert.equal(fixture.policy.authorizationCalls.length, 1);
       });
-      await assert.rejects(
-        fixture.operationApi.handle(authenticationInput, operationRequest),
-        MalformedPinnedOperationCatalogError,
-      );
-      // The executor is never constructed for a malformed catalog, so a
-      // refusal that happened later than this would show up as an execution.
-      assert.equal(fixture.policy.authorizationCalls.length, 1);
-    });
+    }
   }
 });
 
@@ -1597,6 +1663,59 @@ function operationCatalogWith(
         precondition: {
           kind: 'booleanPredicate',
           schemaVersion: 'v0-experimental',
+          value: true,
+        },
+        readBackQueryId: queryId,
+        tier: 'o0',
+      },
+    ],
+    schemaVersion: 'northstar.operation-catalog-payload/v0-provisional',
+  };
+}
+
+/**
+ * A transition effect at the shape the compiler emits: both references present,
+ * the flattened ids alongside them, and every node at the effect's own version.
+ * The forgery table above spoils exactly one field of it at a time.
+ */
+function transitionOperationCatalogWith(
+  registeredOperationId: string,
+): ImmutableJsonValue {
+  return {
+    kind: 'operationCatalogPayload',
+    operations: [
+      {
+        confirmation: 'none',
+        effect: {
+          entity: {
+            kind: 'entityReference',
+            schemaVersion: 'v5',
+            targetId: 'northstar.bootstrap:entity.item',
+          },
+          fromStateId: 'northstar.bootstrap:state.item_draft',
+          kind: 'transitionStateEffect',
+          schemaVersion: 'v5',
+          stateFieldId: 'northstar.bootstrap:derived_state_field.machine.item',
+          toStateId: 'northstar.bootstrap:state.item_released',
+          transition: {
+            kind: 'transitionReference',
+            schemaVersion: 'v5',
+            targetId: 'northstar.bootstrap:transition.item_release',
+          },
+        },
+        inputContract: {
+          closedArgumentKeys: ['expectedRevision', 'recordId'],
+          fields: [],
+          relationInputs: [],
+          schemaVersion: 'northstar.module-input-contract/v1',
+          writableFieldIds: [],
+        },
+        lifecycle: 'active',
+        operationId: registeredOperationId,
+        permissionId: 'northstar.bootstrap:permission.create',
+        precondition: {
+          kind: 'booleanPredicate',
+          schemaVersion: 'v5',
           value: true,
         },
         readBackQueryId: queryId,
