@@ -153,22 +153,54 @@ Site 5 is the sharpest instance of the class: **the emitter was derived and its
 assertion was not**, so the fix and the control drifted apart in the same packet
 that named the class.
 
-**Two production sites were found and deliberately NOT changed.**
-`languageHasV2Features` (`normalize.ts:2229`) and
-`languageUsesModuleProjectionShape` (`compiler.ts:1206`) both enumerate
-`featureLevel === 'v2' || 'v3' || 'v4' || 'v5'`. They already include v5, so
-adoption does not break them — they are a **dated** defect (the next cut), not a
-live one. Both are private and unexported, so no control can distinguish the
-enumerated form from a derived one today; converting them would ship unobserved,
-which is the "a warning is not a control" failure this program already paid for.
-Making them observable means an exported shared feature-level helper across three
-predicates in `canonical-model`, which is a compiler-semantics change inside an
-adoption packet. **Routed to `version-predicate-derivation`, with the deletion
-measurement recorded there rather than a claim.**
+**Two production sites were found and deliberately NOT changed**, and what I
+first wrote about them was wrong. `languageHasV2Features` (`normalize.ts:2229`)
+and `languageUsesModuleProjectionShape` (`compiler.ts:1206`) both enumerate
+`featureLevel === 'v2' || 'v3' || 'v4' || 'v5'`. Both already include v5, so
+adoption does not break either. I recorded that *neither could be observed going
+stale*, routed them, and then the deletion table refuted half of it — see the
+table below. The corrected disposition lives in
+`version-predicate-derivation`, which now carries two measurements instead of
+one prediction.
 
 ## The 107-obligation unobserved exemption
 
-_Filled in from the re-derivation; see the run record below._
+Re-derived over the merged ledger; the digest was never retargeted.
+
+| | Before | After |
+|---|---|---|
+| ledger digest | `29b4dc6c…` | **HELD** |
+| obligations | 2050 | **HELD** |
+| observed | 427 | **HELD** |
+| `observedRelationScope` set digest | `e220b123…` | `5b8ec3e8…` |
+| `observedOutsideRelationScope` | `b1ebb712…` | `395d05c5…` |
+| `unobserved` | `6d13fcec…` | `73ef549e…` |
+
+All three decision identities are new, because a decision is bound to the exact
+record it was reviewed against.
+
+**Three numbers held and the record still had to be re-authored, which is the
+point.** The ledger derives obligations from the exported TYPE structure, not
+from `ADOPTED_LANGUAGE_VERSION`, so 2050 could not move. The observed COUNT held
+at 427 because the movement is a swap: **61 v5-valued obligations became
+observed and the 61 v4-valued ones they supersede became unobserved** — 4 in
+relation scope, 57 outside, and **every** obligation that entered or left is a
+version value. Nothing else moved. *A count that holds is not evidence nothing
+moved; the bitmap and the three identities are.*
+
+**The row says the exemption "absorbs 107 obligations that are unobserved only
+because adoption has not happened". Measured: 61 of the 107, not all of them.**
+The other 46 sit on axes the first-party corpus instantiates at NO version —
+unobserved at v4 for that reason, unobserved at v5 for the same one. They are
+not adoption debt.
+
+And the 46 are not a rounding error, they are this packet's own thesis in the
+ledger's voice: **nine are `$.stateMachines[]` axes** — `.entity`,
+`.initialState`, `.schemaVersion`, `.stateField`, `.states[]`, and four on
+`.transitions[]` — plus `$.operations[].effect.transition`. Ten obligations that
+only a product state machine can observe, and the first of those arrives with
+`PUR-1`. The rest are predicate and filter nesting depths, quantity base units,
+storage evolution and promotion, and the surface renderer.
 
 ## `U5b`'s reader-vocabulary debt — checked, and RE-ROUTED
 
@@ -254,6 +286,53 @@ No purchasing entity, no module mount, no product state machine, no change to
 `ADOPTED_COMPILER_SEMANTIC_PROFILE_VERSION` (it stays
 `northstar.compiler-semantic/v1`), no edit to `apps/web/src/surface-contract.ts`.
 All five modules still declare `stateMachines: []`.
+
+## The deletion table
+
+Run on the committed tree, one mutation at a time, each restored before the
+next. **Every claim below is written from what died, not from what the mutation
+was meant to prove.**
+
+| # | Mutation | Reds | Dies at |
+|---|---|---|---|
+| P1 | `ADOPTED_*` reverted to v4, the six definitions stay v5 | 1 | `canonical-contracts-purity.test.ts:298` — the composed package's version follows ADOPTED |
+| P2 | the six definitions reverted to v4, `ADOPTED_*` stays v5 | 1 | `:298` |
+| P3 | **only `platform`** reverted to v4 | 1 | **`:307`** — the `platformModuleDefinition` assertion this packet added |
+| P4 | materialization gate `candidate >= introducedAt` → `=== introducedAt` | **0** | **survivor** |
+| P5 | `languageHasV2Features` drops `'v5'` | **13** | 9 unit + all 4 `adopted-language-shape` controls |
+| P6 | `languageUsesModuleProjectionShape` drops `'v5'` | **0** | **survivor** |
+| A3 | `selectAdoptedProfileVersion` returns the last readable member | 1 | `:258` — the constructed set whose adopted member is not its last |
+| A4 | the same selector falls back instead of throwing | 1 | `:263` — *Missing expected exception* |
+
+**Attribution, asked per check rather than per control.** P1, P2, P3, A3 and A4
+all red the SAME test name, which is precisely the *four names, three specimens*
+trap. Their line numbers are **298, 298, 307, 258, 263** — five mutations, four
+distinct assertions, and P1/P2 sharing one is correct: they are the two
+directions of a single pairing, and the pairing is what that line asserts. **P3
+settles the question it was run to answer:** the platform assertion is not
+decorative, it is the only thing in the tree that sees a platform-only
+regression, because platform is outside the composed package.
+
+**Two survivors, and both are reported rather than smoothed over.**
+
+- **P4.** Narrowing the materialization gate to an exact match — the *precise*
+  defect `5g3-sm-impl` fixed — reds nothing across `test:unit` and the full
+  `test:compiler`. It cannot: **v5 is the last supported version, so `>=` and
+  `===` are indistinguishable until a v6 exists.** The derived form is correct
+  and currently unobservable, and the assertions this packet added to
+  `normalization.test.ts` cannot discriminate it either. The only shape that
+  could is `selectAdoptedProfileVersion`'s — a predicate taking its ordered list
+  as an argument, exercised on a constructed one.
+- **P6.** Dropping the adopted version from `languageUsesModuleProjectionShape`
+  survives `test:unit`, the full `test:compiler` **and** `check:app-release`,
+  while its sibling P5 reds thirteen. Same shape, adjacent roles, opposite
+  coverage. Sample stated deliberately: `test:integration` and `test:postgres`
+  were not run against it, so the claim is *unobserved at this sample*, not
+  *uncovered*.
+
+P5 is why this table exists. It refuted what this record originally said about
+both sites — that neither could be observed going stale — and
+`version-predicate-derivation` was rewritten from the measurement.
 
 ## Gates
 
