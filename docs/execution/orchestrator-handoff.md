@@ -63,6 +63,20 @@ self-contained blocks — the writer has no context but the repository.
 
 ## 4. Where things stand right now
 
+> **STALE — DO NOT ACT ON THIS SECTION OR THE 2026-07-30 ADDENDUM BELOW.**
+> The lanes named here are G3-era and long finished. **Start at**
+> **[session-handoff-2026-08-08.md](session-handoff-2026-08-08.md)** — the live
+> entry point: current lanes, the goal and its blockers, orchestrator
+> behaviour, the errors this session made, and the traps waiting for you.
+> Then [current-plan.md](current-plan.md),
+> [purchasing-sales-v1-plan.md](purchasing-sales-v1-plan.md) and
+> [ui-ux-remaining.md](ui-ux-remaining.md).
+>
+> **This banner has been lost once already**, to two sessions pushing to
+> `main` concurrently. If it is missing again, the section below is still
+> stale — check the dates before believing it.
+
+
 | Lane | Packet | State |
 |---|---|---|
 | KERNEL | `4c` — packages adopt v3 | active; merged main, three bridges cleared |
