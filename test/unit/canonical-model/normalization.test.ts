@@ -14,6 +14,7 @@ import {
   LATEST_LANGUAGE_VERSION,
   LATEST_NORMALIZATION_PROFILE_VERSION,
   languageHasLegalEntityQueryScope,
+  languageHasMaterializedStateFields,
   languageHasV3Features,
   NORMALIZATION_PROFILE_VERSION,
   NORMALIZATION_PROFILE_VERSIONS,
@@ -131,21 +132,24 @@ test('v3 and v4 select their profiles, reject mixed nodes, and leave adoption ex
     NORMALIZATION_PROFILE_VERSIONS.v2,
   );
   // Newest-readable and compiled-at are deliberately apart while a version is
-  // cut and unadopted. LANG-ADOPT adopted v4 and they were briefly equal;
-  // `5g3-sm-impl` cut v5 for ADR-0050's materialized state field and did NOT
-  // adopt it, so they are apart again -- that is the normal cycle, not a
-  // collapse. This pair is the adoption ratchet: it must fail loudly on every
-  // cut and every adoption, so the artifact churn is absorbed deliberately
-  // rather than discovered.
+  // cut and unadopted, and EQUAL between an adoption and the next cut. Both
+  // states are normal; neither is a collapse. LANG-ADOPT adopted v4 and they
+  // were briefly equal; `5g3-sm-impl` cut v5 for ADR-0050's materialized state
+  // field without adopting it, which put them apart; `LANG-ADOPT-v5` adopted
+  // it, which puts them together again. This pair is the adoption ratchet: it
+  // must fail loudly on every cut and every adoption, so the artifact churn is
+  // absorbed deliberately rather than discovered. UPDATE it to the true new
+  // values; never relax it to a relation between the two constants, because
+  // "LATEST is at or after ADOPTED" holds in both states and observes neither.
   assert.equal(LATEST_LANGUAGE_VERSION, LANGUAGE_VERSIONS.v5);
   assert.equal(
     LATEST_NORMALIZATION_PROFILE_VERSION,
     NORMALIZATION_PROFILE_VERSIONS.v5,
   );
-  assert.equal(ADOPTED_LANGUAGE_VERSION, LANGUAGE_VERSIONS.v4);
+  assert.equal(ADOPTED_LANGUAGE_VERSION, LANGUAGE_VERSIONS.v5);
   assert.equal(
     ADOPTED_NORMALIZATION_PROFILE_VERSION,
-    NORMALIZATION_PROFILE_VERSIONS.v4,
+    NORMALIZATION_PROFILE_VERSIONS.v5,
   );
   assert.deepEqual(SUPPORTED_LANGUAGE_VERSIONS, [
     LANGUAGE_VERSIONS.experimentalV0,
@@ -163,13 +167,30 @@ test('v3 and v4 select their profiles, reject mixed nodes, and leave adoption ex
     NORMALIZATION_PROFILE_VERSIONS.v4,
     NORMALIZATION_PROFILE_VERSIONS.v5,
   ]);
-  // Feature levels are cumulative in both directions that matter: v4 answers
-  // yes to every v3 question, and only v4 answers yes to the operand question.
+  // Feature levels are cumulative in both directions that matter: a later
+  // version answers yes to every earlier question, and the version below the
+  // one that introduced a feature answers no. Each predicate is asserted at
+  // its introducing version, at the version above it, and at the version
+  // below -- the third is what fails when a cut drops a released rule.
   assert.equal(languageHasV3Features(LANGUAGE_VERSIONS.v3), true);
   assert.equal(languageHasV3Features(LANGUAGE_VERSIONS.v4), true);
+  assert.equal(languageHasV3Features(LANGUAGE_VERSIONS.v5), true);
   assert.equal(languageHasV3Features(LANGUAGE_VERSION), false);
   assert.equal(languageHasLegalEntityQueryScope(LANGUAGE_VERSIONS.v4), true);
+  assert.equal(languageHasLegalEntityQueryScope(LANGUAGE_VERSIONS.v5), true);
   assert.equal(languageHasLegalEntityQueryScope(LANGUAGE_VERSIONS.v3), false);
+  // v5's own feature predicate. `5g3-sm-impl` added it and no test read it:
+  // its only readers were four production call sites, so the version this
+  // packet adopts had its distinguishing predicate unasserted.
+  assert.equal(languageHasMaterializedStateFields(LANGUAGE_VERSIONS.v5), true);
+  assert.equal(languageHasMaterializedStateFields(LANGUAGE_VERSIONS.v4), false);
+  assert.equal(languageHasMaterializedStateFields(LANGUAGE_VERSIONS.v3), false);
+  // The adopted version answers yes, which is the fact the rest of this packet
+  // depends on and the one a future adoption must re-observe.
+  assert.equal(
+    languageHasMaterializedStateFields(ADOPTED_LANGUAGE_VERSION),
+    true,
+  );
 
   const authored = parseAuthoredApplicationPackageJson(
     readFileSync(fixturePath),

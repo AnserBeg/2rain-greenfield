@@ -68,7 +68,17 @@ export function registerInventoryContractCases(
   register(
     'entity-owned Inventory reads declare one legal-entity operand while the master stays tenant-shared',
     () => {
-      const compiled = mustCompileModule(inventoryModuleDefinition());
+      const authoredModule = inventoryModuleDefinition();
+      // `5g3-sm-impl` finding 4: `normalize.ts` MINTS this parameter type, and
+      // minted it at a hand-written 'v4'. The emitter now derives from
+      // `authored.languageVersion`; this assertion did not, so it went on
+      // pinning the literal the emitter had stopped producing. The fact under
+      // test is that the minted node carries ITS OWN PACKAGE's version -- an
+      // emitter naming any other version is `CANON_VERSION_MIXED` -- so the
+      // package under test is the source, not a constant and not a literal.
+      const mintedNodeVersion = (authoredModule as { languageVersion: string })
+        .languageVersion;
+      const compiled = mustCompileModule(authoredModule);
       const queries = projectionPayload<{
         queries: Array<{
           legalEntityScope?: {
@@ -107,7 +117,7 @@ export function registerInventoryContractCases(
             parameterId: query.legalEntityScope?.operand.parameterId,
             parameterType: {
               kind: 'legalEntityReferenceParameterType',
-              schemaVersion: 'v4',
+              schemaVersion: mintedNodeVersion,
             },
           },
         ]);
@@ -134,7 +144,7 @@ export function registerInventoryContractCases(
             parameterId: `${INVENTORY_NAMESPACE}:parameter.on_hand_legal_entity_id`,
             parameterType: {
               kind: 'legalEntityReferenceParameterType',
-              schemaVersion: 'v4',
+              schemaVersion: mintedNodeVersion,
             },
           },
         ],

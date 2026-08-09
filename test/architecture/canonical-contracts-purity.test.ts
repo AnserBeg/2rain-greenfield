@@ -8,13 +8,18 @@ import {
   ADOPTED_LANGUAGE_VERSION,
   ADOPTED_NORMALIZATION_PROFILE_VERSION,
   LATEST_LANGUAGE_VERSION,
+  SUPPORTED_LANGUAGE_VERSIONS,
   normalizeApplicationPackage,
 } from '../../packages/canonical-model/src/index.js';
 import {
+  ADOPTED_COMPILER_SEMANTIC_PROFILE_VERSION,
   DEFAULT_COMPILER_PROFILE,
   MODULE_COMPILER_PROFILE,
+  SUPPORTED_COMPILER_SEMANTIC_PROFILE_VERSIONS,
+  selectAdoptedProfileVersion,
 } from '../../packages/compiler/src/index.js';
 import { composedApplicationDefinition } from '../../packages/domain/src/app/builder.js';
+import { platformModuleDefinition } from '../../packages/domain/src/platform/definition.js';
 
 const contractsRoot = join(process.cwd(), 'packages/canonical-model/src');
 
@@ -215,18 +220,92 @@ test('the newest readable version is reported, never selected', () => {
     `a cut-but-unadopted version must not be selected:\n${selections.join('\n')}`,
   );
 
-  // The behavioural half. While a version is cut and unadopted the two must
-  // differ, and every default must follow ADOPTED across that gap.
-  assert.notEqual(LATEST_LANGUAGE_VERSION, ADOPTED_LANGUAGE_VERSION);
-  assert.equal(DEFAULT_COMPILER_PROFILE.languageVersion, ADOPTED_LANGUAGE_VERSION);
-  assert.equal(MODULE_COMPILER_PROFILE.languageVersion, ADOPTED_LANGUAGE_VERSION);
+  // The behavioural half: every default follows ADOPTED.
+  assert.equal(
+    DEFAULT_COMPILER_PROFILE.languageVersion,
+    ADOPTED_LANGUAGE_VERSION,
+  );
+  assert.equal(
+    MODULE_COMPILER_PROFILE.languageVersion,
+    ADOPTED_LANGUAGE_VERSION,
+  );
   assert.equal(
     DEFAULT_COMPILER_PROFILE.normalizationProfileVersion,
     ADOPTED_NORMALIZATION_PROFILE_VERSION,
   );
+
+  // THE DISCRIMINATING HALF, and it must not be an assertion about today's
+  // constants -- replaced by `LANG-ADOPT-v5`.
+  //
+  // This read `assert.notEqual(LATEST_LANGUAGE_VERSION, ADOPTED_LANGUAGE_VERSION)`,
+  // which is a PREMISE: it says a gap exists for the scan above to protect. The
+  // premise is false between an adoption and the next cut, and that is a normal
+  // state, not a defect -- `LANG-ADOPT-v5` closed the gap and this line went red
+  // while nothing it guards had moved. Worse than the red: once the two
+  // constants are equal, the assertions above and the scan above them all pass
+  // under the wrong rule, because "take the adopted version" and "take the
+  // latest readable version" are indistinguishable when adoption IS the newest
+  // cut. Deleting the premise would leave a control that cannot fail for the
+  // reason it exists.
+  //
+  // `compiler.ts` already isolated the selection rule for exactly this reason,
+  // in its own words: "asserting it against live constants alone proves
+  // nothing." So the rule is exercised on a CONSTRUCTED readable set whose
+  // adopted member is deliberately NOT its last, where the two rules disagree
+  // and the wrong one is observable -- and it stays observable no matter what
+  // today's constants happen to be.
+  const readable = ['a', 'b', 'c'] as const;
+  assert.equal(selectAdoptedProfileVersion(readable, 'b'), 'b');
+  assert.notEqual(selectAdoptedProfileVersion(readable, 'b'), readable.at(-1));
+  // Fails closed rather than substituting a default: an adopted version outside
+  // the readable set is a programming error, and silently falling back to the
+  // newest readable one is the defect this whole test exists to catch.
+  assert.throws(
+    () => selectAdoptedProfileVersion(readable, 'd' as 'a'),
+    /adopted version d is not a member of the readable set/u,
+  );
+  // And both live axes go THROUGH that rule rather than inlining it. Asserted
+  // as agreement with the profile, which holds in both the gap and the no-gap
+  // state.
+  assert.equal(
+    selectAdoptedProfileVersion(
+      SUPPORTED_LANGUAGE_VERSIONS,
+      ADOPTED_LANGUAGE_VERSION,
+    ),
+    DEFAULT_COMPILER_PROFILE.languageVersion,
+  );
+  assert.equal(
+    selectAdoptedProfileVersion(
+      SUPPORTED_COMPILER_SEMANTIC_PROFILE_VERSIONS,
+      ADOPTED_COMPILER_SEMANTIC_PROFILE_VERSION,
+    ),
+    DEFAULT_COMPILER_PROFILE.compilerSemanticProfileVersion,
+  );
+  // LATEST is still readable, and still not required to be adopted. Stated as
+  // ordering and position rather than equality or inequality, because both of
+  // those describe a moment in the cut/adopt cycle rather than the invariant.
+  assert.ok(
+    SUPPORTED_LANGUAGE_VERSIONS.indexOf(LATEST_LANGUAGE_VERSION) >=
+      SUPPORTED_LANGUAGE_VERSIONS.indexOf(ADOPTED_LANGUAGE_VERSION),
+    'the adopted version can never be newer than the newest readable one',
+  );
+  assert.equal(
+    SUPPORTED_LANGUAGE_VERSIONS.at(-1),
+    LATEST_LANGUAGE_VERSION,
+    'LATEST must be the last member of the supported list, or "newest readable" names nothing',
+  );
+
   assert.equal(
     normalizeApplicationPackage(composedApplicationDefinition())
       .languageVersion,
+    ADOPTED_LANGUAGE_VERSION,
+  );
+  // Platform is a first-party module OUTSIDE the composed package, so the
+  // assertion above cannot see it, and nothing else asserted its version at
+  // all. Node-version purity is what forces every module to move together; a
+  // guard covering four of the five modules does not observe that rule.
+  assert.equal(
+    normalizeApplicationPackage(platformModuleDefinition()).languageVersion,
     ADOPTED_LANGUAGE_VERSION,
   );
 });

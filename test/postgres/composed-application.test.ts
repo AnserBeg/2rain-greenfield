@@ -3825,34 +3825,14 @@ async function assertExactPartitionEvidence(
   );
 }
 
-/**
- * The last entry whose normalized definition differs from the head's -- the
- * previous SOURCE release, which is not the same as the previous lineage
- * position.
- *
- * ADR-0047 §4: the lineage also advances when the OUTPUT CONTRACT changes, so
- * adopting a compiler-semantic profile mints an entry that is byte-identical
- * in source to its predecessor and differs only in release root. `at(-2)` then
- * selects that definition-equal sibling instead of an actually-earlier
- * authored release. Callers that mean "the release before this source" say so
- * here; `at(-2)` keeps meaning "the previous entry" where that is intended.
- */
-function previousSourceRelease(
-  compiled: ReturnType<typeof parseCompiledApplication>,
-):
-  | ReturnType<typeof parseCompiledApplication>['applications'][number]
-  | undefined {
-  const headBytes = compiled.application.normalizedDefinitionBytes;
-  return compiled.applications
-    .slice(0, -1)
-    .findLast(
-      (release) =>
-        !equalNormalizedDefinition(
-          release.normalizedDefinitionBytes,
-          headBytes,
-        ),
-    );
-}
+// DELETED by `LANG-ADOPT-v5`: `previousSourceRelease`, whose only caller now
+// pins its pair by release root instead.
+//
+// It solved a real problem -- `at(-2)` selects the definition-equal sibling that
+// an ADR-0047 §4 profile adoption mints -- but it solved it by making the answer
+// depend on where the head happens to be, which is the same defect one step out.
+// Both spellings answer "which entry is near the end"; neither answers "which
+// entry carries the change this control is about".
 
 function equalNormalizedDefinition(
   left: Uint8Array,
@@ -3881,14 +3861,113 @@ async function assertAttributedSearchCapabilityScenarioDelta(
   compiledApplication: unknown,
 ): Promise<void> {
   const compiled = parseCompiledApplication(compiledApplication);
-  // This delta is attributed to an authored-source change, so it must read the
-  // last entry whose definition actually differs -- see previousSourceRelease.
-  const previousRelease = previousSourceRelease(compiled);
-  assert.ok(previousRelease);
-  const previous = releaseVerificationBinding(previousRelease.compiled);
-  const current = releaseVerificationBinding(compiled.application.compiled);
+  // PINNED BY IDENTITY, NOT BY POSITION -- corrected by `LANG-ADOPT-v5`.
+  //
+  // This read `previousSourceRelease(compiled)` against the lineage HEAD, which
+  // named the right pair only while the search-capability entry WAS the head.
+  // The delta it asserts is a historical fact about one recorded transition;
+  // "the head and the last entry before it that differs" is a description of
+  // where that transition happened to sit, and it silently re-points at a
+  // different pair the moment any authored change lands. `LANG-ADOPT-v5`
+  // appended one and this read 163 where it expected 168, while the transition
+  // it exists to guard had not moved at all.
+  //
+  // It is the second control in this repository found addressing lineage
+  // entries by position; the other is "consecutive lineage entries may share a
+  // normalized definition" in `compiler-semantic-profile.test.ts`.
+  const SEARCH_CAPABILITY_SOURCE_ROOT =
+    '4b254f50b2f558e96b98325467ae339a4bd6492d9691ccb464eb88d1b53f3bb1';
+  const SEARCH_CAPABILITY_TARGET_ROOT =
+    'd726ad313780bc595c97a0ecb30c9eaec84984e4a19fa28c2e8f5361e7edf12e';
+  // The ADR-0047 §4 entry minted by adopting compiler-semantic profile v1: its
+  // normalized definition is byte-identical to the target above and only its
+  // release root differs.
+  const PROFILE_ONLY_SUCCESSOR_ROOT =
+    'b0177bf482a73235eb1308eaf17bde3b0a3f4b23d2a9c9c59f7af23d1c9a2bbb';
+  const releaseByRoot = (releaseRoot: string) => {
+    const release = compiled.applications.find(
+      (candidate) => candidate.compiled.releaseRoot === releaseRoot,
+    );
+    assert.ok(
+      release,
+      `the recorded lineage no longer contains ${releaseRoot}; history is append-only, so a missing root is a rewrite rather than a stale pin`,
+    );
+    return release;
+  };
+  const previous = releaseVerificationBinding(
+    releaseByRoot(SEARCH_CAPABILITY_SOURCE_ROOT).compiled,
+  );
+  const current = releaseVerificationBinding(
+    releaseByRoot(SEARCH_CAPABILITY_TARGET_ROOT).compiled,
+  );
   assert.equal(previous.plan.scenarios.length, 168);
   assert.equal(current.plan.scenarios.length, 163);
+
+  // The pinned pair must still be CONSECUTIVE, or "this transition removed five
+  // scenarios" is a claim about a span rather than an edge and some later entry
+  // could be doing the removing.
+  const rootOrder = compiled.applications.map(
+    (release) => release.compiled.releaseRoot,
+  );
+  assert.equal(
+    rootOrder.indexOf(SEARCH_CAPABILITY_TARGET_ROOT),
+    rootOrder.indexOf(SEARCH_CAPABILITY_SOURCE_ROOT) + 1,
+  );
+
+  // And the head is checked separately, which is what the position-addressed
+  // version was conflating. Nothing after the pinned pair changed an entity, a
+  // query or an operation, so no LATER entry may change what the plan verifies.
+  //
+  // WRITTEN FROM THE MEASUREMENT, and the first attempt at this assertion was
+  // wrong. Asserting the head's scenario IDs equal the pinned target's failed:
+  // adoption holds the count at 163 and holds the verified content identical,
+  // while RE-IDENTIFYING a large fraction of the scenarios, because a scenario
+  // id is a fingerprint over version-stamped nodes. So the content is compared
+  // by what each scenario verifies, and the identity churn is asserted as the
+  // separate fact it is.
+  const headBinding = releaseVerificationBinding(compiled.application.compiled);
+  const verifiedContent = (
+    scenarios: readonly { entityId: string; kind: string; subjectId: string }[],
+  ) =>
+    scenarios
+      .map(
+        (scenario) =>
+          `${scenario.kind}|${scenario.entityId}|${scenario.subjectId}`,
+      )
+      .toSorted();
+  assert.deepEqual(
+    verifiedContent(headBinding.plan.scenarios),
+    verifiedContent(current.plan.scenarios),
+    'no entry after the pinned pair changes what the release verifies',
+  );
+
+  // A language adoption re-identifies scenarios; a compiler-semantic profile
+  // adoption does not. Both halves are needed and neither is decorative: the
+  // first stops the content assertion above being satisfied by a plan that
+  // never moved at all, and the second shows the churn is attributable to the
+  // LANGUAGE axis rather than to lineage growth in general. Downstream, this is
+  // why durable verification evidence keyed by scenario id only partially
+  // survives a language adoption -- load-bearing for `PUR-1`.
+  const idsOf = (
+    scenarios: readonly { scenarioId: string }[],
+  ): ReadonlySet<string> =>
+    new Set(scenarios.map((scenario) => scenario.scenarioId));
+  const headIds = idsOf(headBinding.plan.scenarios);
+  const targetIds = idsOf(current.plan.scenarios);
+  assert.ok(
+    [...targetIds].some((scenarioId) => !headIds.has(scenarioId)),
+    'a language adoption must re-identify scenarios whose fingerprint covers a version-stamped node',
+  );
+  const profileEdgeIds = idsOf(
+    releaseVerificationBinding(
+      releaseByRoot(PROFILE_ONLY_SUCCESSOR_ROOT).compiled,
+    ).plan.scenarios,
+  );
+  assert.deepEqual(
+    [...targetIds].filter((scenarioId) => !profileEdgeIds.has(scenarioId)),
+    [],
+    'a compiler-semantic profile adoption re-identifies nothing; only the source axis does',
+  );
 
   const changes = [
     {
@@ -3930,7 +4009,7 @@ async function assertAttributedSearchCapabilityScenarioDelta(
   );
 
   const derivePrevious = verificationScenarioDeriver(
-    previousRelease.compiled,
+    releaseByRoot(SEARCH_CAPABILITY_SOURCE_ROOT).compiled,
     previous,
   );
   assert.ok(derivePrevious);

@@ -222,19 +222,46 @@ test('the compiler-semantic profile discriminates the release root', () => {
 // when the authored source does, so two consecutive entries may have
 // byte-identical normalized definitions and different release roots. Observed
 // on the recorded artifact rather than declared.
+//
+// ADDRESSED BY THE FACT, NOT BY POSITION -- corrected by `LANG-ADOPT-v5`.
+// This read `at(-1)` and `at(-2)`, which named the pair only for as long as the
+// profile-adoption entry stayed the head. It was the head for exactly one
+// packet. The next entry appended for ANY reason silently re-pointed the
+// control at a pair that has no reason to share a definition, and the control
+// then fails while nothing it exists to protect has moved -- which is what an
+// authored-source adoption did to it here. A control whose subject moves when
+// the tree grows is not observing the fact it names.
 test('consecutive lineage entries may share a normalized definition', () => {
   const lineage = readLineage();
-  const head = lineage.applications.at(-1)!;
-  const predecessor = lineage.applications.at(-2)!;
-
+  const sharedPairs = lineage.applications.flatMap((entry, index) => {
+    const predecessor = lineage.applications[index - 1];
+    return predecessor &&
+      entry.normalizedDefinitionBytesBase64 ===
+        predecessor.normalizedDefinitionBytesBase64
+      ? [{ predecessor, successor: entry }]
+      : [];
+  });
+  // Non-vacuity: an empty lineage, or one where no pair shares a definition,
+  // would satisfy every assertion below by iterating nothing.
   assert.equal(
-    head.normalizedDefinitionBytesBase64,
-    predecessor.normalizedDefinitionBytesBase64,
+    sharedPairs.length,
+    1,
+    'exactly one recorded pair shares a normalized definition; a second means a lineage entry was minted with no reason recorded',
   );
-  assert.notEqual(head.releaseRoot, predecessor.releaseRoot);
-  assert.equal(
-    head.attestation.compilerSemanticProfileVersion,
-    ADOPTED_COMPILER_SEMANTIC_PROFILE_VERSION,
+  const { predecessor, successor } = sharedPairs[0]!;
+
+  assert.notEqual(successor.releaseRoot, predecessor.releaseRoot);
+  // The axis that moved across this pair is the compiler-semantic profile, and
+  // it moved FORWARD in the supported order. Asserting the two recorded
+  // versions differ would also pass if history were rewritten backwards.
+  assert.ok(
+    SUPPORTED_COMPILER_SEMANTIC_PROFILE_VERSIONS.indexOf(
+      successor.attestation.compilerSemanticProfileVersion,
+    ) >
+      SUPPORTED_COMPILER_SEMANTIC_PROFILE_VERSIONS.indexOf(
+        predecessor.attestation.compilerSemanticProfileVersion,
+      ),
+    'the shared-definition pair must advance along the compiler-semantic axis',
   );
   assert.equal(
     predecessor.attestation.compilerSemanticProfileVersion,
@@ -246,6 +273,14 @@ test('consecutive lineage entries may share a normalized definition', () => {
   assert.equal(
     predecessor.releaseManifest.compilerSemanticProfileVersion,
     COMPILER_SEMANTIC_PROFILE_VERSION,
+  );
+  // The HEAD is a separate claim from the pair above, and it is the one that
+  // was silently riding on the pair being at the end of the lineage: every
+  // freshly minted entry compiles at the ADOPTED profile, whatever position it
+  // lands in.
+  assert.equal(
+    lineage.applications.at(-1)!.attestation.compilerSemanticProfileVersion,
+    ADOPTED_COMPILER_SEMANTIC_PROFILE_VERSION,
   );
 });
 

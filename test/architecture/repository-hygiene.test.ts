@@ -42,6 +42,7 @@ const suiteDefinitions = [
     discoveryPattern: 'test/compiler/**/*.test.ts',
     excludedFiles: ['test/compiler/performance-budget.test.ts'],
     expectedFiles: [
+      'test/compiler/adopted-language-shape.test.ts',
       'test/compiler/compiler-semantic-profile.test.ts',
       'test/compiler/determinism.test.ts',
       'test/compiler/disclosure-tier-projection.test.ts',
