@@ -573,6 +573,7 @@ const forgedReferencePositions = [
       catalog.operations[0]!.effect.entity = reference;
     },
     payload: () => structuredClone(operationCatalogWith(operationId)),
+    read: (catalog: ForgeableCatalog) => catalog.operations[0]!.effect.entity,
     request: () => operationRequest,
     version: 'v0-experimental',
   },
@@ -590,6 +591,8 @@ const forgedReferencePositions = [
           queryId,
         ),
       ),
+    read: (catalog: ForgeableCatalog) =>
+      catalog.operations[0]!.effect.capability,
     request: () => operationRequest,
     version: 'v4',
   },
@@ -600,6 +603,7 @@ const forgedReferencePositions = [
       catalog.operations[0]!.effect.entity = reference;
     },
     payload: () => structuredClone(transitionOperationCatalogWith(operationId)),
+    read: (catalog: ForgeableCatalog) => catalog.operations[0]!.effect.entity,
     request: () => operationRequest,
     version: 'v5',
   },
@@ -610,6 +614,8 @@ const forgedReferencePositions = [
       catalog.operations[0]!.effect.transition = reference;
     },
     payload: () => structuredClone(transitionOperationCatalogWith(operationId)),
+    read: (catalog: ForgeableCatalog) =>
+      catalog.operations[0]!.effect.transition,
     request: () => operationRequest,
     version: 'v5',
   },
@@ -620,50 +626,48 @@ type ForgeableCatalog = {
 };
 
 /**
+ * Version MEMBERSHIP, isolated — and deliberately NOT a per-position table.
+ *
+ * The obvious specimen, a reference at an invented version, is refused by the
+ * equality check too: an invented version cannot equal a real effect's. So
+ * isolating membership means moving the EFFECT's version and its references
+ * together, and that mutation is the same catalog whichever reference you name.
+ * A four-row table over it would have been four labels over three specimens,
+ * with both transition rows building an identical payload — a control that
+ * cannot tell one transition call site from the other.
+ *
+ * **Per-call-site routing is proven by `kind` and equality**, which install at
+ * four genuinely distinct positions and so already establish that all four
+ * sites reach the shared parser. This check does not need its own table once
+ * that is established, and one honest mutation is worth more than a column
+ * whose fourth entry is a duplicate.
+ */
+test('an effect at a version the language never had is refused', async () => {
+  const catalog = structuredClone(
+    transitionOperationCatalogWith(operationId),
+  ) as unknown as ForgeableCatalog;
+  const effect = catalog.operations[0]!.effect;
+  effect.schemaVersion = 'invented-version';
+  for (const key of ['entity', 'transition']) {
+    (effect[key] as Record<string, unknown>).schemaVersion = 'invented-version';
+  }
+  const fixture = createFixture({
+    operationPayload: catalog as unknown as ImmutableJsonValue,
+  });
+  await assert.rejects(
+    fixture.operationApi.handle(authenticationInput, operationRequest),
+    MalformedPinnedOperationCatalogError,
+  );
+  assert.equal(fixture.policy.authorizationCalls.length, 1);
+});
+
+/**
  * The admission twin for the forgery table below, and the reason it exists is
  * the table's own history: a control whose specimen is refused for an unrelated
  * reason proves nothing, and reading the failure text cannot recover the
  * attribution. If an UNFORGED catalog at some position is already rejected as
  * malformed, then all three forgeries at that position are decoration.
  */
-/**
- * Version MEMBERSHIP, isolated.
- *
- * The obvious specimen -- a reference at an invented version -- is refused by
- * the equality check too, because an invented version cannot equal a real
- * effect's. Deleting membership alone therefore left the whole table green: a
- * confound of exactly the kind this control exists to avoid, found by asking
- * the generative question of each check rather than of the control as a whole.
- *
- * So this moves the EFFECT's version and the reference's together. They agree,
- * equality is satisfied, and membership is the only thing left that can refuse
- * a version the language never had.
- */
-test('an effect at a version the language never had is refused', async (t) => {
-  for (const position of forgedReferencePositions) {
-    await t.test(position.arm, async () => {
-      const catalog = position.payload() as unknown as ForgeableCatalog;
-      const effect = catalog.operations[0]!.effect;
-      effect.schemaVersion = 'invented-version';
-      for (const key of ['entity', 'capability', 'transition']) {
-        const reference = effect[key];
-        if (reference && typeof reference === 'object') {
-          (reference as Record<string, unknown>).schemaVersion =
-            'invented-version';
-        }
-      }
-      const fixture = createFixture({
-        operationPayload: catalog as unknown as ImmutableJsonValue,
-      });
-      await assert.rejects(
-        fixture.operationApi.handle(authenticationInput, position.request()),
-        MalformedPinnedOperationCatalogError,
-      );
-      assert.equal(fixture.policy.authorizationCalls.length, 1);
-    });
-  }
-});
-
 test('every forgery position starts from a catalog the parser admits', async (t) => {
   for (const position of forgedReferencePositions) {
     await t.test(position.arm, async () => {
@@ -687,44 +691,39 @@ test('every forgery position starts from a catalog the parser admits', async (t)
 
 test('a forged canonical reference never reaches the executor, at every position', async (t) => {
   for (const position of forgedReferencePositions) {
-    for (const [label, reference] of [
-      // Only `kind` is wrong. The version is this effect's own, so deleting the
-      // production kind check is the only way to make this specimen pass.
-      [
-        'kind names a different construct',
-        {
-          kind: 'queryReference',
-          schemaVersion: position.version,
-          targetId: 'northstar.bootstrap:entity.item',
-        },
-      ],
-      // Only the version is wrong, and wrong by never having existed. NOTE this
-      // is ALSO caught by the equality check, since it cannot equal a real
-      // effect version -- the membership case that isolates membership is
-      // below, where the effect itself is moved.
+    // Each specimen is the position's OWN valid reference with exactly one
+    // property replaced. Hardcoding an address instead changed two things at
+    // once for the capability and transition positions, and since everything
+    // downstream resolves from `targetId`, a red could then be sustained by the
+    // wrong address after the nominated check was deleted. The admission twin
+    // cannot catch that -- it inspects the payload before the forgery is
+    // installed, so it never sees the substituted address.
+    const valid = position.read(
+      position.payload() as unknown as ForgeableCatalog,
+    ) as Record<string, unknown>;
+    for (const [label, forged] of [
+      // Only `kind` differs. Its version is this effect's own and its target is
+      // this position's own.
+      ['kind names a different construct', { ...valid, kind: 'queryReference' }],
+      // Only the version differs, and by never having existed.
       [
         'version was never in the language',
-        {
-          kind: position.expectedKind,
-          schemaVersion: 'invented-version',
-          targetId: 'northstar.bootstrap:entity.item',
-        },
+        { ...valid, schemaVersion: 'invented-version' },
       ],
-      // Only the version is wrong, and wrong by disagreeing with its effect
-      // while being a real language version -- the case membership alone misses.
+      // Only the version differs, and by disagreeing with its effect while
+      // being a real language version -- the case membership alone misses.
       [
         'version is admitted but disagrees with its effect',
         {
-          kind: position.expectedKind,
+          ...valid,
           schemaVersion:
             position.version === 'v0-experimental' ? 'v4' : 'v0-experimental',
-          targetId: 'northstar.bootstrap:entity.item',
         },
       ],
     ] as const) {
       await t.test(`${position.arm}: ${label}`, async () => {
         const catalog = position.payload() as unknown as ForgeableCatalog;
-        position.install(catalog, reference as ImmutableJsonValue);
+        position.install(catalog, forged as unknown as ImmutableJsonValue);
         const fixture = createFixture({
           operationPayload: catalog as unknown as ImmutableJsonValue,
         });
