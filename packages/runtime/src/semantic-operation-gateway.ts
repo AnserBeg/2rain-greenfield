@@ -6,6 +6,7 @@ import {
 } from 'node:crypto';
 
 import {
+  SUPPORTED_LANGUAGE_VERSIONS,
   admitPredicateForExecution,
   inspectPredicateForExecution,
   type PredicateKernelReceipt,
@@ -1023,6 +1024,53 @@ function parentGuardsFromCatalog(
  * `COMPILER_TRANSITION_EFFECT_UNSUPPORTED` refuses the only known way to build
  * such a release, at compile time, before any of it is persisted.
  */
+/**
+ * ONE parser for every canonical reference the pinned catalog carries.
+ *
+ * Three arms of `assertOperationDefinition` each grew their own shallow copy of
+ * this -- `assertExactKeys` plus a `targetId` check -- and all three admitted a
+ * reference whose `kind` was for something else entirely: an `effect.entity`
+ * declaring `fieldReference`, an `effect.transition` declaring `queryReference`,
+ * either at an invented `schemaVersion`. Nothing downstream noticed, because the
+ * interpreter resolves from `targetId` and never consults the other two fields.
+ * A fence that reads only the field it later uses is not checking the artifact,
+ * it is trusting it.
+ *
+ * `expectedKind` is required rather than inferred, and the node version must be
+ * an admitted one AND equal to the effect that encloses it -- node-version
+ * purity is a property of the artifact, so a reference disagreeing with its own
+ * effect is a reference the compiler could not have emitted.
+ */
+function assertCanonicalReference(
+  value: unknown,
+  expectedKind: string,
+  effectSchemaVersion: string,
+  path: string,
+  invalid: (message: string) => Error,
+): asserts value is {
+  readonly kind: string;
+  readonly schemaVersion: string;
+  readonly targetId: string;
+} {
+  if (!isRecord(value)) {
+    throw invalid(`${path} must be an object`);
+  }
+  assertExactKeys(value, ['kind', 'schemaVersion', 'targetId'], invalid);
+  assertCanonicalId(value.targetId, `${path}.targetId`, invalid);
+  if (value.kind !== expectedKind) {
+    throw invalid(`${path}.kind must be ${expectedKind}`);
+  }
+  if (
+    typeof value.schemaVersion !== 'string' ||
+    !(SUPPORTED_LANGUAGE_VERSIONS as readonly string[]).includes(
+      value.schemaVersion,
+    ) ||
+    value.schemaVersion !== effectSchemaVersion
+  ) {
+    throw invalid(`${path}.schemaVersion must match its effect`);
+  }
+}
+
 function assertOperationDefinition(
   value: unknown,
 ): asserts value is RegisteredOperationDefinition {
@@ -1086,14 +1134,11 @@ function assertOperationDefinition(
     ) {
       throw invalid('pinned capability operation effect is unsupported');
     }
-    assertExactKeys(
+    assertCanonicalReference(
       value.effect.capability,
-      ['kind', 'schemaVersion', 'targetId'],
-      invalid,
-    );
-    assertCanonicalId(
-      value.effect.capability.targetId,
-      'effect.capability.targetId',
+      'capabilityReference',
+      value.effect.schemaVersion,
+      'effect.capability',
       invalid,
     );
   } else if (value.effect.kind === 'transitionStateEffect') {
@@ -1130,16 +1175,20 @@ function assertOperationDefinition(
     ) {
       throw invalid('pinned transition operation effect is unsupported');
     }
-    for (const [reference, path] of [
-      [value.effect.entity, 'effect.entity'],
-      [value.effect.transition, 'effect.transition'],
-    ] as const) {
-      assertExactKeys(reference, ['kind', 'schemaVersion', 'targetId'], invalid);
-      assertCanonicalId(reference.targetId, `${path}.targetId`, invalid);
-      if (typeof reference.schemaVersion !== 'string') {
-        throw invalid(`${path}.schemaVersion must be a string`);
-      }
-    }
+    assertCanonicalReference(
+      value.effect.entity,
+      'entityReference',
+      value.effect.schemaVersion,
+      'effect.entity',
+      invalid,
+    );
+    assertCanonicalReference(
+      value.effect.transition,
+      'transitionReference',
+      value.effect.schemaVersion,
+      'effect.transition',
+      invalid,
+    );
     assertCanonicalId(value.effect.stateFieldId, 'effect.stateFieldId', invalid);
     assertCanonicalId(value.effect.fromStateId, 'effect.fromStateId', invalid);
     assertCanonicalId(value.effect.toStateId, 'effect.toStateId', invalid);
@@ -1161,14 +1210,11 @@ function assertOperationDefinition(
     ) {
       throw invalid('pinned record operation effect is unsupported');
     }
-    assertExactKeys(
+    assertCanonicalReference(
       value.effect.entity,
-      ['kind', 'schemaVersion', 'targetId'],
-      invalid,
-    );
-    assertCanonicalId(
-      value.effect.entity.targetId,
-      'effect.entity.targetId',
+      'entityReference',
+      value.effect.schemaVersion,
+      'effect.entity',
       invalid,
     );
   }

@@ -547,6 +547,64 @@ test('wrong catalog kind, schema, and shape fail closed after a live policy call
   }
 });
 
+/**
+ * A canonical reference is more than a `targetId`. Three arms of the catalog
+ * parser each read only the field the interpreter later resolves from, so a
+ * reference declaring the WRONG KIND, or a version the language never had,
+ * travelled all the way to the executor. These assert it never gets there.
+ *
+ * Every case keeps a valid `targetId`, because that is the field the old checks
+ * looked at: if the refusal came from the id, these would prove nothing.
+ */
+test('a canonical reference with a forged kind or version never reaches the executor', async (t) => {
+  const forgedReferences: readonly (readonly [string, ImmutableJsonValue])[] = [
+    [
+      'kind names a different construct',
+      {
+        kind: 'fieldReference',
+        schemaVersion: 'v0-experimental',
+        targetId: 'northstar.bootstrap:entity.item',
+      },
+    ],
+    [
+      'version was never in the language',
+      {
+        kind: 'entityReference',
+        schemaVersion: 'invented-version',
+        targetId: 'northstar.bootstrap:entity.item',
+      },
+    ],
+    [
+      'version is admitted but disagrees with its effect',
+      {
+        kind: 'entityReference',
+        schemaVersion: 'v4',
+        targetId: 'northstar.bootstrap:entity.item',
+      },
+    ],
+  ];
+  for (const [label, reference] of forgedReferences) {
+    await t.test(label, async () => {
+      const catalog = structuredClone(
+        operationCatalogWith(operationId),
+      ) as unknown as {
+        operations: Array<{ effect: Record<string, unknown> }>;
+      };
+      catalog.operations[0]!.effect.entity = reference;
+      const fixture = createFixture({
+        operationPayload: catalog as unknown as ImmutableJsonValue,
+      });
+      await assert.rejects(
+        fixture.operationApi.handle(authenticationInput, operationRequest),
+        MalformedPinnedOperationCatalogError,
+      );
+      // The executor is never constructed for a malformed catalog, so a
+      // refusal that happened later than this would show up as an execution.
+      assert.equal(fixture.policy.authorizationCalls.length, 1);
+    });
+  }
+});
+
 test('unissued views fail before catalog access at each direct gateway boundary', async () => {
   let queryCatalogAccesses = 0;
   const forgedQueryView = Object.create(null);
