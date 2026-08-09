@@ -660,3 +660,21 @@ claim covers, or narrow the claim to the site exercised.**
 
 **Generative question:** *for each check this control is supposed to hold, delete
 that check alone — does the control still pass?*
+
+**Ask it of each CHECK, not of the control — sharpened 2026-08-08.** A lane applied
+this rule to its own rebuilt control and found a **third** confound neither the
+reviewer nor the orchestrator had named: deleting the version-*membership* check
+alone left all twelve cases green, because an invented version **cannot equal** a
+real effect version, so the version-*equality* check was refusing every membership
+specimen. Isolating membership required moving the enclosing effect's version and
+its references **together**, so equality is satisfied and membership is the only
+check left that can refuse.
+
+**Asked of the control, it passed while a third of it was decorative.** Per-check
+attribution is the measurement: `kind` 4 reds, equality 4 reds, membership 4 reds,
+one per position. **A control that cannot say which check refused each specimen is
+a control that will survive the deletion of one of them.**
+
+**And a forgery table owes its own admission twin:** every position's *unforged*
+specimen must be admitted. Without it, a position refused for an unrelated reason
+contributes purely decorative cases — the same defect one level up.
