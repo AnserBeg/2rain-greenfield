@@ -375,29 +375,30 @@ test(
 // a 50.30 MiB peak when that lineage held five application entries.
 //
 // Both figures are now stale and the timeout is the reason to say so. The
-// lineage holds NINE application entries, and this test drives three tenants:
-// two for the gateway-persistence subject, plus `-profile-edge`, which activates
-// a lineage truncated THROUGH the profile-only edge so ADR-0047 §6's
-// profile-only direction has a real edge to cross.
+// lineage holds NINE application entries, and this test drives TWO tenants,
+// both for the gateway-persistence subject.
 //
-// THE SPLIT PRESCRIBED BELOW HAS BEEN TAKEN ONCE, by `LANG-ADOPT-v5`. Adoption
-// made the artifact's head source-changing rather than a profile sibling, so
-// the two ADR-0047 §6 directions swapped which one could borrow the real head
-// and which needed a tenant of its own. Carrying both cost two fresh installs
-// and measured 266s against this bound, so the source-changing direction moved
-// out to its own test ("a source-changing rollback edge stays eligible while
-// its verification refuses by name") rather than the bound moving up.
+// THE SPLIT PRESCRIBED BELOW HAS BEEN TAKEN, by `LANG-ADOPT-v5`, and it took
+// two rounds because the first was measured standalone and the bound is
+// in-matrix. Adoption made the artifact's head source-changing rather than a
+// profile sibling, which swapped which ADR-0047 §6 rollback direction could
+// borrow the real head and which needed a served tenant of its own. Round one
+// moved the source-changing direction out and left three tenants here: 251.1s
+// standalone, 1.19x margin, and then a TIMEOUT at 300s in the matrix. Round two
+// moved the profile-only direction out as well. Both now live in
+// "ADR-0047 §6 refuses a profile-only rollback edge by name and leaves a
+// source-changing one eligible", and this test is back to the two tenants it
+// had before adoption.
 //
-// Measured against the 300s bound after that split: 251.1s standalone on a
-// quiet machine (1.19x margin), against 117.6s standalone before adoption. The
-// prior in-matrix figure was 210.9s at a8c9d07 (1.42x); this workload is
-// load-dependent, so the standalone figure here is NOT the matrix figure and
-// the matrix run recorded in the packet governs. Quoting one number without its
-// conditions is how the 54.6s figure above went stale.
+// THE LESSON IS THE UNIT, not the number: a standalone measurement is not
+// evidence about this bound. The prior in-matrix figure was 210.9s at a8c9d07
+// against 117.6s standalone — a 1.79x load factor — and 251.1s standalone
+// against that factor was never going to fit. Quote the in-matrix figure or
+// quote nothing; that is also how the 54.6s figure above went stale.
 //
-// If this reds on timing again, split the `-profile-edge` tenant out the same
-// way. It is NOT to raise the bound: that widens what starvation is permitted
-// to look like, which is the standing prohibition this repository carries.
+// If this reds on timing again, split again. It is NOT to raise the bound:
+// that widens what starvation is permitted to look like, which is the standing
+// prohibition this repository carries.
 test(
   'composed product activates through the kernel and persists tenant-scoped gateway data',
   { timeout: 300_000 },
@@ -558,7 +559,7 @@ test(
           const isolated = await listParty(tenantB);
           assert.equal(isolated.listCoverage?.totalCount, 0);
           assert.deepEqual(isolated.records, []);
-          tenantB = await assertIntermediateBecomesServingOnlyAfterVerification(
+          tenantB = await reopenServingRuntime(
             tenantB,
             compiledApplication,
             databaseUrl,
@@ -2858,67 +2859,23 @@ async function assertBoundedInstallMatchesFullReplaySchema(
   }
 }
 
-async function assertIntermediateBecomesServingOnlyAfterVerification(
+/**
+ * Reopen the tenant's runtime on the recorded lineage.
+ *
+ * This was `assertIntermediateBecomesServingOnlyAfterVerification` and carried
+ * BOTH ADR-0047 §6 rollback directions. `LANG-ADOPT-v5` moved them out: each
+ * needs its own served tenant, three fresh installs exceeded this test's 300 s
+ * bound in-matrix, and that test's standing instruction is to split rather than
+ * raise the bound. The intermediate-becomes-serving fact this name claimed is
+ * asserted by the caller, through `refusedIntermediateRoots`.
+ */
+async function reopenServingRuntime(
   runtime: ComposedApplicationRuntime,
   compiledApplication: unknown,
   databaseUrl: string,
   tenantSlug: string,
 ): Promise<ComposedApplicationRuntime> {
   await runtime.close();
-
-  // DIRECTION 1 -- the refusal FIRES on a profile-only edge. A serving head and
-  // its predecessor that share a normalized definition (ADR-0047 §4) share one
-  // package revision, so the revision graph has no edge to reverse. The target
-  // IS the immediate predecessor -- the index check passes and control reaches
-  // the authorization -- so this must NOT borrow
-  // ROLLBACK_TARGET_NOT_IMMEDIATE_PREDECESSOR (ADR-0047 §6).
-  //
-  // THE EDGE IS LOCATED, NOT ASSUMED TO BE AT THE END -- corrected by
-  // `LANG-ADOPT-v5`. This read `at(-2)` against the real head and asserted the
-  // pair shared a definition, which held only while the profile-adoption entry
-  // WAS the head. Its sibling below already knew that was fragile: direction 2
-  // manufactures a truncated lineage precisely because the head was a profile
-  // sibling. Direction 1 needed the mirror image and did not have it, so an
-  // authored-source adoption turned a real ADR-0047 §6 gate into a premise
-  // failure. The profile-only edge is still in the lineage; only its position
-  // moved.
-  const profileEdgeLineage = throughProfileSiblingHead(compiledApplication);
-  const profileEdge = parseCompiledApplication(profileEdgeLineage);
-  const target = profileEdge.applications.at(-2);
-  assert.ok(target);
-  assert.ok(
-    equalNormalizedDefinition(
-      target.normalizedDefinitionBytes,
-      profileEdge.application.normalizedDefinitionBytes,
-    ),
-    'this direction is only meaningful while the head is a profile sibling',
-  );
-  // The tenant must already serve that head for the rollback to be eligible at
-  // all, exactly as direction 2 records below.
-  const profileEdgeSlug = `${tenantSlug}-profile-edge`;
-  const profileEdgeRuntime = await createRuntime(
-    profileEdgeLineage,
-    databaseUrl,
-    profileEdgeSlug,
-  );
-  assert.equal(
-    profileEdgeRuntime.releaseRoot,
-    profileEdge.application.compiled.releaseRoot,
-  );
-  await profileEdgeRuntime.close();
-  await assert.rejects(
-    createRuntime(profileEdgeLineage, databaseUrl, profileEdgeSlug, {
-      kind: 'rollback',
-      targetReleaseRoot: target.compiled.releaseRoot,
-    }),
-    (error: unknown) => {
-      assert.ok(error instanceof ReleaseReverseTransitionRefusal);
-      assert.equal(error.code, 'ROLLBACK_ACROSS_PROFILE_ONLY_EDGE');
-      assert.match(error.message, /shares its package revision/u);
-      return true;
-    },
-    'ADR-0047 §6: a profile-only edge refuses by its own name, not as a wrong predecessor',
-  );
 
   return createRuntime(compiledApplication, databaseUrl, tenantSlug);
 }
@@ -2929,24 +2886,86 @@ async function assertIntermediateBecomesServingOnlyAfterVerification(
 //   "If this ever reds on timing, the fix is to split the `-source-edge` tenant
 //    into its own test with its own lifecycle. It is NOT to raise the bound."
 //
-// It red on timing. Adoption made the artifact's head source-changing rather
-// than a profile sibling, so ADR-0047 §6's OTHER direction -- the one that must
-// cross a profile-only edge -- can no longer borrow the real head and needs a
-// served tenant of its own. Two fresh installs in one test measured 266s inside
-// a 300s bound with no margin worth having, so this one moves out with its
-// lifecycle instead of the bound moving up.
+// BOTH ADR-0047 §6 rollback directions now live here, and it took two rounds to
+// get there. Adoption made the artifact's head source-changing rather than a
+// profile sibling, which swapped which direction could borrow the real head:
+// the profile-only one suddenly needed a served tenant of its own. Moving only
+// the source-changing direction out left the parent driving three tenants; that
+// measured 251.1s standalone and then TIMED OUT at 300s IN-MATRIX, where the
+// parent's own comment records a 1.79x load factor over standalone. So the
+// second direction followed the first, the parent is back to its two
+// gateway-persistence tenants, and each direction has its own budget.
+//
+// They belong together anyway: each is the other's discriminating half. Direction
+// 1 alone is satisfied by a refusal that fires on every edge; direction 2 alone
+// is satisfied by one that fires on none.
 test(
-  'a source-changing rollback edge stays eligible while its verification refuses by name',
+  'ADR-0047 §6 refuses a profile-only rollback edge by name and leaves a source-changing one eligible',
   { timeout: 300_000 },
   async () => {
     await withEphemeralPostgres(
-      'lang-adopt-v5-source-changing-edge',
+      'lang-adopt-v5-rollback-edges',
       async ({ connection }) => {
         const compiledApplication = JSON.parse(
           await readFile(compiledArtifactPath, 'utf8'),
         ) as unknown;
         const databaseUrl = connectionUrl(connection);
         const tenantSlug = 'composed-tenant-b';
+        // DIRECTION 1 -- the refusal FIRES on a profile-only edge. A serving head and
+        // its predecessor that share a normalized definition (ADR-0047 §4) share one
+        // package revision, so the revision graph has no edge to reverse. The target
+        // IS the immediate predecessor -- the index check passes and control reaches
+        // the authorization -- so this must NOT borrow
+        // ROLLBACK_TARGET_NOT_IMMEDIATE_PREDECESSOR (ADR-0047 §6).
+        //
+        // THE EDGE IS LOCATED, NOT ASSUMED TO BE AT THE END -- corrected by
+        // `LANG-ADOPT-v5`. This read `at(-2)` against the real head and asserted the
+        // pair shared a definition, which held only while the profile-adoption entry
+        // WAS the head. Its sibling below already knew that was fragile: direction 2
+        // manufactures a truncated lineage precisely because the head was a profile
+        // sibling. Direction 1 needed the mirror image and did not have it, so an
+        // authored-source adoption turned a real ADR-0047 §6 gate into a premise
+        // failure. The profile-only edge is still in the lineage; only its position
+        // moved.
+        const profileEdgeLineage =
+          throughProfileSiblingHead(compiledApplication);
+        const profileEdge = parseCompiledApplication(profileEdgeLineage);
+        const target = profileEdge.applications.at(-2);
+        assert.ok(target);
+        assert.ok(
+          equalNormalizedDefinition(
+            target.normalizedDefinitionBytes,
+            profileEdge.application.normalizedDefinitionBytes,
+          ),
+          'this direction is only meaningful while the head is a profile sibling',
+        );
+        // The tenant must already serve that head for the rollback to be eligible at
+        // all, exactly as direction 2 records below.
+        const profileEdgeSlug = `${tenantSlug}-profile-edge`;
+        const profileEdgeRuntime = await createRuntime(
+          profileEdgeLineage,
+          databaseUrl,
+          profileEdgeSlug,
+        );
+        assert.equal(
+          profileEdgeRuntime.releaseRoot,
+          profileEdge.application.compiled.releaseRoot,
+        );
+        await profileEdgeRuntime.close();
+        await assert.rejects(
+          createRuntime(profileEdgeLineage, databaseUrl, profileEdgeSlug, {
+            kind: 'rollback',
+            targetReleaseRoot: target.compiled.releaseRoot,
+          }),
+          (error: unknown) => {
+            assert.ok(error instanceof ReleaseReverseTransitionRefusal);
+            assert.equal(error.code, 'ROLLBACK_ACROSS_PROFILE_ONLY_EDGE');
+            assert.match(error.message, /shares its package revision/u);
+            return true;
+          },
+          'ADR-0047 §6: a profile-only edge refuses by its own name, not as a wrong predecessor',
+        );
+
         // DIRECTION 2 -- the refusal does NOT fire on a source-changing edge, and the
         // ADR-0046 observation this helper exists for is preserved rather than
         // dropped. Truncating the lineage to the last source-changing head restores
