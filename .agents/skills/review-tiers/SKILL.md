@@ -678,3 +678,36 @@ a control that will survive the deletion of one of them.**
 **And a forgery table owes its own admission twin:** every position's *unforged*
 specimen must be admitted. Without it, a position refused for an unrelated reason
 contributes purely decorative cases — the same defect one level up.
+
+## A red count is not attribution — and after two rounds, narrow the claim
+
+**Counting failures does not tell you which specimen failed.** `5g3-sm-impl`'s
+forged-reference table reported *"membership: 4 reds, one per position"*. Two of
+those names were **the same specimen counted twice** — both transition positions
+built an identical mutated catalog, so either reference's refusal passed both
+subtests. Deleting the check at one transition call site and leaving it at the
+other would have kept both green. **Four names, three specimens.**
+
+The lane found an earlier confound by re-running each deletion individually
+because a number disagreed with the code. That was right, and it was not enough:
+**the count was correct and the attribution was still false.**
+
+**So: attribute by specimen identity, not by red name.** Two subtests that
+construct the same payload are one control with two labels.
+
+### After two rounds of a claim exceeding its proof, narrow the claim
+
+Rounds three, four and five of that packet were all one control, while the
+production parser had been confirmed sound since round three. **Each round tried to
+make the control prove more; each round the claim still outran the specimens.**
+
+**The close is to shrink the claim to what the specimens support.** Where a routing
+claim is already proven by other cases — there, `kind` and equality each install at
+four distinct positions and so prove all four call sites reach the shared parser —
+a third check does **not** need its own per-position table. One mutation against the
+shared parser is sufficient, and saying so is more honest than a table whose fourth
+column is a duplicate.
+
+**The tell that you are strengthening when you should be narrowing:** the control
+grows, the production code has not changed in two rounds, and each review finds the
+same shape one layer in.
