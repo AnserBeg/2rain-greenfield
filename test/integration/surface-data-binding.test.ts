@@ -1038,6 +1038,151 @@ for (const intent of ['archive', 'create', 'restore', 'update'] as const) {
   });
 }
 
+/**
+ * THE PACKET'S OWN PREMISE, executable for the first time on this tree.
+ *
+ * `PUR-1`'s shape is a document carrying a release AND a cancel. Both are
+ * `transitionStateEffect`, and `operationIntent` maps both to `command` — the
+ * exact collision this packet lifted. It could not be written before: `v5` cut
+ * the state machine (`5g3-sm`) and this packet keyed the binding by operation
+ * id, and only the merge of the two has both.
+ *
+ * The capability-pair arm in the browser suite exercises the same mechanism
+ * through the other effect kind. This one is the real subject.
+ */
+test('two transitions on one entity bind as two commands, each addressable', async () => {
+  const binding = await masterRecordBinding(
+    compileFixture(twoTransitionPackage()),
+  );
+  const commands = binding.operations.filter(
+    (operation) => operation.intent === 'command',
+  );
+
+  assert.deepEqual(
+    commands.map((operation) => operation.operationId),
+    [
+      `${FIXTURE_IDS.namespace}:operation.master_cancel`,
+      `${FIXTURE_IDS.namespace}:operation.master_release`,
+    ],
+    'both transitions must bind, and deterministically ordered',
+  );
+  // Distinct ids are what makes them separately addressable; distinct labels
+  // are what makes them separately pressable. Both are required and neither
+  // implies the other.
+  assert.deepEqual(
+    commands.map((operation) => operation.label),
+    ['Cancel', 'Release'],
+  );
+  // A transition is not a capability, so the command bar's standing
+  // explanation differs — the half of the merge `5g3-sm` owns.
+  assert.deepEqual(
+    commands.map((operation) => operation.capabilityId),
+    [null, null],
+  );
+});
+
+/** `ordinaryModuleV1` restamped at v5, carrying a two-transition machine. */
+function twoTransitionPackage(): Record<string, unknown> {
+  const version = 'v5';
+  const reference = (kind: string, targetId: string) => ({
+    kind,
+    schemaVersion: version,
+    targetId,
+  });
+  // Node-version purity is uniform within a package revision, so a v5 machine
+  // in a v3 package is refused: the whole package is restamped.
+  const restamp = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(restamp);
+    if (value !== null && typeof value === 'object') {
+      return Object.fromEntries(
+        Object.entries(value as Record<string, unknown>).map(([key, inner]) => [
+          key,
+          key === 'schemaVersion' ? version : restamp(inner),
+        ]),
+      );
+    }
+    return value;
+  };
+  const definition = restamp(ordinaryModuleV1()) as Record<string, unknown>;
+  definition.languageVersion = version;
+
+  const namespace = FIXTURE_IDS.namespace;
+  const entityId = FIXTURE_IDS.entityIds.parent;
+  const draft = `${namespace}:state.master_draft`;
+  const moves = [
+    { action: 'release', orderKey: 10, to: `${namespace}:state.master_released` },
+    { action: 'cancel', orderKey: 20, to: `${namespace}:state.master_cancelled` },
+  ];
+
+  definition.stateMachines = [
+    {
+      entity: reference('entityReference', entityId),
+      initialState: reference('stateReference', draft),
+      kind: 'stateMachineDefinition',
+      machineId: `${namespace}:machine.master_lifecycle`,
+      schemaVersion: version,
+      states: [
+        { kind: 'stateDefinition', label: 'Draft', orderKey: 10, schemaVersion: version, stateId: draft },
+        ...moves.map((move, index) => ({
+          kind: 'stateDefinition',
+          label: move.action,
+          orderKey: 20 + index * 10,
+          schemaVersion: version,
+          stateId: move.to,
+        })),
+      ],
+      transitions: moves.map((move) => ({
+        fromState: reference('stateReference', draft),
+        kind: 'transitionDefinition',
+        label: `${move.action} master`,
+        orderKey: move.orderKey,
+        // ADR-0050 §7: a transition's permission must EQUAL its operation's,
+        // refused at compile time as COMPILER_TRANSITION_PERMISSION_MISMATCH.
+        permission: reference(
+          'permissionReference',
+          `${namespace}:permission.master_${move.action}`,
+        ),
+        schemaVersion: version,
+        toState: reference('stateReference', move.to),
+        transitionId: `${namespace}:transition.master_${move.action}`,
+      })),
+    },
+  ];
+
+  for (const move of moves) {
+    (definition.permissions as unknown[]).push({
+      action: 'transition',
+      kind: 'permissionDefinition',
+      label: `master ${move.action}`,
+      permissionId: `${namespace}:permission.master_${move.action}`,
+      resource: reference('entityReference', entityId),
+      schemaVersion: version,
+    });
+    (definition.operations as unknown[]).push({
+      confirmation: 'none',
+      effect: {
+        kind: 'transitionStateEffect',
+        schemaVersion: version,
+        transition: reference(
+          'transitionReference',
+          `${namespace}:transition.master_${move.action}`,
+        ),
+      },
+      kind: 'operationDefinition',
+      module: reference('moduleReference', FIXTURE_IDS.moduleId),
+      operationId: `${namespace}:operation.master_${move.action}`,
+      permission: reference(
+        'permissionReference',
+        `${namespace}:permission.master_${move.action}`,
+      ),
+      readBack: reference('queryReference', `${namespace}:query.master_get`),
+      schemaVersion: version,
+      tier: 'o0',
+    });
+  }
+  return definition;
+}
+
 /** Reads the master record surface's binding out of a compiled fixture. */
 async function masterRecordBinding(
   compiled: CompileSuccess,

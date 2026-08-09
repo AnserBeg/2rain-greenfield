@@ -7,6 +7,7 @@ import {
   LEGAL_ENTITY_SCOPE_CONTRACT_V1,
   LEGAL_ENTITY_SCOPE_PROFILE_VERSION,
   SUPPORTED_LANGUAGE_VERSIONS,
+  languageHasLegalEntityQueryScope,
   STRUCTURAL_LIMITS_V0,
   VersionedPredicateExpressionSchema,
   canonicalizeAndHash,
@@ -136,9 +137,9 @@ export interface RegisteredLegalEntityScope {
   readonly operand: {
     readonly kind: 'queryParameterReference';
     readonly parameterId: string;
-    readonly schemaVersion: 'v4';
+    readonly schemaVersion: CanonicalLanguageVersion;
   };
-  readonly schemaVersion: 'v4';
+  readonly schemaVersion: CanonicalLanguageVersion;
 }
 
 interface RegisteredQueryDefinitionBase {
@@ -1338,9 +1339,16 @@ function assertRowQueryParameters(
       throw invalid('query parameter contract is invalid');
     }
     const parameterType = parameter.parameterType;
+    // The node carries the version of the package that minted it, so this
+    // admits every version whose language DECLARES the operand -- not the one
+    // that happened to introduce it, and not merely every version that exists.
+    // A literal here refuses a later package's operand outright, falling
+    // through to the field-type parse and naming the wrong cause; "any
+    // supported version" was tried and admitted v3, which never declared the
+    // operand at all.
     const legalEntityReference =
       parameterType.kind === 'legalEntityReferenceParameterType' &&
-      parameterType.schemaVersion === 'v4';
+      isLegalEntityScopeNodeVersion(parameterType.schemaVersion);
     if (
       !legalEntityReference &&
       FieldTypeSchema.safeParse(parameterType).success === false
@@ -1367,9 +1375,15 @@ function assertLegalEntityScopeContract(
     ['cardinality', 'kind', 'operand', 'schemaVersion'],
     invalid,
   );
+  // Every version check in this function admits the versions whose language
+  // declares the legal-entity operand. These nodes are minted by a package
+  // whose version this reader does not choose, so a literal refuses a legal
+  // later package -- refused HERE, as a malformed pinned catalog, three layers
+  // from the literal that caused it. Widening to every supported version is
+  // the opposite error and admits a forgery; the bound is two-sided.
   if (
     value.kind !== 'queryLegalEntityScope' ||
-    value.schemaVersion !== 'v4' ||
+    !isLegalEntityScopeNodeVersion(value.schemaVersion) ||
     !LEGAL_ENTITY_SCOPE_CONTRACT_V1.admittedCardinalities.includes(
       value.cardinality as 'exactlyOne',
     ) ||
@@ -1382,7 +1396,7 @@ function assertLegalEntityScopeContract(
   assertCanonicalId(operand.parameterId, 'parameterId', invalid);
   if (
     operand.kind !== 'queryParameterReference' ||
-    operand.schemaVersion !== 'v4'
+    !isLegalEntityScopeNodeVersion(operand.schemaVersion)
   ) {
     throw invalid('legal-entity scope operand is invalid');
   }
@@ -1403,10 +1417,32 @@ function assertLegalEntityScopeContract(
     !isRecord(operandParameter.parameterType) ||
     operandParameter.parameterType.kind !==
       'legalEntityReferenceParameterType' ||
-    operandParameter.parameterType.schemaVersion !== 'v4'
+    !isLegalEntityScopeNodeVersion(operandParameter.parameterType.schemaVersion)
   ) {
     throw invalid('legal-entity scope operand has the wrong parameter type');
   }
+}
+
+/**
+ * One definition of "a legal-entity scope node version this runtime admits".
+ *
+ * Derived, but from the RIGHT property, and the difference is the whole
+ * lesson. Four checks here used the literal `'v4'`, which refuses a legal v5
+ * package. Replacing them with "any supported version" then admitted `v3` --
+ * and v3 never declared the legal-entity operand, so a `v3`-stamped
+ * `legalEntityReferenceParameterType` is a node the canonical model could not
+ * have produced. An existing forgery control caught it.
+ *
+ * The admitted set is therefore "versions whose language declares this node",
+ * not "versions that exist". Derivation is not automatically correct; it is
+ * correct when it names the property the check actually depends on.
+ */
+function isLegalEntityScopeNodeVersion(value: unknown): boolean {
+  return (
+    typeof value === 'string' &&
+    (SUPPORTED_LANGUAGE_VERSIONS as readonly string[]).includes(value) &&
+    languageHasLegalEntityQueryScope(value as CanonicalLanguageVersion)
+  );
 }
 
 function parsePolicyNarrowing(value: unknown): QueryFilterLoweringPlan {

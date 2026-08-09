@@ -547,6 +547,198 @@ test('wrong catalog kind, schema, and shape fail closed after a live policy call
   }
 });
 
+/**
+ * A canonical reference is more than a `targetId`. Three arms of the catalog
+ * parser each grew their own shallow copy, and all of them admitted a reference
+ * declaring the WRONG CONSTRUCT, or a version the language never had, or a
+ * version admitted but disagreeing with its own effect. Nothing downstream
+ * noticed, because the interpreter resolves from `targetId` and never consults
+ * the other two fields.
+ *
+ * **Every one of the four reference positions is forged here**, not one. A
+ * control installed at a single call site cannot distinguish "all arms route
+ * through the shared parser" from "the arm I happened to pick does" — restoring
+ * a shallow check in either of the other two would leave it green.
+ *
+ * **And each specimen carries exactly one defect.** Its unrelated properties are
+ * valid for its own enclosing effect, including the version on the wrong-kind
+ * case. A specimen wrong in two ways cannot attribute the refusal to either, and
+ * no amount of reading the failure text recovers that.
+ */
+const forgedReferencePositions = [
+  {
+    arm: 'record effect entity',
+    expectedKind: 'entityReference',
+    install: (catalog: ForgeableCatalog, reference: ImmutableJsonValue) => {
+      catalog.operations[0]!.effect.entity = reference;
+    },
+    payload: () => structuredClone(operationCatalogWith(operationId)),
+    read: (catalog: ForgeableCatalog) => catalog.operations[0]!.effect.entity,
+    request: () => operationRequest,
+    version: 'v0-experimental',
+  },
+  {
+    arm: 'capability effect capability',
+    expectedKind: 'capabilityReference',
+    install: (catalog: ForgeableCatalog, reference: ImmutableJsonValue) => {
+      catalog.operations[0]!.effect.capability = reference;
+    },
+    payload: () =>
+      structuredClone(
+        capabilityOperationCatalogWith(
+          operationId,
+          'northstar.inventory:capability.posting',
+          queryId,
+        ),
+      ),
+    read: (catalog: ForgeableCatalog) =>
+      catalog.operations[0]!.effect.capability,
+    request: () => operationRequest,
+    version: 'v4',
+  },
+  {
+    arm: 'transition effect entity',
+    expectedKind: 'entityReference',
+    install: (catalog: ForgeableCatalog, reference: ImmutableJsonValue) => {
+      catalog.operations[0]!.effect.entity = reference;
+    },
+    payload: () => structuredClone(transitionOperationCatalogWith(operationId)),
+    read: (catalog: ForgeableCatalog) => catalog.operations[0]!.effect.entity,
+    request: () => operationRequest,
+    version: 'v5',
+  },
+  {
+    arm: 'transition effect transition',
+    expectedKind: 'transitionReference',
+    install: (catalog: ForgeableCatalog, reference: ImmutableJsonValue) => {
+      catalog.operations[0]!.effect.transition = reference;
+    },
+    payload: () => structuredClone(transitionOperationCatalogWith(operationId)),
+    read: (catalog: ForgeableCatalog) =>
+      catalog.operations[0]!.effect.transition,
+    request: () => operationRequest,
+    version: 'v5',
+  },
+] as const;
+
+type ForgeableCatalog = {
+  operations: Array<{ effect: Record<string, unknown> }>;
+};
+
+/**
+ * Version MEMBERSHIP, isolated — and deliberately NOT a per-position table.
+ *
+ * The obvious specimen, a reference at an invented version, is refused by the
+ * equality check too: an invented version cannot equal a real effect's. So
+ * isolating membership means moving the EFFECT's version and its references
+ * together, and that mutation is the same catalog whichever reference you name.
+ * A four-row table over it would have been four labels over three specimens,
+ * with both transition rows building an identical payload — a control that
+ * cannot tell one transition call site from the other.
+ *
+ * **Per-call-site routing is proven by `kind` and equality**, which install at
+ * four genuinely distinct positions and so already establish that all four
+ * sites reach the shared parser. This check does not need its own table once
+ * that is established, and one honest mutation is worth more than a column
+ * whose fourth entry is a duplicate.
+ */
+test('an effect at a version the language never had is refused', async () => {
+  const catalog = structuredClone(
+    transitionOperationCatalogWith(operationId),
+  ) as unknown as ForgeableCatalog;
+  const effect = catalog.operations[0]!.effect;
+  effect.schemaVersion = 'invented-version';
+  for (const key of ['entity', 'transition']) {
+    (effect[key] as Record<string, unknown>).schemaVersion = 'invented-version';
+  }
+  const fixture = createFixture({
+    operationPayload: catalog as unknown as ImmutableJsonValue,
+  });
+  await assert.rejects(
+    fixture.operationApi.handle(authenticationInput, operationRequest),
+    MalformedPinnedOperationCatalogError,
+  );
+  assert.equal(fixture.policy.authorizationCalls.length, 1);
+});
+
+/**
+ * The admission twin for the forgery table below, and the reason it exists is
+ * the table's own history: a control whose specimen is refused for an unrelated
+ * reason proves nothing, and reading the failure text cannot recover the
+ * attribution. If an UNFORGED catalog at some position is already rejected as
+ * malformed, then all three forgeries at that position are decoration.
+ */
+test('every forgery position starts from a catalog the parser admits', async (t) => {
+  for (const position of forgedReferencePositions) {
+    await t.test(position.arm, async () => {
+      const fixture = createFixture({
+        operationPayload: position.payload() as unknown as ImmutableJsonValue,
+      });
+      const failure = await fixture.operationApi
+        .handle(authenticationInput, position.request())
+        .then(
+          () => null,
+          (error: unknown) => error,
+        );
+      assert.equal(
+        failure instanceof MalformedPinnedOperationCatalogError,
+        false,
+        `unforged catalog for ${position.arm} must parse: ${String(failure)}`,
+      );
+    });
+  }
+});
+
+test('a forged canonical reference never reaches the executor, at every position', async (t) => {
+  for (const position of forgedReferencePositions) {
+    // Each specimen is the position's OWN valid reference with exactly one
+    // property replaced. Hardcoding an address instead changed two things at
+    // once for the capability and transition positions, and since everything
+    // downstream resolves from `targetId`, a red could then be sustained by the
+    // wrong address after the nominated check was deleted. The admission twin
+    // cannot catch that -- it inspects the payload before the forgery is
+    // installed, so it never sees the substituted address.
+    const valid = position.read(
+      position.payload() as unknown as ForgeableCatalog,
+    ) as Record<string, unknown>;
+    for (const [label, forged] of [
+      // Only `kind` differs. Its version is this effect's own and its target is
+      // this position's own.
+      ['kind names a different construct', { ...valid, kind: 'queryReference' }],
+      // Only the version differs, and by never having existed.
+      [
+        'version was never in the language',
+        { ...valid, schemaVersion: 'invented-version' },
+      ],
+      // Only the version differs, and by disagreeing with its effect while
+      // being a real language version -- the case membership alone misses.
+      [
+        'version is admitted but disagrees with its effect',
+        {
+          ...valid,
+          schemaVersion:
+            position.version === 'v0-experimental' ? 'v4' : 'v0-experimental',
+        },
+      ],
+    ] as const) {
+      await t.test(`${position.arm}: ${label}`, async () => {
+        const catalog = position.payload() as unknown as ForgeableCatalog;
+        position.install(catalog, forged as unknown as ImmutableJsonValue);
+        const fixture = createFixture({
+          operationPayload: catalog as unknown as ImmutableJsonValue,
+        });
+        await assert.rejects(
+          fixture.operationApi.handle(authenticationInput, position.request()),
+          MalformedPinnedOperationCatalogError,
+        );
+        // The executor is never constructed for a malformed catalog, so a
+        // refusal later than this would surface as an execution.
+        assert.equal(fixture.policy.authorizationCalls.length, 1);
+      });
+    }
+  }
+});
+
 test('unissued views fail before catalog access at each direct gateway boundary', async () => {
   let queryCatalogAccesses = 0;
   const forgedQueryView = Object.create(null);
@@ -1539,6 +1731,59 @@ function operationCatalogWith(
         precondition: {
           kind: 'booleanPredicate',
           schemaVersion: 'v0-experimental',
+          value: true,
+        },
+        readBackQueryId: queryId,
+        tier: 'o0',
+      },
+    ],
+    schemaVersion: 'northstar.operation-catalog-payload/v0-provisional',
+  };
+}
+
+/**
+ * A transition effect at the shape the compiler emits: both references present,
+ * the flattened ids alongside them, and every node at the effect's own version.
+ * The forgery table above spoils exactly one field of it at a time.
+ */
+function transitionOperationCatalogWith(
+  registeredOperationId: string,
+): ImmutableJsonValue {
+  return {
+    kind: 'operationCatalogPayload',
+    operations: [
+      {
+        confirmation: 'none',
+        effect: {
+          entity: {
+            kind: 'entityReference',
+            schemaVersion: 'v5',
+            targetId: 'northstar.bootstrap:entity.item',
+          },
+          fromStateId: 'northstar.bootstrap:state.item_draft',
+          kind: 'transitionStateEffect',
+          schemaVersion: 'v5',
+          stateFieldId: 'northstar.bootstrap:derived_state_field.machine.item',
+          toStateId: 'northstar.bootstrap:state.item_released',
+          transition: {
+            kind: 'transitionReference',
+            schemaVersion: 'v5',
+            targetId: 'northstar.bootstrap:transition.item_release',
+          },
+        },
+        inputContract: {
+          closedArgumentKeys: ['expectedRevision', 'recordId'],
+          fields: [],
+          relationInputs: [],
+          schemaVersion: 'northstar.module-input-contract/v1',
+          writableFieldIds: [],
+        },
+        lifecycle: 'active',
+        operationId: registeredOperationId,
+        permissionId: 'northstar.bootstrap:permission.create',
+        precondition: {
+          kind: 'booleanPredicate',
+          schemaVersion: 'v5',
           value: true,
         },
         readBackQueryId: queryId,

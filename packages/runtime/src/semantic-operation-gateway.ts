@@ -6,6 +6,7 @@ import {
 } from 'node:crypto';
 
 import {
+  SUPPORTED_LANGUAGE_VERSIONS,
   admitPredicateForExecution,
   inspectPredicateForExecution,
   type PredicateKernelReceipt,
@@ -104,8 +105,38 @@ export interface RegisteredCapabilityOperationDefinition extends RegisteredOpera
   readonly tier: 'o1';
 }
 
+/**
+ * A record transition: an O0 record effect whose next state is DECLARED by the
+ * release rather than supplied by the caller. `toStateId` is the whole
+ * difference from an update, and it is what makes the target server-selected --
+ * the closed input contract carries no argument through which a caller could
+ * name one.
+ */
+export interface RegisteredTransitionOperationDefinition extends RegisteredOperationDefinitionBase {
+  readonly effect: {
+    readonly entity: {
+      readonly kind: string;
+      readonly schemaVersion: string;
+      readonly targetId: string;
+    };
+    readonly fromStateId: string;
+    readonly kind: 'transitionStateEffect';
+    readonly schemaVersion: string;
+    readonly stateFieldId: string;
+    readonly toStateId: string;
+    readonly transition: {
+      readonly kind: string;
+      readonly schemaVersion: string;
+      readonly targetId: string;
+    };
+  };
+  readonly tier: 'o0';
+}
+
 export type RegisteredOperationDefinition =
-  RegisteredCapabilityOperationDefinition | RegisteredRecordOperationDefinition;
+  | RegisteredCapabilityOperationDefinition
+  | RegisteredRecordOperationDefinition
+  | RegisteredTransitionOperationDefinition;
 
 export interface RegisteredOperationInputContract {
   readonly closedArgumentKeys: readonly string[];
@@ -181,7 +212,12 @@ export interface SemanticOperationResultEnvelope {
 export interface SemanticOperationExecutionRequest {
   readonly channel: TrustedInvocationChannel;
   readonly context: TrustedRequestContext;
-  readonly definition: RegisteredRecordOperationDefinition;
+  // The generic executor receives transition definitions as well as record
+  // definitions: a transition is executed by the same press, not by a
+  // registered capability.
+  readonly definition:
+    | RegisteredRecordOperationDefinition
+    | RegisteredTransitionOperationDefinition;
   readonly idempotencyKey: string;
   readonly input: ImmutableJsonValue;
   readonly inputDigest: string;
@@ -609,7 +645,18 @@ export class SemanticOperationGateway {
       if (!definition) {
         throw new NoSuchRegisteredOperationError(request.operationId, view);
       }
-      if (isRegisteredCapabilityOperation(definition)) {
+      // The gateway owns the closed-argument fence for every operation whose
+      // declared contract admits no caller-supplied values -- a capability
+      // command and a record transition alike. Both were already refused, but
+      // a transition's refusal came one layer down, which meant an argument the
+      // declared contract forbids travelled further than it should before
+      // anything rejected it. The inner check stays; two fences on a closed
+      // contract is defence in depth, and the outer one belongs where the
+      // contract is read.
+      if (
+        isRegisteredCapabilityOperation(definition) ||
+        isRegisteredTransitionOperation(definition)
+      ) {
         assertClosedOperationArguments(definition, request.input);
       }
       const operationDecision = await authorizeCurrentPolicy(
@@ -936,6 +983,12 @@ function isRegisteredCapabilityOperation(
   return definition.effect.kind === 'registeredCapabilityEffect';
 }
 
+function isRegisteredTransitionOperation(
+  definition: RegisteredOperationDefinition,
+): definition is RegisteredTransitionOperationDefinition {
+  return definition.effect.kind === 'transitionStateEffect';
+}
+
 function parentGuardsFromCatalog(
   operations: readonly RegisteredOperationDefinition[],
 ): readonly SemanticOperationParentGuard[] {
@@ -955,11 +1008,83 @@ function parentGuardsFromCatalog(
   );
 }
 
+/**
+ * A malformed catalog entry refuses the WHOLE catalog, deliberately: this is an
+ * artifact-integrity fence, and an artifact with one entry the runtime cannot
+ * parse is not an artifact one entry of which can be trusted. Narrowing it to
+ * "skip the bad entry" would let a tampered projection serve.
+ *
+ * What was a defect is that it refused ANONYMOUSLY. An unrelated create
+ * operation died with `object keys do not match the closed contract`, naming
+ * neither the operation at fault nor its effect, which is the misnamed-cause
+ * failure [ADR-0046](../../../docs/decisions/ADR-0046-rollback-activates-history-and-defects-refuse-by-name.md)
+ * forbids and ADR-0050 §1 measured. Every refusal below now names its subject.
+ *
+ * The reachable cause is closed separately and earlier:
+ * `COMPILER_TRANSITION_EFFECT_UNSUPPORTED` refuses the only known way to build
+ * such a release, at compile time, before any of it is persisted.
+ */
+/**
+ * ONE parser for every canonical reference the pinned catalog carries.
+ *
+ * Three arms of `assertOperationDefinition` each grew their own shallow copy of
+ * this -- `assertExactKeys` plus a `targetId` check -- and all three admitted a
+ * reference whose `kind` was for something else entirely: an `effect.entity`
+ * declaring `fieldReference`, an `effect.transition` declaring `queryReference`,
+ * either at an invented `schemaVersion`. Nothing downstream noticed, because the
+ * interpreter resolves from `targetId` and never consults the other two fields.
+ * A fence that reads only the field it later uses is not checking the artifact,
+ * it is trusting it.
+ *
+ * `expectedKind` is required rather than inferred, and the node version must be
+ * an admitted one AND equal to the effect that encloses it -- node-version
+ * purity is a property of the artifact, so a reference disagreeing with its own
+ * effect is a reference no released artifact could have carried.
+ */
+function assertCanonicalReference(
+  value: unknown,
+  expectedKind: string,
+  effectSchemaVersion: string,
+  path: string,
+  invalid: (message: string) => Error,
+): asserts value is {
+  readonly kind: string;
+  readonly schemaVersion: string;
+  readonly targetId: string;
+} {
+  if (!isRecord(value)) {
+    throw invalid(`${path} must be an object`);
+  }
+  assertExactKeys(value, ['kind', 'schemaVersion', 'targetId'], invalid);
+  assertCanonicalId(value.targetId, `${path}.targetId`, invalid);
+  if (value.kind !== expectedKind) {
+    throw invalid(`${path}.kind must be ${expectedKind}`);
+  }
+  if (
+    typeof value.schemaVersion !== 'string' ||
+    !(SUPPORTED_LANGUAGE_VERSIONS as readonly string[]).includes(
+      value.schemaVersion,
+    ) ||
+    value.schemaVersion !== effectSchemaVersion
+  ) {
+    throw invalid(`${path}.schemaVersion must match its effect`);
+  }
+}
+
 function assertOperationDefinition(
   value: unknown,
 ): asserts value is RegisteredOperationDefinition {
+  const subject = isRecord(value) && typeof value.operationId === 'string'
+    ? value.operationId
+    : '<unidentified operation>';
+  const effectKind =
+    isRecord(value) && isRecord(value.effect) && typeof value.effect.kind === 'string'
+      ? value.effect.kind
+      : '<unidentified effect>';
   const invalid = (message: string): MalformedPinnedOperationCatalogError =>
-    new MalformedPinnedOperationCatalogError(message);
+    new MalformedPinnedOperationCatalogError(
+      `${message} (operation ${subject}, effect ${effectKind})`,
+    );
   if (!isRecord(value)) {
     throw invalid('pinned operation definition must be an object');
   }
@@ -1009,16 +1134,64 @@ function assertOperationDefinition(
     ) {
       throw invalid('pinned capability operation effect is unsupported');
     }
-    assertExactKeys(
+    assertCanonicalReference(
       value.effect.capability,
-      ['kind', 'schemaVersion', 'targetId'],
+      'capabilityReference',
+      value.effect.schemaVersion,
+      'effect.capability',
       invalid,
     );
-    assertCanonicalId(
-      value.effect.capability.targetId,
-      'effect.capability.targetId',
+  } else if (value.effect.kind === 'transitionStateEffect') {
+    // The transition arm keeps the O0 fence the record arm below states: an
+    // entity-less effect is still refused, and the entity reference is still
+    // required in full. What it additionally admits is a SERVER-SELECTED
+    // target -- `toStateId` is declared, never an argument -- over the same
+    // closed ['expectedRevision','recordId'] contract the release already
+    // carried for this effect kind before anything executed it.
+    assertExactKeys(
+      value.effect,
+      [
+        'entity',
+        'fromStateId',
+        'kind',
+        'schemaVersion',
+        'stateFieldId',
+        'toStateId',
+        'transition',
+      ],
       invalid,
     );
+    // Every nested reference is checked to the same depth the record arm
+    // below checks its entity. Leaving `schemaVersion` untyped and the two
+    // references unshaped admitted `{ ...valid, schemaVersion: 7,
+    // transition: null }`: the flattened ids still parsed, so it EXECUTED --
+    // a malformed artifact reaching the writer because the fence read only
+    // the fields it happened to use.
+    if (
+      value.tier !== 'o0' ||
+      typeof value.effect.schemaVersion !== 'string' ||
+      !isRecord(value.effect.entity) ||
+      !isRecord(value.effect.transition)
+    ) {
+      throw invalid('pinned transition operation effect is unsupported');
+    }
+    assertCanonicalReference(
+      value.effect.entity,
+      'entityReference',
+      value.effect.schemaVersion,
+      'effect.entity',
+      invalid,
+    );
+    assertCanonicalReference(
+      value.effect.transition,
+      'transitionReference',
+      value.effect.schemaVersion,
+      'effect.transition',
+      invalid,
+    );
+    assertCanonicalId(value.effect.stateFieldId, 'effect.stateFieldId', invalid);
+    assertCanonicalId(value.effect.fromStateId, 'effect.fromStateId', invalid);
+    assertCanonicalId(value.effect.toStateId, 'effect.toStateId', invalid);
   } else {
     // Load-bearing O0 fence: capability admission must never make an entity-
     // less record effect valid. The complete entity reference remains required
@@ -1037,14 +1210,11 @@ function assertOperationDefinition(
     ) {
       throw invalid('pinned record operation effect is unsupported');
     }
-    assertExactKeys(
+    assertCanonicalReference(
       value.effect.entity,
-      ['kind', 'schemaVersion', 'targetId'],
-      invalid,
-    );
-    assertCanonicalId(
-      value.effect.entity.targetId,
-      'effect.entity.targetId',
+      'entityReference',
+      value.effect.schemaVersion,
+      'effect.entity',
       invalid,
     );
   }

@@ -1085,9 +1085,9 @@ interface VerificationQueryContractBase {
     readonly operand: {
       readonly kind: 'queryParameterReference';
       readonly parameterId: string;
-      readonly schemaVersion: 'v4';
+      readonly schemaVersion: string;
     };
-    readonly schemaVersion: 'v4';
+    readonly schemaVersion: string;
   };
   readonly parameters?: readonly { readonly parameterId: string }[];
   readonly queryId: string;
@@ -1930,7 +1930,9 @@ class SemanticVerificationExecutor {
     if (result.outcome !== 'succeeded') {
       throw failure(
         'VERIFICATION_OPERATION_FAILED',
-        `verification operation ${operation.operationId} did not succeed`,
+        // The gateway reports WHY it declined; discarding that turned every
+        // unsupported outcome into the same unactionable sentence.
+        `verification operation ${operation.operationId} did not succeed: ${result.outcome}${result.unsupportedReason ? ` (${result.unsupportedReason})` : ''}`,
       );
     }
     return result;

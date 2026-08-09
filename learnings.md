@@ -538,3 +538,18 @@ How to apply: before requesting the slot, run whatever the last failures came fr
 — not just `typecheck` and `lint`. Roughly three minutes of local checks against
 ~50 minutes of machine time, and the matrix has a much longer preamble than a
 typecheck. See also [[the-matrix-needs-a-quiesced-machine]].
+
+## An instrument that cannot separate the hypotheses is not evidence for either
+Date: 2026-08-08
+Why: A lane added a 30-second CPU-idle sampler to distinguish "these two tests are
+slow because the machine was contended" from "the 300s bound is too tight for this
+tree." It reported mean 78.2%, min 43.9% — and the lane refused to cite it, because
+**the matrix is the dominant load**, so the sampler measures self-load and
+contention identically and would have read roughly the same on both runs. The real
+evidence was a fixed-SHA comparison: the same two tests, same commit, `>300s`
+timeout on one run and 135.8s / 98.8s on the next.
+How to apply: before quoting a measurement, ask what it would have read under the
+hypothesis you are trying to rule out. If the answer is "about the same," it
+discriminates nothing — record it as a limitation, not as proof. **A number in a
+report is read as evidence whether or not it is**, which is why the lane writing it
+down as a limitation was the correct move rather than a cautious one.

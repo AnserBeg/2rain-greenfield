@@ -30,6 +30,16 @@ export const COMPILER_DIAGNOSTIC_COPY = Object.freeze({
       'use archive or restore; separately governed retention purge has no launch capability',
     rule: 'ordinary module operations never delete, purge, or destroy business data',
   },
+  COMPILER_TRANSITION_PERMISSION_MISMATCH: {
+    acceptedAlternative:
+      'declare the same permission on the operation and on the transition it carries',
+    rule: 'a record transition is authorized by one permission, declared once and honoured once',
+  },
+  COMPILER_TRANSITION_EFFECT_UNSUPPORTED: {
+    acceptedAlternative:
+      'author the package at a language version that materializes state fields, or move the state with an update operation',
+    rule: 'a record transition executes only where its state field is an ordinary materialized field',
+  },
   COMPILER_DESTRUCTIVE_STORAGE_DDL_UNSUPPORTED: {
     acceptedAlternative:
       'render only the versioned additive allowlist with restrict-only foreign keys',

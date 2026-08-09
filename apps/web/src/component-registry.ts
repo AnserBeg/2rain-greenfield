@@ -623,12 +623,30 @@ function renderCommandBar(context: SurfaceComponentContext): string {
   );
 }
 
+/**
+ * Two effects bind to the `command` intent and they post identical arguments:
+ * a registered capability, and a record transition. The FORM is therefore the
+ * same; only the standing explanation differs, because a transition stages no
+ * draft and appends no business fact -- it moves one state under a
+ * compare-and-swap. Saying otherwise would describe an effect that does not
+ * happen.
+ */
 function renderCapabilityCommand(
   context: SurfaceComponentContext,
   record: SemanticRecordDto,
   operation: CompiledSurfaceOperationBinding,
 ): string {
-  return `<form class="capability-command" method="post" action="/?surface=${encodeURIComponent(context.surface.surfaceId)}" data-capability-id="${escapeHtml(operation.capabilityId ?? '')}" data-operation-id="${escapeHtml(operation.operationId)}"><input type="hidden" name="operationId" value="${escapeHtml(operation.operationId)}"><input type="hidden" name="idempotencyKey" value="${randomUUID()}"><input type="hidden" name="recordId" value="${escapeHtml(record.recordId)}"><input type="hidden" name="expectedRevision" value="${record.revision}"><span><strong>Draft staged.</strong> Posting is a separate confirmed step.</span><button type="submit">${escapeHtml(operation.label)}</button></form>`;
+  // Both sides of the merge are load-bearing and they compose exactly.
+  // `5g3-sm` distinguishes the standing explanation by effect kind; this
+  // packet replaces the `intent=command` hidden input with the operation's own
+  // id. A release and a cancel are both transitions, so before this merge they
+  // would have been two identical forms differing only in their button label
+  // and posting the same `intent` -- the collision this packet fixes, arriving
+  // for the first time on a tree where transitions actually bind.
+  const explanation = operation.capabilityId
+    ? '<span><strong>Draft staged.</strong> Posting is a separate confirmed step.</span>'
+    : '<span><strong>Ready.</strong> This moves the record to its next state.</span>';
+  return `<form class="capability-command" method="post" action="/?surface=${encodeURIComponent(context.surface.surfaceId)}" data-capability-id="${escapeHtml(operation.capabilityId ?? '')}" data-operation-id="${escapeHtml(operation.operationId)}"><input type="hidden" name="operationId" value="${escapeHtml(operation.operationId)}"><input type="hidden" name="idempotencyKey" value="${randomUUID()}"><input type="hidden" name="recordId" value="${escapeHtml(record.recordId)}"><input type="hidden" name="expectedRevision" value="${record.revision}">${explanation}<button type="submit">${escapeHtml(operation.label)}</button></form>`;
 }
 
 function renderKeyFacts(context: SurfaceComponentContext): string {

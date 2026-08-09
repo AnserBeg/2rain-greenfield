@@ -1,6 +1,7 @@
 import {
   DEFAULT_DISCLOSURE_TIER,
   LANGUAGE_VERSION,
+  languageHasMaterializedStateFields,
   type NormalizedApplicationPackage,
   type VersionedNormalizedApplicationPackage,
 } from '@north-star/canonical-model';
@@ -145,8 +146,17 @@ export function lowerBaseProjectionPayloads(
   );
 
   const isModuleV1 = packageRevision.languageVersion === LANGUAGE_VERSION;
+  // The AUTHORED version. `packageRevision` may be the dispatch alias; the
+  // third parameter is the real revision and is the only reliable source here.
+  const materializedStateFields = languageHasMaterializedStateFields(
+    verificationPackageRevision.languageVersion,
+  );
   const currentStorageTarget = isModuleV1
-    ? lowerStorageTargetV1(packageRevision, previousStorageTarget)
+    ? lowerStorageTargetV1(
+        packageRevision,
+        previousStorageTarget,
+        materializedStateFields,
+      )
     : null;
   const surfaceManifest = surfaceManifestPayload(
     packageRevision,
@@ -455,6 +465,48 @@ function queryCatalogPayload(
   };
 }
 
+/**
+ * A `transitionStateEffect` names a transition and nothing else. The runtime
+ * needs three further facts to execute one -- the entity, the state field, and
+ * the server-selected target -- and **no pinned projection carries any of
+ * them**: the semantic-model projection carries a `semanticFingerprint` of the
+ * transition, not its content. That measured absence is why admitting the
+ * effect is a projection change rather than the execution-fence widening it
+ * resembles.
+ *
+ * Resolving them here keeps the compiler the single authority for what a
+ * transition means. The runtime never walks the machine, so it cannot reach a
+ * different answer.
+ *
+ * Below v5 the effect is refused by `conformance.ts` before reaching this
+ * point, so the unresolved arm is unreachable for a compiled release and is
+ * retained only as a total function.
+ */
+function resolvedEffect(
+  effect: NormalizedApplicationPackage['operations'][number]['effect'],
+  packageRevision: NormalizedApplicationPackage,
+): unknown {
+  if (effect.kind !== 'transitionStateEffect') return effect;
+  const machine = packageRevision.stateMachines.find((candidate) =>
+    candidate.transitions.some(
+      (transition) => transition.transitionId === effect.transition.targetId,
+    ),
+  );
+  if (!machine) return effect;
+  const transition = machine.transitions.find(
+    (candidate) => candidate.transitionId === effect.transition.targetId,
+  )!;
+  return {
+    entity: machine.entity,
+    fromStateId: transition.fromState.targetId,
+    kind: effect.kind,
+    schemaVersion: effect.schemaVersion,
+    stateFieldId: machine.stateField.fieldId,
+    toStateId: transition.toState.targetId,
+    transition: effect.transition,
+  };
+}
+
 function operationCatalogPayload(
   packageRevision: NormalizedApplicationPackage,
   storageTarget: StorageTargetPayloadV1 | null,
@@ -472,11 +524,14 @@ function operationCatalogPayload(
   const storageByEntity = new Map(
     (storageTarget?.entities ?? []).map((entity) => [entity.entityId, entity]),
   );
+  const stateFieldIds = new Set(
+    packageRevision.stateMachines.map((machine) => machine.stateField.fieldId),
+  );
   return {
     kind: 'operationCatalogPayload',
     operations: packageRevision.operations.map((operation) => ({
       confirmation: operation.confirmation,
-      effect: operation.effect,
+      effect: resolvedEffect(operation.effect, packageRevision),
       lifecycle: operation.lifecycle,
       operationId: operation.operationId,
       permissionId: operation.permission.targetId,
@@ -488,7 +543,14 @@ function operationCatalogPayload(
             inputContract: operationInputContract(
               operation,
               'entity' in operation.effect
-                ? (fieldsByEntity.get(operation.effect.entity.targetId) ?? [])
+                ? // A machine's state field is never caller-writable: it is
+                  // seeded from `initialState` and moved only by a transition.
+                  // A caller that could patch it could forge a state, which is
+                  // the whole guarantee the carrier exists to provide. This is
+                  // the same exclusion `systemInput` already applies to
+                  // `legalEntityId`.
+                  (fieldsByEntity.get(operation.effect.entity.targetId) ?? [])
+                    .filter((field) => !stateFieldIds.has(field.fieldId))
                 : [],
               'entity' in operation.effect
                 ? (relationsByEntity.get(operation.effect.entity.targetId) ??
@@ -767,8 +829,30 @@ function verificationPlanPayload(
       )
       .map((query) => query.sourceEntity.targetId),
   );
+  // A materialized state field is not a caller input: the compiled contract
+  // excludes it from create and update, it is seeded from `initialState`, and
+  // only a transition moves it. Both scenarios below probe a field THROUGH the
+  // create operation, so minting them here asks the provider to populate a
+  // field it is structurally forbidden to populate -- which is how this
+  // surfaced, as `VERIFICATION_EXCLUDED_FIELD_VALUE_MISSING`.
+  //
+  // This is the `legal_entity_id` shape from `5g3-mount`: compiler-derived
+  // storage that no generic press can arrange. That column stays outside
+  // `fields` and never reaches this loop; a materialized state field is
+  // deliberately inside `fields` -- that is the whole point of the ruling, and
+  // what makes it selectable and addressable -- so the exclusion is stated
+  // here instead of being had for free.
+  //
+  // Not emitting differs from skipping, and ADR-0020:156 cares about the
+  // difference: nothing is admitted unexecuted. The scenario is never planned,
+  // because the contract it would probe does not exist.
+  const materializedStateFieldIds = new Set(
+    packageRevision.stateMachines.map((machine) => machine.stateField.fieldId),
+  );
   for (const field of packageRevision.fields.filter(
-    (entry) => entry.lifecycle === 'active',
+    (entry) =>
+      entry.lifecycle === 'active' &&
+      !materializedStateFieldIds.has(entry.fieldId),
   )) {
     if (field.fieldType.kind === 'enumFieldType') {
       addScenario({

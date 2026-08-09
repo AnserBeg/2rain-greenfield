@@ -209,6 +209,43 @@ lands. It buys a second perspective at the point where one reviewer and one
 orchestrator have demonstrably converged on the wrong frame.
 
 
+## Does the evidence prove the claim? — the checklist, added 2026-08-08
+
+**Every section from here down is one principle with a different face:** a control
+can pass while the claim above it is false. They were written one at a time as each
+was measured, and by 2026-08-08 there were fourteen of them. **Read this checklist;
+open a section only when it fires.**
+
+Run it against any control before submitting it for review, and against any claim
+ledger while reviewing one:
+
+| Ask | Fails when | Section |
+|---|---|---|
+| Is there a control at all? | A claim was **fenced as settled** with nothing behind it — one shipped four rounds that way | *A fenced claim without a control* |
+| Does the control prove the claim, or its **premise**? | A failure message names a value the assertion never reads | *A control can guard the premise* |
+| Does the specimen vary **one** property? | A forged case is wrong two ways, so deleting either check keeps it green | *A negative control must vary one property* |
+| Does each **check** die alone? | Asked of the control it passes; asked per check, a third is decorative | *Ask the deletion question of each check* |
+| Is the refusal **discriminating**? | A guard that refuses everything satisfies a refusal-only test | *A refusal control needs its admission twin* |
+| Do the red **names** map to distinct specimens? | Two subtests build the same payload — four names, three specimens | *A red count is not attribution* |
+| Did the red fire for the **stated** reason? | A red that reds for the wrong cause looks like evidence | *Verify why a red fired* |
+| Is the harness **in the tree**? | A mutation table nobody can re-derive | *An uncommitted harness is not evidence* |
+| Who **chose** the mutations? | Self-chosen tables measure the author's model | *Self-chosen mutations* |
+| Was the result **observed** or expected? | A probe reports runs its branch cannot produce | *A probe's results must be reproducible* |
+| Is the claim written **from** the measurement? | The comment states the aspiration; the specimens do less | *Write the claim from the measurement* |
+| Could the wrong thing be **unrepresentable** instead? | A detector gets evaded; a value that cannot be passed cannot be misused | *prefer unrepresentable to detectable* |
+
+**Two standing consequences.** After **two rounds** of a claim outrunning its
+specimens, **narrow the claim** rather than grow the table — the tell is that the
+control keeps growing while the production code has not changed. And **rounds one
+and two find production defects; rounds three and beyond find control defects** —
+when that transition happens, the loop has stopped being about the code.
+
+**Why this file is long.** Each section below carries the measurement that earned
+it, and those measurements are why the rules are credible rather than tasteful.
+**The checklist is the entry point; the sections are the evidence.** If this list
+grows past roughly fifteen rows, consolidate again rather than appending — doctrine
+nobody reads to the bottom of is not doctrine.
+
 ## A read count is not a proof — added 2026-08-06
 
 AGENTS.md section 6 requires a negative control per way a gate could pass
@@ -605,3 +642,145 @@ skipping it leaves a ruling with nothing behind it.
 **The tell that an arm was owed and skipped:** the implementing packet spends its
 first round correcting the ADR. That has now happened twice — `5g3-sm-impl`
 withdrawing ADR-0050 item 4, and `PS-1` rebuilding on refuted ADR-0049 rulings.
+
+## A refusal control needs its admission twin — added 2026-08-08
+
+**A control that proves a bad input is refused is satisfiable by refusing
+everything.** Only the paired control — that the *good* input is still admitted —
+distinguishes a guard from a wall.
+
+Three instances in one session:
+
+- **`U5b`'s reader round trip** proved a present tier is *carried* but not that an
+  absent one stays *absent*; a `parseSlot` inventing `always` survived until the
+  absence twin was added.
+- **ADR-0050 §7's permission equality** was ruled *with* the twin named — a
+  mismatch must refuse, **and** the matched case must still compile — and the lane
+  built both.
+- **`5g3-sm-impl`'s state-carrier collision** proves a counterfeit field fails by
+  name, and nothing proves the *exact* derived field is admitted. Replacing the
+  deep comparison with unconditional refusal on any ID collision keeps the
+  counterfeit test green **and** the PostgreSQL vertical green, because that
+  fixture never contains the derived field already.
+
+**The middle case is the tell:** the lane built both directions where the twin was
+named in the ruling, and one direction where it was not. **So name it as a
+standing requirement rather than per-instance** — every refusal control ships with
+the admission that proves the refusal is discriminating.
+
+**Generative question when writing a red:** *what implementation refuses
+everything, and would this control notice?*
+
+## A negative control must vary one property — added 2026-08-08
+
+`5g3-sm-impl`'s canonical-reference control forged a specimen with **both** a wrong
+`kind` **and** an invalid `schemaVersion`. It was refused, so the control passed —
+and **deleting the production `kind` check kept it green**, because the version
+condition still refused the same specimen. The control proved the specimen was bad;
+it never proved which check refused it.
+
+**This is distinct from "verify why a red fired."** There, the red is real and the
+question is whether it fired for the stated reason. Here the specimen is
+**confounded at the source**, so even a correctly-observed red cannot attribute
+itself. No amount of reading the failure text recovers the attribution.
+
+**The rule:** a negative control changes **one** property and leaves every other
+property of the specimen valid — including ones that feel incidental, like a
+version that has to be *some* value. **The tell is a broken tree with two reasons
+to fail.**
+
+**And a specimen installed at one call site does not control the others.**
+`5g3-sm-impl` forged only `effect.entity` in one fixture while its comment claimed
+three arms; restoring the shallow check in the capability arm, or passing the wrong
+expected kind for `effect.transition`, kept it green. **Exercise every call site the
+claim covers, or narrow the claim to the site exercised.**
+
+**Generative question:** *for each check this control is supposed to hold, delete
+that check alone — does the control still pass?*
+
+**Ask it of each CHECK, not of the control — sharpened 2026-08-08.** A lane applied
+this rule to its own rebuilt control and found a **third** confound neither the
+reviewer nor the orchestrator had named: deleting the version-*membership* check
+alone left all twelve cases green, because an invented version **cannot equal** a
+real effect version, so the version-*equality* check was refusing every membership
+specimen. Isolating membership required moving the enclosing effect's version and
+its references **together**, so equality is satisfied and membership is the only
+check left that can refuse.
+
+**Asked of the control, it passed while a third of it was decorative.** Per-check
+attribution is the measurement: `kind` 4 reds, equality 4 reds, membership 4 reds,
+one per position. **A control that cannot say which check refused each specimen is
+a control that will survive the deletion of one of them.**
+
+**And a forgery table owes its own admission twin:** every position's *unforged*
+specimen must be admitted. Without it, a position refused for an unrelated reason
+contributes purely decorative cases — the same defect one level up.
+
+## A red count is not attribution — and after two rounds, narrow the claim
+
+**Counting failures does not tell you which specimen failed.** `5g3-sm-impl`'s
+forged-reference table reported *"membership: 4 reds, one per position"*. Two of
+those names were **the same specimen counted twice** — both transition positions
+built an identical mutated catalog, so either reference's refusal passed both
+subtests. Deleting the check at one transition call site and leaving it at the
+other would have kept both green. **Four names, three specimens.**
+
+The lane found an earlier confound by re-running each deletion individually
+because a number disagreed with the code. That was right, and it was not enough:
+**the count was correct and the attribution was still false.**
+
+**So: attribute by specimen identity, not by red name.** Two subtests that
+construct the same payload are one control with two labels.
+
+### After two rounds of a claim exceeding its proof, narrow the claim
+
+Rounds three, four and five of that packet were all one control, while the
+production parser had been confirmed sound since round three. **Each round tried to
+make the control prove more; each round the claim still outran the specimens.**
+
+**The close is to shrink the claim to what the specimens support.** Where a routing
+claim is already proven by other cases — there, `kind` and equality each install at
+four distinct positions and so prove all four call sites reach the shared parser —
+a third check does **not** need its own per-position table. One mutation against the
+shared parser is sufficient, and saying so is more honest than a table whose fourth
+column is a duplicate.
+
+**The tell that you are strengthening when you should be narrowing:** the control
+grows, the production code has not changed in two rounds, and each review finds the
+same shape one layer in.
+
+## Write the claim from the measurement, and prefer unrepresentable to detectable
+
+**Measured 2026-08-08, across five packets in one session.** Rounds one and two of a
+review find production defects. **Rounds three and beyond find control defects while
+the production code sits unchanged and confirmed.** That transition is the signal
+that the loop has stopped being about the code.
+
+Two writing habits cause it.
+
+**Controls are written claim-first.** The comment states the aspiration — *"all
+three arms controlled"*, *"four positions, one red each"*, *"every entry point is
+leased"* — and the specimens implement a subset. Each review finds the gap, the
+control is strengthened, and the strengthened control makes a **new** slightly
+broad claim. Three rounds on one table is that loop, not three defects.
+
+> **Build the specimens, run the per-check deletion, then write the comment from
+> what actually died.** A lane that did this unprompted found a confound no reviewer
+> had named. Two review rounds would not have existed had it been standard.
+
+**And detection is chosen where impossibility was available.** A source scan
+narrowed from *"no id on the wire"* to *"every read of the posted id is the
+membership lookup"* is still a source scan, and a ternary reading a different
+submission field walks through it. The repository already ruled the better move:
+[ADR-0048](../../../docs/decisions/ADR-0048-the-message-catalog-is-platform-vocabulary-held-in-code.md)
+§2 chose `keyof typeof` because an unregistered code is **inexpressible**, *"strictly
+stronger than"* detectable.
+
+> **Before writing a detector, ask whether the consumer can be built so the wrong
+> input is unavailable to it.** Pass the resolved value, not the raw one. A guard
+> that cannot be evaded needs no control proving it wasn't.
+
+**What does not change:** control-quality findings are still worth the round. The
+worst defects this programme has carried were fenced claims with **no** control —
+one refusal shipped four rounds fenced as settled with nothing holding it, and a
+press-law guard is evaded on `main` to this day by a spliced literal.

@@ -289,3 +289,25 @@ result is *explicable*: which numbers moved, which held, and why. `5g3-sm-impl`
 could say that 107 of the 107 new obligations came from the `v5` cut and that
 observation count was unchanged — which is what made the new digest reviewable
 rather than merely fresh.
+
+## A freeze SHA may sit above its matrix SHA when the delta is the record — ruled 2026-08-08
+
+Raised twice by the same lane, correctly, and it is **structurally unavoidable**:
+any record of a matrix result must be written *after* the matrix. So the head that
+carries the gate table is always one commit above the SHA the gates were measured
+at.
+
+**This is already the identical-tree rule and needs no re-run.** The proof is the
+executable diff:
+
+    git diff --name-only <matrix-sha> <freeze-sha> -- . \
+      ':!docs' ':!.agents' ':!CLAUDE.md' ':!AGENTS.md' ':!learnings.md'
+
+**Empty output — freeze at the head, cite the matrix SHA, and record both.** A
+document describing a run does not invalidate the run.
+
+**Any output — the freeze is not the tested tree and the matrix is owed again.**
+
+**Report both SHAs.** `FULL_MATRIX_PASS_SHA` names what was measured; the freeze
+names what is reviewed and integrated. Collapsing them into one number is how a
+record of a green run becomes a claim about a different tree.

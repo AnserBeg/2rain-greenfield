@@ -1,6 +1,7 @@
 import {
   LANGUAGE_VERSION,
   canonicalizeAndHash,
+  languageHasMaterializedStateFields,
   type NormalizedApplicationPackage,
 } from '@north-star/canonical-model';
 
@@ -1218,6 +1219,16 @@ export function validateModuleConformance(
     }
   }
 
+  // The AUTHORED revision's version, not the dispatch alias's. `packageRevision`
+  // here is `projectionDispatchRevision(...)`, whose `languageVersion` is
+  // rewritten to the legacy compatibility literal -- which is exactly why the
+  // guard at the top of this function compares against `LANGUAGE_VERSION`.
+  // Asking the alias what version the author wrote is always answered "v2".
+  const materializedStateFields = languageHasMaterializedStateFields(
+    authoredOperations.languageVersion as Parameters<
+      typeof languageHasMaterializedStateFields
+    >[0],
+  );
   for (const operation of packageRevision.operations) {
     if (
       operation.effect.kind === 'deleteRecordEffect' ||
@@ -1232,6 +1243,65 @@ export function validateModuleConformance(
           operation.operationId,
         ),
       );
+    }
+    // Honoured or refused, at every version -- ADR-0041's rule applied to the
+    // construct that provoked it. Below v5 the state field is not an ordinary
+    // field, so nothing can write it, no predicate can address it and no query
+    // can select it; the effect compiles into a catalog the runtime cannot
+    // admit. Refusing it HERE, by name and by subject, is what stops that
+    // release from being built. Without this the failure surfaces at request
+    // time as an anonymous `MalformedPinnedOperationCatalogError` that takes
+    // every unrelated operation in the release down with it -- the ADR-0046
+    // defect ADR-0050 §1 recorded.
+    if (
+      operation.effect.kind === 'transitionStateEffect' &&
+      !materializedStateFields
+    ) {
+      diagnostics.push(
+        compilerDiagnostic(
+          'COMPILER_TRANSITION_EFFECT_UNSUPPORTED',
+          'wholeModelValidation',
+          '$.operations.effect.kind',
+          operation.operationId,
+        ),
+      );
+    }
+    // The language declares TWO permissions for a transition -- the
+    // operation's and the transition's (`schemas.ts:634`) -- and execution
+    // honours exactly one: the gateway authorizes `definition.permissionId`,
+    // which is the operation's. A transition declaring `release_restricted`
+    // under an operation declaring `edit_basic` would therefore execute on
+    // `edit_basic`, and the declaration a reader trusts is the one ignored.
+    // That is this packet's own defect class one field down, so it is refused
+    // here rather than carried.
+    //
+    // EQUALITY, not a second runtime decision. `transitionStateEffect` holds
+    // exactly one transition reference, so the two are 1:1 today and one
+    // authorization is the whole truth. When an effect carries more than one
+    // transition that stops being true -- and this rule fails loudly at that
+    // moment, which is the trigger to revisit rather than a silent
+    // generalization made in advance.
+    if (
+      operation.effect.kind === 'transitionStateEffect' &&
+      'transition' in operation.effect
+    ) {
+      const carried = operation.effect.transition.targetId;
+      const transition = packageRevision.stateMachines
+        .flatMap((machine) => machine.transitions)
+        .find((candidate) => candidate.transitionId === carried);
+      if (
+        transition &&
+        transition.permission.targetId !== operation.permission.targetId
+      ) {
+        diagnostics.push(
+          compilerDiagnostic(
+            'COMPILER_TRANSITION_PERMISSION_MISMATCH',
+            'wholeModelValidation',
+            '$.operations.permission',
+            operation.operationId,
+          ),
+        );
+      }
     }
   }
   for (const field of packageRevision.fields) {

@@ -25,6 +25,7 @@ import type {
   RegisteredOperationDefinition,
   RegisteredOperationInputContract,
   RegisteredRecordOperationDefinition,
+  RegisteredTransitionOperationDefinition,
   RegisteredOperationSystemInput,
   SemanticOperationExecutionRequest,
   SemanticOperationExecutor,
@@ -552,14 +553,27 @@ async function prepareMutation(
   const changes =
     kind === 'updateRecordEffect'
       ? updateChanges(request.definition.inputContract, prior, input.patch)
-      : [
-          Object.freeze({
-            classification: 'INTERNAL' as const,
-            fieldId: 'archiveStatus',
-            newState: valueState(kind === 'archiveRecordEffect'),
-            oldState: valueState(kind !== 'archiveRecordEffect'),
-          }),
-        ];
+      : // A transition's change document records the state move, not an
+        // archive flip. The old and new states are both compiled, so the
+        // document cannot disagree with what the UPDATE pinned.
+        kind === 'transitionStateEffect' &&
+          request.definition.effect.kind === 'transitionStateEffect'
+        ? [
+            Object.freeze({
+              classification: 'INTERNAL' as const,
+              fieldId: auditFieldId(request.definition.effect.stateFieldId),
+              newState: valueState(request.definition.effect.toStateId),
+              oldState: valueState(request.definition.effect.fromStateId),
+            }),
+          ]
+        : [
+            Object.freeze({
+              classification: 'INTERNAL' as const,
+              fieldId: 'archiveStatus',
+              newState: valueState(kind === 'archiveRecordEffect'),
+              oldState: valueState(kind !== 'archiveRecordEffect'),
+            }),
+          ];
   return {
     changes,
     expectedRevision: input.expectedRevision,
@@ -700,6 +714,16 @@ async function executeMutationOnClient(
         request.parentGuards,
       );
       await setArchiveState(client, storage, entity, input, false);
+      break;
+    case 'transitionStateEffect':
+      await requireExistingParentGuards(
+        client,
+        storage,
+        entity,
+        input.recordId,
+        request.parentGuards,
+      );
+      await transitionRecordState(client, entity, request.definition, input);
       break;
   }
   const record = await loadRawRecord(client, entity, input.recordId, true, []);
@@ -928,6 +952,51 @@ async function updateRecord(
         SET ${assignments.join(', ')}
       WHERE ${quoted(entity.recordIdentity.column)} = ${recordParameter}
         AND ${quoted(entity.optimisticRevision.column)} = ${revisionParameter}
+        AND ${quoted(entity.archive.archivedAtColumn)} IS NULL`,
+    values,
+  );
+  requireMutation(result.rowCount);
+}
+
+/**
+ * The transition writer. Everything a named document transition needs is
+ * already here in the generic press and none of it is new:
+ *
+ *  - the target is `effect.toStateId`, a COMPILED constant. The caller's input
+ *    is `['expectedRevision','recordId']` and carries no patch at all, so there
+ *    is no argument through which a target could be supplied.
+ *  - `expectedRevision` pins the row, exactly as `updateRecord` does.
+ *  - `fromStateId` pins the prior state IN THE SAME `WHERE`, so a concurrent
+ *    winner leaves this statement matching zero rows.
+ *  - one `UPDATE`, `requireMutation` on the row count: written exactly once.
+ */
+async function transitionRecordState(
+  client: PoolClient,
+  entity: StorageEntity,
+  definition: SemanticOperationExecutionRequest['definition'],
+  input: MutationInput,
+): Promise<void> {
+  if (definition.effect.kind !== 'transitionStateEffect') {
+    throw failure('MODULE_FIELD_UNSUPPORTED', 'effect is not a transition');
+  }
+  const effect = definition.effect;
+  const column = entity.columns.find(
+    (candidate) => candidate.canonicalFieldId === effect.stateFieldId,
+  );
+  if (!column) {
+    throw failure(
+      'MODULE_FIELD_UNSUPPORTED',
+      `state field ${effect.stateFieldId} has no column`,
+    );
+  }
+  const values: unknown[] = [];
+  const result = await client.query(
+    `UPDATE north_star_module.${quoted(entity.physicalTableName)}
+        SET ${quoted(column.physicalName)} = ${parameter(values, effect.toStateId)},
+            ${quoted(entity.optimisticRevision.column)} = ${quoted(entity.optimisticRevision.column)} + 1
+      WHERE ${quoted(entity.recordIdentity.column)} = ${parameter(values, input.recordId)}
+        AND ${quoted(entity.optimisticRevision.column)} = ${parameter(values, input.expectedRevision)}
+        AND ${quoted(column.physicalName)} = ${parameter(values, effect.fromStateId)}
         AND ${quoted(entity.archive.archivedAtColumn)} IS NULL`,
     values,
   );
@@ -3266,7 +3335,9 @@ async function roleFacts(client: PoolClient): Promise<{
 }
 
 function parseMutationInput(
-  definition: RegisteredRecordOperationDefinition,
+  definition:
+    | RegisteredRecordOperationDefinition
+    | RegisteredTransitionOperationDefinition,
   value: ImmutableJsonValue,
 ): MutationInput {
   const contract = definition.inputContract;
@@ -3300,6 +3371,13 @@ function parseMutationInput(
       });
     case 'archiveRecordEffect':
     case 'restoreRecordEffect':
+    // A transition takes the SAME closed two-argument input as archive and
+    // restore, and carries an empty patch. That emptiness is not incidental:
+    // it is what makes the target server-selected rather than caller-supplied.
+    // The gateway now applies the same closed-key fence before this point;
+    // this check stays as the inner of two, because the provider must not
+    // trust an input contract it did not read itself.
+    case 'transitionStateEffect':
       assertAllowedKeys(input, contract.closedArgumentKeys);
       return validateMutationInput(contract, {
         expectedRevision: requiredRevision(input.expectedRevision),
