@@ -1340,10 +1340,12 @@ function assertRowQueryParameters(
     }
     const parameterType = parameter.parameterType;
     // The node carries the version of the package that minted it, so this
-    // admits any SUPPORTED version rather than the one that happened to
-    // introduce the operand. A literal here refuses a later package's scope
-    // operand outright -- it falls through to the field-type parse and is
-    // rejected as an unadmitted parameter type, which names the wrong cause.
+    // admits every version whose language DECLARES the operand -- not the one
+    // that happened to introduce it, and not merely every version that exists.
+    // A literal here refuses a later package's operand outright, falling
+    // through to the field-type parse and naming the wrong cause; "any
+    // supported version" was tried and admitted v3, which never declared the
+    // operand at all.
     const legalEntityReference =
       parameterType.kind === 'legalEntityReferenceParameterType' &&
       isLegalEntityScopeNodeVersion(parameterType.schemaVersion);
@@ -1373,10 +1375,12 @@ function assertLegalEntityScopeContract(
     ['cardinality', 'kind', 'operand', 'schemaVersion'],
     invalid,
   );
-  // Every version check in this function admits any SUPPORTED version. These
-  // nodes are minted by a package whose version this reader does not choose, so
-  // a literal here refuses a legal later package -- and refuses it HERE, as a
-  // malformed pinned catalog, three layers from the literal that caused it.
+  // Every version check in this function admits the versions whose language
+  // declares the legal-entity operand. These nodes are minted by a package
+  // whose version this reader does not choose, so a literal refuses a legal
+  // later package -- refused HERE, as a malformed pinned catalog, three layers
+  // from the literal that caused it. Widening to every supported version is
+  // the opposite error and admits a forgery; the bound is two-sided.
   if (
     value.kind !== 'queryLegalEntityScope' ||
     !isLegalEntityScopeNodeVersion(value.schemaVersion) ||

@@ -101,14 +101,20 @@ what it describes. **A warning is not a control.**
 
 ### Where each is closed
 
-All seven by derivation. The emitter takes `authored.languageVersion`; the
-kernel's switches and all four gateway admitters derive from
-`SUPPORTED_LANGUAGE_VERSIONS` through one `isSupportedNodeVersion`; the
-dispatch-alias readers are *told* the authored version rather than deriving it
-from an alias that cannot know it; and the materialization gate now asks the
-**ordered** supported list — "at or after the version that introduced the rule" —
-so a v6 cut inherits it with nothing to remember. Its siblings enumerate their
-levels, which is why each had to be edited by this cut and why one was missed.
+All seven by derivation, **each from the property its check actually depends
+on** — which is not the same list in every case, and that distinction is the
+finding's second half:
+
+| Site | Derives from | Because the check depends on |
+|---|---|---|
+| the legal-entity emitter | `authored.languageVersion` | the package minting the node |
+| the predicate kernel's node admission | `SUPPORTED_LANGUAGE_VERSIONS` | whether the language has the version at all |
+| the four gateway scope admitters | `languageHasLegalEntityQueryScope`, via `isLegalEntityScopeNodeVersion` | whether that version **declares the operand** — `SUPPORTED_LANGUAGE_VERSIONS` was tried and admitted `v3`, which never did |
+| conformance and storage lowering | the authored revision, passed in | an alias that rewrites the version cannot know it |
+| the materialization gate | the **ordered** supported list, "at or after" | a v6 cut inheriting the rule with nothing to remember |
+
+Its siblings enumerate their levels, which is why each had to be edited by this
+cut and why one was missed.
 
 R2 and R3 below add the controls for the values that remain legitimately pinned.
 
