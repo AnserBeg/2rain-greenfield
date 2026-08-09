@@ -209,6 +209,43 @@ lands. It buys a second perspective at the point where one reviewer and one
 orchestrator have demonstrably converged on the wrong frame.
 
 
+## Does the evidence prove the claim? — the checklist, added 2026-08-08
+
+**Every section from here down is one principle with a different face:** a control
+can pass while the claim above it is false. They were written one at a time as each
+was measured, and by 2026-08-08 there were fourteen of them. **Read this checklist;
+open a section only when it fires.**
+
+Run it against any control before submitting it for review, and against any claim
+ledger while reviewing one:
+
+| Ask | Fails when | Section |
+|---|---|---|
+| Is there a control at all? | A claim was **fenced as settled** with nothing behind it — one shipped four rounds that way | *A fenced claim without a control* |
+| Does the control prove the claim, or its **premise**? | A failure message names a value the assertion never reads | *A control can guard the premise* |
+| Does the specimen vary **one** property? | A forged case is wrong two ways, so deleting either check keeps it green | *A negative control must vary one property* |
+| Does each **check** die alone? | Asked of the control it passes; asked per check, a third is decorative | *Ask the deletion question of each check* |
+| Is the refusal **discriminating**? | A guard that refuses everything satisfies a refusal-only test | *A refusal control needs its admission twin* |
+| Do the red **names** map to distinct specimens? | Two subtests build the same payload — four names, three specimens | *A red count is not attribution* |
+| Did the red fire for the **stated** reason? | A red that reds for the wrong cause looks like evidence | *Verify why a red fired* |
+| Is the harness **in the tree**? | A mutation table nobody can re-derive | *An uncommitted harness is not evidence* |
+| Who **chose** the mutations? | Self-chosen tables measure the author's model | *Self-chosen mutations* |
+| Was the result **observed** or expected? | A probe reports runs its branch cannot produce | *A probe's results must be reproducible* |
+| Is the claim written **from** the measurement? | The comment states the aspiration; the specimens do less | *Write the claim from the measurement* |
+| Could the wrong thing be **unrepresentable** instead? | A detector gets evaded; a value that cannot be passed cannot be misused | *prefer unrepresentable to detectable* |
+
+**Two standing consequences.** After **two rounds** of a claim outrunning its
+specimens, **narrow the claim** rather than grow the table — the tell is that the
+control keeps growing while the production code has not changed. And **rounds one
+and two find production defects; rounds three and beyond find control defects** —
+when that transition happens, the loop has stopped being about the code.
+
+**Why this file is long.** Each section below carries the measurement that earned
+it, and those measurements are why the rules are credible rather than tasteful.
+**The checklist is the entry point; the sections are the evidence.** If this list
+grows past roughly fifteen rows, consolidate again rather than appending — doctrine
+nobody reads to the bottom of is not doctrine.
+
 ## A read count is not a proof — added 2026-08-06
 
 AGENTS.md section 6 requires a negative control per way a gate could pass
