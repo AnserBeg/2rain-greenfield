@@ -221,7 +221,7 @@ guards is worse than none.
 
 ## Gates — one full matrix at the frozen SHA
 
-`FULL_MATRIX_PASS_SHA=40b40291`, tree clean, typecheck clean.
+`FULL_MATRIX_PASS_SHA=6291a876`, tree clean, typecheck clean.
 
 | Step | Result |
 |---|---|
@@ -229,25 +229,31 @@ guards is worse than none.
 | unit / compiler / performance | green |
 | integration / agent / architecture | green |
 | contracts / postgres / locale | green |
-| browser | 67 passed (2.7m) |
+| browser | 67 passed (1.6m) |
 | `check:language-coverage` | **PASS** — 2050 obligations, 2050 decision-covered, 427 first-party observations |
 | `check:reachability` | **PASS** — 99/99 test files, 10 producer artifacts |
 
-694 assertions passed, 0 failed, `MATRIX_EXIT=0` read from inside the log.
+699 assertions passed, 0 failed, `MATRIX_EXIT=0` read from inside the log.
 
 **The compile-budget gate measured**: `cpu_idle_pct=97.9` against the 90.0 floor,
-best-of-5 wall 1371.4 ms against 5000 ms. Pre-flight at launch: registry empty,
-99.1% idle, loadavg 0.98, no worktree busy, **2 `ccd-cli` runtimes**.
+best-of-5 wall 1889.8 ms against 5000 ms.
+
+**Pre-flight, and one thing worth carrying forward.** The reading taken at the
+instant the previous holder released was 92.6% at loadavg 2.42 — above the floor,
+but the shape of a machine still shedding another lane's work. A fresh reading
+moments later was **96.7%** at loadavg 1.22. An idle sample taken at release is
+systematically pessimistic; measuring after the decay is not gaming the gate, it
+is declining to attribute the previous holder's load to your own run.
 
 ### What the failed runs cost, and what changed
 
-Four matrices failed before this one. Two found real defects — an over-wide
-version fence that an existing forgery control refused, and the transition
-permission itself. **Two were residue of my own**: a prohibited word in a
-comment, and a pinned line number the permission rule had moved.
+Six matrices failed across this packet. Three found real defects — the transition
+permission, an over-wide version fence an existing forgery control refused, and
+a shallow reference parser. **Three were residue of my own**: a prohibited word
+in a comment, twice, and a pinned line number the permission rule had moved.
 
-After the third, verification moved before the matrix rather than after it: the
-gateway vocabulary sweep, full integration and full architecture run locally
-first. That pass immediately caught the pinned line and a lock-contention red —
-two more failed matrices that never happened. **Roughly fifty minutes of machine
-time was spent learning that three minutes of local checks come first.**
+After the third, verification moved before the matrix rather than after it — the
+gateway vocabulary sweep, full integration and full architecture, run locally
+first. That pass has since caught a pinned line, a lock-contention red, and a
+third vocabulary hit, none of which became a failed run. **Roughly an hour of
+machine time was spent learning that three minutes of local checks come first.**
