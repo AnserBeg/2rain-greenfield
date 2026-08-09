@@ -626,6 +626,44 @@ type ForgeableCatalog = {
  * attribution. If an UNFORGED catalog at some position is already rejected as
  * malformed, then all three forgeries at that position are decoration.
  */
+/**
+ * Version MEMBERSHIP, isolated.
+ *
+ * The obvious specimen -- a reference at an invented version -- is refused by
+ * the equality check too, because an invented version cannot equal a real
+ * effect's. Deleting membership alone therefore left the whole table green: a
+ * confound of exactly the kind this control exists to avoid, found by asking
+ * the generative question of each check rather than of the control as a whole.
+ *
+ * So this moves the EFFECT's version and the reference's together. They agree,
+ * equality is satisfied, and membership is the only thing left that can refuse
+ * a version the language never had.
+ */
+test('an effect at a version the language never had is refused', async (t) => {
+  for (const position of forgedReferencePositions) {
+    await t.test(position.arm, async () => {
+      const catalog = position.payload() as unknown as ForgeableCatalog;
+      const effect = catalog.operations[0]!.effect;
+      effect.schemaVersion = 'invented-version';
+      for (const key of ['entity', 'capability', 'transition']) {
+        const reference = effect[key];
+        if (reference && typeof reference === 'object') {
+          (reference as Record<string, unknown>).schemaVersion =
+            'invented-version';
+        }
+      }
+      const fixture = createFixture({
+        operationPayload: catalog as unknown as ImmutableJsonValue,
+      });
+      await assert.rejects(
+        fixture.operationApi.handle(authenticationInput, position.request()),
+        MalformedPinnedOperationCatalogError,
+      );
+      assert.equal(fixture.policy.authorizationCalls.length, 1);
+    });
+  }
+});
+
 test('every forgery position starts from a catalog the parser admits', async (t) => {
   for (const position of forgedReferencePositions) {
     await t.test(position.arm, async () => {
@@ -660,7 +698,10 @@ test('a forged canonical reference never reaches the executor, at every position
           targetId: 'northstar.bootstrap:entity.item',
         },
       ],
-      // Only the version is wrong, and wrong by never having existed.
+      // Only the version is wrong, and wrong by never having existed. NOTE this
+      // is ALSO caught by the equality check, since it cannot equal a real
+      // effect version -- the membership case that isolates membership is
+      // below, where the effect itself is moved.
       [
         'version was never in the language',
         {
