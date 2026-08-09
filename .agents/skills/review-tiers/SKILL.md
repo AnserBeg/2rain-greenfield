@@ -605,3 +605,31 @@ skipping it leaves a ruling with nothing behind it.
 **The tell that an arm was owed and skipped:** the implementing packet spends its
 first round correcting the ADR. That has now happened twice — `5g3-sm-impl`
 withdrawing ADR-0050 item 4, and `PS-1` rebuilding on refuted ADR-0049 rulings.
+
+## A refusal control needs its admission twin — added 2026-08-08
+
+**A control that proves a bad input is refused is satisfiable by refusing
+everything.** Only the paired control — that the *good* input is still admitted —
+distinguishes a guard from a wall.
+
+Three instances in one session:
+
+- **`U5b`'s reader round trip** proved a present tier is *carried* but not that an
+  absent one stays *absent*; a `parseSlot` inventing `always` survived until the
+  absence twin was added.
+- **ADR-0050 §7's permission equality** was ruled *with* the twin named — a
+  mismatch must refuse, **and** the matched case must still compile — and the lane
+  built both.
+- **`5g3-sm-impl`'s state-carrier collision** proves a counterfeit field fails by
+  name, and nothing proves the *exact* derived field is admitted. Replacing the
+  deep comparison with unconditional refusal on any ID collision keeps the
+  counterfeit test green **and** the PostgreSQL vertical green, because that
+  fixture never contains the derived field already.
+
+**The middle case is the tell:** the lane built both directions where the twin was
+named in the ruling, and one direction where it was not. **So name it as a
+standing requirement rather than per-instance** — every refusal control ships with
+the admission that proves the refusal is discriminating.
+
+**Generative question when writing a red:** *what implementation refuses
+everything, and would this control notice?*
