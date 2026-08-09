@@ -65,7 +65,17 @@ function assertPostedIdOnlySelects(source: string): void {
     'the posted operation id is never read, so this check proves nothing',
   );
   for (const line of postedIdReads) {
-    assert.match(line, /candidate\.operationId === submission\.operationId/);
+    // Handing it to the selector is the only admissible read. The comparison
+    // itself moved inside `boundOperation` when the boundary became
+    // structural, and this predicate still demanded the old inline shape --
+    // which is how the sweep red'd on its own refactor rather than on a
+    // defect. A ratchet that describes a superseded structure is a ratchet
+    // that will be edited to fit rather than consulted.
+    assert.match(
+      line,
+      /boundOperation\(\s*binding,\s*submission\.operationId\s*\)/,
+      `the posted id is read outside the selector call: ${line.trim()}`,
+    );
   }
 }
 
@@ -77,21 +87,22 @@ function assertPostedIdOnlySelects(source: string): void {
  * firing — it proved a property of the fixture, not of the check.
  */
 test('binding-authority red: a passed-onward id and a never-read id are both observed', () => {
-  const leaked = [
-    'const operation = binding.operations.find(',
-    '  (candidate) => candidate.operationId === submission.operationId,',
-    ');',
-    'const result = await gateways.operationGateway.invoke(view, {',
-    '  operationId: submission.operationId,',
-    '});',
-  ].join('\n');
+  const passing = 'const operation = boundOperation(binding, submission.operationId);';
+
+  // The arm that shows the predicate can pass, asserted FIRST so the three
+  // reds below cannot be a check that simply refuses everything.
+  assertPostedIdOnlySelects(passing);
+
   assert.throws(
-    () => assertPostedIdOnlySelects(leaked),
-    /operationId: submission\.operationId/,
+    () =>
+      assertPostedIdOnlySelects(
+        `${passing}\nconst result = await gateways.operationGateway.invoke(view, {\n  operationId: submission.operationId,\n});`,
+      ),
+    /read outside the selector call: operationId: submission\.operationId/,
   );
 
-  // The other vacuity vector: a source that never reads the posted id must not
-  // satisfy the check by quantifying over an empty list.
+  // A source that never reads the posted id must not satisfy the check by
+  // quantifying over an empty list.
   assert.throws(
     () =>
       assertPostedIdOnlySelects(
@@ -100,30 +111,50 @@ test('binding-authority red: a passed-onward id and a never-read id are both obs
     /the posted operation id is never read/,
   );
 
-  // And the arm that shows the predicate can pass, so the two reds above are
-  // not observing a check that refuses everything.
-  assertPostedIdOnlySelects(
-    'const operation = binding.operations.find(\n' +
-      '  (candidate) => candidate.operationId === submission.operationId,\n' +
-      ');',
+  // And the shape that defeated the previous spelling of this scan: selecting
+  // by something other than the posted id, while still reading it. Caught here
+  // only because the read must BE the selector call; the structural guarantee
+  // is `semanticOperationRequestFor`'s argument list, below.
+  assert.throws(
+    () =>
+      assertPostedIdOnlySelects(
+        "const operation = submission.selectorBypass === '1' ? binding.operations[0] : boundOperation(binding, submission.operationId) ?? binding.operations[0];",
+      ),
+    /read outside the selector call/,
   );
 });
 
 /**
  * ADR-0051 §4's structural half, asserted where it lives: the one construction
- * site for a gateway request cannot see the wire, and does not spread.
+ * site for a gateway request cannot see the wire and does not spread, and the
+ * selector can reach nothing but the binding.
  */
 test('the gateway request is built where the submission is not in scope', () => {
-  const runtime = readFileSync(resolve('apps/web/src/surface-runtime.ts'), 'utf8');
-  const helper = runtime.slice(
-    runtime.indexOf('export function semanticOperationRequestFor('),
+  const runtime = readFileSync(
+    resolve('apps/web/src/surface-runtime.ts'),
+    'utf8',
   );
-  assert.notEqual(helper, '');
-  const body = helper.slice(0, helper.indexOf('\n}\n') + 3);
-  assert.doesNotMatch(body, /submission/);
-  assert.doesNotMatch(body, /\.\.\./);
-  assert.match(body, /operationId: operation\.operationId/);
+
+  const request = functionBody(runtime, 'export function semanticOperationRequestFor(');
+  assert.doesNotMatch(request, /submission/);
+  assert.doesNotMatch(request, /\.\.\./);
+  assert.match(request, /operationId: operation\.operationId/);
+
+  const selector = functionBody(runtime, 'function boundOperation(');
+  assert.doesNotMatch(selector, /submission/);
+  assert.match(selector, /binding\.operations\.find\(/);
+  assert.match(selector, /candidate\.operationId === postedOperationId/);
 });
+
+/** Source from a declaration to its first column-zero closing brace. */
+function functionBody(source: string, declaration: string): string {
+  const start = source.indexOf(declaration);
+  assert.notEqual(start, -1, `${declaration} is absent`);
+  const rest = source.slice(start);
+  const end = rest.indexOf('\n}\n');
+  assert.notEqual(end, -1, `${declaration} has no closing brace`);
+  return rest.slice(0, end + 3);
+}
 
 test('apps/web has no PostgreSQL, SQL, provider, or direct database access', () => {
   for (const file of webSource) {
