@@ -111,16 +111,25 @@ test('binding-authority red: a passed-onward id and a never-read id are both obs
     /the posted operation id is never read/,
   );
 
-  // And the shape that defeated the previous spelling of this scan: selecting
-  // by something other than the posted id, while still reading it. Caught here
-  // only because the read must BE the selector call; the structural guarantee
-  // is `semanticOperationRequestFor`'s argument list, below.
-  assert.throws(
-    () =>
-      assertPostedIdOnlySelects(
-        "const operation = submission.selectorBypass === '1' ? binding.operations[0] : boundOperation(binding, submission.operationId) ?? binding.operations[0];",
-      ),
-    /read outside the selector call/,
+  // WHAT THIS RATCHET CANNOT PROVE, asserted rather than described.
+  //
+  // ADR-0051 §4's bypass, written on ONE line with the compliant selector
+  // call, PASSES. A line-oriented scan sees a line containing
+  // `boundOperation(binding, submission.operationId)` and is satisfied, while
+  // the ternary in front of it hands an unbound posted id straight to
+  // `operations[0]`.
+  //
+  // This is asserted green on purpose. An earlier draft of this file claimed
+  // the ratchet caught this shape; it does not, and the claim red'd here
+  // rather than in a review. Locking the limit in place means strengthening
+  // the scan later has to change this line deliberately, and means no reader
+  // mistakes the ratchet for the guarantee.
+  //
+  // The guarantee is structural and lives in the test below:
+  // `semanticOperationRequestFor` has no submission in its argument list, so
+  // the request cannot carry a posted id no matter what the caller resolved.
+  assertPostedIdOnlySelects(
+    "const operation = submission.selectorBypass === '1' ? binding.operations[0] : boundOperation(binding, submission.operationId) ?? binding.operations[0];",
   );
 });
 
