@@ -334,6 +334,34 @@ P5 is why this table exists. It refuted what this record originally said about
 both sites — that neither could be observed going stale — and
 `version-predicate-derivation` was rewritten from the measurement.
 
+## What the first matrix cost, and why it is the packet's own theme again
+
+The first full matrix ran every suite green — 0 reds across unit, compiler,
+performance, integration, agent, architecture, contracts, postgres, locale and
+browser, with the compile-budget gate MEASURED at `cpu_idle_pct=99.6` — and then
+failed on the last gate but one:
+
+    language coverage: FAIL
+    Observed argv mismatch for compiler: expected [...10 files], received [...11 files]
+
+**The compiler suite's file list is written by hand in THREE places**:
+`package.json`'s `test:compiler` command, `repository-hygiene.test.ts`'s reviewed
+inventory, and `test/helpers/reachability-producers.ts`'s producer argv. Adding
+one test file updated two of them. `repository-hygiene`'s own control compares
+the command against the discovered glob, so it is blind to the third copy — the
+same *one value written by hand in more than one place* shape this packet spent
+its sweep on, one layer out from versions.
+
+The mechanism caught it, which is the system working. What it cost is the
+discovery point: **~40 minutes of green matrix before a list mismatch surfaced**,
+which is the `matrix-preflight` row's complaint in a different gate. Routed as
+`suite-inventory-copies`.
+
+Also recorded, because it nearly went the other way: the background wrapper
+reported the matrix as **exit code 0** while the run had failed. `MATRIX_EXIT=1`
+was read from inside the log, which is the false-green `5g3-sm-impl` recorded and
+the reason its rule exists.
+
 ## Gates
 
 _Filled in at the frozen SHA._
