@@ -1072,9 +1072,16 @@ const ENUM_SELECT_MAXIMUM_OPTIONS = 5;
  *
  * When the manifest carries no per-field kinds -- every profile version before
  * the unadopted v2, which is every recorded release today -- every field falls
- * back to the bare text box that was here before. That fallback is deliberate
- * and it is the reason the projection's `minimumVersion` did not have to move:
- * an unaware reader renders a less capable form, never a wrong value.
+ * back to the bare text box that was here before. **That fallback exists only
+ * for manifests BELOW the field-capability floor.** It is not a compatibility
+ * guarantee and nothing may be argued from it: a manifest that carries `fields`
+ * declares surface-manifest capability version 3, and a reader without field
+ * support must refuse it rather than fall back to this branch.
+ *
+ * This paragraph previously said the fallback was why `minimumVersion` did not
+ * have to move. It has moved. The version is what prevents an unaware reader
+ * from serving a field-bearing manifest; the fallback only serves the older
+ * ones.
  *
  * What this does NOT do is decide how the form BEHAVES. Required-ness, inline
  * validation, chunking and string-to-typed normalisation are `U7`'s.
@@ -1193,10 +1200,15 @@ function renderDateTimeControl(
  * silently rewrote a stored `null` to `false`. That is information destroyed
  * upstream of normalisation, where `U7` cannot recover it.
  *
- * The blank option is the third state. It also restores the property the
- * projection's capability floor depends on: an untouched field posts `""` here
- * exactly as it does from the bare text box an older reader renders, so both
- * readers submit the same entries for the same user action.
+ * The blank option is the third state, and that is the whole of its job.
+ *
+ * It previously carried a second argument -- that an untouched field posts `""`
+ * here exactly as a bare text box does, so old and new readers submit alike --
+ * and the capability floor was said to depend on it. **That argument is
+ * withdrawn.** Submission equivalence between readers is not a supported
+ * invariant of this renderer and must not be relied on when changing a control
+ * or allocating the next floor; surface-manifest version 3 is what keeps an
+ * unaware reader away from a field-bearing manifest.
  *
  * The blank stays present even when the field is REQUIRED. A create form has no
  * value yet, and a two-option select would preselect `true` -- materializing a

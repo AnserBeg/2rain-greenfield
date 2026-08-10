@@ -66,6 +66,14 @@ const principalId = 'a3000000-0000-4000-8000-000000000003';
 const releaseId = 'd4000000-0000-4000-8000-000000000004';
 const pointerId = 'd5000000-0000-4000-8000-000000000005';
 
+/**
+ * Named rather than a bare boolean, so every construction site reads as a claim
+ * about what that double does. `KNOWN_FALSE_GREEN` marks a site that observes a
+ * success production would refuse -- routed to `double-must-honour-refusal`.
+ */
+const HONOURS_REFUSALS = true;
+const KNOWN_FALSE_GREEN = false;
+
 let server: Server;
 let baseUrl: string;
 let executor: BrowserFixtureExecutor;
@@ -77,7 +85,7 @@ let fieldKindExecutor: BrowserFixtureExecutor;
 test.beforeAll(async () => {
   const compiled = compileFixture();
   const policy = allowPolicy();
-  executor = new BrowserFixtureExecutor();
+  executor = new BrowserFixtureExecutor(null, KNOWN_FALSE_GREEN);
   const operationMediation = new SemanticOperationMediationAuthority();
   executor.createSeed('Existing live master');
   missingDisplayRecordId = executor.createSeed();
@@ -97,7 +105,7 @@ test.beforeAll(async () => {
   // is minted (ADR-0047 §4a); it exists because the claim below -- that a date
   // field renders a DATE CONTROL -- can only be observed in a browser.
   const fieldKindPolicy = allowPolicy();
-  fieldKindExecutor = new BrowserFixtureExecutor(null, true);
+  fieldKindExecutor = new BrowserFixtureExecutor(null, HONOURS_REFUSALS);
   const fieldKindMediation = new SemanticOperationMediationAuthority();
   fieldKindServer = createSurfaceRuntimeServer(
     runtimeEntry(compileEveryFieldKindFixture(), fieldKindPolicy),
@@ -456,7 +464,7 @@ test('CLAIM 4 (stand-in): given acceptance, the reread returns the seeded values
  * the first cut's hidden `value="false"` sibling made an unrelated edit rewrite
  * a stored `null` to `false` -- upstream of anywhere `U7` could recover it.
  */
-test('an optional boolean submits three distinct states, and absent equals null', async ({
+test('an optional boolean renders and submits three states, with absent and null identical', async ({
   page,
 }) => {
   await page.setExtraHTTPHeaders({ authorization: 'fixture-user' });
@@ -486,11 +494,15 @@ test('an optional boolean submits three distinct states, and absent equals null'
   // this one is about the wire. They are not the same claim and the four-state
   // sentence previously stood over a two-state measurement.
   //
-  // What submission actually distinguishes is THREE things, not four: `true`,
-  // `false`, and "no value stated". `absent` and `null` are the SAME submission
-  // -- the empty string -- and are distinguishable only in the render. That is
-  // the honest boundary, and it is `form-empty-means-nothing`'s to close, not
-  // this packet's.
+  // What this control distinguishes is THREE things, not four: `true`, `false`,
+  // and "no value stated".
+  //
+  // **A stored `absent` and a stored `null` are identical here in BOTH places
+  // measured** -- both leave the blank option selected and both submit the empty
+  // string. An earlier version of this sentence said they were "distinguishable
+  // only in the render", and the specimen above disproves it: nothing in the
+  // boolean renderer adds a discriminator between them. Closing that difference
+  // is `form-empty-means-nothing`'s, not this packet's.
   const submitted = async (
     seeded: boolean | null | undefined,
     choose: string | null,
@@ -600,7 +612,7 @@ test('compiler-valid one-slot Record surfaces retain fallback actions and feedba
 }) => {
   const compiled = compileFixture(false);
   const policy = allowPolicy();
-  const executor = new BrowserFixtureExecutor();
+  const executor = new BrowserFixtureExecutor(null, KNOWN_FALSE_GREEN);
   const operationMediation = new SemanticOperationMediationAuthority();
   const legacyServer = createSurfaceRuntimeServer(
     runtimeEntry(compiled, policy),
@@ -665,6 +677,7 @@ test('a failed data slot stays inline while ready siblings render without JavaSc
   const policy = allowPolicy();
   const failingExecutor = new BrowserFixtureExecutor(
     `${FIXTURE_IDS.namespace}:query.master_get`,
+    KNOWN_FALSE_GREEN,
   );
   const operationMediation = new SemanticOperationMediationAuthority();
   const failingServer = createSurfaceRuntimeServer(
@@ -732,7 +745,7 @@ test('an empty data slot is observably distinct from a failed slot', async ({
 }) => {
   const compiled = compileFixture();
   const policy = allowPolicy();
-  const emptyExecutor = new BrowserFixtureExecutor();
+  const emptyExecutor = new BrowserFixtureExecutor(null, KNOWN_FALSE_GREEN);
   const operationMediation = new SemanticOperationMediationAuthority();
   const emptyServer = createSurfaceRuntimeServer(
     runtimeEntry(compiled, policy),
@@ -774,7 +787,7 @@ test('an invalid selected-surface binding remains page-level before slot composi
 }) => {
   const compiled = compileFixture(true, true);
   const policy = allowPolicy();
-  const invalidExecutor = new BrowserFixtureExecutor();
+  const invalidExecutor = new BrowserFixtureExecutor(null, KNOWN_FALSE_GREEN);
   const operationMediation = new SemanticOperationMediationAuthority();
   const invalidServer = createSurfaceRuntimeServer(
     runtimeEntry(compiled, policy),
@@ -815,23 +828,30 @@ class BrowserFixtureExecutor
   private readonly records = new Map<string, SemanticRecordDto>();
 
   /**
-   * `honourProviderRefusal` is OPT-IN, and the reason is a measurement rather
-   * than caution. Turning it on for the legacy `ordinaryModuleV1` executor reds
-   * two pre-existing tests: the real parser refuses that fixture's create with
-   * `MODULE_REQUIRED_FIELD_MISSING` on `master_number`, a REQUIRED field the
-   * surface never renders and the form therefore cannot submit. Those tests have
-   * been asserting "Create complete" against a double that accepted what
-   * production rejects.
+   * **This double does NOT honour provider refusals in general, and the
+   * parameter has no default so that no construction site can be silent about
+   * it.**
    *
-   * That is the same defect class this flag exists to close, it is pre-existing,
-   * and it is a different instance from the wire gaps this packet routed. It
-   * belongs to the `double-must-honour-refusal` sweep, not to `ux-picker`, so
-   * the flag is on where this packet's claims depend on it and off where turning
-   * it on would silently widen the lease.
+   * A review found the earlier framing false: with a defaulted `false`,
+   * `execute()` still recorded the refusal and then merged the rejected values,
+   * persisted them and returned `outcome: 'succeeded'` with a read-back. The
+   * class could be described as refusal-honouring while its default behaviour
+   * did the opposite. Requiring the argument does not fix that behaviour -- it
+   * makes every site state which one it has.
+   *
+   * `false` is a KNOWN FALSE GREEN, not a preference. The real parser refuses
+   * `ordinaryModuleV1`'s create with `MODULE_REQUIRED_FIELD_MISSING` on
+   * `master_number` -- a required field that surface never renders, so its form
+   * cannot submit it -- and two tests below observe "Create complete" for an
+   * operation production cannot perform. That is pre-existing, it is a different
+   * instance from the wire gaps `ux-picker` routed, and closing it means
+   * reconciling a surface with its entity's input contract. Routed to the
+   * `double-must-honour-refusal` sweep; deliberately not fixed here, because
+   * fixing it inside this lease would widen the packet past its charter.
    */
   constructor(
-    private readonly failedQueryId: string | null = null,
-    private readonly honourProviderRefusal = false,
+    private readonly failedQueryId: string | null,
+    private readonly honourProviderRefusal: boolean,
   ) {}
 
   /**
