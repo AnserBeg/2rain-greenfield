@@ -8,9 +8,11 @@ import {
   normalizeApplicationPackage,
 } from '../../packages/canonical-model/src/index.js';
 import {
+  COMPILER_SEMANTIC_PROFILE_V2_VERSION,
   DEFAULT_COMPILER_LIMITS,
   MODULE_COMPILER_PROFILE,
   compileApplication,
+  type CompilerSemanticProfileVersion,
   type CompileSuccess,
   type ContentAddressedArtifact,
 } from '../../packages/compiler/src/index.js';
@@ -526,6 +528,123 @@ test('a capability command is artifact-bound, render-minted, and deliberately co
   assert.equal(executor.operationCalls.length, 0);
 });
 
+const REQUIRED_RELATION_ID = `${FIXTURE_IDS.namespace}:relation.master_role_parent`;
+const CHILD_FORM_SURFACE = `${FIXTURE_IDS.namespace}:surface.master_role_form`;
+
+/**
+ * The acceptance criterion for `ux-reference-picker`, stated as the thing that
+ * must be impossible rather than the thing that must work: a create through a
+ * REQUIRED relation cannot be satisfied unless the wire carries it.
+ *
+ * The specimen is the fixture's own `master_role_parent`, which declared
+ * `required: true` long before this packet existed. It was not authored to make
+ * this gate pass.
+ */
+test('a required relation is pickable and reaches the operation input', async () => {
+  const compiled = compileFixture(
+    ordinaryModuleV1(),
+    COMPILER_SEMANTIC_PROFILE_V2_VERSION,
+  );
+  const policy = new RecordingPolicy('ALLOW');
+  const executor = new InMemoryGenericExecutor();
+  const parentRecordId = executor.seed(tenantA, 'Northwind');
+  const entry = runtimeEntry(compiled, policy, {
+    a: identity(tenantA, environmentA, principalA),
+  });
+  const view = await issuedView(entry, 'a');
+  const gateways = semanticGateways(policy, executor);
+
+  const rendered = await renderSurfaceRuntimeWithData(
+    view,
+    `/?surface=${encodeURIComponent(CHILD_FORM_SURFACE)}`,
+    gateways,
+  );
+
+  assert.match(
+    rendered.html,
+    new RegExp(`<select name="relation:${REQUIRED_RELATION_ID}" required>`),
+    'a required relation must render a required server-side control',
+  );
+  assert.match(
+    rendered.html,
+    new RegExp(`<option value="${parentRecordId}">Northwind</option>`),
+    'the control must offer the target entity’s records, labelled by its display field',
+  );
+  assert.doesNotMatch(
+    rendered.html,
+    /<script/,
+    'ADR-0036 §2 admits no script here; a server-rendered select needs none',
+  );
+
+  const before = executor.operationCalls.length;
+  await submitSurfaceRuntimeIntent(
+    view,
+    `/?surface=${encodeURIComponent(CHILD_FORM_SURFACE)}`,
+    {
+      idempotencyKey: randomUUID(),
+      intent: 'create',
+      recordId: randomUUID(),
+      [`relation:${REQUIRED_RELATION_ID}`]: parentRecordId,
+      [`value:${FIXTURE_IDS.fieldIds.childRole}`]:
+        FIXTURE_IDS.optionIds.owner,
+    },
+    gateways,
+  );
+
+  assert.equal(
+    executor.operationCalls.length,
+    before + 1,
+    'the create must have been executed, not refused',
+  );
+  const input = asRecord(executor.operationCalls.at(-1)!.input);
+  assert.deepEqual(
+    input.relations,
+    { [REQUIRED_RELATION_ID]: parentRecordId },
+    'the relation must arrive keyed by relation id, carrying the chosen record',
+  );
+});
+
+/**
+ * The negative control, and the one that decides whether the gate above is
+ * worth anything. Compiled at the ADOPTED profile the relation carries no
+ * target entity, so the picker cannot be built -- and the form must REFUSE
+ * rather than render controls whose submission the provider is certain to
+ * reject. A gate that only ever sees the wire present cannot tell the wire from
+ * the renderer.
+ */
+test('without the relation target the create form refuses instead of rendering', async () => {
+  const compiled = compileFixture();
+  const policy = new RecordingPolicy('ALLOW');
+  const executor = new InMemoryGenericExecutor();
+  executor.seed(tenantA, 'Northwind');
+  const entry = runtimeEntry(compiled, policy, {
+    a: identity(tenantA, environmentA, principalA),
+  });
+  const view = await issuedView(entry, 'a');
+
+  const rendered = await renderSurfaceRuntimeWithData(
+    view,
+    `/?surface=${encodeURIComponent(CHILD_FORM_SURFACE)}`,
+    semanticGateways(policy, executor),
+  );
+
+  assert.doesNotMatch(
+    rendered.html,
+    /<select name="relation:/,
+    'no target entity means no control can be offered',
+  );
+  assert.doesNotMatch(
+    rendered.html,
+    /id="surface-record-form"/,
+    'an unsatisfiable create form must not render at all',
+  );
+  assert.match(
+    rendered.html,
+    /data-diagnostic-code="QUERY_UNSUPPORTED"/,
+    'the refusal is named rather than silent (ADR-0052 §5)',
+  );
+});
+
 class RecordingPolicy implements CurrentPolicyGateway {
   readonly calls: CurrentPolicyDecisionRequest[] = [];
 
@@ -899,6 +1018,7 @@ function decode(value: ContentAddressedArtifact): Record<string, unknown> {
 
 function compileFixture(
   definition: Record<string, unknown> = ordinaryModuleV1(),
+  compilerSemanticProfileVersion: CompilerSemanticProfileVersion = MODULE_COMPILER_PROFILE.compilerSemanticProfileVersion,
 ): CompileSuccess {
   const normalized = normalizeApplicationPackage(definition);
   const result = compileApplication({
@@ -912,6 +1032,7 @@ function compileFixture(
     // Version-from-artifact: compile the fixture at the version it declares.
     profile: {
       ...MODULE_COMPILER_PROFILE,
+      compilerSemanticProfileVersion,
       languageVersion: normalized.languageVersion,
       normalizationProfileVersion: normalized.normalizationProfileVersion,
     },
