@@ -193,6 +193,25 @@ test('the newest readable version is reported, never selected', () => {
     { cwd: process.cwd() },
   ).filter((file) => !file.endsWith('.test.ts'));
 
+  // THE SCAN MUST REACH ITS SUBJECT -- the third erasure mode found on this
+  // control, after a strip that removed the subject and a rename that changed
+  // its name.
+  //
+  // Nothing tied the glob to anything. Repoint it at a path that matches no
+  // files and `selections` is `[]`, the assertion below passes, and every
+  // synthetic control stays green because those call `latestVersionSelections`
+  // directly. Measured: `packages/*/lib/**/*.ts` matches 0 files and this gate
+  // reports the tree clean.
+  //
+  // A non-empty check does NOT close it: a glob pointed at the wrong tree is
+  // non-empty. What closes it is naming the file the gate exists to guard --
+  // `DEFAULT_COMPILER_PROFILE` lives here, and it is the selection site every
+  // round of this review has attacked.
+  assert.ok(
+    productionFiles.includes('packages/compiler/src/compiler.ts'),
+    'the scan must reach the file declaring DEFAULT_COMPILER_PROFILE; a glob that misses it reports every tree clean',
+  );
+
   const selections = productionFiles.flatMap((file) =>
     latestVersionSelections(file, readFileSync(file, 'utf8'), constantNames),
   );

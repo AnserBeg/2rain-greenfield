@@ -397,6 +397,37 @@ shape as the packet's own sixth-omission sweep, which is about versions written
 by hand where they were derivable. A scan over text has this failure mode
 structurally; only resolution removes it.
 
+### The third erasure mode, and the pattern all three share
+
+Round 2's PASS arm routed one more finding; the orchestrator ruled it closes
+here rather than in a queue row, because the packet owed a matrix anyway so the
+close costs zero additional runs, and routing it would ship a Critical control
+that a one-line glob edit silences.
+
+**The scan discovered its own subject by glob and asserted nothing about the
+result.** `productionFiles` came from `globSync`, the scan flat-mapped over it,
+and `assert.deepEqual(selections, [])` passed whether the glob matched 99 files
+or none. Every synthetic control stayed green because those call
+`latestVersionSelections('synthetic.ts', …)` directly, never through the glob.
+Measured: `packages/*/lib/**/*.ts` matches **0 files**, and the gate reports the
+tree clean.
+
+**A non-empty check does not close it** — a glob pointed at the wrong tree is
+non-empty. What closes it is naming the file the gate exists to guard:
+`packages/compiler/src/compiler.ts`, where `DEFAULT_COMPILER_PROFILE` is
+declared, which is the selection site every round of this review has attacked.
+
+**Three rounds, three erasure modes, one class.**
+
+| Round | How the subject disappeared |
+|---|---|
+| 1 | a strip **removed** it — `^(?:import\|export)\s[^;]*;` ate the exported initializer |
+| 2 | a rename **changed its name** — an aliased import bound it to a non-guarded spelling |
+| 3 | a glob **never reached it** — the file set was discovered, not asserted |
+
+*A scan over text has that failure mode structurally; only resolution removes
+it.* Further findings in this class route to `scan-subject-discovered-by-glob`.
+
 ### The revise deletion table
 
 | # | Broken tree | Result |
@@ -408,6 +439,7 @@ structurally; only resolution removes it.
 | R5 | predicate body rewritten to a behaviourally equivalent form | **no red — correct by design** |
 | R5b | the predicate gains a third free binding the harness does not supply | **red**: `STATE_FIELD_INTRODUCED_AT is not defined` |
 | R6 | `LATEST_LANGUAGE_VERSION as ADOPTED_LANGUAGE_VERSION` in `compiler.ts` — round 2's finding | **green before the fix**; after it, **two reds**: the alias at `:4` and the selection at `:167` |
+| R7 | the scan's glob repointed to `packages/*/lib/**` — matches 0 files | **green before the pin**; after it, **red by name**: *"the scan must reach the file declaring DEFAULT_COMPILER_PROFILE"* |
 
 **R5 and R5b together characterise the faithfulness guard, and R5 alone would
 have misdescribed it.** The guard cannot fail on a behaviour change — an
@@ -454,6 +486,10 @@ the reason its rule exists.
 **The `11059ea` matrix is SUPERSEDED** by review round 2, which changed
 executable content in `canonical-contracts-purity.test.ts`. Fresh matrix owed.
 
+**Two green matrices were superseded by review rounds finding control defects
+the matrix cannot see. A vacuous control is green by construction — that is why
+the deletion table exists and why matrix-green was never going to settle this.**
+
 Recorded so the cost is visible: five matrices so far. Two failed on real
 defects this packet introduced (a third copy of a suite file list; a timeout
 split sized against a standalone measurement when the bound is in-matrix), and
@@ -461,3 +497,36 @@ two green runs were superseded by review rounds that found control defects the
 matrix cannot see — a control that passes vacuously is green by construction.
 `MATRIX_EXIT` was read from inside the log every time; the background wrapper
 reported success on every failed run.
+
+### A matrix pre-flight instrument, for the next lane
+
+`matrix-preflight` asks for the idle check to happen at matrix START rather than
+at the exclusive gate sixteen minutes in. This packet built one and used it, so
+it is recorded here rather than left in a scratchpad.
+
+Before the round-2 matrix the machine read **80.1 / 76.1 / 79.5** then
+**97.1 / 95.2 / 91.8** over six 5-second samples — three of six under the 90%
+floor, bimodal, with no test suite running anywhere. The load was agent runtimes
+mid-turn, which is exactly the condition the floor cannot distinguish from real
+contention. Launching would have been a coin flip on
+`COMPILE_BUDGET_INDETERMINATE` at a cost of a full run.
+
+The instrument: poll `/proc/stat` on a 5-second interval and require **four
+CONSECUTIVE samples at or above 93%** before launching. A single sample is what
+the gate itself takes and is why the gate is a coin flip under this load; a
+streak is what distinguishes a quiet machine from a lull between turns. Run it
+in the background and let it notify — it costs nothing and it converts a wasted
+matrix into a wait.
+
+It also earns its keep by failing honestly: on its first use it returned
+`NOT_QUIESCED_AFTER_10_MIN`, because another lane had taken the slot during the
+wait. That is the correct answer, and a lane that had launched instead would
+have raced a running matrix.
+
+**One trap it exposed, worth more than the instrument.** A targeted test run
+under `run-with-test-lock.mjs` while another lane holds the lock exits with
+`TEST_GATE_LOCK_BUSY` after 300s and produces NO test output. A grep for
+`^not ok` over that output returns nothing, which reads exactly like a pass.
+This packet nearly recorded one such empty result as a measurement. Read the
+lock diagnostic, not just the assertion lines — or, for a control that touches
+no database, port or shared state, run it without the lock wrapper at all.
