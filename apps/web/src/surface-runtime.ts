@@ -707,6 +707,11 @@ async function loadRelationPickers(
   operations: readonly CompiledSurfaceOperationBinding[],
   queryGateway: SemanticQueryGateway,
 ): Promise<readonly RelationPicker[]> {
+  // Only a form renders relation controls. Operations bind per entity, so a
+  // list surface over the same entity carries the create binding too, and
+  // enumerating every relation target on a list render would be a query nobody
+  // asked for.
+  if (selection.selected.surfaceRole !== 'form') return Object.freeze([]);
   const create = operations.find((operation) => operation.intent === 'create');
   if (!create || create.relationInputs.length === 0) return Object.freeze([]);
   const pickers = await Promise.all(
@@ -778,7 +783,10 @@ function operationInput(
           )
           .map(
             (entry) =>
-              [entry[0].slice(RELATION_SUBMISSION_PREFIX.length), entry[1]] as const,
+              [
+                entry[0].slice(RELATION_SUBMISSION_PREFIX.length),
+                entry[1],
+              ] as const,
           ),
       ),
     );

@@ -786,9 +786,7 @@ function renderRelationPicker(picker: RelationPicker): string {
  * form rather than left for an operator to discover by editing a draft and
  * finding no control.
  */
-function relationFreezeDisclosure(
-  pickers: readonly RelationPicker[],
-): string {
+function relationFreezeDisclosure(pickers: readonly RelationPicker[]): string {
   if (pickers.length === 0) return '';
   return `<p class="relation-freeze-note" data-relation-freeze="create-only">${escapeHtml(
     pickers.length === 1

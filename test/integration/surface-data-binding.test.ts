@@ -585,8 +585,7 @@ test('a required relation is pickable and reaches the operation input', async ()
       intent: 'create',
       recordId: randomUUID(),
       [`relation:${REQUIRED_RELATION_ID}`]: parentRecordId,
-      [`value:${FIXTURE_IDS.fieldIds.childRole}`]:
-        FIXTURE_IDS.optionIds.owner,
+      [`value:${FIXTURE_IDS.fieldIds.childRole}`]: FIXTURE_IDS.optionIds.owner,
     },
     gateways,
   );

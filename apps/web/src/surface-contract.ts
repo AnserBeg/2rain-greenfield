@@ -617,7 +617,9 @@ function parseOperationBinding(value: unknown): {
   const capability = isRecord(value.effect.capability)
     ? value.effect.capability
     : null;
-  const intent = capabilityEffect ? 'command' : operationIntent(value.effect.kind);
+  const intent = capabilityEffect
+    ? 'command'
+    : operationIntent(value.effect.kind);
   if (!intent) {
     throw invalidBinding(
       'pinned operation catalog contains a destructive or unknown effect',
@@ -663,7 +665,10 @@ function parseRelationInputs(
   inputContract: unknown,
 ): readonly CompiledSurfaceRelationInput[] {
   if (inputContract === undefined) return Object.freeze([]);
-  if (!isRecord(inputContract) || !Array.isArray(inputContract.relationInputs)) {
+  if (
+    !isRecord(inputContract) ||
+    !Array.isArray(inputContract.relationInputs)
+  ) {
     throw invalidBinding(
       'pinned operation input contract has an invalid relation input shape',
     );
@@ -674,7 +679,8 @@ function parseRelationInputs(
         !isRecord(entry) ||
         !isNonBlank(entry.relationId) ||
         typeof entry.required !== 'boolean' ||
-        (entry.targetEntityId !== undefined && !isNonBlank(entry.targetEntityId))
+        (entry.targetEntityId !== undefined &&
+          !isNonBlank(entry.targetEntityId))
       ) {
         throw invalidBinding(
           'pinned operation input contract has an invalid relation input shape',
