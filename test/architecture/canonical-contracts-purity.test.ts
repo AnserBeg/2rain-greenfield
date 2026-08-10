@@ -188,8 +188,15 @@ test('the newest readable version is reported, never selected', () => {
     'LATEST_LANGUAGE_VERSION',
     'LATEST_NORMALIZATION_PROFILE_VERSION',
   ];
+  // `apps/*/scripts/**` is in the set because the RELEASE COMPILERS live there
+  // and construct compiler profiles -- review round 3 found them unscanned.
+  // They are not incidental tooling: `compile-app-release.ts` is the
+  // implementation that makes "the constant is not the artifact event" true,
+  // and `compile-demo-release.ts` is why the shell root holds. A LATEST_*
+  // selection introduced in either is invisible to every other gate this
+  // packet identified.
   const productionFiles = globSync(
-    ['packages/*/src/**/*.ts', 'apps/*/src/**/*.ts'],
+    ['packages/*/src/**/*.ts', 'apps/*/src/**/*.ts', 'apps/*/scripts/**/*.ts'],
     { cwd: process.cwd() },
   ).filter((file) => !file.endsWith('.test.ts'));
 
@@ -207,10 +214,20 @@ test('the newest readable version is reported, never selected', () => {
   // non-empty. What closes it is naming the file the gate exists to guard --
   // `DEFAULT_COMPILER_PROFILE` lives here, and it is the selection site every
   // round of this review has attacked.
-  assert.ok(
-    productionFiles.includes('packages/compiler/src/compiler.ts'),
-    'the scan must reach the file declaring DEFAULT_COMPILER_PROFILE; a glob that misses it reports every tree clean',
-  );
+  // Each subject is pinned by name. A glob is a discovery mechanism, and this
+  // control has now been caught missing its subject twice -- once by matching
+  // nothing, once by matching the wrong tree -- so the required members are
+  // asserted rather than assumed.
+  for (const required of [
+    'packages/compiler/src/compiler.ts',
+    'apps/web/scripts/compile-app-release.ts',
+    'apps/web/scripts/compile-demo-release.ts',
+  ]) {
+    assert.ok(
+      productionFiles.includes(required),
+      `the scan must reach ${required}; a glob that misses a selection site reports every tree clean`,
+    );
+  }
 
   const selections = productionFiles.flatMap((file) =>
     latestVersionSelections(file, readFileSync(file, 'utf8'), constantNames),
@@ -304,6 +321,42 @@ test('the newest readable version is reported, never selected', () => {
     "import { LATEST_LANGUAGE_VERSION } from './constants.js';\nconst reported = `through ${LATEST_LANGUAGE_VERSION}`;\n",
   );
   assert.deepEqual(plainImport, []);
+
+  // (h) A TEMPLATE-DERIVED SELECTION -- round three's finding, and the
+  //     value-preserving one: it copies the newest readable version into the
+  //     adopted constant through an interpolation, so both are equal today and
+  //     nothing behavioural moves. At the next cut the adopted value follows
+  //     latest silently.
+  const templateSelection = detected(
+    "export const ADOPTED_LANGUAGE_VERSION =\n  `${LATEST_LANGUAGE_VERSION}` as (typeof LANGUAGE_VERSIONS)['v5'];\n",
+  );
+  assert.equal(templateSelection.length, 1, templateSelection.join('\n'));
+
+  // (i) the same shape one layer in: a template feeding a PROFILE field. This
+  //     one carries literal text, so rule (i) alone would exempt it; it is the
+  //     version-binding rule that catches it.
+  const templateProfileField = detected(
+    'export const PROFILE = { languageVersion: `${LATEST_LANGUAGE_VERSION}` };\n',
+  );
+  assert.equal(templateProfileField.length, 1, templateProfileField.join('\n'));
+
+  // (j) and the legitimate sink still passes -- BOTH real reporting sites in
+  //     this tree, one a call argument and one a message-record property.
+  //     Without this, (h) and (i) are satisfiable by forbidding every
+  //     interpolation, which would red `normalize.ts` and get the exemption
+  //     widened back by whoever hits it next.
+  assert.deepEqual(
+    detected(
+      'const d = diagnostic(code, path, `value must satisfy a closed supported schema through ${LATEST_LANGUAGE_VERSION}`);\n',
+    ),
+    [],
+  );
+  assert.deepEqual(
+    detected(
+      'const alternatives = {\n  CANON_VERSION_UNSUPPORTED: `use a supported version through ${LATEST_LANGUAGE_VERSION}`,\n};\n',
+    ),
+    [],
+  );
 
   // (g) a RENAMING re-export carries the same indirection one module out:
   //     downstream files import the new name and receive the guarded constant.
@@ -521,12 +574,68 @@ function latestVersionSelections(
         parent !== undefined &&
         ts.isVariableDeclaration(parent) &&
         parent.name === node;
-      // Interpolating it into operator-facing text is REPORTING it, which is
+      // Interpolating it into operator-facing TEXT is REPORTING it, which is
       // the only use the adoption discipline permits before adoption.
-      const isReported =
+      //
+      // NOT every interpolation -- corrected in review round 3. The exemption
+      // was `parent is a TemplateSpan`, which is a syntactic position, not a
+      // sink. Measured: `ADOPTED_LANGUAGE_VERSION = \`${LATEST_LANGUAGE_VERSION}\`
+      // as (typeof LANGUAGE_VERSIONS)['v5']` preserves the runtime value
+      // (both are v5 today), type-checks, leaves compiled output unchanged,
+      // and PASSED this scan. At the next cut the adopted value would follow
+      // latest silently, which is the one coupling this gate exists to refuse.
+      //
+      // Two independent rules, because one is not enough.
+      //
+      // (i) A REPORTING template carries literal text around the value. A
+      //     value-preserving coercion cannot: any added text changes the
+      //     string, so `\`${X}\`` with an empty head and tail is the only
+      //     shape that copies a version, and it is never a message. Both real
+      //     reporting sites in this tree carry text
+      //     (`normalize.ts:600`, `:2493`).
+      const enclosingTemplate =
         parent !== undefined &&
         ts.isTemplateSpan(parent) &&
-        parent.expression === node;
+        parent.expression === node
+          ? (parent.parent as ts.TemplateExpression | undefined)
+          : undefined;
+      const carriesLiteralText =
+        enclosingTemplate !== undefined &&
+        (enclosingTemplate.head.text.length > 0 ||
+          enclosingTemplate.templateSpans.some(
+            (span) => span.literal.text.length > 0,
+          ));
+      // (ii) Even WITH text, a template whose value becomes a version binding
+      //      is a selection. `\`v${n}\`` assigned to a profile field or an
+      //      adopted constant selects; it does not report.
+      const versionBindingNames = new Set([
+        'languageVersion',
+        'normalizationProfileVersion',
+        'compilerSemanticProfileVersion',
+        'schemaVersion',
+        'ADOPTED_LANGUAGE_VERSION',
+        'ADOPTED_NORMALIZATION_PROFILE_VERSION',
+      ]);
+      const becomesVersionBinding = (from: ts.Node | undefined): boolean => {
+        let current: ts.Node | undefined = from;
+        while (current !== undefined) {
+          if (
+            (ts.isVariableDeclaration(current) ||
+              ts.isPropertyAssignment(current) ||
+              ts.isPropertySignature(current)) &&
+            ts.isIdentifier(current.name)
+          ) {
+            return versionBindingNames.has(current.name.text);
+          }
+          if (ts.isCallExpression(current) || ts.isReturnStatement(current)) {
+            return false;
+          }
+          current = current.parent as ts.Node | undefined;
+        }
+        return false;
+      };
+      const isReported =
+        carriesLiteralText && !becomesVersionBinding(enclosingTemplate);
       if (!isOwnDeclarationName && !isReported) {
         const { line } = parsed.getLineAndCharacterOfPosition(node.getStart());
         selections.push(

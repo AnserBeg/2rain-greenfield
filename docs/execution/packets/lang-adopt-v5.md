@@ -435,6 +435,44 @@ declared, which is the selection site every round of this review has attacked.
 *A scan over text has that failure mode structurally; only resolution removes
 it.* Further findings in this class route to `scan-subject-discovered-by-glob`.
 
+### Review round 3 — REVISE, two more control defects on the same gate
+
+Both confirmed by reproduction before fixing, and both are ways the scan passed
+while the fact was false.
+
+**(1) The template exemption was a syntactic position, not a sink.** The rule
+was *"parent is a `TemplateSpan`"*, which exempts EVERY interpolation regardless
+of where the string flows. Measured:
+
+    export const ADOPTED_LANGUAGE_VERSION =
+      `${LATEST_LANGUAGE_VERSION}` as (typeof LANGUAGE_VERSIONS)['v5'];
+
+preserves the runtime value (`ADOPTED= v5 LATEST= v5`), type-checks, leaves
+compiled output unchanged, and **passed the scan**. At the next cut the adopted
+value follows latest silently. Replaced with two independent rules: a reporting
+template must carry literal text — a value-preserving copy cannot, since any
+added text changes the string — and a template whose value becomes a version
+binding is a selection even when it does carry text.
+
+**(2) The scan never reached the release compilers.** It globbed
+`packages/*/src/**` and `apps/*/src/**`, which excludes `apps/web/scripts/**`
+— where `compile-app-release.ts` and `compile-demo-release.ts` both construct
+compiler profiles. Those are not incidental tooling: `compileNormalizedDefinition`
+is the implementation that makes this packet's own headline claim true, and the
+demo compiler is why the shell root holds. This packet DISCLOSED the gap as W5
+in its review prompt and did not close it; disclosure is not a gate. The glob now
+includes `apps/*/scripts/**` (99 → 102 files) and all three selection sites are
+pinned by name rather than discovered.
+
+Measured: **R8** reds at `constants.ts:42`, **R9** at
+`compile-app-release.ts:496`. Both passed before the fix.
+
+**Four erasure modes on one control, across three review rounds.** A strip
+removed the subject; a rename changed its name; a glob never reached it; an
+exemption swallowed it after it was found. Every one was green, and every one
+was found by a review arm rather than by this lane's own deletion tables — which
+is `W1`/`W10` from the prompt, confirmed in substance.
+
 ### The revise deletion table
 
 | # | Broken tree | Result |
@@ -447,6 +485,8 @@ it.* Further findings in this class route to `scan-subject-discovered-by-glob`.
 | R5b | the predicate gains a third free binding the harness does not supply | **red**: `STATE_FIELD_INTRODUCED_AT is not defined` |
 | R6 | `LATEST_LANGUAGE_VERSION as ADOPTED_LANGUAGE_VERSION` in `compiler.ts` — round 2's finding | **green before the fix**; after it, **two reds**: the alias at `:4` and the selection at `:167` |
 | R7 | the scan's glob repointed to `packages/*/lib/**` — matches 0 files | **green before the pin**; after it, **red by name**: *"the scan must reach the file declaring DEFAULT_COMPILER_PROFILE"* |
+| R8 | `ADOPTED_LANGUAGE_VERSION` = a template interpolation of `LATEST_LANGUAGE_VERSION`, value-preserving | **green before the fix**; after it, **red** at `constants.ts:42` |
+| R9 | a `LATEST_LANGUAGE_VERSION` selection inside `compile-app-release.ts`'s profile | **green before the fix** (file unscanned); after it, **red** at `:496` |
 
 **R5 and R5b together characterise the faithfulness guard, and R5 alone would
 have misdescribed it.** The guard cannot fail on a behaviour change — an
@@ -488,47 +528,14 @@ reported the matrix as **exit code 0** while the run had failed. `MATRIX_EXIT=1`
 was read from inside the log, which is the false-green `5g3-sm-impl` recorded and
 the reason its rule exists.
 
-## Gates — one full matrix, green at the re-frozen SHA
+## Gates
 
-`FULL_MATRIX_PASS_SHA=dc60fea`, tree clean, typecheck clean.
-**589 assertions, 0 failures, `MATRIX_EXIT=0` read from inside the log.**
-
-| Step | Result |
-|---|---|
-| `check:demo-release`, `check:app-release` | pass — shell root held, lineage reproduces 9/9 |
-| unit / compiler / performance | green |
-| integration / agent / architecture | green |
-| contracts / postgres / locale | green |
-| browser | 67 passed (2.7m) |
-| `check:language-coverage` | **PASS** — 2050 obligations, 2050 decision-covered, **427 first-party observations** |
-| `check:reachability` | **PASS** — **100/100** test files, 10 producer artifacts |
-
-**Compile-budget gate MEASURED:** `cpu_idle_pct=98.8`, best-of-5 wall
-**1555.8 ms** against 5000 ms — the highest idle and fastest wall of the five
-runs, because the pre-flight below cleared the machine first rather than
-launching into it.
-
-### What six matrices cost, and why no failure was flake
-
-| Run | Result | Cause |
-|---|---|---|
-| 1 | FAIL | a third hand-written copy of the compiler suite's file list (`suite-inventory-copies`) |
-| 2 | FAIL | `test:postgres` timeouts — the first split was sized against a STANDALONE measurement while the bound is IN-MATRIX |
-| 3 | green | **superseded** by review round 1 |
-| 4 | green | **superseded** by review round 2 |
-| 5 | green | this one |
-
-Two failed on defects this packet introduced. **Two green runs were superseded
-by review rounds finding control defects the matrix cannot see. A vacuous
-control is green by construction — that is why the deletion table exists and why
-matrix-green was never going to settle this.**
-
-**The wrapper reported "exit code 0" on every failed run.** `MATRIX_EXIT` was
-read from inside the log each time.
-
-`pnpm lint` reports **7 errors and `prettier --check` drifts, both pre-existing
-on `main` at `5aa2d2c` and neither in the matrix command**
-(`unrun-quality-gates`). This packet adds zero of either.
+**The `dc60fea` matrix is SUPERSEDED** by review round 3, which changed
+executable content in `canonical-contracts-purity.test.ts`. Fresh matrix owed,
+and it is deliberately NOT yet run: review round 3's third finding (a killing
+control for `languageUsesModuleProjectionShape`'s v5 branch) is an open scope
+question with the orchestrator, and running a matrix before it is settled buys
+a run that a ruling could invalidate.
 
 ### A matrix pre-flight instrument, for the next lane
 
