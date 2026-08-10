@@ -162,6 +162,57 @@ the properties, rather than a page that happens to agree with them:
 against the renderer each entry names as its authority, plus its vacuity red
 (a permissive table, and a `find` re-imposed in the command bar).
 
+## The merge, and the control that had to be built twice
+
+`main` gained `5g3-sm`'s v5 cut while this packet was in review, and the merge
+is the payoff rather than the tax: with v5, a release and a cancel are both
+`transitionStateEffect` and `operationIntent` maps both to `command` — the
+exact collision this packet lifted. **No pre-merge tree can exercise the
+packet's own premise.** One parent can author transitions and cannot bind two;
+the other can bind two and cannot author them.
+
+Two conflicts, both resolved as complementary:
+
+- `surface-contract.ts` — main's `KNOWN LIMIT` comment said an entity carrying
+  a release AND a cancel *"binds neither and refuses by name"* and named the
+  rendering question as owed. That comment is this packet's charter, so it is
+  **deleted rather than relocated**.
+- `component-registry.ts` — `renderCapabilityCommand` takes both halves:
+  `5g3-sm`'s effect-sensitive explanation and this packet's `operationId`
+  addressing. Parsed capability effects carry a nonblank `capabilityId` and
+  transitions carry `null`, so the conditional selects correctly without
+  weakening the addressing side.
+
+**The first control for this proved the premise and not the claim.** It
+asserted on the binding — two commands, distinct ids, `capabilityId: null` —
+and never rendered, so `renderCapabilityCommand` was never executed by it. The
+reviewer disproved it with the instrument that now generalises in
+`review-tiers`: **revert each parent's half alone and ask whether the control
+notices.** Neither revert was noticed.
+
+The replacement renders the command bar and asserts both halves on the **same
+two forms**, each with a presence arm *and* an absence arm — because "the new
+thing is here" does not exclude "the old thing is also here", and both is
+exactly what a half-reverted merge produces:
+
+| | present | absent |
+|---|---|---|
+| addressing (`34f452e`) | `name="operationId"` per form | no `name="intent"` |
+| explanation (`eb02adf`) | *"Ready. This moves the record…"* | no *"Draft staged"* |
+| controls | labels `[Cancel, Release]`, in order, off the rendered buttons | |
+
+Run against the reviewer's instrument:
+
+```
+ARM 0  merged tree                        ok
+ARM    revert the 34f452e half alone      not ok   CONTROL_RED_OBSERVED
+ARM    revert the eb02adf half alone      not ok   CONTROL_RED_OBSERVED
+```
+
+The fixture also needed a `commandBar` slot — `entitySurfaces` gives one slot
+per surface, so the transitions had nowhere to render. That absence is part of
+why the binding-only test could not have caught this.
+
 ## The governing pin the row did not predict
 
 `test/architecture/surface-data-binding.test.ts:32` banned the string
