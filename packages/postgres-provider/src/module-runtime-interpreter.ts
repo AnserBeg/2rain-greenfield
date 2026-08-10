@@ -3369,14 +3369,14 @@ function parseMutationInput(
         relations: Object.freeze({}),
         systemInput: null,
       });
-    case 'archiveRecordEffect':
-    case 'restoreRecordEffect':
     // A transition takes the SAME closed two-argument input as archive and
     // restore, and carries an empty patch. That emptiness is not incidental:
     // it is what makes the target server-selected rather than caller-supplied.
     // The gateway now applies the same closed-key fence before this point;
     // this check stays as the inner of two, because the provider must not
     // trust an input contract it did not read itself.
+    case 'archiveRecordEffect':
+    case 'restoreRecordEffect':
     case 'transitionStateEffect':
       assertAllowedKeys(input, contract.closedArgumentKeys);
       return validateMutationInput(contract, {

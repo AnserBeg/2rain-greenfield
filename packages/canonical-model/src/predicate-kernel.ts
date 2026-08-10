@@ -1,9 +1,5 @@
 import {
-  LANGUAGE_VERSION,
-  LANGUAGE_VERSIONS,
   SUPPORTED_LANGUAGE_VERSIONS,
-  LEGACY_LANGUAGE_VERSION,
-  PREVIOUS_LANGUAGE_VERSION,
   STRUCTURAL_LIMITS_V0,
   type CanonicalLanguageVersion,
 } from './constants.js';
@@ -509,9 +505,11 @@ function parsed(predicate: Readonly<PredicateExpression>): ParsedPredicate {
 }
 
 function supportedNodeVersion(value: unknown): CanonicalLanguageVersion | null {
-  return SUPPORTED_LANGUAGE_VERSIONS.find(
-    (candidate): candidate is CanonicalLanguageVersion => candidate === value,
-  ) ?? null;
+  return (
+    SUPPORTED_LANGUAGE_VERSIONS.find(
+      (candidate): candidate is CanonicalLanguageVersion => candidate === value,
+    ) ?? null
+  );
 }
 
 function nodeVersion(value: unknown): string | null {

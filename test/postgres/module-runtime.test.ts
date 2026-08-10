@@ -5432,13 +5432,30 @@ function transitionModuleDefinition(
   return definition;
 }
 
+/**
+ * One entry of a persisted change document, as this test reads it back out of
+ * `platform.trust_business_change_documents.changes`.
+ *
+ * Declared structurally here rather than imported from the producer's
+ * `BusinessFieldChangeInput`: the assertion's job is to observe what was
+ * actually stored, and a reader typed by the writer's own contract stops being
+ * an independent observation of it. `newState`/`oldState` are read as an
+ * optional `value` carrier because a `VALUE` state nests the payload while
+ * `CLEARED` and `ABSENT` do not.
+ */
+interface PersistedFieldChange {
+  readonly fieldId: string;
+  readonly newState: { readonly value?: unknown } | null;
+  readonly oldState: { readonly value?: unknown } | null;
+}
+
 interface TransitionProbeRuntime {
   readonly approvalFieldId: string;
   readonly queries: SemanticQueryGateway;
   readonly stateFieldId: string;
-  readonly changeDocumentStates: (recordId: string) => Promise<
-    Array<{ newState: unknown; oldState: unknown }>
-  >;
+  readonly changeDocumentStates: (
+    recordId: string,
+  ) => Promise<Array<{ newState: unknown; oldState: unknown }>>;
   readonly namespace: string;
   readonly operations: SemanticOperationGateway;
   readonly readState: (recordId: string) => Promise<{
@@ -5481,164 +5498,167 @@ async function withTransitionProbeRuntime(
   const tenant = '5a000000-0000-4000-8000-000000000001';
   const environment = '5b000000-0000-4000-8000-000000000002';
   const principal = '5c000000-0000-4000-8000-000000000003';
-  await withEphemeralPostgres('sm-transition-probe', async ({ connection, pool }) => {
-    await migrateAndSeed(pool, [[tenant, environment, 'smtransition']]);
-    const runtimePool = new pg.Pool({
-      ...connection,
-      max: 3,
-      user: 'north_star_runtime',
-    });
-    const materializerPool = new pg.Pool({
-      ...connection,
-      max: 2,
-      user: 'north_star_module_materializer',
-    });
-    const modulePool = new pg.Pool({
-      ...connection,
-      max: 1,
-      user: 'north_star_module_runtime',
-    });
-    try {
-      const context = (
-        await contextsFor([['transition', tenant, environment, principal]])
-      ).transition!;
-      const releases = await persistSequence(runtimePool, context, [
-        [empty, emptyDefinition_],
-        [compiled, definition],
-      ]);
-      await setPointer(pool, tenant, environment, releases[0]!);
-      await grantExecutorAuthority(pool, [[tenant, principal]]);
-      const materializer = new PostgresModuleStorageMaterializer(
-        materializerPool,
-        modulePool,
-      );
-      await prepare(materializer, context, principal, releases[1]!);
-      const candidateIdentity = identity(tenant, environment, principal);
-      const sourceView = await issuedView(
-        runtimeEntry(runtimePool, { transition: candidateIdentity }),
-        'transition',
-      );
-      const policy = new AllowPolicy();
-      const view = await issuedCandidateView(
-        compiled,
-        releases[1]!,
-        candidateIdentity,
-        sourceView.pointer,
-        policy,
-      );
-      const interpreter = new PostgresModuleRuntimeInterpreter(
-        runtimePool,
-        humanActorIssuer(),
-      );
+  await withEphemeralPostgres(
+    'sm-transition-probe',
+    async ({ connection, pool }) => {
+      await migrateAndSeed(pool, [[tenant, environment, 'smtransition']]);
+      const runtimePool = new pg.Pool({
+        ...connection,
+        max: 3,
+        user: 'north_star_runtime',
+      });
+      const materializerPool = new pg.Pool({
+        ...connection,
+        max: 2,
+        user: 'north_star_module_materializer',
+      });
+      const modulePool = new pg.Pool({
+        ...connection,
+        max: 1,
+        user: 'north_star_module_runtime',
+      });
+      try {
+        const context = (
+          await contextsFor([['transition', tenant, environment, principal]])
+        ).transition!;
+        const releases = await persistSequence(runtimePool, context, [
+          [empty, emptyDefinition_],
+          [compiled, definition],
+        ]);
+        await setPointer(pool, tenant, environment, releases[0]!);
+        await grantExecutorAuthority(pool, [[tenant, principal]]);
+        const materializer = new PostgresModuleStorageMaterializer(
+          materializerPool,
+          modulePool,
+        );
+        await prepare(materializer, context, principal, releases[1]!);
+        const candidateIdentity = identity(tenant, environment, principal);
+        const sourceView = await issuedView(
+          runtimeEntry(runtimePool, { transition: candidateIdentity }),
+          'transition',
+        );
+        const policy = new AllowPolicy();
+        const view = await issuedCandidateView(
+          compiled,
+          releases[1]!,
+          candidateIdentity,
+          sourceView.pointer,
+          policy,
+        );
+        const interpreter = new PostgresModuleRuntimeInterpreter(
+          runtimePool,
+          humanActorIssuer(),
+        );
 
-      const staged = await pool.query<{
-        verification_evidence_id: MintedUuid;
-      }>(
-        `SELECT verification_evidence_id
+        const staged = await pool.query<{
+          verification_evidence_id: MintedUuid;
+        }>(
+          `SELECT verification_evidence_id
            FROM platform.tenant_releases
           WHERE tenant_id = $1 AND environment_id = $2 AND release_id = $3`,
-        [tenant, environment, releases[1]],
-      );
-      const evidenceId = staged.rows[0]?.verification_evidence_id;
-      assert.ok(evidenceId);
-      const verification = await new PostgresReleaseVerificationService(
-        runtimePool,
-      )
-        .executeSemanticCandidateWithExecutor(
-          context,
-          {
-            compiledRelease: compiled,
-            evidenceId,
-            releaseId: releases[1]!,
-          },
-          interpreter,
-        )
-        .then(
-          (resultSet) =>
-            `passed with ${(resultSet as unknown as { results: unknown[] }).results.length} executed results`,
-          (error: unknown) =>
-            `${(error as Error).name}: ${(error as Error).message}`,
+          [tenant, environment, releases[1]],
         );
-      assert.match(
-        verification,
-        /^passed with \d+ executed results$/,
-        `release verification must pass for a transition module, got: ${verification}`,
-      );
+        const evidenceId = staged.rows[0]?.verification_evidence_id;
+        assert.ok(evidenceId);
+        const verification = await new PostgresReleaseVerificationService(
+          runtimePool,
+        )
+          .executeSemanticCandidateWithExecutor(
+            context,
+            {
+              compiledRelease: compiled,
+              evidenceId,
+              releaseId: releases[1]!,
+            },
+            interpreter,
+          )
+          .then(
+            (resultSet) =>
+              `passed with ${(resultSet as unknown as { results: unknown[] }).results.length} executed results`,
+            (error: unknown) =>
+              `${(error as Error).name}: ${(error as Error).message}`,
+          );
+        assert.match(
+          verification,
+          /^passed with \d+ executed results$/,
+          `release verification must pass for a transition module, got: ${verification}`,
+        );
 
-      await run(
-        Object.freeze({
-          approvalFieldId,
-          queries: new SemanticQueryGateway(policy, interpreter),
-          stateFieldId,
-          changeDocumentStates: async (recordId: string) => {
-            const result = await pool.query<{ changes: unknown }>(
-              `SELECT changes
+        await run(
+          Object.freeze({
+            approvalFieldId,
+            queries: new SemanticQueryGateway(policy, interpreter),
+            stateFieldId,
+            changeDocumentStates: async (recordId: string) => {
+              const result = await pool.query<{ changes: unknown }>(
+                `SELECT changes
                  FROM platform.trust_business_change_documents
                 WHERE tenant_id = $1
                   AND environment_id = $2
                   AND record_id = $3
                 ORDER BY recorded_at`,
-              [tenant, environment, recordId],
-            );
-            const auditKey = stateFieldId.replaceAll(/[^A-Za-z0-9_.-]/g, '.');
-            return result.rows.flatMap((row) =>
-              (row.changes as Array<Record<string, any>>)
-                .filter((change) => change.fieldId === auditKey)
-                .map((change) => ({
-                  newState: change.newState?.value ?? change.newState,
-                  oldState: change.oldState?.value ?? change.oldState,
-                })),
-            );
-          },
-          namespace,
-          operations: operationGatewayFor(policy, interpreter),
-          readState: async (recordId: string) => {
-            const result = await pool.query<{
-              revision: string;
-              state: string | null;
-            }>(
-              `SELECT ${quoteTestIdentifier(stateColumn.physicalName)} AS state,
+                [tenant, environment, recordId],
+              );
+              const auditKey = stateFieldId.replaceAll(/[^A-Za-z0-9_.-]/g, '.');
+              return result.rows.flatMap((row) =>
+                (row.changes as readonly PersistedFieldChange[])
+                  .filter((change) => change.fieldId === auditKey)
+                  .map((change) => ({
+                    newState: change.newState?.value ?? change.newState,
+                    oldState: change.oldState?.value ?? change.oldState,
+                  })),
+              );
+            },
+            namespace,
+            operations: operationGatewayFor(policy, interpreter),
+            readState: async (recordId: string) => {
+              const result = await pool.query<{
+                revision: string;
+                state: string | null;
+              }>(
+                `SELECT ${quoteTestIdentifier(stateColumn.physicalName)} AS state,
                       ${quoteTestIdentifier(entity.optimisticRevision.column)} AS revision
                  FROM north_star_module.${quoteTestIdentifier(entity.physicalTableName)}
                 WHERE ${quoteTestIdentifier(entity.recordIdentity.column)} = $1`,
-              [recordId],
-            );
-            assert.equal(result.rowCount, 1);
-            const row = result.rows[0]!;
-            return { revision: Number(row.revision), state: row.state };
-          },
-          // A document must carry exactly ONE state column. This counts the
-          // physical columns whose canonical identity is a state field.
-          stateColumnCount: async () => {
-            const result = await pool.query<{ total: string }>(
-              `SELECT count(*)::text AS total
+                [recordId],
+              );
+              assert.equal(result.rowCount, 1);
+              const row = result.rows[0]!;
+              return { revision: Number(row.revision), state: row.state };
+            },
+            // A document must carry exactly ONE state column. This counts the
+            // physical columns whose canonical identity is a state field.
+            stateColumnCount: async () => {
+              const result = await pool.query<{ total: string }>(
+                `SELECT count(*)::text AS total
                  FROM information_schema.columns
                 WHERE table_schema = 'north_star_module'
                   AND table_name = $1
                   AND column_name = ANY($2::text[])`,
-              [
-                entity.physicalTableName,
                 [
-                  stateColumn.physicalName,
-                  ...entity.derivedStateFields.map(
-                    (field) => field.physicalName,
-                  ),
+                  entity.physicalTableName,
+                  [
+                    stateColumn.physicalName,
+                    ...entity.derivedStateFields.map(
+                      (field) => field.physicalName,
+                    ),
+                  ],
                 ],
-              ],
-            );
-            return Number(result.rows[0]!.total);
-          },
-          view,
-        }),
-      );
-    } finally {
-      await Promise.all([
-        runtimePool.end(),
-        materializerPool.end(),
-        modulePool.end(),
-      ]);
-    }
-  });
+              );
+              return Number(result.rows[0]!.total);
+            },
+            view,
+          }),
+        );
+      } finally {
+        await Promise.all([
+          runtimePool.end(),
+          materializerPool.end(),
+          modulePool.end(),
+        ]);
+      }
+    },
+  );
 }
 
 test('a materialized state field is selectable, and only a transition writes it', async () => {
@@ -5738,11 +5758,7 @@ test('a materialized state field is selectable, and only a transition writes it'
         runtime.namespace,
       ),
       (error: unknown) =>
-        assertModuleError(
-          error,
-          'MODULE_OPERATION_PRECONDITION_REFUSED',
-          null,
-        ),
+        assertModuleError(error, 'MODULE_OPERATION_PRECONDITION_REFUSED', null),
     );
     assert.deepEqual(await runtime.readState(unapprovedId), {
       revision: 1,
@@ -5880,7 +5896,8 @@ test('the machine-derived state field may be authored, and changes nothing', () 
 
   // Admitted, not refused.
   assert.equal(
-    renormalized.fields.filter((field) => field.fieldId === stateFieldId).length,
+    renormalized.fields.filter((field) => field.fieldId === stateFieldId)
+      .length,
     1,
     'authoring the derived field adds no second field and is not refused',
   );
@@ -5909,7 +5926,11 @@ test('an authored field wearing the derived state identity is refused', () => {
       targetId: `${namespace}:entity.master`,
     },
     fieldId: `${namespace}:derived_state_field.machine.master_lifecycle`,
-    fieldType: { kind: 'textFieldType', maximumLength: 40, schemaVersion: 'v5' },
+    fieldType: {
+      kind: 'textFieldType',
+      maximumLength: 40,
+      schemaVersion: 'v5',
+    },
     kind: 'fieldDefinition',
     label: 'State',
     orderKey: 0,
@@ -5955,7 +5976,9 @@ test('a transition permission that disagrees with its operation is refused by na
     },
     schemaVersion: 'v5',
   });
-  const machine = (definition.stateMachines as Array<Record<string, unknown>>)[0]!;
+  const machine = (
+    definition.stateMachines as Array<Record<string, unknown>>
+  )[0]!;
   (machine.transitions as Array<Record<string, unknown>>)[0]!.permission = {
     kind: 'permissionReference',
     schemaVersion: 'v5',
@@ -5991,7 +6014,10 @@ test('a transition whose permissions agree still compiles', () => {
 });
 
 test('below v5 a record transition is refused by name, at compile time', () => {
-  const definition = transitionModuleDefinition('northstar.smtransitionv4', 'v4');
+  const definition = transitionModuleDefinition(
+    'northstar.smtransitionv4',
+    'v4',
+  );
   const result = compileApplication(moduleInput(definition));
   assert.equal(result.status, 'failed');
   assert.deepEqual(
