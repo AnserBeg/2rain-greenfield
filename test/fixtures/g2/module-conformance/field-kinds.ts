@@ -33,7 +33,7 @@ const reference = (kind: string, targetId: string) => ({
 });
 
 export const EVERY_KIND_FIELD_IDS = Object.freeze({
-  /** `booleanFieldType` */
+  /** `booleanFieldType`, `presence: optional` -- three states, not two. */
   active: `${namespace}:field.master_active`,
   /** `integerFieldType` */
   count: `${namespace}:field.master_count`,
@@ -41,6 +41,10 @@ export const EVERY_KIND_FIELD_IDS = Object.freeze({
   due: `${namespace}:field.master_due`,
   /** `enumFieldType`, five options -- the last count that renders a `select`. */
   grade: `${namespace}:field.master_grade`,
+  /** `dateTimeFieldType`, `offsetDateTime` at second precision. */
+  offsetMoment: `${namespace}:field.master_offset_moment`,
+  /** `timeFieldType` at MILLISECOND precision -- the step discriminant's twin. */
+  preciseTime: `${namespace}:field.master_precise_time`,
   /** `moneyFieldType` */
   price: `${namespace}:field.master_price`,
   /** `enumFieldType`, six options -- the first count that renders a `datalist`. */
@@ -158,6 +162,31 @@ export function everyFieldKindModule(): Record<string, unknown> {
         representation: 'canonicalString',
         scale: 3,
         schemaVersion: version,
+      },
+    ],
+    [
+      // The base fixture's `master_utc_instant` is millisecond/utcInstant. This
+      // is its one-property twin on the OTHER timezone semantics, and at second
+      // precision, so neither temporal discriminant can be guessed from the kind.
+      EVERY_KIND_FIELD_IDS.offsetMoment,
+      'Offset moment',
+      {
+        kind: 'dateTimeFieldType',
+        precision: 'second',
+        schemaVersion: version,
+        timezoneSemantics: 'offsetDateTime',
+      },
+    ],
+    [
+      // `master_local_time` is second precision; this is millisecond, so a
+      // renderer that hardcodes one step fails exactly one of the pair.
+      EVERY_KIND_FIELD_IDS.preciseTime,
+      'Precise time',
+      {
+        kind: 'timeFieldType',
+        precision: 'millisecond',
+        schemaVersion: version,
+        timezoneSemantics: 'localWallTime',
       },
     ],
     [EVERY_KIND_FIELD_IDS.grade, 'Grade', enumType('grade', GRADE_OPTIONS)],

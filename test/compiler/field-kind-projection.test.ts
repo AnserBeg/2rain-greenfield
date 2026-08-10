@@ -26,6 +26,11 @@ interface ManifestField {
     readonly label: string;
     readonly optionId: string;
   }[];
+  readonly required: boolean;
+  readonly temporal?: {
+    readonly precision: string | null;
+    readonly timezoneSemantics: string;
+  };
 }
 
 interface ManifestSurface {
@@ -147,6 +152,106 @@ test('every declared field kind reaches the manifest verbatim', () => {
     [...new Set([...fields.values()].map((field) => field.kind))].sort(),
     [...new Set(declared.values())].sort(),
     'the form surface must exercise every kind the fixture declares',
+  );
+});
+
+/**
+ * The discriminants a review blocked the first cut for omitting. `kind` alone
+ * does not say whether a time is second or millisecond precise, nor whether a
+ * date-time is a UTC instant or carries a real offset -- and a control chosen
+ * without them cannot express the stored value at all.
+ *
+ * Read off the fixture's declarations, never off the artifact under test.
+ */
+test('temporal precision and timezone semantics are carried, and only for temporal kinds', () => {
+  const fields = new Map(
+    formSurface(COMPILER_SEMANTIC_PROFILE_V2_VERSION).fields?.map((field) => [
+      field.fieldId,
+      field,
+    ]),
+  );
+  const declared = new Map(
+    (
+      everyFieldKindModule().fields as readonly {
+        readonly fieldId: string;
+        readonly fieldType: Record<string, unknown>;
+      }[]
+    ).map((field) => [field.fieldId, field.fieldType]),
+  );
+  const temporalKinds = new Set([
+    'dateFieldType',
+    'dateTimeFieldType',
+    'timeFieldType',
+  ]);
+  let temporalRead = 0;
+  for (const [fieldId, field] of fields) {
+    assert.equal(
+      Object.hasOwn(field, 'temporal'),
+      temporalKinds.has(field.kind),
+      `${fieldId} carries a temporal domain exactly when it is temporal`,
+    );
+    if (!temporalKinds.has(field.kind)) continue;
+    temporalRead += 1;
+    const source = declared.get(fieldId);
+    assert.ok(source);
+    assert.equal(
+      field.temporal?.precision,
+      field.kind === 'dateFieldType' ? null : source.precision,
+      fieldId,
+    );
+    assert.equal(
+      field.temporal?.timezoneSemantics,
+      field.kind === 'dateFieldType'
+        ? 'calendarDate'
+        : field.kind === 'timeFieldType'
+          ? 'localWallTime'
+          : source.timezoneSemantics,
+      fieldId,
+    );
+  }
+  // Both values of both discriminants must be present, or a hardcoded projection
+  // would pass: second AND millisecond, utcInstant AND offsetDateTime.
+  assert.ok(temporalRead >= 5, `only ${String(temporalRead)} temporal fields`);
+  const dateTimes = [...fields.values()].filter(
+    (field) => field.kind === 'dateTimeFieldType',
+  );
+  const times = [...fields.values()].filter(
+    (field) => field.kind === 'timeFieldType',
+  );
+  assert.deepEqual(
+    [...new Set(dateTimes.map((field) => field.temporal?.timezoneSemantics))].sort(),
+    ['offsetDateTime', 'utcInstant'],
+  );
+  assert.deepEqual(
+    [...new Set(times.map((field) => field.temporal?.precision))].sort(),
+    ['millisecond', 'second'],
+  );
+});
+
+/**
+ * A boolean's legal state count is not derivable from its kind: optional means
+ * three states, required means two, and nothing else on the wire says which.
+ * Carried for `U7` rather than consumed by the renderer -- and both values must
+ * appear, or a constant would satisfy this.
+ */
+test('the required declaration is carried, in both directions', () => {
+  const fields = formSurface(COMPILER_SEMANTIC_PROFILE_V2_VERSION).fields ?? [];
+  const declared = new Map(
+    (
+      everyFieldKindModule().fields as readonly {
+        readonly fieldId: string;
+        readonly presence: string;
+      }[]
+    ).map((field) => [field.fieldId, field.presence === 'required']),
+  );
+  assert.ok(fields.length > 0);
+  for (const field of fields) {
+    assert.equal(field.required, declared.get(field.fieldId), field.fieldId);
+  }
+  assert.deepEqual(
+    [...new Set(fields.map((field) => field.required))].sort(),
+    [false, true],
+    'the fixture must carry a required field and an optional one',
   );
 });
 

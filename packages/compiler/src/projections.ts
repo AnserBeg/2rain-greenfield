@@ -576,15 +576,34 @@ function operationCatalogPayload(
 type NormalizedField = NormalizedApplicationPackage['fields'][number];
 
 /**
- * What a control needs to exist: the declared kind, and -- for an enum -- the
- * options it is a choice between. Nothing else about the field type is carried,
- * because nothing else changes which control is rendered.
+ * The declared domain of a field, projected losslessly enough that a control can
+ * admit all of it and no more.
  *
- * `options` is present exactly when the kind is `enumFieldType`, so a reader
- * that finds it absent on an enum has read a malformed payload rather than an
- * enum with no choices. Order is the normalized order (`normalize.ts` sorts
- * options by `orderKey` then `optionId`), so the rendered order is compiled,
- * not incidental.
+ * **The first cut of this carried `kind` and enum `options` only, and that was
+ * wrong** -- a review found the comment claiming nothing else changes the
+ * control while two temporal discriminants decide whether a control can express
+ * the value at all. `timeFieldType.precision`, `dateTimeFieldType.precision` and
+ * `dateTimeFieldType.timezoneSemantics` are canonical declarations: a stored
+ * `2026-08-09T12:34:56.789Z` or a `-06:00` offset is simply not representable
+ * by a control that does not know them, and both temporal inputs default to a
+ * 60-second step, so seconds and milliseconds fail native validation before any
+ * normalization gets a chance. Carrying them is not implementing `U7`'s form
+ * behaviour; it is what gives `U7` a contract without a hole in it.
+ *
+ * `temporal` deliberately mirrors the operation input contract's already-ratified
+ * shape (`operationInputContract` below), value for value. One fact, one
+ * spelling, in both directions of the seam.
+ *
+ * `required` is carried for the same reason and **the renderer does not branch
+ * on it.** A boolean's legal state count is not derivable from `kind`: an
+ * optional one has three states (`true`, `false`, unset) and a required one has
+ * two, and the difference is invisible to every consumer without this. `U7` owns
+ * what to DO about required-ness; this owns not throwing the fact away.
+ *
+ * Each optional key is present exactly when its kind calls for it -- `options`
+ * iff `enumFieldType`, `temporal` iff a temporal kind -- so a reader that finds
+ * one missing has read a malformed payload rather than a field without choices
+ * or without precision.
  */
 function surfaceManifestField(field: NormalizedField): {
   readonly fieldId: string;
@@ -593,6 +612,12 @@ function surfaceManifestField(field: NormalizedField): {
     readonly label: string;
     readonly optionId: string;
   }[];
+  readonly required: boolean;
+  readonly temporal?: {
+    readonly precision: 'millisecond' | 'second' | null;
+    readonly timezoneSemantics:
+      'calendarDate' | 'localWallTime' | 'offsetDateTime' | 'utcInstant';
+  };
 } {
   return {
     fieldId: field.fieldId,
@@ -605,6 +630,24 @@ function surfaceManifestField(field: NormalizedField): {
           })),
         }
       : {}),
+    required: field.presence === 'required',
+    ...(field.fieldType.kind === 'dateFieldType'
+      ? { temporal: { precision: null, timezoneSemantics: 'calendarDate' } }
+      : field.fieldType.kind === 'timeFieldType'
+        ? {
+            temporal: {
+              precision: field.fieldType.precision,
+              timezoneSemantics: 'localWallTime',
+            },
+          }
+        : field.fieldType.kind === 'dateTimeFieldType'
+          ? {
+              temporal: {
+                precision: field.fieldType.precision,
+                timezoneSemantics: field.fieldType.timezoneSemantics,
+              },
+            }
+          : {}),
   };
 }
 
@@ -702,11 +745,22 @@ function surfaceManifestPayload(
     // condition is that no tier value ever means "hide"; the moment one does,
     // this needs re-deriving. Recorded, not fixed (U5b review item 3).
     //
-    // `fields` is the same shape of honest omission. A reader that drops it
-    // renders every field as a bare text box -- the pre-`ux-picker` render,
-    // which is under-featured but never a WRONG value: the posted key and the
-    // posted string are identical either way. It would stop being true if a
-    // field kind ever changed what the form SUBMITS rather than what it OFFERS.
+    // `fields` is the same shape of honest omission, and the floor was
+    // RE-DERIVED after a review found the first cut violating this very
+    // sentence. A reader that drops `fields` renders every field as a bare text
+    // box; a reader that honours it renders a typed control. The floor may stay
+    // at 1 only while both readers SUBMIT the same entries for the same user
+    // action, and the first cut broke that: a boolean rendered as a checkbox
+    // with a hidden `value="false"` sibling posted `"false"` where the older
+    // reader posted `""`. Two readers, one action, different bytes.
+    //
+    // The fix was to remove the difference rather than to raise the floor: a
+    // boolean now renders as a `select` whose unset state is the blank option,
+    // so an untouched field posts `""` under either reader. That equivalence is
+    // GATED, not asserted -- `test/integration/surface-data-binding.test.ts`
+    // renders one package under both profiles and compares the submitted
+    // entries. The condition remains what it always was: the moment a field kind
+    // changes what the form SUBMITS rather than what it OFFERS, this floor moves.
     requiredRuntimeCapability: {
       capabilityId: 'northstar.runtime:capability.surface-manifest',
       minimumVersion: navigation ? 2 : 1,

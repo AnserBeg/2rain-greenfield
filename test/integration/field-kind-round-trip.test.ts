@@ -31,6 +31,7 @@ import {
   type RequestRuntimeView,
 } from '../../packages/runtime/src/request-runtime-view.js';
 import { partyRuntimeProjections } from '../fixtures/g2/party/compiler.js';
+import { FIXTURE_IDS } from '../fixtures/g2/module-conformance/definitions.js';
 import {
   EVERY_KIND_FIELD_IDS,
   everyFieldKindModule,
@@ -42,7 +43,7 @@ const identity = {
   tenantId: 'c2000000-0000-4000-8000-000000000003',
 } as const;
 
-const FORM_SURFACE = 'northstar.modulefixture:surface.master_form';
+const FORM_SURFACE = `${FIXTURE_IDS.namespace}:surface.master_form`;
 
 /**
  * The completeness control, and it is a TYPE rather than an assertion on
@@ -145,6 +146,8 @@ type MutableSurface = {
     fieldId: string;
     kind: string;
     options?: { label: string; optionId: string }[];
+    required?: boolean;
+    temporal?: { precision: string | null; timezoneSemantics: string };
   }[];
   surfaceId: string;
 };
@@ -225,6 +228,26 @@ test('a v2 payload survives the production reader with its kinds and options', a
     Object.hasOwn(byId.get(EVERY_KIND_FIELD_IDS.due) ?? {}, 'options'),
     false,
   );
+  // The discriminants survive the reader too, in both of their values.
+  assert.deepEqual(byId.get(EVERY_KIND_FIELD_IDS.offsetMoment)?.temporal, {
+    precision: 'second',
+    timezoneSemantics: 'offsetDateTime',
+  });
+  assert.deepEqual(byId.get(EVERY_KIND_FIELD_IDS.preciseTime)?.temporal, {
+    precision: 'millisecond',
+    timezoneSemantics: 'localWallTime',
+  });
+  assert.deepEqual(byId.get(EVERY_KIND_FIELD_IDS.due)?.temporal, {
+    precision: null,
+    timezoneSemantics: 'calendarDate',
+  });
+  assert.equal(
+    Object.hasOwn(byId.get(EVERY_KIND_FIELD_IDS.price) ?? {}, 'temporal'),
+    false,
+  );
+  // Both directions, from the fixture's own ids rather than hand-built ones.
+  assert.equal(byId.get(EVERY_KIND_FIELD_IDS.active)?.required, false);
+  assert.equal(byId.get(FIXTURE_IDS.fieldIds.parentName)?.required, true);
   // Every kind the reader knows is reachable through this specimen, so the
   // refusal tests below are refusing something the admission actually covers.
   assert.deepEqual(
@@ -232,6 +255,114 @@ test('a v2 payload survives the production reader with its kinds and options', a
     [...COMPILED_FIELD_KINDS].sort(),
     'the fixture must exercise every kind in the reader vocabulary',
   );
+});
+
+/**
+ * The refusals for the discriminants the first cut did not carry at all. A
+ * temporal kind whose declared domain is missing or unreadable is refused rather
+ * than rendered: an enum without options shows a visibly empty choice, but a
+ * date-time without its precision and timezone semantics renders a control that
+ * looks correct and cannot express the stored value. The silent one is the one
+ * that must fail loudly.
+ *
+ * Each on its own message, because a shared code cannot attribute which check
+ * refused.
+ */
+test('RED: the reader refuses an unreadable or misplaced temporal domain', async () => {
+  const grafted = refusal(
+    await viewWithCorruptedForm((surface) => {
+      const price = surface.fields?.find(
+        (field) => field.fieldId === EVERY_KIND_FIELD_IDS.price,
+      );
+      assert.ok(price);
+      price.temporal = { precision: 'second', timezoneSemantics: 'utcInstant' };
+    }),
+  );
+  assert.equal(grafted.code, 'INVALID_SURFACE_FIELD');
+  assert.match(
+    grafted.message,
+    /temporal precision that does not belong to kind moneyFieldType/,
+  );
+
+  const stripped = refusal(
+    await viewWithCorruptedForm((surface) => {
+      const due = surface.fields?.find(
+        (field) => field.fieldId === EVERY_KIND_FIELD_IDS.due,
+      );
+      assert.ok(due);
+      delete due.temporal;
+    }),
+  );
+  assert.equal(stripped.code, 'INVALID_SURFACE_FIELD');
+  assert.match(
+    stripped.message,
+    /temporal precision that does not belong to kind dateFieldType/,
+  );
+
+  const unknownSemantics = refusal(
+    await viewWithCorruptedForm((surface) => {
+      const moment = surface.fields?.find(
+        (field) => field.fieldId === EVERY_KIND_FIELD_IDS.offsetMoment,
+      );
+      assert.ok(moment?.temporal);
+      moment.temporal.timezoneSemantics = 'floatingLocal';
+    }),
+  );
+  assert.equal(unknownSemantics.code, 'INVALID_SURFACE_FIELD');
+  assert.match(unknownSemantics.message, /unreadable temporal domain/);
+
+  // `null` precision belongs to `dateFieldType` alone -- a calendar date has no
+  // sub-day component. A null on any other temporal kind is a control that would
+  // silently pick a 60-second step.
+  const nulledPrecision = refusal(
+    await viewWithCorruptedForm((surface) => {
+      const moment = surface.fields?.find(
+        (field) => field.fieldId === EVERY_KIND_FIELD_IDS.offsetMoment,
+      );
+      assert.ok(moment?.temporal);
+      moment.temporal.precision = null;
+    }),
+  );
+  assert.equal(nulledPrecision.code, 'INVALID_SURFACE_FIELD');
+  assert.match(
+    nulledPrecision.message,
+    /temporal precision that kind dateTimeFieldType cannot carry/,
+  );
+
+  const datedPrecision = refusal(
+    await viewWithCorruptedForm((surface) => {
+      const due = surface.fields?.find(
+        (field) => field.fieldId === EVERY_KIND_FIELD_IDS.due,
+      );
+      assert.ok(due?.temporal);
+      due.temporal.precision = 'second';
+    }),
+  );
+  assert.equal(datedPrecision.code, 'INVALID_SURFACE_FIELD');
+  assert.match(
+    datedPrecision.message,
+    /temporal precision that kind dateFieldType cannot carry/,
+  );
+});
+
+test('RED: the reader refuses a field that does not declare whether it is required', async () => {
+  const missing = refusal(
+    await viewWithCorruptedForm((surface) => {
+      assert.ok(surface.fields?.[0]);
+      delete (surface.fields[0] as { required?: unknown }).required;
+    }),
+  );
+  assert.equal(missing.code, 'INVALID_SURFACE_FIELD');
+  assert.match(missing.message, /does not declare whether it is required/);
+
+  const notABoolean = refusal(
+    await viewWithCorruptedForm((surface) => {
+      assert.ok(surface.fields?.[0]);
+      (surface.fields[0] as { required?: unknown }).required = 'true';
+    }),
+  );
+  assert.equal(notABoolean.code, 'INVALID_SURFACE_FIELD');
+  assert.match(notABoolean.message, /does not declare whether it is required/);
 });
 
 /**

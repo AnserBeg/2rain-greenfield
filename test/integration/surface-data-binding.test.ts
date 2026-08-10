@@ -445,8 +445,6 @@ test('a v2 form renders the control each canonical field kind calls for', async 
   const html = await everyKindFormHtml(COMPILER_SEMANTIC_PROFILE_V2_VERSION);
   const expected: readonly (readonly [string, RegExp])[] = [
     [EVERY_KIND_FIELD_IDS.due, /<input type="date" /],
-    [FIXTURE_IDS.fieldIds.parentUtcInstant, /<input type="datetime-local" /],
-    [FIXTURE_IDS.fieldIds.parentLocalTime, /<input type="time" /],
     [EVERY_KIND_FIELD_IDS.count, /<input type="number" inputmode="numeric" /],
     [EVERY_KIND_FIELD_IDS.price, /<input type="number" inputmode="decimal" /],
     [
@@ -454,7 +452,7 @@ test('a v2 form renders the control each canonical field kind calls for', async 
       /<input type="number" inputmode="decimal" /,
     ],
     [EVERY_KIND_FIELD_IDS.weight, /<input type="number" inputmode="decimal" /],
-    [EVERY_KIND_FIELD_IDS.active, /<input type="checkbox" /],
+    [EVERY_KIND_FIELD_IDS.active, /<select /],
     [FIXTURE_IDS.fieldIds.parentName, /<input type="text" /],
     [EVERY_KIND_FIELD_IDS.grade, /<select /],
     [EVERY_KIND_FIELD_IDS.region, /<input [^>]*list="/],
@@ -462,18 +460,137 @@ test('a v2 form renders the control each canonical field kind calls for', async 
   for (const [fieldId, control] of expected) {
     assert.match(controlFor(html, fieldId), control, fieldId);
   }
-  // A boolean must still be able to say "false". An unchecked box posts
-  // nothing, and a field missing from an update patch means "leave it alone".
-  assert.match(
-    controlFor(html, EVERY_KIND_FIELD_IDS.active),
-    /<input type="hidden" name="value:[^"]+" value="false"><input type="checkbox"/,
-  );
   // The blank option is what keeps a select from posting its first option for a
   // field the record never had a value for.
   assert.match(
     controlFor(html, EVERY_KIND_FIELD_IDS.grade),
     /<select [^>]*><option value=""><\/option>/,
   );
+});
+
+/**
+ * The correction a review blocked this packet for. A control that cannot express
+ * the field's declared domain destroys the value before `U7` can normalise it,
+ * so the discriminants have to reach the renderer and the renderer has to use
+ * them.
+ */
+test('a temporal control admits its declared precision and timezone semantics', async () => {
+  const html = await everyKindFormHtml(COMPILER_SEMANTIC_PROFILE_V2_VERSION);
+
+  // A time input defaults to a 60-second step and silently refuses 12:34:56.
+  // Two fields of one kind differing ONLY in declared precision must differ here.
+  assert.match(
+    controlFor(html, FIXTURE_IDS.fieldIds.parentLocalTime),
+    /<input type="time" step="1" /,
+  );
+  assert.match(
+    controlFor(html, EVERY_KIND_FIELD_IDS.preciseTime),
+    /<input type="time" step="0\.001" /,
+  );
+
+  // `datetime-local` is local time with no timezone information, so neither a
+  // utcInstant's `Z` nor a real offset survives it. Refused BY NAME, with the
+  // declared domain on the element, and the carrier left lossless.
+  for (const [fieldId, semantics, precision] of [
+    [FIXTURE_IDS.fieldIds.parentUtcInstant, 'utcInstant', 'millisecond'],
+    [EVERY_KIND_FIELD_IDS.offsetMoment, 'offsetDateTime', 'second'],
+  ] as const) {
+    const control = controlFor(html, fieldId);
+    assert.match(control, /<input type="text" /, fieldId);
+    assert.doesNotMatch(control, /type="datetime-local"/u, fieldId);
+    assert.match(control, /data-refused-control="datetime-local"/u, fieldId);
+    assert.match(
+      control,
+      new RegExp(`data-timezone-semantics="${semantics}"`, 'u'),
+      fieldId,
+    );
+    assert.match(
+      control,
+      new RegExp(`data-precision="${precision}"`, 'u'),
+      fieldId,
+    );
+  }
+});
+
+/**
+ * An optional boolean has THREE states and a checkbox has two. The first cut
+ * rendered a checkbox beside a hidden `value="false"`, so `null`, absent and
+ * `false` all rendered unchecked and all posted `"false"` -- an unrelated edit
+ * on the same form rewrote a stored `null` to `false`, upstream of anywhere
+ * `U7` could recover it.
+ */
+test('an optional boolean keeps its three states distinguishable', async () => {
+  const seeded = async (value: boolean | null | undefined) =>
+    controlFor(
+      await everyKindFormHtml(COMPILER_SEMANTIC_PROFILE_V2_VERSION, (executor) =>
+        executor.seedValues(
+          tenantA,
+          value === undefined
+            ? {}
+            : { [EVERY_KIND_FIELD_IDS.active]: value },
+        ),
+      ),
+      EVERY_KIND_FIELD_IDS.active,
+    );
+
+  const absent = await seeded(undefined);
+  const explicitNull = await seeded(null);
+  const no = await seeded(false);
+  const yes = await seeded(true);
+
+  // No hidden sibling anywhere: nothing posts a value the record did not have.
+  for (const control of [absent, explicitNull, no, yes]) {
+    assert.doesNotMatch(control, /type="hidden"/u);
+    assert.doesNotMatch(control, /type="checkbox"/u);
+    assert.match(control, /<select [^>]*><option value=""><\/option>/u);
+  }
+  // Absent and null both select the blank; false and true select their own.
+  assert.doesNotMatch(absent, /selected/u);
+  assert.doesNotMatch(explicitNull, /selected/u);
+  assert.match(no, /<option value="false" selected>No<\/option>/u);
+  assert.doesNotMatch(no, /<option value="true" selected>/u);
+  assert.match(yes, /<option value="true" selected>Yes<\/option>/u);
+  assert.doesNotMatch(yes, /<option value="false" selected>/u);
+});
+
+/**
+ * The capability floor, gated instead of asserted. `surfaceManifestPayload`
+ * keeps `minimumVersion` at 1 on one condition: a reader that drops `fields`
+ * and a reader that honours it must SUBMIT the same entries for the same user
+ * action. The first cut broke that -- the boolean's hidden sibling posted
+ * `"false"` where the older reader posted `""` -- and the comment claiming the
+ * floor could stay named exactly that condition one line above the violation.
+ *
+ * So compare what the two renders would post, untouched, name for name and
+ * value for value. If a future kind changes submission again, this reds and the
+ * floor has to move.
+ */
+test('both readers submit identical entries for an untouched form', async () => {
+  const submittedEntries = (html: string): readonly (readonly [string, string])[] => {
+    const form = html.slice(
+      html.indexOf('<div class="form-fields">'),
+      html.indexOf('</form>'),
+    );
+    return [...form.matchAll(/<(input|select)\b([^>]*)>/gu)].flatMap((match) => {
+      const attributes = match[2] ?? '';
+      const name = /name="([^"]*)"/u.exec(attributes)?.[1];
+      if (name === undefined) return [];
+      // A select with no `selected` option submits its first option's value,
+      // which the renderer keeps blank; an input submits its `value`.
+      const value =
+        match[1] === 'select' ? '' : (/value="([^"]*)"/u.exec(attributes)?.[1] ?? '');
+      return [[name, value] as const];
+    });
+  };
+
+  const aware = submittedEntries(
+    await everyKindFormHtml(COMPILER_SEMANTIC_PROFILE_V2_VERSION),
+  );
+  const unaware = submittedEntries(
+    await everyKindFormHtml(MODULE_COMPILER_PROFILE.compilerSemanticProfileVersion),
+  );
+  assert.ok(aware.length > 0, 'the form must submit something');
+  assert.deepEqual(aware, unaware);
 });
 
 /**
@@ -539,7 +656,10 @@ test('compiled controls carry the record value they are rendering', async () => 
           'northstar.modulefixture:option.region_west',
       }),
   );
-  assert.match(controlFor(html, EVERY_KIND_FIELD_IDS.active), / checked>/u);
+  assert.match(
+    controlFor(html, EVERY_KIND_FIELD_IDS.active),
+    /<option value="true" selected>/u,
+  );
   assert.match(
     controlFor(html, EVERY_KIND_FIELD_IDS.due),
     /value="2026-08-09"/u,
@@ -550,14 +670,14 @@ test('compiled controls carry the record value they are rendering', async () => 
   );
   assert.match(
     controlFor(html, EVERY_KIND_FIELD_IDS.region),
-    /<input name="value:[^"]+" value="northstar\.modulefixture:option\.region_west" list="/u,
+    /<input [^>]*name="value:[^"]+" value="northstar\.modulefixture:option\.region_west" list="/u,
   );
-  // The twin: an unset boolean is NOT checked, so `checked` is attributable to
+  // The twin: an unset boolean selects nothing, so `selected` is attributable to
   // the stored value rather than to the control always carrying it.
   const unset = await everyKindFormHtml(COMPILER_SEMANTIC_PROFILE_V2_VERSION);
   assert.doesNotMatch(
     controlFor(unset, EVERY_KIND_FIELD_IDS.active),
-    / checked>/u,
+    /selected/u,
   );
 });
 

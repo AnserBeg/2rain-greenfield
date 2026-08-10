@@ -1077,11 +1077,14 @@ const ENUM_SELECT_MAXIMUM_OPTIONS = 5;
  * an unaware reader renders a less capable form, never a wrong value.
  *
  * What this does NOT do is decide how the form BEHAVES. Required-ness, inline
- * validation, chunking and input normalisation are `U7`'s, and the seam is
- * visible here: a `datetime-local` control cannot express a canonical UTC
- * instant's trailing `Z`, and a checkbox posts the string `"false"` where the
- * write path wants a JSON `false`. Both are Postel normalisation, both are
- * named in `U7`'s charter, and neither is invented here.
+ * validation, chunking and string-to-typed normalisation are `U7`'s.
+ *
+ * **The line between the two moved once, under review, and the correction is
+ * worth keeping.** Choosing a control that cannot express a field's declared
+ * domain is not deferring to `U7`; it is destroying the value before `U7` can
+ * see it. So a control here must admit everything the declaration admits, and
+ * where no native control does, the carrier stays lossless and the refusal is
+ * named rather than absorbed.
  */
 function renderFormFields(
   surface: CompiledSurfaceDefinition,
@@ -1114,37 +1117,105 @@ function renderFormControl(
   if (!field) {
     return `<input name="${name}" value="${current}" autocomplete="off">`;
   }
+  const kind = ` data-field-kind="${field.kind}"`;
   switch (field.kind) {
     case 'enumFieldType':
-      return renderEnumControl(field.options ?? [], name, index, value);
+      return renderEnumControl(field.options ?? [], name, kind, index, value);
     case 'booleanFieldType':
-      // The hidden sibling is what makes `false` expressible. An unchecked box
-      // posts nothing, and a field missing from an update patch means "leave it
-      // alone", so without this a checkbox could be turned on and never off.
-      // Last value wins in the submission parser, so checked posts "true".
-      return `<input type="hidden" name="${name}" value="false"><input type="checkbox" name="${name}" value="true"${value === true ? ' checked' : ''}>`;
+      return renderBooleanControl(name, kind, value);
     case 'dateFieldType':
-      return `<input type="date" name="${name}" value="${current}" autocomplete="off">`;
+      // The only temporal kind a native control admits whole: `calendar` and
+      // `timezoneSemantics` are single-valued in the canonical schema, and
+      // `type="date"` emits exactly the `YYYY-MM-DD` the write path validates.
+      return `<input type="date"${kind} name="${name}" value="${current}" autocomplete="off">`;
     case 'dateTimeFieldType':
-      return `<input type="datetime-local" name="${name}" value="${current}" autocomplete="off">`;
+      return renderDateTimeControl(field, name, kind, current);
     case 'timeFieldType':
-      return `<input type="time" name="${name}" value="${current}" autocomplete="off">`;
+      // Without a step a time input defaults to 60 seconds and silently REFUSES
+      // `12:34:56`, which is the value the contract requires. The step comes from
+      // the declared precision -- `1` second, `0.001` millisecond -- so the
+      // control admits the declared domain and nothing wider.
+      return `<input type="time" step="${field.temporal?.precision === 'millisecond' ? '0.001' : '1'}"${kind} name="${name}" value="${current}" autocomplete="off">`;
     case 'integerFieldType':
-      return `<input type="number" inputmode="numeric" step="1" name="${name}" value="${current}" autocomplete="off">`;
+      return `<input type="number" inputmode="numeric" step="1"${kind} name="${name}" value="${current}" autocomplete="off">`;
     case 'exactDecimalFieldType':
     case 'moneyFieldType':
     case 'quantityFieldType':
       // `step="any"` rather than a scale-derived step: the manifest carries the
       // kind, not the scale, and a guessed step REJECTS values the field admits.
-      return `<input type="number" inputmode="decimal" step="any" name="${name}" value="${current}" autocomplete="off">`;
+      return `<input type="number" inputmode="decimal" step="any"${kind} name="${name}" value="${current}" autocomplete="off">`;
     case 'textFieldType':
-      return `<input type="text" name="${name}" value="${current}" autocomplete="off">`;
+      return `<input type="text"${kind} name="${name}" value="${current}" autocomplete="off">`;
   }
+}
+
+/**
+ * No native control expresses a canonical date-time, so this refuses one by name
+ * and keeps the carrier lossless.
+ *
+ * `datetime-local` is local time WITHOUT timezone information. A `utcInstant`
+ * needs its trailing `Z` and an `offsetDateTime` needs a real `±HH:MM` the user
+ * supplies; neither is expressible, and the control would additionally drop
+ * seconds and milliseconds at its default 60-second step. Rendering it would
+ * destroy the stored value on any edit -- silently, and before `U7` could
+ * normalise anything.
+ *
+ * So the control is a text carrier, which round-trips the canonical string
+ * exactly, and the refusal is DECLARED on the element: `data-refused-control`
+ * names what was not offered and the declared domain says why. That is
+ * ADR-0044's shape -- structural absence, declared and observable -- rather than
+ * silent inability. It is deliberately not a message: `ux-grammar` closes
+ * message placement over `page | slot` and reserves any field-level anchor for
+ * `U7`, so inventing one here would coin the vocabulary that ADR forbids.
+ */
+function renderDateTimeControl(
+  field: CompiledSurfaceField,
+  name: string,
+  kind: string,
+  current: string,
+): string {
+  const temporal = field.temporal;
+  const domain = temporal
+    ? ` data-timezone-semantics="${temporal.timezoneSemantics}" data-precision="${String(temporal.precision)}"`
+    : '';
+  return `<input type="text"${kind} data-refused-control="datetime-local"${domain} name="${name}" value="${current}" autocomplete="off">`;
+}
+
+/**
+ * A boolean is a `select`, not a checkbox, and the reason is that a checkbox
+ * cannot count to three.
+ *
+ * An optional boolean has three states -- `true`, `false`, and no value stated --
+ * and a checkbox has two. The first cut of this rendered a checkbox beside a
+ * hidden `value="false"`, which made `null`, absent and `false` render
+ * identically AND post `"false"`, so editing an unrelated field on the same form
+ * silently rewrote a stored `null` to `false`. That is information destroyed
+ * upstream of normalisation, where `U7` cannot recover it.
+ *
+ * The blank option is the third state. It also restores the property the
+ * projection's capability floor depends on: an untouched field posts `""` here
+ * exactly as it does from the bare text box an older reader renders, so both
+ * readers submit the same entries for the same user action.
+ *
+ * The blank stays present even when the field is REQUIRED. A create form has no
+ * value yet, and a two-option select would preselect `true` -- materializing a
+ * default is the one thing this layer must never do. What `required` means for
+ * submission is `U7`'s.
+ */
+function renderBooleanControl(
+  name: string,
+  kind: string,
+  value: unknown,
+): string {
+  const option = (optionValue: string, label: string): string =>
+    `<option value="${optionValue}"${value === (optionValue === 'true') && typeof value === 'boolean' ? ' selected' : ''}>${label}</option>`;
+  return `<select${kind} name="${name}" autocomplete="off"><option value=""></option>${option('true', 'Yes')}${option('false', 'No')}</select>`;
 }
 
 function renderEnumControl(
   options: readonly CompiledFieldOption[],
   name: string,
+  kind: string,
   index: number,
   value: unknown,
 ): string {
@@ -1157,14 +1228,14 @@ function renderEnumControl(
       (option) =>
         `<option value="${escapeHtml(option.optionId)}"${option.optionId === value ? ' selected' : ''}>${escapeHtml(option.label)}</option>`,
     );
-    return `<select name="${name}" autocomplete="off"><option value=""></option>${chosen.join('')}</select>`;
+    return `<select${kind} name="${name}" autocomplete="off"><option value=""></option>${chosen.join('')}</select>`;
   }
   const listId = `surface-field-options-${String(index)}`;
   const suggestions = options.map(
     (option) =>
       `<option value="${escapeHtml(option.optionId)}">${escapeHtml(option.label)}</option>`,
   );
-  return `<input name="${name}" value="${renderInputValue(value)}" list="${listId}" autocomplete="off"><datalist id="${listId}">${suggestions.join('')}</datalist>`;
+  return `<input${kind} name="${name}" value="${renderInputValue(value)}" list="${listId}" autocomplete="off"><datalist id="${listId}">${suggestions.join('')}</datalist>`;
 }
 
 function renderInputValue(value: unknown): string {
