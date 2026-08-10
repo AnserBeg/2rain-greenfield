@@ -1025,12 +1025,17 @@ class BrowserFixtureExecutor
     }
 
     const input = recordValue(request.input);
-    // The double HONOURS the refusal it just recorded. Before this it recorded a
-    // refusal and then merged the refused values anyway, returning
-    // `outcome: 'succeeded'` with an authoritative reread of input production
-    // would not accept -- a green manufactured by the component whose refusal is
-    // the fact under test, which is worse than having no double at all. ADR-0041
-    // is honour-or-refuse, and a test double is not exempt from it.
+    // **Honoured only where the construction site asked for it.** This is NOT a
+    // refusal-honouring double in general: with `KNOWN_FALSE_GREEN` the recorded
+    // refusal is ignored and the branch below merges the rejected values,
+    // persists them and returns `outcome: 'succeeded'` with a read-back. That is
+    // ADR-0041's accepted-and-ignored state, it is live at the sites named
+    // `KNOWN_FALSE_GREEN`, and naming it does not make those tests valid
+    // evidence of semantic create behaviour -- see `double-must-honour-refusal`.
+    //
+    // An earlier version of this comment said the double honours the refusal it
+    // records, without qualification. It does not, and a reviewer had to read
+    // the branch to find that out.
     this.#askTheProvider(request, input);
     const asSubmitted = this.providerVerdicts.at(-3);
     if (this.honourProviderRefusal && asSubmitted && !asSubmitted.accepted) {

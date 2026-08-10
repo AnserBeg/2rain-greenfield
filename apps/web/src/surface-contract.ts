@@ -123,47 +123,61 @@ interface CompiledFieldCommon {
 }
 
 /**
+ * One temporal branch, DERIVED from `timezoneSemanticsByKind` rather than
+ * declared beside it.
+ *
+ * The spellings previously had four independent representations -- the broad
+ * vocabulary list, this table, three hand-written union branches, and the
+ * parser's hardcoded returns -- and a review found what that leaves open:
+ * nothing typed the table against the union, so editing the date entry to
+ * `['utcInstant']` would make the runtime check ADMIT a date field carrying
+ * `utcInstant`, after which the parser substituted the literal `calendarDate`.
+ * Acceptance followed by coercion, which ADR-0041 forbids by name.
+ *
+ * Deriving the branch from the table collapses two of those representations into
+ * one: the table is the only place a spelling is written, and any edit moves the
+ * type, the runtime check and every consumer together. `precision` is keyed off
+ * the same discriminant -- `null` for `dateFieldType` alone, which has no
+ * sub-day component to be precise about.
+ */
+type CompiledTemporalField<K extends CompiledTemporalKind> =
+  // Distributive on purpose: a naked type parameter in a conditional distributes
+  // over the union, so `CompiledTemporalField<CompiledTemporalKind>` is the union
+  // of the three branches rather than one branch whose `kind` is a union. The
+  // parser returns exactly that, and the difference is what lets callers narrow.
+  K extends unknown
+    ? CompiledFieldCommon & {
+        readonly kind: K;
+        readonly temporal: {
+          readonly precision: K extends 'dateFieldType'
+            ? null
+            : CompiledTemporalPrecision;
+          readonly timezoneSemantics: (typeof timezoneSemanticsByKind)[K][number];
+        };
+      }
+    : never;
+
+/**
  * A field is DISCRIMINATED on its kind, and each temporal kind carries only the
  * timezone semantics its own canonical schema admits.
  *
  * The first shape here was a flat record with an optional
  * `{precision, timezoneSemantics}` validated against the union of all four
- * spellings. A review found the consequence: `dateFieldType` with `utcInstant`,
- * `timeFieldType` with `calendarDate` and `dateTimeFieldType` with
- * `localWallTime` were all ADMITTED, and the renderer then picks its control
- * from `kind` alone -- so the compiled contract stated one temporal domain while
- * the control implemented another, silently.
+ * spellings, so `dateFieldType` with `utcInstant` and `timeFieldType` with
+ * `calendarDate` were both ADMITTED while the renderer picked its control from
+ * `kind` alone -- the compiled contract stating one temporal domain and the
+ * control implementing another, silently.
  *
- * `review-tiers` prefers unrepresentable to detectable, and this is the cheaper
- * of the two: with the pairing in the type there is no compatibility table to
- * keep correct and no detector to evade. The reader below still validates the
- * pairing, because a payload arrives as JSON and the type cannot check bytes --
- * but a caller cannot CONSTRUCT the wrong pair, which is what closes it for
- * every consumer downstream of the parse.
+ * `review-tiers` prefers unrepresentable to detectable. The reader below still
+ * validates the pairing, because a payload arrives as JSON and a type cannot
+ * check bytes -- but a caller cannot CONSTRUCT the wrong pair, and the check and
+ * the type now read the same table, so they cannot disagree about which pairs
+ * exist.
  */
 export type CompiledSurfaceField =
-  | (CompiledFieldCommon & {
-      readonly kind: 'dateFieldType';
-      readonly temporal: {
-        // A calendar date has no sub-day component to be precise about.
-        readonly precision: null;
-        readonly timezoneSemantics: 'calendarDate';
-      };
-    })
-  | (CompiledFieldCommon & {
-      readonly kind: 'timeFieldType';
-      readonly temporal: {
-        readonly precision: CompiledTemporalPrecision;
-        readonly timezoneSemantics: 'localWallTime';
-      };
-    })
-  | (CompiledFieldCommon & {
-      readonly kind: 'dateTimeFieldType';
-      readonly temporal: {
-        readonly precision: CompiledTemporalPrecision;
-        readonly timezoneSemantics: 'offsetDateTime' | 'utcInstant';
-      };
-    })
+  | CompiledTemporalField<'dateFieldType'>
+  | CompiledTemporalField<'dateTimeFieldType'>
+  | CompiledTemporalField<'timeFieldType'>
   | (CompiledFieldCommon & {
       readonly kind: 'enumFieldType';
       readonly options: readonly CompiledFieldOption[];
@@ -778,37 +792,7 @@ function parseSurfaceField(
     );
   }
   if (includes(temporalFieldKinds, kind)) {
-    // The narrowing is what makes the pairing checkable: each branch returns the
-    // one temporal shape its kind admits, so a payload pairing `dateFieldType`
-    // with `utcInstant` cannot reach a caller in any form.
-    const temporal = parseFieldTemporal(value, kind, at);
-    return kind === 'dateFieldType'
-      ? Object.freeze({
-          ...common,
-          kind,
-          temporal: Object.freeze({
-            precision: null,
-            timezoneSemantics: 'calendarDate' as const,
-          }),
-        })
-      : kind === 'timeFieldType'
-        ? Object.freeze({
-            ...common,
-            kind,
-            temporal: Object.freeze({
-              precision: temporal.precision as CompiledTemporalPrecision,
-              timezoneSemantics: 'localWallTime' as const,
-            }),
-          })
-        : Object.freeze({
-            ...common,
-            kind,
-            temporal: Object.freeze({
-              precision: temporal.precision as CompiledTemporalPrecision,
-              timezoneSemantics: temporal.timezoneSemantics as
-                'offsetDateTime' | 'utcInstant',
-            }),
-          });
+    return parseTemporalField(value, kind, common, at);
   }
   if (kind !== 'enumFieldType') {
     if (Object.hasOwn(value, 'temporal')) {
@@ -862,11 +846,12 @@ function parseSurfaceField(
  * renderer picked its control from `kind`. One discriminant was checked
  * properly and the other was not, in the same function.
  */
-function parseFieldTemporal(
+function parseTemporalField<K extends CompiledTemporalKind>(
   value: Record<string, unknown>,
-  kind: CompiledTemporalKind,
+  kind: K,
+  common: CompiledFieldCommon,
   at: string,
-): CompiledFieldTemporal {
+): CompiledTemporalField<K> {
   if (!Object.hasOwn(value, 'temporal')) {
     throw invalidField(
       `${at} (${String(value.fieldId)}) carries temporal precision that does not belong to kind ${kind}`,
@@ -893,10 +878,19 @@ function parseFieldTemporal(
       `${at} (${String(value.fieldId)}) declares timezone semantics ${temporal.timezoneSemantics} that kind ${kind} cannot carry`,
     );
   }
+  // The VALIDATED value, never a second spelling. Returning a hardcoded literal
+  // here is how the table and the returned value could disagree: the check would
+  // admit and the parser would quietly substitute. The one cast is justified by
+  // the four refusals immediately above -- shape, vocabulary, precision-to-kind
+  // and semantics-to-kind -- and there is no other route out of this function.
   return Object.freeze({
-    precision: temporal.precision,
-    timezoneSemantics: temporal.timezoneSemantics,
-  });
+    ...common,
+    kind,
+    temporal: Object.freeze({
+      precision: temporal.precision,
+      timezoneSemantics: temporal.timezoneSemantics,
+    }),
+  }) as CompiledTemporalField<K>;
 }
 
 function parseOperationBinding(value: unknown): {
