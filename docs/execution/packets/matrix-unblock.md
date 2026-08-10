@@ -1,6 +1,7 @@
 # matrix-unblock — the matrix reaches its suites again, and the formatter stops drifting
 
-Status: BLOCKED at review round 1 — two open items, one of them a user decision
+Status: round-1 findings all closed; awaiting `lang-adopt-v5` integration, then
+rebase + full matrix + re-freeze
 Tier: Behavioral
 Branch: `packet/matrix-unblock`
 Base: `194871f` (`origin/main` at cut; verified, not assumed)
@@ -70,17 +71,12 @@ The cost is not hypothetical. Two of the expanded files are held by
 `packet/lang-adopt-v5`, which carries substantive semantic work in both (see
 the sequencing note below).
 
-**This is a user-level scope decision and the lane cannot make it, or grant
-itself the authority retroactively by editing this record.** The orchestrator
-must choose one:
-
-1. **Ratify** the full 18-path set and serialize the overlaps with
-   `lang-adopt-v5`; or
-2. **Split or revert** the out-of-lease files, and charter the repository-wide
-   formatting remainder separately.
-
-Until that ruling lands, this candidate is not mergeable under the existing
-charter.
+**This was a user-level scope decision and the lane could not make it, or grant
+itself the authority retroactively by editing this record.** It was put to the
+user and **ratified** — see the ruling in the review section below. The
+ratification covers the changed paths; it does not excuse the order of
+operations, which is recorded here as a process failure so the next lane reads
+it as one.
 
 The seven format-failing files the charter did not name:
 `apps/web/src/surface-contract.ts` (already owned, as a lint file),
@@ -183,6 +179,22 @@ back into the case body is caught by the same error.
 
 ## Gates
 
+> **SUPERSEDED — this run no longer covers the tree.** Closing round-1 finding 2
+> added executable test content (`test/integration/toolchain-contract.test.ts`),
+> so the executable diff from `3f9f358` is no longer empty and the identical-tree
+> exception no longer applies. The run below is retained as the record of what
+> was measured at that SHA, not as this candidate's acceptance evidence.
+>
+> The acceptance matrix is owed **after** `lang-adopt-v5` integrates and this
+> branch rebases onto the new `main` — one run, at the re-frozen SHA, per
+> `git-workflow`'s one-matrix-per-packet rule. Running it before the rebase
+> would measure a tree that is about to change.
+>
+> Interim gates at `8882158`: `format` green, `lint` green, `typecheck` green,
+> and the toolchain contract 4/4 with the four negative controls recorded below.
+> `test:integration` was **not** run — another lane held the exclusive lock
+> (`test:browser`, pid 73443) and this lane did not compete for it.
+
 Full matrix run at `3f9f358`, verdict read from inside the log rather than
 from the pipeline's exit status:
 
@@ -262,10 +274,23 @@ in this record; two remain open and cannot be closed by the lane.
 
 | # | Finding | State |
 | --- | --- | --- |
-| 1 | Lease crossed (18 files vs 11 owned) without a stop-and-bridge request | **OPEN — user decision** |
-| 2 | The exact prettier pin has no in-tree regression gate | **OPEN — needs an out-of-lease file** |
+| 1 | Lease crossed (18 files vs 11 owned) without a stop-and-bridge request | **Ratified by the user** — see ruling below |
+| 2 | The exact prettier pin has no in-tree regression gate | **Closed** — gate added with four observed reds |
 | 3 | The stated `no-fallthrough` mechanism was false | Corrected above; source edit stands |
 | 4 | Derived-artifact rule misapplied to `lang-adopt-v5` merge advice | Corrected above |
+
+### User ruling, 2026-08-10
+
+Put to the user as a scope decision the lane could not make. Ruled:
+
+1. **Ratify the full path set**, plus `test/integration/toolchain-contract.test.ts`
+   for finding 2 — 19 paths in total. The lease crossing stands as a recorded
+   process failure, not as retroactive authority: the lane should have stopped
+   and issued a bridge request on discovering fourteen format-failing files.
+2. **The pin gate lands in this packet**, not a follow-up.
+3. **`lang-adopt-v5` integrates first.** This packet then rebases onto the new
+   `main`, re-runs `format:write` over the merged tree, and takes its full
+   matrix there. The overlap dissolves rather than being resolved by anyone.
 
 ### Finding 2, reproduced and confirmed
 
@@ -300,10 +325,43 @@ exact semantic version generically — not hardcode `3.9.5` — so a deliberate
 reviewed upgrade stays possible, and it should carry a negative control
 showing `^3.6.2` rejected.
 
-**That file is outside this packet's owned paths.** Adding it is a second
-lease crossing, so it waits on the same ruling as finding 1 rather than being
-taken unilaterally. Because it changes executable test content, the resulting
-SHA needs a fresh full matrix and a fresh Behavioral review.
+### Finding 2, closed
+
+Ratified and added to `test/integration/toolchain-contract.test.ts`. It reads
+the **manifest** specifier, because that is the only place the cheapest break
+is visible, and requires exactness generically rather than hardcoding `3.9.5`,
+so a deliberate reviewed upgrade stays a one-line change that does not edit its
+own gate.
+
+The division of labour is verified, not asserted:
+
+| Fact | Observed by | Checked |
+| --- | --- | --- |
+| manifest specifier is exact | the new contract | 4 tests pass |
+| manifest and lockfile agree | `pnpm install --frozen-lockfile` | refuses a mismatch, `rc=1`, naming `prettier (lockfile: ^3.6.2, manifest: 3.9.5)` |
+| lockfile version is what installs | frozen install | resolves 3.9.5 |
+
+**Four observed reds, one per vacuity vector** — a gate never seen failing is
+not evidence:
+
+| Control | Mutation | Observed |
+| --- | --- | --- |
+| A — the real regression | specifier back to `^3.6.2` | test 2 red |
+| B — subject absent | `prettier` key deleted | test 2 red |
+| C — proxy satisfied, fact false | discriminator neutered to always-true | **test 2 still GREEN, test 3 red** |
+| D — unrecognized shapes | `undefined`, `null`, `395` in the table | rejected |
+
+**Control C is the one that matters.** With the predicate returning `true`
+unconditionally, the manifest assertion passes identically — so that assertion
+alone would have been vacuous, and the rejection table is what makes the gate
+mean anything. It executes the discriminator directly instead of inferring it
+from a green run.
+
+The tree was restored and verified clean after each control, and the contract
+was committed before any of them ran so that no `checkout --` could consume it.
+
+No new test file: this lands in the existing toolchain contract, which
+`test:integration` already globs, so the reachability inventory is unchanged.
 
 ## What this packet did NOT verify
 
