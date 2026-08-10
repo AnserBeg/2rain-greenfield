@@ -302,3 +302,76 @@ sibling does not re-break the `at(-2)` class — and
   mechanism.
 - The probe measured that only release roots and the surface-manifest projection
   move; `storage-target.manifest.*` and `storage-target.chunk.*` are stable.
+
+## §8 — A language adoption re-identifies verification scenarios; a profile adoption does not
+
+Added 2026-08-10 by `LANG-ADOPT-v5`, from a measurement it was not looking for.
+
+### The measurement
+
+Across the canonical-language v4 → v5 adoption, on the recorded application
+lineage:
+
+| | |
+|---|---|
+| scenario count | **163 → 163** |
+| `kind \| entityId \| subjectId` signature set | **identical** |
+| scenario ids that changed | **69 of 163** |
+| ids changed by the ADR-0047 §4 profile-only edge (entry 6 → 7) | **0 of 163** |
+
+Every count holds, every behaviour holds, and 42% of the plan is issued under
+new identities. A `scenarioId` is a fingerprint over the scenario's inputs, and
+those inputs include version-stamped nodes; scenarios whose fingerprint reaches
+a stamped node move, and the rest do not. **The profile axis moves the release
+root and re-identifies nothing. The language axis re-identifies without moving
+anything a count can see.**
+
+### Why this is consequential rather than curious
+
+`PUR-2` and `SAL-2` both key posting evidence by scenario id. Durable
+verification evidence recorded before an adoption therefore matches only
+partially afterwards — and the failure is silent in every direction a gate
+currently looks: the plan is the same size, verifies the same subjects, and
+produces the same outcomes. The orphaned fraction surfaces as evidence that
+"was never recorded" for scenarios that were, in fact, recorded and executed.
+
+This is the shape `LANG-ADOPT-v5` spent three review rounds on, one layer out: a
+fact that holds under every count while its identity moves underneath.
+
+### Decision
+
+**Evidence carries the language version it was recorded under, and a
+re-identification is detected rather than prevented.** Scenario identity is NOT
+made adoption-stable.
+
+The rejected alternative — excluding version stamps from the fingerprint so ids
+survive adoption — was considered and is refused for the reason ADR-0047 §1
+already gives about `semanticProfileDigest`: an identity that deliberately omits
+part of its subject cannot distinguish "the same scenario" from "a scenario that
+now verifies different bytes." Two packages differing only in language version
+DO verify different bytes; a v5 storage target materializes a state field a v4
+one does not. Stable ids across that boundary would assert an equivalence that
+is false, and would do it precisely where `PUR-1`'s first state machine lands.
+
+So the adoption-stability question is answered the other way: **the id is
+allowed to move, and the reader must be able to tell that it moved.** Recording
+the language version alongside the evidence makes a partial match legible as a
+version boundary rather than as missing evidence, which is the difference
+between a diagnosable event and a silent one.
+
+### Owed, and not built here
+
+`LANG-ADOPT-v5` measured this and ruled it; it did not implement it, because
+durable evidence is `PUR-2`'s subject area and this packet ships no purchasing
+entity. What is owed:
+
+- verification evidence records the `languageVersion` of the release it was
+  recorded against;
+- a reader comparing evidence across releases that differ in language version
+  reports the boundary explicitly rather than reporting unmatched scenarios;
+- a control that reds when evidence from one language version is silently
+  credited to another.
+
+Until that lands, **a language adoption partially orphans durable verification
+evidence, and nothing observes it.** That sentence is the row's content, not a
+prediction.

@@ -243,6 +243,13 @@ making the answer depend on where the head is, which is the same defect one step
 out. Both spellings answer *which entry is near the end*; neither answers *which
 entry carries the change this control is about*.
 
+**Ruled in [ADR-0047 §8](../../decisions/ADR-0047-the-compiler-semantic-profile-is-the-projection-evolution-axis.md):**
+evidence carries the language version it was recorded under, and a
+re-identification is DETECTED rather than prevented. Stable ids across an
+adoption would assert an equivalence that is false — a v5 storage target
+materializes a state field a v4 one does not — precisely where `PUR-1`'s first
+state machine lands. Owed to `PUR-2`, not built here.
+
 **And the second control yields the adoption fact worth having:** entries 6, 7
 and 8 all carry 163 verification scenarios with identical scenario ids, now
 asserted. The profile adoption and the language adoption each move a release
