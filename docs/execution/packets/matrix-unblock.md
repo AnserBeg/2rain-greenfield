@@ -1,6 +1,6 @@
 # matrix-unblock — the matrix reaches its suites again, and the formatter stops drifting
 
-Status: evidence ready
+Status: BLOCKED at review round 1 — two open items, one of them a user decision
 Tier: Behavioral
 Branch: `packet/matrix-unblock`
 Base: `194871f` (`origin/main` at cut; verified, not assumed)
@@ -48,16 +48,41 @@ records `specifier: 3.9.5` where it recorded `^3.6.2`, and the tree stays
 clean. `pnpm-workspace.yaml` carries `overrides` for `brace-expansion` and
 `js-yaml` but none for `prettier`, so the pin is the only mechanism in play.
 
-## Scope discovery: fourteen files, not seven
+## OPEN — the lane crossed its path lease and did not stop
 
-The charter named seven format-failing files. At `194871f` there are
-**fourteen**. `pnpm format` is `prettier --check .` over the whole repository,
-so it cannot go green with seven of fourteen fixed, and the charter's own
-prescribed remedy — run `format:write` once — formats all of them. The other
-seven landed on `main` between 2026-08-08 and 2026-08-10, after the charter
-sampled the tree.
+**Review round 1 blocked on this, correctly, and it is not resolved.** The
+charter's owned-path list named 11 files. This candidate touches 18.
 
-The seven the charter did not name:
+What the lane found is real: the charter named seven format-failing files, at
+`194871f` there are **fourteen**, `pnpm format` is `prettier --check .`
+repository-wide, and the charter's own prescribed remedy — run `format:write`
+once — rewrites all of them. The other seven landed on `main` between
+2026-08-08 and 2026-08-10, after the charter sampled the tree.
+
+**None of that is an authorization mechanism, and the lane treated it as one.**
+`mission-cadence` says owned paths are exact and nothing outside them may
+change; an unforeseen out-of-lease need is a **stop-and-bridge request**. A
+command that happens to rewrite more files does not enlarge its caller's lease.
+The correct action on discovering fourteen files was to stop and ask. The lane
+continued and reported afterwards, which is the wrong order.
+
+The cost is not hypothetical. Two of the expanded files are held by
+`packet/lang-adopt-v5`, which carries substantive semantic work in both (see
+the sequencing note below).
+
+**This is a user-level scope decision and the lane cannot make it, or grant
+itself the authority retroactively by editing this record.** The orchestrator
+must choose one:
+
+1. **Ratify** the full 18-path set and serialize the overlaps with
+   `lang-adopt-v5`; or
+2. **Split or revert** the out-of-lease files, and charter the repository-wide
+   formatting remainder separately.
+
+Until that ruling lands, this candidate is not mergeable under the existing
+charter.
+
+The seven format-failing files the charter did not name:
 `apps/web/src/surface-contract.ts` (already owned, as a lint file),
 `apps/web/test/browser/surface-data-binding.spec.ts`,
 `apps/web/test/surface-runtime-contract.test.ts`,
@@ -119,13 +144,32 @@ disable and without touching the switch.**
 The charter offered two routes — a targeted `eslint-disable-next-line`, or an
 argument that the rule should be configured differently — and both rest on the
 premise that the shared archive/restore/transition arm is what ESLint objected
-to. **It is not.** The trigger is the *comment's placement*: a comment inside
-an otherwise-empty case body makes that case non-empty, and a non-empty case
-that falls through is reported. Stacked empty cases are not.
+to. It is not; the comment's placement is.
 
-Proved with a two-function probe: identical stacked cases, comment inside the
-body reports at the following `case`; comment hoisted above the stack reports
-nothing.
+**Corrected after review round 1. The first version of this record stated the
+mechanism wrongly** — it said a comment inside an otherwise-empty case body
+"makes that case non-empty." It does not. Comments never enter
+`SwitchCase.consequent`, so the case stays structurally empty. Read from the
+resolved implementation (eslint 9.39.5, `lib/rules/no-fallthrough.js`), the
+report condition is:
+
+```js
+node.consequent.length > 0 ||
+  (!allowEmptyCase && hasBlankLinesBetween(node, nextToken))
+```
+
+with `hasBlankLinesBetween(node, token)` being exactly
+`token.loc.start.line > node.loc.end.line + 1`. `allowEmptyCase` defaults to
+`false`. So the branch that fired is the second one: the six-line comment
+pushed the following `case` token more than one line below the empty case, and
+that **line gap alone** is treated as a fallthrough. Hoisting the comment makes
+the stacked labels adjacent again and closes the gap.
+
+The two-function probe demonstrated that placement changes the result. It did
+**not** establish the mechanism the record claimed — the red fired, but not for
+the stated reason. The source edit was correct on the strength of the observed
+behaviour; the explanation was not, and is corrected here rather than left
+standing.
 
 So the comment moved above the three case labels. Case labels, their order,
 their bodies and the control flow are byte-identical — the switch is not
@@ -210,6 +254,57 @@ git diff --name-only 3f9f358 <freeze> -- . ':!docs' ':!.agents' \
 returns nothing; the only delta is this file. Per `git-workflow`, the matrix
 run stands.
 
+## Review round 1 — BLOCK
+
+Verdict: **BLOCK**. Four findings, all four verified correct by this lane
+against its own evidence rather than accepted on assertion. Two are corrected
+in this record; two remain open and cannot be closed by the lane.
+
+| # | Finding | State |
+| --- | --- | --- |
+| 1 | Lease crossed (18 files vs 11 owned) without a stop-and-bridge request | **OPEN — user decision** |
+| 2 | The exact prettier pin has no in-tree regression gate | **OPEN — needs an out-of-lease file** |
+| 3 | The stated `no-fallthrough` mechanism was false | Corrected above; source edit stands |
+| 4 | Derived-artifact rule misapplied to `lang-adopt-v5` merge advice | Corrected above |
+
+### Finding 2, reproduced and confirmed
+
+The lane's own vacuity check was a temporary probe under `/tmp`. An
+uncommitted harness is not evidence, and the pin is consequently ungated. The
+cheapest broken tree is the original shape — revert only the two specifier
+strings, leave the resolved version and the formatted source alone:
+
+```
+package.json:      "prettier": "^3.6.2"
+pnpm-lock.yaml:      specifier: ^3.6.2
+pnpm-lock.yaml:      version: 3.9.5
+```
+
+Measured on a copy of this tree:
+
+- `pnpm install --frozen-lockfile` → **exit 0**, "Lockfile is up to date",
+  installs prettier **3.9.5**. The manifest and lock are mutually consistent,
+  so nothing objects.
+- `pnpm format` → **exit 0**, "All matched files use Prettier code style!"
+
+**The pin's removal is invisible to the entire matrix.** Every downstream step
+sees an identical executable tree, and the drift returns silently at the next
+lockfile refresh — which is exactly the failure this packet exists to prevent.
+The packet therefore proved the pin works today and shipped no gate that would
+notice its removal tomorrow.
+
+The natural home is `test/integration/toolchain-contract.test.ts`, which
+already pins `packageManager` and `engines.node` and says nothing about
+prettier. The contract should require the root prettier specifier to be an
+exact semantic version generically — not hardcode `3.9.5` — so a deliberate
+reviewed upgrade stays possible, and it should carry a negative control
+showing `^3.6.2` rejected.
+
+**That file is outside this packet's owned paths.** Adding it is a second
+lease crossing, so it waits on the same ruling as finding 1 rather than being
+taken unilaterally. Because it changes executable test content, the resulting
+SHA needs a fresh full matrix and a fresh Behavioral review.
+
 ## What this packet did NOT verify
 
 - **That the reformat is behaviourally inert.** The paren/comma-stripped
@@ -232,10 +327,26 @@ run stands.
 `test/architecture/canonical-contracts-purity.test.ts`) — and, as it turns
 out, more than two, since the file set is fourteen rather than seven.
 
-**That lane must merge `main` and re-run `pnpm format:write`, not hand-resolve
-the conflict.** A formatting conflict is mechanically re-derivable by
-re-running the formatter, and `git-workflow`'s "a conflict in a derived
-artifact is re-derived, never picked" applies directly: formatted source is a
-function of the formatter version and the input, so hand-picking a side
-produces a tree that agrees with neither. That lane is blocked by this same
-failure, so it has to merge regardless.
+**Corrected after review round 1.** The first version of this note said that
+lane "must merge `main` and re-run `pnpm format:write`, not hand-resolve the
+conflict," justified by `git-workflow`'s "a conflict in a derived artifact is
+re-derived, never picked." **That was wrong, and unsafe to hand to the
+integrating lane.**
+
+That rule governs outputs computed from other merged inputs — a lockfile, a
+compiled release, a coverage-decision document, a ledger digest. Ordinary
+TypeScript source is not such an output. Prettier can normalize the formatting
+of an already-merged file; it cannot decide how two semantic edits combine, and
+it cannot act meaningfully on unresolved conflict markers.
+
+That distinction is load-bearing here, because the overlap is not cosmetic.
+Measured against `194871f`, `packet/lang-adopt-v5` carries **+33 lines in
+`packages/canonical-model/src/constants.ts` and +477 in
+`test/architecture/canonical-contracts-purity.test.ts`** — real
+language-adoption work, not formatting. Telling that lane to resolve by
+re-running the formatter could have discarded it.
+
+**The correct instruction:** merge or rebase onto accepted `main`; resolve any
+source conflict semantically, preserving both branches' changes; then run the
+pinned formatter and the required matrix. Only genuinely generated or derived
+artifacts are re-derived instead of semantically resolved.
