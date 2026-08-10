@@ -41,7 +41,7 @@ import {
   type CompiledNavigationTree,
   type CompiledSurfaceDataBinding,
   type CompiledSurfaceDefinition,
-  type CompiledSurfaceOperationBinding,
+  type CompiledSurfaceRelationInput,
   type SurfaceOperationIntent,
 } from './surface-contract.js';
 
@@ -138,7 +138,7 @@ export async function renderSurfaceRuntimeWithData(
   const relationPickers = await loadRelationPickers(
     view,
     selection,
-    binding.operations,
+    binding.relationInputs,
     gateways.queryGateway,
   );
   if (binding.query.legalEntityScope && legalEntitySelection.length === 0) {
@@ -673,6 +673,12 @@ async function recordPickerOptions(
     return null;
   }
   if (result.outcome !== 'exact') return null;
+  // A relation picker must enumerate its target COMPLETELY or refuse. The list
+  // contract reports whether more records exist, and a picker that shows page
+  // one while more valid foreign-key targets sit behind a cursor is not a
+  // usability wrinkle -- it makes those targets unselectable while looking
+  // complete, which is the silent-wrongness ADR-0041 exists to forbid.
+  if (result.listCoverage?.hasMore === true) return null;
   const displayFieldId = list.binding.displayFieldId;
   return Object.freeze(
     result.records
@@ -704,7 +710,7 @@ async function recordPickerOptions(
 async function loadRelationPickers(
   view: RuntimeViewContract.RequestRuntimeView,
   selection: SelectedSurface,
-  operations: readonly CompiledSurfaceOperationBinding[],
+  relationInputs: readonly CompiledSurfaceRelationInput[],
   queryGateway: SemanticQueryGateway,
 ): Promise<readonly RelationPicker[]> {
   // Only a form renders relation controls. Operations bind per entity, so a
@@ -712,10 +718,9 @@ async function loadRelationPickers(
   // enumerating every relation target on a list render would be a query nobody
   // asked for.
   if (selection.selected.surfaceRole !== 'form') return Object.freeze([]);
-  const create = operations.find((operation) => operation.intent === 'create');
-  if (!create || create.relationInputs.length === 0) return Object.freeze([]);
+  if (relationInputs.length === 0) return Object.freeze([]);
   const pickers = await Promise.all(
-    create.relationInputs.map(async (relation) => {
+    relationInputs.map(async (relation) => {
       const list = relation.targetEntityId
         ? pickerListSurfaceFor(view, selection, relation.targetEntityId)
         : null;

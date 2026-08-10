@@ -644,6 +644,158 @@ test('without the relation target the create form refuses instead of rendering',
   );
 });
 
+/**
+ * Raised in review: the picker took page one and ignored list coverage, so a
+ * target entity with more records than the query maximum produced a control
+ * that looked complete while every target after page one was unselectable.
+ *
+ * The prior harness could not catch it -- `listCoverage` hardcoded
+ * `hasMore: false`, so the gate could never see the state it needed to refuse.
+ */
+test('a target the picker cannot enumerate completely refuses rather than truncating', async () => {
+  const compiled = compileFixture(
+    ordinaryModuleV1(),
+    COMPILER_SEMANTIC_PROFILE_V2_VERSION,
+  );
+  const policy = new RecordingPolicy('ALLOW');
+  const executor = new InMemoryGenericExecutor();
+  executor.seed(tenantA, 'Northwind');
+  const entry = runtimeEntry(compiled, policy, {
+    a: identity(tenantA, environmentA, principalA),
+  });
+  const view = await issuedView(entry, 'a');
+  const url = `/?surface=${encodeURIComponent(CHILD_FORM_SURFACE)}`;
+
+  // Admission twin: the SAME tree with complete coverage must render, or this
+  // control would pass against a picker that never renders at all.
+  const complete = await renderSurfaceRuntimeWithData(
+    view,
+    url,
+    semanticGateways(policy, executor),
+  );
+  assert.match(
+    complete.html,
+    new RegExp(`<select name="relation:${REQUIRED_RELATION_ID}" required>`),
+    'complete coverage must still render the control',
+  );
+
+  executor.reportsMoreRecords = true;
+  const truncated = await renderSurfaceRuntimeWithData(
+    view,
+    url,
+    semanticGateways(policy, executor),
+  );
+  assert.doesNotMatch(
+    truncated.html,
+    /<select name="relation:/,
+    'an incompletely enumerable target must not render a partial picker',
+  );
+  assert.match(
+    truncated.html,
+    /data-diagnostic-code="QUERY_UNSUPPORTED"/,
+    'and the required relation makes the whole form refuse, by name',
+  );
+});
+
+/**
+ * Raised in review: the browser had its own relation-input parser that accepted
+ * `targetEntityId` whenever present and turned absence into `null`, so a forged
+ * artifact the operation gateway refuses would have been admitted here. Both
+ * readers now run `parsePinnedRelationInputs`, and this proves the browser side
+ * refuses in BOTH directions rather than only the convenient one.
+ */
+test('the browser reader refuses a contract whose version and relation keys disagree', async () => {
+  const policy = new RecordingPolicy('ALLOW');
+  const url = `/?surface=${encodeURIComponent(CHILD_FORM_SURFACE)}`;
+
+  const forgeries = [
+    {
+      // v1 carrying a v3-only key.
+      from: COMPILER_SEMANTIC_PROFILE_V2_VERSION,
+      mutate: (contract: Record<string, unknown>) => {
+        contract.schemaVersion = 'northstar.module-input-contract/v1';
+      },
+      name: 'a v1 contract carrying targetEntityId',
+    },
+    {
+      // v3 missing the key it declares.
+      from: COMPILER_SEMANTIC_PROFILE_V2_VERSION,
+      mutate: (contract: Record<string, unknown>) => {
+        for (const relation of contract.relationInputs as Record<
+          string,
+          unknown
+        >[]) {
+          delete relation.targetEntityId;
+        }
+      },
+      name: 'a v3 contract missing targetEntityId',
+    },
+  ];
+
+  for (const forgery of forgeries) {
+    const compiled = compileFixture(ordinaryModuleV1(), forgery.from);
+    const projections = runtimeProjections(compiled);
+    const payload = structuredClone(projections.operation.payload) as Record<
+      string,
+      unknown
+    >;
+    let mutated = 0;
+    for (const operation of payload.operations as Record<string, unknown>[]) {
+      const contract = operation.inputContract as
+        Record<string, unknown> | undefined;
+      if (!contract || (contract.relationInputs as unknown[]).length === 0) {
+        continue;
+      }
+      forgery.mutate(contract);
+      mutated += 1;
+    }
+    assert.ok(
+      mutated > 0,
+      `${forgery.name}: the forgery must actually reach a relation-bearing contract`,
+    );
+
+    const entry = new AuthenticatedRequestRuntimeEntryAdapter(
+      new AuthenticatedRequestEntryAdapter(async () =>
+        identity(tenantA, environmentA, principalA),
+      ),
+      {
+        async load(context): Promise<LoadedRequestRuntimeDefinition> {
+          return {
+            environmentId: context.environmentId,
+            pointer: { fence: 1, pointerId },
+            projections: {
+              ...projections,
+              operation: {
+                ...projections.operation,
+                payload: payload as unknown as ImmutableJsonValue,
+              },
+            },
+            release: { contentHash: compiled.releaseRoot, releaseId },
+            tenantId: context.tenantId,
+          };
+        },
+      },
+      policy,
+    );
+    const view = await issuedView(entry, 'a');
+    const rendered = await renderSurfaceRuntimeWithData(
+      view,
+      url,
+      semanticGateways(policy, new InMemoryGenericExecutor()),
+    );
+    assert.doesNotMatch(
+      rendered.html,
+      /<select name="relation:/,
+      `${forgery.name}: must not produce a control`,
+    );
+    assert.match(
+      rendered.html,
+      /data-diagnostic-code="QUERY_UNSUPPORTED"/,
+      `${forgery.name}: must be refused as an unreadable binding`,
+    );
+  }
+});
+
 class RecordingPolicy implements CurrentPolicyGateway {
   readonly calls: CurrentPolicyDecisionRequest[] = [];
 
@@ -667,6 +819,9 @@ class RecordingPolicy implements CurrentPolicyGateway {
 class InMemoryGenericExecutor
   implements SemanticQueryExecutor, SemanticOperationExecutor
 {
+  /** When true, every list result claims more records sit behind a cursor. */
+  reportsMoreRecords = false;
+
   readonly nonAcceptedCalls: SemanticOperationNonAcceptedRequest[] = [];
   readonly operationCalls: SemanticOperationExecutionRequest[] = [];
   readonly queryCalls: SemanticQueryExecutionRequest[] = [];
@@ -737,7 +892,14 @@ class InMemoryGenericExecutor
       unsupportedReason: null,
     };
     return request.list
-      ? { ...result, listCoverage: listCoverage(request, records.length) }
+      ? {
+          ...result,
+          listCoverage: listCoverage(
+            request,
+            records.length,
+            this.reportsMoreRecords,
+          ),
+        }
       : result;
   }
 
@@ -854,14 +1016,15 @@ function displayValue(value: ImmutableJsonValue | undefined): string | null {
 function listCoverage(
   request: SemanticQueryExecutionRequest,
   returnedCount: number,
+  hasMore = false,
 ): NonNullable<SemanticQueryResultEnvelope['listCoverage']> {
   assert.ok(request.list);
   return Object.freeze({
     effectivePageSize: request.list.query.effectivePageSize,
-    hasMore: false,
+    hasMore,
     includeArchived: request.list.query.includeArchived,
     matchMode: request.list.query.matchMode,
-    nextCursor: null,
+    nextCursor: hasMore ? 'cursor-page-2' : null,
     pageOffset: request.list.query.pageOffset,
     projectedSearchValueCount:
       request.list.query.search.length === 0

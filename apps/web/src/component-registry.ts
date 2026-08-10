@@ -747,9 +747,19 @@ function renderSections(context: SurfaceComponentContext): string {
   }
   // Create renders controls inside the field grid; update renders the freeze
   // note after it, because a sentence is not a grid cell.
+  //
+  // An OPTIONAL relation whose target could not be resolved renders nothing at
+  // all. Rendering it would produce a `<select>` whose only choice is `None` --
+  // an operable-looking control that cannot express any valid relation, which
+  // is precisely the inert control this packet exists to remove. Under the
+  // adopted profile no relation carries a target, so this is the normal case
+  // until v2 is adopted, not an edge one.
   const relationControls =
     intent === 'create'
-      ? pickers.map((picker) => renderRelationPicker(picker)).join('')
+      ? pickers
+          .filter((picker) => picker.options !== null)
+          .map((picker) => renderRelationPicker(picker))
+          .join('')
       : '';
   const relationFreeze =
     intent === 'create' ? '' : relationFreezeDisclosure(pickers);
@@ -773,6 +783,8 @@ function renderSections(context: SurfaceComponentContext): string {
  * under the platform's minimum client capability unchanged.
  */
 function renderRelationPicker(picker: RelationPicker): string {
+  // Callers filter unresolvable pickers out; `?? []` here would silently
+  // resurrect the inert control, so an absent option set is a caller error.
   const options = picker.options ?? [];
   const placeholder = picker.required
     ? '<option value="" disabled selected>Select one</option>'

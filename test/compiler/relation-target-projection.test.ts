@@ -22,6 +22,7 @@ import {
   type CompilerSemanticProfileVersion,
   type CompileSuccess,
 } from '../../packages/compiler/src/index.js';
+import { inventoryModuleDefinition } from '../../packages/domain/src/inventory/definition.js';
 import {
   FIXTURE_IDS,
   ordinaryModuleV1,
@@ -48,6 +49,7 @@ interface OperationCatalog {
   readonly operations: readonly {
     readonly effect: { readonly kind: string };
     readonly inputContract?: {
+      readonly closedArgumentKeys: readonly string[];
       readonly relationInputs: readonly RelationInput[];
       readonly schemaVersion: string;
     };
@@ -55,8 +57,11 @@ interface OperationCatalog {
   }[];
 }
 
-function compileAt(version: CompilerSemanticProfileVersion): CompileSuccess {
-  const normalized = normalizeApplicationPackage(ordinaryModuleV1()) as {
+function compileAt(
+  version: CompilerSemanticProfileVersion,
+  definition: Record<string, unknown> = ordinaryModuleV1(),
+): CompileSuccess {
+  const normalized = normalizeApplicationPackage(definition) as {
     readonly languageVersion?: string;
     readonly normalizationProfileVersion?: string;
   };
@@ -88,9 +93,12 @@ function compileAt(version: CompilerSemanticProfileVersion): CompileSuccess {
   return result;
 }
 
-function catalogAt(version: CompilerSemanticProfileVersion): OperationCatalog {
+function catalogAt(
+  version: CompilerSemanticProfileVersion,
+  definition?: Record<string, unknown>,
+): OperationCatalog {
   return projectionPayload<OperationCatalog>(
-    compileAt(version),
+    compileAt(version, definition),
     PROJECTION_FAMILY_IDS.operationCatalog,
   );
 }
@@ -134,12 +142,20 @@ test('a required relation carries its target entity at v2, and at no earlier ver
 });
 
 /**
- * The negative control for the vector that actually bit during development:
- * gating the VERSION while emitting the KEY unconditionally. That mistake
- * typechecks, passes every shape assertion above at v2, and silently moves
- * every recorded release root. Only an artifact-bytes comparison catches it.
+ * REPLACES a control that proved nothing. The first version compared
+ * `catalogAt(ADOPTED_...)` with `catalogAt(V1)` -- but the adopted constant IS
+ * `COMPILER_SEMANTIC_PROFILE_V1_VERSION`, so it compiled the same profile twice
+ * and asserted a compilation equals itself. It passed for a reason unrelated to
+ * the property it named. Caught in review, 2026-08-10.
+ *
+ * The expectation is now a LITERAL, pinned here rather than derived from any
+ * compile, so the subject cannot move both sides together. Whole-artifact byte
+ * identity across the 8 recorded lineage entries is proven by
+ * `check:app-release`, which recompiles each stored definition and exact-
+ * compares its release root; this gate proves the narrower fact it can observe,
+ * which is that the adopted profile emits the pre-packet relation shape.
  */
-test('an unadopted profile leaves the emitted catalog bytes untouched', () => {
+test('the adopted profile emits the pre-packet relation shape, pinned literally', () => {
   const adopted = ADOPTED_COMPILER_SEMANTIC_PROFILE_VERSION;
   assert.notEqual(
     adopted,
@@ -147,14 +163,23 @@ test('an unadopted profile leaves the emitted catalog bytes untouched', () => {
     'this gate is meaningless once v2 is adopted; it must be revisited then',
   );
   assert.deepEqual(
-    catalogAt(adopted),
-    catalogAt(COMPILER_SEMANTIC_PROFILE_V1_VERSION),
-    'the adopted profile must emit exactly what it emitted before v2 was cut',
+    requiredRelationInput(adopted),
+    {
+      archiveBehavior: 'restrict',
+      relationId: REQUIRED_RELATION_ID,
+      required: true,
+    },
+    'exactly three keys, and no targetEntityId, at the adopted profile',
   );
-  assert.notDeepEqual(
-    catalogAt(COMPILER_SEMANTIC_PROFILE_V2_VERSION),
-    catalogAt(adopted),
-    'v2 must actually differ, or the test above proves nothing',
+  assert.deepEqual(
+    requiredRelationInput(COMPILER_SEMANTIC_PROFILE_V2_VERSION),
+    {
+      archiveBehavior: 'restrict',
+      relationId: REQUIRED_RELATION_ID,
+      required: true,
+      targetEntityId: FIXTURE_IDS.entityIds.parent,
+    },
+    'exactly four keys at v2, or the gate above is not discriminating',
   );
 });
 
@@ -201,4 +226,54 @@ test('the input contract version names both optional shapes independently', () =
     MODULE_INPUT_CONTRACT_V2_VERSION,
     'the systemInput axis stays distinct from the relation axis',
   );
+});
+
+/**
+ * The v4 quadrant -- systemInput AND relation targets together -- which the
+ * tenant-shared fixture cannot reach because it declares no legal entity. Raised
+ * in review as evidenced only by source inspection. Inventory is the specimen:
+ * `stock_count_line` carries a legal entity and two required relations.
+ */
+test('an operation with both a legal entity and relations declares v4', () => {
+  const catalog = catalogAt(
+    COMPILER_SEMANTIC_PROFILE_V2_VERSION,
+    inventoryModuleDefinition() as unknown as Record<string, unknown>,
+  );
+  const both = catalog.operations.filter(
+    (operation) =>
+      operation.inputContract !== undefined &&
+      operation.inputContract.relationInputs.length > 0 &&
+      operation.inputContract.closedArgumentKeys.includes('legalEntityId'),
+  );
+  assert.ok(
+    both.length > 0,
+    'inventory must contribute an operation carrying both shapes',
+  );
+  for (const operation of both) {
+    assert.equal(
+      operation.inputContract!.schemaVersion,
+      MODULE_INPUT_CONTRACT_V4_VERSION,
+      'both shapes present must declare v4, not v2 or v3',
+    );
+    for (const relation of operation.inputContract!.relationInputs) {
+      assert.ok(
+        relation.targetEntityId !== undefined,
+        'a v4 relation input carries its target',
+      );
+    }
+  }
+
+  const relationsOnly = catalog.operations.filter(
+    (operation) =>
+      operation.inputContract !== undefined &&
+      operation.inputContract.relationInputs.length > 0 &&
+      !operation.inputContract.closedArgumentKeys.includes('legalEntityId'),
+  );
+  for (const operation of relationsOnly) {
+    assert.equal(
+      operation.inputContract!.schemaVersion,
+      MODULE_INPUT_CONTRACT_V3_VERSION,
+      'relations without a legal entity stay v3, so v4 is not a blanket bump',
+    );
+  }
 });

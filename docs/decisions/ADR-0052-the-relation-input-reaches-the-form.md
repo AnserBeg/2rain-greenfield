@@ -85,9 +85,25 @@ So both axes are named:
 | **no relation inputs** | `v1` | `v2` |
 | **relation inputs with targets** | `v3` | `v4` |
 
-Both biconditionals are enforced at the gateway: `systemInput` present iff `v2`
-or `v4`, and `relationInputs` non-empty iff `v3` or `v4`. A contract that carries
-a shape it did not declare is refused, in either direction.
+Both biconditionals are enforced: `systemInput` present iff `v2` or `v4`, and
+**`targetEntityId` carried on every relation input iff `v3` or `v4`.** A contract
+that carries a shape it did not declare is refused, in either direction.
+
+**CORRECTED 2026-08-10 after review.** This section first said *"`relationInputs`
+non-empty iff `v3` or `v4`"*, which is wrong and would have been a defect if the
+code had obeyed it: a generation-1 artifact may legitimately declare relations
+**without** targets, and binding relation-input *presence* to the version refuses
+every historical contract that does. The reviewer caught the ADR and the code
+disagreeing, and ruled for the code. The version binds the **key**, not the
+presence of the list. The only additional version-level rule is that `v3`/`v4`
+cannot be minted vacuously: a contract claiming to carry targets must have at
+least one relation input to carry them on.
+
+**One parser, not two.** `parsePinnedRelationInputs` in the operation gateway is
+the sole authority on these rules, and both the gateway and the browser's surface
+contract call it. An independent second reader is exactly how a forged `v1`
+contract carrying a `v3`-only `targetEntityId` gets admitted by one consumer and
+refused by another.
 
 An operation with no relations is therefore **byte-identical** to what it emitted
 before this ADR, which is what keeps the change scoped to definitions that
@@ -117,6 +133,12 @@ same gate as its version, and the check was run to observe it.
 
 ### 4. Relations are create-only, and the freeze is DECLARED in the UI
 
+Relation metadata is read from the **entity**, not from the active create
+binding. A release whose create effect has been retired still has an update form
+and still has frozen relations; sourcing the disclosure from an active create
+operation would drop it exactly where an operator is most likely to be surprised.
+**Corrected 2026-08-10 after review.**
+
 Relations are create-only all the way down: emitted only for
 `createRecordEffect`, absent from `updateRecordEffect`'s closed argument keys,
 and hardcoded to `relations: Object.freeze({})` on the provider's update branch
@@ -135,6 +157,20 @@ If a required relation's target entity cannot be enumerated — no pinned list
 query for it, or more than one, so the runtime would have to guess — the create
 form refuses instead of rendering controls whose submission the provider is
 certain to reject. This is ADR-0041's "honoured or refused" at the surface.
+
+**A target that cannot be enumerated COMPLETELY is treated the same way.** The
+shared list contract reports whether more records exist; a picker that renders
+page one while further valid foreign-key targets sit behind a cursor makes those
+targets unselectable while looking complete. That is not a usability wrinkle, it
+is the silent wrongness this ADR's own §5 forbids, so `hasMore` refuses the
+picker. **Corrected 2026-08-10 after review**, which rejected the original
+routing of this to `ux-list-usability` as future UX work; it is a correctness
+defect in the write path and belongs here.
+
+**An OPTIONAL relation with no resolvable target renders nothing**, rather than a
+`<select>` whose only choice is `None`. Under the adopted profile no relation
+carries a target, so that is the normal case until v2 adoption, and rendering an
+inert control there would reintroduce exactly the defect this ADR removes.
 
 The refusal reuses `QUERY_UNSUPPORTED`, because the missing thing genuinely is a
 semantic data capability. **The reuse is declared, not silent:** that sentence

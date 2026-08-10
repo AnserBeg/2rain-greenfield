@@ -5,6 +5,7 @@ import {
   GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION,
   SUPPORTED_SURFACE_MANIFEST_PAYLOAD_VERSIONS,
 } from '../../../packages/compiler/src/protocol.js';
+import { parsePinnedRelationInputs } from '../../../packages/runtime/src/semantic-operation-gateway.js';
 import type { RegisteredOperationDefinition } from '../../../packages/runtime/src/semantic-operation-gateway.js';
 import {
   registeredSemanticQueryFromPinnedView,
@@ -127,6 +128,12 @@ export interface CompiledSurfaceDataBinding {
   readonly displayFieldId: string | null;
   readonly operations: readonly CompiledSurfaceOperationBinding[];
   readonly query: RegisteredSemanticQueryDefinition;
+  /**
+   * The entity's create-input relations, read regardless of whether the create
+   * operation is active, because ADR-0052 s4's freeze disclosure must not
+   * depend on create being executable.
+   */
+  readonly relationInputs: readonly CompiledSurfaceRelationInput[];
 }
 
 export interface CompiledSurfaceManifest {
@@ -195,6 +202,7 @@ export function readCompiledSurfaceDataBinding(
       displayFieldId: null,
       operations: Object.freeze([]),
       query,
+      relationInputs: Object.freeze([]),
     });
   }
 
@@ -214,15 +222,29 @@ export function readCompiledSurfaceDataBinding(
     SurfaceOperationIntent,
     CompiledSurfaceOperationBinding
   >();
+  // Relations belong to the ENTITY, not to whether its create operation is
+  // currently executable. ADR-0052 s4 requires the update form to disclose that
+  // relations are frozen, and a release whose create effect has been retired
+  // still has an update form and still has frozen relations -- so gathering
+  // this from the active create binding would silently drop the disclosure
+  // exactly where it is most surprising.
+  let relationInputs: readonly CompiledSurfaceRelationInput[] = Object.freeze(
+    [],
+  );
   for (const value of payload.operations) {
     const operation = parseOperationBinding(value);
     const entityId =
       operation.entityId ??
       registeredSemanticQueryFromPinnedView(view, operation.readBackQueryId)
         ?.sourceEntityId;
-    if (operation.lifecycle !== 'active' || entityId !== query.sourceEntityId) {
-      continue;
+    if (entityId !== query.sourceEntityId) continue;
+    if (
+      operation.intent === 'create' &&
+      operation.relationInputs.length > relationInputs.length
+    ) {
+      relationInputs = operation.relationInputs;
     }
+    if (operation.lifecycle !== 'active') continue;
     // KNOWN LIMIT, declared rather than silent: one operation per intent, so
     // an entity carrying two named transitions (a release AND a cancel) binds
     // neither and refuses by name. Rendering a list of named actions is a
@@ -255,6 +277,7 @@ export function readCompiledSurfaceDataBinding(
       ),
     ),
     query,
+    relationInputs,
   });
 }
 
@@ -656,44 +679,16 @@ function parseOperationBinding(value: unknown): {
 }
 
 /**
- * Reads the relation inputs the operation declares. This validates the pinned
- * artifact independently of the operation gateway, for the same reason the
- * provider re-reads it: a consumer must not trust a contract it did not read
- * itself.
+ * Delegates to the operation gateway's parser rather than reimplementing it.
+ * An independent reader here is exactly how a forged v1 contract carrying a
+ * v3-only `targetEntityId`, or a v3 contract missing one, would be admitted by
+ * the browser while the gateway refused the same catalog.
  */
 function parseRelationInputs(
   inputContract: unknown,
 ): readonly CompiledSurfaceRelationInput[] {
   if (inputContract === undefined) return Object.freeze([]);
-  if (
-    !isRecord(inputContract) ||
-    !Array.isArray(inputContract.relationInputs)
-  ) {
-    throw invalidBinding(
-      'pinned operation input contract has an invalid relation input shape',
-    );
-  }
-  return Object.freeze(
-    inputContract.relationInputs.map((entry) => {
-      if (
-        !isRecord(entry) ||
-        !isNonBlank(entry.relationId) ||
-        typeof entry.required !== 'boolean' ||
-        (entry.targetEntityId !== undefined &&
-          !isNonBlank(entry.targetEntityId))
-      ) {
-        throw invalidBinding(
-          'pinned operation input contract has an invalid relation input shape',
-        );
-      }
-      return Object.freeze({
-        relationId: entry.relationId,
-        required: entry.required,
-        targetEntityId:
-          entry.targetEntityId === undefined ? null : entry.targetEntityId,
-      });
-    }),
-  );
+  return parsePinnedRelationInputs(inputContract, invalidBinding);
 }
 
 function operationLabel(operationId: string): string {

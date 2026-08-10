@@ -1265,6 +1265,79 @@ function assertOperationDefinition(
   }
 }
 
+export interface PinnedRelationInput {
+  readonly relationId: string;
+  readonly required: boolean;
+  readonly targetEntityId: string | null;
+}
+
+/**
+ * The ONE authority on what a pinned relation input may say.
+ *
+ * The browser reader and this gateway both consume relation inputs, and they
+ * must not be able to disagree about which artifacts are valid: a second parser
+ * that merely accepts `targetEntityId` when present would admit a forged v1
+ * contract carrying a v3-only key, and downgrade a v3 contract missing its
+ * required key to `null`, while this gateway refused the same catalog. Both
+ * callers therefore run this function rather than reimplementing its rules.
+ *
+ * `targetEntityId` is carried on EVERY relation input iff the contract is v3 or
+ * v4. It is NOT the case that a non-empty relation-input list implies v3/v4 —
+ * a generation-1 artifact may legitimately declare relations without targets,
+ * and refusing those would break every historical contract.
+ */
+export function parsePinnedRelationInputs(
+  inputContract: unknown,
+  fail: (message: string) => Error,
+): readonly PinnedRelationInput[] {
+  if (!isRecord(inputContract)) {
+    throw fail('pinned operation input contract must be an object');
+  }
+  const schemaVersion = inputContract.schemaVersion;
+  const carriesTargets =
+    schemaVersion === 'northstar.module-input-contract/v3' ||
+    schemaVersion === 'northstar.module-input-contract/v4';
+  if (
+    schemaVersion !== 'northstar.module-input-contract/v1' &&
+    schemaVersion !== 'northstar.module-input-contract/v2' &&
+    !carriesTargets
+  ) {
+    throw fail('pinned operation input contract declares an unknown version');
+  }
+  const relationInputs = inputContract.relationInputs;
+  if (!Array.isArray(relationInputs)) {
+    throw fail('pinned operation input contract has an invalid shape');
+  }
+  if (carriesTargets && relationInputs.length === 0) {
+    throw fail(
+      'pinned operation input contract declares relation targets without a relation',
+    );
+  }
+  return Object.freeze(
+    relationInputs.map((relation) => {
+      if (!isRecord(relation)) {
+        throw fail('pinned relation input contract must be an object');
+      }
+      const hasTarget = Object.hasOwn(relation, 'targetEntityId');
+      if (
+        hasTarget !== carriesTargets ||
+        typeof relation.relationId !== 'string' ||
+        typeof relation.required !== 'boolean' ||
+        (carriesTargets && typeof relation.targetEntityId !== 'string')
+      ) {
+        throw fail('pinned relation input contract has an invalid shape');
+      }
+      return Object.freeze({
+        relationId: relation.relationId,
+        required: relation.required,
+        targetEntityId: carriesTargets
+          ? (relation.targetEntityId as string)
+          : null,
+      });
+    }),
+  );
+}
+
 function assertOperationInputContract(
   value: unknown,
 ): asserts value is RegisteredOperationInputContract {
@@ -1383,6 +1456,10 @@ function assertOperationInputContract(
       throw invalid('pinned field temporal contract has an invalid shape');
     }
   }
+  // Run the shared authority here too, so this gateway and the browser reader
+  // cannot drift: if the two ever disagreed about a version/key pairing, this
+  // call would throw rather than let one side admit what the other refuses.
+  parsePinnedRelationInputs(value, invalid);
   for (const relation of value.relationInputs) {
     if (!isRecord(relation)) {
       throw invalid('pinned relation input contract must be an object');
