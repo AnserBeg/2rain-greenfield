@@ -543,6 +543,57 @@ P5 is why this table exists. It refuted what this record originally said about
 both sites — that neither could be observed going stale — and
 `version-predicate-derivation` was rewritten from the measurement.
 
+### Review round 4 — BLOCK, and the packet stops patching
+
+Round 4 found a FIFTH escape on the purity scan and invoked the convergence
+rule. It was right on both counts, and the orchestrator's round-2 ruling — that
+further findings in this class route rather than get fixed — was right when it
+was made and was overridden by this lane. Round 4 is the cost of that override.
+
+**The fifth escape needs no obfuscation:**
+
+    profile.languageVersion === SUPPORTED_LANGUAGE_VERSIONS.at(-1)!
+
+selects the newest readable version using an identifier production already
+imports. Measured on the real `DEFAULT_COMPILER_PROFILE`: it still resolved to
+v5, every behavioural assertion held, the scan stayed **green**.
+
+**The claim is narrowed rather than the table grown** — the doctrine's answer to
+a third recurrence, and this is the fifth. The control is renamed to what it
+proves, *no production file references a `LATEST_` constant except to report
+it*, and records what it does not: that the newest readable version is never
+SELECTED. Closing that needs a production selector seam taking the supported
+profiles and adopted members as parameters, routed to `adoption-selector-seam`
+with the `.at(-1)!` mutation as its owed red.
+
+**Four repairs, five escapes, each cheaper than the last.** That progression is
+the finding. A scan over source text classifies SPELLINGS; only a seam that
+takes the choice as a parameter can observe the CHOICE.
+
+### Round 4's second finding corrected the ADR, not just the control
+
+The scenario-identity control asserted `.some(...)` where ADR-0047 §8 published
+**69 of 163**, and a subset check where it published **0 of 163**. Both are now
+asserted exactly.
+
+**Building that control refuted the ADR's own wording.** §8 said *"69 scenarios
+were re-identified"*, and that reading is not expressible: **no key
+distinguishes all 163 scenarios except the id itself.** Every combination of the
+recorded non-id fields — `kind`, `entityId`, `subjectId`, `probePolarity`,
+`targetEntityId`, `provider` — collapses to **105 unique values**. Under the
+best available key only **11** signatures map to a different id; the raw id-set
+difference is **69**. So 69 is a difference between identity SETS, not a count
+of scenarios that kept their meaning and changed their name.
+
+The correction strengthens §8's ruling rather than weakening it: **an evidence
+reader cannot re-key orphaned evidence by matching on what a scenario verifies,
+because 58 of 163 are indistinguishable that way.** Recording the language
+version is not one option among several — it is the only handle there is.
+
+The signature comparison is now a MULTISET rather than a set, because a set
+comparison would tolerate a dropped scenario while a duplicate signature covered
+for it.
+
 ## What the first matrix cost, and why it is the packet's own theme again
 
 The first full matrix ran every suite green — 0 reds across unit, compiler,
