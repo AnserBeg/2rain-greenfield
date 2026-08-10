@@ -31,6 +31,7 @@ import {
   parseVersionedAuthoredApplicationPackageJson,
   type V3AuthoredApplicationPackage,
 } from '../../../packages/canonical-model/src/index.js';
+import { languageUsesModuleProjectionShape } from '../../../packages/compiler/src/index.js';
 import {
   V3_AGGREGATE_IDS,
   v3AggregateModule,
@@ -191,6 +192,45 @@ test('v3 and v4 select their profiles, reject mixed nodes, and leave adoption ex
     languageHasMaterializedStateFields(ADOPTED_LANGUAGE_VERSION),
     true,
   );
+
+  // THE MODULE-PROJECTION MEMBERSHIP, which no authored package can reach.
+  //
+  // `languageUsesModuleProjectionShape` decides three things for a package
+  // revision: whether the reporting family is REQUIRED, whether the
+  // reporting-entity invariant is checked, and whether lowered physical
+  // mappings are validated. Every one is a self-check over the compiler's own
+  // output, and the compiler satisfies all three by construction.
+  //
+  // Measured: `LANG-ADOPT-v5` removed v5 from that list and ran the FULL
+  // matrix — unit, compiler, performance, integration, agent, architecture,
+  // contracts, postgres, locale, browser, and both closing gates. It stayed
+  // GREEN at 589 assertions, byte-identical to the unmutated run. A v5 package
+  // was silently exempted from physical-mapping validation and nothing in the
+  // repository noticed.
+  //
+  // The specimen review asked for -- a v5 package with an invalid physical
+  // mapping, otherwise valid -- is NOT constructible: physical names are
+  // fixed-length hashes, so neither `COMPILER_PHYSICAL_NAME_COLLISION` nor
+  // `COMPILER_PHYSICAL_NAME_TOO_LONG` can be produced from authored input.
+  // A disabled safety net is invisible unless you also introduce the fault it
+  // catches. So the witness is the membership, asserted here.
+  assert.equal(
+    languageUsesModuleProjectionShape(ADOPTED_LANGUAGE_VERSION),
+    true,
+  );
+  // Derived across the whole supported list rather than spot-checked, so the
+  // NEXT cut inherits the assertion instead of needing one. The boundary is
+  // v2: v0-experimental and v1 predate the module projection shape.
+  const moduleShapeIntroducedAt =
+    SUPPORTED_LANGUAGE_VERSIONS.indexOf(LANGUAGE_VERSION);
+  assert.ok(moduleShapeIntroducedAt > 0);
+  for (const [index, supported] of SUPPORTED_LANGUAGE_VERSIONS.entries()) {
+    assert.equal(
+      languageUsesModuleProjectionShape(supported),
+      index >= moduleShapeIntroducedAt,
+      `${supported} must ${index >= moduleShapeIntroducedAt ? 'carry' : 'not carry'} the module projection shape`,
+    );
+  }
 
   // THE SUCCESSOR ARM, which no ordinary call can reach today.
   //

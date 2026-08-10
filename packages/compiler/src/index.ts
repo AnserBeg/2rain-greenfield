@@ -6,6 +6,7 @@ export {
   compileApplication,
   expectedActiveReleaseFrom,
   reproduceHistoricalApplication,
+  languageUsesModuleProjectionShape,
   selectAdoptedProfileVersion,
   type HistoricalApplicationReproductionExpectation,
 } from './compiler.js';

@@ -473,7 +473,49 @@ exemption swallowed it after it was found. Every one was green, and every one
 was found by a review arm rather than by this lane's own deletion tables — which
 is `W1`/`W10` from the prompt, confirmed in substance.
 
-### The revise deletion table
+### Finding 3: the branch a whole matrix cannot see
+
+Review round 3 asked for a killing control on `languageUsesModuleProjectionShape`'s
+v5 branch, and the orchestrator authorised the measurement rather than the guess.
+
+**The mutated full matrix ran GREEN.** With v5 removed from that predicate:
+`MATRIX_EXIT=0`, **589 assertions, 0 failures — byte-identical totals to the
+unmutated run**, across unit, compiler, performance, integration, agent,
+architecture, contracts, postgres, locale, browser and both closing gates. The
+mutation was verified still present in the tree after the run and before restore.
+The packet's earlier "unobserved at this sample" was too generous: it is
+unobserved at EVERY sample the repository has.
+
+**Why, and it is the interesting part.** The predicate gates exactly three
+things, and all three are self-checks over the compiler's OWN output:
+
+| Site | What it gates |
+|---|---|
+| `compiler.ts:424` | `validatePhysicalMappingRecords` on the lowered storage target |
+| `compiler.ts:1955` | required family set — `REQUIRED_MODULE_*` differs from `REQUIRED_BASE_*` by exactly one member, `reporting` |
+| `compiler.ts:2072` | the reporting-entity invariant |
+
+The compiler satisfies all three by construction, so removing v5 changes no
+output — it disables a safety net. **A disabled safety net is invisible from
+outside unless you also introduce the fault it catches.**
+
+**The specimen review asked for is not constructible.** A v5 package with an
+invalid physical mapping cannot be authored: physical names are fixed-length
+hashes (`nsm_c_…`, ~58 chars), so neither `COMPILER_PHYSICAL_NAME_COLLISION` nor
+`COMPILER_PHYSICAL_NAME_TOO_LONG` is reachable from authored input. Building one
+would mean corrupting the compiler's own output, which tests the corruption
+rather than the branch.
+
+**So the witness is the membership**, and the predicate is exported for it — on
+the precedent `selectAdoptedProfileVersion` already sets in the same file, which
+is exported for exactly this reason. The control asserts the adopted version
+carries the module projection shape, and derives the boundary across the whole
+supported list so the next cut inherits the assertion rather than needing one.
+
+**R10:** removing v5 reds at `normalization.test.ts:217`, `false !== true`, on
+the adopted-version assertion — the stated reason, not a downstream count.
+
+
 
 | # | Broken tree | Result |
 |---|---|---|
@@ -487,6 +529,7 @@ is `W1`/`W10` from the prompt, confirmed in substance.
 | R7 | the scan's glob repointed to `packages/*/lib/**` — matches 0 files | **green before the pin**; after it, **red by name**: *"the scan must reach the file declaring DEFAULT_COMPILER_PROFILE"* |
 | R8 | `ADOPTED_LANGUAGE_VERSION` = a template interpolation of `LATEST_LANGUAGE_VERSION`, value-preserving | **green before the fix**; after it, **red** at `constants.ts:42` |
 | R9 | a `LATEST_LANGUAGE_VERSION` selection inside `compile-app-release.ts`'s profile | **green before the fix** (file unscanned); after it, **red** at `:496` |
+| R10 | v5 removed from `languageUsesModuleProjectionShape` | **green across the ENTIRE matrix** (589/0, unchanged); after the membership control, **red** at `normalization.test.ts:217` |
 
 **R5 and R5b together characterise the faithfulness guard, and R5 alone would
 have misdescribed it.** The guard cannot fail on a behaviour change — an
@@ -531,11 +574,9 @@ the reason its rule exists.
 ## Gates
 
 **The `dc60fea` matrix is SUPERSEDED** by review round 3, which changed
-executable content in `canonical-contracts-purity.test.ts`. Fresh matrix owed,
-and it is deliberately NOT yet run: review round 3's third finding (a killing
-control for `languageUsesModuleProjectionShape`'s v5 branch) is an open scope
-question with the orchestrator, and running a matrix before it is settled buys
-a run that a ruling could invalidate.
+executable content in `canonical-contracts-purity.test.ts`. All three round-3 findings
+are now closed and measured (R8, R9, R10). Fresh matrix owed at the re-frozen
+SHA.
 
 ### A matrix pre-flight instrument, for the next lane
 
