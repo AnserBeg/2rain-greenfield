@@ -137,6 +137,79 @@ the rule on the one line where a genuine fallthrough could later be
 introduced. The guard stays armed, and any future edit that moves the comment
 back into the case body is caught by the same error.
 
+## Gates
+
+Full matrix run at `3f9f358`, verdict read from inside the log rather than
+from the pipeline's exit status:
+
+```
+PERFORMANCE_GATE_PASS_SHA=3f9f358c289f5693f2e0406d2e6867dc92dc8752
+FULL_MATRIX_PASS_SHA=3f9f358c289f5693f2e0406d2e6867dc92dc8752
+```
+
+Log: `/tmp/matrix-matrix-unblock-3f9f358.log`. Ran 12:39-13:05.
+
+| Step | Result |
+| --- | --- |
+| `format` / `lint` / `typecheck` / `build` | pass — the two that were red are green |
+| `check:boundaries`, `check:schema`, `check:demo-release`, `check:app-release` | pass |
+| `test:performance` | 5 pass, 0 fail |
+| `test:unit` | 106 pass, 0 fail |
+| `test:compiler` | 133 pass, 0 fail |
+| `test:integration` | 113 pass, 0 fail |
+| `test:agent` | 3 pass, 0 fail |
+| `test:architecture` | 141 pass, 0 fail |
+| `test:contracts` | 16 pass, 0 fail |
+| `test:postgres` | 196 pass, 0 fail |
+| `test:locale` | 1 pass, 0 fail |
+| `test:browser` | 70 passed (2.8m) |
+| observability producer | 11 pass, 0 fail |
+| `check:language-coverage` | PASS — 2050 obligations, 427 first-party observations |
+| `check:reachability` | PASS — 99/99 test files executed, 10 producer artifacts |
+| security scans | passed |
+
+**Nothing downstream was red.** The charter anticipated that this packet would
+be the first in a while to reach the suites at all and asked for careful
+reporting if anything beyond format/lint turned out broken. Nothing did.
+
+Two log lines look alarming and are not. `TEST_GATE_LOCK_BUSY` appears three
+times against locks named `north-star-*-control-2554` — those are the lock
+gate's own negative controls asserting the busy path, not the real lock. And
+`WRN leaks found: 1` is the secret scanner's planted synthetic credential in a
+throwaway one-commit repository; `run-security-scans.sh` requires
+`negativeRuleDetected` to be true, so that line is the gate observing itself
+fail, which is what AGENTS.md section 6 asks of it.
+
+### Pre-matrix conditions
+
+Reported as required, after the previous holder's load decayed:
+
+1. **Lock holders** — `/tmp/north-star-matrix.lock.holders/*.json` **empty**.
+   It was not when this packet started: `packet/lang-adopt-v5` held it (pid
+   40546) from before 12:12 until 12:37:44, running `pnpm test` through
+   `test:browser`. This lane waited rather than competing.
+2. **CPU idle** — **96%** over a 10s `vmstat` sample, against the 90% floor.
+   Pass. One-minute load average 0.82, down from 8.64 at 12:34.
+3. **Worktree CPU burn** — **none.** No process under any
+   `2rain-greenfield-*` path was consuming CPU.
+
+Decision: run. All three cleared with margin.
+
+### Freeze SHA sits one docs commit above the matrix SHA
+
+`3f9f358` is both, as it happens — the record was committed before the matrix
+so the run had a clean tree to freeze on, and the gate table is appended
+afterwards, producing a fourth commit. The executable diff from the matrix SHA
+to the freeze SHA is empty:
+
+```
+git diff --name-only 3f9f358 <freeze> -- . ':!docs' ':!.agents' \
+  ':!CLAUDE.md' ':!AGENTS.md' ':!learnings.md'
+```
+
+returns nothing; the only delta is this file. Per `git-workflow`, the matrix
+run stands.
+
 ## What this packet did NOT verify
 
 - **That the reformat is behaviourally inert.** The paren/comma-stripped
