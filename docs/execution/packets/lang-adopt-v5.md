@@ -313,22 +313,66 @@ settles the question it was run to answer:** the platform assertion is not
 decorative, it is the only thing in the tree that sees a platform-only
 regression, because platform is outside the composed package.
 
-**Two survivors, and both are reported rather than smoothed over.**
+**REVIEW ROUND 1 — REVISE, no production defect, two CONTROL defects. Both are
+corrections to work this record previously defended, and both are here in the
+reviewer's terms rather than mine.**
 
-- **P4.** Narrowing the materialization gate to an exact match — the *precise*
-  defect `5g3-sm-impl` fixed — reds nothing across `test:unit` and the full
-  `test:compiler`. It cannot: **v5 is the last supported version, so `>=` and
-  `===` are indistinguishable until a v6 exists.** The derived form is correct
-  and currently unobservable, and the assertions this packet added to
-  `normalization.test.ts` cannot discriminate it either. The only shape that
-  could is `selectAdoptedProfileVersion`'s — a predicate taking its ordered list
-  as an argument, exercised on a constructed one.
-- **P6.** Dropping the adopted version from `languageUsesModuleProjectionShape`
-  survives `test:unit`, the full `test:compiler` **and** `check:app-release`,
-  while its sibling P5 reds thirteen. Same shape, adjacent roles, opposite
-  coverage. Sample stated deliberately: `test:integration` and `test:postgres`
-  were not run against it, so the claim is *unobserved at this sample*, not
-  *uncovered*.
+**(1) The purity scan deleted the subject it exists to inspect.** The strip
+`^(?:import|export)\s[^;]*;` was there because an import clause spans lines. It
+also removes every EXPORTED INITIALIZED DECLARATION, and
+`DEFAULT_COMPILER_PROFILE` is exactly one. Measured on the real declaration: the
+statement reduces to the empty string, so the scan erased the production
+selector and then reported the tree clean. The cheapest broken tree the reviewer
+named: point that exported initializer at `LATEST_LANGUAGE_VERSION` directly and
+leave the selector helper untouched — the constructed three-element test still
+passes, every live equality still holds because LATEST and ADOPTED are equal
+today, and the wrong route surfaces only at the next cut. A second escape in the
+same class: `constants.ts` was excluded WHOLESALE, so `ADOPTED = LATEST`
+aliasing was invisible to the one control that forbids it.
+
+Fixed with a syntax-aware walk rather than a narrower regex — a narrower regex
+moves the boundary rather than removing it. `ImportDeclaration` and
+`ExportDeclaration` are skipped; a `VariableStatement` carrying an `export`
+modifier is neither, which is the whole point. `constants.ts` is now scanned,
+with only a constant's own declaration name exempt. Four committed controls, not
+a one-off check: an exported initializer selecting LATEST is detected, a pure
+re-export is not falsely reported, an aliased adopted constant is detected, and
+template-interpolated reporting still passes.
+
+**(2) P4 was an unforced gap, not a structural survivor.** This record claimed
+the materialization gate's `>=` vs `===` could not be observed without a
+production change, on the reasoning that no version follows v5. The reasoning
+was right and the conclusion was wrong: unreachable by an ordinary CALL is not
+unobservable. The exported predicate's free bindings can be supplied, so a
+committed test-only harness now evaluates ITS OWN EMITTED BODY — not a shadow
+copy of the rule, not an assertion pinning its source tokens — against a
+synthetic supported list that has a successor: `[v4, v5, v6]`, introduced at v5,
+requiring `false / true / true`. The three live-constant assertions stay as its
+companions.
+
+**Only P6 remains a survivor**, and it is reported at the sample actually run:
+`test:unit`, the full `test:compiler` and `check:app-release`. Integration and
+postgres were not run against it. It stays routed to
+`version-predicate-derivation` as *unobserved at this sample*, not *uncovered*.
+
+### The revise deletion table
+
+| # | Broken tree | Result |
+|---|---|---|
+| R1 | exported initializer selects `LATEST` directly, helper untouched | **red** at `:199`, the live scan |
+| R2 | `ADOPTED = LATEST` aliased inside `constants.ts` | **red** at `:199` |
+| R3 | the detector's identity check disabled — scan reads zero input | **red** at `:223`, the vacuity control, a different assertion |
+| R4 | materialization gate `>=` narrowed to `===` | **red** on the successor arm alone, by its own message: *"narrowing 'at or after' to 'exactly' reds here and nowhere else"* |
+| R5 | predicate body rewritten to a behaviourally equivalent form | **no red — correct by design** |
+| R5b | the predicate gains a third free binding the harness does not supply | **red**: `STATE_FIELD_INTRODUCED_AT is not defined` |
+
+**R5 and R5b together characterise the faithfulness guard, and R5 alone would
+have misdescribed it.** The guard cannot fail on a behaviour change — an
+equivalent body SHOULD agree, since the control measures behaviour rather than
+spelling. What it catches is the harness losing the ability to reconstruct the
+export, which is the standing hazard of a `toString()`-based control. R5 was
+written expecting a red, got a green, and the green was right; R5b is the
+mutation that tests what the guard actually guards.
 
 P5 is why this table exists. It refuted what this record originally said about
 both sites — that neither could be observed going stale — and
@@ -362,48 +406,27 @@ reported the matrix as **exit code 0** while the run had failed. `MATRIX_EXIT=1`
 was read from inside the log, which is the false-green `5g3-sm-impl` recorded and
 the reason its rule exists.
 
-## Gates — one full matrix, green
+## Gates
 
-`FULL_MATRIX_PASS_SHA=2e587fe`, tree clean, typecheck clean.
-**589 assertions, 0 failures, `MATRIX_EXIT=0` read from inside the log.**
+**The `2e587fe` matrix is SUPERSEDED.** It was green — 589 assertions, 0
+failures, `MATRIX_EXIT=0`, compile-budget MEASURED at 96.3% idle — but review
+round 1 changed executable content in two test files, so that run cannot be
+inherited. Fresh matrix owed at the corrected SHA.
 
-| Step | Result |
-|---|---|
-| `check:demo-release`, `check:app-release` | pass — shell root held, lineage reproduces 9/9 |
-| unit / compiler / performance | green |
-| integration / agent / architecture | green |
-| contracts / postgres / locale | green |
-| browser | 67 passed (2.0m) |
-| `check:language-coverage` | **PASS** — 2050 obligations, 2050 decision-covered, **427 first-party observations** |
-| `check:reachability` | **PASS** — **100/100** test files, 10 producer artifacts (99/99 before; the new fixture is the +1) |
+For the record, since the earlier runs cost real time and each failure was real:
 
-**Compile-budget gate MEASURED, not declined:** `cpu_idle_pct=96.3`, best-of-5
-wall **1679.9 ms** against a 5000 ms budget. Pre-flight: registry empty, no
-containers, no worktree burning CPU, idle 97.5 / 97.2 / 96.1 after decay,
-loadavg 0.21, four `ccd-cli` runtimes recorded as exposure.
-
-`pnpm lint` reports **7 errors and `prettier --check` drifts, both pre-existing
-on `main` at `5aa2d2c` and neither in the matrix command** — routed as
-`unrun-quality-gates`. This packet adds zero of either; the count is identical
-to the base, which is the comparison that means anything until that row lands.
-
-### It took three matrices, and both earlier failures were real
-
-Neither was flake, and neither would have been found by a subset.
-
-1. **`check:language-coverage`** — the compiler suite's file list is hand-written
-   in three places and this packet updated two. Everything else was green;
-   ~40 minutes to learn a list mismatch. Routed as `suite-inventory-copies`.
-2. **`test:postgres` timeouts** — `composed product activates through the kernel`
-   measured **251.1 s standalone** after the first split and then **timed out at
-   300 s in-matrix**, taking two sibling tests down with it. The first split was
-   sized against the wrong unit: that test's own comment records a **1.79×**
-   in-matrix load factor, and 251.1 s against it was never going to fit. Both
-   ADR-0047 §6 rollback directions then moved out together, returning the parent
-   to the two tenants it had before adoption — **110.6 s** and **109.3 s**
-   standalone, ≈1.5× margin at the recorded factor.
-
-**And the wrapper reported "exit code 0" on both failed runs.** `MATRIX_EXIT`
-was read from inside the log every time, which is the false green `5g3-sm-impl`
-recorded arriving through a different door — a background-task completion status
-rather than a shell wrapper.
+- **Three matrices were needed to reach `2e587fe`.** The first died at
+  `check:language-coverage` on a third hand-written copy of the compiler suite's
+  file list (`suite-inventory-copies`). The second died on `test:postgres`
+  timeouts — `composed product activates through the kernel` measured 251.1 s
+  standalone and then exceeded its 300 s bound in-matrix, because the first
+  split was sized against a standalone measurement while the bound is
+  in-matrix, and that test's own comment records a 1.79x load factor.
+- **The wrapper reported "exit code 0" on both failed runs.** `MATRIX_EXIT` was
+  read from inside the log every time — the false green `5g3-sm-impl` recorded,
+  arriving through a background-task completion status rather than a shell
+  wrapper.
+- `pnpm lint` reports **7 errors and `prettier --check` drifts, both
+  pre-existing on `main` at `5aa2d2c` and neither in the matrix command**
+  (`unrun-quality-gates`). This packet adds zero of either; parity against the
+  base is the comparison that means anything until that row lands.

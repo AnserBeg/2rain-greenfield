@@ -192,6 +192,65 @@ test('v3 and v4 select their profiles, reject mixed nodes, and leave adoption ex
     true,
   );
 
+  // THE SUCCESSOR ARM, which no ordinary call can reach today.
+  //
+  // `5g3-sm-impl` rewrote this predicate from an exact `featureLevel === 'v5'`
+  // to the ORDERED "at or after the introducing version", so a v6 cut inherits
+  // the rule with nothing to remember. `LANG-ADOPT-v5`'s deletion table then
+  // narrowed `candidate >= introducedAt` back to `=== introducedAt` -- exactly
+  // the defect that rewrite fixed -- and NOTHING RED, across `test:unit` and the
+  // full compiler suite. It could not: v5 is the last supported version, so the
+  // two forms agree on every value that exists, and the three assertions above
+  // agree with them. The packet recorded that as a structural survivor.
+  //
+  // REVIEW CORRECTED THAT. Unreachable by an ordinary call is not the same as
+  // unobservable: the exported predicate's free bindings can be supplied. This
+  // evaluates THE REAL FUNCTION -- its own emitted body, not a shadow copy of
+  // the rule and not an assertion about its source tokens -- against a
+  // synthetic supported list that HAS a successor.
+  const underBindings = (
+    supported: readonly string[],
+    versions: Record<string, string>,
+  ): ((languageVersion: string) => boolean) =>
+    // The subject IS the production body. Re-implementing the rule here would
+    // be the shadow predicate this control exists to avoid, and asserting on
+    // the source tokens would pin the spelling rather than the behaviour.
+    new Function(
+      'SUPPORTED_LANGUAGE_VERSIONS',
+      'LANGUAGE_VERSIONS',
+      `return (${languageHasMaterializedStateFields.toString()});`,
+    )(supported, versions) as (languageVersion: string) => boolean;
+
+  // Faithfulness first: under the REAL bindings the harness must answer exactly
+  // as the export does. Without this the assertions below could be measuring a
+  // body that no longer resembles what ships.
+  const faithful = underBindings(
+    SUPPORTED_LANGUAGE_VERSIONS,
+    LANGUAGE_VERSIONS,
+  );
+  for (const supported of SUPPORTED_LANGUAGE_VERSIONS) {
+    assert.equal(
+      faithful(supported),
+      languageHasMaterializedStateFields(supported),
+      `harness disagrees with the export at ${supported}`,
+    );
+  }
+
+  // Now the same body against a list with a version ABOVE the introducing one.
+  const withSuccessor = underBindings(
+    [LANGUAGE_VERSIONS.v4, LANGUAGE_VERSIONS.v5, 'v6'],
+    { ...LANGUAGE_VERSIONS },
+  );
+  assert.equal(withSuccessor(LANGUAGE_VERSIONS.v4), false);
+  assert.equal(withSuccessor(LANGUAGE_VERSIONS.v5), true);
+  // THIS is the arm that dies when the ordering test is narrowed to equality,
+  // and the only one that can. It is the whole reason the rewrite happened.
+  assert.equal(
+    withSuccessor('v6'),
+    true,
+    'a version after the introducing one must inherit the rule; narrowing "at or after" to "exactly" reds here and nowhere else',
+  );
+
   const authored = parseAuthoredApplicationPackageJson(
     readFileSync(fixturePath),
   );

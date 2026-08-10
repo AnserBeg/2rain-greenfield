@@ -3,6 +3,8 @@ import { globSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
 
+import ts from 'typescript';
+
 import { checkPredicateDispatchTripwire } from '../../packages/dev-tooling/src/predicate-dispatch-tripwire/index.js';
 import {
   ADOPTED_LANGUAGE_VERSION,
@@ -189,35 +191,73 @@ test('the newest readable version is reported, never selected', () => {
   const productionFiles = globSync(
     ['packages/*/src/**/*.ts', 'apps/*/src/**/*.ts'],
     { cwd: process.cwd() },
-  ).filter(
-    (file) =>
-      !file.endsWith('.test.ts') &&
-      !file.endsWith('packages/canonical-model/src/constants.ts'),
-  );
+  ).filter((file) => !file.endsWith('.test.ts'));
 
-  const selections: string[] = [];
-  for (const file of productionFiles) {
-    // Re-exporting a constant is not selecting it, and an `import`/`export`
-    // clause spans lines, so the whole statement is removed rather than
-    // matched line by line -- which is what a first attempt at this got wrong.
-    const source = readFileSync(file, 'utf8').replaceAll(
-      /^(?:import|export)\s[^;]*;/gmu,
-      '',
-    );
-    source.split('\n').forEach((line, index) => {
-      for (const name of constantNames) {
-        if (!line.includes(name)) continue;
-        // Interpolating it into operator-facing text is REPORTING it, which is
-        // the only use the adoption discipline permits before adoption.
-        if (line.includes(`\${${name}}`)) continue;
-        selections.push(`${file}:${String(index + 1)}: ${line.trim()}`);
-      }
-    });
-  }
+  const selections = productionFiles.flatMap((file) =>
+    latestVersionSelections(file, readFileSync(file, 'utf8'), constantNames),
+  );
   assert.deepEqual(
     selections,
     [],
     `a cut-but-unadopted version must not be selected:\n${selections.join('\n')}`,
+  );
+
+  // NEGATIVE CONTROLS FOR THE SCAN ITSELF, committed rather than run once by
+  // hand. The scan is the only thing standing between a cut version and every
+  // caller's default, and review found it deleting its own subject: the old
+  // `^(?:import|export)\s[^;]*;` strip removed EXPORTED INITIALIZED
+  // DECLARATIONS, and `DEFAULT_COMPILER_PROFILE` is exactly that, so the
+  // production selector was erased before the scan looked at it. Measured on
+  // the real declaration: the whole statement reduced to the empty string.
+  //
+  // Each control below is a way the scan can pass while the fact is false.
+  const detected = (source: string) =>
+    latestVersionSelections('synthetic.ts', source, constantNames);
+
+  // (a) an exported initializer that SELECTS the newest readable version. This
+  //     is the escape the old strip created, and the cheapest broken tree:
+  //     point the exported default at LATEST directly, leave the selector
+  //     helper untouched, and every live equality still holds because LATEST
+  //     and ADOPTED are equal today. The wrong route would surface at the next
+  //     cut, years from the edit.
+  assert.equal(
+    detected(
+      'export const DEFAULT_COMPILER_PROFILE: Profile =\n  profiles.find((p) => p.languageVersion === LATEST_LANGUAGE_VERSION)!;\n',
+    ).length,
+    1,
+  );
+
+  // (b) a PURE re-export is not a selection, and must not be reported. Without
+  //     this the fix for (a) is satisfiable by deleting the strip entirely,
+  //     which turns every re-export into a false red and gets the scan
+  //     weakened again by whoever hits it next.
+  assert.deepEqual(
+    detected(
+      "export { LATEST_LANGUAGE_VERSION } from './constants.js';\nimport { LATEST_NORMALIZATION_PROFILE_VERSION } from './constants.js';\n",
+    ),
+    [],
+  );
+
+  // (c) ALIASING the adopted constant to the latest readable one, inside the
+  //     file that declares both. `constants.ts` used to be excluded wholesale,
+  //     so `ADOPTED = LATEST` was invisible to the scan that exists to forbid
+  //     exactly that. It is no longer excluded; only a constant's own
+  //     declaration name is exempt.
+  assert.equal(
+    detected(
+      'export const LATEST_LANGUAGE_VERSION = LANGUAGE_VERSIONS.v5;\nexport const ADOPTED_LANGUAGE_VERSION = LATEST_LANGUAGE_VERSION;\n',
+    ).length,
+    1,
+  );
+
+  // (d) reporting is still permitted, which is the one use the discipline
+  //     allows before adoption. Without it (a) and (c) are satisfiable by a
+  //     scan that flags every mention.
+  assert.deepEqual(
+    detected(
+      'const message = `use a supported version through ${LATEST_LANGUAGE_VERSION}`;\n',
+    ),
+    [],
   );
 
   // The behavioural half: every default follows ADOPTED.
@@ -309,3 +349,72 @@ test('the newest readable version is reported, never selected', () => {
     ADOPTED_LANGUAGE_VERSION,
   );
 });
+
+/**
+ * Every place a production file REFERS to a cut-but-unadopted version constant,
+ * excluding the three things that are not selections.
+ *
+ * SYNTAX-AWARE ON PURPOSE. This replaced a regex
+ * (`^(?:import|export)\s[^;]*;`) that stripped whole statements before
+ * scanning, on the reasoning that an import clause spans lines. It also
+ * stripped every EXPORTED INITIALIZED DECLARATION -- and
+ * `DEFAULT_COMPILER_PROFILE` is one, so the scan erased the production
+ * selector it exists to inspect and then reported it clean. Measured on the
+ * real declaration: the statement reduced to the empty string.
+ *
+ * A narrower regex would have moved the boundary rather than removed it, so
+ * the question "is this statement an import or a pure re-export?" is asked of
+ * the parser instead. `ImportDeclaration` and `ExportDeclaration` cover
+ * `import ...`, `export { X } from '...'` and `export { X }`; a
+ * `VariableStatement` carrying an `export` modifier is NOT either of those,
+ * which is the whole point.
+ */
+function latestVersionSelections(
+  file: string,
+  source: string,
+  constantNames: readonly string[],
+): string[] {
+  const names = new Set(constantNames);
+  const parsed = ts.createSourceFile(
+    file,
+    source,
+    ts.ScriptTarget.ESNext,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const selections: string[] = [];
+
+  const visit = (node: ts.Node): void => {
+    // Importing or re-exporting a constant is not selecting it.
+    if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) return;
+    if (ts.isIdentifier(node) && names.has(node.text)) {
+      const parent = node.parent as ts.Node | undefined;
+      // A constant's own declaration is not a selection of itself. This is what
+      // lets `constants.ts` be scanned rather than excluded wholesale -- the
+      // exclusion is why `ADOPTED_LANGUAGE_VERSION = LATEST_LANGUAGE_VERSION`
+      // was invisible to the one control that forbids it.
+      const isOwnDeclarationName =
+        parent !== undefined &&
+        ts.isVariableDeclaration(parent) &&
+        parent.name === node;
+      // Interpolating it into operator-facing text is REPORTING it, which is
+      // the only use the adoption discipline permits before adoption.
+      const isReported =
+        parent !== undefined &&
+        ts.isTemplateSpan(parent) &&
+        parent.expression === node;
+      if (!isOwnDeclarationName && !isReported) {
+        const { line } = parsed.getLineAndCharacterOfPosition(node.getStart());
+        selections.push(
+          `${file}:${String(line + 1)}: ${
+            source.split('\n')[line]?.trim() ?? node.text
+          }`,
+        );
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+
+  ts.forEachChild(parsed, visit);
+  return selections;
+}
