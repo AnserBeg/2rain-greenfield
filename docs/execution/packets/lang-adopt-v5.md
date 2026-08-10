@@ -406,27 +406,50 @@ reported the matrix as **exit code 0** while the run had failed. `MATRIX_EXIT=1`
 was read from inside the log, which is the false-green `5g3-sm-impl` recorded and
 the reason its rule exists.
 
-## Gates
+## Gates — one full matrix, green at the revised SHA
 
-**The `2e587fe` matrix is SUPERSEDED.** It was green — 589 assertions, 0
-failures, `MATRIX_EXIT=0`, compile-budget MEASURED at 96.3% idle — but review
-round 1 changed executable content in two test files, so that run cannot be
-inherited. Fresh matrix owed at the corrected SHA.
+`FULL_MATRIX_PASS_SHA=11059ea`, tree clean, typecheck clean.
+**589 assertions, 0 failures, `MATRIX_EXIT=0` read from inside the log.**
 
-For the record, since the earlier runs cost real time and each failure was real:
+| Step | Result |
+|---|---|
+| `check:demo-release`, `check:app-release` | pass — shell root held, lineage reproduces 9/9 |
+| unit / compiler / performance | green |
+| integration / agent / architecture | green |
+| contracts / postgres / locale | green |
+| browser | 67 passed (2.1m) |
+| `check:language-coverage` | **PASS** — 2050 obligations, 2050 decision-covered, **427 first-party observations** |
+| `check:reachability` | **PASS** — **100/100** test files, 10 producer artifacts |
 
-- **Three matrices were needed to reach `2e587fe`.** The first died at
-  `check:language-coverage` on a third hand-written copy of the compiler suite's
-  file list (`suite-inventory-copies`). The second died on `test:postgres`
-  timeouts — `composed product activates through the kernel` measured 251.1 s
-  standalone and then exceeded its 300 s bound in-matrix, because the first
-  split was sized against a standalone measurement while the bound is
-  in-matrix, and that test's own comment records a 1.79x load factor.
-- **The wrapper reported "exit code 0" on both failed runs.** `MATRIX_EXIT` was
-  read from inside the log every time — the false green `5g3-sm-impl` recorded,
-  arriving through a background-task completion status rather than a shell
-  wrapper.
-- `pnpm lint` reports **7 errors and `prettier --check` drifts, both
-  pre-existing on `main` at `5aa2d2c` and neither in the matrix command**
-  (`unrun-quality-gates`). This packet adds zero of either; parity against the
-  base is the comparison that means anything until that row lands.
+**Compile-budget gate MEASURED:** `cpu_idle_pct=97.5`, best-of-5 wall
+**1952.4 ms** against 5000 ms. Pre-flight: registry empty, no containers, no
+worktree burning CPU, idle 97.8 / 94.7 / 97.4 after decay, loadavg 1.73 falling
+from 2.58, **five** `ccd-cli` runtimes recorded as exposure.
+
+**The longest test ran 207.0 s against its 300 s bound (~1.45x).** That is the
+number the two-way split existed to produce, and it is an IN-MATRIX figure —
+the same test timed out at this bound one round earlier on a 251.1 s standalone
+measurement. Standalone is not evidence about this bound.
+
+### What the earlier matrices cost, and why each failure was real
+
+Four runs reached this one. None was flake.
+
+1. `check:language-coverage` — a third hand-written copy of the compiler suite's
+   file list, updated in two of three places (`suite-inventory-copies`).
+2. `test:postgres` timeouts — the first split was sized against a standalone
+   measurement while the bound is in-matrix; that test's own comment records a
+   1.79x load factor.
+3. Green at `2e587fe`, **superseded** by review round 1, which changed
+   executable content in two test files.
+4. Green here.
+
+**The wrapper reported "exit code 0" on every failed run.** `MATRIX_EXIT` was
+read from inside the log each time — the false green `5g3-sm-impl` recorded,
+arriving through a background-task completion status rather than a shell
+wrapper.
+
+`pnpm lint` reports **7 errors and `prettier --check` drifts, both pre-existing
+on `main` at `5aa2d2c` and neither in the matrix command**
+(`unrun-quality-gates`). This packet adds zero of either; parity against the
+base is the comparison that means anything until that row lands.
