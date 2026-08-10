@@ -67,12 +67,23 @@ const releaseId = 'd4000000-0000-4000-8000-000000000004';
 const pointerId = 'd5000000-0000-4000-8000-000000000005';
 
 /**
- * Named rather than a bare boolean, so every construction site reads as a claim
- * about what that double does. `KNOWN_FALSE_GREEN` marks a site that observes a
- * success production would refuse -- routed to `double-must-honour-refusal`.
+ * **Configuration, not evidence** -- and the distinction was a review finding.
+ *
+ * These name what a double DOES with a recorded refusal. They say nothing about
+ * whether a given test ever reaches the operation branch where that matters, and
+ * the earlier name pretended otherwise: `KNOWN_FALSE_GREEN` sat on five
+ * construction sites while only two of them assert a manufactured success. The
+ * other three -- the failed-data-slot, empty-data-slot and invalid-binding
+ * fixtures -- exercise query and pre-operation refusal paths and never call the
+ * provider at all, so labelling them as observing a refused operation succeed
+ * was false in one direction, and a grep for the marker missed the real ones in
+ * the other.
+ *
+ * `KNOWN_FALSE_GREEN` now appears beside the two ASSERTIONS that actually
+ * observe it, where a sweep will find them.
  */
-const HONOURS_REFUSALS = true;
-const KNOWN_FALSE_GREEN = false;
+const HONOURS_PROVIDER_REFUSALS = true;
+const IGNORES_PROVIDER_REFUSALS = false;
 
 let server: Server;
 let baseUrl: string;
@@ -85,7 +96,7 @@ let fieldKindExecutor: BrowserFixtureExecutor;
 test.beforeAll(async () => {
   const compiled = compileFixture();
   const policy = allowPolicy();
-  executor = new BrowserFixtureExecutor(null, KNOWN_FALSE_GREEN);
+  executor = new BrowserFixtureExecutor(null, IGNORES_PROVIDER_REFUSALS);
   const operationMediation = new SemanticOperationMediationAuthority();
   executor.createSeed('Existing live master');
   missingDisplayRecordId = executor.createSeed();
@@ -105,7 +116,7 @@ test.beforeAll(async () => {
   // is minted (ADR-0047 §4a); it exists because the claim below -- that a date
   // field renders a DATE CONTROL -- can only be observed in a browser.
   const fieldKindPolicy = allowPolicy();
-  fieldKindExecutor = new BrowserFixtureExecutor(null, HONOURS_REFUSALS);
+  fieldKindExecutor = new BrowserFixtureExecutor(null, HONOURS_PROVIDER_REFUSALS);
   const fieldKindMediation = new SemanticOperationMediationAuthority();
   fieldKindServer = createSurfaceRuntimeServer(
     runtimeEntry(compileEveryFieldKindFixture(), fieldKindPolicy),
@@ -573,6 +584,13 @@ test('fixture list and form render live DTOs and reflect a semantic create', asy
   await page.getByLabel('Master Name').fill('Browser-created master');
   await page.getByRole('button', { name: 'Save' }).click();
 
+  // KNOWN_FALSE_GREEN: production REFUSES this create. `ordinaryModuleV1`
+  // declares `master_number` required while this surface's bound query
+  // selects only `master_name`, so the browser cannot submit it and
+  // `parseMutationInput` returns MODULE_REQUIRED_FIELD_MISSING. The executor
+  // is configured to IGNORE that refusal, so the success asserted below is
+  // manufactured and this is NOT valid evidence of semantic create
+  // behaviour. Routed: `double-must-honour-refusal`.
   await expect(page.getByRole('status')).toContainText('Create complete');
   await expect(page.getByRole('status')).toContainText(
     'trust evidence is linked',
@@ -612,7 +630,7 @@ test('compiler-valid one-slot Record surfaces retain fallback actions and feedba
 }) => {
   const compiled = compileFixture(false);
   const policy = allowPolicy();
-  const executor = new BrowserFixtureExecutor(null, KNOWN_FALSE_GREEN);
+  const executor = new BrowserFixtureExecutor(null, IGNORES_PROVIDER_REFUSALS);
   const operationMediation = new SemanticOperationMediationAuthority();
   const legacyServer = createSurfaceRuntimeServer(
     runtimeEntry(compiled, policy),
@@ -638,6 +656,13 @@ test('compiler-valid one-slot Record surfaces retain fallback actions and feedba
     ).toHaveCount(0);
     await page.getByLabel('Master Name').fill('Legacy one-slot master');
     await page.getByRole('button', { name: 'Save' }).click();
+    // KNOWN_FALSE_GREEN: production REFUSES this create. `ordinaryModuleV1`
+    // declares `master_number` required while this surface's bound query
+    // selects only `master_name`, so the browser cannot submit it and
+    // `parseMutationInput` returns MODULE_REQUIRED_FIELD_MISSING. The executor
+    // is configured to IGNORE that refusal, so the success asserted below is
+    // manufactured and this is NOT valid evidence of semantic create
+    // behaviour. Routed: `double-must-honour-refusal`.
     await expect(page.getByRole('status')).toContainText('Create complete');
 
     await page
@@ -677,7 +702,7 @@ test('a failed data slot stays inline while ready siblings render without JavaSc
   const policy = allowPolicy();
   const failingExecutor = new BrowserFixtureExecutor(
     `${FIXTURE_IDS.namespace}:query.master_get`,
-    KNOWN_FALSE_GREEN,
+    IGNORES_PROVIDER_REFUSALS,
   );
   const operationMediation = new SemanticOperationMediationAuthority();
   const failingServer = createSurfaceRuntimeServer(
@@ -745,7 +770,7 @@ test('an empty data slot is observably distinct from a failed slot', async ({
 }) => {
   const compiled = compileFixture();
   const policy = allowPolicy();
-  const emptyExecutor = new BrowserFixtureExecutor(null, KNOWN_FALSE_GREEN);
+  const emptyExecutor = new BrowserFixtureExecutor(null, IGNORES_PROVIDER_REFUSALS);
   const operationMediation = new SemanticOperationMediationAuthority();
   const emptyServer = createSurfaceRuntimeServer(
     runtimeEntry(compiled, policy),
@@ -787,7 +812,7 @@ test('an invalid selected-surface binding remains page-level before slot composi
 }) => {
   const compiled = compileFixture(true, true);
   const policy = allowPolicy();
-  const invalidExecutor = new BrowserFixtureExecutor(null, KNOWN_FALSE_GREEN);
+  const invalidExecutor = new BrowserFixtureExecutor(null, IGNORES_PROVIDER_REFUSALS);
   const operationMediation = new SemanticOperationMediationAuthority();
   const invalidServer = createSurfaceRuntimeServer(
     runtimeEntry(compiled, policy),
@@ -839,7 +864,8 @@ class BrowserFixtureExecutor
    * did the opposite. Requiring the argument does not fix that behaviour -- it
    * makes every site state which one it has.
    *
-   * `false` is a KNOWN FALSE GREEN, not a preference. The real parser refuses
+   * `IGNORES_PROVIDER_REFUSALS` is a live defect at the two sites that reach the
+   * operation branch, not a preference. The real parser refuses
    * `ordinaryModuleV1`'s create with `MODULE_REQUIRED_FIELD_MISSING` on
    * `master_number` -- a required field that surface never renders, so its form
    * cannot submit it -- and two tests below observe "Create complete" for an
@@ -1029,9 +1055,10 @@ class BrowserFixtureExecutor
     // refusal-honouring double in general: with `KNOWN_FALSE_GREEN` the recorded
     // refusal is ignored and the branch below merges the rejected values,
     // persists them and returns `outcome: 'succeeded'` with a read-back. That is
-    // ADR-0041's accepted-and-ignored state, it is live at the sites named
-    // `KNOWN_FALSE_GREEN`, and naming it does not make those tests valid
-    // evidence of semantic create behaviour -- see `double-must-honour-refusal`.
+    // ADR-0041's accepted-and-ignored state. It is live only where a test
+    // actually reaches this branch -- the two create journeys marked
+    // `KNOWN_FALSE_GREEN` below -- and naming it does not make them valid
+    // evidence of semantic create behaviour. See `double-must-honour-refusal`.
     //
     // An earlier version of this comment said the double honours the refusal it
     // records, without qualification. It does not, and a reviewer had to read

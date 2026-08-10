@@ -79,29 +79,46 @@ const temporalFieldKinds = [
   'timeFieldType',
 ] as const;
 const temporalPrecisions = ['millisecond', 'second'] as const;
-const timezoneSemantics = [
-  'calendarDate',
-  'localWallTime',
-  'offsetDateTime',
-  'utcInstant',
-] as const;
-
-export type CompiledTemporalPrecision = (typeof temporalPrecisions)[number];
-export type CompiledTimezoneSemantics = (typeof timezoneSemantics)[number];
 export type CompiledTemporalKind = (typeof temporalFieldKinds)[number];
+export type CompiledTemporalPrecision = (typeof temporalPrecisions)[number];
 
 /**
- * The one place the kind-to-semantics mapping is written down, so the reader's
- * check and the type above cannot drift apart. Each entry is exactly what that
- * kind's canonical schema admits: `dateFieldType.timezoneSemantics` and
- * `timeFieldType.timezoneSemantics` are single literals there, and
- * `dateTimeFieldType`'s is a two-value enum.
+ * **The only place a timezone spelling is written**, and now literally so.
+ *
+ * Each entry is exactly what that kind's canonical schema admits:
+ * `dateFieldType.timezoneSemantics` and `timeFieldType.timezoneSemantics` are
+ * single literals there, and `dateTimeFieldType`'s is a two-value enum.
+ *
+ * `satisfies` pins the KEYS to the temporal kinds, so a kind added to
+ * `temporalFieldKinds` without an entry here fails to compile rather than
+ * reaching the reader as an unmapped lookup.
  */
 const timezoneSemanticsByKind = Object.freeze({
   dateFieldType: Object.freeze(['calendarDate'] as const),
   dateTimeFieldType: Object.freeze(['offsetDateTime', 'utcInstant'] as const),
   timeFieldType: Object.freeze(['localWallTime'] as const),
-});
+}) satisfies Record<CompiledTemporalKind, readonly string[]>;
+
+/**
+ * The accepted vocabulary, DERIVED from the table rather than declared beside
+ * it.
+ *
+ * A review found the gap this closes: the broad list and the table were two
+ * independent declarations, and nothing tied them together. Adding a spelling to
+ * one kind's entry and forgetting the list would make `CompiledSurfaceField`
+ * statically admit a value the parser refuses one check earlier as an
+ * "unreadable temporal domain" -- not silent coercion, but exactly the
+ * type-versus-runtime contradiction the single-authority claim says cannot
+ * happen. The claim was false while both representations existed unchecked, and
+ * deriving one from the other is what makes it true rather than restating it.
+ */
+const timezoneSemantics = Object.freeze([
+  ...timezoneSemanticsByKind.dateFieldType,
+  ...timezoneSemanticsByKind.dateTimeFieldType,
+  ...timezoneSemanticsByKind.timeFieldType,
+] as const);
+
+export type CompiledTimezoneSemantics = (typeof timezoneSemantics)[number];
 
 export interface CompiledFieldOption {
   readonly label: string;
@@ -170,9 +187,10 @@ type CompiledTemporalField<K extends CompiledTemporalKind> =
  *
  * `review-tiers` prefers unrepresentable to detectable. The reader below still
  * validates the pairing, because a payload arrives as JSON and a type cannot
- * check bytes -- but a caller cannot CONSTRUCT the wrong pair, and the check and
- * the type now read the same table, so they cannot disagree about which pairs
- * exist.
+ * check bytes -- but a caller cannot CONSTRUCT the wrong pair, and every
+ * spelling the parser accepts, the type admits and the branches carry now
+ * derives from `timezoneSemanticsByKind`, so no edit can move one without the
+ * others.
  */
 export type CompiledSurfaceField =
   | CompiledTemporalField<'dateFieldType'>
