@@ -8,6 +8,31 @@ wire that makes the create half reachable and carries that ruling into a
 decision record.
 Tier: Critical (it changes compiled operation-contract output)
 
+> **NOT SATISFIED BY ANY SHIPPED IMPLEMENTATION — annotated 2026-08-10 after
+> `ux-reference-picker` returned BLOCK at round 2 and re-chartered.**
+>
+> Read the decisions below as the *intent*, not as a description of `main` or of
+> any branch. Four statements in this document are known wrong or unenforced, and
+> they must be amended before the re-chartered work starts:
+>
+> - **§7's claim that a picker caller cannot supply a legal-entity scope is
+>   FALSE.** The request runtime already carries the selected value. Because the
+>   implementation excluded scoped target lists on that false premise, and every
+>   first-party inventory target list IS scoped, three of the four form surfaces
+>   this ADR's own Context cites remained uncreatable. Only `party_role` was fixed.
+> - **§4's create-only rule is not an artifact invariant.** The catalog parser
+>   admits relation inputs on update/archive/restore/transition effects, which the
+>   provider then cannot satisfy — ADR-0041's accepted-and-ignored state.
+> - **§2's "one parser, not two" overstates.** The shared function is a strict
+>   subset of the gateway's own validation, so the browser accepts forgeries the
+>   gateway refuses.
+> - **§2's table still labels v1/v2 "no relation inputs"**, contradicting the
+>   corrected prose directly below it, and **§3's "the shipped app is unchanged"
+>   overclaims** — browser behaviour changed even though compiled bytes did not.
+>
+> Tracked as `relation-picker-rechartered` in `docs/execution/current-plan.md`.
+> The reviewed candidate is preserved at tag `ux-reference-picker-reviewed-r2`.
+
 ## Context
 
 A module with a required relation could not be created from any web surface.
