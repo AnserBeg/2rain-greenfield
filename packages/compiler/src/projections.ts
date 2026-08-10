@@ -1039,7 +1039,9 @@ function operationInputContract(
             archiveBehavior: relation.archiveBehavior,
             relationId: relation.relationId,
             required: relation.required,
-            targetEntityId: relation.targetEntity.targetId,
+            ...(relationTargets
+              ? { targetEntityId: relation.targetEntity.targetId }
+              : {}),
           }))
         : [],
     // Two independent optional shapes, so the version is a 2x2 rather than a
