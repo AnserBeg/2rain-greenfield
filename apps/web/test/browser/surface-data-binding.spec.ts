@@ -29,6 +29,10 @@ import {
   type SemanticOperationResultEnvelope,
 } from '../../../../packages/runtime/src/semantic-operation-gateway.js';
 import {
+  ModuleRuntimeInterpreterError,
+  parseMutationInput,
+} from '../../../../packages/postgres-provider/src/module-runtime-interpreter.js';
+import {
   SEMANTIC_QUERY_RESULT_VERSION,
   SemanticQueryGateway,
   type SemanticQueryExecutionRequest,
@@ -68,6 +72,7 @@ let executor: BrowserFixtureExecutor;
 let missingDisplayRecordId: string;
 let fieldKindServer: Server;
 let fieldKindUrl: string;
+let fieldKindExecutor: BrowserFixtureExecutor;
 
 test.beforeAll(async () => {
   const compiled = compileFixture();
@@ -92,7 +97,7 @@ test.beforeAll(async () => {
   // is minted (ADR-0047 §4a); it exists because the claim below -- that a date
   // field renders a DATE CONTROL -- can only be observed in a browser.
   const fieldKindPolicy = allowPolicy();
-  const fieldKindExecutor = new BrowserFixtureExecutor();
+  fieldKindExecutor = new BrowserFixtureExecutor();
   const fieldKindMediation = new SemanticOperationMediationAuthority();
   fieldKindServer = createSurfaceRuntimeServer(
     runtimeEntry(compileEveryFieldKindFixture(), fieldKindPolicy),
@@ -169,12 +174,40 @@ test('compiled field kinds render as real browser controls', async ({
     await date.evaluate((element: HTMLInputElement) => element.value),
   ).toBe('2026-08-09');
 
-  const checkbox = page.locator(
-    `input[type="checkbox"][name="value:${EVERY_KIND_FIELD_IDS.active}"]`,
+  // A boolean is a three-option select, not a checkbox: an optional one has
+  // three states and a checkbox has two. Blank is the unset state, and it is
+  // what the control starts on for a record that has no value.
+  const active = page.locator(`[name="value:${EVERY_KIND_FIELD_IDS.active}"]`);
+  expect(
+    await active.evaluate((element) => element.tagName.toLowerCase()),
+  ).toBe('select');
+  await expect(active).toHaveJSProperty('value', '');
+  expect(
+    await active.evaluate((element: HTMLSelectElement) =>
+      [...element.options].map((option) => option.value),
+    ),
+  ).toEqual(['', 'true', 'false']);
+  await active.selectOption('false');
+  await expect(active).toHaveJSProperty('value', 'false');
+
+  // A date-time carrier is deliberately NOT a native control: datetime-local is
+  // local time without timezone information, so it cannot hold either declared
+  // semantics. Refused by name, with the declared domain on the element.
+  const instant = page.locator(
+    `[name="value:${FIXTURE_IDS.fieldIds.parentUtcInstant}"]`,
   );
-  await expect(checkbox).toHaveJSProperty('checked', false);
-  await checkbox.check();
-  await expect(checkbox).toHaveJSProperty('checked', true);
+  await expect(instant).toHaveJSProperty('type', 'text');
+  await expect(instant).toHaveAttribute('data-refused-control', 'datetime-local');
+  await expect(instant).toHaveAttribute('data-timezone-semantics', 'utcInstant');
+
+  // Two time fields of one kind, differing only in declared precision, must
+  // differ in the step that decides what the browser will accept.
+  await expect(
+    page.locator(`[name="value:${FIXTURE_IDS.fieldIds.parentLocalTime}"]`),
+  ).toHaveJSProperty('step', '1');
+  await expect(
+    page.locator(`[name="value:${EVERY_KIND_FIELD_IDS.preciseTime}"]`),
+  ).toHaveJSProperty('step', '0.001');
 
   const price = page.locator(`[name="value:${EVERY_KIND_FIELD_IDS.price}"]`);
   await expect(price).toHaveJSProperty('type', 'number');
@@ -201,6 +234,224 @@ test('compiled field kinds render as real browser controls', async ({
       (element: HTMLInputElement) => element.list?.options.length ?? 0,
     ),
   ).toBe(6);
+});
+
+const SEEDED = Object.freeze({
+  // Nonzero seconds AND milliseconds, on both timezone semantics. A control
+  // that drops either -- which is what every datetime-local does at its default
+  // 60-second step -- destroys these on the first edit.
+  [FIXTURE_IDS.fieldIds.parentUtcInstant]: '2026-08-09T12:34:56.789Z',
+  [EVERY_KIND_FIELD_IDS.offsetMoment]: '2026-08-09T12:34:56-06:00',
+  // Times WITH seconds, at both declared precisions.
+  [FIXTURE_IDS.fieldIds.parentLocalTime]: '12:34:56',
+  [EVERY_KIND_FIELD_IDS.preciseTime]: '12:34:56.789',
+  [EVERY_KIND_FIELD_IDS.due]: '2026-08-09',
+  [EVERY_KIND_FIELD_IDS.price]: '1250.75',
+  [EVERY_KIND_FIELD_IDS.count]: '42',
+  [EVERY_KIND_FIELD_IDS.grade]: `${FIXTURE_IDS.namespace}:option.grade_c`,
+  [EVERY_KIND_FIELD_IDS.region]: `${FIXTURE_IDS.namespace}:option.region_west`,
+  [FIXTURE_IDS.fieldIds.parentName]: 'Round trip master',
+});
+
+async function idleValue(page: Page, fieldId: string): Promise<string> {
+  return page
+    .locator(`[name="value:${fieldId}"]`)
+    .evaluate((element: HTMLInputElement | HTMLSelectElement) => element.value);
+}
+
+/**
+ * **The execution that adjudicates all three review findings**, because each of
+ * them is a claim about what survives the wire.
+ *
+ * Temporal discriminants: a control that does not know the declared precision
+ * refuses `12:34:56` at its default 60-second step, and one that does not know
+ * the timezone semantics cannot hold a `Z` or an offset at all. Boolean shape:
+ * `null`, absent and `false` must stay three distinguishable things from render
+ * through submission. Capability floor: what the form SUBMITS is the thing the
+ * floor's premise is about, so this reads the encoded body rather than the DOM.
+ *
+ * Five observations, none of them a proxy: the live IDL value, native
+ * `checkValidity()`, the encoded request entries and their order, the REAL
+ * provider's verdict on that input, and the authoritative reread.
+ */
+test('a v2 form round-trips every declared temporal and boolean value', async ({
+  page,
+}) => {
+  await page.setExtraHTTPHeaders({ authorization: 'fixture-user' });
+  const recordId = fieldKindExecutor.seedTypedValues({
+    ...SEEDED,
+    [EVERY_KIND_FIELD_IDS.active]: true,
+  });
+  const url = `${fieldKindUrl}/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_form`)}&record=${encodeURIComponent(recordId)}`;
+  await page.goto(url);
+  await expect(page.locator('#surface-record-form')).toBeVisible();
+
+  // 1. LIVE IDL VALUE. Every seeded value reached its control intact. Read
+  //    through the IDL, so a control that silently truncated or refused the
+  //    value reports what the user would actually have, not the markup.
+  for (const [fieldId, value] of Object.entries(SEEDED)) {
+    expect(await idleValue(page, fieldId), fieldId).toBe(value);
+  }
+  expect(await idleValue(page, EVERY_KIND_FIELD_IDS.active)).toBe('true');
+
+  // 2. checkValidity(). The step has to match the declared precision or the
+  //    browser refuses the value the contract requires.
+  for (const fieldId of Object.keys(SEEDED)) {
+    expect(
+      await page
+        .locator(`[name="value:${fieldId}"]`)
+        .evaluate((element: HTMLInputElement) => element.checkValidity()),
+      fieldId,
+    ).toBe(true);
+  }
+  // The control for that claim, as a probe pair rather than by mutating the
+  // live element -- assigning `.step` after the fact was measured NOT to
+  // re-evaluate, so that version passed while proving nothing. Two inputs
+  // identical but for the step, given the same declared value: the rendered
+  // step accepts it and the browser default refuses it.
+  expect(
+    await page.evaluate((stored) => {
+      const probe = (step: string | null): boolean => {
+        const input = document.createElement('input');
+        input.type = 'time';
+        if (step !== null) input.step = step;
+        input.value = stored;
+        return input.checkValidity();
+      };
+      return { asRendered: probe('0.001'), browserDefault: probe(null) };
+    }, SEEDED[EVERY_KIND_FIELD_IDS.preciseTime]!),
+  ).toEqual({ asRendered: true, browserDefault: false });
+  // And the control for refusing `datetime-local`: a real one cannot hold the
+  // stored instant at all, which is why the carrier stays text.
+  expect(
+    await page.evaluate((stored) => {
+      const probe = document.createElement('input');
+      probe.type = 'datetime-local';
+      probe.value = stored;
+      return probe.value;
+    }, SEEDED[FIXTURE_IDS.fieldIds.parentUtcInstant]!),
+  ).toBe('');
+
+  // 3. THE ENCODED REQUEST ENTRIES AND THEIR ORDER. Order is load-bearing:
+  //    `readFormSubmission` builds its record with last-value-wins, so two
+  //    entries sharing a name resolve by position.
+  const posted = new Promise<string>((resolve) => {
+    page.on('request', (request) => {
+      if (request.method() === 'POST') resolve(request.postData() ?? '');
+    });
+  });
+  await page.getByRole('button', { name: 'Save' }).click();
+  const entries = [...new URLSearchParams(await posted).entries()];
+  const valueEntries = entries.filter(([key]) => key.startsWith('value:'));
+  expect(entries.map(([key]) => key).slice(0, 4)).toEqual([
+    'intent',
+    'idempotencyKey',
+    'recordId',
+    'expectedRevision',
+  ]);
+  // Exactly one entry per field, in the compiled field order -- no hidden
+  // sibling shadowing a control, which is what broke the capability floor.
+  expect(valueEntries.length).toBe(new Set(valueEntries.map(([key]) => key)).size);
+  for (const [fieldId, value] of Object.entries(SEEDED)) {
+    expect(valueEntries.find(([key]) => key === `value:${fieldId}`), fieldId).toEqual([
+      `value:${fieldId}`,
+      value,
+    ]);
+  }
+  expect(
+    valueEntries.find(
+      ([key]) => key === `value:${EVERY_KIND_FIELD_IDS.active}`,
+    ),
+  ).toEqual([`value:${EVERY_KIND_FIELD_IDS.active}`, 'true']);
+
+  // 4. PROVIDER ACCEPTANCE, decided by the real write path's own parser rather
+  //    than by a stub. Three stages, so each missing transformation is
+  //    attributable instead of one lumped refusal.
+  const verdicts = fieldKindExecutor.providerVerdicts;
+  const stage = (name: string) =>
+    verdicts.find((entry) => entry.stage === name);
+  // What a form actually submits is refused today, and NOT because of anything
+  // this packet changed -- a bare text box posted `""` for an unset field too.
+  // Two string shapes are not values: `"true"` for a boolean, and `""` for any
+  // non-text kind the record has no value for.
+  expect(stage('as-submitted')).toMatchObject({
+    accepted: false,
+    code: 'MODULE_FIELD_VALUE_INVALID',
+  });
+  // Coercing booleans alone is NOT enough, which is why the middle stage exists:
+  // without it, "normalised accepts" would be read as "the boolean was the
+  // whole problem".
+  expect(stage('booleans-coerced')).toMatchObject({
+    accepted: false,
+    code: 'MODULE_FIELD_VALUE_INVALID',
+  });
+  // The admission twin. With `U7`'s normalisation stood in for -- empty strings
+  // read as "no value stated", booleans coerced -- the SAME input is accepted,
+  // so every temporal, enum and numeric value the controls rendered survives
+  // the wire byte for byte.
+  expect(stage('normalised')).toEqual({
+    accepted: true,
+    code: null,
+    stage: 'normalised',
+    subjectId: null,
+  });
+
+  // 5. AUTHORITATIVE REREAD. The operation's read-back is what the page renders
+  //    next, so every value must come back into its control unchanged.
+  await expect(page.locator('#surface-record-form')).toBeVisible();
+  for (const [fieldId, value] of Object.entries(SEEDED)) {
+    expect(await idleValue(page, fieldId), `reread ${fieldId}`).toBe(value);
+  }
+});
+
+/**
+ * The boolean's three states, end to end. A checkbox cannot express them, and
+ * the first cut's hidden `value="false"` sibling made an unrelated edit rewrite
+ * a stored `null` to `false` -- upstream of anywhere `U7` could recover it.
+ */
+test('an optional boolean keeps absent, null, false and true apart on the wire', async ({
+  page,
+}) => {
+  await page.setExtraHTTPHeaders({ authorization: 'fixture-user' });
+  const control = `[name="value:${EVERY_KIND_FIELD_IDS.active}"]`;
+  for (const [seeded, expectedIdl] of [
+    [undefined, ''],
+    [null, ''],
+    [false, 'false'],
+    [true, 'true'],
+  ] as const) {
+    const recordId = fieldKindExecutor.seedTypedValues(
+      seeded === undefined
+        ? {}
+        : { [EVERY_KIND_FIELD_IDS.active]: seeded },
+    );
+    await page.goto(
+      `${fieldKindUrl}/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_form`)}&record=${encodeURIComponent(recordId)}`,
+    );
+    await expect(page.locator(control)).toHaveJSProperty('value', expectedIdl);
+    // No checkbox and no hidden sibling: nothing can post a value the record
+    // did not have.
+    await expect(page.locator(`input[type="checkbox"]${control}`)).toHaveCount(0);
+    await expect(page.locator(`input[type="hidden"]${control}`)).toHaveCount(0);
+  }
+
+  // Absent and null both submit the empty string -- distinct from "false", which
+  // is the whole point. A form that posted "false" here would silently write one.
+  const posted = new Promise<string>((resolve) => {
+    page.on('request', (request) => {
+      if (request.method() === 'POST') resolve(request.postData() ?? '');
+    });
+  });
+  const untouched = fieldKindExecutor.seedTypedValues({});
+  await page.goto(
+    `${fieldKindUrl}/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_form`)}&record=${encodeURIComponent(untouched)}`,
+  );
+  await page.getByRole('button', { name: 'Save' }).click();
+  expect(
+    new URLSearchParams(await posted).getAll(
+      `value:${EVERY_KIND_FIELD_IDS.active}`,
+    ),
+  ).toEqual(['']);
 });
 
 /**
@@ -502,9 +753,47 @@ class BrowserFixtureExecutor
 
   constructor(private readonly failedQueryId: string | null = null) {}
 
+  /**
+   * What the REAL provider decided about each operation input it was handed.
+   *
+   * `parseMutationInput` is the first thing `PostgresModuleRuntimeInterpreter`
+   * does on a mutation, before a connection is taken, and it is where every
+   * compiled value contract is enforced. Calling it here makes "the provider
+   * accepts this" an observation rather than a stub's opinion -- with no
+   * database, so a browser gate can hold it.
+   */
+  readonly providerVerdicts: {
+    accepted: boolean;
+    code: string | null;
+    stage: 'as-submitted' | 'booleans-coerced' | 'normalised';
+    subjectId: string | null;
+  }[] = [];
+
   createSeed(name?: string): string {
     const recordId = randomUUID();
     this.records.set(recordId, dto(recordId, name));
+    return recordId;
+  }
+
+  /**
+   * Seeds a record carrying real typed values. `createSeed` stores one string,
+   * which cannot express a JSON `true` or the difference between a stored `null`
+   * and a field that was never set.
+   */
+  seedTypedValues(
+    values: Readonly<Record<string, ImmutableJsonValue>>,
+  ): string {
+    const recordId = randomUUID();
+    this.records.set(
+      recordId,
+      Object.freeze({
+        archived: false,
+        entityId: FIXTURE_IDS.entityIds.parent,
+        recordId,
+        revision: 1,
+        values: Object.freeze({ ...values }),
+      }),
+    );
     return recordId;
   }
 
@@ -512,6 +801,84 @@ class BrowserFixtureExecutor
     _request: SemanticOperationNonAcceptedRequest,
   ): Promise<void> {
     void _request;
+  }
+
+  /**
+   * Puts the submitted input past the REAL write path's value contracts three
+   * times, so each transformation's contribution is attributable instead of one
+   * lumped verdict.
+   *
+   * **Both transformations stand in for a mechanism that does not exist**, and
+   * recording all three stages is how this gate reports that rather than hiding
+   * it behind a stub that accepts anything. Measured here, in this order:
+   *
+   * - **as submitted** -- refused. A form posts strings, and two kinds of string
+   *   are not values: `"true"` where `booleanFieldType` demands a JSON boolean,
+   *   and `""` for every field the record has no value for, which no non-text
+   *   kind admits.
+   * - **booleans coerced** -- still refused, which is the point of the middle
+   *   stage: fixing the boolean alone is not enough.
+   * - **normalised** (empty strings omitted as "no value stated", booleans
+   *   coerced) -- accepted, so every temporal and enum value the controls
+   *   rendered survives the wire byte for byte.
+   *
+   * Neither gap is introduced by `ux-picker`; a bare text box posted `""` too.
+   * Both are `U7`'s Postel input normalisation, and whether an empty control
+   * means "leave alone" or "clear it" is a decision `U7` owns -- this stand-in
+   * takes the conservative reading and does not pretend to settle it.
+   */
+  #askTheProvider(
+    request: SemanticOperationExecutionRequest,
+    input: Record<string, unknown>,
+  ): void {
+    const key = 'values' in input ? 'values' : 'patch';
+    const submitted = recordValue(input[key] ?? {});
+    const withValues = (
+      entries: readonly (readonly [string, unknown])[],
+    ): Record<string, unknown> => ({
+      ...input,
+      [key]: Object.fromEntries(entries),
+    });
+    const asBoolean = (value: unknown): unknown =>
+      value === 'true' ? true : value === 'false' ? false : value;
+    const entries = Object.entries(submitted);
+
+    for (const [stage, candidate] of [
+      ['as-submitted', input],
+      [
+        'booleans-coerced',
+        withValues(entries.map(([field, value]) => [field, asBoolean(value)])),
+      ],
+      [
+        'normalised',
+        withValues(
+          entries
+            .filter(([, value]) => value !== '')
+            .map(([field, value]) => [field, asBoolean(value)]),
+        ),
+      ],
+    ] as const) {
+      try {
+        parseMutationInput(
+          request.definition as Parameters<typeof parseMutationInput>[0],
+          candidate as unknown as ImmutableJsonValue,
+        );
+        this.providerVerdicts.push({
+          accepted: true,
+          code: null,
+          stage,
+          subjectId: null,
+        });
+      } catch (error) {
+        const known = error instanceof ModuleRuntimeInterpreterError;
+        this.providerVerdicts.push({
+          accepted: false,
+          code: known ? error.code : null,
+          stage,
+          subjectId: known ? error.subjectId : null,
+        });
+      }
+    }
   }
 
   execute(
@@ -557,6 +924,7 @@ class BrowserFixtureExecutor
     }
 
     const input = recordValue(request.input);
+    this.#askTheProvider(request, input);
     const values = recordValue(input.values ?? input.patch ?? {});
     const recordId = String(input.recordId);
     const previous = this.records.get(recordId);
