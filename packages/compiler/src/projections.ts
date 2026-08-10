@@ -549,8 +549,9 @@ function operationCatalogPayload(
                   // the whole guarantee the carrier exists to provide. This is
                   // the same exclusion `systemInput` already applies to
                   // `legalEntityId`.
-                  (fieldsByEntity.get(operation.effect.entity.targetId) ?? [])
-                    .filter((field) => !stateFieldIds.has(field.fieldId))
+                  (
+                    fieldsByEntity.get(operation.effect.entity.targetId) ?? []
+                  ).filter((field) => !stateFieldIds.has(field.fieldId))
                 : [],
               'entity' in operation.effect
                 ? (relationsByEntity.get(operation.effect.entity.targetId) ??

@@ -442,20 +442,22 @@ test('a record command bar renders every granted command as its own operable con
       `form.capability-command[data-operation-id="${commandOperationId('release')}"]`,
     );
     await expect(cancel.getByRole('button', { name: 'Cancel' })).toBeEnabled();
-    await expect(release.getByRole('button', { name: 'Release' })).toBeEnabled();
     await expect(
-      cancel.locator('input[name="operationId"]'),
-    ).toHaveValue(commandOperationId('cancel'));
-    await expect(
-      release.locator('input[name="operationId"]'),
-    ).toHaveValue(commandOperationId('release'));
+      release.getByRole('button', { name: 'Release' }),
+    ).toBeEnabled();
+    await expect(cancel.locator('input[name="operationId"]')).toHaveValue(
+      commandOperationId('cancel'),
+    );
+    await expect(release.locator('input[name="operationId"]')).toHaveValue(
+      commandOperationId('release'),
+    );
 
     // Press the SECOND control. Under the old dispatch this ran the first.
     await release.getByRole('button', { name: 'Release' }).click();
     await expect(page.getByRole('status')).toContainText('Release complete');
-    await expect(page.locator('[data-platform-slot="record:keyFacts"]')).toContainText(
-      `ran ${commandCapabilityId('release')}`,
-    );
+    await expect(
+      page.locator('[data-platform-slot="record:keyFacts"]'),
+    ).toContainText(`ran ${commandCapabilityId('release')}`);
     assert.deepEqual(
       capabilityExecutors.map((candidate) => candidate.executed),
       [[commandOperationId('release')], []],
@@ -615,9 +617,7 @@ test('a posted operation id outside the surface binding is refused', async ({
   }
 });
 
-class RecordingCapabilityExecutor
-  implements RegisteredCapabilityOperationExecutor
-{
+class RecordingCapabilityExecutor implements RegisteredCapabilityOperationExecutor {
   readonly executed: string[] = [];
 
   constructor(
@@ -630,7 +630,10 @@ class RecordingCapabilityExecutor
   ): Promise<SemanticOperationResultEnvelope> {
     this.executed.push(request.definition.operationId);
     const input = request.input as Readonly<Record<string, ImmutableJsonValue>>;
-    const stored = this.records.stamp(String(input.recordId), this.capabilityId);
+    const stored = this.records.stamp(
+      String(input.recordId),
+      this.capabilityId,
+    );
     return {
       kind: 'semanticOperationResult',
       operationId: request.definition.operationId,
@@ -952,7 +955,8 @@ function pushDuplicateCreate(authored: Record<string, unknown>): void {
   const operations = authored.operations as Array<Record<string, unknown>>;
   const create = operations.find(
     (operation) =>
-      operation.operationId === `${FIXTURE_IDS.namespace}:operation.master_create`,
+      operation.operationId ===
+      `${FIXTURE_IDS.namespace}:operation.master_create`,
   );
   assert.ok(create);
   operations.push({

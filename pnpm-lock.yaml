@@ -37,7 +37,7 @@ importers:
         specifier: ^8.22.0
         version: 8.22.0
       prettier:
-        specifier: ^3.6.2
+        specifier: 3.9.5
         version: 3.9.5
       tsx:
         specifier: ^4.20.5

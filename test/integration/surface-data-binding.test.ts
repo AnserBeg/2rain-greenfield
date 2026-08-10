@@ -1118,8 +1118,9 @@ test('the merged command bar renders both halves on the same two transition form
   assert.equal(rendered.statusCode, 200);
   const html = rendered.html;
 
-  const forms = [...html.matchAll(/<form class="capability-command"[\s\S]*?<\/form>/g)]
-    .map((match) => match[0]);
+  const forms = [
+    ...html.matchAll(/<form class="capability-command"[\s\S]*?<\/form>/g),
+  ].map((match) => match[0]);
   assert.equal(forms.length, 2, 'both transitions must render their own form');
 
   const namespace = FIXTURE_IDS.namespace;
@@ -1131,7 +1132,9 @@ test('the merged command bar renders both halves on the same two transition form
     // 34f452e's half: each form names its own operation on the wire...
     assert.match(
       form,
-      new RegExp(`<input type="hidden" name="operationId" value="${operationId}">`),
+      new RegExp(
+        `<input type="hidden" name="operationId" value="${operationId}">`,
+      ),
     );
     // ...and the shared intent addressing it replaced is gone. Without this
     // arm, a form carrying BOTH would pass — and both is what a partial
@@ -1139,14 +1142,19 @@ test('the merged command bar renders both halves on the same two transition form
     assert.doesNotMatch(form, /name="intent"/);
 
     // eb02adf's half: a transition stages no draft, so it must not claim to.
-    assert.match(form, /<strong>Ready\.<\/strong> This moves the record to its next state\./);
+    assert.match(
+      form,
+      /<strong>Ready\.<\/strong> This moves the record to its next state\./,
+    );
     assert.doesNotMatch(form, /Draft staged/);
   }
 
   // Distinct labels and deterministic order, on the rendered page rather than
   // on the binding: the two controls must be separately pressable, not merely
   // separately addressable.
-  const labels = forms.map((form) => /<button type="submit">([^<]+)<\/button>/.exec(form)?.[1]);
+  const labels = forms.map(
+    (form) => /<button type="submit">([^<]+)<\/button>/.exec(form)?.[1],
+  );
   assert.deepEqual(labels, ['Cancel', 'Release']);
 });
 
@@ -1177,11 +1185,12 @@ function twoTransitionPackage(): Record<string, unknown> {
 
   // The record surface needs a command bar for the two transitions to have
   // anywhere to render. `entitySurfaces` gives each surface one slot.
-  const recordSurface = (definition.surfaces as Array<Record<string, unknown>>)
-    .find(
-      (surface) =>
-        surface.surfaceId === `${FIXTURE_IDS.namespace}:surface.master_record`,
-    );
+  const recordSurface = (
+    definition.surfaces as Array<Record<string, unknown>>
+  ).find(
+    (surface) =>
+      surface.surfaceId === `${FIXTURE_IDS.namespace}:surface.master_record`,
+  );
   assert.ok(recordSurface && Array.isArray(recordSurface.slots));
   recordSurface.slots.push({
     content: {
@@ -1200,8 +1209,16 @@ function twoTransitionPackage(): Record<string, unknown> {
   const entityId = FIXTURE_IDS.entityIds.parent;
   const draft = `${namespace}:state.master_draft`;
   const moves = [
-    { action: 'release', orderKey: 10, to: `${namespace}:state.master_released` },
-    { action: 'cancel', orderKey: 20, to: `${namespace}:state.master_cancelled` },
+    {
+      action: 'release',
+      orderKey: 10,
+      to: `${namespace}:state.master_released`,
+    },
+    {
+      action: 'cancel',
+      orderKey: 20,
+      to: `${namespace}:state.master_cancelled`,
+    },
   ];
 
   definition.stateMachines = [
@@ -1212,7 +1229,13 @@ function twoTransitionPackage(): Record<string, unknown> {
       machineId: `${namespace}:machine.master_lifecycle`,
       schemaVersion: version,
       states: [
-        { kind: 'stateDefinition', label: 'Draft', orderKey: 10, schemaVersion: version, stateId: draft },
+        {
+          kind: 'stateDefinition',
+          label: 'Draft',
+          orderKey: 10,
+          schemaVersion: version,
+          stateId: draft,
+        },
         ...moves.map((move, index) => ({
           kind: 'stateDefinition',
           label: move.action,

@@ -609,7 +609,6 @@ export function lowerStorageTargetV1(
     (machine) => machine.entity.targetId,
   );
 
-
   const entities = packageRevision.entities.map(
     (entity): StorageEntityTarget => {
       const legalEntityFamily = resolvePinnedLegalEntityFamily(

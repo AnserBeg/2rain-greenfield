@@ -218,8 +218,14 @@ test('the newest readable version is reported, never selected', () => {
   // The behavioural half. While a version is cut and unadopted the two must
   // differ, and every default must follow ADOPTED across that gap.
   assert.notEqual(LATEST_LANGUAGE_VERSION, ADOPTED_LANGUAGE_VERSION);
-  assert.equal(DEFAULT_COMPILER_PROFILE.languageVersion, ADOPTED_LANGUAGE_VERSION);
-  assert.equal(MODULE_COMPILER_PROFILE.languageVersion, ADOPTED_LANGUAGE_VERSION);
+  assert.equal(
+    DEFAULT_COMPILER_PROFILE.languageVersion,
+    ADOPTED_LANGUAGE_VERSION,
+  );
+  assert.equal(
+    MODULE_COMPILER_PROFILE.languageVersion,
+    ADOPTED_LANGUAGE_VERSION,
+  );
   assert.equal(
     DEFAULT_COMPILER_PROFILE.normalizationProfileVersion,
     ADOPTED_NORMALIZATION_PROFILE_VERSION,

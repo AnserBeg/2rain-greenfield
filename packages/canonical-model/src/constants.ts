@@ -120,7 +120,9 @@ export function languageHasV3Features(
 ): languageVersion is 'v3' | 'v4' | 'v5' {
   const featureLevel =
     CANONICAL_LANGUAGE_PROFILES[languageVersion].featureLevel;
-  return featureLevel === 'v3' || featureLevel === 'v4' || featureLevel === 'v5';
+  return (
+    featureLevel === 'v3' || featureLevel === 'v4' || featureLevel === 'v5'
+  );
 }
 
 /** v4 admits the legal-entity query operand; no earlier version does. */

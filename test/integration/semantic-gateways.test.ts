@@ -704,7 +704,10 @@ test('a forged canonical reference never reaches the executor, at every position
     for (const [label, forged] of [
       // Only `kind` differs. Its version is this effect's own and its target is
       // this position's own.
-      ['kind names a different construct', { ...valid, kind: 'queryReference' }],
+      [
+        'kind names a different construct',
+        { ...valid, kind: 'queryReference' },
+      ],
       // Only the version differs, and by never having existed.
       [
         'version was never in the language',

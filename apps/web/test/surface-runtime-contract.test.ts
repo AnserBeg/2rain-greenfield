@@ -591,7 +591,10 @@ test('only the intent with a control per operation admits more than one', () => 
     /const commands = record\s*\?\s*\(context\.operations \?\? \[\]\)\.filter\(/u,
   );
   assert.match(registry, /const intent = record \? 'update' : 'create';/u);
-  assert.match(registry, /const intent = record\.archived \? 'restore' : 'archive';/u);
+  assert.match(
+    registry,
+    /const intent = record\.archived \? 'restore' : 'archive';/u,
+  );
 });
 
 /**
@@ -604,16 +607,14 @@ test('arity red: a permissive table and a re-imposed find are both observed', ()
     ...INTENT_RENDERED_ARITY,
     create: Number.POSITIVE_INFINITY,
   });
-  assert.throws(
-    () => {
-      for (const intent of ['archive', 'create', 'restore', 'update']) {
-        assert.equal(permissive[intent], 1, `${intent} is not singular`);
-      }
-    },
-    /create is not singular/u,
-  );
+  assert.throws(() => {
+    for (const intent of ['archive', 'create', 'restore', 'update']) {
+      assert.equal(permissive[intent], 1, `${intent} is not singular`);
+    }
+  }, /create is not singular/u);
 
-  const reImposed = 'const commands = record ? (context.operations ?? []).find(';
+  const reImposed =
+    'const commands = record ? (context.operations ?? []).find(';
   assert.doesNotMatch(
     reImposed,
     /const commands = record\s*\?\s*\(context\.operations \?\? \[\]\)\.filter\(/u,
