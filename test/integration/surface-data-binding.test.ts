@@ -1081,6 +1081,75 @@ test('two transitions on one entity bind as two commands, each addressable', asy
   );
 });
 
+/**
+ * THE CONFLICT RESOLUTION ITSELF, which the binding assertion above does not
+ * reach — REVISE round 2.
+ *
+ * That test stops at the premise: transitions arrive with `capabilityId: null`.
+ * The reviewer disproved it as evidence with the right instrument — revert
+ * `component-registry.ts` to either parent and it stays green. Restoring the
+ * `34f452e` half keeps `operationId` addressing while rendering "Draft staged"
+ * for both transitions; restoring the `eb02adf` half keeps the transition
+ * explanation while posting a shared `intent=command`. Neither revert is
+ * noticed, so neither half was under test.
+ *
+ * `renderCapabilityCommand` merged both halves, so both must be observed on
+ * the SAME rendered forms: the addressing (`34f452e`) and the effect-sensitive
+ * explanation (`eb02adf`). Each assertion below has a presence arm and an
+ * absence arm, because "the new thing is here" does not exclude "the old thing
+ * is also here" — which is precisely how a half-reverted merge stays green.
+ */
+test('the merged command bar renders both halves on the same two transition forms', async () => {
+  const compiled = compileFixture(twoTransitionPackage());
+  const policy = new RecordingPolicy('ALLOW');
+  const executor = new InMemoryGenericExecutor();
+  const recordId = executor.seed(tenantA, 'Draft');
+  const view = await issuedView(
+    runtimeEntry(compiled, policy, {
+      a: identity(tenantA, environmentA, principalA),
+    }),
+    'a',
+  );
+  const rendered = await renderSurfaceRuntimeWithData(
+    view,
+    `/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_record`)}&record=${encodeURIComponent(recordId)}`,
+    semanticGateways(policy, executor),
+  );
+  assert.equal(rendered.statusCode, 200);
+  const html = rendered.html;
+
+  const forms = [...html.matchAll(/<form class="capability-command"[\s\S]*?<\/form>/g)]
+    .map((match) => match[0]);
+  assert.equal(forms.length, 2, 'both transitions must render their own form');
+
+  const namespace = FIXTURE_IDS.namespace;
+  for (const action of ['cancel', 'release']) {
+    const operationId = `${namespace}:operation.master_${action}`;
+    const form = forms.find((candidate) => candidate.includes(operationId));
+    assert.ok(form, `no form addresses ${operationId}`);
+
+    // 34f452e's half: each form names its own operation on the wire...
+    assert.match(
+      form,
+      new RegExp(`<input type="hidden" name="operationId" value="${operationId}">`),
+    );
+    // ...and the shared intent addressing it replaced is gone. Without this
+    // arm, a form carrying BOTH would pass — and both is what a partial
+    // revert produces.
+    assert.doesNotMatch(form, /name="intent"/);
+
+    // eb02adf's half: a transition stages no draft, so it must not claim to.
+    assert.match(form, /<strong>Ready\.<\/strong> This moves the record to its next state\./);
+    assert.doesNotMatch(form, /Draft staged/);
+  }
+
+  // Distinct labels and deterministic order, on the rendered page rather than
+  // on the binding: the two controls must be separately pressable, not merely
+  // separately addressable.
+  const labels = forms.map((form) => /<button type="submit">([^<]+)<\/button>/.exec(form)?.[1]);
+  assert.deepEqual(labels, ['Cancel', 'Release']);
+});
+
 /** `ordinaryModuleV1` restamped at v5, carrying a two-transition machine. */
 function twoTransitionPackage(): Record<string, unknown> {
   const version = 'v5';
@@ -1105,6 +1174,27 @@ function twoTransitionPackage(): Record<string, unknown> {
   };
   const definition = restamp(ordinaryModuleV1()) as Record<string, unknown>;
   definition.languageVersion = version;
+
+  // The record surface needs a command bar for the two transitions to have
+  // anywhere to render. `entitySurfaces` gives each surface one slot.
+  const recordSurface = (definition.surfaces as Array<Record<string, unknown>>)
+    .find(
+      (surface) =>
+        surface.surfaceId === `${FIXTURE_IDS.namespace}:surface.master_record`,
+    );
+  assert.ok(recordSurface && Array.isArray(recordSurface.slots));
+  recordSurface.slots.push({
+    content: {
+      kind: 'opaqueSurfaceContentReference',
+      schemaVersion: version,
+      targetId: FIXTURE_IDS.contentCapabilityId,
+    },
+    kind: 'surfaceSlot',
+    orderKey: 20,
+    schemaVersion: version,
+    slot: 'commandBar',
+    slotId: `${FIXTURE_IDS.namespace}:slot.master_record_command_bar`,
+  });
 
   const namespace = FIXTURE_IDS.namespace;
   const entityId = FIXTURE_IDS.entityIds.parent;
