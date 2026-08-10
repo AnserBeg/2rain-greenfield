@@ -55,6 +55,38 @@ export type CompiledSurfaceRole = (typeof surfaceRoles)[number];
 export type SurfaceOperationIntent =
   'archive' | 'command' | 'create' | 'restore' | 'update';
 
+/**
+ * How many operations of an intent a surface may bind, and the reason is a
+ * fact about the control that carries them rather than a preference.
+ *
+ * A submission names its operation, so dispatch no longer needs the intent to
+ * be unique. What is still not general is the CONTROL: four of the five
+ * intents are rendered by a single control whose identity is fixed by
+ * something other than the operation -- `create` and `update` by the form
+ * role's one Save button, `archive` and `restore` by whether the record is
+ * archived. A second operation on any of those has nowhere to render, so it
+ * stays refused BY NAME rather than binding invisibly.
+ *
+ * `command` is the exception because each command renders its own named
+ * button, which is the whole reason this limit lifted.
+ *
+ * **This is arity, not order.** ux-grammar's *"command bar orders the primary
+ * action first; destructive actions live behind the overflow"* needs an
+ * authored signal saying which command is primary, and the operation catalog
+ * carries none -- `operationDefinition` has no `orderKey`. Commands therefore
+ * render in a deterministic order that is not yet a meaningful one; the
+ * grammar owns that gap and this constant does not paper over it.
+ */
+export const INTENT_RENDERED_ARITY: Readonly<
+  Record<SurfaceOperationIntent, number>
+> = Object.freeze({
+  archive: 1,
+  command: Number.POSITIVE_INFINITY,
+  create: 1,
+  restore: 1,
+  update: 1,
+});
+
 export interface CompiledSurfaceSlot {
   readonly contentReferenceId: string;
   // Absent under every profile version that does not emit it, which today is
@@ -141,8 +173,16 @@ export class SurfaceProjectionError extends Error {
 
 /**
  * Resolves a surface's semantic read/write binding exclusively from the
- * request-pinned projections. Operation IDs are never selected by browser
- * input and physical storage metadata is not part of this contract.
+ * request-pinned projections. Physical storage metadata is not part of this
+ * contract.
+ *
+ * **Browser input selects an operation id; it does not authorize one or widen
+ * the set.** Corrected 2026-08-08: this said *"Operation IDs are never
+ * selected by browser input"*, which stopped being true the moment a
+ * submission started naming its operation — directly above the reader that
+ * produces the set it names from. The set is built here, from the pinned
+ * catalog alone, and `submitSurfaceRuntimeIntent` may only pick a member of
+ * it.
  */
 export function readCompiledSurfaceDataBinding(
   view: RuntimeViewContract.RequestRuntimeView,
@@ -196,10 +236,8 @@ export function readCompiledSurfaceDataBinding(
     throw invalidBinding('pinned operation catalog has an invalid envelope');
   }
 
-  const byIntent = new Map<
-    SurfaceOperationIntent,
-    CompiledSurfaceOperationBinding
-  >();
+  const byOperationId = new Map<string, CompiledSurfaceOperationBinding>();
+  const intentCount = new Map<SurfaceOperationIntent, number>();
   for (const value of payload.operations) {
     const operation = parseOperationBinding(value);
     const entityId =
@@ -209,18 +247,20 @@ export function readCompiledSurfaceDataBinding(
     if (operation.lifecycle !== 'active' || entityId !== query.sourceEntityId) {
       continue;
     }
-    // KNOWN LIMIT, declared rather than silent: one operation per intent, so
-    // an entity carrying two named transitions (a release AND a cancel) binds
-    // neither and refuses by name. Rendering a list of named actions is a
-    // surface-design question this contract does not answer, and it is owed
-    // before a document with more than one transition reaches a surface.
-    if (byIntent.has(operation.intent)) {
+    // The KNOWN LIMIT comment that stood here is deleted rather than moved:
+    // it said an entity carrying a release AND a cancel "binds neither and
+    // refuses by name", and named the rendering question as owed. That is what
+    // this packet answered. `command` now admits many; the other four still
+    // refuse, and INTENT_RENDERED_ARITY carries the reason.
+    const bound = (intentCount.get(operation.intent) ?? 0) + 1;
+    if (bound > INTENT_RENDERED_ARITY[operation.intent]) {
       throw invalidBinding(
         `surface entity has more than one active ${operation.tier} ${operation.intent} operation`,
       );
     }
-    byIntent.set(
-      operation.intent,
+    intentCount.set(operation.intent, bound);
+    byOperationId.set(
+      operation.operationId,
       Object.freeze({
         capabilityId: operation.capabilityId,
         confirmation: operation.confirmation,
@@ -234,9 +274,16 @@ export function readCompiledSurfaceDataBinding(
 
   return Object.freeze({
     displayFieldId: displayFieldIdFromPinnedQueries(view, query),
+    // Intent first so the four single-control intents keep the order every
+    // existing expectation was written against, then operation id, which is
+    // the only ordering signal the catalog carries -- `operationDefinition`
+    // declares no `orderKey`. Deterministic, and NOT the grammar's
+    // primary-action-first rule: see INTENT_RENDERED_ARITY.
     operations: Object.freeze(
-      [...byIntent.values()].sort((left, right) =>
-        left.intent.localeCompare(right.intent),
+      [...byOperationId.values()].sort(
+        (left, right) =>
+          left.intent.localeCompare(right.intent) ||
+          left.operationId.localeCompare(right.operationId),
       ),
     ),
     query,

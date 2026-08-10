@@ -32,7 +32,10 @@ import {
 } from '../src/component-registry.js';
 import { readDemoCompiledFixture } from '../src/demo-runtime.js';
 import { renderSurfaceRuntime } from '../src/surface-runtime.js';
-import { readCompiledSurfaceManifest } from '../src/surface-contract.js';
+import {
+  INTENT_RENDERED_ARITY,
+  readCompiledSurfaceManifest,
+} from '../src/surface-contract.js';
 import { compiledFixturePath, demoEntry, webRoot } from './helpers.js';
 
 test('checked-in shell artifact is parse-normalized deterministic compiler output', () => {
@@ -550,6 +553,71 @@ test('the rendered-text gate never obtains its expected string from the renderer
     );
   }
   assert.ok(gate.includes('SURFACE_MESSAGE_CATALOG'));
+});
+
+/**
+ * `INTENT_RENDERED_ARITY` decides which intents still refuse a second
+ * operation, so it is the one place a lifted limit could quietly become a
+ * lifted-for-everything limit. The browser gate observes the refusal firing;
+ * this pins the arity that produces it, and each entry is asserted against the
+ * renderer it claims as its authority. A new intent added without a rendering
+ * decision fails on the key list.
+ */
+test('only the intent with a control per operation admits more than one', () => {
+  assert.equal(Object.isFrozen(INTENT_RENDERED_ARITY), true);
+  assert.deepEqual(Object.keys(INTENT_RENDERED_ARITY).sort(), [
+    'archive',
+    'command',
+    'create',
+    'restore',
+    'update',
+  ]);
+
+  // One Save button per form surface; one lifecycle button per archived state.
+  for (const intent of ['archive', 'create', 'restore', 'update'] as const) {
+    assert.equal(INTENT_RENDERED_ARITY[intent], 1, `${intent} is not singular`);
+  }
+  // One named button per command, which is the whole reason the limit lifted.
+  assert.equal(INTENT_RENDERED_ARITY.command, Number.POSITIVE_INFINITY);
+
+  // The renderers those arities name as their authority. A `find` restored in
+  // the command bar would re-impose the limit while this table still said it
+  // had lifted -- drift the browser gate reads as a fixture problem, not a
+  // product one. This is a SOURCE SCAN and therefore a proxy; the browser gate
+  // observes the two controls actually rendering.
+  const registry = readFileSync(`${webRoot}/src/component-registry.ts`, 'utf8');
+  assert.match(
+    registry,
+    /const commands = record\s*\?\s*\(context\.operations \?\? \[\]\)\.filter\(/u,
+  );
+  assert.match(registry, /const intent = record \? 'update' : 'create';/u);
+  assert.match(registry, /const intent = record\.archived \? 'restore' : 'archive';/u);
+});
+
+/**
+ * AGENTS.md §6's vacuity vectors for the check above, both run in-process
+ * against copies because the product cannot hold either shape and stay green:
+ * a table gone permissive, and a proxy satisfied while the fact does not hold.
+ */
+test('arity red: a permissive table and a re-imposed find are both observed', () => {
+  const permissive: Readonly<Record<string, number>> = Object.freeze({
+    ...INTENT_RENDERED_ARITY,
+    create: Number.POSITIVE_INFINITY,
+  });
+  assert.throws(
+    () => {
+      for (const intent of ['archive', 'create', 'restore', 'update']) {
+        assert.equal(permissive[intent], 1, `${intent} is not singular`);
+      }
+    },
+    /create is not singular/u,
+  );
+
+  const reImposed = 'const commands = record ? (context.operations ?? []).find(';
+  assert.doesNotMatch(
+    reImposed,
+    /const commands = record\s*\?\s*\(context\.operations \?\? \[\]\)\.filter\(/u,
+  );
 });
 
 function projectionRecord(

@@ -29,8 +29,141 @@ test('SurfaceRuntime data binding has no module or surface-specific branch', () 
   assert.match(joined, /queryGateway\.invoke/);
   assert.match(joined, /operationGateway\.invoke/);
   assert.match(joined, /operationId:\s*operation\.operationId/);
-  assert.doesNotMatch(joined, /submission\.operationId/);
+
+  // RE-PINNED by `pur1-intent-limit`. This line read
+  // `assert.doesNotMatch(joined, /submission\.operationId/)` -- a ban on the
+  // wire FIELD, which was a sufficient condition for the property it guards
+  // and stopped being a necessary one. Two commands on one surface cannot be
+  // told apart unless the browser names which control was pressed, so the
+  // field ban refuses a correct implementation along with the bad ones.
+  //
+  // The property is unchanged and is now pinned directly: the browser SELECTS
+  // within the compiled binding and never NAMES the operation the gateway
+  // runs. So every read of the posted id must be the comparison that looks it
+  // up in `binding.operations`, and the id handed to the gateway must be the
+  // RESOLVED operation's -- which the assertion above already requires.
+  assert.match(joined, /binding\.operations\.find\(/);
+  assertPostedIdOnlySelects(joined);
 });
+
+/**
+ * A CHEAP RATCHET, and explicitly not what the property rests on — ADR-0051 §4.
+ *
+ * Narrowing this scan to the property left it a source scan, and a source scan
+ * stays green against `submission.selectorBypass === '1' ? operations[0] :
+ * find(...)`: the compliant comparison is still written. The property is now
+ * held structurally by `semanticOperationRequestFor`, whose argument list has
+ * no submission in it, and which is tested directly. This check remains
+ * because it is nearly free and catches the careless case early.
+ */
+function assertPostedIdOnlySelects(source: string): void {
+  const postedIdReads = source
+    .split('\n')
+    .filter((line) => line.includes('submission.operationId'));
+  assert.ok(
+    postedIdReads.length > 0,
+    'the posted operation id is never read, so this check proves nothing',
+  );
+  for (const line of postedIdReads) {
+    // Handing it to the selector is the only admissible read. The comparison
+    // itself moved inside `boundOperation` when the boundary became
+    // structural, and this predicate still demanded the old inline shape --
+    // which is how the sweep red'd on its own refactor rather than on a
+    // defect. A ratchet that describes a superseded structure is a ratchet
+    // that will be edited to fit rather than consulted.
+    assert.match(
+      line,
+      /boundOperation\(\s*binding,\s*submission\.operationId\s*\)/,
+      `the posted id is read outside the selector call: ${line.trim()}`,
+    );
+  }
+}
+
+/**
+ * The vacuity controls for the ratchet, both running the PRODUCTION predicate
+ * against their specimen rather than re-implementing it. The empty-read arm
+ * previously asserted its own specimen had zero reads and never called
+ * `assertPostedIdOnlySelects`, so it never observed the `length > 0` guard
+ * firing — it proved a property of the fixture, not of the check.
+ */
+test('binding-authority red: a passed-onward id and a never-read id are both observed', () => {
+  const passing = 'const operation = boundOperation(binding, submission.operationId);';
+
+  // The arm that shows the predicate can pass, asserted FIRST so the three
+  // reds below cannot be a check that simply refuses everything.
+  assertPostedIdOnlySelects(passing);
+
+  assert.throws(
+    () =>
+      assertPostedIdOnlySelects(
+        `${passing}\nconst result = await gateways.operationGateway.invoke(view, {\n  operationId: submission.operationId,\n});`,
+      ),
+    /read outside the selector call: operationId: submission\.operationId/,
+  );
+
+  // A source that never reads the posted id must not satisfy the check by
+  // quantifying over an empty list.
+  assert.throws(
+    () =>
+      assertPostedIdOnlySelects(
+        'const operation = binding.operations.find(() => true);',
+      ),
+    /the posted operation id is never read/,
+  );
+
+  // WHAT THIS RATCHET CANNOT PROVE, asserted rather than described.
+  //
+  // ADR-0051 §4's bypass, written on ONE line with the compliant selector
+  // call, PASSES. A line-oriented scan sees a line containing
+  // `boundOperation(binding, submission.operationId)` and is satisfied, while
+  // the ternary in front of it hands an unbound posted id straight to
+  // `operations[0]`.
+  //
+  // This is asserted green on purpose. An earlier draft of this file claimed
+  // the ratchet caught this shape; it does not, and the claim red'd here
+  // rather than in a review. Locking the limit in place means strengthening
+  // the scan later has to change this line deliberately, and means no reader
+  // mistakes the ratchet for the guarantee.
+  //
+  // The guarantee is structural and lives in the test below:
+  // `semanticOperationRequestFor` has no submission in its argument list, so
+  // the request cannot carry a posted id no matter what the caller resolved.
+  assertPostedIdOnlySelects(
+    "const operation = submission.selectorBypass === '1' ? binding.operations[0] : boundOperation(binding, submission.operationId) ?? binding.operations[0];",
+  );
+});
+
+/**
+ * ADR-0051 §4's structural half, asserted where it lives: the one construction
+ * site for a gateway request cannot see the wire and does not spread, and the
+ * selector can reach nothing but the binding.
+ */
+test('the gateway request is built where the submission is not in scope', () => {
+  const runtime = readFileSync(
+    resolve('apps/web/src/surface-runtime.ts'),
+    'utf8',
+  );
+
+  const request = functionBody(runtime, 'export function semanticOperationRequestFor(');
+  assert.doesNotMatch(request, /submission/);
+  assert.doesNotMatch(request, /\.\.\./);
+  assert.match(request, /operationId: operation\.operationId/);
+
+  const selector = functionBody(runtime, 'function boundOperation(');
+  assert.doesNotMatch(selector, /submission/);
+  assert.match(selector, /binding\.operations\.find\(/);
+  assert.match(selector, /candidate\.operationId === postedOperationId/);
+});
+
+/** Source from a declaration to its first column-zero closing brace. */
+function functionBody(source: string, declaration: string): string {
+  const start = source.indexOf(declaration);
+  assert.notEqual(start, -1, `${declaration} is absent`);
+  const rest = source.slice(start);
+  const end = rest.indexOf('\n}\n');
+  assert.notEqual(end, -1, `${declaration} has no closing brace`);
+  return rest.slice(0, end + 3);
+}
 
 test('apps/web has no PostgreSQL, SQL, provider, or direct database access', () => {
   for (const file of webSource) {

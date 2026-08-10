@@ -22,6 +22,8 @@ import {
   SEMANTIC_OPERATION_RESULT_VERSION,
   SemanticOperationGateway,
   SemanticOperationMediationAuthority,
+  type RegisteredCapabilityOperationExecutionRequest,
+  type RegisteredCapabilityOperationExecutor,
   type SemanticOperationExecutionRequest,
   type SemanticOperationExecutor,
   type SemanticOperationNonAcceptedRequest,
@@ -47,6 +49,7 @@ import {
 } from '../../../../packages/runtime/src/request-runtime-view.js';
 import {
   FIXTURE_IDS,
+  FIXTURE_LANGUAGE_VERSION,
   ordinaryModuleV1,
 } from '../../../../test/fixtures/g2/module-conformance/definitions.js';
 import { createSurfaceRuntimeServer } from '../../src/app-server.js';
@@ -373,6 +376,278 @@ test('an invalid selected-surface binding remains page-level before slot composi
   }
 });
 
+/**
+ * Records which capability actually executed, and writes it into the record so
+ * the answer is READ BACK FROM THE PAGE rather than asked of the test. A test
+ * that only asserted "two buttons exist" would have passed against the
+ * defect this closes: two controls that both invoke the same operation.
+ */
+/**
+ * The packet's evidence: a RENDERED command bar with two operable controls,
+ * each dispatching its own operation.
+ *
+ * The second assertion is the one that matters. Before this change
+ * `submitSurfaceRuntimeIntent` resolved `intent -> the first operation
+ * carrying it`, so two buttons both posting `intent=command` would both run
+ * whichever sorted first. Counting controls would not have caught that; the
+ * page has to say which one ran.
+ */
+test('a record command bar renders every granted command as its own operable control', async ({
+  page,
+}) => {
+  const compiled = compileFixture(true, false, pushCommandOperations);
+  const policy = allowPolicy();
+  const executor = new BrowserFixtureExecutor();
+  const recordId = executor.createSeed('Two-command master');
+  const capabilityExecutors = COMMAND_ACTIONS.map(
+    (action) =>
+      new RecordingCapabilityExecutor(commandCapabilityId(action), executor),
+  );
+  const operationMediation = new SemanticOperationMediationAuthority();
+  const commandServer = createSurfaceRuntimeServer(
+    runtimeEntry(compiled, policy),
+    {
+      operationGateway: new SemanticOperationGateway(
+        policy,
+        executor,
+        operationMediation,
+        undefined,
+        capabilityExecutors,
+      ),
+      operationMediation,
+      queryGateway: new SemanticQueryGateway(policy, executor),
+    },
+  );
+  const commandBaseUrl = await listen(commandServer);
+
+  try {
+    await page.setExtraHTTPHeaders({ authorization: 'fixture-user' });
+    await page.goto(
+      `${commandBaseUrl}/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_record`)}&record=${encodeURIComponent(recordId)}`,
+    );
+
+    const commandBar = page.locator(
+      '[data-platform-slot="record:commandBar"] .command-bar',
+    );
+    await expect(commandBar).toBeVisible();
+    const commands = commandBar.locator('form.capability-command');
+    await expect(commands).toHaveCount(2);
+
+    // Operable, not merely present: two enabled submit controls carrying
+    // distinct accessible names, each naming its own operation on the wire.
+    const cancel = commandBar.locator(
+      `form.capability-command[data-operation-id="${commandOperationId('cancel')}"]`,
+    );
+    const release = commandBar.locator(
+      `form.capability-command[data-operation-id="${commandOperationId('release')}"]`,
+    );
+    await expect(cancel.getByRole('button', { name: 'Cancel' })).toBeEnabled();
+    await expect(release.getByRole('button', { name: 'Release' })).toBeEnabled();
+    await expect(
+      cancel.locator('input[name="operationId"]'),
+    ).toHaveValue(commandOperationId('cancel'));
+    await expect(
+      release.locator('input[name="operationId"]'),
+    ).toHaveValue(commandOperationId('release'));
+
+    // Press the SECOND control. Under the old dispatch this ran the first.
+    await release.getByRole('button', { name: 'Release' }).click();
+    await expect(page.getByRole('status')).toContainText('Release complete');
+    await expect(page.locator('[data-platform-slot="record:keyFacts"]')).toContainText(
+      `ran ${commandCapabilityId('release')}`,
+    );
+    assert.deepEqual(
+      capabilityExecutors.map((candidate) => candidate.executed),
+      [[commandOperationId('release')], []],
+    );
+
+    // And the first control still reaches the first operation.
+    await release.page().goBack();
+    await commandBar
+      .locator(
+        `form.capability-command[data-operation-id="${commandOperationId('cancel')}"]`,
+      )
+      .getByRole('button', { name: 'Cancel' })
+      .click();
+    await expect(page.getByRole('status')).toContainText('Cancel complete');
+    assert.deepEqual(
+      capabilityExecutors.map((candidate) => candidate.executed),
+      [[commandOperationId('release')], [commandOperationId('cancel')]],
+    );
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      commandServer.close((error) => (error ? reject(error) : resolve()));
+    });
+  }
+});
+
+/**
+ * The limit lifted for `command` and stayed for the other four, so both halves
+ * are asserted. Without the second, "admit two commands" is satisfiable by
+ * admitting everything -- which is the quiet permissiveness this packet was
+ * told is worse than the limit.
+ */
+test('an intent rendered by one control still refuses a second operation by name', async ({
+  page,
+}) => {
+  const compiled = compileFixture(true, false, pushDuplicateCreate);
+  const policy = allowPolicy();
+  const duplicateExecutor = new BrowserFixtureExecutor();
+  const operationMediation = new SemanticOperationMediationAuthority();
+  const duplicateServer = createSurfaceRuntimeServer(
+    runtimeEntry(compiled, policy),
+    {
+      operationGateway: new SemanticOperationGateway(
+        policy,
+        duplicateExecutor,
+        operationMediation,
+      ),
+      operationMediation,
+      queryGateway: new SemanticQueryGateway(policy, duplicateExecutor),
+    },
+  );
+  const duplicateBaseUrl = await listen(duplicateServer);
+
+  try {
+    await page.setExtraHTTPHeaders({ authorization: 'fixture-user' });
+    const response = await page.goto(
+      `${duplicateBaseUrl}/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_record`)}`,
+    );
+    expect(response?.status()).toBe(422);
+    await expect(
+      page.locator(
+        '.standalone__card[role="alert"][data-diagnostic-code="QUERY_UNSUPPORTED"]',
+      ),
+    ).toBeVisible();
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      duplicateServer.close((error) => (error ? reject(error) : resolve()));
+    });
+  }
+});
+
+/**
+ * The property the old dispatch got for free and this one must assert: the
+ * compiled binding is still the sole authority for what is invocable. The wire
+ * now SELECTS within that set; it may not add to it.
+ */
+test('a posted operation id outside the surface binding is refused', async ({
+  page,
+}) => {
+  const compiled = compileFixture(true, false, pushCommandOperations);
+  const policy = allowPolicy();
+  const executor = new BrowserFixtureExecutor();
+  const recordId = executor.createSeed('Binding authority master');
+  const capabilityExecutors = COMMAND_ACTIONS.map(
+    (action) =>
+      new RecordingCapabilityExecutor(commandCapabilityId(action), executor),
+  );
+  const operationMediation = new SemanticOperationMediationAuthority();
+  const authorityServer = createSurfaceRuntimeServer(
+    runtimeEntry(compiled, policy),
+    {
+      operationGateway: new SemanticOperationGateway(
+        policy,
+        executor,
+        operationMediation,
+        undefined,
+        capabilityExecutors,
+      ),
+      operationMediation,
+      queryGateway: new SemanticQueryGateway(policy, executor),
+    },
+  );
+  const authorityBaseUrl = await listen(authorityServer);
+
+  try {
+    await page.setExtraHTTPHeaders({ authorization: 'fixture-user' });
+    const surfaceUrl = `${authorityBaseUrl}/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_record`)}`;
+    for (const operationId of [
+      // Registered in the release, bound to the OTHER entity's surface.
+      `${FIXTURE_IDS.namespace}:operation.master_role_update`,
+      // Not registered at all.
+      `${FIXTURE_IDS.namespace}:operation.master_forged`,
+      // Absent entirely -- the old wire vocabulary is not a fallback.
+      '',
+    ]) {
+      const refused = await page.request.post(surfaceUrl, {
+        form: {
+          expectedRevision: '1',
+          idempotencyKey: randomUUID(),
+          // Posted deliberately: the retired wire vocabulary must not be a
+          // fallback that resurrects the old intent-keyed resolution.
+          intent: 'command',
+          operationId,
+          recordId,
+        },
+        headers: { authorization: 'fixture-user' },
+      });
+      expect(refused.status()).toBe(422);
+      expect(await refused.text()).toContain('OPERATION_UNSUPPORTED');
+    }
+    assert.deepEqual(
+      capabilityExecutors.flatMap((candidate) => candidate.executed),
+      [],
+    );
+
+    // The companion that makes the three refusals mean something. Without it
+    // this test is satisfied by a surface that refuses EVERYTHING -- which is
+    // exactly what the pre-change binding does with two commands bound, so the
+    // refusals alone would pass against the defect.
+    const accepted = await page.request.post(surfaceUrl, {
+      form: {
+        expectedRevision: '1',
+        idempotencyKey: randomUUID(),
+        operationId: commandOperationId('release'),
+        recordId,
+      },
+      headers: { authorization: 'fixture-user' },
+    });
+    expect(accepted.status()).toBe(200);
+    assert.deepEqual(
+      capabilityExecutors.flatMap((candidate) => candidate.executed),
+      [commandOperationId('release')],
+    );
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      authorityServer.close((error) => (error ? reject(error) : resolve()));
+    });
+  }
+});
+
+class RecordingCapabilityExecutor
+  implements RegisteredCapabilityOperationExecutor
+{
+  readonly executed: string[] = [];
+
+  constructor(
+    readonly capabilityId: string,
+    private readonly records: BrowserFixtureExecutor,
+  ) {}
+
+  async execute(
+    request: RegisteredCapabilityOperationExecutionRequest,
+  ): Promise<SemanticOperationResultEnvelope> {
+    this.executed.push(request.definition.operationId);
+    const input = request.input as Readonly<Record<string, ImmutableJsonValue>>;
+    const stored = this.records.stamp(String(input.recordId), this.capabilityId);
+    return {
+      kind: 'semanticOperationResult',
+      operationId: request.definition.operationId,
+      outcome: 'succeeded',
+      readBack: stored,
+      schemaVersion: SEMANTIC_OPERATION_RESULT_VERSION,
+      trust: {
+        changeDocumentId: randomUUID(),
+        domainEventId: randomUUID(),
+        invocationId: randomUUID(),
+        outboxId: randomUUID(),
+      },
+      unsupportedReason: null,
+    };
+  }
+}
+
 class BrowserFixtureExecutor
   implements SemanticQueryExecutor, SemanticOperationExecutor
 {
@@ -384,6 +659,22 @@ class BrowserFixtureExecutor
     const recordId = randomUUID();
     this.records.set(recordId, dto(recordId, name));
     return recordId;
+  }
+
+  /** Names the capability that ran, on the record, where the page will show it. */
+  stamp(recordId: string, capabilityId: string): SemanticRecordDto {
+    const previous = this.records.get(recordId);
+    assert.ok(previous);
+    const stored: SemanticRecordDto = Object.freeze({
+      ...previous,
+      revision: previous.revision + 1,
+      values: Object.freeze({
+        ...previous.values,
+        [FIXTURE_IDS.fieldIds.parentName]: `ran ${capabilityId}`,
+      }) as Readonly<Record<string, ImmutableJsonValue>>,
+    });
+    this.records.set(recordId, stored);
+    return stored;
   }
 
   async recordNonAccepted(
@@ -636,11 +927,108 @@ function decode(value: ContentAddressedArtifact): Record<string, unknown> {
   return decoded;
 }
 
+/**
+ * Two `command` operations on one entity -- the `PUR-1` shape (a release AND a
+ * cancel) expressed in a fixture rather than a module, so this needs no
+ * purchasing entity, no mount and no language cut.
+ *
+ * They are registered capabilities rather than state transitions only because
+ * `transitionStateEffect` does not yet map to `command` on this base; both
+ * effect kinds bind to the same intent, so the mechanism under test is the
+ * same one `PUR-1` will hit.
+ */
+const COMMAND_ACTIONS = Object.freeze(['release', 'cancel'] as const);
+
+function commandCapabilityId(action: string): string {
+  return `${FIXTURE_IDS.namespace}:capability.master_${action}`;
+}
+
+function commandOperationId(action: string): string {
+  return `${FIXTURE_IDS.namespace}:operation.master_${action}`;
+}
+
+/** A second operation on an intent rendered by ONE control, which stays refused. */
+function pushDuplicateCreate(authored: Record<string, unknown>): void {
+  const operations = authored.operations as Array<Record<string, unknown>>;
+  const create = operations.find(
+    (operation) =>
+      operation.operationId === `${FIXTURE_IDS.namespace}:operation.master_create`,
+  );
+  assert.ok(create);
+  operations.push({
+    ...create,
+    operationId: `${FIXTURE_IDS.namespace}:operation.master_create_alternate`,
+  });
+}
+
+function pushCommandOperations(authored: Record<string, unknown>): void {
+  (authored.capabilityRequirements as unknown[]).push(
+    ...COMMAND_ACTIONS.map((action) => ({
+      capabilityId: commandCapabilityId(action),
+      capabilityVersion: 1,
+      declaredEffects: ['recordMutation'],
+      kind: 'capabilityRequirement',
+      requiredProjections: ['operation'],
+      schemaVersion: FIXTURE_LANGUAGE_VERSION,
+      supportStatus: 'supported',
+    })),
+  );
+  (authored.permissions as unknown[]).push(
+    ...COMMAND_ACTIONS.map((action) => ({
+      action: 'update',
+      kind: 'permissionDefinition',
+      label: `master ${action}`,
+      permissionId: `${FIXTURE_IDS.namespace}:permission.master_${action}`,
+      resource: {
+        kind: 'entityReference',
+        schemaVersion: FIXTURE_LANGUAGE_VERSION,
+        targetId: FIXTURE_IDS.entityIds.parent,
+      },
+      schemaVersion: FIXTURE_LANGUAGE_VERSION,
+    })),
+  );
+  (authored.operations as unknown[]).push(
+    ...COMMAND_ACTIONS.map((action) => ({
+      confirmation: 'none',
+      effect: {
+        capability: {
+          kind: 'capabilityReference',
+          schemaVersion: FIXTURE_LANGUAGE_VERSION,
+          targetId: commandCapabilityId(action),
+        },
+        kind: 'registeredCapabilityEffect',
+        schemaVersion: FIXTURE_LANGUAGE_VERSION,
+      },
+      kind: 'operationDefinition',
+      module: {
+        kind: 'moduleReference',
+        schemaVersion: FIXTURE_LANGUAGE_VERSION,
+        targetId: FIXTURE_IDS.moduleId,
+      },
+      operationId: commandOperationId(action),
+      permission: {
+        kind: 'permissionReference',
+        schemaVersion: FIXTURE_LANGUAGE_VERSION,
+        targetId: `${FIXTURE_IDS.namespace}:permission.master_${action}`,
+      },
+      readBack: {
+        kind: 'queryReference',
+        schemaVersion: FIXTURE_LANGUAGE_VERSION,
+        targetId: `${FIXTURE_IDS.namespace}:query.master_get`,
+      },
+      schemaVersion: FIXTURE_LANGUAGE_VERSION,
+      tier: 'o1',
+    })),
+  );
+}
+
 function compileFixture(
   withPartialAnatomy = true,
   withInvalidFormBinding = false,
+  amend?: (authored: Record<string, unknown>) => void,
 ): CompileSuccess {
   const authored = ordinaryModuleV1();
+  amend?.(authored);
   const surfaces = authored.surfaces as Array<Record<string, unknown>>;
   if (withPartialAnatomy) {
     for (const surface of surfaces) {
