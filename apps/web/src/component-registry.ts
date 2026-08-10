@@ -25,12 +25,30 @@ import type {
   SurfaceOperationIntent,
 } from './surface-contract.js';
 
+export interface RecordPickerOption {
+  readonly label: string;
+  readonly recordId: string;
+}
+
+/**
+ * One relation control on a create form. `options` is `null` when the target
+ * entity could not be enumerated at all — distinct from an empty array, which
+ * means the target exists and currently holds no records.
+ */
+export interface RelationPicker {
+  readonly options: readonly RecordPickerOption[] | null;
+  readonly relationId: string;
+  readonly required: boolean;
+  readonly targetEntityId: string | null;
+}
+
 export interface SurfaceComponentContext {
   readonly data?: SurfaceDataRenderState;
   readonly feedback?: SurfaceOperationFeedback | null;
   readonly legalEntitySelection?: readonly string[];
   readonly operations?: readonly CompiledSurfaceOperationBinding[];
   readonly queryParameterValues?: Readonly<Record<string, string>>;
+  readonly relationPickers?: readonly RelationPicker[];
   readonly slot: CompiledSurfaceSlot;
   readonly surface: CompiledSurfaceDefinition;
   readonly surfaces?: readonly CompiledSurfaceDefinition[];
@@ -709,6 +727,28 @@ function renderSections(context: SurfaceComponentContext): string {
       'sections-slot',
     );
   }
+  const pickers = context.relationPickers ?? [];
+  // ADR-0052: a required relation with no resolvable picker makes the form
+  // unsatisfiable, so it refuses instead of rendering controls whose submission
+  // the provider is certain to reject. The missing thing really is a semantic
+  // data capability — no pinned list query enumerates the target entity — which
+  // is why this reuses QUERY_UNSUPPORTED rather than minting a code. The reuse
+  // is declared, not silent: the sentence does not name which capability is
+  // absent, and that imprecision is routed as `relation-refusal-unnamed`.
+  if (
+    intent === 'create' &&
+    pickers.some((picker) => picker.required && picker.options === null)
+  ) {
+    return slotPanel(
+      context,
+      dataDiagnostic('QUERY_UNSUPPORTED'),
+      'sections-slot',
+    );
+  }
+  const relationControls =
+    intent === 'create'
+      ? pickers.map((picker) => renderRelationPicker(picker)).join('')
+      : relationFreezeDisclosure(pickers);
   const recordId = record?.recordId ?? randomUUID();
   const compatibilityFeedback = hasSurfaceSlot(context, 'titleStatus')
     ? ''
@@ -718,9 +758,50 @@ function renderSections(context: SurfaceComponentContext): string {
     : '<button type="submit">Save</button>';
   return slotPanel(
     context,
-    `${compatibilityFeedback}<section class="panel data-panel" data-data-state="${record ? 'exact' : 'empty'}"><div class="panel__heading"><div><p class="eyebrow">Details</p><h2>${record ? 'Update the record' : 'Create a record'}</h2></div></div><form id="surface-record-form" method="post" action="/?surface=${encodeURIComponent(context.surface.surfaceId)}"><input type="hidden" name="intent" value="${intent}"><input type="hidden" name="idempotencyKey" value="${randomUUID()}"><input type="hidden" name="recordId" value="${escapeHtml(recordId)}">${record ? `<input type="hidden" name="expectedRevision" value="${record.revision}">` : ''}<div class="form-fields">${context.surface.fieldIds.map((fieldId) => `<label><span>${escapeHtml(fieldLabel(fieldId))}</span><input name="value:${escapeHtml(fieldId)}" value="${record ? renderInputValue(record.values[fieldId]) : ''}" autocomplete="off"></label>`).join('')}</div>${compatibilityCommand}</form></section>`,
+    `${compatibilityFeedback}<section class="panel data-panel" data-data-state="${record ? 'exact' : 'empty'}"><div class="panel__heading"><div><p class="eyebrow">Details</p><h2>${record ? 'Update the record' : 'Create a record'}</h2></div></div><form id="surface-record-form" method="post" action="/?surface=${encodeURIComponent(context.surface.surfaceId)}"><input type="hidden" name="intent" value="${intent}"><input type="hidden" name="idempotencyKey" value="${randomUUID()}"><input type="hidden" name="recordId" value="${escapeHtml(recordId)}">${record ? `<input type="hidden" name="expectedRevision" value="${record.revision}">` : ''}<div class="form-fields">${context.surface.fieldIds.map((fieldId) => `<label><span>${escapeHtml(fieldLabel(fieldId))}</span><input name="value:${escapeHtml(fieldId)}" value="${record ? renderInputValue(record.values[fieldId]) : ''}" autocomplete="off"></label>`).join('')}${relationControls}</div>${compatibilityCommand}</form></section>`,
     'sections-slot',
   );
+}
+
+/**
+ * A server-rendered `<select>`. ADR-0036 section 2 authorises four client
+ * behaviours and this needs none of them: it carries no script, so it works
+ * under the platform's minimum client capability unchanged.
+ */
+function renderRelationPicker(picker: RelationPicker): string {
+  const options = picker.options ?? [];
+  const placeholder = picker.required
+    ? '<option value="" disabled selected>Select one</option>'
+    : '<option value="">None</option>';
+  return `<label data-relation-id="${escapeHtml(picker.relationId)}" data-relation-required="${picker.required}"><span>${escapeHtml(relationLabel(picker.relationId))}</span><select name="relation:${escapeHtml(picker.relationId)}"${picker.required ? ' required' : ''}>${placeholder}${options
+    .map(
+      (option) =>
+        `<option value="${escapeHtml(option.recordId)}">${escapeHtml(option.label)}</option>`,
+    )
+    .join('')}</select></label>`;
+}
+
+/**
+ * ADR-0052 declares relations create-only. The freeze is stated on the update
+ * form rather than left for an operator to discover by editing a draft and
+ * finding no control.
+ */
+function relationFreezeDisclosure(
+  pickers: readonly RelationPicker[],
+): string {
+  if (pickers.length === 0) return '';
+  return `<p class="relation-freeze-note" data-relation-freeze="create-only">${escapeHtml(
+    pickers.length === 1
+      ? `${relationLabel(pickers[0]!.relationId)} is set when the record is created and cannot be changed here.`
+      : `${pickers.map((picker) => relationLabel(picker.relationId)).join(', ')} are set when the record is created and cannot be changed here.`,
+  )}</p>`;
+}
+
+function relationLabel(relationId: string): string {
+  const local = relationId.slice(relationId.lastIndexOf('.') + 1);
+  return local.length === 0
+    ? 'Related record'
+    : local.slice(0, 1).toUpperCase() + local.slice(1).replaceAll('_', ' ');
 }
 
 function renderReleaseSummary({

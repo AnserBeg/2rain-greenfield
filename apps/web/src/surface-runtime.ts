@@ -15,6 +15,8 @@ import { SHARED_LIST_QUERY_VERSION } from '../../../packages/runtime/src/list-be
 import {
   renderRegisteredSurfaceComponent,
   surfaceSupportsRuntimeIntent,
+  type RecordPickerOption,
+  type RelationPicker,
   type SurfaceDataRenderState,
   type SurfaceOperationFeedback,
 } from './component-registry.js';
@@ -39,6 +41,7 @@ import {
   type CompiledNavigationTree,
   type CompiledSurfaceDataBinding,
   type CompiledSurfaceDefinition,
+  type CompiledSurfaceOperationBinding,
   type SurfaceOperationIntent,
 } from './surface-contract.js';
 
@@ -55,19 +58,17 @@ export interface SurfaceRuntimeGateways {
 
 export type SurfaceRuntimeSubmission = Readonly<Record<string, string>>;
 
+/** Namespaces relation controls so they cannot collide with `value:` fields. */
+const RELATION_SUBMISSION_PREFIX = 'relation:';
+
 interface SelectedSurface {
   readonly navigation: CompiledNavigationTree | null;
   readonly selected: CompiledSurfaceDefinition;
   readonly surfaces: readonly CompiledSurfaceDefinition[];
 }
 
-interface WorkspaceContextOption {
-  readonly label: string;
-  readonly recordId: string;
-}
-
 interface WorkspaceContextBar {
-  readonly options: readonly WorkspaceContextOption[];
+  readonly options: readonly RecordPickerOption[];
   readonly parameterId: string;
   readonly preservedParameters: readonly (readonly [string, string])[];
   readonly selectedRecordId: string | null;
@@ -134,6 +135,12 @@ export async function renderSurfaceRuntimeWithData(
     legalEntitySelection,
     url,
   );
+  const relationPickers = await loadRelationPickers(
+    view,
+    selection,
+    binding.operations,
+    gateways.queryGateway,
+  );
   if (binding.query.legalEntityScope && legalEntitySelection.length === 0) {
     return renderSelectedSurface(
       view,
@@ -145,6 +152,7 @@ export async function renderSurfaceRuntimeWithData(
       legalEntitySelection,
       workspaceContext,
       queryParameterValues,
+      relationPickers,
     );
   }
   if (binding.query.queryType === 'aggregate') {
@@ -168,6 +176,7 @@ export async function renderSurfaceRuntimeWithData(
         legalEntitySelection,
         workspaceContext,
         queryParameterValues,
+        relationPickers,
       );
     }
   }
@@ -187,6 +196,7 @@ export async function renderSurfaceRuntimeWithData(
       legalEntitySelection,
       workspaceContext,
       queryParameterValues,
+      relationPickers,
     );
   }
 
@@ -222,6 +232,7 @@ export async function renderSurfaceRuntimeWithData(
     legalEntitySelection,
     workspaceContext,
     queryParameterValues,
+    relationPickers,
   );
 }
 
@@ -333,6 +344,7 @@ function renderSelectedSurface(
   legalEntitySelection: readonly string[] = [],
   workspaceContext: WorkspaceContextBar | null = null,
   queryParameterValues: Readonly<Record<string, string>> = Object.freeze({}),
+  relationPickers: readonly RelationPicker[] = [],
 ): SurfaceRuntimeResponse {
   // Compact and full layouts are alternative renderings of these same slots;
   // a responsive implementation must never mount both at once.
@@ -343,6 +355,7 @@ function renderSelectedSurface(
       legalEntitySelection,
       operations,
       queryParameterValues,
+      relationPickers,
       slot,
       surface: selected,
       surfaces,
@@ -543,22 +556,8 @@ async function loadWorkspaceContextBar(
   )[0];
   if (!entityNamespace) return null;
   const legalEntityId = `${entityNamespace}:entity.legal_entity`;
-  const candidates = selection.surfaces.flatMap((surface) => {
-    if (surface.surfaceRole !== 'list') return [];
-    try {
-      const binding = readCompiledSurfaceDataBinding(view, surface);
-      return binding.query.lifecycle === 'active' &&
-        binding.query.queryType === 'list' &&
-        binding.query.sourceEntityId === legalEntityId &&
-        binding.query.legalEntityScope === undefined
-        ? [{ binding, surface }]
-        : [];
-    } catch {
-      return [];
-    }
-  });
-  if (candidates.length !== 1) return null;
-  const legalEntityList = candidates[0]!;
+  const legalEntityList = pickerListSurfaceFor(view, selection, legalEntityId);
+  if (!legalEntityList) return null;
   const targetSurface =
     selection.selected.surfaceRole === 'list' ||
     selectedBinding.query.queryType === 'aggregate'
@@ -580,46 +579,14 @@ async function loadWorkspaceContextBar(
     targetSurface?.binding.query.legalEntityScope?.operand.parameterId;
   if (!targetSurface || !parameterId) return null;
 
-  let result: SemanticQueryResultEnvelope;
-  try {
-    result = await queryGateway.invoke(view, {
-      arguments: {
-        includeArchived: false,
-        list: {
-          cursor: null,
-          matchMode: 'substring',
-          pageSize: legalEntityList.binding.query.maximumResultCount,
-          relationLabels: [],
-          schemaVersion: SHARED_LIST_QUERY_VERSION,
-          search: '',
-          sort: [],
-        },
-      },
-      queryId: legalEntityList.binding.query.queryId,
-      schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
-    });
-  } catch {
-    return null;
-  }
-  if (result.outcome !== 'exact') return null;
-  const displayFieldId = legalEntityList.binding.displayFieldId;
-  const options = result.records
-    .map((record) => {
-      const displayValue = displayFieldId
-        ? (record.displayValues?.[displayFieldId] ??
-          record.values[displayFieldId])
-        : null;
-      return Object.freeze({
-        label:
-          typeof displayValue === 'string' && displayValue.trim() !== ''
-            ? displayValue
-            : shortIdentity(record.recordId),
-        recordId: record.recordId,
-      });
-    })
-    .sort((left, right) => left.label.localeCompare(right.label));
+  const options = await recordPickerOptions(
+    view,
+    legalEntityList,
+    queryGateway,
+  );
+  if (!options) return null;
   return Object.freeze({
-    options: Object.freeze(options),
+    options,
     parameterId,
     preservedParameters: Object.freeze(
       targetSurface.binding.query.queryType === 'aggregate'
@@ -636,6 +603,128 @@ async function loadWorkspaceContextBar(
       legalEntitySelection.length === 1 ? legalEntitySelection[0]! : null,
     targetSurfaceId: targetSurface.surface.surfaceId,
   });
+}
+
+interface PickerListSurface {
+  readonly binding: CompiledSurfaceDataBinding;
+  readonly surface: CompiledSurfaceDefinition;
+}
+
+/**
+ * Locates the one pinned list surface that enumerates an entity's records.
+ *
+ * A legal-entity-scoped list is deliberately excluded: it refuses without a
+ * scope argument this caller has no way to supply, so admitting it would
+ * produce an empty control rather than a working one. Exactly one candidate is
+ * required — two lists over the same entity is an authoring ambiguity the
+ * runtime must not resolve by picking.
+ */
+function pickerListSurfaceFor(
+  view: RuntimeViewContract.RequestRuntimeView,
+  selection: SelectedSurface,
+  targetEntityId: string,
+): PickerListSurface | null {
+  const candidates = selection.surfaces.flatMap((surface) => {
+    if (surface.surfaceRole !== 'list') return [];
+    try {
+      const binding = readCompiledSurfaceDataBinding(view, surface);
+      return binding.query.lifecycle === 'active' &&
+        binding.query.queryType === 'list' &&
+        binding.query.sourceEntityId === targetEntityId &&
+        binding.query.legalEntityScope === undefined
+        ? [{ binding, surface }]
+        : [];
+    } catch {
+      return [];
+    }
+  });
+  return candidates.length === 1 ? candidates[0]! : null;
+}
+
+/**
+ * Re-invokes the read gateway inside the same request to enumerate a target
+ * entity's records as pickable options, labelled by the entity's own declared
+ * display field.
+ */
+async function recordPickerOptions(
+  view: RuntimeViewContract.RequestRuntimeView,
+  list: PickerListSurface,
+  queryGateway: SemanticQueryGateway,
+): Promise<readonly RecordPickerOption[] | null> {
+  let result: SemanticQueryResultEnvelope;
+  try {
+    result = await queryGateway.invoke(view, {
+      arguments: {
+        includeArchived: false,
+        list: {
+          cursor: null,
+          matchMode: 'substring',
+          pageSize: list.binding.query.maximumResultCount,
+          relationLabels: [],
+          schemaVersion: SHARED_LIST_QUERY_VERSION,
+          search: '',
+          sort: [],
+        },
+      },
+      queryId: list.binding.query.queryId,
+      schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+    });
+  } catch {
+    return null;
+  }
+  if (result.outcome !== 'exact') return null;
+  const displayFieldId = list.binding.displayFieldId;
+  return Object.freeze(
+    result.records
+      .map((record) => {
+        const displayValue = displayFieldId
+          ? (record.displayValues?.[displayFieldId] ??
+            record.values[displayFieldId])
+          : null;
+        return Object.freeze({
+          label:
+            typeof displayValue === 'string' && displayValue.trim() !== ''
+              ? displayValue
+              : shortIdentity(record.recordId),
+          recordId: record.recordId,
+        });
+      })
+      .sort((left, right) => left.label.localeCompare(right.label)),
+  );
+}
+
+/**
+ * Builds one picker per relation the create operation declares.
+ *
+ * A relation whose target cannot be enumerated yields `options: null` rather
+ * than an empty list. The renderer needs that distinction: an empty target
+ * entity is a legitimate "nothing to choose yet", while an unresolvable target
+ * means the form cannot be satisfied at all and must refuse by name.
+ */
+async function loadRelationPickers(
+  view: RuntimeViewContract.RequestRuntimeView,
+  selection: SelectedSurface,
+  operations: readonly CompiledSurfaceOperationBinding[],
+  queryGateway: SemanticQueryGateway,
+): Promise<readonly RelationPicker[]> {
+  const create = operations.find((operation) => operation.intent === 'create');
+  if (!create || create.relationInputs.length === 0) return Object.freeze([]);
+  const pickers = await Promise.all(
+    create.relationInputs.map(async (relation) => {
+      const list = relation.targetEntityId
+        ? pickerListSurfaceFor(view, selection, relation.targetEntityId)
+        : null;
+      return Object.freeze({
+        options: list
+          ? await recordPickerOptions(view, list, queryGateway)
+          : null,
+        relationId: relation.relationId,
+        required: relation.required,
+        targetEntityId: relation.targetEntityId,
+      });
+    }),
+  );
+  return Object.freeze(pickers);
 }
 
 function dataState(
@@ -671,7 +760,29 @@ function operationInput(
     ),
   );
   if (intent === 'create') {
-    return { recordId: submission.recordId ?? '', values };
+    // ADR-0052: relations travel as a sibling of `values`, keyed by relation ID
+    // and carrying record IDs as strings. `parseMutationInput` reads them
+    // through `uuidRecord`, so a string is the native form here and no
+    // coercion is owed. An empty selection is omitted rather than sent as "",
+    // which is what keeps an optional relation distinguishable from a cleared
+    // one and keeps the refusal for a missing REQUIRED relation on the
+    // provider, where it is already declared.
+    const relations = Object.freeze(
+      Object.fromEntries(
+        Object.entries(submission)
+          .filter(
+            (entry): entry is [string, string] =>
+              entry[0].startsWith(RELATION_SUBMISSION_PREFIX) &&
+              typeof entry[1] === 'string' &&
+              entry[1] !== '',
+          )
+          .map(
+            (entry) =>
+              [entry[0].slice(RELATION_SUBMISSION_PREFIX.length), entry[1]] as const,
+          ),
+      ),
+    );
+    return { recordId: submission.recordId ?? '', relations, values };
   }
   const recordId = submission.recordId ?? '';
   const expectedRevision = Number.parseInt(

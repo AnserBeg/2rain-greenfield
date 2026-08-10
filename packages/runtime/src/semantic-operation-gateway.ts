@@ -178,9 +178,16 @@ export interface RegisteredOperationInputContract {
     readonly archiveBehavior: 'restrict' | 'retainReference';
     readonly relationId: string;
     readonly required: boolean;
+    // Present exactly at the generation-2 versions (v3/v4). A generation-1
+    // artifact that predates the relation picker is still readable, and is
+    // still refused if it carries the key it never declared.
+    readonly targetEntityId?: string;
   }[];
   readonly schemaVersion:
-    'northstar.module-input-contract/v1' | 'northstar.module-input-contract/v2';
+    | 'northstar.module-input-contract/v1'
+    | 'northstar.module-input-contract/v2'
+    | 'northstar.module-input-contract/v3'
+    | 'northstar.module-input-contract/v4';
   readonly systemInput?: RegisteredOperationSystemInput;
   readonly writableFieldIds: readonly string[];
 }
@@ -1238,8 +1245,10 @@ function assertOperationDefinition(
   if (hasInputContract) {
     assertOperationInputContract(value.inputContract);
     if (
-      value.inputContract.schemaVersion ===
-        'northstar.module-input-contract/v2' &&
+      (value.inputContract.schemaVersion ===
+        'northstar.module-input-contract/v2' ||
+        value.inputContract.schemaVersion ===
+          'northstar.module-input-contract/v4') &&
       value.effect.kind !== 'createRecordEffect'
     ) {
       throw invalid(
@@ -1270,11 +1279,23 @@ function assertOperationInputContract(
     ],
     invalid,
   );
+  // Two independent axes, each bound biconditionally to the declared version so
+  // neither can be present without being declared: systemInput iff v2 or v4,
+  // relation `targetEntityId` iff v3 or v4.
+  const carriesSystemInput =
+    value.schemaVersion === 'northstar.module-input-contract/v2' ||
+    value.schemaVersion === 'northstar.module-input-contract/v4';
+  const carriesRelationTargets =
+    value.schemaVersion === 'northstar.module-input-contract/v3' ||
+    value.schemaVersion === 'northstar.module-input-contract/v4';
   if (
     (value.schemaVersion !== 'northstar.module-input-contract/v1' &&
-      value.schemaVersion !== 'northstar.module-input-contract/v2') ||
-    hasSystemInput !==
-      (value.schemaVersion === 'northstar.module-input-contract/v2') ||
+      value.schemaVersion !== 'northstar.module-input-contract/v2' &&
+      value.schemaVersion !== 'northstar.module-input-contract/v3' &&
+      value.schemaVersion !== 'northstar.module-input-contract/v4') ||
+    hasSystemInput !== carriesSystemInput ||
+    !Array.isArray(value.relationInputs) ||
+    value.relationInputs.length > 0 !== carriesRelationTargets ||
     !Array.isArray(value.closedArgumentKeys) ||
     !Array.isArray(value.fields) ||
     !Array.isArray(value.relationInputs) ||
@@ -1358,7 +1379,9 @@ function assertOperationInputContract(
     }
     assertExactKeys(
       relation,
-      ['archiveBehavior', 'relationId', 'required'],
+      carriesRelationTargets
+        ? ['archiveBehavior', 'relationId', 'required', 'targetEntityId']
+        : ['archiveBehavior', 'relationId', 'required'],
       invalid,
     );
     assertCanonicalId(
@@ -1366,6 +1389,13 @@ function assertOperationInputContract(
       'inputContract.relationInputs.relationId',
       invalid,
     );
+    if (carriesRelationTargets) {
+      assertCanonicalId(
+        relation.targetEntityId,
+        'inputContract.relationInputs.targetEntityId',
+        invalid,
+      );
+    }
     if (
       !['restrict', 'retainReference'].includes(
         String(relation.archiveBehavior),

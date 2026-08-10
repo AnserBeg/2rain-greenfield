@@ -98,6 +98,19 @@ export interface CompiledNavigationTree {
   readonly kind: 'navigationTree';
 }
 
+/**
+ * A relation the bound operation accepts as create input. `targetEntityId` is
+ * what makes the input fillable from a screen: it names the entity whose
+ * records are candidates. A generation-1 artifact does not declare it, so it
+ * resolves to `null` and the surface refuses rather than rendering a control
+ * that cannot be satisfied.
+ */
+export interface CompiledSurfaceRelationInput {
+  readonly relationId: string;
+  readonly required: boolean;
+  readonly targetEntityId: string | null;
+}
+
 export interface CompiledSurfaceOperationBinding {
   readonly capabilityId: string | null;
   readonly confirmation: RegisteredOperationDefinition['confirmation'];
@@ -107,6 +120,7 @@ export interface CompiledSurfaceOperationBinding {
   readonly precondition: Readonly<
     Record<string, RuntimeViewContract.ImmutableJsonValue>
   >;
+  readonly relationInputs: readonly CompiledSurfaceRelationInput[];
 }
 
 export interface CompiledSurfaceDataBinding {
@@ -228,6 +242,7 @@ export function readCompiledSurfaceDataBinding(
         label: operationLabel(operation.operationId),
         operationId: operation.operationId,
         precondition: operation.precondition,
+        relationInputs: operation.relationInputs,
       }),
     );
   }
@@ -579,6 +594,7 @@ function parseOperationBinding(value: unknown): {
     Record<string, RuntimeViewContract.ImmutableJsonValue>
   >;
   readonly readBackQueryId: string;
+  readonly relationInputs: readonly CompiledSurfaceRelationInput[];
   readonly tier: RegisteredOperationDefinition['tier'];
 } {
   if (
@@ -632,8 +648,46 @@ function parseOperationBinding(value: unknown): {
       Record<string, RuntimeViewContract.ImmutableJsonValue>
     >,
     readBackQueryId: value.readBackQueryId,
+    relationInputs: parseRelationInputs(value.inputContract),
     tier: value.tier,
   };
+}
+
+/**
+ * Reads the relation inputs the operation declares. This validates the pinned
+ * artifact independently of the operation gateway, for the same reason the
+ * provider re-reads it: a consumer must not trust a contract it did not read
+ * itself.
+ */
+function parseRelationInputs(
+  inputContract: unknown,
+): readonly CompiledSurfaceRelationInput[] {
+  if (inputContract === undefined) return Object.freeze([]);
+  if (!isRecord(inputContract) || !Array.isArray(inputContract.relationInputs)) {
+    throw invalidBinding(
+      'pinned operation input contract has an invalid relation input shape',
+    );
+  }
+  return Object.freeze(
+    inputContract.relationInputs.map((entry) => {
+      if (
+        !isRecord(entry) ||
+        !isNonBlank(entry.relationId) ||
+        typeof entry.required !== 'boolean' ||
+        (entry.targetEntityId !== undefined && !isNonBlank(entry.targetEntityId))
+      ) {
+        throw invalidBinding(
+          'pinned operation input contract has an invalid relation input shape',
+        );
+      }
+      return Object.freeze({
+        relationId: entry.relationId,
+        required: entry.required,
+        targetEntityId:
+          entry.targetEntityId === undefined ? null : entry.targetEntityId,
+      });
+    }),
+  );
 }
 
 function operationLabel(operationId: string): string {

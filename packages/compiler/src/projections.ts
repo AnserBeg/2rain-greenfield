@@ -20,6 +20,8 @@ import {
   HASH_DOMAINS,
   MODULE_INPUT_CONTRACT_VERSION,
   MODULE_INPUT_CONTRACT_V2_VERSION,
+  MODULE_INPUT_CONTRACT_V3_VERSION,
+  MODULE_INPUT_CONTRACT_V4_VERSION,
   OPERATIONS_AGENT_TOOL_IDS,
   POLICY_MODEL_VERSION,
   PROJECTION_FAMILY_IDS,
@@ -187,7 +189,11 @@ export function lowerBaseProjectionPayloads(
       PROJECTION_FAMILY_IDS.operationCatalog,
       namespace,
       packageScope,
-      operationCatalogPayload(packageRevision, currentStorageTarget),
+      operationCatalogPayload(
+        packageRevision,
+        currentStorageTarget,
+        compilerSemanticProfileVersion,
+      ),
     ),
     plan(
       PROJECTION_FAMILY_IDS.surfaceManifest,
@@ -510,6 +516,7 @@ function resolvedEffect(
 function operationCatalogPayload(
   packageRevision: NormalizedApplicationPackage,
   storageTarget: StorageTargetPayloadV1 | null,
+  compilerSemanticProfileVersion: CompilerSemanticProfileVersion,
 ): unknown {
   const fieldsByEntity = groupBy(
     packageRevision.fields.filter((field) => field.lifecycle === 'active'),
@@ -559,6 +566,7 @@ function operationCatalogPayload(
               'entity' in operation.effect
                 ? storageByEntity.get(operation.effect.entity.targetId)
                 : undefined,
+              compilerSemanticProfileVersion,
             ),
             infrastructure: {
               archiveRepresentation: 'nullableArchivedAt',
@@ -934,6 +942,7 @@ function operationInputContract(
   fields: NormalizedApplicationPackage['fields'],
   relations: NormalizedApplicationPackage['relations'],
   storageEntity: StorageTargetPayloadV1['entities'][number] | undefined,
+  compilerSemanticProfileVersion: CompilerSemanticProfileVersion,
 ): unknown {
   const effectKind = operation.effect.kind;
   const capabilityRecordScope = effectKind === 'registeredCapabilityEffect';
@@ -950,6 +959,16 @@ function operationInputContract(
           valueKind: storageEntity.legalEntity.postgresqlType,
         }
       : null;
+  // Gated on the UNADOPTED v2, so this is readable and unemitted: no recorded
+  // lineage entry compiles under v2, and every release root holds. ADR-0047 §1
+  // makes the profile the projection evolution axis precisely so a shape change
+  // like this one does not have to rewrite history to ship. The wire is proven
+  // at v2 by round trip; it reaches the running app when v2 is adopted, which
+  // ADR-0047 §2 and row `U5b` both hold to be a separate, schedulable event.
+  const relationTargets =
+    effectKind === 'createRecordEffect' &&
+    relations.length > 0 &&
+    compilerSemanticProfileVersion === COMPILER_SEMANTIC_PROFILE_V2_VERSION;
   const closedArgumentKeys =
     effectKind === 'createRecordEffect'
       ? [
@@ -1020,11 +1039,21 @@ function operationInputContract(
             archiveBehavior: relation.archiveBehavior,
             relationId: relation.relationId,
             required: relation.required,
+            targetEntityId: relation.targetEntity.targetId,
           }))
         : [],
-    schemaVersion: systemInput
-      ? MODULE_INPUT_CONTRACT_V2_VERSION
-      : MODULE_INPUT_CONTRACT_VERSION,
+    // Two independent optional shapes, so the version is a 2x2 rather than a
+    // generation counter: it names exactly what the artifact carries. An
+    // operation with no relations is byte-identical to what it was before
+    // `targetEntityId` existed, which is what keeps the lineage churn to the
+    // definitions that actually declare a relation.
+    schemaVersion: relationTargets
+      ? systemInput
+        ? MODULE_INPUT_CONTRACT_V4_VERSION
+        : MODULE_INPUT_CONTRACT_V3_VERSION
+      : systemInput
+        ? MODULE_INPUT_CONTRACT_V2_VERSION
+        : MODULE_INPUT_CONTRACT_VERSION,
     ...(systemInput ? { systemInput } : {}),
     writableFieldIds: writesFields
       ? fields.map((field) => field.fieldId).sort(compare)

@@ -81,9 +81,21 @@ export const MODULE_INPUT_CONTRACT_VERSION =
   'northstar.module-input-contract/v1' as const;
 export const MODULE_INPUT_CONTRACT_V2_VERSION =
   'northstar.module-input-contract/v2' as const;
+// Generation 2 carries `targetEntityId` on every relation input, so a renderer
+// can resolve what a relation points at without a module-specific id. The two
+// constants preserve the v1/v2 systemInput biconditional exactly one axis over:
+// systemInput is present iff v2 or v4, relation targets are present iff v3 or
+// v4. A single generational constant would have collapsed those axes and made
+// a systemInput-bearing contract indistinguishable from one without.
+export const MODULE_INPUT_CONTRACT_V3_VERSION =
+  'northstar.module-input-contract/v3' as const;
+export const MODULE_INPUT_CONTRACT_V4_VERSION =
+  'northstar.module-input-contract/v4' as const;
 export const SUPPORTED_MODULE_INPUT_CONTRACT_VERSIONS = Object.freeze([
   MODULE_INPUT_CONTRACT_VERSION,
   MODULE_INPUT_CONTRACT_V2_VERSION,
+  MODULE_INPUT_CONTRACT_V3_VERSION,
+  MODULE_INPUT_CONTRACT_V4_VERSION,
 ] as const);
 export const VERIFICATION_PLAN_PAYLOAD_VERSION =
   'northstar.verification-plan-payload/v1' as const;
