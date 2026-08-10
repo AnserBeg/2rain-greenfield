@@ -578,6 +578,18 @@ wasted arm**, and the arm is the scarcest thing in this loop.
 
     git ls-remote origin <branch>   # must print the exact SHA in the prompt
 
+**Quote the output in the prompt — sharpened 2026-08-09, after a fourth instance.**
+The rule as written said *verify*, and the orchestrator kept verifying sometimes.
+A reviewer then returned **BLOCKED — requested Git objects are unavailable** on a
+range whose branch tip was two revisions stale on `origin`, and could confirm
+nothing.
+
+**So make the evidence part of the artifact:** the prompt carries the
+`ls-remote` line for the SHA it names. A prompt that cannot be written without
+pasting the verified tip cannot be written without running the command. This is
+the same move as appending a matrix exit code *inside* the log rather than beside
+it — bind the check to the thing it certifies.
+
 If it is absent and the object exists locally, **push it yourself** — it is
 non-destructive, it backs up the reviewed candidate off-machine as `git-workflow`
 already requires, and it removes a dependency on the lane being awake.
