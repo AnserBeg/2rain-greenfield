@@ -7,6 +7,7 @@ import {
   readCompiledSurfaceManifest,
   type CompiledFieldKind,
   type CompiledSurfaceDefinition,
+  type CompiledSurfaceField,
 } from '../../apps/web/src/surface-contract.js';
 import {
   canonicalize,
@@ -193,6 +194,29 @@ function formOf(view: RequestRuntimeView): CompiledSurfaceDefinition {
   return surface;
 }
 
+type FieldsById = ReadonlyMap<string, CompiledSurfaceField>;
+
+function optionsOf(
+  byId: FieldsById,
+  fieldId: string,
+): readonly { readonly label: string; readonly optionId: string }[] {
+  const field = byId.get(fieldId);
+  assert.ok(field?.kind === 'enumFieldType', `${fieldId} is not an enum`);
+  return field.options;
+}
+
+function temporalOf(byId: FieldsById, fieldId: string): unknown {
+  const field = byId.get(fieldId);
+  assert.ok(field, fieldId);
+  assert.ok(
+    field.kind === 'dateFieldType' ||
+      field.kind === 'timeFieldType' ||
+      field.kind === 'dateTimeFieldType',
+    `${fieldId} is not temporal`,
+  );
+  return field.temporal;
+}
+
 test('the reader vocabulary is exactly the canonical field-type vocabulary', () => {
   assert.equal(READER_VOCABULARY_IS_THE_CANONICAL_ONE, true);
   assert.equal(
@@ -222,22 +246,24 @@ test('a v2 payload survives the production reader with its kinds and options', a
   assert.equal(byId.get(EVERY_KIND_FIELD_IDS.active)?.kind, 'booleanFieldType');
   assert.equal(byId.get(EVERY_KIND_FIELD_IDS.price)?.kind, 'moneyFieldType');
   assert.equal(byId.get(EVERY_KIND_FIELD_IDS.weight)?.kind, 'quantityFieldType');
-  assert.equal(byId.get(EVERY_KIND_FIELD_IDS.grade)?.options?.length, 5);
-  assert.equal(byId.get(EVERY_KIND_FIELD_IDS.region)?.options?.length, 6);
+  assert.equal(optionsOf(byId, EVERY_KIND_FIELD_IDS.grade).length, 5);
+  assert.equal(optionsOf(byId, EVERY_KIND_FIELD_IDS.region).length, 6);
   assert.equal(
     Object.hasOwn(byId.get(EVERY_KIND_FIELD_IDS.due) ?? {}, 'options'),
     false,
   );
-  // The discriminants survive the reader too, in both of their values.
-  assert.deepEqual(byId.get(EVERY_KIND_FIELD_IDS.offsetMoment)?.temporal, {
+  // The discriminants survive the reader too, in both of their values. Read
+  // through a narrowing helper: after the type discriminated on kind, `temporal`
+  // is not reachable without knowing the kind, which is the point of it.
+  assert.deepEqual(temporalOf(byId, EVERY_KIND_FIELD_IDS.offsetMoment), {
     precision: 'second',
     timezoneSemantics: 'offsetDateTime',
   });
-  assert.deepEqual(byId.get(EVERY_KIND_FIELD_IDS.preciseTime)?.temporal, {
+  assert.deepEqual(temporalOf(byId, EVERY_KIND_FIELD_IDS.preciseTime), {
     precision: 'millisecond',
     timezoneSemantics: 'localWallTime',
   });
-  assert.deepEqual(byId.get(EVERY_KIND_FIELD_IDS.due)?.temporal, {
+  assert.deepEqual(temporalOf(byId, EVERY_KIND_FIELD_IDS.due), {
     precision: null,
     timezoneSemantics: 'calendarDate',
   });
@@ -342,6 +368,70 @@ test('RED: the reader refuses an unreadable or misplaced temporal domain', async
   assert.match(
     datedPrecision.message,
     /temporal precision that kind dateFieldType cannot carry/,
+  );
+});
+
+/**
+ * The pairing, one control per mapping, each varying ONLY the spelling.
+ *
+ * This is the finding a review had to catch because nothing here could: the
+ * first cut bound `precision` to the kind and checked `timezoneSemantics` for
+ * membership in the union of all four spellings, so a valid-but-wrong pair was
+ * admitted and the renderer then chose its control from `kind` alone. Every
+ * negative control this file already had -- unknown spellings, missing
+ * `temporal`, temporal on a non-temporal kind, misplaced precision -- passes
+ * against that defect, because none of them varies a spelling that is valid
+ * somewhere else.
+ *
+ * Each specimen keeps precision, kind, ids and order exactly as the compiler
+ * emitted them and moves one word.
+ */
+test('RED: the reader refuses a timezone spelling its kind cannot carry', async () => {
+  const cases = [
+    [EVERY_KIND_FIELD_IDS.due, 'dateFieldType', 'utcInstant'],
+    [EVERY_KIND_FIELD_IDS.preciseTime, 'timeFieldType', 'calendarDate'],
+    [EVERY_KIND_FIELD_IDS.offsetMoment, 'dateTimeFieldType', 'localWallTime'],
+  ] as const;
+  for (const [fieldId, kind, wrongSpelling] of cases) {
+    const error = refusal(
+      await viewWithCorruptedForm((surface) => {
+        const field = surface.fields?.find((entry) => entry.fieldId === fieldId);
+        assert.ok(field?.temporal, fieldId);
+        field.temporal.timezoneSemantics = wrongSpelling;
+      }),
+    );
+    assert.equal(error.code, 'INVALID_SURFACE_FIELD', fieldId);
+    assert.match(
+      error.message,
+      new RegExp(
+        `timezone semantics ${wrongSpelling} that kind ${kind} cannot carry`,
+      ),
+      fieldId,
+    );
+  }
+});
+
+/**
+ * The admission twin for the three above: refusing all three is otherwise
+ * satisfied by a reader that refuses every temporal field.
+ *
+ * `dateTimeFieldType` is the only kind with two legal spellings, so it is the
+ * only place the twin can vary, and the fixture carries one field of each.
+ */
+test('the reader admits both spellings a date-time may legally carry', async () => {
+  const surface = formOf(
+    await viewOf(compileAt(COMPILER_SEMANTIC_PROFILE_V2_VERSION)),
+  );
+  const byId = new Map((surface.fields ?? []).map((f) => [f.fieldId, f]));
+  assert.deepEqual(
+    [
+      temporalOf(byId, FIXTURE_IDS.fieldIds.parentUtcInstant),
+      temporalOf(byId, EVERY_KIND_FIELD_IDS.offsetMoment),
+    ],
+    [
+      { precision: 'millisecond', timezoneSemantics: 'utcInstant' },
+      { precision: 'second', timezoneSemantics: 'offsetDateTime' },
+    ],
   );
 });
 

@@ -88,6 +88,20 @@ const timezoneSemantics = [
 
 export type CompiledTemporalPrecision = (typeof temporalPrecisions)[number];
 export type CompiledTimezoneSemantics = (typeof timezoneSemantics)[number];
+export type CompiledTemporalKind = (typeof temporalFieldKinds)[number];
+
+/**
+ * The one place the kind-to-semantics mapping is written down, so the reader's
+ * check and the type above cannot drift apart. Each entry is exactly what that
+ * kind's canonical schema admits: `dateFieldType.timezoneSemantics` and
+ * `timeFieldType.timezoneSemantics` are single literals there, and
+ * `dateTimeFieldType`'s is a two-value enum.
+ */
+const timezoneSemanticsByKind = Object.freeze({
+  dateFieldType: Object.freeze(['calendarDate'] as const),
+  dateTimeFieldType: Object.freeze(['offsetDateTime', 'utcInstant'] as const),
+  timeFieldType: Object.freeze(['localWallTime'] as const),
+});
 
 export interface CompiledFieldOption {
   readonly label: string;
@@ -103,15 +117,60 @@ export interface CompiledFieldTemporal {
   readonly timezoneSemantics: CompiledTimezoneSemantics;
 }
 
-export interface CompiledSurfaceField {
+interface CompiledFieldCommon {
   readonly fieldId: string;
-  readonly kind: CompiledFieldKind;
-  /** Present exactly when `kind` is `enumFieldType`. */
-  readonly options?: readonly CompiledFieldOption[];
   readonly required: boolean;
-  /** Present exactly when `kind` is a temporal kind. */
-  readonly temporal?: CompiledFieldTemporal;
 }
+
+/**
+ * A field is DISCRIMINATED on its kind, and each temporal kind carries only the
+ * timezone semantics its own canonical schema admits.
+ *
+ * The first shape here was a flat record with an optional
+ * `{precision, timezoneSemantics}` validated against the union of all four
+ * spellings. A review found the consequence: `dateFieldType` with `utcInstant`,
+ * `timeFieldType` with `calendarDate` and `dateTimeFieldType` with
+ * `localWallTime` were all ADMITTED, and the renderer then picks its control
+ * from `kind` alone -- so the compiled contract stated one temporal domain while
+ * the control implemented another, silently.
+ *
+ * `review-tiers` prefers unrepresentable to detectable, and this is the cheaper
+ * of the two: with the pairing in the type there is no compatibility table to
+ * keep correct and no detector to evade. The reader below still validates the
+ * pairing, because a payload arrives as JSON and the type cannot check bytes --
+ * but a caller cannot CONSTRUCT the wrong pair, which is what closes it for
+ * every consumer downstream of the parse.
+ */
+export type CompiledSurfaceField =
+  | (CompiledFieldCommon & {
+      readonly kind: 'dateFieldType';
+      readonly temporal: {
+        // A calendar date has no sub-day component to be precise about.
+        readonly precision: null;
+        readonly timezoneSemantics: 'calendarDate';
+      };
+    })
+  | (CompiledFieldCommon & {
+      readonly kind: 'timeFieldType';
+      readonly temporal: {
+        readonly precision: CompiledTemporalPrecision;
+        readonly timezoneSemantics: 'localWallTime';
+      };
+    })
+  | (CompiledFieldCommon & {
+      readonly kind: 'dateTimeFieldType';
+      readonly temporal: {
+        readonly precision: CompiledTemporalPrecision;
+        readonly timezoneSemantics: 'offsetDateTime' | 'utcInstant';
+      };
+    })
+  | (CompiledFieldCommon & {
+      readonly kind: 'enumFieldType';
+      readonly options: readonly CompiledFieldOption[];
+    })
+  | (CompiledFieldCommon & {
+      readonly kind: Exclude<CompiledFieldKind, CompiledTemporalKind | 'enumFieldType'>;
+    });
 export type SurfaceOperationIntent =
   'archive' | 'command' | 'create' | 'restore' | 'update';
 
@@ -709,7 +768,7 @@ function parseSurfaceField(
     );
   }
   const required = value.required;
-  const temporal = parseFieldTemporal(value, kind, at);
+  const common = { fieldId: value.fieldId, required };
   // Present exactly when the kind is `enumFieldType`: options on any other kind
   // mean the payload was built by something this reader does not understand,
   // and their absence on an enum would render a choice with nothing to choose.
@@ -718,13 +777,51 @@ function parseSurfaceField(
       `${at} (${value.fieldId}) carries options that do not belong to kind ${kind}`,
     );
   }
+  if (includes(temporalFieldKinds, kind)) {
+    // The narrowing is what makes the pairing checkable: each branch returns the
+    // one temporal shape its kind admits, so a payload pairing `dateFieldType`
+    // with `utcInstant` cannot reach a caller in any form.
+    const temporal = parseFieldTemporal(value, kind, at);
+    return kind === 'dateFieldType'
+      ? Object.freeze({
+          ...common,
+          kind,
+          temporal: Object.freeze({
+            precision: null,
+            timezoneSemantics: 'calendarDate' as const,
+          }),
+        })
+      : kind === 'timeFieldType'
+        ? Object.freeze({
+            ...common,
+            kind,
+            temporal: Object.freeze({
+              precision: temporal.precision as CompiledTemporalPrecision,
+              timezoneSemantics: 'localWallTime' as const,
+            }),
+          })
+        : Object.freeze({
+            ...common,
+            kind,
+            temporal: Object.freeze({
+              precision: temporal.precision as CompiledTemporalPrecision,
+              timezoneSemantics: temporal.timezoneSemantics as
+                'offsetDateTime' | 'utcInstant',
+            }),
+          });
+  }
   if (kind !== 'enumFieldType') {
-    return Object.freeze({
-      fieldId: value.fieldId,
-      kind,
-      required,
-      ...(temporal === undefined ? {} : { temporal }),
-    });
+    if (Object.hasOwn(value, 'temporal')) {
+      throw invalidField(
+        `${at} (${value.fieldId}) carries temporal precision that does not belong to kind ${kind}`,
+      );
+    }
+    return Object.freeze({ ...common, kind });
+  }
+  if (Object.hasOwn(value, 'temporal')) {
+    throw invalidField(
+      `${at} (${value.fieldId}) carries temporal precision that does not belong to kind ${kind}`,
+    );
   }
   if (!Array.isArray(value.options)) {
     throw invalidField(`${at} (${value.fieldId}) declares a non-array option list`);
@@ -742,10 +839,9 @@ function parseSurfaceField(
     return Object.freeze({ label: option.label, optionId: option.optionId });
   });
   return Object.freeze({
-    fieldId: value.fieldId,
+    ...common,
     kind,
     options: Object.freeze(options),
-    required,
   });
 }
 
@@ -753,28 +849,29 @@ function parseSurfaceField(
  * `temporal` is present exactly for a temporal kind, and a temporal kind without
  * it is refused rather than rendered.
  *
- * That asymmetry with `options` is deliberate and it is what the first cut of
- * this packet got wrong: an enum missing its options renders a visibly empty
- * choice, but a `dateTimeFieldType` missing its precision and timezone semantics
- * renders a control that looks fine and cannot express the stored value. The
- * silent one is the one that has to be refused.
+ * That asymmetry with `options` is deliberate: an enum missing its options
+ * renders a visibly empty choice, but a `dateTimeFieldType` missing its
+ * precision and timezone semantics renders a control that looks fine and cannot
+ * express the stored value. The silent one is the one that has to be refused.
  *
- * `precision` is `null` for `dateFieldType` alone -- a calendar date has no
- * sub-day component -- so a null precision on any other temporal kind is a
- * payload this reader will not guess at.
+ * **Both discriminants are bound to the kind, and the second one was the
+ * defect.** The first cut bound `precision` to the kind -- `null` for
+ * `dateFieldType` alone -- and then checked `timezoneSemantics` only for
+ * membership in the union of all four spellings, so `dateFieldType` +
+ * `utcInstant` and `timeFieldType` + `calendarDate` were admitted while the
+ * renderer picked its control from `kind`. One discriminant was checked
+ * properly and the other was not, in the same function.
  */
 function parseFieldTemporal(
   value: Record<string, unknown>,
-  kind: CompiledFieldKind,
+  kind: CompiledTemporalKind,
   at: string,
-): CompiledFieldTemporal | undefined {
-  const isTemporal = includes(temporalFieldKinds, kind);
-  if (Object.hasOwn(value, 'temporal') !== isTemporal) {
+): CompiledFieldTemporal {
+  if (!Object.hasOwn(value, 'temporal')) {
     throw invalidField(
       `${at} (${String(value.fieldId)}) carries temporal precision that does not belong to kind ${kind}`,
     );
   }
-  if (!isTemporal) return undefined;
   const temporal = value.temporal;
   if (
     !isRecord(temporal) ||
@@ -789,6 +886,11 @@ function parseFieldTemporal(
   if ((temporal.precision === null) !== (kind === 'dateFieldType')) {
     throw invalidField(
       `${at} (${String(value.fieldId)}) declares a temporal precision that kind ${kind} cannot carry`,
+    );
+  }
+  if (!includes(timezoneSemanticsByKind[kind], temporal.timezoneSemantics)) {
+    throw invalidField(
+      `${at} (${String(value.fieldId)}) declares timezone semantics ${temporal.timezoneSemantics} that kind ${kind} cannot carry`,
     );
   }
   return Object.freeze({

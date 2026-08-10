@@ -1120,7 +1120,7 @@ function renderFormControl(
   const kind = ` data-field-kind="${field.kind}"`;
   switch (field.kind) {
     case 'enumFieldType':
-      return renderEnumControl(field.options ?? [], name, kind, index, value);
+      return renderEnumControl(field.options, name, kind, index, value);
     case 'booleanFieldType':
       return renderBooleanControl(name, kind, value);
     case 'dateFieldType':
@@ -1135,7 +1135,7 @@ function renderFormControl(
       // `12:34:56`, which is the value the contract requires. The step comes from
       // the declared precision -- `1` second, `0.001` millisecond -- so the
       // control admits the declared domain and nothing wider.
-      return `<input type="time" step="${field.temporal?.precision === 'millisecond' ? '0.001' : '1'}"${kind} name="${name}" value="${current}" autocomplete="off">`;
+      return `<input type="time" step="${field.temporal.precision === 'millisecond' ? '0.001' : '1'}"${kind} name="${name}" value="${current}" autocomplete="off">`;
     case 'integerFieldType':
       return `<input type="number" inputmode="numeric" step="1"${kind} name="${name}" value="${current}" autocomplete="off">`;
     case 'exactDecimalFieldType':
@@ -1169,16 +1169,17 @@ function renderFormControl(
  * `U7`, so inventing one here would coin the vocabulary that ADR forbids.
  */
 function renderDateTimeControl(
-  field: CompiledSurfaceField,
+  // Narrowed to the one branch that HAS a declared date-time domain. The wider
+  // parameter compiled before the type discriminated on kind, and it is what let
+  // the domain be optional here -- a control that could silently render without
+  // the two facts it exists to declare.
+  field: Extract<CompiledSurfaceField, { kind: 'dateTimeFieldType' }>,
   name: string,
   kind: string,
   current: string,
 ): string {
-  const temporal = field.temporal;
-  const domain = temporal
-    ? ` data-timezone-semantics="${temporal.timezoneSemantics}" data-precision="${String(temporal.precision)}"`
-    : '';
-  return `<input type="text"${kind} data-refused-control="datetime-local"${domain} name="${name}" value="${current}" autocomplete="off">`;
+  const { precision, timezoneSemantics } = field.temporal;
+  return `<input type="text"${kind} data-refused-control="datetime-local" data-timezone-semantics="${timezoneSemantics}" data-precision="${precision}" name="${name}" value="${current}" autocomplete="off">`;
 }
 
 /**

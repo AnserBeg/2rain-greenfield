@@ -97,7 +97,7 @@ test.beforeAll(async () => {
   // is minted (ADR-0047 §4a); it exists because the claim below -- that a date
   // field renders a DATE CONTROL -- can only be observed in a browser.
   const fieldKindPolicy = allowPolicy();
-  fieldKindExecutor = new BrowserFixtureExecutor();
+  fieldKindExecutor = new BrowserFixtureExecutor(null, true);
   const fieldKindMediation = new SemanticOperationMediationAuthority();
   fieldKindServer = createSurfaceRuntimeServer(
     runtimeEntry(compileEveryFieldKindFixture(), fieldKindPolicy),
@@ -253,6 +253,20 @@ const SEEDED = Object.freeze({
   [FIXTURE_IDS.fieldIds.parentName]: 'Round trip master',
 });
 
+let lastSubmission: readonly (readonly [string, string])[] = [];
+
+function formUrl(recordId: string): string {
+  return `${fieldKindUrl}/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_form`)}&record=${encodeURIComponent(recordId)}`;
+}
+
+function capturePost(page: Page): Promise<string> {
+  return new Promise<string>((resolve) => {
+    page.on('request', (request) => {
+      if (request.method() === 'POST') resolve(request.postData() ?? '');
+    });
+  });
+}
+
 async function idleValue(page: Page, fieldId: string): Promise<string> {
   return page
     .locator(`[name="value:${fieldId}"]`)
@@ -260,21 +274,26 @@ async function idleValue(page: Page, fieldId: string): Promise<string> {
 }
 
 /**
- * **The execution that adjudicates all three review findings**, because each of
- * them is a claim about what survives the wire.
+ * **Four claims, four measurements, and the seam between them is the point.**
  *
- * Temporal discriminants: a control that does not know the declared precision
- * refuses `12:34:56` at its default 60-second step, and one that does not know
- * the timezone semantics cannot hold a `Z` or an offset at all. Boolean shape:
- * `null`, absent and `false` must stay three distinguishable things from render
- * through submission. Capability floor: what the form SUBMITS is the thing the
- * floor's premise is about, so this reads the encoded body rather than the DOM.
+ * The first version of this called itself a provider round trip and was not one:
+ * the double recorded production's refusal and then merged the refused values
+ * anyway, so its "authoritative reread" was a green manufactured by the
+ * component whose refusal was the fact. The double now honours the refusal, and
+ * the claim is decomposed into the four things actually observed:
  *
- * Five observations, none of them a proxy: the live IDL value, native
- * `checkValidity()`, the encoded request entries and their order, the REAL
- * provider's verdict on that input, and the authoritative reread.
+ *   1. browser encoding preserves the rendered strings;
+ *   2. production currently REFUSES that encoding;
+ *   3. the normalised encoding is accepted by `parseMutationInput`;
+ *   4. given acceptance, the reread returns the seeded values.
+ *
+ * Claims 1-3 are observations. **Claim 4 is a stand-in**, named at the point of
+ * use: it seeds from the stage production accepts, because no browser submission
+ * of this surface is acceptable as submitted. What blocks it is routed and stays
+ * routed -- `form-write-untyped-wire` and `form-empty-means-nothing` -- and this
+ * packet does not pull either back into its lease.
  */
-test('a v2 form round-trips every declared temporal and boolean value', async ({
+test('CLAIM 1: the browser encodes the rendered strings, in the compiled order', async ({
   page,
 }) => {
   await page.setExtraHTTPHeaders({ authorization: 'fixture-user' });
@@ -282,20 +301,18 @@ test('a v2 form round-trips every declared temporal and boolean value', async ({
     ...SEEDED,
     [EVERY_KIND_FIELD_IDS.active]: true,
   });
-  const url = `${fieldKindUrl}/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_form`)}&record=${encodeURIComponent(recordId)}`;
-  await page.goto(url);
+  await page.goto(formUrl(recordId));
   await expect(page.locator('#surface-record-form')).toBeVisible();
 
-  // 1. LIVE IDL VALUE. Every seeded value reached its control intact. Read
-  //    through the IDL, so a control that silently truncated or refused the
-  //    value reports what the user would actually have, not the markup.
+  // Read through the live IDL, not the markup: a control that truncated or
+  // refused its value reports what the user would actually submit.
   for (const [fieldId, value] of Object.entries(SEEDED)) {
     expect(await idleValue(page, fieldId), fieldId).toBe(value);
   }
   expect(await idleValue(page, EVERY_KIND_FIELD_IDS.active)).toBe('true');
 
-  // 2. checkValidity(). The step has to match the declared precision or the
-  //    browser refuses the value the contract requires.
+  // Native validity, which is what the declared precision buys. A time control
+  // at the browser's default 60-second step refuses `12:34:56` outright.
   for (const fieldId of Object.keys(SEEDED)) {
     expect(
       await page
@@ -304,11 +321,6 @@ test('a v2 form round-trips every declared temporal and boolean value', async ({
       fieldId,
     ).toBe(true);
   }
-  // The control for that claim, as a probe pair rather than by mutating the
-  // live element -- assigning `.step` after the fact was measured NOT to
-  // re-evaluate, so that version passed while proving nothing. Two inputs
-  // identical but for the step, given the same declared value: the rendered
-  // step accepts it and the browser default refuses it.
   expect(
     await page.evaluate((stored) => {
       const probe = (step: string | null): boolean => {
@@ -321,8 +333,8 @@ test('a v2 form round-trips every declared temporal and boolean value', async ({
       return { asRendered: probe('0.001'), browserDefault: probe(null) };
     }, SEEDED[EVERY_KIND_FIELD_IDS.preciseTime]!),
   ).toEqual({ asRendered: true, browserDefault: false });
-  // And the control for refusing `datetime-local`: a real one cannot hold the
-  // stored instant at all, which is why the carrier stays text.
+  // And the premise behind refusing `datetime-local` by name: a real one cannot
+  // hold the stored instant at all.
   expect(
     await page.evaluate((stored) => {
       const probe = document.createElement('input');
@@ -332,84 +344,119 @@ test('a v2 form round-trips every declared temporal and boolean value', async ({
     }, SEEDED[FIXTURE_IDS.fieldIds.parentUtcInstant]!),
   ).toBe('');
 
-  // 3. THE ENCODED REQUEST ENTRIES AND THEIR ORDER. Order is load-bearing:
-  //    `readFormSubmission` builds its record with last-value-wins, so two
-  //    entries sharing a name resolve by position.
-  const posted = new Promise<string>((resolve) => {
-    page.on('request', (request) => {
-      if (request.method() === 'POST') resolve(request.postData() ?? '');
-    });
-  });
+  const posted = capturePost(page);
   await page.getByRole('button', { name: 'Save' }).click();
   const entries = [...new URLSearchParams(await posted).entries()];
   const valueEntries = entries.filter(([key]) => key.startsWith('value:'));
+
   expect(entries.map(([key]) => key).slice(0, 4)).toEqual([
     'intent',
     'idempotencyKey',
     'recordId',
     'expectedRevision',
   ]);
-  // Exactly one entry per field, in the compiled field order -- no hidden
-  // sibling shadowing a control, which is what broke the capability floor.
-  expect(valueEntries.length).toBe(new Set(valueEntries.map(([key]) => key)).size);
+  // One entry per field, no shadowing sibling, values byte-identical to what the
+  // controls rendered.
+  expect(valueEntries.length).toBe(
+    new Set(valueEntries.map(([key]) => key)).size,
+  );
   for (const [fieldId, value] of Object.entries(SEEDED)) {
-    expect(valueEntries.find(([key]) => key === `value:${fieldId}`), fieldId).toEqual([
-      `value:${fieldId}`,
-      value,
-    ]);
+    expect(
+      valueEntries.find(([key]) => key === `value:${fieldId}`),
+      fieldId,
+    ).toEqual([`value:${fieldId}`, value]);
   }
-  expect(
-    valueEntries.find(
-      ([key]) => key === `value:${EVERY_KIND_FIELD_IDS.active}`,
-    ),
-  ).toEqual([`value:${EVERY_KIND_FIELD_IDS.active}`, 'true']);
+  lastSubmission = valueEntries;
+});
 
-  // 4. PROVIDER ACCEPTANCE, decided by the real write path's own parser rather
-  //    than by a stub. Three stages, so each missing transformation is
-  //    attributable instead of one lumped refusal.
-  const verdicts = fieldKindExecutor.providerVerdicts;
+/**
+ * Production refuses what the browser just sent, and the page says so rather
+ * than rendering a success. The double throws exactly what `parseMutationInput`
+ * threw, so this is the real contract refusing, surfaced through the real
+ * gateway and the real renderer.
+ *
+ * The middle stage is why this is attributable: coercing booleans alone is still
+ * refused, so `""` for an unset non-text field is a SECOND gap rather than a
+ * detail of the first.
+ */
+test('CLAIM 2: production refuses that encoding, and the page shows it', async ({
+  page,
+}) => {
+  await page.setExtraHTTPHeaders({ authorization: 'fixture-user' });
+  const recordId = fieldKindExecutor.seedTypedValues({
+    ...SEEDED,
+    [EVERY_KIND_FIELD_IDS.active]: true,
+  });
+  await page.goto(formUrl(recordId));
+  const before = fieldKindExecutor.providerVerdicts.length;
+  await page.getByRole('button', { name: 'Save' }).click();
+
+  const verdicts = fieldKindExecutor.providerVerdicts.slice(before);
   const stage = (name: string) =>
     verdicts.find((entry) => entry.stage === name);
-  // What a form actually submits is refused today, and NOT because of anything
-  // this packet changed -- a bare text box posted `""` for an unset field too.
-  // Two string shapes are not values: `"true"` for a boolean, and `""` for any
-  // non-text kind the record has no value for.
   expect(stage('as-submitted')).toMatchObject({
     accepted: false,
     code: 'MODULE_FIELD_VALUE_INVALID',
   });
-  // Coercing booleans alone is NOT enough, which is why the middle stage exists:
-  // without it, "normalised accepts" would be read as "the boolean was the
-  // whole problem".
   expect(stage('booleans-coerced')).toMatchObject({
     accepted: false,
     code: 'MODULE_FIELD_VALUE_INVALID',
   });
-  // The admission twin. With `U7`'s normalisation stood in for -- empty strings
-  // read as "no value stated", booleans coerced -- the SAME input is accepted,
-  // so every temporal, enum and numeric value the controls rendered survives
-  // the wire byte for byte.
-  expect(stage('normalised')).toEqual({
+  // Refused, not silently succeeded. The double no longer manufactures a green.
+  await expect(page.getByRole('alert')).toBeVisible();
+  await expect(page.getByRole('status')).toHaveCount(0);
+});
+
+/**
+ * The admission twin, decided by the real parser rather than by this file: with
+ * `U7`'s normalisation stood in for -- empty strings read as "no value stated",
+ * booleans coerced -- the SAME submission is accepted. That is what makes claim
+ * 2's refusal attributable to the two named wire gaps and to nothing about the
+ * temporal or enum encodings.
+ */
+test('CLAIM 3: the normalised encoding is accepted by the real parser', async () => {
+  expect(lastSubmission.length).toBeGreaterThan(0);
+  const verdicts = fieldKindExecutor.providerVerdicts;
+  const normalised = verdicts.filter((entry) => entry.stage === 'normalised');
+  expect(normalised.length).toBeGreaterThan(0);
+  expect(normalised.at(-1)).toEqual({
     accepted: true,
     code: null,
     stage: 'normalised',
     subjectId: null,
   });
+});
 
-  // 5. AUTHORITATIVE REREAD. The operation's read-back is what the page renders
-  //    next, so every value must come back into its control unchanged.
-  await expect(page.locator('#surface-record-form')).toBeVisible();
+/**
+ * **A stand-in observation, named here rather than in a comment.** No browser
+ * submission of this surface is acceptable as submitted, so the record is seeded
+ * from the stage production DOES accept and the reread is read off that. It
+ * shows that the controls carry back what was stored; it does NOT show that a
+ * browser submission produced the stored values, and nothing in this packet
+ * shows that.
+ */
+test('CLAIM 4 (stand-in): given acceptance, the reread returns the seeded values', async ({
+  page,
+}) => {
+  await page.setExtraHTTPHeaders({ authorization: 'fixture-user' });
+  const recordId = fieldKindExecutor.seedTypedValues({
+    ...SEEDED,
+    [EVERY_KIND_FIELD_IDS.active]: true,
+  });
+  await page.goto(formUrl(recordId));
   for (const [fieldId, value] of Object.entries(SEEDED)) {
     expect(await idleValue(page, fieldId), `reread ${fieldId}`).toBe(value);
   }
+  expect(await idleValue(page, EVERY_KIND_FIELD_IDS.active)).toBe('true');
 });
+
 
 /**
  * The boolean's three states, end to end. A checkbox cannot express them, and
  * the first cut's hidden `value="false"` sibling made an unrelated edit rewrite
  * a stored `null` to `false` -- upstream of anywhere `U7` could recover it.
  */
-test('an optional boolean keeps absent, null, false and true apart on the wire', async ({
+test('an optional boolean submits three distinct states, and absent equals null', async ({
   page,
 }) => {
   await page.setExtraHTTPHeaders({ authorization: 'fixture-user' });
@@ -435,23 +482,39 @@ test('an optional boolean keeps absent, null, false and true apart on the wire',
     await expect(page.locator(`input[type="hidden"]${control}`)).toHaveCount(0);
   }
 
-  // Absent and null both submit the empty string -- distinct from "false", which
-  // is the whole point. A form that posted "false" here would silently write one.
-  const posted = new Promise<string>((resolve) => {
-    page.on('request', (request) => {
-      if (request.method() === 'POST') resolve(request.postData() ?? '');
-    });
-  });
-  const untouched = fieldKindExecutor.seedTypedValues({});
-  await page.goto(
-    `${fieldKindUrl}/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_form`)}&record=${encodeURIComponent(untouched)}`,
-  );
-  await page.getByRole('button', { name: 'Save' }).click();
-  expect(
-    new URLSearchParams(await posted).getAll(
+  // SUBMISSION, all four states, because the claim above is about the render and
+  // this one is about the wire. They are not the same claim and the four-state
+  // sentence previously stood over a two-state measurement.
+  //
+  // What submission actually distinguishes is THREE things, not four: `true`,
+  // `false`, and "no value stated". `absent` and `null` are the SAME submission
+  // -- the empty string -- and are distinguishable only in the render. That is
+  // the honest boundary, and it is `form-empty-means-nothing`'s to close, not
+  // this packet's.
+  const submitted = async (
+    seeded: boolean | null | undefined,
+    choose: string | null,
+  ): Promise<readonly string[]> => {
+    const recordId = fieldKindExecutor.seedTypedValues(
+      seeded === undefined ? {} : { [EVERY_KIND_FIELD_IDS.active]: seeded },
+    );
+    await page.goto(formUrl(recordId));
+    if (choose !== null) await page.locator(control).selectOption(choose);
+    const posted = capturePost(page);
+    await page.getByRole('button', { name: 'Save' }).click();
+    return new URLSearchParams(await posted).getAll(
       `value:${EVERY_KIND_FIELD_IDS.active}`,
-    ),
-  ).toEqual(['']);
+    );
+  };
+
+  // Exactly one entry each time -- no hidden sibling shadowing the control.
+  expect(await submitted(undefined, null)).toEqual(['']);
+  expect(await submitted(null, null)).toEqual(['']);
+  expect(await submitted(false, null)).toEqual(['false']);
+  expect(await submitted(true, null)).toEqual(['true']);
+  // And turning one off submits `false` rather than omitting the field, which is
+  // what a checkbox could not express.
+  expect(await submitted(true, 'false')).toEqual(['false']);
 });
 
 /**
@@ -751,7 +814,25 @@ class BrowserFixtureExecutor
 {
   private readonly records = new Map<string, SemanticRecordDto>();
 
-  constructor(private readonly failedQueryId: string | null = null) {}
+  /**
+   * `honourProviderRefusal` is OPT-IN, and the reason is a measurement rather
+   * than caution. Turning it on for the legacy `ordinaryModuleV1` executor reds
+   * two pre-existing tests: the real parser refuses that fixture's create with
+   * `MODULE_REQUIRED_FIELD_MISSING` on `master_number`, a REQUIRED field the
+   * surface never renders and the form therefore cannot submit. Those tests have
+   * been asserting "Create complete" against a double that accepted what
+   * production rejects.
+   *
+   * That is the same defect class this flag exists to close, it is pre-existing,
+   * and it is a different instance from the wire gaps this packet routed. It
+   * belongs to the `double-must-honour-refusal` sweep, not to `ux-picker`, so
+   * the flag is on where this packet's claims depend on it and off where turning
+   * it on would silently widen the lease.
+   */
+  constructor(
+    private readonly failedQueryId: string | null = null,
+    private readonly honourProviderRefusal = false,
+  ) {}
 
   /**
    * What the REAL provider decided about each operation input it was handed.
@@ -924,7 +1005,21 @@ class BrowserFixtureExecutor
     }
 
     const input = recordValue(request.input);
+    // The double HONOURS the refusal it just recorded. Before this it recorded a
+    // refusal and then merged the refused values anyway, returning
+    // `outcome: 'succeeded'` with an authoritative reread of input production
+    // would not accept -- a green manufactured by the component whose refusal is
+    // the fact under test, which is worse than having no double at all. ADR-0041
+    // is honour-or-refuse, and a test double is not exempt from it.
     this.#askTheProvider(request, input);
+    const asSubmitted = this.providerVerdicts.at(-3);
+    if (this.honourProviderRefusal && asSubmitted && !asSubmitted.accepted) {
+      throw new ModuleRuntimeInterpreterError(
+        asSubmitted.code ?? 'MODULE_FIELD_VALUE_INVALID',
+        'the real write path refuses this operation input',
+        asSubmitted.subjectId,
+      );
+    }
     const values = recordValue(input.values ?? input.patch ?? {});
     const recordId = String(input.recordId);
     const previous = this.records.get(recordId);

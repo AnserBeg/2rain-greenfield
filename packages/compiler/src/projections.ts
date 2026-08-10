@@ -666,6 +666,10 @@ function surfaceManifestPayload(
   const fieldById = new Map(
     packageRevision.fields.map((field) => [field.fieldId, field]),
   );
+  // One condition, read by both the emission below and the capability floor, so
+  // the floor cannot drift from what the payload actually carries.
+  const emitsFieldKinds =
+    compilerSemanticProfileVersion === COMPILER_SEMANTIC_PROFILE_V2_VERSION;
   // Load-bearing compatibility fence: labelling grouped output as v0 lets
   // v0 readers ignore the tree and silently reconstruct unreachable overflow.
   const payloadSchemaVersion = navigation
@@ -700,8 +704,7 @@ function surfaceManifestPayload(
         // assertion because the observable consequence belongs at the reader,
         // where a short `fields` against a full `fieldIds` is refused by name
         // instead of rendering half a form as bare text boxes.
-        ...(compilerSemanticProfileVersion ===
-        COMPILER_SEMANTIC_PROFILE_V2_VERSION
+        ...(emitsFieldKinds
           ? {
               fields: fieldIds.flatMap((fieldId) => {
                 const field = fieldById.get(fieldId);
@@ -745,25 +748,26 @@ function surfaceManifestPayload(
     // condition is that no tier value ever means "hide"; the moment one does,
     // this needs re-deriving. Recorded, not fixed (U5b review item 3).
     //
-    // `fields` is the same shape of honest omission, and the floor was
-    // RE-DERIVED after a review found the first cut violating this very
-    // sentence. A reader that drops `fields` renders every field as a bare text
-    // box; a reader that honours it renders a typed control. The floor may stay
-    // at 1 only while both readers SUBMIT the same entries for the same user
-    // action, and the first cut broke that: a boolean rendered as a checkbox
-    // with a hidden `value="false"` sibling posted `"false"` where the older
-    // reader posted `""`. Two readers, one action, different bytes.
+    // **`fields` ALLOCATES version 3 rather than arguing its way to staying at
+    // 1, and that is a deliberate retreat from a claim this packet could not
+    // hold.** The argument was available -- a reader that drops `fields` renders
+    // bare text boxes, which is under-featured rather than wrong -- but it is
+    // only true while both readers SUBMIT the same entries for the same user
+    // action, and that is a claim about what a BROWSER does with rendered
+    // markup. Two attempts to hold it failed: the first shipped a hidden
+    // `value="false"` sibling that posted different bytes than the older reader,
+    // and the second asserted equivalence through a regex over server HTML that
+    // synthesised what it believed a browser would submit -- no successful-control
+    // rules, no disabled-state behaviour, no form ownership. A control marked
+    // `disabled`, which a real browser omits entirely, kept that gate green.
     //
-    // The fix was to remove the difference rather than to raise the floor: a
-    // boolean now renders as a `select` whose unset state is the blank option,
-    // so an untouched field posts `""` under either reader. That equivalence is
-    // GATED, not asserted -- `test/integration/surface-data-binding.test.ts`
-    // renders one package under both profiles and compares the submitted
-    // entries. The condition remains what it always was: the moment a field kind
-    // changes what the form SUBMITS rather than what it OFFERS, this floor moves.
+    // A version number costs nothing and needs no instrument. The floor now says
+    // what is true by construction: a reader that does not understand `fields`
+    // must not serve this payload. Nothing downstream has to be trusted to
+    // behave like a browser for that sentence to hold.
     requiredRuntimeCapability: {
       capabilityId: 'northstar.runtime:capability.surface-manifest',
-      minimumVersion: navigation ? 2 : 1,
+      minimumVersion: emitsFieldKinds ? 3 : navigation ? 2 : 1,
     },
   };
 }
