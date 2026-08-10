@@ -1286,9 +1286,12 @@ function assertOperationInputContract(
     ],
     invalid,
   );
-  // Two independent axes, each bound biconditionally to the declared version so
-  // neither can be present without being declared: systemInput iff v2 or v4,
-  // relation `targetEntityId` iff v3 or v4.
+  // Two independent axes. `systemInput` is biconditional with v2/v4 exactly as
+  // it always was. The relation axis binds the `targetEntityId` KEY to v3/v4 --
+  // enforced per element by assertExactKeys below -- and NOT the presence of
+  // relation inputs, which a v1 contract may legitimately carry without targets.
+  // The only version-level rule is that v3/v4 must not be minted vacuously: a
+  // contract claiming to carry relation targets must have a relation to target.
   const carriesSystemInput =
     value.schemaVersion === 'northstar.module-input-contract/v2' ||
     value.schemaVersion === 'northstar.module-input-contract/v4';
@@ -1302,7 +1305,7 @@ function assertOperationInputContract(
       value.schemaVersion !== 'northstar.module-input-contract/v4') ||
     hasSystemInput !== carriesSystemInput ||
     !Array.isArray(value.relationInputs) ||
-    value.relationInputs.length > 0 !== carriesRelationTargets ||
+    (carriesRelationTargets && value.relationInputs.length === 0) ||
     !Array.isArray(value.closedArgumentKeys) ||
     !Array.isArray(value.fields) ||
     !Array.isArray(value.relationInputs) ||
