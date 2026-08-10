@@ -52,6 +52,7 @@ export const reachabilityProducers = [
     'test/compiler/legal-entity-query-scope.test.ts',
     'test/compiler/predicate-lowering.test.ts',
     'test/compiler/publish-path-breadth-envelope.test.ts',
+    'test/compiler/relation-target-projection.test.ts',
   ]),
   nodeProducer('performance', 'performance', 'test:performance', [
     'test/compiler/performance-budget.test.ts',
