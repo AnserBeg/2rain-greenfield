@@ -170,20 +170,46 @@ function quarryMetricFork(): { path: string; source: string } {
 }
 
 /**
- * A cut version must not become anyone's default before it is adopted.
+ * NO PRODUCTION FILE REFERENCES A `LATEST_*` CONSTANT EXCEPT TO REPORT IT.
  *
- * The adoption ratchet pins the CONSTANTS -- `ADOPTED === v4`, `LATEST === v5`
- * -- and that is necessary but not sufficient: it stays green while a compiler
- * default, a normalizer selector, a fixture builder or a projection dispatch
- * alias quietly selects `LATEST` instead. Both halves below close that gap, one
- * structurally and one behaviourally.
+ * READ THE TITLE LITERALLY. This control was called "the newest readable
+ * version is reported, never selected" for four review rounds, and that name
+ * was a claim it could not support. It is a SOURCE-REFERENCE scan: it resolves
+ * bindings for two named constants and classifies their uses. It says nothing
+ * about newest-readable values reached by any other derivation.
  *
- * The rule this enforces is ADR-0047 §2's, restated from
- * `DEFAULT_COMPILER_PROFILE`: "Keyed to the ADOPTED version, not the latest
- * readable one. A newly cut but unadopted version must not silently become
- * every caller's default profile."
+ * NARROWED IN ROUND 4, after a fifth escape and on the repository's own
+ * convergence rule. The prior four repairs were each a real fix to a real hole
+ * -- a strip that deleted the subject, a rename that changed its name, a glob
+ * that never reached it, an exemption that swallowed it -- and each was
+ * followed by a cheaper escape than the one before. The fifth needed no
+ * obfuscation at all:
+ *
+ *     profile.languageVersion === SUPPORTED_LANGUAGE_VERSIONS.at(-1)!
+ *
+ * selects the newest readable version using an identifier production already
+ * imports. Measured on the real `DEFAULT_COMPILER_PROFILE`: the profile still
+ * resolved to v5, every behavioural assertion held, and this scan stayed green.
+ * A sixth token rule would have bought a sixth escape.
+ *
+ * WHAT THIS CONTROL PROVES: direct and named-alias references to
+ * `LATEST_LANGUAGE_VERSION` and `LATEST_NORMALIZATION_PROFILE_VERSION` do not
+ * appear in production except interpolated into operator-facing text.
+ *
+ * WHAT IT DOES NOT PROVE, recorded rather than implied: that the newest
+ * readable version is never SELECTED. Any derivation that reaches it without
+ * naming it -- the ordered supported list's last member being the obvious one
+ * -- is outside this scan by construction. Closing that needs a production
+ * SELECTOR SEAM, exercised on a constructed readable set whose adopted member
+ * is deliberately not its last, with `DEFAULT_COMPILER_PROFILE` proven to be
+ * produced through it. That is `adoption-selector-seam`, and it is a design
+ * change rather than another rule here.
+ *
+ * The behavioural assertions below are unchanged and still carry ADR-0047 §2's
+ * rule: every default follows ADOPTED, and the selection rule itself is
+ * exercised on a constructed set where the two candidate rules disagree.
  */
-test('the newest readable version is reported, never selected', () => {
+test('no production file references a LATEST_ constant except to report it', () => {
   const constantNames = [
     'LATEST_LANGUAGE_VERSION',
     'LATEST_NORMALIZATION_PROFILE_VERSION',

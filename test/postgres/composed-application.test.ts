@@ -4065,32 +4065,69 @@ async function assertAttributedSearchCapabilityScenarioDelta(
     'no entry after the pinned pair changes what the release verifies',
   );
 
-  // A language adoption re-identifies scenarios; a compiler-semantic profile
-  // adoption does not. Both halves are needed and neither is decorative: the
-  // first stops the content assertion above being satisfied by a plan that
-  // never moved at all, and the second shows the churn is attributable to the
-  // LANGUAGE axis rather than to lineage growth in general. Downstream, this is
-  // why durable verification evidence keyed by scenario id only partially
-  // survives a language adoption -- load-bearing for `PUR-1`.
-  const idsOf = (
+  // A language adoption changes recorded scenario IDENTITIES; a
+  // compiler-semantic profile adoption does not. ADR-0047 §8 publishes exact
+  // cardinalities, so they are asserted exactly -- review round 4 found this
+  // control proving neither, with `.some(...)` for "69" and a subset check for
+  // "0".
+  //
+  // MEASURED WHILE BUILDING THIS, and it corrected the ADR: there is NO key
+  // that distinguishes all 163 scenarios except the id itself. Every
+  // combination of the recorded non-id fields -- kind, entityId, subjectId,
+  // probePolarity, targetEntityId, provider -- collapses to 105 unique values.
+  // So "69 scenarios were re-identified" is not expressible: under the best
+  // available key only 11 signatures map to a different id, while the raw
+  // id-set difference is 69. The well-defined fact is the id-set difference,
+  // and that is what 69 means.
+  const scenarioIds = (
     scenarios: readonly { scenarioId: string }[],
-  ): ReadonlySet<string> =>
-    new Set(scenarios.map((scenario) => scenario.scenarioId));
-  const headIds = idsOf(headBinding.plan.scenarios);
-  const targetIds = idsOf(current.plan.scenarios);
-  assert.ok(
-    [...targetIds].some((scenarioId) => !headIds.has(scenarioId)),
-    'a language adoption must re-identify scenarios whose fingerprint covers a version-stamped node',
-  );
-  const profileEdgeIds = idsOf(
-    releaseVerificationBinding(
-      releaseByRoot(PROFILE_ONLY_SUCCESSOR_ROOT).compiled,
-    ).plan.scenarios,
-  );
+  ): string[] => scenarios.map((scenario) => scenario.scenarioId).toSorted();
+  const verifiedContentOf = (
+    scenarios: readonly { entityId: string; kind: string; subjectId: string }[],
+  ): string[] =>
+    scenarios
+      .map(
+        (scenario) =>
+          `${scenario.kind}|${scenario.entityId}|${scenario.subjectId}`,
+      )
+      .toSorted();
+
+  const headScenarios = headBinding.plan.scenarios;
+  const profileEdgeScenarios = releaseVerificationBinding(
+    releaseByRoot(PROFILE_ONLY_SUCCESSOR_ROOT).compiled,
+  ).plan.scenarios;
+
+  assert.equal(current.plan.scenarios.length, 163);
+  assert.equal(headScenarios.length, 163);
+  assert.equal(profileEdgeScenarios.length, 163);
+
+  // WHAT is verified does not move -- compared as a MULTISET, because the
+  // signature is not unique and a set comparison would silently tolerate a
+  // scenario being dropped while a duplicate signature covered for it.
   assert.deepEqual(
-    [...targetIds].filter((scenarioId) => !profileEdgeIds.has(scenarioId)),
-    [],
-    'a compiler-semantic profile adoption re-identifies nothing; only the source axis does',
+    verifiedContentOf(headScenarios),
+    verifiedContentOf(current.plan.scenarios),
+    'no entry after the pinned pair changes what the release verifies',
+  );
+
+  // EXACTLY 69 recorded ids do not appear in the other plan, which is the
+  // number ADR-0047 §8 publishes. Update it deliberately if a later change
+  // moves it; never relax it to "some".
+  const targetIdSet = new Set(scenarioIds(current.plan.scenarios));
+  const headIdSet = new Set(scenarioIds(headScenarios));
+  assert.equal(
+    [...targetIdSet].filter((scenarioId) => !headIdSet.has(scenarioId)).length,
+    69,
+    'a language adoption changes exactly the ids whose fingerprint covers a version-stamped node',
+  );
+
+  // EXACTLY 0 across the ADR-0047 §4 profile-only edge, asserted as identity of
+  // the whole sorted id list rather than as a subset, so an added or replaced
+  // scenario cannot pass.
+  assert.deepEqual(
+    scenarioIds(profileEdgeScenarios),
+    scenarioIds(current.plan.scenarios),
+    'a compiler-semantic profile adoption changes no scenario identity; only the source axis does',
   );
 
   const changes = [

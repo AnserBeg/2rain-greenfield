@@ -315,16 +315,34 @@ lineage:
 | | |
 |---|---|
 | scenario count | **163 → 163** |
-| `kind \| entityId \| subjectId` signature set | **identical** |
-| scenario ids that changed | **69 of 163** |
+| `kind \| entityId \| subjectId` multiset | **identical** |
+| recorded ids absent from the other plan | **69 of 163** |
 | ids changed by the ADR-0047 §4 profile-only edge (entry 6 → 7) | **0 of 163** |
 
-Every count holds, every behaviour holds, and 42% of the plan is issued under
-new identities. A `scenarioId` is a fingerprint over the scenario's inputs, and
-those inputs include version-stamped nodes; scenarios whose fingerprint reaches
-a stamped node move, and the rest do not. **The profile axis moves the release
-root and re-identifies nothing. The language axis re-identifies without moving
-anything a count can see.**
+**CORRECTED 2026-08-10, while building the control that asserts these numbers.**
+This section first said *"69 of 163 scenarios were re-identified"*. That reading
+is not expressible, and the correction matters more than the number.
+
+**There is no key that distinguishes all 163 scenarios except the id itself.**
+Every combination of the recorded non-id fields — `kind`, `entityId`,
+`subjectId`, `probePolarity`, `targetEntityId`, `provider` — collapses to **105
+unique values**. Under the best available key only **11** signatures map to a
+different id, while the raw id-set difference is **69**. So 69 is a
+DIFFERENCE BETWEEN IDENTITY SETS, not a count of scenarios that kept their
+meaning and changed their name; the plan simply has no stable per-scenario
+identity other than the fingerprint, which is the thing that moved.
+
+That is worth stating plainly because it bears on the decision below: an
+evidence reader cannot re-key orphaned evidence onto the new plan by matching
+on what a scenario verifies, because 58 of 163 scenarios are indistinguishable
+that way.
+
+Every count holds, every behaviour holds, and 42% of the recorded identities
+are absent from the other plan. A `scenarioId` is a fingerprint over the
+scenario's inputs, and those inputs include version-stamped nodes; scenarios
+whose fingerprint reaches a stamped node move, and the rest do not. **The
+profile axis moves the release root and changes no identity. The language axis
+changes identities without moving anything a count can see.**
 
 ### Why this is consequential rather than curious
 
