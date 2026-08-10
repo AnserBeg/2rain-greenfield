@@ -745,10 +745,14 @@ function renderSections(context: SurfaceComponentContext): string {
       'sections-slot',
     );
   }
+  // Create renders controls inside the field grid; update renders the freeze
+  // note after it, because a sentence is not a grid cell.
   const relationControls =
     intent === 'create'
       ? pickers.map((picker) => renderRelationPicker(picker)).join('')
-      : relationFreezeDisclosure(pickers);
+      : '';
+  const relationFreeze =
+    intent === 'create' ? '' : relationFreezeDisclosure(pickers);
   const recordId = record?.recordId ?? randomUUID();
   const compatibilityFeedback = hasSurfaceSlot(context, 'titleStatus')
     ? ''
@@ -758,7 +762,7 @@ function renderSections(context: SurfaceComponentContext): string {
     : '<button type="submit">Save</button>';
   return slotPanel(
     context,
-    `${compatibilityFeedback}<section class="panel data-panel" data-data-state="${record ? 'exact' : 'empty'}"><div class="panel__heading"><div><p class="eyebrow">Details</p><h2>${record ? 'Update the record' : 'Create a record'}</h2></div></div><form id="surface-record-form" method="post" action="/?surface=${encodeURIComponent(context.surface.surfaceId)}"><input type="hidden" name="intent" value="${intent}"><input type="hidden" name="idempotencyKey" value="${randomUUID()}"><input type="hidden" name="recordId" value="${escapeHtml(recordId)}">${record ? `<input type="hidden" name="expectedRevision" value="${record.revision}">` : ''}<div class="form-fields">${context.surface.fieldIds.map((fieldId) => `<label><span>${escapeHtml(fieldLabel(fieldId))}</span><input name="value:${escapeHtml(fieldId)}" value="${record ? renderInputValue(record.values[fieldId]) : ''}" autocomplete="off"></label>`).join('')}${relationControls}</div>${compatibilityCommand}</form></section>`,
+    `${compatibilityFeedback}<section class="panel data-panel" data-data-state="${record ? 'exact' : 'empty'}"><div class="panel__heading"><div><p class="eyebrow">Details</p><h2>${record ? 'Update the record' : 'Create a record'}</h2></div></div><form id="surface-record-form" method="post" action="/?surface=${encodeURIComponent(context.surface.surfaceId)}"><input type="hidden" name="intent" value="${intent}"><input type="hidden" name="idempotencyKey" value="${randomUUID()}"><input type="hidden" name="recordId" value="${escapeHtml(recordId)}">${record ? `<input type="hidden" name="expectedRevision" value="${record.revision}">` : ''}<div class="form-fields">${context.surface.fieldIds.map((fieldId) => `<label><span>${escapeHtml(fieldLabel(fieldId))}</span><input name="value:${escapeHtml(fieldId)}" value="${record ? renderInputValue(record.values[fieldId]) : ''}" autocomplete="off"></label>`).join('')}${relationControls}</div>${relationFreeze}${compatibilityCommand}</form></section>`,
     'sections-slot',
   );
 }
