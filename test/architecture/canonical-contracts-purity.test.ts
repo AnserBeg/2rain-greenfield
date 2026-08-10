@@ -260,6 +260,41 @@ test('the newest readable version is reported, never selected', () => {
     [],
   );
 
+  // (e) AN ALIASED IMPORT BINDING -- round two's finding, and the cheapest
+  //     mutation of all: it edits one import line, not the initializer. The
+  //     guarded name then appears ONLY inside the skipped import declaration
+  //     and every selection site spells the local binding. Reproduced against
+  //     the real `compiler.ts`: `DEFAULT_COMPILER_PROFILE` selected the newest
+  //     readable version and this scan stayed green, along with every
+  //     behavioural assertion, because both constants are equal today.
+  //
+  //     Two reds are expected, and they are different facts: the alias itself,
+  //     and the use it enables. A scan that reported only the first would pass
+  //     on an alias introduced in one file and used in another.
+  const aliasedImport = detected(
+    "import { LATEST_LANGUAGE_VERSION as ADOPTED_LANGUAGE_VERSION } from './constants.js';\nexport const DEFAULT_PROFILE = { languageVersion: ADOPTED_LANGUAGE_VERSION };\n",
+  );
+  assert.equal(aliasedImport.length, 2, aliasedImport.join('\n'));
+  assert.match(aliasedImport[0] ?? '', /imported under the alias/u);
+
+  // (f) an UNALIASED import of the same constant is a binding, not a rename, so
+  //     the import line itself must not be reported -- only uses are. Without
+  //     this, (e) is satisfiable by flagging every import specifier, which would
+  //     red every legitimate reader of the constant and get the scan weakened.
+  const plainImport = detected(
+    "import { LATEST_LANGUAGE_VERSION } from './constants.js';\nconst reported = `through ${LATEST_LANGUAGE_VERSION}`;\n",
+  );
+  assert.deepEqual(plainImport, []);
+
+  // (g) a RENAMING re-export carries the same indirection one module out:
+  //     downstream files import the new name and receive the guarded constant.
+  //     A plain re-export renames nothing and is control (b) above.
+  const aliasedReExport = detected(
+    "export { LATEST_LANGUAGE_VERSION as ADOPTED_LANGUAGE_VERSION } from './constants.js';\n",
+  );
+  assert.equal(aliasedReExport.length, 1, aliasedReExport.join('\n'));
+  assert.match(aliasedReExport[0] ?? '', /re-exported under the alias/u);
+
   // The behavioural half: every default follows ADOPTED.
   assert.equal(
     DEFAULT_COMPILER_PROFILE.languageVersion,
@@ -384,10 +419,80 @@ function latestVersionSelections(
   );
   const selections: string[] = [];
 
+  // PASS 1 -- resolve BINDINGS, not spellings. Review round 2 found the scan
+  // following identifier text: `import { LATEST_LANGUAGE_VERSION as
+  // ADOPTED_LANGUAGE_VERSION }` puts the guarded name only inside a skipped
+  // import declaration, and every selection site then spells the local binding,
+  // which is not a guarded name. Reproduced against the real
+  // `DEFAULT_COMPILER_PROFILE`: the compiler default selected the newest
+  // readable version and this scan stayed GREEN, as did every behavioural
+  // assertion, because both constants are equal today. That is the same defect
+  // as round one's -- a rename at the boundary makes the subject invisible --
+  // and it is cheaper, because it edits one import line rather than the
+  // initializer.
+  //
+  // A guarded constant reached under any local name is still the guarded
+  // constant, so the local name joins the scanned set. The rename itself is ALSO
+  // reported: aliasing a version constant to the name of a different version
+  // constant is the indirection, whether or not the alias is ever used.
+  const guarded = (name: string): boolean => names.has(name);
+  const bindingNames = new Set(constantNames);
+  const report = (node: ts.Node, note?: string): void => {
+    const { line } = parsed.getLineAndCharacterOfPosition(node.getStart());
+    selections.push(
+      `${file}:${String(line + 1)}: ${source.split('\n')[line]?.trim() ?? ''}${
+        note === undefined ? '' : ` -- ${note}`
+      }`,
+    );
+  };
+
+  const collectBindings = (node: ts.Node): void => {
+    if (ts.isImportDeclaration(node)) {
+      const bindings = node.importClause?.namedBindings;
+      if (bindings !== undefined && ts.isNamedImports(bindings)) {
+        for (const specifier of bindings.elements) {
+          const imported = specifier.propertyName?.text ?? specifier.name.text;
+          if (!guarded(imported)) continue;
+          bindingNames.add(specifier.name.text);
+          if (specifier.propertyName !== undefined) {
+            report(
+              specifier,
+              `${imported} imported under the alias ${specifier.name.text}`,
+            );
+          }
+        }
+      }
+      return;
+    }
+    if (ts.isExportDeclaration(node)) {
+      const bindings = node.exportClause;
+      if (bindings !== undefined && ts.isNamedExports(bindings)) {
+        for (const specifier of bindings.elements) {
+          const exported = specifier.propertyName?.text ?? specifier.name.text;
+          // A RENAMING re-export is the same name-changing indirection one
+          // module out: downstream files import the new name and receive the
+          // guarded constant. A plain re-export renames nothing and is not a
+          // selection.
+          if (guarded(exported) && specifier.propertyName !== undefined) {
+            report(
+              specifier,
+              `${exported} re-exported under the alias ${specifier.name.text}`,
+            );
+          }
+        }
+      }
+      return;
+    }
+    ts.forEachChild(node, collectBindings);
+  };
+  ts.forEachChild(parsed, collectBindings);
+
+  // PASS 2 -- uses of every binding that resolves to a guarded constant.
   const visit = (node: ts.Node): void => {
-    // Importing or re-exporting a constant is not selecting it.
+    // Importing or re-exporting a constant is not selecting it; pass 1 has
+    // already ruled on the specifiers.
     if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) return;
-    if (ts.isIdentifier(node) && names.has(node.text)) {
+    if (ts.isIdentifier(node) && bindingNames.has(node.text)) {
       const parent = node.parent as ts.Node | undefined;
       // A constant's own declaration is not a selection of itself. This is what
       // lets `constants.ts` be scanned rather than excluded wholesale -- the

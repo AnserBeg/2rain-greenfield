@@ -355,6 +355,48 @@ companions.
 postgres were not run against it. It stays routed to
 `version-predicate-derivation` as *unobserved at this sample*, not *uncovered*.
 
+### Review round 2 — REVISE, one control defect, no production defect
+
+**The scan followed identifier SPELLINGS, not resolved BINDINGS.** Round one
+rebuilt it to skip `ImportDeclaration` wholesale, which is correct for a plain
+import and wrong for a renaming one:
+
+    -  ADOPTED_LANGUAGE_VERSION,
+    +  LATEST_LANGUAGE_VERSION as ADOPTED_LANGUAGE_VERSION,
+
+The guarded name then appears ONLY inside the skipped declaration, every
+selection site spells the local binding, and the binding is not a guarded name.
+**Reproduced against the real `compiler.ts` before fixing anything:**
+`DEFAULT_COMPILER_PROFILE` selected the newest readable version and the scan
+returned green — as did every behavioural assertion in the same test, because
+both constants are `v5` today, and the constructed `selectAdoptedProfileVersion`
+control, because that helper is untouched. **This is a cheaper mutation than
+round one's:** it edits a single import line rather than the initializer.
+
+Closed by resolving bindings in a first pass. A guarded constant reached under
+any local name joins the scanned set, so its uses are reported; the rename is
+ALSO reported on its own, because aliasing one version constant to the name of
+another is the indirection whether or not the alias is used. Renaming
+re-exports are reported for the same reason one module out — a plain re-export
+renames nothing and stays exempt.
+
+Three more committed controls: an aliased import produces **two** findings (the
+alias and the use — a scan reporting only the first would pass on an alias
+introduced in one file and used in another), an unaliased import produces none,
+and a renaming re-export produces one.
+
+**Measured, R6:** the reviewer's exact mutation against the rebuilt scan reds at
+`compiler.ts:4` naming the alias and at `compiler.ts:167`, which is the
+selection inside `DEFAULT_COMPILER_PROFILE`.
+
+**The class, stated plainly, since this is its third instance in one packet.**
+Round one: a strip that removed the subject. Round two: a rename that changed
+the subject's name. Both are the same failure — *the control looked for a
+spelling where it should have asked what the thing IS* — and it is the same
+shape as the packet's own sixth-omission sweep, which is about versions written
+by hand where they were derivable. A scan over text has this failure mode
+structurally; only resolution removes it.
+
 ### The revise deletion table
 
 | # | Broken tree | Result |
@@ -365,6 +407,7 @@ postgres were not run against it. It stays routed to
 | R4 | materialization gate `>=` narrowed to `===` | **red** on the successor arm alone, by its own message: *"narrowing 'at or after' to 'exactly' reds here and nowhere else"* |
 | R5 | predicate body rewritten to a behaviourally equivalent form | **no red — correct by design** |
 | R5b | the predicate gains a third free binding the harness does not supply | **red**: `STATE_FIELD_INTRODUCED_AT is not defined` |
+| R6 | `LATEST_LANGUAGE_VERSION as ADOPTED_LANGUAGE_VERSION` in `compiler.ts` — round 2's finding | **green before the fix**; after it, **two reds**: the alias at `:4` and the selection at `:167` |
 
 **R5 and R5b together characterise the faithfulness guard, and R5 alone would
 have misdescribed it.** The guard cannot fail on a behaviour change — an
@@ -406,50 +449,15 @@ reported the matrix as **exit code 0** while the run had failed. `MATRIX_EXIT=1`
 was read from inside the log, which is the false-green `5g3-sm-impl` recorded and
 the reason its rule exists.
 
-## Gates — one full matrix, green at the revised SHA
+## Gates
 
-`FULL_MATRIX_PASS_SHA=11059ea`, tree clean, typecheck clean.
-**589 assertions, 0 failures, `MATRIX_EXIT=0` read from inside the log.**
+**The `11059ea` matrix is SUPERSEDED** by review round 2, which changed
+executable content in `canonical-contracts-purity.test.ts`. Fresh matrix owed.
 
-| Step | Result |
-|---|---|
-| `check:demo-release`, `check:app-release` | pass — shell root held, lineage reproduces 9/9 |
-| unit / compiler / performance | green |
-| integration / agent / architecture | green |
-| contracts / postgres / locale | green |
-| browser | 67 passed (2.1m) |
-| `check:language-coverage` | **PASS** — 2050 obligations, 2050 decision-covered, **427 first-party observations** |
-| `check:reachability` | **PASS** — **100/100** test files, 10 producer artifacts |
-
-**Compile-budget gate MEASURED:** `cpu_idle_pct=97.5`, best-of-5 wall
-**1952.4 ms** against 5000 ms. Pre-flight: registry empty, no containers, no
-worktree burning CPU, idle 97.8 / 94.7 / 97.4 after decay, loadavg 1.73 falling
-from 2.58, **five** `ccd-cli` runtimes recorded as exposure.
-
-**The longest test ran 207.0 s against its 300 s bound (~1.45x).** That is the
-number the two-way split existed to produce, and it is an IN-MATRIX figure —
-the same test timed out at this bound one round earlier on a 251.1 s standalone
-measurement. Standalone is not evidence about this bound.
-
-### What the earlier matrices cost, and why each failure was real
-
-Four runs reached this one. None was flake.
-
-1. `check:language-coverage` — a third hand-written copy of the compiler suite's
-   file list, updated in two of three places (`suite-inventory-copies`).
-2. `test:postgres` timeouts — the first split was sized against a standalone
-   measurement while the bound is in-matrix; that test's own comment records a
-   1.79x load factor.
-3. Green at `2e587fe`, **superseded** by review round 1, which changed
-   executable content in two test files.
-4. Green here.
-
-**The wrapper reported "exit code 0" on every failed run.** `MATRIX_EXIT` was
-read from inside the log each time — the false green `5g3-sm-impl` recorded,
-arriving through a background-task completion status rather than a shell
-wrapper.
-
-`pnpm lint` reports **7 errors and `prettier --check` drifts, both pre-existing
-on `main` at `5aa2d2c` and neither in the matrix command**
-(`unrun-quality-gates`). This packet adds zero of either; parity against the
-base is the comparison that means anything until that row lands.
+Recorded so the cost is visible: five matrices so far. Two failed on real
+defects this packet introduced (a third copy of a suite file list; a timeout
+split sized against a standalone measurement when the bound is in-matrix), and
+two green runs were superseded by review rounds that found control defects the
+matrix cannot see — a control that passes vacuously is green by construction.
+`MATRIX_EXIT` was read from inside the log every time; the background wrapper
+reported success on every failed run.
