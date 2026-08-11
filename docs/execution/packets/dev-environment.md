@@ -1,0 +1,257 @@
+# dev-environment — the application can be opened and looked at
+
+**Tier:** Behavioral. The diff changes what a human sees when they run the
+application and how a container-bearing path ends its life. It adds no
+invariant, no gate, and no compiler or release output.
+
+**Branch:** `packet/dev-environment`, cut from `main` at `08d6465`.
+
+**Worktree:** `/home/rvham/2rain-greenfield-devenv`, per the convention
+`git worktree list` shows and `matrix-must-pin-its-tree` prices.
+
+---
+
+## 1. The charter's premise was wrong, and that is the packet's first finding
+
+The `dev-environment` row says nobody can open the application, that
+"every human view of a data surface goes through a test harness", and that
+"the mechanism to fix it already exists four times over and is test-only" —
+naming `test/fixtures/g2/{catalog,location,party,saved-filter}/runtime-harness.ts`.
+
+**A composed-application dev server already exists and is not a test harness.**
+
+`apps/api` — a workspace package with a `dev` script — has since `G2-P5e`:
+
+- read `apps/web/release/app.compiled.json`, the compiled release, as its only
+  definition source (`composition-root.ts:77-82`);
+- installed it with `createComposedApplicationRuntime`
+  (`packages/postgres-provider/src/composed-application-runtime.ts`, 2,177
+  lines of **provider-owned production code**, not a fixture);
+- seeded records through the real `SemanticOperationGateway`;
+- served them through `createSurfaceRuntimeServer` with the full gateway set,
+  on `http://127.0.0.1:4174`;
+- started its own PostgreSQL container to do it.
+
+The ledger already records a human using it. `G2-P5e`'s row states the
+orchestrator "created a Party through the browser form (POST 200, 'Create
+complete.'), read it back through the list, and confirmed the row directly in
+PostgreSQL". Four later packet records — `G2-P5d-a`, `G2-P5d-a1`, `G2-P5d-b`,
+`G2-P5d-nav` — carry `pnpm --filter @north-star/api dev` in their
+"Test it yourself" steps.
+
+**How the row came to be wrong is more useful than the fact that it is.** The
+measurement behind it was of `apps/web`'s `pnpm dev`, and every statement it
+makes about that script is correct: `demo-server.ts` is hardcoded to
+`shell.compiled.json`, serves four shell surfaces, and cannot be pointed at
+`app.compiled.json` for exactly the structural reason given. The row then
+generalised from one package's `dev` script to the repository. `apps/api`'s
+`dev` script was never examined.
+
+**The four harnesses would have been the wrong mechanism to derive from.**
+They compile *per-module fixtures* — `compileCatalogFixture()` and its
+siblings — and assemble a runtime around one module. Deriving a dev server
+from them would have hand-assembled a variant of the application from module
+fixtures, which is precisely the second-authority hazard the row's own
+constraint (2) forbids. The correct mechanism was the one the row did not
+name.
+
+**They are also not four instruments.** `catalog` and `location` are 706-line
+files differing in **46 lines** after module-name normalisation — 93%
+identical; `party` is the same machinery again. `saved-filter` is a different
+thing entirely (an admission-refusal observer, 349 lines, no server, no
+`withReal*Runtime`). So the shape is *three copies of one harness plus one
+unrelated file*. Filed as a queue row; not repaired here, because those files
+gate `test:postgres` and `test:browser` and the repair's risk profile has
+nothing to do with letting a person open the application.
+
+## 2. What was actually broken
+
+Three defects, all in the dev path that existed.
+
+### 2.1 The dev container was named into the matrix's refusal namespace
+
+`main.ts` defaulted its container to **`north-star-composed-app`**.
+
+`scripts/guard-ephemeral-postgres.mjs` scans `name=^/north-star-` and is
+invoked from `scripts/run-matrix.sh:88` — **after** the exclusive lock is
+acquired at line 69. Consequences, both measured from the source:
+
+- A dev container younger than `NORTH_STAR_CONTAINER_STALE_SECONDS` (3600)
+  makes the matrix print `POSTGRES_CONTAINER_CONTAMINATION` and exit **76**,
+  having already taken and burned the slot. With three lanes queueing for that
+  slot, the dev environment and the test matrix were mutually exclusive.
+- A dev container older than an hour is `docker rm --force`d by `sweepStale`,
+  which checks **age only** and never asks whether an owner is alive. A dev
+  session past the hour mark would have its database destroyed under it.
+
+The four packet records above instruct the user to set
+`NORTH_STAR_DATABASE_CONTAINER=north-star-g2-…`, so the hazardous name is not
+hypothetical — it is copy-pasteable out of the repository's own docs.
+
+### 2.2 The container outlived its session by construction
+
+`main.ts`'s `stop` closed the HTTP server and the runtime pools. **Nothing
+stopped or removed the container.** It kept running, holding its port and its
+volume, after the process that created it exited — which is the shape
+`leak-guard-orphan` records, arrived at deliberately rather than by a
+guardian failure.
+
+### 2.3 The seed rebuilt module identifiers by string concatenation
+
+`composition-root.ts` built its field and operation identifiers as
+`` `${applicationNamespace}:field.${localField}` ``. The modules declare those
+identifiers in `APPLICATION_IDS` (`packages/domain/src/app/builder.ts`). A
+seed that reconstructs them keeps compiling after a module renames a field —
+constraint (3)'s "second authority in a different costume", present in the
+existing code.
+
+It was also 12 records: 4 parties, 4 items, 4 locations. Below the point where
+any list paginates (`maximumResultCount` is **100**) or any search is worth
+pressing.
+
+## 3. What this packet changed
+
+| Path | Change |
+|---|---|
+| `packages/domain/src/app/seed.ts` | **New.** Seed authored beside the module definitions, bound to `APPLICATION_IDS`. Two profiles. |
+| `apps/api/src/composition-root.ts` | Seed table removed; takes a `seedProfile` option, default `demo`. |
+| `apps/api/src/main.ts` | Container renamed out of `north-star-*` and the prefix **refused**; container stopped on exit; asks for the `distributor` profile; prints the surface URLs. |
+| `apps/api/package.json` | `dev:stop`, `dev:reset`. |
+| `apps/web/package.json` | `dev` → `serve:shell-fixture`. |
+| `package.json` | Root `dev` → the composed application. |
+
+### The seed profiles
+
+- **`demo`** — the previous 12 records, **byte-identical**: same ordinals, same
+  record identifiers, same values, same order. Verified by reconstructing the
+  old inline table and deep-comparing. This matters because
+  `apps/web/test/browser/composed-application.spec.ts:2281` asserts
+  `seededRecords` has length 12 and line 872 reads back the
+  `Alpine Office Supply` cell — **and that file is held by `packet/pur-1`**, so
+  it must not need editing.
+- **`distributor`** — a superset: **176 records — 119 items, 45 parties, 12
+  locations.** 119 items is above the declared page size of 100, so the item
+  list paginates. Items are authored as families expanded into variants so the
+  catalogue reads like a real one rather than `Item 037`.
+
+### The rename
+
+The row asks for one: *"the fixture server should be named for the fixture it
+serves, and `dev` should mean the application or not exist."*
+
+- `apps/web`'s `dev` → **`serve:shell-fixture`**. It serves
+  `shell.compiled.json`, a compiled shell fixture; the name now says so.
+  Nothing else in the repository referenced that script.
+- Root **`dev`** now runs the composed application, so `pnpm dev` means the
+  application.
+
+`repository-hygiene` pins only `test:*` suite scripts, so neither rename
+touches a gate.
+
+## 4. The three constraints
+
+**(1) No second authority for how the application is composed.** The dev path
+reads `app.compiled.json` and installs it through
+`createComposedApplicationRuntime`. It does not compile, does not assemble a
+variant, and does not import a module definition to build a runtime. The only
+thing this packet added on that axis is *data*. The compiled release remains
+the authority — as it already was.
+
+**(2) The container.** Discussed in §5.
+
+**(3) Seed beside the modules, bound to their declarations.** `seed.ts` sits in
+`packages/domain/src/app/` beside `builder.ts` and takes every identifier from
+`APPLICATION_IDS`. A module renaming a field now breaks the seed at the type
+level instead of silently.
+
+## 5. The container decision, stated explicitly
+
+**It does not take a lease, and it is not offered one.**
+
+A lease would be wrong on its face: the matrix lock serialises *suites*, and a
+dev database is held for hours. Taking the exclusive lease would block every
+lane; taking a shared one would claim a participation in the lock protocol it
+does not have.
+
+**What stops it racing a matrix:**
+
+- **It cannot trip the container guard.** The guard's subject is
+  `name=^/north-star-`. The dev container is `dev-composed-app-postgres`, and
+  `main.ts` now **throws** if the name is configured into that prefix — the
+  hazard is made unrepresentable rather than documented, because four packet
+  records still carry the hazardous invocation.
+- **No port race.** It publishes one fixed port (55432, configurable).
+  Ephemeral test containers publish ephemeral ports.
+- **No volume accumulation.** One named volume, reused across sessions.
+  `matrix-machine-decay` priced *per-run* volume growth — 481 volumes, 12.96GB
+  reclaimed. A single reused volume does not participate in that.
+- **It stops when the session stops.** `SIGINT`/`SIGTERM` stop the container.
+
+**What does NOT stop it, stated plainly:**
+
+- **`kill -9` leaks it.** There is no detached guardian. The existing one
+  (`test/helpers/postgres-container-guardian.mjs`) hard-requires a
+  `north-star-` prefix at line 17, so reusing it means editing the mechanism
+  every PostgreSQL test depends on — a blast radius out of proportion to this
+  packet. The residual is **one** named container on **one** fixed port with
+  **one** bounded volume, invisible to the matrix guard, removed by
+  `pnpm --filter @north-star/api dev:stop`. That is categorically unlike the
+  test-container leak, where each leak is a *new* container and a *new*
+  volume. Filed as a queue row rather than pretended closed.
+- **It contends for CPU, RAM and disk like any other process.** An idle
+  PostgreSQL is small, but `matrix-machine-decay` shows timing-bounded tests
+  running near their limits, so running a dev database during a matrix is a
+  real if modest cost. Nothing enforces this; it is the user's call.
+
+## 6. `lease-derivation` — which trigger fires
+
+The row's trigger: *the first packet that adds a new test entry point, a new
+container-bearing path, or a third registry producer.*
+
+**This packet fires none of the three, and the reason is the finding in §1.**
+
+- **No new test entry point.** No `*.test.ts` or `*.spec.ts` is added, and no
+  suite script is added. **`test-inventory-third-copy` therefore does not
+  apply** — there is no new test file for its three inventories to disagree
+  about.
+- **No new registry producer.**
+- **No new container-bearing path.** The container-bearing path is
+  `apps/api/src/main.ts`, and it has stood up a container since `G2-P5e`. This
+  packet renames it and gives it an ending; it does not create it.
+
+**What this packet assumes about the row's answer**, since it does not solve
+it: that the authority for "container-bearing path" must be **a real process
+edge**, not a helper-call marker. Concretely —
+
+`test/architecture/test-lock-observability.test.ts:39` derives the set with
+`containerCallPattern = /\bwithEphemeralPostgres\s*\(/u`, and its own comment
+records that "workspace manifests are not scanned here at all". So
+`apps/api`'s `dev` script is invisible on **both** counts: it is a workspace
+manifest script, and it reaches Docker through
+`execFileAsync('docker', ['run', …])` rather than through the helper.
+
+**A container-bearing path has therefore been outside the census since
+`G2-P5e`** — which is `lease-derivation`'s abstract claim ("a gate that asserts
+a *necessary* condition where its name claims the *sufficient* one") with a
+concrete, pre-existing instance attached. This packet does not close it; it
+supplies the specimen.
+
+## 7. What this packet did NOT verify
+
+Listed for the reviewer, not excused.
+
+- **No gate observes any of it.** No test asserts the container name is outside
+  the `north-star-` prefix, that the container stops on exit, or that
+  `distributor` exceeds the page size. Every claim in §3 and §5 is established
+  by construction plus the manual run in §8 — not by a control, and not by a
+  negative control. A future edit re-introducing `north-star-` as the default
+  would be caught only by the thrown error at startup, which nothing exercises.
+- **The `demo`-profile identity is verified by a scratch comparison**, not by a
+  committed test. It compared the reconstructed old table against
+  `composedApplicationSeed('demo')` and reported identical; that script is not
+  in the tree.
+- **`kill -9` leak behaviour is reasoned, not measured.** No leak was staged.
+- **The guard interaction is read from source, not observed.** No matrix was
+  deliberately run with a dev container present to watch it exit 76.
+- **`ux-list-usability`, `form-write-untyped-wire` and `form-empty-means-nothing`
+  are out of scope by charter** and were not investigated.

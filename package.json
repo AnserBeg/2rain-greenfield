@@ -17,6 +17,7 @@
     "check:schema": "node scripts/run-with-test-lock.mjs exclusive -- node --import tsx test/helpers/check-schema.ts",
     "clean": "node scripts/clean.mjs",
     "db:migrate": "node --import tsx packages/postgres-provider/src/migrate.ts",
+    "dev": "corepack pnpm --filter @north-star/api dev",
     "format": "prettier --check .",
     "format:write": "prettier --write .",
     "lint": "eslint .",
