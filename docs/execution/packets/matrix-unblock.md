@@ -1,7 +1,7 @@
 # matrix-unblock — the matrix reaches its suites again, and the formatter stops drifting
 
-Status: evidence ready — merged onto post-`lang-adopt-v5` main, full matrix
-green at `04c44d3`, round-1 findings all closed
+Status: evidence ready — round-2 REVISE closed, full matrix
+green at `f4575a2`; rounds 1 and 2 findings all closed
 Tier: Behavioral
 Branch: `packet/matrix-unblock`
 Base: `194871f` (`origin/main` at cut; verified, not assumed)
@@ -47,7 +47,13 @@ Repository-level, after `rm -rf node_modules`: a fresh
 `pnpm install --frozen-lockfile` resolves `prettier 3.9.5`, the lockfile
 records `specifier: 3.9.5` where it recorded `^3.6.2`, and the tree stays
 clean. `pnpm-workspace.yaml` carries `overrides` for `brace-expansion` and
-`js-yaml` but none for `prettier`, so the pin is the only mechanism in play.
+`js-yaml` but none for `prettier`.
+
+**That last observation used to end "so the pin is the only mechanism in play",
+and review round 2 was right to call that out.** It is a measured fact about
+one SHA, not an invariant — a workspace override added tomorrow would rebind
+the formatter with the manifest untouched. It is now an invariant because the
+toolchain contract enforces it; see round 2 below.
 
 ## OPEN — the lane crossed its path lease and did not stop
 
@@ -177,9 +183,106 @@ the rule on the one line where a genuine fallthrough could later be
 introduced. The guard stays armed, and any future edit that moves the comment
 back into the case body is caught by the same error.
 
+## Review round 2 — REVISE, one blocking finding, closed
+
+Verdict: **REVISE**. Claims 2-4 held on the merged tree and were not reopened.
+One blocking control defect, and it was correct.
+
+**[P1] The gate observed `package.json`, not the effective resolution
+authority.** Round 1's contract read the manifest specifier and treated it as
+the only thing that selects the formatter. `pnpm-workspace.yaml`'s `overrides`
+block is a second, repository-controlled authority, and the packet's own words
+gave the game away: it said the workspace "has no prettier override" and
+concluded the manifest pin was "the only mechanism in play." That was a
+measured fact about one SHA, not an invariant the gate enforced.
+
+**Reproduced before fixing, not accepted on assertion.** Adding
+`overrides.prettier: ^3.9.5` while leaving `"prettier": "3.9.5"` untouched and
+regenerating the lockfile:
+
+| Observation | Result |
+| --- | --- |
+| lockfile recorded specifier | rewritten to **`^3.9.5`** |
+| `package.json` | still `3.9.5` |
+| round-1 contract | **4/4 green** |
+| `pnpm install --frozen-lockfile` | **exit 0** |
+
+The formatter edge is range-governed again and nothing notices — the same
+failure property the gate exists to prevent, reached by a different door.
+
+**One nuance stated precisely rather than overclaimed:** the override makes the
+*selector* a range, which is the defect. In this measurement pnpm still
+resolved to 3.9.5 from the store rather than moving to 3.9.6, so a version
+change was not demonstrated in that same run. The round-1 clean-room control
+already showed a range selector resolving to 3.9.6; the two together are what
+support the drift conclusion.
+
+### The correction
+
+The contract now rejects any `pnpm-workspace.yaml` override capable of claiming
+the **root** prettier dependency, whatever its value — an exact-but-different
+override too, since that would make the version that runs differ from the
+version this file reports as authoritative. A `parent>prettier` key scopes to
+another package's dependency, cannot reach the binary `pnpm format` runs, and
+is deliberately left alone rather than banned on sight.
+
+The reader **throws** on any shape it cannot parse, including an inline
+`overrides: {...}` mapping. A parser that silently skips an unfamiliar line is
+a gate that passes vacuously on exactly the input that would hide a rebind.
+
+**Also tested and recorded rather than assumed:** `package.json`'s
+`pnpm.overrides` is **inert** under pnpm 11 with a workspace file present — the
+specifier stayed `3.9.5` — so it is not guarded, and the code says what would
+have to change for it to need to be.
+
+**Four more observed reds:**
+
+| Control | Mutation | Observed |
+| --- | --- | --- |
+| E | range override + regenerated lockfile | test 5 red, tests 2/3/4 still green |
+| F | exact-but-different override (`3.9.6`) | test 5 red |
+| G | inline `overrides: {...}` | test 5 red — fatal, not silently skipped |
+| H | discriminator neutered to always-false | **test 5 GREEN, test 6 red** |
+
+H is the non-vacuity proof, the same shape as control C: with the
+discriminator dead the live assertion still passes, so the recognition table is
+what makes it mean anything.
+
 ## Gates — ACCEPTANCE MATRIX, GREEN
 
-Full matrix at the post-merge SHA `04c44d3`, verdict read from inside the log:
+Full matrix at `f4575a2`, verdict read from inside the log, green on the first
+attempt:
+
+```
+PERFORMANCE_GATE_PASS_SHA=f4575a2e5ce47a378a052ccca7197bb2baf56edc
+FULL_MATRIX_PASS_SHA=f4575a2e5ce47a378a052ccca7197bb2baf56edc
+```
+
+Ran 15:29:21-15:52:27. Log: `/tmp/matrix-matrix-unblock-f4575a2e.log`.
+
+| Step | Result |
+| --- | --- |
+| `format` / `lint` / `typecheck` / `build` | pass |
+| `check:boundaries`, `check:schema`, `check:demo-release`, `check:app-release` | pass |
+| `test:performance` | 5 pass, 0 fail |
+| `test:unit` | 106 pass, 0 fail |
+| `test:compiler` | 145 pass, 0 fail |
+| `test:integration` | **133** pass, 0 fail (up from 130 — the three new contract tests) |
+| `test:agent` | 3 pass, 0 fail |
+| `test:architecture` | 141 pass, 0 fail |
+| `test:contracts` | 16 pass, 0 fail |
+| `test:postgres` | 197 pass, 0 fail |
+| `test:locale` | 1 pass, 0 fail |
+| `test:browser` | 77 passed (1.6m) |
+| observability producer | 11 pass, 0 fail |
+| `check:language-coverage` | PASS — 2050 obligations |
+| `check:reachability` | PASS — 102/102 test files, 10 producer artifacts |
+| security scans | passed |
+
+### Superseded round-1 matrix at `04c44d3`
+
+Retained as the record of what was measured before the round-2 fix, not as
+acceptance evidence — closing P1 changed executable test content.
 
 ```
 PERFORMANCE_GATE_PASS_SHA=04c44d3a51afa397943c2dc06709706a68d0eb08
