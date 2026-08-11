@@ -776,8 +776,12 @@ the earlier "13" read as a full account and was not one.
 **The row was rewritten rather than removed.** Removing the hunk would have
 discarded real debt: both predicates still enumerate their versions by hand, and
 coverage of the *adopted* version is not coverage of the *next cut* — a freshly
-cut v6 left out of either list still reds nothing, which is exactly how row 1 of
-`5g3-sm-impl` happened. The corrected row separates three things the old one ran
+cut v6 left out of the list still reds nothing, which is exactly how row 1 of
+`5g3-sm-impl` happened. *(Round 9 corrected the scope of that last sentence: it
+holds for `languageHasV2Features` and NOT for `languageUsesModuleProjectionShape`,
+whose whole-supported-list control already catches the omission. See round 9
+below — this round's own fix contained the next round's finding.)* The corrected
+row separates three things the old one ran
 together: the membership witness that now exists, the behavioural witness that
 still cannot be built because the faults are unconstructible, and the conversion
 itself — which is now **provable**, since the free-binding harness observes the
@@ -788,6 +792,78 @@ same-class "record outruns the control" correction at round 8 belongs with the
 orchestrator, not in another lane revision. The correction is confined to `docs/`,
 so the governing matrix SHA `5ee1244` continues to hold under the executable-content
 rule, and the freeze above it is again an empty non-document diff.
+
+### Review round 9 — BLOCK, and the round-8 fix contained the round-9 finding
+
+No production defect. No control defect. `5ee1244` still governs. The block
+landed on **the sentence I wrote to fix round 8**, which is the cleanest possible
+statement of what this packet's review loop had become.
+
+**The finding.** The corrected row said a freshly cut v6 omitted from *either*
+enumeration reds nothing. That is true of `languageHasV2Features` and false of
+`languageUsesModuleProjectionShape`, because its control does not spot-check the
+adopted version — it derives the introduction boundary and walks the whole
+supported list, so an appended successor inherits the assertion automatically.
+The row therefore preserved more behavioural debt than the tree has.
+
+**Measured rather than reasoned, because reasoning past a measurement is this
+packet's own error class.** A v6 cut was simulated: `v6` appended to
+`LANGUAGE_VERSIONS`, `SUPPORTED_LANGUAGE_VERSIONS`, `NORMALIZATION_PROFILE_VERSIONS`,
+`SUPPORTED_NORMALIZATION_PROFILE_VERSIONS`, a profile entry, and both
+supported-list ratchets — with **both predicate enumerations deliberately left
+un-updated**, which is the omission being modelled.
+
+| Predicate left un-updated | Result |
+|---|---|
+| `languageUsesModuleProjectionShape` | **red by name** — *"v6 must carry the module projection shape"* |
+| `languageHasV2Features` | **no red** — `test:unit` and full `test:compiler` (137/137 green) |
+
+The first attempt at this measurement was **inconclusive and looked conclusive**:
+the test aborted at the supported-list ratchet before ever reaching the loop, so
+the red it produced said nothing about the predicate. A real cut updates that
+ratchet, so the simulation was completed and re-run. Two further unit reds in the
+final run are artifacts of the simulation being deliberately partial —
+`LATEST_LANGUAGE_VERSION` was left at v5, which degrades `negative-contracts`'
+derived one-past-newest probe into a mixed-node probe, exactly as that helper's
+own comment predicts. Neither is a v2-features red.
+
+**A second, smaller finding, accepted.** "Physical names are fixed-length hashes,
+so a collision cannot be produced" is not a proof. Overlength is structurally
+unreachable; collision is *infeasible* — it requires a SHA-256 collision under the
+domain-separated naming construction, so it rests on the project's
+collision-resistance assumption. The row now says both halves separately. The same
+overstatement survives in two source comments and is recorded as residue rather
+than fixed, because editing them would put an executable change above the
+governing matrix SHA for a comment.
+
+**What nine rounds actually found.** Zero defects in the product change — six
+`const version` lines, two constants, one lineage entry — which has been correct
+since round 1 and was re-confirmed at every round since. Rounds 1–4 found real
+control defects on the purity scan, which was retired rather than patched a sixth
+time. Rounds 6–7 found real control defects in C6, which was rebuilt from the
+production object. Rounds 5, 8 and 9 found **claims**: sentences that generalised
+past the measurement sitting underneath them.
+
+**The error class, stated plainly so the next packet can avoid it.** Every one of
+those claim findings has the same shape — a correct measurement, then a sentence
+that reaches further than the measurement supports. "Every recorded non-ID field"
+(it was six of fifteen). "Evidence cannot be re-keyed by meaning" (163 of 163
+re-key). "Not observed at all" (two controls existed). "Both predicates are
+exposed" (one is). The measurements were never wrong. The generalisations were.
+
+**The structural fix, and it is cheap:** a routed row carries the MEASUREMENT and
+the SAMPLE, and marks any inference as an inference. *"Dropping v5 reds 46 tests
+across `test:unit` and `test:compiler`"* is checkable and cannot rot. *"Both
+predicates are exposed at the next cut"* is an inference, and it rotted the moment
+a control landed. This row now states each number with the sample it came from,
+which is why round 9's correction was two sentences rather than another rewrite.
+
+**Round 9 is where the packet stops.** The user ruled it accepted on the code
+evidence after nine independent confirmations of the adoption itself. The
+anti-spiral rule in `review-tiers` was invoked at round 4 and never applied, and
+five further rounds were spent reviewing prose that describes future work rather
+than the change being shipped — the same nine-round shape as `G3-R1`, which is the
+failure that rule exists to prevent.
 
 ## What the first matrix cost, and why it is the packet's own theme again
 
