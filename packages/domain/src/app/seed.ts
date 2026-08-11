@@ -486,10 +486,14 @@ function locationRecord(
   name: string,
   locationType: string,
 ): ComposedApplicationSeedRecord {
+  // Key ORDER matters and is not cosmetic: the previous inline seed inserted
+  // code, then name, then type. Property order survives JSON.stringify, so a
+  // different order is different bytes even though the map is equal. The
+  // control asserts exact serialized equality against the recorded prior seed.
   return record(ordinal, APPLICATION_IDS.location.createOperationId, {
     [APPLICATION_IDS.location.fieldIds.code]: code,
-    [APPLICATION_IDS.location.fieldIds.locationType]: locationType,
     [APPLICATION_IDS.location.fieldIds.name]: name,
+    [APPLICATION_IDS.location.fieldIds.locationType]: locationType,
   });
 }
 

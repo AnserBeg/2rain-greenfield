@@ -100,25 +100,41 @@ export async function startComposedApplication(
       : {}),
     tenantSlug: options.tenantSlug ?? 'local-composed-application',
   });
-  const seededRecords = await seedComposedApplication(
-    runtime,
-    options.seedProfile ?? 'demo',
-  );
-  const server = createSurfaceRuntimeServer(runtime.entry, {
-    operationGateway: runtime.operationGateway,
-    operationMediation: runtime.operationMediation,
-    queryGateway: runtime.queryGateway,
-  });
+  // Everything after the runtime exists must hand it back closed on failure.
+  // Seeding is 176 operations and `listen` can fail with EADDRINUSE; either
+  // one previously threw past an open runtime, leaving the caller with no
+  // object to close and its pools and container still held.
+  let seededRecords: readonly ComposedApplicationSeedReceipt[];
+  let server: Server;
   const host = options.host ?? '127.0.0.1';
-  await new Promise<void>((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(options.port ?? 4174, host, () => {
-      server.off('error', reject);
-      resolve();
+  try {
+    seededRecords = await seedComposedApplication(
+      runtime,
+      options.seedProfile ?? 'demo',
+    );
+    server = createSurfaceRuntimeServer(runtime.entry, {
+      operationGateway: runtime.operationGateway,
+      operationMediation: runtime.operationMediation,
+      queryGateway: runtime.queryGateway,
     });
-  });
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(options.port ?? 4174, host, () => {
+        server.off('error', reject);
+        resolve();
+      });
+    });
+  } catch (error) {
+    await runtime.close();
+    throw error;
+  }
   const address = server.address();
   if (!address || typeof address === 'string') {
+    await new Promise<void>((resolve) => {
+      server.close(() => {
+        resolve();
+      });
+    });
     await runtime.close();
     throw new Error('composed application server has no TCP address');
   }

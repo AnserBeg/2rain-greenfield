@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "node --import tsx src/main.ts",
-    "dev:reset": "docker rm --force dev-composed-app-postgres; docker volume rm --force dev-composed-app-postgres-data",
-    "dev:stop": "docker stop dev-composed-app-postgres"
+    "dev:reset": "node --import tsx src/dev-container-cli.ts reset",
+    "dev:stop": "node --import tsx src/dev-container-cli.ts stop"
   },
   "dependencies": {
     "@north-star/postgres-provider": "workspace:*",

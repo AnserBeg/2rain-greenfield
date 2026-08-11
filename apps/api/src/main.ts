@@ -4,43 +4,20 @@ import { promisify } from 'node:util';
 
 import { APPLICATION_IDS } from '../../../packages/domain/src/app/builder.js';
 
-import { startComposedApplication } from './composition-root.js';
+import { resolveDevContainer } from './dev-container.js';
+import {
+  startComposedApplication,
+  type RunningComposedApplication,
+} from './composition-root.js';
 
 const execFileAsync = promisify(execFile);
 const postgresImage =
   'postgres@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777';
 
-/**
- * NOT `north-star-*`, and the prefix is load-bearing rather than cosmetic.
- *
- * `scripts/guard-ephemeral-postgres.mjs` scans `name=^/north-star-` and is
- * invoked by `scripts/run-matrix.sh` AFTER the exclusive lock is taken. Any
- * `north-star-*` container it finds younger than an hour makes the matrix exit
- * 76 — burning the slot for whichever lane was queued — and any older one is
- * `docker rm --force`d with no check on whether its owner is alive. A dev
- * database is deliberately long-lived, so under that name it would both break
- * every lane's matrix and be destroyed mid-session. It is named out of that
- * namespace so the test guard's refusal keeps meaning what it says: a leftover
- * *test* container.
- *
- * The trade is stated rather than hidden: this container is invisible to the
- * matrix guard, so it carries its own lifecycle below.
- */
-const containerName =
-  process.env.NORTH_STAR_DEV_DATABASE_CONTAINER ?? 'dev-composed-app-postgres';
-if (containerName.startsWith('north-star-')) {
-  // Refused rather than warned: four packet records still carry
-  // `NORTH_STAR_DATABASE_CONTAINER=north-star-g2-…` in their "Test it
-  // yourself" steps, and a name that merely *should not* be used is one
-  // copy-paste away from being used. The matrix cannot tell this container
-  // from a leaked test one, so the name is made unavailable instead.
-  throw new TypeError(
-    `NORTH_STAR_DEV_DATABASE_CONTAINER must not start with "north-star-": ` +
-      `that prefix is reserved for ephemeral test containers, and ` +
-      `scripts/run-matrix.sh refuses to run while one is present. Got ${containerName}`,
-  );
-}
-const dataVolume = `${containerName}-data`;
+// Resolved BEFORE anything fallible runs, so a refused name never reaches the
+// point of creating a container. See dev-container.ts for why the prefix and
+// the retired variable are refused rather than warned about.
+const container = resolveDevContainer(process.env);
 const databasePort = Number.parseInt(
   process.env.NORTH_STAR_DATABASE_PORT ?? '55432',
   10,
@@ -50,70 +27,119 @@ const databaseUrl =
   `postgresql://postgres@127.0.0.1:${String(databasePort)}/postgres`;
 const managesContainer = !process.env.DATABASE_URL;
 
-if (managesContainer) await ensureLocalPostgres();
+/**
+ * Both are set the moment the thing they guard EXISTS, not once it is healthy.
+ * `containerExists` in particular flips as soon as `docker run` returns: a
+ * container whose published endpoint never becomes reachable is still a
+ * container this process created and still owes cleanup for.
+ */
+let containerExists = false;
+let application: RunningComposedApplication | undefined;
+let shuttingDown = false;
 
-const application = await startComposedApplication({
-  databaseUrl,
-  host: process.env.HOST ?? '127.0.0.1',
-  port: Number.parseInt(process.env.PORT ?? '4174', 10),
-  ...(process.env.NORTH_STAR_ROLLBACK_RELEASE_ROOT !== undefined
-    ? { rollbackReleaseRoot: process.env.NORTH_STAR_ROLLBACK_RELEASE_ROOT }
-    : {}),
-  seedProfile: 'distributor',
-  tenantSlug:
-    process.env.NORTH_STAR_TENANT_SLUG ?? 'local-composed-application',
-});
-
-process.stdout.write(
-  `COMPOSED_APPLICATION_READY ${JSON.stringify({
-    baseUrl: application.baseUrl,
-    databaseContainer: managesContainer ? containerName : null,
-    releaseRoot: application.runtime.releaseRoot,
-    seededRecords: application.seededRecords.length,
-    tenantId: application.runtime.identity.tenantId,
-  })}\n`,
-);
-process.stdout.write(
-  [
-    '',
-    `  The composed application is running at ${application.baseUrl}`,
-    '',
-    `  Items      ${surfaceUrl(APPLICATION_IDS.catalog.listSurfaceId)}`,
-    `  Parties    ${surfaceUrl(APPLICATION_IDS.party.listSurfaceId)}`,
-    `  Locations  ${surfaceUrl(APPLICATION_IDS.location.listSurfaceId)}`,
-    '',
-    '  Ctrl-C stops the server and its database container.',
-    managesContainer
-      ? `  If this process is killed outright, stop it with: docker stop ${containerName}`
-      : '  DATABASE_URL was supplied, so no container is managed here.',
-    '',
-  ].join('\n'),
-);
-
-let stopping = false;
-const stop = async (): Promise<void> => {
-  if (stopping) return;
-  stopping = true;
-  await application.close();
-  // The container outliving its session is the defect `leak-guard-orphan`
-  // records, so the session stops what it started. A single reused container
-  // and one reused named volume is the bounded case: nothing accumulates
-  // per-run the way ephemeral test containers and their volumes did.
-  if (managesContainer) {
-    await dockerSucceeds(['stop', containerName]);
-  }
-};
+// Installed BEFORE the container starts. Registering them after startup left
+// every failure between `docker run` and `listen()` — a Ctrl-C during the
+// seed, an occupied port, a migration error — leaking the container.
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.once(signal, () => {
-    void stop().then(
-      () => process.exit(0),
-      () => process.exit(1),
-    );
+    void shutdown(0);
   });
 }
 
-function surfaceUrl(surfaceId: string): string {
-  return `${application.baseUrl}/?surface=${encodeURIComponent(surfaceId)}`;
+try {
+  if (managesContainer) await ensureLocalPostgres();
+  application = await startComposedApplication({
+    databaseUrl,
+    host: process.env.HOST ?? '127.0.0.1',
+    port: Number.parseInt(process.env.PORT ?? '4174', 10),
+    ...(process.env.NORTH_STAR_ROLLBACK_RELEASE_ROOT !== undefined
+      ? { rollbackReleaseRoot: process.env.NORTH_STAR_ROLLBACK_RELEASE_ROOT }
+      : {}),
+    seedProfile: 'distributor',
+    tenantSlug:
+      process.env.NORTH_STAR_TENANT_SLUG ?? 'local-composed-application',
+  });
+} catch (error) {
+  process.stderr.write(
+    `COMPOSED_APPLICATION_START_FAILED ${String(error instanceof Error ? error.stack : error)}\n`,
+  );
+  await shutdown(1);
+}
+
+announce(application!);
+
+function announce(running: RunningComposedApplication): void {
+  process.stdout.write(
+    `COMPOSED_APPLICATION_READY ${JSON.stringify({
+      baseUrl: running.baseUrl,
+      databaseContainer: managesContainer ? container.name : null,
+      releaseRoot: running.runtime.releaseRoot,
+      seededRecords: running.seededRecords.length,
+      tenantId: running.runtime.identity.tenantId,
+    })}\n`,
+  );
+  const surface = (surfaceId: string): string =>
+    `${running.baseUrl}/?surface=${encodeURIComponent(surfaceId)}`;
+  process.stdout.write(
+    [
+      '',
+      `  The composed application is running at ${running.baseUrl}`,
+      '',
+      `  Items      ${surface(APPLICATION_IDS.catalog.listSurfaceId)}`,
+      `  Parties    ${surface(APPLICATION_IDS.party.listSurfaceId)}`,
+      `  Locations  ${surface(APPLICATION_IDS.location.listSurfaceId)}`,
+      '',
+      '  Ctrl-C stops the server and its database container.',
+      managesContainer
+        ? `  If this process is killed outright: pnpm --filter @north-star/api dev:stop`
+        : '  DATABASE_URL was supplied, so no container is managed here.',
+      '',
+    ].join('\n'),
+  );
+}
+
+/**
+ * Each step runs independently and every failure is collected, because the
+ * previous shape skipped `docker stop` whenever `application.close()` rejected
+ * and then exited 0 anyway — reporting success while leaking the container.
+ */
+async function shutdown(code: number): Promise<never> {
+  if (shuttingDown) return await never();
+  shuttingDown = true;
+  const failures: unknown[] = [];
+  if (application) {
+    try {
+      await application.close();
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+  if (containerExists) {
+    try {
+      await docker(['stop', container.name]);
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+  for (const failure of failures) {
+    process.stderr.write(
+      `COMPOSED_APPLICATION_SHUTDOWN_FAILED ${String(
+        failure instanceof Error ? failure.stack : failure,
+      )}\n`,
+    );
+  }
+  if (failures.length > 0 && containerExists) {
+    process.stderr.write(
+      `The database container may still be running. Stop it with: ` +
+        `pnpm --filter @north-star/api dev:stop\n`,
+    );
+  }
+  process.exit(failures.length > 0 ? 1 : code);
+}
+
+/** Keeps the `never` return honest for the re-entrant call. */
+function never(): Promise<never> {
+  return new Promise<never>(() => undefined);
 }
 
 async function ensureLocalPostgres(): Promise<void> {
@@ -124,23 +150,27 @@ async function ensureLocalPostgres(): Promise<void> {
   ) {
     throw new TypeError('NORTH_STAR_DATABASE_PORT must be a valid TCP port');
   }
-  const exists = await dockerSucceeds(['container', 'inspect', containerName]);
-  if (!exists) {
+  const exists = await dockerSucceeds(['container', 'inspect', container.name]);
+  if (exists) {
+    containerExists = true;
+    await docker(['start', container.name]);
+  } else {
     await docker([
       'run',
       '--detach',
       '--name',
-      containerName,
+      container.name,
       '--publish',
       `127.0.0.1:${String(databasePort)}:5432`,
       '--volume',
-      `${dataVolume}:/var/lib/postgresql/data`,
+      `${container.volume}:/var/lib/postgresql/data`,
       '--env',
       'POSTGRES_HOST_AUTH_METHOD=trust',
       postgresImage,
     ]);
-  } else {
-    await docker(['start', containerName]);
+    // Set immediately after creation, before readiness: a container that never
+    // becomes ready still exists and still owes cleanup.
+    containerExists = true;
   }
 
   const startedAt = performance.now();
@@ -148,7 +178,7 @@ async function ensureLocalPostgres(): Promise<void> {
     if (
       await dockerSucceeds([
         'exec',
-        containerName,
+        container.name,
         'pg_isready',
         '--username',
         'postgres',
