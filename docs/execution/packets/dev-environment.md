@@ -414,20 +414,27 @@ matrix until that lands.** Repairing them here was rejected: they are another
 lane's held files, and `prettier --write` across them would manufacture
 conflicts.
 
-**What was run instead**, at `63400ce`, each suite named:
+**What was run instead.** Round 1's set at `63400ce`, then the full set again
+at `fa1b024` after the revision, plus the five gates round 1 review named as
+never having run. Every one green except `format` and `lint`:
 
 | Gate | Result |
 |---|---|
 | `typecheck` | **pass** |
 | `check:boundaries` | **pass** |
-| `test:unit` | **pass** |
+| `test:unit` | **pass** — 114/0, up from 106 with the 8 new controls |
 | `test:architecture` | **pass** |
 | `test:compiler` | **pass** — 145/0 |
 | `test:integration` | **pass** — 127/0 |
 | `test:contracts` | **pass** — 16/0 |
 | `test:browser` | **pass** — 77 passed, including the `composed-application` project that asserts `seededRecords` has length 12 |
 | `test:performance` | **pass** (in the matrix run above, before `format` stopped it) |
-| `test:postgres` | **pass on re-run** — 197/0; first run 196/1 on a container-readiness flake, see below |
+| `test:postgres` | **pass** — 197/0 at `fa1b024`; at `63400ce` one run was 196/1 on a container-readiness flake and a re-run was 197/0, see below |
+| `build` | **pass** — named by round 1 as material to the ESM change |
+| `check:schema` | **pass** |
+| `check:demo-release` | **pass** |
+| `check:app-release` | **pass** |
+| `test:locale` | **pass** |
 | `format` / `lint` | **fail on `main`'s files, not this packet's** |
 
 **`test:postgres` — reported honestly.** First run: **196 pass, 1 fail**. The
