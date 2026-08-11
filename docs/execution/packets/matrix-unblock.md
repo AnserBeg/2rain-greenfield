@@ -1,7 +1,7 @@
 # matrix-unblock — the matrix reaches its suites again, and the formatter stops drifting
 
-Status: round-3 findings closed; matrix owed at the new SHA. Tier is
-disputed — round 3 argues Critical, the charter says Behavioral
+Status: evidence ready — round-3 findings closed, full matrix green at
+`f09e2db`. Tier disputed: round 3 argues Critical, the charter says Behavioral
 Tier: Behavioral
 Branch: `packet/matrix-unblock`
 Base: `194871f` (`origin/main` at cut; verified, not assumed)
@@ -327,7 +327,73 @@ claims to prove. That is a live disagreement with the tier this packet has
 carried since its charter, and it is the orchestrator's to settle — the lane
 has not re-tiered itself.
 
-## Gates — ACCEPTANCE MATRIX, GREEN
+## Gates — ACCEPTANCE MATRIX, GREEN at `f09e2db`
+
+```
+PERFORMANCE_GATE_PASS_SHA=f09e2dbadeb63f098f5c39522f92961da1992308
+FULL_MATRIX_PASS_SHA=f09e2dbadeb63f098f5c39522f92961da1992308
+```
+
+Ran 17:25:31-17:46:50. Log: `/tmp/matrix-matrix-unblock-f09e2dba.log`.
+
+| Step | Result |
+| --- | --- |
+| `format` / `lint` / `typecheck` / `build` | pass |
+| the four `check:*` | pass |
+| `test:performance` | 5 pass, 0 fail |
+| `test:unit` | 106 pass, 0 fail |
+| `test:compiler` | 145 pass, 0 fail |
+| `test:integration` | 132 pass, 0 fail |
+| `test:agent` | 3 pass, 0 fail |
+| `test:architecture` | 141 pass, 0 fail |
+| `test:contracts` | 16 pass, 0 fail |
+| `test:postgres` | 197 pass, 0 fail |
+| `test:locale` | 1 pass, 0 fail |
+| `test:browser` | 77 passed (1.8m) |
+| observability producer | 11 pass, 0 fail |
+| `check:language-coverage` | PASS — 2050 obligations |
+| `check:reachability` | PASS — 102/102 test files |
+| security scans | passed |
+
+### The two runs before it, both reported
+
+**Run 8 — `PERFORMANCE_GATE_FAILED`, indeterminate not over-budget.**
+`observed CPU idle 84.6% is below required 90.0%`. Diagnosed rather than
+guessed at: `2rain-greenfield-devenv` was running `tsc` at 235% CPU. That lane's
+typecheck takes no matrix lock and is not in `foreign_matrix()`'s pattern, which
+covers only `test`, `check:boundaries` and `check:schema` — so it legitimately
+runs alongside a matrix and can push idle under the gate's floor.
+
+**Run 9 — `FULL_MATRIX_FAILED`, one real red in `test:postgres`.**
+
+```
+not ok 94 - shared list SQL searches authorized display values before stable covered paging
+  ephemeral PostgreSQL is ready inside its container but its published endpoint
+  is unavailable: Error: connect ECONNREFUSED 127.0.0.1:60090
+```
+
+**Re-run once, deliberately, not looped until green.** Three things justified
+treating it as environmental before re-running, and all three were checked
+first:
+
+1. The message is a **named, deliberately-handled condition** —
+   `test/helpers/postgres.ts:270` distinguishes "container ready, published
+   endpoint unreachable" as its own mode, and
+   `test/architecture/dependency-boundaries.test.ts:358` pins that string. The
+   container's own log shows Postgres starting and completing init normally.
+2. The diff from the last green matrix (`f4575a2`) is **exactly two files** —
+   this record and the toolchain contract. Neither can affect Docker port
+   publishing.
+3. The same test passed with **0 failures in runs 6 and 7**.
+
+Run 10 passed it 197/197 with zero `not ok` lines anywhere. The retry runner
+was configured to stop on any non-indeterminate failure and did exactly that on
+run 9 — the re-run was a separate, deliberate decision, recorded here rather
+than folded into a green result.
+
+### Superseded round-2 matrix at `f4575a2`
+
+Retained as the record of what was measured before the round-3 fix.
 
 Full matrix at `f4575a2`, verdict read from inside the log, green on the first
 attempt:
