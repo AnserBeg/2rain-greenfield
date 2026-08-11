@@ -166,9 +166,16 @@ shared package manifest, so it is declared rather than absorbed:**
 
 ### The seed profiles
 
-- **`demo`** — the previous 12 records, **byte-identical**: same ordinals, same
-  record identifiers, same values, same order. Verified by reconstructing the
-  old inline table and deep-comparing. This matters because
+- **`demo`** — the previous 12 records, **serialization-identical**. The first
+  version of this claim said "byte-identical" and was **not measured**: the
+  scratch comparison sorted the value keys before comparing, so it established
+  *deep* equality only, and the four Location records genuinely had different
+  bytes because the new builder emitted `code, type, name` where the old one
+  emitted `code, name, type`. Round 1 review caught both halves. The key order
+  is restored, and `test/unit/dev-environment.test.ts` now compares
+  `JSON.stringify` output against the prior seed **recorded as a literal in the
+  test**, so the expectation cannot be moved by the subject. This matters
+  because
   `apps/web/test/browser/composed-application.spec.ts:2281` asserts
   `seededRecords` has length 12 and line 872 reads back the
   `Alpine Office Supply` cell — **and that file is held by `packet/pur-1`**, so
@@ -203,10 +210,39 @@ the authority — as it already was.
 
 **(2) The container.** Discussed in §5.
 
-**(3) Seed beside the modules, bound to their declarations.** `seed.ts` sits in
-`packages/domain/src/app/` beside `builder.ts` and takes every identifier from
-`APPLICATION_IDS`. A module renaming a field now breaks the seed at the type
-level instead of silently.
+**(3) Seed beside the modules — and the first version of this claim was
+false.** Round 1 review found it, and it is worth stating exactly.
+
+`seed.ts` sits in `packages/domain/src/app/` beside `builder.ts` and takes its
+identifiers from `APPLICATION_IDS`. **That is not the same as being bound to
+the module declarations.** Each module builds its identifiers privately through
+its own `ids(namespace)` factory; `APPLICATION_IDS` is a *second,
+hand-maintained spelling* of the same strings in `builder.ts`, and nothing
+makes the two agree. Renaming `field.location_code` inside
+`location/definition.ts` leaves `APPLICATION_IDS.location.fieldIds.code` — and
+therefore the seed — fully type-correct. The original claim that a rename
+"breaks the seed at the type level" was **wrong**, and so was the implication
+that constraint (3) was met by construction.
+
+Two identifiers were also still built locally: the `option.warehouse` and
+`option.store` values, which the Location module generates independently from
+`['warehouse', 'Warehouse']`.
+
+**What is true now.** The seed still reads `APPLICATION_IDS` — that table is
+not eliminated, and eliminating it means deriving it from the module `ids()`
+factories, which is a change to `builder.ts` (**held by `packet/pur-1`**) and
+is filed rather than taken. What closes the gap instead is a control that
+checks the seed against **the compiled release**, which is the program's stated
+authority and cannot be moved by either table:
+`test/unit/dev-environment.test.ts` decodes
+`app.compiled.json`'s head `normalizedDefinitionBytesBase64` and asserts every
+seeded operation ID, every seeded field ID, and every seeded enum *value*
+exists in it.
+
+**The same control covers the startup banner**, which was an unguarded path the
+review found: `main.ts` prints three surface URLs from `APPLICATION_IDS`, so a
+surface rename would produce a valid compiled release and a banner of dead
+links. Those three IDs are now asserted against the release too.
 
 ## 5. The container decision, stated explicitly
 
@@ -230,6 +266,29 @@ does not have.
   `matrix-machine-decay` priced *per-run* volume growth — 481 volumes, 12.96GB
   reclaimed. A single reused volume does not participate in that.
 - **It stops when the session stops.** `SIGINT`/`SIGTERM` stop the container.
+
+**Round 1 review found this section understated the leak, and it was right.**
+The original code installed its signal handlers *after* `docker run` and after
+a 60-second install, so a Ctrl-C during migration or the 176-record seed, an
+occupied port 4174, or any database failure left the container running — none
+of which is `kill -9`. `application.close()` rejecting also skipped
+`docker stop` entirely, and a failed `docker stop` was swallowed by a
+boolean-returning helper and exited 0. What is written above was true only of
+the happy path. Now:
+
+- handlers are installed **before** the container starts;
+- `containerExists` flips when `docker run` returns, not when the endpoint is
+  healthy;
+- startup is wrapped, and `startComposedApplication` closes its runtime if
+  seeding or `listen` throws, so the caller is never handed nothing to close;
+- shutdown runs each step independently, collects failures, prints them, and
+  **exits 1** — a failed `docker stop` is now an observable failure that also
+  prints the `dev:stop` command.
+
+**Observed, at `fa1b024`:** SIGTERM to the dev process mid-startup, before the
+ready line → container `Exited (137)`. Port 4174 occupied against a warm
+database → `START_FAILED … EADDRINUSE`, exit **1**, container `Exited (0)`. A
+database connection failure during install → exit 1, container `Exited (0)`.
 
 **What does NOT stop it, stated plainly:**
 
@@ -386,22 +445,45 @@ at roughly 1 in 197 on a loaded machine.
 
 ## 7. What this packet did NOT verify
 
-Listed for the reviewer, not excused.
+Listed for the reviewer, not excused. Rewritten after round 1, which found two
+claims in the previous version of this list that were themselves wrong.
 
-- **No gate observes any of it.** No test asserts the container name is outside
-  the `north-star-` prefix, that the container stops on exit, or that
-  `distributor` exceeds the page size. Every claim in §3 and §5 is established
-  by construction plus the manual run in §8 — not by a control, and not by a
-  negative control. A future edit re-introducing `north-star-` as the default
-  would be caught only by the thrown error at startup, which nothing exercises.
-- **The `demo`-profile identity is verified by a scratch comparison**, not by a
-  committed test. It compared the reconstructed old table against
-  `composedApplicationSeed('demo')` and reported identical; that script is not
-  in the tree.
-- **The `north-star-` refusal in `main.ts` is not exercised.** Nothing sets a
-  bad name and asserts the throw.
-- **No negative control exists for any of the above**, in the sense AGENTS.md
-  §6 requires: nothing has been observed failing. The manual run in §8 shows
-  the good path working; it does not show any guard refusing.
+**Now covered by committed controls** (`test/unit/dev-environment.test.ts`,
+8 tests, registered in all three inventories `test-inventory-third-copy`
+names). Each was driven red one at a time, and each mutation isolates to a
+single failing test:
+
+| Negative control | Result |
+|---|---|
+| Location value keys emitted in the old order | 1 red — the serialization test |
+| A distributor-only record given an undeclared enum option | 1 red — the release check |
+| A distributor-only record with entirely valid identifiers (admission twin) | **stays green** |
+| A printed banner surface renamed in `APPLICATION_IDS` | 1 red — the surface check |
+| The `north-star-` prefix refusal deleted | 1 red — the prefix test |
+| The retired-variable refusal deleted | 1 red — the retired-variable test |
+
+**Still NOT verified by any control:**
+
+- **The lifecycle fixes have no committed control.** The SIGTERM-during-startup,
+  EADDRINUSE and database-failure cases in §5 were observed by hand at
+  `fa1b024` and are **not** reproducible from the tree. They need a spawned-process
+  control that starts the dev entry against a stub `docker`, and that is the
+  single largest remaining gap in this packet.
+- **`application.close()` rejecting, and `docker stop` failing, are unexercised.**
+  The code now collects and reports both, but neither path has been made to
+  happen.
+- **`kill -9` is not covered by a control**, only observed once.
+- **The seed is still not derived from the module `ids()` factories.** The
+  control proves the seed agrees with the compiled release; it does **not**
+  make `APPLICATION_IDS` and the module definitions unable to disagree. If they
+  drift, the compiled release moves with the modules and the control reds —
+  which is the outcome that matters — but the duplication itself remains, filed
+  as `application-ids-is-a-second-spelling`.
+- **The three-inventory registration is verified only by `test:architecture`
+  passing.** No control proves the three lists agree with each other; that is
+  `test-inventory-third-copy`'s open subject.
+- **`build`, `check:schema`, `check:demo-release`, `check:app-release` and
+  `test:locale` results** are recorded in the completion report; if any is
+  absent there, it did not run.
 - **`ux-list-usability`, `form-write-untyped-wire` and `form-empty-means-nothing`
   are out of scope by charter** and were not investigated.
