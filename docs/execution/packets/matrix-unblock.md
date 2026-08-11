@@ -266,6 +266,55 @@ git diff --name-only 3f9f358 <freeze> -- . ':!docs' ':!.agents' \
 returns nothing; the only delta is this file. Per `git-workflow`, the matrix
 run stands.
 
+## Integration: merged onto main after `lang-adopt-v5`
+
+Per the ruling, `lang-adopt-v5` landed first. `main` moved 194871f → `33bcdb6`,
+**41 commits**, carrying `LANG-ADOPT-v5` (`cb2690f`) and `ux-picker`
+(`0c5fa8d`). Merged with `--no-ff` rather than rebased: one resolution instead
+of seven replays, and the reviewed candidate stays retrievable as an ancestor.
+`matrix-unblock-reviewed-r1` was tagged and pushed at `69b398c` **before** the
+merge, so round 1's findings stay checkable at the tree they cite.
+
+### The one conflict, resolved by the corrected rule
+
+`test/architecture/canonical-contracts-purity.test.ts` — exactly the file this
+packet predicted, where `lang-adopt-v5` carried +477 lines of semantic work and
+this packet had reformatted.
+
+Resolved by *measuring first*, not by asserting: this packet's side of that
+file is **formatting-only**, proved by the base and this branch having
+identical token streams once whitespace, grouping parens and commas are
+stripped. No semantic content of this packet's was at stake, so `main`'s
+version was taken whole and the formatting contribution re-derived by the
+pinned formatter. The resolved file is byte-identical to `origin/main`'s.
+
+**That is "resolve semantically, then format" — not "let prettier resolve the
+conflict".** The distinction is precisely what round 1 finding 4 corrected, and
+this merge is the first place it was actually exercised.
+
+`package.json` auto-merged keeping the exact pin. `pnpm-lock.yaml` merged with
+`specifier: 3.9.5` intact, and `pnpm install --frozen-lockfile` accepts the
+merged pair, so no lockfile re-derivation was needed.
+
+### The reformat grew by six files, and two are new
+
+`pnpm format:write` over the merged tree changed six files. Four were already
+in the ratified set. **Two are new from `main` and had never been formatted
+under 3.9.5:**
+
+- `test/compiler/field-kind-projection.test.ts`
+- `test/integration/field-kind-round-trip.test.ts`
+
+Reported rather than absorbed silently — the lesson of round 1 finding 1. They
+are not a fresh expansion: the ratified ruling was "rebase onto the new `main`
+and re-run `format:write` over the merged tree", and formatting what `main`
+brought is that instruction executed.
+
+They are also **this packet's thesis reproducing itself while the packet was in
+flight**: `main` accrued two more format-failing files across 41 commits
+because the caret was still there. The pin and its gate land in this branch, so
+this is the last time the set grows for that reason.
+
 ## Review round 1 — BLOCK
 
 Verdict: **BLOCK**. Four findings, all four verified correct by this lane
