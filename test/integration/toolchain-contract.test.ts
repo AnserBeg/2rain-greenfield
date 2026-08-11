@@ -127,128 +127,158 @@ test('exact versions, including prerelease and build tags, are accepted', () => 
 });
 
 /**
- * The override keys declared in `pnpm-workspace.yaml`, read strictly.
+ * The root importer's recorded `prettier` edge, read from `pnpm-lock.yaml`.
  *
- * **Throws rather than skipping anything it cannot read.** A parser that
- * silently ignores an unfamiliar line is a gate that passes vacuously on
- * precisely the input that would hide a rebind, so every shape inside the
- * block is either understood or fatal. `overrides` written inline (`{...}`)
- * is fatal for the same reason.
+ * **This replaced an attempt to enumerate the authorities that can rebind the
+ * formatter, which review rounds 2 and 3 defeated four times.** The manifest
+ * was one authority; `pnpm-workspace.yaml` overrides were another; and inside
+ * overrides alone, `prettier@>3.9.4` (a package-RANGE selector, not a parent
+ * selector) and `greenfield-north-star-erp>prettier` (a parent selector whose
+ * parent IS the root package) both reach the root edge. A root `.pnpmfile.mjs`
+ * `readPackage` hook reaches it without touching either file. Each was measured
+ * rewriting the effective edge while the enumerating gate reported no failure.
+ *
+ * Enumerating inputs was the wrong shape. **Every one of those authorities has
+ * to pass through this entry to take effect**, so the contract observes the
+ * outcome instead. It is also strictly less code.
+ *
+ * Parsing the lockfile is not the same risk as parsing `pnpm-workspace.yaml`
+ * was. The lockfile is machine-generated in one canonical shape; the workspace
+ * file is hand-written and admits arbitrary valid-YAML spellings, which is
+ * exactly how a quoted `"overrides":` key slipped past the previous reader as
+ * "no overrides at all". This reader still throws rather than returning a
+ * benign default for anything it does not recognise.
  */
-function pnpmWorkspaceOverrideKeys(source: string): string[] {
-  const lines = source.split('\n');
-  const start = lines.findIndex((line) => /^overrides:/.test(line));
-  if (start === -1) return [];
-  if (!/^overrides:\s*(#.*)?$/.test(lines[start]!)) {
-    throw new Error(
-      'pnpm-workspace.yaml declares overrides in a form this contract cannot read',
-    );
+function lockfileFormatterEdge(lockfile: string): {
+  specifier: string;
+  version: string;
+} {
+  const lines = lockfile.split('\n');
+  const importers = lines.findIndex((line) => /^importers:\s*$/.test(line));
+  if (importers === -1) {
+    throw new Error('pnpm-lock.yaml has no importers section');
   }
-  const keys: string[] = [];
-  for (let index = start + 1; index < lines.length; index += 1) {
+  const root = lines.findIndex(
+    (line, index) => index > importers && /^ {2}\.:\s*$/.test(line),
+  );
+  if (root === -1) {
+    throw new Error('pnpm-lock.yaml has no root importer');
+  }
+  for (let index = root + 1; index < lines.length; index += 1) {
     const line = lines[index]!;
-    if (/^\s*$/.test(line) || /^\s*#/.test(line)) continue;
-    // A column-0 line ends the block.
-    if (!/^\s/.test(line)) break;
-    const entry =
-      /^\s+(?:'([^']+)'|"([^"]+)"|([^'"#\s][^:]*?))\s*:\s*\S.*$/.exec(line);
-    if (!entry) {
+    // A new importer, or a new top-level section, ends the root importer.
+    if (/^\S/.test(line) || /^ {2}\S/.test(line)) break;
+    if (!/^ {6}(?:'prettier'|"prettier"|prettier):\s*$/.test(line)) continue;
+    const specifier = /^ {8}specifier:\s*(\S+)\s*$/.exec(
+      lines[index + 1] ?? '',
+    );
+    const version = /^ {8}version:\s*(\S+)\s*$/.exec(lines[index + 2] ?? '');
+    if (!specifier || !version) {
       throw new Error(
-        `unreadable entry in pnpm-workspace.yaml overrides: ${JSON.stringify(line)}`,
+        'pnpm-lock.yaml root importer declares prettier in a shape this contract cannot read',
       );
     }
-    keys.push((entry[1] ?? entry[2] ?? entry[3]!).trim());
+    return { specifier: specifier[1]!, version: version[1]! };
   }
-  return keys;
+  throw new Error('pnpm-lock.yaml root importer does not declare prettier');
 }
 
 /**
- * Whether an override key can rebind the ROOT `prettier` dependency -- the one
- * whose binary `pnpm format` actually runs.
+ * **The invariant, stated over the effective edge rather than over any one file
+ * that influences it.**
  *
- * `prettier`, `prettier@^3` and `prettier@3.9.6` all can. A `parent>prettier`
- * key scopes to some other package's dependency and cannot reach the root
- * binary, so it is deliberately left alone rather than banned on sight.
+ * Three facts, and each is load-bearing:
+ *
+ * 1. the manifest declares an exact version -- so nothing drifts on a refresh;
+ * 2. the lockfile's effective SPECIFIER equals it -- so no override, no parent
+ *    selector and no pnpmfile hook has widened or redirected the edge;
+ * 3. the resolved VERSION equals it -- so the formatter that actually runs is
+ *    the one this contract names, and a patch-bearing or aliased resolution is
+ *    not silently substituted.
+ *
+ * A genuinely non-root override such as `eslint>prettier` leaves the root
+ * importer untouched and stays admitted, with no special case for it -- the
+ * discrimination the enumerating version had to hand-code, and got wrong.
+ *
+ * `package.json`'s `pnpm.overrides` is inert under pnpm 11 with a workspace
+ * file present, but this contract no longer depends on that being true.
  */
-function claimsRootFormatter(overrideKey: string): boolean {
-  if (overrideKey.includes('>')) return false;
-  return overrideKey.split('@')[0] === 'prettier';
-}
+test('the formatter edge the lockfile will install is the exact pin the manifest declares', () => {
+  const declared = JSON.parse(readFileSync('package.json', 'utf8'))
+    .devDependencies?.prettier;
+  assert.ok(
+    isExactVersionSpecifier(declared),
+    `prettier must be pinned to an exact version, got ${JSON.stringify(declared)}`,
+  );
+
+  const edge = lockfileFormatterEdge(readFileSync('pnpm-lock.yaml', 'utf8'));
+  assert.equal(
+    edge.specifier,
+    declared,
+    'the lockfile effective specifier must equal the declared pin; an override, a root-parent selector or a pnpmfile hook has rebound it',
+  );
+  assert.equal(
+    edge.version,
+    declared,
+    'the resolved formatter version must equal the declared pin',
+  );
+});
 
 /**
- * **The manifest is not the only resolution authority, and review round 2
- * caught this gate assuming it was.**
- *
- * `pnpm-workspace.yaml`'s `overrides` block is repository-controlled and pnpm
- * applies it to direct dependencies, replacing the declared specifier. Adding
- * `overrides.prettier: ^3.9.5` while leaving `"prettier": "3.9.5"` untouched
- * was measured to rewrite the lockfile's recorded specifier to `^3.9.5` --
- * with the manifest assertion above still green, the rejection table still
- * green, and `pnpm install --frozen-lockfile` still exit 0. The formatter edge
- * becomes range-governed again and the gate never notices.
- *
- * So the contract observes the effective selector, not just the manifest one.
- *
- * Any override claiming the root formatter is rejected whatever its value,
- * including an exact one: an exact override that disagrees with the manifest
- * would make the version that runs differ from the version this file reports
- * as authoritative, which is the same class of lie in the other direction.
- *
- * `package.json`'s `pnpm.overrides` was tested and is INERT under pnpm 11 with
- * a workspace file present -- the specifier stayed `3.9.5` -- so it is not
- * guarded here. If that ever changes, this is the contract that must grow.
+ * The reader, executed directly. The live assertion above passes identically
+ * against a reader that returned the declared pin unconditionally, so these
+ * cases are what stop it being vacuous -- and every rejection case is a shape
+ * that previously read as benign.
  */
-test('no workspace override can rebind the formatter', () => {
-  const keys = pnpmWorkspaceOverrideKeys(
-    readFileSync('pnpm-workspace.yaml', 'utf8'),
-  );
-  const claiming = keys.filter(claimsRootFormatter);
-
-  assert.deepEqual(
-    claiming,
-    [],
-    `pnpm-workspace.yaml overrides must not rebind the formatter; found ${JSON.stringify(claiming)}`,
-  );
-});
-
-/** The discriminator, executed directly rather than inferred from a green run. */
-test('override keys that can claim the root formatter are recognised', () => {
-  for (const key of ['prettier', 'prettier@^3.9.5', 'prettier@3.9.6']) {
-    assert.equal(claimsRootFormatter(key), true, `${key} claims the root`);
-  }
-  for (const key of ['brace-expansion', 'js-yaml', 'eslint>prettier']) {
-    assert.equal(
-      claimsRootFormatter(key),
-      false,
-      `${key} does not claim the root`,
-    );
-  }
-});
-
-/** The reader finds a planted override, and fails closed on shapes it cannot read. */
-test('the overrides reader observes entries and refuses what it cannot parse', () => {
-  const planted = [
-    'packages:',
-    '  - apps/*',
+test('the lockfile reader observes the root edge and refuses what it cannot read', () => {
+  const lock = [
+    'importers:',
     '',
-    'overrides:',
-    '  prettier: ^3.9.5',
-    "  js-yaml: '>=4.3.1 <5'",
+    '  .:',
+    '    devDependencies:',
+    '      eslint:',
+    '        specifier: ^9.34.0',
+    '        version: 9.39.5',
+    '      prettier:',
+    '        specifier: 3.9.5',
+    '        version: 3.9.5',
     '',
-    'allowBuilds:',
-    '  esbuild: true',
+    '  apps/web:',
+    '    devDependencies:',
+    '      prettier:',
+    '        specifier: ^1.0.0',
+    '        version: 1.0.0',
   ].join('\n');
-  assert.deepEqual(pnpmWorkspaceOverrideKeys(planted), ['prettier', 'js-yaml']);
-  assert.equal(pnpmWorkspaceOverrideKeys('packages:\n  - apps/*\n').length, 0);
+  assert.deepEqual(lockfileFormatterEdge(lock), {
+    specifier: '3.9.5',
+    version: '3.9.5',
+  });
 
   assert.throws(
-    () => pnpmWorkspaceOverrideKeys('overrides: { prettier: ^3.9.5 }\n'),
-    /cannot read/,
-    'an inline overrides mapping must be fatal, never silently skipped',
+    () => lockfileFormatterEdge('packages:\n  foo: {}\n'),
+    /no importers section/,
   );
   assert.throws(
-    () => pnpmWorkspaceOverrideKeys('overrides:\n  - prettier\n'),
-    /unreadable entry/,
-    'a sequence entry must be fatal, never silently skipped',
+    () =>
+      lockfileFormatterEdge(
+        'importers:\n\n  apps/web:\n    devDependencies:\n',
+      ),
+    /no root importer/,
+  );
+  assert.throws(
+    () =>
+      lockfileFormatterEdge(
+        'importers:\n\n  .:\n    devDependencies:\n      eslint:\n        specifier: ^9\n        version: 9\n',
+      ),
+    /does not declare prettier/,
+    'a root importer without prettier must be fatal, never read as satisfied',
+  );
+  assert.throws(
+    () =>
+      lockfileFormatterEdge(
+        'importers:\n\n  .:\n    devDependencies:\n      prettier:\n        resolution: something\n',
+      ),
+    /cannot read/,
+    'an unrecognised prettier entry shape must be fatal',
   );
 });
