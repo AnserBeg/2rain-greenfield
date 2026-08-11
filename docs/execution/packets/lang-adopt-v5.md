@@ -368,6 +368,14 @@ companions.
 postgres were not run against it. It stays routed to
 `version-predicate-derivation` as *unobserved at this sample*, not *uncovered*.
 
+*Amended at round 8.* P6 stopped being a survivor when the membership control
+landed — the same mutation now reds `normalization.test.ts:217` by name. What
+survives it is narrower and was named imprecisely here: the obstacle is not
+sample width but **constructibility**. Running integration and postgres against
+the mutation would not witness it either, because the faults the predicate gates
+cannot be produced from authored input. See round 8 below; the routed row now
+carries the corrected disposition.
+
 ### Review round 2 — REVISE, one control defect, no production defect
 
 **The scan followed identifier SPELLINGS, not resolved BINDINGS.** Round one
@@ -720,6 +728,66 @@ generated id.
 trace which fingerprint inputs carry the version stamp" and then wrote the
 mechanism into an ADR anyway. A disclosed gap in a load-bearing inference is not
 a disclosure — it is an unfinished measurement.
+
+### Review round 8 — BLOCK, and the defect was in the ROUTED RECORD, not the code
+
+**No production defect in C1–C8, and none in the controls.** C6 closed: the
+reviewer independently derived the `declaredEvidence` census from the authored
+source (`11×6 + 2 + 1 = 69`) and confirmed the stronger statement — *every*
+`declaredEvidence` scenario and nothing else — rather than the weaker one-way
+claim. C7's narrowing to a syntactic inventory was accepted. C8's membership
+witness was accepted as discriminating.
+
+**The block landed on `docs/execution/current-plan.md:301`.** The
+`version-predicate-derivation` row was still telling the next packet two things
+this packet had already made false:
+
+- that `languageUsesModuleProjectionShape` is "not observed at all" and needs a
+  control before it needs a refactor; and
+- that `languageHasMaterializedStateFields`'s cumulative behaviour cannot be
+  observed until the predicate accepts its supported-version list as an argument,
+  therefore **do not convert**.
+
+Both were true when the row was written and false in the tree the row was
+written *from*. The row was rewritten once already, from the deletion table that
+refuted its first draft — and then the controls moved again underneath it. **The
+active queue was routing future work from an absence the packet had closed**,
+which instructs the next packet to rebuild completed evidence and hands it the
+wrong account of what is observable.
+
+**That is this packet's own named finding one layer out.** A version written by
+hand goes stale against its cut; a routed disposition written by hand goes stale
+against its controls. Same shape, same failure mode, and the record has now done
+it twice.
+
+**Re-measured at `2ed5595`, each mutation alone on a clean tree, reverted before
+the next:**
+
+| Mutation | Before the packet | At `2ed5595` |
+|---|---|---|
+| `'v5'` dropped from `languageUsesModuleProjectionShape` | green across the **entire 589-assertion matrix**, byte-identical | **1 red** — `normalization.test.ts:217`, by name |
+| `languageHasMaterializedStateFields` narrowed `>=` → `===` | green across `test:unit` **and the full `test:compiler`** | **1 red** — the successor arm alone |
+| `'v5'` dropped from `languageHasV2Features` | 13 reds at the sweep's narrower sample | **46 reds** — 9 `test:unit`, 37 `test:compiler` |
+
+The third is not a correction of a false claim; it is the same mutation read at
+the wider sample. The row now says which sample each number came from, because
+the earlier "13" read as a full account and was not one.
+
+**The row was rewritten rather than removed.** Removing the hunk would have
+discarded real debt: both predicates still enumerate their versions by hand, and
+coverage of the *adopted* version is not coverage of the *next cut* — a freshly
+cut v6 left out of either list still reds nothing, which is exactly how row 1 of
+`5g3-sm-impl` happened. The corrected row separates three things the old one ran
+together: the membership witness that now exists, the behavioural witness that
+still cannot be built because the faults are unconstructible, and the conversion
+itself — which is now **provable**, since the free-binding harness observes the
+ordered form without any production signature change.
+
+**Convergence.** The reviewer invoked `review-tiers`' anti-spiral rule: a second
+same-class "record outruns the control" correction at round 8 belongs with the
+orchestrator, not in another lane revision. The correction is confined to `docs/`,
+so the governing matrix SHA `5ee1244` continues to hold under the executable-content
+rule, and the freeze above it is again an empty non-document diff.
 
 ## What the first matrix cost, and why it is the packet's own theme again
 
