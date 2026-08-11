@@ -219,7 +219,9 @@ test('temporal precision and timezone semantics are carried, and only for tempor
     (field) => field.kind === 'timeFieldType',
   );
   assert.deepEqual(
-    [...new Set(dateTimes.map((field) => field.temporal?.timezoneSemantics))].sort(),
+    [
+      ...new Set(dateTimes.map((field) => field.temporal?.timezoneSemantics)),
+    ].sort(),
     ['offsetDateTime', 'utcInstant'],
   );
   assert.deepEqual(

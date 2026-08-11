@@ -433,7 +433,11 @@ async function everyKindFormHtml(
 function controlFor(html: string, fieldId: string): string {
   const form = html.slice(html.indexOf('<div class="form-fields">'));
   const opening = form.indexOf(`name="value:${fieldId}"`);
-  assert.notEqual(opening, -1, `${fieldId} has no control in the rendered form`);
+  assert.notEqual(
+    opening,
+    -1,
+    `${fieldId} has no control in the rendered form`,
+  );
   const start = form.lastIndexOf('<label>', opening);
   const end = form.indexOf('</label>', opening);
   assert.ok(start !== -1 && end !== -1, `${fieldId} control is not in a label`);
@@ -529,13 +533,13 @@ test('a temporal control admits its declared precision and timezone semantics', 
 test('an optional boolean keeps its three states distinguishable', async () => {
   const seeded = async (value: boolean | null | undefined) =>
     controlFor(
-      await everyKindFormHtml(COMPILER_SEMANTIC_PROFILE_V2_VERSION, (executor) =>
-        executor.seedValues(
-          tenantA,
-          value === undefined
-            ? {}
-            : { [EVERY_KIND_FIELD_IDS.active]: value },
-        ),
+      await everyKindFormHtml(
+        COMPILER_SEMANTIC_PROFILE_V2_VERSION,
+        (executor) =>
+          executor.seedValues(
+            tenantA,
+            value === undefined ? {} : { [EVERY_KIND_FIELD_IDS.active]: value },
+          ),
       ),
       EVERY_KIND_FIELD_IDS.active,
     );

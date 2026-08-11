@@ -119,7 +119,10 @@ test.beforeAll(async () => {
   // is minted (ADR-0047 §4a); it exists because the claim below -- that a date
   // field renders a DATE CONTROL -- can only be observed in a browser.
   const fieldKindPolicy = allowPolicy();
-  fieldKindExecutor = new BrowserFixtureExecutor(null, HONOURS_PROVIDER_REFUSALS);
+  fieldKindExecutor = new BrowserFixtureExecutor(
+    null,
+    HONOURS_PROVIDER_REFUSALS,
+  );
   const fieldKindMediation = new SemanticOperationMediationAuthority();
   fieldKindServer = createSurfaceRuntimeServer(
     runtimeEntry(compileEveryFieldKindFixture(), fieldKindPolicy),
@@ -130,7 +133,10 @@ test.beforeAll(async () => {
         fieldKindMediation,
       ),
       operationMediation: fieldKindMediation,
-      queryGateway: new SemanticQueryGateway(fieldKindPolicy, fieldKindExecutor),
+      queryGateway: new SemanticQueryGateway(
+        fieldKindPolicy,
+        fieldKindExecutor,
+      ),
     },
   );
   fieldKindUrl = await listen(fieldKindServer);
@@ -181,9 +187,7 @@ test('compiled field kinds render as real browser controls', async ({
   );
   await expect(page.locator('#surface-record-form')).toBeVisible();
 
-  const date = page.locator(
-    `[name="value:${EVERY_KIND_FIELD_IDS.due}"]`,
-  );
+  const date = page.locator(`[name="value:${EVERY_KIND_FIELD_IDS.due}"]`);
   await expect(date).toHaveJSProperty('type', 'date');
   await date.evaluate((element: HTMLInputElement) => {
     element.value = 'not-a-date';
@@ -219,8 +223,14 @@ test('compiled field kinds render as real browser controls', async ({
     `[name="value:${FIXTURE_IDS.fieldIds.parentUtcInstant}"]`,
   );
   await expect(instant).toHaveJSProperty('type', 'text');
-  await expect(instant).toHaveAttribute('data-refused-control', 'datetime-local');
-  await expect(instant).toHaveAttribute('data-timezone-semantics', 'utcInstant');
+  await expect(instant).toHaveAttribute(
+    'data-refused-control',
+    'datetime-local',
+  );
+  await expect(instant).toHaveAttribute(
+    'data-timezone-semantics',
+    'utcInstant',
+  );
 
   // Two time fields of one kind, differing only in declared precision, must
   // differ in the step that decides what the browser will accept.
@@ -239,12 +249,14 @@ test('compiled field kinds render as real browser controls', async ({
   ).toBe(true);
 
   const grade = page.locator(`[name="value:${EVERY_KIND_FIELD_IDS.grade}"]`);
-  expect(
-    await grade.evaluate((element) => element.tagName.toLowerCase()),
-  ).toBe('select');
+  expect(await grade.evaluate((element) => element.tagName.toLowerCase())).toBe(
+    'select',
+  );
   await expect(grade).toHaveJSProperty('value', '');
   expect(
-    await grade.evaluate((element: HTMLSelectElement) => element.options.length),
+    await grade.evaluate(
+      (element: HTMLSelectElement) => element.options.length,
+    ),
   ).toBe(6);
 
   const region = page.locator(`[name="value:${EVERY_KIND_FIELD_IDS.region}"]`);
@@ -475,7 +487,6 @@ test('CLAIM 4 (stand-in): given acceptance, the reread returns the seeded values
   expect(await idleValue(page, EVERY_KIND_FIELD_IDS.active)).toBe('true');
 });
 
-
 /**
  * The boolean's three states, end to end. A checkbox cannot express them, and
  * the first cut's hidden `value="false"` sibling made an unrelated edit rewrite
@@ -493,9 +504,7 @@ test('an optional boolean renders and submits three states, with absent and null
     [true, 'true'],
   ] as const) {
     const recordId = fieldKindExecutor.seedTypedValues(
-      seeded === undefined
-        ? {}
-        : { [EVERY_KIND_FIELD_IDS.active]: seeded },
+      seeded === undefined ? {} : { [EVERY_KIND_FIELD_IDS.active]: seeded },
     );
     await page.goto(
       `${fieldKindUrl}/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_form`)}&record=${encodeURIComponent(recordId)}`,
@@ -503,7 +512,9 @@ test('an optional boolean renders and submits three states, with absent and null
     await expect(page.locator(control)).toHaveJSProperty('value', expectedIdl);
     // No checkbox and no hidden sibling: nothing can post a value the record
     // did not have.
-    await expect(page.locator(`input[type="checkbox"]${control}`)).toHaveCount(0);
+    await expect(page.locator(`input[type="checkbox"]${control}`)).toHaveCount(
+      0,
+    );
     await expect(page.locator(`input[type="hidden"]${control}`)).toHaveCount(0);
   }
 
@@ -776,7 +787,10 @@ test('an empty data slot is observably distinct from a failed slot', async ({
 }) => {
   const compiled = compileFixture();
   const policy = allowPolicy();
-  const emptyExecutor = new BrowserFixtureExecutor(null, IGNORES_PROVIDER_REFUSALS);
+  const emptyExecutor = new BrowserFixtureExecutor(
+    null,
+    IGNORES_PROVIDER_REFUSALS,
+  );
   const operationMediation = new SemanticOperationMediationAuthority();
   const emptyServer = createSurfaceRuntimeServer(
     runtimeEntry(compiled, policy),
@@ -818,7 +832,10 @@ test('an invalid selected-surface binding remains page-level before slot composi
 }) => {
   const compiled = compileFixture(true, true);
   const policy = allowPolicy();
-  const invalidExecutor = new BrowserFixtureExecutor(null, IGNORES_PROVIDER_REFUSALS);
+  const invalidExecutor = new BrowserFixtureExecutor(
+    null,
+    IGNORES_PROVIDER_REFUSALS,
+  );
   const operationMediation = new SemanticOperationMediationAuthority();
   const invalidServer = createSurfaceRuntimeServer(
     runtimeEntry(compiled, policy),
@@ -971,7 +988,10 @@ test('an intent rendered by one control still refuses a second operation by name
 }) => {
   const compiled = compileFixture(true, false, pushDuplicateCreate);
   const policy = allowPolicy();
-  const duplicateExecutor = new BrowserFixtureExecutor(null, IGNORES_PROVIDER_REFUSALS);
+  const duplicateExecutor = new BrowserFixtureExecutor(
+    null,
+    IGNORES_PROVIDER_REFUSALS,
+  );
   const operationMediation = new SemanticOperationMediationAuthority();
   const duplicateServer = createSurfaceRuntimeServer(
     runtimeEntry(compiled, policy),
@@ -1218,7 +1238,8 @@ class BrowserFixtureExecutor
       }) as Readonly<Record<string, ImmutableJsonValue>>,
     });
     this.records.set(recordId, stored);
-    return stored;  }
+    return stored;
+  }
 
   async recordNonAccepted(
     _request: SemanticOperationNonAcceptedRequest,
