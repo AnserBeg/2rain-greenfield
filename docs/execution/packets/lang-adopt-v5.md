@@ -594,7 +594,8 @@ of scenarios that kept their meaning and changed their name.
 The correction strengthens §8's ruling rather than weakening it: **an evidence
 reader cannot re-key orphaned evidence by matching on what a scenario verifies,
 because 58 of 163 are indistinguishable that way.** Recording the language
-version is not one option among several — it is the only handle there is.
+version is what makes the boundary legible cheaply, not what makes re-keying
+possible.
 
 The signature comparison is now a MULTISET rather than a set, because a set
 comparison would tolerate a dropped scenario while a duplicate signature covered
@@ -652,7 +653,7 @@ whose identity moves. That is a mechanism: inside an ambiguous group the only
 separator is version-bearing, so the group re-fingerprints together, while a
 scenario determined by its own fields keeps its id. Re-identification is not
 scattered — it is exactly the population that cannot be re-keyed by meaning,
-which makes ADR-0047 §8's ruling airtight rather than merely reasonable.
+**and round 7 refuted that reading — see below.**
 
 **(2) C7 disclaimed semantic status in its header and asserted it everywhere
 else.** The failure message read *"a cut-but-unadopted version must not be
@@ -666,6 +667,59 @@ as what they are: current-value and helper-behaviour pins, not route proof.
 direction 1 assuming the head was a profile sibling — was real, committed, and
 never written up. The section is now three and names it. The record understating
 its own work is the same defect as overstating it.
+
+### Review round 7 — BLOCK, and the packet's own mechanism claim was false
+
+The sharpest finding of the seven, and it landed on the thing this packet was
+proudest of.
+
+**C6's "every recorded non-id field" was a hand-picked tuple of six.** Recorded
+scenarios carry **fifteen** fields across seven kinds. `declaredEvidence` alone
+adds `assertionId`, `evidenceKind`, `expectedOutcome`, `expectedDiagnosticCode`
+and a full `invocation`; `uniquenessFold` adds `nfkcPolicy`. The tuple collapsed
+exactly the 69 `declaredEvidence` scenarios into 11 groups — and rounds 6 read
+that collapse as a property of the data. **It was a property of the projection.**
+
+The reviewer predicted the population from the authored source before measuring
+it: eleven walking-slice assertions at six evidence kinds, plus one at two and
+one at one, is `11×6 + 2 + 1 = 69`. That is the declared-evidence census, not an
+ambiguity census.
+
+**Measured from the production scenario object — excluding only the two
+generated identity fields, normalizing `schemaVersion` recursively:**
+
+| | |
+|---|---|
+| semantic-key uniqueness, both plans | **163 of 163** |
+| semantic key sets across the adoption | **identical — a total bijection** |
+| re-identified | **69, every one `declaredEvidence`** |
+| `assertionId` + `evidenceKind` distinguishes those 69 | **69 of 69** |
+
+**So evidence CAN be re-keyed by meaning**, and the packet's claim that it
+cannot — recorded here and ruled into ADR-0047 §8 as "airtight" — is withdrawn.
+The mechanism is now measured instead of inferred: `declaredEvidence` is the
+only kind carrying an `invocation`, invocations nest canonical references with
+their own version stamps, those stamps are fingerprint inputs, and precisely
+that population re-fingerprints.
+
+**The decision survives; its justification is replaced.** ADR-0047 §8 still
+rules that evidence carries its language version and re-identification is
+detected rather than prevented — now resting on three arguments that survive:
+stable ids would assert a false equivalence where `PUR-1`'s state machine lands;
+re-keying is possible but no reader does it, and a capability existing only in a
+test is not a property of the system; and the version stamp is the cheap signal
+that the expensive comparison is needed.
+
+**The control is rebuilt from the object rather than a field list**, so a
+scenario kind added later is included automatically, with a one-property
+negative control proving the key observes `assertionId`, `evidenceKind` and
+`expectedOutcome` — the fields the old tuple dropped — while ignoring the
+generated id.
+
+**My own W4 was the signal and I did not follow it.** I disclosed "I did not
+trace which fingerprint inputs carry the version stamp" and then wrote the
+mechanism into an ADR anyway. A disclosed gap in a load-bearing inference is not
+a disclosure — it is an unfinished measurement.
 
 ## What the first matrix cost, and why it is the packet's own theme again
 
@@ -695,46 +749,10 @@ reported the matrix as **exit code 0** while the run had failed. `MATRIX_EXIT=1`
 was read from inside the log, which is the false-green `5g3-sm-impl` recorded and
 the reason its rule exists.
 
-## Gates — one full matrix, green at the re-frozen SHA
+## Gates
 
-`FULL_MATRIX_PASS_SHA=5ebd680`, tree clean, typecheck clean.
-**589 assertions, 0 failures, `MATRIX_EXIT=0` read from inside the log.**
-
-| Step | Result |
-|---|---|
-| `check:demo-release`, `check:app-release` | pass — shell root held, lineage reproduces 9/9 |
-| unit / compiler / performance | green |
-| integration / agent / architecture | green |
-| contracts / postgres / locale | green |
-| browser | 67 passed (2.7m) |
-| `check:language-coverage` | **PASS** — 2050 obligations, 2050 decision-covered, **427 first-party observations** |
-| `check:reachability` | **PASS** — **100/100** test files, 10 producer artifacts |
-
-**Compile-budget gate MEASURED:** `cpu_idle_pct=99.2`, best-of-5 wall
-**2414.7 ms** against 5000 ms.
-
-### Ten matrices
-
-| Run | Result | Cause |
-|---|---|---|
-| 1 | FAIL | a third hand-written copy of the compiler suite's file list |
-| 2 | FAIL | `test:postgres` timeouts — a split sized against a STANDALONE measurement while the bound is IN-MATRIX |
-| 3-5, 7, 8 | green | each superseded by a review round finding a control defect |
-| 6 | green **under mutation** | the P6 measurement — the greenness WAS the finding |
-| 9 | green | superseded by review round 6 |
-| 10 | green | this one |
-
-Two failed on defects this packet introduced. **Six green runs were superseded
-by review rounds finding control defects the matrix cannot see. A vacuous
-control is green by construction — that is why the deletion tables exist and why
-matrix-green was never going to settle this.**
-
-**The wrapper reported "exit code 0" on every failed run.** `MATRIX_EXIT` was
-read from inside the log each time.
-
-`pnpm lint` reports **7 errors and `prettier --check` drifts, both pre-existing
-on `main` at `5aa2d2c` and neither in the matrix command**
-(`unrun-quality-gates`). This packet adds zero of either.
+**The `5ebd680` matrix is SUPERSEDED** by review round 7, which changed
+executable content in `composed-application.test.ts`. Fresh matrix owed.
 
 ### A matrix pre-flight instrument, for the next lane
 

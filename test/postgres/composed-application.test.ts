@@ -4110,69 +4110,127 @@ async function assertAttributedSearchCapabilityScenarioDelta(
     'no entry after the pinned pair changes what the release verifies',
   );
 
-  // THE NON-ID KEY PREMISE, ASSERTED RATHER THAN COMMENTED. ADR-0047 §8's
-  // ruling rests on it: if evidence cannot be re-keyed by what a scenario
-  // verifies, recording the language version is the only handle there is.
-  // Review round 6 found that premise living in prose while the control below
-  // asserted only the consequence.
-  // `targetEntityId` is OPTIONAL on a scenario, so the key is "every recorded
-  // non-id field where present" rather than six always-present fields. An
-  // absent value is distinguished from an empty one, or the key would conflate
-  // two shapes it is supposed to separate.
-  const nonIdKey = (scenario: {
-    entityId: string;
-    kind: string;
-    probePolarity: string;
-    provider: string;
-    subjectId: string;
-    targetEntityId?: string;
-  }): string =>
-    [
-      scenario.kind,
-      scenario.entityId,
-      scenario.subjectId,
-      scenario.probePolarity,
-      scenario.targetEntityId ?? '\u0000absent',
-      scenario.provider,
-    ].join('|');
+  // THE SEMANTIC KEY, DERIVED FROM THE PRODUCTION SCENARIO OBJECT.
+  //
+  // Round 7 refuted the previous version of this control and the ADR ruling
+  // built on it. It used a hand-picked six-field tuple -- kind, entityId,
+  // subjectId, probePolarity, targetEntityId, provider -- and called that
+  // "every recorded non-id field". It is not. The recorded scenarios carry
+  // fifteen distinct fields across seven kinds, and `declaredEvidence` alone
+  // adds `assertionId`, `evidenceKind`, `expectedOutcome`,
+  // `expectedDiagnosticCode` and a full `invocation`; `uniquenessFold` adds
+  // `nfkcPolicy`.
+  //
+  // The old tuple therefore COLLAPSED exactly the 69 `declaredEvidence`
+  // scenarios into 11 groups, and the packet read that collapse as evidence
+  // that scenarios are indistinguishable by meaning. They are not: it was the
+  // projection that lost the distinction, not the data.
+  //
+  // Derived from the object rather than a field list, so a scenario kind added
+  // later is included automatically instead of silently dropped. Only the two
+  // GENERATED identity fields are excluded, and `schemaVersion` is normalized
+  // wherever it appears -- recursively, because `invocation` nests canonical
+  // references that carry their own stamps, and those stamps are exactly what
+  // moves.
+  const semanticKey = (scenario: unknown): string => {
+    const normalize = (value: unknown): unknown => {
+      if (Array.isArray(value)) return value.map(normalize);
+      if (typeof value === 'object' && value !== null) {
+        return Object.fromEntries(
+          Object.entries(value)
+            .filter(
+              ([key]) => key !== 'scenarioId' && key !== 'scenarioFingerprint',
+            )
+            .map(([key, entry]) => [
+              key,
+              key === 'schemaVersion' ? '<version>' : normalize(entry),
+            ]),
+        );
+      }
+      return value;
+    };
+    return JSON.stringify(normalize(scenario));
+  };
 
-  const groups = new Map<string, string[]>();
-  for (const scenario of current.plan.scenarios) {
-    const key = nonIdKey(scenario);
-    groups.set(key, [...(groups.get(key) ?? []), scenario.scenarioId]);
-  }
-  // Every recorded non-id field, together, distinguishes only 105 of 163.
-  assert.equal(groups.size, 105);
-  const ambiguousGroups = [...groups.values()].filter(
-    (members) => members.length > 1,
+  // A key that distinguishes every scenario in BOTH plans. The previous claim
+  // -- that none exists but the id itself -- was an artifact of the lossy tuple.
+  const targetBySemantic = new Map(
+    current.plan.scenarios.map((scenario) => [
+      semanticKey(scenario),
+      scenario.scenarioId,
+    ]),
   );
-  assert.equal(ambiguousGroups.length, 11);
-  const ambiguousIds = new Set(ambiguousGroups.flat());
-  assert.equal(ambiguousIds.size, 69);
+  const headBySemantic = new Map(
+    headScenarios.map((scenario) => [
+      semanticKey(scenario),
+      scenario.scenarioId,
+    ]),
+  );
+  assert.equal(targetBySemantic.size, 163);
+  assert.equal(headBySemantic.size, 163);
+
+  // A TOTAL BIJECTION across the language adoption: every scenario in one plan
+  // has exactly one counterpart in the other under a version-normalized reading
+  // of its whole payload. Evidence CAN be re-keyed by meaning.
+  assert.deepEqual(
+    [...headBySemantic.keys()].toSorted(),
+    [...targetBySemantic.keys()].toSorted(),
+    'the language adoption preserves every scenario semantically; only identities move',
+  );
+
+  // Of those 163 pairs, exactly 69 are issued under a new id, and every one is
+  // a `declaredEvidence` scenario -- the only kind carrying an `invocation`,
+  // whose nested canonical references carry the version stamps the fingerprint
+  // covers. That is the mechanism, measured rather than inferred.
+  const reidentified = [...targetBySemantic].filter(
+    ([key, scenarioId]) => headBySemantic.get(key) !== scenarioId,
+  );
+  assert.equal(reidentified.length, 69);
+  assert.deepEqual(
+    [
+      ...new Set(
+        reidentified.map(([key]) => (JSON.parse(key) as { kind: string }).kind),
+      ),
+    ],
+    ['declaredEvidence'],
+    'only scenarios carrying a version-stamped invocation are re-identified',
+  );
+
+  // ONE-PROPERTY NEGATIVE CONTROL on the comparison itself. Changing a field
+  // the OLD tuple omitted must change the semantic key; otherwise this control
+  // repeats the defect it was written to fix.
+  const [sampleDeclared] = current.plan.scenarios.filter(
+    (scenario) => scenario.kind === 'declaredEvidence',
+  );
+  assert.ok(sampleDeclared);
+  for (const omitted of [
+    'assertionId',
+    'evidenceKind',
+    'expectedOutcome',
+  ] as const) {
+    const mutated = { ...sampleDeclared, [omitted]: 'MUTATED' };
+    assert.notEqual(
+      semanticKey(mutated),
+      semanticKey(sampleDeclared),
+      `the semantic key must observe ${omitted}; the six-field tuple did not`,
+    );
+  }
+  // ...while a change to a GENERATED identity field must not, or the key would
+  // report every re-identification as a semantic difference and the bijection
+  // above would be unobservable.
+  assert.equal(
+    semanticKey({ ...sampleDeclared, scenarioId: 'MUTATED' }),
+    semanticKey(sampleDeclared),
+  );
 
   // EXACTLY 69 recorded ids do not appear in the other plan, which is the
-  // number ADR-0047 §8 publishes. Update it deliberately if a later change
-  // moves it; never relax it to "some".
+  // number ADR-0047 §8 publishes.
   const targetIdSet = new Set(scenarioIds(current.plan.scenarios));
   const headIdSet = new Set(scenarioIds(headScenarios));
   assert.equal(
     [...targetIdSet].filter((scenarioId) => !headIdSet.has(scenarioId)).length,
     69,
     'a language adoption changes exactly the ids whose fingerprint covers a version-stamped node',
-  );
-
-  // AND THE TWO POPULATIONS ARE THE SAME SET, which is the mechanism rather
-  // than a coincidence: within an ambiguous group the only thing distinguishing
-  // siblings is version-bearing, so the whole group re-fingerprints when the
-  // version moves, while a scenario fully determined by its non-id fields does
-  // not. Every re-identified scenario is therefore one that CANNOT be re-keyed
-  // by meaning -- which is exactly the population ADR-0047 §8's ruling is about.
-  assert.deepEqual(
-    [...ambiguousIds].toSorted(),
-    [...targetIdSet]
-      .filter((scenarioId) => !headIdSet.has(scenarioId))
-      .toSorted(),
-    'the re-identified scenarios are exactly those sharing every non-id field with a sibling',
   );
 
   // EXACTLY 0 across the ADR-0047 §4 profile-only edge, asserted as identity of

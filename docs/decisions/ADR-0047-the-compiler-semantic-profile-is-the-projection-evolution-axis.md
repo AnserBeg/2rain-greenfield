@@ -319,41 +319,46 @@ lineage:
 | recorded ids absent from the other plan | **69 of 163** |
 | ids changed by the ADR-0047 §4 profile-only edge (entry 6 → 7) | **0 of 163** |
 
-**CORRECTED TWICE, and the second correction is the interesting one.**
+**CORRECTED THREE TIMES. The decision below stands; the reasoning that first
+supported it was wrong, and the third correction reverses it.**
 
-The first correction (2026-08-10) replaced *"69 scenarios were re-identified"*:
-that reading was not expressible, because **no key distinguishes all 163
-scenarios except the id itself.** Every combination of the recorded non-id
-fields — `kind`, `entityId`, `subjectId`, `probePolarity`, `targetEntityId`,
-`provider` — yields **105 distinct values**.
+The first two corrections narrowed *"69 scenarios re-identified"* and then fixed
+an arithmetic slip, both on the premise that **no key distinguishes all 163
+scenarios except the id itself.** That premise was FALSE, and it was false for a
+self-inflicted reason: the key used to establish it was a hand-picked tuple of
+six fields — `kind`, `entityId`, `subjectId`, `probePolarity`, `targetEntityId`,
+`provider` — described as "every recorded non-id field". It is not.
 
-The second correction fixes an arithmetic error in the first, caught in review.
-163 rows over 105 distinct keys gives **58 excess rows beyond one per key**; it
-does NOT give "58 indistinguishable scenarios", which depends on the group-size
-distribution and has to be measured. Measured:
+Recorded scenarios carry **fifteen** distinct fields across seven kinds.
+`declaredEvidence` alone adds `assertionId`, `evidenceKind`, `expectedOutcome`,
+`expectedDiagnosticCode` and a full `invocation`; `uniquenessFold` adds
+`nfkcPolicy`. The tuple therefore collapsed exactly the 69 `declaredEvidence`
+scenarios into 11 groups, and that collapse — an artifact of the projection —
+was read as a property of the data.
+
+**Measured from the production scenario object, excluding only the two generated
+identity fields and normalizing `schemaVersion` recursively:**
 
 | | |
 |---|---|
-| distinct non-id keys | **105** |
-| non-singleton groups | **11** |
-| scenarios inside them | **69** — nine groups of 6, one of 7, one of 8 |
+| semantic-key uniqueness, v4 plan | **163 of 163** |
+| semantic-key uniqueness, v5 plan | **163 of 163** |
+| semantic key sets across the adoption | **identical — a total bijection** |
+| scenarios re-identified | **69, every one `declaredEvidence`** |
+| `assertionId` + `evidenceKind` alone distinguishes those 69 | **69 of 69** |
 
-**And those 69 are exactly the 69 whose ids change.** Asserted, not observed in
-passing: the set of scenarios sharing every non-id field with a sibling is
-identical to the set whose identity moves across the adoption.
+**So evidence CAN be re-keyed by meaning.** Every scenario in the v4 plan has
+exactly one counterpart in the v5 plan under a version-normalized reading of its
+whole payload. The earlier claim that re-keying is impossible, and that
+recording the language version is therefore "the only handle there is", is
+withdrawn.
 
-That is a mechanism rather than a coincidence, and it settles what 69 means.
-Within an ambiguous group the only thing separating siblings is version-bearing,
-so the whole group re-fingerprints when the version moves; a scenario fully
-determined by its non-id fields keeps its identity. **Re-identification is not
-scattered across the plan — it is precisely the population that cannot be
-re-keyed by meaning.**
-
-Every count holds, every behaviour holds, and 42% of the recorded identities are
-absent from the other plan. A `scenarioId` is a fingerprint over the scenario's
-inputs, and those inputs include version-stamped nodes. **The profile axis moves
-the release root and changes no identity. The language axis changes identities
-without moving anything a count can see.**
+**The mechanism, now measured rather than inferred:** `declaredEvidence` is the
+only kind carrying an `invocation`, and an invocation nests canonical references
+that carry their own version stamps. Those stamps are fingerprint inputs, so
+precisely that population re-fingerprints. Every other kind carries no
+version-bearing payload and keeps its identity. The 69 is not a coincidence and
+not an ambiguity — it is the count of scenarios that reference a versioned node.
 
 ### Why this is consequential rather than curious
 
@@ -373,20 +378,30 @@ fact that holds under every count while its identity moves underneath.
 re-identification is detected rather than prevented.** Scenario identity is NOT
 made adoption-stable.
 
-The rejected alternative — excluding version stamps from the fingerprint so ids
-survive adoption — was considered and is refused for the reason ADR-0047 §1
-already gives about `semanticProfileDigest`: an identity that deliberately omits
-part of its subject cannot distinguish "the same scenario" from "a scenario that
-now verifies different bytes." Two packages differing only in language version
-DO verify different bytes; a v5 storage target materializes a state field a v4
-one does not. Stable ids across that boundary would assert an equivalence that
-is false, and would do it precisely where `PUR-1`'s first state machine lands.
+**RE-JUSTIFIED after the third correction, because the original argument was
+withdrawn.** The decision no longer rests on re-keying being impossible — it is
+demonstrably possible, by total bijection. It rests on three things that survive
+the correction:
 
-So the adoption-stability question is answered the other way: **the id is
-allowed to move, and the reader must be able to tell that it moved.** Recording
-the language version alongside the evidence makes a partial match legible as a
-version boundary rather than as missing evidence, which is the difference
-between a diagnosable event and a silent one.
+1. **Stable ids across the boundary would assert a false equivalence.** A v4 and
+   a v5 storage target verify different bytes; v5 materializes a state field v4
+   does not. An identity deliberately omitting the version cannot distinguish
+   *the same scenario* from *a scenario that now verifies something else* —
+   ADR-0047 §1's reasoning about `semanticProfileDigest`, one level down. That
+   divergence lands exactly where `PUR-1`'s first state machine does.
+
+2. **Re-keying is possible but nothing does it.** The bijection requires a
+   recursive version-normalizing comparison over the entire scenario payload,
+   including nested invocation references. No evidence reader performs one. A
+   capability that exists only in a test is not a property of the system.
+
+3. **The version stamp is the cheap signal that a re-key is needed at all.**
+   Without it a partial id match is indistinguishable from missing evidence;
+   with it, the boundary is legible and the expensive comparison can be run
+   deliberately.
+
+The rejected alternative — excluding version stamps from the fingerprint so ids
+survive adoption — is refused on (1).
 
 ### Owed, and not built here
 
