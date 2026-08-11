@@ -236,6 +236,43 @@ a *necessary* condition where its name claims the *sufficient* one") with a
 concrete, pre-existing instance attached. This packet does not close it; it
 supplies the specimen.
 
+## 6a. What was observed by running it
+
+Measured on `5bfd1ab`, worktree `/home/rvham/2rain-greenfield-devenv`.
+
+| Claim | Observation |
+|---|---|
+| The application serves the composed release | `COMPOSED_APPLICATION_READY {"baseUrl":"http://127.0.0.1:4174","releaseRoot":"b0177bf4…2bbb","seededRecords":176}` |
+| Lists paginate | Item list pill reads **`1–100 of 119`**, 100 data rows, and a `Next page` link carrying a `cursor` |
+| The other lists fill | Parties **`1–45 of 45`**, Locations **`1–12 of 12`** |
+| Records open | `party_detail&record=71000000-…-0001` renders `<h1>Alpine Office Supply</h1>` |
+| Search works | `&q=Cascade` on the party list → `1–1 of 1`, "Cascade Fastener Works" |
+| Navigation exists | 12 compiled groups: Party, Party role, Catalog, Location, Inventory movement, On-hand lookup, Inventory period lock, Inventory transaction line, Inventory transaction, Legal entity, Stock count line, Stock count |
+| The write path works | POST to `location_form` → *"Create complete. The saved record is reflected below and its trust evidence is linked."*, State Active, revision 1; list then reads `1–13 of 13` |
+| The container stops with its session | `SIGTERM` → `Exited (0)`, port 4174 stops answering |
+| Data survives a restart | Second `pnpm dev`: same `tenantId`, same `releaseRoot`, 176 records, `1–13 of 13` still including the hand-created record — **the seed is idempotent against a persisted database** |
+| The dev container is invisible to the matrix guard | With `dev-composed-app-postgres` **running**, `docker ps --all --filter name=^/north-star-` (the guard's exact filter) returns empty, and the `DEVENV` matrix passed `guard-ephemeral-postgres.mjs post-lock` without `POSTGRES_CONTAINER_CONTAMINATION` |
+| `kill -9` leaks the container | **Observed.** `kill -9` of the app left `dev-composed-app-postgres` `Up`. This is `dev-container-unguarded`, measured rather than predicted. |
+
+**Two open rows confirmed live, neither repaired (out of scope by charter):**
+
+- **`ux-picker`** — every form field is a bare `<input>`. `location_form`,
+  `item_form` and `party_role_form` render **zero `<select>`, zero
+  `<datalist>`, zero `<textarea>`** between them. `location_type` is a
+  declared 2-option enum and still renders as a text box into which the
+  operator must type `northstar.app:option.warehouse`.
+- **`ux-list-usability`** — the Record column renders `71000000…0001`. The row
+  does link through to the detail surface, so the list is navigable; the
+  identity shown is the truncated UUID.
+
+**Consequence for the checkpoint, stated because the charter asked for
+something that does not exist yet:** there is **no dropdown of any size** in
+this application today, so "a dropdown with more than five options" cannot be
+demonstrated. The seed makes the *data* exceed five options many times over —
+45 parties, 119 items — and `ux-picker`/`ux-reference-picker` are the lanes
+that will render them. What the seed does deliver now is a list that
+paginates, a search that discriminates, and a record that opens.
+
 ## 7. What this packet did NOT verify
 
 Listed for the reviewer, not excused.
@@ -250,8 +287,10 @@ Listed for the reviewer, not excused.
   committed test. It compared the reconstructed old table against
   `composedApplicationSeed('demo')` and reported identical; that script is not
   in the tree.
-- **`kill -9` leak behaviour is reasoned, not measured.** No leak was staged.
-- **The guard interaction is read from source, not observed.** No matrix was
-  deliberately run with a dev container present to watch it exit 76.
+- **The `north-star-` refusal in `main.ts` is not exercised.** Nothing sets a
+  bad name and asserts the throw.
+- **No negative control exists for any of the above**, in the sense AGENTS.md
+  §6 requires: nothing has been observed failing. The manual run in §8 shows
+  the good path working; it does not show any guard refusing.
 - **`ux-list-usability`, `form-write-untyped-wire` and `form-empty-means-nothing`
   are out of scope by charter** and were not investigated.
