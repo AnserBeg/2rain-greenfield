@@ -119,6 +119,50 @@ pressing.
 | `apps/api/package.json` | `dev:stop`, `dev:reset`. |
 | `apps/web/package.json` | `dev` → `serve:shell-fixture`. |
 | `package.json` | Root `dev` → the composed application. |
+| `packages/domain/package.json` + 5 index files | **Bridge, forced.** `"type": "module"` and four `.js` extensions — see §3a. |
+
+### 3a. The bridge this packet had to take, and why it is not optional
+
+**`packages/domain` was the only workspace package without `"type": "module"`.**
+`postgres-provider`, `compiler`, `runtime` and `canonical-model` all declare it.
+
+This was invisible until constraint (3) was satisfied. Authoring the seed beside
+the modules means `apps/api/src/composition-root.ts` imports
+`packages/domain/src/app/seed.ts`, and the browser suite imports
+`composition-root.ts`. Playwright therefore pulled `packages/domain` into its
+transform for the first time, treated it as **CJS** because the manifest said
+nothing, and `require('./builder.js')` looked for a literal `builder.js` that
+does not exist:
+
+```
+Error: Cannot find module './builder.js'
+Require stack:
+- packages/domain/src/app/seed.ts
+```
+
+**Every file in `packages/domain` uses `.js` specifiers**, so this is not about
+one import. Rewriting specifiers instead was tried and rejected: dropping the
+extension in `seed.ts` moved the identical failure one level down, into
+`builder.ts` and its four `../<module>/definition.js` imports.
+
+**So the constraint the charter set — seed data authored where the modules are
+— is unsatisfiable from the composition root until `packages/domain` is an ES
+module.** The fix is 9 lines: the manifest, plus `.js` extensions on five
+re-exports that only resolved because the package was CJS (`node16` resolution
+rejects extensionless relative specifiers under ESM).
+
+**This is a bridge outside the charter's pre-authorised list and it touches a
+shared package manifest, so it is declared rather than absorbed:**
+
+- **`packages/domain/src/index.ts` is held by `packet/pur-1`**, which is adding
+  a purchasing module export. My change is four `.js` suffixes on adjacent
+  lines; a merge will likely need a hand resolution, and the resolution is to
+  keep both.
+- It makes `packages/domain` consistent with every sibling package, and
+  corrects a real import shape: before it, a dynamic `import()` of a domain
+  module yielded `{ default: … }` instead of its named exports. Measured both
+  ways.
+- It was verified rather than assumed — see §6b.
 
 ### The seed profiles
 
