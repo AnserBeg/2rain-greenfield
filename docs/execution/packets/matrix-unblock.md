@@ -1,7 +1,7 @@
 # matrix-unblock — the matrix reaches its suites again, and the formatter stops drifting
 
-Status: evidence ready — round-2 REVISE closed, full matrix
-green at `f4575a2`; rounds 1 and 2 findings all closed
+Status: round-3 findings closed; matrix owed at the new SHA. Tier is
+disputed — round 3 argues Critical, the charter says Behavioral
 Tier: Behavioral
 Branch: `packet/matrix-unblock`
 Base: `194871f` (`origin/main` at cut; verified, not assumed)
@@ -247,6 +247,85 @@ have to change for it to need to be.
 H is the non-vacuity proof, the same shape as control C: with the
 discriminator dead the live assertion still passes, so the recognition table is
 what makes it mean anything.
+
+## Review round 3 — BLOCK, and the approach was the defect
+
+Round 3 found three more ways past the gate and called for a STOP/re-scope
+rather than a fourth REVISE, on the grounds that the findings were more of the
+same class. **The convergence reading was right, and so were all three
+findings.** Every one was reproduced here before being fixed, and each rewrote
+the effective formatter edge while the round-2 gate reported **zero failures**:
+
+| Vector | Effective specifier | Round-2 gate |
+| --- | --- | --- |
+| `prettier@>3.9.4` — a package-RANGE selector, not a parent selector | **3.9.6** | 0 failures |
+| `greenfield-north-star-erp>prettier` — a parent selector whose parent IS the root | **3.9.6** | 0 failures |
+| `"overrides":` quoted top-level key | **^3.9.5** | 0 failures |
+| root `.pnpmfile.mjs` `readPackage` hook | **^3.9.5** | 0 failures |
+
+The first two are ordinary pnpm spellings, not exotica, and the version
+actually moved to 3.9.6 in both. The third defeated the fail-closed property
+this record had **claimed could not fail open** — a quoted key read as "no
+overrides at all". That claim was false and is withdrawn rather than softened.
+
+### The real defect was the shape, not the regexes
+
+Three rounds found the same class of hole because the gate was **enumerating
+the authorities that can change the answer** instead of **checking the
+answer**. That list has no natural end: manifest, workspace overrides, two
+override sub-forms, pnpmfile hooks, patches.
+
+Every one of those has to pass through the root importer's recorded edge in
+`pnpm-lock.yaml` to take effect. So the contract now observes that outcome —
+the manifest declares an exact version, the lockfile's effective **specifier**
+equals it, and the resolved **version** equals it.
+
+**The whole `pnpm-workspace.yaml` reader and the `claimsRootFormatter`
+discriminator are deleted. The fix is less code than it replaces**, which is
+the tell that it is the right shape rather than more armour.
+
+Parsing the lockfile is not the risk parsing `pnpm-workspace.yaml` was: the
+lockfile is machine-generated in one canonical shape, while the workspace file
+is hand-written and admits arbitrary valid-YAML spellings — exactly how the
+quoted key got through. The reader still throws rather than returning a benign
+default for anything it does not recognise, including a root importer that
+declares no prettier at all.
+
+### Controls, all observed
+
+| Control | Mutation | Observed |
+| --- | --- | --- |
+| A | `prettier@>3.9.4` | RED |
+| B | `greenfield-north-star-erp>prettier` | RED |
+| C | quoted `"overrides":` | RED |
+| D | `.pnpmfile.mjs` `readPackage` hook | RED |
+| E | `eslint>prettier`, genuinely non-root | **GREEN — admitted, with no special case** |
+| F | caret in the manifest (the original regression) | RED |
+| G | reader neutered to return the declared pin | **test 5 GREEN, test 6 red** |
+| H | lockfile prettier entry deleted | RED — fails closed, not read as satisfied |
+| I | `patchedDependencies` on prettier | RED — `version` becomes `3.9.5(patch_hash=…)` |
+
+**E is the discrimination the enumerating version had to hand-code and got
+wrong**; here it falls out of observing the outcome. **G** is the non-vacuity
+proof. **I closes the `patchedDependencies` question round 3 left open**, and
+it closed for free: the packet's invariant is the stronger of the two the
+reviewer offered — *the exact version string identifies the formatter
+implementation whose output governs the repository* — and the `version`
+assertion enforces it without extra code.
+
+### On the STOP instruction, and on tier
+
+Round 3 directed a re-charter rather than a round-4 fix. **The user was asked
+and directed the fix to proceed here**; that ruling is recorded, not assumed.
+The convergence concern is nonetheless sound and worth reading as written: what
+justified continuing is that the correct fix DELETED the growing surface rather
+than extending it, and round 3 had specified it precisely.
+
+Round 3 also argues this packet is **Critical, not Behavioral**, because a
+test-only delta that creates an invariant changes what a deterministic gate
+claims to prove. That is a live disagreement with the tier this packet has
+carried since its charter, and it is the orchestrator's to settle — the lane
+has not re-tiered itself.
 
 ## Gates — ACCEPTANCE MATRIX, GREEN
 
