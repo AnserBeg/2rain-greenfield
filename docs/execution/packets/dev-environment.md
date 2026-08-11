@@ -463,22 +463,42 @@ single failing test:
 | Negative control | Result |
 |---|---|
 | Location value keys emitted in the old order | 1 red — the serialization test |
+| A distributor-only **location** given an undeclared operation ID | 1 red — the release check |
+| A distributor-only **item** given an undeclared field ID | 1 red — the release check |
 | A distributor-only record given an undeclared enum option | 1 red — the release check |
 | A distributor-only record with entirely valid identifiers (admission twin) | **stays green** |
 | A printed banner surface renamed in `APPLICATION_IDS` | 1 red — the surface check |
 | The `north-star-` prefix refusal deleted | 1 red — the prefix test |
 | The retired-variable refusal deleted | 1 red — the retired-variable test |
+| **The settle step removed from shutdown** | 1 red — the in-flight signal test |
+| **Ownership recorded AFTER the awaited `docker run` — the exact round-2 defect** | 1 red — the in-flight signal test |
+
+Round 2 review found the release-binding controls exercised only one of that
+test's three checks: deleting the operation-ID or field-ID assertion would have
+left every recorded result unchanged. Both now have isolated specimens. The
+operation-ID mutation is applied to **location** records rather than items,
+because mutating the item operation ID also empties the page-size test's filter
+and reds two tests — varying two properties, which is the defect the checklist
+names.
+
+**A recorded limit of that test, not an implied claim:** it proves identifier
+**membership** — that each seeded operation, field, enum value and printed
+surface exists in the compiled release. It does **not** prove the operation,
+entity and field compose into an executable write, and it would not catch a
+field that exists but belongs to another entity.
 
 **Still NOT verified by any control:**
 
-- **The lifecycle fixes have no committed control.** The SIGTERM-during-startup,
-  EADDRINUSE and database-failure cases in §5 were observed by hand at
-  `fa1b024` and are **not** reproducible from the tree. They need a spawned-process
-  control that starts the dev entry against a stub `docker`, and that is the
-  single largest remaining gap in this packet.
-- **`application.close()` rejecting, and `docker stop` failing, are unexercised.**
-  The code now collects and reports both, but neither path has been made to
-  happen.
+- **The hand-run observations in §5 remain hand-run.** SIGTERM-mid-startup,
+  EADDRINUSE and the database-failure case were observed at `fa1b024` and are
+  not reproducible from the tree. What IS now reproducible is the harder case
+  round 2 identified — a signal while `docker run` is still executing — via a
+  spawned-process control against a stub `docker`, plus direct controls for the
+  rejecting-close and failing-stop branches.
+- **The stub is not Docker.** The in-flight control proves the *ordering*
+  property: the process waits out the create and issues a stop for what it
+  created. It does not prove the real daemon behaves as the stub does, and a
+  real `docker run` that leaks in some other way would not be caught.
 - **`kill -9` is not covered by a control**, only observed once.
 - **The seed is still not derived from the module `ids()` factories.** The
   control proves the seed agrees with the compiled release; it does **not**
