@@ -280,9 +280,23 @@ Every one of those has to pass through the root importer's recorded edge in
 the manifest declares an exact version, the lockfile's effective **specifier**
 equals it, and the resolved **version** equals it.
 
-**The whole `pnpm-workspace.yaml` reader and the `claimsRootFormatter`
-discriminator are deleted. The fix is less code than it replaces**, which is
-the tell that it is the right shape rather than more armour.
+The whole `pnpm-workspace.yaml` reader and the `claimsRootFormatter`
+discriminator are deleted.
+
+**Corrected: the lane first wrote that the fix is "less code than it replaces".
+Measured, it is not.** The file went 254 → 284 lines, 153 → 178 executable, and
+the new reader (32 executable lines) is comparable to the reader plus
+discriminator it replaced (29). The growth is in the control test and the
+comments, and the claim was made from an impression rather than a count.
+
+That is the third overclaim in this packet — after the false `no-fallthrough`
+mechanism and the false fail-closed guarantee — and it is left standing as a
+correction rather than quietly edited out, because the pattern is the point.
+
+**What actually got smaller is the number of authorities that have to be
+enumerated: from an open-ended list nobody could close, to one place every
+authority must pass through.** That is the real argument for the shape, and it
+does not need a line count to support it.
 
 Parsing the lockfile is not the risk parsing `pnpm-workspace.yaml` was: the
 lockfile is machine-generated in one canonical shape, while the workspace file
