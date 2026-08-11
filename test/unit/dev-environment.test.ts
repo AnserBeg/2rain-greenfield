@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { spawn } from 'node:child_process';
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import test from 'node:test';
 
 import { APPLICATION_IDS } from '../../packages/domain/src/app/builder.js';
@@ -8,6 +16,7 @@ import {
   composedApplicationSeed,
   type ComposedApplicationSeedRecord,
 } from '../../packages/domain/src/app/seed.js';
+import { runShutdown } from '../../apps/api/src/dev-lifecycle.js';
 import {
   DEFAULT_DEV_CONTAINER_NAME,
   DEV_CONTAINER_VARIABLE,
@@ -313,4 +322,157 @@ test('the default dev container is outside the reserved prefix', () => {
     'the default dev container name is inside the reserved test prefix',
   );
   assert.equal(resolved.volume, `${DEFAULT_DEV_CONTAINER_NAME}-data`);
+});
+
+test('shutdown runs every step and reports each failure', async () => {
+  // The branches this drives are unreachable from a live run: closing the
+  // application rejecting, and the container stop failing. Before the fix, the
+  // first skipped the stop entirely and the process still exited 0.
+  const closeFailure = new Error('close rejected');
+  const stopFailure = new Error('stop rejected');
+  const both = await runShutdown({
+    closeApplication: () => Promise.reject(closeFailure),
+    stopContainer: () => Promise.reject(stopFailure),
+  });
+  assert.deepEqual(
+    both.failures,
+    [closeFailure, stopFailure],
+    'a rejecting close must not suppress the container stop',
+  );
+  assert.deepEqual(both.ran, ['closeApplication', 'stopContainer']);
+
+  // The admission twin: both succeeding reports no failure, so the assertion
+  // above is not satisfied by a shutdown that always reports failure.
+  const clean = await runShutdown({
+    closeApplication: () => Promise.resolve(),
+    stopContainer: () => Promise.resolve(),
+  });
+  assert.deepEqual(clean.failures, []);
+});
+
+test('shutdown waits for an in-flight container command before stopping', async () => {
+  // The ordering IS the fix. Stopping before the create settles lets the
+  // creation finish afterwards, leaving a container with no owner.
+  const order: string[] = [];
+  let settled = false;
+  const outcome = await runShutdown({
+    settleContainerCommand: async () => {
+      await new Promise((done) => setImmediate(done));
+      settled = true;
+      order.push('settled');
+    },
+    stopContainer: () => {
+      assert.ok(settled, 'the stop ran before the create/start had settled');
+      order.push('stopped');
+      return Promise.resolve();
+    },
+  });
+  assert.deepEqual(order, ['settled', 'stopped']);
+  assert.deepEqual(outcome.failures, []);
+});
+
+test('a failing container command still leads to a stop, and is not itself a failure', async () => {
+  // A create that fails is a reason to clean up, not a reason to skip it.
+  let stopped = false;
+  const outcome = await runShutdown({
+    settleContainerCommand: () => Promise.reject(new Error('docker run died')),
+    stopContainer: () => {
+      stopped = true;
+      return Promise.resolve();
+    },
+  });
+  assert.ok(stopped, 'a failed create/start skipped the cleanup');
+  assert.deepEqual(
+    outcome.failures,
+    [],
+    'a failed create/start must not be reported as a shutdown failure',
+  );
+});
+
+test('a signal while the container command is in flight leaves no container behind', async (t) => {
+  // The window round 2 review identified: SIGTERM arrives while
+  // `docker run --detach` is still executing. The process must not exit until
+  // that command settles and the container it created has been stopped.
+  //
+  // `docker` is stubbed rather than real, so this runs in the unit suite with
+  // no daemon, no image pull and no port binding. The stub's marker file
+  // stands in for the container: if it survives the run, a real container
+  // would have survived too.
+  const root = mkdtempSync(join(tmpdir(), 'dev-lifecycle-'));
+  const log = join(root, 'docker.log');
+  const marker = join(root, 'container');
+  writeFileSync(
+    join(root, 'docker'),
+    [
+      '#!/usr/bin/env bash',
+      `echo "$1" >> "${log}"`,
+      'case "$1" in',
+      // No pre-existing container, so the run arm is taken.
+      '  container) echo "Error: No such container: stub" >&2; exit 1 ;;',
+      // Blocks, so the signal lands mid-flight. The marker appears only after.
+      `  run) sleep 1.5; : > "${marker}"; echo run-end >> "${log}"; exit 0 ;;`,
+      `  stop) if [ -e "${marker}" ]; then rm "${marker}"; exit 0; ` +
+        'else echo "Error: No such container: stub" >&2; exit 1; fi ;;',
+      // Never ready, so nothing proceeds to the database or the HTTP port.
+      '  exec) exit 1 ;;',
+      '  *) exit 0 ;;',
+      'esac',
+    ].join('\n'),
+    { mode: 0o755 },
+  );
+
+  const child = spawn(
+    process.execPath,
+    ['--import', 'tsx', resolve('apps/api/src/main.ts')],
+    {
+      env: {
+        ...process.env,
+        NORTH_STAR_DATABASE_PORT: '55999',
+        NORTH_STAR_DEV_DATABASE_CONTAINER: 'stub-dev-db',
+        PATH: `${root}:${process.env.PATH ?? ''}`,
+        PORT: '4999',
+      },
+      stdio: 'ignore',
+    },
+  );
+  const exited = new Promise<void>((done) => child.once('exit', () => done()));
+  try {
+    // Poll for the command to be in flight rather than sleeping a guessed
+    // interval; the assertion below is meaningless if the signal lands early.
+    const deadline = Date.now() + 30_000;
+    while (
+      Date.now() < deadline &&
+      !(existsSync(log) && readFileSync(log, 'utf8').includes('run'))
+    ) {
+      await new Promise((done) => setTimeout(done, 25));
+    }
+    const observed = existsSync(log) ? readFileSync(log, 'utf8') : '';
+    assert.ok(
+      observed.includes('run'),
+      `docker run never started: ${observed}`,
+    );
+    assert.ok(
+      !observed.includes('run-end'),
+      'the run completed before the signal, so the in-flight window was not exercised',
+    );
+    child.kill('SIGTERM');
+    await exited;
+  } finally {
+    child.kill('SIGKILL');
+  }
+
+  const transcript = readFileSync(log, 'utf8');
+  assert.ok(
+    transcript.includes('run-end'),
+    'shutdown did not wait for the in-flight container command to settle',
+  );
+  assert.ok(
+    transcript.includes('stop'),
+    'no container stop was issued for a container this process created',
+  );
+  assert.ok(
+    !existsSync(marker),
+    'the container outlived the process that created it',
+  );
+  rmSync(root, { force: true, recursive: true });
 });

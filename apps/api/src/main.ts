@@ -5,6 +5,7 @@ import { promisify } from 'node:util';
 import { APPLICATION_IDS } from '../../../packages/domain/src/app/builder.js';
 
 import { resolveDevContainer } from './dev-container.js';
+import { runShutdown } from './dev-lifecycle.js';
 import {
   startComposedApplication,
   type RunningComposedApplication,
@@ -28,12 +29,19 @@ const databaseUrl =
 const managesContainer = !process.env.DATABASE_URL;
 
 /**
- * Both are set the moment the thing they guard EXISTS, not once it is healthy.
- * `containerExists` in particular flips as soon as `docker run` returns: a
- * container whose published endpoint never becomes reachable is still a
- * container this process created and still owes cleanup for.
+ * `containerAttempted` records that a create/start command was ISSUED, not
+ * that it succeeded, and it is set synchronously before the command is
+ * launched. `pendingContainerCommand` is that command.
+ *
+ * Ownership cannot be recorded after the await: a signal arriving while
+ * `docker run --detach` is in flight would then find no container recorded,
+ * skip cleanup, exit, and let the Docker child finish creating an orphan.
+ * Recording it before the await is necessary but not sufficient — shutdown
+ * must also WAIT for the command to settle, or the stop races ahead of the
+ * creation it is meant to undo. Both halves live here and in `runShutdown`.
  */
-let containerExists = false;
+let containerAttempted = false;
+let pendingContainerCommand: Promise<unknown> = Promise.resolve();
 let application: RunningComposedApplication | undefined;
 let shuttingDown = false;
 
@@ -106,21 +114,17 @@ function announce(running: RunningComposedApplication): void {
 async function shutdown(code: number): Promise<never> {
   if (shuttingDown) return await never();
   shuttingDown = true;
-  const failures: unknown[] = [];
-  if (application) {
-    try {
-      await application.close();
-    } catch (error) {
-      failures.push(error);
-    }
-  }
-  if (containerExists) {
-    try {
-      await docker(['stop', container.name]);
-    } catch (error) {
-      failures.push(error);
-    }
-  }
+  const { failures } = await runShutdown({
+    closeApplication: application
+      ? async () => {
+          await application?.close();
+        }
+      : undefined,
+    settleContainerCommand: async () => {
+      await pendingContainerCommand;
+    },
+    stopContainer: containerAttempted ? stopContainer : undefined,
+  });
   for (const failure of failures) {
     process.stderr.write(
       `COMPOSED_APPLICATION_SHUTDOWN_FAILED ${String(
@@ -128,7 +132,7 @@ async function shutdown(code: number): Promise<never> {
       )}\n`,
     );
   }
-  if (failures.length > 0 && containerExists) {
+  if (failures.length > 0 && containerAttempted) {
     process.stderr.write(
       `The database container may still be running. Stop it with: ` +
         `pnpm --filter @north-star/api dev:stop\n`,
@@ -151,27 +155,26 @@ async function ensureLocalPostgres(): Promise<void> {
     throw new TypeError('NORTH_STAR_DATABASE_PORT must be a valid TCP port');
   }
   const exists = await dockerSucceeds(['container', 'inspect', container.name]);
-  if (exists) {
-    containerExists = true;
-    await docker(['start', container.name]);
-  } else {
-    await docker([
-      'run',
-      '--detach',
-      '--name',
-      container.name,
-      '--publish',
-      `127.0.0.1:${String(databasePort)}:5432`,
-      '--volume',
-      `${container.volume}:/var/lib/postgresql/data`,
-      '--env',
-      'POSTGRES_HOST_AUTH_METHOD=trust',
-      postgresImage,
-    ]);
-    // Set immediately after creation, before readiness: a container that never
-    // becomes ready still exists and still owes cleanup.
-    containerExists = true;
-  }
+  // These two statements are adjacent and synchronous on purpose. A signal
+  // handler is a macrotask and cannot interleave between them, so there is no
+  // window in which the command is running but unrecorded.
+  containerAttempted = true;
+  pendingContainerCommand = exists
+    ? docker(['start', container.name])
+    : docker([
+        'run',
+        '--detach',
+        '--name',
+        container.name,
+        '--publish',
+        `127.0.0.1:${String(databasePort)}:5432`,
+        '--volume',
+        `${container.volume}:/var/lib/postgresql/data`,
+        '--env',
+        'POSTGRES_HOST_AUTH_METHOD=trust',
+        postgresImage,
+      ]);
+  await pendingContainerCommand;
 
   const startedAt = performance.now();
   while (performance.now() - startedAt < 30_000) {
@@ -189,6 +192,23 @@ async function ensureLocalPostgres(): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   throw new Error('local PostgreSQL was not ready within 30 seconds');
+}
+
+/**
+ * A container that was never created is not a cleanup failure. Anything else
+ * is, and it must reach the exit code rather than being swallowed.
+ */
+async function stopContainer(): Promise<void> {
+  try {
+    await docker(['stop', container.name]);
+  } catch (error) {
+    const stderr =
+      error instanceof Error && 'stderr' in error
+        ? String((error as { stderr?: unknown }).stderr ?? '')
+        : '';
+    if (/no such (container|object)/iu.test(stderr)) return;
+    throw error;
+  }
 }
 
 async function docker(arguments_: readonly string[]): Promise<void> {
