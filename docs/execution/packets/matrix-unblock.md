@@ -1,7 +1,7 @@
 # matrix-unblock — the matrix reaches its suites again, and the formatter stops drifting
 
-Status: round-1 findings all closed; awaiting `lang-adopt-v5` integration, then
-rebase + full matrix + re-freeze
+Status: evidence ready — merged onto post-`lang-adopt-v5` main, full matrix
+green at `04c44d3`, round-1 findings all closed
 Tier: Behavioral
 Branch: `packet/matrix-unblock`
 Base: `194871f` (`origin/main` at cut; verified, not assumed)
@@ -177,23 +177,72 @@ the rule on the one line where a genuine fallthrough could later be
 introduced. The guard stays armed, and any future edit that moves the comment
 back into the case body is caught by the same error.
 
-## Gates
+## Gates — ACCEPTANCE MATRIX, GREEN
 
-> **SUPERSEDED — this run no longer covers the tree.** Closing round-1 finding 2
-> added executable test content (`test/integration/toolchain-contract.test.ts`),
-> so the executable diff from `3f9f358` is no longer empty and the identical-tree
-> exception no longer applies. The run below is retained as the record of what
-> was measured at that SHA, not as this candidate's acceptance evidence.
->
-> The acceptance matrix is owed **after** `lang-adopt-v5` integrates and this
-> branch rebases onto the new `main` — one run, at the re-frozen SHA, per
-> `git-workflow`'s one-matrix-per-packet rule. Running it before the rebase
-> would measure a tree that is about to change.
->
-> Interim gates at `8882158`: `format` green, `lint` green, `typecheck` green,
-> and the toolchain contract 4/4 with the four negative controls recorded below.
-> `test:integration` was **not** run — another lane held the exclusive lock
-> (`test:browser`, pid 73443) and this lane did not compete for it.
+Full matrix at the post-merge SHA `04c44d3`, verdict read from inside the log:
+
+```
+PERFORMANCE_GATE_PASS_SHA=04c44d3a51afa397943c2dc06709706a68d0eb08
+FULL_MATRIX_PASS_SHA=04c44d3a51afa397943c2dc06709706a68d0eb08
+```
+
+Ran 14:23:44-14:42:46. Log: `/tmp/matrix-matrix-unblock-04c44d3a.log`.
+
+| Step | Result |
+| --- | --- |
+| `format` / `lint` / `typecheck` / `build` | pass — the two that were red are green |
+| `check:boundaries`, `check:schema`, `check:demo-release`, `check:app-release` | pass |
+| `test:performance` | 5 pass, 0 fail |
+| `test:unit` | 106 pass, 0 fail |
+| `test:compiler` | 145 pass, 0 fail |
+| `test:integration` | 130 pass, 0 fail |
+| `test:agent` | 3 pass, 0 fail |
+| `test:architecture` | 141 pass, 0 fail |
+| `test:contracts` | 16 pass, 0 fail |
+| `test:postgres` | 197 pass, 0 fail |
+| `test:locale` | 1 pass, 0 fail |
+| `test:browser` | 77 passed (1.6m) |
+| observability producer | 11 pass, 0 fail |
+| `check:language-coverage` | PASS — 2050 obligations, 427 first-party observations |
+| `check:reachability` | PASS — **102/102** test files executed, 10 producer artifacts |
+| security scans | passed |
+
+Nothing downstream was red.
+
+### It took five attempts, and none of the failures were the code
+
+Recorded because a green run reported without its failures is not an honest
+record, and because three of the five were caused by this lane's own tooling.
+
+| Run | SHA | Outcome | Cause |
+| --- | --- | --- | --- |
+| 1 | `3f9f358` | PASS | pre-merge; superseded when finding 2 added test content |
+| 2 | `04c44d3` | `FULL_MATRIX_FAILED` | performance gate **INDETERMINATE**, not over budget: `observed CPU idle 63.5% is below required 90.0%`. Pre-flight had read 94%; another lane started `test:unit` in between |
+| 3 | `04c44d3` | terminated | killed mid-`test:postgres` when the session interrupted the process tree. Had cleared the performance gate |
+| 4 | `04c44d3` | `REFUSED` rc=76 | `POSTGRES_CONTAINER_CONTAMINATION` — run 3's container orphaned by that kill. Owner pid confirmed dead and no lane running before removing it |
+| 5 | `04c44d3` | `TEST_GATE_LOCK_BUSY` rc=75 | **self-inflicted**: a leftover polling shell of this lane's had `corepack pnpm test:performance` inside its own command line, so `foreign_matrix()` matched the poller as a foreign test process and waited out its 300s |
+| 6 | `04c44d3` | **PASS** | run on a verified-clean machine with an inert checker |
+
+Two lessons worth carrying, both about a monitor being matched by the thing it
+monitors. `pkill -f <pattern>` kills the shell running it when that shell's own
+command line contains the pattern — it did, and it killed a script mid-write.
+And a polling `grep` for matrix process names puts those names on the poller's
+command line, where the matrix's own foreign-process guard finds them. Both are
+now avoided by keeping patterns inside a script file
+(`scratchpad/check-matrix.sh`) so `ps` only ever shows the script name.
+
+**One observation this lane could not explain and is not fixing here.** During
+run 2, another lane's `test:unit` was executing while this lane held the
+matrix's *exclusive* lease — `language-conformance-ledger.test.ts` at 150% CPU,
+observed directly in `ps`. That is either a hole in the shared lock or a lane
+bypassing it. It is shared infrastructure, outside this packet's charter, and
+worth its own packet.
+
+### Superseded run at `3f9f358`
+
+Retained as the record of what was measured pre-merge, not as acceptance
+evidence — closing finding 2 added executable test content, so the
+identical-tree exception no longer applies to it.
 
 Full matrix run at `3f9f358`, verdict read from inside the log rather than
 from the pipeline's exit status:
