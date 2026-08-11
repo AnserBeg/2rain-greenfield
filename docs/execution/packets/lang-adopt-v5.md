@@ -594,6 +594,38 @@ The signature comparison is now a MULTISET rather than a set, because a set
 comparison would tolerate a dropped scenario while a duplicate signature covered
 for it.
 
+### Review round 5 — BLOCK, and the scan is retired as semantic evidence
+
+Round 4 narrowed the purity claim. Round 5 found the narrowed claim still
+outran its classifier, with a specimen that NAMES the guarded constant:
+
+    const selected = `${LATEST_LANGUAGE_VERSION}:selected`;
+    languageVersion: selected.slice(0, -9)
+
+Reproduced against the live scan: `MODULE_COMPILER_PROFILE` resolved to **v5**
+and the scan reported the tree **clean**. That is inside the narrowed claim, not
+the routed one — the sixth escape in a single class.
+
+**The defect was never the rule; it was calling a syntactic position a semantic
+category.** "Interpolated into operator-facing text" is a claim about INTENT.
+What the code can see is "inside a template carrying literal text whose value
+does not reach one of six named bindings". Five rounds of patching the second
+never turned it into the first, and each repair was correct while the next
+escape was cheaper than the last.
+
+**So the scan is retired as semantic acceptance evidence.** It is renamed to the
+syntactic fact it measures — *production references to a `LATEST_` constant
+occur only inside literal-bearing templates* — and its header states plainly
+what it does NOT establish: that those templates are operator-facing, that the
+value is not subsequently selected, or that newest-readable is not reached
+without naming it. No seventh destination name was added.
+
+**Consequence, recorded rather than softened: the ADR-0047 §2 rule has no
+semantic gate right now.** The behavioural assertions still hold every default
+to ADOPTED, and `adoption-selector-seam` owns the real proof, carrying both
+escape 5 and escape 6 as its owed reds. A packet that needs that rule enforced
+before `PUR-1` should treat that row as a prerequisite rather than a cleanup.
+
 ## What the first matrix cost, and why it is the packet's own theme again
 
 The first full matrix ran every suite green — 0 reds across unit, compiler,
@@ -622,48 +654,10 @@ reported the matrix as **exit code 0** while the run had failed. `MATRIX_EXIT=1`
 was read from inside the log, which is the false-green `5g3-sm-impl` recorded and
 the reason its rule exists.
 
-## Gates — one full matrix, green at the re-frozen SHA
+## Gates
 
-`FULL_MATRIX_PASS_SHA=c946d2e`, tree clean, typecheck clean.
-**589 assertions, 0 failures, `MATRIX_EXIT=0` read from inside the log.**
-
-| Step | Result |
-|---|---|
-| `check:demo-release`, `check:app-release` | pass — shell root held, lineage reproduces 9/9 |
-| unit / compiler / performance | green |
-| integration / agent / architecture | green |
-| contracts / postgres / locale | green |
-| browser | 67 passed (3.1m) |
-| `check:language-coverage` | **PASS** — 2050 obligations, 2050 decision-covered, **427 first-party observations** |
-| `check:reachability` | **PASS** — **100/100** test files, 10 producer artifacts |
-
-**Compile-budget gate MEASURED:** `cpu_idle_pct=98.8`, best-of-5 wall
-**2339.5 ms** against 5000 ms.
-
-### Eight matrices, and what each bought
-
-| Run | Result | Cause |
-|---|---|---|
-| 1 | FAIL | a third hand-written copy of the compiler suite's file list |
-| 2 | FAIL | `test:postgres` timeouts — a split sized against a STANDALONE measurement while the bound is IN-MATRIX |
-| 3 | green | superseded by review round 1 |
-| 4 | green | superseded by review round 2 |
-| 5 | green | superseded by review round 3 |
-| 6 | green **under mutation** | the P6 measurement: v5 removed from `languageUsesModuleProjectionShape`, 589/0 unchanged — the greenness WAS the finding |
-| 7 | green | superseded by review round 4 |
-| 8 | green | this one |
-
-Two failed on defects this packet introduced. **Four green runs were superseded
-by review rounds finding control defects the matrix cannot see. A vacuous
-control is green by construction — that is why the deletion tables exist and why
-matrix-green was never going to settle this.**
-
-**The wrapper reported "exit code 0" on every failed run.** `MATRIX_EXIT` was
-read from inside the log each time.
-
-`pnpm lint` reports **7 errors and `prettier --check` drifts, both pre-existing
-on `main` at `5aa2d2c` and neither in the matrix command**
-(`unrun-quality-gates`). This packet adds zero of either.
+**The `c946d2e` matrix is SUPERSEDED** by review round 5, which changed
+executable content in `canonical-contracts-purity.test.ts`. Fresh matrix owed.
 
 ### A matrix pre-flight instrument, for the next lane
 

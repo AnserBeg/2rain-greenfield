@@ -170,46 +170,58 @@ function quarryMetricFork(): { path: string; source: string } {
 }
 
 /**
- * NO PRODUCTION FILE REFERENCES A `LATEST_*` CONSTANT EXCEPT TO REPORT IT.
+ * A SYNTACTIC INVENTORY of where two named constants appear in production.
+ * It is not semantic acceptance evidence, and it does not decide intent.
  *
- * READ THE TITLE LITERALLY. This control was called "the newest readable
- * version is reported, never selected" for four review rounds, and that name
- * was a claim it could not support. It is a SOURCE-REFERENCE scan: it resolves
- * bindings for two named constants and classifies their uses. It says nothing
- * about newest-readable values reached by any other derivation.
+ * RETIRED AS SEMANTIC EVIDENCE IN ROUND 5, after a SIXTH escape in one class.
+ * The history is the argument, so it is kept:
  *
- * NARROWED IN ROUND 4, after a fifth escape and on the repository's own
- * convergence rule. The prior four repairs were each a real fix to a real hole
- * -- a strip that deleted the subject, a rename that changed its name, a glob
- * that never reached it, an exemption that swallowed it -- and each was
- * followed by a cheaper escape than the one before. The fifth needed no
- * obfuscation at all:
+ *   1. a strip removed the subject -- the exported initializer was deleted
+ *      before the scan read it
+ *   2. a rename changed the subject's name -- an aliased import bound it to a
+ *      spelling the scan did not watch
+ *   3. a glob never reached the subject -- the file set was discovered, not
+ *      asserted
+ *   4. an exemption swallowed the subject -- every template interpolation was
+ *      treated as reporting
+ *   5. a derivation avoided the name -- `SUPPORTED_LANGUAGE_VERSIONS.at(-1)!`
+ *   6. an intermediate binding laundered the name:
  *
- *     profile.languageVersion === SUPPORTED_LANGUAGE_VERSIONS.at(-1)!
+ *          const selected = `${LATEST_LANGUAGE_VERSION}:selected`;
+ *          languageVersion: selected.slice(0, -9)
  *
- * selects the newest readable version using an identifier production already
- * imports. Measured on the real `DEFAULT_COMPILER_PROFILE`: the profile still
- * resolved to v5, every behavioural assertion held, and this scan stayed green.
- * A sixth token rule would have bought a sixth escape.
+ * Escape 6 NAMES the constant, so it is inside the narrowed claim rather than
+ * the routed one, and it stayed green: `MODULE_COMPILER_PROFILE` resolved to v5
+ * with the scan reporting the tree clean. Each of the five prior repairs was
+ * correct and each was followed by a cheaper escape. A seventh destination name
+ * would buy a seventh.
  *
- * WHAT THIS CONTROL PROVES: direct and named-alias references to
- * `LATEST_LANGUAGE_VERSION` and `LATEST_NORMALIZATION_PROFILE_VERSION` do not
- * appear in production except interpolated into operator-facing text.
+ * THE DEFECT WAS NEVER THE RULE. It was calling a syntactic position a semantic
+ * category. "Interpolated into operator-facing text" is a claim about INTENT;
+ * what the code can see is "inside a template that carries literal text and
+ * whose value does not reach one of six named bindings". Those are not the same
+ * proposition, and five rounds of patching the second never made it the first.
  *
- * WHAT IT DOES NOT PROVE, recorded rather than implied: that the newest
- * readable version is never SELECTED. Any derivation that reaches it without
- * naming it -- the ordered supported list's last member being the obvious one
- * -- is outside this scan by construction. Closing that needs a production
- * SELECTOR SEAM, exercised on a constructed readable set whose adopted member
- * is deliberately not its last, with `DEFAULT_COMPILER_PROFILE` proven to be
- * produced through it. That is `adoption-selector-seam`, and it is a design
- * change rather than another rule here.
+ * WHAT THIS TEST NOW ASSERTS, exactly and only: every production reference to
+ * `LATEST_LANGUAGE_VERSION` or `LATEST_NORMALIZATION_PROFILE_VERSION`, resolved
+ * through named-import and named-export aliases, sits inside a template literal
+ * that carries literal text. That is a syntactic fact. It is worth keeping
+ * because it catches a bare assignment cheaply.
  *
- * The behavioural assertions below are unchanged and still carry ADR-0047 §2's
- * rule: every default follows ADOPTED, and the selection rule itself is
- * exercised on a constructed set where the two candidate rules disagree.
+ * WHAT IT DOES NOT ESTABLISH, and must not be cited for:
+ *   - that those templates are operator-facing, or messages at all;
+ *   - that the interpolated value is not subsequently SELECTED, whether by an
+ *     intermediate binding, a call, or any other laundering;
+ *   - that the newest readable version is not reached WITHOUT naming it.
+ *
+ * The rule ADR-0047 §2 actually states -- a cut-but-unadopted version must not
+ * become any caller's default -- is enforced by the BEHAVIOURAL assertions
+ * below, and is owed a real proof by `adoption-selector-seam`: a production
+ * seam taking the readable profiles and adopted members as parameters, with
+ * `DEFAULT_COMPILER_PROFILE` proven to be built through it. Both escape 5 and
+ * escape 6 are that row's owed reds.
  */
-test('no production file references a LATEST_ constant except to report it', () => {
+test('production references to a LATEST_ constant occur only inside literal-bearing templates', () => {
   const constantNames = [
     'LATEST_LANGUAGE_VERSION',
     'LATEST_NORMALIZATION_PROFILE_VERSION',
@@ -600,8 +612,12 @@ function latestVersionSelections(
         parent !== undefined &&
         ts.isVariableDeclaration(parent) &&
         parent.name === node;
-      // Interpolating it into operator-facing TEXT is REPORTING it, which is
-      // the only use the adoption discipline permits before adoption.
+      // A SYNTACTIC CATEGORY, not a sink. This does not decide that the
+      // template is a message; it decides that the reference sits inside a
+      // template carrying literal text whose value does not reach one of the
+      // named bindings below. Escape 6 shows the gap: an intermediate variable
+      // outside that list launders the value into a profile and this returns
+      // true. Read the header before citing this for anything semantic.
       //
       // NOT every interpolation -- corrected in review round 3. The exemption
       // was `parent is a TemplateSpan`, which is a syntactic position, not a
@@ -613,7 +629,7 @@ function latestVersionSelections(
       //
       // Two independent rules, because one is not enough.
       //
-      // (i) A REPORTING template carries literal text around the value. A
+      // (i) A template carrying literal text cannot be a value-preserving copy. A
       //     value-preserving coercion cannot: any added text changes the
       //     string, so `\`${X}\`` with an empty head and tail is the only
       //     shape that copies a version, and it is never a message. Both real
