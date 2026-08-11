@@ -1203,7 +1203,28 @@ function validateVerificationAssertionInvocations(
   return diagnostics;
 }
 
-function languageUsesModuleProjectionShape(
+/**
+ * Whether a package revision carries the MODULE projection shape: the reporting
+ * family is required, its entity set must equal the active entity set, and
+ * lowered physical mappings are validated.
+ *
+ * EXPORTED FOR OBSERVATION, on the precedent `selectAdoptedProfileVersion`
+ * above already sets in this file. Everything this predicate gates is a
+ * self-check over the compiler's OWN output — `validatePhysicalMappingRecords`
+ * at the lowering seam, the required-family set, and the reporting-entity
+ * invariant — and the compiler satisfies all three by construction. So no
+ * authored package can distinguish the branches: `LANG-ADOPT-v5` removed v5
+ * from this list and ran the FULL matrix, which stayed green at 589 assertions,
+ * byte-identical to the unmutated run.
+ *
+ * That is what a disabled safety net looks like from outside: nothing. It
+ * cannot be witnessed without also introducing the fault it catches, and the
+ * faults here are unreachable from authored input — physical names are
+ * fixed-length hashes, so neither a collision nor a >63-byte name is
+ * constructible. The only honest witness is the membership itself, which is
+ * why this is exported rather than left private.
+ */
+export function languageUsesModuleProjectionShape(
   languageVersion: VersionedNormalizedApplicationPackage['languageVersion'],
 ): boolean {
   const featureLevel =

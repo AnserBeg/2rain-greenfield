@@ -83,6 +83,25 @@ import {
 import { withEphemeralPostgres } from '../helpers/postgres.js';
 
 const migrations = resolve('db/migrations');
+/**
+ * Derived from the composed application, never written down. Added by
+ * `LANG-ADOPT-v5` in place of five `'v4'` literals.
+ *
+ * Node-version purity is what makes these the right source: every node this
+ * file injects into the composed definition must carry THAT DEFINITION's
+ * version, and the compiler profile must agree with the package it compiles.
+ * Neither fact is about which version is current, so neither should name one.
+ */
+const composedVersions = (() => {
+  const definition = composedApplicationDefinition() as {
+    languageVersion: string;
+    normalizationProfileVersion: string;
+  };
+  return Object.freeze({
+    languageVersion: definition.languageVersion,
+    normalizationProfileVersion: definition.normalizationProfileVersion,
+  });
+})();
 const tenantId = '15a00000-0000-4000-8000-0000000000a1';
 const environmentId = '25b00000-0000-4000-8000-0000000000b2';
 const legalEntityId = '35c00000-0000-4000-8000-0000000000c3';
@@ -144,7 +163,7 @@ interface StagedRelease {
   readonly releaseId: MintedUuid;
 }
 
-test('canonical-language-v4 onHand aggregate catalog is accepted and every unknown nested version is refused before execution', async () => {
+test('the adopted-language onHand aggregate catalog is accepted and every unknown nested version is refused before execution', async () => {
   const fixture = buildFixture();
   const policy = new AllowPolicy();
   const arguments_ = onHandArguments(
@@ -192,7 +211,7 @@ test('canonical-language-v4 onHand aggregate catalog is accepted and every unkno
         query.aggregatePlan.sourceFieldType.kind = 'quantityFieldType';
         query.aggregatePlan.sourceFieldType.baseUnit = {
           kind: 'unitReference',
-          schemaVersion: 'v4',
+          schemaVersion: composedVersions.languageVersion,
           targetId: `${inventoryIds.namespace}:unit.each`,
         };
       },
@@ -1104,7 +1123,7 @@ function verificationDefinitionForTest(): Record<string, unknown> {
   aggregate.aggregate.selectionId = probeSelectionId;
   aggregate.filter = {
     kind: 'booleanPredicate',
-    schemaVersion: 'v4',
+    schemaVersion: composedVersions.languageVersion,
     value: true,
   };
   aggregate.legalEntityScope.operand.parameterId = probeParameterId;
@@ -1115,7 +1134,7 @@ function verificationDefinitionForTest(): Record<string, unknown> {
       kind: 'queryParameterDefinition',
       orderKey: 10,
       parameterId: probeParameterId,
-      schemaVersion: 'v4',
+      schemaVersion: composedVersions.languageVersion,
     },
   ];
   aggregate.permission.targetId = partyPermissionId;
@@ -1133,9 +1152,6 @@ function verificationDefinitionForTest(): Record<string, unknown> {
   scopeAssertion.evidenceKinds = ['provider'];
   scopeAssertion.invocation.query.targetId = probeQueryId;
   (definition.assertions as unknown[]).push(scopeAssertion);
-  adoptCanonicalLanguageV4(definition);
-  definition.languageVersion = 'v4';
-  definition.normalizationProfileVersion = 'northstar.normalization/v4';
   return definition;
 }
 
@@ -1143,9 +1159,6 @@ function inventoryDefinitionForTest(options: {
   readonly removeOnHandScope?: boolean;
 }): Record<string, unknown> {
   const definition = structuredClone(composedApplicationDefinition());
-  adoptCanonicalLanguageV4(definition);
-  definition.languageVersion = 'v4';
-  definition.normalizationProfileVersion = 'northstar.normalization/v4';
   assert.ok(Array.isArray(definition.queries));
   const onHand = definition.queries.find(
     (query) =>
@@ -1165,15 +1178,22 @@ function inventoryDefinitionForTest(options: {
   return definition;
 }
 
-function adoptCanonicalLanguageV4(value: unknown): void {
-  if (Array.isArray(value)) {
-    for (const entry of value) adoptCanonicalLanguageV4(entry);
-    return;
-  }
-  if (!isRecord(value)) return;
-  if (value.schemaVersion === 'v3') value.schemaVersion = 'v4';
-  for (const child of Object.values(value)) adoptCanonicalLanguageV4(child);
-}
+// DELETED by `LANG-ADOPT-v5`: `adoptCanonicalLanguageV4`, which walked the
+// composed definition rewriting every `schemaVersion === 'v3'` to `'v4'` and
+// then stamped the envelope `v4`.
+//
+// It was written when the composed application was still v3 and these tests
+// needed it one version ahead. After `LANG-ADOPT` it was already redundant --
+// the walk found no v3 nodes -- and it survived only because the stamps it
+// wrote happened to equal the version the application had adopted. At v5 the
+// coincidence broke and the stamps produced `CANON_VERSION_MIXED` twelve times
+// over, on a definition nothing in the test had deliberately mixed.
+//
+// It is deleted rather than retargeted at `ADOPTED_LANGUAGE_VERSION`, because
+// `composedApplicationDefinition()` already returns the adopted version: a
+// helper that restamps a package to the version it already carries cannot be
+// right, it can only be currently harmless. Prefer the wrong thing being
+// unrepresentable to it being detectable.
 
 function emptyDefinitionFrom(
   source: Record<string, unknown>,
@@ -1214,9 +1234,10 @@ function moduleInput(
     normalizedDefinitionBytes: definitionBytes(definition),
     profile: {
       ...MODULE_COMPILER_PROFILE,
-      // Canonical language v4; unrelated to Inventory dependency-set v4.
-      languageVersion: 'v4',
-      normalizationProfileVersion: 'northstar.normalization/v4',
+      // The profile must agree with the package it compiles; unrelated to
+      // Inventory dependency-set v4, which does not move with the language.
+      languageVersion: composedVersions.languageVersion,
+      normalizationProfileVersion: composedVersions.normalizationProfileVersion,
     },
   };
 }
