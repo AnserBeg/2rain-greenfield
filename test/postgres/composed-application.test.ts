@@ -4110,6 +4110,46 @@ async function assertAttributedSearchCapabilityScenarioDelta(
     'no entry after the pinned pair changes what the release verifies',
   );
 
+  // THE NON-ID KEY PREMISE, ASSERTED RATHER THAN COMMENTED. ADR-0047 §8's
+  // ruling rests on it: if evidence cannot be re-keyed by what a scenario
+  // verifies, recording the language version is the only handle there is.
+  // Review round 6 found that premise living in prose while the control below
+  // asserted only the consequence.
+  // `targetEntityId` is OPTIONAL on a scenario, so the key is "every recorded
+  // non-id field where present" rather than six always-present fields. An
+  // absent value is distinguished from an empty one, or the key would conflate
+  // two shapes it is supposed to separate.
+  const nonIdKey = (scenario: {
+    entityId: string;
+    kind: string;
+    probePolarity: string;
+    provider: string;
+    subjectId: string;
+    targetEntityId?: string;
+  }): string =>
+    [
+      scenario.kind,
+      scenario.entityId,
+      scenario.subjectId,
+      scenario.probePolarity,
+      scenario.targetEntityId ?? '\u0000absent',
+      scenario.provider,
+    ].join('|');
+
+  const groups = new Map<string, string[]>();
+  for (const scenario of current.plan.scenarios) {
+    const key = nonIdKey(scenario);
+    groups.set(key, [...(groups.get(key) ?? []), scenario.scenarioId]);
+  }
+  // Every recorded non-id field, together, distinguishes only 105 of 163.
+  assert.equal(groups.size, 105);
+  const ambiguousGroups = [...groups.values()].filter(
+    (members) => members.length > 1,
+  );
+  assert.equal(ambiguousGroups.length, 11);
+  const ambiguousIds = new Set(ambiguousGroups.flat());
+  assert.equal(ambiguousIds.size, 69);
+
   // EXACTLY 69 recorded ids do not appear in the other plan, which is the
   // number ADR-0047 §8 publishes. Update it deliberately if a later change
   // moves it; never relax it to "some".
@@ -4119,6 +4159,20 @@ async function assertAttributedSearchCapabilityScenarioDelta(
     [...targetIdSet].filter((scenarioId) => !headIdSet.has(scenarioId)).length,
     69,
     'a language adoption changes exactly the ids whose fingerprint covers a version-stamped node',
+  );
+
+  // AND THE TWO POPULATIONS ARE THE SAME SET, which is the mechanism rather
+  // than a coincidence: within an ambiguous group the only thing distinguishing
+  // siblings is version-bearing, so the whole group re-fingerprints when the
+  // version moves, while a scenario fully determined by its non-id fields does
+  // not. Every re-identified scenario is therefore one that CANNOT be re-keyed
+  // by meaning -- which is exactly the population ADR-0047 §8's ruling is about.
+  assert.deepEqual(
+    [...ambiguousIds].toSorted(),
+    [...targetIdSet]
+      .filter((scenarioId) => !headIdSet.has(scenarioId))
+      .toSorted(),
+    'the re-identified scenarios are exactly those sharing every non-id field with a sibling',
   );
 
   // EXACTLY 0 across the ADR-0047 §4 profile-only edge, asserted as identity of

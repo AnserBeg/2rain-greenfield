@@ -215,11 +215,22 @@ function quarryMetricFork(): { path: string; source: string } {
  *   - that the newest readable version is not reached WITHOUT naming it.
  *
  * The rule ADR-0047 §2 actually states -- a cut-but-unadopted version must not
- * become any caller's default -- is enforced by the BEHAVIOURAL assertions
- * below, and is owed a real proof by `adoption-selector-seam`: a production
- * seam taking the readable profiles and adopted members as parameters, with
- * `DEFAULT_COMPILER_PROFILE` proven to be built through it. Both escape 5 and
- * escape 6 are that row's owed reds.
+ * become any caller's default -- is NOT enforced here, and round 6 caught this
+ * header claiming otherwise while the paragraphs above disclaimed it.
+ *
+ * The behavioural assertions below are CURRENT-VALUE and HELPER-BEHAVIOUR pins:
+ * that `selectAdoptedProfileVersion` returns the designated adopted member and
+ * fails closed outside its readable set, and that today's default profiles
+ * equal today's adopted constants. They do NOT prove that a live default is
+ * CONSTRUCTED through that selector rather than reaching the same value by
+ * another route -- which is unobservable by value while `LATEST_ === ADOPTED`,
+ * and is exactly what escapes 5 and 6 demonstrated.
+ *
+ * That route proof is owed by `adoption-selector-seam`: a production seam
+ * taking the readable profiles and adopted members as parameters, with
+ * `DEFAULT_COMPILER_PROFILE` proven to be built through it. Escapes 5 and 6 are
+ * that row's owed reds. Until it lands the rule has no semantic gate, and
+ * nothing in this file should be cited as one.
  */
 test('production references to a LATEST_ constant occur only inside literal-bearing templates', () => {
   const constantNames = [
@@ -273,12 +284,13 @@ test('production references to a LATEST_ constant occur only inside literal-bear
   assert.deepEqual(
     selections,
     [],
-    `a cut-but-unadopted version must not be selected:\n${selections.join('\n')}`,
+    `a LATEST_ reference appears outside a literal-bearing template. This is a SYNTACTIC finding; it does not by itself establish that the value is selected:\n${selections.join('\n')}`,
   );
 
   // NEGATIVE CONTROLS FOR THE SCAN ITSELF, committed rather than run once by
-  // hand. The scan is the only thing standing between a cut version and every
-  // caller's default, and review found it deleting its own subject: the old
+  // hand. They establish that the SYNTACTIC scan observes what it claims to --
+  // not that the scan is sufficient, which it is not; see the header. Review
+  // round 1 found it deleting its own subject: the old
   // `^(?:import|export)\s[^;]*;` strip removed EXPORTED INITIALIZED
   // DECLARATIONS, and `DEFAULT_COMPILER_PROFILE` is exactly that, so the
   // production selector was erased before the scan looked at it. Measured on

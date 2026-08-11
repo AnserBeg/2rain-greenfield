@@ -319,30 +319,41 @@ lineage:
 | recorded ids absent from the other plan | **69 of 163** |
 | ids changed by the ADR-0047 §4 profile-only edge (entry 6 → 7) | **0 of 163** |
 
-**CORRECTED 2026-08-10, while building the control that asserts these numbers.**
-This section first said *"69 of 163 scenarios were re-identified"*. That reading
-is not expressible, and the correction matters more than the number.
+**CORRECTED TWICE, and the second correction is the interesting one.**
 
-**There is no key that distinguishes all 163 scenarios except the id itself.**
-Every combination of the recorded non-id fields — `kind`, `entityId`,
-`subjectId`, `probePolarity`, `targetEntityId`, `provider` — collapses to **105
-unique values**. Under the best available key only **11** signatures map to a
-different id, while the raw id-set difference is **69**. So 69 is a
-DIFFERENCE BETWEEN IDENTITY SETS, not a count of scenarios that kept their
-meaning and changed their name; the plan simply has no stable per-scenario
-identity other than the fingerprint, which is the thing that moved.
+The first correction (2026-08-10) replaced *"69 scenarios were re-identified"*:
+that reading was not expressible, because **no key distinguishes all 163
+scenarios except the id itself.** Every combination of the recorded non-id
+fields — `kind`, `entityId`, `subjectId`, `probePolarity`, `targetEntityId`,
+`provider` — yields **105 distinct values**.
 
-That is worth stating plainly because it bears on the decision below: an
-evidence reader cannot re-key orphaned evidence onto the new plan by matching
-on what a scenario verifies, because 58 of 163 scenarios are indistinguishable
-that way.
+The second correction fixes an arithmetic error in the first, caught in review.
+163 rows over 105 distinct keys gives **58 excess rows beyond one per key**; it
+does NOT give "58 indistinguishable scenarios", which depends on the group-size
+distribution and has to be measured. Measured:
 
-Every count holds, every behaviour holds, and 42% of the recorded identities
-are absent from the other plan. A `scenarioId` is a fingerprint over the
-scenario's inputs, and those inputs include version-stamped nodes; scenarios
-whose fingerprint reaches a stamped node move, and the rest do not. **The
-profile axis moves the release root and changes no identity. The language axis
-changes identities without moving anything a count can see.**
+| | |
+|---|---|
+| distinct non-id keys | **105** |
+| non-singleton groups | **11** |
+| scenarios inside them | **69** — nine groups of 6, one of 7, one of 8 |
+
+**And those 69 are exactly the 69 whose ids change.** Asserted, not observed in
+passing: the set of scenarios sharing every non-id field with a sibling is
+identical to the set whose identity moves across the adoption.
+
+That is a mechanism rather than a coincidence, and it settles what 69 means.
+Within an ambiguous group the only thing separating siblings is version-bearing,
+so the whole group re-fingerprints when the version moves; a scenario fully
+determined by its non-id fields keeps its identity. **Re-identification is not
+scattered across the plan — it is precisely the population that cannot be
+re-keyed by meaning.**
+
+Every count holds, every behaviour holds, and 42% of the recorded identities are
+absent from the other plan. A `scenarioId` is a fingerprint over the scenario's
+inputs, and those inputs include version-stamped nodes. **The profile axis moves
+the release root and changes no identity. The language axis changes identities
+without moving anything a count can see.**
 
 ### Why this is consequential rather than curious
 

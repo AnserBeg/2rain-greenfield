@@ -227,15 +227,21 @@ Independently confirming: `apps/web/src/surface-contract.ts` is currently held b
 the `pur1-intent-limit` lane, so building there would also have been a lease
 violation.
 
-## Two controls that addressed lineage entries by POSITION
+## Three controls that addressed lineage entries by POSITION
 
-Both went red on an adoption that changed nothing they guard. This is the
+All three went red on an adoption that changed nothing they guard. This is the
 packet's second transferable finding.
+
+**Corrected in round 6:** this section said TWO and listed two, while the
+packet's claim said three. The third repair was real and committed but never
+written up here — the record understated its own work, which is the same
+defect as overstating it.
 
 | Control | Was | Is |
 |---|---|---|
 | `consecutive lineage entries may share a normalized definition` (`compiler-semantic-profile.test.ts`) | `at(-1)` vs `at(-2)` — named the profile-adoption pair only while it was the head, which lasted exactly one packet | searches the lineage for the pair that shares a definition, asserts there is **exactly one**, and asserts it advances FORWARD along the compiler-semantic axis; the head's adopted profile is asserted separately, as the distinct claim it always was |
 | `assertAttributedSearchCapabilityScenarioDelta` (`composed-application.test.ts`) | `previousSourceRelease(head)` vs head — read 163 where it expected 168 | the pair is pinned by release root (`4b254f50…` → `d726ad31…`), asserted still CONSECUTIVE, and the head is checked separately |
+| ADR-0047 §6 direction 1, in `assertIntermediateBecomesServingOnlyAfterVerification` (`composed-application.test.ts`) | assumed the real head WAS a profile sibling and took `at(-2)` as its rollback target — true for exactly one packet, and its own sibling direction already manufactured a truncated lineage for the opposite reason | `throughProfileSiblingHead` truncates the lineage THROUGH the profile-only edge so the direction crosses the edge it names; both §6 directions then moved into their own test |
 
 `previousSourceRelease` is deleted. It solved a real problem — `at(-2)` selects
 the definition-equal sibling a profile adoption mints — but it solved it by
@@ -626,6 +632,41 @@ to ADOPTED, and `adoption-selector-seam` owns the real proof, carrying both
 escape 5 and escape 6 as its owed reds. A packet that needs that rule enforced
 before `PUR-1` should treat that row as a prerequisite rather than a cleanup.
 
+### Review round 6 — BLOCK, and one finding turned into a mechanism
+
+Three findings, all CONTROL, all confirmed by measurement.
+
+**(1) C6's premise lived in prose.** The ADR's ruling rests on "no recorded
+non-id key distinguishes all 163 scenarios", and the committed control asserted
+only the consequence. It now derives the six-field key and asserts **105**
+distinct values, **11** non-singleton groups, **69** scenarios inside them.
+
+**And the arithmetic in the ADR was wrong.** 163 rows over 105 keys is **58
+excess rows**, not "58 indistinguishable scenarios" — the population depends on
+the group-size distribution. Measured: nine groups of 6, one of 7, one of 8,
+totalling **69 scenarios**.
+
+**Which is the same 69 whose ids change, and it is now asserted as an identity.**
+The scenarios that share every non-id field with a sibling ARE the scenarios
+whose identity moves. That is a mechanism: inside an ambiguous group the only
+separator is version-bearing, so the group re-fingerprints together, while a
+scenario determined by its own fields keeps its id. Re-identification is not
+scattered — it is exactly the population that cannot be re-keyed by meaning,
+which makes ADR-0047 §8's ruling airtight rather than merely reasonable.
+
+**(2) C7 disclaimed semantic status in its header and asserted it everywhere
+else.** The failure message read *"a cut-but-unadopted version must not be
+selected"*, and the commentary called the scan *"the only thing standing between
+a cut version and every caller's default"* — while the header above said it
+established none of that. The message now names only the syntactic violation,
+the enforcement language is gone, and the behavioural assertions are described
+as what they are: current-value and helper-behaviour pins, not route proof.
+
+**(3) C5 said three; the record listed two.** The third repair — ADR-0047 §6
+direction 1 assuming the head was a profile sibling — was real, committed, and
+never written up. The section is now three and names it. The record understating
+its own work is the same defect as overstating it.
+
 ## What the first matrix cost, and why it is the packet's own theme again
 
 The first full matrix ran every suite green — 0 reds across unit, compiler,
@@ -654,47 +695,10 @@ reported the matrix as **exit code 0** while the run had failed. `MATRIX_EXIT=1`
 was read from inside the log, which is the false-green `5g3-sm-impl` recorded and
 the reason its rule exists.
 
-## Gates — one full matrix, green at the re-frozen SHA
+## Gates
 
-`FULL_MATRIX_PASS_SHA=6e0b56c`, tree clean, typecheck clean.
-**589 assertions, 0 failures, `MATRIX_EXIT=0` read from inside the log.**
-
-| Step | Result |
-|---|---|
-| `check:demo-release`, `check:app-release` | pass — shell root held, lineage reproduces 9/9 |
-| unit / compiler / performance | green |
-| integration / agent / architecture | green |
-| contracts / postgres / locale | green |
-| browser | 67 passed (2.4m) |
-| `check:language-coverage` | **PASS** — 2050 obligations, 2050 decision-covered, **427 first-party observations** |
-| `check:reachability` | **PASS** — **100/100** test files, 10 producer artifacts |
-
-**Compile-budget gate MEASURED:** `cpu_idle_pct=99.6`, best-of-5 wall
-**1360.4 ms** against 5000 ms — the quietest reading of the nine runs.
-
-### Nine matrices, and the shape of what they bought
-
-| Run | Result | Cause |
-|---|---|---|
-| 1 | FAIL | a third hand-written copy of the compiler suite's file list |
-| 2 | FAIL | `test:postgres` timeouts — a split sized against a STANDALONE measurement while the bound is IN-MATRIX |
-| 3-5, 7 | green | each superseded by a review round finding a control defect |
-| 6 | green **under mutation** | the P6 measurement — the greenness WAS the finding |
-| 8 | green | superseded by review round 5 |
-| 9 | green | this one |
-
-Two failed on defects this packet introduced. **Five green runs were superseded
-by review rounds finding control defects the matrix cannot see. A vacuous
-control is green by construction — that is why the deletion tables exist and why
-matrix-green was never going to settle this.** Run 6 is the sharpest case: an
-entire green matrix was itself the evidence that a branch had no owner.
-
-**The wrapper reported "exit code 0" on every failed run.** `MATRIX_EXIT` was
-read from inside the log each time.
-
-`pnpm lint` reports **7 errors and `prettier --check` drifts, both pre-existing
-on `main` at `5aa2d2c` and neither in the matrix command**
-(`unrun-quality-gates`). This packet adds zero of either.
+**The `6e0b56c` matrix is SUPERSEDED** by review round 6, which changed
+executable content in two test files. Fresh matrix owed.
 
 ### A matrix pre-flight instrument, for the next lane
 
