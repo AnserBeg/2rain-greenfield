@@ -53,9 +53,16 @@ import {
 import { createSurfaceRuntimeServer } from '../../apps/web/src/app-server.js';
 import {
   renderSurfaceRuntimeWithData,
+  semanticOperationRequestFor,
   submitSurfaceRuntimeIntent,
   type SurfaceRuntimeGateways,
 } from '../../apps/web/src/surface-runtime.js';
+import {
+  SurfaceProjectionError,
+  readCompiledSurfaceDataBinding,
+  readCompiledSurfaceManifest,
+  type CompiledSurfaceDataBinding,
+} from '../../apps/web/src/surface-contract.js';
 import {
   FIXTURE_IDS,
   ordinaryModuleV1,
@@ -109,7 +116,7 @@ test('compiled fixture surfaces bind live Q0/O0 data through one pinned request 
       {
         body: new URLSearchParams({
           idempotencyKey: randomUUID(),
-          intent: 'create',
+          operationId: `${FIXTURE_IDS.namespace}:operation.master_create`,
           recordId: randomUUID(),
           [`value:${FIXTURE_IDS.fieldIds.parentName}`]: 'Created in browser',
         }),
@@ -144,7 +151,7 @@ test('compiled fixture surfaces bind live Q0/O0 data through one pinned request 
     const createdId = String(createdInput.recordId);
     const update = await postIntent(baseUrl, formSurface, {
       expectedRevision: '1',
-      intent: 'update',
+      operationId: `${FIXTURE_IDS.namespace}:operation.master_update`,
       recordId: createdId,
       [`value:${FIXTURE_IDS.fieldIds.parentName}`]: 'Updated in browser',
     });
@@ -152,13 +159,13 @@ test('compiled fixture surfaces bind live Q0/O0 data through one pinned request 
     const recordSurface = `${FIXTURE_IDS.namespace}:surface.master_record`;
     const archived = await postIntent(baseUrl, recordSurface, {
       expectedRevision: '2',
-      intent: 'archive',
+      operationId: `${FIXTURE_IDS.namespace}:operation.master_archive`,
       recordId: createdId,
     });
     assert.match(archived, /Archived · revision 3/);
     const restored = await postIntent(baseUrl, recordSurface, {
       expectedRevision: '3',
-      intent: 'restore',
+      operationId: `${FIXTURE_IDS.namespace}:operation.master_restore`,
       recordId: createdId,
     });
     assert.match(restored, /Active · revision 4/);
@@ -330,7 +337,7 @@ test('human-confirmed forms render the authoritative operation read-back without
 
   const createSubmission = {
     idempotencyKey: randomUUID(),
-    intent: 'create',
+    operationId: `${FIXTURE_IDS.namespace}:operation.master_create`,
     recordId: randomUUID(),
     [`value:${FIXTURE_IDS.fieldIds.parentName}`]: 'Authoritative read-back',
   };
@@ -369,7 +376,7 @@ test('human-confirmed forms render the authoritative operation read-back without
   const updateSubmission = {
     expectedRevision: '1',
     idempotencyKey: randomUUID(),
-    intent: 'update',
+    operationId: `${FIXTURE_IDS.namespace}:operation.master_update`,
     recordId: String(createInput.recordId),
     [`value:${FIXTURE_IDS.fieldIds.parentName}`]: 'Updated read-back',
   };
@@ -678,7 +685,7 @@ test('a capability command is artifact-bound, render-minted, and deliberately co
     {
       expectedRevision: '1',
       idempotencyKey: renderedKey,
-      intent: 'command',
+      operationId,
       recordId,
     },
     gateways,
@@ -1173,6 +1180,351 @@ async function postIntent(
   assert.equal(confirmedResponse.status, 200);
   return confirmedResponse.text();
 }
+
+/**
+ * The refusal half of `INTENT_RENDERED_ARITY`, run as a table over all four
+ * singular intents and asserted on the CODE rather than on a rendered page.
+ *
+ * The browser arm this supplements exercised `create` alone and observed a
+ * page-level `QUERY_UNSUPPORTED`, so three holes stayed green: a per-intent
+ * exemption (`intent !== 'update' && bound > arity`), the same independently
+ * for `archive` and `restore`, and a bare `throw` swapped in for
+ * `invalidBinding(...)`. `QUERY_UNSUPPORTED` is what the runtime renders for
+ * ANY unreadable binding, so it cannot tell those apart.
+ *
+ * Each intent carries its admission twin, because a refusal control alone is
+ * satisfiable by refusing everything (`review-tiers`, af44c6f).
+ */
+for (const intent of ['archive', 'create', 'restore', 'update'] as const) {
+  test(`a second active ${intent} operation is refused by name, and one is admitted`, async () => {
+    const operationId = `${FIXTURE_IDS.namespace}:operation.master_${intent}`;
+
+    // Admission twin first: the un-duplicated package binds, and binds exactly
+    // one operation of this intent. Without it the refusal below would prove
+    // nothing about the intent it names.
+    const admitted = await masterRecordBinding(compileFixture());
+    assert.equal(
+      admitted.operations.filter((operation) => operation.intent === intent)
+        .length,
+      1,
+      `${intent} is not bound at all, so its refusal is untested`,
+    );
+
+    const duplicated = ordinaryModuleV1();
+    const operations = duplicated.operations as Array<Record<string, unknown>>;
+    const original = operations.find(
+      (candidate) => candidate.operationId === operationId,
+    );
+    assert.ok(original, `${operationId} is absent from the fixture`);
+    operations.push({ ...original, operationId: `${operationId}_alternate` });
+
+    await assert.rejects(
+      async () => masterRecordBinding(compileFixture(duplicated)),
+      (error: unknown) => {
+        assert.ok(
+          error instanceof SurfaceProjectionError,
+          `${intent}: threw ${String(error)}, not a SurfaceProjectionError`,
+        );
+        assert.equal(error.code, 'INVALID_SURFACE_BINDING');
+        assert.match(error.message, new RegExp(`\\b${intent}\\b`));
+        return true;
+      },
+    );
+  });
+}
+
+/**
+ * THE PACKET'S OWN PREMISE, executable for the first time on this tree.
+ *
+ * `PUR-1`'s shape is a document carrying a release AND a cancel. Both are
+ * `transitionStateEffect`, and `operationIntent` maps both to `command` — the
+ * exact collision this packet lifted. It could not be written before: `v5` cut
+ * the state machine (`5g3-sm`) and this packet keyed the binding by operation
+ * id, and only the merge of the two has both.
+ *
+ * The capability-pair arm in the browser suite exercises the same mechanism
+ * through the other effect kind. This one is the real subject.
+ */
+test('two transitions on one entity bind as two commands, each addressable', async () => {
+  const binding = await masterRecordBinding(
+    compileFixture(twoTransitionPackage()),
+  );
+  const commands = binding.operations.filter(
+    (operation) => operation.intent === 'command',
+  );
+
+  assert.deepEqual(
+    commands.map((operation) => operation.operationId),
+    [
+      `${FIXTURE_IDS.namespace}:operation.master_cancel`,
+      `${FIXTURE_IDS.namespace}:operation.master_release`,
+    ],
+    'both transitions must bind, and deterministically ordered',
+  );
+  // Distinct ids are what makes them separately addressable; distinct labels
+  // are what makes them separately pressable. Both are required and neither
+  // implies the other.
+  assert.deepEqual(
+    commands.map((operation) => operation.label),
+    ['Cancel', 'Release'],
+  );
+  // A transition is not a capability, so the command bar's standing
+  // explanation differs — the half of the merge `5g3-sm` owns.
+  assert.deepEqual(
+    commands.map((operation) => operation.capabilityId),
+    [null, null],
+  );
+});
+
+/**
+ * THE CONFLICT RESOLUTION ITSELF, which the binding assertion above does not
+ * reach — REVISE round 2.
+ *
+ * That test stops at the premise: transitions arrive with `capabilityId: null`.
+ * The reviewer disproved it as evidence with the right instrument — revert
+ * `component-registry.ts` to either parent and it stays green. Restoring the
+ * `34f452e` half keeps `operationId` addressing while rendering "Draft staged"
+ * for both transitions; restoring the `eb02adf` half keeps the transition
+ * explanation while posting a shared `intent=command`. Neither revert is
+ * noticed, so neither half was under test.
+ *
+ * `renderCapabilityCommand` merged both halves, so both must be observed on
+ * the SAME rendered forms: the addressing (`34f452e`) and the effect-sensitive
+ * explanation (`eb02adf`). Each assertion below has a presence arm and an
+ * absence arm, because "the new thing is here" does not exclude "the old thing
+ * is also here" — which is precisely how a half-reverted merge stays green.
+ */
+test('the merged command bar renders both halves on the same two transition forms', async () => {
+  const compiled = compileFixture(twoTransitionPackage());
+  const policy = new RecordingPolicy('ALLOW');
+  const executor = new InMemoryGenericExecutor();
+  const recordId = executor.seed(tenantA, 'Draft');
+  const view = await issuedView(
+    runtimeEntry(compiled, policy, {
+      a: identity(tenantA, environmentA, principalA),
+    }),
+    'a',
+  );
+  const rendered = await renderSurfaceRuntimeWithData(
+    view,
+    `/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_record`)}&record=${encodeURIComponent(recordId)}`,
+    semanticGateways(policy, executor),
+  );
+  assert.equal(rendered.statusCode, 200);
+  const html = rendered.html;
+
+  const forms = [...html.matchAll(/<form class="capability-command"[\s\S]*?<\/form>/g)]
+    .map((match) => match[0]);
+  assert.equal(forms.length, 2, 'both transitions must render their own form');
+
+  const namespace = FIXTURE_IDS.namespace;
+  for (const action of ['cancel', 'release']) {
+    const operationId = `${namespace}:operation.master_${action}`;
+    const form = forms.find((candidate) => candidate.includes(operationId));
+    assert.ok(form, `no form addresses ${operationId}`);
+
+    // 34f452e's half: each form names its own operation on the wire...
+    assert.match(
+      form,
+      new RegExp(`<input type="hidden" name="operationId" value="${operationId}">`),
+    );
+    // ...and the shared intent addressing it replaced is gone. Without this
+    // arm, a form carrying BOTH would pass — and both is what a partial
+    // revert produces.
+    assert.doesNotMatch(form, /name="intent"/);
+
+    // eb02adf's half: a transition stages no draft, so it must not claim to.
+    assert.match(form, /<strong>Ready\.<\/strong> This moves the record to its next state\./);
+    assert.doesNotMatch(form, /Draft staged/);
+  }
+
+  // Distinct labels and deterministic order, on the rendered page rather than
+  // on the binding: the two controls must be separately pressable, not merely
+  // separately addressable.
+  const labels = forms.map((form) => /<button type="submit">([^<]+)<\/button>/.exec(form)?.[1]);
+  assert.deepEqual(labels, ['Cancel', 'Release']);
+});
+
+/** `ordinaryModuleV1` restamped at v5, carrying a two-transition machine. */
+function twoTransitionPackage(): Record<string, unknown> {
+  const version = 'v5';
+  const reference = (kind: string, targetId: string) => ({
+    kind,
+    schemaVersion: version,
+    targetId,
+  });
+  // Node-version purity is uniform within a package revision, so a v5 machine
+  // in a v3 package is refused: the whole package is restamped.
+  const restamp = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(restamp);
+    if (value !== null && typeof value === 'object') {
+      return Object.fromEntries(
+        Object.entries(value as Record<string, unknown>).map(([key, inner]) => [
+          key,
+          key === 'schemaVersion' ? version : restamp(inner),
+        ]),
+      );
+    }
+    return value;
+  };
+  const definition = restamp(ordinaryModuleV1()) as Record<string, unknown>;
+  definition.languageVersion = version;
+
+  // The record surface needs a command bar for the two transitions to have
+  // anywhere to render. `entitySurfaces` gives each surface one slot.
+  const recordSurface = (definition.surfaces as Array<Record<string, unknown>>)
+    .find(
+      (surface) =>
+        surface.surfaceId === `${FIXTURE_IDS.namespace}:surface.master_record`,
+    );
+  assert.ok(recordSurface && Array.isArray(recordSurface.slots));
+  recordSurface.slots.push({
+    content: {
+      kind: 'opaqueSurfaceContentReference',
+      schemaVersion: version,
+      targetId: FIXTURE_IDS.contentCapabilityId,
+    },
+    kind: 'surfaceSlot',
+    orderKey: 20,
+    schemaVersion: version,
+    slot: 'commandBar',
+    slotId: `${FIXTURE_IDS.namespace}:slot.master_record_command_bar`,
+  });
+
+  const namespace = FIXTURE_IDS.namespace;
+  const entityId = FIXTURE_IDS.entityIds.parent;
+  const draft = `${namespace}:state.master_draft`;
+  const moves = [
+    { action: 'release', orderKey: 10, to: `${namespace}:state.master_released` },
+    { action: 'cancel', orderKey: 20, to: `${namespace}:state.master_cancelled` },
+  ];
+
+  definition.stateMachines = [
+    {
+      entity: reference('entityReference', entityId),
+      initialState: reference('stateReference', draft),
+      kind: 'stateMachineDefinition',
+      machineId: `${namespace}:machine.master_lifecycle`,
+      schemaVersion: version,
+      states: [
+        { kind: 'stateDefinition', label: 'Draft', orderKey: 10, schemaVersion: version, stateId: draft },
+        ...moves.map((move, index) => ({
+          kind: 'stateDefinition',
+          label: move.action,
+          orderKey: 20 + index * 10,
+          schemaVersion: version,
+          stateId: move.to,
+        })),
+      ],
+      transitions: moves.map((move) => ({
+        fromState: reference('stateReference', draft),
+        kind: 'transitionDefinition',
+        label: `${move.action} master`,
+        orderKey: move.orderKey,
+        // ADR-0050 §7: a transition's permission must EQUAL its operation's,
+        // refused at compile time as COMPILER_TRANSITION_PERMISSION_MISMATCH.
+        permission: reference(
+          'permissionReference',
+          `${namespace}:permission.master_${move.action}`,
+        ),
+        schemaVersion: version,
+        toState: reference('stateReference', move.to),
+        transitionId: `${namespace}:transition.master_${move.action}`,
+      })),
+    },
+  ];
+
+  for (const move of moves) {
+    (definition.permissions as unknown[]).push({
+      action: 'transition',
+      kind: 'permissionDefinition',
+      label: `master ${move.action}`,
+      permissionId: `${namespace}:permission.master_${move.action}`,
+      resource: reference('entityReference', entityId),
+      schemaVersion: version,
+    });
+    (definition.operations as unknown[]).push({
+      confirmation: 'none',
+      effect: {
+        kind: 'transitionStateEffect',
+        schemaVersion: version,
+        transition: reference(
+          'transitionReference',
+          `${namespace}:transition.master_${move.action}`,
+        ),
+      },
+      kind: 'operationDefinition',
+      module: reference('moduleReference', FIXTURE_IDS.moduleId),
+      operationId: `${namespace}:operation.master_${move.action}`,
+      permission: reference(
+        'permissionReference',
+        `${namespace}:permission.master_${move.action}`,
+      ),
+      readBack: reference('queryReference', `${namespace}:query.master_get`),
+      schemaVersion: version,
+      tier: 'o0',
+    });
+  }
+  return definition;
+}
+
+/** Reads the master record surface's binding out of a compiled fixture. */
+async function masterRecordBinding(
+  compiled: CompileSuccess,
+): Promise<CompiledSurfaceDataBinding> {
+  const policy = new RecordingPolicy('ALLOW');
+  const view = await issuedView(
+    runtimeEntry(compiled, policy, {
+      a: identity(tenantA, environmentA, principalA),
+    }),
+    'a',
+  );
+  const surface = readCompiledSurfaceManifest(view).surfaces.find(
+    (candidate) =>
+      candidate.surfaceId === `${FIXTURE_IDS.namespace}:surface.master_record`,
+  );
+  assert.ok(surface);
+  return readCompiledSurfaceDataBinding(view, surface);
+}
+
+/**
+ * ADR-0051 §4's structural boundary, tested where it is enforced rather than
+ * where it is described. The helper cannot see a submission, so the only way
+ * the gateway's `operationId` can be wrong is for the resolved operation to be
+ * wrong -- which is what `boundOperation` and the ratchet hold.
+ */
+test('the gateway request carries the resolved operation id and nothing from the wire', () => {
+  const operation = Object.freeze({
+    capabilityId: null,
+    confirmation: 'none' as const,
+    intent: 'command' as const,
+    label: 'Release',
+    operationId: `${FIXTURE_IDS.namespace}:operation.master_release`,
+    precondition: Object.freeze({}),
+  });
+  const input = { expectedRevision: 1, recordId: 'r-1' };
+
+  const request = semanticOperationRequestFor(operation, input, null, 'k-1');
+  assert.equal(request.operationId, operation.operationId);
+  assert.deepEqual(Object.keys(request).sort(), [
+    'confirmationGrant',
+    'idempotencyKey',
+    'input',
+    'operationId',
+    'schemaVersion',
+  ]);
+  assert.equal(Object.isFrozen(request), true);
+
+  // The leak the argument list makes inexpressible: an `input` carrying its
+  // own `operationId` cannot reach the envelope, because nothing spreads it.
+  const hostile = semanticOperationRequestFor(
+    operation,
+    { ...input, operationId: 'northstar.forged:operation.evil' },
+    null,
+    'k-2',
+  );
+  assert.equal(hostile.operationId, operation.operationId);
+});
 
 function asRecord(value: unknown): Record<string, unknown> {
   assert.ok(isRecord(value));

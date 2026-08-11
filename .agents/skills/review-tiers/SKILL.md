@@ -578,6 +578,18 @@ wasted arm**, and the arm is the scarcest thing in this loop.
 
     git ls-remote origin <branch>   # must print the exact SHA in the prompt
 
+**Quote the output in the prompt — sharpened 2026-08-09, after a fourth instance.**
+The rule as written said *verify*, and the orchestrator kept verifying sometimes.
+A reviewer then returned **BLOCKED — requested Git objects are unavailable** on a
+range whose branch tip was two revisions stale on `origin`, and could confirm
+nothing.
+
+**So make the evidence part of the artifact:** the prompt carries the
+`ls-remote` line for the SHA it names. A prompt that cannot be written without
+pasting the verified tip cannot be written without running the command. This is
+the same move as appending a matrix exit code *inside* the log rather than beside
+it — bind the check to the thing it certifies.
+
 If it is absent and the object exists locally, **push it yourself** — it is
 non-destructive, it backs up the reviewed candidate off-machine as `git-workflow`
 already requires, and it removes a dependency on the lane being awake.
@@ -784,3 +796,28 @@ stronger than"* detectable.
 worst defects this programme has carried were fenced claims with **no** control —
 one refusal shipped four rounds fenced as settled with nothing holding it, and a
 press-law guard is evaded on `main` to this day by a spliced literal.
+
+## For a merge, revert each parent's half alone — added 2026-08-09
+
+The deletion table asks *what happens if this check is removed*. A **merge** needs
+its own form, because the thing under test is the *resolution* and neither parent
+alone produces it:
+
+> **Revert the merged function to each parent's side in turn. Does the control
+> notice?**
+
+`pur1-intent-limit`'s payoff test asserted that two transition operations bind as
+two addressable commands — and **survived both reverts.** Restoring one parent kept
+operation-id addressing while rendering the wrong explanation for both transitions;
+restoring the other kept the explanation while posting a shared `intent=command`.
+The test proved the **premise** — that transitions arrive with `capabilityId: null`
+— and stopped one layer before the payoff.
+
+**A merge control that only reads the data both parents already produced is testing
+the premise, not the resolution.** Push it to the artifact the resolution actually
+changes: render the output, inspect it, and assert the properties each parent would
+have got wrong.
+
+**The orchestrator's share of this one:** the merge was argued as "the payoff, not
+the tax," and a test was requested to prove it. **Asking for the claim is not the
+same as specifying the observation**, and the lane built exactly what was asked.

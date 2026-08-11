@@ -553,3 +553,16 @@ hypothesis you are trying to rule out. If the answer is "about the same," it
 discriminates nothing — record it as a limitation, not as proof. **A number in a
 report is read as evidence whether or not it is**, which is why the lane writing it
 down as a limitation was the correct move rather than a cautious one.
+
+## Echo what was pushed, not what HEAD is
+Date: 2026-08-09
+Why: The orchestrator ran `git commit && git push origin main && echo "pushed $(git rev-parse --short HEAD)"`
+from a shared working directory that was checked out on a **lane's branch**. The
+commit landed on that branch, `git push origin main` pushed the unchanged local
+`main` ref, and the echo printed the lane's new SHA — so it read as success. One
+queue row sat on a packet branch and on no other ref until the lane noticed.
+How to apply: assert on the **remote**, not on HEAD:
+`git push origin main && git ls-remote origin main`. And never commit from a
+working directory you did not verify the branch of — `lanes.md` already says leases
+separate paths, not directories. Same class as the wrapper exit status that masked
+an aborted matrix: a report derived from the wrong thing.

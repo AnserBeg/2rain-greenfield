@@ -225,7 +225,20 @@ export async function renderSurfaceRuntimeWithData(
   );
 }
 
-/** Resolves a browser intent to one pinned operation; no operation ID is accepted. */
+/**
+ * Resolves a submission to one pinned operation, SELECTED by the posted id and
+ * AUTHORIZED only by the compiled binding.
+ *
+ * The distinction is the whole change, so it is stated rather than implied.
+ * This used to resolve `intent -> the one operation carrying it`, which made
+ * the one-operation-per-intent limit in `surface-contract.ts` load-bearing on
+ * the write path: two commands would both post `intent=command` and the
+ * `find` would return whichever sorted first, so pressing Cancel could
+ * release. The set of reachable operations is UNCHANGED -- it is
+ * `binding.operations`, exactly as before, and an id absent from it is
+ * refused. Only the selection within that already-authorized set moved from
+ * the server's sort order to the control the user actually pressed.
+ */
 export async function submitSurfaceRuntimeIntent(
   view: RuntimeViewContract.RequestRuntimeView,
   requestUrl: string,
@@ -241,22 +254,19 @@ export async function submitSurfaceRuntimeIntent(
   } catch {
     return operationDiagnostic('OPERATION_UNSUPPORTED', 422);
   }
-  const intent = operationIntent(submission.intent);
-  const operation = intent
-    ? binding.operations.find((candidate) => candidate.intent === intent)
-    : undefined;
+  const operation = boundOperation(binding, submission.operationId);
   if (
-    !intent ||
     !operation ||
     !surfaceSupportsRuntimeIntent(
       view,
       selection.selected,
       selection.surfaces,
-      intent,
+      operation.intent,
     )
   ) {
     return operationDiagnostic('OPERATION_UNSUPPORTED', 422);
   }
+  const intent = operation.intent;
   const input = operationInput(selection.selected, intent, submission);
   if (
     operation.confirmation === 'humanRequired' &&
@@ -283,13 +293,12 @@ export async function submitSurfaceRuntimeIntent(
   try {
     result = await gateways.operationGateway.invoke(
       view,
-      {
-        confirmationGrant: submission.confirmationGrant ?? null,
-        idempotencyKey: submission.idempotencyKey ?? '',
+      semanticOperationRequestFor(
+        operation,
         input,
-        operationId: operation.operationId,
-        schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
-      },
+        submission.confirmationGrant ?? null,
+        submission.idempotencyKey ?? '',
+      ),
       gateways.operationMediation.issueInvocation(view, 'UI'),
     );
   } catch (error) {
@@ -683,16 +692,73 @@ function operationInput(
     : { expectedRevision, recordId };
 }
 
-function operationIntent(
-  value: string | undefined,
-): SurfaceOperationIntent | null {
-  return value === 'archive' ||
-    value === 'command' ||
-    value === 'create' ||
-    value === 'restore' ||
-    value === 'update'
-    ? value
-    : null;
+// The wire's `intent` parser is deliberately gone rather than kept alongside
+// the id. It was a SECOND spelling of the closed vocabulary already declared
+// in surface-contract.ts, and with the operation resolved from the binding the
+// intent is read off that operation -- one authority, and a posted `intent`
+// can no longer disagree with the operation it accompanies.
+
+/**
+ * Selection, and it can select from nothing else. `binding.operations` and one
+ * posted string are the whole input, so there is no second axis to branch on
+ * and no submission in scope to reach for.
+ */
+function boundOperation(
+  binding: CompiledSurfaceDataBinding,
+  postedOperationId: string | undefined,
+): CompiledSurfaceDataBinding['operations'][number] | undefined {
+  return binding.operations.find(
+    (candidate) => candidate.operationId === postedOperationId,
+  );
+}
+
+/**
+ * The ONE construction site for a gateway request, and the argument list is
+ * the control rather than a convention.
+ *
+ * `submission` is deliberately absent. A source scan asserting "the posted id
+ * is only ever compared against the binding" is still a source scan: it stays
+ * green against
+ *
+ *   submission.selectorBypass === '1' ? binding.operations[0] : find(...)
+ *
+ * because the compliant comparison is still written, and identically against a
+ * spread that overrides the compliant member. Neither is expressible in here,
+ * because the wire is not a parameter. That is ADR-0048 §2's `keyof typeof`
+ * move applied one layer over: make the wrong thing INEXPRESSIBLE, not
+ * detectable.
+ *
+ * The envelope is built member by member with no spread, so `input` -- which
+ * does legitimately come from the wire -- cannot reach `operationId` either.
+ *
+ * **What this does not do**, stated rather than left to be discovered: it does
+ * not constrain how the caller obtained `operation`. It guarantees that the id
+ * the gateway receives is the id of whatever operation was resolved, never a
+ * posted one. That the resolution itself reads only the binding is what
+ * `boundOperation` above and the architecture ratchet hold.
+ */
+export function semanticOperationRequestFor(
+  operation: CompiledSurfaceDataBinding['operations'][number],
+  input: Record<string, number | string | Readonly<Record<string, string>>>,
+  confirmationGrant: string | null,
+  idempotencyKey: string,
+): {
+  readonly confirmationGrant: string | null;
+  readonly idempotencyKey: string;
+  readonly input: Record<
+    string,
+    number | string | Readonly<Record<string, string>>
+  >;
+  readonly operationId: string;
+  readonly schemaVersion: typeof SEMANTIC_OPERATION_REQUEST_VERSION;
+} {
+  return Object.freeze({
+    confirmationGrant,
+    idempotencyKey,
+    input,
+    operationId: operation.operationId,
+    schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
+  });
 }
 
 function operationDiagnostic(
